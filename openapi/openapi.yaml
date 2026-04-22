@@ -1,0 +1,23 @@
+openapi: 3.1.0
+info:
+  title: Hail
+  version: 0.1.0
+  description: |
+    Universal communication platform for AI agents.
+
+    This file is the source of truth for the Go CLI. Regenerate it after
+    changing API routes — see docs/contributing.md.
+paths:
+  /healthz:
+    get:
+      summary: Health check
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
