@@ -14,7 +14,7 @@ docker compose up postgres minio  # just the data services for host-side dev
 
 - API:      `cd api && uv run uvicorn hail.api.main:app --reload --port 8080`
 - Voicebot: `cd voicebot && uv run python -m hail.voicebot.main`
-- MCP:      `cd mcp && uv run python -m hail.mcp.server`
+- MCP:      `cd mcp && uv run uvicorn hail.mcp.server:app --reload --port 8081`
 - CLI:      `cd cli && go run . <args>`
 
 Full stack in Docker: `docker compose up`.

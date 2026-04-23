@@ -11,14 +11,16 @@ A universal communication platform for AI agents. Outbound phone calls in v1; SM
 ```
 api/        — FastAPI service. Deployed (Docker), not published.
 voicebot/   — LiveKit Agents worker service. Deployed (Docker), not published.
-mcp/        — MCP server. Publishes `hail-mcp` on PyPI.
-core/       — shared Python lib. Publishes `hail-core` on PyPI.
-cli/        — Go binary (`hail`). Released as a binary; codegens its client from `openapi/openapi.yaml`.
+mcp/        — MCP service, remote SSE transport on :8081. Deployed (Docker), not published.
+core/       — shared Python lib. Not published to PyPI in v1 (no external consumers yet).
+cli/        — Go binary (`hail`). Released via GitHub Releases; codegens its client from `openapi/openapi.yaml`.
 openapi/    — committed openapi.yaml. Source of truth for the CLI.
 docs/       — plain markdown; to be served via fumadoc on the website.
 ```
 
-Only `hail-core` and `hail-mcp` are PyPI packages. `api/` and `voicebot/` have `pyproject.toml` for the uv workspace and Docker builds, but carry `Private :: Do Not Upload` to prevent accidental publish.
+**PyPI posture for v1**: nothing published. `api/`, `voicebot/`, `mcp/` all carry `Private :: Do Not Upload`. `core/` is not marked private but is not released either — no external consumers yet. Revisit when a third-party integration wants to `pip install hail-core`.
+
+**MCP distribution**: remote SSE only. We deliberately do **not** ship a stdio PyPI package. Reasoning lives in [docs/setup/mcp.md](docs/setup/mcp.md) — read it before proposing a stdio server; the default answer is "no, use the SSE endpoint".
 
 All four Python packages share the `hail` namespace (PEP 420 implicit namespace packages). Do **not** create `hail/__init__.py` at the namespace root.
 
@@ -45,7 +47,7 @@ Go CLI module path is `github.com/hail-hq/hail/cli`. npm packages are published 
 - Data services:  `docker compose up postgres minio`
 - API:            `cd api && uv run uvicorn hail.api.main:app --reload --port 8080`
 - Voicebot:       `cd voicebot && uv run python -m hail.voicebot.main`
-- MCP:            `cd mcp && uv run python -m hail.mcp.server`
+- MCP:            `cd mcp && uv run uvicorn hail.mcp.server:app --reload --port 8081`
 - CLI:            `cd cli && go run . <cmd>`
 - Full stack:     `docker compose up`
 

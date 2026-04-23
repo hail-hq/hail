@@ -1,18 +1,17 @@
 [project]
 name = "hail-mcp"
 version = "0.1.0"
-description = "Hail MCP server — exposes Hail as tools for AI agents."
-readme = "../README.md"
+description = "Hail MCP service — remote MCP server (SSE), deployed, not published."
 license = { text = "AGPL-3.0-or-later" }
 requires-python = ">=3.11"
+classifiers = ["Private :: Do Not Upload"]
 dependencies = [
     "hail-core",
     "mcp>=1.0",
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.32",
     "httpx>=0.27",
 ]
-
-[project.scripts]
-hail-mcp = "hail.mcp.server:main"
 
 [project.optional-dependencies]
 dev = ["pytest", "ruff", "mypy"]

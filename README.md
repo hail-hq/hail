@@ -18,7 +18,7 @@ docker compose up
 Use it:
 
 ```bash
-# CLI
+# CLI (for humans scripting Hail)
 hail call +15551234567 --prompt "You are calling to confirm a reschedule."
 
 # HTTP
@@ -26,10 +26,13 @@ curl -X POST http://localhost:8080/calls \
   -H "Authorization: Bearer $HAIL_API_KEY" \
   -d '{"to":"+15551234567","system_prompt":"..."}'
 
-# MCP — add hail-mcp to your MCP client's config
+# MCP (for AI agents — Claude.ai, ChatGPT, Claude Code, Cursor, …)
+# Add a remote MCP connector in your client pointing at:
+#   http://<your-host>:8081/sse    (self-hosted)
+#   https://mcp.hail.so/sse        (Hail Cloud, later)
 ```
 
-Full setup: [docs/setup/twilio.md](docs/setup/twilio.md), [docs/setup/livekit-cloud.md](docs/setup/livekit-cloud.md).
+Full setup: [docs/setup/twilio.md](docs/setup/twilio.md), [docs/setup/livekit-cloud.md](docs/setup/livekit-cloud.md), [docs/setup/mcp.md](docs/setup/mcp.md).
 
 ## Tenets
 
@@ -92,9 +95,10 @@ Legend: `[x]` done · `[~]` in progress · `[ ]` todo · `[-]` future.
 - API
   - [~] OpenAPI spec (v1)
 - CLI
-  - [~] `hail` binary (v1)
+  - [~] `hail` binary via GitHub Releases (v1)
 - MCP server
-  - [~] `hail-mcp` (v1)
+  - [~] Remote SSE endpoint bundled with every Hail deploy (v1)
+  - [-] PyPI stdio package — intentionally not shipped; see [docs/setup/mcp.md](docs/setup/mcp.md)
 
 ### Infrastructure
 
