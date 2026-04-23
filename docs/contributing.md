@@ -49,3 +49,5 @@ New adapters live under `core/hail/core/providers/<channel>/<name>.py` and imple
 - New env vars missing from `.env.example`.
 - Features without a milestone in README.
 - Web UI code (no dashboards in v1).
+- Docs that paraphrase the OpenAPI spec or MCP tool schemas instead of linking the canonical source.
+- Non-GFM Markdown in docs.

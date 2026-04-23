@@ -33,6 +33,7 @@ Go CLI module path is `github.com/hail-hq/hail/cli`. npm packages are published 
 3. **Brief docs.** Each doc fits on one screen. Setup ≤ 10 minutes from a fresh clone.
 4. **Self-hostable.** `docker compose up` runs everything except LiveKit Cloud.
 5. **Pluggable brain.** BYO endpoint compatible with OpenAI's completions API, or use Hail's bundled fallback (OpenAI → Gemini → Anthropic). Voice pipeline + transport are always Hail's.
+6. **Agent-first docs.** AI agents are first-class readers. Lead with concrete, runnable examples; link to canonical sources (OpenAPI spec, MCP tool schemas, code paths) rather than paraphrase them. Every page should let a reader — human or agent — take the next action.
 
 ## Invariants
 
@@ -41,6 +42,7 @@ Go CLI module path is `github.com/hail-hq/hail/cli`. npm packages are published 
 - **Provider adapters go in `core/hail/core/providers/<channel>/<name>.py`.** `api/` and `voicebot/` must not import provider SDKs directly; they go through `core`.
 - **Shared models go in `core/`.** No duplicated Call/SMS/Email schemas across services.
 - **AGPLv3.** Any derived SaaS must release source. Be conservative about copying third-party code.
+- **Docs are agent-first.** When writing or updating any doc: lead with a concrete runnable example, link canonical sources (OpenAPI spec, MCP tool schemas, code paths) instead of paraphrasing them, and avoid screenshots when a snippet would work. Use GitHub-flavored Markdown.
 
 ## Dev commands
 

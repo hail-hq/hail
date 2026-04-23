@@ -41,15 +41,16 @@ Full setup: [docs/setup/twilio.md](docs/setup/twilio.md), [docs/setup/livekit-cl
 3. **Brief docs.** One screen per page. Setup ≤ 10 minutes from a fresh clone.
 4. **Self-hostable.** `docker compose up` runs everything except LiveKit Cloud.
 5. **Pluggable brain.** BYO endpoint compatible with OpenAI's completions API, or use Hail's bundled fallback (OpenAI → Gemini → Anthropic). Voice pipeline + transport are always Hail's.
+6. **Agent-first docs.** AI agents are first-class readers. Lead with concrete, runnable examples; link to canonical sources (OpenAPI spec, MCP tool schemas, code paths) rather than paraphrase them. Every page should let a reader — human or agent — take the next action.
 
 ## Milestones
 
-Legend: `[x]` done · `[~]` in progress · `[ ]` todo · `[-]` future.
+Checked = shipped. Version tag shows the target release.
 
 ### Phone calls
 
 - Outbound
-  - [~] Twilio (v1)
+  - [ ] Twilio (v1)
   - [ ] Telnyx (v2)
 - Inbound
   - [ ] Twilio (v1.1)
@@ -71,21 +72,21 @@ Legend: `[x]` done · `[~]` in progress · `[ ]` todo · `[-]` future.
 ### Voice pipeline
 
 - STT
-  - [~] Deepgram (v1)
+  - [ ] Deepgram (v1)
   - [ ] Whisper (v1.2)
   - [ ] AssemblyAI (v1.2)
 - TTS
-  - [~] ElevenLabs (v1)
+  - [ ] ElevenLabs (v1)
   - [ ] Cartesia (v1.2)
   - [ ] Deepgram Aura (v1.2)
 - VAD
-  - [~] Silero (v1)
+  - [ ] Silero (v1)
 - Turn detection
-  - [~] LiveKit turn-detector (v1)
+  - [ ] LiveKit turn-detector (v1)
 - LLM — system-prompt mode
-  - [~] Fallback: OpenAI → Gemini → Anthropic, fast models (v1)
+  - [ ] Fallback: OpenAI → Gemini → Anthropic, fast models (v1)
 - LLM — BYO-endpoint mode
-  - [~] OpenAI chat-completion-compatible (v1)
+  - [ ] OpenAI chat-completions-compatible (v1)
 - Recording
   - [ ] S3 upload (v1)
   - [ ] Diarization (v1.2)
@@ -93,12 +94,12 @@ Legend: `[x]` done · `[~]` in progress · `[ ]` todo · `[-]` future.
 ### Distribution
 
 - API
-  - [~] OpenAPI spec (v1)
+  - [ ] OpenAPI spec (v1)
 - CLI
-  - [~] `hail` binary via GitHub Releases (v1)
+  - [ ] `hail` binary via GitHub Releases (v1)
 - MCP server
-  - [~] Remote SSE endpoint bundled with every Hail deploy (v1)
-  - [-] PyPI stdio package — intentionally not shipped; see [docs/setup/mcp.md](docs/setup/mcp.md)
+  - [ ] Remote SSE endpoint bundled with every Hail deploy (v1)
+  - ~~PyPI stdio package~~ — intentionally not shipped; see [docs/setup/mcp.md](docs/setup/mcp.md)
 
 ### Infrastructure
 
