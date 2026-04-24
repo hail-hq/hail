@@ -33,4 +33,4 @@ COPY --from=builder --chown=hail:hail /opt/venv /opt/venv
 
 USER hail
 
-CMD ["python", "-m", "hail.voicebot.main"]
+CMD ["python", "-m", "hailhq.voicebot.main"]

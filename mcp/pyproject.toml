@@ -1,12 +1,12 @@
 [project]
-name = "hail-mcp"
+name = "hailhq-mcp"
 version = "0.1.0"
 description = "Hail MCP service — remote MCP server (SSE), deployed, not published."
 license = { text = "AGPL-3.0-or-later" }
 requires-python = ">=3.11"
 classifiers = ["Private :: Do Not Upload"]
 dependencies = [
-    "hail-core",
+    "hailhq-core",
     "mcp>=1.0",
     "fastapi>=0.115",
     "uvicorn[standard]>=0.32",
@@ -21,7 +21,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["hail/mcp"]
+packages = ["hailhq/mcp"]
 
 [tool.uv.sources]
-hail-core = { workspace = true }
+hailhq-core = { workspace = true }

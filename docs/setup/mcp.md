@@ -44,7 +44,7 @@ Add an SSE entry to your MCP config (e.g. `.mcp.json` or `claude_desktop_config.
 
 ## Why no stdio / no PyPI install
 
-We ship one MCP distribution — a remote SSE endpoint, bundled with every Hail deploy. We deliberately do **not** publish `hail-mcp` as a PyPI stdio server. Reasons:
+We ship one MCP distribution — a remote SSE endpoint, bundled with every Hail deploy. We deliberately do **not** publish a stdio MCP server on PyPI. Reasons:
 
 1. **Web UIs can't run stdio servers.** Claude.ai's MCP Connectors and ChatGPT's Custom Connectors only accept remote URLs — they can't spawn local processes from a browser. A PyPI stdio package would serve none of those users.
 2. **Every terminal client also accepts SSE.** Claude Code, Claude Desktop, and Cursor all support SSE transports. The URL flow works universally; stdio works only for a subset.

@@ -1,5 +1,5 @@
 [project]
-name = "hail-core"
+name = "hailhq-core"
 version = "0.1.0"
 description = "Hail shared library — models, config, and provider adapters."
 readme = "../README.md"
@@ -18,4 +18,4 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["hail/core"]
+packages = ["hailhq/core"]

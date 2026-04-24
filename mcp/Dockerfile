@@ -34,4 +34,4 @@ COPY --from=builder --chown=hail:hail /opt/venv /opt/venv
 USER hail
 
 EXPOSE 8081
-CMD ["uvicorn", "hail.mcp.server:app", "--host", "0.0.0.0", "--port", "8081"]
+CMD ["uvicorn", "hailhq.mcp.server:app", "--host", "0.0.0.0", "--port", "8081"]

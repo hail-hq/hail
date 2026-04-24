@@ -100,6 +100,8 @@ Checked = shipped. Version tag shows the target release.
 - MCP server
   - [ ] Remote SSE endpoint bundled with every Hail deploy (v1)
   - ~~PyPI stdio package~~ — intentionally not shipped; see [docs/setup/mcp.md](docs/setup/mcp.md)
+- Python SDK
+  - [ ] `hail-sdk` on PyPI, imports as `hail` (v1)
 
 ### Infrastructure
 
@@ -117,7 +119,7 @@ Full diagram: [docs/architecture.md](docs/architecture.md).
 
 ## Contributing
 
-See [docs/contributing.md](docs/contributing.md). TL;DR: fork, branch, conventional-commit, PR. Provider adapters go in `core/hail/core/providers/`. Update `.env.example` for any new env var.
+See [docs/contributing.md](docs/contributing.md). TL;DR: fork, branch, conventional-commit, PR. Provider adapters go in `core/hailhq/core/providers/`. Update `.env.example` for any new env var.
 
 ## License
 

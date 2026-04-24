@@ -18,11 +18,11 @@ openapi/    — committed openapi.yaml. Source of truth for the CLI.
 docs/       — plain markdown; to be served via fumadoc on the website.
 ```
 
-**PyPI posture for v1**: nothing published. `api/`, `voicebot/`, `mcp/` all carry `Private :: Do Not Upload`. `core/` is not marked private but is not released either — no external consumers yet. Revisit when a third-party integration wants to `pip install hail-core`.
+**PyPI posture for v1**: one external artifact — the Python SDK, published as `hail-sdk` (imports as `import hail`). The internal services `hailhq-api`, `hailhq-voicebot`, `hailhq-mcp` all carry `Private :: Do Not Upload`. `hailhq-core` is not marked private but is not released in v1 either — it's an internal workspace dep.
 
 **MCP distribution**: remote SSE only. We deliberately do **not** ship a stdio PyPI package. Reasoning lives in [docs/setup/mcp.md](docs/setup/mcp.md) — read it before proposing a stdio server; the default answer is "no, use the SSE endpoint".
 
-All four Python packages share the `hail` namespace (PEP 420 implicit namespace packages). Do **not** create `hail/__init__.py` at the namespace root.
+Internal packages share the `hailhq.*` namespace (PEP 420 implicit — **no** `hailhq/__init__.py` at the namespace root). The import name `hail` is **reserved** for the external SDK (`hail-sdk` on PyPI); do not introduce top-level `hail` modules inside the monorepo.
 
 Go CLI module path is `github.com/hail-hq/hail/cli`. npm packages are published under the `@hail-hq/` scope.
 
@@ -39,7 +39,7 @@ Go CLI module path is `github.com/hail-hq/hail/cli`. npm packages are published 
 
 - **OpenAPI is source of truth for the CLI.** After any API route change, regenerate `openapi/openapi.yaml` in the same PR.
 - **Secrets live only in `.env` / `.env.local`.** Only `.env.example` is committed. Adding a new env var? Update `.env.example` in the same commit, under the right provider section.
-- **Provider adapters go in `core/hail/core/providers/<channel>/<name>.py`.** `api/` and `voicebot/` must not import provider SDKs directly; they go through `core`.
+- **Provider adapters go in `core/hailhq/core/providers/<channel>/<name>.py`.** `api/` and `voicebot/` must not import provider SDKs directly; they go through `core`.
 - **Shared models go in `core/`.** No duplicated Call/SMS/Email schemas across services.
 - **AGPLv3.** Any derived SaaS must release source. Be conservative about copying third-party code.
 - **Docs are agent-first.** When writing or updating any doc: lead with a concrete runnable example, link canonical sources (OpenAPI spec, MCP tool schemas, code paths) instead of paraphrasing them, and avoid screenshots when a snippet would work. Use GitHub-flavored Markdown.
@@ -47,9 +47,10 @@ Go CLI module path is `github.com/hail-hq/hail/cli`. npm packages are published 
 ## Dev commands
 
 - Data services:  `docker compose up postgres minio`
-- API:            `cd api && uv run uvicorn hail.api.main:app --reload --port 8080`
-- Voicebot:       `cd voicebot && uv run python -m hail.voicebot.main`
-- MCP:            `cd mcp && uv run uvicorn hail.mcp.server:app --reload --port 8081`
+- Migrations:     `cd api && uv run alembic upgrade head`
+- API:            `cd api && uv run uvicorn hailhq.api.main:app --reload --port 8080`
+- Voicebot:       `cd voicebot && uv run python -m hailhq.voicebot.main`
+- MCP:            `cd mcp && uv run uvicorn hailhq.mcp.server:app --reload --port 8081`
 - CLI:            `cd cli && go run . <cmd>`
 - Full stack:     `docker compose up`
 
