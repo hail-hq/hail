@@ -46,19 +46,20 @@ Go CLI module path is `github.com/hail-hq/hail/cli`. npm packages are published 
 
 ## Dev commands
 
-- Data services:  `docker compose up postgres minio`
-- Migrations:     `cd api && uv run alembic upgrade head`
-- API:            `cd api && uv run uvicorn hailhq.api.main:app --reload --port 8080`
-- Voicebot:       `cd voicebot && uv run python -m hailhq.voicebot.main`
-- MCP:            `cd mcp && uv run uvicorn hailhq.mcp.server:app --reload --port 8081`
-- CLI:            `cd cli && go run . <cmd>`
-- Full stack:     `docker compose up`
+- Data services: `docker compose up postgres minio`
+- Migrations: `cd api && uv run alembic upgrade head`
+- API: `cd api && uv run uvicorn hailhq.api.main:app --reload --port 8080`
+- Voicebot: `cd voicebot && uv run python -m hailhq.voicebot.main`
+- MCP: `cd mcp && uv run uvicorn hailhq.mcp.server:app --reload --port 8081`
+- CLI: `cd cli && go run . <cmd>`
+- Full stack: `docker compose up`
 
 ## Style
 
-- **Python**: ruff (format + lint), mypy, pytest. FastAPI async handlers. Type-hinted. Pydantic v2 models.
+- **Python**: ruff (lint, `--fix`) + black (format); mypy + pytest run in CI. FastAPI async handlers. Type-hinted. Pydantic v2 models.
 - **Go**: `gofmt`, stdlib first. Cobra for subcommands if/when the CLI grows them.
 - **Docker**: multi-stage (builder → runtime), runs as non-root `hail` user, runtime image carries no build tools. Deps installed into `/opt/venv`; only that is copied to the runtime stage. Tighten to a pinned `uv.lock`-based cache flow once a lockfile lands.
+- **Pre-commit**: husky + lint-staged run `ruff`/`black`/`gofmt`/`prettier` on staged files. Install with `pnpm install` at repo root; hooks activate automatically via the `prepare` script. pnpm is the Node package manager for this repo (pinned via `packageManager` in `package.json`).
 - **Commits**: Conventional Commits.
 
 ## Do not

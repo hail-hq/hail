@@ -5,6 +5,7 @@ Revises:
 Create Date: 2026-04-24
 
 """
+
 from typing import Sequence, Union
 
 from alembic import op
@@ -61,7 +62,6 @@ CREATE TRIGGER api_keys_updated_at BEFORE UPDATE ON api_keys
 
 -- ============================================================
 -- PHONE NUMBERS
--- source: 'manual' (hand-acquired) vs 'pool' (auto-provisioned, GC-eligible).
 -- ============================================================
 CREATE TABLE phone_numbers (
   id                     UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -70,8 +70,6 @@ CREATE TABLE phone_numbers (
   country_code           TEXT NOT NULL,
   number_type            TEXT NOT NULL CHECK (number_type IN ('local','mobile','toll_free')),
   capabilities           TEXT[] NOT NULL DEFAULT ARRAY['voice','sms'],
-  source                 TEXT NOT NULL DEFAULT 'manual'
-                         CHECK (source IN ('manual','pool')),
   provider               TEXT NOT NULL DEFAULT 'twilio',
   provider_resource_id   TEXT NOT NULL,
   provisioning_state     TEXT NOT NULL DEFAULT 'pending'
@@ -79,16 +77,12 @@ CREATE TABLE phone_numbers (
   provisioning_metadata  JSONB NOT NULL DEFAULT '{}',
   acquired_at            TIMESTAMPTZ,
   released_at            TIMESTAMPTZ,
-  last_used_at           TIMESTAMPTZ,
   created_at             TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at             TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX idx_phone_numbers_org ON phone_numbers(organization_id);
 CREATE INDEX idx_phone_numbers_state ON phone_numbers(provisioning_state)
   WHERE provisioning_state IN ('pending','failed');
-CREATE INDEX idx_phone_numbers_pool
-  ON phone_numbers(organization_id, source, provisioning_state)
-  WHERE source = 'pool';
 CREATE TRIGGER phone_numbers_updated_at BEFORE UPDATE ON phone_numbers
   FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 
@@ -153,8 +147,6 @@ CREATE INDEX idx_calls_status ON calls(status)
 CREATE INDEX idx_calls_conversation ON calls(conversation_id)
   WHERE conversation_id IS NOT NULL;
 CREATE INDEX idx_calls_to ON calls(organization_id, to_e164);
-CREATE INDEX idx_calls_from_number_active ON calls(from_number_id)
-  WHERE status IN ('queued','dialing','ringing','in_progress');
 CREATE TRIGGER calls_updated_at BEFORE UPDATE ON calls
   FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 

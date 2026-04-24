@@ -7,15 +7,18 @@ git clone <repo>
 cd hail
 cp .env.example .env.local
 # fill in keys (see docs/setup/*)
+pnpm install                      # installs husky + lint-staged + prettier
 docker compose up postgres minio  # just the data services for host-side dev
 ```
 
+`pnpm install` wires up the git pre-commit hook that runs `ruff`/`black`/`gofmt`/`prettier` on staged files.
+
 ## Dev loops
 
-- API:        `cd api && uv run uvicorn hailhq.api.main:app --reload --port 8080`
-- Voicebot:   `cd voicebot && uv run python -m hailhq.voicebot.main`
-- MCP:        `cd mcp && uv run uvicorn hailhq.mcp.server:app --reload --port 8081`
-- CLI:        `cd cli && go run . <args>`
+- API: `cd api && uv run uvicorn hailhq.api.main:app --reload --port 8080`
+- Voicebot: `cd voicebot && uv run python -m hailhq.voicebot.main`
+- MCP: `cd mcp && uv run uvicorn hailhq.mcp.server:app --reload --port 8081`
+- CLI: `cd cli && go run . <args>`
 
 Full stack in Docker: `docker compose up`.
 
