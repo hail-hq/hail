@@ -1,2 +1,2 @@
 [tool.uv.workspace]
-members = ["core", "api", "voicebot", "mcp"]
+members = ["core", "api", "voicebot", "mcp", "sdk"]

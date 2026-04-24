@@ -20,3 +20,5 @@
 cli/
 docs/
 openapi/
+sdk/
+.github/
