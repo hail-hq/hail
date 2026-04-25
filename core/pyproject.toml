@@ -8,10 +8,11 @@ requires-python = ">=3.11"
 dependencies = [
     "pydantic>=2.9",
     "pydantic-settings>=2.6",
+    "sqlalchemy>=2.0",
 ]
 
 [project.optional-dependencies]
-dev = ["pytest", "ruff", "mypy"]
+dev = ["pytest", "ruff", "mypy", "testcontainers[postgres]>=4", "psycopg[binary]>=3.2"]
 
 [build-system]
 requires = ["hatchling"]
