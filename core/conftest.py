@@ -1,21 +1,37 @@
+import os
+
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
-from testcontainers.postgres import PostgresContainer
 
 
 @pytest.fixture(scope="session")
-def postgres_container():
+def database_url():
+    """Resolve the test database URL.
+
+    If the ``DATABASE_URL`` environment variable is set (e.g. CI's Postgres
+    service container), use it directly and skip spinning up a testcontainer.
+    Otherwise fall back to a session-scoped ``testcontainers`` Postgres so
+    local dev works with no extra setup.
+    """
+    env_url = os.environ.get("DATABASE_URL")
+    if env_url:
+        yield env_url
+        return
+
+    # Lazy import so test runs against an external DATABASE_URL don't need
+    # the testcontainers/docker stack installed or running.
+    from testcontainers.postgres import PostgresContainer
+
     with PostgresContainer("postgres:16-alpine") as pg:
-        yield pg
+        yield pg.get_connection_url().replace("psycopg2", "psycopg")
 
 
 @pytest.fixture()
-def session(postgres_container):
+def session(database_url):
     from hailhq.core.models import Base
 
-    url = postgres_container.get_connection_url().replace("psycopg2", "psycopg")
-    engine = create_engine(url)
+    engine = create_engine(database_url)
     with engine.begin() as conn:
         conn.exec_driver_sql("CREATE EXTENSION IF NOT EXISTS pgcrypto;")
     Base.metadata.drop_all(engine)

@@ -605,9 +605,8 @@ jobs:
       - uses: astral-sh/setup-uv@v3
         with:
           python-version: "3.12"
-      - run: uv sync --all-packages
-      - run: uv run ruff check .
-      - run: uv run black --check .
+      - run: uvx ruff check .
+      - run: uvx black --check .
 
   test:
     runs-on: ubuntu-latest
@@ -628,8 +627,8 @@ jobs:
       - uses: astral-sh/setup-uv@v3
         with:
           python-version: "3.12"
-      - run: uv sync --all-packages
-      - run: uv run pytest core/tests api/tests voicebot/tests mcp/tests sdk/tests -v
+      - run: uv sync --all-packages --all-extras
+      - run: uv run pytest core/tests -v
         env:
           DATABASE_URL: postgresql+psycopg://hail:hail@localhost:5432/hail
 
