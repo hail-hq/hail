@@ -1035,6 +1035,7 @@ name = "hailhq-core"
 version = "0.1.0"
 source = { editable = "core" }
 dependencies = [
+    { name = "livekit-api" },
     { name = "pydantic" },
     { name = "pydantic-settings" },
     { name = "sqlalchemy" },
@@ -1054,6 +1055,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "livekit-api", specifier = ">=1.1" },
     { name = "mypy", marker = "extra == 'dev'" },
     { name = "psycopg", extras = ["binary"], marker = "extra == 'dev'", specifier = ">=3.2" },
     { name = "pydantic", specifier = ">=2.9" },

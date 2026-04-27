@@ -720,22 +720,33 @@ Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
 **Files:**
 
 - Create: `core/hailhq/core/livekit.py`, `core/tests/test_livekit.py`
-- Modify: `core/pyproject.toml` (add `livekit-api>=0.8`)
+- Modify: `core/pyproject.toml` (add `livekit-api` — pick the current version from PyPI; the legacy `>=0.8` pin in earlier drafts is stale)
 
-**Approach:**
+**Approach (verified against docs.livekit.io 2026-04-27):**
 
-- `livekit.py` exports `create_room(call_id) -> room_name`, `dispatch_agent(room_name, agent_name, metadata: dict) -> AgentJob`, and `create_sip_participant(room_name, to_e164, from_e164, sip_trunk_id) -> ParticipantInfo` — the **outbound dial** through LiveKit's SIP service (which routes via Twilio's trunk).
-- Uses `livekit.api.LiveKitAPI` with `LIVEKIT_URL/KEY/SECRET` from settings.
-- Tests: mock `LiveKitAPI` methods; verify `room_service.create_room`, `agent_dispatch.create_dispatch`, and `sip.create_sip_participant` are called with expected arguments.
+- All helpers are **async** — `livekit.api.LiveKitAPI` is asyncio + aiohttp under the hood.
+- Construct the client once: `from livekit import api; lkapi = api.LiveKitAPI(url, key, secret)`. Always `await lkapi.aclose()` on shutdown.
+- `livekit.py` exports three helpers:
+  - `async def create_room(call_id: UUID) -> str` — calls `lkapi.room.create_room(api.CreateRoomRequest(name=f"hail-{call_id}"))`. Returns the room name (we use the call id as the room id for traceability).
+  - `async def dispatch_agent(room_name: str, agent_name: str, metadata: dict) -> str` — calls `lkapi.agent_dispatch.create_dispatch(api.CreateAgentDispatchRequest(room=room_name, agent_name=agent_name, metadata=json.dumps(metadata)))`. `metadata` must be a JSON string in the API; we accept a dict and serialize. The voicebot must register with `WorkerOptions(agent_name=...)` for explicit dispatch to work — flag this in the docstring so Task 8 knows.
+  - `async def create_sip_participant(room_name: str, to_e164: str, from_e164: str, sip_trunk_id: str, participant_identity: str) -> ParticipantInfo` — calls `lkapi.sip.create_sip_participant(api.CreateSIPParticipantRequest(sip_trunk_id=sip_trunk_id, sip_call_to=to_e164, sip_number=from_e164, room_name=room_name, participant_identity=participant_identity, participant_name=participant_identity))`. This is the outbound dial; LiveKit's SIP service issues the INVITE through the configured Twilio trunk.
+- Reads `LIVEKIT_URL/KEY/SECRET` from `hailhq.core.config.settings`. Allow constructor injection for tests.
+- Tests: instantiate the helpers with a mock `LiveKitAPI` (or patch `lkapi.room`, `lkapi.agent_dispatch`, `lkapi.sip` directly). Verify request types + field values, not just method names.
+
+**Verify before writing code:**
+
+- The Python SDK's exact module path for `CreateAgentDispatchRequest` and `CreateSIPParticipantRequest`. Search `livekit-docs` MCP first; fall back to `WebFetch` against `docs.livekit.io/reference/python/livekit/api/` if MCP isn't reachable.
+- Any code blocks the subagent writes that touch APIs not verified live should carry a `# UNVERIFIED:` comment per the LiveKit Agents skill.
 
 **Commit message:**
 
 ```
-feat(core): LiveKit room/agent-dispatch helpers
+feat(core): LiveKit room, agent-dispatch, and SIP-out helpers
 
-Thin wrappers around livekit-api for create_room and dispatch_agent.
-Keeps LiveKit auth + room-naming conventions in one place so api and
-voicebot don't each reimplement them.
+Async wrappers around livekit-api: create_room, dispatch_agent, and
+create_sip_participant. Keeps LiveKit auth, room-naming convention
+(hail-<call_id>), and SIP-out parameter mapping in one place so api
+and voicebot don't each reimplement them.
 
 Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
 ```
