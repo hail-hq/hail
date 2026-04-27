@@ -36,7 +36,14 @@ jobs:
         with:
           python-version: "3.12"
       - run: uv sync --all-packages --all-extras
-      - run: uv run pytest core/tests -v
+      - name: core tests
+        working-directory: core
+        run: uv run pytest tests -v
+        env:
+          DATABASE_URL: postgresql+psycopg://hail:hail@localhost:5432/hail
+      - name: api tests
+        working-directory: api
+        run: uv run pytest tests -v
         env:
           DATABASE_URL: postgresql+psycopg://hail:hail@localhost:5432/hail
 
