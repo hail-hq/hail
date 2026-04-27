@@ -64,6 +64,9 @@ CallStatus = Literal[
 ]
 
 
+NumberType = Literal["local", "mobile", "toll_free"]
+
+
 class CallResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

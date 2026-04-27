@@ -694,9 +694,10 @@ Temporarily edit any test to fail, push on a branch, confirm the `test` job goes
 
 **Approach:**
 
-- `voice/base.py`: abstract `VoiceProvider` with methods `acquire_number(country, number_type)`, `release_number(resource_id)`, `create_sip_call(from_e164, to_e164, livekit_trunk_uri, call_id)` returning a `ProviderCall` record with `provider_call_sid`.
-- `voice/twilio.py`: concrete implementation using `twilio.rest.Client`. Reads credentials from `hailhq.core.config.settings`.
-- Tests: use `responses` or `respx` to mock Twilio's HTTP API; assert the adapter calls the right endpoints with the right payload. Integration tests (live Twilio) are gated on `HAIL_TWILIO_LIVE=1` and skipped by default.
+- `voice/base.py`: abstract `VoiceProvider` for **carrier-side** concerns: `acquire_number(country_code, number_type, capabilities)`, `release_number(provider_resource_id)`, `get_call_status(provider_call_sid)`, `hangup_call(provider_call_sid)`. Outbound dial is **not** here — that's a LiveKit operation in Task 4 (LiveKit Cloud handles SIP routing through the configured trunk).
+- `voice/base.py` also exports Pydantic types `ProviderNumber` and `ProviderCallStatus` returned by those methods.
+- `voice/twilio.py`: concrete `TwilioVoiceProvider` using the Twilio Python SDK. Reads credentials from `hailhq.core.config.settings`.
+- Tests: mock Twilio's HTTP at the boundary (subagent picks `respx` vs `responses` based on which transport the SDK uses). Assert correct endpoints + payloads. Live integration tests gated on `HAIL_TWILIO_LIVE=1` and skipped by default.
 
 **Commit message:**
 
@@ -704,9 +705,10 @@ Temporarily edit any test to fail, push on a branch, confirm the `test` job goes
 feat(core): Twilio voice provider adapter
 
 VoiceProvider interface in providers/voice/base.py with one concrete
-implementation (twilio.py). acquire_number, release_number, and
-create_sip_call match the v1 surface. Unit-tested via respx mocks;
-live tests gated by HAIL_TWILIO_LIVE.
+implementation (twilio.py): acquire_number, release_number,
+get_call_status, hangup_call. Outbound SIP dial is a LiveKit op
+(Task 4), not the carrier's responsibility. Unit-tested with HTTP
+boundary mocks; live tests gated by HAIL_TWILIO_LIVE.
 
 Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
 ```
@@ -722,9 +724,9 @@ Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
 
 **Approach:**
 
-- `livekit.py` exports `create_room(call_id) -> room_name`, `dispatch_agent(room_name, agent_name, metadata: dict) -> AgentJob`, `build_sip_participant_uri(number_e164)`.
+- `livekit.py` exports `create_room(call_id) -> room_name`, `dispatch_agent(room_name, agent_name, metadata: dict) -> AgentJob`, and `create_sip_participant(room_name, to_e164, from_e164, sip_trunk_id) -> ParticipantInfo` — the **outbound dial** through LiveKit's SIP service (which routes via Twilio's trunk).
 - Uses `livekit.api.LiveKitAPI` with `LIVEKIT_URL/KEY/SECRET` from settings.
-- Tests: mock `LiveKitAPI` methods; verify `room_service.create_room` + `agent_dispatch.create_dispatch` are called with expected arguments.
+- Tests: mock `LiveKitAPI` methods; verify `room_service.create_room`, `agent_dispatch.create_dispatch`, and `sip.create_sip_participant` are called with expected arguments.
 
 **Commit message:**
 
@@ -780,7 +782,7 @@ Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
 
 **Approach:**
 
-- `POST /calls`: accepts `CallCreate`, resolves `from_e164` to a `PhoneNumber`, creates `Call` row with `voice_config` snapshot and `status="queued"`, calls `livekit.create_room` + `dispatch_agent`, triggers `twilio.create_sip_call`, returns `CallResponse`. All inside one DB transaction with the provider calls deferred to `after_commit` hook to avoid orphaned Twilio calls if commit fails.
+- `POST /calls`: accepts `CallCreate`, resolves `from_e164` to a `PhoneNumber`, creates `Call` row with `voice_config` snapshot and `status="queued"`, calls `livekit.create_room` + `dispatch_agent` + `create_sip_participant` (dials out through the Twilio trunk via LiveKit's SIP service), returns `CallResponse`. All inside one DB transaction with the provider calls deferred to `after_commit` hook to avoid orphaned external calls if commit fails.
 - `GET /calls/{id}`: auth → scope-check organization → return `CallResponse`.
 - `GET /calls`: cursor pagination (created_at, id), filter by `status`, `to_e164`. Returns `CallListResponse`.
 - Regenerate OpenAPI: `cd api && uv run python -c "from hailhq.api.main import app; import json, sys, yaml; yaml.safe_dump(app.openapi(), sys.stdout, sort_keys=False)" > ../openapi/openapi.yaml`.
