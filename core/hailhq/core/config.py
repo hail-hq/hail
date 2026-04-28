@@ -35,6 +35,7 @@ class Settings(BaseSettings):
     livekit_url: str = ""
     livekit_api_key: str = ""
     livekit_api_secret: str = ""
+    livekit_sip_trunk_id: str = ""
 
     # Storage
     database_url: str = "postgresql://hail:hail@postgres:5432/hail"
