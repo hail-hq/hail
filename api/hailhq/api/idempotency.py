@@ -14,6 +14,11 @@ returns 409. The insert is the lock — no separate locking primitive needed.
 Failures are cached just like successes: a retry with the same key replays
 the failure rather than re-attempting. Clients who want a fresh attempt
 must mint a new key (Stripe-style).
+
+TODO(v1.x): expired-key garbage collection. The ``expires_at`` column
+defaults to ``now() + interval '24 hours'`` but no process currently
+sweeps stale rows. Add either a periodic worker (apscheduler / dramatiq)
+or a ``pg_cron`` job before scaling.
 """
 
 from __future__ import annotations

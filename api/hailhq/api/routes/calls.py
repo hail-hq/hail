@@ -61,6 +61,18 @@ def get_livekit() -> LiveKitClient:
     return _livekit_singleton
 
 
+async def close_livekit_singleton() -> None:
+    """Close the process-wide ``LiveKitClient`` if one was constructed.
+
+    Wired into ``app.lifespan`` shutdown so the underlying aiohttp session
+    is released cleanly. No-op when tests override ``get_livekit``.
+    """
+    global _livekit_singleton
+    if _livekit_singleton is not None:
+        await _livekit_singleton.aclose()
+        _livekit_singleton = None
+
+
 # --------------------------------------------------------------------------- #
 # Audit logging — runs in a fresh session so failures don't roll back the call.
 # --------------------------------------------------------------------------- #

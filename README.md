@@ -3,7 +3,7 @@
 > Universal communication platform for AI agents.
 > Phone calls, SMS, email — outbound first, inbound next. Self-hostable. Open source (AGPLv3).
 
-Your agent wants to place a call: *"Call +1… and ask if they want to reschedule."* Hail does the carrier glue, runs the voice pipeline, and lets the agent plug in its own brain (or fall back to OpenAI → Gemini → Claude).
+Your agent wants to place a call: _"Call +1… and ask if they want to reschedule."_ Hail does the carrier glue, runs the voice pipeline, and lets the agent plug in its own brain (or fall back to OpenAI → Gemini → Claude).
 
 ## Quickstart
 
@@ -20,6 +20,8 @@ Use it:
 ```bash
 # CLI (for humans scripting Hail)
 hail call +15551234567 --prompt "You are calling to confirm a reschedule."
+hail tail                                # follow every event in your org
+hail tail --id call:<uuid>               # narrow to one call
 
 # HTTP
 curl -X POST http://localhost:8080/calls \

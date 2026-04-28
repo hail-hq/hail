@@ -15,8 +15,6 @@ dependencies = [
     "greenlet>=3.0",
     "psycopg[binary]>=3.2",
     "alembic>=1.13",
-    "twilio>=9.3",
-    "livekit-api>=0.8",
 ]
 
 [project.optional-dependencies]

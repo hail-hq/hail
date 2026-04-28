@@ -12,10 +12,11 @@ from hailhq.api.routes import events as events_routes
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
-    """Hold no resources on startup; dispose the DB engine on shutdown."""
+    """Hold no resources on startup; release the DB engine + LiveKit client on shutdown."""
     try:
         yield
     finally:
+        await calls_routes.close_livekit_singleton()
         await dispose_engine()
 
 

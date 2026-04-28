@@ -1004,11 +1004,9 @@ dependencies = [
     { name = "fastapi" },
     { name = "greenlet" },
     { name = "hailhq-core" },
-    { name = "livekit-api" },
     { name = "psycopg", extra = ["binary"] },
     { name = "pydantic" },
     { name = "sqlalchemy", extra = ["asyncio"] },
-    { name = "twilio" },
     { name = "uvicorn", extra = ["standard"] },
 ]
 
@@ -1030,7 +1028,6 @@ requires-dist = [
     { name = "greenlet", specifier = ">=3.0" },
     { name = "hailhq-core", editable = "core" },
     { name = "httpx", marker = "extra == 'dev'" },
-    { name = "livekit-api", specifier = ">=0.8" },
     { name = "mypy", marker = "extra == 'dev'" },
     { name = "psycopg", extras = ["binary"], specifier = ">=3.2" },
     { name = "pydantic", specifier = ">=2.9" },
@@ -1039,7 +1036,6 @@ requires-dist = [
     { name = "ruff", marker = "extra == 'dev'" },
     { name = "sqlalchemy", extras = ["asyncio"], specifier = ">=2.0" },
     { name = "testcontainers", extras = ["postgres"], marker = "extra == 'dev'", specifier = ">=4" },
-    { name = "twilio", specifier = ">=9.3" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.32" },
 ]
 provides-extras = ["dev"]
