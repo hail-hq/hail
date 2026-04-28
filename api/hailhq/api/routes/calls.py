@@ -21,6 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from hailhq.api.db import get_session, session_scope
 from hailhq.api.deps import Principal, get_current_principal
+from hailhq.api.idempotency import IdempotencyContext, idempotency_for_post_calls
 from hailhq.core.config import settings
 from hailhq.core.livekit import LiveKitClient
 from hailhq.core.models import AuditLog, Call, CallEvent, PhoneNumber
@@ -133,7 +134,32 @@ async def create_call(
     principal: Annotated[Principal, Depends(get_current_principal)],
     db: Annotated[AsyncSession, Depends(get_session)],
     lk: Annotated[LiveKitClient, Depends(get_livekit)],
+    idem: Annotated[
+        IdempotencyContext | None, Depends(idempotency_for_post_calls)
+    ] = None,
 ) -> CallResponse:
+    # Replay before any DB or LiveKit work — a retry must not re-dispatch.
+    if idem is not None and idem.is_replay:
+        cached = idem.cached_response or {}
+        if idem.cached_status and idem.cached_status >= 400:
+            raise HTTPException(
+                status_code=idem.cached_status,
+                detail=cached.get("detail", "cached failure"),
+                headers={"Idempotency-Replay": "true"},
+            )
+        cached_id = UUID(cached["id"])
+        await _write_audit_log(
+            organization_id=principal.organization_id,
+            api_key_id=principal.api_key_id,
+            action="call.create.replayed",
+            resource_type="call",
+            resource_id=cached_id,
+            payload={"to": cached.get("to_e164"), "from": cached.get("from_e164")},
+        )
+        response.headers["Idempotency-Replay"] = "true"
+        response.headers["Location"] = f"/calls/{cached_id}"
+        return CallResponse.model_validate(cached)
+
     # 1. Resolve the from-number for this org.
     if body.from_ is not None:
         stmt = select(PhoneNumber).where(
@@ -236,9 +262,17 @@ async def create_call(
             )
         )
         await db.commit()
+        failure_detail = f"livekit dispatch failed: {exc}"
+        if idem is not None:
+            # Cache failures too — Stripe-style retries replay rather than
+            # re-dispatching. A fresh attempt requires a new Idempotency-Key.
+            await idem.store(
+                status_code=http_status.HTTP_502_BAD_GATEWAY,
+                body={"detail": failure_detail},
+            )
         raise HTTPException(
             status_code=http_status.HTTP_502_BAD_GATEWAY,
-            detail=f"livekit dispatch failed: {exc}",
+            detail=failure_detail,
         ) from exc
 
     # Success: update Call to dialing + insert state-change CallEvent.
@@ -265,7 +299,17 @@ async def create_call(
     await db.refresh(call)
 
     response.headers["Location"] = f"/calls/{call.id}"
-    return CallResponse.model_validate(call)
+    call_response = CallResponse.model_validate(call)
+
+    if idem is not None:
+        # ``mode="json"`` matches what FastAPI is about to serialize, so a
+        # later replay produces the byte-identical body.
+        await idem.store(
+            status_code=http_status.HTTP_201_CREATED,
+            body=call_response.model_dump(mode="json"),
+        )
+
+    return call_response
 
 
 # --------------------------------------------------------------------------- #
