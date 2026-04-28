@@ -8,7 +8,6 @@ from typing import AsyncIterator
 import httpx
 import pytest
 from fastapi import Depends, FastAPI
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from hailhq.api.auth import KEY_SCHEME_PREFIX, generate_key, hash_key, verify_key
@@ -145,12 +144,30 @@ async def test_last_used_at_is_updated_on_success(
     )
     assert resp.status_code == 200
 
-    refreshed = (
-        await async_session.execute(select(ApiKey).where(ApiKey.id == api_key.id))
-    ).scalar_one()
-    assert refreshed.last_used_at is not None
-    delta = datetime.now(timezone.utc) - refreshed.last_used_at
+    await async_session.refresh(api_key)
+    assert api_key.last_used_at is not None
+    delta = datetime.now(timezone.utc) - api_key.last_used_at
     assert delta.total_seconds() < 5
+
+
+async def test_last_used_at_is_throttled(
+    client: httpx.AsyncClient,
+    async_session: AsyncSession,
+    org_and_key: tuple[Organization, ApiKey, str],
+) -> None:
+    """A second request within the throttle window must not re-stamp."""
+    _, api_key, plain = org_and_key
+
+    await client.get("/whoami", headers={"Authorization": f"Bearer {plain}"})
+    await async_session.refresh(api_key)
+    first = api_key.last_used_at
+
+    await client.get("/whoami", headers={"Authorization": f"Bearer {plain}"})
+    await async_session.refresh(api_key)
+    second = api_key.last_used_at
+
+    assert first is not None
+    assert second == first
 
 
 async def test_wrong_scheme_returns_401(client: httpx.AsyncClient) -> None:

@@ -22,6 +22,7 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["hailhq/mcp"]
+dev-mode-dirs = ["."]
 
 [tool.uv.sources]
 hailhq-core = { workspace = true }

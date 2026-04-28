@@ -1,15 +1,9 @@
-"""Request-scoped FastAPI dependencies.
-
-``get_current_principal`` resolves the ``Authorization: Bearer <key>``
-header to a :class:`Principal` and stamps ``api_keys.last_used_at``,
-committing eagerly so the timestamp persists even if the caller's
-handler later rolls back its own work.
-"""
+"""Request-scoped FastAPI dependencies."""
 
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Annotated
 
 from fastapi import Depends, Header, HTTPException, status
@@ -18,8 +12,12 @@ from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from hailhq.api.auth import hash_key
-from hailhq.api.db import get_session
+from hailhq.api.db import get_session, session_scope
 from hailhq.core.models import ApiKey
+
+# Throttle ``last_used_at`` writes so chatty agent traffic doesn't
+# generate one no-op UPDATE per request.
+_LAST_USED_THROTTLE = timedelta(seconds=60)
 
 
 class Principal(BaseModel):
@@ -47,6 +45,19 @@ def _parse_bearer(authorization: str | None) -> str:
     return parts[1].strip()
 
 
+async def _stamp_last_used(api_key_id: uuid.UUID, ts: datetime) -> None:
+    """Stamp ``last_used_at`` in a fresh session.
+
+    Runs outside the request-scoped session so it doesn't commit the
+    handler's transaction.
+    """
+    async with session_scope() as session:
+        await session.execute(
+            update(ApiKey).where(ApiKey.id == api_key_id).values(last_used_at=ts)
+        )
+        await session.commit()
+
+
 async def get_current_principal(
     authorization: Annotated[str | None, Header()] = None,
     db: AsyncSession = Depends(get_session),
@@ -66,11 +77,8 @@ async def get_current_principal(
             detail="API key has expired",
         )
 
-    # Commit eagerly so last_used_at survives a later rollback by the handler.
-    await db.execute(
-        update(ApiKey).where(ApiKey.id == api_key.id).values(last_used_at=now)
-    )
-    await db.commit()
+    if api_key.last_used_at is None or now - api_key.last_used_at > _LAST_USED_THROTTLE:
+        await _stamp_last_used(api_key.id, now)
 
     return Principal(
         api_key_id=api_key.id,

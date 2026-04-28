@@ -30,6 +30,7 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["hailhq/core"]
+dev-mode-dirs = ["."]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

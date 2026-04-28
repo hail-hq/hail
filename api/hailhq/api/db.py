@@ -6,10 +6,10 @@ tests that override ``get_session`` and never touch the real engine.
 
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 from typing import AsyncIterator
 
 from sqlalchemy.ext.asyncio import (
-    AsyncEngine,
     AsyncSession,
     async_sessionmaker,
     create_async_engine,
@@ -17,7 +17,6 @@ from sqlalchemy.ext.asyncio import (
 
 from hailhq.core.config import settings
 
-_engine: AsyncEngine | None = None
 _sessionmaker: async_sessionmaker[AsyncSession] | None = None
 
 
@@ -38,22 +37,28 @@ def to_async_url(url: str) -> str:
 
 
 def _ensure_initialized() -> async_sessionmaker[AsyncSession]:
-    global _engine, _sessionmaker
+    global _sessionmaker
     if _sessionmaker is None:
-        _engine = create_async_engine(to_async_url(settings.database_url))
-        _sessionmaker = async_sessionmaker(_engine, expire_on_commit=False)
+        engine = create_async_engine(to_async_url(settings.database_url))
+        _sessionmaker = async_sessionmaker(engine, expire_on_commit=False)
     return _sessionmaker
 
 
 async def dispose_engine() -> None:
-    global _engine, _sessionmaker
-    if _engine is not None:
-        await _engine.dispose()
-        _engine = None
+    global _sessionmaker
+    if _sessionmaker is not None:
+        await _sessionmaker.kw["bind"].dispose()
         _sessionmaker = None
 
 
 async def get_session() -> AsyncIterator[AsyncSession]:
-    sm = _ensure_initialized()
-    async with sm() as session:
+    """FastAPI dependency yielding a per-request ``AsyncSession``."""
+    async with _ensure_initialized()() as session:
+        yield session
+
+
+@asynccontextmanager
+async def session_scope() -> AsyncIterator[AsyncSession]:
+    """Open a fresh ``AsyncSession`` outside any FastAPI request scope."""
+    async with _ensure_initialized()() as session:
         yield session
