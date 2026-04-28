@@ -10,6 +10,26 @@
 
 **Scope note:** This plan covers 13 tasks spanning multiple subsystems. Tasks 1 and 2 are detailed at TDD-step granularity because they're the immediate next work unit. Tasks 3–13 have structural outlines (files, approach, commit message) — their detailed step-by-step plans should be written as `docs/superpowers/plans/YYYY-MM-DD-task-NN-*.md` when each implementation starts, using this plan as context. This keeps the plan honest about what's immediately actionable.
 
+## Status
+
+| Task | Description                                | Status                                                                                                                                                                    |
+| ---- | ------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1    | Core SQLAlchemy models + Pydantic schemas  | ✅ Implemented                                                                                                                                                            |
+| 2    | CI workflow                                | ✅ Implemented                                                                                                                                                            |
+| 3    | Provider interface + Twilio voice adapter  | ✅ Implemented                                                                                                                                                            |
+| 4    | LiveKit integration helpers                | ✅ Implemented                                                                                                                                                            |
+| 5    | API-key auth middleware                    | ✅ Implemented                                                                                                                                                            |
+| 6    | POST /calls + GET /calls/{id} + GET /calls | ✅ Implemented                                                                                                                                                            |
+| 7    | Idempotency middleware                     | ⏳ Next up                                                                                                                                                                |
+| 8    | Voicebot worker                            | ⏳ Pending — Approach updated 2026-04-28 against current LiveKit Agents docs (FallbackAdapter kwargs, JobContext.job.metadata, entrypoint_fnc, behavioral tests required) |
+| 9    | CLI implementation                         | ⏳ Pending                                                                                                                                                                |
+| 10   | MCP place_call tool                        | ⏳ Pending                                                                                                                                                                |
+| 11   | SDK real client                            | ⏳ Pending                                                                                                                                                                |
+| 12   | CLI release workflow                       | ⏳ Pending                                                                                                                                                                |
+| 13   | Cut v0.1.0                                 | ⏳ Pending                                                                                                                                                                |
+
+LiveKit-touching code (Tasks 4 + 6) verified against canonical `livekit/protocol` `.proto` sources at implementation time and against current docs as of the date in the Status row. Task 8 must re-verify at implementation time per the LiveKit Agents skill.
+
 ---
 
 ## File Structure Overview
@@ -729,7 +749,7 @@ Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
 - `livekit.py` exports three helpers:
   - `async def create_room(call_id: UUID) -> str` — calls `lkapi.room.create_room(api.CreateRoomRequest(name=f"hail-{call_id}"))`. Returns the room name (we use the call id as the room id for traceability).
   - `async def dispatch_agent(room_name: str, agent_name: str, metadata: dict) -> str` — calls `lkapi.agent_dispatch.create_dispatch(api.CreateAgentDispatchRequest(room=room_name, agent_name=agent_name, metadata=json.dumps(metadata)))`. `metadata` must be a JSON string in the API; we accept a dict and serialize. The voicebot must register with `WorkerOptions(agent_name=...)` for explicit dispatch to work — flag this in the docstring so Task 8 knows.
-  - `async def create_sip_participant(room_name: str, to_e164: str, from_e164: str, sip_trunk_id: str, participant_identity: str) -> ParticipantInfo` — calls `lkapi.sip.create_sip_participant(api.CreateSIPParticipantRequest(sip_trunk_id=sip_trunk_id, sip_call_to=to_e164, sip_number=from_e164, room_name=room_name, participant_identity=participant_identity, participant_name=participant_identity))`. This is the outbound dial; LiveKit's SIP service issues the INVITE through the configured Twilio trunk.
+  - `async def create_sip_participant(room_name: str, to_e164: str, from_e164: str, sip_trunk_id: str, participant_identity: str) -> api.SIPParticipantInfo` — calls `lkapi.sip.create_sip_participant(api.CreateSIPParticipantRequest(sip_trunk_id=sip_trunk_id, sip_call_to=to_e164, sip_number=from_e164, room_name=room_name, participant_identity=participant_identity, participant_name=participant_identity))`. This is the outbound dial; LiveKit's SIP service issues the INVITE through the configured Twilio trunk. The returned `SIPParticipantInfo` carries `sip_call_id` (use this as `Call.provider_call_sid`), `participant_id`, `participant_identity`, `room_name` — verified against `livekit_sip.proto`.
 - Reads `LIVEKIT_URL/KEY/SECRET` from `hailhq.core.config.settings`. Allow constructor injection for tests.
 - Tests: instantiate the helpers with a mock `LiveKitAPI` (or patch `lkapi.room`, `lkapi.agent_dispatch`, `lkapi.sip` directly). Verify request types + field values, not just method names.
 
@@ -851,14 +871,32 @@ Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
 - Create: `voicebot/tests/__init__.py`, `voicebot/tests/test_pipeline.py`
 - Modify: `voicebot/hailhq/voicebot/main.py` (real entrypoint replacing the NotImplementedError stub)
 
-**Approach:**
+**Approach (verified against docs.livekit.io 2026-04-28; mark `# UNVERIFIED:` on anything Task 8's subagent can't confirm against the live SDK):**
 
-- `main.py`: `livekit.agents.cli.run_app(WorkerOptions(entrypoint=entrypoint, agent_name="hail-voicebot"))`.
-- `agent.py`: reads `JobContext.metadata` (set by api when dispatching) to get `call_id`, `voice_config`, `system_prompt` or `llm` config, `first_message`. Fetches call from DB.
-- `pipeline.py`: builds `AgentSession(vad=silero.VAD.load(), stt=deepgram.STT(), tts=elevenlabs.TTS(), llm=_build_llm(cfg))`. `_build_llm`: mode A uses `livekit.agents.llm.FallbackAdapter([openai.LLM("gpt-4o-mini"), google.LLM("gemini-1.5-flash"), anthropic.LLM("claude-haiku-4-5")])`; mode B uses `openai.LLM(base_url=cfg.base_url, api_key=cfg.api_key, model=cfg.model)`.
-- On session events, append to `call_events`.
-- On hangup: `recording.upload_to_s3(room, call_id)`, update `calls.recording_s3_key` + `recording_duration_ms` + `status="completed"` + `ended_at`.
-- Tests (unit): `_build_llm(mode_a_cfg)` returns `FallbackAdapter` instance, `_build_llm(mode_b_cfg)` returns configured `openai.LLM`. End-to-end via LiveKit test helpers is future work.
+- `main.py`: register the worker with `livekit.agents.cli.run_app(WorkerOptions(entrypoint_fnc=entrypoint, agent_name="hail-voicebot"))`. The `agent_name` is what makes the worker bind to **explicit** dispatch (Task 4's `dispatch_agent` calls match on this name; without it the worker would auto-join every room). Verify the field name `entrypoint_fnc` against `livekit-agents/livekit/agents/worker.py` on PyPI's installed version — older drafts called it `entrypoint`.
+- `agent.py`: read dispatch metadata via `JobContext.job.metadata` (a JSON string we set in Task 4's `dispatch_agent`). Parse with `json.loads(ctx.job.metadata or "{}")`. The dict carries `call_id`, `voice_config`, `system_prompt`, `llm` (or `None` for mode A), `first_message`. Fetch the `Call` row from DB to confirm + read snapshot fields.
+- `pipeline.py`: `AgentSession(vad=ctx.proc.userdata["vad"], stt=deepgram.STT(model=settings.deepgram_model or "nova-3"), tts=elevenlabs.TTS(voice_id=settings.elevenlabs_voice_id, model=settings.elevenlabs_model or "eleven_turbo_v2_5"), llm=_build_llm(call_cfg))`. **Silero is heavy; load it once per process.** Pass a `prewarm_fnc=prewarm` to `WorkerOptions`; `prewarm(proc)` does `proc.userdata["vad"] = silero.VAD.load()`, then sessions reuse it.
+- `_build_llm` (verified import: `from livekit.agents import llm`):
+  - **Mode A (default fallback chain)**: `llm.FallbackAdapter(llm=[openai.LLM(model=settings.openai_fast_model), google.LLM(model=settings.google_fast_model), anthropic.LLM(model=settings.anthropic_fast_model)], attempt_timeout=10.0, max_retry_per_llm=1, retry_interval=5.0)`. Do **not** pin model IDs in the plan — they age fast. Drive each from a settings field (default-empty in `Settings`, populated in `.env.example` with current fast-tier IDs).
+  - **Mode B (BYO endpoint)**: `openai.LLM(base_url=cfg.base_url, api_key=cfg.api_key, model=cfg.model)`. The `openai` plugin accepts an arbitrary OpenAI-compat endpoint via `base_url`.
+- On session events: append `call_events` rows for `agent_turn` / `user_turn` / `tool_call` / `error` kinds.
+- On hangup: `recording.upload_to_s3(room, call_id)`, update `calls.recording_s3_key` + `recording_duration_ms` + `status="completed"` + `ended_at` + final `transcript` JSONB. Use a separate transaction to avoid colliding with whatever the api service might have written.
+
+**Required tests (per the LiveKit Agents skill — "Voice agent behavior is code"):**
+
+1. `test_build_llm_mode_a_returns_fallback_adapter` — unit: pure construction.
+2. `test_build_llm_mode_b_returns_openai_with_base_url` — unit.
+3. `test_metadata_parser_handles_missing_fields` — defensive parsing of `JobContext.job.metadata`.
+4. **At least one behavioral test using `AgentSession.run(user_input=...)`** — covers basic conversation flow without a real room. Pattern (verify against current docs):
+   ```python
+   session = AgentSession(stt=fake_stt, llm=fake_llm, tts=fake_tts)
+   await session.start(agent=Agent(instructions="..."))
+   result = await session.run(user_input="hello")
+   result.expect.next_event().is_message(role="assistant")
+   ```
+5. `test_call_event_written_on_user_turn` — observe one round-trip; confirm a `call_events` row lands.
+
+End-to-end against a real LiveKit Cloud room is out of scope for v1; the behavioral tests above are mandatory and not deferrable.
 
 **Commit message:**
 
