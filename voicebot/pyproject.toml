@@ -7,19 +7,31 @@ requires-python = ">=3.11"
 classifiers = ["Private :: Do Not Upload"]
 dependencies = [
     "hailhq-core",
-    "livekit>=0.20",
-    "livekit-agents>=0.11",
-    "livekit-plugins-openai",
-    "livekit-plugins-google",
-    "livekit-plugins-anthropic",
-    "livekit-plugins-deepgram",
-    "livekit-plugins-elevenlabs",
-    "livekit-plugins-silero",
-    "livekit-plugins-turn-detector",
+    "asyncpg>=0.30",
+    "sqlalchemy[asyncio]>=2.0",
+    "livekit>=1.1,<2",
+    "livekit-agents>=1.5,<2",
+    "livekit-plugins-openai>=1.5,<2",
+    "livekit-plugins-google>=1.5,<2",
+    "livekit-plugins-anthropic>=1.5,<2",
+    "livekit-plugins-deepgram>=1.5,<2",
+    "livekit-plugins-elevenlabs>=1.5,<2",
+    "livekit-plugins-silero>=1.5,<2",
+    "livekit-plugins-turn-detector>=1.5,<2",
 ]
 
 [project.optional-dependencies]
-dev = ["pytest", "ruff", "mypy"]
+dev = [
+    "pytest",
+    "pytest-asyncio>=0.23",
+    "ruff",
+    "mypy",
+    "testcontainers[postgres]>=4",
+    "psycopg[binary]>=3.2",
+]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
 
 [build-system]
 requires = ["hatchling"]

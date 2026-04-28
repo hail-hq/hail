@@ -12,7 +12,7 @@ from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from hailhq.api.auth import hash_key
-from hailhq.api.db import get_session, session_scope
+from hailhq.core.db import get_session, session_scope
 from hailhq.core.models import ApiKey
 
 # Throttle ``last_used_at`` writes so chatty agent traffic doesn't

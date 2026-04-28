@@ -1121,6 +1121,7 @@ name = "hailhq-voicebot"
 version = "0.1.0"
 source = { editable = "voicebot" }
 dependencies = [
+    { name = "asyncpg" },
     { name = "hailhq-core" },
     { name = "livekit" },
     { name = "livekit-agents" },
@@ -1131,30 +1132,39 @@ dependencies = [
     { name = "livekit-plugins-openai" },
     { name = "livekit-plugins-silero" },
     { name = "livekit-plugins-turn-detector" },
+    { name = "sqlalchemy", extra = ["asyncio"] },
 ]
 
 [package.optional-dependencies]
 dev = [
     { name = "mypy" },
+    { name = "psycopg", extra = ["binary"] },
     { name = "pytest" },
+    { name = "pytest-asyncio" },
     { name = "ruff" },
+    { name = "testcontainers" },
 ]
 
 [package.metadata]
 requires-dist = [
+    { name = "asyncpg", specifier = ">=0.30" },
     { name = "hailhq-core", editable = "core" },
-    { name = "livekit", specifier = ">=0.20" },
-    { name = "livekit-agents", specifier = ">=0.11" },
-    { name = "livekit-plugins-anthropic" },
-    { name = "livekit-plugins-deepgram" },
-    { name = "livekit-plugins-elevenlabs" },
-    { name = "livekit-plugins-google" },
-    { name = "livekit-plugins-openai" },
-    { name = "livekit-plugins-silero" },
-    { name = "livekit-plugins-turn-detector" },
+    { name = "livekit", specifier = ">=1.1,<2" },
+    { name = "livekit-agents", specifier = ">=1.5,<2" },
+    { name = "livekit-plugins-anthropic", specifier = ">=1.5,<2" },
+    { name = "livekit-plugins-deepgram", specifier = ">=1.5,<2" },
+    { name = "livekit-plugins-elevenlabs", specifier = ">=1.5,<2" },
+    { name = "livekit-plugins-google", specifier = ">=1.5,<2" },
+    { name = "livekit-plugins-openai", specifier = ">=1.5,<2" },
+    { name = "livekit-plugins-silero", specifier = ">=1.5,<2" },
+    { name = "livekit-plugins-turn-detector", specifier = ">=1.5,<2" },
     { name = "mypy", marker = "extra == 'dev'" },
+    { name = "psycopg", extras = ["binary"], marker = "extra == 'dev'", specifier = ">=3.2" },
     { name = "pytest", marker = "extra == 'dev'" },
+    { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.23" },
     { name = "ruff", marker = "extra == 'dev'" },
+    { name = "sqlalchemy", extras = ["asyncio"], specifier = ">=2.0" },
+    { name = "testcontainers", extras = ["postgres"], marker = "extra == 'dev'", specifier = ">=4" },
 ]
 provides-extras = ["dev"]
 

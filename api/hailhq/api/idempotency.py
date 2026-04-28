@@ -29,7 +29,7 @@ from fastapi import status as http_status
 from sqlalchemy import select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
-from hailhq.api.db import session_scope
+from hailhq.core.db import session_scope
 from hailhq.api.deps import Principal, get_current_principal
 from hailhq.core.models import IdempotencyKey
 

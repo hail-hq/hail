@@ -19,7 +19,7 @@ from fastapi import status as http_status
 from sqlalchemy import select, tuple_, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from hailhq.api.db import get_session, session_scope
+from hailhq.core.db import get_session, session_scope
 from hailhq.api.deps import Principal, get_current_principal
 from hailhq.api.idempotency import IdempotencyContext, idempotency_for_post_calls
 from hailhq.core.config import settings

@@ -5,7 +5,7 @@ from typing import AsyncIterator
 
 from fastapi import FastAPI
 
-from hailhq.api.db import dispose_engine
+from hailhq.core.db import dispose_engine
 from hailhq.api.routes import calls as calls_routes
 
 

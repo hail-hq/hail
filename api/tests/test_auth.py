@@ -11,8 +11,8 @@ from fastapi import Depends, FastAPI
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from hailhq.api.auth import KEY_SCHEME_PREFIX, generate_key, hash_key, verify_key
-from hailhq.api.db import get_session
 from hailhq.api.deps import Principal, get_current_principal
+from hailhq.core.db import get_session
 from hailhq.core.models import ApiKey, Organization
 
 

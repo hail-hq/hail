@@ -18,9 +18,20 @@ class Settings(BaseSettings):
     google_genai_use_vertexai: bool = True
     anthropic_api_key: str = ""
 
+    # LLM models for the FallbackAdapter chain (mode A — system_prompt only).
+    # Set via .env / .env.local — see .env.example for current values.
+    openai_model: str = ""
+    google_model: str = ""
+    anthropic_model: str = ""
+
     # Voice pipeline
     deepgram_api_key: str = ""
     eleven_api_key: str = ""
+
+    # STT/TTS — model names set via .env / .env.local.
+    deepgram_model: str = ""
+    elevenlabs_voice_id: str = ""
+    elevenlabs_model: str = ""
 
     # Carriers
     twilio_account_sid: str = ""

@@ -1,7 +1,7 @@
 """Integration tests for the v1 calls API.
 
 The conftest's ``async_session`` fixture installs the test sessionmaker
-into ``hailhq.api.db._sessionmaker`` so ``session_scope()`` (used by
+into ``hailhq.core.db._sessionmaker`` so ``session_scope()`` (used by
 audit-log writes and the LiveKit-failure update path) talks to the test
 database without any FastAPI dep override.
 """
