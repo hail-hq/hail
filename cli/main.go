@@ -1,11 +1,8 @@
+// Command hail is the universal communication platform CLI.
 package main
 
-import (
-	"fmt"
-	"os"
-)
+import "github.com/hail-hq/hail/cli/internal/cmd"
 
 func main() {
-	fmt.Fprintln(os.Stderr, "hail: M1 in progress. See docs/architecture.md.")
-	os.Exit(1)
+	cmd.Execute()
 }

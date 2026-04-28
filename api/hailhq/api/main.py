@@ -7,6 +7,7 @@ from fastapi import FastAPI
 
 from hailhq.core.db import dispose_engine
 from hailhq.api.routes import calls as calls_routes
+from hailhq.api.routes import events as events_routes
 
 
 @asynccontextmanager
@@ -29,6 +30,7 @@ app = FastAPI(
     lifespan=lifespan,
 )
 app.include_router(calls_routes.router)
+app.include_router(events_routes.router)
 
 
 @app.get("/healthz")

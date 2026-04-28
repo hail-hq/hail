@@ -22,6 +22,14 @@ paths:
               - type: string
               - type: "null"
             title: Authorization
+        - name: Idempotency-Key
+          in: header
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            title: Idempotency-Key
       requestBody:
         required: true
         content:
@@ -146,6 +154,67 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HTTPValidationError"
+  /events:
+    get:
+      tags:
+        - events
+      summary: List Events
+      operationId: list_events_events_get
+      parameters:
+        - name: cursor
+          in: query
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            title: Cursor
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            maximum: 1000
+            minimum: 1
+            default: 100
+            title: Limit
+        - name: id
+          in: query
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            title: Id
+        - name: kind
+          in: query
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            title: Kind
+        - name: authorization
+          in: header
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            title: Authorization
+      responses:
+        "200":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EventStreamResponse"
+        "422":
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
   /healthz:
     get:
       summary: Healthz
@@ -203,6 +272,35 @@ components:
       required:
         - to
       title: CallCreate
+    CallEventResponse:
+      properties:
+        id:
+          type: string
+          format: uuid
+          title: Id
+        call_id:
+          type: string
+          format: uuid
+          title: Call Id
+        kind:
+          type: string
+          title: Kind
+        payload:
+          additionalProperties: true
+          type: object
+          title: Payload
+        occurred_at:
+          type: string
+          format: date-time
+          title: Occurred At
+      type: object
+      required:
+        - id
+        - call_id
+        - kind
+        - payload
+        - occurred_at
+      title: CallEventResponse
     CallListResponse:
       properties:
         items:
@@ -326,6 +424,37 @@ components:
         - answered_at
         - ended_at
       title: CallResponse
+    EventStreamResponse:
+      properties:
+        items:
+          items:
+            $ref: "#/components/schemas/CallEventResponse"
+          type: array
+          title: Items
+        next_cursor:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Next Cursor
+        call_status:
+          anyOf:
+            - type: string
+              enum:
+                - queued
+                - dialing
+                - ringing
+                - in_progress
+                - completed
+                - failed
+                - busy
+                - no_answer
+                - canceled
+            - type: "null"
+          title: Call Status
+      type: object
+      required:
+        - items
+      title: EventStreamResponse
     HTTPValidationError:
       properties:
         detail:

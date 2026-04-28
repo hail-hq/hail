@@ -8,7 +8,6 @@ GET /calls - cursor-paginated list (org-scoped, optional status / to filters).
 
 from __future__ import annotations
 
-import base64
 import logging
 from datetime import datetime, timezone
 from typing import Annotated, Any
@@ -30,6 +29,8 @@ from hailhq.core.schemas import (
     CallListResponse,
     CallResponse,
     CallStatus,
+    decode_cursor,
+    encode_cursor,
 )
 
 logger = logging.getLogger(__name__)
@@ -58,29 +59,6 @@ def get_livekit() -> LiveKitClient:
     if _livekit_singleton is None:
         _livekit_singleton = LiveKitClient()
     return _livekit_singleton
-
-
-# --------------------------------------------------------------------------- #
-# Cursor encoding helpers.
-# --------------------------------------------------------------------------- #
-
-
-def _encode_cursor(created_at: datetime, call_id: UUID) -> str:
-    raw = f"{created_at.isoformat()}|{call_id}".encode("utf-8")
-    return base64.urlsafe_b64encode(raw).rstrip(b"=").decode("ascii")
-
-
-def _decode_cursor(cursor: str) -> tuple[datetime, UUID]:
-    padded = cursor + "=" * (-len(cursor) % 4)
-    try:
-        raw = base64.urlsafe_b64decode(padded.encode("ascii")).decode("utf-8")
-        ts_str, id_str = raw.split("|", 1)
-        return datetime.fromisoformat(ts_str), UUID(id_str)
-    except (ValueError, UnicodeDecodeError) as exc:
-        raise HTTPException(
-            status_code=http_status.HTTP_400_BAD_REQUEST,
-            detail=f"invalid cursor: {exc}",
-        ) from exc
 
 
 # --------------------------------------------------------------------------- #
@@ -356,7 +334,13 @@ async def list_calls(
     if to is not None:
         stmt = stmt.where(Call.to_e164 == to)
     if cursor is not None:
-        cur_ts, cur_id = _decode_cursor(cursor)
+        try:
+            cur_ts, cur_id = decode_cursor(cursor)
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=http_status.HTTP_400_BAD_REQUEST,
+                detail=str(exc),
+            ) from exc
         stmt = stmt.where(tuple_(Call.created_at, Call.id) < tuple_(cur_ts, cur_id))
 
     stmt = stmt.order_by(Call.created_at.desc(), Call.id.desc()).limit(limit + 1)
@@ -365,7 +349,7 @@ async def list_calls(
     next_cursor: str | None = None
     if len(rows) > limit:
         last = rows[limit - 1]
-        next_cursor = _encode_cursor(last.created_at, last.id)
+        next_cursor = encode_cursor(last.created_at, last.id)
         rows = rows[:limit]
 
     return CallListResponse(
