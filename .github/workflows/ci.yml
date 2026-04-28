@@ -46,6 +46,9 @@ jobs:
         run: uv run pytest tests -v
         env:
           DATABASE_URL: postgresql+psycopg://hail:hail@localhost:5432/hail
+      - name: sdk tests
+        working-directory: sdk
+        run: uv run pytest tests -v
 
   go:
     runs-on: ubuntu-latest

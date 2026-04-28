@@ -14,7 +14,14 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest", "ruff", "mypy"]
+dev = [
+    "pytest",
+    "pytest-asyncio>=0.23",
+    "respx>=0.21",
+    "httpx",
+    "ruff",
+    "mypy",
+]
 
 [build-system]
 requires = ["hatchling"]
@@ -26,3 +33,6 @@ dev-mode-dirs = ["."]
 
 [tool.uv.sources]
 hailhq-core = { workspace = true }
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"

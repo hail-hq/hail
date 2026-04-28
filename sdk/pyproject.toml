@@ -1,6 +1,6 @@
 [project]
 name = "hail-sdk"
-version = "0.0.1"
+version = "0.1.0"
 description = "Python SDK for Hail — universal communication platform for AI agents."
 readme = "README.md"
 license = { text = "AGPL-3.0-or-later" }
@@ -22,6 +22,13 @@ dependencies = [
     "pydantic>=2.9",
 ]
 
+[project.optional-dependencies]
+dev = [
+    "pytest>=8",
+    "pytest-asyncio>=0.23",
+    "respx>=0.21",
+]
+
 [project.urls]
 Homepage = "https://hail.so"
 Repository = "https://github.com/hail-hq/hail"
@@ -34,3 +41,7 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["hail"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
