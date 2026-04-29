@@ -36,11 +36,6 @@ class Settings(BaseSettings):
     # Carriers
     twilio_account_sid: str = ""
     twilio_auth_token: str = ""
-    twilio_sip_trunk_domain: str = ""
-    aws_region: str = "us-east-1"
-    aws_access_key_id: str = ""
-    aws_secret_access_key: str = ""
-    ses_from_address: str = ""
 
     # Media
     livekit_url: str = ""
