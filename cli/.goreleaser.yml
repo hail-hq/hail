@@ -1,0 +1,86 @@
+# GoReleaser config for the hail CLI.
+#
+# Triggered by .github/workflows/release-cli.yml on `cli-v*` tag pushes.
+# Builds darwin/linux x amd64/arm64 binaries, ships them to GitHub Releases on
+# hail-hq/hail, and pushes an auto-generated formula to hail-hq/homebrew-tap so
+# `brew install hail-hq/tap/hail` works after release.
+#
+# Local snapshot build (no publishing):
+#     make release-snapshot
+# or:
+#     goreleaser release --snapshot --skip=publish --clean
+version: 2
+
+project_name: hail
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: hail
+    binary: hail
+    main: ./
+    goos: [linux, darwin]
+    goarch: [amd64, arm64]
+    env:
+      - CGO_ENABLED=0
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w
+      - -X github.com/hail-hq/hail/cli/internal/cmd.version={{ .Version }}
+      - -X github.com/hail-hq/hail/cli/internal/cmd.commit={{ .ShortCommit }}
+      - -X github.com/hail-hq/hail/cli/internal/cmd.buildDate={{ .Date }}
+
+archives:
+  - id: hail
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    formats: [tar.gz]
+    # Binary-only tarball. LICENSE and README live at the repo root and the
+    # archive workdir is `cli/`; GoReleaser does not reliably resolve `../`
+    # parent paths in archive globs. The Homebrew formula still declares
+    # `license: AGPL-3.0-or-later` (see brews block below), and the LICENSE
+    # file ships in the source repo — link it from the GitHub Release notes.
+
+checksum:
+  name_template: "checksums.txt"
+  algorithm: sha256
+
+snapshot:
+  # Use a literal template instead of `{{ incpatch .Version }}-next`: the repo
+  # carries non-semver tags (e.g. `sdk-v0.0.1`) that GoReleaser may pick up as
+  # the latest tag during snapshot, which `incpatch` then can't parse.
+  version_template: "0.0.0-snapshot-{{ .ShortCommit }}"
+
+release:
+  github:
+    owner: hail-hq
+    name: hail
+  draft: false
+  prerelease: auto
+  name_template: "hail CLI {{ .Tag }}"
+  header: |
+    ## hail CLI {{ .Tag }}
+
+    Universal communication platform for AI agents — `hail` CLI binaries.
+
+    Install via Homebrew:
+
+        brew install hail-hq/tap/hail
+
+    Or download a binary below.
+
+brews:
+  - name: hail
+    repository:
+      owner: hail-hq
+      name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
+    homepage: https://hail.so
+    description: Universal communication platform for AI agents (CLI)
+    license: AGPL-3.0-or-later
+    install: |
+      bin.install "hail"
+    test: |
+      system "#{bin}/hail", "--version"

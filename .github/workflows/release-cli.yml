@@ -1,0 +1,43 @@
+# Release workflow for the `hail` CLI.
+#
+# Triggered on `cli-v*` tag pushes. Runs GoReleaser (cli/.goreleaser.yml) to
+# build multi-arch tarballs, publish a GitHub Release on hail-hq/hail, and
+# push the auto-generated formula to hail-hq/homebrew-tap so
+# `brew install hail-hq/tap/hail` works after release.
+#
+# Required secrets:
+#   GITHUB_TOKEN        — auto-provided by Actions; used for the GitHub Release.
+#   HOMEBREW_TAP_TOKEN  — fine-grained PAT (or classic with `repo` scope) that
+#                         can push commits to hail-hq/homebrew-tap. Set at the
+#                         repo or org level under Settings → Secrets → Actions.
+name: Release hail CLI
+
+on:
+  push:
+    tags:
+      - "cli-v*"
+  workflow_dispatch:
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # publish a GitHub Release on this repo
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # GoReleaser needs full history for changelog generation
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+
+      - uses: goreleaser/goreleaser-action@v6
+        with:
+          distribution: goreleaser
+          version: "~> v2"
+          args: release --clean
+          workdir: cli
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}

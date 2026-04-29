@@ -29,6 +29,11 @@ htmlcov/
 venv/
 env/
 
+# uv: a workspace has a single root uv.lock. Per-member lockfiles
+# (e.g. core/uv.lock) only appear when a member is invoked as a
+# standalone project — never commit those.
+*/uv.lock
+
 # ─── Node ──────────────────────────────
 node_modules/
 npm-debug.log*

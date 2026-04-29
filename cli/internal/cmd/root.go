@@ -16,9 +16,15 @@ import (
 // utcTSLayout is the wall-clock format used in human-readable CLI output.
 const utcTSLayout = "2006-01-02 15:04:05Z"
 
-// Version is the CLI version string. v1 hard-codes a development tag; the
-// release workflow (Task 12) will inject a real semver via -ldflags.
-const Version = "0.1.0-dev"
+// Version metadata. These vars are overwritten at link time by GoReleaser
+// (see cli/.goreleaser.yml -> ldflags) when building a tagged release. Local
+// `go build` keeps the defaults below, so `hail --version` prints
+// "dev (commit none, built unknown)" until released.
+var (
+	version   = "dev"
+	commit    = "none"
+	buildDate = "unknown"
+)
 
 // DefaultAPIURL is used when neither --api-url nor HAIL_API_URL is set.
 const DefaultAPIURL = "http://localhost:8080"
@@ -57,7 +63,6 @@ func NewRootCmd(stdout, stderr io.Writer, getenv func(string) string) *cobra.Com
 		Short:         "hail — universal communication platform for AI agents",
 		SilenceUsage:  true,
 		SilenceErrors: true,
-		Version:       Version,
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 			if opts.APIURL == "" {
 				opts.APIURL = getenv("HAIL_API_URL")
@@ -71,6 +76,7 @@ func NewRootCmd(stdout, stderr io.Writer, getenv func(string) string) *cobra.Com
 			return nil
 		},
 	}
+	root.Version = fmt.Sprintf("%s (commit %s, built %s)", version, commit, buildDate)
 	root.SetOut(stdout)
 	root.SetErr(stderr)
 

@@ -1,4 +1,4 @@
-.PHONY: codegen build test vet fmt
+.PHONY: codegen build test vet fmt release-snapshot
 
 # Regenerate the OpenAPI client from openapi/openapi.yaml.
 #
@@ -30,3 +30,14 @@ vet:
 
 fmt:
 	gofmt -w .
+
+# Build a local GoReleaser snapshot — multi-arch tarballs into ./dist/ — without
+# publishing to GitHub Releases or pushing the Homebrew formula. Use this to
+# validate .goreleaser.yml after editing it. CI uses goreleaser-action instead.
+#
+# Requires goreleaser on PATH:
+#     brew install goreleaser
+# or:
+#     go install github.com/goreleaser/goreleaser/v2@latest
+release-snapshot:
+	goreleaser release --snapshot --skip=publish --clean
