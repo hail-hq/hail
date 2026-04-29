@@ -51,11 +51,31 @@ jobs:
             echo "previous=${previous}"
           } >> "$GITHUB_OUTPUT"
 
+      # Manual replacements for the two genuinely-useful checks `--skip=validate`
+      # bypasses below: working tree is clean, and the triggering tag points at
+      # the same commit as HEAD.
+      - name: Assert clean working tree
+        run: git diff --exit-code HEAD
+      - name: Assert tag points at HEAD
+        run: |
+          tag_sha=$(git rev-parse "${GITHUB_REF_NAME}^{}")
+          head_sha=$(git rev-parse HEAD)
+          if [ "${tag_sha}" != "${head_sha}" ]; then
+            echo "tag ${GITHUB_REF_NAME} (${tag_sha}) does not point at HEAD (${head_sha})" >&2
+            exit 1
+          fi
+
       - uses: goreleaser/goreleaser-action@v6
         with:
           distribution: goreleaser
           version: "~> v2"
-          args: release --clean
+          # --skip=validate bypasses GoReleaser's check that the
+          # GORELEASER_CURRENT_TAG name exists as a git tag pointing at HEAD.
+          # Our actual tag (`cli-v<semver>`) does point at HEAD, but GoReleaser
+          # has been told the current tag is the stripped `v<semver>` form,
+          # which doesn't exist in git. This is the OSS-equivalent of the
+          # Pro `monorepo:` feature.
+          args: release --clean --skip=validate
           workdir: cli
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
