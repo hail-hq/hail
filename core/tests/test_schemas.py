@@ -37,6 +37,15 @@ def test_call_create_requires_prompt_or_llm():
         CallCreate(to="+14155551234")
 
 
+def test_call_create_rejects_prompt_and_llm_together():
+    with pytest.raises(ValidationError, match="mutually exclusive"):
+        CallCreate(
+            to="+14155551234",
+            system_prompt="Hi",
+            llm=LLMConfig(base_url="https://x.example/v1", api_key="k", model="m"),
+        )
+
+
 def test_voice_config_defaults():
     cfg = VoiceConfig()
     assert cfg.stt == "deepgram"

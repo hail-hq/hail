@@ -33,8 +33,10 @@ def client(monkeypatch: pytest.MonkeyPatch) -> LiveKitClient:
     fake_api = MagicMock(spec=api.LiveKitAPI)
     fake_api.room = MagicMock()
     fake_api.room.create_room = AsyncMock()
+    fake_api.room.delete_room = AsyncMock()
     fake_api.agent_dispatch = MagicMock()
     fake_api.agent_dispatch.create_dispatch = AsyncMock()
+    fake_api.agent_dispatch.delete_dispatch = AsyncMock()
     fake_api.sip = MagicMock()
     fake_api.sip.create_sip_participant = AsyncMock()
     fake_api.aclose = AsyncMock()
@@ -111,6 +113,24 @@ async def test_create_sip_participant_maps_to_e164_and_from_e164(
     assert req.room_name == f"hail-{CALL_ID}"
     assert req.participant_identity == "caller-7c2a"
     assert req.participant_name == "caller-7c2a"
+
+
+async def test_delete_dispatch_delegates_to_underlying_api(
+    client: LiveKitClient,
+) -> None:
+    await client.delete_dispatch("AD_abc123", f"hail-{CALL_ID}")
+    client._lkapi.agent_dispatch.delete_dispatch.assert_awaited_once_with(
+        "AD_abc123",
+        f"hail-{CALL_ID}",
+    )
+
+
+async def test_delete_room_wraps_delete_room_request(client: LiveKitClient) -> None:
+    await client.delete_room(f"hail-{CALL_ID}")
+    client._lkapi.room.delete_room.assert_awaited_once()
+    (req,), _ = client._lkapi.room.delete_room.call_args
+    assert isinstance(req, api.DeleteRoomRequest)
+    assert req.room == f"hail-{CALL_ID}"
 
 
 async def test_aclose_delegates_to_underlying_api(client: LiveKitClient) -> None:

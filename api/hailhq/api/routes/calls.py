@@ -39,6 +39,7 @@ router = APIRouter(prefix="/calls", tags=["calls"])
 
 _DEFAULT_LIST_LIMIT = 50
 _MAX_LIST_LIMIT = 200
+_CALL_SETUP_FAILED_DETAIL = "call setup failed"
 
 
 # --------------------------------------------------------------------------- #
@@ -49,11 +50,16 @@ _MAX_LIST_LIMIT = 200
 _livekit_singleton: LiveKitClient | None = None
 
 
-def get_livekit() -> LiveKitClient:
+async def get_livekit() -> LiveKitClient:
     """Return a process-wide ``LiveKitClient``.
 
     Built lazily on first request so import-time settings/env aren't
     required. Tests override this via ``app.dependency_overrides``.
+
+    Must be ``async``: ``LiveKitClient()`` constructs an
+    ``aiohttp.ClientSession`` which calls ``asyncio.get_running_loop()``.
+    A sync FastAPI dep runs in a threadpool worker thread with no loop;
+    the async form keeps us on the main event loop.
     """
     global _livekit_singleton
     if _livekit_singleton is None:
@@ -104,6 +110,36 @@ async def _write_audit_log(
             "audit_log write failed for action=%s resource_id=%s",
             action,
             resource_id,
+            exc_info=True,
+        )
+
+
+async def _cleanup_partial_livekit(
+    lk: LiveKitClient,
+    room_name: str | None,
+    dispatch_id: str | None,
+) -> None:
+    """Best-effort cleanup for a partially-provisioned LiveKit call."""
+    if room_name is None:
+        return
+
+    if dispatch_id is not None:
+        try:
+            await lk.delete_dispatch(dispatch_id, room_name)
+        except Exception:  # pragma: no cover - logged, never re-raised
+            logger.warning(
+                "livekit dispatch cleanup failed for room=%s dispatch_id=%s",
+                room_name,
+                dispatch_id,
+                exc_info=True,
+            )
+
+    try:
+        await lk.delete_room(room_name)
+    except Exception:  # pragma: no cover - logged, never re-raised
+        logger.warning(
+            "livekit room cleanup failed for room=%s",
+            room_name,
             exc_info=True,
         )
 
@@ -209,9 +245,13 @@ async def create_call(
     )
 
     # 4. External calls — best-effort with status reconciliation.
+    room_name: str | None = None
+    dispatch_id: str | None = None
+    setup_stage = "room_create"
     try:
         room_name = await lk.create_room(call.id)
-        await lk.dispatch_agent(
+        setup_stage = "agent_dispatch"
+        dispatch_id = await lk.dispatch_agent(
             room_name=room_name,
             agent_name="hail-voicebot",
             metadata={
@@ -222,6 +262,7 @@ async def create_call(
                 "first_message": body.first_message,
             },
         )
+        setup_stage = "sip_participant"
         participant = await lk.create_sip_participant(
             room_name=room_name,
             to_e164=call.to_e164,
@@ -230,13 +271,21 @@ async def create_call(
             participant_identity=f"caller-{call.id}",
         )
     except Exception as exc:
+        logger.warning(
+            "call setup failed for call_id=%s stage=%s",
+            call.id,
+            setup_stage,
+            exc_info=True,
+        )
+        await _cleanup_partial_livekit(lk, room_name, dispatch_id)
         now = datetime.now(timezone.utc)
+        failure_code = f"livekit_{setup_stage}_failed"
         await db.execute(
             update(Call)
             .where(Call.id == call.id)
             .values(
                 status="failed",
-                end_reason=str(exc)[:200],
+                end_reason=failure_code,
                 ended_at=now,
             )
         )
@@ -247,22 +296,21 @@ async def create_call(
                 payload={
                     "from": "queued",
                     "to": "failed",
-                    "error": str(exc)[:200],
+                    "reason": failure_code,
                 },
             )
         )
         await db.commit()
-        failure_detail = f"livekit dispatch failed: {exc}"
         if idem is not None:
             # Cache failures too — Stripe-style retries replay rather than
             # re-dispatching. A fresh attempt requires a new Idempotency-Key.
             await idem.store(
                 status_code=http_status.HTTP_502_BAD_GATEWAY,
-                body={"detail": failure_detail},
+                body={"detail": _CALL_SETUP_FAILED_DETAIL},
             )
         raise HTTPException(
             status_code=http_status.HTTP_502_BAD_GATEWAY,
-            detail=failure_detail,
+            detail=_CALL_SETUP_FAILED_DETAIL,
         ) from exc
 
     # Success: update Call to dialing + insert state-change CallEvent.

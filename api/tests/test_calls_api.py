@@ -52,6 +52,28 @@ async def test_post_calls_invalid_body_returns_422(
     assert resp.status_code == 422
 
 
+async def test_post_calls_rejects_prompt_and_llm_together(
+    client: httpx.AsyncClient,
+    org_and_key: tuple[Organization, ApiKey, str],
+) -> None:
+    _, _, plain = org_and_key
+    resp = await client.post(
+        "/calls",
+        json={
+            "to": "+14155559999",
+            "system_prompt": "hi",
+            "llm": {
+                "base_url": "https://example.invalid/v1",
+                "api_key": "k",
+                "model": "m",
+            },
+        },
+        headers={"Authorization": f"Bearer {plain}"},
+    )
+    assert resp.status_code == 422
+    assert "mutually exclusive" in resp.text
+
+
 async def test_post_calls_no_active_number_returns_422(
     client: httpx.AsyncClient,
     org_and_key: tuple[Organization, ApiKey, str],
@@ -139,13 +161,24 @@ async def test_post_calls_livekit_failure_marks_call_failed(
     )
 
     assert resp.status_code == 502
-    assert "trunk down" in resp.json()["detail"]
+    assert resp.json()["detail"] == "call setup failed"
 
     call = (await async_session.execute(select(Call))).scalar_one()
     assert call.status == "failed"
-    assert call.end_reason is not None
-    assert "trunk down" in call.end_reason
+    assert call.end_reason == "livekit_sip_participant_failed"
     assert call.ended_at is not None
+
+    events = (await async_session.execute(select(CallEvent))).scalars().all()
+    assert len(events) == 1
+    assert events[0].payload == {
+        "from": "queued",
+        "to": "failed",
+        "reason": "livekit_sip_participant_failed",
+    }
+    livekit_mock.delete_dispatch.assert_awaited_once_with(
+        "AD_test_dispatch", "hail-test-room"
+    )
+    livekit_mock.delete_room.assert_awaited_once_with("hail-test-room")
 
 
 async def test_post_calls_uses_explicit_from_e164(

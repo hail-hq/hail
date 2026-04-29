@@ -86,6 +86,14 @@ class LiveKitClient:
         )
         return result.id
 
+    async def delete_dispatch(self, dispatch_id: str, room_name: str) -> None:
+        """Delete a previously-created explicit agent dispatch."""
+        await self._lkapi.agent_dispatch.delete_dispatch(dispatch_id, room_name)
+
+    async def delete_room(self, room_name: str) -> None:
+        """Delete a room and disconnect any participants still inside it."""
+        await self._lkapi.room.delete_room(api.DeleteRoomRequest(room=room_name))
+
     async def create_sip_participant(
         self,
         room_name: str,

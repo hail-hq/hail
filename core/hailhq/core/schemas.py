@@ -116,7 +116,13 @@ class CallCreate(BaseModel):
 
     @model_validator(mode="after")
     def _prompt_or_llm(self):
-        if self.system_prompt is None and self.llm is None:
+        has_prompt = self.system_prompt is not None and self.system_prompt != ""
+        has_llm = self.llm is not None
+        if has_prompt and has_llm:
+            raise ValueError(
+                "system_prompt and llm are mutually exclusive (use one mode)"
+            )
+        if not has_prompt and not has_llm:
             raise ValueError("either system_prompt or llm must be provided")
         return self
 
