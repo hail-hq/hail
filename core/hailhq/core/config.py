@@ -41,7 +41,12 @@ class Settings(BaseSettings):
     livekit_url: str = ""
     livekit_api_key: str = ""
     livekit_api_secret: str = ""
-    livekit_sip_trunk_id: str = ""
+    # LiveKit SIP trunks are direction-specific. Outbound is used today by
+    # POST /calls (CreateSIPParticipantRequest.sip_trunk_id). Inbound is for
+    # the v1.1 inbound-calls milestone — kept here so the config schema is
+    # ready and operators only set both up once.
+    livekit_sip_outbound_trunk_id: str = ""
+    livekit_sip_inbound_trunk_id: str = ""
 
     # Storage
     database_url: str = "postgresql://hail:hail@postgres:5432/hail"

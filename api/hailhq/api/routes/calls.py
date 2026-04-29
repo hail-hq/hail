@@ -226,7 +226,7 @@ async def create_call(
             room_name=room_name,
             to_e164=call.to_e164,
             from_e164=call.from_e164,
-            sip_trunk_id=settings.livekit_sip_trunk_id,
+            sip_trunk_id=settings.livekit_sip_outbound_trunk_id,
             participant_identity=f"caller-{call.id}",
         )
     except Exception as exc:
