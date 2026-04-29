@@ -32,6 +32,25 @@ jobs:
         with:
           go-version: "1.24"
 
+      # GoReleaser OSS expects pure semver tags (`v0.1.0`). Our monorepo uses
+      # prefixed tags (`cli-v0.1.0`); strip the prefix before passing to
+      # GoReleaser via env vars. Previous tag is the most recent `cli-v*` other
+      # than the current one — empty on the first CLI release, which disables
+      # changelog generation cleanly.
+      - name: Compute GoReleaser current/previous tags
+        id: tags
+        run: |
+          current_full="${GITHUB_REF_NAME}"
+          current="${current_full#cli-}"
+          previous_full=$(git tag --list 'cli-v*' --sort=-version:refname \
+            | grep -vx "${current_full}" \
+            | head -n1 || true)
+          previous="${previous_full#cli-}"
+          {
+            echo "current=${current}"
+            echo "previous=${previous}"
+          } >> "$GITHUB_OUTPUT"
+
       - uses: goreleaser/goreleaser-action@v6
         with:
           distribution: goreleaser
@@ -41,3 +60,5 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          GORELEASER_CURRENT_TAG: ${{ steps.tags.outputs.current }}
+          GORELEASER_PREVIOUS_TAG: ${{ steps.tags.outputs.previous }}

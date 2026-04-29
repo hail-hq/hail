@@ -13,6 +13,11 @@ version: 2
 
 project_name: hail
 
+# Monorepo tag handling: tags are `cli-v<semver>` (sibling to `sdk-v*`, future
+# `v*` umbrella). GoReleaser's built-in `monorepo` block is Pro-only; in OSS we
+# strip the `cli-` prefix in the release-cli.yml workflow via
+# `GORELEASER_CURRENT_TAG=v<semver>` and `GORELEASER_PREVIOUS_TAG=…`.
+
 before:
   hooks:
     - go mod tidy
