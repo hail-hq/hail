@@ -15,7 +15,11 @@ COPY --from=ghcr.io/astral-sh/uv:0.5 /uv /uvx /usr/local/bin/
 COPY core     /build/core
 COPY voicebot /build/voicebot
 
-RUN uv venv /opt/venv && \
+# Minimal workspace root so `[tool.uv.sources] hailhq-core = { workspace = true }`
+# in voicebot/pyproject.toml resolves without the repo-root pyproject in the
+# build context. Stays in the builder layer; doesn't reach runtime.
+RUN printf '[tool.uv.workspace]\nmembers = ["core", "voicebot"]\n' > /build/pyproject.toml && \
+    uv venv /opt/venv && \
     uv pip install --python /opt/venv/bin/python /build/core && \
     uv pip install --python /opt/venv/bin/python /build/voicebot
 
