@@ -127,14 +127,15 @@ def attach_event_handlers(
 
     @session.on("conversation_item_added")
     def _on_item(ev: Any) -> None:
-        role = ev.item.role
+        item = ev.item
+        role = getattr(item, "role", None)
         if role == "user":
             kind = "user_turn"
         elif role == "assistant":
             kind = "agent_turn"
         else:
             return
-        _spawn(kind, {"role": role, "text": ev.item.text_content or ""})
+        _spawn(kind, {"role": role, "text": getattr(item, "text_content", "") or ""})
 
     @session.on("function_tools_executed")
     def _on_tools(ev: Any) -> None:

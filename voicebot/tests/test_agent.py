@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 from datetime import datetime, timezone
+from types import SimpleNamespace
 from uuid import UUID
 
 import pytest
@@ -49,6 +50,18 @@ def test_metadata_parser_rejects_empty_string() -> None:
     """Empty/None metadata is treated as ``{}`` -> missing ``call_id``."""
     with pytest.raises(ValueError, match="call_id"):
         parse_metadata(None)
+
+
+class _FakeSession:
+    def __init__(self) -> None:
+        self.handlers: dict[str, object] = {}
+
+    def on(self, event_name: str):
+        def _register(fn):
+            self.handlers[event_name] = fn
+            return fn
+
+        return _register
 
 
 async def _make_call_row(session: AsyncSession) -> UUID:
@@ -99,6 +112,18 @@ async def test_agent_session_run_emits_assistant_message() -> None:
 
         assert agent.instructions == instructions
         result.expect[:].contains_message(role="assistant")
+
+
+async def test_attach_event_handlers_ignores_non_message_items() -> None:
+    session = _FakeSession()
+    call_id = UUID("11111111-1111-1111-1111-111111111111")
+
+    event_tasks = attach_event_handlers(session, call_id)
+    on_item = session.handlers["conversation_item_added"]
+
+    on_item(SimpleNamespace(item=SimpleNamespace()))
+
+    assert not event_tasks
 
 
 async def test_call_event_written_for_user_turn(async_session: AsyncSession) -> None:
