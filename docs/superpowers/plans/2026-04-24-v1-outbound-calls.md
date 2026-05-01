@@ -26,7 +26,7 @@
 | 10   | MCP place_call tool                        | ⏳ Pending                                                                                                                                                                |
 | 11   | SDK real client                            | ⏳ Pending                                                                                                                                                                |
 | 12   | CLI release workflow                       | ⏳ Pending                                                                                                                                                                |
-| 13   | Cut v0.1.0                                 | ⏳ Pending                                                                                                                                                                |
+| 13   | Cut v0.1.0                                 | ✅ Cut 2026-04-30                                                                                                                                                         |
 
 LiveKit-touching code (Tasks 4 + 6) verified against canonical `livekit/protocol` `.proto` sources at implementation time and against current docs as of the date in the Status row. Task 8 must re-verify at implementation time per the LiveKit Agents skill.
 

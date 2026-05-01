@@ -52,7 +52,7 @@ Checked = shipped. Version tag shows the target release.
 ### Phone calls
 
 - Outbound
-  - [ ] Twilio (v1)
+  - [x] Twilio (v1)
   - [ ] Telnyx (v2)
 - Inbound
   - [ ] Twilio (v1.1)
@@ -74,21 +74,21 @@ Checked = shipped. Version tag shows the target release.
 ### Voice pipeline
 
 - STT
-  - [ ] Deepgram (v1)
+  - [x] Deepgram (v1)
   - [ ] Whisper (v1.2)
   - [ ] AssemblyAI (v1.2)
 - TTS
-  - [ ] ElevenLabs (v1)
+  - [x] ElevenLabs (v1)
   - [ ] Cartesia (v1.2)
   - [ ] Deepgram Aura (v1.2)
 - VAD
-  - [ ] Silero (v1)
+  - [x] Silero (v1)
 - Turn detection
-  - [ ] LiveKit turn-detector (v1)
+  - [x] LiveKit turn-detector (v1)
 - LLM — system-prompt mode
-  - [ ] Fallback: OpenAI → Gemini → Anthropic, fast models (v1)
+  - [x] Fallback: OpenAI → Gemini → Anthropic, fast models (v1)
 - LLM — BYO-endpoint mode
-  - [ ] OpenAI chat-completions-compatible (v1)
+  - [x] OpenAI chat-completions-compatible (v1)
 - Recording
   - [ ] S3 upload (v1)
   - [ ] Diarization (v1.2)
@@ -96,14 +96,14 @@ Checked = shipped. Version tag shows the target release.
 ### Distribution
 
 - API
-  - [ ] OpenAPI spec (v1)
+  - [x] OpenAPI spec (v1)
 - CLI
-  - [ ] `hail` binary via GitHub Releases (v1)
+  - [x] `hail` binary via GitHub Releases (v1)
 - MCP server
-  - [ ] Remote SSE endpoint bundled with every Hail deploy (v1)
+  - [x] Remote SSE endpoint bundled with every Hail deploy (v1)
   - ~~PyPI stdio package~~ — intentionally not shipped; see [docs/setup/mcp.md](docs/setup/mcp.md)
 - Python SDK
-  - [ ] `hail-sdk` on PyPI, imports as `hail` (v1)
+  - [x] `hail-sdk` on PyPI, imports as `hail` (v1)
 
 ### Infrastructure
 
