@@ -52,5 +52,6 @@ coverage.*
 profile.cov
 
 # ─── Local data ────────────────────────
+/docs/ops
 /data/
 /tmp/
