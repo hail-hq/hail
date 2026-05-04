@@ -34,6 +34,10 @@ curl -X POST http://localhost:8080/calls \
 #   https://mcp.hail.so/sse        (Hail Cloud, later)
 ```
 
+`hail tail` in action:
+
+![Animated terminal demo of hail tail streaming live call events](docs/assets/gifs/hail-tail-live-stream.gif)
+
 Full setup: [docs/setup/twilio.md](docs/setup/twilio.md), [docs/setup/livekit-cloud.md](docs/setup/livekit-cloud.md), [docs/setup/mcp.md](docs/setup/mcp.md).
 
 ## Tenets
