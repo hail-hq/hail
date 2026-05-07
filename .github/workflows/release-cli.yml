@@ -71,14 +71,19 @@ jobs:
       # without these mirror tags the step fails on every non-first release.
       # Lightweight tags created in this throwaway checkout never reach the
       # remote; they only need to satisfy GoReleaser's local git lookup.
+      #
+      # `-f` is required because umbrella `v<semver>` tags can already exist
+      # (see docs/operations.md "Cutting an umbrella release") and would
+      # collide with our mirror names. Force-replacing is safe because the
+      # workflow never pushes tags back to origin.
       - name: Mirror prefix-stripped tags for GoReleaser
         env:
           CURRENT: ${{ steps.tags.outputs.current }}
           PREVIOUS: ${{ steps.tags.outputs.previous }}
         run: |
-          git tag "$CURRENT" "$GITHUB_REF_NAME"
+          git tag -f "$CURRENT" "$GITHUB_REF_NAME"
           if [ -n "$PREVIOUS" ]; then
-            git tag "$PREVIOUS" "cli-$PREVIOUS"
+            git tag -f "$PREVIOUS" "cli-$PREVIOUS"
           fi
 
       - uses: goreleaser/goreleaser-action@v6
