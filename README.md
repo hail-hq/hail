@@ -15,6 +15,11 @@ cp .env.example .env
 docker compose up
 ```
 
+Authenticate:
+
+- **Hail Cloud** (managed at hail.so): `hail login` runs the device-flow and saves an API key to `~/.hail/credentials.json`.
+- **Self-host**: seed an API key directly into your local stack — see [docs/operations.md](docs/operations.md) "First-run DB seed". Then export `HAIL_API_KEY` (or pass `--api-key`).
+
 Use it:
 
 ```bash
