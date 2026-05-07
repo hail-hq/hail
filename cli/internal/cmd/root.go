@@ -64,14 +64,31 @@ func NewRootCmd(stdout, stderr io.Writer, getenv func(string) string) *cobra.Com
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+			// Resolution order:
+			//   --api-key > $HAIL_API_KEY > ~/.hail/credentials.json
+			//   --api-url > $HAIL_API_URL > ~/.hail/credentials.json > DefaultAPIURL
 			if opts.APIURL == "" {
 				opts.APIURL = getenv("HAIL_API_URL")
 			}
-			if opts.APIURL == "" {
-				opts.APIURL = DefaultAPIURL
-			}
 			if opts.APIKey == "" {
 				opts.APIKey = getenv("HAIL_API_KEY")
+			}
+			if opts.APIKey == "" || opts.APIURL == "" {
+				creds, err := loadCredentials()
+				if err != nil {
+					return err
+				}
+				if creds != nil {
+					if opts.APIKey == "" {
+						opts.APIKey = creds.APIKey
+					}
+					if opts.APIURL == "" {
+						opts.APIURL = creds.APIURL
+					}
+				}
+			}
+			if opts.APIURL == "" {
+				opts.APIURL = DefaultAPIURL
 			}
 			return nil
 		},
@@ -80,12 +97,13 @@ func NewRootCmd(stdout, stderr io.Writer, getenv func(string) string) *cobra.Com
 	root.SetOut(stdout)
 	root.SetErr(stderr)
 
-	root.PersistentFlags().StringVar(&opts.APIURL, "api-url", "", "API base URL (default: $HAIL_API_URL or "+DefaultAPIURL+")")
-	root.PersistentFlags().StringVar(&opts.APIKey, "api-key", "", "API key (default: $HAIL_API_KEY)")
+	root.PersistentFlags().StringVar(&opts.APIURL, "api-url", "", "API base URL (default: $HAIL_API_URL or ~/.hail/credentials.json or "+DefaultAPIURL+")")
+	root.PersistentFlags().StringVar(&opts.APIKey, "api-key", "", "API key (default: $HAIL_API_KEY or ~/.hail/credentials.json — see 'hail login')")
 	root.PersistentFlags().BoolVar(&opts.JSON, "json", false, "Output JSON instead of human-friendly text")
 
 	root.AddCommand(newCallCmd(opts))
 	root.AddCommand(newTailCmd(opts))
+	root.AddCommand(newLoginCmd(opts))
 
 	return root
 }
@@ -95,7 +113,7 @@ func NewRootCmd(stdout, stderr io.Writer, getenv func(string) string) *cobra.Com
 // re-doing the empty-key check + ClientWithResponses dance.
 func (o *Options) newClient(extra ...client.RequestEditorFn) (*client.ClientWithResponses, error) {
 	if o.APIKey == "" {
-		return nil, errors.New("missing API key: set HAIL_API_KEY or pass --api-key")
+		return nil, errors.New("missing API key: run `hail login`, set HAIL_API_KEY, or pass --api-key")
 	}
 	editors := append([]client.RequestEditorFn{authEditor(o.APIKey)}, extra...)
 	clientOpts := make([]client.ClientOption, len(editors))
