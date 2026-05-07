@@ -17,12 +17,24 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// DefaultAuthURL is the dev-default for the website hosting Better Auth.
-const DefaultAuthURL = "http://localhost:3000"
+// DefaultBaseURL is the Hail website that hosts the device-authorization flow.
+//
+// `hail login` is a Hail Cloud feature: it calls device-flow endpoints on the
+// Hail website, exchanges the resulting session for a long-lived API key, and
+// targets the matching managed API. Self-hosters issue API keys directly via
+// the bootstrap flow in docs/operations.md and never need this command.
+const DefaultBaseURL = "https://hail.so"
 
-// deviceClientID identifies this CLI to the device-authorization plugin.
-// Free-form for now (no validateClient on the server) but kept stable so
-// audit logs / future client allowlists remain coherent.
+// DefaultAPIURL is the API URL paired with DefaultBaseURL — when `hail login`
+// runs against the default base URL (the common case), the saved credentials
+// point subsequent invocations at this matching managed API. If the operator
+// overrides --base-url (e.g., a Hail engineer testing the website locally),
+// the API URL is taken from opts.APIURL instead, falling back to LocalAPIURL.
+const DefaultAPIURL = "https://api.hail.so"
+
+// deviceClientID identifies this CLI to the device-authorization endpoint.
+// Free-form for now (no client allowlist on the server) but kept stable so
+// audit logs remain coherent if one is added.
 const deviceClientID = "hail-cli"
 
 // RFC 8628 § 3.5 token-endpoint error codes. Hoisted so the polling switch
@@ -68,33 +80,38 @@ type issueKeyResp struct {
 }
 
 func newLoginCmd(opts *Options) *cobra.Command {
-	var authURLFlag string
+	var baseURLFlag string
 
 	cmd := &cobra.Command{
 		Use:   "login",
 		Short: "Authenticate with Hail and save an API key to ~/.hail/credentials.json",
-		Long: `Run the OAuth 2.0 device-authorization flow against the Hail website,
+		Long: `Run the OAuth 2.0 device-authorization flow against the Hail base URL,
 exchange the resulting session for a long-lived API key, and persist that key
 locally so subsequent commands authenticate automatically.
 
-Resolution order for the auth URL:
-  --auth-url flag > $HAIL_AUTH_URL > ` + DefaultAuthURL,
+Resolution order for the base URL:
+  --base-url flag > $HAIL_BASE_URL > ` + DefaultBaseURL + `
+
+This command targets Hail Cloud. Self-hosters issue API keys via the bootstrap
+flow in docs/operations.md and do not need to log in.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
 
-			authURL := authURLFlag
-			if authURL == "" {
-				authURL = os.Getenv("HAIL_AUTH_URL")
+			baseURL := baseURLFlag
+			if baseURL == "" {
+				baseURL = os.Getenv("HAIL_BASE_URL")
 			}
-			if authURL == "" {
-				authURL = DefaultAuthURL
+			if baseURL == "" {
+				baseURL = DefaultBaseURL
 			}
-			authURL = strings.TrimRight(authURL, "/")
+			baseURL = strings.TrimRight(baseURL, "/")
 
 			stdout := opts.Stdout
 			stderr := opts.Stderr
 
-			code, err := requestDeviceCode(ctx, authURL)
+			fmt.Fprintf(stdout, "Authenticating against %s\n", baseURL)
+
+			code, err := requestDeviceCode(ctx, baseURL)
 			if err != nil {
 				return fmt.Errorf("request device code: %w", err)
 			}
@@ -122,7 +139,7 @@ Resolution order for the auth URL:
 			}
 
 			fmt.Fprintln(stdout, "Waiting for authorization…")
-			token, err := pollForToken(ctx, authURL, code.DeviceCode, interval, expiresIn)
+			token, err := pollForToken(ctx, baseURL, code.DeviceCode, interval, expiresIn)
 			if err != nil {
 				return err
 			}
@@ -131,15 +148,24 @@ Resolution order for the auth URL:
 			today := time.Now().UTC().Format("2006-01-02")
 			keyName := fmt.Sprintf("hail-cli · %s · %s", host, today)
 
-			apiKey, err := exchangeForAPIKey(ctx, authURL, token.AccessToken, keyName)
+			apiKey, err := exchangeForAPIKey(ctx, baseURL, token.AccessToken, keyName)
 			if err != nil {
 				return fmt.Errorf("issue API key: %w", err)
 			}
 
+			// Pair DefaultAPIURL with DefaultBaseURL so subsequent commands hit
+			// the managed API without an extra env var. When the operator
+			// overrode --base-url, use whatever opts.APIURL resolved to
+			// (typically LocalAPIURL).
+			apiURL := opts.APIURL
+			if baseURL == DefaultBaseURL {
+				apiURL = DefaultAPIURL
+			}
+
 			path, err := saveCredentials(Credentials{
 				APIKey:  apiKey.Key,
-				APIURL:  opts.APIURL,
-				AuthURL: authURL,
+				APIURL:  apiURL,
+				BaseURL: baseURL,
 			})
 			if err != nil {
 				return fmt.Errorf("save credentials: %w", err)
@@ -150,7 +176,7 @@ Resolution order for the auth URL:
 		},
 	}
 
-	cmd.Flags().StringVar(&authURLFlag, "auth-url", "", "Auth server base URL (default: $HAIL_AUTH_URL or "+DefaultAuthURL+")")
+	cmd.Flags().StringVar(&baseURLFlag, "base-url", "", "Hail base URL (default: $HAIL_BASE_URL or "+DefaultBaseURL+")")
 	return cmd
 }
 
@@ -181,9 +207,9 @@ func postJSON(ctx context.Context, url, bearer string, body, out any) error {
 	return json.NewDecoder(resp.Body).Decode(out)
 }
 
-func requestDeviceCode(ctx context.Context, authURL string) (*deviceCodeResp, error) {
+func requestDeviceCode(ctx context.Context, baseURL string) (*deviceCodeResp, error) {
 	var out deviceCodeResp
-	if err := postJSON(ctx, authURL+"/api/auth/device/code", "", map[string]string{
+	if err := postJSON(ctx, baseURL+"/api/auth/device/code", "", map[string]string{
 		"client_id": deviceClientID,
 	}, &out); err != nil {
 		return nil, err
@@ -191,9 +217,9 @@ func requestDeviceCode(ctx context.Context, authURL string) (*deviceCodeResp, er
 	return &out, nil
 }
 
-func exchangeForAPIKey(ctx context.Context, authURL, accessToken, name string) (*issueKeyResp, error) {
+func exchangeForAPIKey(ctx context.Context, baseURL, accessToken, name string) (*issueKeyResp, error) {
 	var out issueKeyResp
-	if err := postJSON(ctx, authURL+"/api/cli/issue-key", accessToken, map[string]string{
+	if err := postJSON(ctx, baseURL+"/api/cli/issue-key", accessToken, map[string]string{
 		"name": name,
 	}, &out); err != nil {
 		return nil, err
@@ -204,7 +230,7 @@ func exchangeForAPIKey(ctx context.Context, authURL, accessToken, name string) (
 // pollForToken loops until the user approves (returns token), denies, or the
 // device code expires. The expiry is enforced by the context deadline so a
 // stalled in-flight request can't push past it by `httpClient.Timeout`.
-func pollForToken(ctx context.Context, authURL, deviceCode string, interval, expiresIn time.Duration) (*deviceTokenResp, error) {
+func pollForToken(ctx context.Context, baseURL, deviceCode string, interval, expiresIn time.Duration) (*deviceTokenResp, error) {
 	pollCtx, cancel := context.WithTimeout(ctx, expiresIn)
 	defer cancel()
 
@@ -215,7 +241,7 @@ func pollForToken(ctx context.Context, authURL, deviceCode string, interval, exp
 	})
 
 	for {
-		req, err := http.NewRequestWithContext(pollCtx, http.MethodPost, authURL+"/api/auth/device/token", bytes.NewReader(body))
+		req, err := http.NewRequestWithContext(pollCtx, http.MethodPost, baseURL+"/api/auth/device/token", bytes.NewReader(body))
 		if err != nil {
 			return nil, err
 		}

@@ -26,8 +26,11 @@ var (
 	buildDate = "unknown"
 )
 
-// DefaultAPIURL is used when neither --api-url nor HAIL_API_URL is set.
-const DefaultAPIURL = "http://localhost:8080"
+// LocalAPIURL is the bare-CLI fallback when neither --api-url, $HAIL_API_URL,
+// nor a stored credentials file pin a value. Localhost matches the self-host
+// docker-compose story; Hail Cloud users get DefaultAPIURL persisted to
+// ~/.hail/credentials.json by `hail login`, paired with DefaultBaseURL.
+const LocalAPIURL = "http://localhost:8080"
 
 // Options bundles the resolved environment + flags for subcommands. Subcommands
 // receive these via cobra's Command.RunE closure rather than reading globals.
@@ -59,8 +62,14 @@ func NewRootCmd(stdout, stderr io.Writer, getenv func(string) string) *cobra.Com
 	opts := &Options{Stdout: stdout, Stderr: stderr}
 
 	root := &cobra.Command{
-		Use:           "hail",
-		Short:         "hail — universal communication platform for AI agents",
+		Use:   "hail",
+		Short: "hail — universal communication platform for AI agents",
+		Long: `hail — universal communication platform for AI agents.
+
+Works with Hail Cloud (the managed offering at https://hail.so) and self-hosted
+deployments. Cloud users authenticate via ` + "`hail login`" + `; self-hosters seed an
+API key into their local stack (see docs/operations.md) and set HAIL_API_KEY
+or pass --api-key.`,
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
@@ -86,7 +95,7 @@ func NewRootCmd(stdout, stderr io.Writer, getenv func(string) string) *cobra.Com
 				}
 			}
 			if opts.APIURL == "" {
-				opts.APIURL = DefaultAPIURL
+				opts.APIURL = LocalAPIURL
 			}
 			return nil
 		},
@@ -95,7 +104,7 @@ func NewRootCmd(stdout, stderr io.Writer, getenv func(string) string) *cobra.Com
 	root.SetOut(stdout)
 	root.SetErr(stderr)
 
-	root.PersistentFlags().StringVar(&opts.APIURL, "api-url", "", "API base URL (default: $HAIL_API_URL or ~/.hail/credentials.json or "+DefaultAPIURL+")")
+	root.PersistentFlags().StringVar(&opts.APIURL, "api-url", "", "API base URL (default: $HAIL_API_URL or ~/.hail/credentials.json or "+LocalAPIURL+")")
 	root.PersistentFlags().StringVar(&opts.APIKey, "api-key", "", "API key (default: $HAIL_API_KEY or ~/.hail/credentials.json — see 'hail login')")
 	root.PersistentFlags().BoolVar(&opts.JSON, "json", false, "Output JSON instead of human-friendly text")
 

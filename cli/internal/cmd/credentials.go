@@ -9,13 +9,13 @@ import (
 )
 
 // Credentials is the JSON payload persisted at ~/.hail/credentials.json by
-// `hail login`. The API key is the only mandatory field; api_url + auth_url
+// `hail login`. The API key is the only mandatory field; api_url + base_url
 // are baked in so that subsequent `hail` invocations resolve to the same
 // backend the user authenticated against without forcing them to set env vars.
 type Credentials struct {
 	APIKey  string `json:"api_key"`
 	APIURL  string `json:"api_url,omitempty"`
-	AuthURL string `json:"auth_url,omitempty"`
+	BaseURL string `json:"base_url,omitempty"`
 }
 
 func credentialsPath() (string, error) {
