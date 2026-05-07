@@ -25,6 +25,15 @@ const DefaultAuthURL = "http://localhost:3000"
 // audit logs / future client allowlists remain coherent.
 const deviceClientID = "hail-cli"
 
+// RFC 8628 § 3.5 token-endpoint error codes. Hoisted so the polling switch
+// reads as a state machine instead of a wall of magic strings.
+const (
+	codeAuthorizationPending = "authorization_pending"
+	codeSlowDown             = "slow_down"
+	codeAccessDenied         = "access_denied"
+	codeExpiredToken         = "expired_token"
+)
+
 // httpClient bounds individual auth requests. Without a timeout, a server
 // that accepts the connection and stalls mid-response would hang the CLI
 // indefinitely (ctx is only cancelled on Ctrl-C).
@@ -94,11 +103,6 @@ Resolution order for the auth URL:
 			if verifyURL == "" {
 				verifyURL = code.VerificationURI
 			}
-			// The plugin returns the configured `verificationUri` as a path;
-			// resolve it against the auth host so the printed URL is clickable.
-			if verifyURL != "" && !strings.HasPrefix(verifyURL, "http://") && !strings.HasPrefix(verifyURL, "https://") {
-				verifyURL = authURL + verifyURL
-			}
 
 			fmt.Fprintln(stdout, "Open this URL in your browser to authorize the CLI:")
 			fmt.Fprintf(stdout, "  %s\n\n", verifyURL)
@@ -116,10 +120,9 @@ Resolution order for the auth URL:
 			if expiresIn < time.Minute {
 				expiresIn = 30 * time.Minute
 			}
-			deadline := time.Now().Add(expiresIn)
 
 			fmt.Fprintln(stdout, "Waiting for authorization…")
-			token, err := pollForToken(ctx, authURL, code.DeviceCode, interval, deadline)
+			token, err := pollForToken(ctx, authURL, code.DeviceCode, interval, expiresIn)
 			if err != nil {
 				return err
 			}
@@ -151,29 +154,60 @@ Resolution order for the auth URL:
 	return cmd
 }
 
-func requestDeviceCode(ctx context.Context, authURL string) (*deviceCodeResp, error) {
-	body, _ := json.Marshal(map[string]string{"client_id": deviceClientID})
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, authURL+"/api/auth/device/code", bytes.NewReader(body))
+// postJSON sends a JSON-encoded body to url and decodes the response into out.
+// Non-2xx responses are surfaced via decodeHTTPError. bearer is empty for
+// unauthenticated calls.
+func postJSON(ctx context.Context, url, bearer string, body, out any) error {
+	payload, err := json.Marshal(body)
 	if err != nil {
-		return nil, err
+		return err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(payload))
+	if err != nil {
+		return err
 	}
 	req.Header.Set("Content-Type", "application/json")
+	if bearer != "" {
+		req.Header.Set("Authorization", "Bearer "+bearer)
+	}
 	resp, err := httpClient.Do(req)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return nil, decodeHTTPError(resp)
+		return decodeHTTPError(resp)
 	}
+	return json.NewDecoder(resp.Body).Decode(out)
+}
+
+func requestDeviceCode(ctx context.Context, authURL string) (*deviceCodeResp, error) {
 	var out deviceCodeResp
-	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
-		return nil, fmt.Errorf("decode device code response: %w", err)
+	if err := postJSON(ctx, authURL+"/api/auth/device/code", "", map[string]string{
+		"client_id": deviceClientID,
+	}, &out); err != nil {
+		return nil, err
 	}
 	return &out, nil
 }
 
-func pollForToken(ctx context.Context, authURL, deviceCode string, interval time.Duration, deadline time.Time) (*deviceTokenResp, error) {
+func exchangeForAPIKey(ctx context.Context, authURL, accessToken, name string) (*issueKeyResp, error) {
+	var out issueKeyResp
+	if err := postJSON(ctx, authURL+"/api/cli/issue-key", accessToken, map[string]string{
+		"name": name,
+	}, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// pollForToken loops until the user approves (returns token), denies, or the
+// device code expires. The expiry is enforced by the context deadline so a
+// stalled in-flight request can't push past it by `httpClient.Timeout`.
+func pollForToken(ctx context.Context, authURL, deviceCode string, interval, expiresIn time.Duration) (*deviceTokenResp, error) {
+	pollCtx, cancel := context.WithTimeout(ctx, expiresIn)
+	defer cancel()
+
 	body, _ := json.Marshal(map[string]string{
 		"grant_type":  "urn:ietf:params:oauth:grant-type:device_code",
 		"device_code": deviceCode,
@@ -181,11 +215,7 @@ func pollForToken(ctx context.Context, authURL, deviceCode string, interval time
 	})
 
 	for {
-		if time.Now().After(deadline) {
-			return nil, errors.New("login expired before authorization completed; run `hail login` again")
-		}
-
-		req, err := http.NewRequestWithContext(ctx, http.MethodPost, authURL+"/api/auth/device/token", bytes.NewReader(body))
+		req, err := http.NewRequestWithContext(pollCtx, http.MethodPost, authURL+"/api/auth/device/token", bytes.NewReader(body))
 		if err != nil {
 			return nil, err
 		}
@@ -193,6 +223,9 @@ func pollForToken(ctx context.Context, authURL, deviceCode string, interval time
 
 		resp, err := httpClient.Do(req)
 		if err != nil {
+			if errors.Is(pollCtx.Err(), context.DeadlineExceeded) {
+				return nil, errors.New("login expired before authorization completed; run `hail login` again")
+			}
 			return nil, err
 		}
 
@@ -211,14 +244,18 @@ func pollForToken(ctx context.Context, authURL, deviceCode string, interval time
 		resp.Body.Close()
 
 		switch derr.Error {
-		case "authorization_pending":
-		case "slow_down":
-			// RFC 8628 § 3.5: bump the interval by 5s when the server tells us
-			// we're polling too quickly, then continue.
+		case codeAuthorizationPending:
+			// Keep polling — user hasn't approved yet.
+		case codeSlowDown:
+			// RFC 8628 § 3.5: bump the interval by 5s, capped so a buggy
+			// server can't push us past the deadline through repeated bumps.
 			interval += 5 * time.Second
-		case "access_denied":
+			if interval > time.Minute {
+				interval = time.Minute
+			}
+		case codeAccessDenied:
 			return nil, errors.New("authorization denied")
-		case "expired_token":
+		case codeExpiredToken:
 			return nil, errors.New("device code expired; run `hail login` again")
 		default:
 			if derr.Error != "" {
@@ -228,49 +265,24 @@ func pollForToken(ctx context.Context, authURL, deviceCode string, interval time
 		}
 
 		select {
-		case <-ctx.Done():
-			return nil, ctx.Err()
+		case <-pollCtx.Done():
+			if errors.Is(pollCtx.Err(), context.DeadlineExceeded) {
+				return nil, errors.New("login expired before authorization completed; run `hail login` again")
+			}
+			return nil, pollCtx.Err()
 		case <-time.After(interval):
 		}
 	}
-}
-
-func exchangeForAPIKey(ctx context.Context, authURL, accessToken, name string) (*issueKeyResp, error) {
-	body, _ := json.Marshal(map[string]string{"name": name})
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, authURL+"/api/cli/issue-key", bytes.NewReader(body))
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+accessToken)
-
-	resp, err := httpClient.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return nil, decodeHTTPError(resp)
-	}
-	var out issueKeyResp
-	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
-		return nil, fmt.Errorf("decode issue-key response: %w", err)
-	}
-	return &out, nil
 }
 
 func decodeHTTPError(resp *http.Response) error {
 	body, _ := io.ReadAll(resp.Body)
 	var derr deviceErrResp
 	if err := json.Unmarshal(body, &derr); err == nil && derr.Error != "" {
-		return fmt.Errorf("HTTP %d: %s — %s", resp.StatusCode, derr.Error, derr.ErrorDescription)
-	}
-	// Some endpoints (e.g. /api/cli/issue-key) return {"error": "..."} on 4xx/5xx.
-	var generic struct {
-		Error string `json:"error"`
-	}
-	if err := json.Unmarshal(body, &generic); err == nil && generic.Error != "" {
-		return fmt.Errorf("HTTP %d: %s", resp.StatusCode, generic.Error)
+		if derr.ErrorDescription != "" {
+			return fmt.Errorf("HTTP %d: %s — %s", resp.StatusCode, derr.Error, derr.ErrorDescription)
+		}
+		return fmt.Errorf("HTTP %d: %s", resp.StatusCode, derr.Error)
 	}
 	return fmt.Errorf("HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
 }

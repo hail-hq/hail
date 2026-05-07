@@ -78,13 +78,11 @@ func NewRootCmd(stdout, stderr io.Writer, getenv func(string) string) *cobra.Com
 				if err != nil {
 					return err
 				}
-				if creds != nil {
-					if opts.APIKey == "" {
-						opts.APIKey = creds.APIKey
-					}
-					if opts.APIURL == "" {
-						opts.APIURL = creds.APIURL
-					}
+				if creds != nil && opts.APIKey == "" {
+					opts.APIKey = creds.APIKey
+				}
+				if creds != nil && opts.APIURL == "" {
+					opts.APIURL = creds.APIURL
 				}
 			}
 			if opts.APIURL == "" {
