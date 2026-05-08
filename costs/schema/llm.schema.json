@@ -1,0 +1,80 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hail.so/costs/schema/llm.json",
+  "title": "LLM Costs",
+  "description": "Cost and capability data for large language model providers.",
+  "type": "object",
+  "required": ["version", "updated", "license", "models"],
+  "additionalProperties": false,
+  "properties": {
+    "version": { "const": 1 },
+    "updated": { "type": "string", "format": "date" },
+    "license": { "const": "CC-BY-4.0" },
+    "models": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/model" }
+    }
+  },
+  "$defs": {
+    "model": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "provider",
+        "model_id",
+        "display_name",
+        "context_window",
+        "max_output_tokens",
+        "input_per_mtok_usd",
+        "output_per_mtok_usd",
+        "modalities",
+        "last_verified",
+        "verified_by",
+        "source_url"
+      ],
+      "properties": {
+        "provider": { "type": "string", "minLength": 1 },
+        "provider_url": { "type": "string", "format": "uri" },
+        "model_id": { "type": "string", "minLength": 1 },
+        "display_name": { "type": "string", "minLength": 1 },
+        "model_family": { "type": "string" },
+        "release_date": { "type": "string", "format": "date" },
+        "knowledge_cutoff": { "type": "string", "format": "date" },
+        "context_window": { "type": "integer", "minimum": 1 },
+        "max_output_tokens": { "type": "integer", "minimum": 1 },
+        "input_per_mtok_usd": { "type": "number", "minimum": 0 },
+        "output_per_mtok_usd": { "type": "number", "minimum": 0 },
+        "cached_input_per_mtok_usd": { "type": "number", "minimum": 0 },
+        "modalities": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["input", "output"],
+          "properties": {
+            "input": {
+              "type": "array",
+              "minItems": 1,
+              "uniqueItems": true,
+              "items": { "enum": ["text", "image", "audio", "video"] }
+            },
+            "output": {
+              "type": "array",
+              "minItems": 1,
+              "uniqueItems": true,
+              "items": { "enum": ["text", "image", "audio"] }
+            }
+          }
+        },
+        "tool_use": { "type": "boolean" },
+        "structured_output": { "type": "boolean" },
+        "last_verified": { "type": "string", "format": "date" },
+        "verified_by": {
+          "type": "string",
+          "pattern": "^[a-zA-Z0-9](?:[a-zA-Z0-9]|-(?=[a-zA-Z0-9])){0,38}$"
+        },
+        "source_url": { "type": "string", "format": "uri" },
+        "notes": { "type": "string" }
+      }
+    }
+  }
+}

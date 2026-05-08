@@ -1,0 +1,117 @@
+{
+  "version": 1,
+  "updated": "2026-05-05",
+  "license": "CC-BY-4.0",
+  "models": [
+    {
+      "provider": "Anthropic",
+      "provider_url": "https://www.anthropic.com",
+      "model_id": "claude-opus-4-7",
+      "display_name": "Claude Opus 4.7",
+      "model_family": "Claude 4",
+      "context_window": 1000000,
+      "max_output_tokens": 128000,
+      "input_per_mtok_usd": 5.0,
+      "output_per_mtok_usd": 25.0,
+      "cached_input_per_mtok_usd": 0.5,
+      "modalities": {
+        "input": ["text", "image"],
+        "output": ["text"]
+      },
+      "tool_use": true,
+      "structured_output": true,
+      "last_verified": "2026-05-05",
+      "verified_by": "r13i",
+      "source_url": "https://www.anthropic.com/pricing",
+      "notes": "Cache hit pricing is 0.1x base input ($0.50/MTok). Knowledge cutoff Jan 2026. Uses a new tokenizer vs prior Claude models (may use up to 35% more tokens for identical text)."
+    },
+    {
+      "provider": "Anthropic",
+      "provider_url": "https://www.anthropic.com",
+      "model_id": "claude-sonnet-4-6",
+      "display_name": "Claude Sonnet 4.6",
+      "model_family": "Claude 4",
+      "context_window": 1000000,
+      "max_output_tokens": 64000,
+      "input_per_mtok_usd": 3.0,
+      "output_per_mtok_usd": 15.0,
+      "cached_input_per_mtok_usd": 0.3,
+      "modalities": {
+        "input": ["text", "image"],
+        "output": ["text"]
+      },
+      "tool_use": true,
+      "structured_output": true,
+      "last_verified": "2026-05-05",
+      "verified_by": "r13i",
+      "source_url": "https://www.anthropic.com/pricing",
+      "notes": "Cache hit pricing is 0.1x base input ($0.30/MTok). Knowledge cutoff Aug 2025. Supports extended thinking and adaptive thinking."
+    },
+    {
+      "provider": "OpenAI",
+      "provider_url": "https://openai.com",
+      "model_id": "gpt-5",
+      "display_name": "GPT-5",
+      "model_family": "GPT-5",
+      "context_window": 400000,
+      "max_output_tokens": 128000,
+      "input_per_mtok_usd": 1.25,
+      "output_per_mtok_usd": 10.0,
+      "cached_input_per_mtok_usd": 0.125,
+      "modalities": {
+        "input": ["text", "image"],
+        "output": ["text"]
+      },
+      "tool_use": true,
+      "structured_output": true,
+      "last_verified": "2026-05-05",
+      "verified_by": "r13i",
+      "source_url": "https://openai.com/api/pricing/",
+      "notes": "Pricing sourced from OpenRouter (openai/gpt-5) and ArtificialAnalysis; OpenAI platform docs returned 403. max_output_tokens is estimated at 128k (low confidence — OpenRouter/ArtificialAnalysis did not expose this field)."
+    },
+    {
+      "provider": "Google",
+      "provider_url": "https://deepmind.google",
+      "model_id": "gemini-2.5-pro",
+      "display_name": "Gemini 2.5 Pro",
+      "model_family": "Gemini 2.5",
+      "context_window": 1048576,
+      "max_output_tokens": 65536,
+      "input_per_mtok_usd": 1.25,
+      "output_per_mtok_usd": 10.0,
+      "cached_input_per_mtok_usd": 0.125,
+      "modalities": {
+        "input": ["text", "image", "audio", "video"],
+        "output": ["text"]
+      },
+      "tool_use": true,
+      "structured_output": true,
+      "last_verified": "2026-05-05",
+      "verified_by": "r13i",
+      "source_url": "https://ai.google.dev/pricing",
+      "notes": "Input pricing shown is for prompts <=200k tokens ($1.25/MTok); prompts >200k tokens are billed at $2.50/MTok input and $15.00/MTok output. Context window and max_output_tokens confirmed via ai.google.dev/gemini-api/docs/models/gemini-2.5-pro."
+    },
+    {
+      "provider": "DeepSeek",
+      "provider_url": "https://www.deepseek.com",
+      "model_id": "deepseek-v4-flash",
+      "display_name": "DeepSeek V4 Flash",
+      "model_family": "DeepSeek V4",
+      "context_window": 1048576,
+      "max_output_tokens": 384000,
+      "input_per_mtok_usd": 0.14,
+      "output_per_mtok_usd": 0.28,
+      "cached_input_per_mtok_usd": 0.0028,
+      "modalities": {
+        "input": ["text"],
+        "output": ["text"]
+      },
+      "tool_use": true,
+      "structured_output": true,
+      "last_verified": "2026-05-05",
+      "verified_by": "r13i",
+      "source_url": "https://api-docs.deepseek.com/quick_start/pricing",
+      "notes": "MoE architecture: 284B total parameters, 13B activated. Replaces deepseek-chat (V3-era alias). Cached input price ($0.0028/MTok) is 1/50th of base input, effective after DeepSeek reduced cache hit rates on 2026-04-26. deepseek-chat and deepseek-reasoner aliases will be deprecated."
+    }
+  ]
+}

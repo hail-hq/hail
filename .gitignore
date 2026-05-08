@@ -40,6 +40,14 @@ npm-debug.log*
 yarn-debug.log*
 pnpm-debug.log*
 
+# ─── Next.js (docs site) ───────────────
+docs/.next/
+docs/node_modules/
+docs/out/
+docs/.source/
+docs/next-env.d.ts
+docs/tsconfig.tsbuildinfo
+
 # ─── Go ────────────────────────────────
 bin/
 *.exe

@@ -1,0 +1,24 @@
+name: costs-validate
+
+on:
+  pull_request:
+    paths:
+      - "costs/**"
+      - ".github/workflows/costs-validate.yml"
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install check-jsonschema
+        run: pip install check-jsonschema==0.29.4
+      - name: Validate LLM data
+        run: check-jsonschema --schemafile costs/schema/llm.schema.json costs/llm.json
+      - name: Validate STT data
+        run: check-jsonschema --schemafile costs/schema/stt.schema.json costs/stt.json
+      - name: Validate TTS data
+        run: check-jsonschema --schemafile costs/schema/tts.schema.json costs/tts.json

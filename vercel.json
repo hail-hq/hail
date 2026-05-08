@@ -1,0 +1,8 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "buildCommand": "pnpm site:build",
+  "devCommand": "pnpm site:dev",
+  "installCommand": "pnpm install --frozen-lockfile",
+  "outputDirectory": "docs/.next",
+  "ignoreCommand": "git diff --quiet HEAD^ HEAD -- docs/ costs/ pnpm-workspace.yaml package.json pnpm-lock.yaml vercel.json"
+}

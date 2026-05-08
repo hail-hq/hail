@@ -1,0 +1,111 @@
+{
+  "version": 1,
+  "updated": "2026-05-05",
+  "license": "CC-BY-4.0",
+  "models": [
+    {
+      "provider": "ElevenLabs",
+      "provider_url": "https://elevenlabs.io",
+      "model_id": "eleven_flash_v2_5",
+      "display_name": "Eleven Flash v2.5",
+      "price_per_1m_chars_usd": 50.0,
+      "voice_quality": "neural",
+      "languages": "32+",
+      "ssml_support": false,
+      "voice_cloning": true,
+      "output_formats": [
+        "mp3_44100_128",
+        "pcm_16000",
+        "wav_44100",
+        "opus_48000_128",
+        "ulaw_8000",
+        "alaw_8000"
+      ],
+      "time_to_first_byte_ms": 75,
+      "last_verified": "2026-05-05",
+      "verified_by": "r13i",
+      "source_url": "https://elevenlabs.io/pricing/api",
+      "notes": "Current low-latency flagship; eleven_turbo_v2_5 is deprecated and replaced by Flash v2.5. Pay-as-you-go rate $0.05/1K chars. ~10K voices available. Plain text input only (no SSML)."
+    },
+    {
+      "provider": "OpenAI",
+      "provider_url": "https://openai.com",
+      "model_id": "tts-1",
+      "display_name": "TTS-1",
+      "price_per_1m_chars_usd": 15.0,
+      "voice_quality": "neural",
+      "languages": ["en"],
+      "ssml_support": false,
+      "voice_cloning": false,
+      "last_verified": "2026-05-05",
+      "verified_by": "r13i",
+      "source_url": "https://openai.com/api/pricing/",
+      "notes": "Standard quality. The newer gpt-4o-mini-tts model is also available in OpenAI's API; consider adding when its pricing structure stabilizes."
+    },
+    {
+      "provider": "OpenAI",
+      "provider_url": "https://openai.com",
+      "model_id": "tts-1-hd",
+      "display_name": "TTS-1 HD",
+      "price_per_1m_chars_usd": 30.0,
+      "voice_quality": "neural",
+      "languages": ["en"],
+      "ssml_support": false,
+      "voice_cloning": false,
+      "last_verified": "2026-05-05",
+      "verified_by": "r13i",
+      "source_url": "https://openai.com/api/pricing/",
+      "notes": "High-definition tier — 2x the price of tts-1 for higher quality output."
+    },
+    {
+      "provider": "Cartesia",
+      "provider_url": "https://cartesia.ai",
+      "model_id": "sonic-3.5",
+      "display_name": "Sonic 3.5",
+      "price_per_1m_chars_usd": 50.0,
+      "voice_quality": "neural",
+      "languages": "42+",
+      "ssml_support": true,
+      "voice_cloning": true,
+      "output_formats": [
+        "raw/pcm_f32le",
+        "raw/pcm_s16le",
+        "raw/pcm_mulaw",
+        "raw/pcm_alaw",
+        "wav",
+        "mp3"
+      ],
+      "time_to_first_byte_ms": 90,
+      "last_verified": "2026-05-05",
+      "verified_by": "r13i",
+      "source_url": "https://cartesia.ai/pricing",
+      "notes": "Cartesia publishes Sonic pricing as $1 per 25 minutes of audio output (~$0.04/min). Converted to ~$50/1M chars assuming ~150 WPM (~750 chars/min). Actual $/1M chars varies with speech rate; verify by sampling. IVC voice cloning included (no clone fee). 90ms TTFB."
+    },
+    {
+      "provider": "Groq",
+      "provider_url": "https://groq.com",
+      "model_id": "canopy-labs-orpheus-english",
+      "display_name": "Canopy Labs Orpheus English (Groq)",
+      "price_per_1m_chars_usd": 22.0,
+      "voice_quality": "neural",
+      "languages": ["en"],
+      "last_verified": "2026-05-05",
+      "verified_by": "r13i",
+      "source_url": "https://groq.com/pricing/",
+      "notes": "Hosted on Groq. Output speed ~100 characters/second."
+    },
+    {
+      "provider": "Groq",
+      "provider_url": "https://groq.com",
+      "model_id": "canopy-labs-orpheus-arabic-saudi",
+      "display_name": "Canopy Labs Orpheus Arabic Saudi (Groq)",
+      "price_per_1m_chars_usd": 40.0,
+      "voice_quality": "neural",
+      "languages": ["ar-SA"],
+      "last_verified": "2026-05-05",
+      "verified_by": "r13i",
+      "source_url": "https://groq.com/pricing/",
+      "notes": "Hosted on Groq. Saudi Arabic variant. Output speed ~100 characters/second."
+    }
+  ]
+}

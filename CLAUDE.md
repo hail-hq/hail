@@ -49,10 +49,14 @@ Go CLI module path is `github.com/hail-hq/hail/cli`. npm packages are published 
 - Data services: `docker compose up postgres minio`
 - Migrations: `cd api && uv run alembic upgrade head`
 - API: `cd api && uv run uvicorn hailhq.api.main:app --reload --port 8080`
-- Voicebot: `cd voicebot && uv run python -m hailhq.voicebot.main`
+- Voicebot: `cd voicebot && uv run python -m hailhq.voicebot.main start`
 - MCP: `cd mcp && uv run uvicorn hailhq.mcp.server:app --reload --port 8081`
 - CLI: `cd cli && go run . <cmd>`
 - Full stack: `docker compose up`
+
+For the comprehensive operations runbook (releases, deployment, DB switching,
+known footguns), see [docs/operations.md](docs/operations.md). **AI agents
+picking up this codebase: read it before making any infra-shaped change.**
 
 ## Style
 

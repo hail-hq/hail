@@ -1,0 +1,93 @@
+'use client';
+
+import type { ColumnDef } from '@tanstack/react-table';
+import type { STTRow } from '@/lib/types';
+import { CategorySection } from '../category-section';
+import { CopyableCode } from '../copyable-code';
+import { VerifiedCell } from '../verified-cell';
+import { langs } from '@/lib/format';
+
+const columns: ColumnDef<STTRow>[] = [
+  {
+    id: 'provider',
+    accessorKey: 'provider',
+    header: 'Provider',
+    cell: ({ row }) => (
+      <div>
+        <div style={{ fontWeight: 700 }}>{row.original.provider}</div>
+        <div style={{ fontSize: 13, marginTop: 2 }}>{row.original.display_name}</div>
+        <CopyableCode value={row.original.model_id} />
+      </div>
+    ),
+  },
+  {
+    id: 'price',
+    accessorKey: 'price_per_minute_usd',
+    header: '$/min',
+    cell: ({ row }) => `$${row.original.price_per_minute_usd.toFixed(4)}`,
+    sortingFn: 'basic',
+    meta: { num: true, killer: true },
+  },
+  {
+    id: 'batch',
+    accessorKey: 'price_per_minute_batch_usd',
+    header: '$/min batch',
+    cell: ({ row }) =>
+      row.original.price_per_minute_batch_usd !== undefined
+        ? `$${row.original.price_per_minute_batch_usd.toFixed(4)}`
+        : '—',
+    sortingFn: 'basic',
+    meta: { num: true },
+  },
+  {
+    id: 'streaming',
+    accessorKey: 'streaming',
+    header: 'Streaming',
+    cell: ({ row }) => (row.original.streaming ? '✓' : '—'),
+  },
+  {
+    id: 'languages',
+    accessorKey: 'languages',
+    header: 'Languages',
+    cell: ({ row }) => langs(row.original.languages),
+  },
+  {
+    id: 'diarization',
+    accessorKey: 'diarization',
+    header: 'Diarize',
+    cell: ({ row }) => row.original.diarization ?? '—',
+  },
+  {
+    id: 'verified',
+    accessorKey: 'last_verified',
+    header: 'Verified',
+    cell: ({ row }) => <VerifiedCell date={row.original.last_verified} />,
+    sortingFn: 'alphanumeric',
+    meta: { num: true },
+  },
+];
+
+function priceRange(rows: STTRow[]): string {
+  if (rows.length === 0) return '—';
+  const prices = rows.map((r) => r.price_per_minute_usd);
+  return `$${Math.min(...prices).toFixed(6)} – $${Math.max(...prices).toFixed(4)} / min`;
+}
+
+export function STTSection({ data }: { data: STTRow[] }) {
+  return (
+    <CategorySection<STTRow>
+      id="stt"
+      num="02"
+      title={
+        <>
+          <em className="it">Speech</em> to text
+        </>
+      }
+      count={data.length}
+      rangeLabel={priceRange(data)}
+      data={data}
+      columns={columns}
+      defaultSort={{ id: 'price', desc: false }}
+    />
+  );
+}

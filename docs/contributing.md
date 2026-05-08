@@ -1,5 +1,9 @@
 # Contributing
 
+For the full operational runbook (releases, deployment, DB switching, all the
+gotchas), see [docs/operations.md](operations.md). This page covers the
+contribution flow only.
+
 ## Setup
 
 ```bash
@@ -16,7 +20,7 @@ docker compose up postgres minio  # just the data services for host-side dev
 ## Dev loops
 
 - API: `cd api && uv run uvicorn hailhq.api.main:app --reload --port 8080`
-- Voicebot: `cd voicebot && uv run python -m hailhq.voicebot.main`
+- Voicebot: `cd voicebot && uv run python -m hailhq.voicebot.main start`
 - MCP: `cd mcp && uv run uvicorn hailhq.mcp.server:app --reload --port 8081`
 - CLI: `cd cli && go run . <args>`
 
@@ -58,6 +62,19 @@ The Go CLI codegens its client from this file, so commit the update in the same 
 ## Adding a provider
 
 New adapters live under `core/hailhq/core/providers/<channel>/<name>.py` and implement that channel's adapter interface. Add config keys to `.env.example` using the same provider-grouped format.
+
+## Model costs contributions
+
+Public AI model costs live in [`costs/`](../costs/) under CC-BY-4.0. JSON files at the top of that directory are the source of truth and are validated against schemas in `costs/schema/` on every PR.
+
+To update a price:
+
+1. Edit `costs/<category>.json` (e.g. `costs/llm.json`).
+2. Bump `last_verified` to today (`YYYY-MM-DD`) and set `verified_by` to your GitHub handle.
+3. Update `source_url` if it has changed.
+4. Run `pnpm costs:validate` locally before pushing.
+
+A weekly cron opens a tracking issue listing rows older than 30 days — see [`.github/workflows/costs-stale.yml`](../.github/workflows/costs-stale.yml).
 
 ## What we won't merge (v1)
 
