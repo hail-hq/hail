@@ -31,9 +31,7 @@ export function CategorySection<T extends { provider: string }>({
   columns,
   defaultSort,
 }: CategorySectionProps<T>) {
-  const [sorting, setSorting] = useState<SortingState>(
-    defaultSort ? [{ id: defaultSort.id, desc: defaultSort.desc }] : [],
-  );
+  const [sorting, setSorting] = useState<SortingState>(defaultSort ? [defaultSort] : []);
 
   const table = useReactTable({
     data,

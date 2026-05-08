@@ -6,6 +6,10 @@ on:
       - "costs/**"
       - ".github/workflows/costs-validate.yml"
 
+concurrency:
+  group: costs-validate-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   validate:
     runs-on: ubuntu-latest
@@ -14,6 +18,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+          cache: pip
       - name: Install check-jsonschema
         run: pip install check-jsonschema==0.29.4
       - name: Validate LLM data

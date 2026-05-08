@@ -5,6 +5,8 @@ import { STTSection } from '@/components/categories/stt-section';
 import { TTSSection } from '@/components/categories/tts-section';
 import { Toolbar } from '@/components/toolbar';
 
+export const dynamic = 'force-static';
+
 export const metadata = {
   title: 'Model costs — Hail',
   description:

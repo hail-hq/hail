@@ -1,6 +1,28 @@
 import type { ReactNode } from 'react';
-import { NuqsAdapter } from 'nuqs/adapters/next/app';
+import { Space_Grotesk, JetBrains_Mono, Instrument_Serif } from 'next/font/google';
 import './global.css';
+
+const fontSans = Space_Grotesk({
+  subsets: ['latin'],
+  weight: ['400', '500', '600', '700'],
+  variable: '--font-sans',
+  display: 'swap',
+});
+
+const fontMono = JetBrains_Mono({
+  subsets: ['latin'],
+  weight: ['400', '500', '700'],
+  variable: '--font-mono',
+  display: 'swap',
+});
+
+const fontSerif = Instrument_Serif({
+  subsets: ['latin'],
+  weight: '400',
+  style: 'italic',
+  variable: '--font-serif',
+  display: 'swap',
+});
 
 export const metadata = {
   title: 'Hail Docs',
@@ -10,18 +32,12 @@ export const metadata = {
 
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
-    <html lang="en" suppressHydrationWarning>
-      <head>
-        <link rel="preconnect" href="https://fonts.googleapis.com" />
-        <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="" />
-        <link
-          href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&family=Instrument+Serif:ital,wght@1,400&display=swap"
-          rel="stylesheet"
-        />
-      </head>
-      <body>
-        <NuqsAdapter>{children}</NuqsAdapter>
-      </body>
+    <html
+      lang="en"
+      suppressHydrationWarning
+      className={`${fontSans.variable} ${fontMono.variable} ${fontSerif.variable}`}
+    >
+      <body>{children}</body>
     </html>
   );
 }

@@ -51,11 +51,11 @@ function CompareGrid({
           </tr>
         </thead>
         <tbody>
-          {rows.map((r, i) => (
-            <tr key={i} className={r.emphasis ? 'compare-row-emphasis' : undefined}>
+          {rows.map((r) => (
+            <tr key={r.label} className={r.emphasis ? 'compare-row-emphasis' : undefined}>
               <th className="compare-attr-label">{r.label}</th>
               {r.cells.map((c, j) => (
-                <td key={j}>{c}</td>
+                <td key={models[j]?.model_id ?? j}>{c}</td>
               ))}
             </tr>
           ))}

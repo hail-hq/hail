@@ -14,8 +14,8 @@ export function url(path: string): string {
   ) {
     return path;
   }
-  if (!path.startsWith('/')) path = '/' + path;
-  return `${BASE_PATH}${path}`;
+  const normalized = path.startsWith('/') ? path : `/${path}`;
+  return `${BASE_PATH}${normalized}`;
 }
 
 export function absoluteUrl(path: string): string {

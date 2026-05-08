@@ -1,48 +1,30 @@
 'use client';
 
-import { useState, useCallback } from 'react';
-
-async function copyToClipboard(text: string): Promise<boolean> {
-  if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
-    try {
-      await navigator.clipboard.writeText(text);
-      return true;
-    } catch {
-      // Fall through to legacy fallback below.
-    }
-  }
-  if (typeof document === 'undefined') return false;
-  const ta = document.createElement('textarea');
-  ta.value = text;
-  ta.setAttribute('readonly', '');
-  ta.style.position = 'fixed';
-  ta.style.left = '-9999px';
-  ta.style.top = '0';
-  ta.style.opacity = '0';
-  document.body.appendChild(ta);
-  try {
-    ta.focus();
-    ta.select();
-    return document.execCommand('copy');
-  } catch {
-    return false;
-  } finally {
-    document.body.removeChild(ta);
-  }
-}
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 export function CopyableCode({ value }: { value: string }) {
   const [copied, setCopied] = useState(false);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (timerRef.current !== null) clearTimeout(timerRef.current);
+    };
+  }, []);
 
   const onClick = useCallback(
     async (e: React.MouseEvent) => {
       e.preventDefault();
       e.stopPropagation();
-      const ok = await copyToClipboard(value);
-      if (ok) {
-        setCopied(true);
-        setTimeout(() => setCopied(false), 1400);
+      if (!navigator.clipboard?.writeText) return;
+      try {
+        await navigator.clipboard.writeText(value);
+      } catch {
+        return;
       }
+      setCopied(true);
+      if (timerRef.current !== null) clearTimeout(timerRef.current);
+      timerRef.current = setTimeout(() => setCopied(false), 1400);
     },
     [value],
   );

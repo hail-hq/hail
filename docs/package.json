@@ -12,11 +12,7 @@
     "next": "^16.2.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
-    "fumadocs-ui": "^16.8.0",
-    "fumadocs-core": "^16.8.0",
-    "fumadocs-mdx": "^14.3.0",
-    "@tanstack/react-table": "^8.20.0",
-    "nuqs": "^2.0.0"
+    "@tanstack/react-table": "^8.20.0"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

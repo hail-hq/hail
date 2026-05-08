@@ -8,10 +8,6 @@
   --color-mute: #555;
   --color-dim: #888;
   --color-accent: #ff4a1c;
-
-  --font-sans: 'Space Grotesk', 'Helvetica Neue', Helvetica, Arial, sans-serif;
-  --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
-  --font-serif: 'Instrument Serif', Georgia, serif;
 }
 
 @layer base {
@@ -243,6 +239,16 @@
   .btn.btn-outline {
     background: transparent;
     color: var(--color-ink);
+  }
+  .btn.btn-accent {
+    background: var(--color-accent);
+    border-color: var(--color-accent);
+    color: var(--color-bg);
+  }
+  .btn.btn-accent:hover {
+    background: var(--color-ink);
+    border-color: var(--color-ink);
+    color: var(--color-bg);
   }
 
   /* ── CATEGORY SECTION ────────────────────── */
