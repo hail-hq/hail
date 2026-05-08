@@ -3,5 +3,5 @@
   "buildCommand": "pnpm --filter @hail-hq/docs-site build",
   "installCommand": "pnpm install --frozen-lockfile",
   "outputDirectory": "docs/.next",
-  "ignoreCommand": "git diff --quiet HEAD^ HEAD -- docs/ costs/ pnpm-workspace.yaml package.json pnpm-lock.yaml vercel.json"
+  "ignoreCommand": "if [ -z \"$VERCEL_GIT_PREVIOUS_SHA\" ]; then exit 1; fi; git diff --quiet \"$VERCEL_GIT_PREVIOUS_SHA\" HEAD -- docs/ costs/ pnpm-workspace.yaml package.json pnpm-lock.yaml vercel.json"
 }
