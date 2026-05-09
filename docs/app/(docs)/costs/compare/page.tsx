@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { loadLLM, loadSTT, loadTTS } from '@/lib/costs';
+import { llm, stt, tts } from '@/lib/costs';
 import { url } from '@/lib/url';
 import {
   LLMCompareTable,
@@ -33,8 +33,6 @@ export default async function ComparePage({ searchParams }: ComparePageProps) {
     .split(',')
     .map((s) => s.trim())
     .filter(Boolean);
-
-  const [llm, stt, tts] = await Promise.all([loadLLM(), loadSTT(), loadTTS()]);
 
   const selectedLLM = requestedIds
     .map((id) => llm.models.find((m) => m.model_id === id))

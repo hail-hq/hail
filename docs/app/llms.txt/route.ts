@@ -1,10 +1,9 @@
-import { loadLLM, loadSTT, loadTTS } from '@/lib/costs';
+import { llm, stt, tts } from '@/lib/costs';
 import { absoluteUrl } from '@/lib/url';
 
 export const dynamic = 'force-static';
 
-export async function GET() {
-  const [llm, stt, tts] = await Promise.all([loadLLM(), loadSTT(), loadTTS()]);
+export function GET() {
   const totalModels = llm.models.length + stt.models.length + tts.models.length;
 
   const body = `# Hail

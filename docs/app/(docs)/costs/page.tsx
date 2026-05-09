@@ -1,4 +1,4 @@
-import { loadLLM, loadSTT, loadTTS } from '@/lib/costs';
+import { llm, stt, tts } from '@/lib/costs';
 import { url } from '@/lib/url';
 import { LLMSection } from '@/components/categories/llm-section';
 import { STTSection } from '@/components/categories/stt-section';
@@ -18,9 +18,8 @@ export const metadata = {
   },
 };
 
-export default async function CostsPage() {
+export default function CostsPage() {
   const today = new Date().toISOString().slice(0, 10);
-  const [llm, stt, tts] = await Promise.all([loadLLM(), loadSTT(), loadTTS()]);
 
   const totalModels = llm.models.length + stt.models.length + tts.models.length;
   const providers = new Set<string>();

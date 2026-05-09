@@ -1,10 +1,9 @@
-import { loadLLM, loadSTT, loadTTS } from '@/lib/costs';
+import { llm, stt, tts } from '@/lib/costs';
 import { renderCostsMarkdown } from '@/lib/markdown';
 
 export const dynamic = 'force-static';
 
-export async function GET() {
-  const [llm, stt, tts] = await Promise.all([loadLLM(), loadSTT(), loadTTS()]);
+export function GET() {
   const md = renderCostsMarkdown(llm, stt, tts, new Date().toISOString());
   return new Response(md, {
     status: 200,
