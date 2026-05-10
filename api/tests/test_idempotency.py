@@ -13,7 +13,6 @@ import httpx
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from hailhq.api.auth import generate_key
 from hailhq.api.idempotency import (
     _IN_FLIGHT_STATUS,
     _storage_key,
@@ -25,6 +24,7 @@ from hailhq.core.models import (
     IdempotencyKey,
     Organization,
 )
+from .conftest import insert_org_and_key
 
 # --------------------------------------------------------------------------- #
 # Pure-function tests
@@ -223,19 +223,9 @@ async def test_post_calls_idempotency_isolated_per_org(
     await add_phone_number(async_session, org_a.id, e164="+14155551001")
 
     # Provision a second org with its own api key + active number.
-    org_b = Organization(name="Beta", slug="beta")
-    async_session.add(org_b)
-    await async_session.flush()
-    plain_b, prefix_b, hex_b = generate_key()
-    async_session.add(
-        ApiKey(
-            organization_id=org_b.id,
-            name="b-key",
-            key_prefix=prefix_b,
-            key_hash=hex_b,
-        )
+    org_b, _, plain_b = await insert_org_and_key(
+        async_session, org_name="Beta", org_slug="beta"
     )
-    await async_session.commit()
     await add_phone_number(
         async_session,
         org_b.id,

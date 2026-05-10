@@ -15,12 +15,12 @@ from uuid import uuid4
 import httpx
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from hailhq.api.auth import generate_key
 from hailhq.core.models import (
     ApiKey,
     CallEvent,
     Organization,
 )
+from .conftest import insert_org_and_key
 
 # --------------------------------------------------------------------------- #
 # Helpers
@@ -53,21 +53,10 @@ async def _add_event(
     return ev
 
 
-async def _make_second_org(session: AsyncSession) -> tuple[Organization, ApiKey, str]:
-    org = Organization(name="Beta", slug="beta")
-    session.add(org)
-    await session.flush()
-    plain, prefix, hex_digest = generate_key()
-    api_key = ApiKey(
-        organization_id=org.id,
-        name="b-key",
-        key_prefix=prefix,
-        key_hash=hex_digest,
-    )
-    session.add(api_key)
-    await session.commit()
-    await session.refresh(api_key)
-    return org, api_key, plain
+async def _make_second_org(
+    session: AsyncSession,
+) -> tuple[Organization, ApiKey, str]:
+    return await insert_org_and_key(session, org_name="Beta", org_slug="beta")
 
 
 # --------------------------------------------------------------------------- #

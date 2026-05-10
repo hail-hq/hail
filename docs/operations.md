@@ -102,26 +102,37 @@ New adapters live under `core/hailhq/core/providers/<channel>/<name>.py` and imp
 
 Detailed setup walkthroughs: `docs/setup/twilio.md`, `docs/setup/livekit-cloud.md`, `docs/setup/mcp.md`.
 
-### First-run DB seed (manual)
+### Authentication
 
-> Hail Cloud users skip this — run `hail login` instead, which provisions an API key against the managed API at `https://api.hail.so` and writes it to `~/.hail/credentials.json`.
+Self-host and managed cloud share the same FastAPI binary, but auth is decided implicitly by what's in the env:
 
-`hail bootstrap` admin CLI is on the v1.x roadmap. Until then, self-hosters seed manually:
+| Mode                    | Trigger                                                                | What hail/api checks                                                                                                             |
+| ----------------------- | ---------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| **Self-host** (default) | Operator sets `HAIL_API_KEY` in `.env`                                 | Constant-time compare against the env var. A single implicit `Organization(slug='self-hosted')` is lazy-seeded on first request. |
+| **Managed cloud**       | The auth backend's `apikey` table is migrated into the shared Postgres | Hashes the bearer with `base64url(sha256())` and looks it up; resolves the org via `organizations.auth_user_id`.                 |
+
+Both can be active simultaneously — if `HAIL_API_KEY` is set in managed cloud, it acts as a master/admin override that always works.
+
+#### Self-host: first-run setup
 
 ```bash
-# 1) Generate an API key + its hash + 8-char prefix; export to env
-read -r HAIL_API_KEY _KEY_PREFIX _KEY_HASH < <(python3 -c 'import base64,hashlib,secrets;r=secrets.token_bytes(32);k="hk_"+base64.urlsafe_b64encode(r).rstrip(b"=").decode();print(k,k[:8],hashlib.sha256(k.encode()).hexdigest())') && export HAIL_API_KEY _KEY_PREFIX _KEY_HASH && echo "$HAIL_API_KEY"
+# 1) Generate a shared API key — used for BOTH directions:
+#    inbound (API checks bearer) + outbound (CLI/MCP/voicebot send it).
+HAIL_API_KEY="hk_$(openssl rand -base64 32 | tr -d '/+=' | head -c 40)"
+echo "HAIL_API_KEY=$HAIL_API_KEY" >> hail/.env
 
-# 2) Set Twilio number details + API URL
-export TWILIO_E164='+1XXXXXXXXXX' TWILIO_PN_SID='PNxxxxxxxxxxxxxxxx' HAIL_API_URL='http://localhost:8080'
-
-# 3) Insert org + api_key + phone_number
-docker compose exec -T postgres psql -U hail -d hail -c "INSERT INTO organizations (name, slug) VALUES ('Dev', 'dev');"
-docker compose exec -T postgres psql -U hail -d hail -c "INSERT INTO api_keys (organization_id, name, key_prefix, key_hash) SELECT id, 'dev-key', '${_KEY_PREFIX}', '${_KEY_HASH}' FROM organizations WHERE slug = 'dev';"
-docker compose exec -T postgres psql -U hail -d hail -c "INSERT INTO phone_numbers (organization_id, e164, country_code, number_type, capabilities, provider, provider_resource_id, provisioning_state, acquired_at) SELECT id, '${TWILIO_E164}', 'US', 'local', ARRAY['voice','sms'], 'twilio', '${TWILIO_PN_SID}', 'active', now() FROM organizations WHERE slug = 'dev';"
+# 2) Add a phone number for the implicit org (created on first authenticated request).
+export TWILIO_E164='+1XXXXXXXXXX' TWILIO_PN_SID='PNxxxxxxxxxxxxxxxx'
+docker compose exec -T postgres psql -U hail -d hail -c "INSERT INTO phone_numbers (organization_id, e164, country_code, number_type, capabilities, provider, provider_resource_id, provisioning_state, acquired_at) SELECT id, '${TWILIO_E164}', 'US', 'local', ARRAY['voice','sms'], 'twilio', '${TWILIO_PN_SID}', 'active', now() FROM organizations WHERE slug = 'self-hosted';"
 ```
 
-Save `HAIL_API_KEY` somewhere durable — it's only shown once (only the SHA-256 is stored).
+Save the value of `HAIL_API_KEY` — there's no recovery path. Then `export HAIL_API_KEY=…` in the shell that runs `hail`, or pass it via `--api-key`.
+
+> **`hail login` is managed-cloud only.** It runs the auth backend's device flow against `hail-website` and writes the resulting `hl_live_*` key to `~/.hail/credentials.json`. In self-host there's no website to authorize against — set `HAIL_API_KEY` directly and you're done.
+
+#### Managed cloud
+
+Run `hail login`. The CLI opens `/device` on the website, you approve, and it exchanges the device-flow session for a long-lived `hl_live_*` key minted by the auth backend into the `apikey` table. `hail/api` reads the same table — keys minted in the console work everywhere (CLI, MCP, direct API calls).
 
 ## Database migrations
 

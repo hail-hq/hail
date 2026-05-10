@@ -15,7 +15,6 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from unittest.mock import AsyncMock
 
-from hailhq.api.auth import generate_key
 from hailhq.core.models import (
     ApiKey,
     AuditLog,
@@ -23,6 +22,7 @@ from hailhq.core.models import (
     CallEvent,
     Organization,
 )
+from .conftest import insert_org_and_key
 
 # --------------------------------------------------------------------------- #
 # POST /calls
@@ -268,19 +268,9 @@ async def test_get_call_by_id_returns_404_for_other_org(
     call_id = create.json()["id"]
 
     # Second org with its own api key.
-    org_b = Organization(name="Beta", slug="beta")
-    async_session.add(org_b)
-    await async_session.flush()
-    plain_b, prefix_b, hex_b = generate_key()
-    async_session.add(
-        ApiKey(
-            organization_id=org_b.id,
-            name="b-key",
-            key_prefix=prefix_b,
-            key_hash=hex_b,
-        )
+    _, _, plain_b = await insert_org_and_key(
+        async_session, org_name="Beta", org_slug="beta"
     )
-    await async_session.commit()
 
     resp = await client.get(
         f"/calls/{call_id}",

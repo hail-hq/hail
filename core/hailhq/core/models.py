@@ -29,6 +29,10 @@ class Organization(Base):
     )
     name: Mapped[str] = mapped_column(Text, nullable=False)
     slug: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
+    # Bridge to the auth backend's user id (TEXT). Populated by /v1/internal/orgs
+    # at signup; used to resolve apikey.referenceId → organization on every
+    # authenticated request.
+    auth_user_id: Mapped[str | None] = mapped_column(Text, unique=True, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         TS, server_default=text("now()"), nullable=False
     )
@@ -38,30 +42,38 @@ class Organization(Base):
 
 
 class ApiKey(Base):
-    __tablename__ = "api_keys"
+    """Read-only mirror of the auth backend's `apikey` table.
 
-    id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
+    The table is owned and migrated by the website's auth backend; hail/api
+    only reads from it during request authentication. Keep field names matching
+    the upstream schema (camelCase, quoted) so SELECTs work without aliasing.
+    """
+
+    __tablename__ = "apikey"
+
+    # Schema mirrors the auth backend's generated migration. Most fields are
+    # nullable in the DB because the backend fills defaults at write-time rather
+    # than via DB defaults — so a NULL ``enabled`` means "use the backend
+    # default (true)", not "disabled".
+    id: Mapped[str] = mapped_column(Text, primary_key=True)
+    name: Mapped[str | None] = mapped_column(Text, nullable=True)
+    start: Mapped[str | None] = mapped_column(Text, nullable=True)
+    reference_id: Mapped[str] = mapped_column(
+        "referenceId", Text, nullable=False, index=True
     )
-    organization_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
-        ForeignKey("organizations.id", ondelete="CASCADE"),
-        nullable=False,
+    prefix: Mapped[str | None] = mapped_column(Text, nullable=True)
+    key: Mapped[str] = mapped_column(Text, nullable=False, index=True)
+    enabled: Mapped[bool | None] = mapped_column(nullable=True)
+    request_count: Mapped[int | None] = mapped_column(
+        "requestCount", Integer, nullable=True
     )
-    name: Mapped[str] = mapped_column(Text, nullable=False)
-    key_prefix: Mapped[str] = mapped_column(Text, nullable=False)
-    key_hash: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
-    scopes: Mapped[list[str]] = mapped_column(
-        ARRAY(Text), server_default=text("ARRAY['*']"), nullable=False
+    last_request: Mapped[datetime | None] = mapped_column(
+        "lastRequest", TS, nullable=True
     )
-    last_used_at: Mapped[datetime | None] = mapped_column(TS, nullable=True)
-    expires_at: Mapped[datetime | None] = mapped_column(TS, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(
-        TS, server_default=text("now()"), nullable=False
-    )
-    updated_at: Mapped[datetime] = mapped_column(
-        TS, server_default=text("now()"), nullable=False
-    )
+    expires_at: Mapped[datetime | None] = mapped_column("expiresAt", TS, nullable=True)
+    created_at: Mapped[datetime] = mapped_column("createdAt", TS, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column("updatedAt", TS, nullable=False)
+    permissions: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
 class PhoneNumber(Base):
@@ -232,11 +244,9 @@ class AuditLog(Base):
         ForeignKey("organizations.id", ondelete="CASCADE"),
         nullable=False,
     )
-    api_key_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True),
-        ForeignKey("api_keys.id", ondelete="SET NULL"),
-        nullable=True,
-    )
+    # The auth backend's apikey.id (TEXT). No FK — that table is owned by the
+    # website's auth backend migrations, not by hail/api.
+    api_key_id: Mapped[str | None] = mapped_column(Text, nullable=True)
     action: Mapped[str] = mapped_column(Text, nullable=False)
     resource_type: Mapped[str | None] = mapped_column(Text, nullable=True)
     resource_id: Mapped[uuid.UUID | None] = mapped_column(

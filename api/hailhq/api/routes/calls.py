@@ -86,7 +86,7 @@ async def close_livekit_singleton() -> None:
 
 async def _write_audit_log(
     organization_id: UUID,
-    api_key_id: UUID,
+    api_key_id: str,
     action: str,
     resource_type: str,
     resource_id: UUID,

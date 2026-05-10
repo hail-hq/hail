@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import secrets
+import uuid
+from datetime import datetime, timezone
 from types import SimpleNamespace
 from typing import AsyncIterator
 from unittest.mock import AsyncMock
@@ -10,7 +13,7 @@ import httpx
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from hailhq.api.auth import generate_key
+from hailhq.api.auth import hash_key
 from hailhq.api.main import app
 from hailhq.api.routes.calls import get_livekit
 from hailhq.core.db import get_session
@@ -20,6 +23,48 @@ from hailhq.core.testing.fixtures import (  # noqa: F401
     async_session,
     database_url,
 )
+
+
+def mint_test_key() -> tuple[str, str]:
+    """Generate an auth-backend-shaped plaintext + its storage hash."""
+    plain = "hl_live_" + secrets.token_urlsafe(32)
+    return plain, hash_key(plain)
+
+
+async def insert_org_and_key(
+    session: AsyncSession,
+    *,
+    org_name: str = "Acme",
+    org_slug: str = "acme",
+    auth_user_id: str | None = None,
+) -> tuple[Organization, ApiKey, str]:
+    """Insert an org and an apikey row (auth-backend-shaped) tied to it.
+
+    Returns ``(org, api_key, plaintext)``. Tests should use the plaintext as
+    the bearer token; the hashed copy lives in ``api_key.key``.
+    """
+    auth_user_id = auth_user_id or f"user_test_{uuid.uuid4().hex[:12]}"
+    org = Organization(name=org_name, slug=org_slug, auth_user_id=auth_user_id)
+    session.add(org)
+    await session.flush()
+
+    plain, hashed = mint_test_key()
+    now = datetime.now(timezone.utc)
+    api_key = ApiKey(
+        id=f"apikey_test_{uuid.uuid4().hex[:12]}",
+        name="test-key",
+        start=plain[:14],
+        reference_id=auth_user_id,
+        prefix="hl_live_",
+        key=hashed,
+        created_at=now,
+        updated_at=now,
+    )
+    session.add(api_key)
+    await session.commit()
+    await session.refresh(api_key)
+    await session.refresh(org)
+    return org, api_key, plain
 
 
 @pytest.fixture()
@@ -67,21 +112,7 @@ async def client(
 async def org_and_key(
     async_session: AsyncSession,  # noqa: F811 (re-used as a fixture parameter name)
 ) -> tuple[Organization, ApiKey, str]:
-    org = Organization(name="Acme", slug="acme")
-    async_session.add(org)
-    await async_session.flush()
-
-    plain, prefix, hex_digest = generate_key()
-    api_key = ApiKey(
-        organization_id=org.id,
-        name="test-key",
-        key_prefix=prefix,
-        key_hash=hex_digest,
-    )
-    async_session.add(api_key)
-    await async_session.commit()
-    await async_session.refresh(api_key)
-    return org, api_key, plain
+    return await insert_org_and_key(async_session)
 
 
 @pytest.fixture()
