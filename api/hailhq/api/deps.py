@@ -2,8 +2,8 @@
 
 Auth picks a path based on what's in the env (see ``docs/operations.md``):
 ``HAIL_API_KEY`` triggers the shared-key path; otherwise we look the bearer up
-in the auth backend's ``apikey`` table and resolve the user's org through
-Better Auth's ``member`` table.
+in the website-owned ``api_keys`` table and resolve the user's org through
+``members``.
 """
 
 from __future__ import annotations
@@ -143,7 +143,7 @@ def _check_shared_key(token: str) -> bool:
 
 async def _principal_from_apikey_table(token: str, db: AsyncSession) -> Principal:
     hashed = hash_key(token)
-    # api_keys.reference_id is TEXT (opaque to Better Auth); members.user_id is UUID.
+    # api_keys.reference_id is TEXT (opaque upstream); members.user_id is UUID.
     stmt = (
         select(ApiKey, OrganizationMember.organization_id)
         .outerjoin(

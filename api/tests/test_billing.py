@@ -181,7 +181,7 @@ async def test_oss_missing_apikey_table_returns_401(
 ) -> None:
     """A bearer that doesn't match HAIL_API_KEY 401s cleanly without the apikey table."""
     # Force the deps cache into the "no apikey table" state to simulate an OSS
-    # deploy that never ran Better Auth's migrations.
+    # deploy that never ran the website-owned migrations.
     monkeypatch.setattr(deps_module._caches, "apikey_table_present", False)
     monkeypatch.setattr("hailhq.core.config.settings.hail_api_key", "the-master")
 

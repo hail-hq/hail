@@ -21,14 +21,13 @@ class Base(DeclarativeBase):
 TS = DateTime(timezone=True)
 
 
-# Better Auth (in the website repo) owns `organizations`, `members`, `api_keys`.
-# hail/api only reads from them. Foreign-key style columns here use plain types
-# with no DB FK so the two migration histories don't need to coordinate — same
-# pattern audit_log.api_key_id uses.
+# The website owns `organizations`, `members`, `api_keys`. hail/api only reads
+# from them. Cross-history columns (organization_id, api_key_id) carry no FK
+# so the two migration tools don't need to coordinate.
 
 
 class OrganizationMember(Base):
-    """Read-only mirror of Better Auth's ``members`` table.
+    """Read-only mirror of the website's ``members`` table.
 
     Used by deps.py to map ``api_keys.reference_id`` → ``organization_id``.
     """

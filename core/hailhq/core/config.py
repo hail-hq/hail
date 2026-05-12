@@ -58,10 +58,9 @@ class Settings(BaseSettings):
 
     # Hail
     # Shared-key mode: when set, requests carrying this bearer authenticate
-    # to the seeded "Self-hosted" organization. The balance gate at
+    # to the sentinel "Self-hosted" organization. The balance gate at
     # POST /v1/calls is skipped for this path — billing is cloud-only. Leave
-    # empty in managed cloud; per-user keys minted via Better Auth are the
-    # only auth path there.
+    # empty in managed cloud; per-user keys are the only auth path there.
     hail_api_key: str = ""
     hail_api_url: str = "http://localhost:8080"
 

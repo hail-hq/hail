@@ -205,11 +205,11 @@ CREATE INDEX idx_idempotency_expires ON idempotency_keys(expires_at);
 
 -- ============================================================
 -- AUDIT LOG — append-only record of mutating API actions.
--- api_key_id and organization_id are TEXT (not UUID) with no foreign keys —
--- Better Auth's apikey and organization tables live in a separate migration
--- history owned by hail-website. The sentinel value "shared" is used for
--- HAIL_API_KEY auth (no row in apikey) and "self-hosted" for its org.
--- Treat these columns as informational lineage, not referential integrity.
+-- api_key_id is TEXT and organization_id is UUID, both with no foreign keys —
+-- the upstream tables live in a separate migration history owned by the
+-- website. Sentinels: ``"shared"`` for HAIL_API_KEY auth (no row in api_keys);
+-- nil UUID for its org. Treat these columns as informational lineage, not
+-- referential integrity.
 -- ============================================================
 CREATE TABLE audit_log (
   id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
