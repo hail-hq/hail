@@ -10,13 +10,15 @@ from __future__ import annotations
 
 import hmac
 import json
+import uuid
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Annotated
 
 from fastapi import Depends, Header, HTTPException, status
 from pydantic import BaseModel
-from sqlalchemy import func, select, text, update
+from sqlalchemy import cast, func, select, text, update
+from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from hailhq.api.auth import hash_key
@@ -29,7 +31,9 @@ from hailhq.core.models import ApiKey, OrganizationMember
 _LAST_USED_THROTTLE = timedelta(seconds=60)
 
 SHARED_PRINCIPAL_KEY_ID = "shared"
-SELF_HOSTED_ORG_ID = "self-hosted"
+# Nil UUID — sentinel organization for every shared-key (HAIL_API_KEY) request.
+# No row in ``organizations``; the balance gate is short-circuited for it.
+SELF_HOSTED_ORG_ID = uuid.UUID(int=0)
 
 
 @dataclass
@@ -51,16 +55,10 @@ def reset_caches() -> None:
 
 
 class Principal(BaseModel):
-    """The authenticated caller, exposed to route handlers.
-
-    ``api_key_id`` is the auth backend's ``apikey.id`` for managed-cloud
-    requests, or the literal ``"shared"`` sentinel for shared-key requests.
-    ``organization_id`` is opaque TEXT — Better Auth's ``organization.id`` for
-    cloud requests, or the literal ``"self-hosted"`` sentinel for shared-key.
-    """
+    """The authenticated caller, exposed to route handlers."""
 
     api_key_id: str
-    organization_id: str
+    organization_id: uuid.UUID
     scopes: list[str]
 
 
@@ -145,11 +143,12 @@ def _check_shared_key(token: str) -> bool:
 
 async def _principal_from_apikey_table(token: str, db: AsyncSession) -> Principal:
     hashed = hash_key(token)
+    # api_keys.reference_id is TEXT (opaque to Better Auth); members.user_id is UUID.
     stmt = (
         select(ApiKey, OrganizationMember.organization_id)
         .outerjoin(
             OrganizationMember,
-            OrganizationMember.user_id == ApiKey.reference_id,
+            OrganizationMember.user_id == cast(ApiKey.reference_id, PG_UUID),
         )
         .where(ApiKey.key == hashed)
     )
@@ -169,7 +168,7 @@ async def _principal_from_apikey_table(token: str, db: AsyncSession) -> Principa
         )
 
     if organization_id is None:
-        # The website's signup hook creates a `member` row alongside every new
+        # The website's signup hook creates a `members` row alongside every new
         # user; if it's missing here, signup either failed or hasn't run for
         # this user yet. Send them to the dashboard rather than fabricating one.
         raise HTTPException(

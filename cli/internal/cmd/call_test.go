@@ -46,7 +46,7 @@ func newFakeServer(t *testing.T, status int, response any) *fakeServer {
 // sampleResponse returns a CallResponse populated with realistic data.
 func sampleResponse() client.CallResponse {
 	id := openapi_types.UUID(uuid.MustParse("11111111-1111-1111-1111-111111111111"))
-	orgID := "org_test_2222222"
+	orgID := openapi_types.UUID(uuid.MustParse("22222222-2222-2222-2222-222222222222"))
 	now := time.Date(2026, 4, 22, 12, 0, 0, 0, time.UTC)
 	return client.CallResponse{
 		Id:              id,

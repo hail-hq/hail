@@ -191,7 +191,7 @@ type CallResponse struct {
 	Id              openapi_types.UUID    `json:"id"`
 	InitialPrompt   *string               `json:"initial_prompt"`
 	LivekitRoom     *string               `json:"livekit_room"`
-	OrganizationId  string                `json:"organization_id"`
+	OrganizationId  openapi_types.UUID    `json:"organization_id"`
 	ProviderCallSid *string               `json:"provider_call_sid"`
 	RecordingS3Key  *string               `json:"recording_s3_key"`
 	RequestedAt     time.Time             `json:"requested_at"`

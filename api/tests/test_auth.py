@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import uuid
 from datetime import datetime, timedelta, timezone
 from typing import AsyncIterator
 
@@ -90,7 +91,7 @@ async def test_bad_key_returns_401(client: httpx.AsyncClient) -> None:
 
 async def test_valid_key_returns_principal(
     client: httpx.AsyncClient,
-    org_and_key: tuple[str, ApiKey, str],
+    org_and_key: tuple[uuid.UUID, ApiKey, str],
 ) -> None:
     org_id, api_key, plain = org_and_key
     resp = await client.get(
@@ -100,13 +101,13 @@ async def test_valid_key_returns_principal(
     assert resp.status_code == 200
     body = resp.json()
     assert body["api_key_id"] == api_key.id
-    assert body["organization_id"] == org_id
+    assert body["organization_id"] == str(org_id)
 
 
 async def test_expired_key_returns_403(
     client: httpx.AsyncClient,
     async_session: AsyncSession,
-    org_and_key: tuple[str, ApiKey, str],
+    org_and_key: tuple[uuid.UUID, ApiKey, str],
 ) -> None:
     _, api_key, plain = org_and_key
     api_key.expires_at = datetime.now(timezone.utc) - timedelta(days=1)
@@ -122,7 +123,7 @@ async def test_expired_key_returns_403(
 async def test_disabled_key_returns_401(
     client: httpx.AsyncClient,
     async_session: AsyncSession,
-    org_and_key: tuple[str, ApiKey, str],
+    org_and_key: tuple[uuid.UUID, ApiKey, str],
 ) -> None:
     _, api_key, plain = org_and_key
     api_key.enabled = False
@@ -138,7 +139,7 @@ async def test_disabled_key_returns_401(
 async def test_last_request_is_updated_on_success(
     client: httpx.AsyncClient,
     async_session: AsyncSession,
-    org_and_key: tuple[str, ApiKey, str],
+    org_and_key: tuple[uuid.UUID, ApiKey, str],
 ) -> None:
     _, api_key, plain = org_and_key
     assert api_key.last_request is None
@@ -158,7 +159,7 @@ async def test_last_request_is_updated_on_success(
 async def test_last_request_is_throttled(
     client: httpx.AsyncClient,
     async_session: AsyncSession,
-    org_and_key: tuple[str, ApiKey, str],
+    org_and_key: tuple[uuid.UUID, ApiKey, str],
 ) -> None:
     """A second request within the throttle window must not re-stamp."""
     _, api_key, plain = org_and_key
@@ -189,7 +190,7 @@ async def test_unprovisioned_user_returns_403(
 ) -> None:
     """A valid key whose referenceId has no ``member`` row gets 403, not a fabricated org."""
     plain = "hl_live_orphan-key-no-org"
-    reference_id = "user_test_no_org_bridged"
+    reference_id = str(uuid.uuid4())
     now = datetime.now(timezone.utc)
     api_key = ApiKey(
         id="apikey_test_orphan",

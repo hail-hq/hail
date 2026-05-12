@@ -43,26 +43,27 @@ async def insert_org_and_key(
     org_slug: str = "acme",  # noqa: ARG001
     auth_user_id: str | None = None,
     initial_credit_cents: int = 100_000,
-) -> tuple[str, ApiKey, str]:
+) -> tuple[uuid.UUID, ApiKey, str]:
     """Insert a member + apikey row tied to a synthetic organization id.
 
     Returns ``(organization_id, api_key, plaintext)``. ``organization_id`` is
-    a TEXT sentinel — no row in ``organization`` (that table lives in the
-    website's Better Auth migration history). The ``member`` row is what
-    ``deps.py`` joins on to resolve ``apikey.referenceId → organizationId``.
+    a freshly-generated UUID; the matching row in ``members`` is what
+    ``deps.py`` joins on to resolve ``api_keys.reference_id`` →
+    ``members.organization_id``.
 
     ``initial_credit_cents`` (default $1000) seeds a credit row so the
     balance gate on POST /v1/calls passes. Pass 0 for billing tests that
     specifically want a zero-balance org.
     """
-    auth_user_id = auth_user_id or f"user_test_{uuid.uuid4().hex[:12]}"
-    organization_id = f"org_test_{uuid.uuid4().hex[:12]}"
+    user_uuid = uuid.UUID(auth_user_id) if auth_user_id else uuid.uuid4()
+    auth_user_id = str(user_uuid)
+    organization_id = uuid.uuid4()
 
     now = datetime.now(timezone.utc)
     session.add(
         OrganizationMember(
-            id=f"mem_test_{uuid.uuid4().hex[:12]}",
-            user_id=auth_user_id,
+            id=uuid.uuid4(),
+            user_id=user_uuid,
             organization_id=organization_id,
             role="owner",
             created_at=now,
@@ -142,7 +143,7 @@ async def client(
 @pytest.fixture()
 async def org_and_key(
     async_session: AsyncSession,  # noqa: F811 (re-used as a fixture parameter name)
-) -> tuple[str, ApiKey, str]:
+) -> tuple[uuid.UUID, ApiKey, str]:
     return await insert_org_and_key(async_session)
 
 
@@ -162,7 +163,7 @@ def add_phone_number():
 
     async def _add(
         session: AsyncSession,
-        organization_id: str,
+        organization_id: uuid.UUID,
         e164: str = "+14155551234",
         state: str = "active",
         provider_resource_id: str = "PN_test",

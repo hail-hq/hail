@@ -21,26 +21,27 @@ class Base(DeclarativeBase):
 TS = DateTime(timezone=True)
 
 
-# The website (Better Auth's organization plugin) owns the `organization` and
-# `member` tables. hail/api only reads from them — see deps.py — and never
-# inserts a row. `organization_id` columns on hail/api-owned tables are plain
-# TEXT without a foreign key, mirroring the existing apikey lineage pattern
-# (audit_log.api_key_id) so the two migration histories don't need to
-# coordinate.
+# Better Auth (in the website repo) owns `organizations`, `members`, `api_keys`.
+# hail/api only reads from them. Foreign-key style columns here use plain types
+# with no DB FK so the two migration histories don't need to coordinate — same
+# pattern audit_log.api_key_id uses.
 
 
 class OrganizationMember(Base):
     """Read-only mirror of Better Auth's ``members`` table.
 
-    Owned and migrated by the website. We read it during principal resolution
-    to map ``api_keys.reference_id`` (= Better Auth user id) → ``organization_id``.
+    Used by deps.py to map ``api_keys.reference_id`` → ``organization_id``.
     """
 
     __tablename__ = "members"
 
-    id: Mapped[str] = mapped_column(Text, primary_key=True)
-    user_id: Mapped[str] = mapped_column(Text, nullable=False, index=True)
-    organization_id: Mapped[str] = mapped_column(Text, nullable=False, index=True)
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), nullable=False, index=True
+    )
+    organization_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), nullable=False, index=True
+    )
     role: Mapped[str] = mapped_column(Text, nullable=False)
     created_at: Mapped[datetime] = mapped_column(TS, nullable=False)
 
@@ -57,7 +58,9 @@ class AccountCredit(Base):
     id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
     )
-    organization_id: Mapped[str] = mapped_column(Text, nullable=False)
+    organization_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), nullable=False
+    )
     kind: Mapped[str] = mapped_column(Text, nullable=False)
     channel: Mapped[str] = mapped_column(Text, nullable=False)
     amount_cents: Mapped[int] = mapped_column(Integer, nullable=False)
@@ -105,7 +108,9 @@ class UsageEvent(Base):
     id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
     )
-    organization_id: Mapped[str] = mapped_column(Text, nullable=False)
+    organization_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), nullable=False
+    )
     channel: Mapped[str] = mapped_column(Text, nullable=False)
     units: Mapped[int] = mapped_column(Integer, nullable=False)
     ref: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -159,7 +164,9 @@ class PhoneNumber(Base):
     id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
     )
-    organization_id: Mapped[str] = mapped_column(Text, nullable=False)
+    organization_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), nullable=False
+    )
     e164: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
     country_code: Mapped[str] = mapped_column(Text, nullable=False)
     number_type: Mapped[str] = mapped_column(Text, nullable=False)
@@ -201,7 +208,9 @@ class Conversation(Base):
     id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
     )
-    organization_id: Mapped[str] = mapped_column(Text, nullable=False)
+    organization_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), nullable=False
+    )
     external_id: Mapped[str | None] = mapped_column(Text, nullable=True)
     metadata_: Mapped[dict] = mapped_column(
         "metadata", JSONB, server_default=text("'{}'::jsonb"), nullable=False
@@ -220,7 +229,9 @@ class Call(Base):
     id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
     )
-    organization_id: Mapped[str] = mapped_column(Text, nullable=False)
+    organization_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), nullable=False
+    )
     conversation_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("conversations.id", ondelete="SET NULL"),
@@ -284,7 +295,9 @@ class IdempotencyKey(Base):
     __tablename__ = "idempotency_keys"
 
     key: Mapped[str] = mapped_column(Text, primary_key=True)
-    organization_id: Mapped[str] = mapped_column(Text, nullable=False)
+    organization_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), nullable=False
+    )
     request_hash: Mapped[str] = mapped_column(Text, nullable=False)
     response_status: Mapped[int] = mapped_column(Integer, nullable=False)
     response_body: Mapped[dict] = mapped_column(JSONB, nullable=False)
@@ -300,7 +313,9 @@ class AuditLog(Base):
     id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
     )
-    organization_id: Mapped[str] = mapped_column(Text, nullable=False)
+    organization_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), nullable=False
+    )
     # The auth backend's apikey.id (TEXT). No FK — that table is owned by the
     # website's auth backend migrations, not by hail/api.
     api_key_id: Mapped[str | None] = mapped_column(Text, nullable=True)

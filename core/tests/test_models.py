@@ -1,10 +1,11 @@
+import uuid
 from datetime import datetime
 
 from hailhq.core.models import Call, PhoneNumber
 
 
 def test_call_round_trip(session):
-    org_id = "org_test_acme"
+    org_id = uuid.uuid4()
 
     number = PhoneNumber(
         organization_id=org_id,

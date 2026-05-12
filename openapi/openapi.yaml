@@ -338,6 +338,7 @@ components:
           title: Id
         organization_id:
           type: string
+          format: uuid
           title: Organization Id
         conversation_id:
           anyOf:

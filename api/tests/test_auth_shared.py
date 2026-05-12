@@ -38,7 +38,7 @@ def _build_app(session: AsyncSession) -> FastAPI:
     ) -> dict[str, str]:
         return {
             "api_key_id": principal.api_key_id,
-            "organization_id": principal.organization_id,
+            "organization_id": str(principal.organization_id),
         }
 
     async def override_get_session() -> AsyncIterator[AsyncSession]:
@@ -74,7 +74,7 @@ async def test_shared_key_returns_sentinel_principal(
     assert resp.status_code == 200
     body = resp.json()
     assert body["api_key_id"] == SHARED_PRINCIPAL_KEY_ID
-    assert body["organization_id"] == SELF_HOSTED_ORG_ID
+    assert body["organization_id"] == str(SELF_HOSTED_ORG_ID)
 
 
 async def test_wrong_shared_key_returns_401(

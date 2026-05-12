@@ -66,7 +66,7 @@ class _FakeSession:
 
 async def _make_call_row(session: AsyncSession) -> UUID:
     """Insert a phone_number + queued call against a synthetic org_id."""
-    org_id = "org_test_acme"
+    org_id = UUID("11111111-2222-3333-4444-555555555555")
 
     pn = PhoneNumber(
         organization_id=org_id,

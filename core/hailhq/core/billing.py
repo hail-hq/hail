@@ -13,6 +13,7 @@ running.
 from __future__ import annotations
 
 import logging
+import uuid
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -22,7 +23,7 @@ from hailhq.core.models import AccountCredit
 logger = logging.getLogger(__name__)
 
 
-async def get_balance_cents(db: AsyncSession, organization_id: str) -> int:
+async def get_balance_cents(db: AsyncSession, organization_id: uuid.UUID) -> int:
     """Current balance for an org, in cents. SUM over the ledger."""
     stmt = select(func.coalesce(func.sum(AccountCredit.amount_cents), 0)).where(
         AccountCredit.organization_id == organization_id
@@ -31,6 +32,6 @@ async def get_balance_cents(db: AsyncSession, organization_id: str) -> int:
     return int(result.scalar_one() or 0)
 
 
-async def has_funds(db: AsyncSession, organization_id: str) -> bool:
+async def has_funds(db: AsyncSession, organization_id: uuid.UUID) -> bool:
     """True iff the org has a positive balance. Single source of truth for the gate."""
     return await get_balance_cents(db, organization_id) > 0
