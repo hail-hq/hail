@@ -18,7 +18,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from hailhq.core.models import (
     ApiKey,
     CallEvent,
-    Organization,
 )
 from .conftest import insert_org_and_key
 
@@ -55,7 +54,7 @@ async def _add_event(
 
 async def _make_second_org(
     session: AsyncSession,
-) -> tuple[Organization, ApiKey, str]:
+) -> tuple[str, ApiKey, str]:
     return await insert_org_and_key(session, org_name="Beta", org_slug="beta")
 
 
@@ -72,11 +71,11 @@ async def test_get_events_unauth_returns_401(client: httpx.AsyncClient) -> None:
 async def test_get_events_returns_only_my_org_events(
     client: httpx.AsyncClient,
     async_session: AsyncSession,
-    org_and_key: tuple[Organization, ApiKey, str],
+    org_and_key: tuple[str, ApiKey, str],
     add_phone_number,
 ) -> None:
-    org_a, _, plain_a = org_and_key
-    await add_phone_number(async_session, org_a.id)
+    org_a_id, _, plain_a = org_and_key
+    await add_phone_number(async_session, org_a_id)
     call_a = await _create_call_for_events(client, plain_a)
 
     # Wipe the synthetic queued->dialing state_change so we can count exactly.
@@ -85,10 +84,10 @@ async def test_get_events_returns_only_my_org_events(
     )
     await async_session.commit()
 
-    org_b, _, plain_b = await _make_second_org(async_session)
+    org_b_id, _, plain_b = await _make_second_org(async_session)
     await add_phone_number(
         async_session,
-        org_b.id,
+        org_b_id,
         e164="+14155550002",
         provider_resource_id="PN_b",
     )
@@ -125,11 +124,11 @@ async def test_get_events_returns_only_my_org_events(
 async def test_get_events_id_filter_call_resolves_to_call(
     client: httpx.AsyncClient,
     async_session: AsyncSession,
-    org_and_key: tuple[Organization, ApiKey, str],
+    org_and_key: tuple[str, ApiKey, str],
     add_phone_number,
 ) -> None:
-    org, _, plain = org_and_key
-    await add_phone_number(async_session, org.id)
+    org_id, _, plain = org_and_key
+    await add_phone_number(async_session, org_id)
     call_id = await _create_call_for_events(client, plain)
 
     base = datetime(2026, 4, 22, 12, 0, 0, tzinfo=timezone.utc)
@@ -149,7 +148,7 @@ async def test_get_events_id_filter_call_resolves_to_call(
 
 async def test_get_events_id_filter_unknown_call_returns_404(
     client: httpx.AsyncClient,
-    org_and_key: tuple[Organization, ApiKey, str],
+    org_and_key: tuple[str, ApiKey, str],
 ) -> None:
     _, _, plain = org_and_key
     resp = await client.get(
@@ -162,11 +161,11 @@ async def test_get_events_id_filter_unknown_call_returns_404(
 async def test_get_events_id_filter_other_org_call_returns_404(
     client: httpx.AsyncClient,
     async_session: AsyncSession,
-    org_and_key: tuple[Organization, ApiKey, str],
+    org_and_key: tuple[str, ApiKey, str],
     add_phone_number,
 ) -> None:
-    org_a, _, plain_a = org_and_key
-    await add_phone_number(async_session, org_a.id)
+    org_a_id, _, plain_a = org_and_key
+    await add_phone_number(async_session, org_a_id)
     call_a = await _create_call_for_events(client, plain_a)
 
     _, _, plain_b = await _make_second_org(async_session)
@@ -182,7 +181,7 @@ async def test_get_events_id_filter_other_org_call_returns_404(
 
 async def test_get_events_id_filter_unsupported_type_returns_422(
     client: httpx.AsyncClient,
-    org_and_key: tuple[Organization, ApiKey, str],
+    org_and_key: tuple[str, ApiKey, str],
 ) -> None:
     _, _, plain = org_and_key
     resp = await client.get(
@@ -197,7 +196,7 @@ async def test_get_events_id_filter_unsupported_type_returns_422(
 
 async def test_get_events_id_filter_malformed_returns_422(
     client: httpx.AsyncClient,
-    org_and_key: tuple[Organization, ApiKey, str],
+    org_and_key: tuple[str, ApiKey, str],
 ) -> None:
     _, _, plain = org_and_key
     headers = {"Authorization": f"Bearer {plain}"}
@@ -226,11 +225,11 @@ async def test_get_events_id_filter_malformed_returns_422(
 async def test_get_events_kind_filter(
     client: httpx.AsyncClient,
     async_session: AsyncSession,
-    org_and_key: tuple[Organization, ApiKey, str],
+    org_and_key: tuple[str, ApiKey, str],
     add_phone_number,
 ) -> None:
-    org, _, plain = org_and_key
-    await add_phone_number(async_session, org.id)
+    org_id, _, plain = org_and_key
+    await add_phone_number(async_session, org_id)
     call_id = await _create_call_for_events(client, plain)
 
     base = datetime(2026, 4, 22, 12, 0, 0, tzinfo=timezone.utc)
@@ -264,11 +263,11 @@ async def test_get_events_kind_filter(
 async def test_get_events_chronological_order_and_pagination(
     client: httpx.AsyncClient,
     async_session: AsyncSession,
-    org_and_key: tuple[Organization, ApiKey, str],
+    org_and_key: tuple[str, ApiKey, str],
     add_phone_number,
 ) -> None:
-    org, _, plain = org_and_key
-    await add_phone_number(async_session, org.id)
+    org_id, _, plain = org_and_key
+    await add_phone_number(async_session, org_id)
     call_a = await _create_call_for_events(client, plain)
     call_b = await _create_call_for_events(client, plain)
 
@@ -316,11 +315,11 @@ async def test_get_events_chronological_order_and_pagination(
 async def test_get_events_org_wide_omits_call_status(
     client: httpx.AsyncClient,
     async_session: AsyncSession,
-    org_and_key: tuple[Organization, ApiKey, str],
+    org_and_key: tuple[str, ApiKey, str],
     add_phone_number,
 ) -> None:
-    org, _, plain = org_and_key
-    await add_phone_number(async_session, org.id)
+    org_id, _, plain = org_and_key
+    await add_phone_number(async_session, org_id)
     await _create_call_for_events(client, plain)
 
     resp = await client.get("/events", headers={"Authorization": f"Bearer {plain}"})

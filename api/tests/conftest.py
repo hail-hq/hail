@@ -18,7 +18,12 @@ from hailhq.api.main import app
 from hailhq.api.routes.calls import get_livekit
 from hailhq.core.db import get_session
 from hailhq.core.livekit import LiveKitClient
-from hailhq.core.models import ApiKey, Organization, PhoneNumber
+from hailhq.core.models import (
+    AccountCredit,
+    ApiKey,
+    OrganizationMember,
+    PhoneNumber,
+)
 from hailhq.core.testing.fixtures import (  # noqa: F401
     async_session,
     database_url,
@@ -34,22 +39,49 @@ def mint_test_key() -> tuple[str, str]:
 async def insert_org_and_key(
     session: AsyncSession,
     *,
-    org_name: str = "Acme",
-    org_slug: str = "acme",
+    org_name: str = "Acme",  # noqa: ARG001 — kept for backwards-compatible call sites
+    org_slug: str = "acme",  # noqa: ARG001
     auth_user_id: str | None = None,
-) -> tuple[Organization, ApiKey, str]:
-    """Insert an org and an apikey row (auth-backend-shaped) tied to it.
+    initial_credit_cents: int = 100_000,
+) -> tuple[str, ApiKey, str]:
+    """Insert a member + apikey row tied to a synthetic organization id.
 
-    Returns ``(org, api_key, plaintext)``. Tests should use the plaintext as
-    the bearer token; the hashed copy lives in ``api_key.key``.
+    Returns ``(organization_id, api_key, plaintext)``. ``organization_id`` is
+    a TEXT sentinel — no row in ``organization`` (that table lives in the
+    website's Better Auth migration history). The ``member`` row is what
+    ``deps.py`` joins on to resolve ``apikey.referenceId → organizationId``.
+
+    ``initial_credit_cents`` (default $1000) seeds a credit row so the
+    balance gate on POST /v1/calls passes. Pass 0 for billing tests that
+    specifically want a zero-balance org.
     """
     auth_user_id = auth_user_id or f"user_test_{uuid.uuid4().hex[:12]}"
-    org = Organization(name=org_name, slug=org_slug, auth_user_id=auth_user_id)
-    session.add(org)
-    await session.flush()
+    organization_id = f"org_test_{uuid.uuid4().hex[:12]}"
+
+    now = datetime.now(timezone.utc)
+    session.add(
+        OrganizationMember(
+            id=f"mem_test_{uuid.uuid4().hex[:12]}",
+            user_id=auth_user_id,
+            organization_id=organization_id,
+            role="owner",
+            created_at=now,
+        )
+    )
+
+    if initial_credit_cents > 0:
+        session.add(
+            AccountCredit(
+                organization_id=organization_id,
+                kind="credit",
+                channel="credit",
+                amount_cents=initial_credit_cents,
+                source="test.fixture",
+                ref="test.fixture",
+            )
+        )
 
     plain, hashed = mint_test_key()
-    now = datetime.now(timezone.utc)
     api_key = ApiKey(
         id=f"apikey_test_{uuid.uuid4().hex[:12]}",
         name="test-key",
@@ -63,8 +95,7 @@ async def insert_org_and_key(
     session.add(api_key)
     await session.commit()
     await session.refresh(api_key)
-    await session.refresh(org)
-    return org, api_key, plain
+    return organization_id, api_key, plain
 
 
 @pytest.fixture()
@@ -111,8 +142,18 @@ async def client(
 @pytest.fixture()
 async def org_and_key(
     async_session: AsyncSession,  # noqa: F811 (re-used as a fixture parameter name)
-) -> tuple[Organization, ApiKey, str]:
+) -> tuple[str, ApiKey, str]:
     return await insert_org_and_key(async_session)
+
+
+@pytest.fixture(autouse=True)
+def reset_deps_caches():
+    """Clear deps.py process-wide caches between tests."""
+    from hailhq.api import deps
+
+    deps.reset_caches()
+    yield
+    deps.reset_caches()
 
 
 @pytest.fixture()
@@ -121,7 +162,7 @@ def add_phone_number():
 
     async def _add(
         session: AsyncSession,
-        organization_id,
+        organization_id: str,
         e164: str = "+14155551234",
         state: str = "active",
         provider_resource_id: str = "PN_test",

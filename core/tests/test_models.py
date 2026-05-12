@@ -1,15 +1,13 @@
 from datetime import datetime
 
-from hailhq.core.models import Call, Organization, PhoneNumber
+from hailhq.core.models import Call, PhoneNumber
 
 
 def test_call_round_trip(session):
-    org = Organization(name="Acme", slug="acme")
-    session.add(org)
-    session.flush()
+    org_id = "org_test_acme"
 
     number = PhoneNumber(
-        organization_id=org.id,
+        organization_id=org_id,
         e164="+14155551234",
         country_code="US",
         number_type="local",
@@ -19,7 +17,7 @@ def test_call_round_trip(session):
     session.flush()
 
     call = Call(
-        organization_id=org.id,
+        organization_id=org_id,
         from_number_id=number.id,
         from_e164=number.e164,
         to_e164="+14155559999",

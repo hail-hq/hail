@@ -5,7 +5,8 @@ verify:
 * the storage hash matches the backend's format (sha256 → base64url, no
   padding);
 * unauthenticated / wrong-scheme / bad-key requests are rejected;
-* a valid bearer resolves to its Organization (lazy-created if missing);
+* a valid bearer resolves to its Organization via the ``member`` join;
+* a valid bearer with no ``member`` row gets a 403 ("not provisioned");
 * expired and disabled keys are rejected;
 * ``lastRequest`` is stamped on the apikey row but throttled to once per
   minute per key.
@@ -21,13 +22,12 @@ from typing import AsyncIterator
 import httpx
 import pytest
 from fastapi import Depends, FastAPI
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from hailhq.api.auth import hash_key
 from hailhq.api.deps import Principal, get_current_principal
 from hailhq.core.db import get_session
-from hailhq.core.models import ApiKey, Organization
+from hailhq.core.models import ApiKey
 
 
 def test_hash_key_format() -> None:
@@ -90,9 +90,9 @@ async def test_bad_key_returns_401(client: httpx.AsyncClient) -> None:
 
 async def test_valid_key_returns_principal(
     client: httpx.AsyncClient,
-    org_and_key: tuple[Organization, ApiKey, str],
+    org_and_key: tuple[str, ApiKey, str],
 ) -> None:
-    org, api_key, plain = org_and_key
+    org_id, api_key, plain = org_and_key
     resp = await client.get(
         "/whoami",
         headers={"Authorization": f"Bearer {plain}"},
@@ -100,13 +100,13 @@ async def test_valid_key_returns_principal(
     assert resp.status_code == 200
     body = resp.json()
     assert body["api_key_id"] == api_key.id
-    assert body["organization_id"] == str(org.id)
+    assert body["organization_id"] == org_id
 
 
 async def test_expired_key_returns_403(
     client: httpx.AsyncClient,
     async_session: AsyncSession,
-    org_and_key: tuple[Organization, ApiKey, str],
+    org_and_key: tuple[str, ApiKey, str],
 ) -> None:
     _, api_key, plain = org_and_key
     api_key.expires_at = datetime.now(timezone.utc) - timedelta(days=1)
@@ -122,7 +122,7 @@ async def test_expired_key_returns_403(
 async def test_disabled_key_returns_401(
     client: httpx.AsyncClient,
     async_session: AsyncSession,
-    org_and_key: tuple[Organization, ApiKey, str],
+    org_and_key: tuple[str, ApiKey, str],
 ) -> None:
     _, api_key, plain = org_and_key
     api_key.enabled = False
@@ -138,7 +138,7 @@ async def test_disabled_key_returns_401(
 async def test_last_request_is_updated_on_success(
     client: httpx.AsyncClient,
     async_session: AsyncSession,
-    org_and_key: tuple[Organization, ApiKey, str],
+    org_and_key: tuple[str, ApiKey, str],
 ) -> None:
     _, api_key, plain = org_and_key
     assert api_key.last_request is None
@@ -158,7 +158,7 @@ async def test_last_request_is_updated_on_success(
 async def test_last_request_is_throttled(
     client: httpx.AsyncClient,
     async_session: AsyncSession,
-    org_and_key: tuple[Organization, ApiKey, str],
+    org_and_key: tuple[str, ApiKey, str],
 ) -> None:
     """A second request within the throttle window must not re-stamp."""
     _, api_key, plain = org_and_key
@@ -183,11 +183,11 @@ async def test_wrong_scheme_returns_401(client: httpx.AsyncClient) -> None:
     assert resp.status_code == 401
 
 
-async def test_unbridged_user_lazy_creates_org(
+async def test_unprovisioned_user_returns_403(
     client: httpx.AsyncClient,
     async_session: AsyncSession,
 ) -> None:
-    """A valid key whose referenceId has no Organization gets one created on use."""
+    """A valid key whose referenceId has no ``member`` row gets 403, not a fabricated org."""
     plain = "hl_live_orphan-key-no-org"
     reference_id = "user_test_no_org_bridged"
     now = datetime.now(timezone.utc)
@@ -208,11 +208,5 @@ async def test_unbridged_user_lazy_creates_org(
         "/whoami",
         headers={"Authorization": f"Bearer {plain}"},
     )
-    assert resp.status_code == 200
-
-    org = (
-        await async_session.execute(
-            select(Organization).where(Organization.auth_user_id == reference_id)
-        )
-    ).scalar_one()
-    assert resp.json()["organization_id"] == str(org.id)
+    assert resp.status_code == 403
+    assert "not provisioned" in resp.json()["detail"].lower()

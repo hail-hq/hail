@@ -27,10 +27,11 @@ from uuid import UUID
 from livekit.agents import Agent, JobContext, JobProcess
 from livekit.agents.voice import AgentSession
 from livekit.plugins import silero
-from sqlalchemy import update
+from sqlalchemy import select, update
 
 from hailhq.core.db import session_scope
-from hailhq.core.models import Call, CallEvent
+from hailhq.core.internal_webhook import notify_usage_event_recorded
+from hailhq.core.models import Call, CallEvent, UsageEvent
 from hailhq.voicebot.pipeline import build_session
 from hailhq.voicebot.recording import upload_recording
 
@@ -88,13 +89,41 @@ async def on_call_end(call_id: UUID, room_name: str) -> None:
     """Finalize the ``Call`` row when the session ends.
 
     Called from a shutdown callback registered against ``ctx``. Uploads the
-    recording (no-op in v1 — see :mod:`hailhq.voicebot.recording`) and marks
-    the call ``completed`` with ``ended_at`` set to ``now()``.
+    recording (no-op in v1 — see :mod:`hailhq.voicebot.recording`), marks
+    the call ``completed`` with ``ended_at`` set to ``now()``, and records
+    one raw ``usage_events`` row with the call duration in milliseconds.
+
+    No money math happens here. The website's private rater converts the
+    raw units into a dollar debit against ``account_credits`` using its
+    private cents-per-unit rates. Self-host operators (no website running)
+    see ``usage_events`` accumulate as a generic analytics primitive they
+    can query directly.
     """
     recording_key = await upload_recording(call_id, room_name)
     now = datetime.now(timezone.utc)
 
     async with session_scope() as session:
+        # Pull started_at + organization_id in the same txn we'll write back.
+        # Falls back to recording_duration_ms when started_at is missing
+        # (call failed before SIP answered → no billable duration).
+        stmt = select(
+            Call.started_at,
+            Call.organization_id,
+            Call.recording_duration_ms,
+        ).where(Call.id == call_id)
+        row = (await session.execute(stmt)).one_or_none()
+        if row is None:
+            logger.warning("on_call_end: call_id=%s not found", call_id)
+            return
+        started_at, organization_id, recording_duration_ms = row
+
+        if started_at is not None:
+            duration_ms = max(0, int((now - started_at).total_seconds() * 1000))
+        elif recording_duration_ms is not None:
+            duration_ms = int(recording_duration_ms)
+        else:
+            duration_ms = 0
+
         await session.execute(
             update(Call)
             .where(Call.id == call_id)
@@ -104,7 +133,21 @@ async def on_call_end(call_id: UUID, room_name: str) -> None:
                 recording_s3_key=recording_key,
             )
         )
+        usage_event_id: str | None = None
+        if duration_ms > 0:
+            usage = UsageEvent(
+                organization_id=organization_id,
+                channel="voice",
+                units=duration_ms,
+                ref=str(call_id),
+            )
+            session.add(usage)
+            await session.flush()
+            usage_event_id = str(usage.id)
         await session.commit()
+
+    if usage_event_id is not None:
+        notify_usage_event_recorded(usage_event_id)
 
 
 def attach_event_handlers(

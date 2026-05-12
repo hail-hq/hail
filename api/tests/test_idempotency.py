@@ -22,7 +22,6 @@ from hailhq.core.models import (
     ApiKey,
     AuditLog,
     IdempotencyKey,
-    Organization,
 )
 from .conftest import insert_org_and_key
 
@@ -51,12 +50,12 @@ def test_hash_request_body_changes_on_body_change() -> None:
 async def test_post_calls_no_idempotency_header_normal_flow(
     client: httpx.AsyncClient,
     async_session: AsyncSession,
-    org_and_key: tuple[Organization, ApiKey, str],
+    org_and_key: tuple[str, ApiKey, str],
     add_phone_number,
 ) -> None:
     """No header → no row in idempotency_keys."""
-    org, _, plain = org_and_key
-    await add_phone_number(async_session, org.id)
+    org_id, _, plain = org_and_key
+    await add_phone_number(async_session, org_id)
 
     resp = await client.post(
         "/calls",
@@ -73,13 +72,13 @@ async def test_post_calls_no_idempotency_header_normal_flow(
 async def test_post_calls_idempotency_first_request_inserts_and_runs(
     client: httpx.AsyncClient,
     async_session: AsyncSession,
-    org_and_key: tuple[Organization, ApiKey, str],
+    org_and_key: tuple[str, ApiKey, str],
     livekit_mock: AsyncMock,
     add_phone_number,
 ) -> None:
     """First request stores final status + body; replay header NOT set."""
-    org, _, plain = org_and_key
-    await add_phone_number(async_session, org.id)
+    org_id, _, plain = org_and_key
+    await add_phone_number(async_session, org_id)
 
     resp = await client.post(
         "/calls",
@@ -97,12 +96,12 @@ async def test_post_calls_idempotency_first_request_inserts_and_runs(
     row = (
         await async_session.execute(
             select(IdempotencyKey).where(
-                IdempotencyKey.key == _storage_key(org.id, "first-key")
+                IdempotencyKey.key == _storage_key(org_id, "first-key")
             )
         )
     ).scalar_one()
     assert row.response_status == 201
-    assert row.organization_id == org.id
+    assert row.organization_id == org_id
     assert row.response_body["id"] == resp.json()["id"]
     assert row.response_body["status"] == "dialing"
 
@@ -110,13 +109,13 @@ async def test_post_calls_idempotency_first_request_inserts_and_runs(
 async def test_post_calls_idempotency_replay_returns_cached(
     client: httpx.AsyncClient,
     async_session: AsyncSession,
-    org_and_key: tuple[Organization, ApiKey, str],
+    org_and_key: tuple[str, ApiKey, str],
     livekit_mock: AsyncMock,
     add_phone_number,
 ) -> None:
     """Same key + same body → second response replays first; LiveKit ran once."""
-    org, _, plain = org_and_key
-    await add_phone_number(async_session, org.id)
+    org_id, _, plain = org_and_key
+    await add_phone_number(async_session, org_id)
 
     headers = {
         "Authorization": f"Bearer {plain}",
@@ -146,12 +145,12 @@ async def test_post_calls_idempotency_replay_returns_cached(
 async def test_post_calls_idempotency_different_body_returns_409(
     client: httpx.AsyncClient,
     async_session: AsyncSession,
-    org_and_key: tuple[Organization, ApiKey, str],
+    org_and_key: tuple[str, ApiKey, str],
     add_phone_number,
 ) -> None:
     """Same key, different body → 409, not a silent overwrite."""
-    org, _, plain = org_and_key
-    await add_phone_number(async_session, org.id)
+    org_id, _, plain = org_and_key
+    await add_phone_number(async_session, org_id)
 
     headers = {
         "Authorization": f"Bearer {plain}",
@@ -177,12 +176,12 @@ async def test_post_calls_idempotency_different_body_returns_409(
 async def test_post_calls_idempotency_in_flight_returns_409(
     client: httpx.AsyncClient,
     async_session: AsyncSession,
-    org_and_key: tuple[Organization, ApiKey, str],
+    org_and_key: tuple[str, ApiKey, str],
     add_phone_number,
 ) -> None:
     """A row stuck at the in-flight sentinel surfaces 'still processing' 409."""
-    org, _, plain = org_and_key
-    await add_phone_number(async_session, org.id)
+    org_id, _, plain = org_and_key
+    await add_phone_number(async_session, org_id)
 
     body = {"to": "+14155559999", "system_prompt": "hi"}
     request_hash = hash_request_body(body)
@@ -190,8 +189,8 @@ async def test_post_calls_idempotency_in_flight_returns_409(
     # Manually plant an in-flight row to simulate a concurrent worker.
     async_session.add(
         IdempotencyKey(
-            key=_storage_key(org.id, "in-flight-key"),
-            organization_id=org.id,
+            key=_storage_key(org_id, "in-flight-key"),
+            organization_id=org_id,
             request_hash=request_hash,
             response_status=_IN_FLIGHT_STATUS,
             response_body={},
@@ -215,20 +214,20 @@ async def test_post_calls_idempotency_in_flight_returns_409(
 async def test_post_calls_idempotency_isolated_per_org(
     client: httpx.AsyncClient,
     async_session: AsyncSession,
-    org_and_key: tuple[Organization, ApiKey, str],
+    org_and_key: tuple[str, ApiKey, str],
     add_phone_number,
 ) -> None:
     """Different orgs reusing the same supplied key both succeed (no collision)."""
-    org_a, _, plain_a = org_and_key
-    await add_phone_number(async_session, org_a.id, e164="+14155551001")
+    org_a_id, _, plain_a = org_and_key
+    await add_phone_number(async_session, org_a_id, e164="+14155551001")
 
     # Provision a second org with its own api key + active number.
-    org_b, _, plain_b = await insert_org_and_key(
+    org_b_id, _, plain_b = await insert_org_and_key(
         async_session, org_name="Beta", org_slug="beta"
     )
     await add_phone_number(
         async_session,
-        org_b.id,
+        org_b_id,
         e164="+14155552002",
         provider_resource_id="PN_b",
     )
@@ -260,20 +259,20 @@ async def test_post_calls_idempotency_isolated_per_org(
     rows = (await async_session.execute(select(IdempotencyKey))).scalars().all()
     keys = {r.key for r in rows}
     assert keys == {
-        _storage_key(org_a.id, shared_key),
-        _storage_key(org_b.id, shared_key),
+        _storage_key(org_a_id, shared_key),
+        _storage_key(org_b_id, shared_key),
     }
 
 
 async def test_post_calls_replay_emits_audit_log(
     client: httpx.AsyncClient,
     async_session: AsyncSession,
-    org_and_key: tuple[Organization, ApiKey, str],
+    org_and_key: tuple[str, ApiKey, str],
     add_phone_number,
 ) -> None:
     """A replay re-emits a 'call.create.replayed' audit row."""
-    org, _, plain = org_and_key
-    await add_phone_number(async_session, org.id)
+    org_id, _, plain = org_and_key
+    await add_phone_number(async_session, org_id)
 
     headers = {
         "Authorization": f"Bearer {plain}",
@@ -295,13 +294,13 @@ async def test_post_calls_replay_emits_audit_log(
 async def test_post_calls_idempotency_caches_502_failure(
     client: httpx.AsyncClient,
     async_session: AsyncSession,
-    org_and_key: tuple[Organization, ApiKey, str],
+    org_and_key: tuple[str, ApiKey, str],
     livekit_mock: AsyncMock,
     add_phone_number,
 ) -> None:
     """A LiveKit-failure 502 is cached so retries replay it (Stripe-style)."""
-    org, _, plain = org_and_key
-    await add_phone_number(async_session, org.id)
+    org_id, _, plain = org_and_key
+    await add_phone_number(async_session, org_id)
 
     livekit_mock.create_sip_participant.side_effect = RuntimeError("trunk down")
 

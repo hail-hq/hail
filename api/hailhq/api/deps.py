@@ -2,41 +2,52 @@
 
 Auth picks a path based on what's in the env (see ``docs/operations.md``):
 ``HAIL_API_KEY`` triggers the shared-key path; otherwise we look the bearer up
-in the auth backend's ``apikey`` table.
+in the auth backend's ``apikey`` table and resolve the user's org through
+Better Auth's ``member`` table.
 """
 
 from __future__ import annotations
 
 import hmac
 import json
-import uuid
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Annotated
 
 from fastapi import Depends, Header, HTTPException, status
 from pydantic import BaseModel
 from sqlalchemy import func, select, text, update
-from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from hailhq.api.auth import hash_key
 from hailhq.core.config import settings
 from hailhq.core.db import get_session, session_scope
-from hailhq.core.models import ApiKey, Organization
+from hailhq.core.models import ApiKey, OrganizationMember
 
 # Throttle ``lastRequest`` writes so chatty agent traffic doesn't generate one
 # no-op UPDATE per request.
 _LAST_USED_THROTTLE = timedelta(seconds=60)
 
-_SHARED_PRINCIPAL_KEY_ID = "shared"
-_SELF_HOSTED_ORG_SLUG = "self-hosted"
-_SELF_HOSTED_ORG_NAME = "Self-hosted"
+SHARED_PRINCIPAL_KEY_ID = "shared"
+SELF_HOSTED_ORG_ID = "self-hosted"
 
-# True if the auth backend's apikey table exists. Self-host operators don't
-# run the auth backend's migrations, so this stays False there.
-_apikey_table_present: bool | None = None
-# Cached for the lifetime of the process — slug is unique and immutable.
-_self_hosted_org_id: uuid.UUID | None = None
+
+@dataclass
+class _Caches:
+    # True iff the auth backend's apikey table exists. Self-host operators
+    # don't run the auth backend's migrations, so this stays False there.
+    apikey_table_present: bool | None = None
+
+    def reset(self) -> None:
+        self.apikey_table_present = None
+
+
+_caches = _Caches()
+
+
+def reset_caches() -> None:
+    """Public hook for tests to clear process-wide caches between runs."""
+    _caches.reset()
 
 
 class Principal(BaseModel):
@@ -44,10 +55,12 @@ class Principal(BaseModel):
 
     ``api_key_id`` is the auth backend's ``apikey.id`` for managed-cloud
     requests, or the literal ``"shared"`` sentinel for shared-key requests.
+    ``organization_id`` is opaque TEXT — Better Auth's ``organization.id`` for
+    cloud requests, or the literal ``"self-hosted"`` sentinel for shared-key.
     """
 
     api_key_id: str
-    organization_id: uuid.UUID
+    organization_id: str
     scopes: list[str]
 
 
@@ -69,7 +82,12 @@ def _parse_bearer(authorization: str | None) -> str:
 
 
 def _scopes_from_permissions(perms_json: str | None) -> list[str]:
-    """Turn the auth backend's ``permissions`` JSON into a flat scopes list."""
+    """Turn the auth backend's ``permissions`` JSON into a flat scopes list.
+
+    Missing/unparseable permissions imply full-wildcard scope (the auth
+    backend stores NULL when the key wasn't created with explicit scopes).
+    A *parsed but empty* permissions object means "no scopes" — return [].
+    """
     if not perms_json:
         return ["*"]
     try:
@@ -83,79 +101,20 @@ def _scopes_from_permissions(perms_json: str | None) -> list[str]:
         if isinstance(actions, list):
             for a in actions:
                 out.append(f"{resource}:{a}")
-    return out or ["*"]
+    return out
 
 
 async def _apikey_table_exists(db: AsyncSession) -> bool:
     """Probe ``information_schema`` once and cache the result."""
-    global _apikey_table_present
-    if _apikey_table_present is None:
+    if _caches.apikey_table_present is None:
         result = await db.execute(
             text(
                 "SELECT 1 FROM information_schema.tables "
-                "WHERE table_name = 'apikey' LIMIT 1"
+                "WHERE table_name = 'api_keys' LIMIT 1"
             )
         )
-        _apikey_table_present = result.scalar_one_or_none() is not None
-    return _apikey_table_present
-
-
-async def _get_or_create_self_hosted_org(db: AsyncSession) -> uuid.UUID:
-    """Return the implicit org id for shared-key mode, creating it once."""
-    global _self_hosted_org_id
-    if _self_hosted_org_id is not None:
-        return _self_hosted_org_id
-
-    # Race-safe upsert in a fresh session so we don't commit the request txn.
-    async with session_scope() as fresh:
-        stmt = (
-            pg_insert(Organization)
-            .values(name=_SELF_HOSTED_ORG_NAME, slug=_SELF_HOSTED_ORG_SLUG)
-            .on_conflict_do_nothing(index_elements=["slug"])
-            .returning(Organization.id)
-        )
-        org_id = (await fresh.execute(stmt)).scalar_one_or_none()
-        if org_id is None:
-            org_id = (
-                await fresh.execute(
-                    select(Organization.id).where(
-                        Organization.slug == _SELF_HOSTED_ORG_SLUG
-                    )
-                )
-            ).scalar_one()
-        await fresh.commit()
-
-    _self_hosted_org_id = org_id
-    return org_id
-
-
-async def _ensure_org_for_user(reference_id: str) -> uuid.UUID:
-    """Lazy-bridge: get-or-create the Organization tied to an auth user id."""
-    async with session_scope() as fresh:
-        stmt = (
-            pg_insert(Organization)
-            .values(
-                name="Personal workspace",
-                slug=reference_id,
-                auth_user_id=reference_id,
-            )
-            .on_conflict_do_nothing(
-                index_elements=["auth_user_id"],
-                index_where=Organization.auth_user_id.isnot(None),
-            )
-            .returning(Organization.id)
-        )
-        org_id = (await fresh.execute(stmt)).scalar_one_or_none()
-        if org_id is None:
-            org_id = (
-                await fresh.execute(
-                    select(Organization.id).where(
-                        Organization.auth_user_id == reference_id
-                    )
-                )
-            ).scalar_one()
-        await fresh.commit()
-    return org_id
+        _caches.apikey_table_present = result.scalar_one_or_none() is not None
+    return _caches.apikey_table_present
 
 
 async def _stamp_last_used(api_key_id: str, ts: datetime) -> None:
@@ -187,10 +146,10 @@ def _check_shared_key(token: str) -> bool:
 async def _principal_from_apikey_table(token: str, db: AsyncSession) -> Principal:
     hashed = hash_key(token)
     stmt = (
-        select(ApiKey, Organization.id)
+        select(ApiKey, OrganizationMember.organization_id)
         .outerjoin(
-            Organization,
-            Organization.auth_user_id == ApiKey.reference_id,
+            OrganizationMember,
+            OrganizationMember.user_id == ApiKey.reference_id,
         )
         .where(ApiKey.key == hashed)
     )
@@ -210,7 +169,16 @@ async def _principal_from_apikey_table(token: str, db: AsyncSession) -> Principa
         )
 
     if organization_id is None:
-        organization_id = await _ensure_org_for_user(api_key.reference_id)
+        # The website's signup hook creates a `member` row alongside every new
+        # user; if it's missing here, signup either failed or hasn't run for
+        # this user yet. Send them to the dashboard rather than fabricating one.
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=(
+                "user not provisioned with an organization; "
+                "sign in to the dashboard to complete setup"
+            ),
+        )
 
     if api_key.last_request is None or now - api_key.last_request > _LAST_USED_THROTTLE:
         await _stamp_last_used(api_key.id, now)
@@ -229,10 +197,9 @@ async def get_current_principal(
     token = _parse_bearer(authorization)
 
     if _check_shared_key(token):
-        org_id = await _get_or_create_self_hosted_org(db)
         return Principal(
-            api_key_id=_SHARED_PRINCIPAL_KEY_ID,
-            organization_id=org_id,
+            api_key_id=SHARED_PRINCIPAL_KEY_ID,
+            organization_id=SELF_HOSTED_ORG_ID,
             scopes=["*"],
         )
 

@@ -20,7 +20,6 @@ from hailhq.core.models import (
     AuditLog,
     Call,
     CallEvent,
-    Organization,
 )
 from .conftest import insert_org_and_key
 
@@ -41,7 +40,7 @@ async def test_post_calls_unauthenticated_returns_401(
 
 async def test_post_calls_invalid_body_returns_422(
     client: httpx.AsyncClient,
-    org_and_key: tuple[Organization, ApiKey, str],
+    org_and_key: tuple[str, ApiKey, str],
 ) -> None:
     _, _, plain = org_and_key
     resp = await client.post(
@@ -54,7 +53,7 @@ async def test_post_calls_invalid_body_returns_422(
 
 async def test_post_calls_rejects_prompt_and_llm_together(
     client: httpx.AsyncClient,
-    org_and_key: tuple[Organization, ApiKey, str],
+    org_and_key: tuple[str, ApiKey, str],
 ) -> None:
     _, _, plain = org_and_key
     resp = await client.post(
@@ -76,7 +75,7 @@ async def test_post_calls_rejects_prompt_and_llm_together(
 
 async def test_post_calls_no_active_number_returns_422(
     client: httpx.AsyncClient,
-    org_and_key: tuple[Organization, ApiKey, str],
+    org_and_key: tuple[str, ApiKey, str],
 ) -> None:
     _, _, plain = org_and_key
     resp = await client.post(
@@ -91,12 +90,12 @@ async def test_post_calls_no_active_number_returns_422(
 async def test_post_calls_happy_path_201(
     client: httpx.AsyncClient,
     async_session: AsyncSession,
-    org_and_key: tuple[Organization, ApiKey, str],
+    org_and_key: tuple[str, ApiKey, str],
     livekit_mock: AsyncMock,
     add_phone_number,
 ) -> None:
-    org, api_key, plain = org_and_key
-    pn = await add_phone_number(async_session, org.id, e164="+14155551234")
+    org_id, api_key, plain = org_and_key
+    pn = await add_phone_number(async_session, org_id, e164="+14155551234")
 
     resp = await client.post(
         "/calls",
@@ -145,12 +144,12 @@ async def test_post_calls_happy_path_201(
 async def test_post_calls_livekit_failure_marks_call_failed(
     client: httpx.AsyncClient,
     async_session: AsyncSession,
-    org_and_key: tuple[Organization, ApiKey, str],
+    org_and_key: tuple[str, ApiKey, str],
     livekit_mock: AsyncMock,
     add_phone_number,
 ) -> None:
-    org, _, plain = org_and_key
-    await add_phone_number(async_session, org.id)
+    org_id, _, plain = org_and_key
+    await add_phone_number(async_session, org_id)
 
     livekit_mock.create_sip_participant.side_effect = RuntimeError("trunk down")
 
@@ -184,21 +183,21 @@ async def test_post_calls_livekit_failure_marks_call_failed(
 async def test_post_calls_uses_explicit_from_e164(
     client: httpx.AsyncClient,
     async_session: AsyncSession,
-    org_and_key: tuple[Organization, ApiKey, str],
+    org_and_key: tuple[str, ApiKey, str],
     livekit_mock: AsyncMock,
     add_phone_number,
 ) -> None:
-    org, _, plain = org_and_key
+    org_id, _, plain = org_and_key
     # Two active numbers; "first by created_at" would pick #1, but we ask for #2.
     await add_phone_number(
         async_session,
-        org.id,
+        org_id,
         e164="+14155550001",
         provider_resource_id="PN_first",
     )
     chosen = await add_phone_number(
         async_session,
-        org.id,
+        org_id,
         e164="+14155550002",
         provider_resource_id="PN_second",
     )
@@ -229,11 +228,11 @@ async def test_post_calls_uses_explicit_from_e164(
 async def test_get_call_by_id_returns_200_for_owner(
     client: httpx.AsyncClient,
     async_session: AsyncSession,
-    org_and_key: tuple[Organization, ApiKey, str],
+    org_and_key: tuple[str, ApiKey, str],
     add_phone_number,
 ) -> None:
-    org, _, plain = org_and_key
-    await add_phone_number(async_session, org.id)
+    org_id, _, plain = org_and_key
+    await add_phone_number(async_session, org_id)
 
     create = await client.post(
         "/calls",
@@ -254,11 +253,11 @@ async def test_get_call_by_id_returns_200_for_owner(
 async def test_get_call_by_id_returns_404_for_other_org(
     client: httpx.AsyncClient,
     async_session: AsyncSession,
-    org_and_key: tuple[Organization, ApiKey, str],
+    org_and_key: tuple[str, ApiKey, str],
     add_phone_number,
 ) -> None:
-    org_a, _, plain_a = org_and_key
-    await add_phone_number(async_session, org_a.id)
+    org_a_id, _, plain_a = org_and_key
+    await add_phone_number(async_session, org_a_id)
 
     create = await client.post(
         "/calls",
@@ -294,11 +293,11 @@ async def test_get_call_by_id_returns_404_for_other_org(
 async def test_list_calls_returns_pagination_cursor(
     client: httpx.AsyncClient,
     async_session: AsyncSession,
-    org_and_key: tuple[Organization, ApiKey, str],
+    org_and_key: tuple[str, ApiKey, str],
     add_phone_number,
 ) -> None:
-    org, _, plain = org_and_key
-    await add_phone_number(async_session, org.id)
+    org_id, _, plain = org_and_key
+    await add_phone_number(async_session, org_id)
 
     created_ids = []
     for _ in range(3):
@@ -337,12 +336,12 @@ async def test_list_calls_returns_pagination_cursor(
 async def test_list_calls_filters_by_status(
     client: httpx.AsyncClient,
     async_session: AsyncSession,
-    org_and_key: tuple[Organization, ApiKey, str],
+    org_and_key: tuple[str, ApiKey, str],
     livekit_mock: AsyncMock,
     add_phone_number,
 ) -> None:
-    org, _, plain = org_and_key
-    await add_phone_number(async_session, org.id)
+    org_id, _, plain = org_and_key
+    await add_phone_number(async_session, org_id)
 
     # First call: succeeds → status=dialing.
     r1 = await client.post(

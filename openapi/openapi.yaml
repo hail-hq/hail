@@ -215,6 +215,19 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HTTPValidationError"
+  /rates:
+    get:
+      tags:
+        - rates
+      summary: Get Rates
+      operationId: get_rates_rates_get
+      responses:
+        "200":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RatesResponse"
   /healthz:
     get:
       summary: Healthz
@@ -325,7 +338,6 @@ components:
           title: Id
         organization_id:
           type: string
-          format: uuid
           title: Organization Id
         conversation_id:
           anyOf:
@@ -482,6 +494,23 @@ components:
         - api_key
         - model
       title: LLMConfig
+    RatesResponse:
+      properties:
+        voice_usd_per_minute:
+          type: number
+          title: Voice Usd Per Minute
+        sms_usd_per_segment:
+          type: number
+          title: Sms Usd Per Segment
+        email_usd_per_send:
+          type: number
+          title: Email Usd Per Send
+      type: object
+      required:
+        - voice_usd_per_minute
+        - sms_usd_per_segment
+        - email_usd_per_send
+      title: RatesResponse
     ValidationError:
       properties:
         loc:

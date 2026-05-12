@@ -147,7 +147,7 @@ class CallResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: UUID
-    organization_id: UUID
+    organization_id: str
     conversation_id: UUID | None
     from_e164: str
     to_e164: str

@@ -4,11 +4,17 @@ from logging.config import fileConfig
 from alembic import context
 from sqlalchemy import engine_from_config, pool
 
+from hailhq.core.db import to_sync_url
+
 config = context.config
 
 db_url = os.environ.get("DATABASE_URL")
-if db_url:
-    config.set_main_option("sqlalchemy.url", db_url)
+if not db_url:
+    raise RuntimeError(
+        "DATABASE_URL is not set. Export it before running alembic so the "
+        "migration targets the right database — there is no implicit default."
+    )
+config.set_main_option("sqlalchemy.url", to_sync_url(db_url))
 
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)

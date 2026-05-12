@@ -18,8 +18,9 @@ from fastapi import status as http_status
 from sqlalchemy import select, tuple_, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from hailhq.core.billing import has_funds
 from hailhq.core.db import get_session, session_scope
-from hailhq.api.deps import Principal, get_current_principal
+from hailhq.api.deps import SHARED_PRINCIPAL_KEY_ID, Principal, get_current_principal
 from hailhq.api.idempotency import IdempotencyContext, idempotency_for_post_calls
 from hailhq.core.config import settings
 from hailhq.core.livekit import LiveKitClient
@@ -85,7 +86,7 @@ async def close_livekit_singleton() -> None:
 
 
 async def _write_audit_log(
-    organization_id: UUID,
+    organization_id: str,
     api_key_id: str,
     action: str,
     resource_type: str,
@@ -185,6 +186,15 @@ async def create_call(
         response.headers["Idempotency-Replay"] = "true"
         response.headers["Location"] = f"/calls/{cached_id}"
         return CallResponse.model_validate(cached)
+
+    # Cloud-only balance gate; shared-key auth lands on the unbilled
+    # "Self-hosted" org and skips it.
+    if principal.api_key_id != SHARED_PRINCIPAL_KEY_ID:
+        if not await has_funds(db, principal.organization_id):
+            raise HTTPException(
+                status_code=http_status.HTTP_402_PAYMENT_REQUIRED,
+                detail="insufficient credits; top up at https://hail.so/console/billing",
+            )
 
     # 1. Resolve the from-number for this org.
     if body.from_ is not None:

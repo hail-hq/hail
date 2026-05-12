@@ -46,7 +46,7 @@ type sequenceResponse struct {
 func sampleCall(idStr, to string, status client.CallResponseStatus) client.CallResponse {
 	id := openapi_types.UUID(uuid.MustParse(idStr))
 	now := time.Date(2026, 4, 22, 12, 0, 0, 0, time.UTC)
-	orgID := openapi_types.UUID(uuid.MustParse("22222222-2222-2222-2222-222222222222"))
+	orgID := "org_test_2222222"
 	return client.CallResponse{
 		Id:             id,
 		OrganizationId: orgID,

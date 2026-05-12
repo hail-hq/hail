@@ -191,7 +191,7 @@ type CallResponse struct {
 	Id              openapi_types.UUID    `json:"id"`
 	InitialPrompt   *string               `json:"initial_prompt"`
 	LivekitRoom     *string               `json:"livekit_room"`
-	OrganizationId  openapi_types.UUID    `json:"organization_id"`
+	OrganizationId  string                `json:"organization_id"`
 	ProviderCallSid *string               `json:"provider_call_sid"`
 	RecordingS3Key  *string               `json:"recording_s3_key"`
 	RequestedAt     time.Time             `json:"requested_at"`
@@ -226,6 +226,13 @@ type LLMConfig struct {
 	ApiKey  string `json:"api_key"`
 	BaseUrl string `json:"base_url"`
 	Model   string `json:"model"`
+}
+
+// RatesResponse defines model for RatesResponse.
+type RatesResponse struct {
+	EmailUsdPerSend   float32 `json:"email_usd_per_send"`
+	SmsUsdPerSegment  float32 `json:"sms_usd_per_segment"`
+	VoiceUsdPerMinute float32 `json:"voice_usd_per_minute"`
 }
 
 // ValidationError defines model for ValidationError.
@@ -442,6 +449,9 @@ type ClientInterface interface {
 
 	// HealthzHealthzGet request
 	HealthzHealthzGet(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// GetRatesRatesGet request
+	GetRatesRatesGet(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
 }
 
 func (c *Client) ListCallsCallsGet(ctx context.Context, params *ListCallsCallsGetParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
@@ -506,6 +516,18 @@ func (c *Client) ListEventsEventsGet(ctx context.Context, params *ListEventsEven
 
 func (c *Client) HealthzHealthzGet(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewHealthzHealthzGetRequest(c.Server)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) GetRatesRatesGet(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetRatesRatesGetRequest(c.Server)
 	if err != nil {
 		return nil, err
 	}
@@ -882,6 +904,33 @@ func NewHealthzHealthzGetRequest(server string) (*http.Request, error) {
 	return req, nil
 }
 
+// NewGetRatesRatesGetRequest generates requests for GetRatesRatesGet
+func NewGetRatesRatesGetRequest(server string) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/rates")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("GET", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
 func (c *Client) applyEditors(ctx context.Context, req *http.Request, additionalEditors []RequestEditorFn) error {
 	for _, r := range c.RequestEditors {
 		if err := r(ctx, req); err != nil {
@@ -941,6 +990,9 @@ type ClientWithResponsesInterface interface {
 
 	// HealthzHealthzGetWithResponse request
 	HealthzHealthzGetWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*HealthzHealthzGetResponse, error)
+
+	// GetRatesRatesGetWithResponse request
+	GetRatesRatesGetWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*GetRatesRatesGetResponse, error)
 }
 
 type ListCallsCallsGetResponse struct {
@@ -1057,6 +1109,28 @@ func (r HealthzHealthzGetResponse) StatusCode() int {
 	return 0
 }
 
+type GetRatesRatesGetResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *RatesResponse
+}
+
+// Status returns HTTPResponse.Status
+func (r GetRatesRatesGetResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetRatesRatesGetResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
 // ListCallsCallsGetWithResponse request returning *ListCallsCallsGetResponse
 func (c *ClientWithResponses) ListCallsCallsGetWithResponse(ctx context.Context, params *ListCallsCallsGetParams, reqEditors ...RequestEditorFn) (*ListCallsCallsGetResponse, error) {
 	rsp, err := c.ListCallsCallsGet(ctx, params, reqEditors...)
@@ -1108,6 +1182,15 @@ func (c *ClientWithResponses) HealthzHealthzGetWithResponse(ctx context.Context,
 		return nil, err
 	}
 	return ParseHealthzHealthzGetResponse(rsp)
+}
+
+// GetRatesRatesGetWithResponse request returning *GetRatesRatesGetResponse
+func (c *ClientWithResponses) GetRatesRatesGetWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*GetRatesRatesGetResponse, error) {
+	rsp, err := c.GetRatesRatesGet(ctx, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetRatesRatesGetResponse(rsp)
 }
 
 // ParseListCallsCallsGetResponse parses an HTTP response from a ListCallsCallsGetWithResponse call
@@ -1258,6 +1341,32 @@ func ParseHealthzHealthzGetResponse(rsp *http.Response) (*HealthzHealthzGetRespo
 	switch {
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
 		var dest map[string]string
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseGetRatesRatesGetResponse parses an HTTP response from a GetRatesRatesGetWithResponse call
+func ParseGetRatesRatesGetResponse(rsp *http.Response) (*GetRatesRatesGetResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetRatesRatesGetResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest RatesResponse
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err
 		}

@@ -106,12 +106,14 @@ Detailed setup walkthroughs: `docs/setup/twilio.md`, `docs/setup/livekit-cloud.m
 
 Self-host and managed cloud share the same FastAPI binary, but auth is decided implicitly by what's in the env:
 
-| Mode                    | Trigger                                                                | What hail/api checks                                                                                                             |
-| ----------------------- | ---------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
-| **Self-host** (default) | Operator sets `HAIL_API_KEY` in `.env`                                 | Constant-time compare against the env var. A single implicit `Organization(slug='self-hosted')` is lazy-seeded on first request. |
-| **Managed cloud**       | The auth backend's `apikey` table is migrated into the shared Postgres | Hashes the bearer with `base64url(sha256())` and looks it up; resolves the org via `organizations.auth_user_id`.                 |
+| Mode                    | Trigger                                                                | What hail/api checks                                                                                                                                           |
+| ----------------------- | ---------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Self-host** (default) | Operator sets `HAIL_API_KEY` in `.env`                                 | Constant-time compare against the env var. All shared-key requests resolve to the sentinel `organization_id = "self-hosted"` — no DB row, no member lookup.    |
+| **Managed cloud**       | The auth backend's `apikey` table is migrated into the shared Postgres | Hashes the bearer with `base64url(sha256())` and looks it up; resolves the org via Better Auth's `member.userId = apikey.referenceId → member.organizationId`. |
 
 Both can be active simultaneously — if `HAIL_API_KEY` is set in managed cloud, it acts as a master/admin override that always works.
+
+A managed-cloud user with no `member` row gets a **403 "user not provisioned"** rather than a fabricated org — provisioning is the website's responsibility (Better Auth's `user.create.after` hook).
 
 #### Self-host: first-run setup
 
@@ -121,9 +123,9 @@ Both can be active simultaneously — if `HAIL_API_KEY` is set in managed cloud,
 HAIL_API_KEY="hk_$(openssl rand -base64 32 | tr -d '/+=' | head -c 40)"
 echo "HAIL_API_KEY=$HAIL_API_KEY" >> hail/.env
 
-# 2) Add a phone number for the implicit org (created on first authenticated request).
+# 2) Add a phone number bound to the self-host sentinel org id.
 export TWILIO_E164='+1XXXXXXXXXX' TWILIO_PN_SID='PNxxxxxxxxxxxxxxxx'
-docker compose exec -T postgres psql -U hail -d hail -c "INSERT INTO phone_numbers (organization_id, e164, country_code, number_type, capabilities, provider, provider_resource_id, provisioning_state, acquired_at) SELECT id, '${TWILIO_E164}', 'US', 'local', ARRAY['voice','sms'], 'twilio', '${TWILIO_PN_SID}', 'active', now() FROM organizations WHERE slug = 'self-hosted';"
+docker compose exec -T postgres psql -U hail -d hail -c "INSERT INTO phone_numbers (organization_id, e164, country_code, number_type, capabilities, provider, provider_resource_id, provisioning_state, acquired_at) VALUES ('self-hosted', '${TWILIO_E164}', 'US', 'local', ARRAY['voice','sms'], 'twilio', '${TWILIO_PN_SID}', 'active', now());"
 ```
 
 Save the value of `HAIL_API_KEY` — there's no recovery path. Then `export HAIL_API_KEY=…` in the shell that runs `hail`, or pass it via `--api-key`.
@@ -152,6 +154,30 @@ cd api && uv run alembic downgrade -1
 ```
 
 Migrations are hand-written raw SQL for v1 (no SQLAlchemy `target_metadata` wired into `env.py`). Switch to `--autogenerate` when models become the source of truth.
+
+### Cross-migration table ownership
+
+Two services migrate the same Postgres database independently:
+
+| Owner            | Migration tool  | Tables                                                                                                                                            |
+| ---------------- | --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **hail-website** | Better Auth CLI | `user`, `account`, `session`, `verification`, `deviceCode`, `apikey`, `organization`, `member`, `invitation` (lives in `better-auth_migrations/`) |
+| **hail/api**     | alembic         | `account_credits`, `usage_events`, `phone_numbers`, `conversations`, `calls`, `call_events`, `idempotency_keys`, `audit_log`                      |
+
+Columns in hail/api-owned tables that point at a hail-website-owned table — `organization_id` everywhere, `audit_log.api_key_id` — are plain `TEXT` with **no foreign key constraint**. This is deliberate.
+
+**Why no FK:** Better Auth's CLI regenerates its schema from a TypeScript config on every relevant version bump. If alembic held a hard FK into `organization(id)`, any rename or shape change on the website side would either need a coordinated alembic migration in the same release, or it would break the next `alembic upgrade head`. Cross-tool referential integrity is a coordination tax we don't want to pay on every dependency bump.
+
+**What we trade off:**
+
+- No `ON DELETE CASCADE` from the auth side. Deleting an `organization` row in Postgres leaves orphaned rows in `account_credits`, `calls`, etc. v1 doesn't hard-delete orgs; if you start, write a sweep query or soft-delete.
+- No DB-level guarantee that `organization_id` points at a real row. The auth flow in `api/hailhq/api/deps.py` validates the org exists on every authenticated request, so application-layer integrity holds for the live path. Bulk inserts from migrations or fixtures need to mind it themselves.
+
+**When to break the rule:** if you add a new hail/api-owned table that joins to another hail/api-owned table (e.g., `call_events.call_id → calls.id`), keep the FK. Both ends are alembic-owned, so the constraint is safe.
+
+### Shared-key sentinel
+
+Shared-key (`HAIL_API_KEY`) requests resolve to `organization_id = "self-hosted"` — a literal TEXT sentinel, not a row. Nothing seeds it; nothing reads from `organization` for that path. Self-host operators can attach `phone_numbers`, `account_credits`, etc. to the sentinel by passing `'self-hosted'` as the org id directly (see _Self-host: first-run setup_ above for the phone-number example).
 
 ### Switching the database
 

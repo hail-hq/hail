@@ -27,7 +27,6 @@ import hashlib
 import json
 from datetime import datetime, timedelta, timezone
 from typing import Annotated, Any
-from uuid import UUID
 
 from fastapi import Depends, Header, HTTPException, Request
 from fastapi import status as http_status
@@ -45,7 +44,7 @@ _IN_FLIGHT_STATUS = 0
 _TTL = timedelta(hours=24)
 
 
-def _storage_key(organization_id: UUID, supplied_key: str) -> str:
+def _storage_key(organization_id: str, supplied_key: str) -> str:
     return f"{organization_id}:{supplied_key}"
 
 
@@ -94,7 +93,7 @@ class IdempotencyContext:
 
 async def _try_acquire_or_load(
     storage_key: str,
-    organization_id: UUID,
+    organization_id: str,
     request_hash: str,
 ) -> IdempotencyKey | None:
     """Atomically claim the slot, or return the existing row.

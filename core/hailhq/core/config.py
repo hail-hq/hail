@@ -57,8 +57,23 @@ class Settings(BaseSettings):
     s3_region: str = "us-east-1"
 
     # Hail
+    # Shared-key mode: when set, requests carrying this bearer authenticate
+    # to the seeded "Self-hosted" organization. The balance gate at
+    # POST /v1/calls is skipped for this path — billing is cloud-only. Leave
+    # empty in managed cloud; per-user keys minted via Better Auth are the
+    # only auth path there.
     hail_api_key: str = ""
     hail_api_url: str = "http://localhost:8080"
+
+    # Base URL of the hail-website deployment. Used by voicebot / api to
+    # trigger internal endpoints (e.g., the usage-events rater). Leave
+    # empty in self-host — the corresponding internal calls become no-ops.
+    hail_base_url: str = ""
+    # Shared HMAC secret for internal API↔website calls (rater webhook
+    # today; other internal endpoints later). Generate with
+    #   openssl rand -base64 32
+    # Must match the value set in hail-website's HAIL_INTERNAL_SECRET.
+    hail_internal_secret: str = ""
 
 
 settings = Settings()

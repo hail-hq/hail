@@ -12,16 +12,16 @@ skip VAD/STT/TTS entirely — verified 2026-04-28 against
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from uuid import UUID
 
 import pytest
 from livekit.agents import Agent, AgentSession
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from hailhq.core.models import Call, CallEvent, Organization, PhoneNumber
+from hailhq.core.models import Call, CallEvent, PhoneNumber, UsageEvent
 from hailhq.voicebot.agent import (
     attach_event_handlers,
     on_call_end,
@@ -65,13 +65,11 @@ class _FakeSession:
 
 
 async def _make_call_row(session: AsyncSession) -> UUID:
-    """Insert an org + phone_number + queued call; return the call id."""
-    org = Organization(name="Acme", slug="acme")
-    session.add(org)
-    await session.flush()
+    """Insert a phone_number + queued call against a synthetic org_id."""
+    org_id = "org_test_acme"
 
     pn = PhoneNumber(
-        organization_id=org.id,
+        organization_id=org_id,
         e164="+14155551234",
         country_code="US",
         number_type="local",
@@ -82,7 +80,7 @@ async def _make_call_row(session: AsyncSession) -> UUID:
     await session.flush()
 
     call = Call(
-        organization_id=org.id,
+        organization_id=org_id,
         from_number_id=pn.id,
         from_e164=pn.e164,
         to_e164="+14155559999",
@@ -182,3 +180,76 @@ async def test_on_call_end_marks_call_completed(async_session: AsyncSession) -> 
     assert refreshed.ended_at >= before
     # v1 stub: recording_s3_key stays None.
     assert refreshed.recording_s3_key is None
+
+
+async def test_on_call_end_inserts_usage_event(async_session: AsyncSession) -> None:
+    """A call with a non-zero duration writes one ``voice`` usage_events row.
+
+    The voicebot no longer does money math; it just records raw duration in ms.
+    The website's private rater turns that into a dollar debit later.
+    """
+    call_id = await _make_call_row(async_session)
+    # Backdate started_at so the (now - started_at) delta is roughly 60s.
+    await async_session.execute(
+        update(Call)
+        .where(Call.id == call_id)
+        .values(started_at=datetime.now(timezone.utc) - timedelta(seconds=60))
+    )
+    await async_session.commit()
+
+    await on_call_end(call_id, room_name=f"hail-{call_id}")
+
+    refreshed = (
+        await async_session.execute(select(Call).where(Call.id == call_id))
+    ).scalar_one()
+    await async_session.refresh(refreshed)
+    # cost_cents stays NULL — the API service no longer prices.
+    assert refreshed.cost_cents is None
+
+    rows = (
+        (
+            await async_session.execute(
+                select(UsageEvent).where(
+                    UsageEvent.organization_id == refreshed.organization_id,
+                    UsageEvent.channel == "voice",
+                    UsageEvent.ref == str(call_id),
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert len(rows) == 1, f"expected exactly one usage_events row, got {len(rows)}"
+    event = rows[0]
+    # ~60s = 60_000ms, allow some wiggle for execution time between start backdate and on_call_end.
+    assert 55_000 <= event.units <= 65_000
+    assert event.priced_at is None
+
+
+async def test_on_call_end_no_usage_event_for_zero_duration(
+    async_session: AsyncSession,
+) -> None:
+    """A call that never started (no ``started_at``) writes no usage_events row."""
+    call_id = await _make_call_row(async_session)
+
+    await on_call_end(call_id, room_name=f"hail-{call_id}")
+
+    refreshed = (
+        await async_session.execute(select(Call).where(Call.id == call_id))
+    ).scalar_one()
+    await async_session.refresh(refreshed)
+    # No started_at, no recording_duration_ms → duration_ms = 0 → no row written.
+    assert refreshed.cost_cents is None
+
+    rows = (
+        (
+            await async_session.execute(
+                select(UsageEvent).where(
+                    UsageEvent.organization_id == refreshed.organization_id
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert rows == []

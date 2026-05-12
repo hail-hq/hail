@@ -24,20 +24,31 @@ _engine: AsyncEngine | None = None
 _sessionmaker: async_sessionmaker[AsyncSession] | None = None
 
 
-def to_async_url(url: str) -> str:
-    """Coerce a ``DATABASE_URL`` to an asyncpg URL.
+_SCHEME_ALIASES = (
+    "postgresql+asyncpg://",
+    "postgresql+psycopg://",
+    "postgresql+psycopg2://",
+    "postgresql://",
+    "postgres://",  # Heroku/Neon/Supabase emit this; SQLAlchemy doesn't accept it as-is
+)
 
-    Accepts the sync forms operators copy-paste from psql docs and
-    rewrites them to use ``asyncpg``. ``+asyncpg`` URLs pass through.
-    """
-    if url.startswith("postgresql+asyncpg://"):
-        return url
-    for sync_prefix in ("postgresql+psycopg://", "postgresql+psycopg2://"):
-        if url.startswith(sync_prefix):
-            return "postgresql+asyncpg://" + url[len(sync_prefix) :]
-    if url.startswith("postgresql://"):
-        return "postgresql+asyncpg://" + url[len("postgresql://") :]
+
+def _rewrite_scheme(url: str, target_prefix: str) -> str:
+    """Strip whichever Postgres scheme alias ``url`` starts with and prepend ``target_prefix``."""
+    for alias in _SCHEME_ALIASES:
+        if url.startswith(alias):
+            return target_prefix + url[len(alias) :]
     return url
+
+
+def to_async_url(url: str) -> str:
+    """Coerce a ``DATABASE_URL`` onto the ``asyncpg`` driver used at runtime."""
+    return _rewrite_scheme(url, "postgresql+asyncpg://")
+
+
+def to_sync_url(url: str) -> str:
+    """Coerce a ``DATABASE_URL`` onto the ``psycopg`` (sync) driver used by alembic."""
+    return _rewrite_scheme(url, "postgresql+psycopg://")
 
 
 def _ensure_initialized() -> async_sessionmaker[AsyncSession]:
