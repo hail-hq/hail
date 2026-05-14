@@ -46,13 +46,16 @@ Go CLI module path is `github.com/hail-hq/hail/cli`. npm packages are published 
 
 ## Dev commands
 
-- Data services: `docker compose up postgres minio`
+- Data services (local Postgres + MinIO): `docker compose -f docker-compose.yml -f docker-compose.local.yml up postgres minio`
 - Migrations: `cd api && uv run alembic upgrade head`
 - API: `cd api && uv run uvicorn hailhq.api.main:app --reload --port 8080`
 - Voicebot: `cd voicebot && uv run python -m hailhq.voicebot.main start`
 - MCP: `cd mcp && uv run uvicorn hailhq.mcp.server:app --reload --port 8081`
 - CLI: `cd cli && go run . <cmd>`
-- Full stack: `docker compose up`
+- Full stack (bundled Postgres): `docker compose -f docker-compose.yml -f docker-compose.local.yml up`
+- Full stack (managed Postgres via `DATABASE_URL`): `docker compose up`
+
+The base `docker-compose.yml` assumes `DATABASE_URL` reaches a Postgres you bring; `docker-compose.local.yml` is a thin overlay that adds the local `postgres` container and wires `depends_on` for `api` and `voicebot`.
 
 For the comprehensive operations runbook (releases, deployment, DB switching,
 known footguns), see [docs/operations.md](docs/operations.md). **AI agents

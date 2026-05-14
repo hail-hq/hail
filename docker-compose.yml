@@ -1,21 +1,10 @@
 name: hail
 
-services:
-  postgres:
-    image: postgres:16-alpine
-    environment:
-      POSTGRES_USER: hail
-      POSTGRES_PASSWORD: hail
-      POSTGRES_DB: hail
-    ports:
-      - "5432:5432"
-    volumes:
-      - postgres-data:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U hail"]
-      interval: 5s
-      retries: 10
+# Base stack. Assumes DATABASE_URL points at a reachable Postgres (managed or
+# otherwise). For a bundled local Postgres, layer docker-compose.local.yml on
+# top — see docs/operations.md ("Switching the database").
 
+services:
   minio:
     image: minio/minio:latest
     command: server /data --console-address ":9001"
@@ -37,13 +26,16 @@ services:
       context: .
       dockerfile: api/Dockerfile
     env_file: .env
-    depends_on:
-      postgres:
-        condition: service_healthy
     ports:
       - "8080:8080"
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8080/healthz').status==200 else 1)"]
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8080/healthz').status==200 else 1)",
+        ]
       interval: 5s
       retries: 10
 
@@ -52,9 +44,6 @@ services:
       context: .
       dockerfile: voicebot/Dockerfile
     env_file: .env
-    depends_on:
-      postgres:
-        condition: service_healthy
 
   mcp:
     build:
@@ -69,10 +58,15 @@ services:
     ports:
       - "8081:8081"
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8081/healthz').status==200 else 1)"]
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8081/healthz').status==200 else 1)",
+        ]
       interval: 5s
       retries: 10
 
 volumes:
-  postgres-data:
   minio-data:

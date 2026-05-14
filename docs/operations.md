@@ -6,7 +6,8 @@ Single source of truth for how to develop, deploy, migrate, and release Hail. If
 
 | task                           | command                                                                              |
 | ------------------------------ | ------------------------------------------------------------------------------------ |
-| Bring up self-host stack       | `docker compose up -d`                                                               |
+| Bring up stack (bundled DB)    | `docker compose -f docker-compose.yml -f docker-compose.local.yml up -d`             |
+| Bring up stack (managed DB)    | `docker compose up -d`                                                               |
 | Tail one service               | `docker compose logs -f <api\|voicebot\|mcp\|postgres>`                              |
 | Run all tests                  | `cd <core\|api\|voicebot\|mcp\|sdk> && uv run pytest` (per suite, **from each dir**) |
 | Lint                           | `uvx ruff check .` then `uvx black --check .` (repo root)                            |
@@ -23,7 +24,9 @@ Single source of truth for how to develop, deploy, migrate, and release Hail. If
 ```bash
 cp .env.example .env                                       # then fill in keys
 pnpm install                                               # husky pre-commit hooks
-docker compose up -d                                       # postgres + minio + api + voicebot + mcp
+docker compose \
+  -f docker-compose.yml -f docker-compose.local.yml \
+  up -d                                                    # postgres + minio + api + voicebot + mcp
 docker compose run --rm api alembic upgrade head           # apply schema
 # seed an org + api_key + phone_number (see Deployment → DB seed below)
 ```
@@ -183,27 +186,40 @@ Shared-key (`HAIL_API_KEY`) requests resolve to `organization_id = 00000000-0000
 
 ### Switching the database
 
-**Reset the local docker postgres** (lose all data, fresh start):
+Compose ships as two files. `docker-compose.yml` is the deployable base and assumes `DATABASE_URL` reaches a Postgres you bring. `docker-compose.local.yml` is a thin overlay that adds a bundled `postgres` container and merges a `depends_on: postgres` into `api` and `voicebot`. Pick a mode:
+
+**Bundled local Postgres** — layer both files:
 
 ```bash
-docker compose down -v                                     # -v removes volumes
-docker compose up -d postgres
-docker compose run --rm api alembic upgrade head
-# re-seed (Phase above)
-docker compose up -d
+docker compose -f docker-compose.yml -f docker-compose.local.yml up -d
 ```
 
-**Switch to managed (Neon / Supabase / RDS)**:
+`.env` should keep the default `DATABASE_URL=postgresql://hail:hail@postgres:5432/hail` (the in-network compose hostname).
+
+**Reset the bundled DB** (lose all data, fresh start):
 
 ```bash
-# 1. Provision the DB; get a postgresql+psycopg://... URL
-# 2. Update DATABASE_URL in .env (and .env.local for host-side dev)
+docker compose -f docker-compose.yml -f docker-compose.local.yml down -v   # -v removes volumes
+docker compose -f docker-compose.yml -f docker-compose.local.yml up -d postgres
+docker compose -f docker-compose.yml -f docker-compose.local.yml run --rm api alembic upgrade head
+# re-seed (Phase above)
+docker compose -f docker-compose.yml -f docker-compose.local.yml up -d
+```
+
+**Managed Postgres (Neon / Supabase / RDS / …)** — use only the base file:
+
+```bash
+# 1. Provision the DB; grab the postgres URL (sslmode=require for most hosted providers)
+# 2. Edit .env:
+#      DATABASE_URL=postgresql://USER:PASSWORD@HOST/DBNAME?sslmode=require
+#    Comment out the bundled-local line.
 # 3. Apply migrations
 docker compose run --rm api alembic upgrade head
 # 4. Re-seed (same SQL as above; replace `docker compose exec -T postgres
 #    psql -U hail -d hail -c` with `psql "$DATABASE_URL" -c`)
-# 5. Optional: drop `postgres` service from docker-compose.yml + the
-#    `depends_on: postgres` lines in api/voicebot/mcp services
+# 5. Bring up the stack — no `-f docker-compose.local.yml`, so no postgres
+#    container is started:
+docker compose up -d
 ```
 
 The migration `0001_initial.py` issues `CREATE EXTENSION IF NOT EXISTS pgcrypto;`. Hosted providers that gate extensions need `pgcrypto` allowed.

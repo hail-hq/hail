@@ -12,7 +12,8 @@ cd hail
 cp .env.example .env.local
 # fill in keys (see docs/setup/*)
 pnpm install                      # installs husky + lint-staged + prettier
-docker compose up postgres minio  # just the data services for host-side dev
+docker compose -f docker-compose.yml -f docker-compose.local.yml up postgres minio
+                                  # just the data services for host-side dev
 ```
 
 `pnpm install` wires up the git pre-commit hook that runs `ruff`/`black`/`gofmt`/`prettier` on staged files.
@@ -24,7 +25,10 @@ docker compose up postgres minio  # just the data services for host-side dev
 - MCP: `cd mcp && uv run uvicorn hailhq.mcp.server:app --reload --port 8081`
 - CLI: `cd cli && go run . <args>`
 
-Full stack in Docker: `docker compose up`.
+Full stack in Docker:
+
+- Bundled Postgres: `docker compose -f docker-compose.yml -f docker-compose.local.yml up`
+- Managed Postgres (set `DATABASE_URL` to your hosted URL first): `docker compose up`
 
 ## Database migrations
 
