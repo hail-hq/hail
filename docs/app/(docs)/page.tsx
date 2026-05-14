@@ -67,45 +67,92 @@ export default function HomePage() {
           >
             Available
           </h2>
-          <Link
-            href="/costs"
+          <div
             style={{
-              display: 'block',
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))',
+              gap: 0,
               border: '2px solid var(--color-ink)',
-              padding: '24px 28px',
-              background: 'var(--color-bg)',
-              maxWidth: 720,
+              maxWidth: 960,
             }}
           >
-            <div
+            <Link
+              href="/costs"
               style={{
-                fontFamily: 'var(--font-mono)',
-                fontSize: 11,
-                fontWeight: 700,
-                letterSpacing: '0.14em',
-                textTransform: 'uppercase',
-                color: 'var(--color-mute)',
+                display: 'block',
+                padding: '24px 28px',
+                background: 'var(--color-bg)',
+                borderRight: '2px solid var(--color-ink)',
               }}
             >
-              01 / Dispatch
-            </div>
-            <div
+              <div
+                style={{
+                  fontFamily: 'var(--font-mono)',
+                  fontSize: 11,
+                  fontWeight: 700,
+                  letterSpacing: '0.14em',
+                  textTransform: 'uppercase',
+                  color: 'var(--color-mute)',
+                }}
+              >
+                01 / Dispatch
+              </div>
+              <div
+                style={{
+                  fontSize: 32,
+                  fontWeight: 800,
+                  letterSpacing: '-0.03em',
+                  lineHeight: 1,
+                  marginTop: 8,
+                  textTransform: 'uppercase',
+                }}
+              >
+                Model <em className="it">costs.</em> →
+              </div>
+              <p style={{ marginTop: 12, fontSize: 14, color: 'var(--color-mute)' }}>
+                Public pricing data across LLM, STT, and TTS providers. Schema-validated,
+                refreshed weekly, CC-BY-4.0.
+              </p>
+            </Link>
+            {/* /mcp lives in the landing zone, cross-zone <a> avoids wasted Next.js prefetch */}
+            <a
+              href="/mcp"
               style={{
-                fontSize: 38,
-                fontWeight: 800,
-                letterSpacing: '-0.03em',
-                lineHeight: 1,
-                marginTop: 8,
-                textTransform: 'uppercase',
+                display: 'block',
+                padding: '24px 28px',
+                background: 'var(--color-paper)',
               }}
             >
-              Model <em className="it">costs.</em> →
-            </div>
-            <p style={{ marginTop: 12, fontSize: 14, color: 'var(--color-mute)' }}>
-              Public pricing data across LLM, STT, and TTS providers. Schema-validated, refreshed
-              weekly, CC-BY-4.0.
-            </p>
-          </Link>
+              <div
+                style={{
+                  fontFamily: 'var(--font-mono)',
+                  fontSize: 11,
+                  fontWeight: 700,
+                  letterSpacing: '0.14em',
+                  textTransform: 'uppercase',
+                  color: 'var(--color-mute)',
+                }}
+              >
+                02 / Connect
+              </div>
+              <div
+                style={{
+                  fontSize: 32,
+                  fontWeight: 800,
+                  letterSpacing: '-0.03em',
+                  lineHeight: 1,
+                  marginTop: 8,
+                  textTransform: 'uppercase',
+                }}
+              >
+                MCP <em className="it">clients.</em> →
+              </div>
+              <p style={{ marginTop: 12, fontSize: 14, color: 'var(--color-mute)' }}>
+                Drop the Hail MCP server into Claude, ChatGPT, Cursor, Gemini, and 4 more —
+                one-click setup snippets.
+              </p>
+            </a>
+          </div>
         </div>
       </section>
 
