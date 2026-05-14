@@ -222,20 +222,26 @@ export default function HomePage() {
               margin: '0 0 14px',
             }}
           >
-            Coming soon
+            Reference
           </h2>
           <ul
             style={{
               listStyle: 'none',
               padding: 0,
               margin: 0,
-              fontSize: 14,
-              color: 'var(--color-mute)',
+              fontSize: 15,
+              lineHeight: 2,
             }}
           >
-            <li>· Architecture overview, setup guides, ops runbooks</li>
-            <li>· OpenAPI reference, MCP server reference</li>
-            <li>· Compare view at /docs/costs/compare?models=…</li>
+            <li>
+              · <Link href="/architecture" style={{ textDecoration: 'underline' }}>Architecture overview</Link>
+            </li>
+            <li>
+              · <Link href="/contributing" style={{ textDecoration: 'underline' }}>Contributing guide</Link>
+            </li>
+            <li style={{ color: 'var(--color-mute)' }}>
+              · Setup guides, ops runbooks, OpenAPI reference — <em className="it">coming soon</em>
+            </li>
           </ul>
         </div>
       </section>

@@ -9,18 +9,20 @@
     "lint": "next lint"
   },
   "dependencies": {
+    "@mdx-js/loader": "^3.1.1",
+    "@tanstack/react-table": "^8.20.0",
     "next": "^16.2.0",
     "react": "^19.2.0",
-    "react-dom": "^19.2.0",
-    "@tanstack/react-table": "^8.20.0"
+    "react-dom": "^19.2.0"
   },
   "devDependencies": {
+    "@tailwindcss/postcss": "^4.0.0",
+    "@types/mdx": "^2.0.13",
     "@types/node": "^22.0.0",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
+    "postcss": "^8.4.0",
     "tailwindcss": "^4.0.0",
-    "@tailwindcss/postcss": "^4.0.0",
-    "typescript": "^5.5.0",
-    "postcss": "^8.4.0"
+    "typescript": "^5.5.0"
   }
 }

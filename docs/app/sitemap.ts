@@ -34,5 +34,17 @@ export default function sitemap(): MetadataRoute.Sitemap {
       changeFrequency: 'monthly',
       priority: 0.5,
     },
+    {
+      url: absoluteUrl('/architecture'),
+      lastModified,
+      changeFrequency: 'monthly',
+      priority: 0.6,
+    },
+    {
+      url: absoluteUrl('/contributing'),
+      lastModified,
+      changeFrequency: 'monthly',
+      priority: 0.4,
+    },
   ];
 }
