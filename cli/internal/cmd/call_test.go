@@ -293,6 +293,91 @@ func TestCallSubcommand_JSONOutput(t *testing.T) {
 	}
 }
 
+// TestSynonyms_Topology pins the synonym wiring so future refactors can't
+// silently drop a documented alias.
+func TestSynonyms_Topology(t *testing.T) {
+	root := NewRootCmd(&bytes.Buffer{}, &bytes.Buffer{}, func(string) string { return "" })
+
+	if c, _, err := root.Find([]string{"login"}); err != nil || c.Name() != "login" {
+		t.Errorf("hail login: cmd=%v err=%v", c, err)
+	}
+	if c, _, err := root.Find([]string{"auth", "login"}); err != nil || c.Name() != "login" {
+		t.Errorf("hail auth login: cmd=%v err=%v", c, err)
+	}
+
+	call, _, err := root.Find([]string{"call"})
+	if err != nil {
+		t.Fatalf("hail call: %v", err)
+	}
+	wantAliases := map[string]string{"list": "ls", "status": "get"}
+	for sub, alias := range wantAliases {
+		found := false
+		for _, c := range call.Commands() {
+			if c.Name() == sub {
+				for _, a := range c.Aliases {
+					if a == alias {
+						found = true
+					}
+				}
+			}
+		}
+		if !found {
+			t.Errorf("hail call %s: alias %q not registered", sub, alias)
+		}
+	}
+
+	loginCmd, _, err := root.Find([]string{"login"})
+	if err != nil {
+		t.Fatalf("login Find: %v", err)
+	}
+	got := string(loginCmd.Flags().GetNormalizeFunc()(loginCmd.Flags(), "login-url"))
+	if got != "auth-url" {
+		t.Errorf("--login-url normalized to %q, want auth-url", got)
+	}
+	if got := string(loginCmd.Flags().GetNormalizeFunc()(loginCmd.Flags(), "auth-url")); got != "auth-url" {
+		t.Errorf("--auth-url normalized to %q, want auth-url", got)
+	}
+}
+
+// TestPersistentFlags_PositionFlexibility pins cobra's behavior: --api-url and
+// --api-key are persistent root flags, so they must be accepted in any order —
+// before the subcommand, after the subcommand, or after the positional. Guards
+// against accidental regressions (e.g. someone moving the flag definition off
+// root.PersistentFlags).
+func TestPersistentFlags_PositionFlexibility(t *testing.T) {
+	tests := []struct {
+		name    string
+		argsFor func(url string) []string
+	}{
+		{"before subcommand", func(u string) []string {
+			return []string{"--api-url", u, "--api-key", "sk_test", "call", "+15551234567", "--prompt", "hi"}
+		}},
+		{"after subcommand", func(u string) []string {
+			return []string{"call", "--api-url", u, "--api-key", "sk_test", "+15551234567", "--prompt", "hi"}
+		}},
+		{"after positional", func(u string) []string {
+			return []string{"call", "+15551234567", "--prompt", "hi", "--api-url", u, "--api-key", "sk_test"}
+		}},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := newFakeServer(t, http.StatusCreated, sampleResponse())
+
+			_, _, err := runRoot(t, map[string]string{}, tc.argsFor(srv.URL)...)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got := atomic.LoadInt32(&srv.hits); got != 1 {
+				t.Fatalf("expected 1 request to %s, got %d (flag did not bind)", srv.URL, got)
+			}
+			if h := srv.lastReq.Header.Get("Authorization"); h != "Bearer sk_test" {
+				t.Fatalf("Authorization header = %q; --api-key did not propagate", h)
+			}
+		})
+	}
+}
+
 func TestCallSubcommand_MissingAPIKey(t *testing.T) {
 	srv := newFakeServer(t, http.StatusCreated, sampleResponse())
 

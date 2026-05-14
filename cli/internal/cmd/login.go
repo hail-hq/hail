@@ -15,22 +15,19 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 )
 
-// DefaultBaseURL is the Hail website that hosts the device-authorization flow.
+// DefaultAuthURL is the Hail website that hosts the device-authorization flow
+// and the key-issuance endpoint used by `hail login`. Distinct from the API
+// (DefaultAPIURL) because the auth dance is browser-driven and lives on the
+// marketing site; subsequent CLI traffic goes to the API host.
 //
 // `hail login` is a Hail Cloud feature: it calls device-flow endpoints on the
 // Hail website, exchanges the resulting session for a long-lived API key, and
 // targets the matching managed API. Self-hosters issue API keys directly via
 // the bootstrap flow in docs/operations.md and never need this command.
-const DefaultBaseURL = "https://hail.so"
-
-// DefaultAPIURL is the API URL paired with DefaultBaseURL — when `hail login`
-// runs against the default base URL (the common case), the saved credentials
-// point subsequent invocations at this matching managed API. If the operator
-// overrides --base-url (e.g., a Hail engineer testing the website locally),
-// the API URL is taken from opts.APIURL instead, falling back to LocalAPIURL.
-const DefaultAPIURL = "https://api.hail.so"
+const DefaultAuthURL = "https://hail.so"
 
 // deviceClientID identifies this CLI to the device-authorization endpoint.
 // Free-form for now (no client allowlist on the server) but kept stable so
@@ -80,38 +77,48 @@ type issueKeyResp struct {
 }
 
 func newLoginCmd(opts *Options) *cobra.Command {
-	var baseURLFlag string
+	var authURLFlag string
 
 	cmd := &cobra.Command{
 		Use:   "login",
 		Short: "Authenticate with Hail and save an API key to ~/.hail/credentials.json",
-		Long: `Run the OAuth 2.0 device-authorization flow against the Hail base URL,
+		Long: `Run the OAuth 2.0 device-authorization flow against the Hail auth server,
 exchange the resulting session for a long-lived API key, and persist that key
 locally so subsequent commands authenticate automatically.
 
-Resolution order for the base URL:
-  --base-url flag > $HAIL_BASE_URL > ` + DefaultBaseURL + `
+Resolution order for the auth server URL:
+  --auth-url flag > $HAIL_AUTH_URL > ` + DefaultAuthURL + `
+
+The auth server (the Hail website) is distinct from the API server (set via
+--api-url / $HAIL_API_URL). Login flows through the auth server because the
+device-authorization pages are browser-rendered there; afterwards, all CLI
+traffic goes to the API server.
 
 This command targets Hail Cloud. Self-hosters issue API keys via the bootstrap
 flow in docs/operations.md and do not need to log in.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
 
-			baseURL := baseURLFlag
-			if baseURL == "" {
-				baseURL = os.Getenv("HAIL_BASE_URL")
+			authURL := authURLFlag
+			if authURL == "" {
+				authURL = opts.Getenv("HAIL_AUTH_URL")
 			}
-			if baseURL == "" {
-				baseURL = DefaultBaseURL
+			if authURL == "" {
+				authURL = DefaultAuthURL
 			}
-			baseURL = strings.TrimRight(baseURL, "/")
+			authURL = strings.TrimRight(authURL, "/")
+
+			// Pre-compute the API URL that will land in credentials.json, so
+			// the user sees both targets before the browser opens. Explicit
+			// --api-url / $HAIL_API_URL / prior creds always win.
+			apiURL := opts.ResolvedAPIURL()
 
 			stdout := opts.Stdout
 			stderr := opts.Stderr
 
-			fmt.Fprintf(stdout, "Authenticating against %s\n", baseURL)
+			fmt.Fprintf(stdout, "Logging in:\n  Auth server: %s\n  API server:  %s\n\n", authURL, apiURL)
 
-			code, err := requestDeviceCode(ctx, baseURL)
+			code, err := requestDeviceCode(ctx, authURL)
 			if err != nil {
 				return fmt.Errorf("request device code: %w", err)
 			}
@@ -139,7 +146,7 @@ flow in docs/operations.md and do not need to log in.`,
 			}
 
 			fmt.Fprintln(stdout, "Waiting for authorization…")
-			token, err := pollForToken(ctx, baseURL, code.DeviceCode, interval, expiresIn)
+			token, err := pollForToken(ctx, authURL, code.DeviceCode, interval, expiresIn)
 			if err != nil {
 				return err
 			}
@@ -148,24 +155,15 @@ flow in docs/operations.md and do not need to log in.`,
 			today := time.Now().UTC().Format("2006-01-02")
 			keyName := fmt.Sprintf("hail-cli · %s · %s", host, today)
 
-			apiKey, err := exchangeForAPIKey(ctx, baseURL, token.AccessToken, keyName)
+			apiKey, err := exchangeForAPIKey(ctx, authURL, token.AccessToken, keyName)
 			if err != nil {
 				return fmt.Errorf("issue API key: %w", err)
-			}
-
-			// Pair DefaultAPIURL with DefaultBaseURL so subsequent commands hit
-			// the managed API without an extra env var. When the operator
-			// overrode --base-url, use whatever opts.APIURL resolved to
-			// (typically LocalAPIURL).
-			apiURL := opts.APIURL
-			if baseURL == DefaultBaseURL {
-				apiURL = DefaultAPIURL
 			}
 
 			path, err := saveCredentials(Credentials{
 				APIKey:  apiKey.Key,
 				APIURL:  apiURL,
-				BaseURL: baseURL,
+				AuthURL: authURL,
 			})
 			if err != nil {
 				return fmt.Errorf("save credentials: %w", err)
@@ -176,8 +174,37 @@ flow in docs/operations.md and do not need to log in.`,
 		},
 	}
 
-	cmd.Flags().StringVar(&baseURLFlag, "base-url", "", "Hail base URL (default: $HAIL_BASE_URL or "+DefaultBaseURL+")")
+	cmd.Flags().StringVar(&authURLFlag, "auth-url", "", "Auth server URL — alias: --login-url (default: $HAIL_AUTH_URL or "+DefaultAuthURL+")")
+	cmd.Flags().SetNormalizeFunc(loginFlagNormalize)
 	return cmd
+}
+
+// loginFlagNormalize maps user-friendly synonyms onto canonical flag names
+// before pflag looks them up. The canonical name is what shows in --help; the
+// alias is documented inline in the canonical flag's usage string.
+func loginFlagNormalize(_ *pflag.FlagSet, name string) pflag.NormalizedName {
+	if name == "login-url" {
+		name = "auth-url"
+	}
+	return pflag.NormalizedName(name)
+}
+
+// newAuthCmd groups authentication-shaped subcommands under `hail auth`.
+// Currently only `login` lives here; `whoami` / `logout` will slot in
+// naturally without further taxonomy churn. `hail login` stays at root as
+// the discoverable shortcut — both invocations share the same RunE.
+func newAuthCmd(opts *Options) *cobra.Command {
+	auth := &cobra.Command{
+		Use:   "auth",
+		Short: "Manage Hail authentication (login, …)",
+		Long: `hail auth — authentication subcommands.
+
+Currently:
+  hail auth login   Same as ` + "`hail login`" + `; provided so muscle-memory from
+                    other CLIs (` + "`gh auth login`" + `, ` + "`gcloud auth login`" + `, …) works.`,
+	}
+	auth.AddCommand(newLoginCmd(opts))
+	return auth
 }
 
 // postJSON sends a JSON-encoded body to url and decodes the response into out.

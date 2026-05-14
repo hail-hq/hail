@@ -26,11 +26,16 @@ var (
 	buildDate = "unknown"
 )
 
-// LocalAPIURL is the bare-CLI fallback when neither --api-url, $HAIL_API_URL,
-// nor a stored credentials file pin a value. Localhost matches the self-host
-// docker-compose story; Hail Cloud users get DefaultAPIURL persisted to
-// ~/.hail/credentials.json by `hail login`, paired with DefaultBaseURL.
-const LocalAPIURL = "http://localhost:8080"
+// DefaultAPIURL is the global API target when neither --api-url, $HAIL_API_URL,
+// nor a stored credentials file pin a value. The CLI talks to production by
+// default; self-hosters opt out explicitly via --api-url / $HAIL_API_URL.
+//
+// The fallback is applied lazily in newClient (and in `hail login`'s
+// credential-save step) rather than in PersistentPreRunE, so subcommands can
+// distinguish "user/env/creds pinned an API URL" (opts.APIURL non-empty) from
+// "nothing was supplied" (opts.APIURL == ""). Without that distinction,
+// `hail login` cannot tell whether to honor an explicit --api-url override.
+const DefaultAPIURL = "https://api.hail.so"
 
 // Options bundles the resolved environment + flags for subcommands. Subcommands
 // receive these via cobra's Command.RunE closure rather than reading globals.
@@ -41,6 +46,20 @@ type Options struct {
 	JSON   bool
 	Stdout io.Writer
 	Stderr io.Writer
+	// Getenv is the env-lookup func injected by NewRootCmd. Subcommands that
+	// need to read env vars must go through this (not os.Getenv) so tests can
+	// drive them deterministically via the runRoot helper.
+	Getenv func(string) string
+}
+
+// ResolvedAPIURL returns o.APIURL when set, otherwise DefaultAPIURL. Centralizes
+// the lazy-default policy referenced by both newClient and `hail login` — see
+// the DefaultAPIURL doc-comment for why the fallback is deferred to call sites.
+func (o *Options) ResolvedAPIURL() string {
+	if o.APIURL != "" {
+		return o.APIURL
+	}
+	return DefaultAPIURL
 }
 
 // NewRootCmd builds the root cobra.Command. All IO is injected: tests provide
@@ -59,7 +78,7 @@ func NewRootCmd(stdout, stderr io.Writer, getenv func(string) string) *cobra.Com
 		stderr = os.Stderr
 	}
 
-	opts := &Options{Stdout: stdout, Stderr: stderr}
+	opts := &Options{Stdout: stdout, Stderr: stderr, Getenv: getenv}
 
 	root := &cobra.Command{
 		Use:   "hail",
@@ -75,7 +94,12 @@ or pass --api-key.`,
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 			// Resolution order:
 			//   --api-key > $HAIL_API_KEY > ~/.hail/credentials.json
-			//   --api-url > $HAIL_API_URL > ~/.hail/credentials.json > DefaultAPIURL
+			//   --api-url > $HAIL_API_URL > ~/.hail/credentials.json
+			//
+			// DefaultAPIURL is NOT applied here — newClient (and login's
+			// credential-save step) fall back to it when opts.APIURL is empty.
+			// Keeping "no signal" distinguishable from "user pinned a URL"
+			// is what lets `hail login` honor an explicit --api-url.
 			if opts.APIURL == "" {
 				opts.APIURL = getenv("HAIL_API_URL")
 			}
@@ -94,9 +118,6 @@ or pass --api-key.`,
 					opts.APIURL = creds.APIURL
 				}
 			}
-			if opts.APIURL == "" {
-				opts.APIURL = LocalAPIURL
-			}
 			return nil
 		},
 	}
@@ -104,13 +125,14 @@ or pass --api-key.`,
 	root.SetOut(stdout)
 	root.SetErr(stderr)
 
-	root.PersistentFlags().StringVar(&opts.APIURL, "api-url", "", "API base URL (default: $HAIL_API_URL or ~/.hail/credentials.json or "+LocalAPIURL+")")
+	root.PersistentFlags().StringVar(&opts.APIURL, "api-url", "", "API base URL (default: $HAIL_API_URL or ~/.hail/credentials.json or "+DefaultAPIURL+")")
 	root.PersistentFlags().StringVar(&opts.APIKey, "api-key", "", "API key (default: $HAIL_API_KEY or ~/.hail/credentials.json — see 'hail login')")
 	root.PersistentFlags().BoolVar(&opts.JSON, "json", false, "Output JSON instead of human-friendly text")
 
 	root.AddCommand(newCallCmd(opts))
 	root.AddCommand(newTailCmd(opts))
 	root.AddCommand(newLoginCmd(opts))
+	root.AddCommand(newAuthCmd(opts))
 
 	return root
 }
@@ -127,7 +149,7 @@ func (o *Options) newClient(extra ...client.RequestEditorFn) (*client.ClientWith
 	for i, e := range editors {
 		clientOpts[i] = client.WithRequestEditorFn(e)
 	}
-	c, err := client.NewClientWithResponses(o.APIURL, clientOpts...)
+	c, err := client.NewClientWithResponses(o.ResolvedAPIURL(), clientOpts...)
 	if err != nil {
 		return nil, fmt.Errorf("client init: %w", err)
 	}

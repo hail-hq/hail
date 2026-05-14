@@ -14,9 +14,10 @@ import (
 
 func newCallStatusCmd(opts *Options) *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "status <call-id>",
-		Short: "Fetch the current status of a call",
-		Args:  cobra.ExactArgs(1),
+		Use:     "status <call-id>",
+		Aliases: []string{"get"},
+		Short:   "Fetch the current status of a call",
+		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runCallStatus(cmd.Context(), opts, args[0])
 		},

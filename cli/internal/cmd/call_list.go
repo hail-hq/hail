@@ -23,9 +23,10 @@ type callListFlags struct {
 func newCallListCmd(opts *Options) *cobra.Command {
 	f := &callListFlags{}
 	cmd := &cobra.Command{
-		Use:   "list",
-		Short: "List recent calls (cursor-paginated)",
-		Args:  cobra.NoArgs,
+		Use:     "list",
+		Aliases: []string{"ls"},
+		Short:   "List recent calls (cursor-paginated)",
+		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runCallList(cmd.Context(), opts, f)
 		},
