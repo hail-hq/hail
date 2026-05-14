@@ -29,11 +29,24 @@ from livekit.agents.voice import AgentSession
 from livekit.plugins import silero
 from sqlalchemy import select, update
 
+from hailhq.core.config import settings
 from hailhq.core.db import session_scope
 from hailhq.core.internal_webhook import notify_usage_event_recorded
+from hailhq.core.pool import release_pool_reservation
 from hailhq.core.models import Call, CallEvent, UsageEvent
 from hailhq.voicebot.pipeline import build_session
 from hailhq.voicebot.recording import upload_recording
+
+# Soft-cap announcement spoken when a call hits HAIL_VOICE_MAX_DURATION_SECONDS.
+# Phrased like an honest operator note rather than a robotic cutoff so the
+# caller has a moment to say their goodbyes.
+SOFT_CAP_ANNOUNCEMENT = (
+    "Sorry, we've reached the time limit for this call. "
+    "Thanks for talking — I'll let you go now. Goodbye."
+)
+
+# Shutdown reason passed to ctx.shutdown() when the soft cap fires.
+SOFT_CAP_END_REASON = "soft_cap_reached"
 
 logger = logging.getLogger("hailhq.voicebot")
 
@@ -85,6 +98,44 @@ async def write_call_event(call_id: UUID, kind: str, payload: dict[str, Any]) ->
         )
 
 
+async def soft_cap_announce_and_hangup(
+    ctx: JobContext,
+    session: AgentSession,
+    call_id: UUID,
+    delay_seconds: int,
+) -> None:
+    """Wait ``delay_seconds`` then politely end the call.
+
+    Soft cap (not a hard cutoff): the agent speaks the announcement,
+    waits for playback to finish so the caller actually hears it, then
+    requests ``ctx.shutdown()``. The existing shutdown callback runs
+    ``on_call_end`` → writes the ``usage_events`` row → fires the rater
+    webhook. Same lifecycle as a natural call end.
+
+    Cancellable: if the call ends naturally before the cap, the
+    entrypoint cancels this task and the announcement never plays.
+    """
+    try:
+        await asyncio.sleep(delay_seconds)
+    except asyncio.CancelledError:
+        return
+
+    logger.info(
+        "call_id=%s reached %ds soft-cap, announcing and ending",
+        call_id,
+        delay_seconds,
+    )
+    try:
+        handle = session.say(SOFT_CAP_ANNOUNCEMENT, allow_interruptions=False)
+        await handle.wait_for_playout()
+    except Exception:  # pragma: no cover — best-effort; we still hang up
+        logger.exception(
+            "call_id=%s soft-cap announcement failed; proceeding to hangup",
+            call_id,
+        )
+    ctx.shutdown(reason=SOFT_CAP_END_REASON)
+
+
 async def on_call_end(call_id: UUID, room_name: str) -> None:
     """Finalize the ``Call`` row when the session ends.
 
@@ -133,6 +184,10 @@ async def on_call_end(call_id: UUID, room_name: str) -> None:
                 recording_s3_key=recording_key,
             )
         )
+        # Same transaction as the status update — a rollback (e.g. failed
+        # usage_events insert) must also unwind the release so the sweeper
+        # backstop can retry. No-op for non-pool calls.
+        await release_pool_reservation(session, call_id=call_id)
         usage_event_id: str | None = None
         if duration_ms > 0:
             usage = UsageEvent(
@@ -210,7 +265,17 @@ async def entrypoint(ctx: JobContext) -> None:
 
     room_name = ctx.room.name
 
+    soft_cap_seconds = settings.hail_voice_max_duration_seconds
+    soft_cap_task: asyncio.Task[None] | None = None
+    if soft_cap_seconds > 0:
+        soft_cap_task = asyncio.create_task(
+            soft_cap_announce_and_hangup(ctx, session, call_id, soft_cap_seconds)
+        )
+
     async def _shutdown() -> None:
+        if soft_cap_task is not None and not soft_cap_task.done():
+            soft_cap_task.cancel()
+            await asyncio.gather(soft_cap_task, return_exceptions=True)
         if event_tasks:
             await asyncio.gather(*list(event_tasks), return_exceptions=True)
         await on_call_end(call_id, room_name)
@@ -219,10 +284,13 @@ async def entrypoint(ctx: JobContext) -> None:
 
 
 __all__ = [
+    "SOFT_CAP_ANNOUNCEMENT",
+    "SOFT_CAP_END_REASON",
     "attach_event_handlers",
     "entrypoint",
     "on_call_end",
     "parse_metadata",
     "prewarm",
+    "soft_cap_announce_and_hangup",
     "write_call_event",
 ]

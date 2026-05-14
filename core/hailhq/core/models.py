@@ -3,6 +3,7 @@ from datetime import datetime
 
 from sqlalchemy import (
     ARRAY,
+    Boolean,
     CheckConstraint,
     DateTime,
     ForeignKey,
@@ -163,8 +164,9 @@ class PhoneNumber(Base):
     id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
     )
-    organization_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), nullable=False
+    # Nullable: pool numbers (is_pool=TRUE) have no owner.
+    organization_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), nullable=True
     )
     e164: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
     country_code: Mapped[str] = mapped_column(Text, nullable=False)
@@ -188,6 +190,26 @@ class PhoneNumber(Base):
     updated_at: Mapped[datetime] = mapped_column(
         TS, server_default=text("now()"), nullable=False
     )
+    # Pool fields — TRUE iff this number is shared across orgs; reserved_call_id
+    # is the single source of truth for "currently in use".
+    is_pool: Mapped[bool] = mapped_column(
+        Boolean, server_default=text("FALSE"), nullable=False
+    )
+    # use_alter=True so the circular FK (calls.from_number_id ↔
+    # phone_numbers.reserved_call_id) can be created/dropped via ALTER TABLE
+    # rather than inline — required for Base.metadata.create_all/drop_all in
+    # tests, and harmless in production where the migration creates the FK
+    # explicitly.
+    reserved_call_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey(
+            "calls.id",
+            ondelete="SET NULL",
+            use_alter=True,
+            name="phone_numbers_reserved_call_id_fkey",
+        ),
+        nullable=True,
+    )
 
     __table_args__ = (
         CheckConstraint(
@@ -197,6 +219,11 @@ class PhoneNumber(Base):
         CheckConstraint(
             "provisioning_state IN ('pending','active','failed','released')",
             name="phone_numbers_state_check",
+        ),
+        CheckConstraint(
+            "(is_pool = TRUE AND organization_id IS NULL)"
+            " OR (is_pool = FALSE AND organization_id IS NOT NULL)",
+            name="phone_numbers_pool_owner_xor",
         ),
     )
 
@@ -252,6 +279,11 @@ class Call(Base):
     )
     livekit_room: Mapped[str | None] = mapped_column(Text, nullable=True)
     voice_config: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    # Snapshot of the effective max-call-duration at insert time. Pool-number
+    # sweeper backstop uses this (now() > requested_at + max_duration + grace);
+    # snapshotting prevents a runtime config tweak from retroactively shortening
+    # a live call's reservation window. Nullable for back-compat with pre-0002 rows.
+    max_duration_seconds: Mapped[int | None] = mapped_column(Integer, nullable=True)
     initial_prompt: Mapped[str | None] = mapped_column(Text, nullable=True)
     transcript: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     recording_s3_key: Mapped[str | None] = mapped_column(Text, nullable=True)

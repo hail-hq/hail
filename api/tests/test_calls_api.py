@@ -21,6 +21,7 @@ from hailhq.core.models import (
     Call,
     CallEvent,
 )
+from hailhq.core.pool import CALL_META_FROM_POOL
 from .conftest import insert_org_and_key
 
 # --------------------------------------------------------------------------- #
@@ -73,18 +74,24 @@ async def test_post_calls_rejects_prompt_and_llm_together(
     assert "mutually exclusive" in resp.text
 
 
-async def test_post_calls_no_active_number_returns_422(
+async def test_post_calls_no_number_and_empty_pool_returns_503(
     client: httpx.AsyncClient,
     org_and_key: tuple[str, ApiKey, str],
 ) -> None:
+    """When the org has no number and the shared pool is empty, expect 503.
+
+    Old behavior was 422 — the resolver now falls back to a shared pool
+    before giving up, so the failure mode is "pool exhausted" rather than
+    "you have no number".
+    """
     _, _, plain = org_and_key
     resp = await client.post(
         "/calls",
         json={"to": "+14155559999", "system_prompt": "hi"},
         headers={"Authorization": f"Bearer {plain}"},
     )
-    assert resp.status_code == 422
-    assert "no active phone number" in resp.json()["detail"]
+    assert resp.status_code == 503
+    assert "pool exhausted" in resp.json()["detail"]
 
 
 async def test_post_calls_happy_path_201(
@@ -178,6 +185,179 @@ async def test_post_calls_livekit_failure_marks_call_failed(
         "AD_test_dispatch", "hail-test-room"
     )
     livekit_mock.delete_room.assert_awaited_once_with("hail-test-room")
+
+
+# --------------------------------------------------------------------------- #
+# Pool fallback
+# --------------------------------------------------------------------------- #
+
+
+async def test_post_calls_falls_back_to_pool_when_org_has_no_number(
+    client: httpx.AsyncClient,
+    async_session: AsyncSession,
+    org_and_key: tuple[str, ApiKey, str],
+    livekit_mock: AsyncMock,
+    add_phone_number,
+) -> None:
+    """Org without a number gets a pool number; reservation is bound to the call."""
+    _, _, plain = org_and_key
+    pool_pn = await add_phone_number(
+        async_session,
+        organization_id=None,
+        e164="+14155550100",
+        is_pool=True,
+    )
+
+    resp = await client.post(
+        "/calls",
+        json={"to": "+14155559999", "system_prompt": "hi"},
+        headers={"Authorization": f"Bearer {plain}"},
+    )
+
+    assert resp.status_code == 201
+    body = resp.json()
+    assert body["from_e164"] == pool_pn.e164
+
+    # Call row metadata stamps the pool origin.
+    call = (await async_session.execute(select(Call))).scalar_one()
+    assert call.from_number_id == pool_pn.id
+    assert call.metadata_[CALL_META_FROM_POOL] is True
+    assert call.max_duration_seconds is not None  # snapshotted from settings
+
+    # Pool row's reservation now points at this call.
+    await async_session.refresh(pool_pn)
+    assert pool_pn.reserved_call_id == call.id
+
+
+async def test_post_calls_skips_pool_when_org_has_active_number(
+    client: httpx.AsyncClient,
+    async_session: AsyncSession,
+    org_and_key: tuple[str, ApiKey, str],
+    livekit_mock: AsyncMock,
+    add_phone_number,
+) -> None:
+    """An org-owned active number wins over the pool; pool reservation untouched."""
+    org_id, _, plain = org_and_key
+    org_pn = await add_phone_number(async_session, org_id, e164="+14155551234")
+    pool_pn = await add_phone_number(
+        async_session,
+        organization_id=None,
+        e164="+14155550100",
+        is_pool=True,
+    )
+
+    resp = await client.post(
+        "/calls",
+        json={"to": "+14155559999", "system_prompt": "hi"},
+        headers={"Authorization": f"Bearer {plain}"},
+    )
+
+    assert resp.status_code == 201
+    body = resp.json()
+    assert body["from_e164"] == org_pn.e164
+    assert CALL_META_FROM_POOL not in (
+        (await async_session.execute(select(Call))).scalar_one().metadata_
+    )
+
+    await async_session.refresh(pool_pn)
+    assert pool_pn.reserved_call_id is None
+
+
+async def test_post_calls_pool_exhausted_returns_503(
+    client: httpx.AsyncClient,
+    async_session: AsyncSession,
+    org_and_key: tuple[str, ApiKey, str],
+    livekit_mock: AsyncMock,
+    add_phone_number,
+) -> None:
+    """When the only pool number is already reserved, the second caller gets 503."""
+    _, _, plain = org_and_key
+    pool_pn = await add_phone_number(
+        async_session,
+        organization_id=None,
+        e164="+14155550100",
+        is_pool=True,
+    )
+
+    # Pre-reserve the only pool row by inserting a placeholder Call.
+    first_resp = await client.post(
+        "/calls",
+        json={"to": "+14155559998", "system_prompt": "hi"},
+        headers={"Authorization": f"Bearer {plain}"},
+    )
+    assert first_resp.status_code == 201
+    await async_session.refresh(pool_pn)
+    assert pool_pn.reserved_call_id is not None
+
+    # Second caller — same org, no number, pool empty → 503.
+    resp = await client.post(
+        "/calls",
+        json={"to": "+14155559997", "system_prompt": "hi"},
+        headers={"Authorization": f"Bearer {plain}"},
+    )
+    assert resp.status_code == 503
+    assert "pool exhausted" in resp.json()["detail"]
+
+
+async def test_post_calls_explicit_from_cannot_address_pool(
+    client: httpx.AsyncClient,
+    async_session: AsyncSession,
+    org_and_key: tuple[str, ApiKey, str],
+    livekit_mock: AsyncMock,
+    add_phone_number,
+) -> None:
+    """A caller cannot use `from` to grab a pool number — it's not theirs."""
+    _, _, plain = org_and_key
+    pool_pn = await add_phone_number(
+        async_session,
+        organization_id=None,
+        e164="+14155550100",
+        is_pool=True,
+    )
+
+    resp = await client.post(
+        "/calls",
+        json={
+            "to": "+14155559999",
+            "from": pool_pn.e164,
+            "system_prompt": "hi",
+        },
+        headers={"Authorization": f"Bearer {plain}"},
+    )
+    assert resp.status_code == 422
+    assert "not registered to this organization" in resp.json()["detail"]
+
+
+async def test_post_calls_pool_release_on_dispatch_failure(
+    client: httpx.AsyncClient,
+    async_session: AsyncSession,
+    org_and_key: tuple[str, ApiKey, str],
+    livekit_mock: AsyncMock,
+    add_phone_number,
+) -> None:
+    """A failed dispatch must release the pool reservation it claimed."""
+    _, _, plain = org_and_key
+    pool_pn = await add_phone_number(
+        async_session,
+        organization_id=None,
+        e164="+14155550100",
+        is_pool=True,
+    )
+    livekit_mock.create_sip_participant.side_effect = RuntimeError("trunk down")
+
+    resp = await client.post(
+        "/calls",
+        json={"to": "+14155559999", "system_prompt": "hi"},
+        headers={"Authorization": f"Bearer {plain}"},
+    )
+    assert resp.status_code == 502
+
+    # Call exists and is failed.
+    call = (await async_session.execute(select(Call))).scalar_one()
+    assert call.status == "failed"
+    # And the pool row is back to available — release fired in the failure path.
+    await async_session.refresh(pool_pn)
+    assert pool_pn.reserved_call_id is None
 
 
 async def test_post_calls_uses_explicit_from_e164(

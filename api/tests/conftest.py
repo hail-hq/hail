@@ -159,14 +159,19 @@ def reset_deps_caches():
 
 @pytest.fixture()
 def add_phone_number():
-    """Factory fixture: ``await add_phone_number(session, org_id, e164=...)``."""
+    """Factory fixture: ``await add_phone_number(session, org_id, e164=...)``.
+
+    Pass ``organization_id=None`` together with ``is_pool=True`` to create a
+    shared-pool number (the CHECK constraint requires both or neither).
+    """
 
     async def _add(
         session: AsyncSession,
-        organization_id: uuid.UUID,
+        organization_id: uuid.UUID | None,
         e164: str = "+14155551234",
         state: str = "active",
         provider_resource_id: str = "PN_test",
+        is_pool: bool = False,
     ) -> PhoneNumber:
         pn = PhoneNumber(
             organization_id=organization_id,
@@ -175,6 +180,7 @@ def add_phone_number():
             number_type="local",
             provider_resource_id=provider_resource_id,
             provisioning_state=state,
+            is_pool=is_pool,
         )
         session.add(pn)
         await session.commit()

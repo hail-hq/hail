@@ -22,13 +22,17 @@ from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from hailhq.core.models import Call, CallEvent, PhoneNumber, UsageEvent
+from hailhq.core.pool import CALL_META_FROM_POOL
 from hailhq.voicebot.agent import (
+    SOFT_CAP_ANNOUNCEMENT,
+    SOFT_CAP_END_REASON,
     attach_event_handlers,
     on_call_end,
     parse_metadata,
+    soft_cap_announce_and_hangup,
 )
 
-from ._fakes import FakeLLM
+from ._fakes import FakeAnnouncingSession, FakeJobContext, FakeLLM
 
 
 def test_metadata_parser_handles_missing_optional_fields() -> None:
@@ -253,3 +257,90 @@ async def test_on_call_end_no_usage_event_for_zero_duration(
         .all()
     )
     assert rows == []
+
+
+async def test_on_call_end_releases_pool_reservation(
+    async_session: AsyncSession,
+) -> None:
+    """Calls that used a pool number release their reservation on completion."""
+    # Build a pool number + a Call that holds its reservation.
+    pool_pn = PhoneNumber(
+        organization_id=None,
+        e164="+14155550100",
+        country_code="US",
+        number_type="local",
+        provider_resource_id="PN_pool",
+        provisioning_state="active",
+        is_pool=True,
+    )
+    async_session.add(pool_pn)
+    await async_session.flush()
+
+    org_id = UUID("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")
+    call = Call(
+        organization_id=org_id,
+        from_number_id=pool_pn.id,
+        from_e164=pool_pn.e164,
+        to_e164="+14155559999",
+        voice_config={"stt": "deepgram", "tts": "elevenlabs"},
+        status="dialing",
+        metadata_={CALL_META_FROM_POOL: True},
+    )
+    async_session.add(call)
+    await async_session.flush()
+    pool_pn.reserved_call_id = call.id
+    await async_session.commit()
+
+    await on_call_end(call.id, room_name=f"hail-{call.id}")
+
+    await async_session.refresh(pool_pn)
+    assert pool_pn.reserved_call_id is None  # released by finalize_call
+
+    refreshed_call = (
+        await async_session.execute(select(Call).where(Call.id == call.id))
+    ).scalar_one()
+    await async_session.refresh(refreshed_call)
+    assert refreshed_call.status == "completed"
+
+
+# --------------------------------------------------------------------------- #
+# Soft-cap behavior — voice call duration limit
+# --------------------------------------------------------------------------- #
+
+
+async def test_soft_cap_speaks_announcement_then_shuts_down() -> None:
+    """After the delay, agent says the cap line (uninterruptible), waits
+    for playout, then calls ctx.shutdown(SOFT_CAP_END_REASON)."""
+    ctx = FakeJobContext()
+    session = FakeAnnouncingSession()
+    call_id = UUID("11111111-2222-3333-4444-555555555555")
+
+    await soft_cap_announce_and_hangup(ctx, session, call_id, delay_seconds=0)  # type: ignore[arg-type]
+
+    assert len(session.say_calls) == 1
+    text, allow_interruptions = session.say_calls[0]
+    assert text == SOFT_CAP_ANNOUNCEMENT
+    # Uninterruptible — the caller must actually hear the goodbye before
+    # the line drops.
+    assert allow_interruptions is False
+    assert session.last_handle is not None
+    assert session.last_handle.played_out is True
+    assert ctx.shutdown_calls == [SOFT_CAP_END_REASON]
+
+
+async def test_soft_cap_cancelled_before_firing_does_not_speak() -> None:
+    """If the call ends naturally before the cap, the task is cancelled
+    and no announcement is spoken."""
+    ctx = FakeJobContext()
+    session = FakeAnnouncingSession()
+    call_id = UUID("11111111-2222-3333-4444-555555555556")
+
+    task = asyncio.create_task(
+        soft_cap_announce_and_hangup(ctx, session, call_id, delay_seconds=60)  # type: ignore[arg-type]
+    )
+    await asyncio.sleep(0)  # let the task reach its sleep
+    task.cancel()
+    await asyncio.gather(task, return_exceptions=True)
+
+    assert session.say_calls == []
+    assert ctx.shutdown_calls == []

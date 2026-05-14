@@ -64,6 +64,20 @@ class Settings(BaseSettings):
     hail_api_key: str = ""
     hail_api_url: str = "http://localhost:8080"
 
+    # Soft cap on voice-call duration. When a call reaches this many seconds
+    # the voicebot says a polite "we've reached the time limit" line, waits
+    # for playout, then triggers ctx.shutdown(). Set to 0 to disable the cap.
+    # Worst-case overrun ≈ this × per-minute rate, bounding abuse from a
+    # single long call.
+    hail_voice_max_duration_seconds: int = 300
+
+    # Pool-number sweeper backstop. Force-release a pool reservation when
+    # now() > calls.requested_at + max_duration_seconds + this grace, even
+    # if neither the API nor the voicebot called release_pool_reservation.
+    # Set wide enough to absorb LiveKit/Twilio teardown + clock skew; small
+    # enough that a stuck reservation doesn't starve the pool for long.
+    hail_pool_release_grace_seconds: int = 120
+
     # Base URL of the hail-website deployment. Used by voicebot / api to
     # trigger internal endpoints (e.g., the usage-events rater). Leave
     # empty in self-host — the corresponding internal calls become no-ops.

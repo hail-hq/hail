@@ -25,6 +25,11 @@ from hailhq.api.idempotency import IdempotencyContext, idempotency_for_post_call
 from hailhq.core.config import settings
 from hailhq.core.livekit import LiveKitClient
 from hailhq.core.models import AuditLog, Call, CallEvent, PhoneNumber
+from hailhq.core.pool import (
+    CALL_META_FROM_POOL,
+    claim_pool_number,
+    release_pool_reservation,
+)
 from hailhq.core.schemas import (
     CallCreate,
     CallListResponse,
@@ -196,7 +201,10 @@ async def create_call(
                 detail="insufficient credits; top up at https://hail.so/console/billing",
             )
 
-    # 1. Resolve the from-number for this org.
+    # 1. Resolve the from-number: explicit `from` → org-owned active → shared
+    #    pool. Pool numbers are never explicitly addressable; naming one would
+    #    let a caller grab a number that isn't theirs.
+    pool_number: PhoneNumber | None = None
     if body.from_ is not None:
         stmt = select(PhoneNumber).where(
             PhoneNumber.organization_id == principal.organization_id,
@@ -220,14 +228,22 @@ async def create_call(
         )
         from_number = (await db.execute(stmt)).scalar_one_or_none()
         if from_number is None:
-            raise HTTPException(
-                status_code=http_status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail="no active phone number on this organization; provision one or pass `from`",
-            )
+            pool_number = await claim_pool_number(db)
+            if pool_number is None:
+                raise HTTPException(
+                    status_code=http_status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail="shared call line pool exhausted; try again shortly",
+                )
+            from_number = pool_number
 
     voice_config = body.voice_config.model_dump()
 
-    # 2. Insert the Call row and commit (separate from audit + LiveKit).
+    # 2. Insert the Call row. Pool path needs flush-then-bind: see
+    #    claim_pool_number docstring for the FK dance.
+    call_metadata = dict(body.metadata)
+    if pool_number is not None:
+        call_metadata[CALL_META_FROM_POOL] = True
+
     call = Call(
         organization_id=principal.organization_id,
         conversation_id=body.conversation_id,
@@ -238,9 +254,14 @@ async def create_call(
         status="queued",
         voice_config=voice_config,
         initial_prompt=body.system_prompt,
-        metadata_=body.metadata,
+        max_duration_seconds=settings.hail_voice_max_duration_seconds,
+        metadata_=call_metadata,
     )
     db.add(call)
+    if pool_number is not None:
+        await db.flush()  # materialize call.id so the FK target exists.
+        pool_number.reserved_call_id = call.id
+
     await db.commit()
     await db.refresh(call)
 
@@ -310,6 +331,8 @@ async def create_call(
                 },
             )
         )
+        # No-op when this call didn't hold a pool reservation.
+        await release_pool_reservation(db, call_id=call.id)
         await db.commit()
         if idem is not None:
             # Cache failures too — Stripe-style retries replay rather than

@@ -98,4 +98,58 @@ class _FakeLLMStream(LLMStream):
         )
 
 
-__all__ = ["FakeLLM"]
+class FakeSpeechHandle:
+    """Stand-in for livekit.agents.voice.SpeechHandle.
+
+    Verified shape against
+    .venv/lib/python3.11/site-packages/livekit/agents/voice/speech_handle.py:
+    the surface we depend on is just ``await handle.wait_for_playout()``.
+    """
+
+    def __init__(self) -> None:
+        self.played_out = False
+
+    async def wait_for_playout(self) -> None:
+        self.played_out = True
+
+
+class FakeAnnouncingSession:
+    """Stand-in for AgentSession that records ``.say()`` calls.
+
+    Verified shape against
+    .venv/lib/python3.11/site-packages/livekit/agents/voice/agent_session.py:
+    the surface we depend on is just ``session.say(text, *, allow_interruptions)``
+    returning a handle with ``wait_for_playout()``.
+    """
+
+    def __init__(self) -> None:
+        self.say_calls: list[tuple[str, bool]] = []
+        self.last_handle: FakeSpeechHandle | None = None
+
+    def say(self, text: str, *, allow_interruptions: bool) -> FakeSpeechHandle:
+        self.say_calls.append((text, allow_interruptions))
+        handle = FakeSpeechHandle()
+        self.last_handle = handle
+        return handle
+
+
+class FakeJobContext:
+    """Stand-in for livekit.agents.JobContext.
+
+    Verified shape against .venv/lib/python3.11/site-packages/livekit/agents/job.py:
+    we only need ``ctx.shutdown(reason=…)``.
+    """
+
+    def __init__(self) -> None:
+        self.shutdown_calls: list[str] = []
+
+    def shutdown(self, reason: str = "") -> None:
+        self.shutdown_calls.append(reason)
+
+
+__all__ = [
+    "FakeAnnouncingSession",
+    "FakeJobContext",
+    "FakeLLM",
+    "FakeSpeechHandle",
+]

@@ -128,12 +128,26 @@ echo "HAIL_API_KEY=$HAIL_API_KEY" >> hail/.env
 
 # 2) Add a phone number bound to the self-host sentinel org id.
 export TWILIO_E164='+1XXXXXXXXXX' TWILIO_PN_SID='PNxxxxxxxxxxxxxxxx'
-docker compose exec -T postgres psql -U hail -d hail -c "INSERT INTO phone_numbers (organization_id, e164, country_code, number_type, capabilities, provider, provider_resource_id, provisioning_state, acquired_at) VALUES ('self-hosted', '${TWILIO_E164}', 'US', 'local', ARRAY['voice','sms'], 'twilio', '${TWILIO_PN_SID}', 'active', now());"
+docker compose exec postgres psql -U hail -d hail -c "INSERT INTO phone_numbers (organization_id, e164, country_code, number_type, capabilities, provider, provider_resource_id, provisioning_state, acquired_at) VALUES ('self-hosted', '${TWILIO_E164}', 'US', 'local', ARRAY['voice','sms'], 'twilio', '${TWILIO_PN_SID}', 'active', now());"
 ```
 
 Save the value of `HAIL_API_KEY` — there's no recovery path. Then `export HAIL_API_KEY=…` in the shell that runs `hail`, or pass it via `--api-key`.
 
 > **`hail login` is managed-cloud only.** It runs the auth backend's device flow against `hail-website` and writes the resulting `hl_live_*` key to `~/.hail/credentials.json`. In self-host there's no website to authorize against — set `HAIL_API_KEY` directly and you're done.
+
+#### Phone number pool
+
+Pool numbers are unowned `phone_numbers` rows (`is_pool=TRUE`, `organization_id IS NULL`) that any org without its own active number falls back to on outbound calls. They're claimed atomically (`SELECT … FOR UPDATE SKIP LOCKED`, randomized order to spread carrier wear), bound to one call at a time via `reserved_call_id`, and released on call end. Implementation: `core/hailhq/core/pool.py`; sweeper backstop window is `HAIL_POOL_RELEASE_GRACE_SECONDS`.
+
+Add a Twilio number to the pool with `organization_id` NULL and `is_pool=TRUE` (the CHECK constraint enforces the pairing):
+
+```bash
+psql "$DATABASE_URL" -c "INSERT INTO phone_numbers (organization_id, e164, country_code, number_type, capabilities, provider, provider_resource_id, provisioning_state, is_pool, acquired_at) VALUES (NULL, '+1XXXXXXXXXX', 'US', 'local', ARRAY['voice','sms'], 'twilio', 'PNxxxxxxxxxxxxxxxx', 'active', TRUE, now());"
+```
+
+The number must be attached to the same Twilio SIP trunk you wired in [Twilio setup](setup/twilio.md) — there's no per-number trunk routing. To grow the pool, repeat the INSERT with a different `e164` / `PN_SID`. To quarantine a misbehaving pool number without deleting it, `UPDATE phone_numbers SET provisioning_state='failed' WHERE e164=...` — the claim query skips non-`active` rows.
+
+Callers can't address a pool number explicitly with `POST /calls`'s `from` field; it's shared, so a caller naming one would cross tenants. The fallback only fires when an org has zero active numbers of its own.
 
 #### Managed cloud
 
