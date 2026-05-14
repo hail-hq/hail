@@ -438,6 +438,44 @@
   .copy-chip-text {
     pointer-events: none;
   }
+
+  .model-id-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+  }
+
+  .compare-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    margin-top: 4px;
+    margin-left: 4px;
+    padding: 2px 7px 2px 6px;
+    border: 1px dashed rgba(0, 0, 0, 0.25);
+    background: transparent;
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--color-mute);
+    text-decoration: none;
+    line-height: 1.4;
+    transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
+  }
+  .compare-link:hover {
+    background: var(--color-accent);
+    border-color: var(--color-accent);
+    border-style: solid;
+    color: var(--color-bg);
+  }
+  .compare-link svg {
+    opacity: 0.7;
+  }
+  .compare-link:hover svg {
+    opacity: 1;
+  }
   .wire-table .stale-pill {
     display: inline-block;
     background: var(--color-accent);

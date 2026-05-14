@@ -3,7 +3,7 @@
 import type { ColumnDef } from '@tanstack/react-table';
 import type { LLMRow } from '@/lib/types';
 import { CategorySection } from '../category-section';
-import { CopyableCode } from '../copyable-code';
+import { ModelIdCell } from '../model-id-cell';
 import { VerifiedCell } from '../verified-cell';
 
 const columns: ColumnDef<LLMRow>[] = [
@@ -15,7 +15,7 @@ const columns: ColumnDef<LLMRow>[] = [
       <div>
         <div style={{ fontWeight: 700 }}>{row.original.provider}</div>
         <div style={{ fontSize: 13, marginTop: 2 }}>{row.original.display_name}</div>
-        <CopyableCode value={row.original.model_id} />
+        <ModelIdCell modelId={row.original.model_id} />
       </div>
     ),
   },
