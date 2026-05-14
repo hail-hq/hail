@@ -106,7 +106,7 @@ export default async function ComparePage({ searchParams }: ComparePageProps) {
             ← all costs
           </Link>
           {totalSelected > 0 && (
-            <a href={url('/costs/compare')} className="btn btn-outline">
+            <a href={url('/costs/compare')} className="btn btn-outline" rel="nofollow">
               clear
             </a>
           )}
@@ -289,7 +289,12 @@ function ModelGroup({
       </div>
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
         {models.map((m) => (
-          <a key={m.model_id} className="add-pill" href={buildAddUrl(currentIds, m.model_id)}>
+          <a
+            key={m.model_id}
+            className="add-pill"
+            href={buildAddUrl(currentIds, m.model_id)}
+            rel="nofollow"
+          >
             <span className="add-pill-plus">+</span>
             <span>
               <span className="add-pill-prov">{m.provider}</span> {m.display_name}

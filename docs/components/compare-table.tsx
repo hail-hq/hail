@@ -40,6 +40,7 @@ function CompareGrid({
                   <a
                     href={compareUrlWithout(currentIds, m.model_id)}
                     className="compare-remove"
+                    rel="nofollow"
                     title={`Remove ${m.display_name}`}
                     aria-label={`Remove ${m.display_name} from comparison`}
                   >
