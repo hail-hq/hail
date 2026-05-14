@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://hail.so/costs/schema/tts.json",
+  "$id": "https://hail.so/docs/costs/schema/tts.json",
   "title": "TTS Costs",
   "description": "Cost and capability data for text-to-speech providers.",
   "type": "object",
