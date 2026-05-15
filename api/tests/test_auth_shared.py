@@ -75,7 +75,6 @@ async def test_shared_key_returns_principal_with_null_api_key_id(
     )
     assert resp.status_code == 200
     body = resp.json()
-    # HAIL_API_KEY auth has no row in api_keys — api_key_id is null.
     assert body["api_key_id"] is None
     assert body["organization_id"] == str(SELF_HOSTED_ORG_ID)
 

@@ -33,21 +33,22 @@ _SCHEME_ALIASES = (
     "postgres://",  # Heroku/Neon/Supabase emit this; SQLAlchemy doesn't accept it as-is
 )
 
-# libpq query-string params that asyncpg's ``connect()`` rejects outright.
-# Managed Postgres URLs (Neon, Supabase, Heroku) commonly carry these.
-_LIBPQ_ONLY_QUERY_PARAMS = frozenset(
-    {
-        "channel_binding",
-        "gssencmode",
-        "sslcert",
-        "sslkey",
-        "sslrootcert",
-        "sslcrl",
-        "options",
-        "application_name",
-        "krbsrvname",
-    }
-)
+# libpq query-string params asyncpg's ``connect()`` rejects, mapped to their
+# asyncpg equivalent (``None`` ⇒ drop). Managed Postgres URLs (Neon, Supabase,
+# Heroku) commonly carry these. ``sslmode`` accepts the same string values
+# ('disable', 'prefer', 'require', ...) under asyncpg's ``ssl`` kwarg.
+_LIBPQ_TO_ASYNCPG: dict[str, str | None] = {
+    "sslmode": "ssl",
+    "channel_binding": None,
+    "gssencmode": None,
+    "sslcert": None,
+    "sslkey": None,
+    "sslrootcert": None,
+    "sslcrl": None,
+    "options": None,
+    "application_name": None,
+    "krbsrvname": None,
+}
 
 
 def _rewrite_scheme(url: str, target_prefix: str) -> str:
@@ -60,19 +61,15 @@ def _rewrite_scheme(url: str, target_prefix: str) -> str:
 
 def _sanitize_asyncpg_query(query: str) -> str:
     """Translate ``sslmode`` to ``ssl`` and drop other libpq-only params asyncpg rejects."""
-    if not query:
-        return query
-    sanitized: list[tuple[str, str]] = []
+    out: list[tuple[str, str]] = []
     for key, value in parse_qsl(query, keep_blank_values=True):
-        if key == "sslmode":
-            # asyncpg accepts the same string values ('disable', 'prefer', 'require', ...)
-            # under the ``ssl`` kwarg.
-            sanitized.append(("ssl", value))
-        elif key in _LIBPQ_ONLY_QUERY_PARAMS:
-            continue
+        if key in _LIBPQ_TO_ASYNCPG:
+            mapped = _LIBPQ_TO_ASYNCPG[key]
+            if mapped is not None:
+                out.append((mapped, value))
         else:
-            sanitized.append((key, value))
-    return urlencode(sanitized)
+            out.append((key, value))
+    return urlencode(out)
 
 
 def to_async_url(url: str) -> str:
