@@ -143,7 +143,9 @@ class ApiKey(Base):
 
     __tablename__ = "api_keys"
 
-    id: Mapped[str] = mapped_column(Text, primary_key=True)
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
+    )
     name: Mapped[str | None] = mapped_column(Text, nullable=True)
     start: Mapped[str | None] = mapped_column(Text, nullable=True)
     reference_id: Mapped[str] = mapped_column(Text, nullable=False, index=True)
@@ -347,9 +349,12 @@ class AuditLog(Base):
     organization_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), nullable=False
     )
-    # The auth backend's apikey.id (TEXT). No FK — that table is owned by the
-    # website's auth backend migrations, not by hail/api.
-    api_key_id: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # ``api_keys.id`` of the caller, or NULL for self-host ``HAIL_API_KEY``
+    # requests (no row in ``api_keys``). No FK; ``api_keys`` is owned by the
+    # website's auth backend.
+    api_key_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), nullable=True
+    )
     action: Mapped[str] = mapped_column(Text, nullable=False)
     resource_type: Mapped[str | None] = mapped_column(Text, nullable=True)
     resource_id: Mapped[uuid.UUID | None] = mapped_column(

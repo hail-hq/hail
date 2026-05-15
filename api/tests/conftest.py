@@ -84,7 +84,7 @@ async def insert_org_and_key(
 
     plain, hashed = mint_test_key()
     api_key = ApiKey(
-        id=f"apikey_test_{uuid.uuid4().hex[:12]}",
+        id=uuid.uuid4(),
         name="test-key",
         start=plain[:14],
         reference_id=auth_user_id,

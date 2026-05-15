@@ -50,9 +50,11 @@ def _build_app(session: AsyncSession) -> FastAPI:
     @app.get("/whoami")
     async def whoami(
         principal: Principal = Depends(get_current_principal),
-    ) -> dict[str, str]:
+    ) -> dict[str, str | None]:
         return {
-            "api_key_id": principal.api_key_id,
+            "api_key_id": (
+                str(principal.api_key_id) if principal.api_key_id is not None else None
+            ),
             "organization_id": str(principal.organization_id),
         }
 
@@ -100,7 +102,7 @@ async def test_valid_key_returns_principal(
     )
     assert resp.status_code == 200
     body = resp.json()
-    assert body["api_key_id"] == api_key.id
+    assert body["api_key_id"] == str(api_key.id)
     assert body["organization_id"] == str(org_id)
 
 
@@ -193,7 +195,7 @@ async def test_unprovisioned_user_returns_403(
     reference_id = str(uuid.uuid4())
     now = datetime.now(timezone.utc)
     api_key = ApiKey(
-        id="apikey_test_orphan",
+        id=uuid.uuid4(),
         name="orphan",
         start=plain[:14],
         reference_id=reference_id,

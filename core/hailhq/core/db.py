@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from contextlib import asynccontextmanager
 from typing import AsyncIterator
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
@@ -32,6 +33,22 @@ _SCHEME_ALIASES = (
     "postgres://",  # Heroku/Neon/Supabase emit this; SQLAlchemy doesn't accept it as-is
 )
 
+# libpq query-string params that asyncpg's ``connect()`` rejects outright.
+# Managed Postgres URLs (Neon, Supabase, Heroku) commonly carry these.
+_LIBPQ_ONLY_QUERY_PARAMS = frozenset(
+    {
+        "channel_binding",
+        "gssencmode",
+        "sslcert",
+        "sslkey",
+        "sslrootcert",
+        "sslcrl",
+        "options",
+        "application_name",
+        "krbsrvname",
+    }
+)
+
 
 def _rewrite_scheme(url: str, target_prefix: str) -> str:
     """Strip whichever Postgres scheme alias ``url`` starts with and prepend ``target_prefix``."""
@@ -41,9 +58,35 @@ def _rewrite_scheme(url: str, target_prefix: str) -> str:
     return url
 
 
+def _sanitize_asyncpg_query(query: str) -> str:
+    """Translate ``sslmode`` to ``ssl`` and drop other libpq-only params asyncpg rejects."""
+    if not query:
+        return query
+    sanitized: list[tuple[str, str]] = []
+    for key, value in parse_qsl(query, keep_blank_values=True):
+        if key == "sslmode":
+            # asyncpg accepts the same string values ('disable', 'prefer', 'require', ...)
+            # under the ``ssl`` kwarg.
+            sanitized.append(("ssl", value))
+        elif key in _LIBPQ_ONLY_QUERY_PARAMS:
+            continue
+        else:
+            sanitized.append((key, value))
+    return urlencode(sanitized)
+
+
 def to_async_url(url: str) -> str:
-    """Coerce a ``DATABASE_URL`` onto the ``asyncpg`` driver used at runtime."""
-    return _rewrite_scheme(url, "postgresql+asyncpg://")
+    """Coerce a ``DATABASE_URL`` onto the ``asyncpg`` driver used at runtime.
+
+    Also strips libpq-only query params that asyncpg's ``connect()`` rejects —
+    notably ``sslmode`` (translated to ``ssl``) and ``channel_binding`` — so
+    managed-Postgres URLs from Neon, Supabase, Heroku, etc. work unchanged.
+    """
+    rewritten = _rewrite_scheme(url, "postgresql+asyncpg://")
+    parts = urlsplit(rewritten)
+    if not parts.query:
+        return rewritten
+    return urlunsplit(parts._replace(query=_sanitize_asyncpg_query(parts.query)))
 
 
 def to_sync_url(url: str) -> str:

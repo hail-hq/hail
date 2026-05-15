@@ -20,7 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from hailhq.core.billing import has_funds
 from hailhq.core.db import get_session, session_scope
-from hailhq.api.deps import SHARED_PRINCIPAL_KEY_ID, Principal, get_current_principal
+from hailhq.api.deps import Principal, get_current_principal
 from hailhq.api.idempotency import IdempotencyContext, idempotency_for_post_calls
 from hailhq.core.config import settings
 from hailhq.core.livekit import LiveKitClient
@@ -92,7 +92,7 @@ async def close_livekit_singleton() -> None:
 
 async def _write_audit_log(
     organization_id: UUID,
-    api_key_id: str,
+    api_key_id: UUID | None,
     action: str,
     resource_type: str,
     resource_id: UUID,
@@ -193,8 +193,8 @@ async def create_call(
         return CallResponse.model_validate(cached)
 
     # Cloud-only balance gate; shared-key auth lands on the unbilled
-    # "Self-hosted" org and skips it.
-    if principal.api_key_id != SHARED_PRINCIPAL_KEY_ID:
+    # "Self-hosted" org and skips it (``api_key_id is None`` ⇒ HAIL_API_KEY path).
+    if principal.api_key_id is not None:
         if not await has_funds(db, principal.organization_id):
             raise HTTPException(
                 status_code=http_status.HTTP_402_PAYMENT_REQUIRED,

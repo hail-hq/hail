@@ -30,7 +30,6 @@ from hailhq.core.models import ApiKey, OrganizationMember
 # no-op UPDATE per request.
 _LAST_USED_THROTTLE = timedelta(seconds=60)
 
-SHARED_PRINCIPAL_KEY_ID = "shared"
 # Nil UUID — sentinel organization for every shared-key (HAIL_API_KEY) request.
 # No row in ``organizations``; the balance gate is short-circuited for it.
 SELF_HOSTED_ORG_ID = uuid.UUID(int=0)
@@ -55,9 +54,13 @@ def reset_caches() -> None:
 
 
 class Principal(BaseModel):
-    """The authenticated caller, exposed to route handlers."""
+    """The authenticated caller, exposed to route handlers.
 
-    api_key_id: str
+    ``api_key_id`` is ``None`` on self-host ``HAIL_API_KEY`` requests, which
+    don't correspond to any row in ``api_keys``.
+    """
+
+    api_key_id: uuid.UUID | None
     organization_id: uuid.UUID
     scopes: list[str]
 
@@ -115,7 +118,7 @@ async def _apikey_table_exists(db: AsyncSession) -> bool:
     return _caches.apikey_table_present
 
 
-async def _stamp_last_used(api_key_id: str, ts: datetime) -> None:
+async def _stamp_last_used(api_key_id: uuid.UUID, ts: datetime) -> None:
     """Update ``lastRequest`` and bump ``requestCount`` in a fresh session.
 
     ``requestCount`` is nullable in the apikey schema; treat NULL as 0 so the
@@ -197,7 +200,7 @@ async def get_current_principal(
 
     if _check_shared_key(token):
         return Principal(
-            api_key_id=SHARED_PRINCIPAL_KEY_ID,
+            api_key_id=None,
             organization_id=SELF_HOSTED_ORG_ID,
             scopes=["*"],
         )

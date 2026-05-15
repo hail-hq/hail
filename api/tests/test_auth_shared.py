@@ -1,7 +1,8 @@
 """Tests for the shared-key auth path (self-host mode).
 
 Covers:
-* a matching ``HAIL_API_KEY`` resolves to the ``self-hosted`` sentinel org;
+* a matching ``HAIL_API_KEY`` yields a Principal with ``api_key_id=None`` and
+  the self-hosted sentinel org;
 * a non-matching bearer is rejected with 401;
 * with no shared key configured and no ``apikey`` table, every request is 401
   (this is the "broken self-host" case — surfaced loudly).
@@ -19,7 +20,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from hailhq.api import deps as deps_module
 from hailhq.api.deps import (
     SELF_HOSTED_ORG_ID,
-    SHARED_PRINCIPAL_KEY_ID,
     Principal,
     get_current_principal,
 )
@@ -35,9 +35,11 @@ def _build_app(session: AsyncSession) -> FastAPI:
     @app.get("/whoami")
     async def whoami(
         principal: Principal = Depends(get_current_principal),
-    ) -> dict[str, str]:
+    ) -> dict[str, str | None]:
         return {
-            "api_key_id": principal.api_key_id,
+            "api_key_id": (
+                str(principal.api_key_id) if principal.api_key_id is not None else None
+            ),
             "organization_id": str(principal.organization_id),
         }
 
@@ -63,7 +65,7 @@ def shared_key_set(monkeypatch: pytest.MonkeyPatch) -> str:
     return SHARED_KEY
 
 
-async def test_shared_key_returns_sentinel_principal(
+async def test_shared_key_returns_principal_with_null_api_key_id(
     client: httpx.AsyncClient,
     shared_key_set: str,
 ) -> None:
@@ -73,7 +75,8 @@ async def test_shared_key_returns_sentinel_principal(
     )
     assert resp.status_code == 200
     body = resp.json()
-    assert body["api_key_id"] == SHARED_PRINCIPAL_KEY_ID
+    # HAIL_API_KEY auth has no row in api_keys — api_key_id is null.
+    assert body["api_key_id"] is None
     assert body["organization_id"] == str(SELF_HOSTED_ORG_ID)
 
 
