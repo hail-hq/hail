@@ -24,10 +24,11 @@ from __future__ import annotations
 
 import uuid
 
-from sqlalchemy import func, select, text, update
+from sqlalchemy import bindparam, func, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from hailhq.core.models import PhoneNumber
+from hailhq.core.schemas import TERMINAL_CALL_STATUSES
 
 # Metadata key stamped on Call.metadata_ when the call drew from the shared
 # pool. Read by tests, the voicebot, and any external consumer that needs
@@ -134,36 +135,38 @@ async def sweep_pool_reservations(
     so the caller can log them. Force-releases should be rare; surfacing
     them is the signal for operational investigation.
     """
+    stmt = text("""
+        UPDATE phone_numbers pn
+           SET reserved_call_id = NULL
+         WHERE pn.is_pool = TRUE
+           AND pn.reserved_call_id IS NOT NULL
+           AND (
+             EXISTS (
+               SELECT 1 FROM calls c
+                WHERE c.id = pn.reserved_call_id
+                  AND c.status IN :terminal_statuses
+             )
+             OR EXISTS (
+               SELECT 1 FROM calls c
+                WHERE c.id = pn.reserved_call_id
+                  AND c.max_duration_seconds IS NOT NULL
+                  AND now() > c.requested_at
+                              + make_interval(secs => (
+                                  c.max_duration_seconds + :grace_s
+                                )::int)
+             )
+             OR NOT EXISTS (
+               SELECT 1 FROM calls c WHERE c.id = pn.reserved_call_id
+             )
+           )
+         RETURNING pn.id
+        """).bindparams(bindparam("terminal_statuses", expanding=True))
     result = await session.execute(
-        text("""
-            UPDATE phone_numbers pn
-               SET reserved_call_id = NULL
-             WHERE pn.is_pool = TRUE
-               AND pn.reserved_call_id IS NOT NULL
-               AND (
-                 EXISTS (
-                   SELECT 1 FROM calls c
-                    WHERE c.id = pn.reserved_call_id
-                      AND c.status IN (
-                        'completed','failed','busy','no_answer','canceled'
-                      )
-                 )
-                 OR EXISTS (
-                   SELECT 1 FROM calls c
-                    WHERE c.id = pn.reserved_call_id
-                      AND c.max_duration_seconds IS NOT NULL
-                      AND now() > c.requested_at
-                                  + make_interval(secs => (
-                                      c.max_duration_seconds + :grace_s
-                                    )::int)
-                 )
-                 OR NOT EXISTS (
-                   SELECT 1 FROM calls c WHERE c.id = pn.reserved_call_id
-                 )
-               )
-             RETURNING pn.id
-            """),
-        {"grace_s": grace_seconds},
+        stmt,
+        {
+            "grace_s": grace_seconds,
+            "terminal_statuses": list(TERMINAL_CALL_STATUSES),
+        },
     )
     return [row[0] for row in result.fetchall()]
 

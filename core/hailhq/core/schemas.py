@@ -139,6 +139,10 @@ CallStatus = Literal[
     "canceled",
 ]
 
+TERMINAL_CALL_STATUSES: frozenset[str] = frozenset(
+    {"completed", "failed", "busy", "no_answer", "canceled"}
+)
+
 
 NumberType = Literal["local", "mobile", "toll_free"]
 

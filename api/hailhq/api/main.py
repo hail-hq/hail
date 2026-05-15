@@ -40,7 +40,7 @@ async def _pool_sweeper_loop() -> None:
                 logger.warning(
                     "pool sweeper force-released %d reservation(s): %s",
                     len(released),
-                    [str(pn_id) for pn_id in released],
+                    released,
                 )
         except asyncio.CancelledError:
             raise
