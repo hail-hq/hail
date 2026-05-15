@@ -24,7 +24,7 @@ from __future__ import annotations
 
 import uuid
 
-from sqlalchemy import func, select, update
+from sqlalchemy import func, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from hailhq.core.models import PhoneNumber
@@ -104,4 +104,73 @@ async def release_pool_reservation(
     return (result.rowcount or 0) > 0
 
 
-__all__ = ["CALL_META_FROM_POOL", "claim_pool_number", "release_pool_reservation"]
+async def sweep_pool_reservations(
+    session: AsyncSession, *, grace_seconds: int
+) -> list[uuid.UUID]:
+    """Force-release stuck pool reservations. Idempotent backstop.
+
+    Three release conditions fold into one UPDATE:
+
+    1. **Missed release** — the call reached a terminal status but
+       :func:`release_pool_reservation` never fired (process crash mid-
+       transaction, an exception in ``finalize_call`` before the helper
+       was reached, etc.). The Call row already says ``completed`` /
+       ``failed`` / ``busy`` / ``no_answer`` / ``canceled``; the sweeper
+       just unwinds the dangling reservation.
+
+    2. **Hard backstop** — neither the API nor the voicebot ever wrote a
+       terminal status. ``now() > requested_at + max_duration_seconds +
+       grace_seconds`` means the call cannot legitimately still be
+       running: the voicebot enforces ``max_duration_seconds`` server-
+       side, plus a configurable grace window absorbs LiveKit/Twilio
+       teardown + clock skew.
+
+    3. **Orphan FK** — ``reserved_call_id`` points at a Call row that no
+       longer exists. The FK has ``ON DELETE SET NULL`` so this shouldn't
+       normally happen, but a manual cleanup or a future cascade race
+       could leave one. Belt-and-suspenders.
+
+    Returns the list of ``phone_numbers.id`` values that were released
+    so the caller can log them. Force-releases should be rare; surfacing
+    them is the signal for operational investigation.
+    """
+    result = await session.execute(
+        text("""
+            UPDATE phone_numbers pn
+               SET reserved_call_id = NULL
+             WHERE pn.is_pool = TRUE
+               AND pn.reserved_call_id IS NOT NULL
+               AND (
+                 EXISTS (
+                   SELECT 1 FROM calls c
+                    WHERE c.id = pn.reserved_call_id
+                      AND c.status IN (
+                        'completed','failed','busy','no_answer','canceled'
+                      )
+                 )
+                 OR EXISTS (
+                   SELECT 1 FROM calls c
+                    WHERE c.id = pn.reserved_call_id
+                      AND c.max_duration_seconds IS NOT NULL
+                      AND now() > c.requested_at
+                                  + make_interval(secs => (
+                                      c.max_duration_seconds + :grace_s
+                                    )::int)
+                 )
+                 OR NOT EXISTS (
+                   SELECT 1 FROM calls c WHERE c.id = pn.reserved_call_id
+                 )
+               )
+             RETURNING pn.id
+            """),
+        {"grace_s": grace_seconds},
+    )
+    return [row[0] for row in result.fetchall()]
+
+
+__all__ = [
+    "CALL_META_FROM_POOL",
+    "claim_pool_number",
+    "release_pool_reservation",
+    "sweep_pool_reservations",
+]
