@@ -18,37 +18,40 @@ jobs:
         run: |
           set -euo pipefail
           body=$(curl --fail --silent --show-error https://hail.so/sitemap.xml)
-          size=$(printf '%s' "$body" | wc -c)
+          size=${#body}
           echo "sitemap.xml: $size bytes"
           printf '%s\n' "$body" | head -5
           [ "$size" -gt 100 ] || { echo "::error::sitemap.xml body too small ($size bytes)"; exit 1; }
-          printf '%s' "$body" | grep -q "<urlset" || { echo "::error::sitemap.xml missing <urlset>"; exit 1; }
-          printf '%s' "$body" | grep -q "</urlset>" || { echo "::error::sitemap.xml missing </urlset>"; exit 1; }
+          # Here-strings avoid SIGPIPE: grep -q exits at first match and
+          # would close the pipe under `set -o pipefail`, failing the step.
+          grep -q "<urlset" <<< "$body" || { echo "::error::sitemap.xml missing <urlset>"; exit 1; }
+          grep -q "</urlset>" <<< "$body" || { echo "::error::sitemap.xml missing </urlset>"; exit 1; }
       - name: Probe llms.txt
         run: |
           set -euo pipefail
           body=$(curl --fail --silent --show-error https://hail.so/llms.txt)
-          size=$(printf '%s' "$body" | wc -c)
+          size=${#body}
           echo "llms.txt: $size bytes"
           printf '%s\n' "$body" | head -5
           [ "$size" -gt 100 ] || { echo "::error::llms.txt body too small ($size bytes)"; exit 1; }
-          printf '%s\n' "$body" | head -5 | grep -q "^# Hail" || { echo "::error::llms.txt missing # Hail header near top"; exit 1; }
+          head_lines=$(printf '%s\n' "$body" | head -5)
+          grep -q "^# Hail" <<< "$head_lines" || { echo "::error::llms.txt missing # Hail header near top"; exit 1; }
       - name: Probe llms-full.txt
         run: |
           set -euo pipefail
           body=$(curl --fail --silent --show-error https://hail.so/llms-full.txt)
-          size=$(printf '%s' "$body" | wc -c)
+          size=${#body}
           echo "llms-full.txt: $size bytes"
           printf '%s\n' "$body" | head -5
           [ "$size" -gt 100 ] || { echo "::error::llms-full.txt body too small ($size bytes)"; exit 1; }
-          printf '%s' "$body" | grep -q "<!-- source:" || { echo "::error::llms-full.txt missing source markers"; exit 1; }
+          grep -q "<!-- source:" <<< "$body" || { echo "::error::llms-full.txt missing source markers"; exit 1; }
       - name: Probe robots.txt
         run: |
           set -euo pipefail
           body=$(curl --fail --silent --show-error https://hail.so/robots.txt)
-          size=$(printf '%s' "$body" | wc -c)
+          size=${#body}
           echo "robots.txt: $size bytes"
           printf '%s\n' "$body"
           [ "$size" -gt 30 ] || { echo "::error::robots.txt body too small ($size bytes)"; exit 1; }
-          printf '%s' "$body" | grep -q "Sitemap:" || { echo "::error::robots.txt missing Sitemap"; exit 1; }
-          printf '%s' "$body" | grep -q "User-agent: \*" || { echo "::error::robots.txt missing User-agent"; exit 1; }
+          grep -q "Sitemap:" <<< "$body" || { echo "::error::robots.txt missing Sitemap"; exit 1; }
+          grep -q "User-agent: \*" <<< "$body" || { echo "::error::robots.txt missing User-agent"; exit 1; }
