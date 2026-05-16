@@ -1,18 +1,13 @@
 import type { NextConfig } from 'next';
+import { createMDX } from 'fumadocs-mdx/next';
 import { BASE_PATH } from './lib/url';
+
+const withMDX = createMDX();
 
 const nextConfig: NextConfig = {
   basePath: BASE_PATH,
   reactStrictMode: true,
   typedRoutes: true,
-  turbopack: {
-    rules: {
-      '*.{md,mdx}': {
-        loaders: ['@mdx-js/loader'],
-        as: '*.tsx',
-      },
-    },
-  },
 };
 
-export default nextConfig;
+export default withMDX(nextConfig);

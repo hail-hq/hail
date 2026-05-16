@@ -1,8 +1,9 @@
-# Contributing
+---
+title: Contributing
+description: Set up a dev environment, run the services, regenerate OpenAPI, and PR.
+---
 
-For the full operational runbook (releases, deployment, DB switching, all the
-gotchas), see [docs/operations.md](operations.md). This page covers the
-contribution flow only.
+For the full operational runbook (releases, deployment, DB switching, all the gotchas), see [Operations](https://github.com/hail-hq/hail/blob/main/docs/operations.md). This page covers the contribution flow only.
 
 ## Setup
 
@@ -10,7 +11,7 @@ contribution flow only.
 git clone <repo>
 cd hail
 cp .env.example .env.local
-# fill in keys (see docs/setup/*)
+# fill in keys (see /docs/setup/*)
 pnpm install                      # installs husky + lint-staged + prettier
 docker compose -f docker-compose.yml -f docker-compose.local.yml up postgres minio
                                   # just the data services for host-side dev
@@ -32,7 +33,7 @@ Full stack in Docker:
 
 ## Database migrations
 
-Schema lives in [`api/migrations/versions/`](../api/migrations/versions/). Alembic config in [`api/alembic.ini`](../api/alembic.ini); `DATABASE_URL` overrides the config default.
+Schema lives in [`api/migrations/versions/`](https://github.com/hail-hq/hail/tree/main/api/migrations/versions). Alembic config in [`api/alembic.ini`](https://github.com/hail-hq/hail/blob/main/api/alembic.ini); `DATABASE_URL` overrides the config default.
 
 ```bash
 cd api
@@ -69,7 +70,7 @@ New adapters live under `core/hailhq/core/providers/<channel>/<name>.py` and imp
 
 ## Model costs contributions
 
-Public AI model costs live in [`costs/`](../costs/) under CC-BY-4.0. JSON files at the top of that directory are the source of truth and are validated against schemas in `costs/schema/` on every PR.
+Public AI model costs live in [`costs/`](https://github.com/hail-hq/hail/tree/main/costs) under CC-BY-4.0. JSON files at the top of that directory are the source of truth and are validated against schemas in `costs/schema/` on every PR.
 
 To update a price:
 
@@ -78,7 +79,7 @@ To update a price:
 3. Update `source_url` if it has changed.
 4. Run `pnpm costs:validate` locally before pushing.
 
-A weekly cron opens a tracking issue listing rows older than 30 days — see [`.github/workflows/costs-stale.yml`](../.github/workflows/costs-stale.yml).
+A weekly cron opens a tracking issue listing rows older than 30 days — see [`costs-stale.yml`](https://github.com/hail-hq/hail/blob/main/.github/workflows/costs-stale.yml).
 
 ## What we won't merge (v1)
 

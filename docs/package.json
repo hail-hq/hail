@@ -3,14 +3,16 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "next dev --port 3001",
+    "dev": "next dev",
     "build": "next build",
-    "start": "next start --port 3001",
+    "start": "next start",
     "lint": "next lint"
   },
   "dependencies": {
-    "@mdx-js/loader": "^3.1.1",
     "@tanstack/react-table": "^8.20.0",
+    "fumadocs-core": "^16.8.11",
+    "fumadocs-mdx": "^15.0.4",
+    "fumadocs-ui": "^16.8.11",
     "next": "^16.2.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0"

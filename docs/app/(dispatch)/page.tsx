@@ -237,10 +237,14 @@ export default function HomePage() {
               · <Link href="/architecture" style={{ textDecoration: 'underline' }}>Architecture overview</Link>
             </li>
             <li>
+              · <Link href="/setup" style={{ textDecoration: 'underline' }}>Setup guides</Link>{' '}
+              <span style={{ color: 'var(--color-mute)' }}>(LiveKit, Twilio, MCP)</span>
+            </li>
+            <li>
               · <Link href="/contributing" style={{ textDecoration: 'underline' }}>Contributing guide</Link>
             </li>
             <li style={{ color: 'var(--color-mute)' }}>
-              · Setup guides, ops runbooks, OpenAPI reference — <em className="it">coming soon</em>
+              · OpenAPI reference — <em className="it">coming soon</em>
             </li>
           </ul>
         </div>
