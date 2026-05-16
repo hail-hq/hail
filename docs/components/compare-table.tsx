@@ -1,7 +1,6 @@
 import type { LLMRow, STTRow, TTSRow } from '@/lib/types';
 import { CopyableCode } from './copyable-code';
 import { isStale, daysSince } from '@/lib/staleness';
-import { url } from '@/lib/url';
 import { langs } from '@/lib/format';
 
 type Cell = React.ReactNode;
@@ -13,7 +12,7 @@ function StaleMaybe({ d }: { d: string }) {
 
 function compareUrlWithout(currentIds: string[], idToRemove: string): string {
   const next = currentIds.filter((id) => id !== idToRemove);
-  return next.length > 0 ? url(`/costs/compare?m=${next.join(',')}`) : url('/costs/compare');
+  return next.length > 0 ? `/costs/compare?m=${next.join(',')}` : '/costs/compare';
 }
 
 function CompareGrid({

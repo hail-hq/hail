@@ -1,7 +1,4 @@
----
-title: Architecture
-description: How Hail is structured — three Python services + a Go CLI, wrapped around LiveKit Cloud.
----
+# Architecture
 
 Hail v1 is three Python services + a Go CLI, wrapped around LiveKit Cloud.
 
@@ -22,7 +19,7 @@ Hail v1 is three Python services + a Go CLI, wrapped around LiveKit Cloud.
 ## Services
 
 - **api** (`:8080`, FastAPI) — REST surface; accepts `POST /calls` etc. Source of truth for OpenAPI.
-- **mcp** (`:8081`, SSE) — MCP server wrapping the API; what agent clients (Claude.ai, ChatGPT, Claude Code, Cursor) connect to. See [MCP setup](/setup/mcp).
+- **mcp** (`:8081`, SSE) — MCP server wrapping the API; what agent clients (Claude.ai, ChatGPT, Claude Code, Cursor) connect to. See [MCP setup](./setup/mcp.md).
 - **voicebot** (LiveKit Agents worker) — registers with LiveKit Cloud; dispatched into a room per call.
 - **postgres** — call records, phone numbers, API keys.
 - **minio** (dev only) — S3-compatible local object storage. Swap for real S3 in prod.

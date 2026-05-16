@@ -1,7 +1,4 @@
----
-title: LiveKit Cloud
-description: Connect a LiveKit Cloud project so Hail's voicebot can handle real-time media (SIP bridge + WebRTC).
----
+# LiveKit Cloud
 
 LiveKit Cloud handles media (SIP bridge + WebRTC) in v1. Self-hosted SFU is a later milestone.
 
@@ -24,4 +21,4 @@ LiveKit Cloud handles media (SIP bridge + WebRTC) in v1. Self-hosted SFU is a la
 
 `docker compose up voicebot` — on startup, registers with LiveKit as a dispatchable agent. The Hail API dispatches it into a room per call.
 
-Full flow: [Architecture](/architecture).
+Full flow: [Architecture](../architecture.md).

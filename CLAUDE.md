@@ -20,7 +20,7 @@ docs/       — plain markdown; to be served via fumadoc on the website.
 
 **PyPI posture for v1**: one external artifact — the Python SDK, published as `hail-sdk` (imports as `import hail`). The internal services `hailhq-api`, `hailhq-voicebot`, `hailhq-mcp` all carry `Private :: Do Not Upload`. `hailhq-core` is not marked private but is not released in v1 either — it's an internal workspace dep.
 
-**MCP distribution**: remote SSE only. We deliberately do **not** ship a stdio PyPI package. Reasoning lives in [docs/content/docs/setup/mcp.mdx](docs/content/docs/setup/mcp.mdx) — read it before proposing a stdio server; the default answer is "no, use the SSE endpoint".
+**MCP distribution**: remote SSE only. We deliberately do **not** ship a stdio PyPI package. Reasoning lives in [docs/setup/mcp.md](docs/setup/mcp.md) — read it before proposing a stdio server; the default answer is "no, use the SSE endpoint".
 
 Internal packages share the `hailhq.*` namespace (PEP 420 implicit — **no** `hailhq/__init__.py` at the namespace root). The import name `hail` is **reserved** for the external SDK (`hail-sdk` on PyPI); do not introduce top-level `hail` modules inside the monorepo.
 

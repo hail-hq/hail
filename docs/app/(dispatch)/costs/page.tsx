@@ -1,5 +1,4 @@
 import { llm, stt, tts } from '@/lib/costs';
-import { url } from '@/lib/url';
 import { LLMSection } from '@/components/categories/llm-section';
 import { STTSection } from '@/components/categories/stt-section';
 import { TTSSection } from '@/components/categories/tts-section';
@@ -13,7 +12,7 @@ export const metadata = {
     'Public, validated pricing and capability data for AI model providers — LLMs, speech-to-text, and text-to-speech. Schema-validated, CC-BY-4.0, refreshed weekly.',
   alternates: {
     types: {
-      'text/markdown': '/docs/costs.md',
+      'text/markdown': '/costs.md',
     },
   },
 };
@@ -170,16 +169,10 @@ export default function CostsPage() {
             }}
           >
             <li>
-              <a href={url('/costs.md')} style={{ textDecoration: 'underline' }}>
-                /docs/costs.md
+              <a href="/costs.md" style={{ textDecoration: 'underline' }}>
+                /costs.md
               </a>{' '}
               · markdown view (this page)
-            </li>
-            <li>
-              <a href={url('/llms.txt')} style={{ textDecoration: 'underline' }}>
-                /docs/llms.txt
-              </a>{' '}
-              · llmstxt.org manifest
             </li>
             <li>
               <a

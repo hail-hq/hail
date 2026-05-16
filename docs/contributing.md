@@ -1,9 +1,6 @@
----
-title: Contributing
-description: Set up a dev environment, run the services, regenerate OpenAPI, and PR.
----
+# Contributing
 
-For the full operational runbook (releases, deployment, DB switching, all the gotchas), see [Operations](https://github.com/hail-hq/hail/blob/main/docs/operations.md). This page covers the contribution flow only.
+For the full operational runbook (releases, deployment, DB switching, all the gotchas), see [Operations](./operations.md). This page covers the contribution flow only.
 
 ## Setup
 
@@ -11,7 +8,7 @@ For the full operational runbook (releases, deployment, DB switching, all the go
 git clone <repo>
 cd hail
 cp .env.example .env.local
-# fill in keys (see /docs/setup/*)
+# fill in keys (see ./setup/)
 pnpm install                      # installs husky + lint-staged + prettier
 docker compose -f docker-compose.yml -f docker-compose.local.yml up postgres minio
                                   # just the data services for host-side dev

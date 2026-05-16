@@ -1,6 +1,5 @@
 import Link from 'next/link';
 import { llm, stt, tts } from '@/lib/costs';
-import { url } from '@/lib/url';
 import {
   LLMCompareTable,
   STTCompareTable,
@@ -20,10 +19,10 @@ interface ComparePageProps {
 
 function buildAddUrl(currentIds: string[], idToAdd: string): string {
   if (currentIds.includes(idToAdd) || currentIds.length >= MAX_COMPARE) {
-    return url(`/costs/compare?m=${currentIds.join(',')}`);
+    return `/costs/compare?m=${currentIds.join(',')}`;
   }
   const next = [...currentIds, idToAdd];
-  return url(`/costs/compare?m=${next.join(',')}`);
+  return `/costs/compare?m=${next.join(',')}`;
 }
 
 export default async function ComparePage({ searchParams }: ComparePageProps) {
@@ -106,7 +105,7 @@ export default async function ComparePage({ searchParams }: ComparePageProps) {
             ← all costs
           </Link>
           {totalSelected > 0 && (
-            <a href={url('/costs/compare')} className="btn btn-outline" rel="nofollow">
+            <a href="/costs/compare" className="btn btn-outline" rel="nofollow">
               clear
             </a>
           )}

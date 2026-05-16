@@ -1,7 +1,4 @@
----
-title: Twilio
-description: Buy a phone number, create a SIP trunk, and bridge it to LiveKit Cloud for inbound and outbound calls.
----
+# Twilio
 
 You need a Twilio account, a phone number, and a SIP trunk bridged to LiveKit Cloud.
 
@@ -21,6 +18,6 @@ Put them in `.env`.
 ## 3. SIP trunk
 
 1. **Elastic SIP Trunking → Trunks → Create new Trunk**.
-2. **Origination**: add the URI from [LiveKit Cloud setup](/setup/livekit).
+2. **Origination**: add the URI from [LiveKit Cloud setup](./livekit-cloud.md).
 3. **Numbers**: attach the phone number from step 2.
 4. Put the Termination URI (e.g. `your-trunk.pstn.twilio.com`) in `.env` as `TWILIO_SIP_TRUNK_DOMAIN`.

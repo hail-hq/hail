@@ -43,7 +43,7 @@ curl -X POST http://localhost:8080/calls \
 
 ![Animated terminal demo of hail tail streaming live call events](docs/assets/gifs/hail-tail-live-stream.gif)
 
-Full setup: [docs/content/docs/setup/twilio.mdx](docs/content/docs/setup/twilio.mdx), [docs/content/docs/setup/livekit.mdx](docs/content/docs/setup/livekit.mdx), [docs/content/docs/setup/mcp.mdx](docs/content/docs/setup/mcp.mdx).
+Full setup: [docs/setup/twilio.md](docs/setup/twilio.md), [docs/setup/livekit-cloud.md](docs/setup/livekit-cloud.md), [docs/setup/mcp.md](docs/setup/mcp.md).
 
 ## Tenets
 
@@ -110,7 +110,7 @@ Checked = shipped. Version tag shows the target release.
   - [x] `hail` binary via GitHub Releases (v1)
 - MCP server
   - [x] Remote SSE endpoint bundled with every Hail deploy (v1)
-  - ~~PyPI stdio package~~ — intentionally not shipped; see [docs/content/docs/setup/mcp.mdx](docs/content/docs/setup/mcp.mdx)
+  - ~~PyPI stdio package~~ — intentionally not shipped; see [docs/setup/mcp.md](docs/setup/mcp.md)
 - Python SDK
   - [x] `hail-sdk` on PyPI, imports as `hail` (v1)
 
@@ -126,11 +126,11 @@ Checked = shipped. Version tag shows the target release.
 AI agent ──► Hail API ──dispatch──► Voicebot ──► LiveKit Cloud ──SIP──► Twilio ──► 📞
 ```
 
-Full diagram: [docs/content/docs/architecture.mdx](docs/content/docs/architecture.mdx).
+Full diagram: [hail-hq/hail/blob/main/docs/architecture.md](https://github.com/hail-hq/hail/blob/main/docs/architecture.md).
 
 ## Contributing
 
-See [docs/content/docs/contributing.mdx](docs/content/docs/contributing.mdx). TL;DR: fork, branch, conventional-commit, PR. Provider adapters go in `core/hailhq/core/providers/`. Update `.env.example` for any new env var.
+See [hail-hq/hail/blob/main/docs/contributing.md](https://github.com/hail-hq/hail/blob/main/docs/contributing.md). TL;DR: fork, branch, conventional-commit, PR. Provider adapters go in `core/hailhq/core/providers/`. Update `.env.example` for any new env var.
 
 ## License
 

@@ -1,7 +1,4 @@
----
-title: MCP clients
-description: Connect any MCP-compatible agent client (Claude.ai, ChatGPT, Cursor, Claude Code) to Hail over a remote SSE endpoint.
----
+# MCP clients
 
 Hail exposes MCP as a **remote server over SSE**. Agents connect by URL; no local install.
 

@@ -1,9 +1,7 @@
-import { url } from '@/lib/url';
-
 export function CompareLink({ modelId }: { modelId: string }) {
   return (
     <a
-      href={url(`/costs/compare?m=${modelId}`)}
+      href={`/costs/compare?m=${modelId}`}
       className="compare-link"
       rel="nofollow"
       aria-label={`Add ${modelId} to comparison`}

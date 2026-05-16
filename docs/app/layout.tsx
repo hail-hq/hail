@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react';
 import { Space_Grotesk, JetBrains_Mono, Instrument_Serif } from 'next/font/google';
+import { siteUrl } from '@/lib/url';
 import './global.css';
 
 const fontSans = Space_Grotesk({
@@ -25,9 +26,10 @@ const fontSerif = Instrument_Serif({
 });
 
 export const metadata = {
-  title: 'Hail Docs',
+  metadataBase: siteUrl,
+  title: 'Hail · model costs',
   description:
-    'Documentation and pricing data for Hail — the universal communication platform for AI agents.',
+    'Public, validated pricing and capability data for AI model providers — LLMs, speech-to-text, and text-to-speech.',
 };
 
 export default function RootLayout({ children }: { children: ReactNode }) {

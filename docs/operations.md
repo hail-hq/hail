@@ -103,7 +103,7 @@ New adapters live under `core/hailhq/core/providers/<channel>/<name>.py` and imp
 - **ElevenLabs** (TTS): API key + a voice ID from your library.
 - **At least one LLM provider**: OpenAI / Gemini / Anthropic API key. The voicebot's mode-A FallbackAdapter chains all three; mode-B uses a caller-provided OpenAI-compatible endpoint per call.
 
-Detailed setup walkthroughs: `docs/content/docs/setup/twilio.mdx`, `docs/content/docs/setup/livekit.mdx`, `docs/content/docs/setup/mcp.mdx`.
+Detailed setup walkthroughs: `docs/setup/twilio.md`, `docs/setup/livekit-cloud.md`, `docs/setup/mcp.md`.
 
 ### Authentication
 
