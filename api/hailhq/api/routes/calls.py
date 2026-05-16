@@ -19,6 +19,7 @@ from sqlalchemy import select, tuple_, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from hailhq.core.billing import has_funds
+from hailhq.core.call_end_reasons import CallEndReason
 from hailhq.core.db import get_session, session_scope
 from hailhq.api.deps import Principal, get_current_principal
 from hailhq.api.idempotency import IdempotencyContext, idempotency_for_post_calls
@@ -310,9 +311,9 @@ async def create_call(
         )
         await _cleanup_partial_livekit(lk, room_name, dispatch_id)
         now = datetime.now(timezone.utc)
-        # Matches the call_end_reason ENUM values: room_create_failed,
-        # agent_dispatch_failed, sip_participant_failed.
-        failure_code = f"{setup_stage}_failed"
+        # Coerce via CallEndReason so an unrecognized stage name fails here
+        # rather than at the DB ENUM boundary.
+        failure_code = CallEndReason(f"{setup_stage}_failed").value
         await db.execute(
             update(Call)
             .where(Call.id == call.id)

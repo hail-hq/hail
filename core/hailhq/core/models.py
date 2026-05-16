@@ -15,6 +15,7 @@ from sqlalchemy.dialects.postgresql import INET, JSONB, UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 from hailhq.core.call_end_reasons import CallEndReasonDB
+from hailhq.core.schemas import TERMINAL_CALL_STATUSES
 
 
 class Base(DeclarativeBase):
@@ -318,8 +319,9 @@ class Call(Base):
         # end_reason. Defined here too so Base.metadata.create_all (tests)
         # produces the same shape as the alembic-managed schema.
         CheckConstraint(
-            "status NOT IN ('completed','failed','busy','no_answer','canceled')"
-            " OR end_reason IS NOT NULL",
+            "status NOT IN ("
+            + ",".join(f"'{s}'" for s in sorted(TERMINAL_CALL_STATUSES))
+            + ") OR end_reason IS NOT NULL",
             name="calls_end_reason_when_terminal",
         ),
     )

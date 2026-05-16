@@ -18,12 +18,7 @@ from sqlalchemy.dialects.postgresql import ENUM as PgEnum
 
 
 class CallEndReason(StrEnum):
-    """Reasons a call row transitions to a terminal status.
-
-    Values are loosely grouped (happy-path → SIP outcomes → SIP failures →
-    dispatch failures → voicebot anomalies → backstop → catch-all) but the
-    DB enum is order-insensitive — group only for the reader.
-    """
+    """Reasons a call row transitions to a terminal status."""
 
     # happy path
     NORMAL_HANGUP = "normal_hangup"

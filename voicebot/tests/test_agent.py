@@ -17,6 +17,7 @@ from types import SimpleNamespace
 from uuid import UUID
 
 import pytest
+from livekit import rtc
 from livekit.agents import Agent, AgentSession
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -314,64 +315,24 @@ async def test_on_call_end_releases_pool_reservation(
 # protobuf rename upstream surfaces immediately in CI.
 
 
-def test_disconnect_reason_user_unavailable_maps_to_no_answer() -> None:
-    from livekit import rtc
-
-    assert disconnect_reason_to_status(rtc.DisconnectReason.USER_UNAVAILABLE) == (
-        "no_answer",
-        "user_unavailable",
-    )
-
-
-def test_disconnect_reason_user_rejected_maps_to_busy() -> None:
-    from livekit import rtc
-
-    assert disconnect_reason_to_status(rtc.DisconnectReason.USER_REJECTED) == (
-        "busy",
-        "user_rejected",
-    )
-
-
-def test_disconnect_reason_sip_trunk_failure_maps_to_failed() -> None:
-    from livekit import rtc
-
-    assert disconnect_reason_to_status(rtc.DisconnectReason.SIP_TRUNK_FAILURE) == (
-        "failed",
-        "sip_trunk_failure",
-    )
-
-
-def test_disconnect_reason_connection_timeout_maps_to_failed() -> None:
-    from livekit import rtc
-
-    assert disconnect_reason_to_status(rtc.DisconnectReason.CONNECTION_TIMEOUT) == (
-        "failed",
-        "connection_timeout",
-    )
-
-
-def test_disconnect_reason_media_failure_maps_to_failed() -> None:
-    from livekit import rtc
-
-    assert disconnect_reason_to_status(rtc.DisconnectReason.MEDIA_FAILURE) == (
-        "failed",
-        "media_failure",
-    )
-
-
-def test_disconnect_reason_client_initiated_is_passthrough() -> None:
-    """CLIENT_INITIATED is the normal-hangup happy path — leave status as-is."""
-    from livekit import rtc
-
-    assert disconnect_reason_to_status(rtc.DisconnectReason.CLIENT_INITIATED) == (
-        None,
-        None,
-    )
-
-
-def test_disconnect_reason_none_is_passthrough() -> None:
-    """A missing disconnect_reason must not override the default status."""
-    assert disconnect_reason_to_status(None) == (None, None)
+@pytest.mark.parametrize(
+    "reason,expected",
+    [
+        (rtc.DisconnectReason.USER_UNAVAILABLE, ("no_answer", "user_unavailable")),
+        (rtc.DisconnectReason.USER_REJECTED, ("busy", "user_rejected")),
+        (rtc.DisconnectReason.SIP_TRUNK_FAILURE, ("failed", "sip_trunk_failure")),
+        (rtc.DisconnectReason.CONNECTION_TIMEOUT, ("failed", "connection_timeout")),
+        (rtc.DisconnectReason.MEDIA_FAILURE, ("failed", "media_failure")),
+        # CLIENT_INITIATED is the normal-hangup happy path — leave status as-is.
+        (rtc.DisconnectReason.CLIENT_INITIATED, (None, None)),
+        # A missing disconnect_reason must not override the default status.
+        (None, (None, None)),
+    ],
+)
+def test_disconnect_reason_mapping(
+    reason: int | None, expected: tuple[str | None, str | None]
+) -> None:
+    assert disconnect_reason_to_status(reason) == expected
 
 
 # --------------------------------------------------------------------------- #
