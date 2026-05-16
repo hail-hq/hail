@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/google/uuid"
 	openapi_types "github.com/oapi-codegen/runtime/types"
@@ -17,7 +18,13 @@ func newCallStatusCmd(opts *Options) *cobra.Command {
 		Use:     "status <call-id>",
 		Aliases: []string{"get"},
 		Short:   "Fetch the current status of a call",
-		Args:    cobra.ExactArgs(1),
+		Long: `hail call status — show one call.
+
+<call-id> may be either a full UUID or a hex prefix (e.g. the 8-char id
+shown by 'hail call list'). Prefix lookups scan the 200 most recent calls
+and fail if the prefix is ambiguous or matches nothing — pass the full
+UUID to look up older calls unambiguously.`,
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runCallStatus(cmd.Context(), opts, args[0])
 		},
@@ -26,16 +33,16 @@ func newCallStatusCmd(opts *Options) *cobra.Command {
 }
 
 func runCallStatus(ctx context.Context, opts *Options, idStr string) error {
-	parsed, err := uuid.Parse(idStr)
-	if err != nil {
-		return fmt.Errorf("invalid call id %q: %w", idStr, err)
-	}
-	callID := openapi_types.UUID(parsed)
-
 	apiClient, err := opts.newClient()
 	if err != nil {
 		return err
 	}
+
+	parsed, err := resolveCallID(ctx, apiClient, idStr)
+	if err != nil {
+		return err
+	}
+	callID := openapi_types.UUID(parsed)
 
 	resp, err := apiClient.GetCallCallsCallIdGetWithResponse(
 		ctx, callID, &client.GetCallCallsCallIdGetParams{},
@@ -44,13 +51,71 @@ func runCallStatus(ctx context.Context, opts *Options, idStr string) error {
 		return fmt.Errorf("call API: %w", err)
 	}
 	if resp.HTTPResponse.StatusCode == http.StatusNotFound {
-		return fmt.Errorf("call %s not found (or not in your org)", idStr)
+		return fmt.Errorf("call %s not found (or not in your org)", parsed.String())
 	}
 	if resp.HTTPResponse.StatusCode != http.StatusOK || resp.JSON200 == nil {
 		return apiError(resp.HTTPResponse.StatusCode, resp.Body)
 	}
 
 	return printCallStatus(opts, resp.JSON200)
+}
+
+// resolveCallID returns a full UUID for input. If input parses as a UUID it
+// is returned directly; otherwise it is treated as a hex prefix and matched
+// against the 200 most recent calls. Dashes in the prefix are stripped before
+// matching, so both 11111111 and 11111111-1111 resolve the same UUID.
+//
+// Mirrors `git rev-parse`'s short-hash behavior: ambiguous prefixes and
+// no-match cases surface as CLI errors with the candidate list / hint.
+func resolveCallID(ctx context.Context, apiClient *client.ClientWithResponses, input string) (uuid.UUID, error) {
+	if parsed, err := uuid.Parse(input); err == nil {
+		return parsed, nil
+	}
+	needle := strings.ToLower(strings.ReplaceAll(input, "-", ""))
+	if len(needle) < 4 || len(needle) > 31 || !isHex(needle) {
+		return uuid.Nil, fmt.Errorf("invalid call id %q (expected full UUID or hex prefix of 4+ chars)", input)
+	}
+
+	limit := 200
+	resp, err := apiClient.ListCallsCallsGetWithResponse(ctx, &client.ListCallsCallsGetParams{Limit: &limit})
+	if err != nil {
+		return uuid.Nil, fmt.Errorf("resolve call prefix: %w", err)
+	}
+	if resp.HTTPResponse.StatusCode != http.StatusOK || resp.JSON200 == nil {
+		return uuid.Nil, apiError(resp.HTTPResponse.StatusCode, resp.Body)
+	}
+
+	var matches []uuid.UUID
+	for _, c := range resp.JSON200.Items {
+		if strings.HasPrefix(strings.ReplaceAll(c.Id.String(), "-", ""), needle) {
+			matches = append(matches, uuid.UUID(c.Id))
+		}
+	}
+
+	switch len(matches) {
+	case 1:
+		return matches[0], nil
+	case 0:
+		return uuid.Nil, fmt.Errorf("no call matches prefix %q (searched %d recent calls); pass the full UUID for older calls", input, len(resp.JSON200.Items))
+	default:
+		names := make([]string, 0, len(matches))
+		for _, m := range matches {
+			names = append(names, m.String())
+		}
+		return uuid.Nil, fmt.Errorf("ambiguous prefix %q matches %d calls: %s", input, len(matches), strings.Join(names, ", "))
+	}
+}
+
+func isHex(s string) bool {
+	for _, c := range s {
+		switch {
+		case c >= '0' && c <= '9':
+		case c >= 'a' && c <= 'f':
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 // printCallStatus renders a CallResponse for the `status` subcommand. Format

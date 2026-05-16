@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -85,5 +86,91 @@ func TestCallStatus_JSONOutput(t *testing.T) {
 	}
 	if got.Id != id {
 		t.Errorf("got.Id = %v", got.Id)
+	}
+}
+
+// TestCallStatus_PrefixResolution: an 8-char hex prefix from `hail call list`
+// resolves against the recent-calls page and the typed UUID is forwarded to
+// the GET endpoint.
+func TestCallStatus_PrefixResolution(t *testing.T) {
+	fullID := "11111111-1111-1111-1111-111111111111"
+	listBody := client.CallListResponse{Items: []client.CallResponse{
+		sampleCall(fullID, "+15550001", client.CallResponseStatusCompleted),
+		sampleCall("22222222-2222-2222-2222-222222222222", "+15550002", client.CallResponseStatusDialing),
+	}}
+
+	srv := newSequenceServer(t, []sequenceResponse{
+		{http.StatusOK, listBody},
+		{http.StatusOK, sampleResponse()},
+	})
+
+	stdout, _, err := runRoot(t,
+		map[string]string{"HAIL_API_KEY": "sk_test", "HAIL_API_URL": srv.URL},
+		"call", "status", "11111111",
+	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got := atomic.LoadInt32(&srv.hits); got != 2 {
+		t.Errorf("expected 2 requests (list + get), got %d", got)
+	}
+	if srv.lastReq.URL.Path != "/calls/"+fullID {
+		t.Errorf("final path = %s; want /calls/%s", srv.lastReq.URL.Path, fullID)
+	}
+	if !strings.Contains(stdout, fullID) {
+		t.Errorf("stdout missing resolved UUID:\n%s", stdout)
+	}
+}
+
+func TestCallStatus_PrefixAmbiguous(t *testing.T) {
+	listBody := client.CallListResponse{Items: []client.CallResponse{
+		sampleCall("11111111-1111-1111-1111-111111111111", "+15550001", client.CallResponseStatusCompleted),
+		sampleCall("11111111-2222-3333-4444-555555555555", "+15550002", client.CallResponseStatusDialing),
+	}}
+
+	srv := newFakeServer(t, http.StatusOK, listBody)
+
+	_, _, err := runRoot(t,
+		map[string]string{"HAIL_API_KEY": "sk_test", "HAIL_API_URL": srv.URL},
+		"call", "status", "11111111",
+	)
+	if err == nil {
+		t.Fatal("expected ambiguous error")
+	}
+	if !strings.Contains(err.Error(), "ambiguous") {
+		t.Errorf("error = %v; expected ambiguous", err)
+	}
+}
+
+func TestCallStatus_PrefixNoMatch(t *testing.T) {
+	srv := newFakeServer(t, http.StatusOK, client.CallListResponse{Items: nil})
+
+	_, _, err := runRoot(t,
+		map[string]string{"HAIL_API_KEY": "sk_test", "HAIL_API_URL": srv.URL},
+		"call", "status", "deadbeef",
+	)
+	if err == nil {
+		t.Fatal("expected no-match error")
+	}
+	if !strings.Contains(err.Error(), "no call matches") {
+		t.Errorf("error = %v", err)
+	}
+}
+
+func TestCallStatus_RejectsBadShape(t *testing.T) {
+	srv := newFakeServer(t, http.StatusOK, sampleResponse())
+
+	_, _, err := runRoot(t,
+		map[string]string{"HAIL_API_KEY": "sk_test", "HAIL_API_URL": srv.URL},
+		"call", "status", "xyz", // not hex, too short
+	)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "invalid call id") {
+		t.Errorf("error = %v", err)
+	}
+	if hits := atomic.LoadInt32(&srv.hits); hits != 0 {
+		t.Errorf("expected 0 HTTP calls for malformed input, got %d", hits)
 	}
 }
