@@ -47,7 +47,7 @@ func runCallStatus(ctx context.Context, opts *Options, idStr string) error {
 		return fmt.Errorf("call %s not found (or not in your org)", idStr)
 	}
 	if resp.HTTPResponse.StatusCode != http.StatusOK || resp.JSON200 == nil {
-		return apiErrorGeneric(resp.HTTPResponse.StatusCode, resp.Body)
+		return apiError(resp.HTTPResponse.StatusCode, resp.Body)
 	}
 
 	return printCallStatus(opts, resp.JSON200)
@@ -82,13 +82,4 @@ func printCallStatus(opts *Options, call *client.CallResponse) error {
 		fmt.Fprintf(opts.Stdout, "  Recording: %s\n", *call.RecordingS3Key)
 	}
 	return nil
-}
-
-// apiErrorGeneric formats a non-success response without depending on the
-// specific endpoint's typed JSON422 field.
-func apiErrorGeneric(status int, body []byte) error {
-	if len(body) > 0 && len(body) < 1024 {
-		return fmt.Errorf("API error %d: %s", status, string(body))
-	}
-	return fmt.Errorf("API error %d", status)
 }

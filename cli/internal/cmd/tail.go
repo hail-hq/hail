@@ -194,44 +194,44 @@ func runTail(ctx context.Context, opts *Options, f *tailFlags) error {
 		cursor = encodeEventCursor(time.Now().UTC(), openapi_types.UUID(uuid.Nil))
 	}
 	interval := time.Duration(f.intervalMS) * time.Millisecond
-
-	for {
-		params := &client.ListEventsEventsGetParams{}
-		if cursor != "" {
-			c := cursor
-			params.Cursor = &c
+	// Generous limit so a single fetch can drain a long backlog.
+	limit := 1000
+	buildParams := func(cur string) *client.ListEventsEventsGetParams {
+		return &client.ListEventsEventsGetParams{
+			Limit:  &limit,
+			Cursor: strPtr(cur),
+			Id:     strPtr(idWire),
+			Kind:   strPtr(f.kind),
 		}
-		// Generous limit so a single fetch can drain a long backlog.
-		limit := 1000
-		params.Limit = &limit
-		if idWire != "" {
-			v := idWire
-			params.Id = &v
-		}
-		if f.kind != "" {
-			k := f.kind
-			params.Kind = &k
-		}
-
-		resp, err := apiClient.ListEventsEventsGetWithResponse(tailCtx, params)
+	}
+	fetch := func(cur string) (*client.EventStreamResponse, error) {
+		resp, err := apiClient.ListEventsEventsGetWithResponse(tailCtx, buildParams(cur))
 		if err != nil {
 			if tailCtx.Err() != nil {
-				return errInterrupted
+				return nil, errInterrupted
 			}
-			return fmt.Errorf("poll events: %w", err)
+			return nil, fmt.Errorf("poll events: %w", err)
 		}
-		if resp.HTTPResponse.StatusCode == http.StatusNotFound {
-			return fmt.Errorf("%s %s not found (or not in your org)", resourceType, f.id)
+		if idWire != "" && resp.HTTPResponse.StatusCode == http.StatusNotFound {
+			return nil, fmt.Errorf("%s %s not found (or not in your org)", resourceType, f.id)
 		}
 		if resp.HTTPResponse.StatusCode != http.StatusOK || resp.JSON200 == nil {
-			return apiErrorGeneric(resp.HTTPResponse.StatusCode, resp.Body)
+			return nil, apiError(resp.HTTPResponse.StatusCode, resp.Body)
 		}
+		return resp.JSON200, nil
+	}
+
+	for {
+		page, err := fetch(cursor)
+		if err != nil {
+			return err
+		}
+		firstPage := page
 
 		// Drain inner pages — the server only sets next_cursor when more rows
 		// exist beyond `limit`. In steady-state polling we drain everything in
 		// one fetch; we synthesize the next polling cursor from the last seen
 		// event so the next poll picks up after the events we just printed.
-		page := resp.JSON200
 		var lastEvent *client.CallEventResponse
 		for {
 			for i := range page.Items {
@@ -244,27 +244,10 @@ func runTail(ctx context.Context, opts *Options, f *tailFlags) error {
 				break
 			}
 			cursor = *page.NextCursor
-			c := cursor
-			subParams := &client.ListEventsEventsGetParams{Cursor: &c, Limit: &limit}
-			if idWire != "" {
-				v := idWire
-				subParams.Id = &v
-			}
-			if f.kind != "" {
-				k := f.kind
-				subParams.Kind = &k
-			}
-			subResp, err := apiClient.ListEventsEventsGetWithResponse(tailCtx, subParams)
+			page, err = fetch(cursor)
 			if err != nil {
-				if tailCtx.Err() != nil {
-					return errInterrupted
-				}
-				return fmt.Errorf("poll events: %w", err)
+				return err
 			}
-			if subResp.HTTPResponse.StatusCode != http.StatusOK || subResp.JSON200 == nil {
-				return apiErrorGeneric(subResp.HTTPResponse.StatusCode, subResp.Body)
-			}
-			page = subResp.JSON200
 		}
 		// Synthesize the forward cursor when the server didn't hand one back.
 		if lastEvent != nil {
@@ -276,10 +259,12 @@ func runTail(ctx context.Context, opts *Options, f *tailFlags) error {
 		}
 
 		// Auto-exit only when narrowed to a single call (--id call:<uuid>).
-		// Org-wide tail and non-call resource types run until SIGINT.
-		if singleCall && resp.JSON200.CallStatus != nil &&
-			terminalCallStatuses[*resp.JSON200.CallStatus] {
-			finalLine := fmt.Sprintf("call %s", string(*resp.JSON200.CallStatus))
+		// Org-wide tail and non-call resource types run until SIGINT. Read
+		// the status off the first page to match the prior behavior — the
+		// inner drain loop may span seconds.
+		if singleCall && firstPage.CallStatus != nil &&
+			terminalCallStatuses[*firstPage.CallStatus] {
+			finalLine := fmt.Sprintf("call %s", string(*firstPage.CallStatus))
 			renderSystemLine(opts, time.Now().UTC(), finalLine, colorize)
 			return nil
 		}
@@ -295,9 +280,9 @@ func runTail(ctx context.Context, opts *Options, f *tailFlags) error {
 // renderEvent dispatches on event.Kind and writes one line to opts.Stdout.
 // In --json mode each event is emitted as a single JSON object per line.
 //
-// `singleCall` is true when --call narrowed the stream; the short-call-id
-// prefix is omitted in that mode (every event belongs to the same call,
-// the prefix would be redundant noise).
+// `singleCall` is true when --id call:<uuid> narrowed the stream; the
+// short-call-id prefix is omitted in that mode (every event belongs to the
+// same call, the prefix would be redundant noise).
 func renderEvent(opts *Options, ev client.CallEventResponse, singleCall, colorize bool) error {
 	if opts.JSON {
 		out, err := json.Marshal(ev)

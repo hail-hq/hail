@@ -46,10 +46,10 @@ func runCallList(ctx context.Context, opts *Options, f *callListFlags) error {
 	}
 
 	cursor := f.cursor
+	limit := f.limit
 	var allItems []client.CallResponse
 	warned := false
 	for {
-		limit := f.limit
 		params := &client.ListCallsCallsGetParams{
 			Limit:  &limit,
 			Cursor: strPtr(cursor),
@@ -65,7 +65,7 @@ func runCallList(ctx context.Context, opts *Options, f *callListFlags) error {
 			return fmt.Errorf("call API: %w", err)
 		}
 		if resp.HTTPResponse.StatusCode != http.StatusOK || resp.JSON200 == nil {
-			return apiErrorGeneric(resp.HTTPResponse.StatusCode, resp.Body)
+			return apiError(resp.HTTPResponse.StatusCode, resp.Body)
 		}
 
 		allItems = append(allItems, resp.JSON200.Items...)
@@ -103,12 +103,7 @@ func printCallList(opts *Options, body *client.CallListResponse) error {
 	tw := tabwriter.NewWriter(opts.Stdout, 0, 0, 2, ' ', 0)
 	fmt.Fprintln(tw, "ID\tTO\tSTATUS\tREQUESTED")
 	for _, c := range body.Items {
-		id := c.Id.String()
-		shortID := id
-		if len(id) > 8 {
-			shortID = id[:8]
-		}
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n", shortID, c.ToE164, string(c.Status), c.RequestedAt.UTC().Format(utcTSLayout))
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n", shortCallID(c.Id), c.ToE164, string(c.Status), c.RequestedAt.UTC().Format(utcTSLayout))
 	}
 	if err := tw.Flush(); err != nil {
 		return fmt.Errorf("write table: %w", err)

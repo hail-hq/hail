@@ -2,9 +2,11 @@ package cmd
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/google/uuid"
 	"github.com/spf13/cobra"
@@ -111,7 +113,7 @@ func runCall(ctx context.Context, opts *Options, f *callFlags, toNumber string) 
 		return fmt.Errorf("call API: %w", err)
 	}
 	if resp.HTTPResponse.StatusCode != http.StatusCreated || resp.JSON201 == nil {
-		return apiError(resp)
+		return apiError(resp.HTTPResponse.StatusCode, resp.Body)
 	}
 
 	return printCall(opts, resp.JSON201)
@@ -154,25 +156,24 @@ func idempotencyEditor(key string) client.RequestEditorFn {
 	}
 }
 
-// apiError translates a non-201 response into a CLI-facing error. We prefer
-// HTTPValidationError details when present; otherwise fall back to status text.
-func apiError(resp *client.CreateCallCallsPostResponse) error {
-	if resp.JSON422 != nil && resp.JSON422.Detail != nil && len(*resp.JSON422.Detail) > 0 {
-		// Surface every validation message; usually one, but join just in case.
-		var msgs string
-		for i, v := range *resp.JSON422.Detail {
-			if i > 0 {
-				msgs += "; "
+// apiError translates a non-success response into a CLI-facing error. On 422
+// the body is parsed as HTTPValidationError and detail messages are joined;
+// otherwise we include the body when small or fall back to the status code.
+func apiError(status int, body []byte) error {
+	if status == http.StatusUnprocessableEntity {
+		var v client.HTTPValidationError
+		if err := json.Unmarshal(body, &v); err == nil && v.Detail != nil && len(*v.Detail) > 0 {
+			msgs := make([]string, 0, len(*v.Detail))
+			for _, d := range *v.Detail {
+				msgs = append(msgs, d.Msg)
 			}
-			msgs += v.Msg
+			return fmt.Errorf("API error %d: %s", status, strings.Join(msgs, "; "))
 		}
-		return fmt.Errorf("API error %d: %s", resp.HTTPResponse.StatusCode, msgs)
 	}
-	// Generic fallback: include the body if it's small enough to be helpful.
-	if len(resp.Body) > 0 && len(resp.Body) < 1024 {
-		return fmt.Errorf("API error %d: %s", resp.HTTPResponse.StatusCode, string(resp.Body))
+	if len(body) > 0 && len(body) < 1024 {
+		return fmt.Errorf("API error %d: %s", status, string(body))
 	}
-	return fmt.Errorf("API error %d: %s", resp.HTTPResponse.StatusCode, resp.HTTPResponse.Status)
+	return fmt.Errorf("API error %d", status)
 }
 
 // printCall renders the success response in either JSON or human form.
