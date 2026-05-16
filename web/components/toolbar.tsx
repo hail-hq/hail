@@ -13,7 +13,7 @@ export function Toolbar({ categories }: { categories: { id: string; label: strin
           <a className="btn btn-accent" href="/costs/compare" rel="nofollow">
             Compare
           </a>
-          <a className="btn btn-filled" href="/costs.md">
+          <a className="btn btn-filled" href="/costs/costs.md">
             ↓ .md
           </a>
         </div>

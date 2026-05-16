@@ -169,7 +169,7 @@ export default function CostsPage() {
             }}
           >
             <li>
-              <a href="/costs.md" style={{ textDecoration: 'underline' }}>
+              <a href="/costs/costs.md" style={{ textDecoration: 'underline' }}>
                 /costs.md
               </a>{' '}
               · markdown view (this page)

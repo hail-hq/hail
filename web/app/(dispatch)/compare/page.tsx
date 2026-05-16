@@ -92,7 +92,7 @@ export default async function ComparePage({ searchParams }: ComparePageProps) {
 
       <div className="toolbar">
         <div className="wrap row">
-          <Link href="/costs" className="btn btn-outline">
+          <Link href="/" className="btn btn-outline">
             ← all costs
           </Link>
           {totalSelected > 0 && (
