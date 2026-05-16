@@ -243,7 +243,9 @@ async def test_sweeper_releases_terminal_call_reservation(async_session):
 
     # Simulate "voicebot wrote terminal status but release helper never fired."
     await async_session.execute(
-        update(Call).where(Call.id == call.id).values(status="completed")
+        update(Call)
+        .where(Call.id == call.id)
+        .values(status="completed", end_reason="normal_hangup")
     )
     await async_session.commit()
 
@@ -353,7 +355,7 @@ async def test_sweeper_handles_multiple_reservations_in_one_pass(async_session):
     await async_session.execute(
         update(Call)
         .where(Call.id.in_([call_a.id, call_b.id]))
-        .values(status="completed")
+        .values(status="completed", end_reason="normal_hangup")
     )
     await async_session.commit()
 

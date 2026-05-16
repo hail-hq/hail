@@ -171,7 +171,7 @@ async def test_post_calls_livekit_failure_marks_call_failed(
 
     call = (await async_session.execute(select(Call))).scalar_one()
     assert call.status == "failed"
-    assert call.end_reason == "livekit_sip_participant_failed"
+    assert call.end_reason == "sip_participant_failed"
     assert call.ended_at is not None
 
     events = (await async_session.execute(select(CallEvent))).scalars().all()
@@ -179,7 +179,7 @@ async def test_post_calls_livekit_failure_marks_call_failed(
     assert events[0].payload == {
         "from": "queued",
         "to": "failed",
-        "reason": "livekit_sip_participant_failed",
+        "reason": "sip_participant_failed",
     }
     livekit_mock.delete_dispatch.assert_awaited_once_with(
         "AD_test_dispatch", "hail-test-room"

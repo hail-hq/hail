@@ -21,14 +21,16 @@ import asyncio
 import json
 import logging
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Callable
 from uuid import UUID
 
+from livekit import rtc
 from livekit.agents import Agent, JobContext, JobProcess
 from livekit.agents.voice import AgentSession
 from livekit.plugins import silero
 from sqlalchemy import select, update
 
+from hailhq.core.call_end_reasons import CallEndReason
 from hailhq.core.config import settings
 from hailhq.core.db import session_scope
 from hailhq.core.internal_webhook import notify_usage_event_recorded
@@ -45,8 +47,58 @@ SOFT_CAP_ANNOUNCEMENT = (
     "Thanks for talking — I'll let you go now. Goodbye."
 )
 
-# Shutdown reason passed to ctx.shutdown() when the soft cap fires.
-SOFT_CAP_END_REASON = "soft_cap_reached"
+# Shutdown reason passed to ctx.shutdown() when the soft cap fires. Value
+# matches the call_end_reason ENUM so it can land directly in the calls row.
+SOFT_CAP_END_REASON: str = CallEndReason.SOFT_CAP_REACHED.value
+
+# Reasons the LiveKit Agents SDK closes the session on automatically. Mirror
+# of livekit-agents 1.5.x `room_io.types.DEFAULT_CLOSE_ON_DISCONNECT_REASONS`.
+# Encoded locally because that module is not part of the public surface.
+# For any other reason that we map to a Call.status, we have to call
+# ctx.shutdown() ourselves or the session sits idle until the worker timeout.
+_SDK_AUTO_CLOSE_REASONS: frozenset[int] = frozenset(
+    {
+        rtc.DisconnectReason.CLIENT_INITIATED,
+        rtc.DisconnectReason.ROOM_DELETED,
+        rtc.DisconnectReason.USER_REJECTED,
+    }
+)
+
+
+_DISCONNECT_REASON_MAP: dict[int, tuple[str, CallEndReason]] = {
+    rtc.DisconnectReason.USER_UNAVAILABLE: (
+        "no_answer",
+        CallEndReason.USER_UNAVAILABLE,
+    ),
+    rtc.DisconnectReason.USER_REJECTED: ("busy", CallEndReason.USER_REJECTED),
+    rtc.DisconnectReason.SIP_TRUNK_FAILURE: ("failed", CallEndReason.SIP_TRUNK_FAILURE),
+    rtc.DisconnectReason.CONNECTION_TIMEOUT: (
+        "failed",
+        CallEndReason.CONNECTION_TIMEOUT,
+    ),
+    rtc.DisconnectReason.MEDIA_FAILURE: ("failed", CallEndReason.MEDIA_FAILURE),
+}
+
+
+def disconnect_reason_to_status(reason: int | None) -> tuple[str | None, str | None]:
+    """Map a LiveKit ``rtc.DisconnectReason`` to ``(call_status, end_reason)``.
+
+    Returns ``(None, None)`` when the disconnect should NOT override the
+    default ``"completed"`` Call status — i.e., the callee answered and
+    hung up normally (``CLIENT_INITIATED``) or the reason is something we
+    do not specifically map. The caller's default applies in that case.
+
+    The ``end_reason`` strings are members of the ``call_end_reason``
+    Postgres ENUM (see :class:`hailhq.core.call_end_reasons.CallEndReason`).
+    """
+    if reason is None:
+        return (None, None)
+    mapped = _DISCONNECT_REASON_MAP.get(reason)
+    if mapped is None:
+        return (None, None)
+    status, end_reason = mapped
+    return (status, end_reason.value)
+
 
 logger = logging.getLogger("hailhq.voicebot")
 
@@ -103,6 +155,7 @@ async def soft_cap_announce_and_hangup(
     session: AgentSession,
     call_id: UUID,
     delay_seconds: int,
+    on_fire: Callable[[], None] | None = None,
 ) -> None:
     """Wait ``delay_seconds`` then politely end the call.
 
@@ -114,6 +167,11 @@ async def soft_cap_announce_and_hangup(
 
     Cancellable: if the call ends naturally before the cap, the
     entrypoint cancels this task and the announcement never plays.
+
+    ``on_fire`` is called synchronously *just before* ``ctx.shutdown`` if
+    the cap actually fires (i.e. not cancelled). The entrypoint uses this
+    hook to stamp ``end_reason='soft_cap_reached'`` in its captured-state
+    dict so ``on_call_end`` writes the right value.
     """
     try:
         await asyncio.sleep(delay_seconds)
@@ -133,16 +191,31 @@ async def soft_cap_announce_and_hangup(
             "call_id=%s soft-cap announcement failed; proceeding to hangup",
             call_id,
         )
+    if on_fire is not None:
+        on_fire()
     ctx.shutdown(reason=SOFT_CAP_END_REASON)
 
 
-async def on_call_end(call_id: UUID, room_name: str) -> None:
+async def on_call_end(
+    call_id: UUID,
+    room_name: str,
+    status_override: str | None = None,
+    end_reason_override: str | None = None,
+) -> None:
     """Finalize the ``Call`` row when the session ends.
 
     Called from a shutdown callback registered against ``ctx``. Uploads the
     recording (no-op in v1 — see :mod:`hailhq.voicebot.recording`), marks
-    the call ``completed`` with ``ended_at`` set to ``now()``, and records
-    one raw ``usage_events`` row with the call duration in milliseconds.
+    the call with the final status (``"completed"`` by default), sets
+    ``ended_at = now()``, and records one raw ``usage_events`` row with the
+    call duration in milliseconds.
+
+    ``status_override`` lets the entrypoint pass a SIP-derived terminal
+    status (e.g. ``"no_answer"`` from ``DisconnectReason.USER_UNAVAILABLE``)
+    when the call ended without a real conversation; in those cases
+    ``end_reason_override`` carries the lowercased DisconnectReason name
+    for operational triage. ``None`` for both keeps the existing happy-path
+    behavior (``status="completed"``, ``end_reason`` unchanged).
 
     No money math happens here. The website's private rater converts the
     raw units into a dollar debit against ``account_credits`` using its
@@ -175,11 +248,24 @@ async def on_call_end(call_id: UUID, room_name: str) -> None:
         else:
             duration_ms = 0
 
+        final_status = status_override or "completed"
+        # Always populate end_reason — the call_end_reason ENUM + CHECK
+        # constraint requires it for terminal rows. Defaults:
+        #   - status='completed' with no override → 'normal_hangup'
+        #   - any other override-less terminal write → 'unknown' (defensive;
+        #     in practice the entrypoint passes both overrides together).
+        if end_reason_override is not None:
+            final_end_reason = end_reason_override
+        elif final_status == "completed":
+            final_end_reason = CallEndReason.NORMAL_HANGUP.value
+        else:
+            final_end_reason = CallEndReason.UNKNOWN.value
         await session.execute(
             update(Call)
             .where(Call.id == call_id)
             .values(
-                status="completed",
+                status=final_status,
+                end_reason=final_end_reason,
                 ended_at=now,
                 recording_s3_key=recording_key,
             )
@@ -189,7 +275,10 @@ async def on_call_end(call_id: UUID, room_name: str) -> None:
         # backstop can retry. No-op for non-pool calls.
         await release_pool_reservation(session, call_id=call_id)
         usage_event_id: str | None = None
-        if duration_ms > 0:
+        # Only bill for calls that actually completed a conversation. A
+        # no-answer / busy / failed call has a non-zero `started_at - now`
+        # delta (the ring time) but isn't billable — skip the usage row.
+        if final_status == "completed" and duration_ms > 0:
             usage = UsageEvent(
                 organization_id=organization_id,
                 channel="voice",
@@ -253,9 +342,58 @@ async def entrypoint(ctx: JobContext) -> None:
 
     await ctx.connect()
 
+    # Captured terminal status / end_reason set by the SIP-participant
+    # disconnect handler below. Read by `_shutdown` to override the default
+    # `"completed"` status when the call actually ended because of busy /
+    # no-answer / trunk failure / etc. Mutable container so the closure
+    # carries the latest value, not a snapshot.
+    captured: dict[str, str | None] = {"status": None, "end_reason": None}
+
+    @ctx.room.on("participant_disconnected")
+    def _on_participant_disconnected(participant: rtc.RemoteParticipant) -> None:
+        # We only care about the SIP participant — the agent (this process)
+        # also fires participant_disconnected on shutdown, which we ignore.
+        if participant.kind != rtc.ParticipantKind.PARTICIPANT_KIND_SIP:
+            return
+        status, end_reason = disconnect_reason_to_status(participant.disconnect_reason)
+        if status is None:
+            # CLIENT_INITIATED — normal hangup after a real conversation.
+            # Leave captured as-is so `_shutdown` falls back to "completed".
+            return
+        captured["status"] = status
+        captured["end_reason"] = end_reason
+        logger.info(
+            "call_id=%s sip participant disconnected — status=%s reason=%s",
+            call_id,
+            status,
+            end_reason,
+        )
+        # For reasons the agent SDK does not auto-close on (notably
+        # USER_UNAVAILABLE for no-answer), the session would otherwise sit
+        # idle until the worker times out. Force a graceful shutdown so
+        # `_shutdown` → `on_call_end` runs promptly.
+        if participant.disconnect_reason not in _SDK_AUTO_CLOSE_REASONS:
+            ctx.shutdown(reason=status)
+
     vad = ctx.proc.userdata["vad"]
     session = build_session(metadata.get("llm"), vad)
     event_tasks = attach_event_handlers(session, call_id)
+
+    # AgentSession-level close events that aren't already covered by the SIP
+    # participant_disconnected handler above: `error` (LLM/STT/TTS crash) and
+    # `job_shutdown` (worker shutdown signal). Only stamp end_reason if the
+    # SIP path hasn't already claimed it.
+    @session.on("close")
+    def _on_session_close(ev: Any) -> None:
+        if captured["end_reason"] is not None:
+            return
+        reason = getattr(ev, "reason", None)
+        if reason == "error":
+            captured["end_reason"] = CallEndReason.AGENT_ERROR.value
+            captured["status"] = "failed"
+        elif reason == "job_shutdown":
+            captured["end_reason"] = CallEndReason.WORKER_SHUTDOWN.value
+            captured["status"] = "failed"
 
     agent = Agent(instructions=metadata.get("system_prompt") or "")
     await session.start(agent=agent, room=ctx.room)
@@ -268,8 +406,21 @@ async def entrypoint(ctx: JobContext) -> None:
     soft_cap_seconds = settings.hail_voice_max_duration_seconds
     soft_cap_task: asyncio.Task[None] | None = None
     if soft_cap_seconds > 0:
+        # When the cap actually fires (vs being cancelled by a natural hangup)
+        # stamp end_reason='soft_cap_reached' before ctx.shutdown so the
+        # shutdown callback writes it.
+        def _on_soft_cap_fired() -> None:
+            captured["end_reason"] = CallEndReason.SOFT_CAP_REACHED.value
+            # Status stays None → on_call_end falls back to "completed".
+
         soft_cap_task = asyncio.create_task(
-            soft_cap_announce_and_hangup(ctx, session, call_id, soft_cap_seconds)
+            soft_cap_announce_and_hangup(
+                ctx,
+                session,
+                call_id,
+                soft_cap_seconds,
+                on_fire=_on_soft_cap_fired,
+            )
         )
 
     async def _shutdown() -> None:
@@ -278,7 +429,12 @@ async def entrypoint(ctx: JobContext) -> None:
             await asyncio.gather(soft_cap_task, return_exceptions=True)
         if event_tasks:
             await asyncio.gather(*list(event_tasks), return_exceptions=True)
-        await on_call_end(call_id, room_name)
+        await on_call_end(
+            call_id,
+            room_name,
+            status_override=captured["status"],
+            end_reason_override=captured["end_reason"],
+        )
 
     ctx.add_shutdown_callback(_shutdown)
 
@@ -287,6 +443,7 @@ __all__ = [
     "SOFT_CAP_ANNOUNCEMENT",
     "SOFT_CAP_END_REASON",
     "attach_event_handlers",
+    "disconnect_reason_to_status",
     "entrypoint",
     "on_call_end",
     "parse_metadata",

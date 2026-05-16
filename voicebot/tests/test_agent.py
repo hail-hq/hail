@@ -27,6 +27,7 @@ from hailhq.voicebot.agent import (
     SOFT_CAP_ANNOUNCEMENT,
     SOFT_CAP_END_REASON,
     attach_event_handlers,
+    disconnect_reason_to_status,
     on_call_end,
     parse_metadata,
     soft_cap_announce_and_hangup,
@@ -301,6 +302,161 @@ async def test_on_call_end_releases_pool_reservation(
     ).scalar_one()
     await async_session.refresh(refreshed_call)
     assert refreshed_call.status == "completed"
+
+
+# --------------------------------------------------------------------------- #
+# SIP DisconnectReason → Call.status mapping
+# --------------------------------------------------------------------------- #
+
+
+# Pure unit tests for the mapping helper — no DB, no session. Parametrized
+# against the real `rtc.DisconnectReason` enum from the installed SDK so a
+# protobuf rename upstream surfaces immediately in CI.
+
+
+def test_disconnect_reason_user_unavailable_maps_to_no_answer() -> None:
+    from livekit import rtc
+
+    assert disconnect_reason_to_status(rtc.DisconnectReason.USER_UNAVAILABLE) == (
+        "no_answer",
+        "user_unavailable",
+    )
+
+
+def test_disconnect_reason_user_rejected_maps_to_busy() -> None:
+    from livekit import rtc
+
+    assert disconnect_reason_to_status(rtc.DisconnectReason.USER_REJECTED) == (
+        "busy",
+        "user_rejected",
+    )
+
+
+def test_disconnect_reason_sip_trunk_failure_maps_to_failed() -> None:
+    from livekit import rtc
+
+    assert disconnect_reason_to_status(rtc.DisconnectReason.SIP_TRUNK_FAILURE) == (
+        "failed",
+        "sip_trunk_failure",
+    )
+
+
+def test_disconnect_reason_connection_timeout_maps_to_failed() -> None:
+    from livekit import rtc
+
+    assert disconnect_reason_to_status(rtc.DisconnectReason.CONNECTION_TIMEOUT) == (
+        "failed",
+        "connection_timeout",
+    )
+
+
+def test_disconnect_reason_media_failure_maps_to_failed() -> None:
+    from livekit import rtc
+
+    assert disconnect_reason_to_status(rtc.DisconnectReason.MEDIA_FAILURE) == (
+        "failed",
+        "media_failure",
+    )
+
+
+def test_disconnect_reason_client_initiated_is_passthrough() -> None:
+    """CLIENT_INITIATED is the normal-hangup happy path — leave status as-is."""
+    from livekit import rtc
+
+    assert disconnect_reason_to_status(rtc.DisconnectReason.CLIENT_INITIATED) == (
+        None,
+        None,
+    )
+
+
+def test_disconnect_reason_none_is_passthrough() -> None:
+    """A missing disconnect_reason must not override the default status."""
+    assert disconnect_reason_to_status(None) == (None, None)
+
+
+# --------------------------------------------------------------------------- #
+# on_call_end overrides (integration with the calls table)
+# --------------------------------------------------------------------------- #
+
+
+async def test_on_call_end_writes_status_override(
+    async_session: AsyncSession,
+) -> None:
+    """`status_override` and `end_reason_override` land on the Call row."""
+    call_id = await _make_call_row(async_session)
+
+    await on_call_end(
+        call_id,
+        room_name=f"hail-{call_id}",
+        status_override="no_answer",
+        end_reason_override="user_unavailable",
+    )
+
+    refreshed = (
+        await async_session.execute(select(Call).where(Call.id == call_id))
+    ).scalar_one()
+    await async_session.refresh(refreshed)
+    assert refreshed.status == "no_answer"
+    assert refreshed.end_reason == "user_unavailable"
+    assert refreshed.ended_at is not None
+
+
+async def test_on_call_end_no_usage_event_for_overridden_status(
+    async_session: AsyncSession,
+) -> None:
+    """Non-completed terminal statuses are not billed even if the call rang."""
+    call_id = await _make_call_row(async_session)
+    # Backdate started_at so a duration would otherwise be billed.
+    await async_session.execute(
+        update(Call)
+        .where(Call.id == call_id)
+        .values(started_at=datetime.now(timezone.utc) - timedelta(seconds=45))
+    )
+    await async_session.commit()
+
+    await on_call_end(
+        call_id,
+        room_name=f"hail-{call_id}",
+        status_override="busy",
+        end_reason_override="user_rejected",
+    )
+
+    refreshed = (
+        await async_session.execute(select(Call).where(Call.id == call_id))
+    ).scalar_one()
+    await async_session.refresh(refreshed)
+    assert refreshed.status == "busy"
+
+    rows = (
+        (
+            await async_session.execute(
+                select(UsageEvent).where(UsageEvent.ref == str(call_id))
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert rows == [], "non-completed call should not write a usage row"
+
+
+async def test_on_call_end_no_override_defaults_to_normal_hangup(
+    async_session: AsyncSession,
+) -> None:
+    """No override → status='completed' AND end_reason='normal_hangup'.
+
+    The call_end_reason ENUM + the migration's CHECK constraint require an
+    end_reason on every terminal row, so the happy-path default must land.
+    """
+    call_id = await _make_call_row(async_session)
+
+    await on_call_end(call_id, room_name=f"hail-{call_id}")
+
+    refreshed = (
+        await async_session.execute(select(Call).where(Call.id == call_id))
+    ).scalar_one()
+    await async_session.refresh(refreshed)
+    assert refreshed.status == "completed"
+    assert refreshed.end_reason == "normal_hangup"
 
 
 # --------------------------------------------------------------------------- #

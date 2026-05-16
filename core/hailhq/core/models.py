@@ -14,6 +14,8 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import INET, JSONB, UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
+from hailhq.core.call_end_reasons import CallEndReasonDB
+
 
 class Base(DeclarativeBase):
     pass
@@ -274,7 +276,11 @@ class Call(Base):
         Text, server_default="outbound", nullable=False
     )
     status: Mapped[str] = mapped_column(Text, server_default="queued", nullable=False)
-    end_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Backed by the `call_end_reason` Postgres ENUM. See
+    # hailhq.core.call_end_reasons for the canonical value list. Stays
+    # nullable because non-terminal rows have no reason yet; the DB CHECK
+    # added in migration 0003 enforces non-null for terminal statuses.
+    end_reason: Mapped[str | None] = mapped_column(CallEndReasonDB, nullable=True)
     provider: Mapped[str] = mapped_column(Text, server_default="twilio", nullable=False)
     provider_call_sid: Mapped[str | None] = mapped_column(
         Text, unique=True, nullable=True
@@ -305,6 +311,17 @@ class Call(Base):
     )
     updated_at: Mapped[datetime] = mapped_column(
         TS, server_default=text("now()"), nullable=False
+    )
+
+    __table_args__ = (
+        # Mirrors migration 0003 — every terminal row must carry an
+        # end_reason. Defined here too so Base.metadata.create_all (tests)
+        # produces the same shape as the alembic-managed schema.
+        CheckConstraint(
+            "status NOT IN ('completed','failed','busy','no_answer','canceled')"
+            " OR end_reason IS NOT NULL",
+            name="calls_end_reason_when_terminal",
+        ),
     )
 
 

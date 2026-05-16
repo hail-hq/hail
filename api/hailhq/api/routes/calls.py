@@ -310,7 +310,9 @@ async def create_call(
         )
         await _cleanup_partial_livekit(lk, room_name, dispatch_id)
         now = datetime.now(timezone.utc)
-        failure_code = f"livekit_{setup_stage}_failed"
+        # Matches the call_end_reason ENUM values: room_create_failed,
+        # agent_dispatch_failed, sip_participant_failed.
+        failure_code = f"{setup_stage}_failed"
         await db.execute(
             update(Call)
             .where(Call.id == call.id)
