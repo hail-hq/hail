@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://hail.so/docs/costs/schema/llm.json",
+  "$id": "https://hail.so/costs/schema/llm.json",
   "title": "LLM Costs",
   "description": "Cost and capability data for large language model providers.",
   "type": "object",
