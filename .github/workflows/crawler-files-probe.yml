@@ -1,0 +1,54 @@
+name: crawler-files-probe
+
+on:
+  schedule:
+    # Daily at 07:15 UTC. Free-tier-friendly (~30 runs/month) and one
+    # missed cycle is still well under Google's crawler revisit interval.
+    - cron: "15 7 * * *"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  probe-apex:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Probe sitemap.xml
+        run: |
+          set -euo pipefail
+          body=$(curl --fail --silent --show-error https://hail.so/sitemap.xml)
+          size=$(printf '%s' "$body" | wc -c)
+          echo "sitemap.xml: $size bytes"
+          printf '%s\n' "$body" | head -5
+          [ "$size" -gt 100 ] || { echo "::error::sitemap.xml body too small ($size bytes)"; exit 1; }
+          printf '%s' "$body" | grep -q "<urlset" || { echo "::error::sitemap.xml missing <urlset>"; exit 1; }
+          printf '%s' "$body" | grep -q "</urlset>" || { echo "::error::sitemap.xml missing </urlset>"; exit 1; }
+      - name: Probe llms.txt
+        run: |
+          set -euo pipefail
+          body=$(curl --fail --silent --show-error https://hail.so/llms.txt)
+          size=$(printf '%s' "$body" | wc -c)
+          echo "llms.txt: $size bytes"
+          printf '%s\n' "$body" | head -5
+          [ "$size" -gt 100 ] || { echo "::error::llms.txt body too small ($size bytes)"; exit 1; }
+          printf '%s\n' "$body" | head -5 | grep -q "^# Hail" || { echo "::error::llms.txt missing # Hail header near top"; exit 1; }
+      - name: Probe llms-full.txt
+        run: |
+          set -euo pipefail
+          body=$(curl --fail --silent --show-error https://hail.so/llms-full.txt)
+          size=$(printf '%s' "$body" | wc -c)
+          echo "llms-full.txt: $size bytes"
+          printf '%s\n' "$body" | head -5
+          [ "$size" -gt 100 ] || { echo "::error::llms-full.txt body too small ($size bytes)"; exit 1; }
+          printf '%s' "$body" | grep -q "<!-- source:" || { echo "::error::llms-full.txt missing source markers"; exit 1; }
+      - name: Probe robots.txt
+        run: |
+          set -euo pipefail
+          body=$(curl --fail --silent --show-error https://hail.so/robots.txt)
+          size=$(printf '%s' "$body" | wc -c)
+          echo "robots.txt: $size bytes"
+          printf '%s\n' "$body"
+          [ "$size" -gt 30 ] || { echo "::error::robots.txt body too small ($size bytes)"; exit 1; }
+          printf '%s' "$body" | grep -q "Sitemap:" || { echo "::error::robots.txt missing Sitemap"; exit 1; }
+          printf '%s' "$body" | grep -q "User-agent: \*" || { echo "::error::robots.txt missing User-agent"; exit 1; }

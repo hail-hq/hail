@@ -1,0 +1,37 @@
+name: openapi-check
+
+on:
+  pull_request:
+    paths:
+      - "api/**"
+      - "openapi/openapi.yaml"
+      - ".github/workflows/openapi-check.yml"
+
+concurrency:
+  group: openapi-check-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Verify openapi.yaml regenerated on api/ changes
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          changed=$(git diff --name-only "$BASE_SHA"..."$HEAD_SHA")
+          api_changed=$(printf '%s\n' "$changed" | grep -E '^api/' | grep -vE '^api/(tests/|README|.*\.md$)' || true)
+          openapi_changed=$(printf '%s\n' "$changed" | grep -E '^openapi/openapi\.yaml$' || true)
+          if [ -n "$api_changed" ] && [ -z "$openapi_changed" ]; then
+            echo "::error::api/ changes detected without a matching openapi/openapi.yaml update."
+            echo "Per CLAUDE.md: after any API route change, regenerate openapi/openapi.yaml in the same PR."
+            echo "Changed under api/:"
+            printf '%s\n' "$api_changed" | sed 's/^/  - /'
+            exit 1
+          fi
+          echo "openapi.yaml gate OK"
