@@ -89,9 +89,6 @@ func TestCallStatus_JSONOutput(t *testing.T) {
 	}
 }
 
-// TestCallStatus_PrefixResolution: an 8-char hex prefix from `hail call list`
-// resolves against the recent-calls page and the typed UUID is forwarded to
-// the GET endpoint.
 func TestCallStatus_PrefixResolution(t *testing.T) {
 	fullID := "11111111-1111-1111-1111-111111111111"
 	listBody := client.CallListResponse{Items: []client.CallResponse{
@@ -99,10 +96,7 @@ func TestCallStatus_PrefixResolution(t *testing.T) {
 		sampleCall("22222222-2222-2222-2222-222222222222", "+15550002", client.CallResponseStatusDialing),
 	}}
 
-	srv := newSequenceServer(t, []sequenceResponse{
-		{http.StatusOK, listBody},
-		{http.StatusOK, sampleResponse()},
-	})
+	srv := newFakeServer(t, http.StatusOK, listBody)
 
 	stdout, _, err := runRoot(t,
 		map[string]string{"HAIL_API_KEY": "sk_test", "HAIL_API_URL": srv.URL},
@@ -111,11 +105,12 @@ func TestCallStatus_PrefixResolution(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if got := atomic.LoadInt32(&srv.hits); got != 2 {
-		t.Errorf("expected 2 requests (list + get), got %d", got)
+	// Single round trip — the matched record is reused from the list response.
+	if got := atomic.LoadInt32(&srv.hits); got != 1 {
+		t.Errorf("expected 1 request (list only, no follow-up GET), got %d", got)
 	}
-	if srv.lastReq.URL.Path != "/calls/"+fullID {
-		t.Errorf("final path = %s; want /calls/%s", srv.lastReq.URL.Path, fullID)
+	if srv.lastReq.URL.Path != "/calls" {
+		t.Errorf("path = %s; want /calls", srv.lastReq.URL.Path)
 	}
 	if !strings.Contains(stdout, fullID) {
 		t.Errorf("stdout missing resolved UUID:\n%s", stdout)
