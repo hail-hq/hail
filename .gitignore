@@ -40,13 +40,12 @@ npm-debug.log*
 yarn-debug.log*
 pnpm-debug.log*
 
-# ─── Next.js (docs site) ───────────────
-docs/.next/
-docs/node_modules/
-docs/out/
-docs/.source/
-docs/next-env.d.ts
-docs/tsconfig.tsbuildinfo
+# ─── Next.js (web app) ─────────────────
+web/.next/
+web/node_modules/
+web/out/
+web/next-env.d.ts
+web/tsconfig.tsbuildinfo
 
 # ─── Go ────────────────────────────────
 bin/
@@ -60,6 +59,5 @@ coverage.*
 profile.cov
 
 # ─── Local data ────────────────────────
-/docs/ops
 /data/
 /tmp/

@@ -2,17 +2,13 @@ import type { LLMRow, STTRow, TTSRow } from '@/lib/types';
 import { CopyableCode } from './copyable-code';
 import { isStale, daysSince } from '@/lib/staleness';
 import { langs } from '@/lib/format';
+import { compareHrefRemove } from '@/lib/url';
 
 type Cell = React.ReactNode;
 type CompareRow = { label: string; cells: Cell[]; emphasis?: boolean };
 
 function StaleMaybe({ d }: { d: string }) {
   return isStale(d) ? <span className="stale-pill">stale {daysSince(d)}d</span> : null;
-}
-
-function compareUrlWithout(currentIds: string[], idToRemove: string): string {
-  const next = currentIds.filter((id) => id !== idToRemove);
-  return next.length > 0 ? `/costs/compare?m=${next.join(',')}` : '/costs/compare';
 }
 
 function CompareGrid({
@@ -37,7 +33,7 @@ function CompareGrid({
                   <div className="compare-model-name">{m.display_name}</div>
                   <CopyableCode value={m.model_id} />
                   <a
-                    href={compareUrlWithout(currentIds, m.model_id)}
+                    href={compareHrefRemove(currentIds, m.model_id)}
                     className="compare-remove"
                     rel="nofollow"
                     title={`Remove ${m.display_name}`}

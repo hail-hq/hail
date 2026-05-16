@@ -5,24 +5,15 @@ import {
   STTCompareTable,
   TTSCompareTable,
 } from '@/components/compare-table';
+import { MAX_COMPARE, compareHrefAdd } from '@/lib/url';
 
 export const metadata = {
   title: 'Compare model costs — Hail',
   description: 'Compare AI model providers side-by-side. Schema-validated, refreshed weekly.',
 };
 
-const MAX_COMPARE = 6;
-
 interface ComparePageProps {
   searchParams: Promise<{ m?: string }>;
-}
-
-function buildAddUrl(currentIds: string[], idToAdd: string): string {
-  if (currentIds.includes(idToAdd) || currentIds.length >= MAX_COMPARE) {
-    return `/costs/compare?m=${currentIds.join(',')}`;
-  }
-  const next = [...currentIds, idToAdd];
-  return `/costs/compare?m=${next.join(',')}`;
 }
 
 export default async function ComparePage({ searchParams }: ComparePageProps) {
@@ -177,7 +168,6 @@ export default async function ComparePage({ searchParams }: ComparePageProps) {
               unselectedSTT={unselectedSTT}
               unselectedTTS={unselectedTTS}
               currentIds={currentIds}
-              buildAddUrl={buildAddUrl}
             />
           )}
         </>
@@ -220,13 +210,11 @@ function AddMoreSection({
   unselectedSTT,
   unselectedTTS,
   currentIds,
-  buildAddUrl,
 }: {
   unselectedLLM: { provider: string; display_name: string; model_id: string }[];
   unselectedSTT: { provider: string; display_name: string; model_id: string }[];
   unselectedTTS: { provider: string; display_name: string; model_id: string }[];
   currentIds: string[];
-  buildAddUrl: (ids: string[], id: string) => string;
 }) {
   return (
     <section
@@ -251,9 +239,9 @@ function AddMoreSection({
         >
           Add another model
         </h3>
-        <ModelGroup label="LLMs" models={unselectedLLM} currentIds={currentIds} buildAddUrl={buildAddUrl} />
-        <ModelGroup label="Speech-to-Text" models={unselectedSTT} currentIds={currentIds} buildAddUrl={buildAddUrl} />
-        <ModelGroup label="Text-to-Speech" models={unselectedTTS} currentIds={currentIds} buildAddUrl={buildAddUrl} />
+        <ModelGroup label="LLMs" models={unselectedLLM} currentIds={currentIds} />
+        <ModelGroup label="Speech-to-Text" models={unselectedSTT} currentIds={currentIds} />
+        <ModelGroup label="Text-to-Speech" models={unselectedTTS} currentIds={currentIds} />
       </div>
     </section>
   );
@@ -263,12 +251,10 @@ function ModelGroup({
   label,
   models,
   currentIds,
-  buildAddUrl,
 }: {
   label: string;
   models: { provider: string; display_name: string; model_id: string }[];
   currentIds: string[];
-  buildAddUrl: (ids: string[], id: string) => string;
 }) {
   if (models.length === 0) return null;
   return (
@@ -291,7 +277,7 @@ function ModelGroup({
           <a
             key={m.model_id}
             className="add-pill"
-            href={buildAddUrl(currentIds, m.model_id)}
+            href={compareHrefAdd(currentIds, m.model_id)}
             rel="nofollow"
           >
             <span className="add-pill-plus">+</span>
@@ -368,9 +354,9 @@ function EmptyState({
         >
           Available models
         </h3>
-        <ModelGroup label="LLMs" models={llm} currentIds={currentIds} buildAddUrl={buildAddUrl} />
-        <ModelGroup label="Speech-to-Text" models={stt} currentIds={currentIds} buildAddUrl={buildAddUrl} />
-        <ModelGroup label="Text-to-Speech" models={tts} currentIds={currentIds} buildAddUrl={buildAddUrl} />
+        <ModelGroup label="LLMs" models={llm} currentIds={currentIds} />
+        <ModelGroup label="Speech-to-Text" models={stt} currentIds={currentIds} />
+        <ModelGroup label="Text-to-Speech" models={tts} currentIds={currentIds} />
       </div>
     </section>
   );

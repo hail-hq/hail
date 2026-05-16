@@ -15,7 +15,8 @@ mcp/        — MCP service, remote SSE transport on :8081. Deployed (Docker), n
 core/       — shared Python lib. Not published to PyPI in v1 (no external consumers yet).
 cli/        — Go binary (`hail`). Released via GitHub Releases; codegens its client from `openapi/openapi.yaml`.
 openapi/    — committed openapi.yaml. Source of truth for the CLI.
-docs/       — plain markdown; to be served via fumadoc on the website.
+docs/       — plain markdown prose (architecture, contributing, operations, setup/*); GitHub renders it.
+web/        — Next.js workspace for the interactive costs surface (/costs, /costs/compare, /costs.md, /costs/schema/*). Deployed to Vercel; hail-website rewrites /costs/* to it.
 ```
 
 **PyPI posture for v1**: one external artifact — the Python SDK, published as `hail-sdk` (imports as `import hail`). The internal services `hailhq-api`, `hailhq-voicebot`, `hailhq-mcp` all carry `Private :: Do Not Upload`. `hailhq-core` is not marked private but is not released in v1 either — it's an internal workspace dep.

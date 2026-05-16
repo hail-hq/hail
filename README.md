@@ -126,11 +126,11 @@ Checked = shipped. Version tag shows the target release.
 AI agent ──► Hail API ──dispatch──► Voicebot ──► LiveKit Cloud ──SIP──► Twilio ──► 📞
 ```
 
-Full diagram: [hail-hq/hail/blob/main/docs/architecture.md](https://github.com/hail-hq/hail/blob/main/docs/architecture.md).
+Full diagram: [docs/architecture.md](docs/architecture.md).
 
 ## Contributing
 
-See [hail-hq/hail/blob/main/docs/contributing.md](https://github.com/hail-hq/hail/blob/main/docs/contributing.md). TL;DR: fork, branch, conventional-commit, PR. Provider adapters go in `core/hailhq/core/providers/`. Update `.env.example` for any new env var.
+See [docs/contributing.md](docs/contributing.md). TL;DR: fork, branch, conventional-commit, PR. Provider adapters go in `core/hailhq/core/providers/`. Update `.env.example` for any new env var.
 
 ## License
 
