@@ -134,4 +134,5 @@ See [docs/contributing.md](docs/contributing.md). TL;DR: fork, branch, conventio
 
 ## License
 
-[AGPLv3](./LICENSE). If you run a modified Hail as a service, you must release your source.
+Source code: [AGPL-3.0-or-later](./LICENSE) — if you run a modified Hail as a service, you must release your source.
+Pricing dataset (`costs/`): [CC-BY-4.0](./costs/LICENSE) — reuse the pricing JSON freely with attribution.

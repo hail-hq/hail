@@ -1,6 +1,5 @@
 {
   "version": 1,
-  "updated": "2026-05-05",
   "license": "CC-BY-4.0",
   "models": [
     {
@@ -65,7 +64,7 @@
       "price_per_1m_chars_usd": 50.0,
       "voice_quality": "neural",
       "languages": "42+",
-      "ssml_support": true,
+      "ssml_support": false,
       "voice_cloning": true,
       "output_formats": [
         "raw/pcm_f32le",
@@ -79,7 +78,7 @@
       "last_verified": "2026-05-05",
       "verified_by": "r13i",
       "source_url": "https://cartesia.ai/pricing",
-      "notes": "Cartesia publishes Sonic pricing as $1 per 25 minutes of audio output (~$0.04/min). Converted to ~$50/1M chars assuming ~150 WPM (~750 chars/min). Actual $/1M chars varies with speech rate; verify by sampling. IVC voice cloning included (no clone fee). 90ms TTFB."
+      "notes": "Cartesia publishes Sonic pricing as $1 per 25 minutes of audio output (~$0.04/min). Converted to ~$50/1M chars assuming ~150 WPM (~750 chars/min). Actual $/1M chars varies with speech rate; verify by sampling. IVC voice cloning included (no clone fee). 90ms TTFB. SSML tags (speed/volume/break/spell/emotion) are documented on sonic-3 but temporarily disabled on sonic-3.5 per https://docs.cartesia.ai/build-with-cartesia/sonic-3/ssml-tags (checked 2026-05-16); flip ssml_support back to true once upstream re-enables."
     },
     {
       "provider": "Groq",

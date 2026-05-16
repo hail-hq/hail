@@ -4,11 +4,10 @@
   "title": "STT Costs",
   "description": "Cost and capability data for speech-to-text providers.",
   "type": "object",
-  "required": ["version", "updated", "license", "models"],
+  "required": ["version", "license", "models"],
   "additionalProperties": false,
   "properties": {
     "version": { "const": 1 },
-    "updated": { "type": "string", "format": "date" },
     "license": { "const": "CC-BY-4.0" },
     "models": {
       "type": "array",
