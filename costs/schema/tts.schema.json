@@ -7,7 +7,7 @@
   "required": ["version", "license", "models"],
   "additionalProperties": false,
   "properties": {
-    "version": { "const": 1 },
+    "version": { "const": 2 },
     "license": { "const": "CC-BY-4.0" },
     "models": {
       "type": "array",
@@ -16,6 +16,10 @@
     }
   },
   "$defs": {
+    "decimal": {
+      "type": "string",
+      "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]{1,8})?$"
+    },
     "model": {
       "type": "object",
       "additionalProperties": false,
@@ -27,6 +31,8 @@
         "voice_quality",
         "languages",
         "last_verified",
+        "last_changed_at",
+        "verification_method",
         "verified_by",
         "source_url"
       ],
@@ -35,16 +41,20 @@
         "provider_url": { "type": "string", "format": "uri" },
         "model_id": { "type": "string", "minLength": 1 },
         "display_name": { "type": "string", "minLength": 1 },
-        "price_per_1m_chars_usd": { "type": "number", "minimum": 0 },
+        "price_per_1m_chars_usd": { "$ref": "#/$defs/decimal" },
         "voice_quality": { "enum": ["standard", "neural", "cloned"] },
         "voice_count": { "type": "integer", "minimum": 1 },
+        "voices_count": { "type": "integer", "minimum": 1 },
+        "voices_premium_count": { "type": "integer", "minimum": 0 },
         "languages": {
           "oneOf": [
             { "type": "array", "items": { "type": "string" }, "minItems": 1 },
             { "type": "string", "pattern": "^[0-9]+\\+$" }
           ]
         },
-        "ssml_support": { "type": "boolean" },
+        "ssml_supported": { "type": "boolean" },
+        "emotion_control_supported": { "type": "boolean" },
+        "streaming_supported": { "type": "boolean" },
         "voice_cloning": {
           "oneOf": [
             { "type": "boolean" },
@@ -53,8 +63,9 @@
               "additionalProperties": false,
               "required": ["price_usd", "unit"],
               "properties": {
-                "price_usd": { "type": "number", "minimum": 0 },
-                "unit": { "enum": ["per-clone", "monthly", "per-1m-chars"] }
+                "price_usd": { "$ref": "#/$defs/decimal" },
+                "unit": { "enum": ["per-clone", "monthly", "per-1m-chars"] },
+                "min_seconds": { "type": "integer", "minimum": 1 }
               }
             }
           ]
@@ -65,8 +76,50 @@
           "uniqueItems": true,
           "items": { "type": "string" }
         },
+        "sample_rates_hz": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "type": "integer", "minimum": 1 }
+        },
         "time_to_first_byte_ms": { "type": "integer", "minimum": 0 },
+        "min_billed_chars": { "type": "integer", "minimum": 0 },
+        "aliases": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "deployment_options": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "native",
+              "bedrock",
+              "vertex",
+              "azure",
+              "together",
+              "fireworks",
+              "groq",
+              "replicate",
+              "dashscope"
+            ]
+          }
+        },
+        "free_tier": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "requests_per_day": { "type": "integer", "minimum": 0 },
+            "tokens_per_day": { "type": "integer", "minimum": 0 }
+          }
+        },
+        "deprecated_at": { "type": "string", "format": "date" },
+        "replaced_by_model_id": { "type": "string", "minLength": 1 },
+        "confidence": { "enum": ["high", "medium", "low"] },
         "last_verified": { "type": "string", "format": "date" },
+        "last_changed_at": { "type": "string", "format": "date" },
+        "verification_method": { "enum": ["manual-confirmed", "community-pr"] },
         "verified_by": {
           "type": "string",
           "pattern": "^[a-zA-Z0-9](?:[a-zA-Z0-9]|-(?=[a-zA-Z0-9])){0,38}$"

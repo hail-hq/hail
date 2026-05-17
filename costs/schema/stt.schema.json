@@ -7,7 +7,7 @@
   "required": ["version", "license", "models"],
   "additionalProperties": false,
   "properties": {
-    "version": { "const": 1 },
+    "version": { "const": 2 },
     "license": { "const": "CC-BY-4.0" },
     "models": {
       "type": "array",
@@ -16,6 +16,10 @@
     }
   },
   "$defs": {
+    "decimal": {
+      "type": "string",
+      "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]{1,8})?$"
+    },
     "model": {
       "type": "object",
       "additionalProperties": false,
@@ -27,6 +31,8 @@
         "languages",
         "streaming",
         "last_verified",
+        "last_changed_at",
+        "verification_method",
         "verified_by",
         "source_url"
       ],
@@ -35,8 +41,10 @@
         "provider_url": { "type": "string", "format": "uri" },
         "model_id": { "type": "string", "minLength": 1 },
         "display_name": { "type": "string", "minLength": 1 },
-        "price_per_minute_usd": { "type": "number", "minimum": 0 },
-        "price_per_minute_batch_usd": { "type": "number", "minimum": 0 },
+        "price_per_minute_usd": { "$ref": "#/$defs/decimal" },
+        "price_per_minute_batch_usd": { "$ref": "#/$defs/decimal" },
+        "diarization_per_minute_usd": { "$ref": "#/$defs/decimal" },
+        "pii_redaction_per_minute_usd": { "$ref": "#/$defs/decimal" },
         "languages": {
           "oneOf": [
             { "type": "array", "items": { "type": "string" }, "minItems": 1 },
@@ -45,9 +53,13 @@
         },
         "streaming": { "type": "boolean" },
         "realtime": { "type": "boolean" },
-        "diarization": {
-          "enum": ["included", "extra-cost", "unsupported"]
-        },
+        "realtime_latency_ms": { "type": "integer", "minimum": 0 },
+        "diarization": { "enum": ["included", "extra-cost", "unsupported"] },
+        "punctuation_included": { "type": "boolean" },
+        "formatting_included": { "type": "boolean" },
+        "min_billed_seconds": { "type": "integer", "minimum": 0 },
+        "max_audio_minutes_per_file": { "type": "integer", "minimum": 1 },
+        "concurrent_streams_included": { "type": "integer", "minimum": 0 },
         "wer_benchmark": {
           "type": "object",
           "additionalProperties": false,
@@ -55,11 +67,47 @@
           "properties": {
             "dataset": { "type": "string" },
             "wer_pct": { "type": "number", "minimum": 0, "maximum": 100 },
-            "source_url": { "type": "string", "format": "uri" }
+            "source_url": { "type": "string", "format": "uri" },
+            "confidence": { "enum": ["high", "medium", "low"] }
           }
         },
         "time_to_first_word_ms": { "type": "integer", "minimum": 0 },
+        "aliases": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "deployment_options": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "native",
+              "bedrock",
+              "vertex",
+              "azure",
+              "together",
+              "fireworks",
+              "groq",
+              "replicate",
+              "dashscope"
+            ]
+          }
+        },
+        "free_tier": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "requests_per_day": { "type": "integer", "minimum": 0 },
+            "tokens_per_day": { "type": "integer", "minimum": 0 }
+          }
+        },
+        "deprecated_at": { "type": "string", "format": "date" },
+        "replaced_by_model_id": { "type": "string", "minLength": 1 },
+        "confidence": { "enum": ["high", "medium", "low"] },
         "last_verified": { "type": "string", "format": "date" },
+        "last_changed_at": { "type": "string", "format": "date" },
+        "verification_method": { "enum": ["manual-confirmed", "community-pr"] },
         "verified_by": {
           "type": "string",
           "pattern": "^[a-zA-Z0-9](?:[a-zA-Z0-9]|-(?=[a-zA-Z0-9])){0,38}$"
