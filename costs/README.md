@@ -31,7 +31,7 @@ curl -s https://raw.githubusercontent.com/hail-hq/hail/main/costs/llm.json | jq 
 Resolving an alias (e.g. a Bedrock model ID):
 
 ```bash
-curl -s https://raw.githubusercontent.com/hail-hq/hail/main/costs/llm.json | jq '.models[] | select(.aliases // [] | index("anthropic.claude-opus-4-7-20250101-v1:0"))'
+curl -s https://raw.githubusercontent.com/hail-hq/hail/main/costs/llm.json | jq '.models[] | select(.aliases // [] | index("anthropic.claude-opus-4-7"))'
 ```
 
 Price history for a row (changelog):
