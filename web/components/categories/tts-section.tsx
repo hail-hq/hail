@@ -5,7 +5,7 @@ import type { TTSRow } from '@/lib/types';
 import { CategorySection } from '../category-section';
 import { ModelIdCell } from '../model-id-cell';
 import { VerifiedCell } from '../verified-cell';
-import { langs } from '@/lib/format';
+import { langs, num, usd } from '@/lib/format';
 
 function cloning(vc: TTSRow['voice_cloning']): string {
   if (vc === undefined) return '—';
@@ -28,9 +28,9 @@ const columns: ColumnDef<TTSRow>[] = [
   },
   {
     id: 'price',
-    accessorKey: 'price_per_1m_chars_usd',
+    accessorFn: (row) => num(row.price_per_1m_chars_usd),
     header: '$/1M chars',
-    cell: ({ row }) => `$${row.original.price_per_1m_chars_usd.toFixed(2)}`,
+    cell: ({ row }) => usd(row.original.price_per_1m_chars_usd, 2),
     sortingFn: 'basic',
     meta: { num: true, killer: true },
   },
@@ -75,7 +75,7 @@ const columns: ColumnDef<TTSRow>[] = [
 
 function priceRange(rows: TTSRow[]): string {
   if (rows.length === 0) return '—';
-  const prices = rows.map((r) => r.price_per_1m_chars_usd);
+  const prices = rows.map((r) => num(r.price_per_1m_chars_usd));
   return `$${Math.min(...prices).toFixed(2)} – $${Math.max(...prices).toFixed(2)} / 1M chars`;
 }
 

@@ -5,6 +5,7 @@ import type { LLMRow } from '@/lib/types';
 import { CategorySection } from '../category-section';
 import { ModelIdCell } from '../model-id-cell';
 import { VerifiedCell } from '../verified-cell';
+import { num, usd } from '@/lib/format';
 
 const columns: ColumnDef<LLMRow>[] = [
   {
@@ -21,28 +22,26 @@ const columns: ColumnDef<LLMRow>[] = [
   },
   {
     id: 'output',
-    accessorKey: 'output_per_mtok_usd',
+    accessorFn: (row) => num(row.output_per_mtok_usd),
     header: 'Output $/MTok',
-    cell: ({ row }) => `$${row.original.output_per_mtok_usd.toFixed(2)}`,
+    cell: ({ row }) => usd(row.original.output_per_mtok_usd, 2),
     sortingFn: 'basic',
     meta: { num: true, killer: true },
   },
   {
     id: 'input',
-    accessorKey: 'input_per_mtok_usd',
+    accessorFn: (row) => num(row.input_per_mtok_usd),
     header: 'Input $/MTok',
-    cell: ({ row }) => `$${row.original.input_per_mtok_usd.toFixed(2)}`,
+    cell: ({ row }) => usd(row.original.input_per_mtok_usd, 2),
     sortingFn: 'basic',
     meta: { num: true },
   },
   {
     id: 'cached',
-    accessorKey: 'cached_input_per_mtok_usd',
+    accessorFn: (row) =>
+      row.cache_read_per_mtok_usd !== undefined ? num(row.cache_read_per_mtok_usd) : undefined,
     header: 'Cached $/MTok',
-    cell: ({ row }) =>
-      row.original.cached_input_per_mtok_usd !== undefined
-        ? `$${row.original.cached_input_per_mtok_usd.toFixed(4)}`
-        : '—',
+    cell: ({ row }) => usd(row.original.cache_read_per_mtok_usd, 4),
     sortingFn: 'basic',
     meta: { num: true },
   },
@@ -74,7 +73,7 @@ const columns: ColumnDef<LLMRow>[] = [
 
 function priceRange(rows: LLMRow[]): string {
   if (rows.length === 0) return '—';
-  const outs = rows.map((r) => r.output_per_mtok_usd);
+  const outs = rows.map((r) => num(r.output_per_mtok_usd));
   return `$${Math.min(...outs).toFixed(2)} – $${Math.max(...outs).toFixed(2)} / Mtok output`;
 }
 

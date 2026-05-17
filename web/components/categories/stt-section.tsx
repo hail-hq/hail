@@ -5,7 +5,7 @@ import type { STTRow } from '@/lib/types';
 import { CategorySection } from '../category-section';
 import { ModelIdCell } from '../model-id-cell';
 import { VerifiedCell } from '../verified-cell';
-import { langs } from '@/lib/format';
+import { langs, num, usd } from '@/lib/format';
 
 const columns: ColumnDef<STTRow>[] = [
   {
@@ -22,20 +22,18 @@ const columns: ColumnDef<STTRow>[] = [
   },
   {
     id: 'price',
-    accessorKey: 'price_per_minute_usd',
+    accessorFn: (row) => num(row.price_per_minute_usd),
     header: '$/min',
-    cell: ({ row }) => `$${row.original.price_per_minute_usd.toFixed(4)}`,
+    cell: ({ row }) => usd(row.original.price_per_minute_usd, 4),
     sortingFn: 'basic',
     meta: { num: true, killer: true },
   },
   {
     id: 'batch',
-    accessorKey: 'price_per_minute_batch_usd',
+    accessorFn: (row) =>
+      row.price_per_minute_batch_usd !== undefined ? num(row.price_per_minute_batch_usd) : undefined,
     header: '$/min batch',
-    cell: ({ row }) =>
-      row.original.price_per_minute_batch_usd !== undefined
-        ? `$${row.original.price_per_minute_batch_usd.toFixed(4)}`
-        : '—',
+    cell: ({ row }) => usd(row.original.price_per_minute_batch_usd, 4),
     sortingFn: 'basic',
     meta: { num: true },
   },
@@ -69,7 +67,7 @@ const columns: ColumnDef<STTRow>[] = [
 
 function priceRange(rows: STTRow[]): string {
   if (rows.length === 0) return '—';
-  const prices = rows.map((r) => r.price_per_minute_usd);
+  const prices = rows.map((r) => num(r.price_per_minute_usd));
   return `$${Math.min(...prices).toFixed(6)} – $${Math.max(...prices).toFixed(4)} / min`;
 }
 

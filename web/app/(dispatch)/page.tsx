@@ -3,6 +3,7 @@ import { LLMSection } from '@/components/categories/llm-section';
 import { STTSection } from '@/components/categories/stt-section';
 import { TTSSection } from '@/components/categories/tts-section';
 import { Toolbar } from '@/components/toolbar';
+import { num, mostRecent } from '@/lib/format';
 
 export const dynamic = 'force-static';
 
@@ -25,6 +26,7 @@ export default function CostsPage() {
   for (const m of [...llm.models, ...stt.models, ...tts.models]) {
     providers.add(m.provider);
   }
+  const verified = mostRecent(llm.models, stt.models, tts.models);
 
   return (
     <>
@@ -62,9 +64,9 @@ export default function CostsPage() {
               <span>Schema-validated public dataset.</span>
               <dl>
                 <dt>VERSION</dt>
-                <dd>1</dd>
-                <dt>UPDATED</dt>
-                <dd>{llm.updated}</dd>
+                <dd>2</dd>
+                <dt>VERIFIED</dt>
+                <dd>{verified}</dd>
                 <dt>LICENSE</dt>
                 <dd>CC-BY-4.0</dd>
                 <dt>SOURCE</dt>
@@ -95,8 +97,8 @@ export default function CostsPage() {
               <div className="v">{llm.models.length}</div>
               <div className="n">
                 $
-                {Math.min(...llm.models.map((m) => m.output_per_mtok_usd)).toFixed(2)} – $
-                {Math.max(...llm.models.map((m) => m.output_per_mtok_usd)).toFixed(0)} / Mtok output
+                {Math.min(...llm.models.map((m) => num(m.output_per_mtok_usd))).toFixed(2)} – $
+                {Math.max(...llm.models.map((m) => num(m.output_per_mtok_usd))).toFixed(0)} / Mtok output
               </div>
             </div>
             <div className="stat">
@@ -104,8 +106,8 @@ export default function CostsPage() {
               <div className="v">{stt.models.length}</div>
               <div className="n">
                 $
-                {Math.min(...stt.models.map((m) => m.price_per_minute_usd)).toFixed(6)} – $
-                {Math.max(...stt.models.map((m) => m.price_per_minute_usd)).toFixed(4)} / min
+                {Math.min(...stt.models.map((m) => num(m.price_per_minute_usd))).toFixed(6)} – $
+                {Math.max(...stt.models.map((m) => num(m.price_per_minute_usd))).toFixed(4)} / min
               </div>
             </div>
             <div className="stat">
@@ -113,8 +115,8 @@ export default function CostsPage() {
               <div className="v">{tts.models.length}</div>
               <div className="n">
                 $
-                {Math.min(...tts.models.map((m) => m.price_per_1m_chars_usd)).toFixed(0)} – $
-                {Math.max(...tts.models.map((m) => m.price_per_1m_chars_usd)).toFixed(0)} / 1M chars
+                {Math.min(...tts.models.map((m) => num(m.price_per_1m_chars_usd))).toFixed(0)} – $
+                {Math.max(...tts.models.map((m) => num(m.price_per_1m_chars_usd))).toFixed(0)} / 1M chars
               </div>
             </div>
           </div>

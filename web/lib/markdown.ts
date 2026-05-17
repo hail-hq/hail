@@ -1,6 +1,6 @@
 import 'server-only';
 import type { LLMRow, STTRow, TTSRow, CostsFile } from './types';
-import { langs } from './format';
+import { langs, num, mostRecent, usd } from './format';
 
 function tableRow(cells: (string | number | undefined)[]): string {
   return `| ${cells.map((c) => (c === undefined || c === null ? '—' : String(c))).join(' | ')} |`;
@@ -25,14 +25,12 @@ function llmTable(rows: LLMRow[]): string {
     tableRow([
       r.provider,
       `${r.display_name} (\`${r.model_id}\`)`,
-      `$${r.output_per_mtok_usd.toFixed(2)}`,
-      `$${r.input_per_mtok_usd.toFixed(2)}`,
-      r.cached_input_per_mtok_usd !== undefined
-        ? `$${r.cached_input_per_mtok_usd.toFixed(4)}`
-        : '—',
+      usd(r.output_per_mtok_usd, 2),
+      usd(r.input_per_mtok_usd, 2),
+      usd(r.cache_read_per_mtok_usd, 4),
       r.context_window.toLocaleString(),
       r.max_output_tokens.toLocaleString(),
-      r.tool_use ? 'yes' : 'no',
+      r.supports_tool_use ? 'yes' : 'no',
       `in: ${r.modalities.input.join(',')} / out: ${r.modalities.output.join(',')}`,
       r.last_verified,
       `[link](${r.source_url})`,
@@ -59,10 +57,8 @@ function sttTable(rows: STTRow[]): string {
     tableRow([
       r.provider,
       `${r.display_name} (\`${r.model_id}\`)`,
-      `$${r.price_per_minute_usd.toFixed(6)}`,
-      r.price_per_minute_batch_usd !== undefined
-        ? `$${r.price_per_minute_batch_usd.toFixed(6)}`
-        : '—',
+      usd(r.price_per_minute_usd, 6),
+      usd(r.price_per_minute_batch_usd, 6),
       r.streaming ? 'yes' : 'no',
       r.realtime ? 'yes' : 'no',
       langs(r.languages),
@@ -100,12 +96,12 @@ function ttsTable(rows: TTSRow[]): string {
     return tableRow([
       r.provider,
       `${r.display_name} (\`${r.model_id}\`)`,
-      `$${r.price_per_1m_chars_usd.toFixed(2)}`,
+      usd(r.price_per_1m_chars_usd, 2),
       r.voice_quality,
       cloning,
       langs(r.languages),
       r.time_to_first_byte_ms !== undefined ? `${r.time_to_first_byte_ms}ms` : '—',
-      r.ssml_support ? 'yes' : 'no',
+      r.ssml_supported ? 'yes' : 'no',
       r.last_verified,
       `[link](${r.source_url})`,
     ]);
@@ -137,23 +133,25 @@ export function renderCostsMarkdown(
   const providers = new Set<string>();
   for (const m of [...llm.models, ...stt.models, ...tts.models]) providers.add(m.provider);
 
-  const llmOuts = llm.models.map((m) => m.output_per_mtok_usd);
-  const sttPrices = stt.models.map((m) => m.price_per_minute_usd);
-  const ttsPrices = tts.models.map((m) => m.price_per_1m_chars_usd);
+  const llmOuts = llm.models.map((m) => num(m.output_per_mtok_usd));
+  const sttPrices = stt.models.map((m) => num(m.price_per_minute_usd));
+  const ttsPrices = tts.models.map((m) => num(m.price_per_1m_chars_usd));
+
+  const verified = mostRecent(llm.models, stt.models, tts.models);
 
   return `---
 title: Model costs
 description: Public, validated pricing and capability data for AI model providers (LLMs, STT, TTS).
 license: CC-BY-4.0
-version: 1
-updated: ${llm.updated}
+version: 2
+verified: ${verified}
 generated_at: ${generatedAt}
 source: https://github.com/hail-hq/hail/tree/main/costs
 ---
 
 # Model costs
 
-Public, validated pricing and capability data for AI model providers — large language models, speech-to-text, and text-to-speech. Schema-validated, refreshed weekly, dual-licensed CC-BY-4.0 for free reuse.
+Public, validated pricing and capability data for AI model providers — large language models, speech-to-text, and text-to-speech. Schema-validated, dual-licensed CC-BY-4.0 for free reuse.
 
 ## At a glance
 
@@ -162,7 +160,7 @@ Public, validated pricing and capability data for AI model providers — large l
 - **LLM output range:** $${Math.min(...llmOuts).toFixed(2)} – $${Math.max(...llmOuts).toFixed(2)} / Mtok
 - **STT range:** $${Math.min(...sttPrices).toFixed(6)} – $${Math.max(...sttPrices).toFixed(4)} / min
 - **TTS range:** $${Math.min(...ttsPrices).toFixed(2)} – $${Math.max(...ttsPrices).toFixed(2)} / 1M chars
-- **Updated:** ${llm.updated}
+- **Verified:** ${verified}
 
 ## For agents
 
@@ -191,6 +189,6 @@ ${notesBlock(tts.models)}
 
 ---
 
-_This page is generated from the JSON datasets at ${generatedAt}. Verify any price against the provider's official pricing page before billing decisions; dataset is updated weekly via [GitHub PRs](https://github.com/hail-hq/hail/tree/main/costs)._
+_This page is generated from the JSON datasets at ${generatedAt}. Verify any price against the provider's official pricing page before billing decisions; dataset is updated via [GitHub PRs](https://github.com/hail-hq/hail/tree/main/costs)._
 `;
 }
