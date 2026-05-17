@@ -37,6 +37,39 @@ class Settings(BaseSettings):
     twilio_account_sid: str = ""
     twilio_auth_token: str = ""
 
+    # AWS — used today for SES (outbound email). boto3 falls back to its
+    # default credential chain (env / config file / IAM role) when these
+    # are empty, so workloads running on EC2/ECS pick up IAM-role creds
+    # automatically.
+    aws_region: str = ""
+    aws_access_key_id: str = ""
+    aws_secret_access_key: str = ""
+
+    # Email — operator-managed parent domain used to mint hail-mail
+    # addresses of the form ``<user>+<org>@<HAIL_MAIL_BASE_DOMAIN>``
+    # (e.g. ``alice+acme@mail.hail.so``). The operator pre-verifies this
+    # one SES identity out-of-band; per-org rows land already-verified.
+    # Leave empty to disable hail-mail mode (only custom domains accepted).
+    hail_mail_base_domain: str = ""
+
+    # Shortcut for self-hosters: one full address that the server splits
+    # into the user/org prefix pair internally. Wins over
+    # ``HAIL_MAIL_DEFAULT_*_PREFIX`` when set. Example:
+    #   HAIL_MAIL_FROM=admin+selfhost@mail.hail.so
+    # The domain portion must match ``HAIL_MAIL_BASE_DOMAIN`` (the
+    # SES-verified parent); each side of the ``+`` must match the
+    # ``^[a-z0-9]([a-z0-9-]{0,18}[a-z0-9])?$`` prefix regex.
+    hail_mail_from: str = ""
+
+    # Default user/org prefixes used when ``POST /sender-domains`` for
+    # ``kind='hail_mail'`` is called without explicit ``local_prefix_user``
+    # / ``local_prefix_org``. Two-variable form kept for managed-cloud
+    # operators who want to set deploy-time defaults independently of any
+    # single From address. Both must match
+    # ``^[a-z0-9]([a-z0-9-]{0,18}[a-z0-9])?$``.
+    hail_mail_default_user_prefix: str = ""
+    hail_mail_default_org_prefix: str = ""
+
     # Media
     livekit_url: str = ""
     livekit_api_key: str = ""

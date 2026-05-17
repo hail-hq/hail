@@ -9,6 +9,7 @@ from sqlalchemy import (
     ForeignKey,
     Integer,
     Text,
+    UniqueConstraint,
     text,
 )
 from sqlalchemy.dialects.postgresql import INET, JSONB, UUID
@@ -357,6 +358,174 @@ class IdempotencyKey(Base):
         TS, server_default=text("now()"), nullable=False
     )
     expires_at: Mapped[datetime] = mapped_column(TS, nullable=False)
+
+
+class SenderDomain(Base):
+    """A sending-domain identity registered with the email provider.
+
+    Two flavors of row:
+
+    * ``kind = 'hail_mail'`` — a per-org sending address of the form
+      ``<local_prefix_user>+<local_prefix_org>@<HAIL_MAIL_BASE_DOMAIN>``
+      (e.g. ``alice+acme@mail.hail.so``). The two prefix columns are the
+      source of truth; ``domain`` is the computed full address kept in
+      sync at write time. The parent base domain is pre-verified by the
+      operator out-of-band, so these rows land at ``verified`` immediately
+      and ``dkim_records`` stays empty.
+    * ``kind = 'custom'`` — a tenant-controlled bare DNS name (e.g.
+      ``acme.com``). The prefix columns are both NULL.
+      ``verification_status`` starts at ``pending`` and ``dkim_records``
+      carries the three CNAMEs the tenant must publish before SES will
+      flip the identity to ``verified``.
+
+    Dual-purpose ``domain`` column (intentional for v1):
+
+    * For ``custom`` rows it's the bare DNS identity SES verifies.
+    * For ``hail_mail`` rows it's the full ``<user>+<org>@<base>``
+      address used as the wire ``From:``.
+
+    A future refactor could split into ``dns_domain`` (always the
+    registrable parent) + an optional ``local_part`` so the columns
+    don't mean different things per ``kind``. For v1 the denormalized
+    materialization is the right trade — it keeps the unique constraint
+    ``(organization_id, domain)`` working for both flavors with one
+    index and lets the API serialize the visible address from a single
+    column.
+    """
+
+    __tablename__ = "sender_domains"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    organization_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), nullable=False
+    )
+    kind: Mapped[str] = mapped_column(Text, nullable=False)
+    domain: Mapped[str] = mapped_column(Text, nullable=False)
+    # Both NULL for kind='custom'; both required for kind='hail_mail'. The
+    # full sending address (`domain`) is computed from these at write time
+    # and kept in sync — these two are the source of truth, `domain` is the
+    # convenience materialization other callers can read without re-parsing.
+    local_prefix_user: Mapped[str | None] = mapped_column(Text, nullable=True)
+    local_prefix_org: Mapped[str | None] = mapped_column(Text, nullable=True)
+    verification_status: Mapped[str] = mapped_column(
+        Text, server_default="pending", nullable=False
+    )
+    # JSON array of {name, value, type} entries — surfaced in the response so
+    # the tenant can paste them straight into their DNS console.
+    dkim_records: Mapped[list[dict]] = mapped_column(
+        JSONB, server_default=text("'[]'::jsonb"), nullable=False
+    )
+    mail_from_domain: Mapped[str | None] = mapped_column(Text, nullable=True)
+    provider: Mapped[str] = mapped_column(Text, server_default="ses", nullable=False)
+    provider_resource_id: Mapped[str | None] = mapped_column(Text, nullable=True)
+    verified_at: Mapped[datetime | None] = mapped_column(TS, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        TS, server_default=text("now()"), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        TS, server_default=text("now()"), nullable=False
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "kind IN ('hail_mail','custom')",
+            name="sender_domains_kind_check",
+        ),
+        CheckConstraint(
+            "verification_status IN ('pending','verified','failed')",
+            name="sender_domains_verification_status_check",
+        ),
+        # Hail-mail rows need both prefixes; custom rows leave both NULL.
+        # Mirrors the migration so Base.metadata.create_all (tests) produces
+        # the same shape.
+        CheckConstraint(
+            "(kind = 'hail_mail' AND local_prefix_user IS NOT NULL "
+            "AND local_prefix_org IS NOT NULL) "
+            "OR (kind = 'custom' AND local_prefix_user IS NULL "
+            "AND local_prefix_org IS NULL)",
+            name="sender_domains_prefix_kind_consistency",
+        ),
+        # An org can't register the same domain twice. Different orgs can
+        # each have their own ``acme.com`` row — SES allows duplicate
+        # identities across accounts and each org publishes their own DKIM.
+        UniqueConstraint(
+            "organization_id", "domain", name="sender_domains_org_domain_unique"
+        ),
+    )
+
+
+class Email(Base):
+    """A single outbound email message.
+
+    Mirrors the ``Call`` shape: requested → sent / failed / bounced /
+    complained, with provider_message_id surfaced for downstream
+    correlation (SES delivery webhooks land here in v1.5).
+    """
+
+    __tablename__ = "emails"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    organization_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), nullable=False
+    )
+    conversation_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("conversations.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    sender_domain_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("sender_domains.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    from_address: Mapped[str] = mapped_column(Text, nullable=False)
+    to_addresses: Mapped[list[str]] = mapped_column(ARRAY(Text), nullable=False)
+    cc_addresses: Mapped[list[str] | None] = mapped_column(ARRAY(Text), nullable=True)
+    bcc_addresses: Mapped[list[str] | None] = mapped_column(ARRAY(Text), nullable=True)
+    reply_to: Mapped[str | None] = mapped_column(Text, nullable=True)
+    subject: Mapped[str] = mapped_column(Text, nullable=False)
+    body_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    body_html: Mapped[str | None] = mapped_column(Text, nullable=True)
+    status: Mapped[str] = mapped_column(Text, server_default="queued", nullable=False)
+    # Populated on terminal rows. For send failures we store a short opaque
+    # provider-error code (e.g. SES ``MessageRejected``); free-form because
+    # the SES surface is wider than calls and we don't want a v2 migration
+    # every time AWS adds a new error.
+    end_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    provider: Mapped[str] = mapped_column(Text, server_default="ses", nullable=False)
+    provider_message_id: Mapped[str | None] = mapped_column(
+        Text, unique=True, nullable=True
+    )
+    requested_at: Mapped[datetime] = mapped_column(
+        TS, server_default=text("now()"), nullable=False
+    )
+    sent_at: Mapped[datetime | None] = mapped_column(TS, nullable=True)
+    failed_at: Mapped[datetime | None] = mapped_column(TS, nullable=True)
+    metadata_: Mapped[dict] = mapped_column(
+        "metadata", JSONB, server_default=text("'{}'::jsonb"), nullable=False
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        TS, server_default=text("now()"), nullable=False
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('queued','sent','failed','bounced','complained')",
+            name="emails_status_check",
+        ),
+        CheckConstraint(
+            "array_length(to_addresses, 1) >= 1",
+            name="emails_to_addresses_nonempty",
+        ),
+        CheckConstraint(
+            "body_text IS NOT NULL OR body_html IS NOT NULL",
+            name="emails_body_required",
+        ),
+    )
 
 
 class AuditLog(Base):

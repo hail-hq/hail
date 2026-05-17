@@ -18,6 +18,7 @@ from hail import Client
 
 async def main():
     async with Client(api_key="sk-...") as client:
+        # Place an outbound call.
         call = await client.calls.create(
             to="+15551234567",
             system_prompt="You are calling to confirm a reschedule.",
@@ -27,6 +28,14 @@ async def main():
         async for event in client.events.tail(id=f"call:{call.id}"):
             print(event.kind, event.payload)
 
+        # Send an outbound email.
+        email = await client.emails.create(
+            to=["alice@example.com"],
+            subject="Welcome",
+            body_text="Thanks for signing up.",
+        )
+        print(email.status, email.from_address)
+
 asyncio.run(main())
 ```
 
@@ -35,9 +44,20 @@ asyncio.run(main())
 
 ## API surface
 
+### Calls
+
 - `client.calls.create(*, to, system_prompt=None, llm=None, from_=None, first_message=None, metadata=None, idempotency_key=None)` — originate an outbound call. Pass either `system_prompt` (mode A) or a full `llm` block (mode B). `idempotency_key` defaults to a fresh UUIDv4.
 - `client.calls.get(call_id)` — fetch a single call.
 - `client.calls.list(*, cursor=None, limit=50, status=None, to=None)` — cursor-paginated org list.
+
+### Emails
+
+- `client.emails.create(*, to, subject, body_text=None, body_html=None, from_=None, cc=None, bcc=None, reply_to=None, conversation_id=None, metadata=None, idempotency_key=None)` — send an outbound email. At least one of `body_text` / `body_html` is required. `from_` is optional; when omitted the server picks a verified sender or auto-mints a hail-mail address (operator-configured). `idempotency_key` defaults to a fresh UUIDv4.
+- `client.emails.get(email_id)` — fetch a single email.
+- `client.emails.list(*, cursor=None, limit=50, status=None)` — cursor-paginated org list.
+
+### Events
+
 - `client.events.list(*, id=None, kind=None, cursor=None, limit=100)` — one-shot fetch of `GET /events`. `id` is a typed `<type>:<uuid>` string (v1 only supports `call:`).
 - `client.events.tail(*, id=None, kind=None, interval_seconds=0.5, follow=True)` — async-iterator tail; auto-exits on terminal call status when narrowed to `id=call:<uuid>`.
 

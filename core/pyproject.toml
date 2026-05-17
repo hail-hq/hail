@@ -5,6 +5,7 @@ description = "Hail shared library — models, config, and provider adapters."
 license = { text = "AGPL-3.0-or-later" }
 requires-python = ">=3.11"
 dependencies = [
+    "boto3>=1.34",
     "livekit-api>=1.1",
     "pydantic>=2.9",
     "pydantic-settings>=2.6",

@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from hailhq.api.auth import hash_key
 from hailhq.api.main import app
 from hailhq.api.routes.calls import get_livekit
+from hailhq.api.routes.sender_domains import get_email_provider
 from hailhq.core.db import get_session
 from hailhq.core.livekit import LiveKitClient
 from hailhq.core.models import (
@@ -23,6 +24,12 @@ from hailhq.core.models import (
     ApiKey,
     OrganizationMember,
     PhoneNumber,
+)
+from hailhq.core.providers.email import EmailProvider
+from hailhq.core.providers.email.base import (
+    DkimRecord,
+    ProviderIdentity,
+    ProviderSendResult,
 )
 from hailhq.core.testing.fixtures import (  # noqa: F401
     async_session,
@@ -121,15 +128,70 @@ def livekit_mock() -> AsyncMock:
 
 
 @pytest.fixture()
+def email_mock() -> AsyncMock:
+    """Default mock email provider — happy-path for every operation.
+
+    Per-test reconfiguration is fine: assign to ``mock.send_email.side_effect``
+    to simulate an SES error, or swap return values for create_identity.
+    """
+    mock = AsyncMock(spec=EmailProvider)
+
+    counter = {"n": 0}
+
+    async def _send(**kwargs):
+        counter["n"] += 1
+        return ProviderSendResult(provider_message_id=f"ses-msg-{counter['n']}")
+
+    mock.send_email.side_effect = _send
+
+    async def _create_identity(domain: str) -> ProviderIdentity:
+        return ProviderIdentity(
+            domain=domain,
+            verification_status="pending",
+            dkim_records=[
+                DkimRecord(
+                    name=f"sel{i}._domainkey.{domain}",
+                    value=f"sel{i}.dkim.amazonses.com",
+                )
+                for i in (1, 2, 3)
+            ],
+            provider_resource_id=domain,
+        )
+
+    mock.create_identity.side_effect = _create_identity
+
+    async def _get_identity(domain: str) -> ProviderIdentity:
+        # Default: caller has published DKIM, SES marks it verified.
+        return ProviderIdentity(
+            domain=domain,
+            verification_status="verified",
+            dkim_records=[
+                DkimRecord(
+                    name=f"sel{i}._domainkey.{domain}",
+                    value=f"sel{i}.dkim.amazonses.com",
+                )
+                for i in (1, 2, 3)
+            ],
+            provider_resource_id=domain,
+        )
+
+    mock.get_identity.side_effect = _get_identity
+    mock.delete_identity.return_value = None
+    return mock
+
+
+@pytest.fixture()
 async def client(
     async_session: AsyncSession,  # noqa: F811 (re-used as a fixture parameter name)
     livekit_mock: AsyncMock,
+    email_mock: AsyncMock,
 ) -> AsyncIterator[httpx.AsyncClient]:
     async def override_get_session() -> AsyncIterator[AsyncSession]:
         yield async_session
 
     app.dependency_overrides[get_session] = override_get_session
     app.dependency_overrides[get_livekit] = lambda: livekit_mock
+    app.dependency_overrides[get_email_provider] = lambda: email_mock
 
     transport = httpx.ASGITransport(app=app)
     try:
@@ -138,6 +200,7 @@ async def client(
     finally:
         app.dependency_overrides.pop(get_session, None)
         app.dependency_overrides.pop(get_livekit, None)
+        app.dependency_overrides.pop(get_email_provider, None)
 
 
 @pytest.fixture()

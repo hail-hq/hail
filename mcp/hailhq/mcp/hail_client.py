@@ -147,6 +147,53 @@ class HailClient:
         return _decode(resp)
 
     # ------------------------------------------------------------------ #
+    # POST /emails
+    # ------------------------------------------------------------------ #
+
+    async def send_email(
+        self,
+        *,
+        to: list[str],
+        subject: str,
+        body_text: str | None = None,
+        body_html: str | None = None,
+        from_: str | None = None,
+        cc: list[str] | None = None,
+        bcc: list[str] | None = None,
+        reply_to: str | None = None,
+        metadata: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> dict[str, Any]:
+        """POST /emails — send an outbound message.
+
+        Mirrors :meth:`place_call`'s idempotency story: a fresh UUID4 is
+        attached unless the caller passes one explicitly, so a retry
+        replays rather than re-sending. The chosen key is surfaced back
+        to the agent in the MCP tool layer.
+        """
+        body: dict[str, Any] = {"to": list(to), "subject": subject}
+        if from_ is not None:
+            body["from"] = from_
+        if body_text is not None:
+            body["body_text"] = body_text
+        if body_html is not None:
+            body["body_html"] = body_html
+        if cc:
+            body["cc"] = list(cc)
+        if bcc:
+            body["bcc"] = list(bcc)
+        if reply_to is not None:
+            body["reply_to"] = reply_to
+        if metadata is not None:
+            body["metadata"] = metadata
+
+        headers = {
+            "Idempotency-Key": idempotency_key or str(uuid.uuid4()),
+        }
+        resp = await self._client.post("/emails", json=body, headers=headers)
+        return _decode(resp)
+
+    # ------------------------------------------------------------------ #
     # GET /events
     # ------------------------------------------------------------------ #
 

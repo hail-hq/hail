@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timezone
-from typing import Annotated, Any
+from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
@@ -18,14 +18,15 @@ from fastapi import status as http_status
 from sqlalchemy import select, tuple_, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from hailhq.api.audit import write_audit_log
 from hailhq.core.billing import has_funds
 from hailhq.core.call_end_reasons import CallEndReason
-from hailhq.core.db import get_session, session_scope
+from hailhq.core.db import get_session
 from hailhq.api.deps import Principal, get_current_principal
-from hailhq.api.idempotency import IdempotencyContext, idempotency_for_post_calls
+from hailhq.api.idempotency import IdempotencyContext, idempotency_dep
 from hailhq.core.config import settings
 from hailhq.core.livekit import LiveKitClient
-from hailhq.core.models import AuditLog, Call, CallEvent, PhoneNumber
+from hailhq.core.models import Call, CallEvent, PhoneNumber
 from hailhq.core.pool import (
     CALL_META_FROM_POOL,
     claim_pool_number,
@@ -86,41 +87,6 @@ async def close_livekit_singleton() -> None:
         _livekit_singleton = None
 
 
-# --------------------------------------------------------------------------- #
-# Audit logging — runs in a fresh session so failures don't roll back the call.
-# --------------------------------------------------------------------------- #
-
-
-async def _write_audit_log(
-    organization_id: UUID,
-    api_key_id: UUID | None,
-    action: str,
-    resource_type: str,
-    resource_id: UUID,
-    payload: dict[str, Any],
-) -> None:
-    try:
-        async with session_scope() as session:
-            session.add(
-                AuditLog(
-                    organization_id=organization_id,
-                    api_key_id=api_key_id,
-                    action=action,
-                    resource_type=resource_type,
-                    resource_id=resource_id,
-                    payload=payload,
-                )
-            )
-            await session.commit()
-    except Exception:  # pragma: no cover - logged, never re-raised
-        logger.warning(
-            "audit_log write failed for action=%s resource_id=%s",
-            action,
-            resource_id,
-            exc_info=True,
-        )
-
-
 async def _cleanup_partial_livekit(
     lk: LiveKitClient,
     room_name: str | None,
@@ -167,9 +133,7 @@ async def create_call(
     principal: Annotated[Principal, Depends(get_current_principal)],
     db: Annotated[AsyncSession, Depends(get_session)],
     lk: Annotated[LiveKitClient, Depends(get_livekit)],
-    idem: Annotated[
-        IdempotencyContext | None, Depends(idempotency_for_post_calls)
-    ] = None,
+    idem: Annotated[IdempotencyContext | None, Depends(idempotency_dep)] = None,
 ) -> CallResponse:
     # Replay before any DB or LiveKit work — a retry must not re-dispatch.
     if idem is not None and idem.is_replay:
@@ -181,7 +145,7 @@ async def create_call(
                 headers={"Idempotency-Replay": "true"},
             )
         cached_id = UUID(cached["id"])
-        await _write_audit_log(
+        await write_audit_log(
             organization_id=principal.organization_id,
             api_key_id=principal.api_key_id,
             action="call.create.replayed",
@@ -267,7 +231,7 @@ async def create_call(
     await db.refresh(call)
 
     # 3. Audit log in a separate transaction; failures must not unwind the call.
-    await _write_audit_log(
+    await write_audit_log(
         organization_id=principal.organization_id,
         api_key_id=principal.api_key_id,
         action="call.create",

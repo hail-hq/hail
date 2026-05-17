@@ -35,8 +35,13 @@ from hail.models import (
     CallListResponse,
     CallResponse,
     CallStatus,
+    EmailListResponse,
+    EmailResponse,
+    EmailStatus,
     EventStreamResponse,
     LLMConfig,
+    SenderDomainListResponse,
+    SenderDomainResponse,
     TERMINAL_CALL_STATUSES,
 )
 
@@ -118,6 +123,181 @@ class _CallsResource:
         params = {"limit": limit, "cursor": cursor, "status": status, "to": to}
         data = await self._http.request("GET", "/calls", params=params)
         return CallListResponse.model_validate(data)
+
+
+class _EmailsResource:
+    """``client.emails.*`` — POST/GET/LIST against ``/emails``."""
+
+    def __init__(self, http: _HailHTTP) -> None:
+        self._http = http
+
+    async def create(
+        self,
+        *,
+        to: list[str],
+        subject: str,
+        body_text: str | None = None,
+        body_html: str | None = None,
+        from_: str | None = None,
+        cc: list[str] | None = None,
+        bcc: list[str] | None = None,
+        reply_to: str | None = None,
+        conversation_id: UUID | str | None = None,
+        metadata: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> EmailResponse:
+        """Send an outbound email.
+
+        At least one of ``body_text`` / ``body_html`` is required; the
+        server returns 422 if neither is supplied. ``from_`` is optional:
+        when omitted the server picks the first verified sender on the
+        org or auto-mints a hail-mail address (operator-configured).
+        ``idempotency_key`` defaults to a fresh UUIDv4.
+        """
+        # Build the body with the wire-side ``"from"`` alias. We don't
+        # construct EmailCreate then dump it — caller might pass values
+        # the server-side validator accepts but the SDK one rejects (e.g.
+        # a recipient with an unusual TLD); keeping pre-validation off
+        # mirrors how _CallsResource defers to the server.
+        body: dict[str, Any] = {"to": list(to), "subject": subject}
+        if from_ is not None:
+            body["from"] = from_
+        if body_text is not None:
+            body["body_text"] = body_text
+        if body_html is not None:
+            body["body_html"] = body_html
+        if cc:
+            body["cc"] = list(cc)
+        if bcc:
+            body["bcc"] = list(bcc)
+        if reply_to is not None:
+            body["reply_to"] = reply_to
+        if conversation_id is not None:
+            body["conversation_id"] = str(conversation_id)
+        if metadata is not None:
+            body["metadata"] = metadata
+
+        key = idempotency_key or generate_idempotency_key()
+        data = await self._http.request(
+            "POST",
+            "/emails",
+            json=body,
+            headers={"Idempotency-Key": key},
+        )
+        return EmailResponse.model_validate(data)
+
+    async def get(self, email_id: str | UUID) -> EmailResponse:
+        """Fetch a single email by id."""
+        eid = str(email_id)
+        data = await self._http.request("GET", f"/emails/{eid}")
+        return EmailResponse.model_validate(data)
+
+    async def list(
+        self,
+        *,
+        cursor: str | None = None,
+        limit: int = 50,
+        status: EmailStatus | None = None,
+    ) -> EmailListResponse:
+        """Cursor-paginated list, scoped to the caller's organization."""
+        params = {"limit": limit, "cursor": cursor, "status": status}
+        data = await self._http.request("GET", "/emails", params=params)
+        return EmailListResponse.model_validate(data)
+
+
+class _SenderDomainsResource:
+    """``client.sender_domains.*`` — manage SES identities."""
+
+    def __init__(self, http: _HailHTTP) -> None:
+        self._http = http
+
+    async def create(
+        self,
+        *,
+        kind: str,
+        domain: str | None = None,
+        local_prefix_user: str | None = None,
+        local_prefix_org: str | None = None,
+        idempotency_key: str | None = None,
+    ) -> SenderDomainResponse:
+        """Register a sender domain.
+
+        ``kind`` is ``'hail_mail'`` (server composes the address from
+        the prefixes) or ``'custom'`` (tenant DNS — server returns DKIM
+        CNAMEs to publish). Validation is deferred to the server so
+        SDK and API stay in lockstep on the rule set.
+        """
+        body: dict[str, Any] = {"kind": kind}
+        if domain is not None:
+            body["domain"] = domain
+        if local_prefix_user is not None:
+            body["local_prefix_user"] = local_prefix_user
+        if local_prefix_org is not None:
+            body["local_prefix_org"] = local_prefix_org
+
+        key = idempotency_key or generate_idempotency_key()
+        data = await self._http.request(
+            "POST",
+            "/sender-domains",
+            json=body,
+            headers={"Idempotency-Key": key},
+        )
+        return SenderDomainResponse.model_validate(data)
+
+    async def get(self, domain_id: str | UUID) -> SenderDomainResponse:
+        """Fetch a single sender domain by id."""
+        did = str(domain_id)
+        data = await self._http.request("GET", f"/sender-domains/{did}")
+        return SenderDomainResponse.model_validate(data)
+
+    async def list(
+        self,
+        *,
+        cursor: str | None = None,
+        limit: int = 50,
+    ) -> SenderDomainListResponse:
+        """Cursor-paginated list, scoped to the caller's organization."""
+        params = {"limit": limit, "cursor": cursor}
+        data = await self._http.request("GET", "/sender-domains", params=params)
+        return SenderDomainListResponse.model_validate(data)
+
+    async def verify(self, domain_id: str | UUID) -> SenderDomainResponse:
+        """Re-poll the email provider for a custom row's DKIM status.
+
+        No-op on hail-mail rows (they're verified by construction);
+        returns the row's current shape so callers can treat both kinds
+        uniformly.
+        """
+        did = str(domain_id)
+        data = await self._http.request("POST", f"/sender-domains/{did}/verify")
+        return SenderDomainResponse.model_validate(data)
+
+    async def patch(
+        self,
+        domain_id: str | UUID,
+        *,
+        local_prefix_user: str | None = None,
+        local_prefix_org: str | None = None,
+    ) -> SenderDomainResponse:
+        """Edit the user/org prefix on a hail-mail row.
+
+        Custom-domain rows return 422 server-side — prefix edits are
+        only meaningful for hail-mail rows. Pass either prefix or both;
+        the server keeps any unchanged field.
+        """
+        body: dict[str, Any] = {}
+        if local_prefix_user is not None:
+            body["local_prefix_user"] = local_prefix_user
+        if local_prefix_org is not None:
+            body["local_prefix_org"] = local_prefix_org
+        did = str(domain_id)
+        data = await self._http.request("PATCH", f"/sender-domains/{did}", json=body)
+        return SenderDomainResponse.model_validate(data)
+
+    async def delete(self, domain_id: str | UUID) -> None:
+        """Remove a sender domain. SES identity is deleted for custom rows."""
+        did = str(domain_id)
+        await self._http.request("DELETE", f"/sender-domains/{did}")
 
 
 class _EventsResource:
@@ -252,6 +432,8 @@ class Client:
             transport_client=_transport_client,
         )
         self.calls = _CallsResource(self._http)
+        self.emails = _EmailsResource(self._http)
+        self.sender_domains = _SenderDomainsResource(self._http)
         self.events = _EventsResource(self._http)
         self.base_url = resolved_base.rstrip("/")
 

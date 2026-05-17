@@ -190,3 +190,254 @@ class EventStreamResponse(BaseModel):
     # ``id=call:<uuid>``). Org-wide tails and non-call resource types leave
     # this null — there's no single "the" status to report.
     call_status: CallStatus | None = None
+
+
+# --------------------------------------------------------------------------- #
+# Email schemas.
+# --------------------------------------------------------------------------- #
+
+# A liberal regex — RFC 5322 in full is a tarpit. This catches the obvious
+# mistakes (no @, whitespace, missing TLD) without rejecting things SES
+# would accept. SES does its own validation at send time.
+EMAIL_ADDR = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
+DOMAIN_NAME = re.compile(
+    r"^([a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$"
+)
+# Local-part prefix for hail-mail. 1-20 chars of lowercase alphanumeric and
+# hyphens, no leading/trailing hyphen. A single character matches because the
+# parenthesized suffix is optional, so we don't need an explicit alternation.
+LOCAL_PREFIX = re.compile(r"^[a-z0-9]([a-z0-9-]{0,18}[a-z0-9])?$")
+
+
+def _normalize_domain(addr: str) -> str:
+    """Lowercase the domain portion of an email address.
+
+    RFC 5321 treats the domain as case-insensitive (and most senders treat
+    the local part the same way in practice), but we keep the local part
+    verbatim — some legacy mailservers still respect it. Lowercasing the
+    domain lets ``alerts@ACME.com`` match a stored ``acme.com`` row, which
+    is what callers expect when they type a domain in mixed case.
+    """
+    local, _, domain = addr.partition("@")
+    if not domain:
+        return addr
+    return f"{local}@{domain.lower()}"
+
+
+SenderDomainKind = Literal["hail_mail", "custom"]
+SenderDomainVerificationStatus = Literal["pending", "verified", "failed"]
+
+
+class DkimRecordSchema(BaseModel):
+    """One DNS CNAME the tenant must publish before SES verifies the domain."""
+
+    model_config = ConfigDict(from_attributes=True, extra="allow")
+
+    name: str
+    value: str
+    type: Literal["CNAME"] = "CNAME"
+
+
+class SenderDomainCreate(BaseModel):
+    """Request body for POST /sender-domains.
+
+    For ``kind='hail_mail'`` ``domain`` is omitted; the server composes
+    the full address as ``<local_prefix_user>+<local_prefix_org>@<base>``.
+    Both prefixes are optional in the body and fall back to the
+    ``HAIL_MAIL_DEFAULT_*_PREFIX`` env vars; the server returns 503 if
+    neither is supplied. For ``kind='custom'`` ``domain`` is required and
+    the prefix fields must be omitted.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    kind: SenderDomainKind
+    domain: str | None = None
+    local_prefix_user: str | None = None
+    local_prefix_org: str | None = None
+
+    @field_validator("domain")
+    @classmethod
+    def _validate_domain(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        v = v.strip().lower()
+        if not DOMAIN_NAME.match(v):
+            raise ValueError(
+                "must be a valid DNS domain (e.g. 'acme.com'); no schemes or paths"
+            )
+        return v
+
+    @field_validator("local_prefix_user", "local_prefix_org")
+    @classmethod
+    def _validate_local_prefix(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        v = v.strip().lower()
+        if not LOCAL_PREFIX.match(v):
+            raise ValueError(
+                "must be 1–20 chars of lowercase a–z, 0–9, or '-', "
+                "with no leading or trailing '-'"
+            )
+        return v
+
+    @model_validator(mode="after")
+    def _kind_field_consistency(self):
+        if self.kind == "custom":
+            if not self.domain:
+                raise ValueError("domain is required when kind='custom'")
+            if self.local_prefix_user is not None or self.local_prefix_org is not None:
+                raise ValueError(
+                    "local_prefix_user/local_prefix_org are only valid when "
+                    "kind='hail_mail'"
+                )
+        if self.kind == "hail_mail" and self.domain is not None:
+            raise ValueError(
+                "domain must be omitted when kind='hail_mail'; the server "
+                "composes it from local_prefix_user + local_prefix_org"
+            )
+        return self
+
+
+class SenderDomainPatch(BaseModel):
+    """Body for PATCH /sender-domains/{id}.
+
+    Only the user/org prefix pair on a ``kind='hail_mail'`` row is mutable
+    today. Custom-domain rows have nothing here a tenant should be free to
+    edit — DNS, DKIM, and verification state are all provider-driven. The
+    handler returns 422 on custom rows so the failure mode is obvious.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    local_prefix_user: str | None = None
+    local_prefix_org: str | None = None
+
+    @field_validator("local_prefix_user", "local_prefix_org")
+    @classmethod
+    def _validate_local_prefix(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        v = v.strip().lower()
+        if not LOCAL_PREFIX.match(v):
+            raise ValueError(
+                "must be 1–20 chars of lowercase a–z, 0–9, or '-', "
+                "with no leading or trailing '-'"
+            )
+        return v
+
+    @model_validator(mode="after")
+    def _at_least_one_field(self):
+        if self.local_prefix_user is None and self.local_prefix_org is None:
+            raise ValueError(
+                "at least one of local_prefix_user / local_prefix_org must be set"
+            )
+        return self
+
+
+class SenderDomainResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    organization_id: UUID
+    kind: SenderDomainKind
+    domain: str
+    local_prefix_user: str | None
+    local_prefix_org: str | None
+    verification_status: SenderDomainVerificationStatus
+    dkim_records: list[DkimRecordSchema]
+    mail_from_domain: str | None
+    provider: str
+    verified_at: datetime | None
+    created_at: datetime
+    updated_at: datetime
+
+
+class SenderDomainListResponse(BaseModel):
+    items: list[SenderDomainResponse]
+    next_cursor: str | None = None
+
+
+class EmailCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+    # ``from`` is reserved; ``from_`` mirrors how CallCreate handles it.
+    from_: str | None = Field(default=None, alias="from")
+    to: list[str] = Field(min_length=1)
+    cc: list[str] | None = None
+    bcc: list[str] | None = None
+    reply_to: str | None = None
+    subject: str = Field(min_length=1, max_length=998)
+    body_text: str | None = None
+    body_html: str | None = None
+    conversation_id: UUID | None = None
+    metadata: dict = Field(default_factory=dict)
+
+    @field_validator("from_", "reply_to")
+    @classmethod
+    def _validate_optional_email(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        if not EMAIL_ADDR.match(v):
+            raise ValueError("must be a valid email address (local@domain.tld)")
+        return _normalize_domain(v)
+
+    @field_validator("to", "cc", "bcc")
+    @classmethod
+    def _validate_email_list(cls, v: list[str] | None) -> list[str] | None:
+        if v is None:
+            return v
+        out: list[str] = []
+        for addr in v:
+            if not EMAIL_ADDR.match(addr):
+                raise ValueError(
+                    f"invalid email address {addr!r} (expected local@domain.tld)"
+                )
+            out.append(_normalize_domain(addr))
+        return out
+
+    @model_validator(mode="after")
+    def _body_required(self):
+        if not self.body_text and not self.body_html:
+            raise ValueError("either body_text or body_html must be provided")
+        return self
+
+
+EmailStatus = Literal["queued", "sent", "failed", "bounced", "complained"]
+
+TERMINAL_EMAIL_STATUSES: frozenset[str] = frozenset(
+    {"sent", "failed", "bounced", "complained"}
+)
+
+
+class EmailResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
+
+    id: UUID
+    organization_id: UUID
+    conversation_id: UUID | None
+    sender_domain_id: UUID
+    from_address: str
+    to_addresses: list[str]
+    cc_addresses: list[str] | None
+    bcc_addresses: list[str] | None
+    reply_to: str | None
+    subject: str
+    body_text: str | None
+    body_html: str | None
+    status: EmailStatus
+    end_reason: str | None
+    provider_message_id: str | None
+    requested_at: datetime
+    sent_at: datetime | None
+    failed_at: datetime | None
+    # ``Email.metadata_`` is the SQLAlchemy attribute (``metadata`` is
+    # reserved by Declarative). The validation_alias bridges that name so
+    # ``from_attributes=True`` reads the right column; the field on the
+    # response is still called ``metadata`` on the wire.
+    metadata: dict[str, Any] = Field(default_factory=dict, validation_alias="metadata_")
+
+
+class EmailListResponse(BaseModel):
+    items: list[EmailResponse]
+    next_cursor: str | None = None

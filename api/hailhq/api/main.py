@@ -11,7 +11,9 @@ from hailhq.core.config import settings
 from hailhq.core.db import dispose_engine, session_scope
 from hailhq.core.pool import sweep_pool_reservations
 from hailhq.api.routes import calls as calls_routes
+from hailhq.api.routes import emails as emails_routes
 from hailhq.api.routes import events as events_routes
+from hailhq.api.routes import sender_domains as sender_domains_routes
 
 logger = logging.getLogger(__name__)
 
@@ -76,7 +78,9 @@ app = FastAPI(
     lifespan=lifespan,
 )
 app.include_router(calls_routes.router)
+app.include_router(emails_routes.router)
 app.include_router(events_routes.router)
+app.include_router(sender_domains_routes.router)
 
 
 @app.get("/healthz")

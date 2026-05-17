@@ -1,0 +1,529 @@
+"""Integration tests for the v1 emails API."""
+
+from __future__ import annotations
+
+from unittest.mock import AsyncMock
+
+import httpx
+import pytest
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from hailhq.core.config import settings
+from hailhq.core.models import ApiKey, AuditLog, Email, SenderDomain
+
+from .conftest import insert_org_and_key  # noqa: F401
+
+# --------------------------------------------------------------------------- #
+# Helpers — keep tests focused on the surface, not boilerplate.
+# --------------------------------------------------------------------------- #
+
+
+async def _register_custom_verified(
+    client: httpx.AsyncClient,
+    headers: dict,
+    domain: str = "acme.com",
+) -> str:
+    """Register + verify a custom domain. Returns its sender-domain id."""
+    created = await client.post(
+        "/sender-domains",
+        json={"kind": "custom", "domain": domain},
+        headers=headers,
+    )
+    assert created.status_code == 201
+    await client.post(f"/sender-domains/{created.json()['id']}/verify", headers=headers)
+    return created.json()["id"]
+
+
+# --------------------------------------------------------------------------- #
+# POST /emails — validation
+# --------------------------------------------------------------------------- #
+
+
+async def test_post_emails_unauthenticated_returns_401(
+    client: httpx.AsyncClient,
+) -> None:
+    resp = await client.post(
+        "/emails",
+        json={"to": ["x@example.com"], "subject": "hi", "body_text": "body"},
+    )
+    assert resp.status_code == 401
+
+
+async def test_post_emails_rejects_invalid_recipient(
+    client: httpx.AsyncClient,
+    org_and_key: tuple,
+) -> None:
+    _, _, plain = org_and_key
+    resp = await client.post(
+        "/emails",
+        json={"to": ["not-an-email"], "subject": "hi", "body_text": "b"},
+        headers={"Authorization": f"Bearer {plain}"},
+    )
+    assert resp.status_code == 422
+
+
+async def test_post_emails_requires_a_body(
+    client: httpx.AsyncClient,
+    org_and_key: tuple,
+) -> None:
+    _, _, plain = org_and_key
+    resp = await client.post(
+        "/emails",
+        json={"to": ["a@example.com"], "subject": "hi"},
+        headers={"Authorization": f"Bearer {plain}"},
+    )
+    assert resp.status_code == 422
+    assert "body_text or body_html" in resp.text
+
+
+async def test_post_emails_requires_at_least_one_recipient(
+    client: httpx.AsyncClient,
+    org_and_key: tuple,
+) -> None:
+    _, _, plain = org_and_key
+    resp = await client.post(
+        "/emails",
+        json={"to": [], "subject": "hi", "body_text": "b"},
+        headers={"Authorization": f"Bearer {plain}"},
+    )
+    assert resp.status_code == 422
+
+
+# --------------------------------------------------------------------------- #
+# POST /emails — sender resolution
+# --------------------------------------------------------------------------- #
+
+
+async def test_post_emails_uses_verified_custom_domain_by_default(
+    client: httpx.AsyncClient,
+    org_and_key: tuple,
+    email_mock: AsyncMock,
+    async_session: AsyncSession,
+) -> None:
+    _, _, plain = org_and_key
+    headers = {"Authorization": f"Bearer {plain}"}
+    await _register_custom_verified(client, headers, domain="acme.com")
+
+    resp = await client.post(
+        "/emails",
+        json={"to": ["alice@example.com"], "subject": "hi", "body_text": "body"},
+        headers=headers,
+    )
+    assert resp.status_code == 201, resp.text
+    body = resp.json()
+    assert body["status"] == "sent"
+    assert body["from_address"] == "noreply@acme.com"
+    assert body["to_addresses"] == ["alice@example.com"]
+    assert body["provider_message_id"]
+    assert body["sent_at"] is not None
+
+    email_mock.send_email.assert_awaited_once()
+    call_kwargs = email_mock.send_email.call_args.kwargs
+    assert call_kwargs["from_address"] == "noreply@acme.com"
+    assert call_kwargs["to_addresses"] == ["alice@example.com"]
+
+
+async def test_post_emails_auto_mints_hail_mail_when_no_sender_exists(
+    client: httpx.AsyncClient,
+    org_and_key: tuple,
+    monkeypatch: pytest.MonkeyPatch,
+    async_session: AsyncSession,
+) -> None:
+    monkeypatch.setattr(settings, "hail_mail_base_domain", "mail.hail.so")
+    monkeypatch.setattr(settings, "hail_mail_default_user_prefix", "admin")
+    monkeypatch.setattr(settings, "hail_mail_default_org_prefix", "selfhost")
+    _, _, plain = org_and_key
+    resp = await client.post(
+        "/emails",
+        json={"to": ["alice@example.com"], "subject": "hi", "body_text": "body"},
+        headers={"Authorization": f"Bearer {plain}"},
+    )
+    assert resp.status_code == 201, resp.text
+    body = resp.json()
+    assert body["from_address"] == "admin+selfhost@mail.hail.so"
+    # A SenderDomain row should have been created on the fly.
+    sd = (await async_session.execute(select(SenderDomain))).scalar_one()
+    assert sd.kind == "hail_mail"
+    assert sd.verification_status == "verified"
+    assert sd.local_prefix_user == "admin"
+    assert sd.local_prefix_org == "selfhost"
+
+
+async def test_post_emails_auto_mint_recovers_from_race(
+    client: httpx.AsyncClient,
+    org_and_key: tuple,
+    monkeypatch: pytest.MonkeyPatch,
+    async_session: AsyncSession,
+) -> None:
+    """Two concurrent first-time POST /emails must not produce a 500.
+
+    Simulates the race by pre-inserting the row a concurrent request would
+    have created (same org, same composed address). The handler's auto-mint
+    flush will collide on the (organization_id, domain) unique constraint;
+    the recovery path should rollback and pick up the winning row.
+    """
+    from datetime import datetime, timezone
+
+    monkeypatch.setattr(settings, "hail_mail_base_domain", "mail.hail.so")
+    monkeypatch.setattr(settings, "hail_mail_default_user_prefix", "admin")
+    monkeypatch.setattr(settings, "hail_mail_default_org_prefix", "selfhost")
+    org_id, _, plain = org_and_key
+
+    # Pre-seed the row that the concurrent request would have committed first.
+    winning = SenderDomain(
+        organization_id=org_id,
+        kind="hail_mail",
+        domain="admin+selfhost@mail.hail.so",
+        local_prefix_user="admin",
+        local_prefix_org="selfhost",
+        verification_status="verified",
+        dkim_records=[],
+        mail_from_domain=None,
+        provider="ses",
+        verified_at=datetime.now(timezone.utc),
+    )
+    async_session.add(winning)
+    await async_session.commit()
+    await async_session.refresh(winning)
+
+    resp = await client.post(
+        "/emails",
+        json={"to": ["alice@example.com"], "subject": "hi", "body_text": "body"},
+        headers={"Authorization": f"Bearer {plain}"},
+    )
+    # Without the IntegrityError guard this is 500. With it, the email lands
+    # against the winning row.
+    assert resp.status_code == 201, resp.text
+    assert resp.json()["from_address"] == "admin+selfhost@mail.hail.so"
+
+    # Exactly one SenderDomain row — recovery used the existing one, didn't
+    # create a duplicate.
+    rows = (await async_session.execute(select(SenderDomain))).scalars().all()
+    assert len(rows) == 1
+    assert rows[0].id == winning.id
+
+
+async def test_post_emails_503_when_no_sender_and_no_hail_mail(
+    client: httpx.AsyncClient,
+    org_and_key: tuple,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings, "hail_mail_base_domain", "")
+    _, _, plain = org_and_key
+    resp = await client.post(
+        "/emails",
+        json={"to": ["alice@example.com"], "subject": "hi", "body_text": "body"},
+        headers={"Authorization": f"Bearer {plain}"},
+    )
+    assert resp.status_code == 503
+
+
+async def test_post_emails_explicit_from_must_match_verified_domain(
+    client: httpx.AsyncClient,
+    org_and_key: tuple,
+) -> None:
+    _, _, plain = org_and_key
+    headers = {"Authorization": f"Bearer {plain}"}
+    await _register_custom_verified(client, headers, domain="acme.com")
+    resp = await client.post(
+        "/emails",
+        json={
+            "from": "evil@notmine.com",
+            "to": ["alice@example.com"],
+            "subject": "hi",
+            "body_text": "body",
+        },
+        headers=headers,
+    )
+    assert resp.status_code == 422
+    assert "verified sender" in resp.text
+
+
+async def test_post_emails_explicit_from_uses_local_part(
+    client: httpx.AsyncClient,
+    org_and_key: tuple,
+    email_mock: AsyncMock,
+) -> None:
+    _, _, plain = org_and_key
+    headers = {"Authorization": f"Bearer {plain}"}
+    await _register_custom_verified(client, headers, domain="acme.com")
+    resp = await client.post(
+        "/emails",
+        json={
+            "from": "alerts@acme.com",
+            "to": ["alice@example.com"],
+            "subject": "hi",
+            "body_text": "body",
+        },
+        headers=headers,
+    )
+    assert resp.status_code == 201, resp.text
+    assert resp.json()["from_address"] == "alerts@acme.com"
+    assert email_mock.send_email.call_args.kwargs["from_address"] == "alerts@acme.com"
+
+
+async def test_post_emails_explicit_from_is_case_insensitive_in_domain(
+    client: httpx.AsyncClient,
+    org_and_key: tuple,
+    email_mock: AsyncMock,
+) -> None:
+    """Mixed-case ``from`` domain should still match a verified row.
+
+    The verified row stores ``acme.com`` (lowercased at registration).
+    Callers passing ``from="alerts@ACME.com"`` should not get a 422.
+    """
+    _, _, plain = org_and_key
+    headers = {"Authorization": f"Bearer {plain}"}
+    await _register_custom_verified(client, headers, domain="acme.com")
+    resp = await client.post(
+        "/emails",
+        json={
+            "from": "alerts@ACME.com",
+            "to": ["alice@example.com"],
+            "subject": "hi",
+            "body_text": "body",
+        },
+        headers=headers,
+    )
+    assert resp.status_code == 201, resp.text
+    # Domain portion lowercased; local part preserved.
+    assert resp.json()["from_address"] == "alerts@acme.com"
+
+
+async def test_post_emails_to_is_case_insensitive_in_domain(
+    client: httpx.AsyncClient,
+    org_and_key: tuple,
+    email_mock: AsyncMock,
+) -> None:
+    """Recipient domain is also normalized to lowercase before send."""
+    _, _, plain = org_and_key
+    headers = {"Authorization": f"Bearer {plain}"}
+    await _register_custom_verified(client, headers, domain="acme.com")
+    resp = await client.post(
+        "/emails",
+        json={
+            "to": ["Alice@EXAMPLE.COM"],
+            "subject": "hi",
+            "body_text": "body",
+        },
+        headers=headers,
+    )
+    assert resp.status_code == 201, resp.text
+    assert resp.json()["to_addresses"] == ["Alice@example.com"]
+
+
+async def test_post_emails_does_not_send_through_pending_domain(
+    client: httpx.AsyncClient,
+    org_and_key: tuple,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Pending custom row → 422 pointing at the verify endpoint.
+
+    The earlier behaviour was a generic 503 ("set HAIL_MAIL_BASE_DOMAIN"),
+    which misled operators who had registered a domain but not yet
+    published its DKIM CNAMEs. The fix returns a specific 422 naming the
+    pending domain so the operator knows exactly what to do.
+    """
+    # Make sure auto-mint doesn't fire as a fallback.
+    monkeypatch.setattr(settings, "hail_mail_base_domain", "")
+    _, _, plain = org_and_key
+    headers = {"Authorization": f"Bearer {plain}"}
+    created = await client.post(
+        "/sender-domains",
+        json={"kind": "custom", "domain": "pending.com"},
+        headers=headers,
+    )
+    assert created.status_code == 201
+    # Do NOT verify — row stays pending.
+    resp = await client.post(
+        "/emails",
+        json={"to": ["x@example.com"], "subject": "hi", "body_text": "body"},
+        headers=headers,
+    )
+    assert resp.status_code == 422
+    detail = resp.json()["detail"]
+    assert "pending.com" in detail
+    assert "verify" in detail
+
+
+# --------------------------------------------------------------------------- #
+# POST /emails — provider failure
+# --------------------------------------------------------------------------- #
+
+
+async def test_post_emails_marks_failed_when_provider_raises(
+    client: httpx.AsyncClient,
+    org_and_key: tuple,
+    email_mock: AsyncMock,
+    async_session: AsyncSession,
+) -> None:
+    _, _, plain = org_and_key
+    headers = {"Authorization": f"Bearer {plain}"}
+    await _register_custom_verified(client, headers, domain="acme.com")
+    email_mock.send_email.side_effect = RuntimeError("MessageRejected")
+
+    resp = await client.post(
+        "/emails",
+        json={"to": ["x@example.com"], "subject": "hi", "body_text": "body"},
+        headers=headers,
+    )
+    assert resp.status_code == 502
+
+    email = (await async_session.execute(select(Email))).scalar_one()
+    assert email.status == "failed"
+    assert email.end_reason == "RuntimeError"
+    assert email.failed_at is not None
+
+
+# --------------------------------------------------------------------------- #
+# POST /emails — idempotency
+# --------------------------------------------------------------------------- #
+
+
+async def test_post_emails_replays_with_same_idempotency_key(
+    client: httpx.AsyncClient,
+    org_and_key: tuple,
+    email_mock: AsyncMock,
+    async_session: AsyncSession,
+) -> None:
+    _, _, plain = org_and_key
+    headers = {
+        "Authorization": f"Bearer {plain}",
+        "Idempotency-Key": "test-key-1",
+    }
+    await _register_custom_verified(client, headers, domain="acme.com")
+
+    payload = {"to": ["x@example.com"], "subject": "hi", "body_text": "body"}
+    r1 = await client.post("/emails", json=payload, headers=headers)
+    assert r1.status_code == 201
+    r2 = await client.post("/emails", json=payload, headers=headers)
+    assert r2.status_code == 201
+    assert r2.headers.get("idempotency-replay") == "true"
+    assert r1.json()["id"] == r2.json()["id"]
+
+    # Provider should have been called exactly once across the two requests.
+    assert email_mock.send_email.await_count == 1
+
+    rows = (await async_session.execute(select(Email))).scalars().all()
+    assert len(rows) == 1
+
+
+# --------------------------------------------------------------------------- #
+# GET /emails/{id} and GET /emails
+# --------------------------------------------------------------------------- #
+
+
+async def test_get_emails_is_org_scoped(
+    client: httpx.AsyncClient,
+    org_and_key: tuple,
+    async_session: AsyncSession,
+) -> None:
+    _, _, plain = org_and_key
+    headers = {"Authorization": f"Bearer {plain}"}
+    await _register_custom_verified(client, headers, domain="acme.com")
+    created = await client.post(
+        "/emails",
+        json={"to": ["x@example.com"], "subject": "hi", "body_text": "body"},
+        headers=headers,
+    )
+    email_id = created.json()["id"]
+
+    # Same org reads its own row.
+    me = await client.get(f"/emails/{email_id}", headers=headers)
+    assert me.status_code == 200
+
+    # Another org can't read it.
+    _, _, other_plain = await insert_org_and_key(async_session)
+    other = await client.get(
+        f"/emails/{email_id}", headers={"Authorization": f"Bearer {other_plain}"}
+    )
+    assert other.status_code == 404
+
+
+async def test_list_emails_filters_by_status(
+    client: httpx.AsyncClient,
+    org_and_key: tuple,
+    email_mock: AsyncMock,
+) -> None:
+    _, _, plain = org_and_key
+    headers = {"Authorization": f"Bearer {plain}"}
+    await _register_custom_verified(client, headers, domain="acme.com")
+
+    # One sent.
+    await client.post(
+        "/emails",
+        json={"to": ["x@example.com"], "subject": "ok", "body_text": "b"},
+        headers=headers,
+    )
+    # One failed.
+    email_mock.send_email.side_effect = RuntimeError("nope")
+    await client.post(
+        "/emails",
+        json={"to": ["y@example.com"], "subject": "bad", "body_text": "b"},
+        headers=headers,
+    )
+    email_mock.send_email.side_effect = None  # reset for any later tests
+
+    resp = await client.get("/emails?status=failed", headers=headers)
+    assert resp.status_code == 200
+    items = resp.json()["items"]
+    assert len(items) == 1
+    assert items[0]["status"] == "failed"
+
+
+# --------------------------------------------------------------------------- #
+# Audit log
+# --------------------------------------------------------------------------- #
+
+
+async def test_post_emails_round_trips_metadata(
+    client: httpx.AsyncClient,
+    org_and_key: tuple,
+) -> None:
+    """Caller-provided metadata is returned in the response."""
+    _, _, plain = org_and_key
+    headers = {"Authorization": f"Bearer {plain}"}
+    await _register_custom_verified(client, headers, domain="acme.com")
+    resp = await client.post(
+        "/emails",
+        json={
+            "to": ["x@example.com"],
+            "subject": "hi",
+            "body_text": "body",
+            "metadata": {"campaign_id": "spring-2026", "tier": "free"},
+        },
+        headers=headers,
+    )
+    assert resp.status_code == 201, resp.text
+    body = resp.json()
+    assert body["metadata"] == {"campaign_id": "spring-2026", "tier": "free"}
+
+
+async def test_post_emails_writes_audit_log(
+    client: httpx.AsyncClient,
+    org_and_key: tuple,
+    async_session: AsyncSession,
+) -> None:
+    _, _, plain = org_and_key
+    headers = {"Authorization": f"Bearer {plain}"}
+    await _register_custom_verified(client, headers, domain="acme.com")
+    await client.post(
+        "/emails",
+        json={"to": ["x@example.com"], "subject": "hi", "body_text": "b"},
+        headers=headers,
+    )
+
+    rows = (
+        (
+            await async_session.execute(
+                select(AuditLog).where(AuditLog.action == "email.create")
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert len(rows) == 1
+
+
+_ = ApiKey  # type hint passthrough

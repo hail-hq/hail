@@ -153,10 +153,274 @@ class EventStreamResponse(BaseModel):
     call_status: CallStatus | None = None
 
 
+# --------------------------------------------------------------------------- #
+# Email models — mirror hailhq.core.schemas. Lockstep maintenance, audited
+# by hand; codegen will replace this once openapi → SDK is wired.
+# --------------------------------------------------------------------------- #
+
+EMAIL_ADDR = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
+
+
+def _normalize_domain(addr: str) -> str:
+    """Lowercase the domain portion of an email address.
+
+    Domains are case-insensitive (RFC 5321); local parts are preserved
+    verbatim. Matches ``hailhq.core.schemas._normalize_domain`` so the
+    SDK and the server agree on what's stored.
+    """
+    local, _, domain = addr.partition("@")
+    if not domain:
+        return addr
+    return f"{local}@{domain.lower()}"
+
+
+EmailStatus = Literal["queued", "sent", "failed", "bounced", "complained"]
+
+TERMINAL_EMAIL_STATUSES: frozenset[str] = frozenset(
+    {"sent", "failed", "bounced", "complained"}
+)
+
+
+class EmailCreate(BaseModel):
+    """Body shape for ``POST /emails``.
+
+    At least one of ``body_text`` / ``body_html`` is required. ``to`` is a
+    non-empty list of recipient addresses. ``from_`` is optional; when
+    omitted the server picks a verified sender (or auto-mints a hail-mail
+    address per the operator's configuration). ``populate_by_name=True``
+    so ``EmailCreate(from_="...")`` works at the Python boundary while
+    ``model_dump(by_alias=True)`` still emits ``"from"`` on the wire.
+    """
+
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+    to: list[str] = Field(min_length=1)
+    subject: str = Field(min_length=1, max_length=998)
+    from_: str | None = Field(default=None, alias="from")
+    cc: list[str] | None = None
+    bcc: list[str] | None = None
+    reply_to: str | None = None
+    body_text: str | None = None
+    body_html: str | None = None
+    conversation_id: UUID | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("from_", "reply_to")
+    @classmethod
+    def _validate_optional_email(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        if not EMAIL_ADDR.match(v):
+            raise ValueError("must be a valid email address (local@domain.tld)")
+        return _normalize_domain(v)
+
+    @field_validator("to", "cc", "bcc")
+    @classmethod
+    def _validate_email_list(cls, v: list[str] | None) -> list[str] | None:
+        if v is None:
+            return v
+        out: list[str] = []
+        for addr in v:
+            if not EMAIL_ADDR.match(addr):
+                raise ValueError(
+                    f"invalid email address {addr!r} (expected local@domain.tld)"
+                )
+            out.append(_normalize_domain(addr))
+        return out
+
+    @model_validator(mode="after")
+    def _body_required(self):
+        if not self.body_text and not self.body_html:
+            raise ValueError("either body_text or body_html must be provided")
+        return self
+
+
+class EmailResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    organization_id: UUID
+    conversation_id: UUID | None = None
+    sender_domain_id: UUID
+    from_address: str
+    to_addresses: list[str]
+    cc_addresses: list[str] | None = None
+    bcc_addresses: list[str] | None = None
+    reply_to: str | None = None
+    subject: str
+    body_text: str | None = None
+    body_html: str | None = None
+    status: EmailStatus
+    end_reason: str | None = None
+    provider_message_id: str | None = None
+    requested_at: datetime
+    sent_at: datetime | None = None
+    failed_at: datetime | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class EmailListResponse(BaseModel):
+    items: list[EmailResponse]
+    next_cursor: str | None = None
+
+
+# --------------------------------------------------------------------------- #
+# Sender domain models — manage SES identities (hail-mail or custom).
+# --------------------------------------------------------------------------- #
+
+
+# 1-20 chars lowercase alphanumeric and hyphens, no leading/trailing hyphen.
+LOCAL_PREFIX = re.compile(r"^[a-z0-9]([a-z0-9-]{0,18}[a-z0-9])?$")
+DOMAIN_NAME = re.compile(
+    r"^([a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$"
+)
+
+
+SenderDomainKind = Literal["hail_mail", "custom"]
+SenderDomainVerificationStatus = Literal["pending", "verified", "failed"]
+
+
+class DkimRecord(BaseModel):
+    """One DNS CNAME the tenant must publish before SES verifies the domain.
+
+    ``model_config`` allows extra keys so a future provider that returns
+    additional metadata round-trips without breaking SDK consumers.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    name: str
+    value: str
+    type: Literal["CNAME"] = "CNAME"
+
+
+class SenderDomainCreate(BaseModel):
+    """Body for ``POST /sender-domains``.
+
+    For ``kind='hail_mail'``, ``domain`` is omitted; the server composes
+    ``<local_prefix_user>+<local_prefix_org>@<HAIL_MAIL_BASE_DOMAIN>``.
+    Prefixes are optional in the body — when omitted the server falls back
+    to the operator's env-var defaults. For ``kind='custom'``, ``domain``
+    is required and the prefix fields must be omitted.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    kind: SenderDomainKind
+    domain: str | None = None
+    local_prefix_user: str | None = None
+    local_prefix_org: str | None = None
+
+    @field_validator("domain")
+    @classmethod
+    def _validate_domain(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        v = v.strip().lower()
+        if not DOMAIN_NAME.match(v):
+            raise ValueError(
+                "must be a valid DNS domain (e.g. 'acme.com'); no schemes or paths"
+            )
+        return v
+
+    @field_validator("local_prefix_user", "local_prefix_org")
+    @classmethod
+    def _validate_local_prefix(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        v = v.strip().lower()
+        if not LOCAL_PREFIX.match(v):
+            raise ValueError(
+                "must be 1–20 chars of lowercase a–z, 0–9, or '-', "
+                "with no leading or trailing '-'"
+            )
+        return v
+
+    @model_validator(mode="after")
+    def _kind_field_consistency(self):
+        if self.kind == "custom":
+            if not self.domain:
+                raise ValueError("domain is required when kind='custom'")
+            if self.local_prefix_user is not None or self.local_prefix_org is not None:
+                raise ValueError(
+                    "local_prefix_user/local_prefix_org are only valid when "
+                    "kind='hail_mail'"
+                )
+        if self.kind == "hail_mail" and self.domain is not None:
+            raise ValueError(
+                "domain must be omitted when kind='hail_mail'; the server "
+                "composes it from local_prefix_user + local_prefix_org"
+            )
+        return self
+
+
+class SenderDomainPatch(BaseModel):
+    """Body for ``PATCH /sender-domains/{id}``.
+
+    Only the user/org prefix pair is mutable today (and only on
+    ``kind='hail_mail'`` rows — custom rows have nothing here that
+    should be tenant-editable).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    local_prefix_user: str | None = None
+    local_prefix_org: str | None = None
+
+    @field_validator("local_prefix_user", "local_prefix_org")
+    @classmethod
+    def _validate_local_prefix(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        v = v.strip().lower()
+        if not LOCAL_PREFIX.match(v):
+            raise ValueError(
+                "must be 1–20 chars of lowercase a–z, 0–9, or '-', "
+                "with no leading or trailing '-'"
+            )
+        return v
+
+    @model_validator(mode="after")
+    def _at_least_one_field(self):
+        if self.local_prefix_user is None and self.local_prefix_org is None:
+            raise ValueError(
+                "at least one of local_prefix_user / local_prefix_org must be set"
+            )
+        return self
+
+
+class SenderDomainResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    organization_id: UUID
+    kind: SenderDomainKind
+    domain: str
+    local_prefix_user: str | None = None
+    local_prefix_org: str | None = None
+    verification_status: SenderDomainVerificationStatus
+    dkim_records: list[DkimRecord]
+    mail_from_domain: str | None = None
+    provider: str
+    verified_at: datetime | None = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class SenderDomainListResponse(BaseModel):
+    items: list[SenderDomainResponse]
+    next_cursor: str | None = None
+
+
 __all__ = [
     "E164",
+    "EMAIL_ADDR",
+    "LOCAL_PREFIX",
+    "DOMAIN_NAME",
     "CallStatus",
     "TERMINAL_CALL_STATUSES",
+    "EmailStatus",
+    "TERMINAL_EMAIL_STATUSES",
     "NumberType",
     "LLMConfig",
     "VoiceConfig",
@@ -165,4 +429,14 @@ __all__ = [
     "CallListResponse",
     "CallEventResponse",
     "EventStreamResponse",
+    "EmailCreate",
+    "EmailResponse",
+    "EmailListResponse",
+    "DkimRecord",
+    "SenderDomainKind",
+    "SenderDomainVerificationStatus",
+    "SenderDomainCreate",
+    "SenderDomainPatch",
+    "SenderDomainResponse",
+    "SenderDomainListResponse",
 ]

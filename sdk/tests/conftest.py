@@ -57,6 +57,68 @@ def make_call_response(
     }
 
 
+def make_sender_domain_response(
+    *,
+    domain_id: UUID | None = None,
+    kind: str = "hail_mail",
+    domain: str = "alice+acme@mail.hail.so",
+    verification_status: str = "verified",
+    local_prefix_user: str | None = "alice",
+    local_prefix_org: str | None = "acme",
+    dkim_records: list[dict] | None = None,
+) -> dict:
+    """Server-shaped JSON for a SenderDomainResponse."""
+    did = domain_id or uuid4()
+    now = datetime.now(timezone.utc)
+    return {
+        "id": str(did),
+        "organization_id": str(uuid4()),
+        "kind": kind,
+        "domain": domain,
+        "local_prefix_user": local_prefix_user if kind == "hail_mail" else None,
+        "local_prefix_org": local_prefix_org if kind == "hail_mail" else None,
+        "verification_status": verification_status,
+        "dkim_records": dkim_records or [],
+        "mail_from_domain": None,
+        "provider": "ses",
+        "verified_at": now.isoformat() if verification_status == "verified" else None,
+        "created_at": now.isoformat(),
+        "updated_at": now.isoformat(),
+    }
+
+
+def make_email_response(
+    *,
+    email_id: UUID | None = None,
+    status: str = "sent",
+    from_address: str = "alice+acme@mail.hail.so",
+) -> dict:
+    """Server-shaped JSON for an EmailResponse."""
+    eid = email_id or uuid4()
+    now = datetime.now(timezone.utc)
+    return {
+        "id": str(eid),
+        "organization_id": str(uuid4()),
+        "conversation_id": None,
+        "sender_domain_id": str(uuid4()),
+        "from_address": from_address,
+        "to_addresses": ["recipient@example.com"],
+        "cc_addresses": None,
+        "bcc_addresses": None,
+        "reply_to": None,
+        "subject": "test subject",
+        "body_text": "test body",
+        "body_html": None,
+        "status": status,
+        "end_reason": None,
+        "provider_message_id": "ses-msg-1",
+        "requested_at": now.isoformat(),
+        "sent_at": now.isoformat() if status == "sent" else None,
+        "failed_at": None,
+        "metadata": {},
+    }
+
+
 def make_event(
     *,
     call_id: UUID,

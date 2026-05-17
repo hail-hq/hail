@@ -240,6 +240,153 @@ async def test_place_call_serializes_from_alias(client: HailClient) -> None:
 
 
 # --------------------------------------------------------------------------- #
+# send_email
+# --------------------------------------------------------------------------- #
+
+
+def _email_response(email_id: str | None = None, status: str = "sent") -> dict:
+    eid = email_id or str(uuid4())
+    return {
+        "id": eid,
+        "organization_id": str(uuid4()),
+        "conversation_id": None,
+        "sender_domain_id": str(uuid4()),
+        "from_address": "alice+acme@mail.hail.so",
+        "to_addresses": ["x@example.com"],
+        "cc_addresses": None,
+        "bcc_addresses": None,
+        "reply_to": None,
+        "subject": "hi",
+        "body_text": "body",
+        "body_html": None,
+        "status": status,
+        "end_reason": None,
+        "provider_message_id": "ses-msg-1",
+        "requested_at": "2026-05-17T00:00:00+00:00",
+        "sent_at": "2026-05-17T00:00:01+00:00",
+        "failed_at": None,
+    }
+
+
+@respx.mock
+async def test_send_email_happy_path(client: HailClient) -> None:
+    captured: dict = {}
+
+    def _handler(request: httpx.Request) -> httpx.Response:
+        captured["headers"] = dict(request.headers)
+        captured["body"] = request.read().decode("utf-8")
+        return httpx.Response(201, json=_email_response())
+
+    respx.post(f"{_BASE_URL}/emails").mock(side_effect=_handler)
+
+    result = await tools.send_email(
+        client=client,
+        to=["x@example.com"],
+        subject="hi",
+        body_text="body",
+    )
+    assert "error" not in result, result
+    assert result["status"] == "sent"
+    assert captured["headers"]["authorization"] == f"Bearer {_API_KEY}"
+    assert _UUID_RE.match(captured["headers"]["idempotency-key"])
+    body = httpx.Response(200, content=captured["body"]).json()
+    assert body["to"] == ["x@example.com"]
+    assert body["subject"] == "hi"
+    assert body["body_text"] == "body"
+
+
+@respx.mock
+async def test_send_email_rejects_empty_recipients(client: HailClient) -> None:
+    respx.post(f"{_BASE_URL}/emails").mock(return_value=httpx.Response(201, json={}))
+    result = await tools.send_email(
+        client=client, to=[], subject="hi", body_text="body"
+    )
+    assert result == {"error": "to must contain at least one recipient"}
+    # respx records every call; verify no HTTP went out.
+    assert not respx.calls.called
+
+
+@respx.mock
+async def test_send_email_requires_a_body(client: HailClient) -> None:
+    respx.post(f"{_BASE_URL}/emails").mock(return_value=httpx.Response(201, json={}))
+    result = await tools.send_email(client=client, to=["x@example.com"], subject="hi")
+    assert "body_text or body_html" in result["error"]
+    assert not respx.calls.called
+
+
+@respx.mock
+async def test_send_email_serializes_from_alias(client: HailClient) -> None:
+    captured: dict = {}
+
+    def _handler(request: httpx.Request) -> httpx.Response:
+        captured["body"] = request.read().decode("utf-8")
+        return httpx.Response(201, json=_email_response())
+
+    respx.post(f"{_BASE_URL}/emails").mock(side_effect=_handler)
+
+    await tools.send_email(
+        client=client,
+        to=["x@example.com"],
+        subject="hi",
+        body_text="body",
+        from_="alice+acme@mail.hail.so",
+    )
+    body = httpx.Response(200, content=captured["body"]).json()
+    assert body["from"] == "alice+acme@mail.hail.so"
+    assert "from_" not in body
+
+
+@respx.mock
+async def test_send_email_returns_idempotency_key_in_response(
+    client: HailClient,
+) -> None:
+    respx.post(f"{_BASE_URL}/emails").mock(
+        return_value=httpx.Response(201, json=_email_response())
+    )
+    result = await tools.send_email(
+        client=client, to=["x@example.com"], subject="hi", body_text="body"
+    )
+    assert _UUID_RE.match(result["idempotency_key"])
+
+
+@respx.mock
+async def test_send_email_propagates_explicit_idempotency_key(
+    client: HailClient,
+) -> None:
+    captured: dict = {}
+
+    def _handler(request: httpx.Request) -> httpx.Response:
+        captured["headers"] = dict(request.headers)
+        return httpx.Response(201, json=_email_response())
+
+    respx.post(f"{_BASE_URL}/emails").mock(side_effect=_handler)
+
+    result = await tools.send_email(
+        client=client,
+        to=["x@example.com"],
+        subject="hi",
+        body_text="body",
+        idempotency_key="my-key-1",
+    )
+    assert result["idempotency_key"] == "my-key-1"
+    assert captured["headers"]["idempotency-key"] == "my-key-1"
+
+
+@respx.mock
+async def test_send_email_maps_503_to_error_detail(client: HailClient) -> None:
+    respx.post(f"{_BASE_URL}/emails").mock(
+        return_value=httpx.Response(
+            503,
+            json={"detail": "hail-mail prefixes are not configured: missing ..."},
+        )
+    )
+    result = await tools.send_email(
+        client=client, to=["x@example.com"], subject="hi", body_text="body"
+    )
+    assert "hail-mail prefixes" in result["error"]
+
+
+# --------------------------------------------------------------------------- #
 # get_call
 # --------------------------------------------------------------------------- #
 
@@ -343,7 +490,9 @@ async def test_api_error_mapping_404(client: HailClient) -> None:
         return_value=httpx.Response(404, json={"detail": "call not found"})
     )
     result = await tools.get_call(client=client, call_id=cid)
-    assert result == {"error": "call not found"}
+    # Generic "resource not found" — the same mapping serves /calls,
+    # /emails, /sender-domains. Specific resource type is in the request.
+    assert result == {"error": "resource not found"}
 
 
 @respx.mock
@@ -362,11 +511,27 @@ async def test_api_error_mapping_422(client: HailClient) -> None:
 
 @respx.mock
 async def test_api_error_mapping_5xx(client: HailClient) -> None:
+    # 502/504 take the generic "hail upstream error: <code>" branch —
+    # the body is provider noise the agent can't act on.
     respx.get(f"{_BASE_URL}/events").mock(
-        return_value=httpx.Response(503, text="upstream down")
+        return_value=httpx.Response(502, text="upstream down")
     )
     result = await tools.get_events(client=client)
-    assert result == {"error": "hail upstream error: 503"}
+    assert result == {"error": "hail upstream error: 502"}
+
+
+@respx.mock
+async def test_api_error_mapping_503_surfaces_detail(client: HailClient) -> None:
+    # 503 is reserved for "operator-configurable preconditions failed"
+    # (e.g. hail-mail prefixes unset, pool exhausted). The detail tells
+    # the agent which knob to turn, so we surface it verbatim.
+    respx.post(f"{_BASE_URL}/calls").mock(
+        return_value=httpx.Response(
+            503, json={"detail": "shared call line pool exhausted; try again shortly"}
+        )
+    )
+    result = await tools.place_call(client=client, to="+14155559999", system_prompt="x")
+    assert "pool exhausted" in result["error"]
 
 
 @respx.mock

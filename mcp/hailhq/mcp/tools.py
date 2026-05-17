@@ -44,8 +44,8 @@ def _format_api_error(exc: HailAPIError) -> dict[str, Any]:
     if status == 401:
         return {"error": "auth failed: check HAIL_API_KEY"}
     if status == 404:
-        return {"error": "call not found"}
-    if status in (409, 422):
+        return {"error": "resource not found"}
+    if status in (409, 422, 503):
         return {"error": exc.detail}
     if 500 <= status < 600:
         return {"error": f"hail upstream error: {status}"}
@@ -135,6 +135,48 @@ async def place_call(
     # Surface the key in the response so the agent can replay this exact
     # request deterministically on a retry. ``setdefault`` so a future
     # server-side echo isn't clobbered.
+    if isinstance(result, dict):
+        result.setdefault("idempotency_key", idempotency_key)
+    return result
+
+
+async def send_email(
+    *,
+    client: HailClient,
+    to: list[str],
+    subject: str,
+    body_text: str | None = None,
+    body_html: str | None = None,
+    from_: str | None = None,
+    cc: list[str] | None = None,
+    bcc: list[str] | None = None,
+    reply_to: str | None = None,
+    metadata: dict[str, Any] | None = None,
+    idempotency_key: str | None = None,
+) -> dict[str, Any]:
+    if not to:
+        return {"error": "to must contain at least one recipient"}
+    if not subject:
+        return {"error": "subject is required"}
+    if not body_text and not body_html:
+        return {"error": "either body_text or body_html must be provided"}
+    if idempotency_key is None:
+        idempotency_key = str(uuid.uuid4())
+    try:
+        result = await client.send_email(
+            to=to,
+            subject=subject,
+            body_text=body_text,
+            body_html=body_html,
+            from_=from_,
+            cc=cc,
+            bcc=bcc,
+            reply_to=reply_to,
+            metadata=metadata,
+            idempotency_key=idempotency_key,
+        )
+    except HailAPIError as exc:
+        return _format_api_error(exc)
     if isinstance(result, dict):
         result.setdefault("idempotency_key", idempotency_key)
     return result
@@ -241,6 +283,68 @@ def register_tools(mcp_app: FastMCP, client: HailClient) -> None:
             idempotency_key=idempotency_key,
         )
 
+    @mcp_app.tool(name="send_email")
+    async def send_email_tool(
+        to: list[str],
+        subject: str,
+        body_text: str | None = None,
+        body_html: str | None = None,
+        from_: str | None = None,
+        cc: list[str] | None = None,
+        bcc: list[str] | None = None,
+        reply_to: str | None = None,
+        metadata: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> dict[str, Any]:
+        """Send an outbound email through your configured SES sender.
+
+        ``to`` is a non-empty list of RFC-style email addresses. At
+        least one of ``body_text`` / ``body_html`` is required (both
+        is fine — multipart-alternative). ``cc``, ``bcc``, and
+        ``reply_to`` are optional and follow the usual mail
+        conventions.
+
+        ``from_`` is optional. When omitted, Hail picks the first
+        verified sender domain on your organization, or — if the
+        operator configured ``HAIL_MAIL_BASE_DOMAIN`` plus a sender
+        identity (any of: ``HAIL_MAIL_FROM=<user>+<org>@<base>``,
+        the split ``HAIL_MAIL_DEFAULT_USER_PREFIX`` /
+        ``HAIL_MAIL_DEFAULT_ORG_PREFIX``, or an explicit row created
+        via ``POST /sender-domains``) — auto-mints a hail-mail address
+        of the form ``<user>+<org>@<base>``. When supplied, it must
+        match a verified row already in ``sender_domains`` (register
+        one with the website console or ``POST /sender-domains``).
+
+        ``metadata`` is free-form JSON attached to the email record.
+
+        ``idempotency_key`` defaults to a fresh UUID and is returned
+        in the response under ``idempotency_key`` — pass the same
+        value on a retry to replay rather than re-send. A new key
+        is a new message.
+
+        Example:
+            send_email(to=["alice@example.com"],
+                       subject="Welcome",
+                       body_text="Thanks for signing up.")
+
+        Returns the ``EmailResponse`` dict (id, status, from_address,
+        to_addresses, sent_at, provider_message_id, ...). On failure
+        returns ``{"error": "<message>"}`` instead.
+        """
+        return await send_email(
+            client=client,
+            to=to,
+            subject=subject,
+            body_text=body_text,
+            body_html=body_html,
+            from_=from_,
+            cc=cc,
+            bcc=bcc,
+            reply_to=reply_to,
+            metadata=metadata,
+            idempotency_key=idempotency_key,
+        )
+
     @mcp_app.tool(name="get_call")
     async def get_call_tool(call_id: str) -> dict[str, Any]:
         """Fetch the current state of one call by id.
@@ -313,6 +417,7 @@ def register_tools(mcp_app: FastMCP, client: HailClient) -> None:
 __all__ = [
     "register_tools",
     "place_call",
+    "send_email",
     "get_call",
     "list_calls",
     "get_events",

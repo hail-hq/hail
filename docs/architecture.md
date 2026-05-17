@@ -47,3 +47,38 @@ One mode per call.
 - **Postgres** — call records, phone numbers, API keys.
 - **S3** — call recordings.
 - **LiveKit Cloud** — transient media (ephemeral).
+
+## Outbound email
+
+Outbound mail goes through AWS SES via the `EmailProvider` adapter in `core/hailhq/core/providers/email/`. Two flavors of sender identity, stored in `sender_domains`:
+
+- **`kind='custom'`** — tenant-controlled DNS (e.g. `acme.com`). `POST /sender-domains` registers the identity with SES and surfaces three DKIM CNAMEs verbatim; the tenant publishes them, then `POST /sender-domains/{id}/verify` re-polls SES.
+- **`kind='hail_mail'`** — per-org address under an operator-managed parent domain. The full sender is `<user>+<org>@<HAIL_MAIL_BASE_DOMAIN>` (e.g. `alice+acme@mail.hail.so`); the parent domain is pre-verified once by the operator out of band, so per-org rows land already-verified without ever calling SES.
+
+### Self-hosted vs managed
+
+The two surfaces differ in where the prefixes come from and where they're edited:
+
+|                       | Self-hosted Hail                                                                               | Managed Hail (hail.so)                                                                     |
+| --------------------- | ---------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
+| Auth                  | Shared `HAIL_API_KEY`; one sentinel "Self-hosted" org                                          | Per-user `hl_live_*` keys via the website's auth backend                                   |
+| Org concept           | None — single sentinel org                                                                     | Real orgs with members                                                                     |
+| Hail-mail base domain | `HAIL_MAIL_BASE_DOMAIN` (operator's `.env`)                                                    | `HAIL_MAIL_BASE_DOMAIN` (operator's deploy env)                                            |
+| Hail-mail prefixes    | `HAIL_MAIL_DEFAULT_USER_PREFIX` + `HAIL_MAIL_DEFAULT_ORG_PREFIX` (`.env` is the configuration) | Same env vars provide the deploy-time default; org admins override per-org via the console |
+| Where edits land      | Restart with new `.env` values                                                                 | `PATCH /sender-domains/{id}` (console writes this)                                         |
+| SES production access | Operator's AWS account                                                                         | Operator's AWS account                                                                     |
+| Billing               | Off — `usage_events` accumulates as raw analytics                                              | Cloud rater applies cents/unit, debits `account_credits`                                   |
+
+Both prefixes are validated against `^[a-z0-9]([a-z0-9-]{0,18}[a-z0-9])?$` (1–20 chars, lowercase alphanumeric + hyphen, no leading/trailing hyphen), so the full local part fits well under the RFC-5321 64-char budget.
+
+### Send-time resolution
+
+`POST /emails` picks a sender in this order:
+
+1. Explicit `from` — must match a `verified` row owned by the caller's org.
+2. First verified org-owned domain (ordered by `created_at`, so a tenant's "default sender" stays stable).
+3. Auto-mint a hail-mail row using the configured prefixes, if `HAIL_MAIL_BASE_DOMAIN` is set.
+
+If none of those resolve, the request returns `503` pointing at how to register a domain.
+
+See [`docs/setup/aws-ses.md`](./setup/aws-ses.md) for the operator-side setup, and [`docs/superpowers/plans/2026-05-17-hail-mail-addressing.md`](./superpowers/plans/2026-05-17-hail-mail-addressing.md) for the addressing/configurability plan.

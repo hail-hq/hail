@@ -25,6 +25,7 @@ Use it:
 ```bash
 # CLI (for humans scripting Hail)
 hail call +15551234567 --prompt "You are calling to confirm a reschedule."
+hail email send --to alice@example.com --subject "hi" --body "hello from Hail"
 hail tail                                # follow every event in your org
 hail tail --id call:<uuid>               # narrow to one call
 
@@ -32,6 +33,10 @@ hail tail --id call:<uuid>               # narrow to one call
 curl -X POST http://localhost:8080/calls \
   -H "Authorization: Bearer $HAIL_API_KEY" \
   -d '{"to":"+15551234567","system_prompt":"..."}'
+
+curl -X POST http://localhost:8080/emails \
+  -H "Authorization: Bearer $HAIL_API_KEY" \
+  -d '{"to":["alice@example.com"],"subject":"hi","body_text":"hello"}'
 
 # MCP (for AI agents — Claude.ai, ChatGPT, Claude Code, Cursor, …)
 # Add a remote MCP connector in your client pointing at:
@@ -43,7 +48,7 @@ curl -X POST http://localhost:8080/calls \
 
 ![Animated terminal demo of hail tail streaming live call events](docs/assets/gifs/hail-tail-live-stream.gif)
 
-Full setup: [docs/setup/twilio.md](docs/setup/twilio.md), [docs/setup/livekit-cloud.md](docs/setup/livekit-cloud.md), [docs/setup/mcp.md](docs/setup/mcp.md).
+Full setup: [docs/setup/twilio.md](docs/setup/twilio.md), [docs/setup/livekit-cloud.md](docs/setup/livekit-cloud.md), [docs/setup/aws-ses.md](docs/setup/aws-ses.md), [docs/setup/mcp.md](docs/setup/mcp.md).
 
 ## Tenets
 
@@ -56,69 +61,69 @@ Full setup: [docs/setup/twilio.md](docs/setup/twilio.md), [docs/setup/livekit-cl
 
 ## Milestones
 
-Checked = shipped. Version tag shows the target release.
+Checked = shipped. Per-artifact changelogs (GitHub Releases for the CLI, PyPI release notes for the SDK) own the "shipped in which version" question.
 
 ### Phone calls
 
 - Outbound
-  - [x] Twilio (v1)
-  - [ ] Telnyx (v2)
+  - [x] Twilio
+  - [ ] Telnyx
 - Inbound
-  - [ ] Twilio (v1.1)
+  - [ ] Twilio
 
 ### SMS
 
 - Outbound
-  - [ ] Twilio (v1.2)
+  - [ ] Twilio
 - Inbound
-  - [ ] Twilio (v1.3)
+  - [ ] Twilio
 
 ### Email
 
 - Outbound
-  - [ ] AWS SES (v1.4)
+  - [x] AWS SES
 - Inbound
-  - [ ] AWS SES (v1.5)
+  - [ ] AWS SES
 
 ### Voice pipeline
 
 - STT
-  - [x] Deepgram (v1)
-  - [ ] Whisper (v1.2)
-  - [ ] AssemblyAI (v1.2)
+  - [x] Deepgram
+  - [ ] Whisper
+  - [ ] AssemblyAI
 - TTS
-  - [x] ElevenLabs (v1)
-  - [ ] Cartesia (v1.2)
-  - [ ] Deepgram Aura (v1.2)
+  - [x] ElevenLabs
+  - [ ] Cartesia
+  - [ ] Deepgram Aura
 - VAD
-  - [x] Silero (v1)
+  - [x] Silero
 - Turn detection
-  - [x] LiveKit turn-detector (v1)
+  - [x] LiveKit turn-detector
 - LLM — system-prompt mode
-  - [x] Fallback: OpenAI → Gemini → Anthropic, fast models (v1)
+  - [x] Fallback: OpenAI → Gemini → Anthropic, fast models
 - LLM — BYO-endpoint mode
-  - [x] OpenAI chat-completions-compatible (v1)
+  - [x] OpenAI chat-completions-compatible
 - Recording
-  - [ ] S3 upload (v1)
-  - [ ] Diarization (v1.2)
+  - [ ] S3 upload
+  - [ ] Diarization
 
 ### Distribution
 
 - API
-  - [x] OpenAPI spec (v1)
+  - [x] OpenAPI spec
 - CLI
-  - [x] `hail` binary via GitHub Releases (v1)
+  - [x] `hail` binary via GitHub Releases
 - MCP server
-  - [x] Remote SSE endpoint bundled with every Hail deploy (v1)
+  - [x] Remote SSE endpoint bundled with every Hail deploy
   - ~~PyPI stdio package~~ — intentionally not shipped; see [docs/setup/mcp.md](docs/setup/mcp.md)
 - Python SDK
-  - [x] `hail-sdk` on PyPI, imports as `hail` (v1)
+  - [x] `hail-sdk` on PyPI, imports as `hail`
 
 ### Infrastructure
 
 - [x] Docker Compose scaffold
 - Self-hosted LiveKit SFU
-  - [ ] docker compose integration (v1.6)
+  - [ ] docker compose integration
 
 ## Architecture
 

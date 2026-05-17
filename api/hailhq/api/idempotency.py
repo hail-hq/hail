@@ -132,16 +132,20 @@ async def _try_acquire_or_load(
         return existing
 
 
-async def idempotency_for_post_calls(
+async def idempotency_dep(
     request: Request,
     principal: Annotated[Principal, Depends(get_current_principal)],
     idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
 ) -> IdempotencyContext | None:
-    """FastAPI dep that gates ``POST /calls`` on an Idempotency-Key.
+    """FastAPI dep that gates any POST handler on an Idempotency-Key.
 
     Returns ``None`` when no header is present (pass-through). On bad JSON
     we also pass through so the route's Pydantic validation surfaces the
     422 — pre-empting it here would surface a less-helpful error.
+
+    The logic is channel-agnostic (the storage key namespaces by
+    ``organization_id``, never by route), so every idempotent POST mounts
+    the same dependency.
     """
     if idempotency_key is None:
         return None
@@ -190,5 +194,5 @@ async def idempotency_for_post_calls(
 __all__ = [
     "IdempotencyContext",
     "hash_request_body",
-    "idempotency_for_post_calls",
+    "idempotency_dep",
 ]

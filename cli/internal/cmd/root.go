@@ -130,6 +130,8 @@ or pass --api-key.`,
 	root.PersistentFlags().BoolVar(&opts.JSON, "json", false, "Output JSON instead of human-friendly text")
 
 	root.AddCommand(newCallCmd(opts))
+	root.AddCommand(newEmailCmd(opts))
+	root.AddCommand(newSenderDomainCmd(opts))
 	root.AddCommand(newTailCmd(opts))
 	root.AddCommand(newLoginCmd(opts))
 	root.AddCommand(newAuthCmd(opts))
