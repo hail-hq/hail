@@ -1,6 +1,6 @@
 import 'server-only';
 import type { LLMRow, STTRow, TTSRow, CostsFile } from './types';
-import { langs, num, mostRecent, usd } from './format';
+import { langs, mostRecent, priceRange, usd } from './format';
 
 function tableRow(cells: (string | number | undefined)[]): string {
   return `| ${cells.map((c) => (c === undefined || c === null ? '—' : String(c))).join(' | ')} |`;
@@ -133,9 +133,9 @@ export function renderCostsMarkdown(
   const providers = new Set<string>();
   for (const m of [...llm.models, ...stt.models, ...tts.models]) providers.add(m.provider);
 
-  const llmOuts = llm.models.map((m) => num(m.output_per_mtok_usd));
-  const sttPrices = stt.models.map((m) => num(m.price_per_minute_usd));
-  const ttsPrices = tts.models.map((m) => num(m.price_per_1m_chars_usd));
+  const llmRange = priceRange(llm.models.map((m) => m.output_per_mtok_usd), 2, 2, 'Mtok');
+  const sttRange = priceRange(stt.models.map((m) => m.price_per_minute_usd), 6, 4, 'min');
+  const ttsRange = priceRange(tts.models.map((m) => m.price_per_1m_chars_usd), 2, 2, '1M chars');
 
   const verified = mostRecent(llm.models, stt.models, tts.models);
 
@@ -157,9 +157,9 @@ Public, validated pricing and capability data for AI model providers — large l
 
 - **Models:** ${totalModels} (${llm.models.length} LLM · ${stt.models.length} STT · ${tts.models.length} TTS)
 - **Providers:** ${providers.size}
-- **LLM output range:** $${Math.min(...llmOuts).toFixed(2)} – $${Math.max(...llmOuts).toFixed(2)} / Mtok
-- **STT range:** $${Math.min(...sttPrices).toFixed(6)} – $${Math.max(...sttPrices).toFixed(4)} / min
-- **TTS range:** $${Math.min(...ttsPrices).toFixed(2)} – $${Math.max(...ttsPrices).toFixed(2)} / 1M chars
+- **LLM output range:** ${llmRange}
+- **STT range:** ${sttRange}
+- **TTS range:** ${ttsRange}
 - **Verified:** ${verified}
 
 ## For agents

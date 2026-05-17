@@ -1,7 +1,7 @@
 import type { LLMRow, STTRow, TTSRow } from '@/lib/types';
 import { CopyableCode } from './copyable-code';
 import { isStale, daysSince } from '@/lib/staleness';
-import { langs, usd } from '@/lib/format';
+import { formatCloning, langs, usd } from '@/lib/format';
 import { compareHrefRemove } from '@/lib/url';
 
 type Cell = React.ReactNode;
@@ -137,15 +137,10 @@ export function STTCompareTable({ models, currentIds }: { models: STTRow[]; curr
 }
 
 export function TTSCompareTable({ models, currentIds }: { models: TTSRow[]; currentIds: string[] }) {
-  function cloning(m: TTSRow): string {
-    if (m.voice_cloning === undefined) return '—';
-    if (typeof m.voice_cloning === 'boolean') return m.voice_cloning ? '✓ included' : '—';
-    return `$${m.voice_cloning.price_usd} ${m.voice_cloning.unit}`;
-  }
   const rows: CompareRow[] = [
     { label: '$/1M chars', cells: models.map((m) => usd(m.price_per_1m_chars_usd, 2)), emphasis: true },
     { label: 'Voice quality', cells: models.map((m) => m.voice_quality) },
-    { label: 'Voice cloning', cells: models.map(cloning) },
+    { label: 'Voice cloning', cells: models.map((m) => formatCloning(m.voice_cloning, '✓ included')) },
     {
       label: 'Voice count',
       cells: models.map((m) => {

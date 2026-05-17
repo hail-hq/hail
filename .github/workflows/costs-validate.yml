@@ -27,7 +27,7 @@ jobs:
         run: check-jsonschema --schemafile costs/schema/stt.schema.json costs/stt.json
       - name: Validate TTS data
         run: check-jsonschema --schemafile costs/schema/tts.schema.json costs/tts.json
-      - name: Check alias uniqueness within each file
+      - name: Cross-field validity checks (aliases unique, replaced_by_model_id resolves)
         run: |
           for f in costs/llm.json costs/stt.json costs/tts.json; do
             dupes=$(jq -r '[.models[] | .aliases // [] | .[]] | group_by(.) | map(select(length > 1) | .[0])' "$f")
@@ -35,10 +35,6 @@ jobs:
               echo "::error file=$f::duplicate aliases: $dupes"
               exit 1
             fi
-          done
-      - name: Check replaced_by_model_id resolves within each file
-        run: |
-          for f in costs/llm.json costs/stt.json costs/tts.json; do
             unresolved=$(jq -r '
               (.models | map(.model_id)) as $ids
               | [.models[] | select(.replaced_by_model_id != null) | select((.replaced_by_model_id as $r | $ids | index($r)) == null) | .model_id]

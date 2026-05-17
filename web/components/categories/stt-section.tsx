@@ -5,7 +5,7 @@ import type { STTRow } from '@/lib/types';
 import { CategorySection } from '../category-section';
 import { ModelIdCell } from '../model-id-cell';
 import { VerifiedCell } from '../verified-cell';
-import { langs, num, usd } from '@/lib/format';
+import { langs, num, numOpt, priceRange, usd } from '@/lib/format';
 
 const columns: ColumnDef<STTRow>[] = [
   {
@@ -30,8 +30,7 @@ const columns: ColumnDef<STTRow>[] = [
   },
   {
     id: 'batch',
-    accessorFn: (row) =>
-      row.price_per_minute_batch_usd !== undefined ? num(row.price_per_minute_batch_usd) : undefined,
+    accessorFn: (row) => numOpt(row.price_per_minute_batch_usd),
     header: '$/min batch',
     cell: ({ row }) => usd(row.original.price_per_minute_batch_usd, 4),
     sortingFn: 'basic',
@@ -65,12 +64,6 @@ const columns: ColumnDef<STTRow>[] = [
   },
 ];
 
-function priceRange(rows: STTRow[]): string {
-  if (rows.length === 0) return '—';
-  const prices = rows.map((r) => num(r.price_per_minute_usd));
-  return `$${Math.min(...prices).toFixed(6)} – $${Math.max(...prices).toFixed(4)} / min`;
-}
-
 export function STTSection({ data }: { data: STTRow[] }) {
   return (
     <CategorySection<STTRow>
@@ -82,7 +75,7 @@ export function STTSection({ data }: { data: STTRow[] }) {
         </>
       }
       count={data.length}
-      rangeLabel={priceRange(data)}
+      rangeLabel={priceRange(data.map((r) => r.price_per_minute_usd), 6, 4, 'min')}
       data={data}
       columns={columns}
       defaultSort={{ id: 'price', desc: false }}

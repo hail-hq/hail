@@ -3,7 +3,7 @@ import { LLMSection } from '@/components/categories/llm-section';
 import { STTSection } from '@/components/categories/stt-section';
 import { TTSSection } from '@/components/categories/tts-section';
 import { Toolbar } from '@/components/toolbar';
-import { num, mostRecent } from '@/lib/format';
+import { mostRecent, priceRange } from '@/lib/format';
 
 export const dynamic = 'force-static';
 
@@ -96,27 +96,21 @@ export default function CostsPage() {
               <div className="k">LLMs</div>
               <div className="v">{llm.models.length}</div>
               <div className="n">
-                $
-                {Math.min(...llm.models.map((m) => num(m.output_per_mtok_usd))).toFixed(2)} – $
-                {Math.max(...llm.models.map((m) => num(m.output_per_mtok_usd))).toFixed(0)} / Mtok output
+                {priceRange(llm.models.map((m) => m.output_per_mtok_usd), 2, 0, 'Mtok output')}
               </div>
             </div>
             <div className="stat">
               <div className="k">STT</div>
               <div className="v">{stt.models.length}</div>
               <div className="n">
-                $
-                {Math.min(...stt.models.map((m) => num(m.price_per_minute_usd))).toFixed(6)} – $
-                {Math.max(...stt.models.map((m) => num(m.price_per_minute_usd))).toFixed(4)} / min
+                {priceRange(stt.models.map((m) => m.price_per_minute_usd), 6, 4, 'min')}
               </div>
             </div>
             <div className="stat">
               <div className="k">TTS</div>
               <div className="v">{tts.models.length}</div>
               <div className="n">
-                $
-                {Math.min(...tts.models.map((m) => num(m.price_per_1m_chars_usd))).toFixed(0)} – $
-                {Math.max(...tts.models.map((m) => num(m.price_per_1m_chars_usd))).toFixed(0)} / 1M chars
+                {priceRange(tts.models.map((m) => m.price_per_1m_chars_usd), 0, 0, '1M chars')}
               </div>
             </div>
           </div>

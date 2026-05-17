@@ -5,7 +5,7 @@ import type { LLMRow } from '@/lib/types';
 import { CategorySection } from '../category-section';
 import { ModelIdCell } from '../model-id-cell';
 import { VerifiedCell } from '../verified-cell';
-import { num, usd } from '@/lib/format';
+import { num, numOpt, priceRange, usd } from '@/lib/format';
 
 const columns: ColumnDef<LLMRow>[] = [
   {
@@ -38,8 +38,7 @@ const columns: ColumnDef<LLMRow>[] = [
   },
   {
     id: 'cached',
-    accessorFn: (row) =>
-      row.cache_read_per_mtok_usd !== undefined ? num(row.cache_read_per_mtok_usd) : undefined,
+    accessorFn: (row) => numOpt(row.cache_read_per_mtok_usd),
     header: 'Cached $/MTok',
     cell: ({ row }) => usd(row.original.cache_read_per_mtok_usd, 4),
     sortingFn: 'basic',
@@ -71,12 +70,6 @@ const columns: ColumnDef<LLMRow>[] = [
   },
 ];
 
-function priceRange(rows: LLMRow[]): string {
-  if (rows.length === 0) return '—';
-  const outs = rows.map((r) => num(r.output_per_mtok_usd));
-  return `$${Math.min(...outs).toFixed(2)} – $${Math.max(...outs).toFixed(2)} / Mtok output`;
-}
-
 export function LLMSection({ data }: { data: LLMRow[] }) {
   return (
     <CategorySection<LLMRow>
@@ -88,7 +81,7 @@ export function LLMSection({ data }: { data: LLMRow[] }) {
         </>
       }
       count={data.length}
-      rangeLabel={priceRange(data)}
+      rangeLabel={priceRange(data.map((r) => r.output_per_mtok_usd), 2, 2, 'Mtok output')}
       data={data}
       columns={columns}
       defaultSort={{ id: 'output', desc: false }}

@@ -5,13 +5,7 @@ import type { TTSRow } from '@/lib/types';
 import { CategorySection } from '../category-section';
 import { ModelIdCell } from '../model-id-cell';
 import { VerifiedCell } from '../verified-cell';
-import { langs, num, usd } from '@/lib/format';
-
-function cloning(vc: TTSRow['voice_cloning']): string {
-  if (vc === undefined) return '—';
-  if (typeof vc === 'boolean') return vc ? '✓' : '—';
-  return `$${vc.price_usd} ${vc.unit}`;
-}
+import { formatCloning, langs, num, priceRange, usd } from '@/lib/format';
 
 const columns: ColumnDef<TTSRow>[] = [
   {
@@ -44,7 +38,7 @@ const columns: ColumnDef<TTSRow>[] = [
     id: 'cloning',
     accessorKey: 'voice_cloning',
     header: 'Cloning',
-    cell: ({ row }) => cloning(row.original.voice_cloning),
+    cell: ({ row }) => formatCloning(row.original.voice_cloning, '✓'),
   },
   {
     id: 'languages',
@@ -73,12 +67,6 @@ const columns: ColumnDef<TTSRow>[] = [
   },
 ];
 
-function priceRange(rows: TTSRow[]): string {
-  if (rows.length === 0) return '—';
-  const prices = rows.map((r) => num(r.price_per_1m_chars_usd));
-  return `$${Math.min(...prices).toFixed(2)} – $${Math.max(...prices).toFixed(2)} / 1M chars`;
-}
-
 export function TTSSection({ data }: { data: TTSRow[] }) {
   return (
     <CategorySection<TTSRow>
@@ -90,7 +78,7 @@ export function TTSSection({ data }: { data: TTSRow[] }) {
         </>
       }
       count={data.length}
-      rangeLabel={priceRange(data)}
+      rangeLabel={priceRange(data.map((r) => r.price_per_1m_chars_usd), 2, 2, '1M chars')}
       data={data}
       columns={columns}
       defaultSort={{ id: 'price', desc: false }}
