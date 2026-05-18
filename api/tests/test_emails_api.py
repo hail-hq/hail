@@ -375,6 +375,22 @@ async def test_post_emails_marks_failed_when_provider_raises(
     assert email.end_reason == "RuntimeError"
     assert email.failed_at is not None
 
+    # ``email.create`` is the optimistic "row created, send attempted" row;
+    # ``email.send_failed`` records the terminal failure. A reviewer reading
+    # only the create row would be misled into thinking the send succeeded.
+    actions = (
+        (
+            await async_session.execute(
+                select(AuditLog.action)
+                .where(AuditLog.resource_type == "email")
+                .order_by(AuditLog.occurred_at.asc())
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert actions == ["email.create", "email.send_failed"]
+
 
 # --------------------------------------------------------------------------- #
 # POST /emails — idempotency
@@ -470,6 +486,47 @@ async def test_list_emails_filters_by_status(
     items = resp.json()["items"]
     assert len(items) == 1
     assert items[0]["status"] == "failed"
+
+
+async def test_list_emails_omits_message_bodies(
+    client: httpx.AsyncClient,
+    org_and_key: tuple,
+) -> None:
+    """List response uses ``EmailSummary`` — bodies live on the detail row.
+
+    Returning full ``body_text`` / ``body_html`` on every list page would
+    leak PII into otherwise-cheap responses and balloon bandwidth on
+    orgs with long mail histories. The detail endpoint still serves
+    them.
+    """
+    _, _, plain = org_and_key
+    headers = {"Authorization": f"Bearer {plain}"}
+    await _register_custom_verified(client, headers, domain="acme.com")
+    await client.post(
+        "/emails",
+        json={
+            "to": ["x@example.com"],
+            "subject": "hi",
+            "body_text": "the body that should NOT appear in list",
+            "body_html": "<p>also should NOT appear</p>",
+        },
+        headers=headers,
+    )
+
+    listed = await client.get("/emails", headers=headers)
+    assert listed.status_code == 200
+    item = listed.json()["items"][0]
+    assert "body_text" not in item
+    assert "body_html" not in item
+    # Spot-check that summary fields are still there.
+    assert item["subject"] == "hi"
+    assert item["status"] in {"queued", "sent"}
+
+    # Detail endpoint still returns the bodies.
+    detail = await client.get(f"/emails/{item['id']}", headers=headers)
+    assert detail.status_code == 200
+    assert detail.json()["body_text"] == "the body that should NOT appear in list"
+    assert detail.json()["body_html"] == "<p>also should NOT appear</p>"
 
 
 # --------------------------------------------------------------------------- #

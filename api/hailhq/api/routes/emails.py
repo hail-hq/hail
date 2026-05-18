@@ -45,6 +45,7 @@ from hailhq.core.schemas import (
     EmailListResponse,
     EmailResponse,
     EmailStatus,
+    EmailSummary,
     decode_cursor,
     encode_cursor,
 )
@@ -308,6 +309,17 @@ async def create_email(
             )
         )
         await db.commit()
+        # Paired with the earlier ``email.create`` row so a compliance
+        # reviewer reading the trail sees both "row created" and "send
+        # failed" — the create row alone would imply success.
+        await write_audit_log(
+            organization_id=principal.organization_id,
+            api_key_id=principal.api_key_id,
+            action="email.send_failed",
+            resource_type="email",
+            resource_id=email.id,
+            payload={"end_reason": type(exc).__name__},
+        )
         if idem is not None:
             await idem.store(
                 status_code=http_status.HTTP_502_BAD_GATEWAY,
@@ -403,7 +415,7 @@ async def list_emails(
         rows = rows[:limit]
 
     return EmailListResponse(
-        items=[EmailResponse.model_validate(e) for e in rows],
+        items=[EmailSummary.model_validate(e) for e in rows],
         next_cursor=next_cursor,
     )
 

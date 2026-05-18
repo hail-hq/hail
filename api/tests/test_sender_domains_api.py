@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import uuid
 from unittest.mock import AsyncMock
 
 import httpx
@@ -624,6 +625,98 @@ async def test_delete_unknown_returns_404(
         headers={"Authorization": f"Bearer {plain}"},
     )
     assert resp.status_code == 404
+
+
+async def test_delete_with_linked_emails_returns_409_and_skips_provider(
+    client: httpx.AsyncClient,
+    org_and_key: tuple,
+    email_mock: AsyncMock,
+    async_session: AsyncSession,
+) -> None:
+    """Sender with sent emails returns 409, leaves DB+SES untouched.
+
+    ``emails.sender_domain_id`` is ``ON DELETE RESTRICT`` — without the
+    pre-check the commit would raise IntegrityError into the caller as a
+    500, AND the SES identity would already be gone, leaving a row that
+    points at nothing. Verify the pre-check fires first.
+    """
+    org_id, _, plain = org_and_key
+    headers = {"Authorization": f"Bearer {plain}"}
+
+    # Land a verified custom row, then send an email through it.
+    created = await client.post(
+        "/sender-domains",
+        json={"kind": "custom", "domain": "acme.com"},
+        headers=headers,
+    )
+    domain_id = created.json()["id"]
+    await async_session.execute(
+        SenderDomain.__table__.update()
+        .where(SenderDomain.id == uuid.UUID(domain_id))
+        .values(verification_status="verified")
+    )
+    await async_session.commit()
+
+    sent = await client.post(
+        "/emails",
+        json={
+            "from": "noreply@acme.com",
+            "to": ["dest@example.com"],
+            "subject": "hi",
+            "body_text": "hello",
+        },
+        headers=headers,
+    )
+    assert sent.status_code == 201, sent.text
+
+    # Reset the delete mock so the pre-check assertion is unambiguous.
+    email_mock.delete_identity.reset_mock()
+
+    resp = await client.delete(f"/sender-domains/{domain_id}", headers=headers)
+    assert resp.status_code == 409, resp.text
+    assert "linked emails" in resp.json()["detail"]
+    email_mock.delete_identity.assert_not_called()
+
+    # Row is still there.
+    still = (
+        await async_session.execute(
+            select(SenderDomain).where(SenderDomain.id == uuid.UUID(domain_id))
+        )
+    ).scalar_one_or_none()
+    assert still is not None
+
+
+async def test_delete_succeeds_even_if_provider_delete_fails(
+    client: httpx.AsyncClient,
+    org_and_key: tuple,
+    email_mock: AsyncMock,
+    async_session: AsyncSession,
+) -> None:
+    """SES delete failure logs a warning but doesn't fail the request.
+
+    The DB row is the source of truth; an orphaned SES identity is benign
+    and operators can prune it manually. Reversed the order so a provider
+    blip can't leave the DB pointing at a vanished identity (the old order
+    deleted SES first and 502'd, leaking state both ways).
+    """
+    _, _, plain = org_and_key
+    headers = {"Authorization": f"Bearer {plain}"}
+
+    created = await client.post(
+        "/sender-domains",
+        json={"kind": "custom", "domain": "acme.com"},
+        headers=headers,
+    )
+    domain_id = created.json()["id"]
+
+    email_mock.delete_identity.side_effect = RuntimeError("ses unavailable")
+
+    resp = await client.delete(f"/sender-domains/{domain_id}", headers=headers)
+    assert resp.status_code == 204
+    email_mock.delete_identity.assert_awaited_once_with("acme.com")
+
+    remaining = (await async_session.execute(select(SenderDomain))).scalars().all()
+    assert remaining == []
 
 
 # --------------------------------------------------------------------------- #

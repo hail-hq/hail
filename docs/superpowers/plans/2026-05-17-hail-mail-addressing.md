@@ -10,6 +10,14 @@
 
 **Scope note:** The existing email migration (`0005_emails.py`) and routes have not yet been committed. This plan modifies them in place rather than introducing a `0006` follow-up — a clean schema is cheaper than a deprecation cycle no production database will see.
 
+**Deviations from the plan that landed in the commit (intentional):**
+
+- **Third env-var tier added: `HAIL_MAIL_FROM`.** Single-string form (`<user>+<org>@<base>`) that wins over the split `HAIL_MAIL_DEFAULT_*_PREFIX` defaults but loses to body args. Rationale: most self-hosters know the full address they want; one env var is cheaper to set than two. The split form stays for managed-cloud deploys that want per-prefix control without committing to one full address.
+- **`CHECK sender_domains_prefix_kind_consistency` is stricter than this plan says.** Plan: `(kind='hail_mail' AND prefixes NOT NULL) OR kind='custom'`. Landed: also requires both prefixes to be `NULL` on `kind='custom'` rows. Trade-off: prevents leftover prefix values from sticking around if a row's `kind` ever changes (it can't today, but the column types allow it). Constraint name also drifted from `sender_domains_hail_mail_prefixes_required` to `sender_domains_prefix_kind_consistency`.
+- **Sender-domain DELETE is FK-aware.** `emails.sender_domain_id` is `ON DELETE RESTRICT`, so the route now (a) pre-checks for linked emails and returns 409 before touching SES, (b) does the DB delete before the SES `delete_identity` call, and (c) treats a post-DB SES failure as best-effort (log + warn, don't fail the request). Reverses the original SES-then-DB order which could orphan an SES identity if the FK fired.
+- **`GET /emails` returns `EmailSummary`, not `EmailResponse`.** Bodies (`body_text`, `body_html`) live on the detail endpoint only. List responses would otherwise leak PII and balloon bandwidth on long histories.
+- **Migration `0004_audit_log_api_key_id_uuid` is a convergence migration**, not a single-purpose audit_log conversion. It also creates the `call_end_reason` ENUM + CHECK if missing, to recover dev DBs that ran the original audit_log-flavored 0003 between commits `9b0bcea` and `deb3692`. Each block is idempotently guarded so the migration is a no-op on shapes that already converged.
+
 ---
 
 ## Status

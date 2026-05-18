@@ -2,8 +2,9 @@ openapi: 3.1.0
 info:
   title: Hail
   description:
-    "Universal communication platform for AI agents.\n\nThis file is the source\
-    \ of truth for the Go CLI. Regenerate it after\nchanging API routes \u2014 see docs/contributing.md.\n"
+    "Universal communication platform for AI agents.\n\nThis file is the\
+    \ source of truth for the Go CLI. Regenerate it after\nchanging API routes \u2014\
+    \ see docs/contributing.md.\n"
   version: 0.1.0
 paths:
   /calls:
@@ -467,12 +468,13 @@ paths:
         - sender-domains
       summary: Patch Sender Domain
       description:
-        "Edit the user/org prefix on a hail-mail row.\n\nThe managed-cloud console\
-        \ writes here when an org admin changes the\nvisible hail-mail address. Self-hosted\
-        \ operators usually skip this\nendpoint and set the env-var defaults instead, but\
-        \ the route works\nthe same way on both surfaces.\n\nOnly ``kind='hail_mail'`` rows\
-        \ accept edits \u2014 there's nothing in a\ncustom-domain row that the tenant should\
-        \ be free to mutate via this\nsurface (DNS, DKIM, verification state are provider-driven)."
+        "Edit the user/org prefix on a hail-mail row.\n\nThe managed-cloud\
+        \ console writes here when an org admin changes the\nvisible hail-mail address.\
+        \ Self-hosted operators usually skip this\nendpoint and set the env-var defaults\
+        \ instead, but the route works\nthe same way on both surfaces.\n\nOnly ``kind='hail_mail'``\
+        \ rows accept edits \u2014 there's nothing in a\ncustom-domain row that the\
+        \ tenant should be free to mutate via this\nsurface (DNS, DKIM, verification\
+        \ state are provider-driven)."
       operationId: patch_sender_domain_sender_domains__domain_id__patch
       parameters:
         - name: domain_id
@@ -545,10 +547,10 @@ paths:
         - sender-domains
       summary: Verify Sender Domain
       description:
-        "Re-poll the email provider for the current verification status.\n\nOn-demand\
-        \ only \u2014 there is no background poller in v1. Operators /\ntenants hit this after\
-        \ publishing DNS to flip the row to ``verified``.\nHail-mail rows are no-ops (they're\
-        \ already verified by construction)."
+        "Re-poll the email provider for the current verification status.\n\
+        \nOn-demand only \u2014 there is no background poller in v1. Operators /\n\
+        tenants hit this after publishing DNS to flip the row to ``verified``.\nHail-mail\
+        \ rows are no-ops (they're already verified by construction)."
       operationId: verify_sender_domain_sender_domains__domain_id__verify_post
       parameters:
         - name: domain_id
@@ -875,7 +877,7 @@ components:
       properties:
         items:
           items:
-            $ref: "#/components/schemas/EmailResponse"
+            $ref: "#/components/schemas/EmailSummary"
           type: array
           title: Items
         next_cursor:
@@ -1007,6 +1009,119 @@ components:
         - sent_at
         - failed_at
       title: EmailResponse
+    EmailSummary:
+      properties:
+        id:
+          type: string
+          format: uuid
+          title: Id
+        organization_id:
+          type: string
+          format: uuid
+          title: Organization Id
+        conversation_id:
+          anyOf:
+            - type: string
+              format: uuid
+            - type: "null"
+          title: Conversation Id
+        sender_domain_id:
+          type: string
+          format: uuid
+          title: Sender Domain Id
+        from_address:
+          type: string
+          title: From Address
+        to_addresses:
+          items:
+            type: string
+          type: array
+          title: To Addresses
+        cc_addresses:
+          anyOf:
+            - items:
+                type: string
+              type: array
+            - type: "null"
+          title: Cc Addresses
+        bcc_addresses:
+          anyOf:
+            - items:
+                type: string
+              type: array
+            - type: "null"
+          title: Bcc Addresses
+        reply_to:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Reply To
+        subject:
+          type: string
+          title: Subject
+        status:
+          type: string
+          enum:
+            - queued
+            - sent
+            - failed
+            - bounced
+            - complained
+          title: Status
+        end_reason:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: End Reason
+        provider_message_id:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Provider Message Id
+        requested_at:
+          type: string
+          format: date-time
+          title: Requested At
+        sent_at:
+          anyOf:
+            - type: string
+              format: date-time
+            - type: "null"
+          title: Sent At
+        failed_at:
+          anyOf:
+            - type: string
+              format: date-time
+            - type: "null"
+          title: Failed At
+        metadata:
+          additionalProperties: true
+          type: object
+          title: Metadata
+      type: object
+      required:
+        - id
+        - organization_id
+        - conversation_id
+        - sender_domain_id
+        - from_address
+        - to_addresses
+        - cc_addresses
+        - bcc_addresses
+        - reply_to
+        - subject
+        - status
+        - end_reason
+        - provider_message_id
+        - requested_at
+        - sent_at
+        - failed_at
+      title: EmailSummary
+      description:
+        "Trimmed view for list endpoints \u2014 drops the message bodies.\n\
+        \nBodies can be large and contain PII; paging through a year of mail\nshouldn't\
+        \ return every byte of every message just to render a list.\nUse ``EmailResponse``\
+        \ (via ``GET /emails/{id}``) for the full row."
     EventStreamResponse:
       properties:
         items:
@@ -1139,11 +1254,11 @@ components:
       type: object
       title: SenderDomainPatch
       description:
-        "Body for PATCH /sender-domains/{id}.\n\nOnly the user/org prefix pair\
-        \ on a ``kind='hail_mail'`` row is mutable\ntoday. Custom-domain rows have nothing\
-        \ here a tenant should be free to\nedit \u2014 DNS, DKIM, and verification state are\
-        \ all provider-driven. The\nhandler returns 422 on custom rows so the failure mode\
-        \ is obvious."
+        "Body for PATCH /sender-domains/{id}.\n\nOnly the user/org prefix\
+        \ pair on a ``kind='hail_mail'`` row is mutable\ntoday. Custom-domain rows\
+        \ have nothing here a tenant should be free to\nedit \u2014 DNS, DKIM, and\
+        \ verification state are all provider-driven. The\nhandler returns 422 on\
+        \ custom rows so the failure mode is obvious."
     SenderDomainResponse:
       properties:
         id:

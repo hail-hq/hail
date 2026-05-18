@@ -47,7 +47,7 @@ Recommended for the Hail public cloud: `mail.hail.so`. Self-hosters: pick a subd
 
 ## 4. Set up the SES identity
 
-Operator setup, once per deployment:
+Operator setup, once per deployment. Hail does not configure SES on your behalf for the parent `HAIL_MAIL_BASE_DOMAIN` — that identity has to exist (and be verified) before the first `POST /emails`, and the MAIL FROM subdomain is also operator-configured. Custom tenant domains follow a separate flow (Hail calls `CreateEmailIdentity` for those; see §7).
 
 1. **AWS Console → SES → Verified identities → Create identity → Domain**. Enter the bare subdomain (`mail.hail.so`). Enable **DKIM** (default; leave the bit-length at 2048).
 2. SES returns three CNAMEs of the form `<token>._domainkey.mail.hail.so → <token>.dkim.amazonses.com`. **Publish all three** at your DNS provider. Wait for SES to flip status to **Verified** (usually < 1 hour).
@@ -57,6 +57,8 @@ Operator setup, once per deployment:
    bounces.mail.hail.so  TXT  "v=spf1 include:amazonses.com ~all"
    ```
 4. Wait for the MAIL FROM domain to flip to **Success**.
+
+> The MAIL FROM subdomain is **operator-managed**, not provisioned by Hail. Hail's `POST /sender-domains` (kind=`custom`) doesn't call `PutEmailIdentityMailFromAttributes`; if a tenant needs a custom MAIL FROM on their own domain they configure it in the AWS console and `POST /sender-domains/{id}/verify` to pick up the value.
 
 ## 5. DMARC alignment (required for inbox delivery)
 
@@ -75,6 +77,8 @@ _dmarc.mail.hail.so  TXT  "v=DMARC1; p=none; rua=mailto:dmarc-reports@hail.so; a
 ```
 
 Field cheat-sheet: `p=none` reports but doesn't block (start here); `quarantine` shunts unaligned mail to spam; `reject` drops it. `adkim=s` and `aspf=s` require strict alignment between the DKIM/SPF authentication domain and the From domain.
+
+> **TODO(dmarc-ratchet):** Hail's public `mail.hail.so` currently sits at `p=none`. After 30+ days of clean DMARC aggregate reports (no unauthenticated mail in `rua=` feeds), step the policy to `p=quarantine`, monitor another 30 days, then move to `p=reject`. Self-hosters should follow the same staged rollout on their own subdomain.
 
 ## 6. Configure Hail
 

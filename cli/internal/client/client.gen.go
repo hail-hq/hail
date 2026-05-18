@@ -102,6 +102,33 @@ func (e EmailResponseStatus) Valid() bool {
 	}
 }
 
+// Defines values for EmailSummaryStatus.
+const (
+	EmailSummaryStatusBounced    EmailSummaryStatus = "bounced"
+	EmailSummaryStatusComplained EmailSummaryStatus = "complained"
+	EmailSummaryStatusFailed     EmailSummaryStatus = "failed"
+	EmailSummaryStatusQueued     EmailSummaryStatus = "queued"
+	EmailSummaryStatusSent       EmailSummaryStatus = "sent"
+)
+
+// Valid indicates whether the value is a known member of the EmailSummaryStatus enum.
+func (e EmailSummaryStatus) Valid() bool {
+	switch e {
+	case EmailSummaryStatusBounced:
+		return true
+	case EmailSummaryStatusComplained:
+		return true
+	case EmailSummaryStatusFailed:
+		return true
+	case EmailSummaryStatusQueued:
+		return true
+	case EmailSummaryStatusSent:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for EventStreamResponseCallStatus.
 const (
 	EventStreamResponseCallStatusBusy       EventStreamResponseCallStatus = "busy"
@@ -239,25 +266,25 @@ func (e ListCallsCallsGetParamsStatus) Valid() bool {
 
 // Defines values for ListEmailsEmailsGetParamsStatus.
 const (
-	ListEmailsEmailsGetParamsStatusBounced    ListEmailsEmailsGetParamsStatus = "bounced"
-	ListEmailsEmailsGetParamsStatusComplained ListEmailsEmailsGetParamsStatus = "complained"
-	ListEmailsEmailsGetParamsStatusFailed     ListEmailsEmailsGetParamsStatus = "failed"
-	ListEmailsEmailsGetParamsStatusQueued     ListEmailsEmailsGetParamsStatus = "queued"
-	ListEmailsEmailsGetParamsStatusSent       ListEmailsEmailsGetParamsStatus = "sent"
+	Bounced    ListEmailsEmailsGetParamsStatus = "bounced"
+	Complained ListEmailsEmailsGetParamsStatus = "complained"
+	Failed     ListEmailsEmailsGetParamsStatus = "failed"
+	Queued     ListEmailsEmailsGetParamsStatus = "queued"
+	Sent       ListEmailsEmailsGetParamsStatus = "sent"
 )
 
 // Valid indicates whether the value is a known member of the ListEmailsEmailsGetParamsStatus enum.
 func (e ListEmailsEmailsGetParamsStatus) Valid() bool {
 	switch e {
-	case ListEmailsEmailsGetParamsStatusBounced:
+	case Bounced:
 		return true
-	case ListEmailsEmailsGetParamsStatusComplained:
+	case Complained:
 		return true
-	case ListEmailsEmailsGetParamsStatusFailed:
+	case Failed:
 		return true
-	case ListEmailsEmailsGetParamsStatusQueued:
+	case Queued:
 		return true
-	case ListEmailsEmailsGetParamsStatusSent:
+	case Sent:
 		return true
 	default:
 		return false
@@ -341,8 +368,8 @@ type EmailCreate struct {
 
 // EmailListResponse defines model for EmailListResponse.
 type EmailListResponse struct {
-	Items      []EmailResponse `json:"items"`
-	NextCursor *string         `json:"next_cursor,omitempty"`
+	Items      []EmailSummary `json:"items"`
+	NextCursor *string        `json:"next_cursor,omitempty"`
 }
 
 // EmailResponse defines model for EmailResponse.
@@ -370,6 +397,34 @@ type EmailResponse struct {
 
 // EmailResponseStatus defines model for EmailResponse.Status.
 type EmailResponseStatus string
+
+// EmailSummary Trimmed view for list endpoints — drops the message bodies.
+//
+// Bodies can be large and contain PII; paging through a year of mail
+// shouldn't return every byte of every message just to render a list.
+// Use “EmailResponse“ (via “GET /emails/{id}“) for the full row.
+type EmailSummary struct {
+	BccAddresses      *[]string               `json:"bcc_addresses"`
+	CcAddresses       *[]string               `json:"cc_addresses"`
+	ConversationId    *openapi_types.UUID     `json:"conversation_id"`
+	EndReason         *string                 `json:"end_reason"`
+	FailedAt          *time.Time              `json:"failed_at"`
+	FromAddress       string                  `json:"from_address"`
+	Id                openapi_types.UUID      `json:"id"`
+	Metadata          *map[string]interface{} `json:"metadata,omitempty"`
+	OrganizationId    openapi_types.UUID      `json:"organization_id"`
+	ProviderMessageId *string                 `json:"provider_message_id"`
+	ReplyTo           *string                 `json:"reply_to"`
+	RequestedAt       time.Time               `json:"requested_at"`
+	SenderDomainId    openapi_types.UUID      `json:"sender_domain_id"`
+	SentAt            *time.Time              `json:"sent_at"`
+	Status            EmailSummaryStatus      `json:"status"`
+	Subject           string                  `json:"subject"`
+	ToAddresses       []string                `json:"to_addresses"`
+}
+
+// EmailSummaryStatus defines model for EmailSummary.Status.
+type EmailSummaryStatus string
 
 // EventStreamResponse defines model for EventStreamResponse.
 type EventStreamResponse struct {

@@ -438,6 +438,35 @@ class EmailResponse(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict, validation_alias="metadata_")
 
 
+class EmailSummary(BaseModel):
+    """Trimmed view for list endpoints — drops the message bodies.
+
+    Bodies can be large and contain PII; paging through a year of mail
+    shouldn't return every byte of every message just to render a list.
+    Use ``EmailResponse`` (via ``GET /emails/{id}``) for the full row.
+    """
+
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
+
+    id: UUID
+    organization_id: UUID
+    conversation_id: UUID | None
+    sender_domain_id: UUID
+    from_address: str
+    to_addresses: list[str]
+    cc_addresses: list[str] | None
+    bcc_addresses: list[str] | None
+    reply_to: str | None
+    subject: str
+    status: EmailStatus
+    end_reason: str | None
+    provider_message_id: str | None
+    requested_at: datetime
+    sent_at: datetime | None
+    failed_at: datetime | None
+    metadata: dict[str, Any] = Field(default_factory=dict, validation_alias="metadata_")
+
+
 class EmailListResponse(BaseModel):
-    items: list[EmailResponse]
+    items: list[EmailSummary]
     next_cursor: str | None = None

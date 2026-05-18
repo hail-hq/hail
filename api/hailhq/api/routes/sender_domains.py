@@ -38,7 +38,7 @@ from hailhq.api.audit import write_audit_log
 from hailhq.api.deps import Principal, get_current_principal
 from hailhq.core.config import settings
 from hailhq.core.db import get_session
-from hailhq.core.models import SenderDomain
+from hailhq.core.models import Email, SenderDomain
 from hailhq.core.providers.email import EmailProvider, SesEmailProvider
 from hailhq.core.schemas import (
     LOCAL_PREFIX,
@@ -561,20 +561,19 @@ async def delete_sender_domain(
             detail="sender domain not found",
         )
 
-    if sd.kind == "custom":
-        try:
-            await email_provider.delete_identity(sd.domain)
-        except Exception as exc:
-            logger.warning(
-                "ses delete_identity failed for org=%s domain=%s",
-                principal.organization_id,
-                sd.domain,
-                exc_info=True,
-            )
-            raise HTTPException(
-                status_code=http_status.HTTP_502_BAD_GATEWAY,
-                detail="email provider unavailable; the row was not deleted",
-            ) from exc
+    # ``emails.sender_domain_id`` is ``ON DELETE RESTRICT`` — Postgres would
+    # raise IntegrityError on the commit below. Surface a clean 409 instead
+    # of a 500, and check before touching the email provider so a partial
+    # failure can't strand the SES identity ahead of a DB row that won't go.
+    linked_stmt = select(Email.id).where(Email.sender_domain_id == sd.id).limit(1)
+    if (await db.execute(linked_stmt)).scalar_one_or_none() is not None:
+        raise HTTPException(
+            status_code=http_status.HTTP_409_CONFLICT,
+            detail=(
+                f"sender domain {sd.domain!r} has linked emails; delete those "
+                "rows first (or wait for retention) before deleting the sender"
+            ),
+        )
 
     # Snapshot id+domain BEFORE the delete; SQLAlchemy may expire the
     # attributes on `sd` after `await db.delete(sd)` completes.
@@ -582,8 +581,39 @@ async def delete_sender_domain(
     deleted_kind = sd.kind
     deleted_domain = sd.domain
 
+    # Order: DB delete first, then SES. If a concurrent send sneaks in an
+    # email row between the pre-check above and the commit below, the FK
+    # raises IntegrityError and we still 409 — SES untouched. SES delete
+    # only runs after the DB row is gone, so a provider failure can't leave
+    # an orphaned row pointing at a vanished identity.
     await db.delete(sd)
-    await db.commit()
+    try:
+        await db.commit()
+    except IntegrityError as exc:
+        await db.rollback()
+        raise HTTPException(
+            status_code=http_status.HTTP_409_CONFLICT,
+            detail=(
+                f"sender domain {deleted_domain!r} has linked emails; delete "
+                "those rows first before deleting the sender"
+            ),
+        ) from exc
+
+    if deleted_kind == "custom":
+        try:
+            await email_provider.delete_identity(deleted_domain)
+        except Exception:
+            # DB row already gone; an orphaned SES identity is benign
+            # (operator can prune it manually). Log loudly so it shows up
+            # in the operator's error feed.
+            logger.warning(
+                "ses delete_identity failed after DB delete for org=%s domain=%s "
+                "(SES identity may be orphaned)",
+                principal.organization_id,
+                deleted_domain,
+                exc_info=True,
+            )
+
     await write_audit_log(
         organization_id=principal.organization_id,
         api_key_id=principal.api_key_id,
