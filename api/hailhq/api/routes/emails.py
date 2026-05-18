@@ -224,6 +224,10 @@ async def _write_usage_event(
     Best-effort, never re-raised — mirrors the audit-log pattern.
     The website's rater reads ``priced_at IS NULL`` rows and turns
     each into a per-unit debit row on account_credits.
+
+    TODO: graduate to ``api/hailhq/api/usage.py`` (parameterized on
+    ``channel``) when a second hail/api producer grows usage_events
+    writes — same trajectory ``write_audit_log`` took.
     """
     try:
         async with session_scope() as session:
@@ -385,7 +389,11 @@ async def create_email(
 
     await _write_usage_event(
         organization_id=principal.organization_id,
-        units=len(email.to_addresses),
+        units=(
+            len(email.to_addresses)
+            + len(email.cc_addresses or [])
+            + len(email.bcc_addresses or [])
+        ),
         ref=f"email:{email.id}",
     )
 
