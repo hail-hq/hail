@@ -1,3 +1,5 @@
+from datetime import datetime, timezone
+from types import SimpleNamespace
 from uuid import UUID, uuid4
 
 import pytest
@@ -5,6 +7,8 @@ from pydantic import ValidationError
 
 from hailhq.core.schemas import (
     CallCreate,
+    EmailResponse,
+    EmailSummary,
     LLMConfig,
     VoiceConfig,
     parse_resource_id,
@@ -84,3 +88,70 @@ def test_parse_resource_id_empty_id():
 def test_parse_resource_id_bad_uuid():
     with pytest.raises(ValueError, match="invalid uuid"):
         parse_resource_id("call:not-a-uuid")
+
+
+def _email_row_stub(**overrides) -> SimpleNamespace:
+    """Duck-typed stand-in for the ``Email`` SQLAlchemy model.
+
+    ``model_validate(from_attributes=True)`` reads attributes, not dict
+    keys — ``SimpleNamespace`` is enough and keeps the test free of a
+    DB dependency.
+    """
+    base = {
+        "id": uuid4(),
+        "organization_id": uuid4(),
+        "conversation_id": None,
+        "sender_domain_id": uuid4(),
+        "from_address": "alice+acme@mail.hail.so",
+        "to_addresses": ["dest@example.com"],
+        "cc_addresses": None,
+        "bcc_addresses": None,
+        "reply_to": None,
+        "subject": "hi",
+        "body_text": "hello",
+        "body_html": None,
+        "status": "sent",
+        "end_reason": None,
+        "provider_message_id": "ses-msg-1",
+        "requested_at": datetime.now(timezone.utc),
+        "sent_at": datetime.now(timezone.utc),
+        "failed_at": None,
+        "metadata_": {"campaign_id": "spring-2026"},
+    }
+    base.update(overrides)
+    return SimpleNamespace(**base)
+
+
+def test_email_response_metadata_alias_maps_from_metadata_underscore():
+    """The wire field ``metadata`` reads the ORM attribute ``metadata_``.
+
+    ``metadata`` is reserved by SQLAlchemy's ``DeclarativeBase``, so the
+    ``Email`` model stores the column under ``metadata_`` with
+    ``Column("metadata")``. ``EmailResponse`` bridges that via
+    ``validation_alias='metadata_'``. If anyone ever changes the alias,
+    the response field would silently go empty — catch that with a
+    direct assertion rather than relying on the API integration test.
+    """
+    row = _email_row_stub(metadata_={"campaign_id": "spring-2026", "tier": "free"})
+    resp = EmailResponse.model_validate(row, from_attributes=True)
+    assert resp.metadata == {"campaign_id": "spring-2026", "tier": "free"}
+
+    dumped = resp.model_dump()
+    assert dumped["metadata"] == {"campaign_id": "spring-2026", "tier": "free"}
+    assert "metadata_" not in dumped
+
+
+def test_email_summary_omits_bodies_keeps_metadata_alias():
+    """``EmailSummary`` (used by ``GET /emails``) must drop ``body_text``
+    and ``body_html`` while still wiring ``metadata_`` to ``metadata``.
+    """
+    row = _email_row_stub(
+        body_text="secret notes",
+        body_html="<p>secret</p>",
+        metadata_={"tier": "free"},
+    )
+    summary = EmailSummary.model_validate(row, from_attributes=True)
+    dumped = summary.model_dump()
+    assert "body_text" not in dumped
+    assert "body_html" not in dumped
+    assert dumped["metadata"] == {"tier": "free"}

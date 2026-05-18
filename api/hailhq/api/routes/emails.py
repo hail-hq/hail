@@ -24,7 +24,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from fastapi import status as http_status
-from sqlalchemy import select, tuple_, update
+from sqlalchemy import and_, or_, select, tuple_, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -83,8 +83,6 @@ async def _resolve_sender(
     Raises ``HTTPException`` if nothing resolves.
     """
     if explicit_from is not None:
-        # Match the exact full address for hail-mail, or the trailing
-        # @domain for custom rows.
         local, _, dom = explicit_from.partition("@")
         if not dom:
             raise HTTPException(
@@ -92,17 +90,27 @@ async def _resolve_sender(
                 detail="from address must be a valid email (local@domain.tld)",
             )
 
+        # Hail-mail rows store the full ``<user>+<org>@<base>`` as ``domain``;
+        # custom rows store just the DNS suffix. Match either in one query so
+        # the lookup is O(1) regardless of how many domains the org owns.
         stmt = (
             select(SenderDomain)
             .where(SenderDomain.organization_id == organization_id)
             .where(SenderDomain.verification_status == "verified")
+            .where(
+                or_(
+                    and_(
+                        SenderDomain.kind == "hail_mail",
+                        SenderDomain.domain == explicit_from,
+                    ),
+                    and_(SenderDomain.kind == "custom", SenderDomain.domain == dom),
+                )
+            )
+            .limit(1)
         )
-        rows = list((await db.execute(stmt)).scalars().all())
-        for sd in rows:
-            if sd.kind == "hail_mail" and sd.domain == explicit_from:
-                return sd
-            if sd.kind == "custom" and sd.domain == dom:
-                return sd
+        sd = (await db.execute(stmt)).scalar_one_or_none()
+        if sd is not None:
+            return sd
 
         raise HTTPException(
             status_code=http_status.HTTP_422_UNPROCESSABLE_ENTITY,

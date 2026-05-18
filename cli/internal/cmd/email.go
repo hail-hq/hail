@@ -31,11 +31,12 @@ type emailSendFlags struct {
 
 // newEmailCmd builds the `email` command tree.
 //
-// `hail email` on its own prints help; the verb is the subcommand. Today
-// the only subcommand is `send` — list/get/etc. can land later. This
-// shape mirrors `hail auth` rather than the dual-form `hail call`, since
-// "email" alone doesn't have an obvious positional argument the way a
-// phone number does for calls.
+// `hail email` on its own prints help; verbs and sub-trees hang off it.
+// Today: `send` for outbound, `sender-domain` for managing the SES
+// identities mail is sent from. The shape mirrors `hail auth` (group
+// of subcommands) rather than the dual-form `hail call`, since "email"
+// alone doesn't have an obvious positional argument the way a phone
+// number does for calls.
 func newEmailCmd(opts *Options) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "email",
@@ -43,9 +44,11 @@ func newEmailCmd(opts *Options) *cobra.Command {
 		Long: `hail email — outbound email operations.
 
 Subcommands:
-  hail email send      Send a message through your configured sender domain.`,
+  hail email send                    Send a message through your configured sender domain.
+  hail email sender-domain ...       Manage the SES identities mail is sent from.`,
 	}
 	cmd.AddCommand(newEmailSendCmd(opts))
+	cmd.AddCommand(newSenderDomainCmd(opts))
 	return cmd
 }
 

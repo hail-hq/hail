@@ -131,7 +131,6 @@ or pass --api-key.`,
 
 	root.AddCommand(newCallCmd(opts))
 	root.AddCommand(newEmailCmd(opts))
-	root.AddCommand(newSenderDomainCmd(opts))
 	root.AddCommand(newTailCmd(opts))
 	root.AddCommand(newLoginCmd(opts))
 	root.AddCommand(newAuthCmd(opts))

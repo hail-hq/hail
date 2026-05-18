@@ -52,7 +52,7 @@ func TestSenderDomain_RegisterHailMail(t *testing.T) {
 
 	stdout, _, err := runRoot(t,
 		map[string]string{"HAIL_API_KEY": "sk_test", "HAIL_API_URL": srv.URL},
-		"sender-domain", "register",
+		"email", "sender-domain", "register",
 		"--kind", "hail_mail",
 		"--local-prefix-user", "alice",
 		"--local-prefix-org", "acme",
@@ -91,7 +91,7 @@ func TestSenderDomain_RegisterCustomReturnsDkim(t *testing.T) {
 
 	stdout, _, err := runRoot(t,
 		map[string]string{"HAIL_API_KEY": "sk_test", "HAIL_API_URL": srv.URL},
-		"sender-domain", "register",
+		"email", "sender-domain", "register",
 		"--kind", "custom",
 		"--domain", "acme.com",
 	)
@@ -120,7 +120,7 @@ func TestSenderDomain_RegisterHailMailMinimalArgs(t *testing.T) {
 
 	_, _, err := runRoot(t,
 		map[string]string{"HAIL_API_KEY": "sk_test", "HAIL_API_URL": srv.URL},
-		"sender-domain", "register", "--kind", "hail_mail",
+		"email", "sender-domain", "register", "--kind", "hail_mail",
 	)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -146,7 +146,7 @@ func TestSenderDomain_RegisterRejectsBadKind(t *testing.T) {
 
 	_, _, err := runRoot(t,
 		map[string]string{"HAIL_API_KEY": "sk_test", "HAIL_API_URL": srv.URL},
-		"sender-domain", "register", "--kind", "carrier-pigeon",
+		"email", "sender-domain", "register", "--kind", "carrier-pigeon",
 	)
 	if err == nil {
 		t.Fatal("expected error on invalid kind")
@@ -164,7 +164,7 @@ func TestSenderDomain_List(t *testing.T) {
 
 	stdout, _, err := runRoot(t,
 		map[string]string{"HAIL_API_KEY": "sk_test", "HAIL_API_URL": srv.URL},
-		"sender-domain", "list",
+		"email", "sender-domain", "list",
 	)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -185,7 +185,7 @@ func TestSenderDomain_Verify(t *testing.T) {
 	id := "11111111-1111-1111-1111-111111111111"
 	_, _, err := runRoot(t,
 		map[string]string{"HAIL_API_KEY": "sk_test", "HAIL_API_URL": srv.URL},
-		"sender-domain", "verify", id,
+		"email", "sender-domain", "verify", id,
 	)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -204,7 +204,7 @@ func TestSenderDomain_Delete(t *testing.T) {
 	id := "11111111-1111-1111-1111-111111111111"
 	stdout, _, err := runRoot(t,
 		map[string]string{"HAIL_API_KEY": "sk_test", "HAIL_API_URL": srv.URL},
-		"sender-domain", "delete", id,
+		"email", "sender-domain", "delete", id,
 	)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -222,7 +222,7 @@ func TestSenderDomain_DeleteInvalidUUID(t *testing.T) {
 
 	_, _, err := runRoot(t,
 		map[string]string{"HAIL_API_KEY": "sk_test", "HAIL_API_URL": srv.URL},
-		"sender-domain", "delete", "not-a-uuid",
+		"email", "sender-domain", "delete", "not-a-uuid",
 	)
 	if err == nil {
 		t.Fatal("expected error on invalid uuid")

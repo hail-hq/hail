@@ -123,9 +123,9 @@ curl -X POST $HAIL_API_URL/sender-domains \
 The response includes three `_domainkey` CNAMEs to publish at DNS. After publishing, the tenant calls `POST /sender-domains/{id}/verify` to re-poll SES.
 
 ```bash
-hail sender-domain register --kind custom --domain acme.com
+hail email sender-domain register --kind custom --domain acme.com
 # → prints DKIM CNAMEs in a copy-pastable table
-hail sender-domain verify <id>
+hail email sender-domain verify <id>
 # → re-polls SES; flips row to verified once CNAMEs are live
 ```
 

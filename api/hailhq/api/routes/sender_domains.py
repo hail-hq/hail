@@ -217,6 +217,12 @@ async def create_sender_domain(
             dkim_records=[],
             mail_from_domain=None,
             provider="ses",
+            # Points at the operator's *parent* identity at SES, shared by
+            # every hail-mail row across every org. NEVER pass this to
+            # ``ses:DeleteEmailIdentity`` — doing so would drop the parent
+            # and break sending for the whole deployment. The DELETE handler
+            # short-circuits SES calls for ``kind='hail_mail'`` rows for this
+            # reason; any future cleanup path must do the same.
             provider_resource_id=settings.hail_mail_base_domain or None,
             verified_at=datetime.now(timezone.utc),
         )

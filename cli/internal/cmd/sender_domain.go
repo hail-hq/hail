@@ -15,17 +15,20 @@ import (
 	"github.com/hail-hq/hail/cli/internal/client"
 )
 
-// newSenderDomainCmd builds the `sender-domain` command tree.
+// newSenderDomainCmd builds the `email sender-domain` subtree.
 //
 // Self-hosters don't have the managed-cloud web console, so the CLI is
 // the only way for them to register a hail-mail row or a custom domain.
 // Subcommand verbs follow the API: register, list, get, verify, delete.
+//
+// Mounted under `hail email` (not top-level) because sender domains are
+// email-only — voice/SMS use phone numbers as their identity primitive.
 func newSenderDomainCmd(opts *Options) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "sender-domain",
 		Aliases: []string{"sd"},
 		Short:   "Manage email sender-domain identities",
-		Long: `hail sender-domain — manage the identities email is sent from.
+		Long: `hail email sender-domain — manage the identities email is sent from.
 
 Two flavors of identity (POST body 'kind' field):
 
@@ -66,18 +69,18 @@ func newSenderDomainRegisterCmd(opts *Options) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "register",
 		Short: "Register a new sender domain",
-		Long: `hail sender-domain register — register a hail_mail or custom domain.
+		Long: `hail email sender-domain register — register a hail_mail or custom domain.
 
 Examples:
   # Hail-mail using server env defaults (HAIL_MAIL_DEFAULT_*_PREFIX):
-  hail sender-domain register --kind hail_mail
+  hail email sender-domain register --kind hail_mail
 
   # Hail-mail with explicit prefixes:
-  hail sender-domain register --kind hail_mail \
+  hail email sender-domain register --kind hail_mail \
       --local-prefix-user alice --local-prefix-org acme
 
   # Custom domain (returns DKIM CNAMEs to publish):
-  hail sender-domain register --kind custom --domain acme.com`,
+  hail email sender-domain register --kind custom --domain acme.com`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return runSenderDomainRegister(cmd.Context(), opts, f)
