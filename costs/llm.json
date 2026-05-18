@@ -745,6 +745,115 @@
       "verified_by": "r13i",
       "source_url": "https://ai.google.dev/gemini-api/docs/pricing",
       "notes": "Deprecated; scheduled shutdown 2026-06-01. Google's documented migration target is a Gemini 3 Flash preview model not yet in this dataset; replaced_by_model_id points at gemini-2.5-flash as the closest in-file successor. Standard production 2.0 Flash does not support thinking (thinking exists only on Gemini 2.5+ and 3 series per ai.google.dev/gemini-api/docs/thinking); reasoning_tokens_billed=false. Audio input is priced separately at $0.70/MTok (text/image/video at $0.10/MTok captured in input_per_mtok_usd); cached audio input is $0.175/MTok vs $0.025/MTok for text/image/video. Batch Mode at flat 50% off. No long-context tier. supports_pdf=false since the 2.0 Flash model card lists supported inputs as audio/images/video/text (PDF not enumerated). Confidence medium because Vertex AI's published pricing for the same model name differs ($0.15 input / $0.60 output) from AI Studio's $0.10/$0.40; AI Studio primary value retained per spec, and OpenRouter (openrouter.ai/google/gemini-2.0-flash-001) cross-confirms $0.10/$0.40. Explicit context caching storage is billed at $1.00 per MTok-stored per hour (not captured in cache_write_per_mtok_usd). Free tier (AI Studio) is published as per-minute RPM/TPM only, not per-day; free_tier omitted."
+    },
+    {
+      "provider": "Meta",
+      "provider_url": "https://www.llama.com",
+      "model_id": "llama-4-maverick",
+      "display_name": "Llama 4 Maverick",
+      "model_family": "Llama 4",
+      "knowledge_cutoff": "2024-08-31",
+      "aliases": [
+        "meta-llama/Llama-4-Maverick-17B-128E-Instruct-FP8",
+        "meta-llama/llama-4-maverick"
+      ],
+      "context_window": 1048576,
+      "max_output_tokens": 8192,
+      "input_per_mtok_usd": "0.27",
+      "output_per_mtok_usd": "0.85",
+      "modalities": {
+        "input": ["text", "image"],
+        "output": ["text"]
+      },
+      "supports_tool_use": true,
+      "structured_output": true,
+      "supports_vision": true,
+      "supports_audio_in": false,
+      "supports_audio_out": false,
+      "supports_pdf": false,
+      "reasoning_tokens_billed": false,
+      "deployment_options": ["together"],
+      "confidence": "high",
+      "last_verified": "2026-05-18",
+      "last_changed_at": "2026-05-18",
+      "verification_method": "manual-confirmed",
+      "verified_by": "r13i",
+      "source_url": "https://huggingface.co/meta-llama/Llama-4-Maverick-17B-128E-Instruct",
+      "notes": "Multi-host pricing snapshot 2026-05-18: Together $0.27/$0.85 per MTok (meta-llama/Llama-4-Maverick-17B-128E-Instruct-FP8) is the row's structured price as the only host in deployment_options. OpenRouter aggregator routes at $0.15/$0.60 but openrouter is not in the deployment_options enum so the row uses the lowest direct-host price; OpenRouter rate is informational only. Groq does not list Maverick on its public pricing page; Fireworks does not offer Maverick on serverless (on-demand deployments only). Context window is Meta's published 1M (1048576 tokens); OpenRouter advertises 1.05M but the HuggingFace model card spec is 1M. max_output_tokens not published on the model card; defaulted to 8192. 17B activated / 400B total MoE with 128 experts. deployment_options[] omits hosts whose canonical slug or full pricing could not be confirmed in a single primary source on this date (Fireworks no-serverless, Groq absent)."
+    },
+    {
+      "provider": "Meta",
+      "provider_url": "https://www.llama.com",
+      "model_id": "llama-4-scout",
+      "display_name": "Llama 4 Scout",
+      "model_family": "Llama 4",
+      "knowledge_cutoff": "2024-08-31",
+      "aliases": [
+        "meta-llama/Llama-4-Scout-17B-16E-Instruct",
+        "meta-llama/llama-4-scout-17b-16e-instruct",
+        "accounts/fireworks/models/llama4-scout-instruct-basic",
+        "meta-llama/llama-4-scout"
+      ],
+      "context_window": 10485760,
+      "max_output_tokens": 8192,
+      "input_per_mtok_usd": "0.11",
+      "output_per_mtok_usd": "0.34",
+      "modalities": {
+        "input": ["text", "image"],
+        "output": ["text"]
+      },
+      "supports_tool_use": true,
+      "structured_output": true,
+      "supports_vision": true,
+      "supports_audio_in": false,
+      "supports_audio_out": false,
+      "supports_pdf": false,
+      "reasoning_tokens_billed": false,
+      "deployment_options": ["together", "fireworks", "groq"],
+      "confidence": "high",
+      "last_verified": "2026-05-18",
+      "last_changed_at": "2026-05-18",
+      "verification_method": "manual-confirmed",
+      "verified_by": "r13i",
+      "source_url": "https://huggingface.co/meta-llama/Llama-4-Scout-17B-16E-Instruct",
+      "notes": "Multi-host pricing snapshot 2026-05-18: Together $0.18/$0.59 per MTok (meta-llama/Llama-4-Scout-17B-16E-Instruct); Fireworks $0.15/$0.60 (accounts/fireworks/models/llama4-scout-instruct-basic); Groq $0.11/$0.34 (meta-llama/llama-4-scout-17b-16e-instruct) is the lowest in-deployment_options host and is the row's structured price. OpenRouter aggregator routes at $0.08/$0.30 but openrouter is not in the deployment_options enum so the row uses the lowest direct-host price; OpenRouter rate is informational only. Context window is Meta's published 10M (10485760 tokens); most hosts cap below Meta's spec (e.g. Groq, Fireworks typically expose ~128K-1M at the API). max_output_tokens not published on the model card; defaulted to 8192. 17B activated / 109B total MoE with 16 experts."
+    },
+    {
+      "provider": "Meta",
+      "provider_url": "https://www.llama.com",
+      "model_id": "llama-3.3-70b",
+      "display_name": "Llama 3.3 70B Instruct",
+      "model_family": "Llama 3.3",
+      "knowledge_cutoff": "2023-12-31",
+      "aliases": [
+        "meta-llama/Llama-3.3-70B-Instruct",
+        "meta-llama/Llama-3.3-70B-Instruct-Turbo",
+        "llama-3.3-70b-versatile",
+        "meta-llama/llama-3.3-70b-instruct"
+      ],
+      "context_window": 131072,
+      "max_output_tokens": 8192,
+      "input_per_mtok_usd": "0.59",
+      "output_per_mtok_usd": "0.79",
+      "modalities": {
+        "input": ["text"],
+        "output": ["text"]
+      },
+      "supports_tool_use": true,
+      "structured_output": true,
+      "supports_vision": false,
+      "supports_audio_in": false,
+      "supports_audio_out": false,
+      "supports_pdf": false,
+      "reasoning_tokens_billed": false,
+      "deployment_options": ["together", "groq"],
+      "confidence": "high",
+      "last_verified": "2026-05-18",
+      "last_changed_at": "2026-05-18",
+      "verification_method": "manual-confirmed",
+      "verified_by": "r13i",
+      "source_url": "https://huggingface.co/meta-llama/Llama-3.3-70B-Instruct",
+      "notes": "Multi-host pricing snapshot 2026-05-18: Together $0.88/$0.88 per MTok (meta-llama/Llama-3.3-70B-Instruct-Turbo); Groq $0.59/$0.79 (llama-3.3-70b-versatile) is the lowest in-deployment_options host and is the row's structured price. Fireworks publishes $0.90 input on accounts/fireworks/models/llama-v3p3-70b-instruct but output price was not captured from a single primary source on this date so Fireworks is omitted from deployment_options. OpenRouter aggregator routes at $0.10/$0.32 but openrouter is not in the deployment_options enum so the row uses the lowest direct-host price; OpenRouter rate is informational only. Context window 128K per Meta's spec (131072 tokens). Text-only; no vision. max_output_tokens not published on the model card; defaulted to 8192. Knowledge cutoff December 2023 per model card."
     }
   ]
 }
