@@ -38,8 +38,8 @@ from hailhq.api.routes.sender_domains import (
     resolve_hail_mail_prefixes,
 )
 from hailhq.core.billing import has_funds
-from hailhq.core.db import get_session
-from hailhq.core.models import Email, SenderDomain
+from hailhq.core.db import get_session, session_scope
+from hailhq.core.models import Email, SenderDomain, UsageEvent
 from hailhq.core.providers.email import EmailProvider
 from hailhq.core.schemas import (
     EmailCreate,
@@ -210,6 +210,41 @@ def _from_address_for(sd: SenderDomain, explicit: str | None) -> str:
 
 
 # --------------------------------------------------------------------------- #
+# Usage events
+# --------------------------------------------------------------------------- #
+
+
+async def _write_usage_event(
+    organization_id: UUID,
+    units: int,
+    ref: str,
+) -> None:
+    """Append one usage_events row in a fresh session.
+
+    Best-effort, never re-raised — mirrors the audit-log pattern.
+    The website's rater reads ``priced_at IS NULL`` rows and turns
+    each into a per-unit debit row on account_credits.
+    """
+    try:
+        async with session_scope() as session:
+            session.add(
+                UsageEvent(
+                    organization_id=organization_id,
+                    channel="email",
+                    units=units,
+                    ref=ref,
+                )
+            )
+            await session.commit()
+    except Exception:  # pragma: no cover - logged, never re-raised
+        logger.warning(
+            "usage_events write failed for ref=%s",
+            ref,
+            exc_info=True,
+        )
+
+
+# --------------------------------------------------------------------------- #
 # POST /emails
 # --------------------------------------------------------------------------- #
 
@@ -347,6 +382,12 @@ async def create_email(
     )
     await db.commit()
     await db.refresh(email)
+
+    await _write_usage_event(
+        organization_id=principal.organization_id,
+        units=len(email.to_addresses),
+        ref=f"email:{email.id}",
+    )
 
     response.headers["Location"] = f"/emails/{email.id}"
     email_response = EmailResponse.model_validate(email)

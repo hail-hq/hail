@@ -581,3 +581,111 @@ async def test_post_emails_writes_audit_log(
 
 
 _ = ApiKey  # type hint passthrough
+
+
+# --------------------------------------------------------------------------- #
+# Usage events
+# --------------------------------------------------------------------------- #
+
+
+async def test_post_emails_writes_usage_event_on_success(
+    client: httpx.AsyncClient,
+    org_and_key: tuple,
+    async_session: AsyncSession,
+) -> None:
+    """Successful send writes one usage_events row with channel='email'.
+
+    The website's rater reads unpriced rows from usage_events and turns
+    them into account_credits debits. Without this write the ledger UI
+    stays empty for emails even though the schema + rater handle them.
+    """
+    from hailhq.core.models import UsageEvent
+
+    _, _, plain = org_and_key
+    headers = {"Authorization": f"Bearer {plain}"}
+    await _register_custom_verified(client, headers, domain="acme.com")
+    resp = await client.post(
+        "/emails",
+        json={"to": ["x@example.com"], "subject": "hi", "body_text": "body"},
+        headers=headers,
+    )
+    assert resp.status_code == 201, resp.text
+    email_id = resp.json()["id"]
+
+    rows = (
+        (
+            await async_session.execute(
+                select(UsageEvent).where(UsageEvent.channel == "email")
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert len(rows) == 1
+    assert rows[0].channel == "email"
+    assert rows[0].units == 1
+    assert rows[0].ref == f"email:{email_id}"
+
+
+async def test_post_emails_usage_event_units_match_recipient_count(
+    client: httpx.AsyncClient,
+    org_and_key: tuple,
+    async_session: AsyncSession,
+) -> None:
+    """units = len(to_addresses). Rater charges per-recipient."""
+    from hailhq.core.models import UsageEvent
+
+    _, _, plain = org_and_key
+    headers = {"Authorization": f"Bearer {plain}"}
+    await _register_custom_verified(client, headers, domain="acme.com")
+    resp = await client.post(
+        "/emails",
+        json={
+            "to": ["a@example.com", "b@example.com", "c@example.com"],
+            "subject": "hi",
+            "body_text": "body",
+        },
+        headers=headers,
+    )
+    assert resp.status_code == 201, resp.text
+
+    row = (await async_session.execute(select(UsageEvent))).scalar_one()
+    assert row.units == 3
+
+
+async def test_post_emails_usage_event_failure_does_not_fail_send(
+    client: httpx.AsyncClient,
+    org_and_key: tuple,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A bookkeeping write failure must not break the user-facing send.
+
+    Mirrors the audit-log pattern: usage_events runs in its own
+    session_scope so the SES success and the response stay intact even
+    if the bookkeeping write fails.
+    """
+    from hailhq.core import db as core_db
+
+    _, _, plain = org_and_key
+    headers = {"Authorization": f"Bearer {plain}"}
+    await _register_custom_verified(client, headers, domain="acme.com")
+
+    class _BrokenSession:
+        async def __aenter__(self):
+            raise RuntimeError("db unreachable for bookkeeping")
+
+        async def __aexit__(self, *_args):
+            return False
+
+    def _broken_session_scope():
+        return _BrokenSession()
+
+    monkeypatch.setattr(core_db, "session_scope", _broken_session_scope)
+
+    resp = await client.post(
+        "/emails",
+        json={"to": ["x@example.com"], "subject": "hi", "body_text": "body"},
+        headers=headers,
+    )
+    assert resp.status_code == 201, resp.text
+    assert resp.json()["status"] == "sent"
