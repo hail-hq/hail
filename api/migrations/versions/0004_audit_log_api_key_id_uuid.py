@@ -37,10 +37,6 @@ branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
 
-# Each block is independent and self-guarded so the migration is safe to
-# apply against any of the three states described in the module docstring.
-# The probes are intentionally narrow (column type / type oid / constraint
-# name) so the body matches what 0003 would have done — no clever drift.
 UPGRADE = """
 -- 1. audit_log.api_key_id: text → uuid (drop "shared" sentinel).
 DO $$
@@ -156,14 +152,6 @@ BEGIN
       ALTER COLUMN api_key_id TYPE text USING api_key_id::text;
   END IF;
 END $$;
-
--- The call_end_reason rollback lives in 0003's downgrade — undoing it
--- here would leave 0003 unable to re-apply against a freshly-downgraded
--- DB. We only undo what 0004 itself created. The CHECK is also left in
--- place for the same reason (0003 owns its lifecycle).
---
--- We don't re-introduce the 'shared' sentinel on downgrade — operators
--- who need it back will have to write it themselves.
 """
 
 

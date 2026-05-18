@@ -27,6 +27,7 @@ from fastapi import status as http_status
 from sqlalchemy import and_, or_, select, tuple_, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import defer
 
 from hailhq.api.audit import write_audit_log
 from hailhq.api.deps import Principal, get_current_principal
@@ -83,16 +84,15 @@ async def _resolve_sender(
     Raises ``HTTPException`` if nothing resolves.
     """
     if explicit_from is not None:
-        local, _, dom = explicit_from.partition("@")
+        _, _, dom = explicit_from.partition("@")
         if not dom:
             raise HTTPException(
                 status_code=http_status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail="from address must be a valid email (local@domain.tld)",
             )
 
-        # Hail-mail rows store the full ``<user>+<org>@<base>`` as ``domain``;
-        # custom rows store just the DNS suffix. Match either in one query so
-        # the lookup is O(1) regardless of how many domains the org owns.
+        # Hail-mail stores the full address as ``domain``; custom stores just
+        # the DNS suffix — match either shape in one query.
         stmt = (
             select(SenderDomain)
             .where(SenderDomain.organization_id == organization_id)
@@ -317,9 +317,6 @@ async def create_email(
             )
         )
         await db.commit()
-        # Paired with the earlier ``email.create`` row so a compliance
-        # reviewer reading the trail sees both "row created" and "send
-        # failed" — the create row alone would imply success.
         await write_audit_log(
             organization_id=principal.organization_id,
             api_key_id=principal.api_key_id,
@@ -400,7 +397,11 @@ async def list_emails(
     limit: int = Query(default=_DEFAULT_LIST_LIMIT, ge=1, le=_MAX_LIST_LIMIT),
     status: EmailStatus | None = Query(default=None),
 ) -> EmailListResponse:
-    stmt = select(Email).where(Email.organization_id == principal.organization_id)
+    stmt = (
+        select(Email)
+        .options(defer(Email.body_text), defer(Email.body_html))
+        .where(Email.organization_id == principal.organization_id)
+    )
     if status is not None:
         stmt = stmt.where(Email.status == status)
     if cursor is not None:

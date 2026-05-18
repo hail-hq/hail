@@ -235,30 +235,6 @@ class EmailCreate(BaseModel):
         return self
 
 
-class EmailResponse(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-
-    id: UUID
-    organization_id: UUID
-    conversation_id: UUID | None = None
-    sender_domain_id: UUID
-    from_address: str
-    to_addresses: list[str]
-    cc_addresses: list[str] | None = None
-    bcc_addresses: list[str] | None = None
-    reply_to: str | None = None
-    subject: str
-    body_text: str | None = None
-    body_html: str | None = None
-    status: EmailStatus
-    end_reason: str | None = None
-    provider_message_id: str | None = None
-    requested_at: datetime
-    sent_at: datetime | None = None
-    failed_at: datetime | None = None
-    metadata: dict[str, Any] = Field(default_factory=dict)
-
-
 class EmailSummary(BaseModel):
     """Trimmed view for list endpoints — drops the message bodies.
 
@@ -285,6 +261,11 @@ class EmailSummary(BaseModel):
     sent_at: datetime | None = None
     failed_at: datetime | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class EmailResponse(EmailSummary):
+    body_text: str | None = None
+    body_html: str | None = None
 
 
 class EmailListResponse(BaseModel):

@@ -939,16 +939,6 @@ components:
         subject:
           type: string
           title: Subject
-        body_text:
-          anyOf:
-            - type: string
-            - type: "null"
-          title: Body Text
-        body_html:
-          anyOf:
-            - type: string
-            - type: "null"
-          title: Body Html
         status:
           type: string
           enum:
@@ -988,6 +978,16 @@ components:
           additionalProperties: true
           type: object
           title: Metadata
+        body_text:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Body Text
+        body_html:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Body Html
       type: object
       required:
         - id
@@ -1000,14 +1000,14 @@ components:
         - bcc_addresses
         - reply_to
         - subject
-        - body_text
-        - body_html
         - status
         - end_reason
         - provider_message_id
         - requested_at
         - sent_at
         - failed_at
+        - body_text
+        - body_html
       title: EmailResponse
     EmailSummary:
       properties:

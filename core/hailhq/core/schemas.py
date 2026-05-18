@@ -410,34 +410,6 @@ TERMINAL_EMAIL_STATUSES: frozenset[str] = frozenset(
 )
 
 
-class EmailResponse(BaseModel):
-    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
-
-    id: UUID
-    organization_id: UUID
-    conversation_id: UUID | None
-    sender_domain_id: UUID
-    from_address: str
-    to_addresses: list[str]
-    cc_addresses: list[str] | None
-    bcc_addresses: list[str] | None
-    reply_to: str | None
-    subject: str
-    body_text: str | None
-    body_html: str | None
-    status: EmailStatus
-    end_reason: str | None
-    provider_message_id: str | None
-    requested_at: datetime
-    sent_at: datetime | None
-    failed_at: datetime | None
-    # ``Email.metadata_`` is the SQLAlchemy attribute (``metadata`` is
-    # reserved by Declarative). The validation_alias bridges that name so
-    # ``from_attributes=True`` reads the right column; the field on the
-    # response is still called ``metadata`` on the wire.
-    metadata: dict[str, Any] = Field(default_factory=dict, validation_alias="metadata_")
-
-
 class EmailSummary(BaseModel):
     """Trimmed view for list endpoints — drops the message bodies.
 
@@ -464,7 +436,16 @@ class EmailSummary(BaseModel):
     requested_at: datetime
     sent_at: datetime | None
     failed_at: datetime | None
+    # ``Email.metadata_`` is the SQLAlchemy attribute (``metadata`` is
+    # reserved by Declarative). The validation_alias bridges that name so
+    # ``from_attributes=True`` reads the right column; the field on the
+    # response is still called ``metadata`` on the wire.
     metadata: dict[str, Any] = Field(default_factory=dict, validation_alias="metadata_")
+
+
+class EmailResponse(EmailSummary):
+    body_text: str | None
+    body_html: str | None
 
 
 class EmailListResponse(BaseModel):

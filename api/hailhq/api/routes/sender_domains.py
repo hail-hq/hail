@@ -217,12 +217,8 @@ async def create_sender_domain(
             dkim_records=[],
             mail_from_domain=None,
             provider="ses",
-            # Points at the operator's *parent* identity at SES, shared by
-            # every hail-mail row across every org. NEVER pass this to
-            # ``ses:DeleteEmailIdentity`` — doing so would drop the parent
-            # and break sending for the whole deployment. The DELETE handler
-            # short-circuits SES calls for ``kind='hail_mail'`` rows for this
-            # reason; any future cleanup path must do the same.
+            # Shared parent identity — DELETE skips SES for hail_mail rows so
+            # the parent is never passed to ses:DeleteEmailIdentity.
             provider_resource_id=settings.hail_mail_base_domain or None,
             verified_at=datetime.now(timezone.utc),
         )
@@ -567,10 +563,9 @@ async def delete_sender_domain(
             detail="sender domain not found",
         )
 
-    # ``emails.sender_domain_id`` is ``ON DELETE RESTRICT`` — Postgres would
-    # raise IntegrityError on the commit below. Surface a clean 409 instead
-    # of a 500, and check before touching the email provider so a partial
-    # failure can't strand the SES identity ahead of a DB row that won't go.
+    # Pre-check linked emails (ON DELETE RESTRICT) before touching SES, so a
+    # caller with linked rows gets a clean 409 without an SES round-trip. The
+    # IntegrityError catch below covers the race between this check and commit.
     linked_stmt = select(Email.id).where(Email.sender_domain_id == sd.id).limit(1)
     if (await db.execute(linked_stmt)).scalar_one_or_none() is not None:
         raise HTTPException(
@@ -587,11 +582,8 @@ async def delete_sender_domain(
     deleted_kind = sd.kind
     deleted_domain = sd.domain
 
-    # Order: DB delete first, then SES. If a concurrent send sneaks in an
-    # email row between the pre-check above and the commit below, the FK
-    # raises IntegrityError and we still 409 — SES untouched. SES delete
-    # only runs after the DB row is gone, so a provider failure can't leave
-    # an orphaned row pointing at a vanished identity.
+    # DB first, then SES — a provider failure can't strand the row pointing
+    # at a vanished identity.
     await db.delete(sd)
     try:
         await db.commit()
@@ -609,9 +601,6 @@ async def delete_sender_domain(
         try:
             await email_provider.delete_identity(deleted_domain)
         except Exception:
-            # DB row already gone; an orphaned SES identity is benign
-            # (operator can prune it manually). Log loudly so it shows up
-            # in the operator's error feed.
             logger.warning(
                 "ses delete_identity failed after DB delete for org=%s domain=%s "
                 "(SES identity may be orphaned)",

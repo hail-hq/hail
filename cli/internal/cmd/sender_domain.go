@@ -20,9 +20,6 @@ import (
 // Self-hosters don't have the managed-cloud web console, so the CLI is
 // the only way for them to register a hail-mail row or a custom domain.
 // Subcommand verbs follow the API: register, list, get, verify, delete.
-//
-// Mounted under `hail email` (not top-level) because sender domains are
-// email-only — voice/SMS use phone numbers as their identity primitive.
 func newSenderDomainCmd(opts *Options) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "sender-domain",

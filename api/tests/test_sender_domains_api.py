@@ -640,10 +640,9 @@ async def test_delete_with_linked_emails_returns_409_and_skips_provider(
     500, AND the SES identity would already be gone, leaving a row that
     points at nothing. Verify the pre-check fires first.
     """
-    org_id, _, plain = org_and_key
+    _, _, plain = org_and_key
     headers = {"Authorization": f"Bearer {plain}"}
 
-    # Land a verified custom row, then send an email through it.
     created = await client.post(
         "/sender-domains",
         json={"kind": "custom", "domain": "acme.com"},
@@ -669,7 +668,6 @@ async def test_delete_with_linked_emails_returns_409_and_skips_provider(
     )
     assert sent.status_code == 201, sent.text
 
-    # Reset the delete mock so the pre-check assertion is unambiguous.
     email_mock.delete_identity.reset_mock()
 
     resp = await client.delete(f"/sender-domains/{domain_id}", headers=headers)

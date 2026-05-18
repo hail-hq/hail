@@ -375,9 +375,6 @@ async def test_post_emails_marks_failed_when_provider_raises(
     assert email.end_reason == "RuntimeError"
     assert email.failed_at is not None
 
-    # ``email.create`` is the optimistic "row created, send attempted" row;
-    # ``email.send_failed`` records the terminal failure. A reviewer reading
-    # only the create row would be misled into thinking the send succeeded.
     actions = (
         (
             await async_session.execute(
