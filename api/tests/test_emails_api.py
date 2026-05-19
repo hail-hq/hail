@@ -589,17 +589,57 @@ _ = ApiKey  # type hint passthrough
 # --------------------------------------------------------------------------- #
 
 
-async def test_post_emails_writes_usage_event_on_success(
+@pytest.mark.parametrize(
+    "recipients,expected_units",
+    [
+        (["x@example.com"], 1),
+        (["a@example.com", "b@example.com", "c@example.com"], 3),
+    ],
+)
+async def test_post_emails_writes_usage_event(
     client: httpx.AsyncClient,
     org_and_key: tuple,
     async_session: AsyncSession,
+    recipients: list[str],
+    expected_units: int,
 ) -> None:
-    """Successful send writes one usage_events row with channel='email'.
+    """Successful send writes one usage_events row; units = len(to+cc+bcc)."""
+    _, _, plain = org_and_key
+    headers = {"Authorization": f"Bearer {plain}"}
+    await _register_custom_verified(client, headers, domain="acme.com")
+    resp = await client.post(
+        "/emails",
+        json={"to": recipients, "subject": "hi", "body_text": "body"},
+        headers=headers,
+    )
+    assert resp.status_code == 201, resp.text
+    email_id = resp.json()["id"]
 
-    The website's rater reads unpriced rows from usage_events and turns
-    them into account_credits debits. Without this write the ledger UI
-    stays empty for emails even though the schema + rater handle them.
+    row = (
+        await async_session.execute(
+            select(UsageEvent).where(UsageEvent.ref == f"email:{email_id}")
+        )
+    ).scalar_one()
+    assert row.channel == "email"
+    assert row.units == expected_units
+
+
+async def test_post_emails_kicks_rater_after_usage_event(
+    client: httpx.AsyncClient,
+    org_and_key: tuple,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A successful usage_events write fires the rater webhook.
+
+    Without this kick the website's rater only sees the row on its next
+    poll cycle, defeating the near-real-time billing contract.
     """
+    calls: list[str] = []
+    monkeypatch.setattr(
+        "hailhq.api.routes.emails.notify_usage_event_recorded",
+        lambda usage_event_id: calls.append(usage_event_id),
+    )
+
     _, _, plain = org_and_key
     headers = {"Authorization": f"Bearer {plain}"}
     await _register_custom_verified(client, headers, domain="acme.com")
@@ -609,49 +649,8 @@ async def test_post_emails_writes_usage_event_on_success(
         headers=headers,
     )
     assert resp.status_code == 201, resp.text
-    email_id = resp.json()["id"]
-
-    rows = (
-        (
-            await async_session.execute(
-                select(UsageEvent).where(UsageEvent.channel == "email")
-            )
-        )
-        .scalars()
-        .all()
-    )
-    assert len(rows) == 1
-    assert rows[0].units == 1
-    assert rows[0].ref == f"email:{email_id}"
-
-
-async def test_post_emails_usage_event_units_match_recipient_count(
-    client: httpx.AsyncClient,
-    org_and_key: tuple,
-    async_session: AsyncSession,
-) -> None:
-    """units = len(to_addresses) + cc + bcc. Rater charges per-recipient."""
-    _, _, plain = org_and_key
-    headers = {"Authorization": f"Bearer {plain}"}
-    await _register_custom_verified(client, headers, domain="acme.com")
-    resp = await client.post(
-        "/emails",
-        json={
-            "to": ["a@example.com", "b@example.com", "c@example.com"],
-            "subject": "hi",
-            "body_text": "body",
-        },
-        headers=headers,
-    )
-    assert resp.status_code == 201, resp.text
-
-    email_id = resp.json()["id"]
-    row = (
-        await async_session.execute(
-            select(UsageEvent).where(UsageEvent.ref == f"email:{email_id}")
-        )
-    ).scalar_one()
-    assert row.units == 3
+    assert len(calls) == 1
+    UUID(calls[0])  # well-formed usage_event id
 
 
 async def test_post_emails_usage_event_failure_does_not_fail_send(

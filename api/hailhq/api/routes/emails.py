@@ -39,6 +39,7 @@ from hailhq.api.routes.sender_domains import (
 )
 from hailhq.core.billing import has_funds
 from hailhq.core.db import get_session, session_scope
+from hailhq.core.internal_webhook import notify_usage_event_recorded
 from hailhq.core.models import Email, SenderDomain, UsageEvent
 from hailhq.core.providers.email import EmailProvider
 from hailhq.core.schemas import (
@@ -219,26 +220,21 @@ async def _write_usage_event(
     units: int,
     ref: str,
 ) -> None:
-    """Append one usage_events row in a fresh session.
+    """Append one usage_events row in a fresh session, then kick the rater.
 
     Best-effort, never re-raised — mirrors the audit-log pattern.
-    The website's rater reads ``priced_at IS NULL`` rows and turns
-    each into a per-unit debit row on account_credits.
-
-    TODO: graduate to ``api/hailhq/api/usage.py`` (parameterized on
-    ``channel``) when a second hail/api producer grows usage_events
-    writes — same trajectory ``write_audit_log`` took.
     """
     try:
         async with session_scope() as session:
-            session.add(
-                UsageEvent(
-                    organization_id=organization_id,
-                    channel="email",
-                    units=units,
-                    ref=ref,
-                )
+            usage = UsageEvent(
+                organization_id=organization_id,
+                channel="email",
+                units=units,
+                ref=ref,
             )
+            session.add(usage)
+            await session.flush()
+            usage_event_id = str(usage.id)
             await session.commit()
     except Exception:  # pragma: no cover - logged, never re-raised
         logger.warning(
@@ -246,6 +242,8 @@ async def _write_usage_event(
             ref,
             exc_info=True,
         )
+        return
+    notify_usage_event_recorded(usage_event_id)
 
 
 # --------------------------------------------------------------------------- #
