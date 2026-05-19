@@ -41,6 +41,36 @@
       "notes": "Pay-as-you-go tier (multilingual, ~61 languages). Growth tier is $0.0050/min streaming, $0.0043/min pre-recorded. Diarization add-on is captured in diarization_per_minute_usd."
     },
     {
+      "provider": "Deepgram",
+      "provider_url": "https://deepgram.com",
+      "model_id": "nova-3-medical",
+      "display_name": "Nova-3 Medical",
+      "price_per_minute_usd": "0.0048",
+      "price_per_minute_batch_usd": "0.0043",
+      "diarization_per_minute_usd": "0.002",
+      "languages": [
+        "en",
+        "en-US",
+        "en-AU",
+        "en-CA",
+        "en-GB",
+        "en-IE",
+        "en-IN",
+        "en-NZ"
+      ],
+      "streaming": true,
+      "realtime": true,
+      "diarization": "extra-cost",
+      "deployment_options": ["native"],
+      "confidence": "medium",
+      "last_verified": "2026-05-19",
+      "last_changed_at": "2026-05-19",
+      "verification_method": "manual-confirmed",
+      "verified_by": "r13i",
+      "source_url": "https://deepgram.com/learn/introducing-nova-3-medical-speech-to-text-api",
+      "notes": "Medical-tuned Nova-3 for clinical transcription. English variants only (en, en-US, en-AU, en-CA, en-GB, en-IE, en-IN, en-NZ). Invoked via `model=nova-3-medical` in the Deepgram API. Pricing is not separately listed on the public pricing page; Deepgram's launch announcement quotes $0.0043/min pre-recorded, which matches the Nova-3 Monolingual batch rate. Streaming rate assumed equal to Nova-3 Monolingual ($0.0048/min PAYG); verify with Deepgram sales for production commitments."
+    },
+    {
       "provider": "AssemblyAI",
       "provider_url": "https://www.assemblyai.com",
       "model_id": "universal-2",

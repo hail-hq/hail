@@ -10,7 +10,8 @@ export type DeploymentOption =
   | 'fireworks'
   | 'groq'
   | 'replicate'
-  | 'dashscope';
+  | 'dashscope'
+  | 'openrouter';
 
 export type CommonFields = {
   provider: string;
@@ -41,12 +42,16 @@ export type LLMRow = CommonFields & {
   output_per_mtok_usd: string;
   cache_read_per_mtok_usd?: string;
   cache_write_per_mtok_usd?: string;
+  cache_storage_per_mtok_per_hour_usd?: string;
+  per_request_usd?: string;
+  per_search_usd?: string;
   batch_input_per_mtok_usd?: string;
   batch_output_per_mtok_usd?: string;
   pricing_tiers?: {
     threshold_tokens: number;
     input_per_mtok_usd: string;
     output_per_mtok_usd: string;
+    cache_read_per_mtok_usd?: string;
   }[];
   modalities: { input: Modality[]; output: Modality[] };
   supports_tool_use?: boolean;

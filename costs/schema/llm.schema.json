@@ -52,6 +52,9 @@
         "output_per_mtok_usd": { "$ref": "#/$defs/decimal" },
         "cache_read_per_mtok_usd": { "$ref": "#/$defs/decimal" },
         "cache_write_per_mtok_usd": { "$ref": "#/$defs/decimal" },
+        "cache_storage_per_mtok_per_hour_usd": { "$ref": "#/$defs/decimal" },
+        "per_request_usd": { "$ref": "#/$defs/decimal" },
+        "per_search_usd": { "$ref": "#/$defs/decimal" },
         "batch_input_per_mtok_usd": { "$ref": "#/$defs/decimal" },
         "batch_output_per_mtok_usd": { "$ref": "#/$defs/decimal" },
         "pricing_tiers": {
@@ -68,7 +71,8 @@
             "properties": {
               "threshold_tokens": { "type": "integer", "minimum": 1 },
               "input_per_mtok_usd": { "$ref": "#/$defs/decimal" },
-              "output_per_mtok_usd": { "$ref": "#/$defs/decimal" }
+              "output_per_mtok_usd": { "$ref": "#/$defs/decimal" },
+              "cache_read_per_mtok_usd": { "$ref": "#/$defs/decimal" }
             }
           }
         },
@@ -128,7 +132,8 @@
               "fireworks",
               "groq",
               "replicate",
-              "dashscope"
+              "dashscope",
+              "openrouter"
             ]
           }
         },

@@ -117,13 +117,15 @@
       "input_per_mtok_usd": "1.25",
       "output_per_mtok_usd": "10.0",
       "cache_read_per_mtok_usd": "0.125",
+      "cache_storage_per_mtok_per_hour_usd": "4.50",
       "batch_input_per_mtok_usd": "0.625",
       "batch_output_per_mtok_usd": "5.0",
       "pricing_tiers": [
         {
           "threshold_tokens": 200000,
           "input_per_mtok_usd": "2.5",
-          "output_per_mtok_usd": "15.0"
+          "output_per_mtok_usd": "15.0",
+          "cache_read_per_mtok_usd": "0.25"
         }
       ],
       "modalities": {
@@ -139,12 +141,12 @@
       "reasoning_tokens_billed": true,
       "deployment_options": ["native", "vertex"],
       "confidence": "high",
-      "last_verified": "2026-05-18",
+      "last_verified": "2026-05-19",
       "last_changed_at": "2026-05-05",
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",
       "source_url": "https://ai.google.dev/pricing",
-      "notes": "Input pricing shown is for prompts <=200k tokens; prompts >200k tokens are billed per pricing_tiers. Cache hit rate also tiers at 200k: $0.125/MTok <=200k, $0.25/MTok >200k (schema captures only the <=200k rate in cache_read_per_mtok_usd). Context window and max_output_tokens confirmed via ai.google.dev/gemini-api/docs/models/gemini-2.5-pro. Thinking is always on and cannot be disabled; thinking tokens are billed at the output rate. Knowledge cutoff January 2025. Batch Mode discount is a flat 50% off input/output. Explicit context caching storage is billed at $4.50 per MTok-stored per hour (not captured in cache_write_per_mtok_usd since the schema's per-Mtok rate cannot express the hourly storage dimension). Free tier (AI Studio) is published as per-minute RPM/TPM only, not per-day; free_tier omitted. PDF input via the Files API; image, audio, and video native."
+      "notes": "Input pricing shown is for prompts <=200k tokens; prompts >200k tokens are billed per pricing_tiers; cached input also tiers at 200k (the >200k rate is captured in pricing_tiers[0].cache_read_per_mtok_usd). Context window and max_output_tokens confirmed via ai.google.dev/gemini-api/docs/models/gemini-2.5-pro. Thinking is always on and cannot be disabled; thinking tokens are billed at the output rate. Knowledge cutoff January 2025. Batch Mode discount is a flat 50% off input/output. Explicit context caching storage is captured in cache_storage_per_mtok_per_hour_usd. Free tier (AI Studio) is published as per-minute RPM/TPM only, not per-day; free_tier omitted. PDF input via the Files API; image, audio, and video native."
     },
     {
       "provider": "DeepSeek",
@@ -724,6 +726,7 @@
       "input_per_mtok_usd": "0.30",
       "output_per_mtok_usd": "2.50",
       "cache_read_per_mtok_usd": "0.03",
+      "cache_storage_per_mtok_per_hour_usd": "1.00",
       "batch_input_per_mtok_usd": "0.15",
       "batch_output_per_mtok_usd": "1.25",
       "modalities": {
@@ -739,12 +742,12 @@
       "reasoning_tokens_billed": true,
       "deployment_options": ["native", "vertex"],
       "confidence": "high",
-      "last_verified": "2026-05-18",
+      "last_verified": "2026-05-19",
       "last_changed_at": "2026-05-18",
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",
       "source_url": "https://ai.google.dev/gemini-api/docs/pricing",
-      "notes": "Hybrid reasoning model with dynamic thinking on by default; thinking can be disabled via thinkingBudget=0. When thinking is on, response pricing is the sum of output and thinking tokens (both billed at the output rate). Audio input is priced separately at $1.00/MTok (text/image/video at $0.30/MTok captured in input_per_mtok_usd); cached audio input is $0.10/MTok vs $0.03/MTok for text/image/video. Batch Mode at flat 50% off; audio batch input is $0.50/MTok. No long-context tier. Context window and max_output_tokens confirmed via ai.google.dev/gemini-api/docs/models/gemini-2.5-flash. Knowledge cutoff January 2025. Explicit context caching storage is billed at $1.00 per MTok-stored per hour (not captured in cache_write_per_mtok_usd since the schema's per-Mtok rate cannot express the hourly storage dimension). Free tier (AI Studio) is published as per-minute RPM/TPM only, not per-day; free_tier omitted. Cross-verified prompt/completion price against openrouter.ai/google/gemini-2.5-flash."
+      "notes": "Hybrid reasoning model with dynamic thinking on by default; thinking can be disabled via thinkingBudget=0. When thinking is on, response pricing is the sum of output and thinking tokens (both billed at the output rate). Audio input is priced separately at $1.00/MTok (text/image/video at $0.30/MTok captured in input_per_mtok_usd); cached audio input is $0.10/MTok vs $0.03/MTok for text/image/video. Batch Mode at flat 50% off; audio batch input is $0.50/MTok. No long-context tier. Context window and max_output_tokens confirmed via ai.google.dev/gemini-api/docs/models/gemini-2.5-flash. Knowledge cutoff January 2025. Explicit context caching storage is captured in cache_storage_per_mtok_per_hour_usd. Free tier (AI Studio) is published as per-minute RPM/TPM only, not per-day; free_tier omitted. Cross-verified prompt/completion price against openrouter.ai/google/gemini-2.5-flash."
     },
     {
       "provider": "Google",
@@ -758,6 +761,7 @@
       "input_per_mtok_usd": "0.10",
       "output_per_mtok_usd": "0.40",
       "cache_read_per_mtok_usd": "0.01",
+      "cache_storage_per_mtok_per_hour_usd": "1.00",
       "batch_input_per_mtok_usd": "0.05",
       "batch_output_per_mtok_usd": "0.20",
       "modalities": {
@@ -773,12 +777,12 @@
       "reasoning_tokens_billed": true,
       "deployment_options": ["native", "vertex"],
       "confidence": "high",
-      "last_verified": "2026-05-18",
+      "last_verified": "2026-05-19",
       "last_changed_at": "2026-05-18",
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",
       "source_url": "https://ai.google.dev/gemini-api/docs/pricing",
-      "notes": "Hybrid reasoning model; thinking is OFF by default (unlike 2.5 Flash/Pro) but can be enabled by setting thinkingBudget. When thinking is enabled, response pricing is the sum of output and thinking tokens at the output rate, so reasoning_tokens_billed is true. Audio input is priced separately at $0.30/MTok (text/image/video at $0.10/MTok captured in input_per_mtok_usd); cached audio input is $0.03/MTok vs $0.01/MTok for text/image/video. Batch Mode at flat 50% off; audio batch input is $0.15/MTok. No long-context tier. Context window and max_output_tokens confirmed via ai.google.dev/gemini-api/docs/models/gemini-2.5-flash-lite. Knowledge cutoff January 2025. Explicit context caching storage is billed at $1.00 per MTok-stored per hour (not captured in cache_write_per_mtok_usd since the schema's per-Mtok rate cannot express the hourly storage dimension). Free tier (AI Studio) is published as per-minute RPM/TPM only, not per-day; free_tier omitted. Cross-verified prompt/completion price against openrouter.ai/google/gemini-2.5-flash-lite."
+      "notes": "Hybrid reasoning model; thinking is OFF by default (unlike 2.5 Flash/Pro) but can be enabled by setting thinkingBudget. When thinking is enabled, response pricing is the sum of output and thinking tokens at the output rate, so reasoning_tokens_billed is true. Audio input is priced separately at $0.30/MTok (text/image/video at $0.10/MTok captured in input_per_mtok_usd); cached audio input is $0.03/MTok vs $0.01/MTok for text/image/video. Batch Mode at flat 50% off; audio batch input is $0.15/MTok. No long-context tier. Context window and max_output_tokens confirmed via ai.google.dev/gemini-api/docs/models/gemini-2.5-flash-lite. Knowledge cutoff January 2025. Explicit context caching storage is captured in cache_storage_per_mtok_per_hour_usd. Free tier (AI Studio) is published as per-minute RPM/TPM only, not per-day; free_tier omitted. Cross-verified prompt/completion price against openrouter.ai/google/gemini-2.5-flash-lite."
     },
     {
       "provider": "Google",
@@ -792,6 +796,7 @@
       "input_per_mtok_usd": "0.10",
       "output_per_mtok_usd": "0.40",
       "cache_read_per_mtok_usd": "0.025",
+      "cache_storage_per_mtok_per_hour_usd": "1.00",
       "batch_input_per_mtok_usd": "0.05",
       "batch_output_per_mtok_usd": "0.20",
       "modalities": {
@@ -809,12 +814,12 @@
       "deprecated_at": "2026-06-01",
       "replaced_by_model_id": "gemini-2.5-flash",
       "confidence": "medium",
-      "last_verified": "2026-05-18",
+      "last_verified": "2026-05-19",
       "last_changed_at": "2026-05-18",
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",
       "source_url": "https://ai.google.dev/gemini-api/docs/pricing",
-      "notes": "Deprecated; scheduled shutdown 2026-06-01. Google's documented migration target is a Gemini 3 Flash preview model not yet in this dataset; replaced_by_model_id points at gemini-2.5-flash as the closest in-file successor. Standard production 2.0 Flash does not support thinking (thinking exists only on Gemini 2.5+ and 3 series per ai.google.dev/gemini-api/docs/thinking); reasoning_tokens_billed=false. Audio input is priced separately at $0.70/MTok (text/image/video at $0.10/MTok captured in input_per_mtok_usd); cached audio input is $0.175/MTok vs $0.025/MTok for text/image/video. Batch Mode at flat 50% off. No long-context tier. supports_pdf=false since the 2.0 Flash model card lists supported inputs as audio/images/video/text (PDF not enumerated). Confidence medium because Vertex AI's published pricing for the same model name differs ($0.15 input / $0.60 output) from AI Studio's $0.10/$0.40; AI Studio primary value retained per spec, and OpenRouter (openrouter.ai/google/gemini-2.0-flash-001) cross-confirms $0.10/$0.40. Explicit context caching storage is billed at $1.00 per MTok-stored per hour (not captured in cache_write_per_mtok_usd). Free tier (AI Studio) is published as per-minute RPM/TPM only, not per-day; free_tier omitted."
+      "notes": "Deprecated; scheduled shutdown 2026-06-01. Google's documented migration target is a Gemini 3 Flash preview model not yet in this dataset; replaced_by_model_id points at gemini-2.5-flash as the closest in-file successor. Standard production 2.0 Flash does not support thinking (thinking exists only on Gemini 2.5+ and 3 series per ai.google.dev/gemini-api/docs/thinking); reasoning_tokens_billed=false. Audio input is priced separately at $0.70/MTok (text/image/video at $0.10/MTok captured in input_per_mtok_usd); cached audio input is $0.175/MTok vs $0.025/MTok for text/image/video. Batch Mode at flat 50% off. No long-context tier. supports_pdf=false since the 2.0 Flash model card lists supported inputs as audio/images/video/text (PDF not enumerated). Confidence medium because Vertex AI's published pricing for the same model name differs ($0.15 input / $0.60 output) from AI Studio's $0.10/$0.40; AI Studio primary value retained per spec, and OpenRouter (openrouter.ai/google/gemini-2.0-flash-001) cross-confirms $0.10/$0.40. Explicit context caching storage is captured in cache_storage_per_mtok_per_hour_usd. Free tier (AI Studio) is published as per-minute RPM/TPM only, not per-day; free_tier omitted."
     },
     {
       "provider": "Meta",
@@ -842,14 +847,14 @@
       "supports_audio_out": false,
       "supports_pdf": false,
       "reasoning_tokens_billed": false,
-      "deployment_options": ["together"],
+      "deployment_options": ["together", "openrouter"],
       "confidence": "high",
-      "last_verified": "2026-05-18",
+      "last_verified": "2026-05-19",
       "last_changed_at": "2026-05-18",
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",
       "source_url": "https://huggingface.co/meta-llama/Llama-4-Maverick-17B-128E-Instruct",
-      "notes": "Multi-host pricing snapshot 2026-05-18: Together $0.27/$0.85 per MTok (meta-llama/Llama-4-Maverick-17B-128E-Instruct-FP8) is the row's structured price as the only host in deployment_options. OpenRouter aggregator routes at $0.15/$0.60 but openrouter is not in the deployment_options enum so the row uses the lowest direct-host price; OpenRouter rate is informational only. Groq does not list Maverick on its public pricing page; Fireworks does not offer Maverick on serverless (on-demand deployments only). Context window is Meta's published 1M (1048576 tokens); OpenRouter advertises 1.05M but the HuggingFace model card spec is 1M. max_output_tokens not published on the model card; defaulted to 8192. 17B activated / 400B total MoE with 128 experts. deployment_options[] omits hosts whose canonical slug or full pricing could not be confirmed in a single primary source on this date (Fireworks no-serverless, Groq absent)."
+      "notes": "Multi-host pricing snapshot 2026-05-18: Together $0.27/$0.85 per MTok (meta-llama/Llama-4-Maverick-17B-128E-Instruct-FP8) is the row's structured price as the lowest direct-host rate in deployment_options. OpenRouter aggregator routes at $0.15/$0.60 (informational only; structured input/output stay at the lowest direct-host price per the PR4 convention). Groq does not list Maverick on its public pricing page; Fireworks does not offer Maverick on serverless (on-demand deployments only). Context window is Meta's published 1M (1048576 tokens); OpenRouter advertises 1.05M but the HuggingFace model card spec is 1M. max_output_tokens not published on the model card; defaulted to 8192. 17B activated / 400B total MoE with 128 experts. deployment_options[] omits hosts whose canonical slug or full pricing could not be confirmed in a single primary source on this date (Fireworks no-serverless, Groq absent)."
     },
     {
       "provider": "Meta",
@@ -879,14 +884,14 @@
       "supports_audio_out": false,
       "supports_pdf": false,
       "reasoning_tokens_billed": false,
-      "deployment_options": ["together", "fireworks", "groq"],
+      "deployment_options": ["together", "fireworks", "groq", "openrouter"],
       "confidence": "high",
-      "last_verified": "2026-05-18",
+      "last_verified": "2026-05-19",
       "last_changed_at": "2026-05-18",
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",
       "source_url": "https://huggingface.co/meta-llama/Llama-4-Scout-17B-16E-Instruct",
-      "notes": "Multi-host pricing snapshot 2026-05-18: Together $0.18/$0.59 per MTok (meta-llama/Llama-4-Scout-17B-16E-Instruct); Fireworks $0.15/$0.60 (accounts/fireworks/models/llama4-scout-instruct-basic); Groq $0.11/$0.34 (meta-llama/llama-4-scout-17b-16e-instruct) is the lowest in-deployment_options host and is the row's structured price. OpenRouter aggregator routes at $0.08/$0.30 but openrouter is not in the deployment_options enum so the row uses the lowest direct-host price; OpenRouter rate is informational only. Context window is Meta's published 10M (10485760 tokens); most hosts cap below Meta's spec (e.g. Groq, Fireworks typically expose ~128K-1M at the API). max_output_tokens not published on the model card; defaulted to 8192. 17B activated / 109B total MoE with 16 experts."
+      "notes": "Multi-host pricing snapshot 2026-05-18: Together $0.18/$0.59 per MTok (meta-llama/Llama-4-Scout-17B-16E-Instruct); Fireworks $0.15/$0.60 (accounts/fireworks/models/llama4-scout-instruct-basic); Groq $0.11/$0.34 (meta-llama/llama-4-scout-17b-16e-instruct) is the lowest direct-host rate and is the row's structured price. OpenRouter aggregator routes at $0.08/$0.30 (informational only; structured input/output stay at the lowest direct-host price per the PR4 convention). Context window is Meta's published 10M (10485760 tokens); most hosts cap below Meta's spec (e.g. Groq, Fireworks typically expose ~128K-1M at the API). max_output_tokens not published on the model card; defaulted to 8192. 17B activated / 109B total MoE with 16 experts."
     },
     {
       "provider": "Meta",
@@ -916,14 +921,14 @@
       "supports_audio_out": false,
       "supports_pdf": false,
       "reasoning_tokens_billed": false,
-      "deployment_options": ["together", "groq"],
+      "deployment_options": ["together", "groq", "openrouter"],
       "confidence": "high",
-      "last_verified": "2026-05-18",
+      "last_verified": "2026-05-19",
       "last_changed_at": "2026-05-18",
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",
       "source_url": "https://huggingface.co/meta-llama/Llama-3.3-70B-Instruct",
-      "notes": "Multi-host pricing snapshot 2026-05-18: Together $0.88/$0.88 per MTok (meta-llama/Llama-3.3-70B-Instruct-Turbo); Groq $0.59/$0.79 (llama-3.3-70b-versatile) is the lowest in-deployment_options host and is the row's structured price. Fireworks publishes $0.90 input on accounts/fireworks/models/llama-v3p3-70b-instruct but output price was not captured from a single primary source on this date so Fireworks is omitted from deployment_options. OpenRouter aggregator routes at $0.10/$0.32 but openrouter is not in the deployment_options enum so the row uses the lowest direct-host price; OpenRouter rate is informational only. Context window 128K per Meta's spec (131072 tokens). Text-only; no vision. max_output_tokens not published on the model card; defaulted to 8192. Knowledge cutoff December 2023 per model card."
+      "notes": "Multi-host pricing snapshot 2026-05-18: Together $0.88/$0.88 per MTok (meta-llama/Llama-3.3-70B-Instruct-Turbo); Groq $0.59/$0.79 (llama-3.3-70b-versatile) is the lowest direct-host rate and is the row's structured price. Fireworks publishes $0.90 input on accounts/fireworks/models/llama-v3p3-70b-instruct but output price was not captured from a single primary source on this date so Fireworks is omitted from deployment_options. OpenRouter aggregator routes at $0.10/$0.32 (informational only; structured input/output stay at the lowest direct-host price per the PR4 convention). Context window 128K per Meta's spec (131072 tokens). Text-only; no vision. max_output_tokens not published on the model card; defaulted to 8192. Knowledge cutoff December 2023 per model card."
     },
     {
       "provider": "Mistral",
@@ -1381,6 +1386,7 @@
       "max_output_tokens": 8000,
       "input_per_mtok_usd": "1.00",
       "output_per_mtok_usd": "1.00",
+      "per_request_usd": "0.005",
       "modalities": {
         "input": ["text"],
         "output": ["text"]
@@ -1398,7 +1404,7 @@
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",
       "source_url": "https://docs.perplexity.ai/getting-started/pricing",
-      "notes": "Perplexity native rates: $1.00 input / $1.00 output per MTok. Web search is built into the API as a first-class capability rather than a user-defined tool, so total cost per query = token costs + a per-request fee billed by search context size: $5 / $8 / $12 per 1,000 requests at low / medium / high context (not captured structurally because the schema models per-token pricing only). Perplexity does not publish a separate per-search fee for this SKU (per-search metering applies to `sonar-deep-research`). 128,000-token context window; max_output_tokens 8,000 per Perplexity's documented Sonar limits. Sonar (released January 2025) is built on a fine-tuned Llama 3.3 70B base optimized for web-grounded question answering with inline citations. Knowledge cutoff is intentionally omitted: Sonar fetches the live web at query time, so a static cutoff date does not meaningfully describe its answer space. Not a reasoning SKU (no chain-of-thought tokens), hence reasoning_tokens_billed is false. supports_tool_use is set conservatively to false because web search — the model's primary capability — is exposed as a built-in feature of the Sonar endpoint, not a user-defined tool; Perplexity recommends its separate Agent API for production tool-using agents. Structured outputs supported via response_format. Perplexity API is native-only (no Bedrock / Vertex / Azure / Together / Fireworks / Groq first-party deployment). Cache and batch APIs are not published."
+      "notes": "Perplexity native rates: $1.00 input / $1.00 output per MTok. Web search is built into the API as a first-class capability rather than a user-defined tool, so total cost per query = token costs + a per-request fee. per_request_usd captures the low-context tier ($5 / 1,000 requests = $0.005); medium and high search-context tiers add $8 / $12 per 1,000 requests respectively (not captured structurally — single-value field). Perplexity does not publish a separate per-search fee for this SKU (per-search metering applies to `sonar-deep-research`), so per_search_usd is omitted. 128,000-token context window; max_output_tokens 8,000 per Perplexity's documented Sonar limits. Sonar (released January 2025) is built on a fine-tuned Llama 3.3 70B base optimized for web-grounded question answering with inline citations. Knowledge cutoff is intentionally omitted: Sonar fetches the live web at query time, so a static cutoff date does not meaningfully describe its answer space. Not a reasoning SKU (no chain-of-thought tokens), hence reasoning_tokens_billed is false. supports_tool_use is set conservatively to false because web search — the model's primary capability — is exposed as a built-in feature of the Sonar endpoint, not a user-defined tool; Perplexity recommends its separate Agent API for production tool-using agents. Structured outputs supported via response_format. Perplexity API is native-only (no Bedrock / Vertex / Azure / Together / Fireworks / Groq first-party deployment). Cache and batch APIs are not published."
     },
     {
       "provider": "Perplexity",
@@ -1410,6 +1416,7 @@
       "max_output_tokens": 8000,
       "input_per_mtok_usd": "3.00",
       "output_per_mtok_usd": "15.00",
+      "per_request_usd": "0.006",
       "modalities": {
         "input": ["text"],
         "output": ["text"]
@@ -1427,7 +1434,7 @@
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",
       "source_url": "https://docs.perplexity.ai/getting-started/pricing",
-      "notes": "Perplexity native rates: $3.00 input / $15.00 output per MTok. Web search is built into the API, not exposed as a user-defined tool; total cost per query = token costs + a per-request fee billed by search context size: $6 / $10 / $14 per 1,000 requests at low / medium / high context (not captured structurally because the schema models per-token pricing only). 200,000-token context window (largest of the Sonar family); max_output_tokens 8,000 per Perplexity's documented Sonar limits. Positioned as Perplexity's advanced search SKU for complex multi-source queries and follow-ups. Knowledge cutoff intentionally omitted: Sonar Pro fetches the live web at query time. Not a reasoning SKU, hence reasoning_tokens_billed is false. supports_tool_use set conservatively to false because Perplexity exposes web search as the built-in capability and recommends the separate Agent API for production tool-using agents. Structured outputs supported via response_format. Perplexity API is native-only (no Bedrock / Vertex / Azure / Together / Fireworks / Groq first-party deployment). Cache and batch APIs are not published."
+      "notes": "Perplexity native rates: $3.00 input / $15.00 output per MTok. Web search is built into the API, not exposed as a user-defined tool; total cost per query = token costs + a per-request fee. per_request_usd captures the low-context tier ($6 / 1,000 requests = $0.006); medium and high search-context tiers add $10 / $14 per 1,000 requests respectively (not captured structurally — single-value field). 200,000-token context window (largest of the Sonar family); max_output_tokens 8,000 per Perplexity's documented Sonar limits. Positioned as Perplexity's advanced search SKU for complex multi-source queries and follow-ups. Knowledge cutoff intentionally omitted: Sonar Pro fetches the live web at query time. Not a reasoning SKU, hence reasoning_tokens_billed is false. supports_tool_use set conservatively to false because Perplexity exposes web search as the built-in capability and recommends the separate Agent API for production tool-using agents. Structured outputs supported via response_format. Perplexity API is native-only (no Bedrock / Vertex / Azure / Together / Fireworks / Groq first-party deployment). Cache and batch APIs are not published."
     },
     {
       "provider": "Perplexity",
@@ -1439,6 +1446,7 @@
       "max_output_tokens": 8000,
       "input_per_mtok_usd": "2.00",
       "output_per_mtok_usd": "8.00",
+      "per_request_usd": "0.006",
       "modalities": {
         "input": ["text"],
         "output": ["text"]
@@ -1456,7 +1464,7 @@
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",
       "source_url": "https://docs.perplexity.ai/getting-started/pricing",
-      "notes": "Perplexity native rates: $2.00 input / $8.00 output per MTok. Web search is built into the API; total cost per query = token costs + a per-request fee billed by search context size: $6 / $10 / $14 per 1,000 requests at low / medium / high context (not captured structurally because the schema models per-token pricing only). 128,000-token context window; max_output_tokens 8,000 per Perplexity's documented Sonar limits. Reasoning SKU built on DeepSeek R1 with Chain-of-Thought; responses include a leading `<think>` reasoning block followed by the answer, and those reasoning tokens are billed at the output rate, hence reasoning_tokens_billed: true. Knowledge cutoff intentionally omitted: Sonar Reasoning Pro fetches the live web at query time. supports_tool_use set conservatively to false because Perplexity exposes web search as the built-in capability and recommends the separate Agent API for production tool-using agents. Structured outputs supported via response_format. Perplexity API is native-only (no Bedrock / Vertex / Azure / Together / Fireworks / Groq first-party deployment). Cache and batch APIs are not published. Note: the older `sonar-reasoning` SKU is no longer listed in Perplexity's current model lineup at last_verified."
+      "notes": "Perplexity native rates: $2.00 input / $8.00 output per MTok. Web search is built into the API; total cost per query = token costs + a per-request fee. per_request_usd captures the low-context tier ($6 / 1,000 requests = $0.006); medium and high search-context tiers add $10 / $14 per 1,000 requests respectively (not captured structurally — single-value field). 128,000-token context window; max_output_tokens 8,000 per Perplexity's documented Sonar limits. Reasoning SKU built on DeepSeek R1 with Chain-of-Thought; responses include a leading `<think>` reasoning block followed by the answer, and those reasoning tokens are billed at the output rate, hence reasoning_tokens_billed: true. Knowledge cutoff intentionally omitted: Sonar Reasoning Pro fetches the live web at query time. supports_tool_use set conservatively to false because Perplexity exposes web search as the built-in capability and recommends the separate Agent API for production tool-using agents. Structured outputs supported via response_format. Perplexity API is native-only (no Bedrock / Vertex / Azure / Together / Fireworks / Groq first-party deployment). Cache and batch APIs are not published. Note: the older `sonar-reasoning` SKU is no longer listed in Perplexity's current model lineup at last_verified."
     }
   ]
 }

@@ -90,7 +90,8 @@
               "fireworks",
               "groq",
               "replicate",
-              "dashscope"
+              "dashscope",
+              "openrouter"
             ]
           }
         },
