@@ -54,11 +54,40 @@ This dataset is licensed [CC-BY-4.0](./LICENSE) — reuse it freely with attribu
 
 ## Citation
 
+Cite the dataset when you reuse it. Pin to a tagged release if you depend on a stable shape; otherwise cite the commit SHA.
+
+**Prose:**
+
 ```
-Hail Costs Dataset v0.X.Y, https://hail.so/costs, accessed YYYY-MM-DD
+Hail Costs Dataset, v0.2.0, https://hail.so/costs, accessed 2026-05-19.
 ```
 
-Release tags follow `costs-v0.X.Y`. Pin a version if you depend on a stable shape.
+**BibTeX:**
+
+```bibtex
+@misc{hail-costs,
+  title  = {Hail Costs Dataset},
+  author = {Hail HQ},
+  year   = {2026},
+  url    = {https://hail.so/costs},
+  note   = {Version v0.2.0, accessed 2026-05-19},
+  license = {CC-BY-4.0}
+}
+```
+
+**Markdown:**
+
+```markdown
+Pricing data: [Hail Costs Dataset v0.2.0](https://hail.so/costs) (CC-BY-4.0).
+```
+
+**Per-row attribution** when you quote a specific price: include the row's `model_id` and `last_verified` date so readers can replay your lookup against the same dataset state.
+
+```
+Anthropic Claude Opus 4.7 input pricing per Hail Costs (claude-opus-4-7, last_verified 2026-05-17).
+```
+
+Release tags follow `costs-v0.X.Y`. The latest release is what `git tag --list 'costs-v*' --sort=-v:refname | head -1` returns; pin to the SHA on `main` if you need a state newer than the latest tag.
 
 ## How to contribute a cost update
 
