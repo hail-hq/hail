@@ -1,8 +1,18 @@
 name: hail
 
-# Base stack. Assumes DATABASE_URL points at a reachable Postgres (managed or
-# otherwise). For a bundled local Postgres, layer docker-compose.local.yml on
-# top — see docs/operations.md ("Switching the database").
+# Base stack. Local-dev focused: services build from source, ports publish to
+# the host on 0.0.0.0 so they're reachable from a browser or another machine
+# on the LAN.
+#
+# Two ways to layer on top:
+#   • docker-compose.local.yml — adds a bundled Postgres container (dev).
+#   • docker-compose.prod.yml  — adds Caddy as the TLS edge, pulls images
+#                                from GHCR instead of building from source,
+#                                and rebinds host ports to 127.0.0.1.
+#
+# Pick one or the other (or neither, if you bring your own managed Postgres
+# and don't need ingress). See docs/operations.md → "Switching the database"
+# and docs/setup/vm-deploy.md.
 
 services:
   minio:

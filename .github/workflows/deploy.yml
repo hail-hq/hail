@@ -1,0 +1,113 @@
+name: Deploy
+
+# Builds the three service images on push to main, pushes them to GHCR, and
+# SSHes the production VM to pull + roll them.
+#
+# Required repo secrets:
+#   DEPLOY_SSH_HOST          — VM hostname or IP
+#   DEPLOY_SSH_USER          — SSH user (must be in the docker group)
+#   DEPLOY_SSH_PRIVATE_KEY   — private key authorised on the VM
+#   DEPLOY_SSH_PORT          — (optional) SSH port; defaults to 22
+#
+# Optional repo variables (Settings → Actions → Variables):
+#   DEPLOY_PATH              — repo checkout on the VM; defaults to /opt/hail
+#
+# Image tagging: every build pushes `latest` + `sha-<commit>`. The VM pulls
+# `:latest` (hard-coded in docker-compose.yml); the SHA tag is for forensics
+# and manual rollback (`docker pull ghcr.io/hail-hq/hail-api:sha-<commit>`
+# then re-tag as :latest and restart).
+#
+# Security notes:
+#   - All `github.*` interpolations land in env: blocks; the remote script
+#     reads them as "$VARS" only. No untrusted string is interpolated into
+#     a run: command.
+#
+# See docs/setup/vm-deploy.md for the VM-side bootstrap.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-prod
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build:
+    name: Build & push ${{ matrix.service }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: true
+      matrix:
+        service: [api, voicebot, mcp]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          # Canonical repo is hail-hq/hail; the compose file hard-codes the
+          # same namespace. Forks need to override both.
+          images: ghcr.io/hail-hq/hail-${{ matrix.service }}
+          tags: |
+            type=sha,format=long
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ${{ matrix.service }}/Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=${{ matrix.service }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.service }}
+
+  deploy:
+    name: Deploy to VM
+    needs: build
+    runs-on: ubuntu-latest
+    environment: production
+    env:
+      DEPLOY_GITHUB_ACTOR: ${{ github.actor }}
+      DEPLOY_GITHUB_SHA: ${{ github.sha }}
+      DEPLOY_PATH: ${{ vars.DEPLOY_PATH || '/opt/hail' }}
+    steps:
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1.2.0
+        env:
+          DEPLOY_GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          host: ${{ secrets.DEPLOY_SSH_HOST }}
+          username: ${{ secrets.DEPLOY_SSH_USER }}
+          key: ${{ secrets.DEPLOY_SSH_PRIVATE_KEY }}
+          port: ${{ secrets.DEPLOY_SSH_PORT }}
+          envs: DEPLOY_GITHUB_TOKEN,DEPLOY_GITHUB_ACTOR,DEPLOY_GITHUB_SHA,DEPLOY_PATH
+          # The VM keeps $DEPLOY_PATH as a checkout of this repo so the
+          # compose file + Caddyfile stay in sync with the deployed commit.
+          # We fetch, check out the exact SHA, log in to GHCR, run alembic,
+          # then swap the running containers for fresh `:latest` images.
+          script: |
+            set -euo pipefail
+            cd "$DEPLOY_PATH"
+            git fetch origin
+            git checkout --detach "$DEPLOY_GITHUB_SHA"
+            echo "$DEPLOY_GITHUB_TOKEN" | docker login ghcr.io -u "$DEPLOY_GITHUB_ACTOR" --password-stdin
+            COMPOSE="docker compose -f docker-compose.yml -f docker-compose.prod.yml"
+            $COMPOSE pull
+            $COMPOSE run --rm api alembic upgrade head
+            $COMPOSE up -d --remove-orphans
+            $COMPOSE ps

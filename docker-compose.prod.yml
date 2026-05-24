@@ -1,0 +1,74 @@
+name: hail
+
+# Production overlay for the single-VM self-host. Layered on top of the base
+# file (and **not** on top of docker-compose.local.yml — prod uses a managed
+# Postgres, not the bundled container):
+#
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+#
+# Differences vs. the base:
+#   - api/voicebot/mcp pull pre-built images from ghcr.io/hail-hq/hail-*
+#     (built by .github/workflows/deploy.yml). The base's `build:` is reset
+#     so `docker compose up` doesn't try to build on the VM.
+#   - api/mcp/minio host ports rebind to 127.0.0.1. Docker's iptables rules
+#     bypass UFW; without the loopback bind, `8080:8080` would be reachable
+#     publicly even with the firewall set to deny.
+#   - Adds Caddy as the TLS edge (auto Let's Encrypt) — the only thing on
+#     the public interface.
+#   - `restart: unless-stopped` so the daemon resurrects services after
+#     reboots or crashes.
+
+services:
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp" # HTTP/3
+    # Only the two vars Caddy actually reads — not the full .env, so no
+    # provider secret leaks into Caddy's process env. The `:-` default-to-
+    # empty lets `compose config` parse cleanly when HAIL_DOMAIN isn't set;
+    # if Caddy actually starts with HAIL_DOMAIN empty, it fails its config
+    # load with a clear error in its logs.
+    environment:
+      HAIL_DOMAIN: ${HAIL_DOMAIN:-}
+      CADDY_ACME_EMAIL: ${CADDY_ACME_EMAIL:-hi@hail.so}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      api:
+        condition: service_healthy
+      mcp:
+        condition: service_healthy
+
+  api:
+    image: ghcr.io/hail-hq/hail-api:latest
+    build: !reset null
+    restart: unless-stopped
+    ports: !override
+      - "127.0.0.1:8080:8080"
+
+  voicebot:
+    image: ghcr.io/hail-hq/hail-voicebot:latest
+    build: !reset null
+    restart: unless-stopped
+
+  mcp:
+    image: ghcr.io/hail-hq/hail-mcp:latest
+    build: !reset null
+    restart: unless-stopped
+    ports: !override
+      - "127.0.0.1:8081:8081"
+
+  minio:
+    restart: unless-stopped
+    ports: !override
+      - "127.0.0.1:9000:9000"
+      - "127.0.0.1:9001:9001"
+
+volumes:
+  caddy-data:
+  caddy-config:

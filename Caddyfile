@@ -1,0 +1,39 @@
+# Caddy edge config for the Hail self-host VM.
+#
+# Two public hostnames:
+#   api.{$HAIL_DOMAIN}  → api:8080   (FastAPI / OpenAPI)
+#   mcp.{$HAIL_DOMAIN}  → mcp:8081   (MCP SSE)
+#
+# Auto-HTTPS: Caddy fetches Let's Encrypt certs on first start and renews
+# them in the background. The TLS-ALPN-01 challenge is used (no DNS plumbing),
+# so :443 must be open on the VM firewall in addition to :80.
+#
+# Voicebot intentionally has no ingress — it's a worker that dials out to
+# LiveKit Cloud.
+
+{
+	# Default set in docker-compose.prod.yml; override CADDY_ACME_EMAIL in
+	# .env if you want renewal notices to reach your own inbox.
+	email {$CADDY_ACME_EMAIL}
+}
+
+api.{$HAIL_DOMAIN} {
+	encode zstd gzip
+	reverse_proxy api:8080 {
+		health_uri /healthz
+		health_interval 10s
+		health_timeout 3s
+	}
+}
+
+mcp.{$HAIL_DOMAIN} {
+	encode zstd gzip
+	# MCP uses Server-Sent Events — disable response buffering so events
+	# stream end-to-end without Caddy holding them.
+	reverse_proxy mcp:8081 {
+		flush_interval -1
+		health_uri /healthz
+		health_interval 10s
+		health_timeout 3s
+	}
+}

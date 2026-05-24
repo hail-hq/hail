@@ -4,18 +4,19 @@ Single source of truth for how to develop, deploy, migrate, and release Hail. If
 
 ## Quick reference
 
-| task                           | command                                                                              |
-| ------------------------------ | ------------------------------------------------------------------------------------ |
-| Bring up stack (bundled DB)    | `docker compose -f docker-compose.yml -f docker-compose.local.yml up -d`             |
-| Bring up stack (managed DB)    | `docker compose up -d`                                                               |
-| Tail one service               | `docker compose logs -f <api\|voicebot\|mcp\|postgres>`                              |
-| Run all tests                  | `cd <core\|api\|voicebot\|mcp\|sdk> && uv run pytest` (per suite, **from each dir**) |
-| Lint                           | `uvx ruff check .` then `uvx black --check .` (repo root)                            |
-| Apply DB migrations            | `docker compose run --rm api alembic upgrade head`                                   |
-| Regenerate OpenAPI + Go client | see _Development → Regenerating OpenAPI_ below                                       |
-| Publish SDK                    | tag `sdk-v<X.Y.Z>` and push (fires `release-sdk.yml`)                                |
-| Publish CLI                    | tag `cli-v<X.Y.Z>` and push (fires `release-cli.yml`)                                |
-| Cut umbrella release           | tag `v<X.Y.Z>` and push (no workflow; just a marker)                                 |
+| task                           | command                                                                                                                         |
+| ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------- |
+| Bring up stack (bundled DB)    | `docker compose -f docker-compose.yml -f docker-compose.local.yml up -d`                                                        |
+| Bring up stack (managed DB)    | `docker compose up -d`                                                                                                          |
+| Bring up stack (prod VM)       | `docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d` — pulls images from GHCR; see `docs/setup/vm-deploy.md` |
+| Tail one service               | `docker compose logs -f <api\|voicebot\|mcp\|postgres>`                                                                         |
+| Run all tests                  | `cd <core\|api\|voicebot\|mcp\|sdk> && uv run pytest` (per suite, **from each dir**)                                            |
+| Lint                           | `uvx ruff check .` then `uvx black --check .` (repo root)                                                                       |
+| Apply DB migrations            | `docker compose run --rm api alembic upgrade head`                                                                              |
+| Regenerate OpenAPI + Go client | see _Development → Regenerating OpenAPI_ below                                                                                  |
+| Publish SDK                    | tag `sdk-v<X.Y.Z>` and push (fires `release-sdk.yml`)                                                                           |
+| Publish CLI                    | tag `cli-v<X.Y.Z>` and push (fires `release-cli.yml`)                                                                           |
+| Cut umbrella release           | tag `v<X.Y.Z>` and push (no workflow; just a marker)                                                                            |
 
 ## Local development
 
@@ -103,7 +104,7 @@ New adapters live under `core/hailhq/core/providers/<channel>/<name>.py` and imp
 - **ElevenLabs** (TTS): API key + a voice ID from your library.
 - **At least one LLM provider**: OpenAI / Gemini / Anthropic API key. The voicebot's mode-A FallbackAdapter chains all three; mode-B uses a caller-provided OpenAI-compatible endpoint per call.
 
-Detailed setup walkthroughs: `docs/setup/twilio.md`, `docs/setup/livekit-cloud.md`, `docs/setup/mcp.md`.
+Detailed setup walkthroughs: `docs/setup/twilio.md`, `docs/setup/livekit-cloud.md`, `docs/setup/mcp.md`. For running the whole stack on a single Ubuntu VM with HTTPS + auto-deploy from `main`, see `docs/setup/vm-deploy.md`.
 
 ### Authentication
 
