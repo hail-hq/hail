@@ -36,6 +36,15 @@ RUN groupadd --system --gid 1000 hail && \
 # breaks them — see https://docs.astral.sh/uv/guides/integration/docker/.
 COPY --from=builder --chown=hail:hail /app/.venv /app/.venv
 
+# Alembic config + migrations are read from the filesystem (not the venv) at
+# `alembic upgrade head` time. Without these, `docker compose run --rm api
+# alembic upgrade head` fails with "No 'script_location' key found in
+# configuration." The runtime image stays small — we only copy what alembic
+# actually reads, not the rest of api/.
+COPY --chown=hail:hail api/alembic.ini /app/api/alembic.ini
+COPY --chown=hail:hail api/migrations  /app/api/migrations
+WORKDIR /app/api
+
 USER hail
 
 EXPOSE 8080

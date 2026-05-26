@@ -108,6 +108,24 @@ jobs:
             echo "$DEPLOY_GITHUB_TOKEN" | docker login ghcr.io -u "$DEPLOY_GITHUB_ACTOR" --password-stdin
             COMPOSE="docker compose -f docker-compose.yml -f docker-compose.prod.yml"
             $COMPOSE pull
-            $COMPOSE run --rm api alembic upgrade head
+
+            # Migration safety. See docs/operations.md → "Migration discipline".
+            #   - alembic current + --sql print the diff in the deploy log
+            #     before anything mutates, so a bad migration is visible to
+            #     post-incident review.
+            #   - PGOPTIONS sets per-connection timeouts on the migration's
+            #     libpq connection: a single statement aborts after 120s, and
+            #     a lock that cannot be acquired within 5s also aborts (so a
+            #     migration cannot queue behind a long-running app query and
+            #     block writes behind itself in the lock queue).
+            echo "=== current schema revision ==="
+            $COMPOSE run --rm api alembic current
+            echo "=== migrations to apply (dry-print) ==="
+            $COMPOSE run --rm api alembic upgrade head --sql | head -200 || true
+            echo "=== applying ==="
+            $COMPOSE run --rm \
+              -e PGOPTIONS='-c statement_timeout=120s -c lock_timeout=5s' \
+              api alembic upgrade head
+
             $COMPOSE up -d --remove-orphans
             $COMPOSE ps

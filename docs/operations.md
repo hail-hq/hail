@@ -173,6 +173,25 @@ cd api && uv run alembic downgrade -1
 
 Migrations are hand-written raw SQL for v1 (no SQLAlchemy `target_metadata` wired into `env.py`). Switch to `--autogenerate` when models become the source of truth.
 
+### Migration discipline
+
+**The deploy workflow runs `alembic upgrade head` against prod on every push to `main`** — there is no human review gate between merging a migration and it executing. Three rules keep this safe; one is enforced by the workflow, two depend on you:
+
+1. **The workflow caps statement runtime at 120s and lock-acquisition at 5s** via `PGOPTIONS='-c statement_timeout=120s -c lock_timeout=5s'`. The deploy log also prints `alembic current` and `alembic upgrade head --sql` before applying, so a problem migration is visible in CI output before it touches data.
+
+   If a legitimate migration genuinely needs longer (a backfill, `CREATE INDEX CONCURRENTLY`), split it into a separate manually-applied step rather than raising the cap globally — a higher cap on every migration means a runaway one chews through more wall-clock before aborting.
+
+2. **All destructive shape changes split into expand → backfill → contract across separate releases.** A column drop, a type narrowing, a `NOT NULL` on existing data — none of these can land in the same release as the code that depends on the new shape, because the old containers are still running when the migration starts. Concretely:
+
+   | bad: one release                                | good: three releases                                                                                                            |
+   | ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+   | drop `phone_numbers.legacy_field` + remove code | release 1: stop writing `legacy_field` (still readable) → release 2: backfill / verify → release 3: `ALTER TABLE … DROP COLUMN` |
+   | rename `calls.requested_at` → `calls.queued_at` | release 1: add new column, dual-write → release 2: backfill, switch reads → release 3: drop old column                          |
+
+3. **Never edit a migration that has been applied to prod.** Author a new revision instead. The workflow's `alembic current` output in the previous deploy log tells you exactly what's on prod; treat any revision at or below that as immutable.
+
+The expand/contract rule is the one that the workflow cannot enforce. If you break it, auto-deploy ships the foot-gun and the rollback is "revert the code, write a new migration to restore the column, re-deploy" — which is hours of incident, not minutes.
+
 ### Cross-migration table ownership
 
 Two services migrate the same Postgres database independently:
