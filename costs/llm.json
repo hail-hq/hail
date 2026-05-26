@@ -141,12 +141,12 @@
       "reasoning_tokens_billed": true,
       "deployment_options": ["native", "vertex"],
       "confidence": "high",
-      "last_verified": "2026-05-19",
+      "last_verified": "2026-05-26",
       "last_changed_at": "2026-05-05",
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",
       "source_url": "https://ai.google.dev/pricing",
-      "notes": "Input pricing shown is for prompts <=200k tokens; prompts >200k tokens are billed per pricing_tiers; cached input also tiers at 200k (the >200k rate is captured in pricing_tiers[0].cache_read_per_mtok_usd). Context window and max_output_tokens confirmed via ai.google.dev/gemini-api/docs/models/gemini-2.5-pro. Thinking is always on and cannot be disabled; thinking tokens are billed at the output rate. Knowledge cutoff January 2025. Batch Mode discount is a flat 50% off input/output. Explicit context caching storage is captured in cache_storage_per_mtok_per_hour_usd. Free tier (AI Studio) is published as per-minute RPM/TPM only, not per-day; free_tier omitted. PDF input via the Files API; image, audio, and video native."
+      "notes": "Input pricing shown is for prompts <=200k tokens; prompts >200k tokens are billed per pricing_tiers; cached input also tiers at 200k (the >200k rate is captured in pricing_tiers[0].cache_read_per_mtok_usd). Context window and max_output_tokens confirmed via ai.google.dev/gemini-api/docs/models/gemini-2.5-pro. Thinking is always on and cannot be disabled; thinking tokens are billed at the output rate. Knowledge cutoff January 2025. Batch Mode discount is a flat 50% off input/output. Audio input is billed at the standard input rate of $1.25/MTok (no separate audio premium, unlike 2.5 Flash/Flash-Lite/2.0 Flash); audio_input_per_mtok_usd omitted. Explicit context caching storage is captured in cache_storage_per_mtok_per_hour_usd. Free tier (AI Studio) is published as per-minute RPM/TPM only, not per-day; free_tier omitted. PDF input via the Files API; image, audio, and video native."
     },
     {
       "provider": "DeepSeek",
@@ -177,6 +177,36 @@
       "verified_by": "r13i",
       "source_url": "https://api-docs.deepseek.com/quick_start/pricing",
       "notes": "MoE architecture: 284B total parameters, 13B activated. Replaces deepseek-chat (V3-era alias). Cached input price ($0.0028/MTok) is 1/50th of base input, effective after DeepSeek reduced cache hit rates on 2026-04-26. Supports both non-thinking and thinking (default) modes; thinking output is billed at the same output rate, so reasoning_tokens_billed: true. deepseek-chat and deepseek-reasoner legacy aliases are scheduled for discontinuation on 2026-07-24; until then they route to V4 Flash non-thinking and thinking modes respectively."
+    },
+    {
+      "provider": "DeepSeek",
+      "provider_url": "https://www.deepseek.com",
+      "model_id": "deepseek-v4-pro",
+      "display_name": "DeepSeek V4 Pro",
+      "model_family": "DeepSeek V4",
+      "context_window": 1048576,
+      "max_output_tokens": 384000,
+      "input_per_mtok_usd": "1.74",
+      "output_per_mtok_usd": "3.48",
+      "cache_read_per_mtok_usd": "0.0145",
+      "modalities": {
+        "input": ["text"],
+        "output": ["text"]
+      },
+      "supports_tool_use": true,
+      "structured_output": true,
+      "supports_vision": false,
+      "supports_audio_in": false,
+      "supports_audio_out": false,
+      "supports_pdf": false,
+      "reasoning_tokens_billed": true,
+      "deployment_options": ["native"],
+      "last_verified": "2026-05-26",
+      "last_changed_at": "2026-05-26",
+      "verification_method": "manual-confirmed",
+      "verified_by": "r13i",
+      "source_url": "https://api-docs.deepseek.com/quick_start/pricing",
+      "notes": "Pro-tier sibling to deepseek-v4-flash, positioned for higher-quality responses at lower concurrency (500 vs Flash's 2500). Structured prices ($1.74 / $3.48 per MTok; cache hit $0.0145) are the list rates published by DeepSeek; a 75% launch promotion is in effect until 2026-05-31 15:59 UTC, during which the effective billed rates are $0.435 input / $0.87 output / $0.003625 cache hit. The DeepSeek pricing page also mentions post-expiration rates of 1/4 the original — re-verify after the promo lapses to confirm which interpretation lands. Cache miss is billed at the base input rate. Supports both non-thinking and thinking modes with tool calls and JSON output; thinking output is billed at the output rate, so reasoning_tokens_billed: true. DeepSeek did not publish an explicit launch date; last_changed_at set to verification date."
     },
     {
       "provider": "DeepSeek",
@@ -725,6 +755,7 @@
       "max_output_tokens": 65536,
       "input_per_mtok_usd": "0.30",
       "output_per_mtok_usd": "2.50",
+      "audio_input_per_mtok_usd": "1.00",
       "cache_read_per_mtok_usd": "0.03",
       "cache_storage_per_mtok_per_hour_usd": "1.00",
       "batch_input_per_mtok_usd": "0.15",
@@ -742,12 +773,12 @@
       "reasoning_tokens_billed": true,
       "deployment_options": ["native", "vertex"],
       "confidence": "high",
-      "last_verified": "2026-05-19",
+      "last_verified": "2026-05-26",
       "last_changed_at": "2026-05-18",
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",
       "source_url": "https://ai.google.dev/gemini-api/docs/pricing",
-      "notes": "Hybrid reasoning model with dynamic thinking on by default; thinking can be disabled via thinkingBudget=0. When thinking is on, response pricing is the sum of output and thinking tokens (both billed at the output rate). Audio input is priced separately at $1.00/MTok (text/image/video at $0.30/MTok captured in input_per_mtok_usd); cached audio input is $0.10/MTok vs $0.03/MTok for text/image/video. Batch Mode at flat 50% off; audio batch input is $0.50/MTok. No long-context tier. Context window and max_output_tokens confirmed via ai.google.dev/gemini-api/docs/models/gemini-2.5-flash. Knowledge cutoff January 2025. Explicit context caching storage is captured in cache_storage_per_mtok_per_hour_usd. Free tier (AI Studio) is published as per-minute RPM/TPM only, not per-day; free_tier omitted. Cross-verified prompt/completion price against openrouter.ai/google/gemini-2.5-flash."
+      "notes": "Hybrid reasoning model with dynamic thinking on by default; thinking can be disabled via thinkingBudget=0. When thinking is on, response pricing is the sum of output and thinking tokens (both billed at the output rate). Audio input is priced separately (captured in audio_input_per_mtok_usd); cached audio input is $0.10/MTok vs $0.03/MTok for text/image/video. Batch Mode at flat 50% off; audio batch input is $0.50/MTok. No long-context tier. Context window and max_output_tokens confirmed via ai.google.dev/gemini-api/docs/models/gemini-2.5-flash. Knowledge cutoff January 2025. Explicit context caching storage is captured in cache_storage_per_mtok_per_hour_usd. Free tier (AI Studio) is published as per-minute RPM/TPM only, not per-day; free_tier omitted. Cross-verified prompt/completion price against openrouter.ai/google/gemini-2.5-flash."
     },
     {
       "provider": "Google",
@@ -760,6 +791,7 @@
       "max_output_tokens": 65536,
       "input_per_mtok_usd": "0.10",
       "output_per_mtok_usd": "0.40",
+      "audio_input_per_mtok_usd": "0.30",
       "cache_read_per_mtok_usd": "0.01",
       "cache_storage_per_mtok_per_hour_usd": "1.00",
       "batch_input_per_mtok_usd": "0.05",
@@ -777,12 +809,12 @@
       "reasoning_tokens_billed": true,
       "deployment_options": ["native", "vertex"],
       "confidence": "high",
-      "last_verified": "2026-05-19",
+      "last_verified": "2026-05-26",
       "last_changed_at": "2026-05-18",
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",
       "source_url": "https://ai.google.dev/gemini-api/docs/pricing",
-      "notes": "Hybrid reasoning model; thinking is OFF by default (unlike 2.5 Flash/Pro) but can be enabled by setting thinkingBudget. When thinking is enabled, response pricing is the sum of output and thinking tokens at the output rate, so reasoning_tokens_billed is true. Audio input is priced separately at $0.30/MTok (text/image/video at $0.10/MTok captured in input_per_mtok_usd); cached audio input is $0.03/MTok vs $0.01/MTok for text/image/video. Batch Mode at flat 50% off; audio batch input is $0.15/MTok. No long-context tier. Context window and max_output_tokens confirmed via ai.google.dev/gemini-api/docs/models/gemini-2.5-flash-lite. Knowledge cutoff January 2025. Explicit context caching storage is captured in cache_storage_per_mtok_per_hour_usd. Free tier (AI Studio) is published as per-minute RPM/TPM only, not per-day; free_tier omitted. Cross-verified prompt/completion price against openrouter.ai/google/gemini-2.5-flash-lite."
+      "notes": "Hybrid reasoning model; thinking is OFF by default (unlike 2.5 Flash/Pro) but can be enabled by setting thinkingBudget. When thinking is enabled, response pricing is the sum of output and thinking tokens at the output rate, so reasoning_tokens_billed is true. Audio input is priced separately (captured in audio_input_per_mtok_usd); cached audio input is $0.03/MTok vs $0.01/MTok for text/image/video. Batch Mode at flat 50% off; audio batch input is $0.15/MTok. No long-context tier. Context window and max_output_tokens confirmed via ai.google.dev/gemini-api/docs/models/gemini-2.5-flash-lite. Knowledge cutoff January 2025. Explicit context caching storage is captured in cache_storage_per_mtok_per_hour_usd. Free tier (AI Studio) is published as per-minute RPM/TPM only, not per-day; free_tier omitted. Cross-verified prompt/completion price against openrouter.ai/google/gemini-2.5-flash-lite."
     },
     {
       "provider": "Google",
@@ -795,6 +827,7 @@
       "max_output_tokens": 8192,
       "input_per_mtok_usd": "0.10",
       "output_per_mtok_usd": "0.40",
+      "audio_input_per_mtok_usd": "0.70",
       "cache_read_per_mtok_usd": "0.025",
       "cache_storage_per_mtok_per_hour_usd": "1.00",
       "batch_input_per_mtok_usd": "0.05",
@@ -814,12 +847,12 @@
       "deprecated_at": "2026-06-01",
       "replaced_by_model_id": "gemini-2.5-flash",
       "confidence": "medium",
-      "last_verified": "2026-05-19",
+      "last_verified": "2026-05-26",
       "last_changed_at": "2026-05-18",
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",
       "source_url": "https://ai.google.dev/gemini-api/docs/pricing",
-      "notes": "Deprecated; scheduled shutdown 2026-06-01. Google's documented migration target is a Gemini 3 Flash preview model not yet in this dataset; replaced_by_model_id points at gemini-2.5-flash as the closest in-file successor. Standard production 2.0 Flash does not support thinking (thinking exists only on Gemini 2.5+ and 3 series per ai.google.dev/gemini-api/docs/thinking); reasoning_tokens_billed=false. Audio input is priced separately at $0.70/MTok (text/image/video at $0.10/MTok captured in input_per_mtok_usd); cached audio input is $0.175/MTok vs $0.025/MTok for text/image/video. Batch Mode at flat 50% off. No long-context tier. supports_pdf=false since the 2.0 Flash model card lists supported inputs as audio/images/video/text (PDF not enumerated). Confidence medium because Vertex AI's published pricing for the same model name differs ($0.15 input / $0.60 output) from AI Studio's $0.10/$0.40; AI Studio primary value retained per spec, and OpenRouter (openrouter.ai/google/gemini-2.0-flash-001) cross-confirms $0.10/$0.40. Explicit context caching storage is captured in cache_storage_per_mtok_per_hour_usd. Free tier (AI Studio) is published as per-minute RPM/TPM only, not per-day; free_tier omitted."
+      "notes": "Deprecated; scheduled shutdown 2026-06-01. Google's documented migration target is a Gemini 3 Flash preview model not yet in this dataset; replaced_by_model_id points at gemini-2.5-flash as the closest in-file successor. Standard production 2.0 Flash does not support thinking (thinking exists only on Gemini 2.5+ and 3 series per ai.google.dev/gemini-api/docs/thinking); reasoning_tokens_billed=false. Audio input is priced separately (captured in audio_input_per_mtok_usd); cached audio input is $0.175/MTok vs $0.025/MTok for text/image/video. Batch Mode at flat 50% off. No long-context tier. supports_pdf=false since the 2.0 Flash model card lists supported inputs as audio/images/video/text (PDF not enumerated). Confidence medium because Vertex AI's published pricing for the same model name differs ($0.15 input / $0.60 output) from AI Studio's $0.10/$0.40; AI Studio primary value retained per spec, and OpenRouter (openrouter.ai/google/gemini-2.0-flash-001) cross-confirms $0.10/$0.40. Explicit context caching storage is captured in cache_storage_per_mtok_per_hour_usd. Free tier (AI Studio) is published as per-minute RPM/TPM only, not per-day; free_tier omitted."
     },
     {
       "provider": "Meta",
@@ -847,14 +880,15 @@
       "supports_audio_out": false,
       "supports_pdf": false,
       "reasoning_tokens_billed": false,
-      "deployment_options": ["together", "openrouter"],
+      "deployment_options": ["together"],
+      "aggregators": ["openrouter"],
       "confidence": "high",
-      "last_verified": "2026-05-19",
+      "last_verified": "2026-05-26",
       "last_changed_at": "2026-05-18",
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",
       "source_url": "https://huggingface.co/meta-llama/Llama-4-Maverick-17B-128E-Instruct",
-      "notes": "Multi-host pricing snapshot 2026-05-18: Together $0.27/$0.85 per MTok (meta-llama/Llama-4-Maverick-17B-128E-Instruct-FP8) is the row's structured price as the lowest direct-host rate in deployment_options. OpenRouter aggregator routes at $0.15/$0.60 (informational only; structured input/output stay at the lowest direct-host price per the PR4 convention). Groq does not list Maverick on its public pricing page; Fireworks does not offer Maverick on serverless (on-demand deployments only). Context window is Meta's published 1M (1048576 tokens); OpenRouter advertises 1.05M but the HuggingFace model card spec is 1M. max_output_tokens not published on the model card; defaulted to 8192. 17B activated / 400B total MoE with 128 experts. deployment_options[] omits hosts whose canonical slug or full pricing could not be confirmed in a single primary source on this date (Fireworks no-serverless, Groq absent)."
+      "notes": "Multi-host pricing snapshot 2026-05-18: Together $0.27/$0.85 per MTok (meta-llama/Llama-4-Maverick-17B-128E-Instruct-FP8) is the row's structured price as the lowest direct-host rate. OpenRouter aggregator routes at $0.15/$0.60 (informational only; structured input/output stay at the lowest direct-host price per the PR4 convention) and is structured as aggregators[\"openrouter\"]. Groq does not list Maverick on its public pricing page; Fireworks does not offer Maverick on serverless (on-demand deployments only). Context window is Meta's published 1M (1048576 tokens); OpenRouter advertises 1.05M but the HuggingFace model card spec is 1M. max_output_tokens not published on the model card; defaulted to 8192. 17B activated / 400B total MoE with 128 experts. deployment_options[] omits hosts whose canonical slug or full pricing could not be confirmed in a single primary source on this date (Fireworks no-serverless, Groq absent)."
     },
     {
       "provider": "Meta",
@@ -884,14 +918,15 @@
       "supports_audio_out": false,
       "supports_pdf": false,
       "reasoning_tokens_billed": false,
-      "deployment_options": ["together", "fireworks", "groq", "openrouter"],
+      "deployment_options": ["together", "fireworks", "groq"],
+      "aggregators": ["openrouter"],
       "confidence": "high",
-      "last_verified": "2026-05-19",
+      "last_verified": "2026-05-26",
       "last_changed_at": "2026-05-18",
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",
       "source_url": "https://huggingface.co/meta-llama/Llama-4-Scout-17B-16E-Instruct",
-      "notes": "Multi-host pricing snapshot 2026-05-18: Together $0.18/$0.59 per MTok (meta-llama/Llama-4-Scout-17B-16E-Instruct); Fireworks $0.15/$0.60 (accounts/fireworks/models/llama4-scout-instruct-basic); Groq $0.11/$0.34 (meta-llama/llama-4-scout-17b-16e-instruct) is the lowest direct-host rate and is the row's structured price. OpenRouter aggregator routes at $0.08/$0.30 (informational only; structured input/output stay at the lowest direct-host price per the PR4 convention). Context window is Meta's published 10M (10485760 tokens); most hosts cap below Meta's spec (e.g. Groq, Fireworks typically expose ~128K-1M at the API). max_output_tokens not published on the model card; defaulted to 8192. 17B activated / 109B total MoE with 16 experts."
+      "notes": "Multi-host pricing snapshot 2026-05-18: Together $0.18/$0.59 per MTok (meta-llama/Llama-4-Scout-17B-16E-Instruct); Fireworks $0.15/$0.60 (accounts/fireworks/models/llama4-scout-instruct-basic); Groq $0.11/$0.34 (meta-llama/llama-4-scout-17b-16e-instruct) is the lowest direct-host rate and is the row's structured price. OpenRouter aggregator routes at $0.08/$0.30 (informational only; structured input/output stay at the lowest direct-host price per the PR4 convention) and is structured as aggregators[\"openrouter\"]. Context window is Meta's published 10M (10485760 tokens); most hosts cap below Meta's spec (e.g. Groq, Fireworks typically expose ~128K-1M at the API). max_output_tokens not published on the model card; defaulted to 8192. 17B activated / 109B total MoE with 16 experts."
     },
     {
       "provider": "Meta",
@@ -921,14 +956,15 @@
       "supports_audio_out": false,
       "supports_pdf": false,
       "reasoning_tokens_billed": false,
-      "deployment_options": ["together", "groq", "openrouter"],
+      "deployment_options": ["together", "groq"],
+      "aggregators": ["openrouter"],
       "confidence": "high",
-      "last_verified": "2026-05-19",
+      "last_verified": "2026-05-26",
       "last_changed_at": "2026-05-18",
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",
       "source_url": "https://huggingface.co/meta-llama/Llama-3.3-70B-Instruct",
-      "notes": "Multi-host pricing snapshot 2026-05-18: Together $0.88/$0.88 per MTok (meta-llama/Llama-3.3-70B-Instruct-Turbo); Groq $0.59/$0.79 (llama-3.3-70b-versatile) is the lowest direct-host rate and is the row's structured price. Fireworks publishes $0.90 input on accounts/fireworks/models/llama-v3p3-70b-instruct but output price was not captured from a single primary source on this date so Fireworks is omitted from deployment_options. OpenRouter aggregator routes at $0.10/$0.32 (informational only; structured input/output stay at the lowest direct-host price per the PR4 convention). Context window 128K per Meta's spec (131072 tokens). Text-only; no vision. max_output_tokens not published on the model card; defaulted to 8192. Knowledge cutoff December 2023 per model card."
+      "notes": "Multi-host pricing snapshot 2026-05-18: Together $0.88/$0.88 per MTok (meta-llama/Llama-3.3-70B-Instruct-Turbo); Groq $0.59/$0.79 (llama-3.3-70b-versatile) is the lowest direct-host rate and is the row's structured price. Fireworks publishes $0.90 input on accounts/fireworks/models/llama-v3p3-70b-instruct but output price was not captured from a single primary source on this date so Fireworks is omitted from deployment_options. OpenRouter aggregator routes at $0.10/$0.32 (informational only; structured input/output stay at the lowest direct-host price per the PR4 convention) and is structured as aggregators[\"openrouter\"]. Context window 128K per Meta's spec (131072 tokens). Text-only; no vision. max_output_tokens not published on the model card; defaulted to 8192. Knowledge cutoff December 2023 per model card."
     },
     {
       "provider": "Mistral",

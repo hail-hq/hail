@@ -454,6 +454,24 @@
       "verified_by": "r13i",
       "source_url": "https://deepgram.com/pricing",
       "notes": "Deepgram's current TTS family, addressed as 'aura-2-<voice>-<lang>' (e.g., aura-2-thalia-en) per https://developers.deepgram.com/docs/tts-models. Vendor rate $0.030/1K chars = $30/1M chars on Pay-As-You-Go; Growth tier $0.027/1K = $27/1M. Voice counts by language: en 40+ (incl. Aura 1 legacy), es 15+ (Early Access), nl 8, fr 2, de 7, it 10, ja 4. Free tier ships $200 of signup credit applicable to all products (not representable as tokens_per_day in schema). Aura 1 voices remain callable but Deepgram recommends Aura 2 for new integrations."
+    },
+    {
+      "provider": "Resemble AI",
+      "provider_url": "https://www.resemble.ai",
+      "model_id": "chatterbox-turbo",
+      "display_name": "Resemble Chatterbox Turbo",
+      "price_per_second_usd": "0.0005",
+      "voice_quality": "neural",
+      "languages": ["en"],
+      "voice_cloning": true,
+      "deployment_options": ["native"],
+      "confidence": "medium",
+      "last_verified": "2026-05-26",
+      "last_changed_at": "2026-05-26",
+      "verification_method": "manual-confirmed",
+      "verified_by": "r13i",
+      "source_url": "https://www.resemble.ai/pricing",
+      "notes": "Resemble bills TTS per second of generated audio at a flat $0.0005/sec on their Flex (pay-as-you-go) plan; the rate is not split per model. Chatterbox Turbo is Resemble's flagship English TTS per https://www.resemble.ai (also open-sourced at https://github.com/resemble-ai/chatterbox, 'SoTA open-source TTS'). Confidence medium because the pricing page lists the rate against the service category 'Text-to-speech' rather than naming Chatterbox Turbo specifically, and the API's exact 'model' parameter slug was not verified against live docs. Multilingual ('Chatterbox Multilingual') and dramatic-read ('DramaBox') variants are marketed separately; modeled here as the English flagship only."
     }
   ]
 }
