@@ -13,6 +13,18 @@ Authenticate with your `HAIL_API_KEY` as a bearer token.
 
 > For web-based clients (Claude.ai, ChatGPT), the URL must be reachable from the client's servers — public DNS + TLS. Expose via a tunnel (cloudflared, tailscale funnel) or reverse proxy. For localhost use, stick to terminal clients.
 
+## Tools
+
+The server exposes five tools. Schemas (args, validation, return shapes) are the source of truth — see [`mcp/hailhq/mcp/tools.py`](../../mcp/hailhq/mcp/tools.py).
+
+| Tool         | Does                                  |
+| ------------ | ------------------------------------- |
+| `place_call` | Originate an outbound phone call.     |
+| `send_email` | Send an outbound email.               |
+| `get_call`   | Fetch the current state of one call.  |
+| `list_calls` | List recent calls (cursor-paginated). |
+| `get_events` | Page through the event stream.        |
+
 ## Claude.ai (web)
 
 1. **Settings → Connectors → Add custom connector**
