@@ -5,7 +5,7 @@ import type { TTSRow } from '@/lib/types';
 import { CategorySection } from '../category-section';
 import { ModelIdCell } from '../model-id-cell';
 import { VerifiedCell } from '../verified-cell';
-import { formatCloning, langs, num, priceRange, usd } from '@/lib/format';
+import { formatCloning, langs, numOpt, priceRange, usd } from '@/lib/format';
 
 const columns: ColumnDef<TTSRow>[] = [
   {
@@ -22,7 +22,7 @@ const columns: ColumnDef<TTSRow>[] = [
   },
   {
     id: 'price',
-    accessorFn: (row) => num(row.price_per_1m_chars_usd),
+    accessorFn: (row) => numOpt(row.price_per_1m_chars_usd),
     header: '$/1M chars',
     cell: ({ row }) => usd(row.original.price_per_1m_chars_usd, 2),
     sortingFn: 'basic',

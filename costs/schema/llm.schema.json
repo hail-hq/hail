@@ -50,6 +50,7 @@
         "max_output_tokens": { "type": "integer", "minimum": 1 },
         "input_per_mtok_usd": { "$ref": "#/$defs/decimal" },
         "output_per_mtok_usd": { "$ref": "#/$defs/decimal" },
+        "audio_input_per_mtok_usd": { "$ref": "#/$defs/decimal" },
         "cache_read_per_mtok_usd": { "$ref": "#/$defs/decimal" },
         "cache_write_per_mtok_usd": { "$ref": "#/$defs/decimal" },
         "cache_storage_per_mtok_per_hour_usd": { "$ref": "#/$defs/decimal" },
@@ -135,6 +136,13 @@
               "dashscope",
               "openrouter"
             ]
+          }
+        },
+        "aggregators": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "enum": ["openrouter"]
           }
         },
         "free_tier": {

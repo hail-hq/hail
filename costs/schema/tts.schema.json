@@ -27,7 +27,6 @@
         "provider",
         "model_id",
         "display_name",
-        "price_per_1m_chars_usd",
         "voice_quality",
         "languages",
         "last_verified",
@@ -36,12 +35,17 @@
         "verified_by",
         "source_url"
       ],
+      "anyOf": [
+        { "required": ["price_per_1m_chars_usd"] },
+        { "required": ["price_per_second_usd"] }
+      ],
       "properties": {
         "provider": { "type": "string", "minLength": 1 },
         "provider_url": { "type": "string", "format": "uri" },
         "model_id": { "type": "string", "minLength": 1 },
         "display_name": { "type": "string", "minLength": 1 },
         "price_per_1m_chars_usd": { "$ref": "#/$defs/decimal" },
+        "price_per_second_usd": { "$ref": "#/$defs/decimal" },
         "voice_quality": { "enum": ["standard", "neural", "cloned"] },
         "voice_count": { "type": "integer", "minimum": 1 },
         "voices_count": { "type": "integer", "minimum": 1 },
@@ -105,6 +109,13 @@
               "dashscope",
               "openrouter"
             ]
+          }
+        },
+        "aggregators": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "enum": ["openrouter"]
           }
         },
         "free_tier": {

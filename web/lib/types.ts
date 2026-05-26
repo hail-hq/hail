@@ -13,6 +13,8 @@ export type DeploymentOption =
   | 'dashscope'
   | 'openrouter';
 
+export type Aggregator = 'openrouter';
+
 export type CommonFields = {
   provider: string;
   provider_url?: string;
@@ -40,6 +42,7 @@ export type LLMRow = CommonFields & {
   max_output_tokens: number;
   input_per_mtok_usd: string;
   output_per_mtok_usd: string;
+  audio_input_per_mtok_usd?: string;
   cache_read_per_mtok_usd?: string;
   cache_write_per_mtok_usd?: string;
   cache_storage_per_mtok_per_hour_usd?: string;
@@ -68,10 +71,12 @@ export type LLMRow = CommonFields & {
     output_tps?: number;
     confidence?: Confidence;
   };
+  aggregators?: Aggregator[];
 };
 
 export type STTRow = CommonFields & {
-  price_per_minute_usd: string;
+  price_per_minute_usd?: string;
+  price_per_second_usd?: string;
   price_per_minute_batch_usd?: string;
   diarization_per_minute_usd?: string;
   pii_redaction_per_minute_usd?: string;
@@ -92,10 +97,12 @@ export type STTRow = CommonFields & {
     confidence?: Confidence;
   };
   time_to_first_word_ms?: number;
+  aggregators?: Aggregator[];
 };
 
 export type TTSRow = CommonFields & {
-  price_per_1m_chars_usd: string;
+  price_per_1m_chars_usd?: string;
+  price_per_second_usd?: string;
   voice_quality: 'standard' | 'neural' | 'cloned';
   voice_count?: number;
   voices_count?: number;
@@ -115,6 +122,7 @@ export type TTSRow = CommonFields & {
   sample_rates_hz?: number[];
   time_to_first_byte_ms?: number;
   min_billed_chars?: number;
+  aggregators?: Aggregator[];
 };
 
 export type CostsFile<T> = {

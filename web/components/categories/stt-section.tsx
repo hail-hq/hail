@@ -5,7 +5,7 @@ import type { STTRow } from '@/lib/types';
 import { CategorySection } from '../category-section';
 import { ModelIdCell } from '../model-id-cell';
 import { VerifiedCell } from '../verified-cell';
-import { langs, num, numOpt, priceRange, usd } from '@/lib/format';
+import { langs, numOpt, priceRange, usd } from '@/lib/format';
 
 const columns: ColumnDef<STTRow>[] = [
   {
@@ -22,7 +22,7 @@ const columns: ColumnDef<STTRow>[] = [
   },
   {
     id: 'price',
-    accessorFn: (row) => num(row.price_per_minute_usd),
+    accessorFn: (row) => numOpt(row.price_per_minute_usd),
     header: '$/min',
     cell: ({ row }) => usd(row.original.price_per_minute_usd, 4),
     sortingFn: 'basic',
