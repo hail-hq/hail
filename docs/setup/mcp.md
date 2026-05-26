@@ -38,9 +38,9 @@ The server exposes five tools. Schemas (args, validation, return shapes) are the
 2. Paste the URL + API key
 3. Save
 
-## Claude Code / Claude Desktop / Cursor
+## Claude Code / Cursor
 
-Add an SSE entry to your MCP config (e.g. `.mcp.json` or `claude_desktop_config.json`):
+These read a remote SSE entry straight from their MCP config file (`.mcp.json` for Claude Code, `~/.cursor/mcp.json` for Cursor):
 
 ```json
 {
@@ -51,6 +51,40 @@ Add an SSE entry to your MCP config (e.g. `.mcp.json` or `claude_desktop_config.
       "headers": {
         "Authorization": "Bearer ${HAIL_API_KEY}"
       }
+    }
+  }
+}
+```
+
+Claude Code can also add it from the CLI:
+
+```sh
+claude mcp add --transport sse hail http://localhost:8081/sse \
+  --header "Authorization: Bearer ${HAIL_API_KEY}"
+```
+
+Cursor uses the same block without the `type` field — just `url` + `headers`.
+
+## Claude Desktop
+
+Desktop's `claude_desktop_config.json` loads **local (stdio) servers only** — a bare remote `url` entry is rejected as invalid. Two ways to connect a remote server:
+
+- **Connectors UI** (no config edit): Settings → Connectors → Add custom connector → paste the `/sse` URL, with `HAIL_API_KEY` as the bearer token.
+- **Bridge it in the config file** with [`mcp-remote`](https://www.npmjs.com/package/mcp-remote) (needs Node), which proxies the remote SSE endpoint as a local stdio server:
+
+```json
+{
+  "mcpServers": {
+    "hail": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "mcp-remote",
+        "http://localhost:8081/sse",
+        "--header",
+        "Authorization: Bearer ${HAIL_API_KEY}"
+      ],
+      "env": { "HAIL_API_KEY": "hl_live_…" }
     }
   }
 }
