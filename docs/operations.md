@@ -177,9 +177,11 @@ Migrations are hand-written raw SQL for v1 (no SQLAlchemy `target_metadata` wire
 
 **The deploy workflow runs `alembic upgrade head` against prod on every push to `main`** — there is no human review gate between merging a migration and it executing. Three rules keep this safe; one is enforced by the workflow, two depend on you:
 
-1. **The workflow caps statement runtime at 120s and lock-acquisition at 5s** via `PGOPTIONS='-c statement_timeout=120s -c lock_timeout=5s'`. The deploy log also prints `alembic current` and `alembic upgrade head --sql` before applying, so a problem migration is visible in CI output before it touches data.
+1. **`api/migrations/env.py` caps statement runtime at 120s and lock-acquisition at 5s** via `SET LOCAL statement_timeout` / `SET LOCAL lock_timeout`, issued inside the migration transaction so they apply to every statement the migration runs. `SET LOCAL` (rather than `PGOPTIONS` or session-level `SET`) is deliberate — Neon's `-pooler` endpoint and other PgBouncer transaction-pooled connections reject the libpq startup option and reset session state between transactions; the per-transaction form is the only one that works on all of pooled / unpooled / direct.
 
-   If a legitimate migration genuinely needs longer (a backfill, `CREATE INDEX CONCURRENTLY`), split it into a separate manually-applied step rather than raising the cap globally — a higher cap on every migration means a runaway one chews through more wall-clock before aborting.
+   The deploy log also prints `alembic current` and `alembic upgrade head --sql` before applying, so a problem migration is visible in CI output before it touches data.
+
+   If a legitimate migration genuinely needs longer (a backfill, `CREATE INDEX CONCURRENTLY`), bypass the guard by issuing its own `SET LOCAL statement_timeout = '<bigger>'` at the top of the migration body — explicit per-migration, not a global cap raise. Bigger caps on every migration mean a runaway one chews through more wall-clock before aborting.
 
 2. **All destructive shape changes split into expand → backfill → contract across separate releases.** A column drop, a type narrowing, a `NOT NULL` on existing data — none of these can land in the same release as the code that depends on the new shape, because the old containers are still running when the migration starts. Concretely:
 

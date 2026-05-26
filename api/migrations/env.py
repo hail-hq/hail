@@ -43,6 +43,13 @@ def run_migrations_online() -> None:
     with connectable.connect() as connection:
         context.configure(connection=connection, target_metadata=target_metadata)
         with context.begin_transaction():
+            # Migration safety guards. See docs/operations.md → Migration
+            # discipline. SET LOCAL keeps these scoped to the current
+            # transaction so they survive PgBouncer transaction pooling
+            # (e.g. Neon's -pooler endpoint, which rejects libpq's PGOPTIONS
+            # startup parameter outright).
+            connection.exec_driver_sql("SET LOCAL statement_timeout = '120s'")
+            connection.exec_driver_sql("SET LOCAL lock_timeout = '5s'")
             context.run_migrations()
 
 

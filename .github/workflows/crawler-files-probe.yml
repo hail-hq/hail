@@ -20,7 +20,7 @@ jobs:
           body=$(curl --fail --silent --show-error https://hail.so/sitemap.xml)
           size=${#body}
           echo "sitemap.xml: $size bytes"
-          printf '%s\n' "$body" | head -5
+          head -5 <<< "$body"
           [ "$size" -gt 100 ] || { echo "::error::sitemap.xml body too small ($size bytes)"; exit 1; }
           # Here-strings avoid SIGPIPE: grep -q exits at first match and
           # would close the pipe under `set -o pipefail`, failing the step.
@@ -32,9 +32,9 @@ jobs:
           body=$(curl --fail --silent --show-error https://hail.so/llms.txt)
           size=${#body}
           echo "llms.txt: $size bytes"
-          printf '%s\n' "$body" | head -5
+          head -5 <<< "$body"
           [ "$size" -gt 100 ] || { echo "::error::llms.txt body too small ($size bytes)"; exit 1; }
-          head_lines=$(printf '%s\n' "$body" | head -5)
+          head_lines=$(head -5 <<< "$body")
           grep -q "^# Hail" <<< "$head_lines" || { echo "::error::llms.txt missing # Hail header near top"; exit 1; }
       - name: Probe llms-full.txt
         run: |
@@ -42,7 +42,7 @@ jobs:
           body=$(curl --fail --silent --show-error https://hail.so/llms-full.txt)
           size=${#body}
           echo "llms-full.txt: $size bytes"
-          printf '%s\n' "$body" | head -5
+          head -5 <<< "$body"
           [ "$size" -gt 100 ] || { echo "::error::llms-full.txt body too small ($size bytes)"; exit 1; }
           grep -q "<!-- source:" <<< "$body" || { echo "::error::llms-full.txt missing source markers"; exit 1; }
       - name: Probe robots.txt
