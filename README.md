@@ -40,8 +40,8 @@ curl -X POST http://localhost:8080/emails \
 
 # MCP (for AI agents — Claude.ai, ChatGPT, Claude Code, Cursor, …)
 # Add a remote MCP connector in your client pointing at:
-#   http://<your-host>:8081/sse    (self-hosted)
-#   https://mcp.hail.so/sse        (Hail Cloud, later)
+#   http://<your-host>:8081    (self-hosted)
+#   https://mcp.hail.so        (Hail Cloud, later)
 ```
 
 `hail tail` in action:
@@ -114,7 +114,7 @@ Checked = shipped. Per-artifact changelogs (GitHub Releases for the CLI, PyPI re
 - CLI
   - [x] `hail` binary via GitHub Releases
 - MCP server
-  - [x] Remote SSE endpoint bundled with every Hail deploy
+  - [x] Remote Streamable HTTP endpoint bundled with every Hail deploy
   - ~~PyPI stdio package~~ — intentionally not shipped; see [docs/setup/mcp.md](docs/setup/mcp.md)
 - Python SDK
   - [x] `hail-sdk` on PyPI, imports as `hail`

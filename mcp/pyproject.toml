@@ -1,7 +1,7 @@
 [project]
 name = "hailhq-mcp"
 version = "0.1.0"
-description = "Hail MCP service — remote MCP server (SSE), deployed, not published."
+description = "Hail MCP service — remote MCP server (Streamable HTTP), deployed, not published."
 license = { text = "AGPL-3.0-or-later" }
 requires-python = ">=3.11"
 classifiers = ["Private :: Do Not Upload"]

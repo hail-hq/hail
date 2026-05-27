@@ -11,7 +11,7 @@ A universal communication platform for AI agents. Outbound phone calls in v1; SM
 ```
 api/        — FastAPI service. Deployed (Docker), not published.
 voicebot/   — LiveKit Agents worker service. Deployed (Docker), not published.
-mcp/        — MCP service, remote SSE transport on :8081. Deployed (Docker), not published.
+mcp/        — MCP service, remote Streamable HTTP transport on :8081. Deployed (Docker), not published.
 core/       — shared Python lib. Not published to PyPI in v1 (no external consumers yet).
 cli/        — Go binary (`hail`). Released via GitHub Releases; codegens its client from `openapi/openapi.yaml`.
 openapi/    — committed openapi.yaml. Source of truth for the CLI.
@@ -21,7 +21,7 @@ web/        — Next.js workspace for the interactive costs surface (/costs, /co
 
 **PyPI posture for v1**: one external artifact — the Python SDK, published as `hail-sdk` (imports as `import hail`). The internal services `hailhq-api`, `hailhq-voicebot`, `hailhq-mcp` all carry `Private :: Do Not Upload`. `hailhq-core` is not marked private but is not released in v1 either — it's an internal workspace dep.
 
-**MCP distribution**: remote SSE only. We deliberately do **not** ship a stdio PyPI package. Reasoning lives in [docs/setup/mcp.md](docs/setup/mcp.md) — read it before proposing a stdio server; the default answer is "no, use the SSE endpoint".
+**MCP distribution**: remote Streamable HTTP only. We deliberately do **not** ship a stdio PyPI package. Reasoning lives in [docs/setup/mcp.md](docs/setup/mcp.md) — read it before proposing a stdio server; the default answer is "no, use the remote HTTP endpoint".
 
 Internal packages share the `hailhq.*` namespace (PEP 420 implicit — **no** `hailhq/__init__.py` at the namespace root). The import name `hail` is **reserved** for the external SDK (`hail-sdk` on PyPI); do not introduce top-level `hail` modules inside the monorepo.
 
