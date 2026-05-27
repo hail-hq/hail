@@ -5,7 +5,7 @@ Hail v1 is three Python services + a Go CLI, wrapped around LiveKit Cloud.
 ```
  AI agent                                     Hail                                LiveKit Cloud         PSTN
 (caller)  ─────MCP URL──►  Hail MCP ─HTTP─►  Hail API  ◄────►  SIP+WebRTC  ◄────► Twilio ◄────► 📞
-                          (SSE :8081)      (FastAPI :8080)
+                          (HTTP :8081)     (FastAPI :8080)
                                                  │
                                                  └─dispatch──►  Hail voicebot  (LiveKit Agents worker)
                                                                      │
