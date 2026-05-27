@@ -117,6 +117,10 @@ Phase 3  (gated on Phases 1–2)
 - **Transition windows**: how long `/sse` stays mounted (0a); how long `static-key` remains accepted on cloud during rollout (1c).
 - **API-key vs OAuth UX**: confirm terminal clients keep the pasted-key path while connectors use OAuth.
 
+## Decisions
+
+- **MCP stays a separate service from `api/`** (not merged or mounted in-process). MCP holds long-lived streaming connections with a different scaling/failure profile than the transactional REST API; transport churn (e.g. the 0a SSE→Streamable HTTP migration) should not redeploy the core API; and MCP is an adapter over the _public_ API surface, which preserves "OpenAPI is the source of truth" and lets MCP own protocol concerns (transport, the 1c OAuth resource-server, tool annotations). The drift and shared-key irritants that motivate merging are addressed by Phase 0b (shared contract) and Phase 1 (auth) instead. Revisit only if independent scaling proves unnecessary and one-service ops simplicity dominates.
+
 ## Next steps
 
 Write per-phase specs in priority order, each through the normal brainstorming → writing-plans cycle:
