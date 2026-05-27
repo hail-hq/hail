@@ -32,7 +32,17 @@ def _build_app() -> tuple[FastMCP, HailClient, Starlette]:
     # streamable_http_path defaults to "/mcp"; the service runs on a
     # dedicated MCP subdomain, so serve Streamable HTTP at the root to
     # avoid a redundant /mcp segment in the public URL.
-    mcp_app: FastMCP = FastMCP(name="hail", streamable_http_path="/")
+    #
+    # host="0.0.0.0" matches the uvicorn bind and marks this as a public
+    # bind, so FastMCP skips the localhost-only DNS-rebinding guard it
+    # would otherwise auto-enable — that guard 421s the proxied public
+    # Host (e.g. mcp.hail.so). The guard protects browser-reachable
+    # localhost dev servers, which does not apply here: in prod the
+    # container binds loopback only (127.0.0.1:8081) and Caddy host-routes
+    # mcp.${HAIL_DOMAIN}. The server does not yet validate an inbound
+    # bearer — per-connection auth lands in Phase 1c; pinning allowed_hosts
+    # would add no real protection given the loopback bind.
+    mcp_app: FastMCP = FastMCP(name="hail", streamable_http_path="/", host="0.0.0.0")
     client = HailClient()
     register_tools(mcp_app, client)
 

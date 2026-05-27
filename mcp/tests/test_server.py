@@ -45,3 +45,25 @@ def test_healthz_ok_under_lifespan() -> None:
         resp = test_client.get("/healthz")
     assert resp.status_code == 200
     assert resp.json() == {"status": "ok"}
+
+
+def test_streamable_http_accepts_proxied_host() -> None:
+    # Regression: FastMCP auto-enables DNS-rebinding protection when its
+    # configured host is localhost, which 421s a proxied public Host
+    # (e.g. mcp.hail.so behind Caddy). Binding the app host to "0.0.0.0"
+    # tells the SDK this is a public bind, skipping that localhost-only
+    # guard. 421 here means the Host header was rejected.
+    _mcp_app, _client, app = _build_app()
+    with TestClient(app) as client:
+        resp = client.post(
+            "/",
+            headers={
+                "host": "mcp.hail.so",
+                "accept": "application/json, text/event-stream",
+                "content-type": "application/json",
+            },
+            json={"jsonrpc": "2.0", "id": 0, "method": "initialize", "params": {}},
+        )
+    assert (
+        resp.status_code != 421
+    ), f"Host header rejected: {resp.status_code} {resp.text}"
