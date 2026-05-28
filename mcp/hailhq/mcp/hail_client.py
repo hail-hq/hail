@@ -1,21 +1,22 @@
 """Thin async httpx wrapper around the Hail API.
 
-The MCP service talks to the same public ``POST /calls`` / ``GET /calls`` /
-``GET /events`` surface that external clients use. This module is the
-single place we encode that wire contract for the MCP tool layer:
+The MCP service talks to the same public ``POST /calls`` / ``POST /emails``
+/ ``GET /calls`` / ``GET /events`` surface external clients use. Request
+bodies are built from the *shared* ``hailhq.core.schemas`` models the API
+itself uses, and 2xx responses are parsed through the matching response
+model — so the wire contract (field names, aliases, validation) lives in
+exactly one place and cannot drift from the API.
 
 * ``Authorization: Bearer <hail_api_key>`` is auto-injected on every request.
-* ``Idempotency-Key`` is auto-injected on ``place_call`` (a fresh UUID per
-  invocation unless the caller passed one explicitly), so an agent that
-  retries a tool call deterministically replays the same originate.
-* Non-2xx responses are mapped to a typed :class:`HailAPIError` with the
-  status code + parsed ``detail`` field — the tool layer turns that into a
-  structured ``{"error": ...}`` payload for the agent.
+* ``Idempotency-Key`` is auto-injected on ``place_call`` / ``send_email``
+  (a fresh UUID per invocation unless the caller passed one).
+* Non-2xx responses map to :class:`HailAPIError`; the tool layer turns that
+  into a structured ``{"error": ...}`` payload. A request model that fails
+  validation raises ``pydantic.ValidationError`` *before* any HTTP call —
+  the tool layer maps that too.
 
 Configuration reads from :data:`hailhq.core.config.settings`; constructor
-kwargs override for tests. The client is a regular ``httpx.AsyncClient``
-holder — call :meth:`aclose` (or use it as an async context manager) to
-release connections.
+kwargs override for tests.
 """
 
 from __future__ import annotations
@@ -26,15 +27,22 @@ from typing import Any
 import httpx
 
 from hailhq.core.config import settings
+from hailhq.core.schemas import (
+    CallCreate,
+    CallListResponse,
+    CallResponse,
+    EmailCreate,
+    EmailResponse,
+    EventStreamResponse,
+)
 
 
 class HailAPIError(Exception):
     """Non-2xx response from the Hail API.
 
-    ``status`` is the HTTP status code; ``detail`` is the parsed
-    ``detail`` field from the JSON body when present, otherwise the raw
-    response text. The MCP tool layer converts this to an agent-facing
-    error dict (see :mod:`hailhq.mcp.tools`).
+    ``status`` is the HTTP status code; ``detail`` is the parsed ``detail``
+    field from the JSON body when present, otherwise the raw response text.
+    The MCP tool layer converts this to an agent-facing error dict.
     """
 
     def __init__(self, status: int, detail: str) -> None:
@@ -89,30 +97,28 @@ class HailClient:
     ) -> dict[str, Any]:
         """POST /calls — originate an outbound call.
 
-        ``idempotency_key`` defaults to a fresh UUID4 so a retry of the
-        same logical request deterministically replays rather than
-        re-dispatching. The chosen key is *not* echoed in the API
-        response body — the MCP tool layer surfaces it back to the
-        agent (see :mod:`hailhq.mcp.tools`).
+        Builds the body from :class:`CallCreate` (which enforces E.164,
+        system_prompt-XOR-llm, and ``LLMConfig`` completeness). Construction
+        raises ``pydantic.ValidationError`` before any HTTP on bad input.
         """
-        # Build the body with the wire-side ``"from"`` key (Pydantic alias).
-        body: dict[str, Any] = {"to": to}
+        fields: dict[str, Any] = {"to": to}
         if from_ is not None:
-            body["from"] = from_
+            fields["from"] = from_  # alias key — CallCreate has no populate_by_name
         if system_prompt is not None:
-            body["system_prompt"] = system_prompt
+            fields["system_prompt"] = system_prompt
         if llm is not None:
-            body["llm"] = llm
+            fields["llm"] = llm
         if first_message is not None:
-            body["first_message"] = first_message
+            fields["first_message"] = first_message
         if metadata is not None:
-            body["metadata"] = metadata
+            fields["metadata"] = metadata
 
-        headers = {
-            "Idempotency-Key": idempotency_key or str(uuid.uuid4()),
-        }
+        body = CallCreate.model_validate(fields).model_dump(
+            mode="json", by_alias=True, exclude_unset=True
+        )
+        headers = {"Idempotency-Key": idempotency_key or str(uuid.uuid4())}
         resp = await self._client.post("/calls", json=body, headers=headers)
-        return _decode(resp)
+        return CallResponse.model_validate(_decode(resp)).model_dump(mode="json")
 
     # ------------------------------------------------------------------ #
     # GET /calls/{id}
@@ -120,7 +126,7 @@ class HailClient:
 
     async def get_call(self, call_id: str) -> dict[str, Any]:
         resp = await self._client.get(f"/calls/{call_id}")
-        return _decode(resp)
+        return CallResponse.model_validate(_decode(resp)).model_dump(mode="json")
 
     # ------------------------------------------------------------------ #
     # GET /calls
@@ -144,7 +150,7 @@ class HailClient:
         if to is not None:
             params["to"] = to
         resp = await self._client.get("/calls", params=params)
-        return _decode(resp)
+        return CallListResponse.model_validate(_decode(resp)).model_dump(mode="json")
 
     # ------------------------------------------------------------------ #
     # POST /emails
@@ -166,32 +172,31 @@ class HailClient:
     ) -> dict[str, Any]:
         """POST /emails — send an outbound message.
 
-        Mirrors :meth:`place_call`'s idempotency story: a fresh UUID4 is
-        attached unless the caller passes one explicitly, so a retry
-        replays rather than re-sending. The chosen key is surfaced back
-        to the agent in the MCP tool layer.
+        Builds the body from :class:`EmailCreate` (which enforces ≥1
+        recipient, a non-empty subject, body-required, and email formats).
         """
-        body: dict[str, Any] = {"to": list(to), "subject": subject}
+        fields: dict[str, Any] = {"to": list(to), "subject": subject}
         if from_ is not None:
-            body["from"] = from_
+            fields["from"] = from_
         if body_text is not None:
-            body["body_text"] = body_text
+            fields["body_text"] = body_text
         if body_html is not None:
-            body["body_html"] = body_html
+            fields["body_html"] = body_html
         if cc:
-            body["cc"] = list(cc)
+            fields["cc"] = list(cc)
         if bcc:
-            body["bcc"] = list(bcc)
+            fields["bcc"] = list(bcc)
         if reply_to is not None:
-            body["reply_to"] = reply_to
+            fields["reply_to"] = reply_to
         if metadata is not None:
-            body["metadata"] = metadata
+            fields["metadata"] = metadata
 
-        headers = {
-            "Idempotency-Key": idempotency_key or str(uuid.uuid4()),
-        }
+        body = EmailCreate.model_validate(fields).model_dump(
+            mode="json", by_alias=True, exclude_unset=True
+        )
+        headers = {"Idempotency-Key": idempotency_key or str(uuid.uuid4())}
         resp = await self._client.post("/emails", json=body, headers=headers)
-        return _decode(resp)
+        return EmailResponse.model_validate(_decode(resp)).model_dump(mode="json")
 
     # ------------------------------------------------------------------ #
     # GET /events
@@ -215,10 +220,10 @@ class HailClient:
         if limit is not None:
             params["limit"] = limit
         resp = await self._client.get("/events", params=params)
-        return _decode(resp)
+        return EventStreamResponse.model_validate(_decode(resp)).model_dump(mode="json")
 
 
-def _decode(resp: httpx.Response) -> dict[str, Any]:
+def _decode(resp: httpx.Response) -> Any:
     """Return the JSON body on 2xx, raise :class:`HailAPIError` otherwise."""
     if 200 <= resp.status_code < 300:
         return resp.json()

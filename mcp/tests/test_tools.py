@@ -1,6 +1,6 @@
 """Unit tests for the MCP tool wrappers.
 
-Tests target the four tool callables in :mod:`hailhq.mcp.tools`,
+Tests target the five tool callables in :mod:`hailhq.mcp.tools`,
 exercising local validation, HTTP request shape, and error mapping.
 The MCP/FastMCP transport layer is not covered here — that's framework
 territory; we trust the registered tools dispatch to the same callables
@@ -142,7 +142,7 @@ async def test_place_call_rejects_neither_mode(client: HailClient) -> None:
     )
     result = await tools.place_call(client=client, to="+14155559999")
     assert "error" in result
-    assert "must provide either" in result["error"]
+    assert "either system_prompt or llm" in result["error"]
     assert not route.called
 
 
@@ -301,7 +301,8 @@ async def test_send_email_rejects_empty_recipients(client: HailClient) -> None:
     result = await tools.send_email(
         client=client, to=[], subject="hi", body_text="body"
     )
-    assert result == {"error": "to must contain at least one recipient"}
+    assert "error" in result
+    assert "at least 1" in result["error"]
     # respx records every call; verify no HTTP went out.
     assert not respx.calls.called
 

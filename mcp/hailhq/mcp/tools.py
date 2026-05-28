@@ -1,22 +1,26 @@
 """MCP tool surface for Hail's outbound-call API.
 
-Exposes four tools to the calling agent:
+Exposes five tools to the calling agent:
 
 * ``place_call`` — originate an outbound phone call
 * ``get_call`` — fetch the current state of one call
 * ``list_calls`` — page through recent calls
 * ``get_events`` — page through the event stream (call-narrow or org-wide)
+* ``send_email`` — send an outbound email
 
 The tool docstrings are the agent's only documentation, so each one
 spells out the contract (required vs optional fields, mutually exclusive
 modes, example invocation, terminal-status loop hint).
 
 Errors are returned as ``{"error": "<message>"}`` dicts rather than
-raised — agents read tool responses, not exception traces. Validation
-that can be done locally (mode A/B exclusivity, ``<type>:<uuid>`` shape)
-runs before any HTTP so a malformed call never hits the network.
+raised — agents read tool responses, not exception traces. Field and
+shape validation comes from the shared ``hailhq.core.schemas`` request
+models (``CallCreate``, ``EmailCreate``) constructed inside
+``hail_client``; a ``pydantic.ValidationError`` is caught and mapped to
+an ``{"error": ...}`` dict. Only the ``<type>:<uuid>`` resource-id shape
+for ``get_events`` is still checked locally via ``parse_resource_id``.
 
-The four tool functions are kept module-importable so unit tests can
+The five tool functions are kept module-importable so unit tests can
 call them directly with a constructed ``HailClient``; ``register_tools``
 is the FastMCP wiring step. Nothing in this module holds module-level
 state — the SDK (Task 11) and the MCP service therefore never share a
@@ -27,6 +31,8 @@ from __future__ import annotations
 
 import uuid
 from typing import Any
+
+from pydantic import ValidationError
 
 from mcp.server.fastmcp import FastMCP
 
@@ -52,46 +58,18 @@ def _format_api_error(exc: HailAPIError) -> dict[str, Any]:
     return {"error": f"hail api error {status}: {exc.detail}"}
 
 
-# --------------------------------------------------------------------------- #
-# Mode validation — mirrors cli/internal/cmd/call.go validateMode().
-# --------------------------------------------------------------------------- #
+def _validation_error_message(exc: ValidationError) -> str:
+    """First Pydantic error as a compact agent-facing string.
 
-
-_LLM_REQUIRED_KEYS = ("base_url", "api_key", "model")
-
-
-def _validate_modes(
-    system_prompt: str | None, llm: dict[str, Any] | None
-) -> str | None:
-    """Return an error message if mode A/B is misconfigured, else ``None``.
-
-    Mirrors the CLI: exactly one of ``system_prompt`` / ``llm`` must be
-    provided, and an ``llm`` dict must supply all three of ``base_url``,
-    ``api_key``, ``model`` (non-empty strings).
+    Field errors read as ``loc: msg`` (e.g. ``llm.model: Field required``);
+    model-level errors (mode A/B, body-required) have an empty loc, so just
+    the message. The text comes from ``hailhq.core.schemas`` — the single
+    source of the contract — so this layer never restates a rule.
     """
-    has_prompt = bool(system_prompt)
-
-    if has_prompt and llm is not None:
-        return "system_prompt and llm are mutually exclusive (use one mode)"
-    if not has_prompt and llm is None:
-        return (
-            "must provide either system_prompt or llm (with base_url, api_key, model)"
-        )
-    if llm is not None:
-        missing = [
-            k
-            for k in _LLM_REQUIRED_KEYS
-            if not isinstance(llm.get(k), str) or not llm[k]
-        ]
-        if missing:
-            return (
-                "llm requires non-empty base_url, api_key, and model "
-                f"(missing: {', '.join(missing)})"
-            )
-        extra = set(llm) - set(_LLM_REQUIRED_KEYS)
-        if extra:
-            return f"llm has unexpected keys: {', '.join(sorted(extra))}"
-    return None
+    err = exc.errors()[0]
+    loc = ".".join(str(p) for p in err["loc"])
+    msg = str(err["msg"])
+    return f"{loc}: {msg}" if loc else msg
 
 
 # --------------------------------------------------------------------------- #
@@ -115,9 +93,6 @@ async def place_call(
     metadata: dict[str, Any] | None = None,
     idempotency_key: str | None = None,
 ) -> dict[str, Any]:
-    err = _validate_modes(system_prompt, llm)
-    if err is not None:
-        return {"error": err}
     if idempotency_key is None:
         idempotency_key = str(uuid.uuid4())
     try:
@@ -130,6 +105,8 @@ async def place_call(
             metadata=metadata,
             idempotency_key=idempotency_key,
         )
+    except ValidationError as exc:
+        return {"error": _validation_error_message(exc)}
     except HailAPIError as exc:
         return _format_api_error(exc)
     # Surface the key in the response so the agent can replay this exact
@@ -154,12 +131,6 @@ async def send_email(
     metadata: dict[str, Any] | None = None,
     idempotency_key: str | None = None,
 ) -> dict[str, Any]:
-    if not to:
-        return {"error": "to must contain at least one recipient"}
-    if not subject:
-        return {"error": "subject is required"}
-    if not body_text and not body_html:
-        return {"error": "either body_text or body_html must be provided"}
     if idempotency_key is None:
         idempotency_key = str(uuid.uuid4())
     try:
@@ -175,6 +146,8 @@ async def send_email(
             metadata=metadata,
             idempotency_key=idempotency_key,
         )
+    except ValidationError as exc:
+        return {"error": _validation_error_message(exc)}
     except HailAPIError as exc:
         return _format_api_error(exc)
     if isinstance(result, dict):
@@ -185,6 +158,8 @@ async def send_email(
 async def get_call(*, client: HailClient, call_id: str) -> dict[str, Any]:
     try:
         return await client.get_call(call_id)
+    except ValidationError as exc:
+        return {"error": _validation_error_message(exc)}
     except HailAPIError as exc:
         return _format_api_error(exc)
 
@@ -199,6 +174,8 @@ async def list_calls(
 ) -> dict[str, Any]:
     try:
         return await client.list_calls(cursor=cursor, limit=limit, status=status, to=to)
+    except ValidationError as exc:
+        return {"error": _validation_error_message(exc)}
     except HailAPIError as exc:
         return _format_api_error(exc)
 
@@ -218,6 +195,8 @@ async def get_events(
             return {"error": str(exc)}
     try:
         return await client.get_events(id=id, kind=kind, cursor=cursor, limit=limit)
+    except ValidationError as exc:
+        return {"error": _validation_error_message(exc)}
     except HailAPIError as exc:
         return _format_api_error(exc)
 
@@ -233,7 +212,7 @@ async def get_events(
 
 
 def register_tools(mcp_app: FastMCP, client: HailClient) -> None:
-    """Register the four Hail tools on a FastMCP app."""
+    """Register the five Hail tools on a FastMCP app."""
 
     @mcp_app.tool(name="place_call")
     async def place_call_tool(
