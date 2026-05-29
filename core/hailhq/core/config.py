@@ -121,5 +121,16 @@ class Settings(BaseSettings):
     # Must match the value set in hail-website's HAIL_INTERNAL_SECRET.
     hail_internal_secret: str = ""
 
+    # Hail auth backend (cloud) — OAuth/JWT verification alongside the
+    # existing API-key path. ``hail_auth_url`` is the issuer URL the auth
+    # backend stamps on JWTs (Better Auth's ``ctx.baseURL``, e.g.
+    # "https://hail.so/api/auth"); the JWKS endpoint is derived as
+    # ``${hail_auth_url}/jwks``. ``hail_auth_audiences`` is a CSV of
+    # accepted ``aud`` claims (e.g. "https://api.hail.so,https://mcp.hail.so").
+    # Leave both empty in self-host: the JWT path stays disabled and only
+    # shared-key + API-key paths are tried.
+    hail_auth_url: str = ""
+    hail_auth_audiences: str = ""
+
 
 settings = Settings()

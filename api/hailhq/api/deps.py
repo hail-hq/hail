@@ -1,9 +1,15 @@
 """Request-scoped FastAPI dependencies.
 
-Auth picks a path based on what's in the env (see ``docs/operations.md``):
-``HAIL_API_KEY`` triggers the shared-key path; otherwise we look the bearer up
-in the website-owned ``api_keys`` table and resolve the user's org through
-``members``.
+Auth dispatches by bearer shape (see ``docs/operations.md``):
+
+* ``HAIL_API_KEY`` (set in env) triggers the shared-key path → sentinel
+  Self-hosted org.
+* A 3-segment dot-separated token (a JWT) triggers Better Auth OAuth
+  verification — only when ``HAIL_AUTH_URL`` and ``HAIL_AUTH_AUDIENCES``
+  are configured (the JWKS endpoint is derived from ``HAIL_AUTH_URL``).
+  The JWT ``sub`` is resolved to an organization through the ``members`` join.
+* Everything else is looked up in the website-owned ``api_keys`` table and
+  resolved through the same ``members`` join.
 """
 
 from __future__ import annotations
@@ -15,13 +21,19 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Annotated
 
+import jwt as _pyjwt
 from fastapi import Depends, Header, HTTPException, status
 from pydantic import BaseModel
 from sqlalchemy import cast, func, select, text, update
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from hailhq.api.auth import hash_key
+from hailhq.api.auth import (
+    JWKSFetchError,
+    get_jwks_cache,
+    hash_key,
+    verify_jwt,
+)
 from hailhq.core.config import settings
 from hailhq.core.db import get_session, session_scope
 from hailhq.core.models import ApiKey, OrganizationMember
@@ -56,8 +68,8 @@ def reset_caches() -> None:
 class Principal(BaseModel):
     """The authenticated caller, exposed to route handlers.
 
-    ``api_key_id`` is ``None`` on self-host ``HAIL_API_KEY`` requests, which
-    don't correspond to any row in ``api_keys``.
+    ``api_key_id`` is ``None`` on shared-key (``HAIL_API_KEY``) and JWT
+    requests — neither corresponds to a row in ``api_keys``.
     """
 
     api_key_id: uuid.UUID | None
@@ -192,6 +204,83 @@ async def _principal_from_apikey_table(token: str, db: AsyncSession) -> Principa
     )
 
 
+def _looks_like_jwt(token: str) -> bool:
+    """Header.Payload.Signature shape — three non-empty dot-separated parts."""
+    parts = token.split(".")
+    return len(parts) == 3 and all(parts)
+
+
+def _jwt_configured() -> bool:
+    return bool(settings.hail_auth_url and settings.hail_auth_audiences)
+
+
+def _allowed_audiences() -> list[str]:
+    return [a.strip() for a in settings.hail_auth_audiences.split(",") if a.strip()]
+
+
+def _scopes_from_jwt(claims: dict) -> list[str]:
+    """OAuth ``scope`` (space-separated) or ``scopes`` (list); default ``["*"]``."""
+    scope = claims.get("scope")
+    if isinstance(scope, str):
+        out = [s for s in scope.split() if s]
+        return out or ["*"]
+    scopes = claims.get("scopes")
+    if isinstance(scopes, list):
+        out = [str(s) for s in scopes if s]
+        return out or ["*"]
+    return ["*"]
+
+
+async def _principal_from_jwt(token: str, db: AsyncSession) -> Principal:
+    cache = get_jwks_cache()
+    if cache is None:
+        # _jwt_configured() should have prevented us getting here; defence
+        # in depth — never silently accept an unverified token.
+        raise _unauthorized("jwt auth not configured on this deployment")
+    try:
+        claims = await verify_jwt(
+            token,
+            jwks_cache=cache,
+            issuer=settings.hail_auth_url,
+            audiences=_allowed_audiences(),
+        )
+    except _pyjwt.InvalidTokenError as exc:
+        raise _unauthorized(f"invalid jwt: {exc}") from exc
+    except JWKSFetchError as exc:
+        # The token may be valid — we just couldn't reach the JWKS to check
+        # it. Surface a transient 503, not a 401 that tells the client to
+        # re-auth. The API-key path (different code path) is unaffected.
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="auth temporarily unavailable; retry shortly",
+        ) from exc
+
+    sub = str(claims.get("sub") or "")
+    try:
+        user_uuid = uuid.UUID(sub)
+    except ValueError as exc:
+        raise _unauthorized("jwt sub is not a valid user id") from exc
+
+    stmt = select(OrganizationMember.organization_id).where(
+        OrganizationMember.user_id == user_uuid
+    )
+    organization_id = (await db.execute(stmt)).scalar_one_or_none()
+    if organization_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=(
+                "user not provisioned with an organization; "
+                "sign in to the dashboard to complete setup"
+            ),
+        )
+
+    return Principal(
+        api_key_id=None,
+        organization_id=organization_id,
+        scopes=_scopes_from_jwt(claims),
+    )
+
+
 async def get_current_principal(
     authorization: Annotated[str | None, Header()] = None,
     db: AsyncSession = Depends(get_session),
@@ -204,6 +293,15 @@ async def get_current_principal(
             organization_id=SELF_HOSTED_ORG_ID,
             scopes=["*"],
         )
+
+    # A JWT-shaped bearer is dispatched here before the api_keys lookup. When
+    # the JWT path is unconfigured (self-host) we 401 rather than falling
+    # through: real ``hl_live_*`` keys never contain dots, so no genuine
+    # API key is ever shaped like a JWT and shadowed by this branch.
+    if _looks_like_jwt(token):
+        if not _jwt_configured():
+            raise _unauthorized("invalid API key")
+        return await _principal_from_jwt(token, db)
 
     if await _apikey_table_exists(db):
         return await _principal_from_apikey_table(token, db)

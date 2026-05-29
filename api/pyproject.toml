@@ -15,6 +15,7 @@ dependencies = [
     "greenlet>=3.0",
     "psycopg[binary]>=3.2",
     "alembic>=1.13",
+    "pyjwt[crypto]>=2.9",
 ]
 
 [project.optional-dependencies]

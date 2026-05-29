@@ -2,17 +2,25 @@
 
 from __future__ import annotations
 
+import json as _jwt_json
 import secrets
 import uuid
+from collections.abc import Callable, Iterable
 from datetime import datetime, timezone
 from types import SimpleNamespace
-from typing import AsyncIterator
+from typing import Any, AsyncIterator
 from unittest.mock import AsyncMock
 
 import httpx
+import httpx as _httpx_for_jwt
+import jwt as _jwt_lib
 import pytest
+from cryptography.hazmat.primitives import serialization as _serialization
+from cryptography.hazmat.primitives.asymmetric import ed25519 as _ed25519
+from jwt.algorithms import OKPAlgorithm as _OKPAlgorithm
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from hailhq.api import auth as _auth_module
 from hailhq.api.auth import hash_key
 from hailhq.api.main import app
 from hailhq.api.routes.calls import get_livekit
@@ -216,8 +224,10 @@ def reset_deps_caches():
     from hailhq.api import deps
 
     deps.reset_caches()
+    _auth_module.reset_jwks_cache_for_testing()
     yield
     deps.reset_caches()
+    _auth_module.reset_jwks_cache_for_testing()
 
 
 @pytest.fixture()
@@ -251,3 +261,95 @@ def add_phone_number():
         return pn
 
     return _add
+
+
+# ----------------------------------------------------------------------
+# JWT fixtures — shared across api/tests/test_auth_jwt.py.
+# ----------------------------------------------------------------------
+
+_TEST_KID = "test-kid-1"
+
+
+@pytest.fixture(scope="session")
+def signing_keypair() -> tuple[bytes, dict[str, Any]]:
+    """A throwaway Ed25519 keypair: (private_pem, public_jwk_dict)."""
+    key = _ed25519.Ed25519PrivateKey.generate()
+    private_pem = key.private_bytes(
+        encoding=_serialization.Encoding.PEM,
+        format=_serialization.PrivateFormat.PKCS8,
+        encryption_algorithm=_serialization.NoEncryption(),
+    )
+    public_jwk = _jwt_json.loads(_OKPAlgorithm.to_jwk(key.public_key()))
+    public_jwk["kid"] = _TEST_KID
+    public_jwk["use"] = "sig"
+    public_jwk["alg"] = "EdDSA"
+    return private_pem, public_jwk
+
+
+@pytest.fixture()
+def jwks_dict(signing_keypair) -> dict[str, Any]:
+    _, public_jwk = signing_keypair
+    return {"keys": [public_jwk]}
+
+
+@pytest.fixture()
+def sign_jwt(signing_keypair) -> Callable[..., str]:
+    """Returns a function that signs an EdDSA JWT with the test key."""
+    private_pem, _ = signing_keypair
+
+    def _sign(
+        claims: dict[str, Any], *, kid: str = _TEST_KID, alg: str = "EdDSA"
+    ) -> str:
+        return _jwt_lib.encode(claims, private_pem, algorithm=alg, headers={"kid": kid})
+
+    return _sign
+
+
+@pytest.fixture()
+def jwks_client_factory(jwks_dict) -> Callable[[], _httpx_for_jwt.AsyncClient]:
+    """A factory returning httpx clients whose MockTransport serves the JWKS."""
+
+    def _factory() -> _httpx_for_jwt.AsyncClient:
+        def _handler(_req: _httpx_for_jwt.Request) -> _httpx_for_jwt.Response:
+            return _httpx_for_jwt.Response(200, json=jwks_dict)
+
+        return _httpx_for_jwt.AsyncClient(
+            transport=_httpx_for_jwt.MockTransport(_handler)
+        )
+
+    return _factory
+
+
+def _now_ts() -> int:
+    return int(datetime.now(timezone.utc).timestamp())
+
+
+@pytest.fixture()
+def base_claims() -> Callable[..., dict[str, Any]]:
+    """Builds a minimal valid claim set, allowing per-test overrides."""
+
+    def _make(
+        *,
+        sub: str | None = None,
+        iss: str = "https://issuer.example.com",
+        aud: str | Iterable[str] = "https://api.example.com",
+        exp_offset_seconds: int = 300,
+        scope: str | None = None,
+        scopes: list[str] | None = None,
+    ) -> dict[str, Any]:
+        import uuid
+
+        claims: dict[str, Any] = {
+            "sub": sub or str(uuid.uuid4()),
+            "iss": iss,
+            "aud": list(aud) if not isinstance(aud, str) else aud,
+            "exp": _now_ts() + exp_offset_seconds,
+            "iat": _now_ts(),
+        }
+        if scope is not None:
+            claims["scope"] = scope
+        if scopes is not None:
+            claims["scopes"] = scopes
+        return claims
+
+    return _make
