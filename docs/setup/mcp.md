@@ -35,13 +35,21 @@ That's it. No API key field.
 
 ## ChatGPT (web)
 
-1. **Settings → Connectors → Add MCP server**
-2. Paste `https://mcp.hail.so`
+Custom MCP connectors live behind Developer Mode on ChatGPT today:
+
+1. **Settings → Connectors → Advanced → Developer mode**
+2. **Create** → paste `https://mcp.hail.so`
 3. Save. ChatGPT walks you through the OAuth consent on first call.
 
 ## Other clients
 
 The [client picker](https://hail.so/mcp) has setup snippets for Cursor, Gemini, Windsurf, Copilot, Zed, Raycast, and Claude Desktop. All follow the same shape: paste URL, click Allow.
+
+## Authorized apps
+
+Each cloud client you connect appears as a row at [`hail.so/console/apps`](https://hail.so/console/apps). Revoke deletes the consent + every active access and refresh token for that client; the client's next tool call returns 401 and re-runs OAuth from scratch.
+
+Access tokens last 30 days, refresh tokens 180. In practice you'll re-authorize each client roughly every six months — the consent screen pops, you click **Allow**, and the client resumes.
 
 ## Self-host
 
