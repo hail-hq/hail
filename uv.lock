@@ -1043,6 +1043,7 @@ dependencies = [
     { name = "fastapi" },
     { name = "greenlet" },
     { name = "hailhq-core" },
+    { name = "httpx" },
     { name = "psycopg", extra = ["binary"] },
     { name = "pydantic" },
     { name = "pyjwt", extra = ["crypto"] },
@@ -1052,7 +1053,6 @@ dependencies = [
 
 [package.optional-dependencies]
 dev = [
-    { name = "httpx" },
     { name = "mypy" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
@@ -1067,7 +1067,7 @@ requires-dist = [
     { name = "fastapi", specifier = ">=0.115" },
     { name = "greenlet", specifier = ">=3.0" },
     { name = "hailhq-core", editable = "core" },
-    { name = "httpx", marker = "extra == 'dev'" },
+    { name = "httpx", specifier = ">=0.27" },
     { name = "mypy", marker = "extra == 'dev'" },
     { name = "psycopg", extras = ["binary"], specifier = ">=3.2" },
     { name = "pydantic", specifier = ">=2.9" },
