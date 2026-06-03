@@ -123,3 +123,12 @@ jobs:
 
             $COMPOSE up -d --remove-orphans
             $COMPOSE ps
+
+            # Restore main so operators SSHing the VM see a normal branch
+            # state. Deploy work above ran against the detached SHA; this
+            # only moves the symbolic ref. Skip if origin/main moved past
+            # the deployed SHA mid-flight so the tree stays in lockstep
+            # with the image rolled.
+            if [ "$(git rev-parse origin/main)" = "$DEPLOY_GITHUB_SHA" ]; then
+              git checkout main
+            fi
