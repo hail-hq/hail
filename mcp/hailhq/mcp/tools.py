@@ -22,22 +22,26 @@ for ``get_events`` is still checked locally via ``parse_resource_id``.
 
 The five tool functions are kept module-importable so unit tests can
 call them directly with a constructed ``HailClient``; ``register_tools``
-is the FastMCP wiring step. Nothing in this module holds module-level
-state — the SDK (Task 11) and the MCP service therefore never share a
-client by accident.
+is the FastMCP wiring step. Each registered tool closure accepts a
+FastMCP ``Context`` (auto-injected on dispatch) and uses the
+``_client_for`` async context manager to obtain a per-call ``HailClient``
+(oauth-rs mode, built from the inbound bearer) or the shared singleton
+(static-key mode).
 """
 
 from __future__ import annotations
 
+import contextlib
 import uuid
+from collections.abc import AsyncIterator
 from typing import Any
 
+from mcp.server.fastmcp import Context, FastMCP
 from pydantic import ValidationError
-
-from mcp.server.fastmcp import FastMCP
 
 from hailhq.core.schemas import parse_resource_id
 
+from hailhq.mcp.auth import AuthMode
 from hailhq.mcp.hail_client import HailAPIError, HailClient
 
 # --------------------------------------------------------------------------- #
@@ -48,7 +52,10 @@ from hailhq.mcp.hail_client import HailAPIError, HailClient
 def _format_api_error(exc: HailAPIError) -> dict[str, Any]:
     status = exc.status
     if status == 401:
-        return {"error": "auth failed: check HAIL_API_KEY"}
+        # Generic — the message surfaces to LLM agents in both oauth-rs
+        # (token bad/expired) and static-key (HAIL_API_KEY wrong) modes.
+        # Naming a specific env var would mislead the cloud user.
+        return {"error": "auth failed: token rejected by Hail API"}
     if status == 404:
         return {"error": "resource not found"}
     if status in (409, 422, 503):
@@ -202,20 +209,94 @@ async def get_events(
 
 
 # --------------------------------------------------------------------------- #
-# FastMCP registration.
+# Per-tool-call client helper.
 #
-# We register thin wrappers that close over ``client`` rather than the
-# module-level functions directly — FastMCP derives the JSON schema from
-# the *registered* function's signature, and we want the agent-facing
-# signature to omit the ``client`` argument (it's an injected dep).
+# Tools are oblivious to the active auth mode: ``_client_for`` either
+# builds a fresh ``HailClient`` from the inbound JWT (oauth-rs) or yields
+# the shared singleton (static-key). The helper lives here, next to the
+# tool wiring, so the registration loop can call it uniformly.
 # --------------------------------------------------------------------------- #
 
 
-def register_tools(mcp_app: FastMCP, client: HailClient) -> None:
-    """Register the five Hail tools on a FastMCP app."""
+def _bearer_from_ctx(ctx: Context) -> str:
+    """Extract the Bearer token from FastMCP's request context.
+
+    The lookup is case-insensitive (Starlette's ``Headers`` already lowercases
+    on read, but a plain ``dict`` may not). A missing or malformed header
+    raises ``RuntimeError``; the tool wrapper catches that and returns a
+    structured ``{"error": ...}`` to the agent rather than 500-ing.
+    """
+    headers = ctx.request_context.request.headers
+    raw = headers.get("authorization") or headers.get("Authorization") or ""
+    if not raw:
+        raise RuntimeError("missing Authorization header on MCP request")
+    parts = raw.split(" ", 1)
+    if len(parts) != 2 or parts[0].lower() != "bearer" or not parts[1].strip():
+        raise RuntimeError("missing Authorization Bearer token on MCP request")
+    return parts[1].strip()
+
+
+@contextlib.asynccontextmanager
+async def _client_for(
+    ctx: Context,
+    *,
+    mode: AuthMode,
+    singleton: HailClient | None,
+) -> AsyncIterator[HailClient]:
+    """Yield a HailClient appropriate to the active auth mode.
+
+    oauth-rs: build a per-call client from the inbound Authorization
+    bearer (a JWT minted by hail-website's Better Auth oauth-provider).
+    The client closes its httpx pool on context exit.
+
+    static-key: yield the shared singleton without closing it on exit
+    (its httpx pool lives for the lifetime of the process).
+    """
+    if mode is AuthMode.OAUTH_RS:
+        bearer = _bearer_from_ctx(ctx)
+        client = HailClient(api_key=bearer)
+        try:
+            yield client
+        finally:
+            await client.aclose()
+        return
+
+    # static-key
+    if singleton is None:  # defensive — server.py wires this
+        raise RuntimeError("static-key mode requires a singleton HailClient")
+    yield singleton
+
+
+# --------------------------------------------------------------------------- #
+# FastMCP registration.
+#
+# We register thin wrappers that delegate to the module-level domain
+# functions — FastMCP derives the JSON schema from the *registered*
+# function's signature, and we want the agent-facing signature to omit
+# the ``client`` argument (it's resolved per-call by ``_client_for``).
+# Each closure takes a ``ctx: Context`` first param (FastMCP auto-injects
+# it) and wraps the delegation in ``async with _client_for(ctx, ...)``.
+# A ``RuntimeError`` from ``_client_for`` (missing/malformed bearer in
+# oauth-rs mode) is caught and surfaced as a structured tool error.
+# --------------------------------------------------------------------------- #
+
+
+def register_tools(
+    mcp_app: FastMCP,
+    *,
+    mode: AuthMode,
+    singleton: HailClient | None,
+) -> None:
+    """Register the five Hail tools on a FastMCP app.
+
+    Tools accept a FastMCP ``Context`` parameter (auto-injected). The
+    ``_client_for`` helper picks the right HailClient for the active mode
+    — per-tool-call in oauth-rs, shared singleton in static-key.
+    """
 
     @mcp_app.tool(name="place_call")
     async def place_call_tool(
+        ctx: Context,
         to: str,
         system_prompt: str | None = None,
         llm: dict[str, Any] | None = None,
@@ -251,19 +332,24 @@ def register_tools(mcp_app: FastMCP, client: HailClient) -> None:
         from_e164, to_e164, ...). On failure returns
         ``{"error": "<message>"}`` instead.
         """
-        return await place_call(
-            client=client,
-            to=to,
-            system_prompt=system_prompt,
-            llm=llm,
-            from_=from_,
-            first_message=first_message,
-            metadata=metadata,
-            idempotency_key=idempotency_key,
-        )
+        try:
+            async with _client_for(ctx, mode=mode, singleton=singleton) as client:
+                return await place_call(
+                    client=client,
+                    to=to,
+                    system_prompt=system_prompt,
+                    llm=llm,
+                    from_=from_,
+                    first_message=first_message,
+                    metadata=metadata,
+                    idempotency_key=idempotency_key,
+                )
+        except RuntimeError as exc:
+            return {"error": str(exc)}
 
     @mcp_app.tool(name="send_email")
     async def send_email_tool(
+        ctx: Context,
         to: list[str],
         subject: str,
         body_text: str | None = None,
@@ -310,22 +396,26 @@ def register_tools(mcp_app: FastMCP, client: HailClient) -> None:
         to_addresses, sent_at, provider_message_id, ...). On failure
         returns ``{"error": "<message>"}`` instead.
         """
-        return await send_email(
-            client=client,
-            to=to,
-            subject=subject,
-            body_text=body_text,
-            body_html=body_html,
-            from_=from_,
-            cc=cc,
-            bcc=bcc,
-            reply_to=reply_to,
-            metadata=metadata,
-            idempotency_key=idempotency_key,
-        )
+        try:
+            async with _client_for(ctx, mode=mode, singleton=singleton) as client:
+                return await send_email(
+                    client=client,
+                    to=to,
+                    subject=subject,
+                    body_text=body_text,
+                    body_html=body_html,
+                    from_=from_,
+                    cc=cc,
+                    bcc=bcc,
+                    reply_to=reply_to,
+                    metadata=metadata,
+                    idempotency_key=idempotency_key,
+                )
+        except RuntimeError as exc:
+            return {"error": str(exc)}
 
     @mcp_app.tool(name="get_call")
-    async def get_call_tool(call_id: str) -> dict[str, Any]:
+    async def get_call_tool(ctx: Context, call_id: str) -> dict[str, Any]:
         """Fetch the current state of one call by id.
 
         Use this after ``place_call`` (or to check on any prior call)
@@ -334,10 +424,15 @@ def register_tools(mcp_app: FastMCP, client: HailClient) -> None:
         Returns the API's ``CallResponse`` as a dict, or
         ``{"error": "call not found"}`` for an unknown id.
         """
-        return await get_call(client=client, call_id=call_id)
+        try:
+            async with _client_for(ctx, mode=mode, singleton=singleton) as client:
+                return await get_call(client=client, call_id=call_id)
+        except RuntimeError as exc:
+            return {"error": str(exc)}
 
     @mcp_app.tool(name="list_calls")
     async def list_calls_tool(
+        ctx: Context,
         cursor: str | None = None,
         limit: int = 50,
         status: str | None = None,
@@ -352,12 +447,17 @@ def register_tools(mcp_app: FastMCP, client: HailClient) -> None:
 
         Returns a dict ``{"items": [...], "next_cursor": <str|None>}``.
         """
-        return await list_calls(
-            client=client, cursor=cursor, limit=limit, status=status, to=to
-        )
+        try:
+            async with _client_for(ctx, mode=mode, singleton=singleton) as client:
+                return await list_calls(
+                    client=client, cursor=cursor, limit=limit, status=status, to=to
+                )
+        except RuntimeError as exc:
+            return {"error": str(exc)}
 
     @mcp_app.tool(name="get_events")
     async def get_events_tool(
+        ctx: Context,
         id: str | None = None,
         kind: str | None = None,
         cursor: str | None = None,
@@ -388,9 +488,13 @@ def register_tools(mcp_app: FastMCP, client: HailClient) -> None:
         "call_status": <str|None>}`` on success, or
         ``{"error": ...}`` on a malformed ``id`` or upstream failure.
         """
-        return await get_events(
-            client=client, id=id, kind=kind, cursor=cursor, limit=limit
-        )
+        try:
+            async with _client_for(ctx, mode=mode, singleton=singleton) as client:
+                return await get_events(
+                    client=client, id=id, kind=kind, cursor=cursor, limit=limit
+                )
+        except RuntimeError as exc:
+            return {"error": str(exc)}
 
 
 __all__ = [

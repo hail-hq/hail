@@ -1,11 +1,18 @@
-"""Hail MCP server — remote app exposing both MCP transports.
+"""Hail MCP server — Streamable HTTP only, mode-dispatched at boot.
 
 The deployable artifact is ``app``. FastMCP serves Streamable HTTP at
-``/`` (root — the service runs on a dedicated MCP subdomain, so the
-endpoint is the bare host URL, not ``/mcp``) and legacy SSE at ``/sse``
-+ ``/messages/`` during the transition window. We add ``/healthz`` to the
-same Starlette app so the compose healthcheck stays a one-line probe
-instead of spawning an MCP handshake per check.
+``/`` (root — the service runs on a dedicated MCP subdomain so the
+endpoint is the bare host URL). ``/healthz`` is mounted on the same
+Starlette parent app so the compose healthcheck stays a one-line probe.
+
+Two boot modes (see ``hailhq.mcp.auth.select_auth_mode``):
+
+* **oauth-rs** — FastMCP receives ``AuthSettings`` + a pass-through
+  ``TokenVerifier``. FastMCP auto-mounts
+  ``/.well-known/oauth-protected-resource`` and rejects bearer-less
+  requests with ``401 WWW-Authenticate: Bearer resource_metadata=...``.
+* **static-key** — no FastMCP auth, no protected-resource route. Tools
+  use the shared ``HAIL_API_KEY`` singleton (unchanged from pre-1c).
 
 Streamable HTTP needs its session manager running for the lifetime of
 the app. ``FastMCP.streamable_http_app()`` wires that into its own
@@ -18,38 +25,49 @@ from __future__ import annotations
 import contextlib
 from collections.abc import AsyncIterator
 
+from mcp.server.auth.settings import AuthSettings
 from mcp.server.fastmcp import FastMCP
 from starlette.applications import Starlette
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 from starlette.routing import Route
 
+from hailhq.core.config import settings
+from hailhq.mcp.auth import AuthMode, PassThroughVerifier, select_auth_mode
 from hailhq.mcp.hail_client import HailClient
 from hailhq.mcp.tools import register_tools
 
 
-def _build_app() -> tuple[FastMCP, HailClient, Starlette]:
-    # streamable_http_path defaults to "/mcp"; the service runs on a
-    # dedicated MCP subdomain, so serve Streamable HTTP at the root to
-    # avoid a redundant /mcp segment in the public URL.
-    #
-    # host="0.0.0.0" matches the uvicorn bind and marks this as a public
-    # bind, so FastMCP skips the localhost-only DNS-rebinding guard it
-    # would otherwise auto-enable — that guard 421s the proxied public
-    # Host (e.g. mcp.hail.so). The guard protects browser-reachable
-    # localhost dev servers, which does not apply here: in prod the
-    # container binds loopback only (127.0.0.1:8081) and Caddy host-routes
-    # mcp.${HAIL_DOMAIN}. The server does not yet validate an inbound
-    # bearer — per-connection auth lands in Phase 1c; pinning allowed_hosts
-    # would add no real protection given the loopback bind.
-    mcp_app: FastMCP = FastMCP(name="hail", streamable_http_path="/", host="0.0.0.0")
-    client = HailClient()
-    register_tools(mcp_app, client)
+def _build_app() -> tuple[FastMCP, HailClient | None, Starlette]:
+    mode = select_auth_mode()
 
-    # Build both transports. streamable_http_app() lazily creates the
-    # session manager that the lifespan below runs; call it before the
-    # lifespan references mcp_app.session_manager.
-    sse_app = mcp_app.sse_app()  # /sse + /messages/
+    if mode is AuthMode.OAUTH_RS and not settings.mcp_resource_url:
+        raise RuntimeError("oauth-rs mode requires MCP_RESOURCE_URL to be set")
+
+    if mode is AuthMode.OAUTH_RS:
+        verifier = PassThroughVerifier(resource_server_url=settings.mcp_resource_url)
+        auth_settings = AuthSettings(
+            issuer_url=settings.hail_auth_url,
+            resource_server_url=settings.mcp_resource_url,
+            required_scopes=None,  # scope enforcement deferred to Phase 2
+        )
+        mcp_app: FastMCP = FastMCP(
+            name="hail",
+            streamable_http_path="/",
+            host="0.0.0.0",
+            token_verifier=verifier,
+            auth=auth_settings,
+        )
+        # Tools build per-call HailClient from ctx.request_context bearer;
+        # no module-level singleton in oauth-rs mode.
+        singleton: HailClient | None = None
+    else:
+        # static-key: pre-1c shape.
+        mcp_app = FastMCP(name="hail", streamable_http_path="/", host="0.0.0.0")
+        singleton = HailClient()
+
+    register_tools(mcp_app, mode=mode, singleton=singleton)
+
     http_app = mcp_app.streamable_http_app()  # / (root)
 
     async def healthz(_request: Request) -> Response:
@@ -60,24 +78,20 @@ def _build_app() -> tuple[FastMCP, HailClient, Starlette]:
         async with mcp_app.session_manager.run():
             yield
 
-    # NOTE: splatting sub_app.routes drops sub_app.user_middleware. Both
-    # middleware lists are empty today (no auth configured). Phase 1c
-    # (oauth-rs mode) configures a token verifier, which makes FastMCP add
-    # AuthenticationMiddleware + AuthContextMiddleware inside sse_app() /
-    # streamable_http_app() — that spec must either fold sub_app.user_middleware
-    # in here or switch to a FastMCP-owned app with a different combining strategy.
+    # Splatting sub_app.routes drops sub_app.user_middleware. FastMCP
+    # adds AuthenticationMiddleware + AuthContextMiddleware *inside*
+    # streamable_http_app() when auth is configured — those land on
+    # http_app.user_middleware, NOT on its routes. Fold them into the
+    # parent app's middleware stack so 401-with-WWW-Authenticate fires
+    # before any route resolution.
     app = Starlette(
-        routes=[
-            Route("/healthz", healthz, methods=["GET"]),
-            *sse_app.routes,
-            *http_app.routes,
-        ],
+        routes=[Route("/healthz", healthz, methods=["GET"]), *http_app.routes],
+        middleware=list(http_app.user_middleware),
         lifespan=lifespan,
     )
-    return mcp_app, client, app
+    return mcp_app, singleton, app
 
 
 mcp_app, hail_client, app = _build_app()
-
 
 __all__ = ["app", "mcp_app", "hail_client"]

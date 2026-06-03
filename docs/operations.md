@@ -154,6 +154,19 @@ Callers can't address a pool number explicitly with `POST /calls`'s `from` field
 
 Run `hail login`. The CLI opens `/device` on the website, you approve, and it exchanges the device-flow session for a long-lived `hl_live_*` key minted by the auth backend into the `apikey` table. `hail/api` reads the same table — keys minted in the console work everywhere (CLI, MCP, direct API calls).
 
+### MCP modes
+
+The MCP service (`hail/mcp`) picks one of two modes at boot from env:
+
+| Mode           | Env                                                            | Behaviour                                                                                                                                                                                  |
+| -------------- | -------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **oauth-rs**   | `HAIL_AUTH_URL` + `MCP_RESOURCE_URL` set, `HAIL_API_KEY` empty | FastMCP rejects unauth requests with `401 WWW-Authenticate: Bearer resource_metadata=…`; tools forward each request's JWT to the API; `.well-known/oauth-protected-resource` is published. |
+| **static-key** | `HAIL_API_KEY` set, `HAIL_AUTH_URL` empty                      | No inbound auth; tools use the singleton `HailClient(api_key=HAIL_API_KEY)`; no protected-resource route.                                                                                  |
+
+Both set → boot fails with `ambiguous MCP auth config`. Neither set → boot fails with `MCP auth not configured`. The mode is decided once and cannot change without restart.
+
+The MCP service does not validate JWT signatures — `hail/api` is the single source of JWT-validation truth (`HAIL_AUTH_URL`, `HAIL_AUTH_AUDIENCES`). MCP forwards the bearer onto the outbound call; the API validates and resolves the org.
+
 ## Database migrations
 
 Schema lives in `api/migrations/versions/`. Alembic config: `api/alembic.ini`. The `DATABASE_URL` env var overrides `sqlalchemy.url`.

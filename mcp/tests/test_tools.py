@@ -481,7 +481,7 @@ async def test_api_error_mapping_401(client: HailClient) -> None:
         return_value=httpx.Response(401, json={"detail": "bad key"})
     )
     result = await tools.place_call(client=client, to="+14155559999", system_prompt="x")
-    assert result == {"error": "auth failed: check HAIL_API_KEY"}
+    assert result == {"error": "auth failed: token rejected by Hail API"}
 
 
 @respx.mock
