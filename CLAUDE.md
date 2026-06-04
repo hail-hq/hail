@@ -44,6 +44,7 @@ Go CLI module path is `github.com/hail-hq/hail/cli`. npm packages are published 
 - **Shared models go in `core/`.** No duplicated Call/SMS/Email schemas across services.
 - **AGPLv3.** Any derived SaaS must release source. Be conservative about copying third-party code.
 - **Docs are agent-first.** When writing or updating any doc: lead with a concrete runnable example, link canonical sources (OpenAPI spec, MCP tool schemas, code paths) instead of paraphrasing them, and avoid screenshots when a snippet would work. Use GitHub-flavored Markdown.
+- **URLs are not strings.** Use [`hailhq.core.urls`](core/hailhq/core/urls.py) helpers (`canonical_url`, `url_variants`, `join_url`) — never f-string `{base}/{path}`, never raw `==` against a URL minted by another service, never `.rstrip("/")` ad-hoc. Pydantic adds trailing slashes to root URLs; Node TS doesn't; OAuth audience checks are exact-string equality. Skipping this has cost us OAuth flows already (consent succeeded, token endpoint rejected `resource=https://mcp.hail.so/` because hail-website held `https://mcp.hail.so`). If a URL crosses a language boundary and lands in any comparison, reach for the helpers.
 
 ## Dev commands
 

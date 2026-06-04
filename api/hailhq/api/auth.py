@@ -30,6 +30,7 @@ import jwt
 from jwt import PyJWK
 
 from hailhq.core.config import settings
+from hailhq.core.urls import join_url
 
 # --------------------------------------------------------------------------- #
 # API-key hashing (unchanged).
@@ -155,11 +156,11 @@ def jwks_url_from_auth_url(auth_url: str) -> str:
 
     Better Auth mounts its JWKS at ``${baseURL}/jwks``; since the auth
     backend's ``baseURL`` is what we treat as the issuer (``hail_auth_url``),
-    the JWKS URL is a trivial suffix. Splitting this out lets tests
-    monkeypatch a single value and lets the MCP service share the same
-    derivation later.
+    the JWKS URL is a trivial suffix. ``join_url`` strips any trailing
+    slash on the auth URL before appending ``jwks`` — see
+    ``hailhq.core.urls`` for why we don't trust raw string concatenation.
     """
-    return f"{auth_url.rstrip('/')}/jwks"
+    return join_url(auth_url, "jwks")
 
 
 def get_jwks_cache() -> JWKSCache | None:

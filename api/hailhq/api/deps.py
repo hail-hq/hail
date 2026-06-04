@@ -35,6 +35,7 @@ from hailhq.api.auth import (
     verify_jwt,
 )
 from hailhq.core.config import settings
+from hailhq.core.urls import url_variants
 from hailhq.core.db import get_session, session_scope
 from hailhq.core.models import ApiKey, OrganizationMember
 
@@ -215,7 +216,16 @@ def _jwt_configured() -> bool:
 
 
 def _allowed_audiences() -> list[str]:
-    return [a.strip() for a in settings.hail_auth_audiences.split(",") if a.strip()]
+    """Parse the configured audiences and expand each to its slash variants.
+
+    JWT ``aud`` claims come back to us via tokens minted by hail-website's
+    Better Auth oauth-provider, which echoes whatever ``resource=`` Claude
+    sent at the token endpoint. Pydantic on the MCP side normalizes that
+    resource URL to include a trailing slash, so we tolerate both forms.
+    See ``hailhq.core.urls`` for the cross-language rationale.
+    """
+    raw = [a.strip() for a in settings.hail_auth_audiences.split(",") if a.strip()]
+    return [v for aud in raw for v in url_variants(aud)]
 
 
 def _scopes_from_jwt(claims: dict) -> list[str]:

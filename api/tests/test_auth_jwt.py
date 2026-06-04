@@ -372,6 +372,39 @@ async def test_jwt_path_happy_resolves_to_org(
     assert body["scopes"] == ["*"]
 
 
+async def test_jwt_path_accepts_trailing_slash_audience(
+    monkeypatch,
+    jwks_client_factory,
+    base_claims,
+    sign_jwt,
+    jwt_member_pair,
+    async_session: AsyncSession,
+):
+    """Regression: pydantic ``AnyHttpUrl`` on the Python MCP side normalizes
+    the resource URL to add a trailing slash, so JWTs minted via the MCP
+    flow can arrive with ``aud="https://api.example.com/"`` even when
+    ``HAIL_AUTH_AUDIENCES`` is configured without the slash. The audience
+    helper expands both forms via ``hailhq.core.urls.url_variants``; this
+    pins that behavior so a future refactor that drops the expansion
+    re-introduces the OAuth-token-endpoint bug fixed this session.
+    """
+    _configure_env(monkeypatch)
+    _install_test_jwks(monkeypatch, jwks_client_factory)
+
+    user_id, organization_id = jwt_member_pair
+    token = sign_jwt(
+        base_claims(
+            sub=str(user_id), aud="https://api.example.com/"
+        )  # ← trailing slash
+    )
+
+    transport = httpx.ASGITransport(app=_whoami_app(async_session))
+    async with httpx.AsyncClient(transport=transport, base_url="http://t") as client:
+        resp = await client.get("/whoami", headers={"Authorization": f"Bearer {token}"})
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["organization_id"] == str(organization_id)
+
+
 async def test_jwt_path_unknown_sub_returns_403(
     monkeypatch,
     jwks_client_factory,
