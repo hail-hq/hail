@@ -25,10 +25,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from hailhq.core.models import Call, CallEvent, PhoneNumber, UsageEvent
 from hailhq.core.pool import CALL_META_FROM_POOL
 from hailhq.voicebot.agent import (
+    SIP_CALL_STATUS_ACTIVE,
+    SIP_CALL_STATUS_ATTRIBUTE,
     SOFT_CAP_ANNOUNCEMENT,
     SOFT_CAP_END_REASON,
+    VOICE_PREAMBLE,
     attach_event_handlers,
+    build_instructions,
     disconnect_reason_to_status,
+    is_sip_answer_signal,
+    mark_call_answered,
     on_call_end,
     parse_metadata,
     soft_cap_announce_and_hangup,
@@ -56,6 +62,48 @@ def test_metadata_parser_rejects_empty_string() -> None:
     """Empty/None metadata is treated as ``{}`` -> missing ``call_id``."""
     with pytest.raises(ValueError, match="call_id"):
         parse_metadata(None)
+
+
+# --------------------------------------------------------------------------- #
+# Voice-call instruction assembly (Bug 2 — agent must not claim to be text-based)
+# --------------------------------------------------------------------------- #
+
+
+def test_build_instructions_prepends_preamble_to_caller_prompt() -> None:
+    """The fixed voice preamble always leads; the caller prompt follows it."""
+    caller = "You are calling Dr. Lee's office to book a teeth cleaning."
+    out = build_instructions(caller)
+
+    assert out.startswith(VOICE_PREAMBLE)
+    assert caller in out
+    # Preamble precedes the caller prompt — it frames, never gets replaced.
+    assert out.index(VOICE_PREAMBLE) < out.index(caller)
+
+
+def test_build_instructions_present_without_caller_prompt() -> None:
+    """A missing/empty caller prompt still yields the voice framing.
+
+    This is the exact condition behind the bug: no caller framing → the model
+    defaulted to a generic chat-assistant self-concept.
+    """
+    assert build_instructions(None) == VOICE_PREAMBLE
+    assert build_instructions("") == VOICE_PREAMBLE
+    assert VOICE_PREAMBLE.strip(), "preamble must be non-empty"
+
+
+def test_voice_preamble_frames_the_channel() -> None:
+    """The preamble explicitly addresses the observed failure modes."""
+    low = VOICE_PREAMBLE.lower()
+    # Forbids the exact phrasing the agent used on the bad call.
+    assert "text-based" in low
+    # Establishes the telephone/voice channel.
+    assert "telephone" in low or "phone call" in low
+    assert "speech-to-text" in low and "text-to-speech" in low
+    # Never claim to be human.
+    assert "human" in low
+    # No emoji — the real TTS fix (stripping the stored transcript would not
+    # change what the LLM hands the TTS engine).
+    assert "emoji" in low
 
 
 class _FakeSession:
@@ -336,6 +384,272 @@ def test_disconnect_reason_mapping(
 
 
 # --------------------------------------------------------------------------- #
+# SIP answer signal → in_progress + answered_at (Bug 1a)
+# --------------------------------------------------------------------------- #
+
+
+def _fake_participant(kind: int, call_status: str | None) -> SimpleNamespace:
+    attrs = {} if call_status is None else {SIP_CALL_STATUS_ATTRIBUTE: call_status}
+    return SimpleNamespace(kind=kind, attributes=attrs)
+
+
+@pytest.mark.parametrize(
+    "kind,call_status,expected",
+    [
+        # SIP participant whose call went active = the callee answered.
+        (rtc.ParticipantKind.PARTICIPANT_KIND_SIP, SIP_CALL_STATUS_ACTIVE, True),
+        # Still dialing — not answered yet.
+        (rtc.ParticipantKind.PARTICIPANT_KIND_SIP, "dialing", False),
+        # No status attribute yet.
+        (rtc.ParticipantKind.PARTICIPANT_KIND_SIP, None, False),
+        # The agent's own participant going active is not a callee answer.
+        (rtc.ParticipantKind.PARTICIPANT_KIND_AGENT, SIP_CALL_STATUS_ACTIVE, False),
+        (rtc.ParticipantKind.PARTICIPANT_KIND_STANDARD, SIP_CALL_STATUS_ACTIVE, False),
+    ],
+)
+def test_is_sip_answer_signal(
+    kind: int, call_status: str | None, expected: bool
+) -> None:
+    assert is_sip_answer_signal(_fake_participant(kind, call_status)) is expected
+
+
+async def test_mark_call_answered_transitions_to_in_progress(
+    async_session: AsyncSession,
+) -> None:
+    """Pickup flips dialing → in_progress, stamps answered_at, logs the event."""
+    call_id = await _make_call_row(async_session)  # status='dialing'
+    before = datetime.now(timezone.utc)
+
+    await mark_call_answered(call_id)
+
+    refreshed = (
+        await async_session.execute(select(Call).where(Call.id == call_id))
+    ).scalar_one()
+    await async_session.refresh(refreshed)
+    assert refreshed.status == "in_progress"
+    assert refreshed.answered_at is not None
+    assert refreshed.answered_at >= before
+
+    events = (
+        (
+            await async_session.execute(
+                select(CallEvent).where(
+                    CallEvent.call_id == call_id, CallEvent.kind == "state_change"
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert len(events) == 1
+    assert events[0].payload == {"from": "dialing", "to": "in_progress"}
+
+
+async def test_mark_call_answered_is_idempotent(async_session: AsyncSession) -> None:
+    """A duplicate attribute event must not re-stamp or double-log."""
+    call_id = await _make_call_row(async_session)
+
+    await mark_call_answered(call_id)
+    refreshed = (
+        await async_session.execute(select(Call).where(Call.id == call_id))
+    ).scalar_one()
+    await async_session.refresh(refreshed)
+    first_answered_at = refreshed.answered_at
+
+    await mark_call_answered(call_id)
+    refreshed2 = (
+        await async_session.execute(select(Call).where(Call.id == call_id))
+    ).scalar_one()
+    await async_session.refresh(refreshed2)
+    assert refreshed2.status == "in_progress"
+    assert refreshed2.answered_at == first_answered_at  # unchanged
+
+    events = (
+        (
+            await async_session.execute(
+                select(CallEvent).where(
+                    CallEvent.call_id == call_id, CallEvent.kind == "state_change"
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert len(events) == 1, "second answer must not write a second state_change"
+
+
+async def test_mark_call_answered_returns_false_when_no_transition(
+    async_session: AsyncSession,
+) -> None:
+    """The return value reports whether a row actually transitioned.
+
+    The entrypoint latches its dedupe flag on a True return only, so a second
+    (already-answered) signal must report False.
+    """
+    call_id = await _make_call_row(async_session)
+    assert await mark_call_answered(call_id) is True
+    assert await mark_call_answered(call_id) is False  # already in_progress
+
+
+async def test_on_call_end_noops_when_reconciler_already_closed(
+    async_session: AsyncSession,
+) -> None:
+    """A late on_call_end after the sweeper force-closed a call must not clobber.
+
+    Regression for the unguarded terminal write: an un-hung worker running
+    on_call_end after sweep_stale_calls failed the row must NOT overwrite the
+    outcome back to 'completed', must NOT emit a second contradictory
+    state_change, and must NOT write a (duplicate) usage_events row —
+    usage_events.ref carries no unique constraint, so nothing else stops it.
+    """
+    call_id = await _make_call_row(async_session)
+    # The call had been answered (so on_call_end would otherwise bill it)...
+    await async_session.execute(
+        update(Call)
+        .where(Call.id == call_id)
+        .values(
+            status="in_progress",
+            answered_at=datetime.now(timezone.utc) - timedelta(seconds=90),
+        )
+    )
+    await async_session.commit()
+    # ...then the reconciler force-closed it (as sweep_stale_calls would).
+    await async_session.execute(
+        update(Call)
+        .where(Call.id == call_id)
+        .values(
+            status="failed",
+            end_reason="sweeper_timeout",
+            ended_at=datetime.now(timezone.utc),
+        )
+    )
+    await async_session.commit()
+
+    await on_call_end(call_id, room_name=f"hail-{call_id}")
+
+    refreshed = (
+        await async_session.execute(select(Call).where(Call.id == call_id))
+    ).scalar_one()
+    await async_session.refresh(refreshed)
+    # Outcome preserved — not reverted to completed/normal_hangup.
+    assert refreshed.status == "failed"
+    assert refreshed.end_reason == "sweeper_timeout"
+
+    # No state_change emitted by on_call_end (it no-oped).
+    events = (
+        (
+            await async_session.execute(
+                select(CallEvent).where(
+                    CallEvent.call_id == call_id, CallEvent.kind == "state_change"
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert events == []
+
+    # No spurious bill for a call the reconciler already failed.
+    usage = (
+        (
+            await async_session.execute(
+                select(UsageEvent).where(UsageEvent.ref == str(call_id))
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert usage == []
+
+
+async def test_mark_call_answered_noops_on_terminal_call(
+    async_session: AsyncSession,
+) -> None:
+    """A late answer signal must never resurrect an already-closed call."""
+    call_id = await _make_call_row(async_session)
+    # Race: on_call_end already wrote a terminal status (e.g. fast hangup).
+    await async_session.execute(
+        update(Call)
+        .where(Call.id == call_id)
+        .values(status="completed", end_reason="normal_hangup", answered_at=None)
+    )
+    await async_session.commit()
+
+    await mark_call_answered(call_id)
+
+    refreshed = (
+        await async_session.execute(select(Call).where(Call.id == call_id))
+    ).scalar_one()
+    await async_session.refresh(refreshed)
+    assert refreshed.status == "completed"  # not clobbered back to in_progress
+    assert refreshed.answered_at is None
+
+    events = (
+        (
+            await async_session.execute(
+                select(CallEvent).where(
+                    CallEvent.call_id == call_id, CallEvent.kind == "state_change"
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert events == []
+
+
+async def test_call_lifecycle_dialing_to_completed_integration(
+    async_session: AsyncSession,
+) -> None:
+    """End-to-end walk: dialing → in_progress (pickup) → completed (hangup).
+
+    The spec's headline test: a completed call must pass through ``in_progress``
+    and carry a non-null ``answered_at``. Drives the real functions in sequence
+    (no live room needed) and asserts ``answered_at`` is stamped on pickup AND
+    survives ``on_call_end`` — plus the full state_change trail, the regression
+    that previously left finished calls looking stuck at 'dialing'.
+    """
+    call_id = await _make_call_row(async_session)  # status='dialing'
+
+    # Pickup.
+    await mark_call_answered(call_id)
+    mid = (
+        await async_session.execute(select(Call).where(Call.id == call_id))
+    ).scalar_one()
+    await async_session.refresh(mid)
+    assert mid.status == "in_progress"
+    assert mid.answered_at is not None
+    answered_at = mid.answered_at
+
+    # Hangup.
+    await on_call_end(call_id, room_name=f"hail-{call_id}")
+    final = (
+        await async_session.execute(select(Call).where(Call.id == call_id))
+    ).scalar_one()
+    await async_session.refresh(final)
+    assert final.status == "completed"
+    # answered_at must not be wiped by the terminal write.
+    assert final.answered_at == answered_at
+
+    events = (
+        (
+            await async_session.execute(
+                select(CallEvent)
+                .where(CallEvent.call_id == call_id, CallEvent.kind == "state_change")
+                .order_by(CallEvent.occurred_at)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    trail = [(e.payload["from"], e.payload["to"]) for e in events]
+    assert trail == [
+        ("dialing", "in_progress"),
+        ("in_progress", "completed"),
+    ]
+
+
+# --------------------------------------------------------------------------- #
 # on_call_end overrides (integration with the calls table)
 # --------------------------------------------------------------------------- #
 
@@ -398,6 +712,117 @@ async def test_on_call_end_no_usage_event_for_overridden_status(
         .all()
     )
     assert rows == [], "non-completed call should not write a usage row"
+
+
+async def test_on_call_end_emits_terminal_state_change_event(
+    async_session: AsyncSession,
+) -> None:
+    """on_call_end logs a state_change so observers see the terminal transition.
+
+    Without this, the only state_change ever emitted is queued→dialing (from
+    the API) — the symptom that made completed calls look stuck at 'dialing'.
+    """
+    call_id = await _make_call_row(async_session)  # status='dialing'
+    # Simulate a real conversation: the call had reached in_progress.
+    await async_session.execute(
+        update(Call)
+        .where(Call.id == call_id)
+        .values(status="in_progress", answered_at=datetime.now(timezone.utc))
+    )
+    await async_session.commit()
+
+    await on_call_end(call_id, room_name=f"hail-{call_id}")
+
+    events = (
+        (
+            await async_session.execute(
+                select(CallEvent).where(
+                    CallEvent.call_id == call_id, CallEvent.kind == "state_change"
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert len(events) == 1
+    assert events[0].payload == {
+        "from": "in_progress",
+        "to": "completed",
+        "reason": "normal_hangup",
+    }
+
+
+async def test_on_call_end_terminal_event_carries_override_reason(
+    async_session: AsyncSession,
+) -> None:
+    """A SIP-derived terminal status surfaces its real prior state + reason."""
+    call_id = await _make_call_row(async_session)  # status='dialing' (never answered)
+
+    await on_call_end(
+        call_id,
+        room_name=f"hail-{call_id}",
+        status_override="no_answer",
+        end_reason_override="user_unavailable",
+    )
+
+    events = (
+        (
+            await async_session.execute(
+                select(CallEvent).where(
+                    CallEvent.call_id == call_id, CallEvent.kind == "state_change"
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert len(events) == 1
+    assert events[0].payload == {
+        "from": "dialing",
+        "to": "no_answer",
+        "reason": "user_unavailable",
+    }
+
+
+async def test_on_call_end_bills_from_answered_at_when_present(
+    async_session: AsyncSession,
+) -> None:
+    """Duration is billed from pickup (answered_at), not dial time (started_at).
+
+    started_at is dial time; ring time is not billable. With answered_at set,
+    only the conversation after pickup is metered.
+    """
+    call_id = await _make_call_row(async_session)
+    now = datetime.now(timezone.utc)
+    await async_session.execute(
+        update(Call)
+        .where(Call.id == call_id)
+        .values(
+            status="in_progress",
+            started_at=now - timedelta(seconds=120),  # dialed 120s ago
+            answered_at=now - timedelta(seconds=30),  # picked up 30s ago
+        )
+    )
+    await async_session.commit()
+
+    await on_call_end(call_id, room_name=f"hail-{call_id}")
+
+    refreshed = (
+        await async_session.execute(select(Call).where(Call.id == call_id))
+    ).scalar_one()
+    usage = (
+        (
+            await async_session.execute(
+                select(UsageEvent).where(UsageEvent.ref == str(call_id))
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert len(usage) == 1
+    # ~30s billed (from pickup), NOT ~120s (from dial). Wide-ish band for slack.
+    assert 25_000 <= usage[0].units <= 35_000
+    assert refreshed.status == "completed"
 
 
 async def test_on_call_end_no_override_defaults_to_normal_hangup(

@@ -314,11 +314,16 @@ async def create_call(
         ) from exc
 
     # Success: update Call to dialing + insert state-change CallEvent.
+    # Guard on `status='queued'`: the voicebot owns the answer transition and,
+    # in the rare case the SIP leg goes active before this commit lands, will
+    # already have written `in_progress`. The guard makes this write lose that
+    # race cleanly instead of clobbering `in_progress` back to `dialing`. The
+    # event is emitted only when the row actually transitioned (rowcount).
     now = datetime.now(timezone.utc)
     sip_call_id = getattr(participant, "sip_call_id", None)
-    await db.execute(
+    result = await db.execute(
         update(Call)
-        .where(Call.id == call.id)
+        .where(Call.id == call.id, Call.status == "queued")
         .values(
             livekit_room=room_name,
             provider_call_sid=sip_call_id,
@@ -326,13 +331,14 @@ async def create_call(
             started_at=now,
         )
     )
-    db.add(
-        CallEvent(
-            call_id=call.id,
-            kind="state_change",
-            payload={"from": "queued", "to": "dialing"},
+    if (result.rowcount or 0) > 0:
+        db.add(
+            CallEvent(
+                call_id=call.id,
+                kind="state_change",
+                payload={"from": "queued", "to": "dialing"},
+            )
         )
-    )
     await db.commit()
     await db.refresh(call)
 

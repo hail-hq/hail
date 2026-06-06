@@ -36,8 +36,48 @@ from hailhq.core.db import session_scope
 from hailhq.core.internal_webhook import notify_usage_event_recorded
 from hailhq.core.pool import release_pool_reservation
 from hailhq.core.models import Call, CallEvent, UsageEvent
+from hailhq.core.schemas import TERMINAL_CALL_STATUSES
 from hailhq.voicebot.pipeline import build_session
 from hailhq.voicebot.recording import upload_recording
+
+# Fixed voice-context framing prepended to every agent's instructions. The
+# bundled fallback LLM (mode A) and a caller-supplied prompt both default to a
+# generic *chat* assistant self-concept; on a live call that produced an agent
+# insisting it was "text-based" and couldn't hear audio. This preamble always
+# leads the instructions (see `build_instructions`) so the caller's prompt
+# *adds to* the voice framing rather than replacing it. The no-emoji line is
+# the real fix for emoji reaching TTS: the LLM hands its raw text to the TTS
+# engine inside the pipeline, so we have to stop emission at the source — the
+# `conversation_item_added` transcript we store never touches TTS.
+VOICE_PREAMBLE = (
+    "You are on a live telephone call. You hear the other party through "
+    "speech-to-text and you reply through text-to-speech — you are a voice "
+    "assistant, not a text-based chat assistant. Never say you are "
+    '"text-based" or that you cannot hear audio; you can hear the caller. '
+    "You are an AI voice assistant placing this call on behalf of the person "
+    "who set it up. If asked, say that plainly, and never claim to be human. "
+    "Keep replies short — one or two spoken sentences — then pause to let the "
+    "other party respond. Speak in plain words only: no emoji, markdown, or "
+    "other symbols that cannot be read aloud."
+)
+
+
+def build_instructions(system_prompt: str | None) -> str:
+    """Assemble the agent's instructions: voice preamble first, caller prompt after.
+
+    The :data:`VOICE_PREAMBLE` is non-overridable framing — it always leads.
+    A caller-supplied ``system_prompt`` is appended after it (separated by a
+    blank line) so callers customize the task without losing the voice-call
+    self-concept. When the caller supplies nothing, the preamble alone is the
+    instruction set. Mode-agnostic: applies identically to the mode A fallback
+    chain and a mode B BYO endpoint, since instructions are wired once here
+    regardless of which LLM the session uses.
+    """
+    caller = (system_prompt or "").strip()
+    if not caller:
+        return VOICE_PREAMBLE
+    return f"{VOICE_PREAMBLE}\n\n{caller}"
+
 
 # Soft-cap announcement spoken when a call hits HAIL_VOICE_MAX_DURATION_SECONDS.
 # Phrased like an honest operator note rather than a robotic cutoff so the
@@ -78,6 +118,31 @@ _DISCONNECT_REASON_MAP: dict[int, tuple[str, CallEndReason]] = {
     ),
     rtc.DisconnectReason.MEDIA_FAILURE: ("failed", CallEndReason.MEDIA_FAILURE),
 }
+
+
+# LiveKit SIP participant attribute carrying the live call state. For an
+# outbound call it walks `dialing` → `active` when the callee picks up; `active`
+# is our answer signal. Verified 2026-06-05 against
+# docs.livekit.io/reference/telephony/sip-participant (SIP attributes table).
+# NB: `participant_connected` fires when the trunk *accepts the INVITE* (dial
+# time), not on pickup, so we key off this attribute reaching `active` rather
+# than the connect event.
+SIP_CALL_STATUS_ATTRIBUTE = "sip.callStatus"
+SIP_CALL_STATUS_ACTIVE = "active"
+
+
+def is_sip_answer_signal(participant: rtc.Participant) -> bool:
+    """True when ``participant`` is the SIP leg and its call just went active.
+
+    The callee answering is the only thing that should flip a call to
+    ``in_progress``; the agent's own participant and any non-SIP participant
+    are ignored.
+    """
+    return (
+        participant.kind == rtc.ParticipantKind.PARTICIPANT_KIND_SIP
+        and participant.attributes.get(SIP_CALL_STATUS_ATTRIBUTE)
+        == SIP_CALL_STATUS_ACTIVE
+    )
 
 
 def disconnect_reason_to_status(reason: int | None) -> tuple[str | None, str | None]:
@@ -196,6 +261,50 @@ async def soft_cap_announce_and_hangup(
     ctx.shutdown(reason=SOFT_CAP_END_REASON)
 
 
+async def mark_call_answered(call_id: UUID) -> bool:
+    """Transition a dialing/ringing call to ``in_progress`` and stamp ``answered_at``.
+
+    Called when the SIP participant's ``sip.callStatus`` reaches ``active``
+    (see :func:`is_sip_answer_signal`). The ``answered_at`` stamp is the
+    pickup timestamp — distinct from ``started_at`` (dial time) — and is what
+    :func:`on_call_end` bills from.
+
+    Returns ``True`` iff this call actually transitioned a row. Idempotent and
+    race-safe by construction: the guard matches only a not-yet-answered,
+    non-terminal row, so a duplicate attribute event, the API's slightly-later
+    ``dialing`` write, or an already-terminal call all fall through to a no-op
+    (and return ``False``). The ``state_change`` event is written only on a
+    real transition, so observers see exactly one ``dialing → in_progress``.
+    The boolean lets the caller latch its dedupe flag on success only, so a
+    signal that arrives a hair before the ``dialing`` write can be retried.
+    """
+    now = datetime.now(timezone.utc)
+    async with session_scope() as session:
+        result = await session.execute(
+            update(Call)
+            .where(
+                Call.id == call_id,
+                Call.status.in_(("dialing", "ringing")),
+                Call.answered_at.is_(None),
+            )
+            .values(status="in_progress", answered_at=now)
+        )
+        transitioned = (result.rowcount or 0) > 0
+        if transitioned:
+            # `from` is always `dialing` in practice — we never write `ringing`
+            # for outbound (LiveKit only exposes `ringing` inbound) — but the
+            # guard tolerates it so a future inbound path stays correct.
+            session.add(
+                CallEvent(
+                    call_id=call_id,
+                    kind="state_change",
+                    payload={"from": "dialing", "to": "in_progress"},
+                )
+            )
+        await session.commit()
+    return transitioned
+
+
 async def on_call_end(
     call_id: UUID,
     room_name: str,
@@ -217,6 +326,14 @@ async def on_call_end(
     for operational triage. ``None`` for both keeps the existing happy-path
     behavior (``status="completed"``, ``end_reason`` unchanged).
 
+    Idempotent against a row that is already terminal: the status UPDATE is
+    guarded ``status NOT IN terminal``, so if the reconciler sweeper (or a
+    prior shutdown) already closed this call, this call no-ops — it does not
+    overwrite the recorded outcome, emit a contradictory ``state_change``, or
+    write a duplicate ``usage_events`` row (``usage_events.ref`` is not unique).
+    The pool release still runs unconditionally (it is idempotent) so the
+    number is never leaked regardless of which writer recorded the terminal.
+
     No money math happens here. The website's private rater converts the
     raw units into a dollar debit against ``account_credits`` using its
     private cents-per-unit rates. Self-host operators (no website running)
@@ -231,7 +348,9 @@ async def on_call_end(
         # Falls back to recording_duration_ms when started_at is missing
         # (call failed before SIP answered → no billable duration).
         stmt = select(
+            Call.status,
             Call.started_at,
+            Call.answered_at,
             Call.organization_id,
             Call.recording_duration_ms,
         ).where(Call.id == call_id)
@@ -239,10 +358,21 @@ async def on_call_end(
         if row is None:
             logger.warning("on_call_end: call_id=%s not found", call_id)
             return
-        started_at, organization_id, recording_duration_ms = row
+        (
+            prior_status,
+            started_at,
+            answered_at,
+            organization_id,
+            recording_duration_ms,
+        ) = row
 
-        if started_at is not None:
-            duration_ms = max(0, int((now - started_at).total_seconds() * 1000))
+        # Bill from pickup (answered_at) when we have it — ring time before the
+        # callee answered isn't conversation and isn't billable. Fall back to
+        # started_at (dial time) for legacy rows or calls that closed without a
+        # recorded answer.
+        billed_from = answered_at or started_at
+        if billed_from is not None:
+            duration_ms = max(0, int((now - billed_from).total_seconds() * 1000))
         elif recording_duration_ms is not None:
             duration_ms = int(recording_duration_ms)
         else:
@@ -260,9 +390,13 @@ async def on_call_end(
             final_end_reason = CallEndReason.NORMAL_HANGUP.value
         else:
             final_end_reason = CallEndReason.UNKNOWN.value
-        await session.execute(
+        # Guard on a non-terminal status: if the reconciler sweeper already
+        # force-closed this call (or a prior shutdown finalized it), this write
+        # must lose cleanly rather than overwrite the recorded outcome. Whether
+        # the row actually transitioned gates the event + the bill below.
+        result = await session.execute(
             update(Call)
-            .where(Call.id == call_id)
+            .where(Call.id == call_id, Call.status.not_in(TERMINAL_CALL_STATUSES))
             .values(
                 status=final_status,
                 end_reason=final_end_reason,
@@ -270,15 +404,35 @@ async def on_call_end(
                 recording_s3_key=recording_key,
             )
         )
-        # Same transaction as the status update — a rollback (e.g. failed
+        transitioned = (result.rowcount or 0) > 0
+        if transitioned:
+            # Terminal state_change so observers see the full lifecycle, not
+            # just queued→dialing. Same transaction as the status UPDATE — they
+            # commit atomically. `prior_status` is whatever the row held coming
+            # in (in_progress on a normal call, dialing on a no-answer/busy).
+            session.add(
+                CallEvent(
+                    call_id=call_id,
+                    kind="state_change",
+                    payload={
+                        "from": prior_status,
+                        "to": final_status,
+                        "reason": final_end_reason,
+                    },
+                )
+            )
+        # Idempotent and order-independent — free the pool number regardless of
+        # which writer recorded the terminal status, so it is never leaked. In
+        # the same transaction as the status update: a rollback (e.g. failed
         # usage_events insert) must also unwind the release so the sweeper
         # backstop can retry. No-op for non-pool calls.
         await release_pool_reservation(session, call_id=call_id)
         usage_event_id: str | None = None
-        # Only bill for calls that actually completed a conversation. A
-        # no-answer / busy / failed call has a non-zero `started_at - now`
-        # delta (the ring time) but isn't billable — skip the usage row.
-        if final_status == "completed" and duration_ms > 0:
+        # Only bill for calls that *this call* actually completed a conversation
+        # on. A no-answer / busy / failed call has a non-zero ring delta but
+        # isn't billable; an already-terminal row (transitioned is False) was
+        # billed — or deliberately not — by whoever closed it first.
+        if transitioned and final_status == "completed" and duration_ms > 0:
             usage = UsageEvent(
                 organization_id=organization_id,
                 channel="voice",
@@ -375,6 +529,51 @@ async def entrypoint(ctx: JobContext) -> None:
         if participant.disconnect_reason not in _SDK_AUTO_CLOSE_REASONS:
             ctx.shutdown(reason=status)
 
+    # Answer detection: flip the call to `in_progress` + stamp `answered_at`
+    # the moment the SIP leg's `sip.callStatus` reaches `active` (callee
+    # picked up). We watch BOTH `participant_attributes_changed` (the status
+    # flips after the participant already exists) and `participant_connected`
+    # (covers the case where the leg is already active when we register), plus
+    # a one-shot scan of current participants — mirroring the SDK's own
+    # `wait_for_participant_attribute`. A local flag dedupes; `mark_call_answered`
+    # is idempotent regardless, so a missed dedupe is still safe.
+    answer_tasks: set[asyncio.Task[None]] = set()
+    answered = {"done": False}
+
+    def _maybe_mark_answered(participant: rtc.Participant) -> None:
+        if answered["done"] or not is_sip_answer_signal(participant):
+            return
+        logger.info(
+            "call_id=%s sip participant answered — marking in_progress", call_id
+        )
+
+        async def _run() -> None:
+            # Latch the dedupe flag only once the row actually transitioned, so
+            # a signal seen a hair before the API's `dialing` commit (guard
+            # no-op) is retried by a later attribute event rather than dropped.
+            # `mark_call_answered` is idempotent, so the brief window in which a
+            # duplicate event schedules a second task is harmless.
+            if await mark_call_answered(call_id):
+                answered["done"] = True
+
+        task = asyncio.ensure_future(_run())
+        answer_tasks.add(task)
+        task.add_done_callback(answer_tasks.discard)
+
+    @ctx.room.on("participant_connected")
+    def _on_participant_connected(participant: rtc.RemoteParticipant) -> None:
+        _maybe_mark_answered(participant)
+
+    @ctx.room.on("participant_attributes_changed")
+    def _on_participant_attributes_changed(
+        _changed: Any, participant: rtc.Participant
+    ) -> None:
+        _maybe_mark_answered(participant)
+
+    # The SIP leg may already be present/active by the time handlers register.
+    for _participant in ctx.room.remote_participants.values():
+        _maybe_mark_answered(_participant)
+
     vad = ctx.proc.userdata["vad"]
     session = build_session(metadata.get("llm"), vad)
     event_tasks = attach_event_handlers(session, call_id)
@@ -395,7 +594,7 @@ async def entrypoint(ctx: JobContext) -> None:
             captured["end_reason"] = CallEndReason.WORKER_SHUTDOWN.value
             captured["status"] = "failed"
 
-    agent = Agent(instructions=metadata.get("system_prompt") or "")
+    agent = Agent(instructions=build_instructions(metadata.get("system_prompt")))
     await session.start(agent=agent, room=ctx.room)
 
     if metadata.get("first_message"):
@@ -429,6 +628,8 @@ async def entrypoint(ctx: JobContext) -> None:
             await asyncio.gather(soft_cap_task, return_exceptions=True)
         if event_tasks:
             await asyncio.gather(*list(event_tasks), return_exceptions=True)
+        if answer_tasks:
+            await asyncio.gather(*list(answer_tasks), return_exceptions=True)
         await on_call_end(
             call_id,
             room_name,
@@ -440,11 +641,17 @@ async def entrypoint(ctx: JobContext) -> None:
 
 
 __all__ = [
+    "SIP_CALL_STATUS_ACTIVE",
+    "SIP_CALL_STATUS_ATTRIBUTE",
     "SOFT_CAP_ANNOUNCEMENT",
     "SOFT_CAP_END_REASON",
+    "VOICE_PREAMBLE",
     "attach_event_handlers",
+    "build_instructions",
     "disconnect_reason_to_status",
     "entrypoint",
+    "is_sip_answer_signal",
+    "mark_call_answered",
     "on_call_end",
     "parse_metadata",
     "prewarm",
