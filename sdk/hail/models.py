@@ -174,7 +174,7 @@ def _normalize_domain(addr: str) -> str:
     return f"{local}@{domain.lower()}"
 
 
-EmailStatus = Literal["queued", "sent", "failed", "bounced", "complained"]
+EmailStatus = Literal["queued", "sent", "failed", "bounced", "complained", "received"]
 
 TERMINAL_EMAIL_STATUSES: frozenset[str] = frozenset(
     {"sent", "failed", "bounced", "complained"}
@@ -247,7 +247,7 @@ class EmailSummary(BaseModel):
     id: UUID
     organization_id: UUID
     conversation_id: UUID | None = None
-    sender_domain_id: UUID
+    email_domain_id: UUID
     from_address: str
     to_addresses: list[str]
     cc_addresses: list[str] | None = None
@@ -263,9 +263,42 @@ class EmailSummary(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
+class EmailAttachmentResponse(BaseModel):
+    """One inbound MIME attachment as exposed to API consumers.
+
+    ``url`` is the stable Hail API endpoint that 302-redirects to a
+    presigned S3 URL on access — see GET /emails/{id}/attachments/{aid}.
+    Mirrors ``core/hailhq/core/schemas.py:EmailAttachmentResponse``.
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    filename: str
+    content_type: str
+    size_bytes: int
+    content_id: str | None = None
+    url: str
+
+
 class EmailResponse(EmailSummary):
     body_text: str | None = None
     body_html: str | None = None
+    # Inbound-only metadata. Outbound rows leave these all null/empty.
+    # Defaults match the outbound shape so existing serializations keep
+    # working. Mirrors ``core/hailhq/core/schemas.py:EmailResponse``.
+    direction: Literal["outbound", "inbound"] = "outbound"
+    message_id: str | None = None
+    in_reply_to: str | None = None
+    references_ids: list[str] | None = None
+    spam_verdict: str | None = None
+    virus_verdict: str | None = None
+    dkim_verdict: str | None = None
+    spf_verdict: str | None = None
+    dmarc_verdict: str | None = None
+    provider_received_at: datetime | None = None
+    raw_url: str | None = None
+    attachments: list[EmailAttachmentResponse] = []
 
 
 class EmailListResponse(BaseModel):
@@ -285,8 +318,8 @@ DOMAIN_NAME = re.compile(
 )
 
 
-SenderDomainKind = Literal["hail_mail", "custom"]
-SenderDomainVerificationStatus = Literal["pending", "verified", "failed"]
+EmailDomainKind = Literal["hail_mail", "custom"]
+EmailDomainVerificationStatus = Literal["pending", "verified", "failed"]
 
 
 class DkimRecord(BaseModel):
@@ -303,8 +336,8 @@ class DkimRecord(BaseModel):
     type: Literal["CNAME"] = "CNAME"
 
 
-class SenderDomainCreate(BaseModel):
-    """Body for ``POST /sender-domains``.
+class EmailDomainCreate(BaseModel):
+    """Body for ``POST /email-domains``.
 
     For ``kind='hail_mail'``, ``domain`` is omitted; the server composes
     ``<local_prefix_user>+<local_prefix_org>@<HAIL_MAIL_BASE_DOMAIN>``.
@@ -315,7 +348,7 @@ class SenderDomainCreate(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    kind: SenderDomainKind
+    kind: EmailDomainKind
     domain: str | None = None
     local_prefix_user: str | None = None
     local_prefix_org: str | None = None
@@ -363,18 +396,26 @@ class SenderDomainCreate(BaseModel):
         return self
 
 
-class SenderDomainPatch(BaseModel):
-    """Body for ``PATCH /sender-domains/{id}``.
+class EmailDomainPatch(BaseModel):
+    """Body for ``PATCH /email-domains/{id}``.
 
-    Only the user/org prefix pair is mutable today (and only on
-    ``kind='hail_mail'`` rows — custom rows have nothing here that
-    should be tenant-editable).
+    Two clusters of mutable fields, mirroring the server contract:
+
+    * Hail-mail addressing — ``local_prefix_user`` / ``local_prefix_org``
+      (``kind='hail_mail'`` rows only; the server 422s otherwise).
+    * Inbound action — ``inbound_enabled``, ``forward_to``,
+      ``webhook_url`` (empty string clears it; the server returns the new
+      plaintext secret once when set), ``forward_rate_per_hour``.
     """
 
     model_config = ConfigDict(extra="forbid")
 
     local_prefix_user: str | None = None
     local_prefix_org: str | None = None
+    inbound_enabled: bool | None = None
+    forward_to: list[str] | None = None
+    webhook_url: str | None = None
+    forward_rate_per_hour: int | None = None
 
     @field_validator("local_prefix_user", "local_prefix_org")
     @classmethod
@@ -391,33 +432,39 @@ class SenderDomainPatch(BaseModel):
 
     @model_validator(mode="after")
     def _at_least_one_field(self):
-        if self.local_prefix_user is None and self.local_prefix_org is None:
-            raise ValueError(
-                "at least one of local_prefix_user / local_prefix_org must be set"
-            )
+        if not self.model_fields_set:
+            raise ValueError("at least one field must be set")
         return self
 
 
-class SenderDomainResponse(BaseModel):
+class EmailDomainResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: UUID
     organization_id: UUID
-    kind: SenderDomainKind
+    kind: EmailDomainKind
     domain: str
     local_prefix_user: str | None = None
     local_prefix_org: str | None = None
-    verification_status: SenderDomainVerificationStatus
+    verification_status: EmailDomainVerificationStatus
     dkim_records: list[DkimRecord]
     mail_from_domain: str | None = None
     provider: str
     verified_at: datetime | None = None
+    inbound_enabled: bool = False
+    forward_to: list[str] | None = None
+    webhook_url: str | None = None
+    forward_rate_per_hour: int | None = None
+    # Populated only by PATCH responses that minted or rotated a webhook
+    # secret. The plaintext is returned once and never echoed on subsequent
+    # GETs — the server stores only the encrypted form.
+    webhook_secret: str | None = None
     created_at: datetime
     updated_at: datetime
 
 
-class SenderDomainListResponse(BaseModel):
-    items: list[SenderDomainResponse]
+class EmailDomainListResponse(BaseModel):
+    items: list[EmailDomainResponse]
     next_cursor: str | None = None
 
 
@@ -439,14 +486,15 @@ __all__ = [
     "CallEventResponse",
     "EventStreamResponse",
     "EmailCreate",
+    "EmailAttachmentResponse",
     "EmailResponse",
     "EmailSummary",
     "EmailListResponse",
     "DkimRecord",
-    "SenderDomainKind",
-    "SenderDomainVerificationStatus",
-    "SenderDomainCreate",
-    "SenderDomainPatch",
-    "SenderDomainResponse",
-    "SenderDomainListResponse",
+    "EmailDomainKind",
+    "EmailDomainVerificationStatus",
+    "EmailDomainCreate",
+    "EmailDomainPatch",
+    "EmailDomainResponse",
+    "EmailDomainListResponse",
 ]

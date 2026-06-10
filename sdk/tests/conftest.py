@@ -57,7 +57,7 @@ def make_call_response(
     }
 
 
-def make_sender_domain_response(
+def make_email_domain_response(
     *,
     domain_id: UUID | None = None,
     kind: str = "hail_mail",
@@ -67,7 +67,7 @@ def make_sender_domain_response(
     local_prefix_org: str | None = "acme",
     dkim_records: list[dict] | None = None,
 ) -> dict:
-    """Server-shaped JSON for a SenderDomainResponse."""
+    """Server-shaped JSON for an EmailDomainResponse."""
     did = domain_id or uuid4()
     now = datetime.now(timezone.utc)
     return {
@@ -100,7 +100,7 @@ def make_email_response(
         "id": str(eid),
         "organization_id": str(uuid4()),
         "conversation_id": None,
-        "sender_domain_id": str(uuid4()),
+        "email_domain_id": str(uuid4()),
         "from_address": from_address,
         "to_addresses": ["recipient@example.com"],
         "cc_addresses": None,

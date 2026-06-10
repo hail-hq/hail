@@ -154,3 +154,111 @@ def test_email_create_serializes_from_alias() -> None:
     dumped = e.model_dump(by_alias=True, exclude_none=True)
     assert dumped["from"] == "alice@example.com"
     assert "from_" not in dumped
+
+
+# --------------------------------------------------------------------------- #
+# Inbound EmailResponse — direction, verdicts, attachments, status="received"
+# --------------------------------------------------------------------------- #
+
+
+def test_email_response_inbound_fields_parse() -> None:
+    """EmailResponse must accept inbound-only fields without dropping them.
+
+    Also validates that status='received' is accepted (inbound mails use
+    this status and the SDK Literal must include it).
+    """
+    from hail.models import EmailResponse, EmailAttachmentResponse
+    from uuid import uuid4
+    from datetime import datetime, timezone
+
+    now = datetime.now(timezone.utc)
+    att_id = str(uuid4())
+    email = EmailResponse.model_validate(
+        {
+            "id": str(uuid4()),
+            "organization_id": str(uuid4()),
+            "conversation_id": None,
+            "email_domain_id": str(uuid4()),
+            "from_address": "sender@example.com",
+            "to_addresses": ["inbox@mail.hail.so"],
+            "cc_addresses": None,
+            "bcc_addresses": None,
+            "reply_to": None,
+            "subject": "hello",
+            "status": "received",
+            "end_reason": None,
+            "provider_message_id": None,
+            "requested_at": now.isoformat(),
+            "sent_at": None,
+            "failed_at": None,
+            "metadata": {},
+            "body_text": "hi there",
+            "body_html": None,
+            "direction": "inbound",
+            "message_id": "<abc@example.com>",
+            "in_reply_to": None,
+            "references_ids": ["<prev@example.com>"],
+            "spam_verdict": "pass",
+            "virus_verdict": "pass",
+            "dkim_verdict": "pass",
+            "spf_verdict": "pass",
+            "dmarc_verdict": "pass",
+            "provider_received_at": now.isoformat(),
+            "raw_url": "https://api.hail.so/emails/abc/raw",
+            "attachments": [
+                {
+                    "id": att_id,
+                    "filename": "report.pdf",
+                    "content_type": "application/pdf",
+                    "size_bytes": 4096,
+                    "content_id": None,
+                    "url": "https://api.hail.so/emails/abc/attachments/1",
+                }
+            ],
+        }
+    )
+    assert email.status == "received"
+    assert email.direction == "inbound"
+    assert email.message_id == "<abc@example.com>"
+    assert email.spam_verdict == "pass"
+    assert email.raw_url == "https://api.hail.so/emails/abc/raw"
+    assert len(email.attachments) == 1
+    att = email.attachments[0]
+    assert isinstance(att, EmailAttachmentResponse)
+    assert att.filename == "report.pdf"
+    assert att.size_bytes == 4096
+
+
+def test_email_response_outbound_keeps_defaults() -> None:
+    """Outbound EmailResponse (no inbound fields in payload) still parses cleanly."""
+    from hail.models import EmailResponse
+    from uuid import uuid4
+    from datetime import datetime, timezone
+
+    now = datetime.now(timezone.utc)
+    email = EmailResponse.model_validate(
+        {
+            "id": str(uuid4()),
+            "organization_id": str(uuid4()),
+            "conversation_id": None,
+            "email_domain_id": str(uuid4()),
+            "from_address": "sender@example.com",
+            "to_addresses": ["dest@example.com"],
+            "cc_addresses": None,
+            "bcc_addresses": None,
+            "reply_to": None,
+            "subject": "hello",
+            "status": "sent",
+            "end_reason": None,
+            "provider_message_id": "ses-123",
+            "requested_at": now.isoformat(),
+            "sent_at": now.isoformat(),
+            "failed_at": None,
+            "metadata": {},
+            "body_text": "body",
+            "body_html": None,
+        }
+    )
+    assert email.direction == "outbound"
+    assert email.attachments == []
+    assert email.spam_verdict is None

@@ -22,7 +22,7 @@ import asyncio
 import base64
 import os
 from datetime import datetime
-from typing import Any, AsyncIterator
+from typing import Any, AsyncIterator, Literal
 from uuid import UUID
 
 import httpx
@@ -40,8 +40,8 @@ from hail.models import (
     EmailStatus,
     EventStreamResponse,
     LLMConfig,
-    SenderDomainListResponse,
-    SenderDomainResponse,
+    EmailDomainListResponse,
+    EmailDomainResponse,
     TERMINAL_CALL_STATUSES,
 )
 
@@ -198,15 +198,21 @@ class _EmailsResource:
         cursor: str | None = None,
         limit: int = 50,
         status: EmailStatus | None = None,
+        direction: Literal["outbound", "inbound"] | None = None,
     ) -> EmailListResponse:
         """Cursor-paginated list, scoped to the caller's organization."""
-        params = {"limit": limit, "cursor": cursor, "status": status}
+        params = {
+            "limit": limit,
+            "cursor": cursor,
+            "status": status,
+            "direction": direction,
+        }
         data = await self._http.request("GET", "/emails", params=params)
         return EmailListResponse.model_validate(data)
 
 
-class _SenderDomainsResource:
-    """``client.sender_domains.*`` — manage SES identities."""
+class _EmailDomainsResource:
+    """``client.email_domains.*`` — manage SES identities."""
 
     def __init__(self, http: _HailHTTP) -> None:
         self._http = http
@@ -219,8 +225,8 @@ class _SenderDomainsResource:
         local_prefix_user: str | None = None,
         local_prefix_org: str | None = None,
         idempotency_key: str | None = None,
-    ) -> SenderDomainResponse:
-        """Register a sender domain.
+    ) -> EmailDomainResponse:
+        """Register an email domain.
 
         ``kind`` is ``'hail_mail'`` (server composes the address from
         the prefixes) or ``'custom'`` (tenant DNS — server returns DKIM
@@ -238,30 +244,30 @@ class _SenderDomainsResource:
         key = idempotency_key or generate_idempotency_key()
         data = await self._http.request(
             "POST",
-            "/sender-domains",
+            "/email-domains",
             json=body,
             headers={"Idempotency-Key": key},
         )
-        return SenderDomainResponse.model_validate(data)
+        return EmailDomainResponse.model_validate(data)
 
-    async def get(self, domain_id: str | UUID) -> SenderDomainResponse:
-        """Fetch a single sender domain by id."""
+    async def get(self, domain_id: str | UUID) -> EmailDomainResponse:
+        """Fetch a single email domain by id."""
         did = str(domain_id)
-        data = await self._http.request("GET", f"/sender-domains/{did}")
-        return SenderDomainResponse.model_validate(data)
+        data = await self._http.request("GET", f"/email-domains/{did}")
+        return EmailDomainResponse.model_validate(data)
 
     async def list(
         self,
         *,
         cursor: str | None = None,
         limit: int = 50,
-    ) -> SenderDomainListResponse:
+    ) -> EmailDomainListResponse:
         """Cursor-paginated list, scoped to the caller's organization."""
         params = {"limit": limit, "cursor": cursor}
-        data = await self._http.request("GET", "/sender-domains", params=params)
-        return SenderDomainListResponse.model_validate(data)
+        data = await self._http.request("GET", "/email-domains", params=params)
+        return EmailDomainListResponse.model_validate(data)
 
-    async def verify(self, domain_id: str | UUID) -> SenderDomainResponse:
+    async def verify(self, domain_id: str | UUID) -> EmailDomainResponse:
         """Re-poll the email provider for a custom row's DKIM status.
 
         No-op on hail-mail rows (they're verified by construction);
@@ -269,8 +275,8 @@ class _SenderDomainsResource:
         uniformly.
         """
         did = str(domain_id)
-        data = await self._http.request("POST", f"/sender-domains/{did}/verify")
-        return SenderDomainResponse.model_validate(data)
+        data = await self._http.request("POST", f"/email-domains/{did}/verify")
+        return EmailDomainResponse.model_validate(data)
 
     async def patch(
         self,
@@ -278,26 +284,102 @@ class _SenderDomainsResource:
         *,
         local_prefix_user: str | None = None,
         local_prefix_org: str | None = None,
-    ) -> SenderDomainResponse:
-        """Edit the user/org prefix on a hail-mail row.
+        inbound_enabled: bool | None = None,
+        forward_to: list[str] | None = None,
+        webhook_url: str | None = None,
+        forward_rate_per_hour: int | None = None,
+    ) -> EmailDomainResponse:
+        """Edit hail-mail prefixes and/or inbound action settings.
 
-        Custom-domain rows return 422 server-side — prefix edits are
-        only meaningful for hail-mail rows. Pass either prefix or both;
-        the server keeps any unchanged field.
+        Prefix edits (``local_prefix_user``/``local_prefix_org``) only
+        apply to hail_mail rows. Inbound action fields (``inbound_enabled``,
+        ``forward_to``, ``webhook_url``, ``forward_rate_per_hour``) apply
+        to any kind. Setting ``webhook_url`` mints a fresh secret and
+        returns it once in the response's ``webhook_secret``.
         """
         body: dict[str, Any] = {}
         if local_prefix_user is not None:
             body["local_prefix_user"] = local_prefix_user
         if local_prefix_org is not None:
             body["local_prefix_org"] = local_prefix_org
+        if inbound_enabled is not None:
+            body["inbound_enabled"] = inbound_enabled
+        if forward_to is not None:
+            body["forward_to"] = list(forward_to)
+        if webhook_url is not None:
+            body["webhook_url"] = webhook_url
+        if forward_rate_per_hour is not None:
+            body["forward_rate_per_hour"] = forward_rate_per_hour
         did = str(domain_id)
-        data = await self._http.request("PATCH", f"/sender-domains/{did}", json=body)
-        return SenderDomainResponse.model_validate(data)
+        data = await self._http.request("PATCH", f"/email-domains/{did}", json=body)
+        return EmailDomainResponse.model_validate(data)
+
+    async def rotate_webhook_secret(self, domain_id: str | UUID) -> str:
+        """Rotate the per-domain webhook secret; returns the new plaintext."""
+        did = str(domain_id)
+        data = await self._http.request(
+            "POST", f"/email-domains/{did}/rotate-webhook-secret"
+        )
+        return data["webhook_secret"]
 
     async def delete(self, domain_id: str | UUID) -> None:
-        """Remove a sender domain. SES identity is deleted for custom rows."""
+        """Remove an email domain. SES identity is deleted for custom rows."""
         did = str(domain_id)
-        await self._http.request("DELETE", f"/sender-domains/{did}")
+        await self._http.request("DELETE", f"/email-domains/{did}")
+
+
+class _WebhooksResource:
+    """``client.webhooks.*`` — manage outbound webhook subscriptions."""
+
+    def __init__(self, http: _HailHTTP) -> None:
+        self._http = http
+
+    async def create(
+        self, *, target_url: str, event_types: list[str]
+    ) -> dict[str, Any]:
+        """Create a subscription; returns the response including the plaintext secret once."""
+        body = {"target_url": target_url, "event_types": list(event_types)}
+        return await self._http.request("POST", "/webhooks", json=body)
+
+    async def list(self) -> dict[str, Any]:
+        return await self._http.request("GET", "/webhooks")
+
+    async def get(self, sub_id: str | UUID) -> dict[str, Any]:
+        return await self._http.request("GET", f"/webhooks/{sub_id}")
+
+    async def patch(
+        self,
+        sub_id: str | UUID,
+        *,
+        target_url: str | None = None,
+        event_types: list[str] | None = None,
+        status: str | None = None,
+    ) -> dict[str, Any]:
+        body: dict[str, Any] = {}
+        if target_url is not None:
+            body["target_url"] = target_url
+        if event_types is not None:
+            body["event_types"] = list(event_types)
+        if status is not None:
+            body["status"] = status
+        return await self._http.request("PATCH", f"/webhooks/{sub_id}", json=body)
+
+    async def delete(self, sub_id: str | UUID) -> None:
+        await self._http.request("DELETE", f"/webhooks/{sub_id}")
+
+    async def rotate_secret(self, sub_id: str | UUID) -> str:
+        data = await self._http.request("POST", f"/webhooks/{sub_id}/rotate-secret")
+        return data["secret"]
+
+    async def deliveries(self, sub_id: str | UUID) -> dict[str, Any]:
+        return await self._http.request("GET", f"/webhooks/{sub_id}/deliveries")
+
+    async def redeliver(
+        self, sub_id: str | UUID, delivery_id: str | UUID
+    ) -> dict[str, Any]:
+        return await self._http.request(
+            "POST", f"/webhooks/{sub_id}/deliveries/{delivery_id}/redeliver"
+        )
 
 
 class _EventsResource:
@@ -433,7 +515,8 @@ class Client:
         )
         self.calls = _CallsResource(self._http)
         self.emails = _EmailsResource(self._http)
-        self.sender_domains = _SenderDomainsResource(self._http)
+        self.email_domains = _EmailDomainsResource(self._http)
+        self.webhooks = _WebhooksResource(self._http)
         self.events = _EventsResource(self._http)
         self.base_url = resolved_base.rstrip("/")
 
