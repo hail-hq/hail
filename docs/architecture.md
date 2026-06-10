@@ -50,9 +50,9 @@ One mode per call.
 
 ## Outbound email
 
-Outbound mail goes through AWS SES via the `EmailProvider` adapter in `core/hailhq/core/providers/email/`. Two flavors of sender identity, stored in `sender_domains`:
+Outbound mail goes through AWS SES via the `EmailProvider` adapter in `core/hailhq/core/providers/email/`. Two flavors of sender identity, stored in `email_domains`:
 
-- **`kind='custom'`** — tenant-controlled DNS (e.g. `acme.com`). `POST /sender-domains` registers the identity with SES and surfaces three DKIM CNAMEs verbatim; the tenant publishes them, then `POST /sender-domains/{id}/verify` re-polls SES.
+- **`kind='custom'`** — tenant-controlled DNS (e.g. `acme.com`). `POST /email-domains` registers the identity with SES and surfaces three DKIM CNAMEs verbatim; the tenant publishes them, then `POST /email-domains/{id}/verify` re-polls SES.
 - **`kind='hail_mail'`** — per-org address under an operator-managed parent domain. The full sender is `<user>+<org>@<HAIL_MAIL_BASE_DOMAIN>` (e.g. `alice+acme@mail.hail.so`); the parent domain is pre-verified once by the operator out of band, so per-org rows land already-verified without ever calling SES.
 
 ### Self-hosted vs managed
@@ -65,7 +65,7 @@ The two surfaces differ in where the prefixes come from and where they're edited
 | Org concept           | None — single sentinel org                                                                     | Real orgs with members                                                                     |
 | Hail-mail base domain | `HAIL_MAIL_BASE_DOMAIN` (operator's `.env`)                                                    | `HAIL_MAIL_BASE_DOMAIN` (operator's deploy env)                                            |
 | Hail-mail prefixes    | `HAIL_MAIL_DEFAULT_USER_PREFIX` + `HAIL_MAIL_DEFAULT_ORG_PREFIX` (`.env` is the configuration) | Same env vars provide the deploy-time default; org admins override per-org via the console |
-| Where edits land      | Restart with new `.env` values                                                                 | `PATCH /sender-domains/{id}` (console writes this)                                         |
+| Where edits land      | Restart with new `.env` values                                                                 | `PATCH /email-domains/{id}` (console writes this)                                          |
 | SES production access | Operator's AWS account                                                                         | Operator's AWS account                                                                     |
 | Billing               | Off — `usage_events` accumulates as raw analytics                                              | Cloud rater applies cents/unit, debits `account_credits`                                   |
 
@@ -82,3 +82,49 @@ Both prefixes are validated against `^[a-z0-9]([a-z0-9-]{0,18}[a-z0-9])?$` (1–
 If none of those resolve, the request returns `503` pointing at how to register a domain.
 
 See [`docs/setup/aws-ses.md`](./setup/aws-ses.md) for the operator-side setup, and [`docs/superpowers/plans/2026-05-17-hail-mail-addressing.md`](./superpowers/plans/2026-05-17-hail-mail-addressing.md) for the addressing/configurability plan.
+
+## Inbound email
+
+Operators on AWS enable inbound by applying `infra/terraform/`, which
+provisions an S3 bucket, an SES Receipt Rule + Rule Set, and a small
+Lambda that signs and forwards SES events into Hail's
+`POST /internal/ses-events` endpoint. The API parses raw MIME from S3,
+routes the message to the owning org by parsing the hail-mail
+local-part (`<user>+<org>@mail.hail.so`), persists an `Email` row with
+`direction='inbound'`, and fans out events to per-domain webhooks and
+org-wide subscriptions via the background delivery worker.
+
+```
+inbound SMTP ──► SES Receipt Rule
+                 ├─ Action: S3       → s3://hail-inbound/raw/<msgid>
+                 └─ Action: Lambda   → POST /internal/ses-events (HMAC-signed)
+                                          │
+                                          ▼
+                                    Hail API:
+                                      • verify HMAC
+                                      • fetch raw MIME from S3
+                                      • parse MIME, route to org
+                                      • write Email row (direction='inbound')
+                                      • enqueue email_attachments to S3
+                                      • fan out webhook deliveries
+                                      • enqueue forwarding sends (header rewrite)
+```
+
+The cloud-agnostic SMTP path is stubbed
+([`SmtpInboundProvider`](../core/hailhq/core/providers/email/inbound/smtp.py))
+and tracked in [`docs/setup/smtp-inbound.md`](setup/smtp-inbound.md).
+
+### Per-domain routing — forward and/or webhook
+
+Each `email_domains` row carries `inbound_enabled`, `forward_to`, and `webhook_url`. When `inbound_enabled` is true:
+
+- `forward_to` (list of addresses) triggers one outbound `Email` row per target through the existing send loop, with header rewrite (envelope `From:` = `forwarder+<org>@mail.hail.so`, `Reply-To:` = original sender, `References:` preserved for threading, `X-Hail-Forward-Hops` and `Auto-Submitted: auto-forwarded` for loop suppression).
+- `webhook_url` triggers a signed POST through the webhook delivery worker.
+
+A separate `inbound_routes` table for per-mailbox routing within custom domains is deferred to a future milestone (when tenants point their own MX at SES).
+
+### Org-wide subscriptions
+
+The `/webhooks` CRUD surface is the firehose pattern — one subscription covers multiple event types (`email.received`, `email.bounced`, `email.complained`). Stripe-style signing: `X-Hail-Signature: t=<unix>,v1=<hex>`. Retries on a fixed `0/30s/2m/10m/1h/6h/24h` ladder; after the last retry the delivery is marked `dead` and after 50 consecutive dead deliveries the subscription auto-disables.
+
+See [`docs/setup/aws-ses.md`](./setup/aws-ses.md) §10 for the operator runbook and [`docs/superpowers/specs/2026-06-06-inbound-email-design.md`](./superpowers/specs/2026-06-06-inbound-email-design.md) for the full spec.
