@@ -52,7 +52,7 @@ func sampleCall(idStr, to string, status client.CallResponseStatus) client.CallR
 		OrganizationId: orgID,
 		FromE164:       "+14155551234",
 		ToE164:         to,
-		Direction:      client.Outbound,
+		Direction:      client.CallResponseDirectionOutbound,
 		Status:         status,
 		RequestedAt:    now,
 	}

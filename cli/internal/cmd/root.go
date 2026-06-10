@@ -134,6 +134,7 @@ or pass --api-key.`,
 	root.AddCommand(newTailCmd(opts))
 	root.AddCommand(newLoginCmd(opts))
 	root.AddCommand(newAuthCmd(opts))
+	root.AddCommand(newWebhooksCmd(opts))
 
 	return root
 }

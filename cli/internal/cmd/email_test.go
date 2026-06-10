@@ -26,7 +26,7 @@ func sampleEmailResponse() client.EmailResponse {
 	return client.EmailResponse{
 		Id:                id,
 		OrganizationId:    orgID,
-		SenderDomainId:    sdID,
+		EmailDomainId:     sdID,
 		FromAddress:       "alice+acme@mail.hail.so",
 		ToAddresses:       []string{"x@example.com"},
 		Subject:           "hi",

@@ -20,16 +20,16 @@ import (
 
 // Defines values for CallResponseDirection.
 const (
-	Inbound  CallResponseDirection = "inbound"
-	Outbound CallResponseDirection = "outbound"
+	CallResponseDirectionInbound  CallResponseDirection = "inbound"
+	CallResponseDirectionOutbound CallResponseDirection = "outbound"
 )
 
 // Valid indicates whether the value is a known member of the CallResponseDirection enum.
 func (e CallResponseDirection) Valid() bool {
 	switch e {
-	case Inbound:
+	case CallResponseDirectionInbound:
 		return true
-	case Outbound:
+	case CallResponseDirectionOutbound:
 		return true
 	default:
 		return false
@@ -75,12 +75,88 @@ func (e CallResponseStatus) Valid() bool {
 	}
 }
 
+// Defines values for EmailDomainCreateKind.
+const (
+	EmailDomainCreateKindCustom   EmailDomainCreateKind = "custom"
+	EmailDomainCreateKindHailMail EmailDomainCreateKind = "hail_mail"
+)
+
+// Valid indicates whether the value is a known member of the EmailDomainCreateKind enum.
+func (e EmailDomainCreateKind) Valid() bool {
+	switch e {
+	case EmailDomainCreateKindCustom:
+		return true
+	case EmailDomainCreateKindHailMail:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for EmailDomainResponseKind.
+const (
+	EmailDomainResponseKindCustom   EmailDomainResponseKind = "custom"
+	EmailDomainResponseKindHailMail EmailDomainResponseKind = "hail_mail"
+)
+
+// Valid indicates whether the value is a known member of the EmailDomainResponseKind enum.
+func (e EmailDomainResponseKind) Valid() bool {
+	switch e {
+	case EmailDomainResponseKindCustom:
+		return true
+	case EmailDomainResponseKindHailMail:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for EmailDomainResponseVerificationStatus.
+const (
+	EmailDomainResponseVerificationStatusFailed   EmailDomainResponseVerificationStatus = "failed"
+	EmailDomainResponseVerificationStatusPending  EmailDomainResponseVerificationStatus = "pending"
+	EmailDomainResponseVerificationStatusVerified EmailDomainResponseVerificationStatus = "verified"
+)
+
+// Valid indicates whether the value is a known member of the EmailDomainResponseVerificationStatus enum.
+func (e EmailDomainResponseVerificationStatus) Valid() bool {
+	switch e {
+	case EmailDomainResponseVerificationStatusFailed:
+		return true
+	case EmailDomainResponseVerificationStatusPending:
+		return true
+	case EmailDomainResponseVerificationStatusVerified:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for EmailResponseDirection.
+const (
+	EmailResponseDirectionInbound  EmailResponseDirection = "inbound"
+	EmailResponseDirectionOutbound EmailResponseDirection = "outbound"
+)
+
+// Valid indicates whether the value is a known member of the EmailResponseDirection enum.
+func (e EmailResponseDirection) Valid() bool {
+	switch e {
+	case EmailResponseDirectionInbound:
+		return true
+	case EmailResponseDirectionOutbound:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for EmailResponseStatus.
 const (
 	EmailResponseStatusBounced    EmailResponseStatus = "bounced"
 	EmailResponseStatusComplained EmailResponseStatus = "complained"
 	EmailResponseStatusFailed     EmailResponseStatus = "failed"
 	EmailResponseStatusQueued     EmailResponseStatus = "queued"
+	EmailResponseStatusReceived   EmailResponseStatus = "received"
 	EmailResponseStatusSent       EmailResponseStatus = "sent"
 )
 
@@ -95,6 +171,8 @@ func (e EmailResponseStatus) Valid() bool {
 		return true
 	case EmailResponseStatusQueued:
 		return true
+	case EmailResponseStatusReceived:
+		return true
 	case EmailResponseStatusSent:
 		return true
 	default:
@@ -108,6 +186,7 @@ const (
 	EmailSummaryStatusComplained EmailSummaryStatus = "complained"
 	EmailSummaryStatusFailed     EmailSummaryStatus = "failed"
 	EmailSummaryStatusQueued     EmailSummaryStatus = "queued"
+	EmailSummaryStatusReceived   EmailSummaryStatus = "received"
 	EmailSummaryStatusSent       EmailSummaryStatus = "sent"
 )
 
@@ -121,6 +200,8 @@ func (e EmailSummaryStatus) Valid() bool {
 	case EmailSummaryStatusFailed:
 		return true
 	case EmailSummaryStatusQueued:
+		return true
+	case EmailSummaryStatusReceived:
 		return true
 	case EmailSummaryStatusSent:
 		return true
@@ -168,57 +249,108 @@ func (e EventStreamResponseCallStatus) Valid() bool {
 	}
 }
 
-// Defines values for SenderDomainCreateKind.
+// Defines values for WebhookDeliveryResponseStatus.
 const (
-	SenderDomainCreateKindCustom   SenderDomainCreateKind = "custom"
-	SenderDomainCreateKindHailMail SenderDomainCreateKind = "hail_mail"
+	WebhookDeliveryResponseStatusDead      WebhookDeliveryResponseStatus = "dead"
+	WebhookDeliveryResponseStatusFailed    WebhookDeliveryResponseStatus = "failed"
+	WebhookDeliveryResponseStatusPending   WebhookDeliveryResponseStatus = "pending"
+	WebhookDeliveryResponseStatusSucceeded WebhookDeliveryResponseStatus = "succeeded"
 )
 
-// Valid indicates whether the value is a known member of the SenderDomainCreateKind enum.
-func (e SenderDomainCreateKind) Valid() bool {
+// Valid indicates whether the value is a known member of the WebhookDeliveryResponseStatus enum.
+func (e WebhookDeliveryResponseStatus) Valid() bool {
 	switch e {
-	case SenderDomainCreateKindCustom:
+	case WebhookDeliveryResponseStatusDead:
 		return true
-	case SenderDomainCreateKindHailMail:
+	case WebhookDeliveryResponseStatusFailed:
+		return true
+	case WebhookDeliveryResponseStatusPending:
+		return true
+	case WebhookDeliveryResponseStatusSucceeded:
 		return true
 	default:
 		return false
 	}
 }
 
-// Defines values for SenderDomainResponseKind.
+// Defines values for WebhookSubscriptionCreateEventTypes.
 const (
-	SenderDomainResponseKindCustom   SenderDomainResponseKind = "custom"
-	SenderDomainResponseKindHailMail SenderDomainResponseKind = "hail_mail"
+	WebhookSubscriptionCreateEventTypesEmailBounced            WebhookSubscriptionCreateEventTypes = "email.bounced"
+	WebhookSubscriptionCreateEventTypesEmailComplained         WebhookSubscriptionCreateEventTypes = "email.complained"
+	WebhookSubscriptionCreateEventTypesEmailReceived           WebhookSubscriptionCreateEventTypes = "email.received"
+	WebhookSubscriptionCreateEventTypesEmailReceivedSuppressed WebhookSubscriptionCreateEventTypes = "email.received.suppressed"
 )
 
-// Valid indicates whether the value is a known member of the SenderDomainResponseKind enum.
-func (e SenderDomainResponseKind) Valid() bool {
+// Valid indicates whether the value is a known member of the WebhookSubscriptionCreateEventTypes enum.
+func (e WebhookSubscriptionCreateEventTypes) Valid() bool {
 	switch e {
-	case SenderDomainResponseKindCustom:
+	case WebhookSubscriptionCreateEventTypesEmailBounced:
 		return true
-	case SenderDomainResponseKindHailMail:
+	case WebhookSubscriptionCreateEventTypesEmailComplained:
+		return true
+	case WebhookSubscriptionCreateEventTypesEmailReceived:
+		return true
+	case WebhookSubscriptionCreateEventTypesEmailReceivedSuppressed:
 		return true
 	default:
 		return false
 	}
 }
 
-// Defines values for SenderDomainResponseVerificationStatus.
+// Defines values for WebhookSubscriptionPatchEventTypes.
 const (
-	SenderDomainResponseVerificationStatusFailed   SenderDomainResponseVerificationStatus = "failed"
-	SenderDomainResponseVerificationStatusPending  SenderDomainResponseVerificationStatus = "pending"
-	SenderDomainResponseVerificationStatusVerified SenderDomainResponseVerificationStatus = "verified"
+	WebhookSubscriptionPatchEventTypesEmailBounced            WebhookSubscriptionPatchEventTypes = "email.bounced"
+	WebhookSubscriptionPatchEventTypesEmailComplained         WebhookSubscriptionPatchEventTypes = "email.complained"
+	WebhookSubscriptionPatchEventTypesEmailReceived           WebhookSubscriptionPatchEventTypes = "email.received"
+	WebhookSubscriptionPatchEventTypesEmailReceivedSuppressed WebhookSubscriptionPatchEventTypes = "email.received.suppressed"
 )
 
-// Valid indicates whether the value is a known member of the SenderDomainResponseVerificationStatus enum.
-func (e SenderDomainResponseVerificationStatus) Valid() bool {
+// Valid indicates whether the value is a known member of the WebhookSubscriptionPatchEventTypes enum.
+func (e WebhookSubscriptionPatchEventTypes) Valid() bool {
 	switch e {
-	case SenderDomainResponseVerificationStatusFailed:
+	case WebhookSubscriptionPatchEventTypesEmailBounced:
 		return true
-	case SenderDomainResponseVerificationStatusPending:
+	case WebhookSubscriptionPatchEventTypesEmailComplained:
 		return true
-	case SenderDomainResponseVerificationStatusVerified:
+	case WebhookSubscriptionPatchEventTypesEmailReceived:
+		return true
+	case WebhookSubscriptionPatchEventTypesEmailReceivedSuppressed:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for WebhookSubscriptionPatchStatus.
+const (
+	WebhookSubscriptionPatchStatusActive   WebhookSubscriptionPatchStatus = "active"
+	WebhookSubscriptionPatchStatusDisabled WebhookSubscriptionPatchStatus = "disabled"
+)
+
+// Valid indicates whether the value is a known member of the WebhookSubscriptionPatchStatus enum.
+func (e WebhookSubscriptionPatchStatus) Valid() bool {
+	switch e {
+	case WebhookSubscriptionPatchStatusActive:
+		return true
+	case WebhookSubscriptionPatchStatusDisabled:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for WebhookSubscriptionResponseStatus.
+const (
+	WebhookSubscriptionResponseStatusActive   WebhookSubscriptionResponseStatus = "active"
+	WebhookSubscriptionResponseStatusDisabled WebhookSubscriptionResponseStatus = "disabled"
+)
+
+// Valid indicates whether the value is a known member of the WebhookSubscriptionResponseStatus enum.
+func (e WebhookSubscriptionResponseStatus) Valid() bool {
+	switch e {
+	case WebhookSubscriptionResponseStatusActive:
+		return true
+	case WebhookSubscriptionResponseStatusDisabled:
 		return true
 	default:
 		return false
@@ -266,25 +398,46 @@ func (e ListCallsCallsGetParamsStatus) Valid() bool {
 
 // Defines values for ListEmailsEmailsGetParamsStatus.
 const (
-	Bounced    ListEmailsEmailsGetParamsStatus = "bounced"
-	Complained ListEmailsEmailsGetParamsStatus = "complained"
-	Failed     ListEmailsEmailsGetParamsStatus = "failed"
-	Queued     ListEmailsEmailsGetParamsStatus = "queued"
-	Sent       ListEmailsEmailsGetParamsStatus = "sent"
+	ListEmailsEmailsGetParamsStatusBounced    ListEmailsEmailsGetParamsStatus = "bounced"
+	ListEmailsEmailsGetParamsStatusComplained ListEmailsEmailsGetParamsStatus = "complained"
+	ListEmailsEmailsGetParamsStatusFailed     ListEmailsEmailsGetParamsStatus = "failed"
+	ListEmailsEmailsGetParamsStatusQueued     ListEmailsEmailsGetParamsStatus = "queued"
+	ListEmailsEmailsGetParamsStatusReceived   ListEmailsEmailsGetParamsStatus = "received"
+	ListEmailsEmailsGetParamsStatusSent       ListEmailsEmailsGetParamsStatus = "sent"
 )
 
 // Valid indicates whether the value is a known member of the ListEmailsEmailsGetParamsStatus enum.
 func (e ListEmailsEmailsGetParamsStatus) Valid() bool {
 	switch e {
-	case Bounced:
+	case ListEmailsEmailsGetParamsStatusBounced:
 		return true
-	case Complained:
+	case ListEmailsEmailsGetParamsStatusComplained:
 		return true
-	case Failed:
+	case ListEmailsEmailsGetParamsStatusFailed:
 		return true
-	case Queued:
+	case ListEmailsEmailsGetParamsStatusQueued:
 		return true
-	case Sent:
+	case ListEmailsEmailsGetParamsStatusReceived:
+		return true
+	case ListEmailsEmailsGetParamsStatusSent:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ListEmailsEmailsGetParamsDirection.
+const (
+	Inbound  ListEmailsEmailsGetParamsDirection = "inbound"
+	Outbound ListEmailsEmailsGetParamsDirection = "outbound"
+)
+
+// Valid indicates whether the value is a known member of the ListEmailsEmailsGetParamsDirection enum.
+func (e ListEmailsEmailsGetParamsDirection) Valid() bool {
+	switch e {
+	case Inbound:
+		return true
+	case Outbound:
 		return true
 	default:
 		return false
@@ -352,6 +505,19 @@ type DkimRecordSchema struct {
 	AdditionalProperties map[string]interface{} `json:"-"`
 }
 
+// EmailAttachmentResponse One inbound MIME attachment as exposed to API consumers.
+//
+// “url“ is the stable Hail API endpoint that 302-redirects to a
+// presigned S3 URL on access — see GET /emails/{id}/attachments/{aid}.
+type EmailAttachmentResponse struct {
+	ContentId   *string            `json:"content_id,omitempty"`
+	ContentType string             `json:"content_type"`
+	Filename    string             `json:"filename"`
+	Id          openapi_types.UUID `json:"id"`
+	SizeBytes   int                `json:"size_bytes"`
+	Url         string             `json:"url"`
+}
+
 // EmailCreate defines model for EmailCreate.
 type EmailCreate struct {
 	Bcc            *[]string               `json:"bcc,omitempty"`
@@ -366,6 +532,98 @@ type EmailCreate struct {
 	To             []string                `json:"to"`
 }
 
+// EmailDomainCreate Request body for POST /email-domains.
+//
+// For “kind='hail_mail'“ “domain“ is omitted; the server composes
+// the full address as “<local_prefix_user>+<local_prefix_org>@<base>“.
+// Both prefixes are optional in the body and fall back to the
+// “HAIL_MAIL_DEFAULT_*_PREFIX“ env vars; the server returns 503 if
+// neither is supplied. For “kind='custom'“ “domain“ is required and
+// the prefix fields must be omitted.
+type EmailDomainCreate struct {
+	Domain          *string               `json:"domain,omitempty"`
+	Kind            EmailDomainCreateKind `json:"kind"`
+	LocalPrefixOrg  *string               `json:"local_prefix_org,omitempty"`
+	LocalPrefixUser *string               `json:"local_prefix_user,omitempty"`
+}
+
+// EmailDomainCreateKind defines model for EmailDomainCreate.Kind.
+type EmailDomainCreateKind string
+
+// EmailDomainListResponse defines model for EmailDomainListResponse.
+type EmailDomainListResponse struct {
+	Items      []EmailDomainResponse `json:"items"`
+	NextCursor *string               `json:"next_cursor,omitempty"`
+}
+
+// EmailDomainPatch Body for PATCH /email-domains/{id}.
+//
+// Two clusters of mutable fields:
+//
+//   - Hail-mail addressing — the user/org prefix pair (only valid on
+//     “kind='hail_mail'“ rows; the handler returns 422 if a tenant tries
+//     to PATCH these on a custom row).
+//   - Inbound action — “inbound_enabled“ + at least one of “forward_to“
+//     / “webhook_url“ + the optional “forward_rate_per_hour“ cap. These
+//     apply to either kind, but this milestone routes inbound only to
+//     “hail_mail“ rows; custom-domain inbound (MX delegation) is the
+//     next milestone.
+//
+// Every field is independently optional so “PATCH“ semantics work the
+// way callers expect: send only what you want to change. The route
+// enforces the cross-field rules (the CHECK constraint on the table
+// requires an action when “inbound_enabled“ is true) — we don't
+// re-implement it here because the patch may merge with existing row
+// state to satisfy the invariant.
+//
+// NOTE: the plaintext webhook secret is NOT a PATCH field. It's set at
+// create time and rotated via a dedicated endpoint that returns the new
+// plaintext exactly once. “webhook_secret_encrypted“ is server-managed and
+// never accepted on the wire.
+type EmailDomainPatch struct {
+	ForwardRatePerHour *int      `json:"forward_rate_per_hour,omitempty"`
+	ForwardTo          *[]string `json:"forward_to,omitempty"`
+	InboundEnabled     *bool     `json:"inbound_enabled,omitempty"`
+	LocalPrefixOrg     *string   `json:"local_prefix_org,omitempty"`
+	LocalPrefixUser    *string   `json:"local_prefix_user,omitempty"`
+	WebhookUrl         *string   `json:"webhook_url,omitempty"`
+}
+
+// EmailDomainResponse Read view for an email domain.
+//
+// The inbound-action fields (“inbound_enabled“, “forward_to“,
+// “webhook_url“, “forward_rate_per_hour“) surface what the row has
+// configured for incoming mail. “webhook_secret_encrypted“ is intentionally
+// NOT exposed — the plaintext secret is returned exactly once at create
+// or rotate via a dedicated endpoint, and the ciphertext that
+// sits on the row is server-internal.
+type EmailDomainResponse struct {
+	CreatedAt          time.Time                             `json:"created_at"`
+	DkimRecords        []DkimRecordSchema                    `json:"dkim_records"`
+	Domain             string                                `json:"domain"`
+	ForwardRatePerHour *int                                  `json:"forward_rate_per_hour,omitempty"`
+	ForwardTo          *[]string                             `json:"forward_to,omitempty"`
+	Id                 openapi_types.UUID                    `json:"id"`
+	InboundEnabled     *bool                                 `json:"inbound_enabled,omitempty"`
+	Kind               EmailDomainResponseKind               `json:"kind"`
+	LocalPrefixOrg     *string                               `json:"local_prefix_org"`
+	LocalPrefixUser    *string                               `json:"local_prefix_user"`
+	MailFromDomain     *string                               `json:"mail_from_domain"`
+	OrganizationId     openapi_types.UUID                    `json:"organization_id"`
+	Provider           string                                `json:"provider"`
+	UpdatedAt          time.Time                             `json:"updated_at"`
+	VerificationStatus EmailDomainResponseVerificationStatus `json:"verification_status"`
+	VerifiedAt         *time.Time                            `json:"verified_at"`
+	WebhookSecret      *string                               `json:"webhook_secret,omitempty"`
+	WebhookUrl         *string                               `json:"webhook_url,omitempty"`
+}
+
+// EmailDomainResponseKind defines model for EmailDomainResponse.Kind.
+type EmailDomainResponseKind string
+
+// EmailDomainResponseVerificationStatus defines model for EmailDomainResponse.VerificationStatus.
+type EmailDomainResponseVerificationStatus string
+
 // EmailListResponse defines model for EmailListResponse.
 type EmailListResponse struct {
 	Items      []EmailSummary `json:"items"`
@@ -374,26 +632,41 @@ type EmailListResponse struct {
 
 // EmailResponse defines model for EmailResponse.
 type EmailResponse struct {
-	BccAddresses      *[]string               `json:"bcc_addresses"`
-	BodyHtml          *string                 `json:"body_html"`
-	BodyText          *string                 `json:"body_text"`
-	CcAddresses       *[]string               `json:"cc_addresses"`
-	ConversationId    *openapi_types.UUID     `json:"conversation_id"`
-	EndReason         *string                 `json:"end_reason"`
-	FailedAt          *time.Time              `json:"failed_at"`
-	FromAddress       string                  `json:"from_address"`
-	Id                openapi_types.UUID      `json:"id"`
-	Metadata          *map[string]interface{} `json:"metadata,omitempty"`
-	OrganizationId    openapi_types.UUID      `json:"organization_id"`
-	ProviderMessageId *string                 `json:"provider_message_id"`
-	ReplyTo           *string                 `json:"reply_to"`
-	RequestedAt       time.Time               `json:"requested_at"`
-	SenderDomainId    openapi_types.UUID      `json:"sender_domain_id"`
-	SentAt            *time.Time              `json:"sent_at"`
-	Status            EmailResponseStatus     `json:"status"`
-	Subject           string                  `json:"subject"`
-	ToAddresses       []string                `json:"to_addresses"`
+	Attachments        *[]EmailAttachmentResponse `json:"attachments,omitempty"`
+	BccAddresses       *[]string                  `json:"bcc_addresses"`
+	BodyHtml           *string                    `json:"body_html"`
+	BodyText           *string                    `json:"body_text"`
+	CcAddresses        *[]string                  `json:"cc_addresses"`
+	ConversationId     *openapi_types.UUID        `json:"conversation_id"`
+	Direction          *EmailResponseDirection    `json:"direction,omitempty"`
+	DkimVerdict        *string                    `json:"dkim_verdict,omitempty"`
+	DmarcVerdict       *string                    `json:"dmarc_verdict,omitempty"`
+	EmailDomainId      openapi_types.UUID         `json:"email_domain_id"`
+	EndReason          *string                    `json:"end_reason"`
+	FailedAt           *time.Time                 `json:"failed_at"`
+	FromAddress        string                     `json:"from_address"`
+	Id                 openapi_types.UUID         `json:"id"`
+	InReplyTo          *string                    `json:"in_reply_to,omitempty"`
+	MessageId          *string                    `json:"message_id,omitempty"`
+	Metadata           *map[string]interface{}    `json:"metadata,omitempty"`
+	OrganizationId     openapi_types.UUID         `json:"organization_id"`
+	ProviderMessageId  *string                    `json:"provider_message_id"`
+	ProviderReceivedAt *time.Time                 `json:"provider_received_at,omitempty"`
+	RawUrl             *string                    `json:"raw_url,omitempty"`
+	ReferencesIds      *[]string                  `json:"references_ids,omitempty"`
+	ReplyTo            *string                    `json:"reply_to"`
+	RequestedAt        time.Time                  `json:"requested_at"`
+	SentAt             *time.Time                 `json:"sent_at"`
+	SpamVerdict        *string                    `json:"spam_verdict,omitempty"`
+	SpfVerdict         *string                    `json:"spf_verdict,omitempty"`
+	Status             EmailResponseStatus        `json:"status"`
+	Subject            string                     `json:"subject"`
+	ToAddresses        []string                   `json:"to_addresses"`
+	VirusVerdict       *string                    `json:"virus_verdict,omitempty"`
 }
+
+// EmailResponseDirection defines model for EmailResponse.Direction.
+type EmailResponseDirection string
 
 // EmailResponseStatus defines model for EmailResponse.Status.
 type EmailResponseStatus string
@@ -407,6 +680,7 @@ type EmailSummary struct {
 	BccAddresses      *[]string               `json:"bcc_addresses"`
 	CcAddresses       *[]string               `json:"cc_addresses"`
 	ConversationId    *openapi_types.UUID     `json:"conversation_id"`
+	EmailDomainId     openapi_types.UUID      `json:"email_domain_id"`
 	EndReason         *string                 `json:"end_reason"`
 	FailedAt          *time.Time              `json:"failed_at"`
 	FromAddress       string                  `json:"from_address"`
@@ -416,7 +690,6 @@ type EmailSummary struct {
 	ProviderMessageId *string                 `json:"provider_message_id"`
 	ReplyTo           *string                 `json:"reply_to"`
 	RequestedAt       time.Time               `json:"requested_at"`
-	SenderDomainId    openapi_types.UUID      `json:"sender_domain_id"`
 	SentAt            *time.Time              `json:"sent_at"`
 	Status            EmailSummaryStatus      `json:"status"`
 	Subject           string                  `json:"subject"`
@@ -448,64 +721,6 @@ type LLMConfig struct {
 	Model   string `json:"model"`
 }
 
-// SenderDomainCreate Request body for POST /sender-domains.
-//
-// For “kind='hail_mail'“ “domain“ is omitted; the server composes
-// the full address as “<local_prefix_user>+<local_prefix_org>@<base>“.
-// Both prefixes are optional in the body and fall back to the
-// “HAIL_MAIL_DEFAULT_*_PREFIX“ env vars; the server returns 503 if
-// neither is supplied. For “kind='custom'“ “domain“ is required and
-// the prefix fields must be omitted.
-type SenderDomainCreate struct {
-	Domain          *string                `json:"domain,omitempty"`
-	Kind            SenderDomainCreateKind `json:"kind"`
-	LocalPrefixOrg  *string                `json:"local_prefix_org,omitempty"`
-	LocalPrefixUser *string                `json:"local_prefix_user,omitempty"`
-}
-
-// SenderDomainCreateKind defines model for SenderDomainCreate.Kind.
-type SenderDomainCreateKind string
-
-// SenderDomainListResponse defines model for SenderDomainListResponse.
-type SenderDomainListResponse struct {
-	Items      []SenderDomainResponse `json:"items"`
-	NextCursor *string                `json:"next_cursor,omitempty"`
-}
-
-// SenderDomainPatch Body for PATCH /sender-domains/{id}.
-//
-// Only the user/org prefix pair on a “kind='hail_mail'“ row is mutable
-// today. Custom-domain rows have nothing here a tenant should be free to
-// edit — DNS, DKIM, and verification state are all provider-driven. The
-// handler returns 422 on custom rows so the failure mode is obvious.
-type SenderDomainPatch struct {
-	LocalPrefixOrg  *string `json:"local_prefix_org,omitempty"`
-	LocalPrefixUser *string `json:"local_prefix_user,omitempty"`
-}
-
-// SenderDomainResponse defines model for SenderDomainResponse.
-type SenderDomainResponse struct {
-	CreatedAt          time.Time                              `json:"created_at"`
-	DkimRecords        []DkimRecordSchema                     `json:"dkim_records"`
-	Domain             string                                 `json:"domain"`
-	Id                 openapi_types.UUID                     `json:"id"`
-	Kind               SenderDomainResponseKind               `json:"kind"`
-	LocalPrefixOrg     *string                                `json:"local_prefix_org"`
-	LocalPrefixUser    *string                                `json:"local_prefix_user"`
-	MailFromDomain     *string                                `json:"mail_from_domain"`
-	OrganizationId     openapi_types.UUID                     `json:"organization_id"`
-	Provider           string                                 `json:"provider"`
-	UpdatedAt          time.Time                              `json:"updated_at"`
-	VerificationStatus SenderDomainResponseVerificationStatus `json:"verification_status"`
-	VerifiedAt         *time.Time                             `json:"verified_at"`
-}
-
-// SenderDomainResponseKind defines model for SenderDomainResponse.Kind.
-type SenderDomainResponseKind string
-
-// SenderDomainResponseVerificationStatus defines model for SenderDomainResponse.VerificationStatus.
-type SenderDomainResponseVerificationStatus string
-
 // ValidationError defines model for ValidationError.
 type ValidationError struct {
 	Ctx   *map[string]interface{}    `json:"ctx,omitempty"`
@@ -534,6 +749,85 @@ type VoiceConfig struct {
 	Vad           *string `json:"vad,omitempty"`
 }
 
+// WebhookDeliveryListResponse defines model for WebhookDeliveryListResponse.
+type WebhookDeliveryListResponse struct {
+	Items      []WebhookDeliveryResponse `json:"items"`
+	NextCursor *string                   `json:"next_cursor,omitempty"`
+}
+
+// WebhookDeliveryResponse defines model for WebhookDeliveryResponse.
+type WebhookDeliveryResponse struct {
+	Attempt        int                           `json:"attempt"`
+	CreatedAt      time.Time                     `json:"created_at"`
+	EmailDomainId  *openapi_types.UUID           `json:"email_domain_id"`
+	EventId        openapi_types.UUID            `json:"event_id"`
+	EventType      string                        `json:"event_type"`
+	Id             openapi_types.UUID            `json:"id"`
+	NextAttemptAt  time.Time                     `json:"next_attempt_at"`
+	ResponseBody   *string                       `json:"response_body,omitempty"`
+	ResponseStatus *int                          `json:"response_status,omitempty"`
+	Status         WebhookDeliveryResponseStatus `json:"status"`
+	SubscriptionId *openapi_types.UUID           `json:"subscription_id"`
+	SucceededAt    *time.Time                    `json:"succeeded_at,omitempty"`
+}
+
+// WebhookDeliveryResponseStatus defines model for WebhookDeliveryResponse.Status.
+type WebhookDeliveryResponseStatus string
+
+// WebhookSecretResponse Plaintext webhook secret, returned exactly once (create/rotate).
+type WebhookSecretResponse struct {
+	WebhookSecret string `json:"webhook_secret"`
+}
+
+// WebhookSubscriptionCreate defines model for WebhookSubscriptionCreate.
+type WebhookSubscriptionCreate struct {
+	EventTypes []WebhookSubscriptionCreateEventTypes `json:"event_types"`
+	TargetUrl  string                                `json:"target_url"`
+}
+
+// WebhookSubscriptionCreateEventTypes defines model for WebhookSubscriptionCreate.EventTypes.
+type WebhookSubscriptionCreateEventTypes string
+
+// WebhookSubscriptionListResponse defines model for WebhookSubscriptionListResponse.
+type WebhookSubscriptionListResponse struct {
+	Items      []WebhookSubscriptionResponse `json:"items"`
+	NextCursor *string                       `json:"next_cursor,omitempty"`
+}
+
+// WebhookSubscriptionPatch defines model for WebhookSubscriptionPatch.
+type WebhookSubscriptionPatch struct {
+	EventTypes *[]WebhookSubscriptionPatchEventTypes `json:"event_types,omitempty"`
+	Status     *WebhookSubscriptionPatchStatus       `json:"status,omitempty"`
+	TargetUrl  *string                               `json:"target_url,omitempty"`
+}
+
+// WebhookSubscriptionPatchEventTypes defines model for WebhookSubscriptionPatch.EventTypes.
+type WebhookSubscriptionPatchEventTypes string
+
+// WebhookSubscriptionPatchStatus defines model for WebhookSubscriptionPatch.Status.
+type WebhookSubscriptionPatchStatus string
+
+// WebhookSubscriptionResponse Subscription as returned by the API.
+//
+// “secret“ is populated **only** by create + rotate-secret responses;
+// later GETs return “None“ so the plaintext never round-trips.
+type WebhookSubscriptionResponse struct {
+	ConsecutiveFailures int                               `json:"consecutive_failures"`
+	CreatedAt           time.Time                         `json:"created_at"`
+	EventTypes          []string                          `json:"event_types"`
+	Id                  openapi_types.UUID                `json:"id"`
+	LastFailureAt       *time.Time                        `json:"last_failure_at,omitempty"`
+	LastSuccessAt       *time.Time                        `json:"last_success_at,omitempty"`
+	OrganizationId      openapi_types.UUID                `json:"organization_id"`
+	Secret              *string                           `json:"secret,omitempty"`
+	Status              WebhookSubscriptionResponseStatus `json:"status"`
+	TargetUrl           string                            `json:"target_url"`
+	UpdatedAt           time.Time                         `json:"updated_at"`
+}
+
+// WebhookSubscriptionResponseStatus defines model for WebhookSubscriptionResponse.Status.
+type WebhookSubscriptionResponseStatus string
+
 // ListCallsCallsGetParams defines parameters for ListCallsCallsGet.
 type ListCallsCallsGetParams struct {
 	Cursor        *string                        `form:"cursor,omitempty" json:"cursor,omitempty"`
@@ -557,16 +851,57 @@ type GetCallCallsCallIdGetParams struct {
 	Authorization *string `json:"authorization,omitempty"`
 }
 
+// ListEmailDomainsEmailDomainsGetParams defines parameters for ListEmailDomainsEmailDomainsGet.
+type ListEmailDomainsEmailDomainsGetParams struct {
+	Cursor        *string `form:"cursor,omitempty" json:"cursor,omitempty"`
+	Limit         *int    `form:"limit,omitempty" json:"limit,omitempty"`
+	Authorization *string `json:"authorization,omitempty"`
+}
+
+// CreateEmailDomainEmailDomainsPostParams defines parameters for CreateEmailDomainEmailDomainsPost.
+type CreateEmailDomainEmailDomainsPostParams struct {
+	Authorization *string `json:"authorization,omitempty"`
+}
+
+// DeleteEmailDomainEmailDomainsDomainIdDeleteParams defines parameters for DeleteEmailDomainEmailDomainsDomainIdDelete.
+type DeleteEmailDomainEmailDomainsDomainIdDeleteParams struct {
+	Authorization *string `json:"authorization,omitempty"`
+}
+
+// GetEmailDomainEmailDomainsDomainIdGetParams defines parameters for GetEmailDomainEmailDomainsDomainIdGet.
+type GetEmailDomainEmailDomainsDomainIdGetParams struct {
+	Authorization *string `json:"authorization,omitempty"`
+}
+
+// PatchEmailDomainEmailDomainsDomainIdPatchParams defines parameters for PatchEmailDomainEmailDomainsDomainIdPatch.
+type PatchEmailDomainEmailDomainsDomainIdPatchParams struct {
+	Authorization *string `json:"authorization,omitempty"`
+}
+
+// RotateWebhookSecretEmailDomainsDomainIdRotateWebhookSecretPostParams defines parameters for RotateWebhookSecretEmailDomainsDomainIdRotateWebhookSecretPost.
+type RotateWebhookSecretEmailDomainsDomainIdRotateWebhookSecretPostParams struct {
+	Authorization *string `json:"authorization,omitempty"`
+}
+
+// VerifyEmailDomainEmailDomainsDomainIdVerifyPostParams defines parameters for VerifyEmailDomainEmailDomainsDomainIdVerifyPost.
+type VerifyEmailDomainEmailDomainsDomainIdVerifyPostParams struct {
+	Authorization *string `json:"authorization,omitempty"`
+}
+
 // ListEmailsEmailsGetParams defines parameters for ListEmailsEmailsGet.
 type ListEmailsEmailsGetParams struct {
-	Cursor        *string                          `form:"cursor,omitempty" json:"cursor,omitempty"`
-	Limit         *int                             `form:"limit,omitempty" json:"limit,omitempty"`
-	Status        *ListEmailsEmailsGetParamsStatus `form:"status,omitempty" json:"status,omitempty"`
-	Authorization *string                          `json:"authorization,omitempty"`
+	Cursor        *string                             `form:"cursor,omitempty" json:"cursor,omitempty"`
+	Limit         *int                                `form:"limit,omitempty" json:"limit,omitempty"`
+	Status        *ListEmailsEmailsGetParamsStatus    `form:"status,omitempty" json:"status,omitempty"`
+	Direction     *ListEmailsEmailsGetParamsDirection `form:"direction,omitempty" json:"direction,omitempty"`
+	Authorization *string                             `json:"authorization,omitempty"`
 }
 
 // ListEmailsEmailsGetParamsStatus defines parameters for ListEmailsEmailsGet.
 type ListEmailsEmailsGetParamsStatus string
+
+// ListEmailsEmailsGetParamsDirection defines parameters for ListEmailsEmailsGet.
+type ListEmailsEmailsGetParamsDirection string
 
 // CreateEmailEmailsPostParams defines parameters for CreateEmailEmailsPost.
 type CreateEmailEmailsPostParams struct {
@@ -579,6 +914,16 @@ type GetEmailEmailsEmailIdGetParams struct {
 	Authorization *string `json:"authorization,omitempty"`
 }
 
+// GetEmailAttachmentEmailsEmailIdAttachmentsAttachmentIdGetParams defines parameters for GetEmailAttachmentEmailsEmailIdAttachmentsAttachmentIdGet.
+type GetEmailAttachmentEmailsEmailIdAttachmentsAttachmentIdGetParams struct {
+	Authorization *string `json:"authorization,omitempty"`
+}
+
+// GetEmailRawEmailsEmailIdRawGetParams defines parameters for GetEmailRawEmailsEmailIdRawGet.
+type GetEmailRawEmailsEmailIdRawGetParams struct {
+	Authorization *string `json:"authorization,omitempty"`
+}
+
 // ListEventsEventsGetParams defines parameters for ListEventsEventsGet.
 type ListEventsEventsGetParams struct {
 	Cursor        *string `form:"cursor,omitempty" json:"cursor,omitempty"`
@@ -588,49 +933,67 @@ type ListEventsEventsGetParams struct {
 	Authorization *string `json:"authorization,omitempty"`
 }
 
-// ListSenderDomainsSenderDomainsGetParams defines parameters for ListSenderDomainsSenderDomainsGet.
-type ListSenderDomainsSenderDomainsGetParams struct {
+// ListSubscriptionsWebhooksGetParams defines parameters for ListSubscriptionsWebhooksGet.
+type ListSubscriptionsWebhooksGetParams struct {
 	Cursor        *string `form:"cursor,omitempty" json:"cursor,omitempty"`
 	Limit         *int    `form:"limit,omitempty" json:"limit,omitempty"`
 	Authorization *string `json:"authorization,omitempty"`
 }
 
-// CreateSenderDomainSenderDomainsPostParams defines parameters for CreateSenderDomainSenderDomainsPost.
-type CreateSenderDomainSenderDomainsPostParams struct {
+// CreateSubscriptionWebhooksPostParams defines parameters for CreateSubscriptionWebhooksPost.
+type CreateSubscriptionWebhooksPostParams struct {
 	Authorization *string `json:"authorization,omitempty"`
 }
 
-// DeleteSenderDomainSenderDomainsDomainIdDeleteParams defines parameters for DeleteSenderDomainSenderDomainsDomainIdDelete.
-type DeleteSenderDomainSenderDomainsDomainIdDeleteParams struct {
+// DeleteSubscriptionWebhooksSubIdDeleteParams defines parameters for DeleteSubscriptionWebhooksSubIdDelete.
+type DeleteSubscriptionWebhooksSubIdDeleteParams struct {
 	Authorization *string `json:"authorization,omitempty"`
 }
 
-// GetSenderDomainSenderDomainsDomainIdGetParams defines parameters for GetSenderDomainSenderDomainsDomainIdGet.
-type GetSenderDomainSenderDomainsDomainIdGetParams struct {
+// GetSubscriptionWebhooksSubIdGetParams defines parameters for GetSubscriptionWebhooksSubIdGet.
+type GetSubscriptionWebhooksSubIdGetParams struct {
 	Authorization *string `json:"authorization,omitempty"`
 }
 
-// PatchSenderDomainSenderDomainsDomainIdPatchParams defines parameters for PatchSenderDomainSenderDomainsDomainIdPatch.
-type PatchSenderDomainSenderDomainsDomainIdPatchParams struct {
+// PatchSubscriptionWebhooksSubIdPatchParams defines parameters for PatchSubscriptionWebhooksSubIdPatch.
+type PatchSubscriptionWebhooksSubIdPatchParams struct {
 	Authorization *string `json:"authorization,omitempty"`
 }
 
-// VerifySenderDomainSenderDomainsDomainIdVerifyPostParams defines parameters for VerifySenderDomainSenderDomainsDomainIdVerifyPost.
-type VerifySenderDomainSenderDomainsDomainIdVerifyPostParams struct {
+// ListDeliveriesWebhooksSubIdDeliveriesGetParams defines parameters for ListDeliveriesWebhooksSubIdDeliveriesGet.
+type ListDeliveriesWebhooksSubIdDeliveriesGetParams struct {
+	Cursor        *string `form:"cursor,omitempty" json:"cursor,omitempty"`
+	Limit         *int    `form:"limit,omitempty" json:"limit,omitempty"`
+	Authorization *string `json:"authorization,omitempty"`
+}
+
+// RedeliverWebhooksSubIdDeliveriesDeliveryIdRedeliverPostParams defines parameters for RedeliverWebhooksSubIdDeliveriesDeliveryIdRedeliverPost.
+type RedeliverWebhooksSubIdDeliveriesDeliveryIdRedeliverPostParams struct {
+	Authorization *string `json:"authorization,omitempty"`
+}
+
+// RotateSecretWebhooksSubIdRotateSecretPostParams defines parameters for RotateSecretWebhooksSubIdRotateSecretPost.
+type RotateSecretWebhooksSubIdRotateSecretPostParams struct {
 	Authorization *string `json:"authorization,omitempty"`
 }
 
 // CreateCallCallsPostJSONRequestBody defines body for CreateCallCallsPost for application/json ContentType.
 type CreateCallCallsPostJSONRequestBody = CallCreate
 
+// CreateEmailDomainEmailDomainsPostJSONRequestBody defines body for CreateEmailDomainEmailDomainsPost for application/json ContentType.
+type CreateEmailDomainEmailDomainsPostJSONRequestBody = EmailDomainCreate
+
+// PatchEmailDomainEmailDomainsDomainIdPatchJSONRequestBody defines body for PatchEmailDomainEmailDomainsDomainIdPatch for application/json ContentType.
+type PatchEmailDomainEmailDomainsDomainIdPatchJSONRequestBody = EmailDomainPatch
+
 // CreateEmailEmailsPostJSONRequestBody defines body for CreateEmailEmailsPost for application/json ContentType.
 type CreateEmailEmailsPostJSONRequestBody = EmailCreate
 
-// CreateSenderDomainSenderDomainsPostJSONRequestBody defines body for CreateSenderDomainSenderDomainsPost for application/json ContentType.
-type CreateSenderDomainSenderDomainsPostJSONRequestBody = SenderDomainCreate
+// CreateSubscriptionWebhooksPostJSONRequestBody defines body for CreateSubscriptionWebhooksPost for application/json ContentType.
+type CreateSubscriptionWebhooksPostJSONRequestBody = WebhookSubscriptionCreate
 
-// PatchSenderDomainSenderDomainsDomainIdPatchJSONRequestBody defines body for PatchSenderDomainSenderDomainsDomainIdPatch for application/json ContentType.
-type PatchSenderDomainSenderDomainsDomainIdPatchJSONRequestBody = SenderDomainPatch
+// PatchSubscriptionWebhooksSubIdPatchJSONRequestBody defines body for PatchSubscriptionWebhooksSubIdPatch for application/json ContentType.
+type PatchSubscriptionWebhooksSubIdPatchJSONRequestBody = WebhookSubscriptionPatch
 
 // Getter for additional properties for DkimRecordSchema. Returns the specified
 // element and whether it was found
@@ -872,6 +1235,31 @@ type ClientInterface interface {
 	// GetCallCallsCallIdGet request
 	GetCallCallsCallIdGet(ctx context.Context, callId openapi_types.UUID, params *GetCallCallsCallIdGetParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
+	// ListEmailDomainsEmailDomainsGet request
+	ListEmailDomainsEmailDomainsGet(ctx context.Context, params *ListEmailDomainsEmailDomainsGetParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// CreateEmailDomainEmailDomainsPostWithBody request with any body
+	CreateEmailDomainEmailDomainsPostWithBody(ctx context.Context, params *CreateEmailDomainEmailDomainsPostParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	CreateEmailDomainEmailDomainsPost(ctx context.Context, params *CreateEmailDomainEmailDomainsPostParams, body CreateEmailDomainEmailDomainsPostJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// DeleteEmailDomainEmailDomainsDomainIdDelete request
+	DeleteEmailDomainEmailDomainsDomainIdDelete(ctx context.Context, domainId openapi_types.UUID, params *DeleteEmailDomainEmailDomainsDomainIdDeleteParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// GetEmailDomainEmailDomainsDomainIdGet request
+	GetEmailDomainEmailDomainsDomainIdGet(ctx context.Context, domainId openapi_types.UUID, params *GetEmailDomainEmailDomainsDomainIdGetParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// PatchEmailDomainEmailDomainsDomainIdPatchWithBody request with any body
+	PatchEmailDomainEmailDomainsDomainIdPatchWithBody(ctx context.Context, domainId openapi_types.UUID, params *PatchEmailDomainEmailDomainsDomainIdPatchParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	PatchEmailDomainEmailDomainsDomainIdPatch(ctx context.Context, domainId openapi_types.UUID, params *PatchEmailDomainEmailDomainsDomainIdPatchParams, body PatchEmailDomainEmailDomainsDomainIdPatchJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// RotateWebhookSecretEmailDomainsDomainIdRotateWebhookSecretPost request
+	RotateWebhookSecretEmailDomainsDomainIdRotateWebhookSecretPost(ctx context.Context, domainId openapi_types.UUID, params *RotateWebhookSecretEmailDomainsDomainIdRotateWebhookSecretPostParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// VerifyEmailDomainEmailDomainsDomainIdVerifyPost request
+	VerifyEmailDomainEmailDomainsDomainIdVerifyPost(ctx context.Context, domainId openapi_types.UUID, params *VerifyEmailDomainEmailDomainsDomainIdVerifyPostParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
 	// ListEmailsEmailsGet request
 	ListEmailsEmailsGet(ctx context.Context, params *ListEmailsEmailsGetParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
@@ -883,33 +1271,45 @@ type ClientInterface interface {
 	// GetEmailEmailsEmailIdGet request
 	GetEmailEmailsEmailIdGet(ctx context.Context, emailId openapi_types.UUID, params *GetEmailEmailsEmailIdGetParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
+	// GetEmailAttachmentEmailsEmailIdAttachmentsAttachmentIdGet request
+	GetEmailAttachmentEmailsEmailIdAttachmentsAttachmentIdGet(ctx context.Context, emailId openapi_types.UUID, attachmentId openapi_types.UUID, params *GetEmailAttachmentEmailsEmailIdAttachmentsAttachmentIdGetParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// GetEmailRawEmailsEmailIdRawGet request
+	GetEmailRawEmailsEmailIdRawGet(ctx context.Context, emailId openapi_types.UUID, params *GetEmailRawEmailsEmailIdRawGetParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
 	// ListEventsEventsGet request
 	ListEventsEventsGet(ctx context.Context, params *ListEventsEventsGetParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// HealthzHealthzGet request
 	HealthzHealthzGet(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
 
-	// ListSenderDomainsSenderDomainsGet request
-	ListSenderDomainsSenderDomainsGet(ctx context.Context, params *ListSenderDomainsSenderDomainsGetParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+	// ListSubscriptionsWebhooksGet request
+	ListSubscriptionsWebhooksGet(ctx context.Context, params *ListSubscriptionsWebhooksGetParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
-	// CreateSenderDomainSenderDomainsPostWithBody request with any body
-	CreateSenderDomainSenderDomainsPostWithBody(ctx context.Context, params *CreateSenderDomainSenderDomainsPostParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+	// CreateSubscriptionWebhooksPostWithBody request with any body
+	CreateSubscriptionWebhooksPostWithBody(ctx context.Context, params *CreateSubscriptionWebhooksPostParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
 
-	CreateSenderDomainSenderDomainsPost(ctx context.Context, params *CreateSenderDomainSenderDomainsPostParams, body CreateSenderDomainSenderDomainsPostJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+	CreateSubscriptionWebhooksPost(ctx context.Context, params *CreateSubscriptionWebhooksPostParams, body CreateSubscriptionWebhooksPostJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
-	// DeleteSenderDomainSenderDomainsDomainIdDelete request
-	DeleteSenderDomainSenderDomainsDomainIdDelete(ctx context.Context, domainId openapi_types.UUID, params *DeleteSenderDomainSenderDomainsDomainIdDeleteParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+	// DeleteSubscriptionWebhooksSubIdDelete request
+	DeleteSubscriptionWebhooksSubIdDelete(ctx context.Context, subId openapi_types.UUID, params *DeleteSubscriptionWebhooksSubIdDeleteParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
-	// GetSenderDomainSenderDomainsDomainIdGet request
-	GetSenderDomainSenderDomainsDomainIdGet(ctx context.Context, domainId openapi_types.UUID, params *GetSenderDomainSenderDomainsDomainIdGetParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+	// GetSubscriptionWebhooksSubIdGet request
+	GetSubscriptionWebhooksSubIdGet(ctx context.Context, subId openapi_types.UUID, params *GetSubscriptionWebhooksSubIdGetParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
-	// PatchSenderDomainSenderDomainsDomainIdPatchWithBody request with any body
-	PatchSenderDomainSenderDomainsDomainIdPatchWithBody(ctx context.Context, domainId openapi_types.UUID, params *PatchSenderDomainSenderDomainsDomainIdPatchParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+	// PatchSubscriptionWebhooksSubIdPatchWithBody request with any body
+	PatchSubscriptionWebhooksSubIdPatchWithBody(ctx context.Context, subId openapi_types.UUID, params *PatchSubscriptionWebhooksSubIdPatchParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
 
-	PatchSenderDomainSenderDomainsDomainIdPatch(ctx context.Context, domainId openapi_types.UUID, params *PatchSenderDomainSenderDomainsDomainIdPatchParams, body PatchSenderDomainSenderDomainsDomainIdPatchJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+	PatchSubscriptionWebhooksSubIdPatch(ctx context.Context, subId openapi_types.UUID, params *PatchSubscriptionWebhooksSubIdPatchParams, body PatchSubscriptionWebhooksSubIdPatchJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
-	// VerifySenderDomainSenderDomainsDomainIdVerifyPost request
-	VerifySenderDomainSenderDomainsDomainIdVerifyPost(ctx context.Context, domainId openapi_types.UUID, params *VerifySenderDomainSenderDomainsDomainIdVerifyPostParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+	// ListDeliveriesWebhooksSubIdDeliveriesGet request
+	ListDeliveriesWebhooksSubIdDeliveriesGet(ctx context.Context, subId openapi_types.UUID, params *ListDeliveriesWebhooksSubIdDeliveriesGetParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// RedeliverWebhooksSubIdDeliveriesDeliveryIdRedeliverPost request
+	RedeliverWebhooksSubIdDeliveriesDeliveryIdRedeliverPost(ctx context.Context, subId openapi_types.UUID, deliveryId openapi_types.UUID, params *RedeliverWebhooksSubIdDeliveriesDeliveryIdRedeliverPostParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// RotateSecretWebhooksSubIdRotateSecretPost request
+	RotateSecretWebhooksSubIdRotateSecretPost(ctx context.Context, subId openapi_types.UUID, params *RotateSecretWebhooksSubIdRotateSecretPostParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 }
 
 func (c *Client) ListCallsCallsGet(ctx context.Context, params *ListCallsCallsGetParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
@@ -950,6 +1350,114 @@ func (c *Client) CreateCallCallsPost(ctx context.Context, params *CreateCallCall
 
 func (c *Client) GetCallCallsCallIdGet(ctx context.Context, callId openapi_types.UUID, params *GetCallCallsCallIdGetParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewGetCallCallsCallIdGetRequest(c.Server, callId, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) ListEmailDomainsEmailDomainsGet(ctx context.Context, params *ListEmailDomainsEmailDomainsGetParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewListEmailDomainsEmailDomainsGetRequest(c.Server, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) CreateEmailDomainEmailDomainsPostWithBody(ctx context.Context, params *CreateEmailDomainEmailDomainsPostParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewCreateEmailDomainEmailDomainsPostRequestWithBody(c.Server, params, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) CreateEmailDomainEmailDomainsPost(ctx context.Context, params *CreateEmailDomainEmailDomainsPostParams, body CreateEmailDomainEmailDomainsPostJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewCreateEmailDomainEmailDomainsPostRequest(c.Server, params, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) DeleteEmailDomainEmailDomainsDomainIdDelete(ctx context.Context, domainId openapi_types.UUID, params *DeleteEmailDomainEmailDomainsDomainIdDeleteParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewDeleteEmailDomainEmailDomainsDomainIdDeleteRequest(c.Server, domainId, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) GetEmailDomainEmailDomainsDomainIdGet(ctx context.Context, domainId openapi_types.UUID, params *GetEmailDomainEmailDomainsDomainIdGetParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetEmailDomainEmailDomainsDomainIdGetRequest(c.Server, domainId, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) PatchEmailDomainEmailDomainsDomainIdPatchWithBody(ctx context.Context, domainId openapi_types.UUID, params *PatchEmailDomainEmailDomainsDomainIdPatchParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewPatchEmailDomainEmailDomainsDomainIdPatchRequestWithBody(c.Server, domainId, params, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) PatchEmailDomainEmailDomainsDomainIdPatch(ctx context.Context, domainId openapi_types.UUID, params *PatchEmailDomainEmailDomainsDomainIdPatchParams, body PatchEmailDomainEmailDomainsDomainIdPatchJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewPatchEmailDomainEmailDomainsDomainIdPatchRequest(c.Server, domainId, params, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) RotateWebhookSecretEmailDomainsDomainIdRotateWebhookSecretPost(ctx context.Context, domainId openapi_types.UUID, params *RotateWebhookSecretEmailDomainsDomainIdRotateWebhookSecretPostParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewRotateWebhookSecretEmailDomainsDomainIdRotateWebhookSecretPostRequest(c.Server, domainId, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) VerifyEmailDomainEmailDomainsDomainIdVerifyPost(ctx context.Context, domainId openapi_types.UUID, params *VerifyEmailDomainEmailDomainsDomainIdVerifyPostParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewVerifyEmailDomainEmailDomainsDomainIdVerifyPostRequest(c.Server, domainId, params)
 	if err != nil {
 		return nil, err
 	}
@@ -1008,6 +1516,30 @@ func (c *Client) GetEmailEmailsEmailIdGet(ctx context.Context, emailId openapi_t
 	return c.Client.Do(req)
 }
 
+func (c *Client) GetEmailAttachmentEmailsEmailIdAttachmentsAttachmentIdGet(ctx context.Context, emailId openapi_types.UUID, attachmentId openapi_types.UUID, params *GetEmailAttachmentEmailsEmailIdAttachmentsAttachmentIdGetParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetEmailAttachmentEmailsEmailIdAttachmentsAttachmentIdGetRequest(c.Server, emailId, attachmentId, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) GetEmailRawEmailsEmailIdRawGet(ctx context.Context, emailId openapi_types.UUID, params *GetEmailRawEmailsEmailIdRawGetParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetEmailRawEmailsEmailIdRawGetRequest(c.Server, emailId, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
 func (c *Client) ListEventsEventsGet(ctx context.Context, params *ListEventsEventsGetParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewListEventsEventsGetRequest(c.Server, params)
 	if err != nil {
@@ -1032,8 +1564,8 @@ func (c *Client) HealthzHealthzGet(ctx context.Context, reqEditors ...RequestEdi
 	return c.Client.Do(req)
 }
 
-func (c *Client) ListSenderDomainsSenderDomainsGet(ctx context.Context, params *ListSenderDomainsSenderDomainsGetParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewListSenderDomainsSenderDomainsGetRequest(c.Server, params)
+func (c *Client) ListSubscriptionsWebhooksGet(ctx context.Context, params *ListSubscriptionsWebhooksGetParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewListSubscriptionsWebhooksGetRequest(c.Server, params)
 	if err != nil {
 		return nil, err
 	}
@@ -1044,8 +1576,8 @@ func (c *Client) ListSenderDomainsSenderDomainsGet(ctx context.Context, params *
 	return c.Client.Do(req)
 }
 
-func (c *Client) CreateSenderDomainSenderDomainsPostWithBody(ctx context.Context, params *CreateSenderDomainSenderDomainsPostParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewCreateSenderDomainSenderDomainsPostRequestWithBody(c.Server, params, contentType, body)
+func (c *Client) CreateSubscriptionWebhooksPostWithBody(ctx context.Context, params *CreateSubscriptionWebhooksPostParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewCreateSubscriptionWebhooksPostRequestWithBody(c.Server, params, contentType, body)
 	if err != nil {
 		return nil, err
 	}
@@ -1056,8 +1588,8 @@ func (c *Client) CreateSenderDomainSenderDomainsPostWithBody(ctx context.Context
 	return c.Client.Do(req)
 }
 
-func (c *Client) CreateSenderDomainSenderDomainsPost(ctx context.Context, params *CreateSenderDomainSenderDomainsPostParams, body CreateSenderDomainSenderDomainsPostJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewCreateSenderDomainSenderDomainsPostRequest(c.Server, params, body)
+func (c *Client) CreateSubscriptionWebhooksPost(ctx context.Context, params *CreateSubscriptionWebhooksPostParams, body CreateSubscriptionWebhooksPostJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewCreateSubscriptionWebhooksPostRequest(c.Server, params, body)
 	if err != nil {
 		return nil, err
 	}
@@ -1068,8 +1600,8 @@ func (c *Client) CreateSenderDomainSenderDomainsPost(ctx context.Context, params
 	return c.Client.Do(req)
 }
 
-func (c *Client) DeleteSenderDomainSenderDomainsDomainIdDelete(ctx context.Context, domainId openapi_types.UUID, params *DeleteSenderDomainSenderDomainsDomainIdDeleteParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewDeleteSenderDomainSenderDomainsDomainIdDeleteRequest(c.Server, domainId, params)
+func (c *Client) DeleteSubscriptionWebhooksSubIdDelete(ctx context.Context, subId openapi_types.UUID, params *DeleteSubscriptionWebhooksSubIdDeleteParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewDeleteSubscriptionWebhooksSubIdDeleteRequest(c.Server, subId, params)
 	if err != nil {
 		return nil, err
 	}
@@ -1080,8 +1612,8 @@ func (c *Client) DeleteSenderDomainSenderDomainsDomainIdDelete(ctx context.Conte
 	return c.Client.Do(req)
 }
 
-func (c *Client) GetSenderDomainSenderDomainsDomainIdGet(ctx context.Context, domainId openapi_types.UUID, params *GetSenderDomainSenderDomainsDomainIdGetParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewGetSenderDomainSenderDomainsDomainIdGetRequest(c.Server, domainId, params)
+func (c *Client) GetSubscriptionWebhooksSubIdGet(ctx context.Context, subId openapi_types.UUID, params *GetSubscriptionWebhooksSubIdGetParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetSubscriptionWebhooksSubIdGetRequest(c.Server, subId, params)
 	if err != nil {
 		return nil, err
 	}
@@ -1092,8 +1624,8 @@ func (c *Client) GetSenderDomainSenderDomainsDomainIdGet(ctx context.Context, do
 	return c.Client.Do(req)
 }
 
-func (c *Client) PatchSenderDomainSenderDomainsDomainIdPatchWithBody(ctx context.Context, domainId openapi_types.UUID, params *PatchSenderDomainSenderDomainsDomainIdPatchParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewPatchSenderDomainSenderDomainsDomainIdPatchRequestWithBody(c.Server, domainId, params, contentType, body)
+func (c *Client) PatchSubscriptionWebhooksSubIdPatchWithBody(ctx context.Context, subId openapi_types.UUID, params *PatchSubscriptionWebhooksSubIdPatchParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewPatchSubscriptionWebhooksSubIdPatchRequestWithBody(c.Server, subId, params, contentType, body)
 	if err != nil {
 		return nil, err
 	}
@@ -1104,8 +1636,8 @@ func (c *Client) PatchSenderDomainSenderDomainsDomainIdPatchWithBody(ctx context
 	return c.Client.Do(req)
 }
 
-func (c *Client) PatchSenderDomainSenderDomainsDomainIdPatch(ctx context.Context, domainId openapi_types.UUID, params *PatchSenderDomainSenderDomainsDomainIdPatchParams, body PatchSenderDomainSenderDomainsDomainIdPatchJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewPatchSenderDomainSenderDomainsDomainIdPatchRequest(c.Server, domainId, params, body)
+func (c *Client) PatchSubscriptionWebhooksSubIdPatch(ctx context.Context, subId openapi_types.UUID, params *PatchSubscriptionWebhooksSubIdPatchParams, body PatchSubscriptionWebhooksSubIdPatchJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewPatchSubscriptionWebhooksSubIdPatchRequest(c.Server, subId, params, body)
 	if err != nil {
 		return nil, err
 	}
@@ -1116,8 +1648,32 @@ func (c *Client) PatchSenderDomainSenderDomainsDomainIdPatch(ctx context.Context
 	return c.Client.Do(req)
 }
 
-func (c *Client) VerifySenderDomainSenderDomainsDomainIdVerifyPost(ctx context.Context, domainId openapi_types.UUID, params *VerifySenderDomainSenderDomainsDomainIdVerifyPostParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewVerifySenderDomainSenderDomainsDomainIdVerifyPostRequest(c.Server, domainId, params)
+func (c *Client) ListDeliveriesWebhooksSubIdDeliveriesGet(ctx context.Context, subId openapi_types.UUID, params *ListDeliveriesWebhooksSubIdDeliveriesGetParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewListDeliveriesWebhooksSubIdDeliveriesGetRequest(c.Server, subId, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) RedeliverWebhooksSubIdDeliveriesDeliveryIdRedeliverPost(ctx context.Context, subId openapi_types.UUID, deliveryId openapi_types.UUID, params *RedeliverWebhooksSubIdDeliveriesDeliveryIdRedeliverPostParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewRedeliverWebhooksSubIdDeliveriesDeliveryIdRedeliverPostRequest(c.Server, subId, deliveryId, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) RotateSecretWebhooksSubIdRotateSecretPost(ctx context.Context, subId openapi_types.UUID, params *RotateSecretWebhooksSubIdRotateSecretPostParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewRotateSecretWebhooksSubIdRotateSecretPostRequest(c.Server, subId, params)
 	if err != nil {
 		return nil, err
 	}
@@ -1355,6 +1911,399 @@ func NewGetCallCallsCallIdGetRequest(server string, callId openapi_types.UUID, p
 	return req, nil
 }
 
+// NewListEmailDomainsEmailDomainsGetRequest generates requests for ListEmailDomainsEmailDomainsGet
+func NewListEmailDomainsEmailDomainsGetRequest(server string, params *ListEmailDomainsEmailDomainsGetParams) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/email-domains")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+		queryValues := queryURL.Query()
+
+		if params.Cursor != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "cursor", *params.Cursor, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+				return nil, err
+			} else {
+				for k, v := range parsed {
+					for _, v2 := range v {
+						queryValues.Add(k, v2)
+					}
+				}
+			}
+
+		}
+
+		if params.Limit != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "limit", *params.Limit, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "integer", Format: ""}); err != nil {
+				return nil, err
+			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+				return nil, err
+			} else {
+				for k, v := range parsed {
+					for _, v2 := range v {
+						queryValues.Add(k, v2)
+					}
+				}
+			}
+
+		}
+
+		queryURL.RawQuery = queryValues.Encode()
+	}
+
+	req, err := http.NewRequest("GET", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+
+		if params.Authorization != nil {
+			var headerParam0 string
+
+			headerParam0, err = runtime.StyleParamWithOptions("simple", false, "authorization", *params.Authorization, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationHeader, Type: "string", Format: ""})
+			if err != nil {
+				return nil, err
+			}
+
+			req.Header.Set("authorization", headerParam0)
+		}
+
+	}
+
+	return req, nil
+}
+
+// NewCreateEmailDomainEmailDomainsPostRequest calls the generic CreateEmailDomainEmailDomainsPost builder with application/json body
+func NewCreateEmailDomainEmailDomainsPostRequest(server string, params *CreateEmailDomainEmailDomainsPostParams, body CreateEmailDomainEmailDomainsPostJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewCreateEmailDomainEmailDomainsPostRequestWithBody(server, params, "application/json", bodyReader)
+}
+
+// NewCreateEmailDomainEmailDomainsPostRequestWithBody generates requests for CreateEmailDomainEmailDomainsPost with any type of body
+func NewCreateEmailDomainEmailDomainsPostRequestWithBody(server string, params *CreateEmailDomainEmailDomainsPostParams, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/email-domains")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("POST", queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	if params != nil {
+
+		if params.Authorization != nil {
+			var headerParam0 string
+
+			headerParam0, err = runtime.StyleParamWithOptions("simple", false, "authorization", *params.Authorization, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationHeader, Type: "string", Format: ""})
+			if err != nil {
+				return nil, err
+			}
+
+			req.Header.Set("authorization", headerParam0)
+		}
+
+	}
+
+	return req, nil
+}
+
+// NewDeleteEmailDomainEmailDomainsDomainIdDeleteRequest generates requests for DeleteEmailDomainEmailDomainsDomainIdDelete
+func NewDeleteEmailDomainEmailDomainsDomainIdDeleteRequest(server string, domainId openapi_types.UUID, params *DeleteEmailDomainEmailDomainsDomainIdDeleteParams) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "domain_id", domainId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/email-domains/%s", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("DELETE", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+
+		if params.Authorization != nil {
+			var headerParam0 string
+
+			headerParam0, err = runtime.StyleParamWithOptions("simple", false, "authorization", *params.Authorization, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationHeader, Type: "string", Format: ""})
+			if err != nil {
+				return nil, err
+			}
+
+			req.Header.Set("authorization", headerParam0)
+		}
+
+	}
+
+	return req, nil
+}
+
+// NewGetEmailDomainEmailDomainsDomainIdGetRequest generates requests for GetEmailDomainEmailDomainsDomainIdGet
+func NewGetEmailDomainEmailDomainsDomainIdGetRequest(server string, domainId openapi_types.UUID, params *GetEmailDomainEmailDomainsDomainIdGetParams) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "domain_id", domainId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/email-domains/%s", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("GET", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+
+		if params.Authorization != nil {
+			var headerParam0 string
+
+			headerParam0, err = runtime.StyleParamWithOptions("simple", false, "authorization", *params.Authorization, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationHeader, Type: "string", Format: ""})
+			if err != nil {
+				return nil, err
+			}
+
+			req.Header.Set("authorization", headerParam0)
+		}
+
+	}
+
+	return req, nil
+}
+
+// NewPatchEmailDomainEmailDomainsDomainIdPatchRequest calls the generic PatchEmailDomainEmailDomainsDomainIdPatch builder with application/json body
+func NewPatchEmailDomainEmailDomainsDomainIdPatchRequest(server string, domainId openapi_types.UUID, params *PatchEmailDomainEmailDomainsDomainIdPatchParams, body PatchEmailDomainEmailDomainsDomainIdPatchJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewPatchEmailDomainEmailDomainsDomainIdPatchRequestWithBody(server, domainId, params, "application/json", bodyReader)
+}
+
+// NewPatchEmailDomainEmailDomainsDomainIdPatchRequestWithBody generates requests for PatchEmailDomainEmailDomainsDomainIdPatch with any type of body
+func NewPatchEmailDomainEmailDomainsDomainIdPatchRequestWithBody(server string, domainId openapi_types.UUID, params *PatchEmailDomainEmailDomainsDomainIdPatchParams, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "domain_id", domainId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/email-domains/%s", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("PATCH", queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	if params != nil {
+
+		if params.Authorization != nil {
+			var headerParam0 string
+
+			headerParam0, err = runtime.StyleParamWithOptions("simple", false, "authorization", *params.Authorization, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationHeader, Type: "string", Format: ""})
+			if err != nil {
+				return nil, err
+			}
+
+			req.Header.Set("authorization", headerParam0)
+		}
+
+	}
+
+	return req, nil
+}
+
+// NewRotateWebhookSecretEmailDomainsDomainIdRotateWebhookSecretPostRequest generates requests for RotateWebhookSecretEmailDomainsDomainIdRotateWebhookSecretPost
+func NewRotateWebhookSecretEmailDomainsDomainIdRotateWebhookSecretPostRequest(server string, domainId openapi_types.UUID, params *RotateWebhookSecretEmailDomainsDomainIdRotateWebhookSecretPostParams) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "domain_id", domainId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/email-domains/%s/rotate-webhook-secret", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("POST", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+
+		if params.Authorization != nil {
+			var headerParam0 string
+
+			headerParam0, err = runtime.StyleParamWithOptions("simple", false, "authorization", *params.Authorization, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationHeader, Type: "string", Format: ""})
+			if err != nil {
+				return nil, err
+			}
+
+			req.Header.Set("authorization", headerParam0)
+		}
+
+	}
+
+	return req, nil
+}
+
+// NewVerifyEmailDomainEmailDomainsDomainIdVerifyPostRequest generates requests for VerifyEmailDomainEmailDomainsDomainIdVerifyPost
+func NewVerifyEmailDomainEmailDomainsDomainIdVerifyPostRequest(server string, domainId openapi_types.UUID, params *VerifyEmailDomainEmailDomainsDomainIdVerifyPostParams) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "domain_id", domainId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/email-domains/%s/verify", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("POST", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+
+		if params.Authorization != nil {
+			var headerParam0 string
+
+			headerParam0, err = runtime.StyleParamWithOptions("simple", false, "authorization", *params.Authorization, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationHeader, Type: "string", Format: ""})
+			if err != nil {
+				return nil, err
+			}
+
+			req.Header.Set("authorization", headerParam0)
+		}
+
+	}
+
+	return req, nil
+}
+
 // NewListEmailsEmailsGetRequest generates requests for ListEmailsEmailsGet
 func NewListEmailsEmailsGetRequest(server string, params *ListEmailsEmailsGetParams) (*http.Request, error) {
 	var err error
@@ -1412,6 +2361,22 @@ func NewListEmailsEmailsGetRequest(server string, params *ListEmailsEmailsGetPar
 		if params.Status != nil {
 
 			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "status", *params.Status, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+				return nil, err
+			} else {
+				for k, v := range parsed {
+					for _, v2 := range v {
+						queryValues.Add(k, v2)
+					}
+				}
+			}
+
+		}
+
+		if params.Direction != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "direction", *params.Direction, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
 				return nil, err
 			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
 				return nil, err
@@ -1534,6 +2499,111 @@ func NewGetEmailEmailsEmailIdGetRequest(server string, emailId openapi_types.UUI
 	}
 
 	operationPath := fmt.Sprintf("/emails/%s", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("GET", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+
+		if params.Authorization != nil {
+			var headerParam0 string
+
+			headerParam0, err = runtime.StyleParamWithOptions("simple", false, "authorization", *params.Authorization, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationHeader, Type: "string", Format: ""})
+			if err != nil {
+				return nil, err
+			}
+
+			req.Header.Set("authorization", headerParam0)
+		}
+
+	}
+
+	return req, nil
+}
+
+// NewGetEmailAttachmentEmailsEmailIdAttachmentsAttachmentIdGetRequest generates requests for GetEmailAttachmentEmailsEmailIdAttachmentsAttachmentIdGet
+func NewGetEmailAttachmentEmailsEmailIdAttachmentsAttachmentIdGetRequest(server string, emailId openapi_types.UUID, attachmentId openapi_types.UUID, params *GetEmailAttachmentEmailsEmailIdAttachmentsAttachmentIdGetParams) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "email_id", emailId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithOptions("simple", false, "attachment_id", attachmentId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/emails/%s/attachments/%s", pathParam0, pathParam1)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("GET", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+
+		if params.Authorization != nil {
+			var headerParam0 string
+
+			headerParam0, err = runtime.StyleParamWithOptions("simple", false, "authorization", *params.Authorization, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationHeader, Type: "string", Format: ""})
+			if err != nil {
+				return nil, err
+			}
+
+			req.Header.Set("authorization", headerParam0)
+		}
+
+	}
+
+	return req, nil
+}
+
+// NewGetEmailRawEmailsEmailIdRawGetRequest generates requests for GetEmailRawEmailsEmailIdRawGet
+func NewGetEmailRawEmailsEmailIdRawGetRequest(server string, emailId openapi_types.UUID, params *GetEmailRawEmailsEmailIdRawGetParams) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "email_id", emailId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/emails/%s/raw", pathParam0)
 	if operationPath[0] == '/' {
 		operationPath = "." + operationPath
 	}
@@ -1705,8 +2775,8 @@ func NewHealthzHealthzGetRequest(server string) (*http.Request, error) {
 	return req, nil
 }
 
-// NewListSenderDomainsSenderDomainsGetRequest generates requests for ListSenderDomainsSenderDomainsGet
-func NewListSenderDomainsSenderDomainsGetRequest(server string, params *ListSenderDomainsSenderDomainsGetParams) (*http.Request, error) {
+// NewListSubscriptionsWebhooksGetRequest generates requests for ListSubscriptionsWebhooksGet
+func NewListSubscriptionsWebhooksGetRequest(server string, params *ListSubscriptionsWebhooksGetParams) (*http.Request, error) {
 	var err error
 
 	serverURL, err := url.Parse(server)
@@ -1714,7 +2784,7 @@ func NewListSenderDomainsSenderDomainsGetRequest(server string, params *ListSend
 		return nil, err
 	}
 
-	operationPath := fmt.Sprintf("/sender-domains")
+	operationPath := fmt.Sprintf("/webhooks")
 	if operationPath[0] == '/' {
 		operationPath = "." + operationPath
 	}
@@ -1785,19 +2855,19 @@ func NewListSenderDomainsSenderDomainsGetRequest(server string, params *ListSend
 	return req, nil
 }
 
-// NewCreateSenderDomainSenderDomainsPostRequest calls the generic CreateSenderDomainSenderDomainsPost builder with application/json body
-func NewCreateSenderDomainSenderDomainsPostRequest(server string, params *CreateSenderDomainSenderDomainsPostParams, body CreateSenderDomainSenderDomainsPostJSONRequestBody) (*http.Request, error) {
+// NewCreateSubscriptionWebhooksPostRequest calls the generic CreateSubscriptionWebhooksPost builder with application/json body
+func NewCreateSubscriptionWebhooksPostRequest(server string, params *CreateSubscriptionWebhooksPostParams, body CreateSubscriptionWebhooksPostJSONRequestBody) (*http.Request, error) {
 	var bodyReader io.Reader
 	buf, err := json.Marshal(body)
 	if err != nil {
 		return nil, err
 	}
 	bodyReader = bytes.NewReader(buf)
-	return NewCreateSenderDomainSenderDomainsPostRequestWithBody(server, params, "application/json", bodyReader)
+	return NewCreateSubscriptionWebhooksPostRequestWithBody(server, params, "application/json", bodyReader)
 }
 
-// NewCreateSenderDomainSenderDomainsPostRequestWithBody generates requests for CreateSenderDomainSenderDomainsPost with any type of body
-func NewCreateSenderDomainSenderDomainsPostRequestWithBody(server string, params *CreateSenderDomainSenderDomainsPostParams, contentType string, body io.Reader) (*http.Request, error) {
+// NewCreateSubscriptionWebhooksPostRequestWithBody generates requests for CreateSubscriptionWebhooksPost with any type of body
+func NewCreateSubscriptionWebhooksPostRequestWithBody(server string, params *CreateSubscriptionWebhooksPostParams, contentType string, body io.Reader) (*http.Request, error) {
 	var err error
 
 	serverURL, err := url.Parse(server)
@@ -1805,7 +2875,7 @@ func NewCreateSenderDomainSenderDomainsPostRequestWithBody(server string, params
 		return nil, err
 	}
 
-	operationPath := fmt.Sprintf("/sender-domains")
+	operationPath := fmt.Sprintf("/webhooks")
 	if operationPath[0] == '/' {
 		operationPath = "." + operationPath
 	}
@@ -1840,13 +2910,13 @@ func NewCreateSenderDomainSenderDomainsPostRequestWithBody(server string, params
 	return req, nil
 }
 
-// NewDeleteSenderDomainSenderDomainsDomainIdDeleteRequest generates requests for DeleteSenderDomainSenderDomainsDomainIdDelete
-func NewDeleteSenderDomainSenderDomainsDomainIdDeleteRequest(server string, domainId openapi_types.UUID, params *DeleteSenderDomainSenderDomainsDomainIdDeleteParams) (*http.Request, error) {
+// NewDeleteSubscriptionWebhooksSubIdDeleteRequest generates requests for DeleteSubscriptionWebhooksSubIdDelete
+func NewDeleteSubscriptionWebhooksSubIdDeleteRequest(server string, subId openapi_types.UUID, params *DeleteSubscriptionWebhooksSubIdDeleteParams) (*http.Request, error) {
 	var err error
 
 	var pathParam0 string
 
-	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "domain_id", domainId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "sub_id", subId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
 	if err != nil {
 		return nil, err
 	}
@@ -1856,7 +2926,7 @@ func NewDeleteSenderDomainSenderDomainsDomainIdDeleteRequest(server string, doma
 		return nil, err
 	}
 
-	operationPath := fmt.Sprintf("/sender-domains/%s", pathParam0)
+	operationPath := fmt.Sprintf("/webhooks/%s", pathParam0)
 	if operationPath[0] == '/' {
 		operationPath = "." + operationPath
 	}
@@ -1889,13 +2959,13 @@ func NewDeleteSenderDomainSenderDomainsDomainIdDeleteRequest(server string, doma
 	return req, nil
 }
 
-// NewGetSenderDomainSenderDomainsDomainIdGetRequest generates requests for GetSenderDomainSenderDomainsDomainIdGet
-func NewGetSenderDomainSenderDomainsDomainIdGetRequest(server string, domainId openapi_types.UUID, params *GetSenderDomainSenderDomainsDomainIdGetParams) (*http.Request, error) {
+// NewGetSubscriptionWebhooksSubIdGetRequest generates requests for GetSubscriptionWebhooksSubIdGet
+func NewGetSubscriptionWebhooksSubIdGetRequest(server string, subId openapi_types.UUID, params *GetSubscriptionWebhooksSubIdGetParams) (*http.Request, error) {
 	var err error
 
 	var pathParam0 string
 
-	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "domain_id", domainId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "sub_id", subId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
 	if err != nil {
 		return nil, err
 	}
@@ -1905,7 +2975,7 @@ func NewGetSenderDomainSenderDomainsDomainIdGetRequest(server string, domainId o
 		return nil, err
 	}
 
-	operationPath := fmt.Sprintf("/sender-domains/%s", pathParam0)
+	operationPath := fmt.Sprintf("/webhooks/%s", pathParam0)
 	if operationPath[0] == '/' {
 		operationPath = "." + operationPath
 	}
@@ -1938,24 +3008,24 @@ func NewGetSenderDomainSenderDomainsDomainIdGetRequest(server string, domainId o
 	return req, nil
 }
 
-// NewPatchSenderDomainSenderDomainsDomainIdPatchRequest calls the generic PatchSenderDomainSenderDomainsDomainIdPatch builder with application/json body
-func NewPatchSenderDomainSenderDomainsDomainIdPatchRequest(server string, domainId openapi_types.UUID, params *PatchSenderDomainSenderDomainsDomainIdPatchParams, body PatchSenderDomainSenderDomainsDomainIdPatchJSONRequestBody) (*http.Request, error) {
+// NewPatchSubscriptionWebhooksSubIdPatchRequest calls the generic PatchSubscriptionWebhooksSubIdPatch builder with application/json body
+func NewPatchSubscriptionWebhooksSubIdPatchRequest(server string, subId openapi_types.UUID, params *PatchSubscriptionWebhooksSubIdPatchParams, body PatchSubscriptionWebhooksSubIdPatchJSONRequestBody) (*http.Request, error) {
 	var bodyReader io.Reader
 	buf, err := json.Marshal(body)
 	if err != nil {
 		return nil, err
 	}
 	bodyReader = bytes.NewReader(buf)
-	return NewPatchSenderDomainSenderDomainsDomainIdPatchRequestWithBody(server, domainId, params, "application/json", bodyReader)
+	return NewPatchSubscriptionWebhooksSubIdPatchRequestWithBody(server, subId, params, "application/json", bodyReader)
 }
 
-// NewPatchSenderDomainSenderDomainsDomainIdPatchRequestWithBody generates requests for PatchSenderDomainSenderDomainsDomainIdPatch with any type of body
-func NewPatchSenderDomainSenderDomainsDomainIdPatchRequestWithBody(server string, domainId openapi_types.UUID, params *PatchSenderDomainSenderDomainsDomainIdPatchParams, contentType string, body io.Reader) (*http.Request, error) {
+// NewPatchSubscriptionWebhooksSubIdPatchRequestWithBody generates requests for PatchSubscriptionWebhooksSubIdPatch with any type of body
+func NewPatchSubscriptionWebhooksSubIdPatchRequestWithBody(server string, subId openapi_types.UUID, params *PatchSubscriptionWebhooksSubIdPatchParams, contentType string, body io.Reader) (*http.Request, error) {
 	var err error
 
 	var pathParam0 string
 
-	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "domain_id", domainId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "sub_id", subId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
 	if err != nil {
 		return nil, err
 	}
@@ -1965,7 +3035,7 @@ func NewPatchSenderDomainSenderDomainsDomainIdPatchRequestWithBody(server string
 		return nil, err
 	}
 
-	operationPath := fmt.Sprintf("/sender-domains/%s", pathParam0)
+	operationPath := fmt.Sprintf("/webhooks/%s", pathParam0)
 	if operationPath[0] == '/' {
 		operationPath = "." + operationPath
 	}
@@ -2000,13 +3070,13 @@ func NewPatchSenderDomainSenderDomainsDomainIdPatchRequestWithBody(server string
 	return req, nil
 }
 
-// NewVerifySenderDomainSenderDomainsDomainIdVerifyPostRequest generates requests for VerifySenderDomainSenderDomainsDomainIdVerifyPost
-func NewVerifySenderDomainSenderDomainsDomainIdVerifyPostRequest(server string, domainId openapi_types.UUID, params *VerifySenderDomainSenderDomainsDomainIdVerifyPostParams) (*http.Request, error) {
+// NewListDeliveriesWebhooksSubIdDeliveriesGetRequest generates requests for ListDeliveriesWebhooksSubIdDeliveriesGet
+func NewListDeliveriesWebhooksSubIdDeliveriesGetRequest(server string, subId openapi_types.UUID, params *ListDeliveriesWebhooksSubIdDeliveriesGetParams) (*http.Request, error) {
 	var err error
 
 	var pathParam0 string
 
-	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "domain_id", domainId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "sub_id", subId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
 	if err != nil {
 		return nil, err
 	}
@@ -2016,7 +3086,150 @@ func NewVerifySenderDomainSenderDomainsDomainIdVerifyPostRequest(server string, 
 		return nil, err
 	}
 
-	operationPath := fmt.Sprintf("/sender-domains/%s/verify", pathParam0)
+	operationPath := fmt.Sprintf("/webhooks/%s/deliveries", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+		queryValues := queryURL.Query()
+
+		if params.Cursor != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "cursor", *params.Cursor, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+				return nil, err
+			} else {
+				for k, v := range parsed {
+					for _, v2 := range v {
+						queryValues.Add(k, v2)
+					}
+				}
+			}
+
+		}
+
+		if params.Limit != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "limit", *params.Limit, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "integer", Format: ""}); err != nil {
+				return nil, err
+			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+				return nil, err
+			} else {
+				for k, v := range parsed {
+					for _, v2 := range v {
+						queryValues.Add(k, v2)
+					}
+				}
+			}
+
+		}
+
+		queryURL.RawQuery = queryValues.Encode()
+	}
+
+	req, err := http.NewRequest("GET", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+
+		if params.Authorization != nil {
+			var headerParam0 string
+
+			headerParam0, err = runtime.StyleParamWithOptions("simple", false, "authorization", *params.Authorization, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationHeader, Type: "string", Format: ""})
+			if err != nil {
+				return nil, err
+			}
+
+			req.Header.Set("authorization", headerParam0)
+		}
+
+	}
+
+	return req, nil
+}
+
+// NewRedeliverWebhooksSubIdDeliveriesDeliveryIdRedeliverPostRequest generates requests for RedeliverWebhooksSubIdDeliveriesDeliveryIdRedeliverPost
+func NewRedeliverWebhooksSubIdDeliveriesDeliveryIdRedeliverPostRequest(server string, subId openapi_types.UUID, deliveryId openapi_types.UUID, params *RedeliverWebhooksSubIdDeliveriesDeliveryIdRedeliverPostParams) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "sub_id", subId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithOptions("simple", false, "delivery_id", deliveryId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/webhooks/%s/deliveries/%s/redeliver", pathParam0, pathParam1)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("POST", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+
+		if params.Authorization != nil {
+			var headerParam0 string
+
+			headerParam0, err = runtime.StyleParamWithOptions("simple", false, "authorization", *params.Authorization, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationHeader, Type: "string", Format: ""})
+			if err != nil {
+				return nil, err
+			}
+
+			req.Header.Set("authorization", headerParam0)
+		}
+
+	}
+
+	return req, nil
+}
+
+// NewRotateSecretWebhooksSubIdRotateSecretPostRequest generates requests for RotateSecretWebhooksSubIdRotateSecretPost
+func NewRotateSecretWebhooksSubIdRotateSecretPostRequest(server string, subId openapi_types.UUID, params *RotateSecretWebhooksSubIdRotateSecretPostParams) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "sub_id", subId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/webhooks/%s/rotate-secret", pathParam0)
 	if operationPath[0] == '/' {
 		operationPath = "." + operationPath
 	}
@@ -2103,6 +3316,31 @@ type ClientWithResponsesInterface interface {
 	// GetCallCallsCallIdGetWithResponse request
 	GetCallCallsCallIdGetWithResponse(ctx context.Context, callId openapi_types.UUID, params *GetCallCallsCallIdGetParams, reqEditors ...RequestEditorFn) (*GetCallCallsCallIdGetResponse, error)
 
+	// ListEmailDomainsEmailDomainsGetWithResponse request
+	ListEmailDomainsEmailDomainsGetWithResponse(ctx context.Context, params *ListEmailDomainsEmailDomainsGetParams, reqEditors ...RequestEditorFn) (*ListEmailDomainsEmailDomainsGetResponse, error)
+
+	// CreateEmailDomainEmailDomainsPostWithBodyWithResponse request with any body
+	CreateEmailDomainEmailDomainsPostWithBodyWithResponse(ctx context.Context, params *CreateEmailDomainEmailDomainsPostParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CreateEmailDomainEmailDomainsPostResponse, error)
+
+	CreateEmailDomainEmailDomainsPostWithResponse(ctx context.Context, params *CreateEmailDomainEmailDomainsPostParams, body CreateEmailDomainEmailDomainsPostJSONRequestBody, reqEditors ...RequestEditorFn) (*CreateEmailDomainEmailDomainsPostResponse, error)
+
+	// DeleteEmailDomainEmailDomainsDomainIdDeleteWithResponse request
+	DeleteEmailDomainEmailDomainsDomainIdDeleteWithResponse(ctx context.Context, domainId openapi_types.UUID, params *DeleteEmailDomainEmailDomainsDomainIdDeleteParams, reqEditors ...RequestEditorFn) (*DeleteEmailDomainEmailDomainsDomainIdDeleteResponse, error)
+
+	// GetEmailDomainEmailDomainsDomainIdGetWithResponse request
+	GetEmailDomainEmailDomainsDomainIdGetWithResponse(ctx context.Context, domainId openapi_types.UUID, params *GetEmailDomainEmailDomainsDomainIdGetParams, reqEditors ...RequestEditorFn) (*GetEmailDomainEmailDomainsDomainIdGetResponse, error)
+
+	// PatchEmailDomainEmailDomainsDomainIdPatchWithBodyWithResponse request with any body
+	PatchEmailDomainEmailDomainsDomainIdPatchWithBodyWithResponse(ctx context.Context, domainId openapi_types.UUID, params *PatchEmailDomainEmailDomainsDomainIdPatchParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*PatchEmailDomainEmailDomainsDomainIdPatchResponse, error)
+
+	PatchEmailDomainEmailDomainsDomainIdPatchWithResponse(ctx context.Context, domainId openapi_types.UUID, params *PatchEmailDomainEmailDomainsDomainIdPatchParams, body PatchEmailDomainEmailDomainsDomainIdPatchJSONRequestBody, reqEditors ...RequestEditorFn) (*PatchEmailDomainEmailDomainsDomainIdPatchResponse, error)
+
+	// RotateWebhookSecretEmailDomainsDomainIdRotateWebhookSecretPostWithResponse request
+	RotateWebhookSecretEmailDomainsDomainIdRotateWebhookSecretPostWithResponse(ctx context.Context, domainId openapi_types.UUID, params *RotateWebhookSecretEmailDomainsDomainIdRotateWebhookSecretPostParams, reqEditors ...RequestEditorFn) (*RotateWebhookSecretEmailDomainsDomainIdRotateWebhookSecretPostResponse, error)
+
+	// VerifyEmailDomainEmailDomainsDomainIdVerifyPostWithResponse request
+	VerifyEmailDomainEmailDomainsDomainIdVerifyPostWithResponse(ctx context.Context, domainId openapi_types.UUID, params *VerifyEmailDomainEmailDomainsDomainIdVerifyPostParams, reqEditors ...RequestEditorFn) (*VerifyEmailDomainEmailDomainsDomainIdVerifyPostResponse, error)
+
 	// ListEmailsEmailsGetWithResponse request
 	ListEmailsEmailsGetWithResponse(ctx context.Context, params *ListEmailsEmailsGetParams, reqEditors ...RequestEditorFn) (*ListEmailsEmailsGetResponse, error)
 
@@ -2114,33 +3352,45 @@ type ClientWithResponsesInterface interface {
 	// GetEmailEmailsEmailIdGetWithResponse request
 	GetEmailEmailsEmailIdGetWithResponse(ctx context.Context, emailId openapi_types.UUID, params *GetEmailEmailsEmailIdGetParams, reqEditors ...RequestEditorFn) (*GetEmailEmailsEmailIdGetResponse, error)
 
+	// GetEmailAttachmentEmailsEmailIdAttachmentsAttachmentIdGetWithResponse request
+	GetEmailAttachmentEmailsEmailIdAttachmentsAttachmentIdGetWithResponse(ctx context.Context, emailId openapi_types.UUID, attachmentId openapi_types.UUID, params *GetEmailAttachmentEmailsEmailIdAttachmentsAttachmentIdGetParams, reqEditors ...RequestEditorFn) (*GetEmailAttachmentEmailsEmailIdAttachmentsAttachmentIdGetResponse, error)
+
+	// GetEmailRawEmailsEmailIdRawGetWithResponse request
+	GetEmailRawEmailsEmailIdRawGetWithResponse(ctx context.Context, emailId openapi_types.UUID, params *GetEmailRawEmailsEmailIdRawGetParams, reqEditors ...RequestEditorFn) (*GetEmailRawEmailsEmailIdRawGetResponse, error)
+
 	// ListEventsEventsGetWithResponse request
 	ListEventsEventsGetWithResponse(ctx context.Context, params *ListEventsEventsGetParams, reqEditors ...RequestEditorFn) (*ListEventsEventsGetResponse, error)
 
 	// HealthzHealthzGetWithResponse request
 	HealthzHealthzGetWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*HealthzHealthzGetResponse, error)
 
-	// ListSenderDomainsSenderDomainsGetWithResponse request
-	ListSenderDomainsSenderDomainsGetWithResponse(ctx context.Context, params *ListSenderDomainsSenderDomainsGetParams, reqEditors ...RequestEditorFn) (*ListSenderDomainsSenderDomainsGetResponse, error)
+	// ListSubscriptionsWebhooksGetWithResponse request
+	ListSubscriptionsWebhooksGetWithResponse(ctx context.Context, params *ListSubscriptionsWebhooksGetParams, reqEditors ...RequestEditorFn) (*ListSubscriptionsWebhooksGetResponse, error)
 
-	// CreateSenderDomainSenderDomainsPostWithBodyWithResponse request with any body
-	CreateSenderDomainSenderDomainsPostWithBodyWithResponse(ctx context.Context, params *CreateSenderDomainSenderDomainsPostParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CreateSenderDomainSenderDomainsPostResponse, error)
+	// CreateSubscriptionWebhooksPostWithBodyWithResponse request with any body
+	CreateSubscriptionWebhooksPostWithBodyWithResponse(ctx context.Context, params *CreateSubscriptionWebhooksPostParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CreateSubscriptionWebhooksPostResponse, error)
 
-	CreateSenderDomainSenderDomainsPostWithResponse(ctx context.Context, params *CreateSenderDomainSenderDomainsPostParams, body CreateSenderDomainSenderDomainsPostJSONRequestBody, reqEditors ...RequestEditorFn) (*CreateSenderDomainSenderDomainsPostResponse, error)
+	CreateSubscriptionWebhooksPostWithResponse(ctx context.Context, params *CreateSubscriptionWebhooksPostParams, body CreateSubscriptionWebhooksPostJSONRequestBody, reqEditors ...RequestEditorFn) (*CreateSubscriptionWebhooksPostResponse, error)
 
-	// DeleteSenderDomainSenderDomainsDomainIdDeleteWithResponse request
-	DeleteSenderDomainSenderDomainsDomainIdDeleteWithResponse(ctx context.Context, domainId openapi_types.UUID, params *DeleteSenderDomainSenderDomainsDomainIdDeleteParams, reqEditors ...RequestEditorFn) (*DeleteSenderDomainSenderDomainsDomainIdDeleteResponse, error)
+	// DeleteSubscriptionWebhooksSubIdDeleteWithResponse request
+	DeleteSubscriptionWebhooksSubIdDeleteWithResponse(ctx context.Context, subId openapi_types.UUID, params *DeleteSubscriptionWebhooksSubIdDeleteParams, reqEditors ...RequestEditorFn) (*DeleteSubscriptionWebhooksSubIdDeleteResponse, error)
 
-	// GetSenderDomainSenderDomainsDomainIdGetWithResponse request
-	GetSenderDomainSenderDomainsDomainIdGetWithResponse(ctx context.Context, domainId openapi_types.UUID, params *GetSenderDomainSenderDomainsDomainIdGetParams, reqEditors ...RequestEditorFn) (*GetSenderDomainSenderDomainsDomainIdGetResponse, error)
+	// GetSubscriptionWebhooksSubIdGetWithResponse request
+	GetSubscriptionWebhooksSubIdGetWithResponse(ctx context.Context, subId openapi_types.UUID, params *GetSubscriptionWebhooksSubIdGetParams, reqEditors ...RequestEditorFn) (*GetSubscriptionWebhooksSubIdGetResponse, error)
 
-	// PatchSenderDomainSenderDomainsDomainIdPatchWithBodyWithResponse request with any body
-	PatchSenderDomainSenderDomainsDomainIdPatchWithBodyWithResponse(ctx context.Context, domainId openapi_types.UUID, params *PatchSenderDomainSenderDomainsDomainIdPatchParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*PatchSenderDomainSenderDomainsDomainIdPatchResponse, error)
+	// PatchSubscriptionWebhooksSubIdPatchWithBodyWithResponse request with any body
+	PatchSubscriptionWebhooksSubIdPatchWithBodyWithResponse(ctx context.Context, subId openapi_types.UUID, params *PatchSubscriptionWebhooksSubIdPatchParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*PatchSubscriptionWebhooksSubIdPatchResponse, error)
 
-	PatchSenderDomainSenderDomainsDomainIdPatchWithResponse(ctx context.Context, domainId openapi_types.UUID, params *PatchSenderDomainSenderDomainsDomainIdPatchParams, body PatchSenderDomainSenderDomainsDomainIdPatchJSONRequestBody, reqEditors ...RequestEditorFn) (*PatchSenderDomainSenderDomainsDomainIdPatchResponse, error)
+	PatchSubscriptionWebhooksSubIdPatchWithResponse(ctx context.Context, subId openapi_types.UUID, params *PatchSubscriptionWebhooksSubIdPatchParams, body PatchSubscriptionWebhooksSubIdPatchJSONRequestBody, reqEditors ...RequestEditorFn) (*PatchSubscriptionWebhooksSubIdPatchResponse, error)
 
-	// VerifySenderDomainSenderDomainsDomainIdVerifyPostWithResponse request
-	VerifySenderDomainSenderDomainsDomainIdVerifyPostWithResponse(ctx context.Context, domainId openapi_types.UUID, params *VerifySenderDomainSenderDomainsDomainIdVerifyPostParams, reqEditors ...RequestEditorFn) (*VerifySenderDomainSenderDomainsDomainIdVerifyPostResponse, error)
+	// ListDeliveriesWebhooksSubIdDeliveriesGetWithResponse request
+	ListDeliveriesWebhooksSubIdDeliveriesGetWithResponse(ctx context.Context, subId openapi_types.UUID, params *ListDeliveriesWebhooksSubIdDeliveriesGetParams, reqEditors ...RequestEditorFn) (*ListDeliveriesWebhooksSubIdDeliveriesGetResponse, error)
+
+	// RedeliverWebhooksSubIdDeliveriesDeliveryIdRedeliverPostWithResponse request
+	RedeliverWebhooksSubIdDeliveriesDeliveryIdRedeliverPostWithResponse(ctx context.Context, subId openapi_types.UUID, deliveryId openapi_types.UUID, params *RedeliverWebhooksSubIdDeliveriesDeliveryIdRedeliverPostParams, reqEditors ...RequestEditorFn) (*RedeliverWebhooksSubIdDeliveriesDeliveryIdRedeliverPostResponse, error)
+
+	// RotateSecretWebhooksSubIdRotateSecretPostWithResponse request
+	RotateSecretWebhooksSubIdRotateSecretPostWithResponse(ctx context.Context, subId openapi_types.UUID, params *RotateSecretWebhooksSubIdRotateSecretPostParams, reqEditors ...RequestEditorFn) (*RotateSecretWebhooksSubIdRotateSecretPostResponse, error)
 }
 
 type ListCallsCallsGetResponse struct {
@@ -2206,6 +3456,166 @@ func (r GetCallCallsCallIdGetResponse) Status() string {
 
 // StatusCode returns HTTPResponse.StatusCode
 func (r GetCallCallsCallIdGetResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type ListEmailDomainsEmailDomainsGetResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *EmailDomainListResponse
+	JSON422      *HTTPValidationError
+}
+
+// Status returns HTTPResponse.Status
+func (r ListEmailDomainsEmailDomainsGetResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ListEmailDomainsEmailDomainsGetResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type CreateEmailDomainEmailDomainsPostResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON201      *EmailDomainResponse
+	JSON422      *HTTPValidationError
+}
+
+// Status returns HTTPResponse.Status
+func (r CreateEmailDomainEmailDomainsPostResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r CreateEmailDomainEmailDomainsPostResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type DeleteEmailDomainEmailDomainsDomainIdDeleteResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON422      *HTTPValidationError
+}
+
+// Status returns HTTPResponse.Status
+func (r DeleteEmailDomainEmailDomainsDomainIdDeleteResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r DeleteEmailDomainEmailDomainsDomainIdDeleteResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type GetEmailDomainEmailDomainsDomainIdGetResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *EmailDomainResponse
+	JSON422      *HTTPValidationError
+}
+
+// Status returns HTTPResponse.Status
+func (r GetEmailDomainEmailDomainsDomainIdGetResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetEmailDomainEmailDomainsDomainIdGetResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type PatchEmailDomainEmailDomainsDomainIdPatchResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *EmailDomainResponse
+	JSON422      *HTTPValidationError
+}
+
+// Status returns HTTPResponse.Status
+func (r PatchEmailDomainEmailDomainsDomainIdPatchResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r PatchEmailDomainEmailDomainsDomainIdPatchResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type RotateWebhookSecretEmailDomainsDomainIdRotateWebhookSecretPostResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *WebhookSecretResponse
+	JSON422      *HTTPValidationError
+}
+
+// Status returns HTTPResponse.Status
+func (r RotateWebhookSecretEmailDomainsDomainIdRotateWebhookSecretPostResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r RotateWebhookSecretEmailDomainsDomainIdRotateWebhookSecretPostResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type VerifyEmailDomainEmailDomainsDomainIdVerifyPostResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *EmailDomainResponse
+	JSON422      *HTTPValidationError
+}
+
+// Status returns HTTPResponse.Status
+func (r VerifyEmailDomainEmailDomainsDomainIdVerifyPostResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r VerifyEmailDomainEmailDomainsDomainIdVerifyPostResponse) StatusCode() int {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.StatusCode
 	}
@@ -2281,6 +3691,52 @@ func (r GetEmailEmailsEmailIdGetResponse) StatusCode() int {
 	return 0
 }
 
+type GetEmailAttachmentEmailsEmailIdAttachmentsAttachmentIdGetResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *interface{}
+	JSON422      *HTTPValidationError
+}
+
+// Status returns HTTPResponse.Status
+func (r GetEmailAttachmentEmailsEmailIdAttachmentsAttachmentIdGetResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetEmailAttachmentEmailsEmailIdAttachmentsAttachmentIdGetResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type GetEmailRawEmailsEmailIdRawGetResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *interface{}
+	JSON422      *HTTPValidationError
+}
+
+// Status returns HTTPResponse.Status
+func (r GetEmailRawEmailsEmailIdRawGetResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetEmailRawEmailsEmailIdRawGetResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
 type ListEventsEventsGetResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
@@ -2326,15 +3782,15 @@ func (r HealthzHealthzGetResponse) StatusCode() int {
 	return 0
 }
 
-type ListSenderDomainsSenderDomainsGetResponse struct {
+type ListSubscriptionsWebhooksGetResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
-	JSON200      *SenderDomainListResponse
+	JSON200      *WebhookSubscriptionListResponse
 	JSON422      *HTTPValidationError
 }
 
 // Status returns HTTPResponse.Status
-func (r ListSenderDomainsSenderDomainsGetResponse) Status() string {
+func (r ListSubscriptionsWebhooksGetResponse) Status() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Status
 	}
@@ -2342,22 +3798,22 @@ func (r ListSenderDomainsSenderDomainsGetResponse) Status() string {
 }
 
 // StatusCode returns HTTPResponse.StatusCode
-func (r ListSenderDomainsSenderDomainsGetResponse) StatusCode() int {
+func (r ListSubscriptionsWebhooksGetResponse) StatusCode() int {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.StatusCode
 	}
 	return 0
 }
 
-type CreateSenderDomainSenderDomainsPostResponse struct {
+type CreateSubscriptionWebhooksPostResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
-	JSON201      *SenderDomainResponse
+	JSON201      *WebhookSubscriptionResponse
 	JSON422      *HTTPValidationError
 }
 
 // Status returns HTTPResponse.Status
-func (r CreateSenderDomainSenderDomainsPostResponse) Status() string {
+func (r CreateSubscriptionWebhooksPostResponse) Status() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Status
 	}
@@ -2365,21 +3821,21 @@ func (r CreateSenderDomainSenderDomainsPostResponse) Status() string {
 }
 
 // StatusCode returns HTTPResponse.StatusCode
-func (r CreateSenderDomainSenderDomainsPostResponse) StatusCode() int {
+func (r CreateSubscriptionWebhooksPostResponse) StatusCode() int {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.StatusCode
 	}
 	return 0
 }
 
-type DeleteSenderDomainSenderDomainsDomainIdDeleteResponse struct {
+type DeleteSubscriptionWebhooksSubIdDeleteResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
 	JSON422      *HTTPValidationError
 }
 
 // Status returns HTTPResponse.Status
-func (r DeleteSenderDomainSenderDomainsDomainIdDeleteResponse) Status() string {
+func (r DeleteSubscriptionWebhooksSubIdDeleteResponse) Status() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Status
 	}
@@ -2387,22 +3843,22 @@ func (r DeleteSenderDomainSenderDomainsDomainIdDeleteResponse) Status() string {
 }
 
 // StatusCode returns HTTPResponse.StatusCode
-func (r DeleteSenderDomainSenderDomainsDomainIdDeleteResponse) StatusCode() int {
+func (r DeleteSubscriptionWebhooksSubIdDeleteResponse) StatusCode() int {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.StatusCode
 	}
 	return 0
 }
 
-type GetSenderDomainSenderDomainsDomainIdGetResponse struct {
+type GetSubscriptionWebhooksSubIdGetResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
-	JSON200      *SenderDomainResponse
+	JSON200      *WebhookSubscriptionResponse
 	JSON422      *HTTPValidationError
 }
 
 // Status returns HTTPResponse.Status
-func (r GetSenderDomainSenderDomainsDomainIdGetResponse) Status() string {
+func (r GetSubscriptionWebhooksSubIdGetResponse) Status() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Status
 	}
@@ -2410,22 +3866,22 @@ func (r GetSenderDomainSenderDomainsDomainIdGetResponse) Status() string {
 }
 
 // StatusCode returns HTTPResponse.StatusCode
-func (r GetSenderDomainSenderDomainsDomainIdGetResponse) StatusCode() int {
+func (r GetSubscriptionWebhooksSubIdGetResponse) StatusCode() int {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.StatusCode
 	}
 	return 0
 }
 
-type PatchSenderDomainSenderDomainsDomainIdPatchResponse struct {
+type PatchSubscriptionWebhooksSubIdPatchResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
-	JSON200      *SenderDomainResponse
+	JSON200      *WebhookSubscriptionResponse
 	JSON422      *HTTPValidationError
 }
 
 // Status returns HTTPResponse.Status
-func (r PatchSenderDomainSenderDomainsDomainIdPatchResponse) Status() string {
+func (r PatchSubscriptionWebhooksSubIdPatchResponse) Status() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Status
 	}
@@ -2433,22 +3889,22 @@ func (r PatchSenderDomainSenderDomainsDomainIdPatchResponse) Status() string {
 }
 
 // StatusCode returns HTTPResponse.StatusCode
-func (r PatchSenderDomainSenderDomainsDomainIdPatchResponse) StatusCode() int {
+func (r PatchSubscriptionWebhooksSubIdPatchResponse) StatusCode() int {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.StatusCode
 	}
 	return 0
 }
 
-type VerifySenderDomainSenderDomainsDomainIdVerifyPostResponse struct {
+type ListDeliveriesWebhooksSubIdDeliveriesGetResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
-	JSON200      *SenderDomainResponse
+	JSON200      *WebhookDeliveryListResponse
 	JSON422      *HTTPValidationError
 }
 
 // Status returns HTTPResponse.Status
-func (r VerifySenderDomainSenderDomainsDomainIdVerifyPostResponse) Status() string {
+func (r ListDeliveriesWebhooksSubIdDeliveriesGetResponse) Status() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Status
 	}
@@ -2456,7 +3912,53 @@ func (r VerifySenderDomainSenderDomainsDomainIdVerifyPostResponse) Status() stri
 }
 
 // StatusCode returns HTTPResponse.StatusCode
-func (r VerifySenderDomainSenderDomainsDomainIdVerifyPostResponse) StatusCode() int {
+func (r ListDeliveriesWebhooksSubIdDeliveriesGetResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type RedeliverWebhooksSubIdDeliveriesDeliveryIdRedeliverPostResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *WebhookDeliveryResponse
+	JSON422      *HTTPValidationError
+}
+
+// Status returns HTTPResponse.Status
+func (r RedeliverWebhooksSubIdDeliveriesDeliveryIdRedeliverPostResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r RedeliverWebhooksSubIdDeliveriesDeliveryIdRedeliverPostResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type RotateSecretWebhooksSubIdRotateSecretPostResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *WebhookSubscriptionResponse
+	JSON422      *HTTPValidationError
+}
+
+// Status returns HTTPResponse.Status
+func (r RotateSecretWebhooksSubIdRotateSecretPostResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r RotateSecretWebhooksSubIdRotateSecretPostResponse) StatusCode() int {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.StatusCode
 	}
@@ -2498,6 +4000,85 @@ func (c *ClientWithResponses) GetCallCallsCallIdGetWithResponse(ctx context.Cont
 	return ParseGetCallCallsCallIdGetResponse(rsp)
 }
 
+// ListEmailDomainsEmailDomainsGetWithResponse request returning *ListEmailDomainsEmailDomainsGetResponse
+func (c *ClientWithResponses) ListEmailDomainsEmailDomainsGetWithResponse(ctx context.Context, params *ListEmailDomainsEmailDomainsGetParams, reqEditors ...RequestEditorFn) (*ListEmailDomainsEmailDomainsGetResponse, error) {
+	rsp, err := c.ListEmailDomainsEmailDomainsGet(ctx, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseListEmailDomainsEmailDomainsGetResponse(rsp)
+}
+
+// CreateEmailDomainEmailDomainsPostWithBodyWithResponse request with arbitrary body returning *CreateEmailDomainEmailDomainsPostResponse
+func (c *ClientWithResponses) CreateEmailDomainEmailDomainsPostWithBodyWithResponse(ctx context.Context, params *CreateEmailDomainEmailDomainsPostParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CreateEmailDomainEmailDomainsPostResponse, error) {
+	rsp, err := c.CreateEmailDomainEmailDomainsPostWithBody(ctx, params, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseCreateEmailDomainEmailDomainsPostResponse(rsp)
+}
+
+func (c *ClientWithResponses) CreateEmailDomainEmailDomainsPostWithResponse(ctx context.Context, params *CreateEmailDomainEmailDomainsPostParams, body CreateEmailDomainEmailDomainsPostJSONRequestBody, reqEditors ...RequestEditorFn) (*CreateEmailDomainEmailDomainsPostResponse, error) {
+	rsp, err := c.CreateEmailDomainEmailDomainsPost(ctx, params, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseCreateEmailDomainEmailDomainsPostResponse(rsp)
+}
+
+// DeleteEmailDomainEmailDomainsDomainIdDeleteWithResponse request returning *DeleteEmailDomainEmailDomainsDomainIdDeleteResponse
+func (c *ClientWithResponses) DeleteEmailDomainEmailDomainsDomainIdDeleteWithResponse(ctx context.Context, domainId openapi_types.UUID, params *DeleteEmailDomainEmailDomainsDomainIdDeleteParams, reqEditors ...RequestEditorFn) (*DeleteEmailDomainEmailDomainsDomainIdDeleteResponse, error) {
+	rsp, err := c.DeleteEmailDomainEmailDomainsDomainIdDelete(ctx, domainId, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseDeleteEmailDomainEmailDomainsDomainIdDeleteResponse(rsp)
+}
+
+// GetEmailDomainEmailDomainsDomainIdGetWithResponse request returning *GetEmailDomainEmailDomainsDomainIdGetResponse
+func (c *ClientWithResponses) GetEmailDomainEmailDomainsDomainIdGetWithResponse(ctx context.Context, domainId openapi_types.UUID, params *GetEmailDomainEmailDomainsDomainIdGetParams, reqEditors ...RequestEditorFn) (*GetEmailDomainEmailDomainsDomainIdGetResponse, error) {
+	rsp, err := c.GetEmailDomainEmailDomainsDomainIdGet(ctx, domainId, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetEmailDomainEmailDomainsDomainIdGetResponse(rsp)
+}
+
+// PatchEmailDomainEmailDomainsDomainIdPatchWithBodyWithResponse request with arbitrary body returning *PatchEmailDomainEmailDomainsDomainIdPatchResponse
+func (c *ClientWithResponses) PatchEmailDomainEmailDomainsDomainIdPatchWithBodyWithResponse(ctx context.Context, domainId openapi_types.UUID, params *PatchEmailDomainEmailDomainsDomainIdPatchParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*PatchEmailDomainEmailDomainsDomainIdPatchResponse, error) {
+	rsp, err := c.PatchEmailDomainEmailDomainsDomainIdPatchWithBody(ctx, domainId, params, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParsePatchEmailDomainEmailDomainsDomainIdPatchResponse(rsp)
+}
+
+func (c *ClientWithResponses) PatchEmailDomainEmailDomainsDomainIdPatchWithResponse(ctx context.Context, domainId openapi_types.UUID, params *PatchEmailDomainEmailDomainsDomainIdPatchParams, body PatchEmailDomainEmailDomainsDomainIdPatchJSONRequestBody, reqEditors ...RequestEditorFn) (*PatchEmailDomainEmailDomainsDomainIdPatchResponse, error) {
+	rsp, err := c.PatchEmailDomainEmailDomainsDomainIdPatch(ctx, domainId, params, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParsePatchEmailDomainEmailDomainsDomainIdPatchResponse(rsp)
+}
+
+// RotateWebhookSecretEmailDomainsDomainIdRotateWebhookSecretPostWithResponse request returning *RotateWebhookSecretEmailDomainsDomainIdRotateWebhookSecretPostResponse
+func (c *ClientWithResponses) RotateWebhookSecretEmailDomainsDomainIdRotateWebhookSecretPostWithResponse(ctx context.Context, domainId openapi_types.UUID, params *RotateWebhookSecretEmailDomainsDomainIdRotateWebhookSecretPostParams, reqEditors ...RequestEditorFn) (*RotateWebhookSecretEmailDomainsDomainIdRotateWebhookSecretPostResponse, error) {
+	rsp, err := c.RotateWebhookSecretEmailDomainsDomainIdRotateWebhookSecretPost(ctx, domainId, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseRotateWebhookSecretEmailDomainsDomainIdRotateWebhookSecretPostResponse(rsp)
+}
+
+// VerifyEmailDomainEmailDomainsDomainIdVerifyPostWithResponse request returning *VerifyEmailDomainEmailDomainsDomainIdVerifyPostResponse
+func (c *ClientWithResponses) VerifyEmailDomainEmailDomainsDomainIdVerifyPostWithResponse(ctx context.Context, domainId openapi_types.UUID, params *VerifyEmailDomainEmailDomainsDomainIdVerifyPostParams, reqEditors ...RequestEditorFn) (*VerifyEmailDomainEmailDomainsDomainIdVerifyPostResponse, error) {
+	rsp, err := c.VerifyEmailDomainEmailDomainsDomainIdVerifyPost(ctx, domainId, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseVerifyEmailDomainEmailDomainsDomainIdVerifyPostResponse(rsp)
+}
+
 // ListEmailsEmailsGetWithResponse request returning *ListEmailsEmailsGetResponse
 func (c *ClientWithResponses) ListEmailsEmailsGetWithResponse(ctx context.Context, params *ListEmailsEmailsGetParams, reqEditors ...RequestEditorFn) (*ListEmailsEmailsGetResponse, error) {
 	rsp, err := c.ListEmailsEmailsGet(ctx, params, reqEditors...)
@@ -2533,6 +4114,24 @@ func (c *ClientWithResponses) GetEmailEmailsEmailIdGetWithResponse(ctx context.C
 	return ParseGetEmailEmailsEmailIdGetResponse(rsp)
 }
 
+// GetEmailAttachmentEmailsEmailIdAttachmentsAttachmentIdGetWithResponse request returning *GetEmailAttachmentEmailsEmailIdAttachmentsAttachmentIdGetResponse
+func (c *ClientWithResponses) GetEmailAttachmentEmailsEmailIdAttachmentsAttachmentIdGetWithResponse(ctx context.Context, emailId openapi_types.UUID, attachmentId openapi_types.UUID, params *GetEmailAttachmentEmailsEmailIdAttachmentsAttachmentIdGetParams, reqEditors ...RequestEditorFn) (*GetEmailAttachmentEmailsEmailIdAttachmentsAttachmentIdGetResponse, error) {
+	rsp, err := c.GetEmailAttachmentEmailsEmailIdAttachmentsAttachmentIdGet(ctx, emailId, attachmentId, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetEmailAttachmentEmailsEmailIdAttachmentsAttachmentIdGetResponse(rsp)
+}
+
+// GetEmailRawEmailsEmailIdRawGetWithResponse request returning *GetEmailRawEmailsEmailIdRawGetResponse
+func (c *ClientWithResponses) GetEmailRawEmailsEmailIdRawGetWithResponse(ctx context.Context, emailId openapi_types.UUID, params *GetEmailRawEmailsEmailIdRawGetParams, reqEditors ...RequestEditorFn) (*GetEmailRawEmailsEmailIdRawGetResponse, error) {
+	rsp, err := c.GetEmailRawEmailsEmailIdRawGet(ctx, emailId, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetEmailRawEmailsEmailIdRawGetResponse(rsp)
+}
+
 // ListEventsEventsGetWithResponse request returning *ListEventsEventsGetResponse
 func (c *ClientWithResponses) ListEventsEventsGetWithResponse(ctx context.Context, params *ListEventsEventsGetParams, reqEditors ...RequestEditorFn) (*ListEventsEventsGetResponse, error) {
 	rsp, err := c.ListEventsEventsGet(ctx, params, reqEditors...)
@@ -2551,74 +4150,92 @@ func (c *ClientWithResponses) HealthzHealthzGetWithResponse(ctx context.Context,
 	return ParseHealthzHealthzGetResponse(rsp)
 }
 
-// ListSenderDomainsSenderDomainsGetWithResponse request returning *ListSenderDomainsSenderDomainsGetResponse
-func (c *ClientWithResponses) ListSenderDomainsSenderDomainsGetWithResponse(ctx context.Context, params *ListSenderDomainsSenderDomainsGetParams, reqEditors ...RequestEditorFn) (*ListSenderDomainsSenderDomainsGetResponse, error) {
-	rsp, err := c.ListSenderDomainsSenderDomainsGet(ctx, params, reqEditors...)
+// ListSubscriptionsWebhooksGetWithResponse request returning *ListSubscriptionsWebhooksGetResponse
+func (c *ClientWithResponses) ListSubscriptionsWebhooksGetWithResponse(ctx context.Context, params *ListSubscriptionsWebhooksGetParams, reqEditors ...RequestEditorFn) (*ListSubscriptionsWebhooksGetResponse, error) {
+	rsp, err := c.ListSubscriptionsWebhooksGet(ctx, params, reqEditors...)
 	if err != nil {
 		return nil, err
 	}
-	return ParseListSenderDomainsSenderDomainsGetResponse(rsp)
+	return ParseListSubscriptionsWebhooksGetResponse(rsp)
 }
 
-// CreateSenderDomainSenderDomainsPostWithBodyWithResponse request with arbitrary body returning *CreateSenderDomainSenderDomainsPostResponse
-func (c *ClientWithResponses) CreateSenderDomainSenderDomainsPostWithBodyWithResponse(ctx context.Context, params *CreateSenderDomainSenderDomainsPostParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CreateSenderDomainSenderDomainsPostResponse, error) {
-	rsp, err := c.CreateSenderDomainSenderDomainsPostWithBody(ctx, params, contentType, body, reqEditors...)
+// CreateSubscriptionWebhooksPostWithBodyWithResponse request with arbitrary body returning *CreateSubscriptionWebhooksPostResponse
+func (c *ClientWithResponses) CreateSubscriptionWebhooksPostWithBodyWithResponse(ctx context.Context, params *CreateSubscriptionWebhooksPostParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CreateSubscriptionWebhooksPostResponse, error) {
+	rsp, err := c.CreateSubscriptionWebhooksPostWithBody(ctx, params, contentType, body, reqEditors...)
 	if err != nil {
 		return nil, err
 	}
-	return ParseCreateSenderDomainSenderDomainsPostResponse(rsp)
+	return ParseCreateSubscriptionWebhooksPostResponse(rsp)
 }
 
-func (c *ClientWithResponses) CreateSenderDomainSenderDomainsPostWithResponse(ctx context.Context, params *CreateSenderDomainSenderDomainsPostParams, body CreateSenderDomainSenderDomainsPostJSONRequestBody, reqEditors ...RequestEditorFn) (*CreateSenderDomainSenderDomainsPostResponse, error) {
-	rsp, err := c.CreateSenderDomainSenderDomainsPost(ctx, params, body, reqEditors...)
+func (c *ClientWithResponses) CreateSubscriptionWebhooksPostWithResponse(ctx context.Context, params *CreateSubscriptionWebhooksPostParams, body CreateSubscriptionWebhooksPostJSONRequestBody, reqEditors ...RequestEditorFn) (*CreateSubscriptionWebhooksPostResponse, error) {
+	rsp, err := c.CreateSubscriptionWebhooksPost(ctx, params, body, reqEditors...)
 	if err != nil {
 		return nil, err
 	}
-	return ParseCreateSenderDomainSenderDomainsPostResponse(rsp)
+	return ParseCreateSubscriptionWebhooksPostResponse(rsp)
 }
 
-// DeleteSenderDomainSenderDomainsDomainIdDeleteWithResponse request returning *DeleteSenderDomainSenderDomainsDomainIdDeleteResponse
-func (c *ClientWithResponses) DeleteSenderDomainSenderDomainsDomainIdDeleteWithResponse(ctx context.Context, domainId openapi_types.UUID, params *DeleteSenderDomainSenderDomainsDomainIdDeleteParams, reqEditors ...RequestEditorFn) (*DeleteSenderDomainSenderDomainsDomainIdDeleteResponse, error) {
-	rsp, err := c.DeleteSenderDomainSenderDomainsDomainIdDelete(ctx, domainId, params, reqEditors...)
+// DeleteSubscriptionWebhooksSubIdDeleteWithResponse request returning *DeleteSubscriptionWebhooksSubIdDeleteResponse
+func (c *ClientWithResponses) DeleteSubscriptionWebhooksSubIdDeleteWithResponse(ctx context.Context, subId openapi_types.UUID, params *DeleteSubscriptionWebhooksSubIdDeleteParams, reqEditors ...RequestEditorFn) (*DeleteSubscriptionWebhooksSubIdDeleteResponse, error) {
+	rsp, err := c.DeleteSubscriptionWebhooksSubIdDelete(ctx, subId, params, reqEditors...)
 	if err != nil {
 		return nil, err
 	}
-	return ParseDeleteSenderDomainSenderDomainsDomainIdDeleteResponse(rsp)
+	return ParseDeleteSubscriptionWebhooksSubIdDeleteResponse(rsp)
 }
 
-// GetSenderDomainSenderDomainsDomainIdGetWithResponse request returning *GetSenderDomainSenderDomainsDomainIdGetResponse
-func (c *ClientWithResponses) GetSenderDomainSenderDomainsDomainIdGetWithResponse(ctx context.Context, domainId openapi_types.UUID, params *GetSenderDomainSenderDomainsDomainIdGetParams, reqEditors ...RequestEditorFn) (*GetSenderDomainSenderDomainsDomainIdGetResponse, error) {
-	rsp, err := c.GetSenderDomainSenderDomainsDomainIdGet(ctx, domainId, params, reqEditors...)
+// GetSubscriptionWebhooksSubIdGetWithResponse request returning *GetSubscriptionWebhooksSubIdGetResponse
+func (c *ClientWithResponses) GetSubscriptionWebhooksSubIdGetWithResponse(ctx context.Context, subId openapi_types.UUID, params *GetSubscriptionWebhooksSubIdGetParams, reqEditors ...RequestEditorFn) (*GetSubscriptionWebhooksSubIdGetResponse, error) {
+	rsp, err := c.GetSubscriptionWebhooksSubIdGet(ctx, subId, params, reqEditors...)
 	if err != nil {
 		return nil, err
 	}
-	return ParseGetSenderDomainSenderDomainsDomainIdGetResponse(rsp)
+	return ParseGetSubscriptionWebhooksSubIdGetResponse(rsp)
 }
 
-// PatchSenderDomainSenderDomainsDomainIdPatchWithBodyWithResponse request with arbitrary body returning *PatchSenderDomainSenderDomainsDomainIdPatchResponse
-func (c *ClientWithResponses) PatchSenderDomainSenderDomainsDomainIdPatchWithBodyWithResponse(ctx context.Context, domainId openapi_types.UUID, params *PatchSenderDomainSenderDomainsDomainIdPatchParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*PatchSenderDomainSenderDomainsDomainIdPatchResponse, error) {
-	rsp, err := c.PatchSenderDomainSenderDomainsDomainIdPatchWithBody(ctx, domainId, params, contentType, body, reqEditors...)
+// PatchSubscriptionWebhooksSubIdPatchWithBodyWithResponse request with arbitrary body returning *PatchSubscriptionWebhooksSubIdPatchResponse
+func (c *ClientWithResponses) PatchSubscriptionWebhooksSubIdPatchWithBodyWithResponse(ctx context.Context, subId openapi_types.UUID, params *PatchSubscriptionWebhooksSubIdPatchParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*PatchSubscriptionWebhooksSubIdPatchResponse, error) {
+	rsp, err := c.PatchSubscriptionWebhooksSubIdPatchWithBody(ctx, subId, params, contentType, body, reqEditors...)
 	if err != nil {
 		return nil, err
 	}
-	return ParsePatchSenderDomainSenderDomainsDomainIdPatchResponse(rsp)
+	return ParsePatchSubscriptionWebhooksSubIdPatchResponse(rsp)
 }
 
-func (c *ClientWithResponses) PatchSenderDomainSenderDomainsDomainIdPatchWithResponse(ctx context.Context, domainId openapi_types.UUID, params *PatchSenderDomainSenderDomainsDomainIdPatchParams, body PatchSenderDomainSenderDomainsDomainIdPatchJSONRequestBody, reqEditors ...RequestEditorFn) (*PatchSenderDomainSenderDomainsDomainIdPatchResponse, error) {
-	rsp, err := c.PatchSenderDomainSenderDomainsDomainIdPatch(ctx, domainId, params, body, reqEditors...)
+func (c *ClientWithResponses) PatchSubscriptionWebhooksSubIdPatchWithResponse(ctx context.Context, subId openapi_types.UUID, params *PatchSubscriptionWebhooksSubIdPatchParams, body PatchSubscriptionWebhooksSubIdPatchJSONRequestBody, reqEditors ...RequestEditorFn) (*PatchSubscriptionWebhooksSubIdPatchResponse, error) {
+	rsp, err := c.PatchSubscriptionWebhooksSubIdPatch(ctx, subId, params, body, reqEditors...)
 	if err != nil {
 		return nil, err
 	}
-	return ParsePatchSenderDomainSenderDomainsDomainIdPatchResponse(rsp)
+	return ParsePatchSubscriptionWebhooksSubIdPatchResponse(rsp)
 }
 
-// VerifySenderDomainSenderDomainsDomainIdVerifyPostWithResponse request returning *VerifySenderDomainSenderDomainsDomainIdVerifyPostResponse
-func (c *ClientWithResponses) VerifySenderDomainSenderDomainsDomainIdVerifyPostWithResponse(ctx context.Context, domainId openapi_types.UUID, params *VerifySenderDomainSenderDomainsDomainIdVerifyPostParams, reqEditors ...RequestEditorFn) (*VerifySenderDomainSenderDomainsDomainIdVerifyPostResponse, error) {
-	rsp, err := c.VerifySenderDomainSenderDomainsDomainIdVerifyPost(ctx, domainId, params, reqEditors...)
+// ListDeliveriesWebhooksSubIdDeliveriesGetWithResponse request returning *ListDeliveriesWebhooksSubIdDeliveriesGetResponse
+func (c *ClientWithResponses) ListDeliveriesWebhooksSubIdDeliveriesGetWithResponse(ctx context.Context, subId openapi_types.UUID, params *ListDeliveriesWebhooksSubIdDeliveriesGetParams, reqEditors ...RequestEditorFn) (*ListDeliveriesWebhooksSubIdDeliveriesGetResponse, error) {
+	rsp, err := c.ListDeliveriesWebhooksSubIdDeliveriesGet(ctx, subId, params, reqEditors...)
 	if err != nil {
 		return nil, err
 	}
-	return ParseVerifySenderDomainSenderDomainsDomainIdVerifyPostResponse(rsp)
+	return ParseListDeliveriesWebhooksSubIdDeliveriesGetResponse(rsp)
+}
+
+// RedeliverWebhooksSubIdDeliveriesDeliveryIdRedeliverPostWithResponse request returning *RedeliverWebhooksSubIdDeliveriesDeliveryIdRedeliverPostResponse
+func (c *ClientWithResponses) RedeliverWebhooksSubIdDeliveriesDeliveryIdRedeliverPostWithResponse(ctx context.Context, subId openapi_types.UUID, deliveryId openapi_types.UUID, params *RedeliverWebhooksSubIdDeliveriesDeliveryIdRedeliverPostParams, reqEditors ...RequestEditorFn) (*RedeliverWebhooksSubIdDeliveriesDeliveryIdRedeliverPostResponse, error) {
+	rsp, err := c.RedeliverWebhooksSubIdDeliveriesDeliveryIdRedeliverPost(ctx, subId, deliveryId, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseRedeliverWebhooksSubIdDeliveriesDeliveryIdRedeliverPostResponse(rsp)
+}
+
+// RotateSecretWebhooksSubIdRotateSecretPostWithResponse request returning *RotateSecretWebhooksSubIdRotateSecretPostResponse
+func (c *ClientWithResponses) RotateSecretWebhooksSubIdRotateSecretPostWithResponse(ctx context.Context, subId openapi_types.UUID, params *RotateSecretWebhooksSubIdRotateSecretPostParams, reqEditors ...RequestEditorFn) (*RotateSecretWebhooksSubIdRotateSecretPostResponse, error) {
+	rsp, err := c.RotateSecretWebhooksSubIdRotateSecretPost(ctx, subId, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseRotateSecretWebhooksSubIdRotateSecretPostResponse(rsp)
 }
 
 // ParseListCallsCallsGetResponse parses an HTTP response from a ListCallsCallsGetWithResponse call
@@ -2703,6 +4320,230 @@ func ParseGetCallCallsCallIdGetResponse(rsp *http.Response) (*GetCallCallsCallId
 	switch {
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
 		var dest CallResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 422:
+		var dest HTTPValidationError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON422 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseListEmailDomainsEmailDomainsGetResponse parses an HTTP response from a ListEmailDomainsEmailDomainsGetWithResponse call
+func ParseListEmailDomainsEmailDomainsGetResponse(rsp *http.Response) (*ListEmailDomainsEmailDomainsGetResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ListEmailDomainsEmailDomainsGetResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest EmailDomainListResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 422:
+		var dest HTTPValidationError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON422 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseCreateEmailDomainEmailDomainsPostResponse parses an HTTP response from a CreateEmailDomainEmailDomainsPostWithResponse call
+func ParseCreateEmailDomainEmailDomainsPostResponse(rsp *http.Response) (*CreateEmailDomainEmailDomainsPostResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &CreateEmailDomainEmailDomainsPostResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 201:
+		var dest EmailDomainResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON201 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 422:
+		var dest HTTPValidationError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON422 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseDeleteEmailDomainEmailDomainsDomainIdDeleteResponse parses an HTTP response from a DeleteEmailDomainEmailDomainsDomainIdDeleteWithResponse call
+func ParseDeleteEmailDomainEmailDomainsDomainIdDeleteResponse(rsp *http.Response) (*DeleteEmailDomainEmailDomainsDomainIdDeleteResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &DeleteEmailDomainEmailDomainsDomainIdDeleteResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 422:
+		var dest HTTPValidationError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON422 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseGetEmailDomainEmailDomainsDomainIdGetResponse parses an HTTP response from a GetEmailDomainEmailDomainsDomainIdGetWithResponse call
+func ParseGetEmailDomainEmailDomainsDomainIdGetResponse(rsp *http.Response) (*GetEmailDomainEmailDomainsDomainIdGetResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetEmailDomainEmailDomainsDomainIdGetResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest EmailDomainResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 422:
+		var dest HTTPValidationError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON422 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParsePatchEmailDomainEmailDomainsDomainIdPatchResponse parses an HTTP response from a PatchEmailDomainEmailDomainsDomainIdPatchWithResponse call
+func ParsePatchEmailDomainEmailDomainsDomainIdPatchResponse(rsp *http.Response) (*PatchEmailDomainEmailDomainsDomainIdPatchResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &PatchEmailDomainEmailDomainsDomainIdPatchResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest EmailDomainResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 422:
+		var dest HTTPValidationError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON422 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseRotateWebhookSecretEmailDomainsDomainIdRotateWebhookSecretPostResponse parses an HTTP response from a RotateWebhookSecretEmailDomainsDomainIdRotateWebhookSecretPostWithResponse call
+func ParseRotateWebhookSecretEmailDomainsDomainIdRotateWebhookSecretPostResponse(rsp *http.Response) (*RotateWebhookSecretEmailDomainsDomainIdRotateWebhookSecretPostResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &RotateWebhookSecretEmailDomainsDomainIdRotateWebhookSecretPostResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest WebhookSecretResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 422:
+		var dest HTTPValidationError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON422 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseVerifyEmailDomainEmailDomainsDomainIdVerifyPostResponse parses an HTTP response from a VerifyEmailDomainEmailDomainsDomainIdVerifyPostWithResponse call
+func ParseVerifyEmailDomainEmailDomainsDomainIdVerifyPostResponse(rsp *http.Response) (*VerifyEmailDomainEmailDomainsDomainIdVerifyPostResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &VerifyEmailDomainEmailDomainsDomainIdVerifyPostResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest EmailDomainResponse
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err
 		}
@@ -2819,6 +4660,72 @@ func ParseGetEmailEmailsEmailIdGetResponse(rsp *http.Response) (*GetEmailEmailsE
 	return response, nil
 }
 
+// ParseGetEmailAttachmentEmailsEmailIdAttachmentsAttachmentIdGetResponse parses an HTTP response from a GetEmailAttachmentEmailsEmailIdAttachmentsAttachmentIdGetWithResponse call
+func ParseGetEmailAttachmentEmailsEmailIdAttachmentsAttachmentIdGetResponse(rsp *http.Response) (*GetEmailAttachmentEmailsEmailIdAttachmentsAttachmentIdGetResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetEmailAttachmentEmailsEmailIdAttachmentsAttachmentIdGetResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest interface{}
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 422:
+		var dest HTTPValidationError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON422 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseGetEmailRawEmailsEmailIdRawGetResponse parses an HTTP response from a GetEmailRawEmailsEmailIdRawGetWithResponse call
+func ParseGetEmailRawEmailsEmailIdRawGetResponse(rsp *http.Response) (*GetEmailRawEmailsEmailIdRawGetResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetEmailRawEmailsEmailIdRawGetResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest interface{}
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 422:
+		var dest HTTPValidationError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON422 = &dest
+
+	}
+
+	return response, nil
+}
+
 // ParseListEventsEventsGetResponse parses an HTTP response from a ListEventsEventsGetWithResponse call
 func ParseListEventsEventsGetResponse(rsp *http.Response) (*ListEventsEventsGetResponse, error) {
 	bodyBytes, err := io.ReadAll(rsp.Body)
@@ -2878,22 +4785,22 @@ func ParseHealthzHealthzGetResponse(rsp *http.Response) (*HealthzHealthzGetRespo
 	return response, nil
 }
 
-// ParseListSenderDomainsSenderDomainsGetResponse parses an HTTP response from a ListSenderDomainsSenderDomainsGetWithResponse call
-func ParseListSenderDomainsSenderDomainsGetResponse(rsp *http.Response) (*ListSenderDomainsSenderDomainsGetResponse, error) {
+// ParseListSubscriptionsWebhooksGetResponse parses an HTTP response from a ListSubscriptionsWebhooksGetWithResponse call
+func ParseListSubscriptionsWebhooksGetResponse(rsp *http.Response) (*ListSubscriptionsWebhooksGetResponse, error) {
 	bodyBytes, err := io.ReadAll(rsp.Body)
 	defer func() { _ = rsp.Body.Close() }()
 	if err != nil {
 		return nil, err
 	}
 
-	response := &ListSenderDomainsSenderDomainsGetResponse{
+	response := &ListSubscriptionsWebhooksGetResponse{
 		Body:         bodyBytes,
 		HTTPResponse: rsp,
 	}
 
 	switch {
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
-		var dest SenderDomainListResponse
+		var dest WebhookSubscriptionListResponse
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err
 		}
@@ -2911,22 +4818,22 @@ func ParseListSenderDomainsSenderDomainsGetResponse(rsp *http.Response) (*ListSe
 	return response, nil
 }
 
-// ParseCreateSenderDomainSenderDomainsPostResponse parses an HTTP response from a CreateSenderDomainSenderDomainsPostWithResponse call
-func ParseCreateSenderDomainSenderDomainsPostResponse(rsp *http.Response) (*CreateSenderDomainSenderDomainsPostResponse, error) {
+// ParseCreateSubscriptionWebhooksPostResponse parses an HTTP response from a CreateSubscriptionWebhooksPostWithResponse call
+func ParseCreateSubscriptionWebhooksPostResponse(rsp *http.Response) (*CreateSubscriptionWebhooksPostResponse, error) {
 	bodyBytes, err := io.ReadAll(rsp.Body)
 	defer func() { _ = rsp.Body.Close() }()
 	if err != nil {
 		return nil, err
 	}
 
-	response := &CreateSenderDomainSenderDomainsPostResponse{
+	response := &CreateSubscriptionWebhooksPostResponse{
 		Body:         bodyBytes,
 		HTTPResponse: rsp,
 	}
 
 	switch {
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 201:
-		var dest SenderDomainResponse
+		var dest WebhookSubscriptionResponse
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err
 		}
@@ -2944,15 +4851,15 @@ func ParseCreateSenderDomainSenderDomainsPostResponse(rsp *http.Response) (*Crea
 	return response, nil
 }
 
-// ParseDeleteSenderDomainSenderDomainsDomainIdDeleteResponse parses an HTTP response from a DeleteSenderDomainSenderDomainsDomainIdDeleteWithResponse call
-func ParseDeleteSenderDomainSenderDomainsDomainIdDeleteResponse(rsp *http.Response) (*DeleteSenderDomainSenderDomainsDomainIdDeleteResponse, error) {
+// ParseDeleteSubscriptionWebhooksSubIdDeleteResponse parses an HTTP response from a DeleteSubscriptionWebhooksSubIdDeleteWithResponse call
+func ParseDeleteSubscriptionWebhooksSubIdDeleteResponse(rsp *http.Response) (*DeleteSubscriptionWebhooksSubIdDeleteResponse, error) {
 	bodyBytes, err := io.ReadAll(rsp.Body)
 	defer func() { _ = rsp.Body.Close() }()
 	if err != nil {
 		return nil, err
 	}
 
-	response := &DeleteSenderDomainSenderDomainsDomainIdDeleteResponse{
+	response := &DeleteSubscriptionWebhooksSubIdDeleteResponse{
 		Body:         bodyBytes,
 		HTTPResponse: rsp,
 	}
@@ -2970,22 +4877,22 @@ func ParseDeleteSenderDomainSenderDomainsDomainIdDeleteResponse(rsp *http.Respon
 	return response, nil
 }
 
-// ParseGetSenderDomainSenderDomainsDomainIdGetResponse parses an HTTP response from a GetSenderDomainSenderDomainsDomainIdGetWithResponse call
-func ParseGetSenderDomainSenderDomainsDomainIdGetResponse(rsp *http.Response) (*GetSenderDomainSenderDomainsDomainIdGetResponse, error) {
+// ParseGetSubscriptionWebhooksSubIdGetResponse parses an HTTP response from a GetSubscriptionWebhooksSubIdGetWithResponse call
+func ParseGetSubscriptionWebhooksSubIdGetResponse(rsp *http.Response) (*GetSubscriptionWebhooksSubIdGetResponse, error) {
 	bodyBytes, err := io.ReadAll(rsp.Body)
 	defer func() { _ = rsp.Body.Close() }()
 	if err != nil {
 		return nil, err
 	}
 
-	response := &GetSenderDomainSenderDomainsDomainIdGetResponse{
+	response := &GetSubscriptionWebhooksSubIdGetResponse{
 		Body:         bodyBytes,
 		HTTPResponse: rsp,
 	}
 
 	switch {
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
-		var dest SenderDomainResponse
+		var dest WebhookSubscriptionResponse
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err
 		}
@@ -3003,22 +4910,22 @@ func ParseGetSenderDomainSenderDomainsDomainIdGetResponse(rsp *http.Response) (*
 	return response, nil
 }
 
-// ParsePatchSenderDomainSenderDomainsDomainIdPatchResponse parses an HTTP response from a PatchSenderDomainSenderDomainsDomainIdPatchWithResponse call
-func ParsePatchSenderDomainSenderDomainsDomainIdPatchResponse(rsp *http.Response) (*PatchSenderDomainSenderDomainsDomainIdPatchResponse, error) {
+// ParsePatchSubscriptionWebhooksSubIdPatchResponse parses an HTTP response from a PatchSubscriptionWebhooksSubIdPatchWithResponse call
+func ParsePatchSubscriptionWebhooksSubIdPatchResponse(rsp *http.Response) (*PatchSubscriptionWebhooksSubIdPatchResponse, error) {
 	bodyBytes, err := io.ReadAll(rsp.Body)
 	defer func() { _ = rsp.Body.Close() }()
 	if err != nil {
 		return nil, err
 	}
 
-	response := &PatchSenderDomainSenderDomainsDomainIdPatchResponse{
+	response := &PatchSubscriptionWebhooksSubIdPatchResponse{
 		Body:         bodyBytes,
 		HTTPResponse: rsp,
 	}
 
 	switch {
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
-		var dest SenderDomainResponse
+		var dest WebhookSubscriptionResponse
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err
 		}
@@ -3036,22 +4943,88 @@ func ParsePatchSenderDomainSenderDomainsDomainIdPatchResponse(rsp *http.Response
 	return response, nil
 }
 
-// ParseVerifySenderDomainSenderDomainsDomainIdVerifyPostResponse parses an HTTP response from a VerifySenderDomainSenderDomainsDomainIdVerifyPostWithResponse call
-func ParseVerifySenderDomainSenderDomainsDomainIdVerifyPostResponse(rsp *http.Response) (*VerifySenderDomainSenderDomainsDomainIdVerifyPostResponse, error) {
+// ParseListDeliveriesWebhooksSubIdDeliveriesGetResponse parses an HTTP response from a ListDeliveriesWebhooksSubIdDeliveriesGetWithResponse call
+func ParseListDeliveriesWebhooksSubIdDeliveriesGetResponse(rsp *http.Response) (*ListDeliveriesWebhooksSubIdDeliveriesGetResponse, error) {
 	bodyBytes, err := io.ReadAll(rsp.Body)
 	defer func() { _ = rsp.Body.Close() }()
 	if err != nil {
 		return nil, err
 	}
 
-	response := &VerifySenderDomainSenderDomainsDomainIdVerifyPostResponse{
+	response := &ListDeliveriesWebhooksSubIdDeliveriesGetResponse{
 		Body:         bodyBytes,
 		HTTPResponse: rsp,
 	}
 
 	switch {
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
-		var dest SenderDomainResponse
+		var dest WebhookDeliveryListResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 422:
+		var dest HTTPValidationError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON422 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseRedeliverWebhooksSubIdDeliveriesDeliveryIdRedeliverPostResponse parses an HTTP response from a RedeliverWebhooksSubIdDeliveriesDeliveryIdRedeliverPostWithResponse call
+func ParseRedeliverWebhooksSubIdDeliveriesDeliveryIdRedeliverPostResponse(rsp *http.Response) (*RedeliverWebhooksSubIdDeliveriesDeliveryIdRedeliverPostResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &RedeliverWebhooksSubIdDeliveriesDeliveryIdRedeliverPostResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest WebhookDeliveryResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 422:
+		var dest HTTPValidationError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON422 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseRotateSecretWebhooksSubIdRotateSecretPostResponse parses an HTTP response from a RotateSecretWebhooksSubIdRotateSecretPostWithResponse call
+func ParseRotateSecretWebhooksSubIdRotateSecretPostResponse(rsp *http.Response) (*RotateSecretWebhooksSubIdRotateSecretPostResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &RotateSecretWebhooksSubIdRotateSecretPostResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest WebhookSubscriptionResponse
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err
 		}

@@ -14,18 +14,18 @@ import (
 	"github.com/hail-hq/hail/cli/internal/client"
 )
 
-func sampleSenderDomainResponse(kind string) client.SenderDomainResponse {
+func sampleEmailDomainResponse(kind string) client.EmailDomainResponse {
 	id := openapi_types.UUID(uuid.MustParse("11111111-1111-1111-1111-111111111111"))
 	orgID := openapi_types.UUID(uuid.MustParse("22222222-2222-2222-2222-222222222222"))
 	now := time.Date(2026, 5, 17, 12, 0, 0, 0, time.UTC)
 	user := "alice"
 	org := "acme"
-	resp := client.SenderDomainResponse{
+	resp := client.EmailDomainResponse{
 		Id:                 id,
 		OrganizationId:     orgID,
-		Kind:               client.SenderDomainResponseKind(kind),
+		Kind:               client.EmailDomainResponseKind(kind),
 		Domain:             "alice+acme@mail.hail.so",
-		VerificationStatus: client.SenderDomainResponseVerificationStatusVerified,
+		VerificationStatus: client.EmailDomainResponseVerificationStatusVerified,
 		DkimRecords:        []client.DkimRecordSchema{},
 		Provider:           "ses",
 		CreatedAt:          now,
@@ -36,7 +36,7 @@ func sampleSenderDomainResponse(kind string) client.SenderDomainResponse {
 		resp.LocalPrefixOrg = &org
 	} else {
 		resp.Domain = "acme.com"
-		resp.VerificationStatus = client.SenderDomainResponseVerificationStatusPending
+		resp.VerificationStatus = client.EmailDomainResponseVerificationStatusPending
 		typ := "CNAME"
 		resp.DkimRecords = []client.DkimRecordSchema{
 			{Name: "sel1._domainkey.acme.com", Value: "sel1.dkim.amazonses.com", Type: &typ},
@@ -47,12 +47,12 @@ func sampleSenderDomainResponse(kind string) client.SenderDomainResponse {
 	return resp
 }
 
-func TestSenderDomain_RegisterHailMail(t *testing.T) {
-	srv := newFakeServer(t, http.StatusCreated, sampleSenderDomainResponse("hail_mail"))
+func TestEmailDomain_RegisterHailMail(t *testing.T) {
+	srv := newFakeServer(t, http.StatusCreated, sampleEmailDomainResponse("hail_mail"))
 
 	stdout, _, err := runRoot(t,
 		map[string]string{"HAIL_API_KEY": "sk_test", "HAIL_API_URL": srv.URL},
-		"email", "sender-domain", "register",
+		"email", "email-domain", "register",
 		"--kind", "hail_mail",
 		"--local-prefix-user", "alice",
 		"--local-prefix-org", "acme",
@@ -64,11 +64,11 @@ func TestSenderDomain_RegisterHailMail(t *testing.T) {
 	if got := atomic.LoadInt32(&srv.hits); got != 1 {
 		t.Fatalf("expected 1 request, got %d", got)
 	}
-	if srv.lastReq.URL.Path != "/sender-domains" {
+	if srv.lastReq.URL.Path != "/email-domains" {
 		t.Fatalf("unexpected path: %s", srv.lastReq.URL.Path)
 	}
 
-	var body client.SenderDomainCreate
+	var body client.EmailDomainCreate
 	if err := json.Unmarshal(srv.lastBody, &body); err != nil {
 		t.Fatalf("body parse: %v; raw=%s", err, srv.lastBody)
 	}
@@ -86,12 +86,12 @@ func TestSenderDomain_RegisterHailMail(t *testing.T) {
 	}
 }
 
-func TestSenderDomain_RegisterCustomReturnsDkim(t *testing.T) {
-	srv := newFakeServer(t, http.StatusCreated, sampleSenderDomainResponse("custom"))
+func TestEmailDomain_RegisterCustomReturnsDkim(t *testing.T) {
+	srv := newFakeServer(t, http.StatusCreated, sampleEmailDomainResponse("custom"))
 
 	stdout, _, err := runRoot(t,
 		map[string]string{"HAIL_API_KEY": "sk_test", "HAIL_API_URL": srv.URL},
-		"email", "sender-domain", "register",
+		"email", "email-domain", "register",
 		"--kind", "custom",
 		"--domain", "acme.com",
 	)
@@ -99,7 +99,7 @@ func TestSenderDomain_RegisterCustomReturnsDkim(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	var body client.SenderDomainCreate
+	var body client.EmailDomainCreate
 	if err := json.Unmarshal(srv.lastBody, &body); err != nil {
 		t.Fatalf("body parse: %v; raw=%s", err, srv.lastBody)
 	}
@@ -111,16 +111,16 @@ func TestSenderDomain_RegisterCustomReturnsDkim(t *testing.T) {
 	}
 }
 
-func TestSenderDomain_RegisterHailMailMinimalArgs(t *testing.T) {
+func TestEmailDomain_RegisterHailMailMinimalArgs(t *testing.T) {
 	// Caller relies entirely on server-side env defaults (HAIL_MAIL_FROM
 	// or HAIL_MAIL_DEFAULT_*_PREFIX). The wire body must NOT carry domain
 	// or empty prefix fields — those would cause server-side validation
 	// errors. strPtr("") returns nil, so omitting flags should omit fields.
-	srv := newFakeServer(t, http.StatusCreated, sampleSenderDomainResponse("hail_mail"))
+	srv := newFakeServer(t, http.StatusCreated, sampleEmailDomainResponse("hail_mail"))
 
 	_, _, err := runRoot(t,
 		map[string]string{"HAIL_API_KEY": "sk_test", "HAIL_API_URL": srv.URL},
-		"email", "sender-domain", "register", "--kind", "hail_mail",
+		"email", "email-domain", "register", "--kind", "hail_mail",
 	)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -141,12 +141,12 @@ func TestSenderDomain_RegisterHailMailMinimalArgs(t *testing.T) {
 	}
 }
 
-func TestSenderDomain_RegisterRejectsBadKind(t *testing.T) {
-	srv := newFakeServer(t, http.StatusCreated, sampleSenderDomainResponse("hail_mail"))
+func TestEmailDomain_RegisterRejectsBadKind(t *testing.T) {
+	srv := newFakeServer(t, http.StatusCreated, sampleEmailDomainResponse("hail_mail"))
 
 	_, _, err := runRoot(t,
 		map[string]string{"HAIL_API_KEY": "sk_test", "HAIL_API_URL": srv.URL},
-		"email", "sender-domain", "register", "--kind", "carrier-pigeon",
+		"email", "email-domain", "register", "--kind", "carrier-pigeon",
 	)
 	if err == nil {
 		t.Fatal("expected error on invalid kind")
@@ -156,15 +156,15 @@ func TestSenderDomain_RegisterRejectsBadKind(t *testing.T) {
 	}
 }
 
-func TestSenderDomain_List(t *testing.T) {
-	listResp := client.SenderDomainListResponse{
-		Items: []client.SenderDomainResponse{sampleSenderDomainResponse("hail_mail")},
+func TestEmailDomain_List(t *testing.T) {
+	listResp := client.EmailDomainListResponse{
+		Items: []client.EmailDomainResponse{sampleEmailDomainResponse("hail_mail")},
 	}
 	srv := newFakeServer(t, http.StatusOK, listResp)
 
 	stdout, _, err := runRoot(t,
 		map[string]string{"HAIL_API_KEY": "sk_test", "HAIL_API_URL": srv.URL},
-		"email", "sender-domain", "list",
+		"email", "email-domain", "list",
 	)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -177,20 +177,20 @@ func TestSenderDomain_List(t *testing.T) {
 	}
 }
 
-func TestSenderDomain_Verify(t *testing.T) {
-	verified := sampleSenderDomainResponse("custom")
-	verified.VerificationStatus = client.SenderDomainResponseVerificationStatusVerified
+func TestEmailDomain_Verify(t *testing.T) {
+	verified := sampleEmailDomainResponse("custom")
+	verified.VerificationStatus = client.EmailDomainResponseVerificationStatusVerified
 	srv := newFakeServer(t, http.StatusOK, verified)
 
 	id := "11111111-1111-1111-1111-111111111111"
 	_, _, err := runRoot(t,
 		map[string]string{"HAIL_API_KEY": "sk_test", "HAIL_API_URL": srv.URL},
-		"email", "sender-domain", "verify", id,
+		"email", "email-domain", "verify", id,
 	)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if srv.lastReq.URL.Path != "/sender-domains/"+id+"/verify" {
+	if srv.lastReq.URL.Path != "/email-domains/"+id+"/verify" {
 		t.Fatalf("unexpected path: %s", srv.lastReq.URL.Path)
 	}
 	if srv.lastReq.Method != http.MethodPost {
@@ -198,13 +198,13 @@ func TestSenderDomain_Verify(t *testing.T) {
 	}
 }
 
-func TestSenderDomain_Delete(t *testing.T) {
+func TestEmailDomain_Delete(t *testing.T) {
 	srv := newFakeServer(t, http.StatusNoContent, nil)
 
 	id := "11111111-1111-1111-1111-111111111111"
 	stdout, _, err := runRoot(t,
 		map[string]string{"HAIL_API_KEY": "sk_test", "HAIL_API_URL": srv.URL},
-		"email", "sender-domain", "delete", id,
+		"email", "email-domain", "delete", id,
 	)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -217,12 +217,12 @@ func TestSenderDomain_Delete(t *testing.T) {
 	}
 }
 
-func TestSenderDomain_DeleteInvalidUUID(t *testing.T) {
+func TestEmailDomain_DeleteInvalidUUID(t *testing.T) {
 	srv := newFakeServer(t, http.StatusNoContent, nil)
 
 	_, _, err := runRoot(t,
 		map[string]string{"HAIL_API_KEY": "sk_test", "HAIL_API_URL": srv.URL},
-		"email", "sender-domain", "delete", "not-a-uuid",
+		"email", "email-domain", "delete", "not-a-uuid",
 	)
 	if err == nil {
 		t.Fatal("expected error on invalid uuid")

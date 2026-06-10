@@ -54,7 +54,7 @@ func sampleResponse() client.CallResponse {
 		ConversationId:  nil,
 		FromE164:        "+14155551234",
 		ToE164:          "+15551234567",
-		Direction:       client.Outbound,
+		Direction:       client.CallResponseDirectionOutbound,
 		Status:          client.CallResponseStatusDialing,
 		EndReason:       nil,
 		ProviderCallSid: nil,
@@ -379,6 +379,12 @@ func TestPersistentFlags_PositionFlexibility(t *testing.T) {
 }
 
 func TestCallSubcommand_MissingAPIKey(t *testing.T) {
+	// loadCredentials falls back to ~/.hail/credentials.json via
+	// os.UserHomeDir(), which reads $HOME on unix. Point HOME at an empty
+	// temp dir so a developer's real credentials file can't satisfy the
+	// API-key lookup and mask the missing-key error.
+	t.Setenv("HOME", t.TempDir())
+
 	srv := newFakeServer(t, http.StatusCreated, sampleResponse())
 
 	_, _, err := runRoot(t,
