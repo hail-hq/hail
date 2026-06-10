@@ -224,8 +224,8 @@ def _normalize_domain(addr: str) -> str:
     return f"{local}@{domain.lower()}"
 
 
-SenderDomainKind = Literal["hail_mail", "custom"]
-SenderDomainVerificationStatus = Literal["pending", "verified", "failed"]
+EmailDomainKind = Literal["hail_mail", "custom"]
+EmailDomainVerificationStatus = Literal["pending", "verified", "failed"]
 
 
 class DkimRecordSchema(BaseModel):
@@ -238,8 +238,8 @@ class DkimRecordSchema(BaseModel):
     type: Literal["CNAME"] = "CNAME"
 
 
-class SenderDomainCreate(BaseModel):
-    """Request body for POST /sender-domains.
+class EmailDomainCreate(BaseModel):
+    """Request body for POST /email-domains.
 
     For ``kind='hail_mail'`` ``domain`` is omitted; the server composes
     the full address as ``<local_prefix_user>+<local_prefix_org>@<base>``.
@@ -251,7 +251,7 @@ class SenderDomainCreate(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    kind: SenderDomainKind
+    kind: EmailDomainKind
     domain: str | None = None
     local_prefix_user: str | None = None
     local_prefix_org: str | None = None
@@ -299,19 +299,41 @@ class SenderDomainCreate(BaseModel):
         return self
 
 
-class SenderDomainPatch(BaseModel):
-    """Body for PATCH /sender-domains/{id}.
+class EmailDomainPatch(BaseModel):
+    """Body for PATCH /email-domains/{id}.
 
-    Only the user/org prefix pair on a ``kind='hail_mail'`` row is mutable
-    today. Custom-domain rows have nothing here a tenant should be free to
-    edit — DNS, DKIM, and verification state are all provider-driven. The
-    handler returns 422 on custom rows so the failure mode is obvious.
+    Two clusters of mutable fields:
+
+    * Hail-mail addressing — the user/org prefix pair (only valid on
+      ``kind='hail_mail'`` rows; the handler returns 422 if a tenant tries
+      to PATCH these on a custom row).
+    * Inbound action — ``inbound_enabled`` + at least one of ``forward_to``
+      / ``webhook_url`` + the optional ``forward_rate_per_hour`` cap. These
+      apply to either kind, but this milestone routes inbound only to
+      ``hail_mail`` rows; custom-domain inbound (MX delegation) is the
+      next milestone.
+
+    Every field is independently optional so ``PATCH`` semantics work the
+    way callers expect: send only what you want to change. The route
+    enforces the cross-field rules (the CHECK constraint on the table
+    requires an action when ``inbound_enabled`` is true) — we don't
+    re-implement it here because the patch may merge with existing row
+    state to satisfy the invariant.
+
+    NOTE: the plaintext webhook secret is NOT a PATCH field. It's set at
+    create time and rotated via a dedicated endpoint that returns the new
+    plaintext exactly once. ``webhook_secret_encrypted`` is server-managed and
+    never accepted on the wire.
     """
 
     model_config = ConfigDict(extra="forbid")
 
     local_prefix_user: str | None = None
     local_prefix_org: str | None = None
+    inbound_enabled: bool | None = None
+    forward_to: list[str] | None = None
+    webhook_url: str | None = None
+    forward_rate_per_hour: int | None = None
 
     @field_validator("local_prefix_user", "local_prefix_org")
     @classmethod
@@ -326,35 +348,74 @@ class SenderDomainPatch(BaseModel):
             )
         return v
 
+    @field_validator("forward_to")
+    @classmethod
+    def _forward_to_look_like_addresses(cls, v: list[str] | None) -> list[str] | None:
+        if v is None:
+            return v
+        for addr in v:
+            local, sep, domain = addr.rpartition("@")
+            if not sep or not local or "." not in domain:
+                raise ValueError(f"forward_to entry {addr!r} is not an email address")
+        return v
+
     @model_validator(mode="after")
     def _at_least_one_field(self):
-        if self.local_prefix_user is None and self.local_prefix_org is None:
+        if (
+            self.local_prefix_user is None
+            and self.local_prefix_org is None
+            and self.inbound_enabled is None
+            and self.forward_to is None
+            and self.webhook_url is None
+            and self.forward_rate_per_hour is None
+        ):
             raise ValueError(
-                "at least one of local_prefix_user / local_prefix_org must be set"
+                "at least one of local_prefix_user, local_prefix_org, "
+                "inbound_enabled, forward_to, webhook_url, "
+                "or forward_rate_per_hour must be set"
             )
         return self
 
 
-class SenderDomainResponse(BaseModel):
+class EmailDomainResponse(BaseModel):
+    """Read view for an email domain.
+
+    The inbound-action fields (``inbound_enabled``, ``forward_to``,
+    ``webhook_url``, ``forward_rate_per_hour``) surface what the row has
+    configured for incoming mail. ``webhook_secret_encrypted`` is intentionally
+    NOT exposed — the plaintext secret is returned exactly once at create
+    or rotate via a dedicated endpoint, and the ciphertext that
+    sits on the row is server-internal.
+    """
+
     model_config = ConfigDict(from_attributes=True)
 
     id: UUID
     organization_id: UUID
-    kind: SenderDomainKind
+    kind: EmailDomainKind
     domain: str
     local_prefix_user: str | None
     local_prefix_org: str | None
-    verification_status: SenderDomainVerificationStatus
+    verification_status: EmailDomainVerificationStatus
     dkim_records: list[DkimRecordSchema]
     mail_from_domain: str | None
     provider: str
     verified_at: datetime | None
+    inbound_enabled: bool = False
+    forward_to: list[str] | None = None
+    webhook_url: str | None = None
+    forward_rate_per_hour: int | None = None
+    # Populated **only** by PATCH responses that minted or rotated a
+    # webhook secret. The plaintext is returned once and never echoed on
+    # subsequent GETs (the encrypted secret stored on the row is what the
+    # worker decrypts to sign each delivery).
+    webhook_secret: str | None = None
     created_at: datetime
     updated_at: datetime
 
 
-class SenderDomainListResponse(BaseModel):
-    items: list[SenderDomainResponse]
+class EmailDomainListResponse(BaseModel):
+    items: list[EmailDomainResponse]
     next_cursor: str | None = None
 
 
@@ -403,7 +464,7 @@ class EmailCreate(BaseModel):
         return self
 
 
-EmailStatus = Literal["queued", "sent", "failed", "bounced", "complained"]
+EmailStatus = Literal["queued", "sent", "failed", "bounced", "complained", "received"]
 
 TERMINAL_EMAIL_STATUSES: frozenset[str] = frozenset(
     {"sent", "failed", "bounced", "complained"}
@@ -423,7 +484,7 @@ class EmailSummary(BaseModel):
     id: UUID
     organization_id: UUID
     conversation_id: UUID | None
-    sender_domain_id: UUID
+    email_domain_id: UUID
     from_address: str
     to_addresses: list[str]
     cc_addresses: list[str] | None
@@ -443,11 +504,133 @@ class EmailSummary(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict, validation_alias="metadata_")
 
 
+class EmailAttachmentResponse(BaseModel):
+    """One inbound MIME attachment as exposed to API consumers.
+
+    ``url`` is the stable Hail API endpoint that 302-redirects to a
+    presigned S3 URL on access — see GET /emails/{id}/attachments/{aid}.
+    """
+
+    id: UUID
+    filename: str
+    content_type: str
+    size_bytes: int
+    content_id: str | None = None
+    url: str
+
+    model_config = ConfigDict(from_attributes=True)
+
+
 class EmailResponse(EmailSummary):
     body_text: str | None
     body_html: str | None
+    # Inbound-only metadata. Outbound rows leave these all null/empty —
+    # we surface them on the full-row endpoint (GET /emails/{id}) rather
+    # than the list summary because most inbound consumers will fetch the
+    # row anyway to read the body. Defaults match the outbound shape so
+    # existing serializations keep working.
+    direction: Literal["outbound", "inbound"] = "outbound"
+    message_id: str | None = None
+    in_reply_to: str | None = None
+    references_ids: list[str] | None = None
+    spam_verdict: str | None = None
+    virus_verdict: str | None = None
+    dkim_verdict: str | None = None
+    spf_verdict: str | None = None
+    dmarc_verdict: str | None = None
+    provider_received_at: datetime | None = None
+    # ``raw_url`` is the API endpoint that 302-redirects to a presigned
+    # S3 URL for the original MIME blob; ``raw_s3_key`` is the column on
+    # the row but we don't expose internal storage paths on the wire.
+    raw_url: str | None = None
+    attachments: list[EmailAttachmentResponse] = []
 
 
 class EmailListResponse(BaseModel):
     items: list[EmailSummary]
+    next_cursor: str | None = None
+
+
+# --------------------------------------------------------------------------- #
+# Webhook subscriptions + deliveries
+# --------------------------------------------------------------------------- #
+
+# email.bounced / email.complained are subscribable now but only emitted once
+# SES bounce/complaint ingestion lands (next milestone); documented in
+# docs/setup/aws-ses.md. email.received.suppressed fires with
+# data.reason ∈ {forward_loop, forward_rate_limit, inbound_rate_limit}.
+WebhookEventType = Literal[
+    "email.received",
+    "email.bounced",
+    "email.complained",
+    "email.received.suppressed",
+]
+
+WebhookSubscriptionStatus = Literal["active", "disabled"]
+WebhookDeliveryStatus = Literal["pending", "succeeded", "failed", "dead"]
+
+
+class WebhookSecretResponse(BaseModel):
+    """Plaintext webhook secret, returned exactly once (create/rotate)."""
+
+    webhook_secret: str
+
+
+class WebhookSubscriptionCreate(BaseModel):
+    target_url: str = Field(min_length=1)
+    event_types: list[WebhookEventType] = Field(min_length=1)
+
+
+class WebhookSubscriptionPatch(BaseModel):
+    target_url: str | None = None
+    event_types: list[WebhookEventType] | None = None
+    status: WebhookSubscriptionStatus | None = None
+
+
+class WebhookSubscriptionResponse(BaseModel):
+    """Subscription as returned by the API.
+
+    ``secret`` is populated **only** by create + rotate-secret responses;
+    later GETs return ``None`` so the plaintext never round-trips.
+    """
+
+    id: UUID
+    organization_id: UUID
+    target_url: str
+    event_types: list[str]
+    status: WebhookSubscriptionStatus
+    consecutive_failures: int
+    last_success_at: datetime | None = None
+    last_failure_at: datetime | None = None
+    created_at: datetime
+    updated_at: datetime
+    secret: str | None = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class WebhookSubscriptionListResponse(BaseModel):
+    items: list[WebhookSubscriptionResponse]
+    next_cursor: str | None = None
+
+
+class WebhookDeliveryResponse(BaseModel):
+    id: UUID
+    subscription_id: UUID | None
+    email_domain_id: UUID | None
+    event_type: str
+    event_id: UUID
+    attempt: int
+    status: WebhookDeliveryStatus
+    response_status: int | None = None
+    response_body: str | None = None
+    next_attempt_at: datetime
+    succeeded_at: datetime | None = None
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class WebhookDeliveryListResponse(BaseModel):
+    items: list[WebhookDeliveryResponse]
     next_cursor: str | None = None

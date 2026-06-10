@@ -7,6 +7,7 @@ from sqlalchemy import (
     CheckConstraint,
     DateTime,
     ForeignKey,
+    Index,
     Integer,
     Text,
     UniqueConstraint,
@@ -360,7 +361,7 @@ class IdempotencyKey(Base):
     expires_at: Mapped[datetime] = mapped_column(TS, nullable=False)
 
 
-class SenderDomain(Base):
+class EmailDomain(Base):
     """A sending-domain identity registered with the email provider.
 
     Two flavors of row:
@@ -393,7 +394,7 @@ class SenderDomain(Base):
     column.
     """
 
-    __tablename__ = "sender_domains"
+    __tablename__ = "email_domains"
 
     id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
@@ -421,6 +422,13 @@ class SenderDomain(Base):
     provider: Mapped[str] = mapped_column(Text, server_default="ses", nullable=False)
     provider_resource_id: Mapped[str | None] = mapped_column(Text, nullable=True)
     verified_at: Mapped[datetime | None] = mapped_column(TS, nullable=True)
+    inbound_enabled: Mapped[bool] = mapped_column(
+        Boolean, server_default=text("false"), nullable=False
+    )
+    forward_to: Mapped[list[str] | None] = mapped_column(ARRAY(Text), nullable=True)
+    webhook_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    webhook_secret_encrypted: Mapped[str | None] = mapped_column(Text, nullable=True)
+    forward_rate_per_hour: Mapped[int | None] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         TS, server_default=text("now()"), nullable=False
     )
@@ -431,11 +439,11 @@ class SenderDomain(Base):
     __table_args__ = (
         CheckConstraint(
             "kind IN ('hail_mail','custom')",
-            name="sender_domains_kind_check",
+            name="email_domains_kind_check",
         ),
         CheckConstraint(
             "verification_status IN ('pending','verified','failed')",
-            name="sender_domains_verification_status_check",
+            name="email_domains_verification_status_check",
         ),
         # Hail-mail rows need both prefixes; custom rows leave both NULL.
         # Mirrors the migration so Base.metadata.create_all (tests) produces
@@ -445,23 +453,44 @@ class SenderDomain(Base):
             "AND local_prefix_org IS NOT NULL) "
             "OR (kind = 'custom' AND local_prefix_user IS NULL "
             "AND local_prefix_org IS NULL)",
-            name="sender_domains_prefix_kind_consistency",
+            name="email_domains_prefix_kind_consistency",
+        ),
+        CheckConstraint(
+            "NOT inbound_enabled OR forward_to IS NOT NULL OR webhook_url IS NOT NULL",
+            name="email_domains_inbound_action",
+        ),
+        CheckConstraint(
+            "(webhook_url IS NULL) = (webhook_secret_encrypted IS NULL)",
+            name="email_domains_webhook_pair",
         ),
         # An org can't register the same domain twice. Different orgs can
         # each have their own ``acme.com`` row — SES allows duplicate
         # identities across accounts and each org publishes their own DKIM.
         UniqueConstraint(
-            "organization_id", "domain", name="sender_domains_org_domain_unique"
+            "organization_id", "domain", name="email_domains_org_domain_unique"
+        ),
+        # Hail-mail addresses route inbound mail by (user, org) prefix with
+        # no org scoping at lookup time (email_ingest matches the prefix
+        # pair, not the domain column) — the pair must be globally unique or
+        # org B could register org A's prefixes and intercept mail, even if
+        # HAIL_MAIL_BASE_DOMAIN changed between the two registrations.
+        Index(
+            "email_domains_hail_mail_prefix_uq",
+            "local_prefix_user",
+            "local_prefix_org",
+            unique=True,
+            postgresql_where=text("kind = 'hail_mail'"),
         ),
     )
 
 
 class Email(Base):
-    """A single outbound email message.
+    """A single email message, outbound or inbound.
 
-    Mirrors the ``Call`` shape: requested → sent / failed / bounced /
-    complained, with provider_message_id surfaced for downstream
-    correlation (SES delivery webhooks land here in v1.5).
+    Outbound mirrors the ``Call`` shape: requested → sent / failed /
+    bounced / complained, with provider_message_id surfaced for
+    downstream correlation (SES delivery webhooks land here in v1.5).
+    Inbound rows carry ``direction='inbound'`` and status ``received``.
     """
 
     __tablename__ = "emails"
@@ -477,10 +506,10 @@ class Email(Base):
         ForeignKey("conversations.id", ondelete="SET NULL"),
         nullable=True,
     )
-    sender_domain_id: Mapped[uuid.UUID] = mapped_column(
+    email_domain_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
-        ForeignKey("sender_domains.id", ondelete="RESTRICT"),
-        nullable=False,
+        ForeignKey("email_domains.id", ondelete="RESTRICT"),
+        nullable=True,
     )
     from_address: Mapped[str] = mapped_column(Text, nullable=False)
     to_addresses: Mapped[list[str]] = mapped_column(ARRAY(Text), nullable=False)
@@ -497,9 +526,7 @@ class Email(Base):
     # every time AWS adds a new error.
     end_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     provider: Mapped[str] = mapped_column(Text, server_default="ses", nullable=False)
-    provider_message_id: Mapped[str | None] = mapped_column(
-        Text, unique=True, nullable=True
-    )
+    provider_message_id: Mapped[str | None] = mapped_column(Text, nullable=True)
     requested_at: Mapped[datetime] = mapped_column(
         TS, server_default=text("now()"), nullable=False
     )
@@ -508,13 +535,26 @@ class Email(Base):
     metadata_: Mapped[dict] = mapped_column(
         "metadata", JSONB, server_default=text("'{}'::jsonb"), nullable=False
     )
+    direction: Mapped[str] = mapped_column(
+        Text, server_default="outbound", nullable=False
+    )
+    provider_received_at: Mapped[datetime | None] = mapped_column(TS, nullable=True)
+    message_id: Mapped[str | None] = mapped_column(Text, nullable=True)
+    in_reply_to: Mapped[str | None] = mapped_column(Text, nullable=True)
+    references_ids: Mapped[list[str] | None] = mapped_column(ARRAY(Text), nullable=True)
+    raw_s3_key: Mapped[str | None] = mapped_column(Text, nullable=True)
+    spam_verdict: Mapped[str | None] = mapped_column(Text, nullable=True)
+    virus_verdict: Mapped[str | None] = mapped_column(Text, nullable=True)
+    dkim_verdict: Mapped[str | None] = mapped_column(Text, nullable=True)
+    spf_verdict: Mapped[str | None] = mapped_column(Text, nullable=True)
+    dmarc_verdict: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         TS, server_default=text("now()"), nullable=False
     )
 
     __table_args__ = (
         CheckConstraint(
-            "status IN ('queued','sent','failed','bounced','complained')",
+            "status IN ('queued','sent','failed','bounced','complained','received')",
             name="emails_status_check",
         ),
         CheckConstraint(
@@ -525,6 +565,79 @@ class Email(Base):
             "body_text IS NOT NULL OR body_html IS NOT NULL",
             name="emails_body_required",
         ),
+        CheckConstraint(
+            "direction IN ('outbound','inbound')",
+            name="emails_direction_check",
+        ),
+        CheckConstraint(
+            "direction = 'inbound' OR email_domain_id IS NOT NULL",
+            name="emails_outbound_has_domain",
+        ),
+        Index(
+            "emails_provider_message_id_outbound_uq",
+            "provider_message_id",
+            unique=True,
+            postgresql_where=text(
+                "direction = 'outbound' AND provider_message_id IS NOT NULL"
+            ),
+        ),
+        Index(
+            "emails_inbound_message_id_uq",
+            "organization_id",
+            "message_id",
+            unique=True,
+            postgresql_where=text("direction = 'inbound' AND message_id IS NOT NULL"),
+        ),
+        # Dedupe fallback for mail without a Message-ID header: the SES
+        # receipt id repeats on redelivery, so it backs the same
+        # idempotency guarantee, org-scoped.
+        Index(
+            "emails_inbound_provider_message_id_uq",
+            "organization_id",
+            "provider_message_id",
+            unique=True,
+            postgresql_where=text(
+                "direction = 'inbound' AND provider_message_id IS NOT NULL"
+            ),
+        ),
+        Index(
+            "emails_org_direction_created_idx",
+            "organization_id",
+            "direction",
+            text("created_at DESC"),
+        ),
+        Index("emails_message_id_idx", "message_id"),
+        # The forward worker polls this every second; keep it index-only.
+        # Direct-send rows pass through 'queued' only momentarily, so the
+        # partial index stays tiny.
+        Index(
+            "emails_forward_queue_idx",
+            "created_at",
+            postgresql_where=text("status = 'queued' AND direction = 'outbound'"),
+        ),
+    )
+
+
+class EmailAttachment(Base):
+    __tablename__ = "email_attachments"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        server_default=text("gen_random_uuid()"),
+    )
+    email_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("emails.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    filename: Mapped[str] = mapped_column(Text, nullable=False)
+    content_type: Mapped[str] = mapped_column(Text, nullable=False)
+    size_bytes: Mapped[int] = mapped_column(Integer, nullable=False)
+    s3_key: Mapped[str] = mapped_column(Text, nullable=False)
+    content_id: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        TS, server_default=text("now()"), nullable=False
     )
 
 
@@ -553,4 +666,101 @@ class AuditLog(Base):
     payload: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     occurred_at: Mapped[datetime] = mapped_column(
         TS, server_default=text("now()"), nullable=False
+    )
+
+
+class WebhookSubscription(Base):
+    """Org-wide outbound webhook subscription.
+
+    Mirrors Stripe's surface: tenants register a target_url + event_types
+    + a generated secret (Fernet-encrypted at rest, see
+    ``hailhq.core.secret_cipher``), and the delivery worker POSTs
+    matching events with an HMAC signature header. ``consecutive_failures``
+    auto-disables the subscription after 50; an admin re-enables via PATCH.
+    """
+
+    __tablename__ = "webhook_subscriptions"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    organization_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), nullable=False
+    )
+    target_url: Mapped[str] = mapped_column(Text, nullable=False)
+    secret_encrypted: Mapped[str] = mapped_column(Text, nullable=False)
+    event_types: Mapped[list[str]] = mapped_column(ARRAY(Text), nullable=False)
+    status: Mapped[str] = mapped_column(Text, server_default="active", nullable=False)
+    consecutive_failures: Mapped[int] = mapped_column(
+        Integer, server_default="0", nullable=False
+    )
+    last_success_at: Mapped[datetime | None] = mapped_column(TS, nullable=True)
+    last_failure_at: Mapped[datetime | None] = mapped_column(TS, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        TS, server_default=text("now()"), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        TS, server_default=text("now()"), nullable=False
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('active','disabled')",
+            name="webhook_subscriptions_status_check",
+        ),
+        CheckConstraint(
+            "cardinality(event_types) >= 1",
+            name="webhook_subscriptions_event_types_nonempty",
+        ),
+    )
+
+
+class WebhookDelivery(Base):
+    """Per-attempt audit + retry queue for outbound webhook events.
+
+    A delivery is owned by either an org-wide ``WebhookSubscription`` or a
+    per-domain ``email_domains.webhook_url`` (never both). The background
+    worker polls ``status='pending' AND next_attempt_at <= now()`` with
+    SKIP LOCKED, POSTs, and updates the row.
+    """
+
+    __tablename__ = "webhook_deliveries"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    subscription_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("webhook_subscriptions.id", ondelete="CASCADE"),
+        nullable=True,
+    )
+    email_domain_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("email_domains.id", ondelete="CASCADE"),
+        nullable=True,
+    )
+    event_type: Mapped[str] = mapped_column(Text, nullable=False)
+    event_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    payload: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    attempt: Mapped[int] = mapped_column(Integer, server_default="0", nullable=False)
+    status: Mapped[str] = mapped_column(Text, server_default="pending", nullable=False)
+    response_status: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    response_body: Mapped[str | None] = mapped_column(Text, nullable=True)
+    next_attempt_at: Mapped[datetime] = mapped_column(
+        TS, server_default=text("now()"), nullable=False
+    )
+    succeeded_at: Mapped[datetime | None] = mapped_column(TS, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        TS, server_default=text("now()"), nullable=False
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "subscription_id IS NOT NULL OR email_domain_id IS NOT NULL",
+            name="webhook_deliveries_target_check",
+        ),
+        CheckConstraint(
+            "status IN ('pending','succeeded','failed','dead')",
+            name="webhook_deliveries_status_check",
+        ),
     )

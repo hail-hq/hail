@@ -1,4 +1,4 @@
-"""Integration tests for /sender-domains routes."""
+"""Integration tests for /email-domains routes."""
 
 from __future__ import annotations
 
@@ -9,14 +9,14 @@ import httpx
 import pytest
 
 from hailhq.core.config import settings
-from hailhq.core.models import ApiKey, SenderDomain
+from hailhq.core.models import ApiKey, EmailDomain
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .conftest import insert_org_and_key  # noqa: F401
 
 # --------------------------------------------------------------------------- #
-# POST /sender-domains
+# POST /email-domains
 # --------------------------------------------------------------------------- #
 
 
@@ -27,7 +27,7 @@ async def test_post_custom_domain_returns_dkim_records(
 ) -> None:
     _, _, plain = org_and_key
     resp = await client.post(
-        "/sender-domains",
+        "/email-domains",
         json={"kind": "custom", "domain": "acme.com"},
         headers={"Authorization": f"Bearer {plain}"},
     )
@@ -47,7 +47,7 @@ async def test_post_custom_domain_lowercases_and_validates(
 ) -> None:
     _, _, plain = org_and_key
     resp = await client.post(
-        "/sender-domains",
+        "/email-domains",
         json={"kind": "custom", "domain": "ACME.COM"},
         headers={"Authorization": f"Bearer {plain}"},
     )
@@ -61,7 +61,7 @@ async def test_post_custom_rejects_invalid_dns_name(
 ) -> None:
     _, _, plain = org_and_key
     resp = await client.post(
-        "/sender-domains",
+        "/email-domains",
         json={"kind": "custom", "domain": "not a domain"},
         headers={"Authorization": f"Bearer {plain}"},
     )
@@ -74,7 +74,7 @@ async def test_post_custom_requires_domain(
 ) -> None:
     _, _, plain = org_and_key
     resp = await client.post(
-        "/sender-domains",
+        "/email-domains",
         json={"kind": "custom"},
         headers={"Authorization": f"Bearer {plain}"},
     )
@@ -90,7 +90,7 @@ async def test_post_hail_mail_uses_explicit_prefixes(
     monkeypatch.setattr(settings, "hail_mail_base_domain", "mail.hail.so")
     _, _, plain = org_and_key
     resp = await client.post(
-        "/sender-domains",
+        "/email-domains",
         json={
             "kind": "hail_mail",
             "local_prefix_user": "alice",
@@ -118,7 +118,7 @@ async def test_post_hail_mail_falls_back_to_env_defaults(
     monkeypatch.setattr(settings, "hail_mail_default_org_prefix", "selfhost")
     _, _, plain = org_and_key
     resp = await client.post(
-        "/sender-domains",
+        "/email-domains",
         json={"kind": "hail_mail"},
         headers={"Authorization": f"Bearer {plain}"},
     )
@@ -139,7 +139,7 @@ async def test_post_hail_mail_uses_hail_mail_from_env(
     monkeypatch.setattr(settings, "hail_mail_default_org_prefix", "")
     _, _, plain = org_and_key
     resp = await client.post(
-        "/sender-domains",
+        "/email-domains",
         json={"kind": "hail_mail"},
         headers={"Authorization": f"Bearer {plain}"},
     )
@@ -162,7 +162,7 @@ async def test_post_hail_mail_from_overrides_default_prefix_vars(
     monkeypatch.setattr(settings, "hail_mail_default_org_prefix", "alsoignored")
     _, _, plain = org_and_key
     resp = await client.post(
-        "/sender-domains",
+        "/email-domains",
         json={"kind": "hail_mail"},
         headers={"Authorization": f"Bearer {plain}"},
     )
@@ -180,7 +180,7 @@ async def test_post_hail_mail_body_prefixes_override_hail_mail_from(
     monkeypatch.setattr(settings, "hail_mail_from", "alice+acme@mail.hail.so")
     _, _, plain = org_and_key
     resp = await client.post(
-        "/sender-domains",
+        "/email-domains",
         json={
             "kind": "hail_mail",
             "local_prefix_user": "bob",
@@ -202,7 +202,7 @@ async def test_post_hail_mail_from_rejects_domain_mismatch(
     monkeypatch.setattr(settings, "hail_mail_from", "alice+acme@wrong-domain.com")
     _, _, plain = org_and_key
     resp = await client.post(
-        "/sender-domains",
+        "/email-domains",
         json={"kind": "hail_mail"},
         headers={"Authorization": f"Bearer {plain}"},
     )
@@ -220,7 +220,7 @@ async def test_post_hail_mail_from_rejects_missing_plus(
     monkeypatch.setattr(settings, "hail_mail_from", "admin@mail.hail.so")
     _, _, plain = org_and_key
     resp = await client.post(
-        "/sender-domains",
+        "/email-domains",
         json={"kind": "hail_mail"},
         headers={"Authorization": f"Bearer {plain}"},
     )
@@ -239,7 +239,7 @@ async def test_post_hail_mail_from_rejects_invalid_prefix(
     monkeypatch.setattr(settings, "hail_mail_from", "Alice!+acme@mail.hail.so")
     _, _, plain = org_and_key
     resp = await client.post(
-        "/sender-domains",
+        "/email-domains",
         json={"kind": "hail_mail"},
         headers={"Authorization": f"Bearer {plain}"},
     )
@@ -256,7 +256,7 @@ async def test_post_hail_mail_503_when_prefix_missing_and_no_default(
     monkeypatch.setattr(settings, "hail_mail_default_org_prefix", "")
     _, _, plain = org_and_key
     resp = await client.post(
-        "/sender-domains",
+        "/email-domains",
         json={"kind": "hail_mail"},
         headers={"Authorization": f"Bearer {plain}"},
     )
@@ -272,7 +272,7 @@ async def test_post_hail_mail_rejects_invalid_prefix(
     monkeypatch.setattr(settings, "hail_mail_base_domain", "mail.hail.so")
     _, _, plain = org_and_key
     resp = await client.post(
-        "/sender-domains",
+        "/email-domains",
         json={
             "kind": "hail_mail",
             "local_prefix_user": "Alice!",  # invalid: uppercase + '!'
@@ -291,7 +291,7 @@ async def test_post_hail_mail_rejects_domain_in_body(
     monkeypatch.setattr(settings, "hail_mail_base_domain", "mail.hail.so")
     _, _, plain = org_and_key
     resp = await client.post(
-        "/sender-domains",
+        "/email-domains",
         json={"kind": "hail_mail", "domain": "acme.com"},
         headers={"Authorization": f"Bearer {plain}"},
     )
@@ -306,7 +306,7 @@ async def test_post_hail_mail_503_when_base_domain_unset(
     monkeypatch.setattr(settings, "hail_mail_base_domain", "")
     _, _, plain = org_and_key
     resp = await client.post(
-        "/sender-domains",
+        "/email-domains",
         json={
             "kind": "hail_mail",
             "local_prefix_user": "alice",
@@ -324,7 +324,7 @@ async def test_post_custom_rejects_prefix_fields(
 ) -> None:
     _, _, plain = org_and_key
     resp = await client.post(
-        "/sender-domains",
+        "/email-domains",
         json={
             "kind": "custom",
             "domain": "acme.com",
@@ -344,7 +344,7 @@ async def test_patch_hail_mail_updates_prefixes_and_domain(
     _, _, plain = org_and_key
     headers = {"Authorization": f"Bearer {plain}"}
     created = await client.post(
-        "/sender-domains",
+        "/email-domains",
         json={
             "kind": "hail_mail",
             "local_prefix_user": "u1",
@@ -355,7 +355,7 @@ async def test_patch_hail_mail_updates_prefixes_and_domain(
     domain_id = created.json()["id"]
 
     resp = await client.patch(
-        f"/sender-domains/{domain_id}",
+        f"/email-domains/{domain_id}",
         json={"local_prefix_user": "alice", "local_prefix_org": "acme"},
         headers=headers,
     )
@@ -375,7 +375,7 @@ async def test_patch_hail_mail_partial_update_keeps_other_prefix(
     _, _, plain = org_and_key
     headers = {"Authorization": f"Bearer {plain}"}
     created = await client.post(
-        "/sender-domains",
+        "/email-domains",
         json={
             "kind": "hail_mail",
             "local_prefix_user": "alice",
@@ -386,7 +386,7 @@ async def test_patch_hail_mail_partial_update_keeps_other_prefix(
     domain_id = created.json()["id"]
 
     resp = await client.patch(
-        f"/sender-domains/{domain_id}",
+        f"/email-domains/{domain_id}",
         json={"local_prefix_user": "bob"},
         headers=headers,
     )
@@ -401,12 +401,12 @@ async def test_patch_on_custom_domain_returns_422(
     _, _, plain = org_and_key
     headers = {"Authorization": f"Bearer {plain}"}
     created = await client.post(
-        "/sender-domains",
+        "/email-domains",
         json={"kind": "custom", "domain": "acme.com"},
         headers=headers,
     )
     resp = await client.patch(
-        f"/sender-domains/{created.json()['id']}",
+        f"/email-domains/{created.json()['id']}",
         json={"local_prefix_user": "alice"},
         headers=headers,
     )
@@ -420,7 +420,7 @@ async def test_patch_unknown_returns_404(
 ) -> None:
     _, _, plain = org_and_key
     resp = await client.patch(
-        "/sender-domains/00000000-0000-0000-0000-000000000000",
+        "/email-domains/00000000-0000-0000-0000-000000000000",
         json={"local_prefix_user": "alice"},
         headers={"Authorization": f"Bearer {plain}"},
     )
@@ -434,13 +434,13 @@ async def test_post_duplicate_custom_domain_returns_409(
     _, _, plain = org_and_key
     headers = {"Authorization": f"Bearer {plain}"}
     r1 = await client.post(
-        "/sender-domains",
+        "/email-domains",
         json={"kind": "custom", "domain": "acme.com"},
         headers=headers,
     )
     assert r1.status_code == 201
     r2 = await client.post(
-        "/sender-domains",
+        "/email-domains",
         json={"kind": "custom", "domain": "acme.com"},
         headers=headers,
     )
@@ -448,12 +448,44 @@ async def test_post_duplicate_custom_domain_returns_409(
     assert "already registered" in r2.text
 
 
+async def test_post_hail_mail_duplicate_across_orgs_returns_409(
+    client: httpx.AsyncClient,
+    org_and_key: tuple,
+    async_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A hail-mail address is globally unique — inbound routing matches on
+    (local_prefix_user, local_prefix_org) with no org scoping, so org B
+    registering org A's address would intercept org A's mail."""
+    monkeypatch.setattr(settings, "hail_mail_base_domain", "mail.hail.so")
+    _, _, plain_a = org_and_key
+    _, _, plain_b = await insert_org_and_key(async_session)
+    body = {
+        "kind": "hail_mail",
+        "local_prefix_user": "alice",
+        "local_prefix_org": "acme",
+    }
+    r1 = await client.post(
+        "/email-domains",
+        json=body,
+        headers={"Authorization": f"Bearer {plain_a}"},
+    )
+    assert r1.status_code == 201, r1.text
+    r2 = await client.post(
+        "/email-domains",
+        json=body,
+        headers={"Authorization": f"Bearer {plain_b}"},
+    )
+    assert r2.status_code == 409, r2.text
+    assert "already registered" in r2.text
+
+
 # --------------------------------------------------------------------------- #
-# GET /sender-domains
+# GET /email-domains
 # --------------------------------------------------------------------------- #
 
 
-async def test_list_sender_domains_is_org_scoped(
+async def test_list_email_domains_is_org_scoped(
     client: httpx.AsyncClient,
     org_and_key: tuple,
     async_session: AsyncSession,
@@ -461,17 +493,17 @@ async def test_list_sender_domains_is_org_scoped(
     _, _, plain = org_and_key
     headers = {"Authorization": f"Bearer {plain}"}
     await client.post(
-        "/sender-domains",
+        "/email-domains",
         json={"kind": "custom", "domain": "acme.com"},
         headers=headers,
     )
     await client.post(
-        "/sender-domains",
+        "/email-domains",
         json={"kind": "custom", "domain": "beta.com"},
         headers=headers,
     )
 
-    resp = await client.get("/sender-domains", headers=headers)
+    resp = await client.get("/email-domains", headers=headers)
     assert resp.status_code == 200
     items = resp.json()["items"]
     assert {r["domain"] for r in items} == {"acme.com", "beta.com"}
@@ -479,14 +511,14 @@ async def test_list_sender_domains_is_org_scoped(
     # Foreign org's keys should see none of these.
     _, _, other_plain = await insert_org_and_key(async_session)
     other = await client.get(
-        "/sender-domains", headers={"Authorization": f"Bearer {other_plain}"}
+        "/email-domains", headers={"Authorization": f"Bearer {other_plain}"}
     )
     assert other.status_code == 200
     assert other.json()["items"] == []
 
 
 # --------------------------------------------------------------------------- #
-# POST /sender-domains/{id}/verify
+# POST /email-domains/{id}/verify
 # --------------------------------------------------------------------------- #
 
 
@@ -498,14 +530,14 @@ async def test_verify_flips_status_from_pending_to_verified(
     _, _, plain = org_and_key
     headers = {"Authorization": f"Bearer {plain}"}
     created = await client.post(
-        "/sender-domains",
+        "/email-domains",
         json={"kind": "custom", "domain": "acme.com"},
         headers=headers,
     )
     assert created.status_code == 201
     domain_id = created.json()["id"]
 
-    resp = await client.post(f"/sender-domains/{domain_id}/verify", headers=headers)
+    resp = await client.post(f"/email-domains/{domain_id}/verify", headers=headers)
     assert resp.status_code == 200
     body = resp.json()
     assert body["verification_status"] == "verified"
@@ -522,7 +554,7 @@ async def test_verify_hail_mail_is_a_noop(
     _, _, plain = org_and_key
     headers = {"Authorization": f"Bearer {plain}"}
     created = await client.post(
-        "/sender-domains",
+        "/email-domains",
         json={
             "kind": "hail_mail",
             "local_prefix_user": "alice",
@@ -531,7 +563,7 @@ async def test_verify_hail_mail_is_a_noop(
         headers=headers,
     )
     domain_id = created.json()["id"]
-    resp = await client.post(f"/sender-domains/{domain_id}/verify", headers=headers)
+    resp = await client.post(f"/email-domains/{domain_id}/verify", headers=headers)
     assert resp.status_code == 200
     # Should not have touched SES.
     email_mock.get_identity.assert_not_called()
@@ -546,26 +578,26 @@ async def test_verify_returns_404_when_identity_vanished(
     _, _, plain = org_and_key
     headers = {"Authorization": f"Bearer {plain}"}
     created = await client.post(
-        "/sender-domains",
+        "/email-domains",
         json={"kind": "custom", "domain": "acme.com"},
         headers=headers,
     )
     domain_id = created.json()["id"]
     email_mock.get_identity.side_effect = LookupError("missing")
-    resp = await client.post(f"/sender-domains/{domain_id}/verify", headers=headers)
+    resp = await client.post(f"/email-domains/{domain_id}/verify", headers=headers)
     assert resp.status_code == 404
 
     # And the row should be marked failed so subsequent sends fail fast.
     sd = (
         await async_session.execute(
-            select(SenderDomain).where(SenderDomain.domain == "acme.com")
+            select(EmailDomain).where(EmailDomain.domain == "acme.com")
         )
     ).scalar_one()
     assert sd.verification_status == "failed"
 
 
 # --------------------------------------------------------------------------- #
-# DELETE /sender-domains/{id}
+# DELETE /email-domains/{id}
 # --------------------------------------------------------------------------- #
 
 
@@ -578,16 +610,16 @@ async def test_delete_custom_calls_provider_and_deletes_row(
     _, _, plain = org_and_key
     headers = {"Authorization": f"Bearer {plain}"}
     created = await client.post(
-        "/sender-domains",
+        "/email-domains",
         json={"kind": "custom", "domain": "acme.com"},
         headers=headers,
     )
     domain_id = created.json()["id"]
 
-    resp = await client.delete(f"/sender-domains/{domain_id}", headers=headers)
+    resp = await client.delete(f"/email-domains/{domain_id}", headers=headers)
     assert resp.status_code == 204
     email_mock.delete_identity.assert_awaited_once_with("acme.com")
-    remaining = (await async_session.execute(select(SenderDomain))).scalars().all()
+    remaining = (await async_session.execute(select(EmailDomain))).scalars().all()
     assert remaining == []
 
 
@@ -601,7 +633,7 @@ async def test_delete_hail_mail_does_not_touch_provider(
     _, _, plain = org_and_key
     headers = {"Authorization": f"Bearer {plain}"}
     created = await client.post(
-        "/sender-domains",
+        "/email-domains",
         json={
             "kind": "hail_mail",
             "local_prefix_user": "alice",
@@ -610,7 +642,7 @@ async def test_delete_hail_mail_does_not_touch_provider(
         headers=headers,
     )
     domain_id = created.json()["id"]
-    resp = await client.delete(f"/sender-domains/{domain_id}", headers=headers)
+    resp = await client.delete(f"/email-domains/{domain_id}", headers=headers)
     assert resp.status_code == 204
     email_mock.delete_identity.assert_not_called()
 
@@ -621,7 +653,7 @@ async def test_delete_unknown_returns_404(
 ) -> None:
     _, _, plain = org_and_key
     resp = await client.delete(
-        "/sender-domains/00000000-0000-0000-0000-000000000000",
+        "/email-domains/00000000-0000-0000-0000-000000000000",
         headers={"Authorization": f"Bearer {plain}"},
     )
     assert resp.status_code == 404
@@ -635,7 +667,7 @@ async def test_delete_with_linked_emails_returns_409_and_skips_provider(
 ) -> None:
     """Sender with sent emails returns 409, leaves DB+SES untouched.
 
-    ``emails.sender_domain_id`` is ``ON DELETE RESTRICT`` — without the
+    ``emails.email_domain_id`` is ``ON DELETE RESTRICT`` — without the
     pre-check the commit would raise IntegrityError into the caller as a
     500, AND the SES identity would already be gone, leaving a row that
     points at nothing. Verify the pre-check fires first.
@@ -644,14 +676,14 @@ async def test_delete_with_linked_emails_returns_409_and_skips_provider(
     headers = {"Authorization": f"Bearer {plain}"}
 
     created = await client.post(
-        "/sender-domains",
+        "/email-domains",
         json={"kind": "custom", "domain": "acme.com"},
         headers=headers,
     )
     domain_id = created.json()["id"]
     await async_session.execute(
-        SenderDomain.__table__.update()
-        .where(SenderDomain.id == uuid.UUID(domain_id))
+        EmailDomain.__table__.update()
+        .where(EmailDomain.id == uuid.UUID(domain_id))
         .values(verification_status="verified")
     )
     await async_session.commit()
@@ -670,7 +702,7 @@ async def test_delete_with_linked_emails_returns_409_and_skips_provider(
 
     email_mock.delete_identity.reset_mock()
 
-    resp = await client.delete(f"/sender-domains/{domain_id}", headers=headers)
+    resp = await client.delete(f"/email-domains/{domain_id}", headers=headers)
     assert resp.status_code == 409, resp.text
     assert "linked emails" in resp.json()["detail"]
     email_mock.delete_identity.assert_not_called()
@@ -678,7 +710,7 @@ async def test_delete_with_linked_emails_returns_409_and_skips_provider(
     # Row is still there.
     still = (
         await async_session.execute(
-            select(SenderDomain).where(SenderDomain.id == uuid.UUID(domain_id))
+            select(EmailDomain).where(EmailDomain.id == uuid.UUID(domain_id))
         )
     ).scalar_one_or_none()
     assert still is not None
@@ -701,7 +733,7 @@ async def test_delete_succeeds_even_if_provider_delete_fails(
     headers = {"Authorization": f"Bearer {plain}"}
 
     created = await client.post(
-        "/sender-domains",
+        "/email-domains",
         json={"kind": "custom", "domain": "acme.com"},
         headers=headers,
     )
@@ -709,11 +741,11 @@ async def test_delete_succeeds_even_if_provider_delete_fails(
 
     email_mock.delete_identity.side_effect = RuntimeError("ses unavailable")
 
-    resp = await client.delete(f"/sender-domains/{domain_id}", headers=headers)
+    resp = await client.delete(f"/email-domains/{domain_id}", headers=headers)
     assert resp.status_code == 204
     email_mock.delete_identity.assert_awaited_once_with("acme.com")
 
-    remaining = (await async_session.execute(select(SenderDomain))).scalars().all()
+    remaining = (await async_session.execute(select(EmailDomain))).scalars().all()
     assert remaining == []
 
 
@@ -722,7 +754,7 @@ async def test_delete_succeeds_even_if_provider_delete_fails(
 # --------------------------------------------------------------------------- #
 
 
-async def test_sender_domain_mutations_write_audit_log(
+async def test_email_domain_mutations_write_audit_log(
     client: httpx.AsyncClient,
     org_and_key: tuple,
     async_session: AsyncSession,
@@ -742,7 +774,7 @@ async def test_sender_domain_mutations_write_audit_log(
 
     # create (hail_mail flavor)
     created = await client.post(
-        "/sender-domains",
+        "/email-domains",
         json={
             "kind": "hail_mail",
             "local_prefix_user": "alice",
@@ -755,25 +787,25 @@ async def test_sender_domain_mutations_write_audit_log(
 
     # patch
     patch = await client.patch(
-        f"/sender-domains/{domain_id}",
+        f"/email-domains/{domain_id}",
         json={"local_prefix_user": "bob"},
         headers=headers,
     )
     assert patch.status_code == 200
 
     # verify (hail_mail is a no-op server-side but still audit-logged)
-    verify = await client.post(f"/sender-domains/{domain_id}/verify", headers=headers)
+    verify = await client.post(f"/email-domains/{domain_id}/verify", headers=headers)
     assert verify.status_code == 200
 
     # delete
-    delete = await client.delete(f"/sender-domains/{domain_id}", headers=headers)
+    delete = await client.delete(f"/email-domains/{domain_id}", headers=headers)
     assert delete.status_code == 204
 
     actions = (
         (
             await async_session.execute(
                 select(AuditLog.action)
-                .where(AuditLog.resource_type == "sender_domain")
+                .where(AuditLog.resource_type == "email_domain")
                 .order_by(AuditLog.occurred_at.asc())
             )
         )
@@ -782,14 +814,14 @@ async def test_sender_domain_mutations_write_audit_log(
     )
     # verify hail_mail short-circuits SES but still writes an audit row
     assert actions == [
-        "sender_domain.create",
-        "sender_domain.patch",
-        "sender_domain.verify",
-        "sender_domain.delete",
+        "email_domain.create",
+        "email_domain.patch",
+        "email_domain.verify",
+        "email_domain.delete",
     ]
 
 
-async def test_sender_domain_custom_create_writes_audit_log(
+async def test_email_domain_custom_create_writes_audit_log(
     client: httpx.AsyncClient,
     org_and_key: tuple,
     async_session: AsyncSession,
@@ -801,7 +833,7 @@ async def test_sender_domain_custom_create_writes_audit_log(
     headers = {"Authorization": f"Bearer {plain}"}
 
     resp = await client.post(
-        "/sender-domains",
+        "/email-domains",
         json={"kind": "custom", "domain": "acme.com"},
         headers=headers,
     )
@@ -809,12 +841,49 @@ async def test_sender_domain_custom_create_writes_audit_log(
 
     row = (
         await async_session.execute(
-            select(AuditLog).where(AuditLog.action == "sender_domain.create")
+            select(AuditLog).where(AuditLog.action == "email_domain.create")
         )
     ).scalar_one()
-    assert row.resource_type == "sender_domain"
+    assert row.resource_type == "email_domain"
     assert row.payload["kind"] == "custom"
     assert row.payload["domain"] == "acme.com"
+
+
+@pytest.mark.asyncio
+async def test_patch_duplicate_prefix_returns_409(
+    client: httpx.AsyncClient,
+    org_and_key: tuple,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings, "hail_mail_base_domain", "mail.hail.so")
+    _, _, plain = org_and_key
+    headers = {"Authorization": f"Bearer {plain}"}
+    r1 = await client.post(
+        "/email-domains",
+        json={
+            "kind": "hail_mail",
+            "local_prefix_user": "a",
+            "local_prefix_org": "acme",
+        },
+        headers=headers,
+    )
+    r2 = await client.post(
+        "/email-domains",
+        json={
+            "kind": "hail_mail",
+            "local_prefix_user": "b",
+            "local_prefix_org": "acme",
+        },
+        headers=headers,
+    )
+    assert r1.status_code == 201 and r2.status_code == 201
+
+    resp = await client.patch(
+        f"/email-domains/{r2.json()['id']}",
+        json={"local_prefix_user": "a"},  # collides with r1's address
+        headers=headers,
+    )
+    assert resp.status_code == 409
 
 
 _ = ApiKey  # re-exposed for type hint in fixtures

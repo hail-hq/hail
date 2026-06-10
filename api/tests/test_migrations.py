@@ -126,9 +126,15 @@ def _assert_head_schema(url: str) -> None:
         assert _column_data_type(conn, "audit_log", "api_key_id") == "uuid"
         assert _constraint_exists(conn, "calls_end_reason_when_terminal")
         assert _table_exists(conn, "emails")
-        assert _table_exists(conn, "sender_domains")
-        # The sender_domains prefix-consistency CHECK landed in 0005.
-        assert _constraint_exists(conn, "sender_domains_prefix_kind_consistency")
+        assert _table_exists(conn, "email_domains")
+        # The prefix-consistency CHECK landed in 0005 on sender_domains
+        # and was renamed alongside the table in 0006.
+        assert _constraint_exists(conn, "email_domains_prefix_kind_consistency")
+        # 0007 added the inbound-email schema additions.
+        assert _table_exists(conn, "email_attachments")
+        assert _constraint_exists(conn, "emails_direction_check")
+        assert _constraint_exists(conn, "emails_outbound_has_domain")
+        assert _constraint_exists(conn, "email_domains_inbound_action")
 
 
 def test_fresh_db_upgrade_head(empty_db: str) -> None:
@@ -171,6 +177,79 @@ def test_audit_log_flavored_0003_db_converges(empty_db: str) -> None:
     # The recovery itself.
     _run_alembic(empty_db, ["upgrade", "head"])
     _assert_head_schema(empty_db)
+
+
+def _index_def(conn: psycopg.Connection, indexname: str) -> str | None:
+    cur = conn.execute(
+        "SELECT indexdef FROM pg_indexes WHERE indexname = %s",
+        (indexname,),
+    )
+    row = cur.fetchone()
+    return row[0] if row else None
+
+
+def test_provider_message_id_unique_is_outbound_only(empty_db: str) -> None:
+    """After 0009 the global unique is gone; only a partial (outbound) one remains."""
+    _run_alembic(empty_db, ["upgrade", "0009"])
+    with psycopg.connect(_to_libpq_url(to_sync_url(empty_db))) as conn:
+        # The old global unique constraint must be gone.
+        assert not _constraint_exists(
+            conn, "emails_provider_message_id_key"
+        ), "global unique on provider_message_id still present after 0009"
+        # A partial unique index scoped to outbound must exist.
+        indexdef = _index_def(conn, "emails_provider_message_id_outbound_uq")
+        assert (
+            indexdef is not None
+        ), "partial unique index emails_provider_message_id_outbound_uq missing"
+        assert "direction" in indexdef and "outbound" in indexdef
+
+
+def test_hail_mail_prefix_pair_is_globally_unique(empty_db: str) -> None:
+    """After 0010 a partial unique index makes hail_mail prefix pairs
+    global — inbound routing matches (local_prefix_user, local_prefix_org)
+    with no org scoping, so two orgs holding the same pair would let one
+    intercept the other's mail (even across base-domain changes)."""
+    _run_alembic(empty_db, ["upgrade", "head"])
+    with psycopg.connect(_to_libpq_url(to_sync_url(empty_db))) as conn:
+        indexdef = _index_def(conn, "email_domains_hail_mail_prefix_uq")
+        assert (
+            indexdef is not None
+        ), "partial unique index email_domains_hail_mail_prefix_uq missing"
+        assert "UNIQUE" in indexdef
+        assert "hail_mail" in indexdef
+        assert "local_prefix_user" in indexdef
+        assert "local_prefix_org" in indexdef
+
+
+def test_forward_queue_poll_index_exists(empty_db: str) -> None:
+    """After 0010 a partial index covers the forward worker's 1s poll
+    (status='queued' AND direction='outbound') so it never seq-scans
+    emails."""
+    _run_alembic(empty_db, ["upgrade", "head"])
+    with psycopg.connect(_to_libpq_url(to_sync_url(empty_db))) as conn:
+        indexdef = _index_def(conn, "emails_forward_queue_idx")
+        assert indexdef is not None, "partial index emails_forward_queue_idx missing"
+        assert "WHERE" in indexdef
+        assert "queued" in indexdef
+        assert "outbound" in indexdef
+        assert "created_at" in indexdef
+
+
+def test_inbound_provider_message_id_dedupe_index_exists(empty_db: str) -> None:
+    """After 0010 a partial unique index dedupes inbound rows on
+    (organization_id, provider_message_id) — the SES receipt id, which is
+    what repeats on redelivery for mail without a Message-ID header. It is
+    org-scoped: the same receipt id may land once per organization."""
+    _run_alembic(empty_db, ["upgrade", "head"])
+    with psycopg.connect(_to_libpq_url(to_sync_url(empty_db))) as conn:
+        indexdef = _index_def(conn, "emails_inbound_provider_message_id_uq")
+        assert (
+            indexdef is not None
+        ), "partial unique index emails_inbound_provider_message_id_uq missing"
+        assert "UNIQUE" in indexdef
+        assert "organization_id" in indexdef
+        assert "provider_message_id" in indexdef
+        assert "inbound" in indexdef
 
 
 def test_audit_log_idempotent_on_already_converted_column(empty_db: str) -> None:

@@ -1,0 +1,8 @@
+From: Alice <alice@example.com>
+To: Bob <bob+acme@mail.hail.so>
+Subject: Hello
+Message-ID: <m1@example.com>
+Date: Sat, 06 Jun 2026 10:11:12 +0000
+Content-Type: text/plain; charset="utf-8"
+
+Hi Bob, hello from Alice.

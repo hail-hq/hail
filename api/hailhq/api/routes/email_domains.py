@@ -1,11 +1,11 @@
 """Routes for managing email-sending domain identities.
 
-POST   /sender-domains             — register a custom domain or mint a hail-mail address.
-GET    /sender-domains             — cursor-paginated list (org-scoped).
-GET    /sender-domains/{id}        — single domain (org-scoped).
-PATCH  /sender-domains/{id}        — edit the user/org prefix on a hail-mail row.
-POST   /sender-domains/{id}/verify — re-poll the email provider's view of the identity.
-DELETE /sender-domains/{id}        — delete from provider + DB (idempotent on missing).
+POST   /email-domains             — register a custom domain or mint a hail-mail address.
+GET    /email-domains             — cursor-paginated list (org-scoped).
+GET    /email-domains/{id}        — single domain (org-scoped).
+PATCH  /email-domains/{id}        — edit the user/org prefix on a hail-mail row.
+POST   /email-domains/{id}/verify — re-poll the email provider's view of the identity.
+DELETE /email-domains/{id}        — delete from provider + DB (idempotent on missing).
 
 Two flavors of row land here:
 
@@ -24,6 +24,7 @@ Two flavors of row land here:
 from __future__ import annotations
 
 import logging
+import secrets as _secrets
 from datetime import datetime, timezone
 from typing import Annotated
 from uuid import UUID
@@ -38,21 +39,24 @@ from hailhq.api.audit import write_audit_log
 from hailhq.api.deps import Principal, get_current_principal
 from hailhq.core.config import settings
 from hailhq.core.db import get_session
-from hailhq.core.models import Email, SenderDomain
+from hailhq.core.http_post import validate_webhook_target
+from hailhq.core.models import Email, EmailDomain
 from hailhq.core.providers.email import EmailProvider, SesEmailProvider
+from hailhq.core.secret_cipher import SecretCipher
 from hailhq.core.schemas import (
     LOCAL_PREFIX,
-    SenderDomainCreate,
-    SenderDomainListResponse,
-    SenderDomainPatch,
-    SenderDomainResponse,
+    EmailDomainCreate,
+    EmailDomainListResponse,
+    EmailDomainPatch,
+    EmailDomainResponse,
+    WebhookSecretResponse,
     decode_cursor,
     encode_cursor,
 )
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/sender-domains", tags=["sender-domains"])
+router = APIRouter(prefix="/email-domains", tags=["email-domains"])
 
 _DEFAULT_LIST_LIMIT = 50
 _MAX_LIST_LIMIT = 200
@@ -185,28 +189,28 @@ def compose_hail_mail_address(user_prefix: str, org_prefix: str) -> str:
 
 
 # --------------------------------------------------------------------------- #
-# POST /sender-domains
+# POST /email-domains
 # --------------------------------------------------------------------------- #
 
 
 @router.post(
     "",
-    response_model=SenderDomainResponse,
+    response_model=EmailDomainResponse,
     status_code=http_status.HTTP_201_CREATED,
 )
-async def create_sender_domain(
-    body: SenderDomainCreate,
+async def create_email_domain(
+    body: EmailDomainCreate,
     response: Response,
     principal: Annotated[Principal, Depends(get_current_principal)],
     db: Annotated[AsyncSession, Depends(get_session)],
     email_provider: Annotated[EmailProvider, Depends(get_email_provider)],
-) -> SenderDomainResponse:
+) -> EmailDomainResponse:
     if body.kind == "hail_mail":
         user_prefix, org_prefix = resolve_hail_mail_prefixes(
             body.local_prefix_user, body.local_prefix_org
         )
         address = compose_hail_mail_address(user_prefix, org_prefix)
-        sd = SenderDomain(
+        sd = EmailDomain(
             organization_id=principal.organization_id,
             kind="hail_mail",
             domain=address,
@@ -229,22 +233,19 @@ async def create_sender_domain(
             await db.rollback()
             raise HTTPException(
                 status_code=http_status.HTTP_409_CONFLICT,
-                detail=(
-                    f"hail-mail address {address!r} is already registered "
-                    "for this organization"
-                ),
+                detail=f"hail-mail address {address!r} is already registered",
             ) from exc
         await db.refresh(sd)
         await write_audit_log(
             organization_id=principal.organization_id,
             api_key_id=principal.api_key_id,
-            action="sender_domain.create",
-            resource_type="sender_domain",
+            action="email_domain.create",
+            resource_type="email_domain",
             resource_id=sd.id,
             payload={"kind": "hail_mail", "domain": sd.domain},
         )
-        response.headers["Location"] = f"/sender-domains/{sd.id}"
-        return SenderDomainResponse.model_validate(sd)
+        response.headers["Location"] = f"/email-domains/{sd.id}"
+        return EmailDomainResponse.model_validate(sd)
 
     # kind == 'custom' — call SES, persist DKIM records, ask the tenant to
     # publish DNS. The row stays pending until POST /verify flips it.
@@ -265,7 +266,7 @@ async def create_sender_domain(
             detail="email provider rejected the domain; check provider logs",
         ) from exc
 
-    sd = SenderDomain(
+    sd = EmailDomain(
         organization_id=principal.organization_id,
         kind="custom",
         domain=domain,
@@ -288,29 +289,29 @@ async def create_sender_domain(
     await write_audit_log(
         organization_id=principal.organization_id,
         api_key_id=principal.api_key_id,
-        action="sender_domain.create",
-        resource_type="sender_domain",
+        action="email_domain.create",
+        resource_type="email_domain",
         resource_id=sd.id,
         payload={"kind": "custom", "domain": sd.domain},
     )
-    response.headers["Location"] = f"/sender-domains/{sd.id}"
-    return SenderDomainResponse.model_validate(sd)
+    response.headers["Location"] = f"/email-domains/{sd.id}"
+    return EmailDomainResponse.model_validate(sd)
 
 
 # --------------------------------------------------------------------------- #
-# GET /sender-domains
+# GET /email-domains
 # --------------------------------------------------------------------------- #
 
 
-@router.get("", response_model=SenderDomainListResponse)
-async def list_sender_domains(
+@router.get("", response_model=EmailDomainListResponse)
+async def list_email_domains(
     principal: Annotated[Principal, Depends(get_current_principal)],
     db: Annotated[AsyncSession, Depends(get_session)],
     cursor: str | None = Query(default=None),
     limit: int = Query(default=_DEFAULT_LIST_LIMIT, ge=1, le=_MAX_LIST_LIMIT),
-) -> SenderDomainListResponse:
-    stmt = select(SenderDomain).where(
-        SenderDomain.organization_id == principal.organization_id
+) -> EmailDomainListResponse:
+    stmt = select(EmailDomain).where(
+        EmailDomain.organization_id == principal.organization_id
     )
     if cursor is not None:
         try:
@@ -321,10 +322,10 @@ async def list_sender_domains(
                 detail=str(exc),
             ) from exc
         stmt = stmt.where(
-            tuple_(SenderDomain.created_at, SenderDomain.id) < tuple_(cur_ts, cur_id)
+            tuple_(EmailDomain.created_at, EmailDomain.id) < tuple_(cur_ts, cur_id)
         )
 
-    stmt = stmt.order_by(SenderDomain.created_at.desc(), SenderDomain.id.desc()).limit(
+    stmt = stmt.order_by(EmailDomain.created_at.desc(), EmailDomain.id.desc()).limit(
         limit + 1
     )
     rows = list((await db.execute(stmt)).scalars().all())
@@ -335,26 +336,26 @@ async def list_sender_domains(
         next_cursor = encode_cursor(last.created_at, last.id)
         rows = rows[:limit]
 
-    return SenderDomainListResponse(
-        items=[SenderDomainResponse.model_validate(r) for r in rows],
+    return EmailDomainListResponse(
+        items=[EmailDomainResponse.model_validate(r) for r in rows],
         next_cursor=next_cursor,
     )
 
 
 # --------------------------------------------------------------------------- #
-# GET /sender-domains/{id}
+# GET /email-domains/{id}
 # --------------------------------------------------------------------------- #
 
 
-@router.get("/{domain_id}", response_model=SenderDomainResponse)
-async def get_sender_domain(
+@router.get("/{domain_id}", response_model=EmailDomainResponse)
+async def get_email_domain(
     domain_id: UUID,
     principal: Annotated[Principal, Depends(get_current_principal)],
     db: Annotated[AsyncSession, Depends(get_session)],
-) -> SenderDomainResponse:
-    stmt = select(SenderDomain).where(
-        SenderDomain.id == domain_id,
-        SenderDomain.organization_id == principal.organization_id,
+) -> EmailDomainResponse:
+    stmt = select(EmailDomain).where(
+        EmailDomain.id == domain_id,
+        EmailDomain.organization_id == principal.organization_id,
     )
     sd = (await db.execute(stmt)).scalar_one_or_none()
     if sd is None:
@@ -362,108 +363,191 @@ async def get_sender_domain(
             status_code=http_status.HTTP_404_NOT_FOUND,
             detail="sender domain not found",
         )
-    return SenderDomainResponse.model_validate(sd)
+    return EmailDomainResponse.model_validate(sd)
 
 
 # --------------------------------------------------------------------------- #
-# PATCH /sender-domains/{id}
+# PATCH /email-domains/{id}
 # --------------------------------------------------------------------------- #
 
 
-@router.patch("/{domain_id}", response_model=SenderDomainResponse)
-async def patch_sender_domain(
+@router.patch("/{domain_id}", response_model=EmailDomainResponse)
+async def patch_email_domain(
     domain_id: UUID,
-    body: SenderDomainPatch,
+    body: EmailDomainPatch,
     principal: Annotated[Principal, Depends(get_current_principal)],
     db: Annotated[AsyncSession, Depends(get_session)],
-) -> SenderDomainResponse:
-    """Edit the user/org prefix on a hail-mail row.
+) -> EmailDomainResponse:
+    """Edit hail-mail prefixes and/or inbound action settings.
 
-    The managed-cloud console writes here when an org admin changes the
-    visible hail-mail address. Self-hosted operators usually skip this
-    endpoint and set the env-var defaults instead, but the route works
-    the same way on both surfaces.
+    Two modes, mutually compatible:
 
-    Only ``kind='hail_mail'`` rows accept edits — there's nothing in a
-    custom-domain row that the tenant should be free to mutate via this
-    surface (DNS, DKIM, verification state are provider-driven).
+    * **Prefix edit** (``local_prefix_user`` / ``local_prefix_org``):
+      hail_mail rows only. The managed-cloud console writes here when
+      an org admin changes the visible hail-mail address.
+    * **Inbound action edit** (``inbound_enabled`` / ``forward_to`` /
+      ``webhook_url`` / ``forward_rate_per_hour``): any row kind.
+      Setting ``webhook_url`` mints a fresh secret and returns it once
+      in ``webhook_secret``.
     """
-    stmt = select(SenderDomain).where(
-        SenderDomain.id == domain_id,
-        SenderDomain.organization_id == principal.organization_id,
+    stmt = select(EmailDomain).where(
+        EmailDomain.id == domain_id,
+        EmailDomain.organization_id == principal.organization_id,
     )
     sd = (await db.execute(stmt)).scalar_one_or_none()
     if sd is None:
         raise HTTPException(
             status_code=http_status.HTTP_404_NOT_FOUND,
-            detail="sender domain not found",
+            detail="email domain not found",
         )
 
-    if sd.kind != "hail_mail":
+    updates: dict = {}
+    new_secret: str | None = None
+
+    # ---- prefix edits (hail_mail only) ----
+    if body.local_prefix_user is not None or body.local_prefix_org is not None:
+        if sd.kind != "hail_mail":
+            raise HTTPException(
+                status_code=http_status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="prefix edits are only allowed on kind='hail_mail' rows",
+            )
+        new_user = body.local_prefix_user or sd.local_prefix_user
+        new_org = body.local_prefix_org or sd.local_prefix_org
+        assert new_user is not None and new_org is not None
+        new_address = compose_hail_mail_address(new_user, new_org)
+        updates["local_prefix_user"] = new_user
+        updates["local_prefix_org"] = new_org
+        updates["domain"] = new_address
+
+    # ---- inbound action edits (any kind) ----
+    if body.inbound_enabled is not None:
+        updates["inbound_enabled"] = body.inbound_enabled
+    if body.forward_to is not None:
+        updates["forward_to"] = body.forward_to or None
+    if body.forward_rate_per_hour is not None:
+        updates["forward_rate_per_hour"] = body.forward_rate_per_hour
+    if body.webhook_url is not None:
+        if body.webhook_url == "":
+            updates["webhook_url"] = None
+            updates["webhook_secret_encrypted"] = None
+        else:
+            try:
+                validate_webhook_target(
+                    body.webhook_url,
+                    allow_private_networks=settings.hail_webhook_allow_private_networks,
+                )
+            except ValueError as exc:
+                raise HTTPException(status_code=422, detail=str(exc))
+            cipher = SecretCipher(settings.hail_webhook_secret_key)
+            new_secret = "whd_" + _secrets.token_urlsafe(24)
+            updates["webhook_url"] = body.webhook_url
+            updates["webhook_secret_encrypted"] = cipher.encrypt(new_secret)
+
+    # ---- post-merge invariant check (mirrors DB CHECK) ----
+    final_enabled = updates.get("inbound_enabled", sd.inbound_enabled)
+    final_forward = updates.get("forward_to", sd.forward_to)
+    final_webhook = updates.get("webhook_url", sd.webhook_url)
+    if final_enabled and not (final_forward or final_webhook):
         raise HTTPException(
             status_code=http_status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="prefix edits are only allowed on kind='hail_mail' rows",
+            detail="inbound_enabled requires forward_to or webhook_url",
         )
 
-    new_user = body.local_prefix_user or sd.local_prefix_user
-    new_org = body.local_prefix_org or sd.local_prefix_org
-    assert new_user is not None and new_org is not None  # CHECK guarantees it
-    new_address = compose_hail_mail_address(new_user, new_org)
+    if not updates:
+        return EmailDomainResponse.model_validate(sd)
 
     try:
         await db.execute(
-            update(SenderDomain)
-            .where(SenderDomain.id == sd.id)
-            .values(
-                local_prefix_user=new_user,
-                local_prefix_org=new_org,
-                domain=new_address,
-            )
+            update(EmailDomain).where(EmailDomain.id == sd.id).values(**updates)
         )
         await db.commit()
     except IntegrityError as exc:
         await db.rollback()
+        if "local_prefix_user" in updates:
+            raise HTTPException(
+                status_code=http_status.HTTP_409_CONFLICT,
+                detail=(
+                    f"hail-mail address {updates.get('domain')!r} is already registered"
+                ),
+            ) from exc
         raise HTTPException(
-            status_code=http_status.HTTP_409_CONFLICT,
-            detail=(
-                f"hail-mail address {new_address!r} is already registered "
-                "for this organization"
-            ),
+            status_code=http_status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="patch violates a domain check constraint",
         ) from exc
 
     await db.refresh(sd)
     await write_audit_log(
         organization_id=principal.organization_id,
         api_key_id=principal.api_key_id,
-        action="sender_domain.patch",
-        resource_type="sender_domain",
+        action="email_domain.patch",
+        resource_type="email_domain",
         resource_id=sd.id,
         payload={"domain": sd.domain},
     )
-    return SenderDomainResponse.model_validate(sd)
+
+    resp = EmailDomainResponse.model_validate(sd)
+    if new_secret is not None:
+        resp = resp.model_copy(update={"webhook_secret": new_secret})
+    return resp
+
+
+@router.post(
+    "/{domain_id}/rotate-webhook-secret",
+    response_model=WebhookSecretResponse,
+)
+async def rotate_webhook_secret(
+    domain_id: UUID,
+    principal: Annotated[Principal, Depends(get_current_principal)],
+    db: Annotated[AsyncSession, Depends(get_session)],
+) -> WebhookSecretResponse:
+    """Rotate the per-domain webhook secret. Returns the new plaintext once."""
+    stmt = select(EmailDomain).where(
+        EmailDomain.id == domain_id,
+        EmailDomain.organization_id == principal.organization_id,
+    )
+    sd = (await db.execute(stmt)).scalar_one_or_none()
+    if sd is None:
+        raise HTTPException(
+            status_code=http_status.HTTP_404_NOT_FOUND,
+            detail="email domain not found",
+        )
+    if not sd.webhook_url:
+        raise HTTPException(
+            status_code=http_status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="domain has no webhook_url configured",
+        )
+    cipher = SecretCipher(settings.hail_webhook_secret_key)
+    secret = "whd_" + _secrets.token_urlsafe(24)
+    await db.execute(
+        update(EmailDomain)
+        .where(EmailDomain.id == sd.id)
+        .values(webhook_secret_encrypted=cipher.encrypt(secret))
+    )
+    await db.commit()
+    return WebhookSecretResponse(webhook_secret=secret)
 
 
 # --------------------------------------------------------------------------- #
-# POST /sender-domains/{id}/verify
+# POST /email-domains/{id}/verify
 # --------------------------------------------------------------------------- #
 
 
-@router.post("/{domain_id}/verify", response_model=SenderDomainResponse)
-async def verify_sender_domain(
+@router.post("/{domain_id}/verify", response_model=EmailDomainResponse)
+async def verify_email_domain(
     domain_id: UUID,
     principal: Annotated[Principal, Depends(get_current_principal)],
     db: Annotated[AsyncSession, Depends(get_session)],
     email_provider: Annotated[EmailProvider, Depends(get_email_provider)],
-) -> SenderDomainResponse:
+) -> EmailDomainResponse:
     """Re-poll the email provider for the current verification status.
 
     On-demand only — there is no background poller in v1. Operators /
     tenants hit this after publishing DNS to flip the row to ``verified``.
     Hail-mail rows are no-ops (they're already verified by construction).
     """
-    stmt = select(SenderDomain).where(
-        SenderDomain.id == domain_id,
-        SenderDomain.organization_id == principal.organization_id,
+    stmt = select(EmailDomain).where(
+        EmailDomain.id == domain_id,
+        EmailDomain.organization_id == principal.organization_id,
     )
     sd = (await db.execute(stmt)).scalar_one_or_none()
     if sd is None:
@@ -478,12 +562,12 @@ async def verify_sender_domain(
         await write_audit_log(
             organization_id=principal.organization_id,
             api_key_id=principal.api_key_id,
-            action="sender_domain.verify",
-            resource_type="sender_domain",
+            action="email_domain.verify",
+            resource_type="email_domain",
             resource_id=sd.id,
             payload={"domain": sd.domain, "status": sd.verification_status},
         )
-        return SenderDomainResponse.model_validate(sd)
+        return EmailDomainResponse.model_validate(sd)
 
     try:
         identity = await email_provider.get_identity(sd.domain)
@@ -491,8 +575,8 @@ async def verify_sender_domain(
         # Identity vanished provider-side (operator deleted it out-of-band).
         # Mark the row failed so the next POST /emails fails fast.
         await db.execute(
-            update(SenderDomain)
-            .where(SenderDomain.id == sd.id)
+            update(EmailDomain)
+            .where(EmailDomain.id == sd.id)
             .values(verification_status="failed")
         )
         await db.commit()
@@ -518,8 +602,8 @@ async def verify_sender_domain(
         else sd.verified_at
     )
     await db.execute(
-        update(SenderDomain)
-        .where(SenderDomain.id == sd.id)
+        update(EmailDomain)
+        .where(EmailDomain.id == sd.id)
         .values(
             verification_status=identity.verification_status,
             dkim_records=[r.model_dump() for r in identity.dkim_records],
@@ -532,29 +616,29 @@ async def verify_sender_domain(
     await write_audit_log(
         organization_id=principal.organization_id,
         api_key_id=principal.api_key_id,
-        action="sender_domain.verify",
-        resource_type="sender_domain",
+        action="email_domain.verify",
+        resource_type="email_domain",
         resource_id=sd.id,
         payload={"domain": sd.domain, "status": sd.verification_status},
     )
-    return SenderDomainResponse.model_validate(sd)
+    return EmailDomainResponse.model_validate(sd)
 
 
 # --------------------------------------------------------------------------- #
-# DELETE /sender-domains/{id}
+# DELETE /email-domains/{id}
 # --------------------------------------------------------------------------- #
 
 
 @router.delete("/{domain_id}", status_code=http_status.HTTP_204_NO_CONTENT)
-async def delete_sender_domain(
+async def delete_email_domain(
     domain_id: UUID,
     principal: Annotated[Principal, Depends(get_current_principal)],
     db: Annotated[AsyncSession, Depends(get_session)],
     email_provider: Annotated[EmailProvider, Depends(get_email_provider)],
 ) -> Response:
-    stmt = select(SenderDomain).where(
-        SenderDomain.id == domain_id,
-        SenderDomain.organization_id == principal.organization_id,
+    stmt = select(EmailDomain).where(
+        EmailDomain.id == domain_id,
+        EmailDomain.organization_id == principal.organization_id,
     )
     sd = (await db.execute(stmt)).scalar_one_or_none()
     if sd is None:
@@ -566,7 +650,7 @@ async def delete_sender_domain(
     # Pre-check linked emails (ON DELETE RESTRICT) before touching SES, so a
     # caller with linked rows gets a clean 409 without an SES round-trip. The
     # IntegrityError catch below covers the race between this check and commit.
-    linked_stmt = select(Email.id).where(Email.sender_domain_id == sd.id).limit(1)
+    linked_stmt = select(Email.id).where(Email.email_domain_id == sd.id).limit(1)
     if (await db.execute(linked_stmt)).scalar_one_or_none() is not None:
         raise HTTPException(
             status_code=http_status.HTTP_409_CONFLICT,
@@ -612,8 +696,8 @@ async def delete_sender_domain(
     await write_audit_log(
         organization_id=principal.organization_id,
         api_key_id=principal.api_key_id,
-        action="sender_domain.delete",
-        resource_type="sender_domain",
+        action="email_domain.delete",
+        resource_type="email_domain",
         resource_id=deleted_id,
         payload={"kind": deleted_kind, "domain": deleted_domain},
     )

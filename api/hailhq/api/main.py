@@ -5,16 +5,27 @@ import logging
 from contextlib import asynccontextmanager
 from typing import AsyncIterator
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
+
+from functools import partial
 
 from hailhq.core.config import settings
 from hailhq.core.db import dispose_engine, session_scope
+from hailhq.core.http_post import httpx_post
+from hailhq.core.outbound_worker import OutboundForwardWorker
 from hailhq.core.pool import sweep_pool_reservations
+from hailhq.core.providers.email.ses import SesEmailProvider
 from hailhq.core.reconcile import sweep_stale_calls
+from hailhq.core.s3_inbound import S3InboundClient
+from hailhq.core.secret_cipher import SecretCipher, SecretKeyMissing
+from hailhq.core.webhook_worker import WebhookWorker
 from hailhq.api.routes import calls as calls_routes
 from hailhq.api.routes import emails as emails_routes
 from hailhq.api.routes import events as events_routes
-from hailhq.api.routes import sender_domains as sender_domains_routes
+from hailhq.api.routes import email_domains as email_domains_routes
+from hailhq.api.routes import webhooks as webhooks_routes
+from hailhq.api.routes.internal import ses_events as internal_ses_events
 
 logger = logging.getLogger(__name__)
 
@@ -65,12 +76,62 @@ async def _backstop_sweeper_loop() -> None:
         await asyncio.sleep(SWEEP_INTERVAL_SECONDS)
 
 
+async def _stop_worker(worker, task: asyncio.Task) -> None:
+    """Graceful-stop a polling worker task, hard-cancelling after 5s."""
+    await worker.stop()
+    try:
+        await asyncio.wait_for(task, timeout=5)
+    except (asyncio.TimeoutError, asyncio.CancelledError, Exception):
+        task.cancel()
+    await asyncio.gather(task, return_exceptions=True)
+
+
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
-    """Start the backstop sweepers on boot; release DB engine + LiveKit on shutdown."""
+    """Start backstop sweepers + webhook worker on boot; tear them down on shutdown."""
     sweeper_task = asyncio.create_task(
         _backstop_sweeper_loop(), name="backstop-sweeper"
     )
+
+    webhook_worker: WebhookWorker | None = None
+    webhook_task: asyncio.Task | None = None
+    try:
+        cipher = SecretCipher(settings.hail_webhook_secret_key)
+    except SecretKeyMissing:
+        logger.warning(
+            "HAIL_WEBHOOK_SECRET_KEY is unset or invalid; webhook delivery "
+            "worker disabled and webhook routes will return 503. Generate a "
+            'key with: python -c "from hailhq.core.secret_cipher import '
+            'generate_key; print(generate_key())"'
+        )
+    else:
+        webhook_worker = WebhookWorker(
+            session_factory=session_scope,
+            http_post=partial(
+                httpx_post,
+                allow_private_networks=settings.hail_webhook_allow_private_networks,
+            ),
+            decrypt=cipher.decrypt,
+        )
+        webhook_task = asyncio.create_task(
+            webhook_worker.run_forever(), name="webhook-worker"
+        )
+
+    # Forward sender: drains the status='queued' + metadata.forwarded_from
+    # rows that inbound ingest enqueues. Only useful (and only configured)
+    # when inbound is on — direct POST /emails sends are inline in the route.
+    forward_worker: OutboundForwardWorker | None = None
+    forward_task: asyncio.Task | None = None
+    if settings.hail_inbound_enabled and settings.hail_inbound_bucket:
+        forward_worker = OutboundForwardWorker(
+            session_factory=session_scope,
+            provider_factory=SesEmailProvider,
+            s3_factory=lambda: S3InboundClient(bucket=settings.hail_inbound_bucket),
+        )
+        forward_task = asyncio.create_task(
+            forward_worker.run_forever(), name="outbound-forward-worker"
+        )
+
     try:
         yield
     finally:
@@ -79,6 +140,10 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
             await sweeper_task
         except (asyncio.CancelledError, Exception):
             pass
+        if webhook_worker is not None and webhook_task is not None:
+            await _stop_worker(webhook_worker, webhook_task)
+        if forward_worker is not None and forward_task is not None:
+            await _stop_worker(forward_worker, forward_task)
         await calls_routes.close_livekit_singleton()
         await dispose_engine()
 
@@ -93,10 +158,25 @@ app = FastAPI(
     ),
     lifespan=lifespan,
 )
+
+
+@app.exception_handler(SecretKeyMissing)
+async def _secret_key_missing(_request: Request, exc: SecretKeyMissing) -> JSONResponse:
+    """Webhook routes need HAIL_WEBHOOK_SECRET_KEY; without it they 503, not 500."""
+    return JSONResponse(
+        status_code=503,
+        content={
+            "detail": "webhooks unavailable: server is missing HAIL_WEBHOOK_SECRET_KEY"
+        },
+    )
+
+
 app.include_router(calls_routes.router)
 app.include_router(emails_routes.router)
 app.include_router(events_routes.router)
-app.include_router(sender_domains_routes.router)
+app.include_router(email_domains_routes.router)
+app.include_router(webhooks_routes.router)
+app.include_router(internal_ses_events.router)
 
 
 @app.get("/healthz")

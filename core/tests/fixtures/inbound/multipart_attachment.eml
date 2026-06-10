@@ -1,0 +1,20 @@
+From: Alice <alice@example.com>
+To: Bob <bob+acme@mail.hail.so>
+Subject: With attachment
+Message-ID: <m2@example.com>
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="BOUNDARY"
+
+--BOUNDARY
+Content-Type: text/plain; charset="utf-8"
+
+See attached.
+
+--BOUNDARY
+Content-Type: application/pdf; name="report.pdf"
+Content-Disposition: attachment; filename="report.pdf"
+Content-Transfer-Encoding: base64
+
+JVBERi0xLjQKJeLjz9MKCg==
+
+--BOUNDARY--

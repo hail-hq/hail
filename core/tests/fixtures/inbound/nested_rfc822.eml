@@ -1,0 +1,23 @@
+From: outer@example.com
+To: alpha@mail.hail.so
+Subject: Fwd: please see attached
+Message-ID: <outer@example.com>
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="BOUND"
+
+--BOUND
+Content-Type: text/plain; charset="utf-8"
+
+Parent body — this must be body_text.
+--BOUND
+Content-Type: message/rfc822
+Content-Disposition: attachment; filename="inner.eml"
+
+From: inner@example.com
+To: outer@example.com
+Subject: the inner message
+Message-ID: <inner@example.com>
+Content-Type: text/plain
+
+Inner body — must NOT leak into the parent's body_text.
+--BOUND--
