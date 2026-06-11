@@ -354,6 +354,214 @@ gh release create v0.2.0 --repo hail-hq/hail --notes-file CHANGELOG.md
 | `pytest` from repo root fails with `ImportPathMismatchError`                               | Run each suite from its own directory. CI does this; replicate locally.                                                                                                        |
 | First `pip install hail-sdk` from a venv with `hailhq.*` already installed shadows imports | The SDK is standalone by design. If you mix it with internal packages in the same venv, the `hail` package wins for `import hail` (intended); don't co-install for production. |
 
+## Inbound email rollout
+
+Five stages. Stage 1 needs a brief maintenance window (the table rename
+is not online-safe); stages 2 onward are online.
+
+### Stage 1 — schema rename + new code (coordinated cutover, ~30s downtime)
+
+Migration `0006` renames `sender_domains` → `email_domains`. The new
+app code only references the new name, so the rename and the deploy
+have to land together. There's no incremental path that doesn't add
+view-shim complexity for marginal gain.
+
+```bash
+# Take the API offline.
+docker compose stop api
+
+# Apply 0006 only.
+DATABASE_URL=$DATABASE_URL uv run --directory api alembic upgrade 0006
+
+# Deploy the new image and start.
+docker compose up -d api
+
+# Smoke: should 200, list returns same rows under the new name.
+hail email domain list
+```
+
+Rollback: `alembic downgrade 0005` reverses the rename. The new code
+breaks against the old name, so this only works if you also roll back
+the image.
+
+### Stage 2 — additive inbound schema (online, anytime after stage 1)
+
+Migration `0007` is pure additive: nullable columns on `emails`, new
+`email_attachments` table, action columns on `email_domains`. Old and
+new code both run against it cleanly.
+
+```bash
+DATABASE_URL=$DATABASE_URL uv run --directory api alembic upgrade 0007
+```
+
+**Footgun on large tables.** `emails_inbound_message_id_uq` is a
+partial unique index whose `WHERE` is false for every existing row,
+but Postgres still scans the whole table to build it. If `emails` is
+north of a few million rows, edit the migration to `CREATE INDEX
+CONCURRENTLY` via `op.execute` (alembic's `create_index` runs in a
+transaction, which blocks the concurrent flag).
+
+### Stage 3 — webhook tables (online, anytime after stage 2)
+
+Migration `0008` adds `webhook_subscriptions` + `webhook_deliveries`.
+Pure new tables, no locks on existing tables.
+
+```bash
+DATABASE_URL=$DATABASE_URL uv run --directory api alembic upgrade 0008
+```
+
+At this point the API is ready to receive inbound mail and fire
+webhooks — but nothing's wired up yet on the AWS side, and the inbound
+flag is off, so the system is still effectively outbound-only.
+
+### Stage 4 — provision AWS infrastructure
+
+The Terraform module under `infra/terraform/` provisions S3, the SES
+Receipt Rule + Rule Set, the Lambda, and IAM.
+
+```bash
+cd infra/terraform
+cp hail.tfvars.example hail.tfvars       # gitignored
+
+# Generate a strong shared secret. The same value goes into
+# HAIL_INBOUND_HMAC_SECRET on the API.
+openssl rand -hex 32 | pbcopy            # paste into hail.tfvars
+
+terraform init
+terraform plan -out=plan.out
+terraform apply plan.out
+```
+
+Outputs to capture:
+
+- `inbound_mx_record` — publish at DNS for `HAIL_MAIL_BASE_DOMAIN`.
+- `inbound_bucket` — goes into `HAIL_INBOUND_BUCKET` on the API.
+- `activate_command` — the `aws sesv2 set-active-receipt-rule-set ...`
+  to run after apply.
+
+**Manual step: activate the receipt rule set.** Terraform creates the
+rule set but does not activate it (SES allows one active rule set per
+region per account, and activation is destructive against any
+existing one):
+
+```bash
+# Greenfield AWS account:
+aws sesv2 set-active-receipt-rule-set --rule-set-name hail-inbound-prod-rules
+
+# Account with existing receipt rules: import the existing rule set
+# into Terraform state, merge Hail's rule into it via the AWS console,
+# or skip the module's aws_ses_receipt_rule resource entirely.
+```
+
+**Manual step: publish the MX record.** Whatever `inbound_mx_record`
+output prints, e.g.:
+
+```
+mail.hail.so  MX  10  inbound-smtp.us-east-1.amazonaws.com
+```
+
+DNS propagation is typically minutes; SES won't deliver until the
+record is live.
+
+### Stage 5 — flip the inbound flag
+
+Add to the API service `.env`:
+
+```bash
+HAIL_INBOUND_ENABLED=true
+HAIL_INBOUND_BUCKET=<terraform output>
+HAIL_INBOUND_HMAC_SECRET=<same value Terraform got>
+HAIL_WEBHOOK_SECRET_KEY=<generate with `python -c "from hailhq.core.secret_cipher import generate_key; print(generate_key())"`>
+```
+
+Restart the API. Until this step, `POST /internal/ses-events` returns
+503 even if the Lambda is wired — so steps 1–4 can land days ahead of
+step 5 and you keep a free rollback window (no migration revert
+required to disable inbound).
+
+### Smoke test sequence
+
+After stage 5, in order:
+
+1. **Routing exists.** Pick an org you control. From the console or
+   the API, verify the hail-mail row exists and `inbound_enabled=true`:
+
+   ```bash
+   hail email domain list
+   ```
+
+2. **MX is live.** From any host with `dig`:
+
+   ```bash
+   dig MX mail.hail.so
+   # Should answer with inbound-smtp.<region>.amazonaws.com
+   ```
+
+3. **Round-trip a test mail.** Send to the org's hail-mail address
+   from any external account. Within 30s:
+
+   ```bash
+   hail email list --direction inbound
+   # Should show the new row with status=received.
+   ```
+
+4. **Raw + attachment access.** If the test mail had attachments,
+   the listing should include their metadata; fetching:
+
+   ```bash
+   hail email get <id> | jq .raw_url
+   curl -L -H "Authorization: Bearer $HAIL_API_KEY" "$RAW_URL" > out.eml
+   ```
+
+   should download the raw MIME bytes.
+
+5. **Forwarding** (only if `forward_to` is configured on the domain):
+   the forward target should receive a copy from
+   `forwarder+<org>@mail.hail.so` with the original sender in
+   `Reply-To:`. Check `hail email list --direction outbound` — a
+   row with `metadata.forwarded_from = <inbound id>` should land
+   in `status=sent`.
+
+6. **Webhook delivery** (only if a webhook is configured): the
+   target should receive a signed POST. Verify the signature header
+   parses, the body shape matches the documented event, and the
+   delivery row reaches `status=succeeded`:
+
+   ```bash
+   hail webhooks deliveries <subscription_id>
+   ```
+
+7. **Bounce/complaint plumbing.** Send a test bounce by addressing a
+   mail to `bounce@simulator.amazonses.com` from the verified sender;
+   SES generates a bounce notification. The matching outbound row
+   should flip to `status=bounced` within a few seconds.
+
+8. **Rate cap.** Set `email_domains.forward_rate_per_hour=1`, then
+   send two inbounds with forwarding configured. The second's
+   `suppressed_reasons` should include `forward_rate_limit`.
+
+### What can go wrong (failure modes I've seen first-hand or modeled)
+
+- **DNS not propagated.** SES silently drops mail to a domain whose
+  MX is wrong. `dig MX` is the first diagnostic.
+- **Receipt rule set not activated.** SES accepts mail but doesn't
+  route it; no S3 object appears. Re-check `aws sesv2
+describe-active-receipt-rule-set`.
+- **SES sandbox.** New SES accounts only accept mail from verified
+  addresses. The mail's `From:` must be on a verified SES identity
+  during sandbox.
+- **Private webhook target rejected.** `httpx_post` blocks RFC-1918
+  addresses by default. Self-hosters with internal webhook targets
+  set `HAIL_WEBHOOK_ALLOW_PRIVATE_NETWORKS=true`.
+- **Lambda → API connection refused.** Check the Lambda's
+  CloudWatch logs (`/aws/lambda/hail-inbound-prod-ingest`); the
+  POST URL must be reachable from AWS over the public internet.
+- **Forward loops.** Forwarding to a target on
+  `HAIL_MAIL_BASE_DOMAIN` is rejected; forwarding to a target whose
+  auto-responder replies to the forwarder will get caught by the
+  3-hop counter. If it isn't, raise `HAIL_FORWARD_MAX_HOPS` or
+  blacklist the target by clearing `forward_to`.
+
 ## Carry-forwards / open work
 
 (See `CHANGELOG.md` "Deferred to v1.x" for the canonical list.)
