@@ -180,6 +180,24 @@ func (e EmailResponseStatus) Valid() bool {
 	}
 }
 
+// Defines values for EmailSummaryDirection.
+const (
+	EmailSummaryDirectionInbound  EmailSummaryDirection = "inbound"
+	EmailSummaryDirectionOutbound EmailSummaryDirection = "outbound"
+)
+
+// Valid indicates whether the value is a known member of the EmailSummaryDirection enum.
+func (e EmailSummaryDirection) Valid() bool {
+	switch e {
+	case EmailSummaryDirectionInbound:
+		return true
+	case EmailSummaryDirectionOutbound:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for EmailSummaryStatus.
 const (
 	EmailSummaryStatusBounced    EmailSummaryStatus = "bounced"
@@ -428,16 +446,16 @@ func (e ListEmailsEmailsGetParamsStatus) Valid() bool {
 
 // Defines values for ListEmailsEmailsGetParamsDirection.
 const (
-	Inbound  ListEmailsEmailsGetParamsDirection = "inbound"
-	Outbound ListEmailsEmailsGetParamsDirection = "outbound"
+	ListEmailsEmailsGetParamsDirectionInbound  ListEmailsEmailsGetParamsDirection = "inbound"
+	ListEmailsEmailsGetParamsDirectionOutbound ListEmailsEmailsGetParamsDirection = "outbound"
 )
 
 // Valid indicates whether the value is a known member of the ListEmailsEmailsGetParamsDirection enum.
 func (e ListEmailsEmailsGetParamsDirection) Valid() bool {
 	switch e {
-	case Inbound:
+	case ListEmailsEmailsGetParamsDirectionInbound:
 		return true
-	case Outbound:
+	case ListEmailsEmailsGetParamsDirectionOutbound:
 		return true
 	default:
 		return false
@@ -641,7 +659,7 @@ type EmailResponse struct {
 	Direction          *EmailResponseDirection    `json:"direction,omitempty"`
 	DkimVerdict        *string                    `json:"dkim_verdict,omitempty"`
 	DmarcVerdict       *string                    `json:"dmarc_verdict,omitempty"`
-	EmailDomainId      openapi_types.UUID         `json:"email_domain_id"`
+	EmailDomainId      *openapi_types.UUID        `json:"email_domain_id"`
 	EndReason          *string                    `json:"end_reason"`
 	FailedAt           *time.Time                 `json:"failed_at"`
 	FromAddress        string                     `json:"from_address"`
@@ -680,7 +698,8 @@ type EmailSummary struct {
 	BccAddresses      *[]string               `json:"bcc_addresses"`
 	CcAddresses       *[]string               `json:"cc_addresses"`
 	ConversationId    *openapi_types.UUID     `json:"conversation_id"`
-	EmailDomainId     openapi_types.UUID      `json:"email_domain_id"`
+	Direction         *EmailSummaryDirection  `json:"direction,omitempty"`
+	EmailDomainId     *openapi_types.UUID     `json:"email_domain_id"`
 	EndReason         *string                 `json:"end_reason"`
 	FailedAt          *time.Time              `json:"failed_at"`
 	FromAddress       string                  `json:"from_address"`
@@ -695,6 +714,9 @@ type EmailSummary struct {
 	Subject           string                  `json:"subject"`
 	ToAddresses       []string                `json:"to_addresses"`
 }
+
+// EmailSummaryDirection defines model for EmailSummary.Direction.
+type EmailSummaryDirection string
 
 // EmailSummaryStatus defines model for EmailSummary.Status.
 type EmailSummaryStatus string

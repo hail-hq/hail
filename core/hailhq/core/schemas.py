@@ -484,7 +484,8 @@ class EmailSummary(BaseModel):
     id: UUID
     organization_id: UUID
     conversation_id: UUID | None
-    email_domain_id: UUID
+    email_domain_id: UUID | None
+    direction: Literal["outbound", "inbound"] = "outbound"
     from_address: str
     to_addresses: list[str]
     cc_addresses: list[str] | None
@@ -529,7 +530,6 @@ class EmailResponse(EmailSummary):
     # than the list summary because most inbound consumers will fetch the
     # row anyway to read the body. Defaults match the outbound shape so
     # existing serializations keep working.
-    direction: Literal["outbound", "inbound"] = "outbound"
     message_id: str | None = None
     in_reply_to: str | None = None
     references_ids: list[str] | None = None

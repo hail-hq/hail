@@ -247,7 +247,8 @@ class EmailSummary(BaseModel):
     id: UUID
     organization_id: UUID
     conversation_id: UUID | None = None
-    email_domain_id: UUID
+    email_domain_id: UUID | None = None
+    direction: Literal["outbound", "inbound"] = "outbound"
     from_address: str
     to_addresses: list[str]
     cc_addresses: list[str] | None = None
@@ -287,7 +288,6 @@ class EmailResponse(EmailSummary):
     # Inbound-only metadata. Outbound rows leave these all null/empty.
     # Defaults match the outbound shape so existing serializations keep
     # working. Mirrors ``core/hailhq/core/schemas.py:EmailResponse``.
-    direction: Literal["outbound", "inbound"] = "outbound"
     message_id: str | None = None
     in_reply_to: str | None = None
     references_ids: list[str] | None = None

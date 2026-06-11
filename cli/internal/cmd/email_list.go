@@ -100,7 +100,7 @@ func printEmailList(opts *Options, body *client.EmailListResponse) error {
 	}
 
 	tw := tabwriter.NewWriter(opts.Stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(tw, "ID\tFROM\tTO\tSTATUS\tSUBJECT\tREQUESTED")
+	fmt.Fprintln(tw, "ID\tDIRECTION\tFROM\tTO\tSTATUS\tSUBJECT\tREQUESTED")
 	for _, e := range body.Items {
 		to := ""
 		if len(e.ToAddresses) > 0 {
@@ -113,9 +113,14 @@ func printEmailList(opts *Options, body *client.EmailListResponse) error {
 		if len(subj) > 40 {
 			subj = subj[:37] + "..."
 		}
+		direction := "outbound"
+		if e.Direction != nil {
+			direction = string(*e.Direction)
+		}
 		fmt.Fprintf(
-			tw, "%s\t%s\t%s\t%s\t%s\t%s\n",
+			tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
 			shortCallID(e.Id),
+			direction,
 			e.FromAddress,
 			to,
 			string(e.Status),

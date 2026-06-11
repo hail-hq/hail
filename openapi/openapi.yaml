@@ -2,9 +2,8 @@ openapi: 3.1.0
 info:
   title: Hail
   description:
-    "Universal communication platform for AI agents.\n\nThis file is the\
-    \ source of truth for the Go CLI. Regenerate it after\nchanging API routes \u2014\
-    \ see docs/contributing.md.\n"
+    "Universal communication platform for AI agents.\n\nThis file is the source\
+    \ of truth for the Go CLI. Regenerate it after\nchanging API routes \u2014 see docs/contributing.md.\n"
   version: 0.1.0
 paths:
   /calls:
@@ -306,9 +305,7 @@ paths:
       tags:
         - emails
       summary: Get Email Raw
-      description:
-        "302 \u2192 presigned S3 URL for the raw inbound MIME (404 for\
-        \ outbound)."
+      description: "302 \u2192 presigned S3 URL for the raw inbound MIME (404 for outbound)."
       operationId: get_email_raw_emails__email_id__raw_get
       parameters:
         - name: email_id
@@ -559,13 +556,12 @@ paths:
         - email-domains
       summary: Patch Email Domain
       description:
-        "Edit hail-mail prefixes and/or inbound action settings.\n\nTwo\
-        \ modes, mutually compatible:\n\n* **Prefix edit** (``local_prefix_user``\
-        \ / ``local_prefix_org``):\n  hail_mail rows only. The managed-cloud console\
-        \ writes here when\n  an org admin changes the visible hail-mail address.\n\
-        * **Inbound action edit** (``inbound_enabled`` / ``forward_to`` /\n  ``webhook_url``\
-        \ / ``forward_rate_per_hour``): any row kind.\n  Setting ``webhook_url`` mints\
-        \ a fresh secret and returns it once\n  in ``webhook_secret``."
+        "Edit hail-mail prefixes and/or inbound action settings.\n\nTwo modes,\
+        \ mutually compatible:\n\n* **Prefix edit** (``local_prefix_user`` / ``local_prefix_org``):\n\
+        \  hail_mail rows only. The managed-cloud console writes here when\n  an org admin\
+        \ changes the visible hail-mail address.\n* **Inbound action edit** (``inbound_enabled``\
+        \ / ``forward_to`` /\n  ``webhook_url`` / ``forward_rate_per_hour``): any row kind.\n\
+        \  Setting ``webhook_url`` mints a fresh secret and returns it once\n  in ``webhook_secret``."
       operationId: patch_email_domain_email_domains__domain_id__patch
       parameters:
         - name: domain_id
@@ -637,9 +633,7 @@ paths:
       tags:
         - email-domains
       summary: Rotate Webhook Secret
-      description:
-        Rotate the per-domain webhook secret. Returns the new plaintext
-        once.
+      description: Rotate the per-domain webhook secret. Returns the new plaintext once.
       operationId: rotate_webhook_secret_email_domains__domain_id__rotate_webhook_secret_post
       parameters:
         - name: domain_id
@@ -676,10 +670,10 @@ paths:
         - email-domains
       summary: Verify Email Domain
       description:
-        "Re-poll the email provider for the current verification status.\n\
-        \nOn-demand only \u2014 there is no background poller in v1. Operators /\n\
-        tenants hit this after publishing DNS to flip the row to ``verified``.\nHail-mail\
-        \ rows are no-ops (they're already verified by construction)."
+        "Re-poll the email provider for the current verification status.\n\nOn-demand\
+        \ only \u2014 there is no background poller in v1. Operators /\ntenants hit this after\
+        \ publishing DNS to flip the row to ``verified``.\nHail-mail rows are no-ops (they're\
+        \ already verified by construction)."
       operationId: verify_email_domain_email_domains__domain_id__verify_post
       parameters:
         - name: domain_id
@@ -1283,9 +1277,9 @@ components:
         - url
       title: EmailAttachmentResponse
       description:
-        "One inbound MIME attachment as exposed to API consumers.\n\n``url``\
-        \ is the stable Hail API endpoint that 302-redirects to a\npresigned S3 URL\
-        \ on access \u2014 see GET /emails/{id}/attachments/{aid}."
+        "One inbound MIME attachment as exposed to API consumers.\n\n``url`` is\
+        \ the stable Hail API endpoint that 302-redirects to a\npresigned S3 URL on access\
+        \ \u2014 see GET /emails/{id}/attachments/{aid}."
     EmailCreate:
       properties:
         from:
@@ -1445,22 +1439,21 @@ components:
       type: object
       title: EmailDomainPatch
       description:
-        "Body for PATCH /email-domains/{id}.\n\nTwo clusters of mutable\
-        \ fields:\n\n* Hail-mail addressing \u2014 the user/org prefix pair (only\
-        \ valid on\n  ``kind='hail_mail'`` rows; the handler returns 422 if a tenant\
-        \ tries\n  to PATCH these on a custom row).\n* Inbound action \u2014 ``inbound_enabled``\
-        \ + at least one of ``forward_to``\n  / ``webhook_url`` + the optional ``forward_rate_per_hour``\
-        \ cap. These\n  apply to either kind, but this milestone routes inbound only\
-        \ to\n  ``hail_mail`` rows; custom-domain inbound (MX delegation) is the\n\
-        \  next milestone.\n\nEvery field is independently optional so ``PATCH`` semantics\
-        \ work the\nway callers expect: send only what you want to change. The route\n\
-        enforces the cross-field rules (the CHECK constraint on the table\nrequires\
-        \ an action when ``inbound_enabled`` is true) \u2014 we don't\nre-implement\
-        \ it here because the patch may merge with existing row\nstate to satisfy\
-        \ the invariant.\n\nNOTE: the plaintext webhook secret is NOT a PATCH field.\
-        \ It's set at\ncreate time and rotated via a dedicated endpoint that returns\
-        \ the new\nplaintext exactly once. ``webhook_secret_encrypted`` is server-managed\
-        \ and\nnever accepted on the wire."
+        "Body for PATCH /email-domains/{id}.\n\nTwo clusters of mutable fields:\n\
+        \n* Hail-mail addressing \u2014 the user/org prefix pair (only valid on\n  ``kind='hail_mail'``\
+        \ rows; the handler returns 422 if a tenant tries\n  to PATCH these on a custom row).\n\
+        * Inbound action \u2014 ``inbound_enabled`` + at least one of ``forward_to``\n  /\
+        \ ``webhook_url`` + the optional ``forward_rate_per_hour`` cap. These\n  apply to\
+        \ either kind, but this milestone routes inbound only to\n  ``hail_mail`` rows; custom-domain\
+        \ inbound (MX delegation) is the\n  next milestone.\n\nEvery field is independently\
+        \ optional so ``PATCH`` semantics work the\nway callers expect: send only what you\
+        \ want to change. The route\nenforces the cross-field rules (the CHECK constraint\
+        \ on the table\nrequires an action when ``inbound_enabled`` is true) \u2014 we don't\n\
+        re-implement it here because the patch may merge with existing row\nstate to satisfy\
+        \ the invariant.\n\nNOTE: the plaintext webhook secret is NOT a PATCH field. It's\
+        \ set at\ncreate time and rotated via a dedicated endpoint that returns the new\n\
+        plaintext exactly once. ``webhook_secret_encrypted`` is server-managed and\nnever\
+        \ accepted on the wire."
     EmailDomainResponse:
       properties:
         id:
@@ -1568,11 +1561,10 @@ components:
       title: EmailDomainResponse
       description:
         "Read view for an email domain.\n\nThe inbound-action fields (``inbound_enabled``,\
-        \ ``forward_to``,\n``webhook_url``, ``forward_rate_per_hour``) surface what\
-        \ the row has\nconfigured for incoming mail. ``webhook_secret_encrypted``\
-        \ is intentionally\nNOT exposed \u2014 the plaintext secret is returned exactly\
-        \ once at create\nor rotate via a dedicated endpoint, and the ciphertext that\n\
-        sits on the row is server-internal."
+        \ ``forward_to``,\n``webhook_url``, ``forward_rate_per_hour``) surface what the row\
+        \ has\nconfigured for incoming mail. ``webhook_secret_encrypted`` is intentionally\n\
+        NOT exposed \u2014 the plaintext secret is returned exactly once at create\nor rotate\
+        \ via a dedicated endpoint, and the ciphertext that\nsits on the row is server-internal."
     EmailListResponse:
       properties:
         items:
@@ -1606,9 +1598,18 @@ components:
             - type: "null"
           title: Conversation Id
         email_domain_id:
-          type: string
-          format: uuid
+          anyOf:
+            - type: string
+              format: uuid
+            - type: "null"
           title: Email Domain Id
+        direction:
+          type: string
+          enum:
+            - outbound
+            - inbound
+          title: Direction
+          default: outbound
         from_address:
           type: string
           title: From Address
@@ -1689,13 +1690,6 @@ components:
             - type: string
             - type: "null"
           title: Body Html
-        direction:
-          type: string
-          enum:
-            - outbound
-            - inbound
-          title: Direction
-          default: outbound
         message_id:
           anyOf:
             - type: string
@@ -1793,9 +1787,18 @@ components:
             - type: "null"
           title: Conversation Id
         email_domain_id:
-          type: string
-          format: uuid
+          anyOf:
+            - type: string
+              format: uuid
+            - type: "null"
           title: Email Domain Id
+        direction:
+          type: string
+          enum:
+            - outbound
+            - inbound
+          title: Direction
+          default: outbound
         from_address:
           type: string
           title: From Address
@@ -1886,10 +1889,10 @@ components:
         - failed_at
       title: EmailSummary
       description:
-        "Trimmed view for list endpoints \u2014 drops the message bodies.\n\
-        \nBodies can be large and contain PII; paging through a year of mail\nshouldn't\
-        \ return every byte of every message just to render a list.\nUse ``EmailResponse``\
-        \ (via ``GET /emails/{id}``) for the full row."
+        "Trimmed view for list endpoints \u2014 drops the message bodies.\n\nBodies\
+        \ can be large and contain PII; paging through a year of mail\nshouldn't return every\
+        \ byte of every message just to render a list.\nUse ``EmailResponse`` (via ``GET /emails/{id}``)\
+        \ for the full row."
     EventStreamResponse:
       properties:
         items:
