@@ -14,17 +14,16 @@ import (
 	"github.com/hail-hq/hail/cli/internal/client"
 )
 
-// newEmailDomainCmd builds the `email email-domain` subtree.
+// newEmailDomainCmd builds the `email domain` subtree.
 //
 // Self-hosters don't have the managed-cloud web console, so the CLI is
 // the only way for them to register a hail-mail row or a custom domain.
 // Subcommand verbs follow the API: register, list, get, verify, delete.
 func newEmailDomainCmd(opts *Options) *cobra.Command {
 	cmd := &cobra.Command{
-		Use:     "email-domain",
-		Aliases: []string{"ed"},
-		Short:   "Manage email domain identities (send + receive)",
-		Long: `hail email email-domain — manage the identities email is sent from and received on.
+		Use:   "domain",
+		Short: "Manage email domain identities (send + receive)",
+		Long: `hail email domain — manage the identities email is sent from and received on.
 
 Two flavors of identity (POST body 'kind' field):
 
@@ -65,18 +64,18 @@ func newEmailDomainRegisterCmd(opts *Options) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "register",
 		Short: "Register a new email domain",
-		Long: `hail email email-domain register — register a hail_mail or custom domain.
+		Long: `hail email domain register — register a hail_mail or custom domain.
 
 Examples:
   # Hail-mail using server env defaults (HAIL_MAIL_DEFAULT_*_PREFIX):
-  hail email email-domain register --kind hail_mail
+  hail email domain register --kind hail_mail
 
   # Hail-mail with explicit prefixes:
-  hail email email-domain register --kind hail_mail \
+  hail email domain register --kind hail_mail \
       --local-prefix-user alice --local-prefix-org acme
 
   # Custom domain (returns DKIM CNAMEs to publish):
-  hail email email-domain register --kind custom --domain acme.com`,
+  hail email domain register --kind custom --domain acme.com`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return runEmailDomainRegister(cmd.Context(), opts, f)
