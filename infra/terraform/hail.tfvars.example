@@ -1,8 +1,0 @@
-# Copy to hail.tfvars and edit before `terraform apply`.
-# hail.tfvars is gitignored.
-
-name_prefix              = "hail-inbound-prod"
-region                   = "us-east-1"
-hail_api_url             = "https://api.hail.so"
-hail_inbound_hmac_secret = "REPLACE_WITH_RANDOM_64_HEX"
-hail_mail_base_domain    = "mail.hail.so"

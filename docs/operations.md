@@ -379,12 +379,16 @@ docker compose run --rm api alembic upgrade 0007      # inbound columns + email_
 docker compose run --rm api alembic upgrade 0008      # webhook tables
 docker compose run --rm api alembic current           # → 0008 (head)
 
-# ── 3. Provision AWS infra (Terraform) ─────────────────────────────────────
-cd infra/terraform
-cp hail.tfvars.example hail.tfvars
-openssl rand -hex 32                                  # paste into hail_inbound_hmac_secret
-terraform init && terraform plan -out=plan.out && terraform apply plan.out
+# ── 3. Provision AWS infra (Terragrunt reads .env directly) ───────────────
+cd infra
+terragrunt init
+terragrunt plan
+terragrunt apply
 # Capture outputs: inbound_mx_record, inbound_bucket, activate_command, lambda_function_arn
+#
+# First time only: pre-create the state bucket + DynamoDB lock table once
+# per AWS account — terragrunt can't bootstrap them. See the comment
+# block at the top of infra/terragrunt.hcl for the AWS CLI one-liners.
 
 # ── 4. Activate the SES Receipt Rule Set (manual; one-time per region) ─────
 aws sesv2 set-active-receipt-rule-set --rule-set-name hail-inbound-prod-rules
@@ -486,20 +490,52 @@ flag is off, so the system is still effectively outbound-only.
 
 ### Stage 4 — provision AWS infrastructure
 
-The Terraform module under `infra/terraform/` provisions S3, the SES
-Receipt Rule + Rule Set, the Lambda, and IAM.
+The bare Terraform module under `infra/terraform/` provisions S3, the SES
+Receipt Rule + Rule Set, the Lambda, and IAM. A Terragrunt wrapper at
+`infra/terragrunt.hcl` adds an S3 remote backend with a DynamoDB lock
+table, and pulls every variable from the repo's `.env` so there's no
+parallel `tfvars` file to keep in sync.
+
+**One-time bootstrap** per AWS account. Terragrunt's state backend
+can't bootstrap itself; create the bucket + lock table once with the
+AWS CLI (the AWS CLI doesn't read `.env` like Terragrunt does, so this
+one step needs the env exported into your shell). Note the state
+backend's region is `HAIL_TERRAFORM_STATE_REGION` — often shared
+across deployments and **separate from `AWS_REGION`** (which is where
+the SES + Lambda + raw-MIME bucket get provisioned). It falls back to
+`AWS_REGION` when unset.
 
 ```bash
-cd infra/terraform
-cp hail.tfvars.example hail.tfvars       # gitignored
+set -a; source .env; set +a   # exports AWS_PROFILE, AWS_REGION, HAIL_TERRAFORM_*
+STATE_REGION=${HAIL_TERRAFORM_STATE_REGION:-$AWS_REGION}
 
-# Generate a strong shared secret. The same value goes into
-# HAIL_INBOUND_HMAC_SECRET on the API.
-openssl rand -hex 32 | pbcopy            # paste into hail.tfvars
+aws --profile $AWS_PROFILE s3api create-bucket \
+    --bucket $HAIL_TERRAFORM_STATE_BUCKET \
+    --region $STATE_REGION
+aws --profile $AWS_PROFILE s3api put-bucket-versioning \
+    --bucket $HAIL_TERRAFORM_STATE_BUCKET \
+    --versioning-configuration Status=Enabled
+aws --profile $AWS_PROFILE dynamodb create-table \
+    --table-name $HAIL_TERRAFORM_LOCK_TABLE \
+    --attribute-definitions AttributeName=LockID,AttributeType=S \
+    --key-schema AttributeName=LockID,KeyType=HASH \
+    --billing-mode PAY_PER_REQUEST \
+    --region $STATE_REGION
+```
 
-terraform init
-terraform plan -out=plan.out
-terraform apply plan.out
+**Each deploy.** Generate (or rotate) the shared HMAC secret in `.env`
+ahead of time — the same value is what the API uses to verify Lambda
+POSTs:
+
+```bash
+# In .env:
+#   HAIL_INBOUND_HMAC_SECRET=<openssl rand -hex 32 output>
+#   HAIL_API_URL=https://api.hail.so          # the URL the Lambda calls
+
+cd infra
+terragrunt init                # Terragrunt reads .env via run_cmd internally;
+terragrunt plan                # no manual `source .env` needed here.
+terragrunt apply
 ```
 
 Outputs to capture:
@@ -508,6 +544,11 @@ Outputs to capture:
 - `inbound_bucket` — goes into `HAIL_INBOUND_BUCKET` on the API.
 - `activate_command` — the `aws sesv2 set-active-receipt-rule-set ...`
   to run after apply.
+
+**Plain Terraform alternative.** The bare module under `infra/terraform/`
+still works with `terraform apply -var ...` if you'd rather skip
+Terragrunt. The Terragrunt wrapper is opinionated about remote state +
+`.env`-driven inputs; the underlying module is provider-vanilla.
 
 **Manual step: activate the receipt rule set.** Terraform creates the
 rule set but does not activate it (SES allows one active rule set per

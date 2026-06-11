@@ -82,3 +82,7 @@ infra/terraform/crash.log
 infra/terraform/crash.*.log
 # Plan output files (`terraform plan -out=...`).
 infra/terraform/*.tfplan
+# Terragrunt cache (downloaded modules + generated backend stubs).
+**/.terragrunt-cache/
+# The S3 backend stub Terragrunt drops into the module dir at runtime.
+infra/terraform/backend.tf

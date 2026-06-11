@@ -173,23 +173,40 @@ Receiving mail at `<user>+<org>@<HAIL_MAIL_BASE_DOMAIN>` requires four things:
 3. A SES Receipt Rule that writes the object and invokes a Lambda.
 4. A small Lambda that signs the SES event and POSTs it to Hail.
 
-Provisioning is automated by the Terraform module in `infra/terraform/`.
+Provisioning is automated by a Terragrunt wrapper at `infra/terragrunt.hcl`
+around the bare Terraform module in `infra/terraform/`. The wrapper
+configures an S3-backed remote state with a DynamoDB lock table and
+pulls every input from the repo's `.env` — no parallel `tfvars` file.
 
-### 10.1 Terraform apply
+### 10.1 Terragrunt apply
 
 ```bash
-cd infra/terraform
-cp hail.tfvars.example hail.tfvars   # fill in values; generate a 64-hex hmac secret
-terraform init
-terraform plan
-terraform apply
+# .env must contain at minimum: AWS_PROFILE, AWS_REGION,
+# HAIL_TERRAFORM_STATE_BUCKET, HAIL_TERRAFORM_LOCK_TABLE, HAIL_API_URL,
+# HAIL_INBOUND_HMAC_SECRET (generate: openssl rand -hex 32),
+# HAIL_MAIL_BASE_DOMAIN.
+
+cd infra
+terragrunt init                # Terragrunt sources .env automatically via
+terragrunt plan                # `run_cmd`; no manual export step.
+terragrunt apply
 ```
+
+One-time bootstrap per AWS account before the first `terragrunt init`:
+the state bucket + lock table don't auto-create. See the comment block
+at the top of [`infra/terragrunt.hcl`](../../infra/terragrunt.hcl) for
+the AWS CLI one-liners, and [`docs/operations.md`](../operations.md) →
+"Inbound email rollout → Stage 4" for the full sequence.
 
 Outputs:
 
 - `inbound_mx_record` — publish at DNS for `HAIL_MAIL_BASE_DOMAIN`.
 - `inbound_bucket` — set as `HAIL_INBOUND_BUCKET` in the API `.env`.
 - `activate_command` — the `aws sesv2 set-active-receipt-rule-set ...` to run once.
+
+The bare Terraform module at `infra/terraform/` is provider-vanilla and
+still works with `terraform apply -var=...` if you'd prefer to skip
+Terragrunt.
 
 ### 10.2 Activate the receipt rule set (manual)
 
