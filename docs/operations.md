@@ -356,8 +356,78 @@ gh release create v0.2.0 --repo hail-hq/hail --notes-file CHANGELOG.md
 
 ## Inbound email rollout
 
-Five stages. Stage 1 needs a brief maintenance window (the table rename
-is not online-safe); stages 2 onward are online.
+End-to-end deployment of the inbound-email milestone (umbrella `v0.5.0`,
+`sdk-v0.3.0`, `cli-v0.5.0`). Five DB stages + infra + tag-driven
+component releases. Stage 1 needs a brief maintenance window (the table
+rename is not online-safe); everything else is online.
+
+### Full deployment order (copy-paste cheat-sheet)
+
+```bash
+# ── 0. Preflight on main ───────────────────────────────────────────────────
+git checkout main && git pull --ff-only origin main
+git log -1 --oneline                                  # confirm merge SHA
+
+# ── 1. Stage-1 cutover: stop API, migrate, deploy new image ────────────────
+docker compose stop api
+docker compose run --rm api alembic upgrade 0006      # rename (DOWNTIME)
+docker compose up -d api                              # new image w/ new code
+hail email domain list                                # 200 smoke
+
+# ── 2. Stage-2 + Stage-3 migrations (online) ───────────────────────────────
+docker compose run --rm api alembic upgrade 0007      # inbound columns + email_attachments
+docker compose run --rm api alembic upgrade 0008      # webhook tables
+docker compose run --rm api alembic current           # → 0008 (head)
+
+# ── 3. Provision AWS infra (Terraform) ─────────────────────────────────────
+cd infra/terraform
+cp hail.tfvars.example hail.tfvars
+openssl rand -hex 32                                  # paste into hail_inbound_hmac_secret
+terraform init && terraform plan -out=plan.out && terraform apply plan.out
+# Capture outputs: inbound_mx_record, inbound_bucket, activate_command, lambda_function_arn
+
+# ── 4. Activate the SES Receipt Rule Set (manual; one-time per region) ─────
+aws sesv2 set-active-receipt-rule-set --rule-set-name hail-inbound-prod-rules
+#  ↑ ONLY safe on accounts with no other active rule set; see Stage 4 below.
+
+# ── 5. Publish the MX record (manual at your DNS provider) ─────────────────
+#  e.g. mail.hail.so  MX  10  inbound-smtp.us-east-1.amazonaws.com
+dig MX mail.hail.so                                   # wait for propagation
+
+# ── 6. Flip the inbound flag in API .env, restart ──────────────────────────
+# Add: HAIL_INBOUND_ENABLED=true
+#      HAIL_INBOUND_BUCKET=<terraform output inbound_bucket>
+#      HAIL_INBOUND_HMAC_SECRET=<same as tfvars>
+#      HAIL_WEBHOOK_SECRET_KEY=$(python -c "from hailhq.core.secret_cipher import generate_key; print(generate_key())")
+docker compose up -d api                              # picks up new env
+
+# ── 7. Release SDK 0.3.0 (fires release-sdk.yml → PyPI) ────────────────────
+git tag -a sdk-v0.3.0 -m "SDK 0.3.0 — inbound email + webhooks"
+git push origin sdk-v0.3.0
+
+# ── 8. Release CLI 0.5.0 (fires release-cli.yml → GitHub Releases + brew) ──
+git tag -a cli-v0.5.0 -m "CLI 0.5.0 — hail email list/get; webhooks; domain rename"
+git push origin cli-v0.5.0
+
+# ── 9. Umbrella tag marker (no workflow fires) ─────────────────────────────
+git tag -a v0.5.0 -m "Hail 0.5.0 — inbound email milestone"
+git push origin v0.5.0
+gh release create v0.5.0 --notes-file CHANGELOG.md    # optional release page
+
+# ── 10. Smoke test (see "Smoke test sequence" subsection below) ────────────
+hail email domain list
+dig MX mail.hail.so
+# … send a test mail, expect status=received within 30s
+hail email list --direction inbound
+```
+
+**Decoupling note.** Steps 1–6 can ship days ahead of steps 7–9; until
+the flag in step 6 flips, the system is outbound-only and the new CLI
+and SDK haven't gone public yet. If anything looks wrong after step 6,
+you can roll back by setting `HAIL_INBOUND_ENABLED=false` and
+restarting — no migration revert needed, no tag re-spin needed.
+
+Detailed nuance per stage follows.
 
 ### Stage 1 — schema rename + new code (coordinated cutover, ~30s downtime)
 
