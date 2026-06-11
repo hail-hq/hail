@@ -402,7 +402,7 @@ dig MX mail.hail.so                                   # wait for propagation
 # Add: HAIL_INBOUND_ENABLED=true
 #      HAIL_INBOUND_BUCKET=<terraform output inbound_bucket>
 #      HAIL_INBOUND_HMAC_SECRET=<same as tfvars>
-#      HAIL_WEBHOOK_SECRET_KEY=$(python -c "from hailhq.core.secret_cipher import generate_key; print(generate_key())")
+#      HAIL_WEBHOOK_SECRET_KEY=$(uv run --directory core python -c "from hailhq.core.secret_cipher import generate_key; print(generate_key())")
 docker compose up -d api                              # picks up new env
 
 # ── 7. Release SDK 0.3.0 (fires release-sdk.yml → PyPI) ────────────────────
@@ -582,7 +582,7 @@ Add to the API service `.env`:
 HAIL_INBOUND_ENABLED=true
 HAIL_INBOUND_BUCKET=<terraform output>
 HAIL_INBOUND_HMAC_SECRET=<same value Terraform got>
-HAIL_WEBHOOK_SECRET_KEY=<generate with `python -c "from hailhq.core.secret_cipher import generate_key; print(generate_key())"`>
+HAIL_WEBHOOK_SECRET_KEY=<generate with `uv run --directory core python -c "from hailhq.core.secret_cipher import generate_key; print(generate_key())"`>
 ```
 
 Restart the API. Until this step, `POST /internal/ses-events` returns

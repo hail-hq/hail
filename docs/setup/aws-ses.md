@@ -290,8 +290,9 @@ work across multi-process deployments. If `HAIL_WEBHOOK_SECRET_KEY` is unset,
 webhook creation returns `500` — generate and set it before enabling webhooks:
 
 ```bash
-# Generate a key (run once; store in .env, never commit)
-python -c "from hailhq.core.secret_cipher import generate_key; print(generate_key())"
+# Generate a key (run once; store in .env, never commit). Run inside the
+# project venv so the `cryptography` package is on PYTHONPATH.
+uv run --directory core python -c "from hailhq.core.secret_cipher import generate_key; print(generate_key())"
 
 # In .env:
 HAIL_WEBHOOK_SECRET_KEY=<output above>
