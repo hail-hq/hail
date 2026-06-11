@@ -743,3 +743,47 @@ async def test_post_emails_usage_event_failure_does_not_fail_send(
         )
     ).scalar_one()
     assert email_row.status == "sent"
+
+
+# --------------------------------------------------------------------------- #
+# POST /emails — branding footer
+# --------------------------------------------------------------------------- #
+
+
+async def test_post_emails_appends_footer_on_wire_only(
+    client: httpx.AsyncClient,
+    org_and_key: tuple,
+    email_mock: AsyncMock,
+) -> None:
+    """The provider send carries the branding footer; the stored row and
+    API responses keep the tenant-authored body untouched."""
+    _, _, plain = org_and_key
+    headers = {"Authorization": f"Bearer {plain}"}
+    await _register_custom_verified(client, headers, domain="acme.com")
+
+    resp = await client.post(
+        "/emails",
+        json={
+            "to": ["alice@example.com"],
+            "subject": "hi",
+            "body_text": "body",
+            "body_html": "<p>body</p>",
+        },
+        headers=headers,
+    )
+    assert resp.status_code == 201, resp.text
+
+    call_kwargs = email_mock.send_email.call_args.kwargs
+    assert call_kwargs["body_text"].startswith("body")
+    assert "Sent by Hail.so" in call_kwargs["body_text"]
+    assert call_kwargs["body_text"].rstrip().endswith("(https://hail.so)")
+    assert call_kwargs["body_html"].startswith("<p>body</p>")
+    assert 'href="https://hail.so"' in call_kwargs["body_html"]
+
+    # POST response and GET both return the original body, footer-free.
+    assert resp.json()["body_text"] == "body"
+    assert resp.json()["body_html"] == "<p>body</p>"
+    got = await client.get(f"/emails/{resp.json()['id']}", headers=headers)
+    assert got.status_code == 200
+    assert got.json()["body_text"] == "body"
+    assert got.json()["body_html"] == "<p>body</p>"

@@ -41,6 +41,7 @@ from hailhq.api.routes.email_domains import (
 )
 from hailhq.core.billing import has_funds
 from hailhq.core.db import get_session, session_scope
+from hailhq.core.email_footer import FOOTER_SENT, append_footer
 from hailhq.core.internal_webhook import notify_usage_event_recorded
 from hailhq.core.models import Email, EmailAttachment, EmailDomain, UsageEvent
 from hailhq.core.s3_inbound import S3InboundClient
@@ -349,13 +350,18 @@ async def create_email(
     # Provider send — best-effort with status reconciliation. Synchronous
     # in v1: callers get back ``sent`` or ``failed`` on the response, no
     # background polling needed for the happy path.
+    # Branding footer rides the wire message only; the stored row keeps
+    # the tenant-authored body.
+    wire_text, wire_html = append_footer(
+        email.body_text, email.body_html, label=FOOTER_SENT
+    )
     try:
         result = await email_provider.send_email(
             from_address=email.from_address,
             to_addresses=email.to_addresses,
             subject=email.subject,
-            body_text=email.body_text,
-            body_html=email.body_html,
+            body_text=wire_text,
+            body_html=wire_html,
             cc=email.cc_addresses,
             bcc=email.bcc_addresses,
             reply_to=email.reply_to,

@@ -186,6 +186,30 @@ def test_build_forwarded_strips_crlf_from_hostile_headers():
         assert "\r" not in value and "\n" not in value
 
 
+def test_build_forwarded_appends_branding_footer():
+    parsed = ParsedMime(
+        from_address="alice@example.com",
+        to_addresses=["alice+acme@mail.hail.so"],
+        cc_addresses=[],
+        subject="hi",
+        message_id="<orig@example.com>",
+        in_reply_to=None,
+        references_ids=None,
+        body_text="original",
+        body_html="<p>original</p>",
+    )
+    fwd = build_forwarded(
+        parsed=parsed,
+        target="ops@example.com",
+        forwarder_address="forwarder+acme@mail.hail.so",
+        inbound_id=uuid4(),
+        hops=0,
+    )
+    assert "Forwarded by Hail.so" in fwd.body_text
+    assert fwd.body_text.index("original") < fwd.body_text.index("Forwarded by")
+    assert 'href="https://hail.so"' in fwd.body_html
+
+
 def test_loop_detected_carries_cause():
     # base-domain self-reference → cause == "base_domain"
     with pytest.raises(LoopDetected) as exc_info:

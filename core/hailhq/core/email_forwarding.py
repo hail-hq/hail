@@ -21,6 +21,7 @@ import re
 from dataclasses import dataclass, field
 from uuid import UUID
 
+from hailhq.core.email_footer import FOOTER_FORWARDED, append_footer
 from hailhq.core.email_mime import ParsedMime
 
 __all__ = ["Forwarded", "LoopDetected", "build_forwarded", "detect_loop"]
@@ -104,6 +105,7 @@ def build_forwarded(
         # Attachment-only original — the preamble alone satisfies the
         # emails_body_required CHECK on the queued outbound row.
         body_text = preamble
+    body_text, body_html = append_footer(body_text, body_html, label=FOOTER_FORWARDED)
     headers = {
         "X-Hail-Forwarded-From": _header_safe(parsed.from_address or ""),
         "X-Hail-Original-Message-Id": _header_safe(parsed.message_id or ""),
