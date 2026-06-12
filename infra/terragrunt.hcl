@@ -37,18 +37,24 @@
 locals {
   env_file = "${get_repo_root()}/.env"
 
-  # Sourced from .env. `$$` escapes terragrunt interpolation so the
-  # `${VAR:-default}` reaches bash. Empty AWS_PROFILE means "use the
-  # default AWS credential chain" — leave it that way for IAM-role hosts.
-  aws_profile           = run_cmd("--terragrunt-quiet", "bash", "-c", "source ${local.env_file} && echo -n \"$${AWS_PROFILE:-}\"")
-  aws_region            = run_cmd("--terragrunt-quiet", "bash", "-c", "source ${local.env_file} && echo -n \"$${AWS_REGION:-us-east-1}\"")
-  state_region          = run_cmd("--terragrunt-quiet", "bash", "-c", "source ${local.env_file} && echo -n \"$${HAIL_TERRAFORM_STATE_REGION:-$${AWS_REGION:-us-east-1}}\"")
-  state_bucket          = run_cmd("--terragrunt-quiet", "bash", "-c", "source ${local.env_file} && echo -n \"$$HAIL_TERRAFORM_STATE_BUCKET\"")
-  lock_table            = run_cmd("--terragrunt-quiet", "bash", "-c", "source ${local.env_file} && echo -n \"$$HAIL_TERRAFORM_LOCK_TABLE\"")
-  name_prefix           = run_cmd("--terragrunt-quiet", "bash", "-c", "source ${local.env_file} && echo -n \"$${HAIL_INBOUND_NAME_PREFIX:-hail-inbound}\"")
-  hail_api_url          = run_cmd("--terragrunt-quiet", "bash", "-c", "source ${local.env_file} && echo -n \"$$HAIL_API_URL\"")
-  hail_inbound_secret   = run_cmd("--terragrunt-quiet", "bash", "-c", "source ${local.env_file} && echo -n \"$$HAIL_INBOUND_HMAC_SECRET\"")
-  hail_mail_base_domain = run_cmd("--terragrunt-quiet", "bash", "-c", "source ${local.env_file} && echo -n \"$$HAIL_MAIL_BASE_DOMAIN\"")
+  # Sourced from .env. HCL only interprets `${...}` with braces — bare
+  # `$VAR` passes through to bash unchanged, so no escape needed for
+  # those. For `${VAR:-default}` we escape the HCL braces with `$${...}`
+  # so bash gets the parameter-expansion form. Empty AWS_PROFILE means
+  # "use the default AWS credential chain" — leave it that way for
+  # IAM-role hosts.
+  aws_profile  = run_cmd("--terragrunt-quiet", "bash", "-c", "source ${local.env_file} && echo -n \"$${AWS_PROFILE:-}\"")
+  aws_region   = run_cmd("--terragrunt-quiet", "bash", "-c", "source ${local.env_file} && echo -n \"$${AWS_REGION:-us-east-1}\"")
+  state_region = run_cmd("--terragrunt-quiet", "bash", "-c", "source ${local.env_file} && echo -n \"$${HAIL_TERRAFORM_STATE_REGION:-$${AWS_REGION:-us-east-1}}\"")
+  state_bucket = run_cmd("--terragrunt-quiet", "bash", "-c", "source ${local.env_file} && echo -n \"$HAIL_TERRAFORM_STATE_BUCKET\"")
+  lock_table   = run_cmd("--terragrunt-quiet", "bash", "-c", "source ${local.env_file} && echo -n \"$HAIL_TERRAFORM_LOCK_TABLE\"")
+  # Prefix for the AWS resources THIS Terraform module owns
+  # (SES + S3 + Lambda for inbound email). Scoped to email because
+  # other inbound channels (SMS, voice) don't provision AWS infra.
+  email_inbound_name_prefix = run_cmd("--terragrunt-quiet", "bash", "-c", "source ${local.env_file} && echo -n \"$${HAIL_INBOUND_EMAIL_NAME_PREFIX:-hail-email-inbound}\"")
+  hail_api_url              = run_cmd("--terragrunt-quiet", "bash", "-c", "source ${local.env_file} && echo -n \"$HAIL_API_URL\"")
+  hail_inbound_secret       = run_cmd("--terragrunt-quiet", "bash", "-c", "source ${local.env_file} && echo -n \"$HAIL_INBOUND_HMAC_SECRET\"")
+  hail_mail_base_domain     = run_cmd("--terragrunt-quiet", "bash", "-c", "source ${local.env_file} && echo -n \"$HAIL_MAIL_BASE_DOMAIN\"")
 }
 
 terraform {
@@ -72,9 +78,17 @@ remote_state {
 }
 
 inputs = {
-  name_prefix              = local.name_prefix
+  name_prefix              = local.email_inbound_name_prefix
   region                   = local.aws_region
   hail_api_url             = local.hail_api_url
   hail_inbound_hmac_secret = local.hail_inbound_secret
   hail_mail_base_domain    = local.hail_mail_base_domain
+  # AWS profile for the provider — same value the S3 backend above
+  # uses so backend + resource calls share one credential source.
+  aws_profile = local.aws_profile
+  # Absolute path to the Lambda source. Terragrunt copies `./terraform`
+  # into `.terragrunt-cache/`, so the in-tree relative reference
+  # (`${path.module}/../ses-ingest-lambda`) breaks; thread the real
+  # repo-rooted path through as a variable.
+  lambda_source_dir = "${get_repo_root()}/infra/ses-ingest-lambda"
 }

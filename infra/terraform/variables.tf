@@ -29,3 +29,15 @@ variable "raw_object_expiration_days" {
   type        = number
   default     = 90
 }
+
+variable "lambda_source_dir" {
+  description = "Absolute path to the ses-ingest-lambda directory. Terragrunt resolves this from the repo root because `terraform` runs out of `.terragrunt-cache/...` and `path.module/../ses-ingest-lambda` no longer points at the sibling. Plain `terraform apply` callers can leave this empty — the default falls back to the in-tree path next to this module."
+  type        = string
+  default     = ""
+}
+
+variable "aws_profile" {
+  description = "AWS named profile from ~/.aws/credentials. Empty falls back to the default credential chain (env vars, IAM role, etc.). Terragrunt threads $AWS_PROFILE here from .env."
+  type        = string
+  default     = ""
+}

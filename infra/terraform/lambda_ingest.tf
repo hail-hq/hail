@@ -1,6 +1,6 @@
 data "archive_file" "ingest" {
   type        = "zip"
-  source_dir  = "${path.module}/../ses-ingest-lambda"
+  source_dir  = coalesce(var.lambda_source_dir, "${path.module}/../ses-ingest-lambda")
   output_path = "${path.module}/.build/ses-ingest-lambda.zip"
   excludes    = ["test_handler.py", "README.md"]
 }
