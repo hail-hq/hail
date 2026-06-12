@@ -13,7 +13,6 @@ import (
 	"strings"
 	"text/tabwriter"
 
-	"github.com/google/uuid"
 	openapi_types "github.com/oapi-codegen/runtime/types"
 	"github.com/spf13/cobra"
 
@@ -131,16 +130,16 @@ func newWebhooksListCmd(opts *Options) *cobra.Command {
 func newWebhooksDeliveriesCmd(opts *Options) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "deliveries <subscription-id>",
-		Short: "List delivery attempts for a subscription",
+		Short: "List delivery attempts for a subscription (full UUID or 4+ char prefix)",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			apiClient, err := opts.newClient()
 			if err != nil {
 				return err
 			}
-			subID, err := uuid.Parse(args[0])
+			subID, err := resolveWebhookID(cmd.Context(), apiClient, args[0])
 			if err != nil {
-				return fmt.Errorf("invalid subscription id: %w", err)
+				return err
 			}
 			resp, err := apiClient.ListDeliveriesWebhooksSubIdDeliveriesGetWithResponse(
 				cmd.Context(),
@@ -162,20 +161,20 @@ func newWebhooksDeliveriesCmd(opts *Options) *cobra.Command {
 func newWebhooksRedeliverCmd(opts *Options) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "redeliver <subscription-id> <delivery-id>",
-		Short: "Replay a single delivery row",
+		Short: "Replay a single delivery row (each id may be full UUID or 4+ char prefix)",
 		Args:  cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			apiClient, err := opts.newClient()
 			if err != nil {
 				return err
 			}
-			subID, err := uuid.Parse(args[0])
+			subID, err := resolveWebhookID(cmd.Context(), apiClient, args[0])
 			if err != nil {
-				return fmt.Errorf("invalid subscription id: %w", err)
+				return err
 			}
-			deliveryID, err := uuid.Parse(args[1])
+			deliveryID, err := resolveWebhookDeliveryID(cmd.Context(), apiClient, subID, args[1])
 			if err != nil {
-				return fmt.Errorf("invalid delivery id: %w", err)
+				return err
 			}
 			resp, err := apiClient.RedeliverWebhooksSubIdDeliveriesDeliveryIdRedeliverPostWithResponse(
 				cmd.Context(),

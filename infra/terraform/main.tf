@@ -1,8 +1,5 @@
 provider "aws" {
-  region = var.region
-  # Empty string is the AWS provider's idiom for "no explicit profile;
-  # fall back to env vars / default chain". Terragrunt threads
-  # $AWS_PROFILE from .env; plain `terraform apply` leaves it unset.
+  region  = var.region
   profile = var.aws_profile != "" ? var.aws_profile : null
 }
 

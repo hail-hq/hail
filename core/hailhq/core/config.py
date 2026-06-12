@@ -1,3 +1,4 @@
+from pydantic import computed_field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -76,7 +77,10 @@ class Settings(BaseSettings):
     # SES Receipt Rule, and Lambda; HAIL_INBOUND_HMAC_SECRET is shared
     # between the Lambda env and the API.
     hail_inbound_enabled: bool = False
-    hail_inbound_bucket: str = ""
+    # Single source of truth for both the Terraform module and the API.
+    # The raw-MIME bucket name is derived as ``{prefix}-raw``; SES Lambda
+    # writes there, the API reads back from it. Set in .env / .env.example.
+    hail_inbound_email_name_prefix: str = ""
     hail_inbound_hmac_secret: str = ""
     # Forwarding controls — see docs spec §6.2.
     hail_forward_max_hops: int = 3
@@ -158,6 +162,14 @@ class Settings(BaseSettings):
     # WWW-Authenticate header points clients at this MCP's own
     # ``.well-known/oauth-protected-resource``. Empty in self-host.
     mcp_resource_url: str = ""
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def hail_inbound_bucket(self) -> str:
+        """Raw-MIME bucket name. Derived to match Terraform's `${prefix}-raw`."""
+        if not self.hail_inbound_email_name_prefix:
+            return ""
+        return f"{self.hail_inbound_email_name_prefix}-raw"
 
 
 settings = Settings()
