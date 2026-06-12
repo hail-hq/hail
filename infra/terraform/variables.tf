@@ -1,26 +1,26 @@
 variable "name_prefix" {
-  description = "Prefix for AWS resources (e.g. hail-inbound-prod). Buckets, the rule set, the Lambda, and IAM roles all derive their names from this."
+  description = "Prefix for AWS resources (S3 bucket, SES rule set, Lambda, IAM)."
   type        = string
 }
 
 variable "region" {
-  description = "AWS region for SES inbound. SES inbound is only available in select regions (us-east-1, us-west-2, eu-west-1, ...). Pick one and stick with it."
+  description = "AWS region. Must support SES inbound (us-east-1, us-west-2, eu-west-1, ...)."
   type        = string
 }
 
 variable "hail_api_url" {
-  description = "Base URL of the Hail API (e.g. https://api.hail.so). No trailing slash."
+  description = "Public base URL of the Hail API. The Lambda POSTs to <hail_api_url>/internal/ses-events."
   type        = string
 }
 
 variable "hail_inbound_hmac_secret" {
-  description = "Shared secret between the Lambda and the Hail API. Generate something random and 64+ hex chars. Set HAIL_INBOUND_HMAC_SECRET in the API service env to the same value."
+  description = "Shared HMAC secret between the Lambda and the API."
   type        = string
   sensitive   = true
 }
 
 variable "hail_mail_base_domain" {
-  description = "Base domain mail will be received on (e.g. mail.hail.so). Must be in the SES Receipt Rule's recipient filter."
+  description = "Domain SES receives mail on (e.g. mail.hail.so)."
   type        = string
 }
 
@@ -31,13 +31,19 @@ variable "raw_object_expiration_days" {
 }
 
 variable "lambda_source_dir" {
-  description = "Absolute path to the ses-ingest-lambda directory. Terragrunt resolves this from the repo root because `terraform` runs out of `.terragrunt-cache/...` and `path.module/../ses-ingest-lambda` no longer points at the sibling. Plain `terraform apply` callers can leave this empty — the default falls back to the in-tree path next to this module."
+  description = "Absolute path to the ses-ingest-lambda directory. Set by Terragrunt; default works when running `terraform` directly from infra/terraform/."
   type        = string
   default     = ""
 }
 
 variable "aws_profile" {
-  description = "AWS named profile from ~/.aws/credentials. Empty falls back to the default credential chain (env vars, IAM role, etc.). Terragrunt threads $AWS_PROFILE here from .env."
+  description = "AWS named profile for the provider. Empty uses the default credential chain."
   type        = string
   default     = ""
+}
+
+variable "iam_user_name" {
+  description = "IAM user provisioned for every Hail service."
+  type        = string
+  default     = "hail"
 }

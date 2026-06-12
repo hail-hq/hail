@@ -55,7 +55,7 @@ def _payload_multi(
             "dkim": "PASS",
             "dmarc": "PASS",
         },
-        "s3_bucket": "hail-inbound-test",
+        "s3_bucket": "hail-inbound-test-raw",
         "s3_key": s3_key,
         "timestamp": "2026-06-06T10:11:12Z",
     }
@@ -67,7 +67,8 @@ def inbound_enabled(monkeypatch: pytest.MonkeyPatch):
 
     monkeypatch.setattr(settings, "hail_inbound_enabled", True)
     monkeypatch.setattr(settings, "hail_inbound_hmac_secret", HMAC_SECRET)
-    monkeypatch.setattr(settings, "hail_inbound_bucket", "hail-inbound-test")
+    # Bucket is derived as `${prefix}-raw`, so this yields "hail-inbound-test-raw".
+    monkeypatch.setattr(settings, "hail_inbound_email_name_prefix", "hail-inbound-test")
     monkeypatch.setattr(settings, "hail_mail_base_domain", "mail.hail.so")
 
 

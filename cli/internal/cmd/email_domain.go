@@ -182,12 +182,16 @@ func runEmailDomainList(
 func newEmailDomainGetCmd(opts *Options) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "get <id>",
-		Short: "Fetch one email domain by id",
+		Short: "Fetch one email domain by id (full UUID or 4+ char prefix)",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			id, err := uuid.Parse(args[0])
+			apiClient, err := opts.newClient()
 			if err != nil {
-				return fmt.Errorf("invalid id: %w", err)
+				return err
+			}
+			id, err := resolveEmailDomainID(cmd.Context(), apiClient, args[0])
+			if err != nil {
+				return err
 			}
 			return runEmailDomainGet(cmd.Context(), opts, id)
 		},
@@ -221,12 +225,16 @@ func runEmailDomainGet(ctx context.Context, opts *Options, id uuid.UUID) error {
 func newEmailDomainVerifyCmd(opts *Options) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "verify <id>",
-		Short: "Re-poll the email provider for a custom row's verification status",
+		Short: "Re-poll the email provider for a custom row's verification status (full UUID or 4+ char prefix)",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			id, err := uuid.Parse(args[0])
+			apiClient, err := opts.newClient()
 			if err != nil {
-				return fmt.Errorf("invalid id: %w", err)
+				return err
+			}
+			id, err := resolveEmailDomainID(cmd.Context(), apiClient, args[0])
+			if err != nil {
+				return err
 			}
 			return runEmailDomainVerify(cmd.Context(), opts, id)
 		},
@@ -261,12 +269,16 @@ func newEmailDomainDeleteCmd(opts *Options) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "delete <id>",
 		Aliases: []string{"rm"},
-		Short:   "Delete an email domain (and the SES identity for custom rows)",
+		Short:   "Delete an email domain (full UUID or 4+ char prefix). Also drops the SES identity for custom rows.",
 		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			id, err := uuid.Parse(args[0])
+			apiClient, err := opts.newClient()
 			if err != nil {
-				return fmt.Errorf("invalid id: %w", err)
+				return err
+			}
+			id, err := resolveEmailDomainID(cmd.Context(), apiClient, args[0])
+			if err != nil {
+				return err
 			}
 			return runEmailDomainDelete(cmd.Context(), opts, id)
 		},

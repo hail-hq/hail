@@ -7,7 +7,6 @@ import (
 	"strings"
 	"text/tabwriter"
 
-	"github.com/google/uuid"
 	openapi_types "github.com/oapi-codegen/runtime/types"
 	"github.com/spf13/cobra"
 
@@ -17,7 +16,7 @@ import (
 func newEmailGetCmd(opts *Options) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "get <id>",
-		Short: "Fetch one email by id",
+		Short: "Fetch one email by id (full UUID or 4+ char prefix)",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runEmailGet(cmd.Context(), opts, args[0])
@@ -27,11 +26,11 @@ func newEmailGetCmd(opts *Options) *cobra.Command {
 }
 
 func runEmailGet(ctx context.Context, opts *Options, idStr string) error {
-	id, err := uuid.Parse(idStr)
-	if err != nil {
-		return fmt.Errorf("invalid email id: %w", err)
-	}
 	apiClient, err := opts.newClient()
+	if err != nil {
+		return err
+	}
+	id, err := resolveEmailID(ctx, apiClient, idStr)
 	if err != nil {
 		return err
 	}
