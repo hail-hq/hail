@@ -1,0 +1,9 @@
+From: Carol <carol@example.com>
+To: Bob <bob+acme@mail.hail.so>
+Subject: Re: Hello
+Message-ID: <m3@example.com>
+In-Reply-To: <m1@example.com>
+References: <m1@example.com> <m2@example.com>
+Content-Type: text/plain; charset="utf-8"
+
+Replying to your message.

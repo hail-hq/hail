@@ -15,6 +15,7 @@ from botocore.stub import ANY, Stubber
 from hailhq.core.providers.email import SesEmailProvider
 from hailhq.core.providers.email.base import (
     DkimRecord,
+    ProviderAttachment,
     ProviderIdentity,
     ProviderSendResult,
 )
@@ -108,6 +109,80 @@ async def test_send_email_html_and_text_with_cc_bcc_reply_to(
     )
     assert result.provider_message_id == "msg-id"
     stub.assert_no_pending_responses()
+
+
+async def test_send_email_with_headers_uses_simple_headers(
+    ses_client, stub: Stubber
+) -> None:
+    stub.add_response(
+        "send_email",
+        {"MessageId": "m-1"},
+        {
+            "FromEmailAddress": "forwarder+acme@mail.hail.so",
+            "Destination": {"ToAddresses": ["ops@example.com"]},
+            "Content": {
+                "Simple": {
+                    "Subject": {"Data": "Fwd: hi", "Charset": "UTF-8"},
+                    "Body": {"Text": {"Data": "x", "Charset": "UTF-8"}},
+                    "Headers": [
+                        {"Name": "X-Hail-Forward-Hops", "Value": "1"},
+                        {"Name": "Auto-Submitted", "Value": "auto-forwarded"},
+                    ],
+                }
+            },
+        },
+    )
+
+    provider = SesEmailProvider(client=ses_client)
+    result = await provider.send_email(
+        from_address="forwarder+acme@mail.hail.so",
+        to_addresses=["ops@example.com"],
+        subject="Fwd: hi",
+        body_text="x",
+        body_html=None,
+        headers={"X-Hail-Forward-Hops": "1", "Auto-Submitted": "auto-forwarded"},
+    )
+    assert result.provider_message_id == "m-1"
+    stub.assert_no_pending_responses()
+
+
+async def test_send_email_with_attachments_uses_raw_mime() -> None:
+    # Raw MIME bytes contain a nondeterministic multipart boundary, so the
+    # Stubber's exact-params matching can't pin them. Record the call shape
+    # with a fake client instead and assert on the raw payload directly.
+    class FakeClient:
+        def __init__(self) -> None:
+            self.kwargs: dict | None = None
+
+        def send_email(self, **kwargs):
+            self.kwargs = kwargs
+            return {"MessageId": "m-2"}
+
+    fake = FakeClient()
+    provider = SesEmailProvider(client=fake)
+    result = await provider.send_email(
+        from_address="forwarder+acme@mail.hail.so",
+        to_addresses=["ops@example.com"],
+        subject="Fwd: invoice",
+        body_text="see attached",
+        body_html=None,
+        headers={"X-Hail-Forward-Hops": "1"},
+        attachments=[
+            ProviderAttachment(
+                filename="invoice.pdf",
+                content_type="application/pdf",
+                payload=b"%PDF-1.4",
+            )
+        ],
+    )
+
+    assert result.provider_message_id == "m-2"
+    assert fake.kwargs is not None
+    assert "Raw" in fake.kwargs["Content"]
+    raw = fake.kwargs["Content"]["Raw"]["Data"]
+    assert b"invoice.pdf" in raw
+    assert b"X-Hail-Forward-Hops" in raw
+    assert b"base64" in raw  # attachment payload is base64-encoded
 
 
 async def test_send_email_requires_recipients(ses_client) -> None:

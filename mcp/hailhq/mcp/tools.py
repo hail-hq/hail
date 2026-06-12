@@ -375,10 +375,10 @@ def register_tools(
         identity (any of: ``HAIL_MAIL_FROM=<user>+<org>@<base>``,
         the split ``HAIL_MAIL_DEFAULT_USER_PREFIX`` /
         ``HAIL_MAIL_DEFAULT_ORG_PREFIX``, or an explicit row created
-        via ``POST /sender-domains``) — auto-mints a hail-mail address
+        via ``POST /email-domains``) — auto-mints a hail-mail address
         of the form ``<user>+<org>@<base>``. When supplied, it must
-        match a verified row already in ``sender_domains`` (register
-        one with the website console or ``POST /sender-domains``).
+        match a verified row already in ``email_domains`` (register
+        one with the website console or ``POST /email-domains``).
 
         ``metadata`` is free-form JSON attached to the email record.
 

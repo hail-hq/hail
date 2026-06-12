@@ -8,5 +8,12 @@ module.exports = {
   // Markdown / JSON / YAML — format with Prettier.
   "**/*.{md,json,yml,yaml}": ["prettier --write"],
 
+  // Terraform — canonical formatter, in-place.
+  "infra/**/*.tf": ["terraform fmt"],
+
+  // Terragrunt — canonical formatter for .hcl files (also matches the
+  // `terragrunt hcl format --check` gate run in CI).
+  "infra/**/*.hcl": ["terragrunt hcl format"],
+
   // Dockerfiles — no formatter in v1; add hadolint via CI later.
 };

@@ -250,7 +250,7 @@ def _email_response(email_id: str | None = None, status: str = "sent") -> dict:
         "id": eid,
         "organization_id": str(uuid4()),
         "conversation_id": None,
-        "sender_domain_id": str(uuid4()),
+        "email_domain_id": str(uuid4()),
         "from_address": "alice+acme@mail.hail.so",
         "to_addresses": ["x@example.com"],
         "cc_addresses": None,
@@ -492,7 +492,7 @@ async def test_api_error_mapping_404(client: HailClient) -> None:
     )
     result = await tools.get_call(client=client, call_id=cid)
     # Generic "resource not found" — the same mapping serves /calls,
-    # /emails, /sender-domains. Specific resource type is in the request.
+    # /emails, /email-domains. Specific resource type is in the request.
     assert result == {"error": "resource not found"}
 
 

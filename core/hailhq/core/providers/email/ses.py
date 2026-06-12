@@ -13,6 +13,7 @@ The SESv2 surface is much cleaner than v1 for identity management:
 from __future__ import annotations
 
 import asyncio
+from email.message import EmailMessage
 from typing import Any
 
 import boto3
@@ -23,6 +24,7 @@ from hailhq.core.providers.email.base import (
     DkimRecord,
     EmailProvider,
     IdentityVerificationStatus,
+    ProviderAttachment,
     ProviderIdentity,
     ProviderSendResult,
 )
@@ -49,7 +51,7 @@ def _status_from_ses(raw: str | None) -> IdentityVerificationStatus:
     SES values: SUCCESS, PENDING, FAILED, TEMPORARY_FAILURE, NOT_STARTED.
     Everything that isn't an outright FAILED is treated as still pending
     so a transient TEMPORARY_FAILURE doesn't permanently quarantine a
-    domain — the operator can re-poll via POST /sender-domains/{id}/verify.
+    domain — the operator can re-poll via POST /email-domains/{id}/verify.
     """
     if raw == "SUCCESS":
         return "verified"
@@ -73,6 +75,51 @@ def _dkim_records_for(domain: str, tokens: list[str]) -> list[DkimRecord]:
     ]
 
 
+def _build_raw_mime(
+    *,
+    from_address: str,
+    to_addresses: list[str],
+    subject: str,
+    body_text: str | None,
+    body_html: str | None,
+    cc: list[str] | None,
+    reply_to: str | None,
+    headers: dict[str, str],
+    attachments: list[ProviderAttachment],
+) -> bytes:
+    """Render a multipart MIME message for SES ``Content.Raw``.
+
+    SESv2 Simple content can't carry attachments, so any send with files
+    goes through this path instead.
+    """
+    msg = EmailMessage()
+    msg["From"] = from_address
+    msg["To"] = ", ".join(to_addresses)
+    if cc:
+        msg["Cc"] = ", ".join(cc)
+    if reply_to:
+        msg["Reply-To"] = reply_to
+    msg["Subject"] = subject
+    for name, value in headers.items():
+        if value:
+            msg[name] = value
+    if body_text is not None:
+        msg.set_content(body_text)
+        if body_html is not None:
+            msg.add_alternative(body_html, subtype="html")
+    elif body_html is not None:
+        msg.set_content(body_html, subtype="html")
+    for att in attachments:
+        maintype, _, subtype = att.content_type.partition("/")
+        msg.add_attachment(
+            att.payload,
+            maintype=maintype or "application",
+            subtype=subtype or "octet-stream",
+            filename=att.filename,
+        )
+    return msg.as_bytes()
+
+
 class SesEmailProvider(EmailProvider):
     """SESv2-backed adapter."""
 
@@ -90,6 +137,8 @@ class SesEmailProvider(EmailProvider):
         cc: list[str] | None = None,
         bcc: list[str] | None = None,
         reply_to: str | None = None,
+        headers: dict[str, str] | None = None,
+        attachments: list[ProviderAttachment] | None = None,
     ) -> ProviderSendResult:
         if not to_addresses:
             raise ValueError("send_email requires at least one recipient")
@@ -108,12 +157,37 @@ class SesEmailProvider(EmailProvider):
         if body_html is not None:
             body["Html"] = {"Data": body_html, "Charset": "UTF-8"}
 
-        message = {
+        message: dict[str, Any] = {
             "Subject": {"Data": subject, "Charset": "UTF-8"},
             "Body": body,
         }
 
-        kwargs: dict[str, Any] = {
+        if attachments:
+            raw = _build_raw_mime(
+                from_address=from_address,
+                to_addresses=to_addresses,
+                subject=subject,
+                body_text=body_text,
+                body_html=body_html,
+                cc=cc,
+                reply_to=reply_to,
+                headers={k: v for k, v in (headers or {}).items() if v},
+                attachments=attachments,
+            )
+            kwargs: dict[str, Any] = {
+                "FromEmailAddress": from_address,
+                "Destination": destination,
+                "Content": {"Raw": {"Data": raw}},
+            }
+            response = await asyncio.to_thread(self._client.send_email, **kwargs)
+            return ProviderSendResult(provider_message_id=response["MessageId"])
+
+        if headers:
+            message["Headers"] = [
+                {"Name": k, "Value": v} for k, v in headers.items() if v
+            ]
+
+        kwargs = {
             "FromEmailAddress": from_address,
             "Destination": destination,
             "Content": {"Simple": message},

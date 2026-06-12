@@ -24,6 +24,7 @@ __all__ = [
     "DkimRecord",
     "EmailProvider",
     "IdentityVerificationStatus",
+    "ProviderAttachment",
     "ProviderIdentity",
     "ProviderSendResult",
 ]
@@ -58,6 +59,14 @@ class ProviderIdentity(BaseModel):
     provider_resource_id: str | None = None
 
 
+class ProviderAttachment(BaseModel):
+    """One file to attach on send. Payload is raw bytes (already fetched)."""
+
+    filename: str
+    content_type: str
+    payload: bytes
+
+
 class ProviderSendResult(BaseModel):
     """Successful send outcome.
 
@@ -83,8 +92,15 @@ class EmailProvider(ABC):
         cc: list[str] | None = None,
         bcc: list[str] | None = None,
         reply_to: str | None = None,
+        headers: dict[str, str] | None = None,
+        attachments: list[ProviderAttachment] | None = None,
     ) -> ProviderSendResult:
-        """Send one message. Implementations must raise on provider error."""
+        """Send one message. Implementations must raise on provider error.
+
+        ``headers`` carries extra top-level headers (loop-prevention,
+        Auto-Submitted, References). ``attachments`` force the raw-MIME
+        path on providers whose simple-content API can't carry files.
+        """
 
     @abstractmethod
     async def create_identity(self, domain: str) -> ProviderIdentity:

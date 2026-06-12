@@ -19,30 +19,35 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timezone
-from typing import Annotated
+from typing import Annotated, Literal
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from fastapi import status as http_status
+from fastapi.responses import RedirectResponse
 from sqlalchemy import and_, or_, select, tuple_, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import defer
 
 from hailhq.api.audit import write_audit_log
+from hailhq.core.urls import join_url
 from hailhq.api.deps import Principal, get_current_principal
 from hailhq.api.idempotency import IdempotencyContext, idempotency_dep
-from hailhq.api.routes.sender_domains import (
+from hailhq.api.routes.email_domains import (
     compose_hail_mail_address,
     get_email_provider,
     resolve_hail_mail_prefixes,
 )
 from hailhq.core.billing import has_funds
 from hailhq.core.db import get_session, session_scope
+from hailhq.core.email_footer import FOOTER_SENT, append_footer
 from hailhq.core.internal_webhook import notify_usage_event_recorded
-from hailhq.core.models import Email, SenderDomain, UsageEvent
+from hailhq.core.models import Email, EmailAttachment, EmailDomain, UsageEvent
+from hailhq.core.s3_inbound import S3InboundClient
 from hailhq.core.providers.email import EmailProvider
 from hailhq.core.schemas import (
+    EmailAttachmentResponse,
     EmailCreate,
     EmailListResponse,
     EmailResponse,
@@ -70,8 +75,8 @@ async def _resolve_sender(
     db: AsyncSession,
     organization_id: UUID,
     explicit_from: str | None,
-) -> SenderDomain:
-    """Find the SenderDomain row to send through, in priority order.
+) -> EmailDomain:
+    """Find the EmailDomain row to send through, in priority order.
 
     1. Explicit ``from``: look up by full address (hail-mail row's
        ``domain`` is the full address; custom row's ``domain`` is the
@@ -95,16 +100,16 @@ async def _resolve_sender(
         # Hail-mail stores the full address as ``domain``; custom stores just
         # the DNS suffix — match either shape in one query.
         stmt = (
-            select(SenderDomain)
-            .where(SenderDomain.organization_id == organization_id)
-            .where(SenderDomain.verification_status == "verified")
+            select(EmailDomain)
+            .where(EmailDomain.organization_id == organization_id)
+            .where(EmailDomain.verification_status == "verified")
             .where(
                 or_(
                     and_(
-                        SenderDomain.kind == "hail_mail",
-                        SenderDomain.domain == explicit_from,
+                        EmailDomain.kind == "hail_mail",
+                        EmailDomain.domain == explicit_from,
                     ),
-                    and_(SenderDomain.kind == "custom", SenderDomain.domain == dom),
+                    and_(EmailDomain.kind == "custom", EmailDomain.domain == dom),
                 )
             )
             .limit(1)
@@ -123,10 +128,10 @@ async def _resolve_sender(
 
     # No explicit `from` — prefer any verified domain, ordered by created_at.
     stmt = (
-        select(SenderDomain)
-        .where(SenderDomain.organization_id == organization_id)
-        .where(SenderDomain.verification_status == "verified")
-        .order_by(SenderDomain.created_at.asc())
+        select(EmailDomain)
+        .where(EmailDomain.organization_id == organization_id)
+        .where(EmailDomain.verification_status == "verified")
+        .order_by(EmailDomain.created_at.asc())
         .limit(1)
     )
     sd = (await db.execute(stmt)).scalar_one_or_none()
@@ -138,10 +143,10 @@ async def _resolve_sender(
     # "set HAIL_MAIL_BASE_DOMAIN" message that would mislead the operator
     # into thinking hail-mail config was the problem.
     pending_stmt = (
-        select(SenderDomain.domain)
-        .where(SenderDomain.organization_id == organization_id)
-        .where(SenderDomain.kind == "custom")
-        .where(SenderDomain.verification_status == "pending")
+        select(EmailDomain.domain)
+        .where(EmailDomain.organization_id == organization_id)
+        .where(EmailDomain.kind == "custom")
+        .where(EmailDomain.verification_status == "pending")
         .limit(1)
     )
     pending_domain = (await db.execute(pending_stmt)).scalar_one_or_none()
@@ -150,7 +155,7 @@ async def _resolve_sender(
             status_code=http_status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=(
                 f"sender domain {pending_domain!r} is pending DKIM verification; "
-                "publish the DNS records and call POST /sender-domains/{id}/verify, "
+                "publish the DNS records and call POST /email-domains/{id}/verify, "
                 "or pass an explicit verified `from` address"
             ),
         )
@@ -160,7 +165,7 @@ async def _resolve_sender(
     # right response for a tenant who hasn't registered anything yet.
     user_prefix, org_prefix = resolve_hail_mail_prefixes(None, None)
     address = compose_hail_mail_address(user_prefix, org_prefix)
-    sd = SenderDomain(
+    sd = EmailDomain(
         organization_id=organization_id,
         kind="hail_mail",
         domain=address,
@@ -176,19 +181,38 @@ async def _resolve_sender(
     try:
         await db.flush()
     except IntegrityError:
-        # Concurrent first-send race: another request just minted the same
-        # row. Roll back our insert and pick up the winning one — the
-        # ``(organization_id, domain)`` unique constraint guarantees there's
-        # exactly one to find.
+        # Another row already holds this hail-mail prefix pair. Two cases:
+        #
+        # * Same org — concurrent first-send race; another request just
+        #   minted the row. Benign: pick up the winner and send through it.
+        # * Another org — the global hail-mail unique index (one prefix
+        #   pair per deployment) blocked us. Surface an actionable 409;
+        #   silently sending through env-var defaults another tenant owns
+        #   would let them intercept our replies.
+        #
+        # Look up WITHOUT org scoping: the global index guarantees exactly
+        # one hail_mail row for this prefix pair.
         await db.rollback()
         existing = (
             await db.execute(
-                select(SenderDomain).where(
-                    SenderDomain.organization_id == organization_id,
-                    SenderDomain.domain == address,
+                select(EmailDomain).where(
+                    EmailDomain.kind == "hail_mail",
+                    EmailDomain.local_prefix_user == user_prefix,
+                    EmailDomain.local_prefix_org == org_prefix,
                 )
             )
         ).scalar_one()
+        if existing.organization_id != organization_id:
+            raise HTTPException(
+                status_code=http_status.HTTP_409_CONFLICT,
+                detail=(
+                    f"the deployment's default hail-mail address {address!r} "
+                    "is already claimed by another organization; set distinct "
+                    "HAIL_MAIL_DEFAULT_USER_PREFIX/HAIL_MAIL_DEFAULT_ORG_PREFIX "
+                    "(or HAIL_MAIL_FROM) per organization, or register an "
+                    "explicit address via POST /email-domains"
+                ),
+            )
         return existing
     # Populate server-defaulted timestamps so any future read of this row
     # in the same request observes the materialized values.
@@ -196,7 +220,7 @@ async def _resolve_sender(
     return sd
 
 
-def _from_address_for(sd: SenderDomain, explicit: str | None) -> str:
+def _from_address_for(sd: EmailDomain, explicit: str | None) -> str:
     """Resolve the wire ``From:`` for a send.
 
     Hail-mail: ``sd.domain`` is the full address.
@@ -293,7 +317,7 @@ async def create_email(
     email = Email(
         organization_id=principal.organization_id,
         conversation_id=body.conversation_id,
-        sender_domain_id=sd.id,
+        email_domain_id=sd.id,
         from_address=from_address,
         to_addresses=list(body.to),
         cc_addresses=list(body.cc) if body.cc else None,
@@ -326,13 +350,18 @@ async def create_email(
     # Provider send — best-effort with status reconciliation. Synchronous
     # in v1: callers get back ``sent`` or ``failed`` on the response, no
     # background polling needed for the happy path.
+    # Branding footer rides the wire message only; the stored row keeps
+    # the tenant-authored body.
+    wire_text, wire_html = append_footer(
+        email.body_text, email.body_html, label=FOOTER_SENT
+    )
     try:
         result = await email_provider.send_email(
             from_address=email.from_address,
             to_addresses=email.to_addresses,
             subject=email.subject,
-            body_text=email.body_text,
-            body_html=email.body_html,
+            body_text=wire_text,
+            body_html=wire_html,
             cc=email.cc_addresses,
             bcc=email.bcc_addresses,
             reply_to=email.reply_to,
@@ -415,6 +444,7 @@ async def create_email(
 @router.get("/{email_id}", response_model=EmailResponse)
 async def get_email(
     email_id: UUID,
+    request: Request,
     principal: Annotated[Principal, Depends(get_current_principal)],
     db: Annotated[AsyncSession, Depends(get_session)],
 ) -> EmailResponse:
@@ -428,12 +458,90 @@ async def get_email(
             status_code=http_status.HTTP_404_NOT_FOUND,
             detail="email not found",
         )
-    return EmailResponse.model_validate(email)
+    resp = EmailResponse.model_validate(email)
+    base = str(request.base_url)
+    if email.raw_s3_key:
+        resp.raw_url = join_url(base, f"emails/{email.id}/raw")
+    att_rows = (
+        (
+            await db.execute(
+                select(EmailAttachment).where(EmailAttachment.email_id == email.id)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    resp.attachments = [
+        EmailAttachmentResponse(
+            id=a.id,
+            filename=a.filename,
+            content_type=a.content_type,
+            size_bytes=a.size_bytes,
+            content_id=a.content_id,
+            url=join_url(base, f"emails/{email.id}/attachments/{a.id}"),
+        )
+        for a in att_rows
+    ]
+    return resp
 
 
 # --------------------------------------------------------------------------- #
 # GET /emails
 # --------------------------------------------------------------------------- #
+
+
+def _get_s3_inbound() -> S3InboundClient:
+    from hailhq.core.config import settings as _s
+
+    return S3InboundClient(bucket=_s.hail_inbound_bucket)
+
+
+@router.get("/{email_id}/raw")
+async def get_email_raw(
+    email_id: UUID,
+    principal: Annotated[Principal, Depends(get_current_principal)],
+    db: Annotated[AsyncSession, Depends(get_session)],
+    s3: Annotated[S3InboundClient, Depends(_get_s3_inbound)],
+) -> Response:
+    """302 → presigned S3 URL for the raw inbound MIME (404 for outbound)."""
+    stmt = select(Email).where(
+        Email.id == email_id,
+        Email.organization_id == principal.organization_id,
+    )
+    email = (await db.execute(stmt)).scalar_one_or_none()
+    if email is None or email.direction != "inbound" or not email.raw_s3_key:
+        raise HTTPException(
+            status_code=http_status.HTTP_404_NOT_FOUND,
+            detail="raw MIME not available",
+        )
+    url = await s3.presign_get(email.raw_s3_key, ttl_seconds=300)
+    return RedirectResponse(url=url, status_code=http_status.HTTP_302_FOUND)
+
+
+@router.get("/{email_id}/attachments/{attachment_id}")
+async def get_email_attachment(
+    email_id: UUID,
+    attachment_id: UUID,
+    principal: Annotated[Principal, Depends(get_current_principal)],
+    db: Annotated[AsyncSession, Depends(get_session)],
+    s3: Annotated[S3InboundClient, Depends(_get_s3_inbound)],
+) -> Response:
+    """302 → presigned S3 URL for one attachment."""
+    stmt = (
+        select(EmailAttachment)
+        .join(Email, Email.id == EmailAttachment.email_id)
+        .where(EmailAttachment.id == attachment_id)
+        .where(Email.id == email_id)
+        .where(Email.organization_id == principal.organization_id)
+    )
+    att = (await db.execute(stmt)).scalar_one_or_none()
+    if att is None:
+        raise HTTPException(
+            status_code=http_status.HTTP_404_NOT_FOUND,
+            detail="attachment not found",
+        )
+    url = await s3.presign_get(att.s3_key, ttl_seconds=300)
+    return RedirectResponse(url=url, status_code=http_status.HTTP_302_FOUND)
 
 
 @router.get("", response_model=EmailListResponse)
@@ -443,6 +551,7 @@ async def list_emails(
     cursor: str | None = Query(default=None),
     limit: int = Query(default=_DEFAULT_LIST_LIMIT, ge=1, le=_MAX_LIST_LIMIT),
     status: EmailStatus | None = Query(default=None),
+    direction: Literal["outbound", "inbound"] | None = Query(default=None),
 ) -> EmailListResponse:
     stmt = (
         select(Email)
@@ -451,6 +560,8 @@ async def list_emails(
     )
     if status is not None:
         stmt = stmt.where(Email.status == status)
+    if direction is not None:
+        stmt = stmt.where(Email.direction == direction)
     if cursor is not None:
         try:
             cur_ts, cur_id = decode_cursor(cursor)

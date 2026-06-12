@@ -61,7 +61,7 @@ class Settings(BaseSettings):
     # ``^[a-z0-9]([a-z0-9-]{0,18}[a-z0-9])?$`` prefix regex.
     hail_mail_from: str = ""
 
-    # Default user/org prefixes used when ``POST /sender-domains`` for
+    # Default user/org prefixes used when ``POST /email-domains`` for
     # ``kind='hail_mail'`` is called without explicit ``local_prefix_user``
     # / ``local_prefix_org``. Two-variable form kept for managed-cloud
     # operators who want to set deploy-time defaults independently of any
@@ -69,6 +69,26 @@ class Settings(BaseSettings):
     # ``^[a-z0-9]([a-z0-9-]{0,18}[a-z0-9])?$``.
     hail_mail_default_user_prefix: str = ""
     hail_mail_default_org_prefix: str = ""
+
+    # Inbound email (SES). Off by default so a misconfigured Lambda can't
+    # write rows into a deployment that hasn't opted into inbound. The
+    # Terraform module under ``infra/terraform/`` provisions S3 bucket,
+    # SES Receipt Rule, and Lambda; HAIL_INBOUND_HMAC_SECRET is shared
+    # between the Lambda env and the API.
+    hail_inbound_enabled: bool = False
+    hail_inbound_bucket: str = ""
+    hail_inbound_hmac_secret: str = ""
+    # Forwarding controls — see docs spec §6.2.
+    hail_forward_max_hops: int = 3
+    hail_forward_rate_per_hour: int = 200
+    # Per-org soft cap on inbound. Beyond it we persist but skip fan-out.
+    hail_inbound_org_rate_per_hour: int = 1000
+    # Self-host convenience — when true, webhook targets pointing at
+    # localhost / RFC-1918 / link-local are accepted. Leave false in prod.
+    hail_webhook_allow_private_networks: bool = False
+    # Fernet key for encrypting webhook secrets at rest. Generate with
+    # `python -c "from hailhq.core.secret_cipher import generate_key; print(generate_key())"`.
+    hail_webhook_secret_key: str = ""
 
     # Media
     livekit_url: str = ""

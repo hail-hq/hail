@@ -101,7 +101,7 @@ def _email_row_stub(**overrides) -> SimpleNamespace:
         "id": uuid4(),
         "organization_id": uuid4(),
         "conversation_id": None,
-        "sender_domain_id": uuid4(),
+        "email_domain_id": uuid4(),
         "from_address": "alice+acme@mail.hail.so",
         "to_addresses": ["dest@example.com"],
         "cc_addresses": None,

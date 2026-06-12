@@ -1,0 +1,14 @@
+From: alice@example.com
+To: alice+acme@mail.hail.so
+Subject: invoice attached
+Message-ID: <attonly@example.com>
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="b1"
+
+--b1
+Content-Type: application/pdf
+Content-Disposition: attachment; filename="invoice.pdf"
+Content-Transfer-Encoding: base64
+
+JVBERi0xLjQK
+--b1--

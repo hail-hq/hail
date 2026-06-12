@@ -1,0 +1,9 @@
+From: weird@example.com
+To: alpha@mail.hail.so
+Subject: bad charset
+Message-ID: <badcharset@example.com>
+MIME-Version: 1.0
+Content-Type: text/plain; charset="x-not-a-real-charset"
+Content-Transfer-Encoding: 8bit
+
+hello with a bad charset label

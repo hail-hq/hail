@@ -354,6 +354,325 @@ gh release create v0.2.0 --repo hail-hq/hail --notes-file CHANGELOG.md
 | `pytest` from repo root fails with `ImportPathMismatchError`                               | Run each suite from its own directory. CI does this; replicate locally.                                                                                                        |
 | First `pip install hail-sdk` from a venv with `hailhq.*` already installed shadows imports | The SDK is standalone by design. If you mix it with internal packages in the same venv, the `hail` package wins for `import hail` (intended); don't co-install for production. |
 
+## Inbound email rollout
+
+End-to-end deployment of the inbound-email milestone (umbrella `v0.5.0`,
+`sdk-v0.3.0`, `cli-v0.5.0`). Five DB stages + infra + tag-driven
+component releases. Stage 1 needs a brief maintenance window (the table
+rename is not online-safe); everything else is online.
+
+### Full deployment order (copy-paste cheat-sheet)
+
+```bash
+# ── 0. Preflight on main ───────────────────────────────────────────────────
+git checkout main && git pull --ff-only origin main
+git log -1 --oneline                                  # confirm merge SHA
+
+# ── 1. Stage-1 cutover: stop API, migrate, deploy new image ────────────────
+docker compose stop api
+docker compose run --rm api alembic upgrade 0006      # rename (DOWNTIME)
+docker compose up -d api                              # new image w/ new code
+hail email domain list                                # 200 smoke
+
+# ── 2. Stage-2 + Stage-3 migrations (online) ───────────────────────────────
+docker compose run --rm api alembic upgrade 0007      # inbound columns + email_attachments
+docker compose run --rm api alembic upgrade 0008      # webhook tables
+docker compose run --rm api alembic current           # → 0008 (head)
+
+# ── 3. Provision AWS infra (Terragrunt reads .env directly) ───────────────
+cd infra
+terragrunt init
+terragrunt plan
+terragrunt apply
+# Capture outputs: inbound_mx_record, inbound_bucket, activate_command, lambda_function_arn
+#
+# First time only: pre-create the state bucket + DynamoDB lock table once
+# per AWS account — terragrunt can't bootstrap them. See the comment
+# block at the top of infra/terragrunt.hcl for the AWS CLI one-liners.
+
+# ── 4. Activate the SES Receipt Rule Set (manual; one-time per region) ─────
+aws sesv2 set-active-receipt-rule-set --rule-set-name hail-inbound-prod-rules
+#  ↑ ONLY safe on accounts with no other active rule set; see Stage 4 below.
+
+# ── 5. Publish the MX record (manual at your DNS provider) ─────────────────
+#  e.g. mail.hail.so  MX  10  inbound-smtp.us-east-1.amazonaws.com
+dig MX mail.hail.so                                   # wait for propagation
+
+# ── 6. Flip the inbound flag in API .env, restart ──────────────────────────
+# Add: HAIL_INBOUND_ENABLED=true
+#      HAIL_INBOUND_BUCKET=<terraform output inbound_bucket>
+#      HAIL_INBOUND_HMAC_SECRET=<same as tfvars>
+#      HAIL_WEBHOOK_SECRET_KEY=$(uv run --directory core python -c "from hailhq.core.secret_cipher import generate_key; print(generate_key())")
+docker compose up -d api                              # picks up new env
+
+# ── 7. Release SDK 0.3.0 (fires release-sdk.yml → PyPI) ────────────────────
+git tag -a sdk-v0.3.0 -m "SDK 0.3.0 — inbound email + webhooks"
+git push origin sdk-v0.3.0
+
+# ── 8. Release CLI 0.5.0 (fires release-cli.yml → GitHub Releases + brew) ──
+git tag -a cli-v0.5.0 -m "CLI 0.5.0 — hail email list/get; webhooks; domain rename"
+git push origin cli-v0.5.0
+
+# ── 9. Umbrella tag marker (no workflow fires) ─────────────────────────────
+git tag -a v0.5.0 -m "Hail 0.5.0 — inbound email milestone"
+git push origin v0.5.0
+gh release create v0.5.0 --notes-file CHANGELOG.md    # optional release page
+
+# ── 10. Smoke test (see "Smoke test sequence" subsection below) ────────────
+hail email domain list
+dig MX mail.hail.so
+# … send a test mail, expect status=received within 30s
+hail email list --direction inbound
+```
+
+**Decoupling note.** Steps 1–6 can ship days ahead of steps 7–9; until
+the flag in step 6 flips, the system is outbound-only and the new CLI
+and SDK haven't gone public yet. If anything looks wrong after step 6,
+you can roll back by setting `HAIL_INBOUND_ENABLED=false` and
+restarting — no migration revert needed, no tag re-spin needed.
+
+Detailed nuance per stage follows.
+
+### Stage 1 — schema rename + new code (coordinated cutover, ~30s downtime)
+
+Migration `0006` renames `sender_domains` → `email_domains`. The new
+app code only references the new name, so the rename and the deploy
+have to land together. There's no incremental path that doesn't add
+view-shim complexity for marginal gain.
+
+```bash
+# Take the API offline.
+docker compose stop api
+
+# Apply 0006 only.
+DATABASE_URL=$DATABASE_URL uv run --directory api alembic upgrade 0006
+
+# Deploy the new image and start.
+docker compose up -d api
+
+# Smoke: should 200, list returns same rows under the new name.
+hail email domain list
+```
+
+Rollback: `alembic downgrade 0005` reverses the rename. The new code
+breaks against the old name, so this only works if you also roll back
+the image.
+
+### Stage 2 — additive inbound schema (online, anytime after stage 1)
+
+Migration `0007` is pure additive: nullable columns on `emails`, new
+`email_attachments` table, action columns on `email_domains`. Old and
+new code both run against it cleanly.
+
+```bash
+DATABASE_URL=$DATABASE_URL uv run --directory api alembic upgrade 0007
+```
+
+**Footgun on large tables.** `emails_inbound_message_id_uq` is a
+partial unique index whose `WHERE` is false for every existing row,
+but Postgres still scans the whole table to build it. If `emails` is
+north of a few million rows, edit the migration to `CREATE INDEX
+CONCURRENTLY` via `op.execute` (alembic's `create_index` runs in a
+transaction, which blocks the concurrent flag).
+
+### Stage 3 — webhook tables (online, anytime after stage 2)
+
+Migration `0008` adds `webhook_subscriptions` + `webhook_deliveries`.
+Pure new tables, no locks on existing tables.
+
+```bash
+DATABASE_URL=$DATABASE_URL uv run --directory api alembic upgrade 0008
+```
+
+At this point the API is ready to receive inbound mail and fire
+webhooks — but nothing's wired up yet on the AWS side, and the inbound
+flag is off, so the system is still effectively outbound-only.
+
+### Stage 4 — provision AWS infrastructure
+
+The bare Terraform module under `infra/terraform/` provisions S3, the SES
+Receipt Rule + Rule Set, the Lambda, and IAM. A Terragrunt wrapper at
+`infra/terragrunt.hcl` adds an S3 remote backend with a DynamoDB lock
+table, and pulls every variable from the repo's `.env` so there's no
+parallel `tfvars` file to keep in sync.
+
+**One-time bootstrap** per AWS account. Terragrunt's state backend
+can't bootstrap itself; create the bucket + lock table once with the
+AWS CLI (the AWS CLI doesn't read `.env` like Terragrunt does, so this
+one step needs the env exported into your shell). Note the state
+backend's region is `HAIL_TERRAFORM_STATE_REGION` — often shared
+across deployments and **separate from `AWS_REGION`** (which is where
+the SES + Lambda + raw-MIME bucket get provisioned). It falls back to
+`AWS_REGION` when unset.
+
+```bash
+set -a; source .env; set +a   # exports AWS_PROFILE, AWS_REGION, HAIL_TERRAFORM_*
+STATE_REGION=${HAIL_TERRAFORM_STATE_REGION:-$AWS_REGION}
+
+aws --profile $AWS_PROFILE s3api create-bucket \
+    --bucket $HAIL_TERRAFORM_STATE_BUCKET \
+    --region $STATE_REGION
+aws --profile $AWS_PROFILE s3api put-bucket-versioning \
+    --bucket $HAIL_TERRAFORM_STATE_BUCKET \
+    --versioning-configuration Status=Enabled
+aws --profile $AWS_PROFILE dynamodb create-table \
+    --table-name $HAIL_TERRAFORM_LOCK_TABLE \
+    --attribute-definitions AttributeName=LockID,AttributeType=S \
+    --key-schema AttributeName=LockID,KeyType=HASH \
+    --billing-mode PAY_PER_REQUEST \
+    --region $STATE_REGION
+```
+
+**Each deploy.** Generate (or rotate) the shared HMAC secret in `.env`
+ahead of time — the same value is what the API uses to verify Lambda
+POSTs:
+
+```bash
+# In .env:
+#   HAIL_INBOUND_HMAC_SECRET=<openssl rand -hex 32 output>
+#   HAIL_API_URL=https://api.hail.so          # the URL the Lambda calls
+
+cd infra
+terragrunt init                # Terragrunt reads .env via run_cmd internally;
+terragrunt plan                # no manual `source .env` needed here.
+terragrunt apply
+```
+
+Outputs to capture:
+
+- `inbound_mx_record` — publish at DNS for `HAIL_MAIL_BASE_DOMAIN`.
+- `inbound_bucket` — goes into `HAIL_INBOUND_BUCKET` on the API.
+- `activate_command` — the `aws sesv2 set-active-receipt-rule-set ...`
+  to run after apply.
+
+**Plain Terraform alternative.** The bare module under `infra/terraform/`
+still works with `terraform apply -var ...` if you'd rather skip
+Terragrunt. The Terragrunt wrapper is opinionated about remote state +
+`.env`-driven inputs; the underlying module is provider-vanilla.
+
+**Manual step: activate the receipt rule set.** Terraform creates the
+rule set but does not activate it (SES allows one active rule set per
+region per account, and activation is destructive against any
+existing one):
+
+```bash
+# Greenfield AWS account:
+aws sesv2 set-active-receipt-rule-set --rule-set-name hail-inbound-prod-rules
+
+# Account with existing receipt rules: import the existing rule set
+# into Terraform state, merge Hail's rule into it via the AWS console,
+# or skip the module's aws_ses_receipt_rule resource entirely.
+```
+
+**Manual step: publish the MX record.** Whatever `inbound_mx_record`
+output prints, e.g.:
+
+```
+mail.hail.so  MX  10  inbound-smtp.us-east-1.amazonaws.com
+```
+
+DNS propagation is typically minutes; SES won't deliver until the
+record is live.
+
+### Stage 5 — flip the inbound flag
+
+Add to the API service `.env`:
+
+```bash
+HAIL_INBOUND_ENABLED=true
+HAIL_INBOUND_BUCKET=<terraform output>
+HAIL_INBOUND_HMAC_SECRET=<same value Terraform got>
+HAIL_WEBHOOK_SECRET_KEY=<generate with `uv run --directory core python -c "from hailhq.core.secret_cipher import generate_key; print(generate_key())"`>
+```
+
+Restart the API. Until this step, `POST /internal/ses-events` returns
+503 even if the Lambda is wired — so steps 1–4 can land days ahead of
+step 5 and you keep a free rollback window (no migration revert
+required to disable inbound).
+
+### Smoke test sequence
+
+After stage 5, in order:
+
+1. **Routing exists.** Pick an org you control. From the console or
+   the API, verify the hail-mail row exists and `inbound_enabled=true`:
+
+   ```bash
+   hail email domain list
+   ```
+
+2. **MX is live.** From any host with `dig`:
+
+   ```bash
+   dig MX mail.hail.so
+   # Should answer with inbound-smtp.<region>.amazonaws.com
+   ```
+
+3. **Round-trip a test mail.** Send to the org's hail-mail address
+   from any external account. Within 30s:
+
+   ```bash
+   hail email list --direction inbound
+   # Should show the new row with status=received.
+   ```
+
+4. **Raw + attachment access.** If the test mail had attachments,
+   the listing should include their metadata; fetching:
+
+   ```bash
+   hail email get <id> | jq .raw_url
+   curl -L -H "Authorization: Bearer $HAIL_API_KEY" "$RAW_URL" > out.eml
+   ```
+
+   should download the raw MIME bytes.
+
+5. **Forwarding** (only if `forward_to` is configured on the domain):
+   the forward target should receive a copy from
+   `forwarder+<org>@mail.hail.so` with the original sender in
+   `Reply-To:`. Check `hail email list --direction outbound` — a
+   row with `metadata.forwarded_from = <inbound id>` should land
+   in `status=sent`.
+
+6. **Webhook delivery** (only if a webhook is configured): the
+   target should receive a signed POST. Verify the signature header
+   parses, the body shape matches the documented event, and the
+   delivery row reaches `status=succeeded`:
+
+   ```bash
+   hail webhooks deliveries <subscription_id>
+   ```
+
+7. **Bounce/complaint plumbing.** Send a test bounce by addressing a
+   mail to `bounce@simulator.amazonses.com` from the verified sender;
+   SES generates a bounce notification. The matching outbound row
+   should flip to `status=bounced` within a few seconds.
+
+8. **Rate cap.** Set `email_domains.forward_rate_per_hour=1`, then
+   send two inbounds with forwarding configured. The second's
+   `suppressed_reasons` should include `forward_rate_limit`.
+
+### What can go wrong (failure modes I've seen first-hand or modeled)
+
+- **DNS not propagated.** SES silently drops mail to a domain whose
+  MX is wrong. `dig MX` is the first diagnostic.
+- **Receipt rule set not activated.** SES accepts mail but doesn't
+  route it; no S3 object appears. Re-check `aws sesv2
+describe-active-receipt-rule-set`.
+- **SES sandbox.** New SES accounts only accept mail from verified
+  addresses. The mail's `From:` must be on a verified SES identity
+  during sandbox.
+- **Private webhook target rejected.** `httpx_post` blocks RFC-1918
+  addresses by default. Self-hosters with internal webhook targets
+  set `HAIL_WEBHOOK_ALLOW_PRIVATE_NETWORKS=true`.
+- **Lambda → API connection refused.** Check the Lambda's
+  CloudWatch logs (`/aws/lambda/hail-inbound-prod-ingest`); the
+  POST URL must be reachable from AWS over the public internet.
+- **Forward loops.** Forwarding to a target on
+  `HAIL_MAIL_BASE_DOMAIN` is rejected; forwarding to a target whose
+  auto-responder replies to the forwarder will get caught by the
+  3-hop counter. If it isn't, raise `HAIL_FORWARD_MAX_HOPS` or
+  blacklist the target by clearing `forward_to`.
+
 ## Carry-forwards / open work
 
 (See `CHANGELOG.md` "Deferred to v1.x" for the canonical list.)

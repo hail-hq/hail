@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"strings"
 	"text/tabwriter"
 
 	"github.com/google/uuid"
@@ -15,17 +14,16 @@ import (
 	"github.com/hail-hq/hail/cli/internal/client"
 )
 
-// newSenderDomainCmd builds the `email sender-domain` subtree.
+// newEmailDomainCmd builds the `email domain` subtree.
 //
 // Self-hosters don't have the managed-cloud web console, so the CLI is
 // the only way for them to register a hail-mail row or a custom domain.
 // Subcommand verbs follow the API: register, list, get, verify, delete.
-func newSenderDomainCmd(opts *Options) *cobra.Command {
+func newEmailDomainCmd(opts *Options) *cobra.Command {
 	cmd := &cobra.Command{
-		Use:     "sender-domain",
-		Aliases: []string{"sd"},
-		Short:   "Manage email sender-domain identities",
-		Long: `hail email sender-domain — manage the identities email is sent from.
+		Use:   "domain",
+		Short: "Manage email domain identities (send + receive)",
+		Long: `hail email domain — manage the identities email is sent from and received on.
 
 Two flavors of identity (POST body 'kind' field):
 
@@ -35,17 +33,17 @@ Two flavors of identity (POST body 'kind' field):
               then call 'verify' to flip the row to verified.
 
 Subcommands:
-  register    Register a new sender domain (hail_mail or custom).
-  list        List org-scoped sender domains.
-  get         Fetch one sender domain by id.
+  register    Register a new email domain (hail_mail or custom).
+  list        List org-scoped email domains.
+  get         Fetch one email domain by id.
   verify      Re-poll the email provider for a custom row's DKIM status.
-  delete      Remove a sender domain (custom rows are deleted in SES too).`,
+  delete      Remove an email domain (custom rows are deleted in SES too).`,
 	}
-	cmd.AddCommand(newSenderDomainRegisterCmd(opts))
-	cmd.AddCommand(newSenderDomainListCmd(opts))
-	cmd.AddCommand(newSenderDomainGetCmd(opts))
-	cmd.AddCommand(newSenderDomainVerifyCmd(opts))
-	cmd.AddCommand(newSenderDomainDeleteCmd(opts))
+	cmd.AddCommand(newEmailDomainRegisterCmd(opts))
+	cmd.AddCommand(newEmailDomainListCmd(opts))
+	cmd.AddCommand(newEmailDomainGetCmd(opts))
+	cmd.AddCommand(newEmailDomainVerifyCmd(opts))
+	cmd.AddCommand(newEmailDomainDeleteCmd(opts))
 	return cmd
 }
 
@@ -53,7 +51,7 @@ Subcommands:
 // register
 // --------------------------------------------------------------------------- //
 
-type senderDomainRegisterFlags struct {
+type emailDomainRegisterFlags struct {
 	kind       string
 	domain     string
 	userPrefix string
@@ -61,26 +59,26 @@ type senderDomainRegisterFlags struct {
 	idemKey    string
 }
 
-func newSenderDomainRegisterCmd(opts *Options) *cobra.Command {
-	f := &senderDomainRegisterFlags{}
+func newEmailDomainRegisterCmd(opts *Options) *cobra.Command {
+	f := &emailDomainRegisterFlags{}
 	cmd := &cobra.Command{
 		Use:   "register",
-		Short: "Register a new sender domain",
-		Long: `hail email sender-domain register — register a hail_mail or custom domain.
+		Short: "Register a new email domain",
+		Long: `hail email domain register — register a hail_mail or custom domain.
 
 Examples:
   # Hail-mail using server env defaults (HAIL_MAIL_DEFAULT_*_PREFIX):
-  hail email sender-domain register --kind hail_mail
+  hail email domain register --kind hail_mail
 
   # Hail-mail with explicit prefixes:
-  hail email sender-domain register --kind hail_mail \
+  hail email domain register --kind hail_mail \
       --local-prefix-user alice --local-prefix-org acme
 
   # Custom domain (returns DKIM CNAMEs to publish):
-  hail email sender-domain register --kind custom --domain acme.com`,
+  hail email domain register --kind custom --domain acme.com`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			return runSenderDomainRegister(cmd.Context(), opts, f)
+			return runEmailDomainRegister(cmd.Context(), opts, f)
 		},
 	}
 	cmd.Flags().StringVar(&f.kind, "kind", "", "Identity kind: hail_mail or custom (required)")
@@ -94,15 +92,15 @@ Examples:
 	return cmd
 }
 
-func runSenderDomainRegister(
-	ctx context.Context, opts *Options, f *senderDomainRegisterFlags,
+func runEmailDomainRegister(
+	ctx context.Context, opts *Options, f *emailDomainRegisterFlags,
 ) error {
 	if f.kind != "hail_mail" && f.kind != "custom" {
 		return errors.New("--kind must be 'hail_mail' or 'custom'")
 	}
 
-	body := client.SenderDomainCreate{
-		Kind:            client.SenderDomainCreateKind(f.kind),
+	body := client.EmailDomainCreate{
+		Kind:            client.EmailDomainCreateKind(f.kind),
 		Domain:          strPtr(f.domain),
 		LocalPrefixUser: strPtr(f.userPrefix),
 		LocalPrefixOrg:  strPtr(f.orgPrefix),
@@ -118,37 +116,37 @@ func runSenderDomainRegister(
 		return err
 	}
 
-	resp, err := apiClient.CreateSenderDomainSenderDomainsPostWithResponse(
-		ctx, &client.CreateSenderDomainSenderDomainsPostParams{}, body,
+	resp, err := apiClient.CreateEmailDomainEmailDomainsPostWithResponse(
+		ctx, &client.CreateEmailDomainEmailDomainsPostParams{}, body,
 	)
 	if err != nil {
-		return fmt.Errorf("sender-domain API: %w", err)
+		return fmt.Errorf("email-domain API: %w", err)
 	}
 	if resp.HTTPResponse.StatusCode != http.StatusCreated || resp.JSON201 == nil {
 		return apiError(resp.HTTPResponse.StatusCode, resp.Body)
 	}
 
-	return printSenderDomain(opts, resp.JSON201)
+	return printEmailDomain(opts, resp.JSON201)
 }
 
 // --------------------------------------------------------------------------- //
 // list
 // --------------------------------------------------------------------------- //
 
-type senderDomainListFlags struct {
+type emailDomainListFlags struct {
 	limit  int
 	cursor string
 }
 
-func newSenderDomainListCmd(opts *Options) *cobra.Command {
-	f := &senderDomainListFlags{}
+func newEmailDomainListCmd(opts *Options) *cobra.Command {
+	f := &emailDomainListFlags{}
 	cmd := &cobra.Command{
 		Use:     "list",
 		Aliases: []string{"ls"},
-		Short:   "List sender domains for the calling org",
+		Short:   "List email domains for the calling org",
 		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			return runSenderDomainList(cmd.Context(), opts, f)
+			return runEmailDomainList(cmd.Context(), opts, f)
 		},
 	}
 	cmd.Flags().IntVar(&f.limit, "limit", 50, "Page size (1..200)")
@@ -156,71 +154,71 @@ func newSenderDomainListCmd(opts *Options) *cobra.Command {
 	return cmd
 }
 
-func runSenderDomainList(
-	ctx context.Context, opts *Options, f *senderDomainListFlags,
+func runEmailDomainList(
+	ctx context.Context, opts *Options, f *emailDomainListFlags,
 ) error {
 	apiClient, err := opts.newClient()
 	if err != nil {
 		return err
 	}
-	params := &client.ListSenderDomainsSenderDomainsGetParams{
+	params := &client.ListEmailDomainsEmailDomainsGetParams{
 		Limit:  &f.limit,
 		Cursor: strPtr(f.cursor),
 	}
-	resp, err := apiClient.ListSenderDomainsSenderDomainsGetWithResponse(ctx, params)
+	resp, err := apiClient.ListEmailDomainsEmailDomainsGetWithResponse(ctx, params)
 	if err != nil {
-		return fmt.Errorf("sender-domain API: %w", err)
+		return fmt.Errorf("email-domain API: %w", err)
 	}
 	if resp.HTTPResponse.StatusCode != http.StatusOK || resp.JSON200 == nil {
 		return apiError(resp.HTTPResponse.StatusCode, resp.Body)
 	}
-	return printSenderDomainList(opts, resp.JSON200)
+	return printEmailDomainList(opts, resp.JSON200)
 }
 
 // --------------------------------------------------------------------------- //
 // get
 // --------------------------------------------------------------------------- //
 
-func newSenderDomainGetCmd(opts *Options) *cobra.Command {
+func newEmailDomainGetCmd(opts *Options) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "get <id>",
-		Short: "Fetch one sender domain by id",
+		Short: "Fetch one email domain by id",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			id, err := uuid.Parse(args[0])
 			if err != nil {
 				return fmt.Errorf("invalid id: %w", err)
 			}
-			return runSenderDomainGet(cmd.Context(), opts, id)
+			return runEmailDomainGet(cmd.Context(), opts, id)
 		},
 	}
 	return cmd
 }
 
-func runSenderDomainGet(ctx context.Context, opts *Options, id uuid.UUID) error {
+func runEmailDomainGet(ctx context.Context, opts *Options, id uuid.UUID) error {
 	apiClient, err := opts.newClient()
 	if err != nil {
 		return err
 	}
-	resp, err := apiClient.GetSenderDomainSenderDomainsDomainIdGetWithResponse(
+	resp, err := apiClient.GetEmailDomainEmailDomainsDomainIdGetWithResponse(
 		ctx,
 		openapi_types.UUID(id),
-		&client.GetSenderDomainSenderDomainsDomainIdGetParams{},
+		&client.GetEmailDomainEmailDomainsDomainIdGetParams{},
 	)
 	if err != nil {
-		return fmt.Errorf("sender-domain API: %w", err)
+		return fmt.Errorf("email-domain API: %w", err)
 	}
 	if resp.HTTPResponse.StatusCode != http.StatusOK || resp.JSON200 == nil {
 		return apiError(resp.HTTPResponse.StatusCode, resp.Body)
 	}
-	return printSenderDomain(opts, resp.JSON200)
+	return printEmailDomain(opts, resp.JSON200)
 }
 
 // --------------------------------------------------------------------------- //
 // verify
 // --------------------------------------------------------------------------- //
 
-func newSenderDomainVerifyCmd(opts *Options) *cobra.Command {
+func newEmailDomainVerifyCmd(opts *Options) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "verify <id>",
 		Short: "Re-poll the email provider for a custom row's verification status",
@@ -230,64 +228,64 @@ func newSenderDomainVerifyCmd(opts *Options) *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("invalid id: %w", err)
 			}
-			return runSenderDomainVerify(cmd.Context(), opts, id)
+			return runEmailDomainVerify(cmd.Context(), opts, id)
 		},
 	}
 	return cmd
 }
 
-func runSenderDomainVerify(ctx context.Context, opts *Options, id uuid.UUID) error {
+func runEmailDomainVerify(ctx context.Context, opts *Options, id uuid.UUID) error {
 	apiClient, err := opts.newClient()
 	if err != nil {
 		return err
 	}
-	resp, err := apiClient.VerifySenderDomainSenderDomainsDomainIdVerifyPostWithResponse(
+	resp, err := apiClient.VerifyEmailDomainEmailDomainsDomainIdVerifyPostWithResponse(
 		ctx,
 		openapi_types.UUID(id),
-		&client.VerifySenderDomainSenderDomainsDomainIdVerifyPostParams{},
+		&client.VerifyEmailDomainEmailDomainsDomainIdVerifyPostParams{},
 	)
 	if err != nil {
-		return fmt.Errorf("sender-domain API: %w", err)
+		return fmt.Errorf("email-domain API: %w", err)
 	}
 	if resp.HTTPResponse.StatusCode != http.StatusOK || resp.JSON200 == nil {
 		return apiError(resp.HTTPResponse.StatusCode, resp.Body)
 	}
-	return printSenderDomain(opts, resp.JSON200)
+	return printEmailDomain(opts, resp.JSON200)
 }
 
 // --------------------------------------------------------------------------- //
 // delete
 // --------------------------------------------------------------------------- //
 
-func newSenderDomainDeleteCmd(opts *Options) *cobra.Command {
+func newEmailDomainDeleteCmd(opts *Options) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "delete <id>",
 		Aliases: []string{"rm"},
-		Short:   "Delete a sender domain (and the SES identity for custom rows)",
+		Short:   "Delete an email domain (and the SES identity for custom rows)",
 		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			id, err := uuid.Parse(args[0])
 			if err != nil {
 				return fmt.Errorf("invalid id: %w", err)
 			}
-			return runSenderDomainDelete(cmd.Context(), opts, id)
+			return runEmailDomainDelete(cmd.Context(), opts, id)
 		},
 	}
 	return cmd
 }
 
-func runSenderDomainDelete(ctx context.Context, opts *Options, id uuid.UUID) error {
+func runEmailDomainDelete(ctx context.Context, opts *Options, id uuid.UUID) error {
 	apiClient, err := opts.newClient()
 	if err != nil {
 		return err
 	}
-	resp, err := apiClient.DeleteSenderDomainSenderDomainsDomainIdDelete(
+	resp, err := apiClient.DeleteEmailDomainEmailDomainsDomainIdDelete(
 		ctx,
 		openapi_types.UUID(id),
-		&client.DeleteSenderDomainSenderDomainsDomainIdDeleteParams{},
+		&client.DeleteEmailDomainEmailDomainsDomainIdDeleteParams{},
 	)
 	if err != nil {
-		return fmt.Errorf("sender-domain API: %w", err)
+		return fmt.Errorf("email-domain API: %w", err)
 	}
 	if resp.StatusCode != http.StatusNoContent {
 		// Bodyless DELETE — drain into a buffer for the error message.
@@ -297,7 +295,7 @@ func runSenderDomainDelete(ctx context.Context, opts *Options, id uuid.UUID) err
 		return apiError(resp.StatusCode, buf[:n])
 	}
 	_ = resp.Body.Close()
-	fmt.Fprintf(opts.Stdout, "✓ Sender domain %s deleted\n", id)
+	fmt.Fprintf(opts.Stdout, "✓ Email domain %s deleted\n", id)
 	return nil
 }
 
@@ -305,11 +303,11 @@ func runSenderDomainDelete(ctx context.Context, opts *Options, id uuid.UUID) err
 // printers
 // --------------------------------------------------------------------------- //
 
-func printSenderDomain(opts *Options, sd *client.SenderDomainResponse) error {
+func printEmailDomain(opts *Options, sd *client.EmailDomainResponse) error {
 	if opts.JSON {
 		return printJSON(opts.Stdout, sd)
 	}
-	fmt.Fprintf(opts.Stdout, "✓ Sender domain %s: %s\n", string(sd.Kind), sd.Id.String())
+	fmt.Fprintf(opts.Stdout, "✓ Email domain %s: %s\n", string(sd.Kind), sd.Id.String())
 	fmt.Fprintf(opts.Stdout, "  Domain:       %s\n", sd.Domain)
 	if sd.LocalPrefixUser != nil && *sd.LocalPrefixUser != "" {
 		fmt.Fprintf(opts.Stdout, "  User prefix:  %s\n", *sd.LocalPrefixUser)
@@ -334,12 +332,12 @@ func printSenderDomain(opts *Options, sd *client.SenderDomainResponse) error {
 	return nil
 }
 
-func printSenderDomainList(opts *Options, body *client.SenderDomainListResponse) error {
+func printEmailDomainList(opts *Options, body *client.EmailDomainListResponse) error {
 	if opts.JSON {
 		return printJSON(opts.Stdout, body)
 	}
 	if len(body.Items) == 0 {
-		fmt.Fprintln(opts.Stdout, "(no sender domains)")
+		fmt.Fprintln(opts.Stdout, "(no email domains)")
 		return nil
 	}
 	w := tabwriter.NewWriter(opts.Stdout, 0, 0, 2, ' ', 0)
@@ -359,6 +357,3 @@ func printSenderDomainList(opts *Options, body *client.SenderDomainListResponse)
 	}
 	return nil
 }
-
-// _ keeps strings linkable even if all string-using helpers later move out.
-var _ = strings.TrimSpace

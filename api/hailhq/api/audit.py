@@ -1,6 +1,6 @@
 """Shared audit-log writer.
 
-Used by every mutating route (calls, emails, sender-domains). The write
+Used by every mutating route (calls, emails, email-domains). The write
 runs in its own session (``session_scope()``) so a logging failure can
 never roll back the user-facing operation — the audit trail is a
 best-effort safety net, never a correctness guarantee.
@@ -12,7 +12,7 @@ Each entry pins:
   (``HAIL_API_KEY`` path) where no row exists in the auth backend's
   ``api_keys`` table.
 * ``action`` — dotted verb (``call.create``, ``email.create``,
-  ``sender_domain.patch``). Use the same vocabulary as the
+  ``email_domain.patch``). Use the same vocabulary as the
   ``resource_type`` so callers can filter on either.
 * ``resource_type`` / ``resource_id`` — the row touched.
 * ``payload`` — arbitrary JSON; keep it small and grep-able. Don't

@@ -2,9 +2,8 @@ openapi: 3.1.0
 info:
   title: Hail
   description:
-    "Universal communication platform for AI agents.\n\nThis file is the\
-    \ source of truth for the Go CLI. Regenerate it after\nchanging API routes \u2014\
-    \ see docs/contributing.md.\n"
+    "Universal communication platform for AI agents.\n\nThis file is the source\
+    \ of truth for the Go CLI. Regenerate it after\nchanging API routes \u2014 see docs/contributing.md.\n"
   version: 0.1.0
 paths:
   /calls:
@@ -230,9 +229,21 @@ paths:
                   - failed
                   - bounced
                   - complained
+                  - received
                 type: string
               - type: "null"
             title: Status
+        - name: direction
+          in: query
+          required: false
+          schema:
+            anyOf:
+              - enum:
+                  - outbound
+                  - inbound
+                type: string
+              - type: "null"
+            title: Direction
         - name: authorization
           in: header
           required: false
@@ -283,6 +294,83 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/EmailResponse"
+        "422":
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
+  /emails/{email_id}/raw:
+    get:
+      tags:
+        - emails
+      summary: Get Email Raw
+      description: "302 \u2192 presigned S3 URL for the raw inbound MIME (404 for outbound)."
+      operationId: get_email_raw_emails__email_id__raw_get
+      parameters:
+        - name: email_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+            title: Email Id
+        - name: authorization
+          in: header
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            title: Authorization
+      responses:
+        "200":
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        "422":
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
+  /emails/{email_id}/attachments/{attachment_id}:
+    get:
+      tags:
+        - emails
+      summary: Get Email Attachment
+      description: "302 \u2192 presigned S3 URL for one attachment."
+      operationId: get_email_attachment_emails__email_id__attachments__attachment_id__get
+      parameters:
+        - name: email_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+            title: Email Id
+        - name: attachment_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+            title: Attachment Id
+        - name: authorization
+          in: header
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            title: Authorization
+      responses:
+        "200":
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
         "422":
           description: Validation Error
           content:
@@ -350,12 +438,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HTTPValidationError"
-  /sender-domains:
+  /email-domains:
     post:
       tags:
-        - sender-domains
-      summary: Create Sender Domain
-      operationId: create_sender_domain_sender_domains_post
+        - email-domains
+      summary: Create Email Domain
+      operationId: create_email_domain_email_domains_post
       parameters:
         - name: authorization
           in: header
@@ -370,14 +458,14 @@ paths:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/SenderDomainCreate"
+              $ref: "#/components/schemas/EmailDomainCreate"
       responses:
         "201":
           description: Successful Response
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/SenderDomainResponse"
+                $ref: "#/components/schemas/EmailDomainResponse"
         "422":
           description: Validation Error
           content:
@@ -386,9 +474,9 @@ paths:
                 $ref: "#/components/schemas/HTTPValidationError"
     get:
       tags:
-        - sender-domains
-      summary: List Sender Domains
-      operationId: list_sender_domains_sender_domains_get
+        - email-domains
+      summary: List Email Domains
+      operationId: list_email_domains_email_domains_get
       parameters:
         - name: cursor
           in: query
@@ -421,19 +509,19 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/SenderDomainListResponse"
+                $ref: "#/components/schemas/EmailDomainListResponse"
         "422":
           description: Validation Error
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/HTTPValidationError"
-  /sender-domains/{domain_id}:
+  /email-domains/{domain_id}:
     get:
       tags:
-        - sender-domains
-      summary: Get Sender Domain
-      operationId: get_sender_domain_sender_domains__domain_id__get
+        - email-domains
+      summary: Get Email Domain
+      operationId: get_email_domain_email_domains__domain_id__get
       parameters:
         - name: domain_id
           in: path
@@ -456,7 +544,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/SenderDomainResponse"
+                $ref: "#/components/schemas/EmailDomainResponse"
         "422":
           description: Validation Error
           content:
@@ -465,17 +553,16 @@ paths:
                 $ref: "#/components/schemas/HTTPValidationError"
     patch:
       tags:
-        - sender-domains
-      summary: Patch Sender Domain
+        - email-domains
+      summary: Patch Email Domain
       description:
-        "Edit the user/org prefix on a hail-mail row.\n\nThe managed-cloud\
-        \ console writes here when an org admin changes the\nvisible hail-mail address.\
-        \ Self-hosted operators usually skip this\nendpoint and set the env-var defaults\
-        \ instead, but the route works\nthe same way on both surfaces.\n\nOnly ``kind='hail_mail'``\
-        \ rows accept edits \u2014 there's nothing in a\ncustom-domain row that the\
-        \ tenant should be free to mutate via this\nsurface (DNS, DKIM, verification\
-        \ state are provider-driven)."
-      operationId: patch_sender_domain_sender_domains__domain_id__patch
+        "Edit hail-mail prefixes and/or inbound action settings.\n\nTwo modes,\
+        \ mutually compatible:\n\n* **Prefix edit** (``local_prefix_user`` / ``local_prefix_org``):\n\
+        \  hail_mail rows only. The managed-cloud console writes here when\n  an org admin\
+        \ changes the visible hail-mail address.\n* **Inbound action edit** (``inbound_enabled``\
+        \ / ``forward_to`` /\n  ``webhook_url`` / ``forward_rate_per_hour``): any row kind.\n\
+        \  Setting ``webhook_url`` mints a fresh secret and returns it once\n  in ``webhook_secret``."
+      operationId: patch_email_domain_email_domains__domain_id__patch
       parameters:
         - name: domain_id
           in: path
@@ -497,14 +584,14 @@ paths:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/SenderDomainPatch"
+              $ref: "#/components/schemas/EmailDomainPatch"
       responses:
         "200":
           description: Successful Response
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/SenderDomainResponse"
+                $ref: "#/components/schemas/EmailDomainResponse"
         "422":
           description: Validation Error
           content:
@@ -513,9 +600,9 @@ paths:
                 $ref: "#/components/schemas/HTTPValidationError"
     delete:
       tags:
-        - sender-domains
-      summary: Delete Sender Domain
-      operationId: delete_sender_domain_sender_domains__domain_id__delete
+        - email-domains
+      summary: Delete Email Domain
+      operationId: delete_email_domain_email_domains__domain_id__delete
       parameters:
         - name: domain_id
           in: path
@@ -541,17 +628,13 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HTTPValidationError"
-  /sender-domains/{domain_id}/verify:
+  /email-domains/{domain_id}/rotate-webhook-secret:
     post:
       tags:
-        - sender-domains
-      summary: Verify Sender Domain
-      description:
-        "Re-poll the email provider for the current verification status.\n\
-        \nOn-demand only \u2014 there is no background poller in v1. Operators /\n\
-        tenants hit this after publishing DNS to flip the row to ``verified``.\nHail-mail\
-        \ rows are no-ops (they're already verified by construction)."
-      operationId: verify_sender_domain_sender_domains__domain_id__verify_post
+        - email-domains
+      summary: Rotate Webhook Secret
+      description: Rotate the per-domain webhook secret. Returns the new plaintext once.
+      operationId: rotate_webhook_secret_email_domains__domain_id__rotate_webhook_secret_post
       parameters:
         - name: domain_id
           in: path
@@ -574,7 +657,359 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/SenderDomainResponse"
+                $ref: "#/components/schemas/WebhookSecretResponse"
+        "422":
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
+  /email-domains/{domain_id}/verify:
+    post:
+      tags:
+        - email-domains
+      summary: Verify Email Domain
+      description:
+        "Re-poll the email provider for the current verification status.\n\nOn-demand\
+        \ only \u2014 there is no background poller in v1. Operators /\ntenants hit this after\
+        \ publishing DNS to flip the row to ``verified``.\nHail-mail rows are no-ops (they're\
+        \ already verified by construction)."
+      operationId: verify_email_domain_email_domains__domain_id__verify_post
+      parameters:
+        - name: domain_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+            title: Domain Id
+        - name: authorization
+          in: header
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            title: Authorization
+      responses:
+        "200":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EmailDomainResponse"
+        "422":
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
+  /webhooks:
+    post:
+      tags:
+        - webhooks
+      summary: Create Subscription
+      operationId: create_subscription_webhooks_post
+      parameters:
+        - name: authorization
+          in: header
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            title: Authorization
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WebhookSubscriptionCreate"
+      responses:
+        "201":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WebhookSubscriptionResponse"
+        "422":
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
+    get:
+      tags:
+        - webhooks
+      summary: List Subscriptions
+      operationId: list_subscriptions_webhooks_get
+      parameters:
+        - name: cursor
+          in: query
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            title: Cursor
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            maximum: 200
+            minimum: 1
+            default: 50
+            title: Limit
+        - name: authorization
+          in: header
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            title: Authorization
+      responses:
+        "200":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WebhookSubscriptionListResponse"
+        "422":
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
+  /webhooks/{sub_id}:
+    get:
+      tags:
+        - webhooks
+      summary: Get Subscription
+      operationId: get_subscription_webhooks__sub_id__get
+      parameters:
+        - name: sub_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+            title: Sub Id
+        - name: authorization
+          in: header
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            title: Authorization
+      responses:
+        "200":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WebhookSubscriptionResponse"
+        "422":
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
+    patch:
+      tags:
+        - webhooks
+      summary: Patch Subscription
+      operationId: patch_subscription_webhooks__sub_id__patch
+      parameters:
+        - name: sub_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+            title: Sub Id
+        - name: authorization
+          in: header
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            title: Authorization
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WebhookSubscriptionPatch"
+      responses:
+        "200":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WebhookSubscriptionResponse"
+        "422":
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
+    delete:
+      tags:
+        - webhooks
+      summary: Delete Subscription
+      operationId: delete_subscription_webhooks__sub_id__delete
+      parameters:
+        - name: sub_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+            title: Sub Id
+        - name: authorization
+          in: header
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            title: Authorization
+      responses:
+        "204":
+          description: Successful Response
+        "422":
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
+  /webhooks/{sub_id}/rotate-secret:
+    post:
+      tags:
+        - webhooks
+      summary: Rotate Secret
+      operationId: rotate_secret_webhooks__sub_id__rotate_secret_post
+      parameters:
+        - name: sub_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+            title: Sub Id
+        - name: authorization
+          in: header
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            title: Authorization
+      responses:
+        "200":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WebhookSubscriptionResponse"
+        "422":
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
+  /webhooks/{sub_id}/deliveries:
+    get:
+      tags:
+        - webhooks
+      summary: List Deliveries
+      operationId: list_deliveries_webhooks__sub_id__deliveries_get
+      parameters:
+        - name: sub_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+            title: Sub Id
+        - name: cursor
+          in: query
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            title: Cursor
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            maximum: 200
+            minimum: 1
+            default: 50
+            title: Limit
+        - name: authorization
+          in: header
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            title: Authorization
+      responses:
+        "200":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WebhookDeliveryListResponse"
+        "422":
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
+  /webhooks/{sub_id}/deliveries/{delivery_id}/redeliver:
+    post:
+      tags:
+        - webhooks
+      summary: Redeliver
+      operationId: redeliver_webhooks__sub_id__deliveries__delivery_id__redeliver_post
+      parameters:
+        - name: sub_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+            title: Sub Id
+        - name: delivery_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+            title: Delivery Id
+        - name: authorization
+          in: header
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            title: Authorization
+      responses:
+        "200":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WebhookDeliveryResponse"
         "422":
           description: Validation Error
           content:
@@ -810,6 +1245,41 @@ components:
         - value
       title: DkimRecordSchema
       description: One DNS CNAME the tenant must publish before SES verifies the domain.
+    EmailAttachmentResponse:
+      properties:
+        id:
+          type: string
+          format: uuid
+          title: Id
+        filename:
+          type: string
+          title: Filename
+        content_type:
+          type: string
+          title: Content Type
+        size_bytes:
+          type: integer
+          title: Size Bytes
+        content_id:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Content Id
+        url:
+          type: string
+          title: Url
+      type: object
+      required:
+        - id
+        - filename
+        - content_type
+        - size_bytes
+        - url
+      title: EmailAttachmentResponse
+      description:
+        "One inbound MIME attachment as exposed to API consumers.\n\n``url`` is\
+        \ the stable Hail API endpoint that 302-redirects to a\npresigned S3 URL on access\
+        \ \u2014 see GET /emails/{id}/attachments/{aid}."
     EmailCreate:
       properties:
         from:
@@ -873,6 +1343,228 @@ components:
         - to
         - subject
       title: EmailCreate
+    EmailDomainCreate:
+      properties:
+        kind:
+          type: string
+          enum:
+            - hail_mail
+            - custom
+          title: Kind
+        domain:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Domain
+        local_prefix_user:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Local Prefix User
+        local_prefix_org:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Local Prefix Org
+      additionalProperties: false
+      type: object
+      required:
+        - kind
+      title: EmailDomainCreate
+      description: "Request body for POST /email-domains.
+
+
+        For ``kind='hail_mail'`` ``domain`` is omitted; the server composes
+
+        the full address as ``<local_prefix_user>+<local_prefix_org>@<base>``.
+
+        Both prefixes are optional in the body and fall back to the
+
+        ``HAIL_MAIL_DEFAULT_*_PREFIX`` env vars; the server returns 503 if
+
+        neither is supplied. For ``kind='custom'`` ``domain`` is required and
+
+        the prefix fields must be omitted."
+    EmailDomainListResponse:
+      properties:
+        items:
+          items:
+            $ref: "#/components/schemas/EmailDomainResponse"
+          type: array
+          title: Items
+        next_cursor:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Next Cursor
+      type: object
+      required:
+        - items
+      title: EmailDomainListResponse
+    EmailDomainPatch:
+      properties:
+        local_prefix_user:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Local Prefix User
+        local_prefix_org:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Local Prefix Org
+        inbound_enabled:
+          anyOf:
+            - type: boolean
+            - type: "null"
+          title: Inbound Enabled
+        forward_to:
+          anyOf:
+            - items:
+                type: string
+              type: array
+            - type: "null"
+          title: Forward To
+        webhook_url:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Webhook Url
+        forward_rate_per_hour:
+          anyOf:
+            - type: integer
+            - type: "null"
+          title: Forward Rate Per Hour
+      additionalProperties: false
+      type: object
+      title: EmailDomainPatch
+      description:
+        "Body for PATCH /email-domains/{id}.\n\nTwo clusters of mutable fields:\n\
+        \n* Hail-mail addressing \u2014 the user/org prefix pair (only valid on\n  ``kind='hail_mail'``\
+        \ rows; the handler returns 422 if a tenant tries\n  to PATCH these on a custom row).\n\
+        * Inbound action \u2014 ``inbound_enabled`` + at least one of ``forward_to``\n  /\
+        \ ``webhook_url`` + the optional ``forward_rate_per_hour`` cap. These\n  apply to\
+        \ either kind, but this milestone routes inbound only to\n  ``hail_mail`` rows; custom-domain\
+        \ inbound (MX delegation) is the\n  next milestone.\n\nEvery field is independently\
+        \ optional so ``PATCH`` semantics work the\nway callers expect: send only what you\
+        \ want to change. The route\nenforces the cross-field rules (the CHECK constraint\
+        \ on the table\nrequires an action when ``inbound_enabled`` is true) \u2014 we don't\n\
+        re-implement it here because the patch may merge with existing row\nstate to satisfy\
+        \ the invariant.\n\nNOTE: the plaintext webhook secret is NOT a PATCH field. It's\
+        \ set at\ncreate time and rotated via a dedicated endpoint that returns the new\n\
+        plaintext exactly once. ``webhook_secret_encrypted`` is server-managed and\nnever\
+        \ accepted on the wire."
+    EmailDomainResponse:
+      properties:
+        id:
+          type: string
+          format: uuid
+          title: Id
+        organization_id:
+          type: string
+          format: uuid
+          title: Organization Id
+        kind:
+          type: string
+          enum:
+            - hail_mail
+            - custom
+          title: Kind
+        domain:
+          type: string
+          title: Domain
+        local_prefix_user:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Local Prefix User
+        local_prefix_org:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Local Prefix Org
+        verification_status:
+          type: string
+          enum:
+            - pending
+            - verified
+            - failed
+          title: Verification Status
+        dkim_records:
+          items:
+            $ref: "#/components/schemas/DkimRecordSchema"
+          type: array
+          title: Dkim Records
+        mail_from_domain:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Mail From Domain
+        provider:
+          type: string
+          title: Provider
+        verified_at:
+          anyOf:
+            - type: string
+              format: date-time
+            - type: "null"
+          title: Verified At
+        inbound_enabled:
+          type: boolean
+          title: Inbound Enabled
+          default: false
+        forward_to:
+          anyOf:
+            - items:
+                type: string
+              type: array
+            - type: "null"
+          title: Forward To
+        webhook_url:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Webhook Url
+        forward_rate_per_hour:
+          anyOf:
+            - type: integer
+            - type: "null"
+          title: Forward Rate Per Hour
+        webhook_secret:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Webhook Secret
+        created_at:
+          type: string
+          format: date-time
+          title: Created At
+        updated_at:
+          type: string
+          format: date-time
+          title: Updated At
+      type: object
+      required:
+        - id
+        - organization_id
+        - kind
+        - domain
+        - local_prefix_user
+        - local_prefix_org
+        - verification_status
+        - dkim_records
+        - mail_from_domain
+        - provider
+        - verified_at
+        - created_at
+        - updated_at
+      title: EmailDomainResponse
+      description:
+        "Read view for an email domain.\n\nThe inbound-action fields (``inbound_enabled``,\
+        \ ``forward_to``,\n``webhook_url``, ``forward_rate_per_hour``) surface what the row\
+        \ has\nconfigured for incoming mail. ``webhook_secret_encrypted`` is intentionally\n\
+        NOT exposed \u2014 the plaintext secret is returned exactly once at create\nor rotate\
+        \ via a dedicated endpoint, and the ciphertext that\nsits on the row is server-internal."
     EmailListResponse:
       properties:
         items:
@@ -905,10 +1597,19 @@ components:
               format: uuid
             - type: "null"
           title: Conversation Id
-        sender_domain_id:
+        email_domain_id:
+          anyOf:
+            - type: string
+              format: uuid
+            - type: "null"
+          title: Email Domain Id
+        direction:
           type: string
-          format: uuid
-          title: Sender Domain Id
+          enum:
+            - outbound
+            - inbound
+          title: Direction
+          default: outbound
         from_address:
           type: string
           title: From Address
@@ -947,6 +1648,7 @@ components:
             - failed
             - bounced
             - complained
+            - received
           title: Status
         end_reason:
           anyOf:
@@ -988,12 +1690,71 @@ components:
             - type: string
             - type: "null"
           title: Body Html
+        message_id:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Message Id
+        in_reply_to:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: In Reply To
+        references_ids:
+          anyOf:
+            - items:
+                type: string
+              type: array
+            - type: "null"
+          title: References Ids
+        spam_verdict:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Spam Verdict
+        virus_verdict:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Virus Verdict
+        dkim_verdict:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Dkim Verdict
+        spf_verdict:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Spf Verdict
+        dmarc_verdict:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Dmarc Verdict
+        provider_received_at:
+          anyOf:
+            - type: string
+              format: date-time
+            - type: "null"
+          title: Provider Received At
+        raw_url:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Raw Url
+        attachments:
+          items:
+            $ref: "#/components/schemas/EmailAttachmentResponse"
+          type: array
+          title: Attachments
+          default: []
       type: object
       required:
         - id
         - organization_id
         - conversation_id
-        - sender_domain_id
+        - email_domain_id
         - from_address
         - to_addresses
         - cc_addresses
@@ -1025,10 +1786,19 @@ components:
               format: uuid
             - type: "null"
           title: Conversation Id
-        sender_domain_id:
+        email_domain_id:
+          anyOf:
+            - type: string
+              format: uuid
+            - type: "null"
+          title: Email Domain Id
+        direction:
           type: string
-          format: uuid
-          title: Sender Domain Id
+          enum:
+            - outbound
+            - inbound
+          title: Direction
+          default: outbound
         from_address:
           type: string
           title: From Address
@@ -1067,6 +1837,7 @@ components:
             - failed
             - bounced
             - complained
+            - received
           title: Status
         end_reason:
           anyOf:
@@ -1103,7 +1874,7 @@ components:
         - id
         - organization_id
         - conversation_id
-        - sender_domain_id
+        - email_domain_id
         - from_address
         - to_addresses
         - cc_addresses
@@ -1118,10 +1889,10 @@ components:
         - failed_at
       title: EmailSummary
       description:
-        "Trimmed view for list endpoints \u2014 drops the message bodies.\n\
-        \nBodies can be large and contain PII; paging through a year of mail\nshouldn't\
-        \ return every byte of every message just to render a list.\nUse ``EmailResponse``\
-        \ (via ``GET /emails/{id}``) for the full row."
+        "Trimmed view for list endpoints \u2014 drops the message bodies.\n\nBodies\
+        \ can be large and contain PII; paging through a year of mail\nshouldn't return every\
+        \ byte of every message just to render a list.\nUse ``EmailResponse`` (via ``GET /emails/{id}``)\
+        \ for the full row."
     EventStreamResponse:
       properties:
         items:
@@ -1180,164 +1951,6 @@ components:
         - api_key
         - model
       title: LLMConfig
-    SenderDomainCreate:
-      properties:
-        kind:
-          type: string
-          enum:
-            - hail_mail
-            - custom
-          title: Kind
-        domain:
-          anyOf:
-            - type: string
-            - type: "null"
-          title: Domain
-        local_prefix_user:
-          anyOf:
-            - type: string
-            - type: "null"
-          title: Local Prefix User
-        local_prefix_org:
-          anyOf:
-            - type: string
-            - type: "null"
-          title: Local Prefix Org
-      additionalProperties: false
-      type: object
-      required:
-        - kind
-      title: SenderDomainCreate
-      description: "Request body for POST /sender-domains.
-
-
-        For ``kind='hail_mail'`` ``domain`` is omitted; the server composes
-
-        the full address as ``<local_prefix_user>+<local_prefix_org>@<base>``.
-
-        Both prefixes are optional in the body and fall back to the
-
-        ``HAIL_MAIL_DEFAULT_*_PREFIX`` env vars; the server returns 503 if
-
-        neither is supplied. For ``kind='custom'`` ``domain`` is required and
-
-        the prefix fields must be omitted."
-    SenderDomainListResponse:
-      properties:
-        items:
-          items:
-            $ref: "#/components/schemas/SenderDomainResponse"
-          type: array
-          title: Items
-        next_cursor:
-          anyOf:
-            - type: string
-            - type: "null"
-          title: Next Cursor
-      type: object
-      required:
-        - items
-      title: SenderDomainListResponse
-    SenderDomainPatch:
-      properties:
-        local_prefix_user:
-          anyOf:
-            - type: string
-            - type: "null"
-          title: Local Prefix User
-        local_prefix_org:
-          anyOf:
-            - type: string
-            - type: "null"
-          title: Local Prefix Org
-      additionalProperties: false
-      type: object
-      title: SenderDomainPatch
-      description:
-        "Body for PATCH /sender-domains/{id}.\n\nOnly the user/org prefix\
-        \ pair on a ``kind='hail_mail'`` row is mutable\ntoday. Custom-domain rows\
-        \ have nothing here a tenant should be free to\nedit \u2014 DNS, DKIM, and\
-        \ verification state are all provider-driven. The\nhandler returns 422 on\
-        \ custom rows so the failure mode is obvious."
-    SenderDomainResponse:
-      properties:
-        id:
-          type: string
-          format: uuid
-          title: Id
-        organization_id:
-          type: string
-          format: uuid
-          title: Organization Id
-        kind:
-          type: string
-          enum:
-            - hail_mail
-            - custom
-          title: Kind
-        domain:
-          type: string
-          title: Domain
-        local_prefix_user:
-          anyOf:
-            - type: string
-            - type: "null"
-          title: Local Prefix User
-        local_prefix_org:
-          anyOf:
-            - type: string
-            - type: "null"
-          title: Local Prefix Org
-        verification_status:
-          type: string
-          enum:
-            - pending
-            - verified
-            - failed
-          title: Verification Status
-        dkim_records:
-          items:
-            $ref: "#/components/schemas/DkimRecordSchema"
-          type: array
-          title: Dkim Records
-        mail_from_domain:
-          anyOf:
-            - type: string
-            - type: "null"
-          title: Mail From Domain
-        provider:
-          type: string
-          title: Provider
-        verified_at:
-          anyOf:
-            - type: string
-              format: date-time
-            - type: "null"
-          title: Verified At
-        created_at:
-          type: string
-          format: date-time
-          title: Created At
-        updated_at:
-          type: string
-          format: date-time
-          title: Updated At
-      type: object
-      required:
-        - id
-        - organization_id
-        - kind
-        - domain
-        - local_prefix_user
-        - local_prefix_org
-        - verification_status
-        - dkim_records
-        - mail_from_domain
-        - provider
-        - verified_at
-        - created_at
-        - updated_at
-      title: SenderDomainResponse
     ValidationError:
       properties:
         loc:
@@ -1389,3 +2002,237 @@ components:
       additionalProperties: false
       type: object
       title: VoiceConfig
+    WebhookDeliveryListResponse:
+      properties:
+        items:
+          items:
+            $ref: "#/components/schemas/WebhookDeliveryResponse"
+          type: array
+          title: Items
+        next_cursor:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Next Cursor
+      type: object
+      required:
+        - items
+      title: WebhookDeliveryListResponse
+    WebhookDeliveryResponse:
+      properties:
+        id:
+          type: string
+          format: uuid
+          title: Id
+        subscription_id:
+          anyOf:
+            - type: string
+              format: uuid
+            - type: "null"
+          title: Subscription Id
+        email_domain_id:
+          anyOf:
+            - type: string
+              format: uuid
+            - type: "null"
+          title: Email Domain Id
+        event_type:
+          type: string
+          title: Event Type
+        event_id:
+          type: string
+          format: uuid
+          title: Event Id
+        attempt:
+          type: integer
+          title: Attempt
+        status:
+          type: string
+          enum:
+            - pending
+            - succeeded
+            - failed
+            - dead
+          title: Status
+        response_status:
+          anyOf:
+            - type: integer
+            - type: "null"
+          title: Response Status
+        response_body:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Response Body
+        next_attempt_at:
+          type: string
+          format: date-time
+          title: Next Attempt At
+        succeeded_at:
+          anyOf:
+            - type: string
+              format: date-time
+            - type: "null"
+          title: Succeeded At
+        created_at:
+          type: string
+          format: date-time
+          title: Created At
+      type: object
+      required:
+        - id
+        - subscription_id
+        - email_domain_id
+        - event_type
+        - event_id
+        - attempt
+        - status
+        - next_attempt_at
+        - created_at
+      title: WebhookDeliveryResponse
+    WebhookSecretResponse:
+      properties:
+        webhook_secret:
+          type: string
+          title: Webhook Secret
+      type: object
+      required:
+        - webhook_secret
+      title: WebhookSecretResponse
+      description: Plaintext webhook secret, returned exactly once (create/rotate).
+    WebhookSubscriptionCreate:
+      properties:
+        target_url:
+          type: string
+          minLength: 1
+          title: Target Url
+        event_types:
+          items:
+            type: string
+            enum:
+              - email.received
+              - email.bounced
+              - email.complained
+              - email.received.suppressed
+          type: array
+          minItems: 1
+          title: Event Types
+      type: object
+      required:
+        - target_url
+        - event_types
+      title: WebhookSubscriptionCreate
+    WebhookSubscriptionListResponse:
+      properties:
+        items:
+          items:
+            $ref: "#/components/schemas/WebhookSubscriptionResponse"
+          type: array
+          title: Items
+        next_cursor:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Next Cursor
+      type: object
+      required:
+        - items
+      title: WebhookSubscriptionListResponse
+    WebhookSubscriptionPatch:
+      properties:
+        target_url:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Target Url
+        event_types:
+          anyOf:
+            - items:
+                type: string
+                enum:
+                  - email.received
+                  - email.bounced
+                  - email.complained
+                  - email.received.suppressed
+              type: array
+            - type: "null"
+          title: Event Types
+        status:
+          anyOf:
+            - type: string
+              enum:
+                - active
+                - disabled
+            - type: "null"
+          title: Status
+      type: object
+      title: WebhookSubscriptionPatch
+    WebhookSubscriptionResponse:
+      properties:
+        id:
+          type: string
+          format: uuid
+          title: Id
+        organization_id:
+          type: string
+          format: uuid
+          title: Organization Id
+        target_url:
+          type: string
+          title: Target Url
+        event_types:
+          items:
+            type: string
+          type: array
+          title: Event Types
+        status:
+          type: string
+          enum:
+            - active
+            - disabled
+          title: Status
+        consecutive_failures:
+          type: integer
+          title: Consecutive Failures
+        last_success_at:
+          anyOf:
+            - type: string
+              format: date-time
+            - type: "null"
+          title: Last Success At
+        last_failure_at:
+          anyOf:
+            - type: string
+              format: date-time
+            - type: "null"
+          title: Last Failure At
+        created_at:
+          type: string
+          format: date-time
+          title: Created At
+        updated_at:
+          type: string
+          format: date-time
+          title: Updated At
+        secret:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Secret
+      type: object
+      required:
+        - id
+        - organization_id
+        - target_url
+        - event_types
+        - status
+        - consecutive_failures
+        - created_at
+        - updated_at
+      title: WebhookSubscriptionResponse
+      description: "Subscription as returned by the API.
+
+
+        ``secret`` is populated **only** by create + rotate-secret responses;
+
+        later GETs return ``None`` so the plaintext never round-trips."

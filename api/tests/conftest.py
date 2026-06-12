@@ -24,7 +24,7 @@ from hailhq.api import auth as _auth_module
 from hailhq.api.auth import hash_key
 from hailhq.api.main import app
 from hailhq.api.routes.calls import get_livekit
-from hailhq.api.routes.sender_domains import get_email_provider
+from hailhq.api.routes.email_domains import get_email_provider
 from hailhq.core.db import get_session
 from hailhq.core.livekit import LiveKitClient
 from hailhq.core.models import (

@@ -11,7 +11,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from hailhq.core.config import settings
-from hailhq.core.models import ApiKey, AuditLog, Email, SenderDomain, UsageEvent
+from hailhq.core.models import ApiKey, AuditLog, Email, EmailDomain, UsageEvent
 
 from .conftest import insert_org_and_key  # noqa: F401
 
@@ -25,14 +25,14 @@ async def _register_custom_verified(
     headers: dict,
     domain: str = "acme.com",
 ) -> str:
-    """Register + verify a custom domain. Returns its sender-domain id."""
+    """Register + verify a custom domain. Returns its email-domain id."""
     created = await client.post(
-        "/sender-domains",
+        "/email-domains",
         json={"kind": "custom", "domain": domain},
         headers=headers,
     )
     assert created.status_code == 201
-    await client.post(f"/sender-domains/{created.json()['id']}/verify", headers=headers)
+    await client.post(f"/email-domains/{created.json()['id']}/verify", headers=headers)
     return created.json()["id"]
 
 
@@ -143,8 +143,8 @@ async def test_post_emails_auto_mints_hail_mail_when_no_sender_exists(
     assert resp.status_code == 201, resp.text
     body = resp.json()
     assert body["from_address"] == "admin+selfhost@mail.hail.so"
-    # A SenderDomain row should have been created on the fly.
-    sd = (await async_session.execute(select(SenderDomain))).scalar_one()
+    # An EmailDomain row should have been created on the fly.
+    sd = (await async_session.execute(select(EmailDomain))).scalar_one()
     assert sd.kind == "hail_mail"
     assert sd.verification_status == "verified"
     assert sd.local_prefix_user == "admin"
@@ -172,7 +172,7 @@ async def test_post_emails_auto_mint_recovers_from_race(
     org_id, _, plain = org_and_key
 
     # Pre-seed the row that the concurrent request would have committed first.
-    winning = SenderDomain(
+    winning = EmailDomain(
         organization_id=org_id,
         kind="hail_mail",
         domain="admin+selfhost@mail.hail.so",
@@ -198,11 +198,56 @@ async def test_post_emails_auto_mint_recovers_from_race(
     assert resp.status_code == 201, resp.text
     assert resp.json()["from_address"] == "admin+selfhost@mail.hail.so"
 
-    # Exactly one SenderDomain row — recovery used the existing one, didn't
+    # Exactly one EmailDomain row — recovery used the existing one, didn't
     # create a duplicate.
-    rows = (await async_session.execute(select(SenderDomain))).scalars().all()
+    rows = (await async_session.execute(select(EmailDomain))).scalars().all()
     assert len(rows) == 1
     assert rows[0].id == winning.id
+
+
+async def test_post_emails_auto_mint_conflict_across_orgs_returns_409(
+    client: httpx.AsyncClient,
+    org_and_key: tuple,
+    monkeypatch: pytest.MonkeyPatch,
+    async_session: AsyncSession,
+) -> None:
+    """Org B's first send must not 500 when org A already auto-minted the
+    deployment's default hail-mail address.
+
+    The global hail-mail unique index means only one org can hold a given
+    prefix pair. Org A's auto-mint wins; org B's flush hits IntegrityError
+    and the recovery must surface an actionable 409, not a 500.
+    """
+    monkeypatch.setattr(settings, "hail_mail_base_domain", "mail.hail.so")
+    monkeypatch.setattr(settings, "hail_mail_default_user_prefix", "admin")
+    monkeypatch.setattr(settings, "hail_mail_default_org_prefix", "selfhost")
+
+    _, _, plain_a = org_and_key
+    _, _, plain_b = await insert_org_and_key(async_session)
+
+    # Org A auto-mints the default address and sends fine.
+    resp_a = await client.post(
+        "/emails",
+        json={"to": ["alice@example.com"], "subject": "hi", "body_text": "body"},
+        headers={"Authorization": f"Bearer {plain_a}"},
+    )
+    assert resp_a.status_code == 201, resp_a.text
+    assert resp_a.json()["from_address"] == "admin+selfhost@mail.hail.so"
+
+    # Org B collides with org A's row — clear 409, not a 500.
+    resp_b = await client.post(
+        "/emails",
+        json={"to": ["bob@example.com"], "subject": "hi", "body_text": "body"},
+        headers={"Authorization": f"Bearer {plain_b}"},
+    )
+    assert resp_b.status_code == 409, resp_b.text
+    detail = resp_b.json()["detail"]
+    assert "another organization" in detail
+    assert "admin+selfhost@mail.hail.so" in detail
+
+    # Only org A's row exists — org B's failed insert left nothing behind.
+    rows = (await async_session.execute(select(EmailDomain))).scalars().all()
+    assert len(rows) == 1
 
 
 async def test_post_emails_503_when_no_sender_and_no_hail_mail(
@@ -331,7 +376,7 @@ async def test_post_emails_does_not_send_through_pending_domain(
     _, _, plain = org_and_key
     headers = {"Authorization": f"Bearer {plain}"}
     created = await client.post(
-        "/sender-domains",
+        "/email-domains",
         json={"kind": "custom", "domain": "pending.com"},
         headers=headers,
     )
@@ -698,3 +743,47 @@ async def test_post_emails_usage_event_failure_does_not_fail_send(
         )
     ).scalar_one()
     assert email_row.status == "sent"
+
+
+# --------------------------------------------------------------------------- #
+# POST /emails — branding footer
+# --------------------------------------------------------------------------- #
+
+
+async def test_post_emails_appends_footer_on_wire_only(
+    client: httpx.AsyncClient,
+    org_and_key: tuple,
+    email_mock: AsyncMock,
+) -> None:
+    """The provider send carries the branding footer; the stored row and
+    API responses keep the tenant-authored body untouched."""
+    _, _, plain = org_and_key
+    headers = {"Authorization": f"Bearer {plain}"}
+    await _register_custom_verified(client, headers, domain="acme.com")
+
+    resp = await client.post(
+        "/emails",
+        json={
+            "to": ["alice@example.com"],
+            "subject": "hi",
+            "body_text": "body",
+            "body_html": "<p>body</p>",
+        },
+        headers=headers,
+    )
+    assert resp.status_code == 201, resp.text
+
+    call_kwargs = email_mock.send_email.call_args.kwargs
+    assert call_kwargs["body_text"].startswith("body")
+    assert "Sent by Hail.so" in call_kwargs["body_text"]
+    assert call_kwargs["body_text"].rstrip().endswith("(https://hail.so)")
+    assert call_kwargs["body_html"].startswith("<p>body</p>")
+    assert 'href="https://hail.so"' in call_kwargs["body_html"]
+
+    # POST response and GET both return the original body, footer-free.
+    assert resp.json()["body_text"] == "body"
+    assert resp.json()["body_html"] == "<p>body</p>"
+    got = await client.get(f"/emails/{resp.json()['id']}", headers=headers)
+    assert got.status_code == 200
+    assert got.json()["body_text"] == "body"
+    assert got.json()["body_html"] == "<p>body</p>"
