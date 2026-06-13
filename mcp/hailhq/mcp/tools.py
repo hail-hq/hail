@@ -1,12 +1,14 @@
 """MCP tool surface for Hail's outbound-call API.
 
-Exposes five tools to the calling agent:
+Exposes seven tools to the calling agent:
 
 * ``place_call`` — originate an outbound phone call
 * ``get_call`` — fetch the current state of one call
 * ``list_calls`` — page through recent calls
 * ``get_events`` — page through the event stream (call-narrow or org-wide)
 * ``send_email`` — send an outbound email
+* ``get_email`` — fetch the full record of one email
+* ``list_emails`` — page through emails (``direction="inbound"`` for replies)
 
 The tool docstrings are the agent's only documentation, so each one
 spells out the contract (required vs optional fields, mutually exclusive
@@ -181,6 +183,33 @@ async def list_calls(
 ) -> dict[str, Any]:
     try:
         return await client.list_calls(cursor=cursor, limit=limit, status=status, to=to)
+    except ValidationError as exc:
+        return {"error": _validation_error_message(exc)}
+    except HailAPIError as exc:
+        return _format_api_error(exc)
+
+
+async def get_email(*, client: HailClient, email_id: str) -> dict[str, Any]:
+    try:
+        return await client.get_email(email_id)
+    except ValidationError as exc:
+        return {"error": _validation_error_message(exc)}
+    except HailAPIError as exc:
+        return _format_api_error(exc)
+
+
+async def list_emails(
+    *,
+    client: HailClient,
+    cursor: str | None = None,
+    limit: int = 50,
+    status: str | None = None,
+    direction: str | None = None,
+) -> dict[str, Any]:
+    try:
+        return await client.list_emails(
+            cursor=cursor, limit=limit, status=status, direction=direction
+        )
     except ValidationError as exc:
         return {"error": _validation_error_message(exc)}
     except HailAPIError as exc:
@@ -455,6 +484,63 @@ def register_tools(
         except RuntimeError as exc:
             return {"error": str(exc)}
 
+    @mcp_app.tool(name="get_email")
+    async def get_email_tool(ctx: Context, email_id: str) -> dict[str, Any]:
+        """Fetch the full record of one email by id.
+
+        Returns the complete row — including ``body_text`` / ``body_html``
+        and (for inbound mail) the ``in_reply_to`` / ``message_id`` headers
+        and ``spam``/``virus``/``spf``/``dkim``/``dmarc`` verdicts. Use this
+        after ``list_emails`` to read a received reply's body.
+
+        Returns the API's ``EmailResponse`` as a dict, or
+        ``{"error": "resource not found"}`` for an unknown id.
+        """
+        try:
+            async with _client_for(ctx, mode=mode, singleton=singleton) as client:
+                return await get_email(client=client, email_id=email_id)
+        except RuntimeError as exc:
+            return {"error": str(exc)}
+
+    @mcp_app.tool(name="list_emails")
+    async def list_emails_tool(
+        ctx: Context,
+        cursor: str | None = None,
+        limit: int = 50,
+        status: str | None = None,
+        direction: str | None = None,
+    ) -> dict[str, Any]:
+        """List emails in your organization, newest first.
+
+        Cursor-paginated: pass the previous response's ``next_cursor`` to
+        fetch the next page. Two optional server-side filters:
+
+        * ``direction`` — ``outbound`` or ``inbound``. Pass
+          ``direction="inbound"`` to read replies and other received mail.
+        * ``status`` — one of ``queued``, ``sent``, ``failed``,
+          ``bounced``, ``complained``, ``received``.
+
+        Items are trimmed summaries (no message body). Call ``get_email``
+        with an item's ``id`` to read the full body.
+
+        Example:
+            list_emails(direction="inbound")
+
+        Returns ``{"items": [...], "next_cursor": <str|None>}`` on success,
+        or ``{"error": "<message>"}`` instead.
+        """
+        try:
+            async with _client_for(ctx, mode=mode, singleton=singleton) as client:
+                return await list_emails(
+                    client=client,
+                    cursor=cursor,
+                    limit=limit,
+                    status=status,
+                    direction=direction,
+                )
+        except RuntimeError as exc:
+            return {"error": str(exc)}
+
     @mcp_app.tool(name="get_events")
     async def get_events_tool(
         ctx: Context,
@@ -503,5 +589,7 @@ __all__ = [
     "send_email",
     "get_call",
     "list_calls",
+    "get_email",
+    "list_emails",
     "get_events",
 ]

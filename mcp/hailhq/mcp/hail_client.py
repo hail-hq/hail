@@ -32,6 +32,7 @@ from hailhq.core.schemas import (
     CallListResponse,
     CallResponse,
     EmailCreate,
+    EmailListResponse,
     EmailResponse,
     EventStreamResponse,
 )
@@ -197,6 +198,38 @@ class HailClient:
         headers = {"Idempotency-Key": idempotency_key or str(uuid.uuid4())}
         resp = await self._client.post("/emails", json=body, headers=headers)
         return EmailResponse.model_validate(_decode(resp)).model_dump(mode="json")
+
+    # ------------------------------------------------------------------ #
+    # GET /emails/{id}
+    # ------------------------------------------------------------------ #
+
+    async def get_email(self, email_id: str) -> dict[str, Any]:
+        resp = await self._client.get(f"/emails/{email_id}")
+        return EmailResponse.model_validate(_decode(resp)).model_dump(mode="json")
+
+    # ------------------------------------------------------------------ #
+    # GET /emails
+    # ------------------------------------------------------------------ #
+
+    async def list_emails(
+        self,
+        *,
+        cursor: str | None = None,
+        limit: int | None = None,
+        status: str | None = None,
+        direction: str | None = None,
+    ) -> dict[str, Any]:
+        params: dict[str, Any] = {}
+        if cursor is not None:
+            params["cursor"] = cursor
+        if limit is not None:
+            params["limit"] = limit
+        if status is not None:
+            params["status"] = status
+        if direction is not None:
+            params["direction"] = direction
+        resp = await self._client.get("/emails", params=params)
+        return EmailListResponse.model_validate(_decode(resp)).model_dump(mode="json")
 
     # ------------------------------------------------------------------ #
     # GET /events

@@ -424,6 +424,101 @@ async def test_list_calls_pagination(client: HailClient) -> None:
 
 
 # --------------------------------------------------------------------------- #
+# get_email
+# --------------------------------------------------------------------------- #
+
+
+@respx.mock
+async def test_get_email_happy_path(client: HailClient) -> None:
+    eid = str(uuid4())
+    respx.get(f"{_BASE_URL}/emails/{eid}").mock(
+        return_value=httpx.Response(200, json=_email_response(eid, status="received"))
+    )
+    result = await tools.get_email(client=client, email_id=eid)
+    assert "error" not in result, result
+    assert result["id"] == eid
+    assert result["status"] == "received"
+    # The full row carries the body so an agent can read a reply directly.
+    assert result["body_text"] == "body"
+
+
+@respx.mock
+async def test_get_email_maps_404_to_not_found(client: HailClient) -> None:
+    eid = str(uuid4())
+    respx.get(f"{_BASE_URL}/emails/{eid}").mock(
+        return_value=httpx.Response(404, json={"detail": "email not found"})
+    )
+    result = await tools.get_email(client=client, email_id=eid)
+    assert result == {"error": "resource not found"}
+
+
+# --------------------------------------------------------------------------- #
+# list_emails
+# --------------------------------------------------------------------------- #
+
+
+def _email_summary(email_id: str | None = None, direction: str = "inbound") -> dict:
+    """Return a minimal EmailSummary-shaped dict (no body) for list mocks."""
+    eid = email_id or str(uuid4())
+    return {
+        "id": eid,
+        "organization_id": str(uuid4()),
+        "conversation_id": None,
+        "email_domain_id": str(uuid4()),
+        "direction": direction,
+        "from_address": "sender@example.com",
+        "to_addresses": ["alice+acme@mail.hail.so"],
+        "cc_addresses": None,
+        "bcc_addresses": None,
+        "reply_to": None,
+        "subject": "re: hi",
+        "status": "received",
+        "end_reason": None,
+        "provider_message_id": "ses-in-1",
+        "requested_at": "2026-06-13T00:00:00+00:00",
+        "sent_at": None,
+        "failed_at": None,
+    }
+
+
+@respx.mock
+async def test_list_emails_filters_inbound(client: HailClient) -> None:
+    captured: dict = {}
+
+    def _handler(request: httpx.Request) -> httpx.Response:
+        captured["url"] = str(request.url)
+        return httpx.Response(
+            200, json={"items": [_email_summary()], "next_cursor": None}
+        )
+
+    respx.get(f"{_BASE_URL}/emails").mock(side_effect=_handler)
+
+    result = await tools.list_emails(
+        client=client, direction="inbound", status="received"
+    )
+    assert "error" not in result, result
+    assert result["items"][0]["direction"] == "inbound"
+    # The filters that close the inbound-reply blind spot reach the wire.
+    assert "direction=inbound" in captured["url"]
+    assert "status=received" in captured["url"]
+
+
+@respx.mock
+async def test_list_emails_pagination(client: HailClient) -> None:
+    captured: dict = {}
+
+    def _handler(request: httpx.Request) -> httpx.Response:
+        captured["url"] = str(request.url)
+        return httpx.Response(200, json={"items": [], "next_cursor": None})
+
+    respx.get(f"{_BASE_URL}/emails").mock(side_effect=_handler)
+
+    await tools.list_emails(client=client, cursor="cur-xyz", limit=10)
+    assert "cursor=cur-xyz" in captured["url"]
+    assert "limit=10" in captured["url"]
+
+
+# --------------------------------------------------------------------------- #
 # get_events
 # --------------------------------------------------------------------------- #
 
