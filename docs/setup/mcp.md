@@ -15,15 +15,17 @@ The Streamable HTTP transport serves the MCP root path; no `/mcp` suffix, no SSE
 
 ## Tools
 
-The server exposes five tools. Schemas (args, validation, return shapes) are the source of truth — see [`mcp/hailhq/mcp/tools.py`](../../mcp/hailhq/mcp/tools.py).
+The server exposes seven tools. Schemas (args, validation, return shapes) are the source of truth — see [`mcp/hailhq/mcp/tools.py`](../../mcp/hailhq/mcp/tools.py).
 
-| Tool         | Does                                  |
-| ------------ | ------------------------------------- |
-| `place_call` | Originate an outbound phone call.     |
-| `send_email` | Send an outbound email.               |
-| `get_call`   | Fetch the current state of one call.  |
-| `list_calls` | List recent calls (cursor-paginated). |
-| `get_events` | Page through the event stream.        |
+| Tool          | Does                                                    |
+| ------------- | ------------------------------------------------------- |
+| `place_call`  | Originate an outbound phone call.                       |
+| `send_email`  | Send an outbound email.                                 |
+| `get_call`    | Fetch the current state of one call.                    |
+| `list_calls`  | List recent calls (cursor-paginated).                   |
+| `get_email`   | Fetch one email's full record (body + inbound headers). |
+| `list_emails` | List emails (`direction="inbound"` for replies).        |
+| `get_events`  | Page through the event stream.                          |
 
 ## Claude.ai (web)
 
