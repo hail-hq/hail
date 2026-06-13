@@ -22,7 +22,7 @@ models (``CallCreate``, ``EmailCreate``) constructed inside
 an ``{"error": ...}`` dict. Only the ``<type>:<uuid>`` resource-id shape
 for ``get_events`` is still checked locally via ``parse_resource_id``.
 
-The five tool functions are kept module-importable so unit tests can
+The seven tool functions are kept module-importable so unit tests can
 call them directly with a constructed ``HailClient``; ``register_tools``
 is the FastMCP wiring step. Each registered tool closure accepts a
 FastMCP ``Context`` (auto-injected on dispatch) and uses the
@@ -316,7 +316,7 @@ def register_tools(
     mode: AuthMode,
     singleton: HailClient | None,
 ) -> None:
-    """Register the five Hail tools on a FastMCP app.
+    """Register the seven Hail tools on a FastMCP app.
 
     Tools accept a FastMCP ``Context`` parameter (auto-injected). The
     ``_client_for`` helper picks the right HailClient for the active mode
