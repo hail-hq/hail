@@ -178,11 +178,11 @@ async def test_two_orgs_same_provider_message_id_persists_both(
         # point before 0009.
         assert row.provider_message_id == "ses-receipt-shared-1"
 
-    # One delivery to two orgs → one email_inbound usage row per org.
+    # One delivery to two orgs → one email usage row per org.
     usage = (
         (
             await async_session.execute(
-                select(UsageEvent).where(UsageEvent.channel == "email_inbound")
+                select(UsageEvent).where(UsageEvent.channel == "email")
             )
         )
         .scalars()

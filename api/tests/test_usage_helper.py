@@ -18,20 +18,20 @@ async def test_write_usage_event_inserts_row_and_notifies(async_session):
     with patch("hailhq.api.usage.notify_usage_event_recorded") as notify:
         await write_usage_event(
             organization_id=org_id,
-            channel="email_inbound",
+            channel="email",
             units=1,
-            ref="email_inbound:test-1",
+            ref="email:test-1",
         )
     rows = (
         (
             await async_session.execute(
-                select(UsageEvent).where(UsageEvent.ref == "email_inbound:test-1")
+                select(UsageEvent).where(UsageEvent.ref == "email:test-1")
             )
         )
         .scalars()
         .all()
     )
     assert len(rows) == 1
-    assert rows[0].channel == "email_inbound"
+    assert rows[0].channel == "email"
     assert rows[0].units == 1
     notify.assert_called_once()

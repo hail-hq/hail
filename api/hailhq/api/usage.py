@@ -3,8 +3,8 @@
 Appends one ``usage_events`` row in a fresh session and pings the website
 rater. Best-effort — failures are logged, never re-raised — so a metering
 hiccup can't roll back the user-facing operation. Used by both the outbound
-send path (``channel='email'``) and the inbound ingest path
-(``channel='email_inbound'``).
+send path and the inbound ingest path — both write ``channel='email'``
+(direction is recorded on the ``emails`` row, not the usage channel).
 """
 
 from __future__ import annotations

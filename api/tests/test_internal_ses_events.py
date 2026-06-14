@@ -300,7 +300,7 @@ async def test_inbound_meters_one_usage_event_per_created_row(
             .select_from(UsageEvent)
             .where(
                 UsageEvent.organization_id == org_id,
-                UsageEvent.channel == "email_inbound",
+                UsageEvent.channel == "email",
             )
         )
     ).scalar_one()

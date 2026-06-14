@@ -99,9 +99,9 @@ async def receive_ses_event(
     for created_id, created_org_id in result.created_email_ids:
         await write_usage_event(
             organization_id=created_org_id,
-            channel="email_inbound",
+            channel="email",
             units=1,
-            ref=f"email_inbound:{created_id}",
+            ref=f"email:{created_id}",
         )
     return {
         "email_ids": [str(x) for x in result.email_ids],

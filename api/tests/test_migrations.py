@@ -114,16 +114,6 @@ def _constraint_exists(conn: psycopg.Connection, name: str) -> bool:
     return cur.fetchone() is not None
 
 
-def _constraint_src(conn: psycopg.Connection, name: str) -> str | None:
-    """Return the Postgres-normalised CHECK expression for a named constraint."""
-    cur = conn.execute(
-        "SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conname = %s",
-        (name,),
-    )
-    row = cur.fetchone()
-    return row[0] if row else None
-
-
 def _assert_head_schema(url: str) -> None:
     """Every reachable upgrade path lands here."""
     with psycopg.connect(_to_libpq_url(to_sync_url(url))) as conn:
@@ -282,15 +272,3 @@ def test_audit_log_idempotent_on_already_converted_column(empty_db: str) -> None
 
     _run_alembic(empty_db, ["upgrade", "head"])
     _assert_head_schema(empty_db)
-
-
-def test_account_credits_channel_check_permits_email_inbound(empty_db: str) -> None:
-    """After 0011 the account_credits_channel_check constraint must include
-    email_inbound so the website billing rater can write inbound-email debit rows."""
-    _run_alembic(empty_db, ["upgrade", "head"])
-    with psycopg.connect(_to_libpq_url(to_sync_url(empty_db))) as conn:
-        src = _constraint_src(conn, "account_credits_channel_check")
-        assert src is not None, "account_credits_channel_check constraint missing"
-        assert (
-            "email_inbound" in src
-        ), f"account_credits_channel_check does not permit email_inbound; got: {src}"
