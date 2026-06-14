@@ -1123,6 +1123,47 @@ async def test_missing_from_header_falls_back_to_envelope_from(async_session):
 
 
 @pytest.mark.asyncio
+async def test_created_email_ids_excludes_replays(async_session):
+    org_id = uuid.uuid4()
+    domain = _make_inbound_domain(org_id)
+    async_session.add(domain)
+    await async_session.commit()
+    s3 = AsyncMock()
+    s3.fetch_raw.return_value = (FIX / "simple.eml").read_bytes()
+    msg = InboundMessage(
+        provider_message_id="created-1",
+        envelope_from="alice@example.com",
+        envelope_recipients=[domain.domain],
+        raw_s3_bucket="b",
+        raw_s3_key="raw/created-1",
+        spam_verdict="PASS",
+        virus_verdict="PASS",
+        spf_verdict="PASS",
+        dkim_verdict="PASS",
+        dmarc_verdict="PASS",
+        received_at=datetime(2026, 6, 6, tzinfo=timezone.utc),
+    )
+    first = await ingest_inbound(
+        async_session,
+        message=msg,
+        s3=s3,
+        hail_mail_base_domain="mail.hail.so",
+        org_rate_per_hour=10_000,
+    )
+    second = await ingest_inbound(
+        async_session,
+        message=msg,
+        s3=s3,
+        hail_mail_base_domain="mail.hail.so",
+        org_rate_per_hour=10_000,
+    )
+    assert len(first.created_email_ids) == 1
+    assert first.created_email_ids[0][1] == org_id  # (email_id, org_id) tuple
+    assert second.created_email_ids == []  # replay creates nothing
+    assert len(second.email_ids) == 1  # but still resolves the row
+
+
+@pytest.mark.asyncio
 async def test_mail_without_message_id_is_still_dedupe_safe(async_session):
     raw = b"From: a@x\r\nTo: alice+acme@mail.hail.so\r\nSubject: no mid\r\n\r\nhi"
     org_id = uuid.uuid4()
@@ -1163,3 +1204,138 @@ async def test_mail_without_message_id_is_still_dedupe_safe(async_session):
         )
     ).scalar_one()
     assert count == 1
+
+
+@pytest.mark.asyncio
+async def test_unfunded_org_suppresses_forwarding_with_reason(async_session):
+    org_id = uuid.uuid4()
+    domain = _make_inbound_domain(org_id)
+    domain.inbound_enabled = True
+    domain.forward_to = ["ops@example.com"]
+    async_session.add(domain)
+    await async_session.commit()
+
+    s3 = AsyncMock()
+    s3.fetch_raw.return_value = (FIX / "simple.eml").read_bytes()
+    forward_enqueue = AsyncMock()
+    fanout = AsyncMock(return_value=1)
+
+    async def broke(_db, _org_id):
+        return False
+
+    result = await ingest_inbound(
+        async_session,
+        message=InboundMessage(
+            provider_message_id="nofunds-1",
+            envelope_from="alice@example.com",
+            envelope_recipients=[domain.domain],
+            raw_s3_bucket="b",
+            raw_s3_key="raw/nofunds-1",
+            spam_verdict="PASS",
+            virus_verdict="PASS",
+            spf_verdict="PASS",
+            dkim_verdict="PASS",
+            dmarc_verdict="PASS",
+            received_at=datetime(2026, 6, 6, tzinfo=timezone.utc),
+        ),
+        s3=s3,
+        hail_mail_base_domain="mail.hail.so",
+        forward_enqueue=forward_enqueue,
+        fanout=fanout,
+        funds_check=broke,
+        org_rate_per_hour=10_000,
+    )
+    assert len(result.created_email_ids) == 1
+    forward_enqueue.assert_not_awaited()
+    assert "insufficient_funds" in result.suppressed_reasons
+    types = [c.kwargs["event_type"] for c in fanout.await_args_list]
+    assert "email.received" in types
+    sup = next(
+        c.kwargs
+        for c in fanout.await_args_list
+        if c.kwargs["event_type"] == "email.received.suppressed"
+    )
+    assert sup["data"]["reason"] == "insufficient_funds"
+
+
+@pytest.mark.asyncio
+async def test_funded_org_forwards_normally(async_session):
+    org_id = uuid.uuid4()
+    domain = _make_inbound_domain(org_id)
+    domain.inbound_enabled = True
+    domain.forward_to = ["ops@example.com"]
+    async_session.add(domain)
+    await async_session.commit()
+    s3 = AsyncMock()
+    s3.fetch_raw.return_value = (FIX / "simple.eml").read_bytes()
+    forward_enqueue = AsyncMock()
+
+    async def funded(_db, _org_id):
+        return True
+
+    result = await ingest_inbound(
+        async_session,
+        message=InboundMessage(
+            provider_message_id="funds-1",
+            envelope_from="alice@example.com",
+            envelope_recipients=[domain.domain],
+            raw_s3_bucket="b",
+            raw_s3_key="raw/funds-1",
+            spam_verdict="PASS",
+            virus_verdict="PASS",
+            spf_verdict="PASS",
+            dkim_verdict="PASS",
+            dmarc_verdict="PASS",
+            received_at=datetime(2026, 6, 6, tzinfo=timezone.utc),
+        ),
+        s3=s3,
+        hail_mail_base_domain="mail.hail.so",
+        forward_enqueue=forward_enqueue,
+        funds_check=funded,
+        org_rate_per_hour=10_000,
+    )
+    forward_enqueue.assert_awaited_once()
+    assert "insufficient_funds" not in result.suppressed_reasons
+
+
+@pytest.mark.asyncio
+async def test_suppression_reason_persisted_on_row(async_session):
+    org_id = uuid.uuid4()
+    domain = _make_inbound_domain(org_id)
+    domain.inbound_enabled = True
+    domain.forward_to = ["ops@example.com"]
+    async_session.add(domain)
+    await async_session.commit()
+    s3 = AsyncMock()
+    s3.fetch_raw.return_value = (FIX / "simple.eml").read_bytes()
+
+    async def broke(_db, _org):
+        return False
+
+    result = await ingest_inbound(
+        async_session,
+        message=InboundMessage(
+            provider_message_id="supmeta-1",
+            envelope_from="a@x",
+            envelope_recipients=[domain.domain],
+            raw_s3_bucket="b",
+            raw_s3_key="raw/supmeta-1",
+            spam_verdict="PASS",
+            virus_verdict="PASS",
+            spf_verdict="PASS",
+            dkim_verdict="PASS",
+            dmarc_verdict="PASS",
+            received_at=datetime(2026, 6, 6, tzinfo=timezone.utc),
+        ),
+        s3=s3,
+        hail_mail_base_domain="mail.hail.so",
+        forward_enqueue=AsyncMock(),
+        funds_check=broke,
+        org_rate_per_hour=10_000,
+    )
+    email = (
+        await async_session.execute(
+            select(Email).where(Email.id == result.created_email_ids[0][0])
+        )
+    ).scalar_one()
+    assert email.metadata_.get("suppressed_reasons") == ["insufficient_funds"]

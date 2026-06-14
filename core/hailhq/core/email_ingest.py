@@ -23,7 +23,8 @@ from email import message_from_bytes
 from typing import Any
 from uuid import UUID, uuid4
 
-from sqlalchemy import func, select
+from sqlalchemy import cast, func, select, update
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -37,16 +38,18 @@ from hailhq.core.s3_inbound import S3InboundClient
 from hailhq.core.urls import join_url
 from hailhq.core.webhook_fanout import build_event_data
 
-__all__ = ["FanoutFn", "ForwardEnqueue", "IngestResult", "ingest_inbound"]
+__all__ = ["FanoutFn", "ForwardEnqueue", "FundsCheck", "IngestResult", "ingest_inbound"]
 
 
 ForwardEnqueue = Callable[..., Awaitable[None]]
 FanoutFn = Callable[..., Awaitable[int]]
+FundsCheck = Callable[[AsyncSession, UUID], Awaitable[bool]]
 
 
 @dataclass
 class IngestResult:
     email_ids: list[UUID] = field(default_factory=list)
+    created_email_ids: list[tuple[UUID, UUID]] = field(default_factory=list)
     suppressed_reasons: list[str] = field(default_factory=list)
     skipped_recipients: list[str] = field(default_factory=list)
 
@@ -338,6 +341,7 @@ async def ingest_inbound(
     forward_max_hops: int = 3,
     forward_default_per_hour: int = 200,
     fanout: FanoutFn | None = None,
+    funds_check: FundsCheck | None = None,
     api_base_url: str | None = None,
     org_rate_per_hour: int,
 ) -> IngestResult:
@@ -387,6 +391,8 @@ async def ingest_inbound(
         if email_id is None:
             continue
         result.email_ids.append(email_id)
+        if created:
+            result.created_email_ids.append((email_id, domain.organization_id))
 
         row_reasons: list[str] = []
         if over_cap:
@@ -399,21 +405,48 @@ async def ingest_inbound(
             and forward_enqueue is not None
             and domain.inbound_enabled
         ):
-            row_reasons += await _enqueue_forwards(
-                db,
-                domain=domain,
-                parsed=parsed,
-                inbound_id=email_id,
-                hops=inbound_hops,
-                hail_mail_base_domain=hail_mail_base_domain,
-                forward_max_hops=forward_max_hops,
-                forward_default_per_hour=forward_default_per_hour,
-                forward_enqueue=forward_enqueue,
+            funded = funds_check is None or await funds_check(
+                db, domain.organization_id
             )
+            if funded:
+                row_reasons += await _enqueue_forwards(
+                    db,
+                    domain=domain,
+                    parsed=parsed,
+                    inbound_id=email_id,
+                    hops=inbound_hops,
+                    hail_mail_base_domain=hail_mail_base_domain,
+                    forward_max_hops=forward_max_hops,
+                    forward_default_per_hour=forward_default_per_hour,
+                    forward_enqueue=forward_enqueue,
+                )
+            elif domain.forward_to:
+                # Out of credit: keep + store + (later) charge, but don't spend
+                # on SES forwards. Only flag when targets were actually configured.
+                row_reasons.append("insufficient_funds")
 
         for reason in row_reasons:
             if reason not in result.suppressed_reasons:
                 result.suppressed_reasons.append(reason)
+
+        # Stamp the forward/rate/funds suppression reasons onto the row so the
+        # console can explain why a forward didn't fire. Merged with ``||`` so
+        # an existing spam/virus ``suppressed`` key is preserved — a spam row
+        # that is also over the inbound cap reaches here with
+        # row_reasons=["inbound_rate_limit"], and the merge keeps both keys.
+        if created and row_reasons:
+            await db.execute(
+                update(Email)
+                .where(Email.id == email_id)
+                .values(
+                    metadata_=Email.metadata_.op("||")(
+                        func.jsonb_build_object(
+                            "suppressed_reasons",
+                            cast(row_reasons, JSONB),
+                        )
+                    )
+                )
+            )
 
         if created and suppress is None and fanout is not None:
             if not over_cap:

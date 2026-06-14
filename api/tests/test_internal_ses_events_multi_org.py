@@ -25,7 +25,7 @@ from hailhq.api.routes.internal.ses_events import (
     get_inbound_provider,
     get_s3_inbound_client,
 )
-from hailhq.core.models import Email, EmailDomain
+from hailhq.core.models import Email, EmailDomain, UsageEvent
 from hailhq.core.providers.email.inbound.ses import SesInboundProvider
 
 FIX = Path(__file__).parent.parent.parent / "core" / "tests" / "fixtures" / "inbound"
@@ -149,9 +149,12 @@ async def test_two_orgs_same_provider_message_id_persists_both(
         )
     ).encode()
 
-    resp = await client.post(
-        "/internal/ses-events", content=body, headers=_signed(body)
-    )
+    from unittest.mock import patch
+
+    with patch("hailhq.api.usage.notify_usage_event_recorded"):
+        resp = await client.post(
+            "/internal/ses-events", content=body, headers=_signed(body)
+        )
     assert resp.status_code == 200, resp.text
 
     data = resp.json()
@@ -174,3 +177,16 @@ async def test_two_orgs_same_provider_message_id_persists_both(
         # Both rows share the same provider_message_id — this was the collision
         # point before 0009.
         assert row.provider_message_id == "ses-receipt-shared-1"
+
+    # One delivery to two orgs → one email_inbound usage row per org.
+    usage = (
+        (
+            await async_session.execute(
+                select(UsageEvent).where(UsageEvent.channel == "email_inbound")
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert {u.organization_id for u in usage} == {org_a, org_b}
+    assert len(usage) == 2

@@ -22,6 +22,8 @@ from fastapi import status as http_status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from hailhq.api.outbound_queue import enqueue_outbound_forward
+from hailhq.api.usage import write_usage_event
+from hailhq.core.billing import has_funds
 from hailhq.core.config import settings
 from hailhq.core.db import get_session
 from hailhq.core.email_ingest import ingest_inbound
@@ -92,7 +94,15 @@ async def receive_ses_event(
         fanout=fanout_email_event,
         api_base_url=canonical_url(str(request.base_url)),
         org_rate_per_hour=settings.hail_inbound_org_rate_per_hour,
+        funds_check=has_funds,
     )
+    for created_id, created_org_id in result.created_email_ids:
+        await write_usage_event(
+            organization_id=created_org_id,
+            channel="email_inbound",
+            units=1,
+            ref=f"email_inbound:{created_id}",
+        )
     return {
         "email_ids": [str(x) for x in result.email_ids],
         "skipped_recipients": result.skipped_recipients,

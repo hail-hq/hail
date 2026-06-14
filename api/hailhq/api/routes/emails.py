@@ -34,16 +34,16 @@ from hailhq.api.audit import write_audit_log
 from hailhq.core.urls import join_url
 from hailhq.api.deps import Principal, get_current_principal
 from hailhq.api.idempotency import IdempotencyContext, idempotency_dep
+from hailhq.api.usage import write_usage_event
 from hailhq.api.routes.email_domains import (
     compose_hail_mail_address,
     get_email_provider,
     resolve_hail_mail_prefixes,
 )
 from hailhq.core.billing import has_funds
-from hailhq.core.db import get_session, session_scope
+from hailhq.core.db import get_session
 from hailhq.core.email_footer import FOOTER_SENT, append_footer
-from hailhq.core.internal_webhook import notify_usage_event_recorded
-from hailhq.core.models import Email, EmailAttachment, EmailDomain, UsageEvent
+from hailhq.core.models import Email, EmailAttachment, EmailDomain
 from hailhq.core.s3_inbound import S3InboundClient
 from hailhq.core.providers.email import EmailProvider
 from hailhq.core.schemas import (
@@ -244,30 +244,15 @@ async def _write_usage_event(
     units: int,
     ref: str,
 ) -> None:
-    """Append one usage_events row in a fresh session, then kick the rater.
+    """Append one ``usage_events`` row for an outbound send.
 
-    Best-effort, never re-raised — mirrors the audit-log pattern.
+    Thin wrapper over the shared ``write_usage_event`` helper, pinning the
+    channel to ``email`` and preserving the positional call sites in this
+    module.
     """
-    try:
-        async with session_scope() as session:
-            usage = UsageEvent(
-                organization_id=organization_id,
-                channel="email",
-                units=units,
-                ref=ref,
-            )
-            session.add(usage)
-            await session.flush()
-            usage_event_id = str(usage.id)
-            await session.commit()
-    except Exception:  # pragma: no cover - logged, never re-raised
-        logger.warning(
-            "usage_events write failed for ref=%s",
-            ref,
-            exc_info=True,
-        )
-        return
-    notify_usage_event_recorded(usage_event_id)
+    await write_usage_event(
+        organization_id=organization_id, channel="email", units=units, ref=ref
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -414,13 +399,10 @@ async def create_email(
     await db.commit()
     await db.refresh(email)
 
+    # Flat 1¢ per send regardless of recipient count.
     await _write_usage_event(
         organization_id=principal.organization_id,
-        units=(
-            len(email.to_addresses)
-            + len(email.cc_addresses or [])
-            + len(email.bcc_addresses or [])
-        ),
+        units=1,
         ref=f"email:{email.id}",
     )
 

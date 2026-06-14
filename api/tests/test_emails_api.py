@@ -638,7 +638,7 @@ _ = ApiKey  # type hint passthrough
     "recipients,expected_units",
     [
         (["x@example.com"], 1),
-        (["a@example.com", "b@example.com", "c@example.com"], 3),
+        (["a@example.com", "b@example.com", "c@example.com"], 1),
     ],
 )
 async def test_post_emails_writes_usage_event(
@@ -648,7 +648,7 @@ async def test_post_emails_writes_usage_event(
     recipients: list[str],
     expected_units: int,
 ) -> None:
-    """Successful send writes one usage_events row; units = len(to+cc+bcc)."""
+    """Successful send writes one usage_events row; units = 1 (flat per send)."""
     _, _, plain = org_and_key
     headers = {"Authorization": f"Bearer {plain}"}
     await _register_custom_verified(client, headers, domain="acme.com")
@@ -681,7 +681,7 @@ async def test_post_emails_kicks_rater_after_usage_event(
     """
     calls: list[str] = []
     monkeypatch.setattr(
-        "hailhq.api.routes.emails.notify_usage_event_recorded",
+        "hailhq.api.usage.notify_usage_event_recorded",
         lambda usage_event_id: calls.append(usage_event_id),
     )
 
@@ -696,6 +696,43 @@ async def test_post_emails_kicks_rater_after_usage_event(
     assert resp.status_code == 201, resp.text
     assert len(calls) == 1
     UUID(calls[0])  # well-formed usage_event id
+
+
+async def test_outbound_email_meters_flat_one_unit(
+    client: httpx.AsyncClient,
+    org_and_key: tuple,
+    async_session: AsyncSession,
+) -> None:
+    """Outbound email meters exactly 1 unit regardless of recipient count.
+
+    Sending to 2 To + 1 Cc + 1 Bcc (= 4 addresses) must produce a single
+    usage_events row with units == 1, not 4.
+    """
+    _, _, plain = org_and_key
+    headers = {"Authorization": f"Bearer {plain}"}
+    await _register_custom_verified(client, headers, domain="acme.com")
+
+    resp = await client.post(
+        "/emails",
+        json={
+            "to": ["alice@example.com", "bob@example.com"],
+            "cc": ["carol@example.com"],
+            "bcc": ["dave@example.com"],
+            "subject": "flat billing test",
+            "body_text": "body",
+        },
+        headers=headers,
+    )
+    assert resp.status_code == 201, resp.text
+    email_id = resp.json()["id"]
+
+    row = (
+        await async_session.execute(
+            select(UsageEvent).where(UsageEvent.ref == f"email:{email_id}")
+        )
+    ).scalar_one()
+    assert row.channel == "email"
+    assert row.units == 1  # flat rate: 1¢ per send, not per recipient
 
 
 async def test_post_emails_usage_event_failure_does_not_fail_send(
@@ -725,7 +762,7 @@ async def test_post_emails_usage_event_failure_does_not_fail_send(
         return _BrokenSession()
 
     monkeypatch.setattr(
-        "hailhq.api.routes.emails.session_scope",
+        "hailhq.api.usage.session_scope",
         _broken_session_scope,
     )
 

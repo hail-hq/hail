@@ -82,7 +82,7 @@ class AccountCredit(Base):
             name="account_credits_kind_check",
         ),
         CheckConstraint(
-            "channel IN ('voice','sms','email','credit')",
+            "channel IN ('voice','sms','email','email_inbound','credit')",
             name="account_credits_channel_check",
         ),
         CheckConstraint(
@@ -126,7 +126,7 @@ class UsageEvent(Base):
 
     __table_args__ = (
         CheckConstraint(
-            "channel IN ('voice','sms','email')",
+            "channel IN ('voice','sms','email','email_inbound')",
             name="usage_events_channel_check",
         ),
         CheckConstraint(

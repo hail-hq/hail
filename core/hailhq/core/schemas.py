@@ -558,7 +558,8 @@ class EmailListResponse(BaseModel):
 # email.bounced / email.complained are subscribable now but only emitted once
 # SES bounce/complaint ingestion lands (next milestone); documented in
 # docs/setup/aws-ses.md. email.received.suppressed fires with
-# data.reason ∈ {forward_loop, forward_rate_limit, inbound_rate_limit}.
+# data.reason ∈ {forward_loop, forward_rate_limit, inbound_rate_limit,
+# insufficient_funds}.
 WebhookEventType = Literal[
     "email.received",
     "email.bounced",
