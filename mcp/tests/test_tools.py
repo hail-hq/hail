@@ -1,6 +1,6 @@
 """Unit tests for the MCP tool wrappers.
 
-Tests target the five tool callables in :mod:`hailhq.mcp.tools`,
+Tests target the nine tool callables in :mod:`hailhq.mcp.tools`,
 exercising local validation, HTTP request shape, and error mapping.
 The MCP/FastMCP transport layer is not covered here — that's framework
 territory; we trust the registered tools dispatch to the same callables
@@ -516,6 +516,83 @@ async def test_list_emails_pagination(client: HailClient) -> None:
     await tools.list_emails(client=client, cursor="cur-xyz", limit=10)
     assert "cursor=cur-xyz" in captured["url"]
     assert "limit=10" in captured["url"]
+
+
+# --------------------------------------------------------------------------- #
+# get_email_raw
+# --------------------------------------------------------------------------- #
+
+_PRESIGNED = (
+    "https://s3.eu-west-1.amazonaws.com/hail-inbound/raw/abc"
+    "?X-Amz-Signature=deadbeef&X-Amz-Expires=300"
+)
+
+
+@respx.mock
+async def test_get_email_raw_returns_presigned_url(client: HailClient) -> None:
+    eid = str(uuid4())
+    respx.get(f"{_BASE_URL}/emails/{eid}/raw").mock(
+        return_value=httpx.Response(302, headers={"location": _PRESIGNED})
+    )
+    result = await tools.get_email_raw(client=client, email_id=eid)
+    assert "error" not in result, result
+    # The tool returns the presigned URL, not the bytes — no redirect follow.
+    assert result["url"] == _PRESIGNED
+
+
+@respx.mock
+async def test_get_email_raw_maps_404_to_not_found(client: HailClient) -> None:
+    eid = str(uuid4())
+    respx.get(f"{_BASE_URL}/emails/{eid}/raw").mock(
+        return_value=httpx.Response(404, json={"detail": "raw MIME not available"})
+    )
+    result = await tools.get_email_raw(client=client, email_id=eid)
+    assert result == {"error": "resource not found"}
+
+
+@respx.mock
+async def test_get_email_raw_redirect_without_location_errors(
+    client: HailClient,
+) -> None:
+    # Defensive: a 3xx with no Location header must surface an error, never
+    # a {"url": None}. Production always sets Location; this guards the path.
+    eid = str(uuid4())
+    respx.get(f"{_BASE_URL}/emails/{eid}/raw").mock(return_value=httpx.Response(302))
+    result = await tools.get_email_raw(client=client, email_id=eid)
+    assert "error" in result
+    assert "redirect without Location" in result["error"]
+
+
+# --------------------------------------------------------------------------- #
+# get_email_attachment
+# --------------------------------------------------------------------------- #
+
+
+@respx.mock
+async def test_get_email_attachment_returns_presigned_url(client: HailClient) -> None:
+    eid = str(uuid4())
+    aid = str(uuid4())
+    respx.get(f"{_BASE_URL}/emails/{eid}/attachments/{aid}").mock(
+        return_value=httpx.Response(302, headers={"location": _PRESIGNED})
+    )
+    result = await tools.get_email_attachment(
+        client=client, email_id=eid, attachment_id=aid
+    )
+    assert "error" not in result, result
+    assert result["url"] == _PRESIGNED
+
+
+@respx.mock
+async def test_get_email_attachment_maps_404_to_not_found(client: HailClient) -> None:
+    eid = str(uuid4())
+    aid = str(uuid4())
+    respx.get(f"{_BASE_URL}/emails/{eid}/attachments/{aid}").mock(
+        return_value=httpx.Response(404, json={"detail": "attachment not found"})
+    )
+    result = await tools.get_email_attachment(
+        client=client, email_id=eid, attachment_id=aid
+    )
+    assert result == {"error": "resource not found"}
 
 
 # --------------------------------------------------------------------------- #

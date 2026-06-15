@@ -1,6 +1,6 @@
 """MCP tool surface for Hail's outbound-call API.
 
-Exposes seven tools to the calling agent:
+Exposes nine tools to the calling agent:
 
 * ``place_call`` — originate an outbound phone call
 * ``get_call`` — fetch the current state of one call
@@ -9,6 +9,8 @@ Exposes seven tools to the calling agent:
 * ``send_email`` — send an outbound email
 * ``get_email`` — fetch the full record of one email
 * ``list_emails`` — page through emails (``direction="inbound"`` for replies)
+* ``get_email_raw`` — presigned URL for an inbound email's raw MIME
+* ``get_email_attachment`` — presigned URL for one inbound attachment
 
 The tool docstrings are the agent's only documentation, so each one
 spells out the contract (required vs optional fields, mutually exclusive
@@ -22,7 +24,7 @@ models (``CallCreate``, ``EmailCreate``) constructed inside
 an ``{"error": ...}`` dict. Only the ``<type>:<uuid>`` resource-id shape
 for ``get_events`` is still checked locally via ``parse_resource_id``.
 
-The seven tool functions are kept module-importable so unit tests can
+The nine tool functions are kept module-importable so unit tests can
 call them directly with a constructed ``HailClient``; ``register_tools``
 is the FastMCP wiring step. Each registered tool closure accepts a
 FastMCP ``Context`` (auto-injected on dispatch) and uses the
@@ -216,6 +218,26 @@ async def list_emails(
         return _format_api_error(exc)
 
 
+async def get_email_raw(*, client: HailClient, email_id: str) -> dict[str, Any]:
+    try:
+        return await client.get_email_raw(email_id)
+    except ValidationError as exc:
+        return {"error": _validation_error_message(exc)}
+    except HailAPIError as exc:
+        return _format_api_error(exc)
+
+
+async def get_email_attachment(
+    *, client: HailClient, email_id: str, attachment_id: str
+) -> dict[str, Any]:
+    try:
+        return await client.get_email_attachment(email_id, attachment_id)
+    except ValidationError as exc:
+        return {"error": _validation_error_message(exc)}
+    except HailAPIError as exc:
+        return _format_api_error(exc)
+
+
 async def get_events(
     *,
     client: HailClient,
@@ -316,7 +338,7 @@ def register_tools(
     mode: AuthMode,
     singleton: HailClient | None,
 ) -> None:
-    """Register the seven Hail tools on a FastMCP app.
+    """Register the nine Hail tools on a FastMCP app.
 
     Tools accept a FastMCP ``Context`` parameter (auto-injected). The
     ``_client_for`` helper picks the right HailClient for the active mode
@@ -541,6 +563,42 @@ def register_tools(
         except RuntimeError as exc:
             return {"error": str(exc)}
 
+    @mcp_app.tool(name="get_email_raw")
+    async def get_email_raw_tool(ctx: Context, email_id: str) -> dict[str, Any]:
+        """Get a fetchable URL for an email's original MIME source.
+
+        Returns ``{"url": "<presigned-s3-url>"}`` — a short-lived
+        (~5 minute) link to the full raw RFC822 message. Fetch the URL
+        directly to read the complete original; it needs no auth header.
+        Raw source exists for **inbound** mail only — outbound ids return
+        ``{"error": "resource not found"}``.
+        """
+        try:
+            async with _client_for(ctx, mode=mode, singleton=singleton) as client:
+                return await get_email_raw(client=client, email_id=email_id)
+        except RuntimeError as exc:
+            return {"error": str(exc)}
+
+    @mcp_app.tool(name="get_email_attachment")
+    async def get_email_attachment_tool(
+        ctx: Context, email_id: str, attachment_id: str
+    ) -> dict[str, Any]:
+        """Get a fetchable URL for one inbound email attachment.
+
+        ``attachment_id`` comes from an item in ``get_email``'s
+        ``attachments`` list. Returns ``{"url": "<presigned-s3-url>"}`` —
+        a short-lived (~5 minute) link to the attachment bytes, fetchable
+        directly with no auth header. Unknown ids return
+        ``{"error": "resource not found"}``.
+        """
+        try:
+            async with _client_for(ctx, mode=mode, singleton=singleton) as client:
+                return await get_email_attachment(
+                    client=client, email_id=email_id, attachment_id=attachment_id
+                )
+        except RuntimeError as exc:
+            return {"error": str(exc)}
+
     @mcp_app.tool(name="get_events")
     async def get_events_tool(
         ctx: Context,
@@ -591,5 +649,7 @@ __all__ = [
     "list_calls",
     "get_email",
     "list_emails",
+    "get_email_raw",
+    "get_email_attachment",
     "get_events",
 ]

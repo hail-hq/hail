@@ -232,6 +232,27 @@ class HailClient:
         return EmailListResponse.model_validate(_decode(resp)).model_dump(mode="json")
 
     # ------------------------------------------------------------------ #
+    # GET /emails/{id}/raw — 302 → presigned S3 URL
+    # ------------------------------------------------------------------ #
+
+    async def get_email_raw(self, email_id: str) -> dict[str, Any]:
+        resp = await self._client.get(f"/emails/{email_id}/raw", follow_redirects=False)
+        return {"url": _location(resp)}
+
+    # ------------------------------------------------------------------ #
+    # GET /emails/{id}/attachments/{aid} — 302 → presigned S3 URL
+    # ------------------------------------------------------------------ #
+
+    async def get_email_attachment(
+        self, email_id: str, attachment_id: str
+    ) -> dict[str, Any]:
+        resp = await self._client.get(
+            f"/emails/{email_id}/attachments/{attachment_id}",
+            follow_redirects=False,
+        )
+        return {"url": _location(resp)}
+
+    # ------------------------------------------------------------------ #
     # GET /events
     # ------------------------------------------------------------------ #
 
@@ -260,18 +281,36 @@ def _decode(resp: httpx.Response) -> Any:
     """Return the JSON body on 2xx, raise :class:`HailAPIError` otherwise."""
     if 200 <= resp.status_code < 300:
         return resp.json()
-    detail: str
+    raise HailAPIError(status=resp.status_code, detail=_error_detail(resp))
+
+
+def _location(resp: httpx.Response) -> str:
+    """Return the ``Location`` header of a 3xx, raise on anything else.
+
+    The /raw and /attachments endpoints 302-redirect to a short-lived
+    presigned S3 URL. We capture that URL rather than follow it — the
+    bytes are large/binary and belong in the agent's fetch, not the
+    JSON tool response. A non-3xx (e.g. 404 outbound) maps through the
+    same ``HailAPIError`` path as every other tool.
+    """
+    if 300 <= resp.status_code < 400:
+        loc = resp.headers.get("location")
+        if loc:
+            return loc
+        raise HailAPIError(status=resp.status_code, detail="redirect without Location")
+    raise HailAPIError(status=resp.status_code, detail=_error_detail(resp))
+
+
+def _error_detail(resp: httpx.Response) -> str:
+    """Extract a ``detail`` string from a non-success response body."""
     try:
         payload = resp.json()
     except ValueError:
-        detail = resp.text or resp.reason_phrase
-    else:
-        if isinstance(payload, dict) and "detail" in payload:
-            d = payload["detail"]
-            detail = d if isinstance(d, str) else str(d)
-        else:
-            detail = str(payload)
-    raise HailAPIError(status=resp.status_code, detail=detail)
+        return resp.text or resp.reason_phrase
+    if isinstance(payload, dict) and "detail" in payload:
+        d = payload["detail"]
+        return d if isinstance(d, str) else str(d)
+    return str(payload)
 
 
 __all__ = ["HailAPIError", "HailClient"]
