@@ -26,7 +26,7 @@ import logging
 from collections.abc import Callable
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Protocol
 from uuid import UUID
 
 from sqlalchemy import select
@@ -43,6 +43,20 @@ POLL_BATCH = 20
 SessionFactory = Callable[[], "asynccontextmanager[AsyncSession]"]
 
 
+class UsageCallback(Protocol):
+    """Called once per delivered forward so the API layer can meter it.
+
+    Core stays billing-semantics-agnostic — channel, units, and ledger ref are
+    the api wiring's business; core only reports "this row was sent" and which
+    org/row it was. The keyword-only signature is the actual contract, so a
+    mismatched callback is a type error here rather than a runtime AttributeError.
+    """
+
+    async def __call__(
+        self, *, organization_id: UUID, forward_email_id: UUID
+    ) -> None: ...
+
+
 def _is_missing_object_error(exc: Exception) -> bool:
     """True when S3 says the object is permanently gone (NoSuchKey/404)."""
     code = getattr(exc, "response", {}).get("Error", {}).get("Code", "")
@@ -56,11 +70,13 @@ class OutboundForwardWorker:
         session_factory: SessionFactory,
         provider_factory: Callable[[], EmailProvider],
         s3_factory: Callable[[], S3InboundClient],
+        usage_callback: UsageCallback | None = None,
         poll_interval: float = 1.0,
     ) -> None:
         self._session_factory = session_factory
         self._provider_factory = provider_factory
         self._s3_factory = s3_factory
+        self._usage_callback = usage_callback
         self._provider: EmailProvider | None = None
         self._s3: S3InboundClient | None = None
         self._poll_interval = poll_interval
@@ -119,12 +135,46 @@ class OutboundForwardWorker:
                 if row is None:
                     return processed
                 outcome = await self._send_one(session, row)
+                # Read the ids we need to meter with before commit, so the meter
+                # never depends on the row staying loaded post-commit (a session
+                # factory with expire_on_commit would otherwise re-fetch them).
+                forward_org_id = row.organization_id
+                forward_email_id = row.id
                 await session.commit()
             if outcome == "deferred":
                 # Transient infra failure (S3) — stop the tick; retry next poll.
                 return processed
+            if outcome == "sent":
+                # Meter the delivered forward as a billable outbound send. Only
+                # after commit, so we never bill mail that didn't durably send.
+                await self._meter_forward(forward_org_id, forward_email_id)
             processed += 1
         return processed
+
+    async def _meter_forward(
+        self, organization_id: UUID, forward_email_id: UUID
+    ) -> None:
+        """Report one delivered forward to the usage callback, best-effort.
+
+        Metering must never break delivery: the row is already committed
+        ``sent`` here, so a callback failure just drops one meter (logged) — it
+        cannot re-send the mail or roll anything back.
+        """
+        if self._usage_callback is None:
+            return
+        try:
+            await self._usage_callback(
+                organization_id=organization_id,
+                forward_email_id=forward_email_id,
+            )
+        except (
+            Exception
+        ):  # metering is best-effort; a dropped meter must not break delivery
+            logger.warning(
+                "forward usage meter failed for email_id=%s",
+                forward_email_id,
+                exc_info=True,
+            )
 
     async def _send_one(self, session: AsyncSession, row: Email) -> str:
         """Attempt one forward. Returns ``"sent" | "failed" | "deferred"``.

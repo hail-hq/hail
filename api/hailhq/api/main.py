@@ -26,8 +26,26 @@ from hailhq.api.routes import events as events_routes
 from hailhq.api.routes import email_domains as email_domains_routes
 from hailhq.api.routes import webhooks as webhooks_routes
 from hailhq.api.routes.internal import ses_events as internal_ses_events
+from hailhq.api.usage import write_usage_event
 
 logger = logging.getLogger(__name__)
+
+
+async def _meter_forward_send(*, organization_id, forward_email_id) -> None:
+    """Meter one delivered forward as a billable outbound send.
+
+    A forward is an outbound message and bills like one: flat 1 unit on the
+    ``email`` channel, same as ``POST /emails`` and the inbound meter. The
+    ``email-forward:`` ref prefix keeps it distinct from the inbound
+    ``email:{id}`` event for the same conversation in the ledger.
+    """
+    await write_usage_event(
+        organization_id=organization_id,
+        channel="email",
+        units=1,
+        ref=f"email-forward:{forward_email_id}",
+    )
+
 
 # How often the backstop sweepers run. Both the call reconciler and the pool
 # release first happen on the hot path (the voicebot's on_call_end, ~immediate);
@@ -127,6 +145,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
             session_factory=session_scope,
             provider_factory=SesEmailProvider,
             s3_factory=lambda: S3InboundClient(bucket=settings.hail_inbound_bucket),
+            usage_callback=_meter_forward_send,
         )
         forward_task = asyncio.create_task(
             forward_worker.run_forever(), name="outbound-forward-worker"

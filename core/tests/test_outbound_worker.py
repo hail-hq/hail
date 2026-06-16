@@ -48,7 +48,7 @@ def _queued_forward(org_id, domain_id, inbound_id, headers=None):
     )
 
 
-def _worker(async_session, provider, s3=None):
+def _worker(async_session, provider, s3=None, usage_callback=None):
     @asynccontextmanager
     async def session_factory():
         yield async_session
@@ -57,6 +57,7 @@ def _worker(async_session, provider, s3=None):
         session_factory=session_factory,
         provider_factory=lambda: provider,
         s3_factory=lambda: s3 or AsyncMock(),
+        usage_callback=usage_callback,
     )
 
 
@@ -84,6 +85,74 @@ async def test_tick_sends_queued_forward_and_marks_sent(async_session):
     assert refreshed.provider_message_id == "ses-1"
     kwargs = provider.send_email.await_args.kwargs
     assert kwargs["headers"]["X-Hail-Forward-Hops"] == "1"
+
+
+@pytest.mark.asyncio
+async def test_tick_meters_sent_forward(async_session):
+    """Each delivered forward is a billable outbound send: the worker invokes
+    the usage callback once per row it marks ``sent``, keyed by org + row id."""
+    org_id = uuid.uuid4()
+    dom = _domain(org_id)
+    async_session.add(dom)
+    await async_session.flush()
+    row = _queued_forward(org_id, dom.id, uuid.uuid4())
+    async_session.add(row)
+    await async_session.commit()
+    email_id = row.id
+
+    provider = AsyncMock()
+    provider.send_email.return_value = ProviderSendResult(provider_message_id="ses-1")
+    usage = AsyncMock()
+
+    await _worker(async_session, provider, usage_callback=usage).tick()
+
+    usage.assert_awaited_once_with(organization_id=org_id, forward_email_id=email_id)
+
+
+@pytest.mark.asyncio
+async def test_tick_does_not_meter_failed_forward(async_session):
+    """A forward that never sends must not be billed."""
+    org_id = uuid.uuid4()
+    dom = _domain(org_id)
+    async_session.add(dom)
+    await async_session.flush()
+    row = _queued_forward(org_id, dom.id, uuid.uuid4())
+    async_session.add(row)
+    await async_session.commit()
+
+    provider = AsyncMock()
+    provider.send_email.side_effect = RuntimeError("ses down")
+    usage = AsyncMock()
+
+    await _worker(async_session, provider, usage_callback=usage).tick()
+
+    usage.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_tick_survives_metering_failure(async_session):
+    """Metering is best-effort: a raising usage callback must not roll back or
+    re-send delivery — the row stays ``sent`` and the tick completes normally."""
+    org_id = uuid.uuid4()
+    dom = _domain(org_id)
+    async_session.add(dom)
+    await async_session.flush()
+    row = _queued_forward(org_id, dom.id, uuid.uuid4())
+    async_session.add(row)
+    await async_session.commit()
+
+    provider = AsyncMock()
+    provider.send_email.return_value = ProviderSendResult(provider_message_id="ses-1")
+    usage = AsyncMock(side_effect=RuntimeError("ledger down"))
+
+    processed = await _worker(async_session, provider, usage_callback=usage).tick()
+
+    assert processed == 1
+    usage.assert_awaited_once()
+    refreshed = (
+        await async_session.execute(select(Email).where(Email.id == row.id))
+    ).scalar_one()
+    assert refreshed.status == "sent"
 
 
 @pytest.mark.asyncio
