@@ -114,6 +114,16 @@ def _constraint_exists(conn: psycopg.Connection, name: str) -> bool:
     return cur.fetchone() is not None
 
 
+def _constraint_src(conn: psycopg.Connection, name: str) -> str | None:
+    """Return the Postgres-normalised CHECK expression for a named constraint."""
+    cur = conn.execute(
+        "SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conname = %s",
+        (name,),
+    )
+    row = cur.fetchone()
+    return row[0] if row else None
+
+
 def _assert_head_schema(url: str) -> None:
     """Every reachable upgrade path lands here."""
     with psycopg.connect(_to_libpq_url(to_sync_url(url))) as conn:
@@ -272,3 +282,53 @@ def test_audit_log_idempotent_on_already_converted_column(empty_db: str) -> None
 
     _run_alembic(empty_db, ["upgrade", "head"])
     _assert_head_schema(empty_db)
+
+
+def test_head_schema_forbids_email_inbound(empty_db: str) -> None:
+    """email_inbound was collapsed into the single ``email`` channel. At head,
+    neither channel CHECK may permit it — the value must be gone from the
+    schema, not merely unused."""
+    _run_alembic(empty_db, ["upgrade", "head"])
+    with psycopg.connect(_to_libpq_url(to_sync_url(empty_db))) as conn:
+        for name in ("usage_events_channel_check", "account_credits_channel_check"):
+            src = _constraint_src(conn, name)
+            assert src is not None, f"{name} missing"
+            assert (
+                "email_inbound" not in src
+            ), f"{name} still permits email_inbound: {src}"
+
+
+def test_email_inbound_rows_converted_on_upgrade(empty_db: str) -> None:
+    """A DB that ran 0011 while the channel was live may hold email_inbound
+    rows. 0012 must convert them to email *before* narrowing the CHECK — else
+    Postgres validates the narrower constraint against the leftover row and
+    aborts, re-breaking the deploy."""
+    _run_alembic(empty_db, ["upgrade", "0011"])
+    org = "11111111-1111-1111-1111-111111111111"
+    with psycopg.connect(_to_libpq_url(to_sync_url(empty_db)), autocommit=True) as conn:
+        conn.execute(
+            "INSERT INTO usage_events (organization_id, channel, units) "
+            "VALUES (%s, 'email_inbound', 1)",
+            (org,),
+        )
+        conn.execute(
+            "INSERT INTO account_credits "
+            "(organization_id, kind, channel, amount_cents, source) "
+            "VALUES (%s, 'debit', 'email_inbound', -1, 'test')",
+            (org,),
+        )
+
+    _run_alembic(empty_db, ["upgrade", "head"])
+
+    with psycopg.connect(_to_libpq_url(to_sync_url(empty_db))) as conn:
+        for table in ("usage_events", "account_credits"):
+            remaining = conn.execute(
+                f"SELECT count(*) FROM {table} WHERE channel = 'email_inbound'"
+            ).fetchone()[0]
+            assert remaining == 0, f"{table} still has email_inbound rows"
+        converted = conn.execute(
+            "SELECT count(*) FROM usage_events WHERE channel = 'email'"
+        ).fetchone()[0]
+        assert (
+            converted == 1
+        ), "the email_inbound usage_event was not converted to email"
