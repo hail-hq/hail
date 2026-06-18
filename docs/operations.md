@@ -101,7 +101,8 @@ New adapters live under `core/hailhq/core/providers/<channel>/<name>.py` and imp
 - **Twilio**: account SID + auth token + a phone number with voice capability + an Elastic SIP Trunk (Origination URI → LiveKit's inbound, Termination → Twilio's PSTN).
 - **LiveKit Cloud**: project + URL + API key + secret + an outbound SIP trunk (`LIVEKIT_SIP_OUTBOUND_TRUNK_ID`) + an inbound trunk (`LIVEKIT_SIP_INBOUND_TRUNK_ID`, reserved for v1.1).
 - **Deepgram** (STT): API key.
-- **ElevenLabs** (TTS): API key + a voice ID from your library.
+- **Cartesia** (primary TTS): API key + a voice ID from the Cartesia voice library.
+- **ElevenLabs** (fallback TTS, optional): API key + a voice ID. Used automatically when Cartesia fails, if `ELEVEN_API_KEY` is set.
 - **At least one LLM provider**: OpenAI / Gemini / Anthropic API key. The voicebot's mode-A FallbackAdapter chains all three; mode-B uses a caller-provided OpenAI-compatible endpoint per call.
 
 Detailed setup walkthroughs: `docs/setup/twilio.md`, `docs/setup/livekit-cloud.md`, `docs/setup/mcp.md`. For running the whole stack on a single Ubuntu VM with HTTPS + auto-deploy from `main`, see `docs/setup/vm-deploy.md`.

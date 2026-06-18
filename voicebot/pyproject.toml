@@ -15,6 +15,7 @@ dependencies = [
     "livekit-plugins-google>=1.5,<2",
     "livekit-plugins-anthropic>=1.5,<2",
     "livekit-plugins-deepgram>=1.5,<2",
+    "livekit-plugins-cartesia>=1.5,<2",
     "livekit-plugins-elevenlabs>=1.5,<2",
     "livekit-plugins-silero>=1.5,<2",
     "livekit-plugins-turn-detector>=1.5,<2",

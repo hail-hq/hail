@@ -22,7 +22,7 @@ def test_call_round_trip(session):
         from_number_id=number.id,
         from_e164=number.e164,
         to_e164="+14155559999",
-        voice_config={"stt": "deepgram", "tts": "elevenlabs"},
+        voice_config={"stt": "deepgram", "tts": "cartesia"},
     )
     session.add(call)
     session.commit()

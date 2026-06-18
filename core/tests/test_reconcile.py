@@ -45,7 +45,7 @@ async def _make_call(
         from_number_id=pn.id,
         from_e164=pn.e164,
         to_e164="+14155551234",
-        voice_config={"stt": "deepgram", "tts": "elevenlabs"},
+        voice_config={"stt": "deepgram", "tts": "cartesia"},
         status=status,
         max_duration_seconds=max_duration_seconds,
         end_reason=end_reason,

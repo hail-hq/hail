@@ -83,7 +83,7 @@ cp .env.example .env
 
 Edit `/opt/hail/.env` and fill in:
 
-- All provider secrets (Twilio, LiveKit, Deepgram, ElevenLabs, at least one LLM key — see `docs/setup/`).
+- All provider secrets (Twilio, LiveKit, Deepgram, Cartesia (+ optional ElevenLabs fallback), at least one LLM key — see `docs/setup/`).
 - `HAIL_API_KEY` — generate with `openssl rand -base64 32 | tr -d '/+=' | head -c 40 | sed 's/^/hk_/'`.
 - `DATABASE_URL` — the managed Postgres connection string. Most providers require `?sslmode=require`.
 - `HAIL_DOMAIN` — your apex (e.g. `hail.example.com`). Both `api.` and `mcp.` subdomains derive from it.

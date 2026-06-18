@@ -55,7 +55,7 @@ async def _make_call(session, *, from_number_id: uuid.UUID) -> Call:
         from_number_id=from_number_id,
         from_e164="+14155550100",
         to_e164="+14155551234",
-        voice_config={"stt": "deepgram", "tts": "elevenlabs"},
+        voice_config={"stt": "deepgram", "tts": "cartesia"},
     )
     session.add(call)
     await session.commit()

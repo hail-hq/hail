@@ -27,9 +27,13 @@ from typing import Any
 
 from livekit.agents import AgentSession
 from livekit.agents import llm as agents_llm
+from livekit.agents import tts as agents_tts
 from livekit.agents import vad as agents_vad
 from livekit.plugins import (
     anthropic as anthropic_plugin,
+)
+from livekit.plugins import (
+    cartesia as cartesia_plugin,
 )
 from livekit.plugins import (
     deepgram as deepgram_plugin,
@@ -76,6 +80,41 @@ def build_llm(llm_cfg: dict[str, Any] | None) -> agents_llm.LLM:
     )
 
 
+def build_tts() -> agents_tts.TTS:
+    """Construct the TTS for one call: Cartesia primary, ElevenLabs fallback.
+
+    A provider is included only when its API key is configured, so a
+    single-key self-host still works (tenet 4). With both keys set the two are
+    wrapped in a ``FallbackAdapter`` with Cartesia first — the fixed
+    provider ordering mirrors the hardcoded LLM fallback chain; retry/timeout
+    tuning is left at the SDK defaults for v1. With one key set that provider is used
+    directly with no adapter. The order is fixed in code, not caller- or
+    env-selectable.
+    """
+    instances: list[agents_tts.TTS] = []
+    if settings.cartesia_api_key:
+        instances.append(
+            cartesia_plugin.TTS(
+                model=settings.cartesia_model,
+                voice=settings.cartesia_voice_id,
+            )
+        )
+    if settings.eleven_api_key:
+        instances.append(
+            elevenlabs_plugin.TTS(
+                voice_id=settings.elevenlabs_voice_id,
+                model=settings.elevenlabs_model,
+            )
+        )
+    if not instances:
+        raise RuntimeError(
+            "No TTS provider configured: set CARTESIA_API_KEY or ELEVEN_API_KEY."
+        )
+    if len(instances) == 1:
+        return instances[0]
+    return agents_tts.FallbackAdapter(instances)
+
+
 def build_session(
     llm_cfg: dict[str, Any] | None,
     vad: agents_vad.VAD,
@@ -88,12 +127,9 @@ def build_session(
     return AgentSession(
         vad=vad,
         stt=deepgram_plugin.STT(model=settings.deepgram_model),
-        tts=elevenlabs_plugin.TTS(
-            voice_id=settings.elevenlabs_voice_id,
-            model=settings.elevenlabs_model,
-        ),
+        tts=build_tts(),
         llm=build_llm(llm_cfg),
     )
 
 
-__all__ = ["build_llm", "build_session"]
+__all__ = ["build_llm", "build_tts", "build_session"]

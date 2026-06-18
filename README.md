@@ -11,7 +11,7 @@ Your agent wants to place a call: _"Call +1… and ask if they want to reschedul
 git clone https://github.com/hail-hq/hail
 cd hail
 cp .env.example .env
-# fill in Twilio, LiveKit Cloud, Deepgram, ElevenLabs, and one of OpenAI / Gemini / Anthropic
+# fill in Twilio, LiveKit Cloud, Deepgram, Cartesia, and one of OpenAI / Gemini / Anthropic
 docker compose up
 ```
 
@@ -92,8 +92,8 @@ Checked = shipped. Per-artifact changelogs (GitHub Releases for the CLI, PyPI re
   - [ ] Whisper
   - [ ] AssemblyAI
 - TTS
+  - [x] Cartesia
   - [x] ElevenLabs
-  - [ ] Cartesia
   - [ ] Deepgram Aura
 - VAD
   - [x] Silero

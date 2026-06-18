@@ -53,7 +53,7 @@ def test_call_create_rejects_prompt_and_llm_together():
 def test_voice_config_defaults():
     cfg = VoiceConfig()
     assert cfg.stt == "deepgram"
-    assert cfg.tts == "elevenlabs"
+    assert cfg.tts == "cartesia"
     assert cfg.vad == "silero"
 
 

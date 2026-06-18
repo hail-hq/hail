@@ -92,7 +92,7 @@ First public release. Outbound phone calls for AI agents, end-to-end.
 ### Voice pipeline
 
 - Deepgram STT.
-- ElevenLabs TTS.
+- Cartesia TTS (primary) with ElevenLabs fallback.
 - Silero VAD (prewarmed once per worker process).
 - LiveKit turn-detector for end-of-utterance detection.
 - LLM system-prompt mode with OpenAI to Gemini to Anthropic fallback chain.

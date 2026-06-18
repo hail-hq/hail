@@ -90,7 +90,7 @@ class VoiceConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     stt: Literal["deepgram"] = "deepgram"
-    tts: Literal["elevenlabs"] = "elevenlabs"
+    tts: Literal["cartesia"] = "cartesia"
     vad: Literal["silero"] = "silero"
     turn_detection: Literal["livekit"] = "livekit"
 

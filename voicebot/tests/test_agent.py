@@ -91,6 +91,16 @@ def test_build_instructions_present_without_caller_prompt() -> None:
     assert VOICE_PREAMBLE.strip(), "preamble must be non-empty"
 
 
+def test_build_instructions_adds_caller_boundary_header() -> None:
+    """A caller prompt is appended under its own header so its Markdown
+    sections never collide with the preamble's `#` sections."""
+    caller = "You are calling Dr. Lee's office to book a teeth cleaning."
+    out = build_instructions(caller)
+
+    assert "# Caller instructions" in out
+    assert out.index("# Caller instructions") < out.index(caller)
+
+
 def test_voice_preamble_frames_the_channel() -> None:
     """The preamble explicitly addresses the observed failure modes."""
     low = VOICE_PREAMBLE.lower()
@@ -138,7 +148,7 @@ async def _make_call_row(session: AsyncSession) -> UUID:
         from_number_id=pn.id,
         from_e164=pn.e164,
         to_e164="+14155559999",
-        voice_config={"stt": "deepgram", "tts": "elevenlabs"},
+        voice_config={"stt": "deepgram", "tts": "cartesia"},
         status="dialing",
     )
     session.add(call)
@@ -332,7 +342,7 @@ async def test_on_call_end_releases_pool_reservation(
         from_number_id=pool_pn.id,
         from_e164=pool_pn.e164,
         to_e164="+14155559999",
-        voice_config={"stt": "deepgram", "tts": "elevenlabs"},
+        voice_config={"stt": "deepgram", "tts": "cartesia"},
         status="dialing",
         metadata_={CALL_META_FROM_POOL: True},
     )

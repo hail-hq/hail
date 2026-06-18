@@ -1986,9 +1986,9 @@ components:
           default: deepgram
         tts:
           type: string
-          const: elevenlabs
+          const: cartesia
           title: Tts
-          default: elevenlabs
+          default: cartesia
         vad:
           type: string
           const: silero
