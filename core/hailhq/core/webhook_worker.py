@@ -179,9 +179,8 @@ class WebhookWorker:
                     "X-Hail-Signature": sig,
                     "X-Hail-Event": row.event_type,
                     "X-Hail-Delivery": str(row.id),
+                    "X-Hail-Subscription": str(row.subscription_id),
                 }
-                if row.subscription_id:
-                    headers["X-Hail-Subscription"] = str(row.subscription_id)
                 if row.email_domain_id:
                     headers["X-Hail-Email-Domain"] = str(row.email_domain_id)
 
@@ -206,19 +205,22 @@ class WebhookWorker:
     async def _resolve_target_url(
         self, db: AsyncSession, row: WebhookDelivery
     ) -> tuple[str, str] | None:
-        """Return (target_url, secret_encrypted) or None if undeliverable."""
-        if row.subscription_id:
-            sub = (
-                await db.execute(
-                    select(WebhookSubscription).where(
-                        WebhookSubscription.id == row.subscription_id
-                    )
+        """Return (target_url, secret_encrypted) or None if undeliverable.
+
+        Every delivery is owned by a subscription (DB CHECK
+        ``webhook_deliveries_target_check``); a missing or inactive
+        subscription is the only undeliverable case.
+        """
+        sub = (
+            await db.execute(
+                select(WebhookSubscription).where(
+                    WebhookSubscription.id == row.subscription_id
                 )
-            ).scalar_one_or_none()
-            if sub is None or sub.status != "active":
-                return None
-            return sub.target_url, sub.secret_encrypted
-        return None
+            )
+        ).scalar_one_or_none()
+        if sub is None or sub.status != "active":
+            return None
+        return sub.target_url, sub.secret_encrypted
 
     async def _record_success(
         self,
@@ -239,15 +241,14 @@ class WebhookWorker:
                 succeeded_at=datetime.now(timezone.utc),
             )
         )
-        if row.subscription_id is not None:
-            await db.execute(
-                update(WebhookSubscription)
-                .where(WebhookSubscription.id == row.subscription_id)
-                .values(
-                    consecutive_failures=0,
-                    last_success_at=datetime.now(timezone.utc),
-                )
+        await db.execute(
+            update(WebhookSubscription)
+            .where(WebhookSubscription.id == row.subscription_id)
+            .values(
+                consecutive_failures=0,
+                last_success_at=datetime.now(timezone.utc),
             )
+        )
         await db.commit()
 
     async def _record_failure(
@@ -269,10 +270,9 @@ class WebhookWorker:
         await db.execute(
             update(WebhookDelivery).where(WebhookDelivery.id == row.id).values(**values)
         )
-        if row.subscription_id is not None:
-            await self._update_subscription_on_failure(
-                db, row.subscription_id, terminal=(new_status == "dead")
-            )
+        await self._update_subscription_on_failure(
+            db, row.subscription_id, terminal=(new_status == "dead")
+        )
         await db.commit()
 
     async def _update_subscription_on_failure(

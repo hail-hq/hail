@@ -724,14 +724,14 @@ class WebhookDelivery(Base):
     id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
     )
-    subscription_id: Mapped[uuid.UUID | None] = mapped_column(
+    subscription_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("webhook_subscriptions.id", ondelete="CASCADE"),
-        nullable=True,
+        nullable=False,
     )
     email_domain_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
-        ForeignKey("email_domains.id", ondelete="CASCADE"),
+        ForeignKey("email_domains.id", ondelete="SET NULL"),
         nullable=True,
     )
     event_type: Mapped[str] = mapped_column(Text, nullable=False)
@@ -750,10 +750,6 @@ class WebhookDelivery(Base):
     )
 
     __table_args__ = (
-        CheckConstraint(
-            "subscription_id IS NOT NULL",
-            name="webhook_deliveries_target_check",
-        ),
         CheckConstraint(
             "status IN ('pending','succeeded','failed','dead')",
             name="webhook_deliveries_status_check",

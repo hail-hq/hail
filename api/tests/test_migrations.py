@@ -339,8 +339,8 @@ def test_0013_drops_per_domain_webhook(empty_db: str) -> None:
     re-expresses email_domains_inbound_action without webhook_url, drops
     email_domains_webhook_pair, and tightens webhook_deliveries_target_check
     to require subscription_id. A full down/up round-trip must also succeed."""
-    # Apply all migrations 0001..0013.
-    _run_alembic(empty_db, ["upgrade", "head"])
+    # Apply migrations 0001..0013 (pinned: 0014 drops target_check entirely).
+    _run_alembic(empty_db, ["upgrade", "0013"])
 
     with psycopg.connect(_to_libpq_url(to_sync_url(empty_db))) as conn:
         # Primary assertion: the two webhook columns are gone.
@@ -379,3 +379,65 @@ def test_0013_drops_per_domain_webhook(empty_db: str) -> None:
         assert (
             _column_data_type(conn, "email_domains", "webhook_secret_encrypted") is None
         ), "email_domains.webhook_secret_encrypted reappeared after round-trip upgrade"
+
+
+def _column_is_nullable(conn: psycopg.Connection, table: str, column: str) -> bool:
+    cur = conn.execute(
+        "SELECT is_nullable FROM information_schema.columns "
+        "WHERE table_schema = current_schema() "
+        "AND table_name = %s AND column_name = %s",
+        (table, column),
+    )
+    row = cur.fetchone()
+    assert row is not None, f"{table}.{column} missing"
+    return row[0] == "YES"
+
+
+def _fk_delete_rule(conn: psycopg.Connection, conname: str) -> str | None:
+    """Return the FK ON DELETE action: 'c' cascade, 'n' set null, 'a' no action."""
+    cur = conn.execute(
+        "SELECT confdeltype FROM pg_constraint WHERE conname = %s", (conname,)
+    )
+    row = cur.fetchone()
+    return row[0] if row else None
+
+
+def test_0014_tightens_webhook_delivery_ownership(empty_db: str) -> None:
+    """0014 makes webhook_deliveries.subscription_id NOT NULL, drops the
+    degenerate webhook_deliveries_target_check, and switches the
+    email_domain_id FK from ON DELETE CASCADE to SET NULL. A down/up
+    round-trip must restore the 0013 state and re-tighten cleanly."""
+    _run_alembic(empty_db, ["upgrade", "head"])
+
+    with psycopg.connect(_to_libpq_url(to_sync_url(empty_db))) as conn:
+        assert not _column_is_nullable(
+            conn, "webhook_deliveries", "subscription_id"
+        ), "subscription_id should be NOT NULL after 0014"
+        assert not _constraint_exists(
+            conn, "webhook_deliveries_target_check"
+        ), "degenerate target CHECK should be dropped by 0014"
+        assert (
+            _fk_delete_rule(conn, "webhook_deliveries_email_domain_id_fkey") == "n"
+        ), "email_domain_id FK should be ON DELETE SET NULL after 0014"
+
+    # Round-trip: downgrade to 0013 (restores the looser schema), then back.
+    _run_alembic(empty_db, ["downgrade", "-1"])
+    with psycopg.connect(_to_libpq_url(to_sync_url(empty_db))) as conn:
+        assert _column_is_nullable(
+            conn, "webhook_deliveries", "subscription_id"
+        ), "subscription_id should be nullable again at 0013"
+        assert _constraint_exists(
+            conn, "webhook_deliveries_target_check"
+        ), "target CHECK should be restored at 0013"
+        assert (
+            _fk_delete_rule(conn, "webhook_deliveries_email_domain_id_fkey") == "c"
+        ), "email_domain_id FK should be CASCADE again at 0013"
+
+    _run_alembic(empty_db, ["upgrade", "head"])
+    with psycopg.connect(_to_libpq_url(to_sync_url(empty_db))) as conn:
+        assert not _column_is_nullable(
+            conn, "webhook_deliveries", "subscription_id"
+        ), "subscription_id should be NOT NULL again after round-trip"
+        assert (
+            _fk_delete_rule(conn, "webhook_deliveries_email_domain_id_fkey") == "n"
+        ), "email_domain_id FK should be SET NULL again after round-trip"
