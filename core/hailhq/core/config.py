@@ -79,6 +79,11 @@ class Settings(BaseSettings):
     # Terraform module under ``infra/terraform/`` provisions S3 bucket,
     # SES Receipt Rule, and Lambda; HAIL_INBOUND_HMAC_SECRET is shared
     # between the Lambda env and the API.
+    # Background re-poll cadence (seconds) for pending custom sender domains.
+    # The worker flips them to verified once DKIM lands and fails them past a
+    # 72h TTL. Set 0 to disable (rely on POST /email-domains/{id}/verify only).
+    hail_domain_verify_poll_seconds: int = 120
+
     hail_inbound_enabled: bool = False
     # Single source of truth for both the Terraform module and the API.
     # The raw-MIME bucket name is derived as ``{prefix}-raw``; SES Lambda

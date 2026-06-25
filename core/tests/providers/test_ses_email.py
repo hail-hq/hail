@@ -212,6 +212,64 @@ async def test_send_email_requires_a_body(ses_client) -> None:
 # ---------------------------------------------------------- create_identity
 
 
+async def test_create_identity_sets_mail_from_and_returns_all_records(
+    ses_client, stub: Stubber
+) -> None:
+    from hailhq.core.providers.email.base import DnsRecord
+
+    stub.add_response(
+        "create_email_identity",
+        {
+            "IdentityType": "DOMAIN",
+            "DkimAttributes": {
+                "Tokens": ["aaaaa", "bbbbb", "ccccc"],
+                "Status": "PENDING",
+            },
+        },
+        {"EmailIdentity": "acme.com"},
+    )
+    stub.add_response(
+        "put_email_identity_mail_from_attributes",
+        {},
+        {
+            "EmailIdentity": "acme.com",
+            "MailFromDomain": "send.acme.com",
+            "BehaviorOnMxFailure": "USE_DEFAULT_VALUE",
+        },
+    )
+
+    provider = SesEmailProvider(client=ses_client)
+    identity = await provider.create_identity("acme.com")
+
+    assert identity.mail_from_domain == "send.acme.com"
+    assert identity.mail_from_status == "pending"
+    assert identity.verification_status == "pending"
+    # 3 DKIM CNAMEs ...
+    assert (
+        DnsRecord(name="aaaaa._domainkey.acme.com", value="aaaaa.dkim.amazonses.com")
+        in identity.dkim_records
+    )
+    # ... plus the MAIL FROM MX (region from the us-east-1 test client) ...
+    assert (
+        DnsRecord(
+            name="send.acme.com",
+            value="feedback-smtp.us-east-1.amazonses.com",
+            type="MX",
+            priority=10,
+        )
+        in identity.dkim_records
+    )
+    # ... plus the SPF TXT.
+    assert (
+        DnsRecord(
+            name="send.acme.com", value="v=spf1 include:amazonses.com ~all", type="TXT"
+        )
+        in identity.dkim_records
+    )
+    assert len(identity.dkim_records) == 5
+    stub.assert_no_pending_responses()
+
+
 async def test_create_identity_returns_dkim_cnames(ses_client, stub: Stubber) -> None:
     stub.add_response(
         "create_email_identity",
@@ -224,6 +282,15 @@ async def test_create_identity_returns_dkim_cnames(ses_client, stub: Stubber) ->
         },
         {"EmailIdentity": "acme.com"},
     )
+    stub.add_response(
+        "put_email_identity_mail_from_attributes",
+        {},
+        {
+            "EmailIdentity": "acme.com",
+            "MailFromDomain": "send.acme.com",
+            "BehaviorOnMxFailure": "USE_DEFAULT_VALUE",
+        },
+    )
 
     provider = SesEmailProvider(client=ses_client)
     identity = await provider.create_identity("acme.com")
@@ -231,11 +298,13 @@ async def test_create_identity_returns_dkim_cnames(ses_client, stub: Stubber) ->
     assert isinstance(identity, ProviderIdentity)
     assert identity.domain == "acme.com"
     assert identity.verification_status == "pending"
-    assert identity.dkim_records == [
-        DkimRecord(name="aaaaa._domainkey.acme.com", value="aaaaa.dkim.amazonses.com"),
-        DkimRecord(name="bbbbb._domainkey.acme.com", value="bbbbb.dkim.amazonses.com"),
-        DkimRecord(name="ccccc._domainkey.acme.com", value="ccccc.dkim.amazonses.com"),
-    ]
+    for token in ("aaaaa", "bbbbb", "ccccc"):
+        assert (
+            DkimRecord(
+                name=f"{token}._domainkey.acme.com", value=f"{token}.dkim.amazonses.com"
+            )
+            in identity.dkim_records
+        )
     stub.assert_no_pending_responses()
 
 
@@ -288,6 +357,51 @@ async def test_get_identity_treats_temporary_failure_as_pending(
     provider = SesEmailProvider(client=ses_client)
     identity = await provider.get_identity("acme.com")
     assert identity.verification_status == "pending"
+
+
+async def test_get_identity_maps_mail_from_status(ses_client, stub: Stubber) -> None:
+    stub.add_response(
+        "get_email_identity",
+        {
+            "IdentityType": "DOMAIN",
+            "VerificationStatus": "SUCCESS",
+            "DkimAttributes": {
+                "Status": "SUCCESS",
+                "Tokens": ["aaaaa", "bbbbb", "ccccc"],
+            },
+            "MailFromAttributes": {
+                "MailFromDomain": "send.acme.com",
+                "MailFromDomainStatus": "PENDING",
+                "BehaviorOnMxFailure": "USE_DEFAULT_VALUE",
+            },
+        },
+        {"EmailIdentity": "acme.com"},
+    )
+    provider = SesEmailProvider(client=ses_client)
+    identity = await provider.get_identity("acme.com")
+    assert identity.verification_status == "verified"  # DKIM SUCCESS
+    assert identity.mail_from_status == "pending"  # MAIL FROM still PENDING
+    # get_identity must return all 5 records (3 DKIM + MX + SPF TXT) so that
+    # mail_from records are never lost when the stored dns_records are refreshed.
+    assert len(identity.dkim_records) == 5
+    assert (
+        DkimRecord(
+            name="send.acme.com",
+            value="feedback-smtp.us-east-1.amazonses.com",
+            type="MX",
+            priority=10,
+        )
+        in identity.dkim_records
+    )
+    assert (
+        DkimRecord(
+            name="send.acme.com",
+            value="v=spf1 include:amazonses.com ~all",
+            type="TXT",
+        )
+        in identity.dkim_records
+    )
+    stub.assert_no_pending_responses()
 
 
 async def test_get_identity_missing_raises_lookup_error(

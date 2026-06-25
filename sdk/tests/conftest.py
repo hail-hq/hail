@@ -65,6 +65,7 @@ def make_email_domain_response(
     verification_status: str = "verified",
     local_prefix_user: str | None = "alice",
     local_prefix_org: str | None = "acme",
+    dns_records: list[dict] | None = None,
     dkim_records: list[dict] | None = None,
 ) -> dict:
     """Server-shaped JSON for an EmailDomainResponse."""
@@ -78,8 +79,9 @@ def make_email_domain_response(
         "local_prefix_user": local_prefix_user if kind == "hail_mail" else None,
         "local_prefix_org": local_prefix_org if kind == "hail_mail" else None,
         "verification_status": verification_status,
-        "dkim_records": dkim_records or [],
+        "dns_records": dns_records or dkim_records or [],
         "mail_from_domain": None,
+        "mail_from_status": None,
         "provider": "ses",
         "verified_at": now.isoformat() if verification_status == "verified" else None,
         "created_at": now.isoformat(),

@@ -22,6 +22,7 @@ from pydantic import BaseModel
 
 __all__ = [
     "DkimRecord",
+    "DnsRecord",
     "EmailProvider",
     "IdentityVerificationStatus",
     "ProviderAttachment",
@@ -33,16 +34,23 @@ __all__ = [
 IdentityVerificationStatus = Literal["pending", "verified", "failed"]
 
 
-class DkimRecord(BaseModel):
-    """One DNS CNAME the operator must publish before the domain is usable.
+class DnsRecord(BaseModel):
+    """One DNS record the operator must publish for a sending domain.
 
-    SES returns three of these (selectors 1/2/3); the API surfaces them
-    verbatim so the caller can copy them straight into their DNS console.
+    Covers DKIM CNAMEs (SES Easy DKIM, 3 per domain) plus the custom
+    MAIL FROM records: an MX to the SES feedback endpoint and a TXT SPF.
+    Surfaced verbatim so the caller can paste them into their DNS console.
     """
 
     name: str
     value: str
-    type: Literal["CNAME"] = "CNAME"
+    type: Literal["CNAME", "MX", "TXT"] = "CNAME"
+    # Only meaningful for MX records; None otherwise.
+    priority: int | None = None
+
+
+# Back-compat alias — existing call sites import DkimRecord.
+DkimRecord = DnsRecord
 
 
 class ProviderIdentity(BaseModel):
@@ -50,7 +58,11 @@ class ProviderIdentity(BaseModel):
 
     domain: str
     verification_status: IdentityVerificationStatus
-    dkim_records: list[DkimRecord]
+    dkim_records: list[DnsRecord]
+    # SES MAIL FROM verification (the Return-Path subdomain). None until a
+    # custom MAIL FROM is configured. Independent of `verification_status`,
+    # which is DKIM-driven and gates sending.
+    mail_from_status: IdentityVerificationStatus | None = None
     # MAIL FROM domain (used for the SPF Return-Path); SES returns this only
     # for custom domains once the operator configures one. Hail-mail rows
     # skip it because the parent domain is pre-configured by the operator.

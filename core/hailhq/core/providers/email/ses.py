@@ -75,6 +75,29 @@ def _dkim_records_for(domain: str, tokens: list[str]) -> list[DkimRecord]:
     ]
 
 
+def _mail_from_records(domain: str) -> list[DkimRecord]:
+    """The two records for a custom MAIL FROM on ``send.<domain>``.
+
+    The MX points at the region's SES feedback endpoint; the TXT is the SPF
+    record authorising SES. Region-specific — unlike the DKIM CNAMEs.
+    """
+    mail_from = f"send.{domain}"
+    region = settings.aws_region or "us-east-1"
+    return [
+        DkimRecord(
+            name=mail_from,
+            value=f"feedback-smtp.{region}.amazonses.com",
+            type="MX",
+            priority=10,
+        ),
+        DkimRecord(
+            name=mail_from,
+            value="v=spf1 include:amazonses.com ~all",
+            type="TXT",
+        ),
+    ]
+
+
 def _build_raw_mime(
     *,
     from_address: str,
@@ -204,14 +227,25 @@ class SesEmailProvider(EmailProvider):
             EmailIdentity=domain,
         )
         tokens: list[str] = (response.get("DkimAttributes") or {}).get("Tokens") or []
-        # CreateEmailIdentity returns DKIM tokens immediately but never a
-        # SUCCESS status — the domain is always pending until the operator
-        # publishes the CNAMEs and SES re-checks. Surface that explicitly.
+
+        mail_from = f"send.{domain}"
+        # Configure a custom MAIL FROM so the Return-Path aligns to the
+        # customer's domain (no "via amazonses.com"). USE_DEFAULT_VALUE keeps
+        # sending working while the MX/SPF DNS is still propagating.
+        await asyncio.to_thread(
+            self._client.put_email_identity_mail_from_attributes,
+            EmailIdentity=domain,
+            MailFromDomain=mail_from,
+            BehaviorOnMxFailure="USE_DEFAULT_VALUE",
+        )
+
+        records = _dkim_records_for(domain, tokens) + _mail_from_records(domain)
         return ProviderIdentity(
             domain=domain,
             verification_status="pending",
-            dkim_records=_dkim_records_for(domain, tokens),
-            mail_from_domain=None,
+            dkim_records=records,
+            mail_from_domain=mail_from,
+            mail_from_status="pending",
             provider_resource_id=domain,
         )
 
@@ -233,13 +267,24 @@ class SesEmailProvider(EmailProvider):
             dkim.get("Status") or response.get("VerificationStatus")
         )
 
-        mail_from = (response.get("MailFromAttributes") or {}).get("MailFromDomain")
+        mail_from_attrs = response.get("MailFromAttributes") or {}
+        mail_from = mail_from_attrs.get("MailFromDomain")
+        mail_from_status = (
+            _status_from_ses(mail_from_attrs.get("MailFromDomainStatus"))
+            if mail_from
+            else None
+        )
+
+        records = _dkim_records_for(domain, tokens)
+        if mail_from:
+            records = records + _mail_from_records(domain)
 
         return ProviderIdentity(
             domain=domain,
             verification_status=status,
-            dkim_records=_dkim_records_for(domain, tokens),
+            dkim_records=records,
             mail_from_domain=mail_from,
+            mail_from_status=mail_from_status,
             provider_resource_id=domain,
         )
 

@@ -2,16 +2,17 @@
 
 Import the fixtures you need from here in each package's ``conftest.py``::
 
-    from hailhq.core.testing.fixtures import async_session, database_url  # noqa: F401
+    from hailhq.core.testing.fixtures import async_session, database_url, db, session_factory  # noqa: F401
 """
 
 from __future__ import annotations
 
 import os
-from typing import AsyncIterator, Iterator
+from typing import AsyncGenerator, AsyncIterator, Iterator
 
 import pytest
 from sqlalchemy.ext.asyncio import (
+    AsyncEngine,
     AsyncSession,
     async_sessionmaker,
     create_async_engine,
@@ -41,16 +42,14 @@ def database_url() -> Iterator[str]:
 
 
 @pytest.fixture()
-async def async_session(
+async def db(
     database_url: str,  # noqa: F811 (re-used as a fixture parameter name)
     monkeypatch: pytest.MonkeyPatch,
-) -> AsyncIterator[AsyncSession]:
-    """A per-test ``AsyncSession`` against a freshly recreated schema.
+) -> AsyncGenerator[AsyncEngine, None]:
+    """Fresh async engine with recreated schema; patches the global sessionmaker.
 
-    Also installs the test sessionmaker as ``hailhq.core.db._sessionmaker``
-    so production ``session_scope()`` callers (auth bookkeeping, audit-log
-    writes, voicebot event writes) talk to the test database without any
-    FastAPI dep override.
+    Base fixture for all async DB tests. ``async_session`` and
+    ``session_factory`` compose on top of this.
     """
     from hailhq.core.models import Base
 
@@ -61,10 +60,33 @@ async def async_session(
         await conn.run_sync(Base.metadata.drop_all)
         await conn.run_sync(Base.metadata.create_all)
 
-    sessionmaker = async_sessionmaker(engine, expire_on_commit=False)
-    monkeypatch.setattr(core_db, "_sessionmaker", sessionmaker)
+    monkeypatch.setattr(
+        core_db, "_sessionmaker", async_sessionmaker(engine, expire_on_commit=False)
+    )
 
-    async with sessionmaker() as session:
-        yield session
+    yield engine
 
     await engine.dispose()
+
+
+@pytest.fixture()
+def session_factory(db: AsyncEngine) -> async_sessionmaker[AsyncSession]:
+    """Async session factory backed by the test engine."""
+    return async_sessionmaker(db, expire_on_commit=False)
+
+
+@pytest.fixture()
+async def async_session(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> AsyncIterator[AsyncSession]:
+    """A per-test ``AsyncSession`` against a freshly recreated schema.
+
+    Also installs the test sessionmaker as ``hailhq.core.db._sessionmaker``
+    so production ``session_scope()`` callers (auth bookkeeping, audit-log
+    writes, voicebot event writes) talk to the test database without any
+    FastAPI dep override.
+
+    The ``db`` fixture handles the schema setup and sessionmaker patch.
+    """
+    async with session_factory() as session:
+        yield session

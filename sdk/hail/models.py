@@ -322,9 +322,10 @@ EmailDomainKind = Literal["hail_mail", "custom"]
 EmailDomainVerificationStatus = Literal["pending", "verified", "failed"]
 
 
-class DkimRecord(BaseModel):
-    """One DNS CNAME the tenant must publish before SES verifies the domain.
+class DnsRecord(BaseModel):
+    """One DNS record the tenant must publish for a sending domain.
 
+    Covers DKIM CNAMEs, MAIL FROM MX, and SPF TXT records.
     ``model_config`` allows extra keys so a future provider that returns
     additional metadata round-trips without breaking SDK consumers.
     """
@@ -333,7 +334,12 @@ class DkimRecord(BaseModel):
 
     name: str
     value: str
-    type: Literal["CNAME"] = "CNAME"
+    type: Literal["CNAME", "MX", "TXT"] = "CNAME"
+    priority: int | None = None
+
+
+# Back-compat alias.
+DkimRecord = DnsRecord
 
 
 class EmailDomainCreate(BaseModel):
@@ -447,8 +453,9 @@ class EmailDomainResponse(BaseModel):
     local_prefix_user: str | None = None
     local_prefix_org: str | None = None
     verification_status: EmailDomainVerificationStatus
-    dkim_records: list[DkimRecord]
+    dns_records: list[DnsRecord]
     mail_from_domain: str | None = None
+    mail_from_status: str | None = None
     provider: str
     verified_at: datetime | None = None
     inbound_enabled: bool = False
@@ -491,6 +498,7 @@ __all__ = [
     "EmailSummary",
     "EmailListResponse",
     "DkimRecord",
+    "DnsRecord",
     "EmailDomainKind",
     "EmailDomainVerificationStatus",
     "EmailDomainCreate",

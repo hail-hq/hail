@@ -57,7 +57,7 @@ async def test_email_domains_create_custom_returns_dkim(
         verification_status="pending",
         local_prefix_user=None,
         local_prefix_org=None,
-        dkim_records=dkim,
+        dns_records=dkim,
     )
     respx.post(f"{base_url}/email-domains").mock(
         return_value=httpx.Response(201, json=payload)
@@ -66,8 +66,8 @@ async def test_email_domains_create_custom_returns_dkim(
         sd = await c.email_domains.create(kind="custom", domain="acme.com")
     assert sd.kind == "custom"
     assert sd.verification_status == "pending"
-    assert len(sd.dkim_records) == 3
-    assert sd.dkim_records[0].name == "sel1._domainkey.acme.com"
+    assert len(sd.dns_records) == 3
+    assert sd.dns_records[0].name == "sel1._domainkey.acme.com"
 
 
 @respx.mock
@@ -265,8 +265,9 @@ def test_email_domain_response_inbound_fields_default_to_safe_values() -> None:
             "local_prefix_user": "alice",
             "local_prefix_org": "acme",
             "verification_status": "verified",
-            "dkim_records": [],
+            "dns_records": [],
             "mail_from_domain": None,
+            "mail_from_status": None,
             "provider": "ses",
             "verified_at": now.isoformat(),
             "created_at": now.isoformat(),

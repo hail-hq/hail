@@ -42,6 +42,8 @@ from hailhq.core.providers.email.base import (
 from hailhq.core.testing.fixtures import (  # noqa: F401
     async_session,
     database_url,
+    db,
+    session_factory,
 )
 
 
@@ -135,6 +137,23 @@ def livekit_mock() -> AsyncMock:
     return mock
 
 
+def _mail_from_dns_records(domain: str) -> list[DkimRecord]:
+    """The MAIL FROM MX + SPF TXT records SES returns for a custom domain."""
+    return [
+        DkimRecord(
+            name=f"send.{domain}",
+            value="feedback-smtp.us-east-1.amazonses.com",
+            type="MX",
+            priority=10,
+        ),
+        DkimRecord(
+            name=f"send.{domain}",
+            value="v=spf1 include:amazonses.com ~all",
+            type="TXT",
+        ),
+    ]
+
+
 @pytest.fixture()
 def email_mock() -> AsyncMock:
     """Default mock email provider — happy-path for every operation.
@@ -158,11 +177,13 @@ def email_mock() -> AsyncMock:
             verification_status="pending",
             dkim_records=[
                 DkimRecord(
-                    name=f"sel{i}._domainkey.{domain}",
-                    value=f"sel{i}.dkim.amazonses.com",
-                )
-                for i in (1, 2, 3)
+                    name=f"t._domainkey.{domain}",
+                    value="t.dkim.amazonses.com",
+                ),
+                *_mail_from_dns_records(domain),
             ],
+            mail_from_domain=f"send.{domain}",
+            mail_from_status="pending",
             provider_resource_id=domain,
         )
 
@@ -170,6 +191,8 @@ def email_mock() -> AsyncMock:
 
     async def _get_identity(domain: str) -> ProviderIdentity:
         # Default: caller has published DKIM, SES marks it verified.
+        # Returns all 5 records (3 DKIM CNAMEs + MAIL FROM MX + SPF TXT) to
+        # match real SesEmailProvider.get_identity behavior after the fix.
         return ProviderIdentity(
             domain=domain,
             verification_status="verified",
@@ -179,7 +202,10 @@ def email_mock() -> AsyncMock:
                     value=f"sel{i}.dkim.amazonses.com",
                 )
                 for i in (1, 2, 3)
-            ],
+            ]
+            + _mail_from_dns_records(domain),
+            mail_from_domain=f"send.{domain}",
+            mail_from_status="verified",
             provider_resource_id=domain,
         )
 

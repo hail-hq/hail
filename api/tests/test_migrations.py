@@ -402,12 +402,18 @@ def _fk_delete_rule(conn: psycopg.Connection, conname: str) -> str | None:
     return row[0] if row else None
 
 
+def _column_exists(conn: psycopg.Connection, table: str, column: str) -> bool:
+    return _column_data_type(conn, table, column) is not None
+
+
 def test_0014_tightens_webhook_delivery_ownership(empty_db: str) -> None:
     """0014 makes webhook_deliveries.subscription_id NOT NULL, drops the
     degenerate webhook_deliveries_target_check, and switches the
     email_domain_id FK from ON DELETE CASCADE to SET NULL. A down/up
-    round-trip must restore the 0013 state and re-tighten cleanly."""
-    _run_alembic(empty_db, ["upgrade", "head"])
+    round-trip must restore the 0013 state and re-tighten cleanly.
+
+    Pinned to explicit revisions so this test is independent of head."""
+    _run_alembic(empty_db, ["upgrade", "0014"])
 
     with psycopg.connect(_to_libpq_url(to_sync_url(empty_db))) as conn:
         assert not _column_is_nullable(
@@ -421,7 +427,7 @@ def test_0014_tightens_webhook_delivery_ownership(empty_db: str) -> None:
         ), "email_domain_id FK should be ON DELETE SET NULL after 0014"
 
     # Round-trip: downgrade to 0013 (restores the looser schema), then back.
-    _run_alembic(empty_db, ["downgrade", "-1"])
+    _run_alembic(empty_db, ["downgrade", "0013"])
     with psycopg.connect(_to_libpq_url(to_sync_url(empty_db))) as conn:
         assert _column_is_nullable(
             conn, "webhook_deliveries", "subscription_id"
@@ -433,7 +439,7 @@ def test_0014_tightens_webhook_delivery_ownership(empty_db: str) -> None:
             _fk_delete_rule(conn, "webhook_deliveries_email_domain_id_fkey") == "c"
         ), "email_domain_id FK should be CASCADE again at 0013"
 
-    _run_alembic(empty_db, ["upgrade", "head"])
+    _run_alembic(empty_db, ["upgrade", "0014"])
     with psycopg.connect(_to_libpq_url(to_sync_url(empty_db))) as conn:
         assert not _column_is_nullable(
             conn, "webhook_deliveries", "subscription_id"
@@ -441,3 +447,51 @@ def test_0014_tightens_webhook_delivery_ownership(empty_db: str) -> None:
         assert (
             _fk_delete_rule(conn, "webhook_deliveries_email_domain_id_fkey") == "n"
         ), "email_domain_id FK should be SET NULL again after round-trip"
+
+
+def test_0015_email_domain_dns_records(empty_db: str) -> None:
+    """0015 renames email_domains.dkim_records -> dns_records and adds a
+    nullable mail_from_status column. A down/up round-trip must restore the
+    0014 state (dkim_records back, dns_records/mail_from_status gone) and
+    re-apply cleanly."""
+    _run_alembic(empty_db, ["upgrade", "0015"])
+
+    with psycopg.connect(_to_libpq_url(to_sync_url(empty_db))) as conn:
+        assert _column_exists(
+            conn, "email_domains", "dns_records"
+        ), "email_domains.dns_records missing after 0015"
+        assert not _column_exists(
+            conn, "email_domains", "dkim_records"
+        ), "email_domains.dkim_records still present after 0015"
+        assert _column_exists(
+            conn, "email_domains", "mail_from_status"
+        ), "email_domains.mail_from_status missing after 0015"
+        assert _column_is_nullable(
+            conn, "email_domains", "mail_from_status"
+        ), "email_domains.mail_from_status should be nullable after 0015"
+
+    # Round-trip: downgrade to 0014 — old column name back, new ones gone.
+    _run_alembic(empty_db, ["downgrade", "0014"])
+    with psycopg.connect(_to_libpq_url(to_sync_url(empty_db))) as conn:
+        assert _column_exists(
+            conn, "email_domains", "dkim_records"
+        ), "email_domains.dkim_records should be restored at 0014"
+        assert not _column_exists(
+            conn, "email_domains", "dns_records"
+        ), "email_domains.dns_records should be gone at 0014"
+        assert not _column_exists(
+            conn, "email_domains", "mail_from_status"
+        ), "email_domains.mail_from_status should be gone at 0014"
+
+    # Re-upgrade to confirm the migration applies cleanly a second time.
+    _run_alembic(empty_db, ["upgrade", "0015"])
+    with psycopg.connect(_to_libpq_url(to_sync_url(empty_db))) as conn:
+        assert _column_exists(
+            conn, "email_domains", "dns_records"
+        ), "email_domains.dns_records missing after round-trip upgrade"
+        assert not _column_exists(
+            conn, "email_domains", "dkim_records"
+        ), "email_domains.dkim_records reappeared after round-trip upgrade"
+        assert _column_exists(
+            conn, "email_domains", "mail_from_status"
+        ), "email_domains.mail_from_status missing after round-trip upgrade"

@@ -36,9 +36,29 @@ async def test_post_custom_domain_returns_dkim_records(
     assert body["kind"] == "custom"
     assert body["domain"] == "acme.com"
     assert body["verification_status"] == "pending"
-    assert len(body["dkim_records"]) == 3
-    assert all(r["type"] == "CNAME" for r in body["dkim_records"])
+    assert len(body["dns_records"]) == 3
     email_mock.create_identity.assert_awaited_once_with("acme.com")
+
+
+async def test_post_custom_returns_dns_records_with_mail_from(
+    client: httpx.AsyncClient,
+    org_and_key: tuple,
+    email_mock: AsyncMock,
+) -> None:
+    _, _, plain = org_and_key
+    headers = {"Authorization": f"Bearer {plain}"}
+    resp = await client.post(
+        "/email-domains",
+        json={"kind": "custom", "domain": "acme.com"},
+        headers=headers,
+    )
+    assert resp.status_code == 201
+    body = resp.json()
+    assert "dns_records" in body
+    types = {r["type"] for r in body["dns_records"]}
+    assert {"CNAME", "MX", "TXT"} <= types
+    assert body["mail_from_domain"] == "send.acme.com"
+    assert body["mail_from_status"] == "pending"
 
 
 async def test_post_custom_domain_lowercases_and_validates(
@@ -105,7 +125,7 @@ async def test_post_hail_mail_uses_explicit_prefixes(
     assert body["local_prefix_user"] == "alice"
     assert body["local_prefix_org"] == "acme"
     assert body["verification_status"] == "verified"
-    assert body["dkim_records"] == []
+    assert body["dns_records"] == []
 
 
 async def test_post_hail_mail_falls_back_to_env_defaults(
@@ -884,6 +904,53 @@ async def test_patch_duplicate_prefix_returns_409(
         headers=headers,
     )
     assert resp.status_code == 409
+
+
+async def test_delete_skips_ses_when_another_org_shares_domain(
+    client: httpx.AsyncClient,
+    org_and_key: tuple,
+    email_mock: AsyncMock,
+    async_session: AsyncSession,
+) -> None:
+    _, _, plain = org_and_key
+    headers = {"Authorization": f"Bearer {plain}"}
+    created = await client.post(
+        "/email-domains",
+        json={"kind": "custom", "domain": "acme.com"},
+        headers=headers,
+    )
+    domain_id = created.json()["id"]
+
+    # A second org also registers acme.com (shared SES identity, one AWS acct).
+    other_org_id = uuid.uuid4()
+    async_session.add(
+        EmailDomain(
+            organization_id=other_org_id,
+            kind="custom",
+            domain="acme.com",
+            verification_status="verified",
+            dns_records=[],
+            provider="ses",
+        )
+    )
+    await async_session.commit()
+
+    resp = await client.delete(f"/email-domains/{domain_id}", headers=headers)
+    assert resp.status_code == 204
+    # SES identity must NOT be deleted — the other org still sends through it.
+    email_mock.delete_identity.assert_not_called()
+    # The caller's row is gone; the other org's row remains.
+    remaining = (
+        (
+            await async_session.execute(
+                select(EmailDomain).where(EmailDomain.domain == "acme.com")
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert len(remaining) == 1
+    assert remaining[0].organization_id == other_org_id
 
 
 _ = ApiKey  # re-exposed for type hint in fixtures

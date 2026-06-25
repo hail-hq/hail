@@ -372,10 +372,10 @@ class EmailDomain(Base):
       source of truth; ``domain`` is the computed full address kept in
       sync at write time. The parent base domain is pre-verified by the
       operator out-of-band, so these rows land at ``verified`` immediately
-      and ``dkim_records`` stays empty.
+      and ``dns_records`` stays empty.
     * ``kind = 'custom'`` — a tenant-controlled bare DNS name (e.g.
       ``acme.com``). The prefix columns are both NULL.
-      ``verification_status`` starts at ``pending`` and ``dkim_records``
+      ``verification_status`` starts at ``pending`` and ``dns_records``
       carries the three CNAMEs the tenant must publish before SES will
       flip the identity to ``verified``.
 
@@ -413,12 +413,19 @@ class EmailDomain(Base):
     verification_status: Mapped[str] = mapped_column(
         Text, server_default="pending", nullable=False
     )
-    # JSON array of {name, value, type} entries — surfaced in the response so
-    # the tenant can paste them straight into their DNS console.
-    dkim_records: Mapped[list[dict]] = mapped_column(
-        JSONB, server_default=text("'[]'::jsonb"), nullable=False
+    # JSON array of {name, value, type, priority} entries (DKIM CNAMEs + the
+    # custom MAIL FROM MX/SPF) — surfaced in the response so the tenant can
+    # paste them straight into their DNS console.
+    dns_records: Mapped[list[dict]] = mapped_column(
+        "dns_records",
+        JSONB,
+        server_default=text("'[]'::jsonb"),
+        nullable=False,
     )
     mail_from_domain: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # SES MAIL FROM verification status (pending/verified/failed); NULL until a
+    # custom MAIL FROM is configured. Secondary to verification_status.
+    mail_from_status: Mapped[str | None] = mapped_column(Text, nullable=True)
     provider: Mapped[str] = mapped_column(Text, server_default="ses", nullable=False)
     provider_resource_id: Mapped[str | None] = mapped_column(Text, nullable=True)
     verified_at: Mapped[datetime | None] = mapped_column(TS, nullable=True)

@@ -179,7 +179,7 @@ async def test_post_emails_auto_mint_recovers_from_race(
         local_prefix_user="admin",
         local_prefix_org="selfhost",
         verification_status="verified",
-        dkim_records=[],
+        dns_records=[],
         mail_from_domain=None,
         provider="ses",
         verified_at=datetime.now(timezone.utc),

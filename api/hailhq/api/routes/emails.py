@@ -172,7 +172,7 @@ async def _resolve_sender(
         local_prefix_user=user_prefix,
         local_prefix_org=org_prefix,
         verification_status="verified",
-        dkim_records=[],
+        dns_records=[],
         mail_from_domain=None,
         provider="ses",
         verified_at=datetime.now(timezone.utc),
