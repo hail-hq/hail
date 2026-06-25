@@ -19,7 +19,7 @@ def _make_inbound_domain(org_id, user_prefix="alice", org_prefix="acme"):
     ``inbound_enabled`` stays False here because the ingest service
     persists rows regardless of the flag — the flag only gates the
     later forwarding / webhook fan-out steps. Setting it True without
-    forward_to/webhook_url would violate the email_domains_inbound_action
+    forward_to would violate the email_domains_inbound_action
     check constraint.
     """
     return EmailDomain(
@@ -240,8 +240,8 @@ async def test_ingest_skips_unknown_recipient(async_session):
 async def test_forward_enqueues_per_target(async_session):
     org_id = uuid.uuid4()
     domain = _make_inbound_domain(org_id, user_prefix="eve", org_prefix="evilcorp")
-    # Inbound_enabled requires at least one of forward_to/webhook_url, so
-    # setting forward_to here is what unlocks forwarding.
+    # Inbound_enabled requires forward_to, so setting forward_to here is
+    # what unlocks forwarding.
     domain.inbound_enabled = True
     domain.forward_to = ["ops@example.com", "billing@example.com"]
     async_session.add(domain)

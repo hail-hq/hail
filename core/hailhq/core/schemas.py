@@ -307,11 +307,10 @@ class EmailDomainPatch(BaseModel):
     * Hail-mail addressing — the user/org prefix pair (only valid on
       ``kind='hail_mail'`` rows; the handler returns 422 if a tenant tries
       to PATCH these on a custom row).
-    * Inbound action — ``inbound_enabled`` + at least one of ``forward_to``
-      / ``webhook_url`` + the optional ``forward_rate_per_hour`` cap. These
-      apply to either kind, but this milestone routes inbound only to
-      ``hail_mail`` rows; custom-domain inbound (MX delegation) is the
-      next milestone.
+    * Inbound action — ``inbound_enabled`` + ``forward_to`` + the optional
+      ``forward_rate_per_hour`` cap. These apply to either kind, but this
+      milestone routes inbound only to ``hail_mail`` rows; custom-domain
+      inbound (MX delegation) is the next milestone.
 
     Every field is independently optional so ``PATCH`` semantics work the
     way callers expect: send only what you want to change. The route
@@ -319,11 +318,6 @@ class EmailDomainPatch(BaseModel):
     requires an action when ``inbound_enabled`` is true) — we don't
     re-implement it here because the patch may merge with existing row
     state to satisfy the invariant.
-
-    NOTE: the plaintext webhook secret is NOT a PATCH field. It's set at
-    create time and rotated via a dedicated endpoint that returns the new
-    plaintext exactly once. ``webhook_secret_encrypted`` is server-managed and
-    never accepted on the wire.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -332,7 +326,6 @@ class EmailDomainPatch(BaseModel):
     local_prefix_org: str | None = None
     inbound_enabled: bool | None = None
     forward_to: list[str] | None = None
-    webhook_url: str | None = None
     forward_rate_per_hour: int | None = None
 
     @field_validator("local_prefix_user", "local_prefix_org")
@@ -366,12 +359,11 @@ class EmailDomainPatch(BaseModel):
             and self.local_prefix_org is None
             and self.inbound_enabled is None
             and self.forward_to is None
-            and self.webhook_url is None
             and self.forward_rate_per_hour is None
         ):
             raise ValueError(
                 "at least one of local_prefix_user, local_prefix_org, "
-                "inbound_enabled, forward_to, webhook_url, "
+                "inbound_enabled, forward_to, "
                 "or forward_rate_per_hour must be set"
             )
         return self
@@ -381,11 +373,8 @@ class EmailDomainResponse(BaseModel):
     """Read view for an email domain.
 
     The inbound-action fields (``inbound_enabled``, ``forward_to``,
-    ``webhook_url``, ``forward_rate_per_hour``) surface what the row has
-    configured for incoming mail. ``webhook_secret_encrypted`` is intentionally
-    NOT exposed — the plaintext secret is returned exactly once at create
-    or rotate via a dedicated endpoint, and the ciphertext that
-    sits on the row is server-internal.
+    ``forward_rate_per_hour``) surface what the row has configured for
+    incoming mail.
     """
 
     model_config = ConfigDict(from_attributes=True)
@@ -403,13 +392,7 @@ class EmailDomainResponse(BaseModel):
     verified_at: datetime | None
     inbound_enabled: bool = False
     forward_to: list[str] | None = None
-    webhook_url: str | None = None
     forward_rate_per_hour: int | None = None
-    # Populated **only** by PATCH responses that minted or rotated a
-    # webhook secret. The plaintext is returned once and never echoed on
-    # subsequent GETs (the encrypted secret stored on the row is what the
-    # worker decrypts to sign each delivery).
-    webhook_secret: str | None = None
     created_at: datetime
     updated_at: datetime
 
@@ -569,12 +552,6 @@ WebhookEventType = Literal[
 
 WebhookSubscriptionStatus = Literal["active", "disabled"]
 WebhookDeliveryStatus = Literal["pending", "succeeded", "failed", "dead"]
-
-
-class WebhookSecretResponse(BaseModel):
-    """Plaintext webhook secret, returned exactly once (create/rotate)."""
-
-    webhook_secret: str
 
 
 class WebhookSubscriptionCreate(BaseModel):

@@ -24,7 +24,6 @@ Two flavors of row land here:
 from __future__ import annotations
 
 import logging
-import secrets as _secrets
 from datetime import datetime, timezone
 from typing import Annotated
 from uuid import UUID
@@ -39,17 +38,14 @@ from hailhq.api.audit import write_audit_log
 from hailhq.api.deps import Principal, get_current_principal
 from hailhq.core.config import settings
 from hailhq.core.db import get_session
-from hailhq.core.http_post import validate_webhook_target
 from hailhq.core.models import Email, EmailDomain
 from hailhq.core.providers.email import EmailProvider, SesEmailProvider
-from hailhq.core.secret_cipher import SecretCipher
 from hailhq.core.schemas import (
     LOCAL_PREFIX,
     EmailDomainCreate,
     EmailDomainListResponse,
     EmailDomainPatch,
     EmailDomainResponse,
-    WebhookSecretResponse,
     decode_cursor,
     encode_cursor,
 )
@@ -386,9 +382,7 @@ async def patch_email_domain(
       hail_mail rows only. The managed-cloud console writes here when
       an org admin changes the visible hail-mail address.
     * **Inbound action edit** (``inbound_enabled`` / ``forward_to`` /
-      ``webhook_url`` / ``forward_rate_per_hour``): any row kind.
-      Setting ``webhook_url`` mints a fresh secret and returns it once
-      in ``webhook_secret``.
+      ``forward_rate_per_hour``): any row kind.
     """
     stmt = select(EmailDomain).where(
         EmailDomain.id == domain_id,
@@ -402,7 +396,6 @@ async def patch_email_domain(
         )
 
     updates: dict = {}
-    new_secret: str | None = None
 
     # ---- prefix edits (hail_mail only) ----
     if body.local_prefix_user is not None or body.local_prefix_org is not None:
@@ -426,31 +419,14 @@ async def patch_email_domain(
         updates["forward_to"] = body.forward_to or None
     if body.forward_rate_per_hour is not None:
         updates["forward_rate_per_hour"] = body.forward_rate_per_hour
-    if body.webhook_url is not None:
-        if body.webhook_url == "":
-            updates["webhook_url"] = None
-            updates["webhook_secret_encrypted"] = None
-        else:
-            try:
-                validate_webhook_target(
-                    body.webhook_url,
-                    allow_private_networks=settings.hail_webhook_allow_private_networks,
-                )
-            except ValueError as exc:
-                raise HTTPException(status_code=422, detail=str(exc))
-            cipher = SecretCipher(settings.hail_webhook_secret_key)
-            new_secret = "whd_" + _secrets.token_urlsafe(24)
-            updates["webhook_url"] = body.webhook_url
-            updates["webhook_secret_encrypted"] = cipher.encrypt(new_secret)
 
     # ---- post-merge invariant check (mirrors DB CHECK) ----
     final_enabled = updates.get("inbound_enabled", sd.inbound_enabled)
     final_forward = updates.get("forward_to", sd.forward_to)
-    final_webhook = updates.get("webhook_url", sd.webhook_url)
-    if final_enabled and not (final_forward or final_webhook):
+    if final_enabled and not final_forward:
         raise HTTPException(
             status_code=http_status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="inbound_enabled requires forward_to or webhook_url",
+            detail="inbound_enabled requires forward_to",
         )
 
     if not updates:
@@ -485,46 +461,7 @@ async def patch_email_domain(
         payload={"domain": sd.domain},
     )
 
-    resp = EmailDomainResponse.model_validate(sd)
-    if new_secret is not None:
-        resp = resp.model_copy(update={"webhook_secret": new_secret})
-    return resp
-
-
-@router.post(
-    "/{domain_id}/rotate-webhook-secret",
-    response_model=WebhookSecretResponse,
-)
-async def rotate_webhook_secret(
-    domain_id: UUID,
-    principal: Annotated[Principal, Depends(get_current_principal)],
-    db: Annotated[AsyncSession, Depends(get_session)],
-) -> WebhookSecretResponse:
-    """Rotate the per-domain webhook secret. Returns the new plaintext once."""
-    stmt = select(EmailDomain).where(
-        EmailDomain.id == domain_id,
-        EmailDomain.organization_id == principal.organization_id,
-    )
-    sd = (await db.execute(stmt)).scalar_one_or_none()
-    if sd is None:
-        raise HTTPException(
-            status_code=http_status.HTTP_404_NOT_FOUND,
-            detail="email domain not found",
-        )
-    if not sd.webhook_url:
-        raise HTTPException(
-            status_code=http_status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="domain has no webhook_url configured",
-        )
-    cipher = SecretCipher(settings.hail_webhook_secret_key)
-    secret = "whd_" + _secrets.token_urlsafe(24)
-    await db.execute(
-        update(EmailDomain)
-        .where(EmailDomain.id == sd.id)
-        .values(webhook_secret_encrypted=cipher.encrypt(secret))
-    )
-    await db.commit()
-    return WebhookSecretResponse(webhook_secret=secret)
+    return EmailDomainResponse.model_validate(sd)
 
 
 # --------------------------------------------------------------------------- #

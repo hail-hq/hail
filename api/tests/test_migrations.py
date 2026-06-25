@@ -332,3 +332,50 @@ def test_email_inbound_rows_converted_on_upgrade(empty_db: str) -> None:
         assert (
             converted == 1
         ), "the email_inbound usage_event was not converted to email"
+
+
+def test_0013_drops_per_domain_webhook(empty_db: str) -> None:
+    """0013 removes webhook_url and webhook_secret_encrypted from email_domains,
+    re-expresses email_domains_inbound_action without webhook_url, drops
+    email_domains_webhook_pair, and tightens webhook_deliveries_target_check
+    to require subscription_id. A full down/up round-trip must also succeed."""
+    # Apply all migrations 0001..0013.
+    _run_alembic(empty_db, ["upgrade", "head"])
+
+    with psycopg.connect(_to_libpq_url(to_sync_url(empty_db))) as conn:
+        # Primary assertion: the two webhook columns are gone.
+        assert (
+            _column_data_type(conn, "email_domains", "webhook_url") is None
+        ), "email_domains.webhook_url still present after 0013"
+        assert (
+            _column_data_type(conn, "email_domains", "webhook_secret_encrypted") is None
+        ), "email_domains.webhook_secret_encrypted still present after 0013"
+        # The paired constraint should be gone too.
+        assert not _constraint_exists(
+            conn, "email_domains_webhook_pair"
+        ), "email_domains_webhook_pair constraint still present after 0013"
+        # The inbound-action CHECK must no longer mention webhook_url.
+        src = _constraint_src(conn, "email_domains_inbound_action")
+        assert src is not None, "email_domains_inbound_action constraint missing"
+        assert (
+            "webhook_url" not in src
+        ), f"email_domains_inbound_action still references webhook_url: {src}"
+        # Deliveries target CHECK should only require subscription_id.
+        delivery_src = _constraint_src(conn, "webhook_deliveries_target_check")
+        assert delivery_src is not None, "webhook_deliveries_target_check missing"
+        assert (
+            "email_domain_id" not in delivery_src
+        ), f"webhook_deliveries_target_check still references email_domain_id: {delivery_src}"
+
+    # Round-trip: downgrade one step, then upgrade back to head.
+    _run_alembic(empty_db, ["downgrade", "-1"])
+    _run_alembic(empty_db, ["upgrade", "head"])
+
+    with psycopg.connect(_to_libpq_url(to_sync_url(empty_db))) as conn:
+        # After round-trip, columns are still absent.
+        assert (
+            _column_data_type(conn, "email_domains", "webhook_url") is None
+        ), "email_domains.webhook_url reappeared after round-trip upgrade"
+        assert (
+            _column_data_type(conn, "email_domains", "webhook_secret_encrypted") is None
+        ), "email_domains.webhook_secret_encrypted reappeared after round-trip upgrade"

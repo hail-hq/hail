@@ -27,8 +27,6 @@ def test_email_domain_has_action_columns():
     assert {
         "inbound_enabled",
         "forward_to",
-        "webhook_url",
-        "webhook_secret_encrypted",
         "forward_rate_per_hour",
     } <= cols
 
@@ -46,4 +44,3 @@ def test_email_direction_check_constraint_present():
 def test_email_domains_inbound_action_constraint_present():
     names = {c.name for c in EmailDomain.__table__.constraints}
     assert "email_domains_inbound_action" in names
-    assert "email_domains_webhook_pair" in names

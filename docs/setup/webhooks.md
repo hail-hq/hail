@@ -61,16 +61,13 @@ those bytes, not `await req.json()`.
 Every delivery carries these (see
 [`core/hailhq/core/webhook_worker.py`](../../core/hailhq/core/webhook_worker.py)):
 
-| Header                | Meaning                                                    |
-| --------------------- | ---------------------------------------------------------- |
-| `X-Hail-Signature`    | `t=<unix>,v1=<hex hmac_sha256>` — verify this.             |
-| `X-Hail-Event`        | Event type, e.g. `email.received`.                         |
-| `X-Hail-Delivery`     | Unique delivery id (stable across retries; use to dedupe). |
-| `X-Hail-Subscription` | Present for org-wide subscription deliveries.              |
-| `X-Hail-Email-Domain` | Present for per-address (per-domain) webhook deliveries.   |
-
-`X-Hail-Subscription` and `X-Hail-Email-Domain` are mutually exclusive — exactly
-one is set per delivery, telling you which configuration produced it.
+| Header                | Meaning                                                                                                                     |
+| --------------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| `X-Hail-Signature`    | `t=<unix>,v1=<hex hmac_sha256>` — verify this.                                                                              |
+| `X-Hail-Event`        | Event type, e.g. `email.received`.                                                                                          |
+| `X-Hail-Delivery`     | Unique delivery id (stable across retries; use to dedupe).                                                                  |
+| `X-Hail-Subscription` | Always present — identifies the subscription that produced this delivery.                                                   |
+| `X-Hail-Email-Domain` | Informational: the source email domain for inbound events (when known). Branch on this to route per-domain in your handler. |
 
 ## Event types
 
@@ -150,24 +147,16 @@ console or with the CLI:
 hail webhooks redeliver <subscription-id> <delivery-id>
 ```
 
-## Two ways to receive events
+## Subscribe
 
-Both deliver the identical signed payload — pick whichever fits.
+Create a subscription — the signing secret is returned **once** at create:
 
-- **Per-address** — set `webhook_url` on one email domain. The plaintext secret
-  is minted and returned **once** in the response:
+```bash
+POST /webhooks   {"target_url": "https://example.com/hooks/hail",
+                  "event_types": ["email.received", "email.received.suppressed"]}
+```
 
-  ```bash
-  PATCH /email-domains/{id}   {"webhook_url": "https://example.com/hooks/hail"}
-  ```
-
-- **Org-wide** — one subscription receives chosen event types across the org.
-  The secret is returned **once** at create:
-
-  ```bash
-  POST /webhooks   {"target_url": "https://example.com/hooks/hail",
-                    "event_types": ["email.received", "email.received.suppressed"]}
-  ```
+CLI equivalent: `hail webhooks create`.
 
 The `event_types` enum and request/response schemas are in
 [`openapi/openapi.yaml`](../../openapi/openapi.yaml) (`WebhookSubscriptionCreate`).

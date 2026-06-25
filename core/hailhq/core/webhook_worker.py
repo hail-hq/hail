@@ -31,7 +31,7 @@ from uuid import UUID
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from hailhq.core.models import EmailDomain, WebhookDelivery, WebhookSubscription
+from hailhq.core.models import WebhookDelivery, WebhookSubscription
 from hailhq.core.webhooks import build_event_payload, next_attempt_delay, sign_payload
 
 logger = logging.getLogger(__name__)
@@ -218,15 +218,6 @@ class WebhookWorker:
             if sub is None or sub.status != "active":
                 return None
             return sub.target_url, sub.secret_encrypted
-        if row.email_domain_id:
-            dom = (
-                await db.execute(
-                    select(EmailDomain).where(EmailDomain.id == row.email_domain_id)
-                )
-            ).scalar_one_or_none()
-            if dom is None or not dom.webhook_url or not dom.webhook_secret_encrypted:
-                return None
-            return dom.webhook_url, dom.webhook_secret_encrypted
         return None
 
     async def _record_success(

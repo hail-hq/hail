@@ -8,7 +8,7 @@ from hailhq.core.models import EmailDomain, WebhookDelivery, WebhookSubscription
 from hailhq.core.webhook_fanout import build_event_data, fanout_email_event
 
 
-async def _seed_domain_with_webhook(session, org_id):
+async def _seed_domain(session, org_id):
     domain = EmailDomain(
         organization_id=org_id,
         kind="hail_mail",
@@ -19,8 +19,7 @@ async def _seed_domain_with_webhook(session, org_id):
         provider="ses",
         verified_at=datetime.now(timezone.utc),
         inbound_enabled=True,
-        webhook_url="https://example.com/per-domain",
-        webhook_secret_encrypted="hash",
+        forward_to=["ops@acme.com"],
     )
     session.add(domain)
     await session.commit()
@@ -47,9 +46,9 @@ def _data():
 
 
 @pytest.mark.asyncio
-async def test_fanout_creates_per_domain_and_subscription_deliveries(async_session):
+async def test_fanout_creates_one_delivery_per_matching_subscription(async_session):
     org_id = uuid.uuid4()
-    domain = await _seed_domain_with_webhook(async_session, org_id)
+    domain = await _seed_domain(async_session, org_id)
     sub = WebhookSubscription(
         organization_id=org_id,
         target_url="https://example.com/firehose",
@@ -67,18 +66,19 @@ async def test_fanout_creates_per_domain_and_subscription_deliveries(async_sessi
         event_id=domain.id,
         data=_data(),
     )
-    assert n == 2
+    assert n == 1
 
     rows = (await async_session.execute(select(WebhookDelivery))).scalars().all()
-    targets = {(r.subscription_id, r.email_domain_id) for r in rows}
-    assert (sub.id, None) in targets
-    assert (None, domain.id) in targets
+    assert len(rows) == 1
+    # The single delivery is subscription-owned AND stamped with the source domain.
+    assert rows[0].subscription_id == sub.id
+    assert rows[0].email_domain_id == domain.id
 
 
 @pytest.mark.asyncio
-async def test_fanout_skips_subscription_with_non_matching_event_type(async_session):
+async def test_fanout_skips_non_matching_event_type(async_session):
     org_id = uuid.uuid4()
-    domain = await _seed_domain_with_webhook(async_session, org_id)
+    domain = await _seed_domain(async_session, org_id)
     async_session.add(
         WebhookSubscription(
             organization_id=org_id,
@@ -97,35 +97,13 @@ async def test_fanout_skips_subscription_with_non_matching_event_type(async_sess
         event_id=domain.id,
         data=_data(),
     )
-    # Only the per-domain webhook fires; the subscription doesn't match the event.
-    assert n == 1
-
-
-@pytest.mark.asyncio
-async def test_fanout_skips_per_domain_when_inbound_disabled(async_session):
-    org_id = uuid.uuid4()
-    domain = await _seed_domain_with_webhook(async_session, org_id)
-    domain.inbound_enabled = False
-    await async_session.commit()
-
-    n = await fanout_email_event(
-        async_session,
-        organization_id=org_id,
-        email_domain_id=domain.id,
-        event_type="email.received",
-        event_id=domain.id,
-        data=_data(),
-    )
     assert n == 0
 
 
 @pytest.mark.asyncio
 async def test_fanout_skips_disabled_subscription(async_session):
     org_id = uuid.uuid4()
-    domain = await _seed_domain_with_webhook(async_session, org_id)
-    domain.inbound_enabled = False
-    await async_session.commit()
-
+    domain = await _seed_domain(async_session, org_id)
     async_session.add(
         WebhookSubscription(
             organization_id=org_id,
@@ -146,6 +124,33 @@ async def test_fanout_skips_disabled_subscription(async_session):
         data=_data(),
     )
     assert n == 0
+
+
+@pytest.mark.asyncio
+async def test_fanout_stamps_null_domain_when_source_unknown(async_session):
+    org_id = uuid.uuid4()
+    async_session.add(
+        WebhookSubscription(
+            organization_id=org_id,
+            target_url="https://example.com/firehose",
+            secret_encrypted="hash",
+            event_types=["email.received"],
+        )
+    )
+    await async_session.commit()
+
+    n = await fanout_email_event(
+        async_session,
+        organization_id=org_id,
+        email_domain_id=None,
+        event_type="email.received",
+        event_id=uuid.uuid4(),
+        data=_data(),
+    )
+    assert n == 1
+    row = (await async_session.execute(select(WebhookDelivery))).scalars().one()
+    assert row.subscription_id is not None
+    assert row.email_domain_id is None
 
 
 def test_build_event_data_passes_through_attachments():

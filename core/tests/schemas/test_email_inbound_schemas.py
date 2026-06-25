@@ -32,7 +32,6 @@ def test_email_domain_response_has_action_fields():
     for name in (
         "inbound_enabled",
         "forward_to",
-        "webhook_url",
         "forward_rate_per_hour",
     ):
         assert name in fields

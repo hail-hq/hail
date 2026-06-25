@@ -13,7 +13,7 @@ from datetime import datetime, timedelta, timezone
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from hailhq.core.models import WebhookDelivery, WebhookSubscription
+from hailhq.core.models import EmailDomain, WebhookDelivery, WebhookSubscription
 from hailhq.core.webhook_worker import (
     MAX_CONSECUTIVE_FAILURES,
     WebhookWorker,
@@ -397,3 +397,43 @@ async def test_tick_picks_up_redelivered_dead_row(async_session):
     assert delivery.status == "succeeded"
     assert delivery.attempt == 1
     assert delivery.succeeded_at is not None
+
+
+@pytest.mark.asyncio
+async def test_tick_emits_both_subscription_and_domain_headers(async_session):
+    org_id = uuid.uuid4()
+    dom = EmailDomain(
+        organization_id=org_id,
+        kind="custom",
+        domain="example.com",
+    )
+    async_session.add(dom)
+    sub = WebhookSubscription(
+        organization_id=org_id,
+        target_url="https://hooks.example.com/h",
+        secret_encrypted="plain",
+        event_types=["email.received"],
+    )
+    async_session.add(sub)
+    await async_session.commit()
+
+    delivery = WebhookDelivery(
+        subscription_id=sub.id,
+        email_domain_id=dom.id,
+        event_type="email.received",
+        event_id=uuid.uuid4(),
+        payload={"organization_id": str(org_id), "data": {"id": "evt_x"}},
+    )
+    async_session.add(delivery)
+    await async_session.commit()
+
+    captured: list[dict[str, str]] = []
+
+    async def fake_post(url, body, headers):
+        captured.append(dict(headers))
+        return 204, ""
+
+    worker = _build_worker(async_session, http_post=fake_post)
+    assert await worker.tick() == 1
+    assert captured[0]["X-Hail-Subscription"] == str(sub.id)
+    assert captured[0]["X-Hail-Email-Domain"] == str(dom.id)

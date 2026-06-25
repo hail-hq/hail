@@ -426,8 +426,6 @@ class EmailDomain(Base):
         Boolean, server_default=text("false"), nullable=False
     )
     forward_to: Mapped[list[str] | None] = mapped_column(ARRAY(Text), nullable=True)
-    webhook_url: Mapped[str | None] = mapped_column(Text, nullable=True)
-    webhook_secret_encrypted: Mapped[str | None] = mapped_column(Text, nullable=True)
     forward_rate_per_hour: Mapped[int | None] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         TS, server_default=text("now()"), nullable=False
@@ -456,12 +454,8 @@ class EmailDomain(Base):
             name="email_domains_prefix_kind_consistency",
         ),
         CheckConstraint(
-            "NOT inbound_enabled OR forward_to IS NOT NULL OR webhook_url IS NOT NULL",
+            "NOT inbound_enabled OR forward_to IS NOT NULL",
             name="email_domains_inbound_action",
-        ),
-        CheckConstraint(
-            "(webhook_url IS NULL) = (webhook_secret_encrypted IS NULL)",
-            name="email_domains_webhook_pair",
         ),
         # An org can't register the same domain twice. Different orgs can
         # each have their own ``acme.com`` row — SES allows duplicate
@@ -718,10 +712,11 @@ class WebhookSubscription(Base):
 class WebhookDelivery(Base):
     """Per-attempt audit + retry queue for outbound webhook events.
 
-    A delivery is owned by either an org-wide ``WebhookSubscription`` or a
-    per-domain ``email_domains.webhook_url`` (never both). The background
-    worker polls ``status='pending' AND next_attempt_at <= now()`` with
-    SKIP LOCKED, POSTs, and updates the row.
+    A delivery is owned by an org-wide ``WebhookSubscription``;
+    ``email_domain_id`` records the informational source domain of the
+    event (surfaced as the ``X-Hail-Email-Domain`` header), not a routing
+    target. The background worker polls ``status='pending' AND
+    next_attempt_at <= now()`` with SKIP LOCKED, POSTs, and updates the row.
     """
 
     __tablename__ = "webhook_deliveries"
@@ -756,7 +751,7 @@ class WebhookDelivery(Base):
 
     __table_args__ = (
         CheckConstraint(
-            "subscription_id IS NOT NULL OR email_domain_id IS NOT NULL",
+            "subscription_id IS NOT NULL",
             name="webhook_deliveries_target_check",
         ),
         CheckConstraint(

@@ -1,15 +1,11 @@
 """Fan-out service: enqueue webhook_deliveries rows for one email event.
 
-The delivery worker (Phase 6) does the POSTing; this service only writes
-the rows. A single inbound event can produce two deliveries:
-
-* The per-domain row, when ``email_domains.webhook_url`` is configured
-  and ``inbound_enabled`` is True.
-* One row per active org-wide ``WebhookSubscription`` whose
-  ``event_types`` includes the fired event.
-
-The two paths fire independently — if both are set, the tenant gets
-both POSTs. Duplicates by design (explicit beats clever).
+The delivery worker does the POSTing; this service only writes the rows.
+One row is created per active org-wide ``WebhookSubscription`` whose
+``event_types`` includes the fired event. Each row is stamped with the
+source ``email_domain_id`` (when known) so the worker can emit the
+informational ``X-Hail-Email-Domain`` header; routing is purely by
+subscription.
 """
 
 from __future__ import annotations
@@ -20,7 +16,7 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from hailhq.core.models import EmailDomain, WebhookDelivery, WebhookSubscription
+from hailhq.core.models import WebhookDelivery, WebhookSubscription
 
 __all__ = ["build_event_data", "fanout_email_event"]
 
@@ -72,26 +68,6 @@ async def fanout_email_event(
     """Insert delivery rows. Returns the number inserted."""
     inserted = 0
 
-    # Per-domain webhook target (Cloudflare Email Routing-style ergonomic).
-    if email_domain_id is not None:
-        dom = (
-            await db.execute(
-                select(EmailDomain).where(EmailDomain.id == email_domain_id)
-            )
-        ).scalar_one_or_none()
-        if dom is not None and dom.webhook_url and dom.inbound_enabled:
-            db.add(
-                WebhookDelivery(
-                    subscription_id=None,
-                    email_domain_id=dom.id,
-                    event_type=event_type,
-                    event_id=event_id,
-                    payload=_payload(organization_id, data),
-                )
-            )
-            inserted += 1
-
-    # Org-wide multi-event subscriptions.
     subs = (
         (
             await db.execute(
@@ -110,7 +86,7 @@ async def fanout_email_event(
         db.add(
             WebhookDelivery(
                 subscription_id=sub.id,
-                email_domain_id=None,
+                email_domain_id=email_domain_id,
                 event_type=event_type,
                 event_id=event_id,
                 payload=_payload(organization_id, data),
