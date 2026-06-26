@@ -468,6 +468,35 @@ async def test_post_duplicate_custom_domain_returns_409(
     assert "already registered" in r2.text
 
 
+async def test_post_custom_domain_duplicate_across_orgs_returns_409(
+    client: httpx.AsyncClient,
+    org_and_key: tuple,
+    async_session: AsyncSession,
+    email_mock: AsyncMock,
+) -> None:
+    """Custom sender domains are globally unique — a second org attempting to
+    register a domain already owned by org A must receive 409, not 201.
+    Without the global partial index a second org could ride org A's SES
+    verification and intercept their inbound mail."""
+    _, _, plain_a = org_and_key
+    _, _, plain_b = await insert_org_and_key(async_session)
+
+    r1 = await client.post(
+        "/email-domains",
+        json={"kind": "custom", "domain": "acme.com"},
+        headers={"Authorization": f"Bearer {plain_a}"},
+    )
+    assert r1.status_code == 201, r1.text
+
+    r2 = await client.post(
+        "/email-domains",
+        json={"kind": "custom", "domain": "acme.com"},
+        headers={"Authorization": f"Bearer {plain_b}"},
+    )
+    assert r2.status_code == 409, r2.text
+    assert "already registered" in r2.text
+
+
 async def test_post_hail_mail_duplicate_across_orgs_returns_409(
     client: httpx.AsyncClient,
     org_and_key: tuple,
@@ -906,12 +935,19 @@ async def test_patch_duplicate_prefix_returns_409(
     assert resp.status_code == 409
 
 
-async def test_delete_skips_ses_when_another_org_shares_domain(
+async def test_duplicate_custom_domain_direct_insert_raises_integrity_error(
     client: httpx.AsyncClient,
     org_and_key: tuple,
     email_mock: AsyncMock,
     async_session: AsyncSession,
 ) -> None:
+    """Custom domains are globally unique at the DB level.  Since 0017,
+    directly inserting a second kind='custom' row for the same domain (even
+    under a different org_id) must raise IntegrityError.  This is the DB-layer
+    proof of the security property: no cross-org SES identity sharing is
+    possible for custom domains."""
+    from sqlalchemy.exc import IntegrityError as SAIntegrityError
+
     _, _, plain = org_and_key
     headers = {"Authorization": f"Bearer {plain}"}
     created = await client.post(
@@ -919,38 +955,27 @@ async def test_delete_skips_ses_when_another_org_shares_domain(
         json={"kind": "custom", "domain": "acme.com"},
         headers=headers,
     )
-    domain_id = created.json()["id"]
+    assert created.status_code == 201, created.text
 
-    # A second org also registers acme.com (shared SES identity, one AWS acct).
+    # Attempting a direct DB insert for a different org must violate the
+    # global partial unique index email_domains_custom_domain_global_uq.
     other_org_id = uuid.uuid4()
     async_session.add(
         EmailDomain(
             organization_id=other_org_id,
             kind="custom",
             domain="acme.com",
-            verification_status="verified",
+            verification_status="pending",
             dns_records=[],
             provider="ses",
         )
     )
-    await async_session.commit()
+    import pytest as _pytest
 
-    resp = await client.delete(f"/email-domains/{domain_id}", headers=headers)
-    assert resp.status_code == 204
-    # SES identity must NOT be deleted — the other org still sends through it.
-    email_mock.delete_identity.assert_not_called()
-    # The caller's row is gone; the other org's row remains.
-    remaining = (
-        (
-            await async_session.execute(
-                select(EmailDomain).where(EmailDomain.domain == "acme.com")
-            )
-        )
-        .scalars()
-        .all()
-    )
-    assert len(remaining) == 1
-    assert remaining[0].organization_id == other_org_id
+    with _pytest.raises(
+        SAIntegrityError, match="email_domains_custom_domain_global_uq"
+    ):
+        await async_session.commit()
 
 
 _ = ApiKey  # re-exposed for type hint in fixtures

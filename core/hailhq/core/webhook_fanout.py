@@ -37,10 +37,12 @@ def build_event_data(
     dmarc_verdict: str | None,
     raw_url: str | None,
     attachments: list[dict[str, Any]],
+    email_domain: str | None = None,
 ) -> dict[str, Any]:
     return {
         "id": email_id,
         "direction": direction,
+        "email_domain": email_domain,
         "from_address": from_address,
         "to_addresses": to_addresses,
         "subject": subject,

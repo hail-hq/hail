@@ -280,7 +280,7 @@ async def create_email_domain(
         await db.rollback()
         raise HTTPException(
             status_code=http_status.HTTP_409_CONFLICT,
-            detail=f"sender domain {domain!r} is already registered for this organization",
+            detail=f"sender domain {domain!r} is already registered",
         ) from exc
     await db.refresh(sd)
     await write_audit_log(

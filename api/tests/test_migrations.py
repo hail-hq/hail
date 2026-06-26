@@ -246,20 +246,54 @@ def test_forward_queue_poll_index_exists(empty_db: str) -> None:
 
 
 def test_inbound_provider_message_id_dedupe_index_exists(empty_db: str) -> None:
-    """After 0010 a partial unique index dedupes inbound rows on
-    (organization_id, provider_message_id) — the SES receipt id, which is
-    what repeats on redelivery for mail without a Message-ID header. It is
-    org-scoped: the same receipt id may land once per organization."""
+    """After 0016 the old org-scoped inbound pmid index is replaced by two
+    kind-aware partial unique indexes: one for hail_mail (org-scoped) and one
+    for custom (domain-scoped)."""
     _run_alembic(empty_db, ["upgrade", "head"])
     with psycopg.connect(_to_libpq_url(to_sync_url(empty_db))) as conn:
-        indexdef = _index_def(conn, "emails_inbound_provider_message_id_uq")
+        # Old global index must be gone.
         assert (
-            indexdef is not None
-        ), "partial unique index emails_inbound_provider_message_id_uq missing"
-        assert "UNIQUE" in indexdef
-        assert "organization_id" in indexdef
-        assert "provider_message_id" in indexdef
-        assert "inbound" in indexdef
+            _index_def(conn, "emails_inbound_provider_message_id_uq") is None
+        ), "old emails_inbound_provider_message_id_uq still present after 0016"
+
+        # hail_mail: org-scoped, partial on hail_mail kind.
+        hm_pmid = _index_def(conn, "emails_hailmail_inbound_pmid_uq")
+        assert hm_pmid is not None, "emails_hailmail_inbound_pmid_uq missing"
+        assert "UNIQUE" in hm_pmid
+        assert "organization_id" in hm_pmid
+        assert "provider_message_id" in hm_pmid
+        assert "inbound" in hm_pmid
+        assert "hail_mail" in hm_pmid
+
+        # custom: domain-scoped, partial on custom kind.
+        cu_pmid = _index_def(conn, "emails_custom_inbound_pmid_uq")
+        assert cu_pmid is not None, "emails_custom_inbound_pmid_uq missing"
+        assert "UNIQUE" in cu_pmid
+        assert "email_domain_id" in cu_pmid
+        assert "provider_message_id" in cu_pmid
+        assert "inbound" in cu_pmid
+        assert "custom" in cu_pmid
+
+        # hail_mail message_id index: org-scoped.
+        hm_mid = _index_def(conn, "emails_hailmail_inbound_message_id_uq")
+        assert hm_mid is not None, "emails_hailmail_inbound_message_id_uq missing"
+        assert "UNIQUE" in hm_mid
+        assert "organization_id" in hm_mid
+        assert "message_id" in hm_mid
+        assert "hail_mail" in hm_mid
+
+        # custom message_id index: domain-scoped.
+        cu_mid = _index_def(conn, "emails_custom_inbound_message_id_uq")
+        assert cu_mid is not None, "emails_custom_inbound_message_id_uq missing"
+        assert "UNIQUE" in cu_mid
+        assert "email_domain_id" in cu_mid
+        assert "message_id" in cu_mid
+        assert "custom" in cu_mid
+
+        # Old message_id index must also be gone.
+        assert (
+            _index_def(conn, "emails_inbound_message_id_uq") is None
+        ), "old emails_inbound_message_id_uq still present after 0016"
 
 
 def test_audit_log_idempotent_on_already_converted_column(empty_db: str) -> None:
@@ -495,3 +529,115 @@ def test_0015_email_domain_dns_records(empty_db: str) -> None:
         assert _column_exists(
             conn, "email_domains", "mail_from_status"
         ), "email_domains.mail_from_status missing after round-trip upgrade"
+
+
+def test_0016_custom_domain_inbound_dedup(empty_db: str) -> None:
+    """0016 adds email_domain_kind column, drops two old org-scoped inbound
+    dedup indexes, and creates four kind-aware replacement partial unique indexes.
+    A down/up round-trip must restore the 0015 state (two old indexes back,
+    email_domain_kind gone) and re-apply cleanly."""
+    _run_alembic(empty_db, ["upgrade", "0016"])
+
+    with psycopg.connect(_to_libpq_url(to_sync_url(empty_db))) as conn:
+        # email_domain_kind column must exist after 0016.
+        assert _column_exists(
+            conn, "emails", "email_domain_kind"
+        ), "emails.email_domain_kind missing after 0016"
+
+        # Four new kind-aware partial unique indexes must exist.
+        assert (
+            _index_def(conn, "emails_hailmail_inbound_message_id_uq") is not None
+        ), "emails_hailmail_inbound_message_id_uq missing after 0016"
+        assert (
+            _index_def(conn, "emails_custom_inbound_message_id_uq") is not None
+        ), "emails_custom_inbound_message_id_uq missing after 0016"
+        assert (
+            _index_def(conn, "emails_hailmail_inbound_pmid_uq") is not None
+        ), "emails_hailmail_inbound_pmid_uq missing after 0016"
+        assert (
+            _index_def(conn, "emails_custom_inbound_pmid_uq") is not None
+        ), "emails_custom_inbound_pmid_uq missing after 0016"
+
+        # The two old org-scoped indexes must be gone.
+        assert (
+            _index_def(conn, "emails_inbound_message_id_uq") is None
+        ), "emails_inbound_message_id_uq still present after 0016"
+        assert (
+            _index_def(conn, "emails_inbound_provider_message_id_uq") is None
+        ), "emails_inbound_provider_message_id_uq still present after 0016"
+
+    # Round-trip: downgrade to 0015 — old indexes back, new column gone.
+    _run_alembic(empty_db, ["downgrade", "0015"])
+    with psycopg.connect(_to_libpq_url(to_sync_url(empty_db))) as conn:
+        assert not _column_exists(
+            conn, "emails", "email_domain_kind"
+        ), "emails.email_domain_kind should be gone at 0015"
+
+        # Old org-scoped indexes restored.
+        assert (
+            _index_def(conn, "emails_inbound_message_id_uq") is not None
+        ), "emails_inbound_message_id_uq should be restored at 0015"
+        assert (
+            _index_def(conn, "emails_inbound_provider_message_id_uq") is not None
+        ), "emails_inbound_provider_message_id_uq should be restored at 0015"
+
+        # Four new indexes gone.
+        assert (
+            _index_def(conn, "emails_hailmail_inbound_message_id_uq") is None
+        ), "emails_hailmail_inbound_message_id_uq should be gone at 0015"
+        assert (
+            _index_def(conn, "emails_custom_inbound_message_id_uq") is None
+        ), "emails_custom_inbound_message_id_uq should be gone at 0015"
+        assert (
+            _index_def(conn, "emails_hailmail_inbound_pmid_uq") is None
+        ), "emails_hailmail_inbound_pmid_uq should be gone at 0015"
+        assert (
+            _index_def(conn, "emails_custom_inbound_pmid_uq") is None
+        ), "emails_custom_inbound_pmid_uq should be gone at 0015"
+
+    # Re-upgrade to confirm 0016 applies cleanly a second time.
+    _run_alembic(empty_db, ["upgrade", "0016"])
+    with psycopg.connect(_to_libpq_url(to_sync_url(empty_db))) as conn:
+        assert _column_exists(
+            conn, "emails", "email_domain_kind"
+        ), "emails.email_domain_kind missing after round-trip upgrade"
+        assert (
+            _index_def(conn, "emails_hailmail_inbound_message_id_uq") is not None
+        ), "emails_hailmail_inbound_message_id_uq missing after round-trip upgrade"
+        assert (
+            _index_def(conn, "emails_custom_inbound_pmid_uq") is not None
+        ), "emails_custom_inbound_pmid_uq missing after round-trip upgrade"
+
+
+def test_0017_custom_domain_global_unique(empty_db: str) -> None:
+    """0017 adds a partial unique index on email_domains.domain filtered to
+    kind='custom', enforcing one custom row per domain across all orgs.
+    A down/up round-trip must restore the 0016 state (index absent) and
+    re-apply cleanly."""
+    _run_alembic(empty_db, ["upgrade", "0017"])
+
+    with psycopg.connect(_to_libpq_url(to_sync_url(empty_db))) as conn:
+        indexdef = _index_def(conn, "email_domains_custom_domain_global_uq")
+        assert (
+            indexdef is not None
+        ), "email_domains_custom_domain_global_uq missing after 0017"
+        assert "UNIQUE" in indexdef, "index is not unique"
+        assert "domain" in indexdef, "index does not cover domain column"
+        assert "custom" in indexdef, "index WHERE clause missing kind='custom' filter"
+
+    # Downgrade to 0016 — the index must be gone.
+    _run_alembic(empty_db, ["downgrade", "0016"])
+    with psycopg.connect(_to_libpq_url(to_sync_url(empty_db))) as conn:
+        assert (
+            _index_def(conn, "email_domains_custom_domain_global_uq") is None
+        ), "email_domains_custom_domain_global_uq should be gone at 0016"
+
+    # Re-upgrade to 0017 — must apply cleanly a second time.
+    _run_alembic(empty_db, ["upgrade", "0017"])
+    with psycopg.connect(_to_libpq_url(to_sync_url(empty_db))) as conn:
+        indexdef = _index_def(conn, "email_domains_custom_domain_global_uq")
+        assert (
+            indexdef is not None
+        ), "email_domains_custom_domain_global_uq missing after round-trip upgrade"
+        assert "UNIQUE" in indexdef
+        assert "custom" in indexdef

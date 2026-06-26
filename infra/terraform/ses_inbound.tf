@@ -7,8 +7,12 @@ resource "aws_ses_receipt_rule" "main" {
   rule_set_name = aws_ses_receipt_rule_set.main.rule_set_name
   enabled       = true
   scan_enabled  = true
-  recipients    = [var.hail_mail_base_domain]
-  tls_policy    = "Require"
+  # Catch-all (no `recipients`): SES accepts mail for ANY verified identity in
+  # this account — the hail-mail base domain and every verified custom sender
+  # domain. Routing to the right org/domain happens in the ingest layer
+  # (email_ingest._find_domain_for_recipient), so no per-domain SES rule is
+  # needed and the 200-rule / 100-recipient receipt-rule limits never bind.
+  tls_policy = "Require"
 
   s3_action {
     bucket_name       = aws_s3_bucket.inbound.bucket

@@ -464,11 +464,22 @@ class EmailDomain(Base):
             "NOT inbound_enabled OR forward_to IS NOT NULL",
             name="email_domains_inbound_action",
         ),
-        # An org can't register the same domain twice. Different orgs can
-        # each have their own ``acme.com`` row — SES allows duplicate
-        # identities across accounts and each org publishes their own DKIM.
+        # An org can't register the same domain twice.  Custom domains are
+        # globally unique (one org per domain) — see the partial index below.
+        # hail_mail rows are org-scoped by this constraint only (their global
+        # uniqueness is enforced on the prefix pair, not the domain column).
         UniqueConstraint(
             "organization_id", "domain", name="email_domains_org_domain_unique"
+        ),
+        # Custom sender domains must be globally unique across all orgs:
+        # Hail uses a single shared SES account, so a second org claiming
+        # the same domain could ride the real owner's SES verification and
+        # (with inbound enabled) intercept their mail.
+        Index(
+            "email_domains_custom_domain_global_uq",
+            "domain",
+            unique=True,
+            postgresql_where=text("kind = 'custom'"),
         ),
         # Hail-mail addresses route inbound mail by (user, org) prefix with
         # no org scoping at lookup time (email_ingest matches the prefix
@@ -549,6 +560,10 @@ class Email(Base):
     dkim_verdict: Mapped[str | None] = mapped_column(Text, nullable=True)
     spf_verdict: Mapped[str | None] = mapped_column(Text, nullable=True)
     dmarc_verdict: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Denormalised from email_domains.kind so the inbound dedup indexes can
+    # branch on it without a join. NULL for outbound rows (kind is not
+    # meaningful there) and for legacy inbound rows created before this column.
+    email_domain_kind: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         TS, server_default=text("now()"), nullable=False
     )
@@ -582,23 +597,49 @@ class Email(Base):
                 "direction = 'outbound' AND provider_message_id IS NOT NULL"
             ),
         ),
+        # Inbound dedup — split by email_domain_kind so hail_mail deduplicates
+        # per-org (one row regardless of how many recipients share the same
+        # org) while custom deduplicates per-domain (one row per receiving
+        # domain, even within the same org).
         Index(
-            "emails_inbound_message_id_uq",
+            "emails_hailmail_inbound_message_id_uq",
             "organization_id",
             "message_id",
             unique=True,
-            postgresql_where=text("direction = 'inbound' AND message_id IS NOT NULL"),
+            postgresql_where=text(
+                "direction = 'inbound' AND message_id IS NOT NULL"
+                " AND email_domain_kind = 'hail_mail'"
+            ),
         ),
-        # Dedupe fallback for mail without a Message-ID header: the SES
-        # receipt id repeats on redelivery, so it backs the same
-        # idempotency guarantee, org-scoped.
         Index(
-            "emails_inbound_provider_message_id_uq",
+            "emails_custom_inbound_message_id_uq",
+            "email_domain_id",
+            "message_id",
+            unique=True,
+            postgresql_where=text(
+                "direction = 'inbound' AND message_id IS NOT NULL"
+                " AND email_domain_kind = 'custom'"
+            ),
+        ),
+        # Provider-message-id fallback for mail without a Message-ID header.
+        Index(
+            "emails_hailmail_inbound_pmid_uq",
             "organization_id",
             "provider_message_id",
             unique=True,
             postgresql_where=text(
                 "direction = 'inbound' AND provider_message_id IS NOT NULL"
+                " AND email_domain_kind = 'hail_mail'"
+            ),
+        ),
+        Index(
+            "emails_custom_inbound_pmid_uq",
+            "email_domain_id",
+            "provider_message_id",
+            unique=True,
+            postgresql_where=text(
+                "direction = 'inbound' AND provider_message_id IS NOT NULL"
+                " AND email_domain_kind = 'custom'"
             ),
         ),
         Index(

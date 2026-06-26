@@ -1,12 +1,17 @@
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 import pytest
 from sqlalchemy import func, select
 
-from hailhq.core.email_ingest import IngestResult, _persist_one, ingest_inbound
+from hailhq.core.email_ingest import (
+    IngestResult,
+    _find_domain_for_recipient,
+    _persist_one,
+    ingest_inbound,
+)
 from hailhq.core.models import Email, EmailAttachment, EmailDomain
 from hailhq.core.providers.email.inbound.base import InboundMessage
 
@@ -32,6 +37,96 @@ def _make_inbound_domain(org_id, user_prefix="alice", org_prefix="acme"):
         provider="ses",
         verified_at=datetime.now(timezone.utc),
     )
+
+
+def _make_custom_inbound_domain(
+    org_id, domain="mail.acme.com", *, enabled=True, status="verified"
+):
+    """A kind='custom' row set up (or not) to receive inbound mail."""
+    return EmailDomain(
+        organization_id=org_id,
+        kind="custom",
+        domain=domain,
+        verification_status=status,
+        provider="ses",
+        inbound_enabled=enabled,
+        forward_to=["ops@example.com"] if enabled else None,
+    )
+
+
+@pytest.mark.asyncio
+async def test_custom_domain_receives_when_verified_and_inbound_enabled(async_session):
+    org_id = uuid.uuid4()
+    async_session.add(_make_custom_inbound_domain(org_id, "mail.acme.com"))
+    await async_session.commit()
+
+    msg = InboundMessage(
+        provider_message_id="cust1",
+        envelope_from="x@example.com",
+        envelope_recipients=["support@mail.acme.com"],  # any local-part
+        raw_s3_bucket="b",
+        raw_s3_key="raw/cust1",
+        spam_verdict="PASS",
+        virus_verdict="PASS",
+        spf_verdict="PASS",
+        dkim_verdict="PASS",
+        dmarc_verdict="PASS",
+        received_at=datetime(2026, 6, 6, tzinfo=timezone.utc),
+    )
+    s3 = AsyncMock()
+    s3.fetch_raw.return_value = (FIX / "multipart_attachment.eml").read_bytes()
+
+    result = await ingest_inbound(
+        async_session,
+        message=msg,
+        s3=s3,
+        hail_mail_base_domain="mail.hail.so",
+        org_rate_per_hour=10_000,
+    )
+    assert len(result.email_ids) == 1
+    assert result.skipped_recipients == []
+
+
+@pytest.mark.asyncio
+async def test_custom_domain_skipped_when_pending_or_inbound_disabled(async_session):
+    org_id = uuid.uuid4()
+    async_session.add(
+        _make_custom_inbound_domain(
+            org_id, "pending.acme.com", enabled=True, status="pending"
+        )
+    )
+    async_session.add(
+        _make_custom_inbound_domain(
+            org_id, "off.acme.com", enabled=False, status="verified"
+        )
+    )
+    await async_session.commit()
+
+    msg = InboundMessage(
+        provider_message_id="cust2",
+        envelope_from="x@example.com",
+        envelope_recipients=["a@pending.acme.com", "b@off.acme.com"],
+        raw_s3_bucket="b",
+        raw_s3_key="raw/cust2",
+        spam_verdict="PASS",
+        virus_verdict="PASS",
+        spf_verdict="PASS",
+        dkim_verdict="PASS",
+        dmarc_verdict="PASS",
+        received_at=datetime(2026, 6, 6, tzinfo=timezone.utc),
+    )
+    s3 = AsyncMock()
+    s3.fetch_raw.return_value = (FIX / "multipart_attachment.eml").read_bytes()
+
+    result = await ingest_inbound(
+        async_session,
+        message=msg,
+        s3=s3,
+        hail_mail_base_domain="mail.hail.so",
+        org_rate_per_hour=10_000,
+    )
+    assert result.email_ids == []
+    assert set(result.skipped_recipients) == {"a@pending.acme.com", "b@off.acme.com"}
 
 
 @pytest.mark.asyncio
@@ -469,10 +564,12 @@ async def test_persist_one_survives_unique_violation(async_session):
     async_session.add(domain)
     await async_session.commit()
 
-    # Pre-insert a colliding inbound row.
+    # Pre-insert a colliding inbound row (email_domain_kind required so the
+    # kind-aware pre-check in _existing_inbound_id matches it).
     pre = Email(
         organization_id=org_id,
         email_domain_id=domain.id,
+        email_domain_kind=domain.kind,
         direction="inbound",
         from_address="a@b.com",
         to_addresses=["zara+zerocorp@mail.hail.so"],
@@ -544,6 +641,7 @@ async def test_persist_one_savepoint_catches_race(async_session):
     pre = Email(
         organization_id=org_id,
         email_domain_id=domain.id,
+        email_domain_kind=domain.kind,  # required for new kind-aware dedup indexes
         direction="inbound",
         from_address="a@b.com",
         to_addresses=["yvonne+yolocorp@mail.hail.so"],
@@ -782,6 +880,48 @@ async def test_attachment_url_no_double_slash_when_base_has_trailing_slash(
     # Must start correctly and contain no double slash after the scheme.
     assert att_url.startswith(f"https://api.hail.so/emails/{email_id}/attachments/")
     assert "//" not in att_url.replace("https://", "")
+
+
+@pytest.mark.asyncio
+async def test_inbound_fanout_payload_carries_email_domain_name(async_session):
+    org_id = uuid.uuid4()
+    async_session.add(_make_custom_inbound_domain(org_id, "mail.acme.com"))
+    await async_session.commit()
+
+    msg = InboundMessage(
+        provider_message_id="dn1",
+        envelope_from="x@example.com",
+        envelope_recipients=["support@mail.acme.com"],
+        raw_s3_bucket="b",
+        raw_s3_key="raw/dn1",
+        spam_verdict="PASS",
+        virus_verdict="PASS",
+        spf_verdict="PASS",
+        dkim_verdict="PASS",
+        dmarc_verdict="PASS",
+        received_at=datetime(2026, 6, 6, tzinfo=timezone.utc),
+    )
+    s3 = AsyncMock()
+    s3.fetch_raw.return_value = (FIX / "multipart_attachment.eml").read_bytes()
+
+    captured = {}
+
+    async def _fanout(
+        db, *, organization_id, email_domain_id, event_type, event_id, data
+    ):
+        if event_type == "email.received":
+            captured.update(data)
+        return 1
+
+    await ingest_inbound(
+        async_session,
+        message=msg,
+        s3=s3,
+        hail_mail_base_domain="mail.hail.so",
+        org_rate_per_hour=10_000,
+        fanout=_fanout,
+    )
+    assert captured.get("email_domain") == "mail.acme.com"
 
 
 @pytest.mark.asyncio
@@ -1339,3 +1479,305 @@ async def test_suppression_reason_persisted_on_row(async_session):
         )
     ).scalar_one()
     assert email.metadata_.get("suppressed_reasons") == ["insufficient_funds"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "recipients",
+    [
+        # custom-first ordering
+        ["support@mail.acme.com", "alice+acme@mail.hail.so"],
+        # hail_mail-first ordering
+        ["alice+acme@mail.hail.so", "support@mail.acme.com"],
+    ],
+    ids=["custom_first", "hailmail_first"],
+)
+async def test_mixed_kind_recipients_same_org_yield_two_rows(async_session, recipients):
+    """A message addressed to BOTH a verified custom inbound domain AND a
+    hail_mail address in the SAME org must produce exactly two rows — one
+    custom, one hail_mail — regardless of recipient ordering.
+
+    A second ingest of the same message (SES redelivery) must create NO new
+    rows and raise NO exception (idempotency across kinds).
+
+    This is a regression test for the bug where the unfiltered hail_mail
+    pre-check in _existing_inbound_id matched the custom row first and
+    silently suppressed the hail_mail row.
+    """
+    org_id = uuid.uuid4()
+    hm_domain = _make_inbound_domain(org_id, user_prefix="alice", org_prefix="acme")
+    cu_domain = _make_custom_inbound_domain(org_id, "mail.acme.com")
+    async_session.add(hm_domain)
+    async_session.add(cu_domain)
+    await async_session.commit()
+
+    def _make_msg(provider_msg_id: str) -> InboundMessage:
+        return InboundMessage(
+            provider_message_id=provider_msg_id,
+            envelope_from="sender@example.com",
+            envelope_recipients=recipients,
+            raw_s3_bucket="b",
+            raw_s3_key=f"raw/{provider_msg_id}",
+            spam_verdict="PASS",
+            virus_verdict="PASS",
+            spf_verdict="PASS",
+            dkim_verdict="PASS",
+            dmarc_verdict="PASS",
+            received_at=datetime(2026, 6, 6, tzinfo=timezone.utc),
+        )
+
+    # Use raw MIME with a fixed message_id so both kinds share it.
+    raw = (
+        b"From: sender@example.com\r\n"
+        b"To: support@mail.acme.com, alice+acme@mail.hail.so\r\n"
+        b"Subject: Mixed kind test\r\n"
+        b"Message-ID: <mixed-kind-1@example.com>\r\n"
+        b"\r\n"
+        b"body"
+    )
+    s3 = AsyncMock()
+    s3.fetch_raw.return_value = raw
+
+    # First delivery: both rows must be created.
+    result1 = await ingest_inbound(
+        async_session,
+        message=_make_msg("mixed-pmid-1"),
+        s3=s3,
+        hail_mail_base_domain="mail.hail.so",
+        org_rate_per_hour=10_000,
+    )
+    assert len(result1.email_ids) == 2, (
+        f"expected 2 rows (one per kind), got {len(result1.email_ids)}: "
+        f"created={result1.created_email_ids}"
+    )
+    assert len(result1.created_email_ids) == 2
+
+    # Confirm one row per kind.
+    from sqlalchemy import select as _select
+
+    rows = (
+        (
+            await async_session.execute(
+                _select(Email.email_domain_kind).where(Email.id.in_(result1.email_ids))
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert set(rows) == {
+        "hail_mail",
+        "custom",
+    }, f"expected one hail_mail and one custom row, got kinds: {rows}"
+
+    # Second delivery (SES redelivery): no new rows, no exception.
+    result2 = await ingest_inbound(
+        async_session,
+        message=_make_msg("mixed-pmid-1"),
+        s3=s3,
+        hail_mail_base_domain="mail.hail.so",
+        org_rate_per_hour=10_000,
+    )
+    assert (
+        result2.email_ids == result1.email_ids
+    ), "redelivery must resolve the same row ids, not create new ones"
+    assert (
+        result2.created_email_ids == []
+    ), "redelivery must not report any newly created rows"
+
+    # Total row count must still be exactly 2.
+    total = (
+        await async_session.execute(
+            _select(func.count())
+            .select_from(Email)
+            .where(Email.organization_id == org_id, Email.direction == "inbound")
+        )
+    ).scalar_one()
+    assert total == 2, f"expected 2 inbound rows total, found {total}"
+
+
+@pytest.mark.asyncio
+async def test_two_custom_domains_same_org_yield_two_rows(async_session):
+    org_id = uuid.uuid4()
+    async_session.add(_make_custom_inbound_domain(org_id, "mail.acme.com"))
+    async_session.add(_make_custom_inbound_domain(org_id, "mail.beta.com"))
+    await async_session.commit()
+
+    msg = InboundMessage(
+        provider_message_id="multi1",
+        envelope_from="x@example.com",
+        envelope_recipients=["a@mail.acme.com", "b@mail.beta.com"],
+        raw_s3_bucket="b",
+        raw_s3_key="raw/multi1",
+        spam_verdict="PASS",
+        virus_verdict="PASS",
+        spf_verdict="PASS",
+        dkim_verdict="PASS",
+        dmarc_verdict="PASS",
+        received_at=datetime(2026, 6, 6, tzinfo=timezone.utc),
+    )
+    s3 = AsyncMock()
+    s3.fetch_raw.return_value = (FIX / "multipart_attachment.eml").read_bytes()
+
+    result = await ingest_inbound(
+        async_session,
+        message=msg,
+        s3=s3,
+        hail_mail_base_domain="mail.hail.so",
+        org_rate_per_hour=10_000,
+    )
+    # One row PER receiving domain, even though both are the same org.
+    assert len(result.email_ids) == 2
+    domain_ids = {
+        d
+        for (_eid, _oid) in result.created_email_ids
+        for d in [
+            (
+                await async_session.execute(
+                    select(Email.email_domain_id).where(Email.id == _eid)
+                )
+            ).scalar_one()
+        ]
+    }
+    assert len(domain_ids) == 2
+
+
+@pytest.mark.asyncio
+async def test_custom_domain_lookup_is_deterministic_across_orgs(async_session):
+    """_find_domain_for_recipient must always return the same EmailDomain row
+    (the oldest one by created_at) when two different orgs both hold a
+    verified, inbound-enabled custom domain with the same DNS name.
+
+    Without ORDER BY the query is non-deterministic: different rows can win
+    on different calls, so a SES redelivery may resolve a different
+    email_domain_id, causing the per-domain dedup index to miss and creating
+    a duplicate inbound row.
+
+    This is a regression test for the fix that adds
+    .order_by(EmailDomain.created_at.asc(), EmailDomain.id.asc()) to the
+    custom-domain branch of _find_domain_for_recipient.
+    """
+    org_a = uuid.uuid4()
+    org_b = uuid.uuid4()
+
+    # Create the OLDER domain first (org_a) with an explicitly earlier timestamp.
+    earlier = datetime(2025, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
+    later = earlier + timedelta(hours=1)
+
+    domain_a = _make_custom_inbound_domain(org_a, "mail.acme.com")
+    domain_a.created_at = earlier
+
+    domain_b = _make_custom_inbound_domain(org_b, "mail.acme.com")
+    domain_b.created_at = later
+
+    async_session.add(domain_a)
+    async_session.add(domain_b)
+    await async_session.commit()
+
+    # Refresh to get DB-assigned ids.
+    await async_session.refresh(domain_a)
+    await async_session.refresh(domain_b)
+
+    # Call twice (simulating initial delivery + SES redelivery).
+    result1 = await _find_domain_for_recipient(
+        async_session, "x@mail.acme.com", "mail.hail.so"
+    )
+    result2 = await _find_domain_for_recipient(
+        async_session, "x@mail.acme.com", "mail.hail.so"
+    )
+
+    assert result1 is not None, "expected a matching domain, got None"
+    assert result2 is not None, "expected a matching domain, got None"
+
+    # Both calls must return the SAME row.
+    assert result1.id == result2.id, (
+        f"non-deterministic: first call returned {result1.id}, "
+        f"second returned {result2.id}"
+    )
+
+    # And it must be the EARLIER-created row (domain_a / org_a).
+    assert result1.id == domain_a.id, (
+        f"expected earlier domain {domain_a.id} (org_a, created {earlier}), "
+        f"got {result1.id}"
+    )
+    assert result1.organization_id == org_a
+
+
+@pytest.mark.asyncio
+async def test_custom_domain_dedup_stable_across_redelivery_with_two_orgs(
+    async_session,
+):
+    """Full ingest_inbound redelivery: two orgs share the same custom domain;
+    two ingests with the same provider_message_id must produce exactly ONE
+    Email row, not two (one per redelivery resolving a different domain row).
+    """
+    org_a = uuid.uuid4()
+    org_b = uuid.uuid4()
+
+    earlier = datetime(2025, 2, 1, 0, 0, 0, tzinfo=timezone.utc)
+    later = earlier + timedelta(hours=2)
+
+    domain_a = _make_custom_inbound_domain(org_a, "shared.acme.com")
+    domain_a.created_at = earlier
+
+    domain_b = _make_custom_inbound_domain(org_b, "shared.acme.com")
+    domain_b.created_at = later
+
+    async_session.add(domain_a)
+    async_session.add(domain_b)
+    await async_session.commit()
+    await async_session.refresh(domain_a)
+
+    raw = (
+        b"From: sender@example.com\r\n"
+        b"To: inbox@shared.acme.com\r\n"
+        b"Subject: Redelivery dedup test\r\n"
+        b"Message-ID: <dedup-shared-domain@example.com>\r\n"
+        b"\r\n"
+        b"body"
+    )
+    s3 = AsyncMock()
+    s3.fetch_raw.return_value = raw
+
+    msg = InboundMessage(
+        provider_message_id="shared-dedup-pmid-1",
+        envelope_from="sender@example.com",
+        envelope_recipients=["inbox@shared.acme.com"],
+        raw_s3_bucket="b",
+        raw_s3_key="raw/shared-dedup-pmid-1",
+        spam_verdict="PASS",
+        virus_verdict="PASS",
+        spf_verdict="PASS",
+        dkim_verdict="PASS",
+        dmarc_verdict="PASS",
+        received_at=datetime(2026, 6, 6, tzinfo=timezone.utc),
+    )
+
+    r1 = await ingest_inbound(
+        async_session,
+        message=msg,
+        s3=s3,
+        hail_mail_base_domain="mail.hail.so",
+        org_rate_per_hour=10_000,
+    )
+    r2 = await ingest_inbound(
+        async_session,
+        message=msg,
+        s3=s3,
+        hail_mail_base_domain="mail.hail.so",
+        org_rate_per_hour=10_000,
+    )
+
+    # Both calls must resolve the same email row.
+    assert (
+        r1.email_ids == r2.email_ids
+    ), f"redelivery returned different email ids: {r1.email_ids} vs {r2.email_ids}"
+
+    # Exactly ONE Email row for the older domain.
+    total = (
+        await async_session.execute(
+            select(func.count())
+            .select_from(Email)
+            .where(Email.email_domain_id == domain_a.id, Email.direction == "inbound")
+        )
+    ).scalar_one()
+    assert total == 1, f"expected 1 inbound row, found {total}"

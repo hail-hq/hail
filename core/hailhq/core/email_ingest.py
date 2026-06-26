@@ -1,14 +1,14 @@
 """Inbound persistence service.
 
-Orchestrates: fetch raw MIME from S3 → parse → resolve owning org per
-recipient → write one Email row per matched org → extract attachments
+Orchestrates: fetch raw MIME from S3 → parse → resolve owning domain per
+recipient → write one Email row per matched dedup scope → extract attachments
 into S3 and write email_attachments rows. Idempotency is enforced by
-the ``emails_inbound_message_id_uq`` partial unique index — a duplicate
-``(organization_id, message_id)`` raises IntegrityError, which we
-absorb and short-circuit to the existing row's id. Mail without a
-Message-ID header falls back to ``emails_inbound_provider_message_id_uq``
-on ``(organization_id, provider_message_id)`` — the SES receipt id, which
-is what repeats on redelivery.
+kind-aware partial unique indexes — hail_mail dedupes per
+``(organization_id, message_id)`` while custom dedupes per
+``(email_domain_id, message_id)``. A duplicate raises IntegrityError, which we
+absorb and short-circuit to the existing row's id. Mail without a Message-ID
+header falls back to the matching ``provider_message_id`` index — the SES
+receipt id, which is what repeats on redelivery.
 
 Forwarding and webhook fan-out are NOT triggered here. The ingest
 service only persists. The caller (the API endpoint) layers on top.
@@ -45,6 +45,18 @@ ForwardEnqueue = Callable[..., Awaitable[None]]
 FanoutFn = Callable[..., Awaitable[int]]
 FundsCheck = Callable[[AsyncSession, UUID], Awaitable[bool]]
 
+# Inbound dedup indexes whose unique violation is a benign concurrent-delivery
+# race (absorbed, not raised). Mirrors the four partial indexes defined in
+# ``models.Email.__table_args__``.
+_BENIGN_DEDUP_INDEXES = frozenset(
+    {
+        "emails_hailmail_inbound_message_id_uq",
+        "emails_custom_inbound_message_id_uq",
+        "emails_hailmail_inbound_pmid_uq",
+        "emails_custom_inbound_pmid_uq",
+    }
+)
+
 
 @dataclass
 class IngestResult:
@@ -66,13 +78,31 @@ async def _find_domain_for_recipient(
     db: AsyncSession, recipient: str, base_domain: str
 ) -> EmailDomain | None:
     classified = classify_hail_mail_recipient(recipient, base_domain)
-    if classified is None:
+    if classified is not None:
+        stmt = (
+            select(EmailDomain)
+            .where(EmailDomain.kind == "hail_mail")
+            .where(EmailDomain.local_prefix_user == classified.user_prefix)
+            .where(EmailDomain.local_prefix_org == classified.org_prefix)
+            .limit(1)
+        )
+        row = (await db.execute(stmt)).scalar_one_or_none()
+        if row is not None:
+            return row
+
+    # Custom domains: match any local-part at a verified, inbound-enabled
+    # custom domain. Receiving is opt-in per customer, so (unlike hail-mail)
+    # both the verified and inbound_enabled gates are required.
+    _, _, dom = recipient.partition("@")
+    if not dom:
         return None
     stmt = (
         select(EmailDomain)
-        .where(EmailDomain.kind == "hail_mail")
-        .where(EmailDomain.local_prefix_user == classified.user_prefix)
-        .where(EmailDomain.local_prefix_org == classified.org_prefix)
+        .where(EmailDomain.kind == "custom")
+        .where(EmailDomain.domain == dom.lower())
+        .where(EmailDomain.inbound_enabled.is_(True))
+        .where(EmailDomain.verification_status == "verified")
+        .order_by(EmailDomain.created_at.asc(), EmailDomain.id.asc())
         .limit(1)
     )
     return (await db.execute(stmt)).scalar_one_or_none()
@@ -103,26 +133,41 @@ async def _persist_attachments(
 
 async def _existing_inbound_id(
     db: AsyncSession,
-    organization_id: UUID,
+    domain: EmailDomain,
     message_id: str | None,
     provider_message_id: str | None,
 ) -> UUID | None:
-    if message_id is not None:
+    """Return the id of an existing inbound Email that matches this delivery.
+
+    Dedup scope is kind-aware:
+    - ``hail_mail``: org-scoped (one row per org, regardless of how many
+      recipients share the same org). ``email_domain_kind`` is filtered too
+      because ``organization_id`` alone isn't unique across kinds.
+    - ``custom``: domain-scoped (one row per receiving domain, so a message
+      to two custom domains in the same org produces two rows). ``email_domain_id``
+      already pins the kind, so no extra filter is needed.
+    """
+    is_custom = domain.kind == "custom"
+    if is_custom:
+        scope = [Email.email_domain_id == domain.id]
+    else:
+        scope = [
+            Email.organization_id == domain.organization_id,
+            Email.email_domain_kind == "hail_mail",
+        ]
+
+    for column, value in (
+        (Email.message_id, message_id),
+        (Email.provider_message_id, provider_message_id),
+    ):
+        if value is None:
+            continue
         stmt = select(Email.id).where(
-            Email.organization_id == organization_id,
-            Email.message_id == message_id,
-            Email.direction == "inbound",
+            *scope, column == value, Email.direction == "inbound"
         )
         found = (await db.execute(stmt)).scalar_one_or_none()
         if found is not None:
             return found
-    if provider_message_id is not None:
-        stmt = select(Email.id).where(
-            Email.organization_id == organization_id,
-            Email.provider_message_id == provider_message_id,
-            Email.direction == "inbound",
-        )
-        return (await db.execute(stmt)).scalar_one_or_none()
     return None
 
 
@@ -141,13 +186,12 @@ async def _persist_one(
     redelivery or a lost concurrent-insert race) — callers must skip side
     effects (forwarding, webhook fan-out) in that case.
     """
-    # Idempotency: short-circuit if (org, message_id) — or, for mail
-    # without a Message-ID header, (org, provider_message_id) — is already
-    # on file. A concurrent insert that slips past this SELECT is caught by
-    # the SAVEPOINT-wrapped flush below (emails_inbound_message_id_uq /
-    # emails_inbound_provider_message_id_uq).
+    # Idempotency: short-circuit if a matching inbound row already exists.
+    # Scope is kind-aware (org-scoped for hail_mail, domain-scoped for
+    # custom). A concurrent insert that slips past this SELECT is caught by
+    # the SAVEPOINT-wrapped flush below.
     existing_id = await _existing_inbound_id(
-        db, domain.organization_id, parsed.message_id, message.provider_message_id
+        db, domain, parsed.message_id, message.provider_message_id
     )
     if existing_id is not None:
         return existing_id, False
@@ -166,6 +210,7 @@ async def _persist_one(
     email = Email(
         organization_id=domain.organization_id,
         email_domain_id=domain.id,
+        email_domain_kind=domain.kind,
         direction="inbound",
         from_address=parsed.from_address or message.envelope_from,
         to_addresses=parsed.to_addresses or list(message.envelope_recipients),
@@ -200,17 +245,14 @@ async def _persist_one(
         await nested.rollback()
         # Only the dedupe indexes are a benign race; everything else (CHECK,
         # FK, NOT NULL violations) must propagate, not silently skip.
-        if "emails_inbound_message_id_uq" not in str(
-            exc.orig
-        ) and "emails_inbound_provider_message_id_uq" not in str(exc.orig):
+        exc_str = str(exc.orig)
+        if not any(idx in exc_str for idx in _BENIGN_DEDUP_INDEXES):
             raise
         # A concurrent delivery won the race on one of the dedupe indexes.
         # Rolling back to the savepoint restores the outer transaction; the
-        # other orgs' rows in the same ingest_inbound batch are intact.
-        # None-message_id rows still dedupe via (org, provider_message_id) —
-        # the SES receipt id, which is what repeats on redelivery.
+        # other domains' rows in the same ingest_inbound batch are intact.
         existing_id = await _existing_inbound_id(
-            db, domain.organization_id, parsed.message_id, message.provider_message_id
+            db, domain, parsed.message_id, message.provider_message_id
         )
         return existing_id, False
 
@@ -364,15 +406,18 @@ async def ingest_inbound(
     # loop prevention — same trade-off as classic Received: counting).
     inbound_hops = _incoming_forward_hops(raw)
 
-    seen_orgs: set[UUID] = set()
+    # One row per dedup scope: custom → receiving domain id, hail_mail → org id.
+    # (domain ids and org ids are disjoint UUID spaces, so one set is safe.)
+    seen_scopes: set[UUID] = set()
     for recipient in message.envelope_recipients:
         domain = await _find_domain_for_recipient(db, recipient, hail_mail_base_domain)
         if domain is None:
             result.skipped_recipients.append(recipient)
             continue
-        if domain.organization_id in seen_orgs:
+        scope = domain.id if domain.kind == "custom" else domain.organization_id
+        if scope in seen_scopes:
             continue
-        seen_orgs.add(domain.organization_id)
+        seen_scopes.add(scope)
 
         # Evaluate the cap BEFORE persisting this message so the count reflects
         # how many inbound rows the org already received in the last hour.
@@ -470,6 +515,7 @@ async def ingest_inbound(
                         else None
                     ),
                     attachments=await _attachment_payload(db, email_id, api_base_url),
+                    email_domain=domain.domain,
                 )
                 await fanout(
                     db,
@@ -489,6 +535,7 @@ async def ingest_inbound(
                     data={
                         "id": str(email_id),
                         "direction": "inbound",
+                        "email_domain": domain.domain,
                         "from_address": parsed.from_address,
                         "to_addresses": parsed.to_addresses
                         or list(message.envelope_recipients),
