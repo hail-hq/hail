@@ -92,7 +92,9 @@ async def _find_domain_for_recipient(
 
     # Custom domains: match any local-part at a verified, inbound-enabled
     # custom domain. Receiving is opt-in per customer, so (unlike hail-mail)
-    # both the verified and inbound_enabled gates are required.
+    # both the verified and inbound_enabled gates are required. Custom domains
+    # are globally unique (email_domains_custom_domain_global_uq), so at most
+    # one row matches — no ordering needed to make the result deterministic.
     _, _, dom = recipient.partition("@")
     if not dom:
         return None
@@ -102,7 +104,6 @@ async def _find_domain_for_recipient(
         .where(EmailDomain.domain == dom.lower())
         .where(EmailDomain.inbound_enabled.is_(True))
         .where(EmailDomain.verification_status == "verified")
-        .order_by(EmailDomain.created_at.asc(), EmailDomain.id.asc())
         .limit(1)
     )
     return (await db.execute(stmt)).scalar_one_or_none()

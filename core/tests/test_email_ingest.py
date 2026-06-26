@@ -1,5 +1,5 @@
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
@@ -8,7 +8,6 @@ from sqlalchemy import func, select
 
 from hailhq.core.email_ingest import (
     IngestResult,
-    _find_domain_for_recipient,
     _persist_one,
     ingest_inbound,
 )
@@ -1639,145 +1638,3 @@ async def test_two_custom_domains_same_org_yield_two_rows(async_session):
         ]
     }
     assert len(domain_ids) == 2
-
-
-@pytest.mark.asyncio
-async def test_custom_domain_lookup_is_deterministic_across_orgs(async_session):
-    """_find_domain_for_recipient must always return the same EmailDomain row
-    (the oldest one by created_at) when two different orgs both hold a
-    verified, inbound-enabled custom domain with the same DNS name.
-
-    Without ORDER BY the query is non-deterministic: different rows can win
-    on different calls, so a SES redelivery may resolve a different
-    email_domain_id, causing the per-domain dedup index to miss and creating
-    a duplicate inbound row.
-
-    This is a regression test for the fix that adds
-    .order_by(EmailDomain.created_at.asc(), EmailDomain.id.asc()) to the
-    custom-domain branch of _find_domain_for_recipient.
-    """
-    org_a = uuid.uuid4()
-    org_b = uuid.uuid4()
-
-    # Create the OLDER domain first (org_a) with an explicitly earlier timestamp.
-    earlier = datetime(2025, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
-    later = earlier + timedelta(hours=1)
-
-    domain_a = _make_custom_inbound_domain(org_a, "mail.acme.com")
-    domain_a.created_at = earlier
-
-    domain_b = _make_custom_inbound_domain(org_b, "mail.acme.com")
-    domain_b.created_at = later
-
-    async_session.add(domain_a)
-    async_session.add(domain_b)
-    await async_session.commit()
-
-    # Refresh to get DB-assigned ids.
-    await async_session.refresh(domain_a)
-    await async_session.refresh(domain_b)
-
-    # Call twice (simulating initial delivery + SES redelivery).
-    result1 = await _find_domain_for_recipient(
-        async_session, "x@mail.acme.com", "mail.hail.so"
-    )
-    result2 = await _find_domain_for_recipient(
-        async_session, "x@mail.acme.com", "mail.hail.so"
-    )
-
-    assert result1 is not None, "expected a matching domain, got None"
-    assert result2 is not None, "expected a matching domain, got None"
-
-    # Both calls must return the SAME row.
-    assert result1.id == result2.id, (
-        f"non-deterministic: first call returned {result1.id}, "
-        f"second returned {result2.id}"
-    )
-
-    # And it must be the EARLIER-created row (domain_a / org_a).
-    assert result1.id == domain_a.id, (
-        f"expected earlier domain {domain_a.id} (org_a, created {earlier}), "
-        f"got {result1.id}"
-    )
-    assert result1.organization_id == org_a
-
-
-@pytest.mark.asyncio
-async def test_custom_domain_dedup_stable_across_redelivery_with_two_orgs(
-    async_session,
-):
-    """Full ingest_inbound redelivery: two orgs share the same custom domain;
-    two ingests with the same provider_message_id must produce exactly ONE
-    Email row, not two (one per redelivery resolving a different domain row).
-    """
-    org_a = uuid.uuid4()
-    org_b = uuid.uuid4()
-
-    earlier = datetime(2025, 2, 1, 0, 0, 0, tzinfo=timezone.utc)
-    later = earlier + timedelta(hours=2)
-
-    domain_a = _make_custom_inbound_domain(org_a, "shared.acme.com")
-    domain_a.created_at = earlier
-
-    domain_b = _make_custom_inbound_domain(org_b, "shared.acme.com")
-    domain_b.created_at = later
-
-    async_session.add(domain_a)
-    async_session.add(domain_b)
-    await async_session.commit()
-    await async_session.refresh(domain_a)
-
-    raw = (
-        b"From: sender@example.com\r\n"
-        b"To: inbox@shared.acme.com\r\n"
-        b"Subject: Redelivery dedup test\r\n"
-        b"Message-ID: <dedup-shared-domain@example.com>\r\n"
-        b"\r\n"
-        b"body"
-    )
-    s3 = AsyncMock()
-    s3.fetch_raw.return_value = raw
-
-    msg = InboundMessage(
-        provider_message_id="shared-dedup-pmid-1",
-        envelope_from="sender@example.com",
-        envelope_recipients=["inbox@shared.acme.com"],
-        raw_s3_bucket="b",
-        raw_s3_key="raw/shared-dedup-pmid-1",
-        spam_verdict="PASS",
-        virus_verdict="PASS",
-        spf_verdict="PASS",
-        dkim_verdict="PASS",
-        dmarc_verdict="PASS",
-        received_at=datetime(2026, 6, 6, tzinfo=timezone.utc),
-    )
-
-    r1 = await ingest_inbound(
-        async_session,
-        message=msg,
-        s3=s3,
-        hail_mail_base_domain="mail.hail.so",
-        org_rate_per_hour=10_000,
-    )
-    r2 = await ingest_inbound(
-        async_session,
-        message=msg,
-        s3=s3,
-        hail_mail_base_domain="mail.hail.so",
-        org_rate_per_hour=10_000,
-    )
-
-    # Both calls must resolve the same email row.
-    assert (
-        r1.email_ids == r2.email_ids
-    ), f"redelivery returned different email ids: {r1.email_ids} vs {r2.email_ids}"
-
-    # Exactly ONE Email row for the older domain.
-    total = (
-        await async_session.execute(
-            select(func.count())
-            .select_from(Email)
-            .where(Email.email_domain_id == domain_a.id, Email.direction == "inbound")
-        )
-    ).scalar_one()
-    assert total == 1, f"expected 1 inbound row, found {total}"
