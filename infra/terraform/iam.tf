@@ -19,6 +19,9 @@ data "aws_iam_policy_document" "main" {
       "ses:CreateEmailIdentity",
       "ses:GetEmailIdentity",
       "ses:DeleteEmailIdentity",
+      # Custom MAIL FROM (send.<domain>) — set by create_identity so the
+      # Return-Path aligns to the customer's domain (no "via amazonses.com").
+      "ses:PutEmailIdentityMailFromAttributes",
     ]
     resources = ["*"]
   }
