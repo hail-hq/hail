@@ -621,31 +621,18 @@ async def delete_email_domain(
         ) from exc
 
     if deleted_kind == "custom":
-        # Single AWS account → one shared SES identity per domain name. Only
-        # tear it down at SES when no other org still sends through it.
-        other = (
-            await db.execute(
-                select(EmailDomain.id)
-                .where(EmailDomain.domain == deleted_domain)
-                .where(EmailDomain.organization_id != principal.organization_id)
-                .limit(1)
-            )
-        ).scalar_one_or_none()
-        if other is None:
-            try:
-                await email_provider.delete_identity(deleted_domain)
-            except Exception:
-                logger.warning(
-                    "ses delete_identity failed after DB delete for org=%s domain=%s "
-                    "(SES identity may be orphaned)",
-                    principal.organization_id,
-                    deleted_domain,
-                    exc_info=True,
-                )
-        else:
-            logger.info(
-                "kept SES identity for domain=%s — still used by another org",
+        # Custom domains are globally unique (one org per domain — see the
+        # email_domains_custom_domain_global_uq index), so deleting the
+        # caller's row always means no other org still uses this SES identity.
+        try:
+            await email_provider.delete_identity(deleted_domain)
+        except Exception:
+            logger.warning(
+                "ses delete_identity failed after DB delete for org=%s domain=%s "
+                "(SES identity may be orphaned)",
+                principal.organization_id,
                 deleted_domain,
+                exc_info=True,
             )
 
     await write_audit_log(
