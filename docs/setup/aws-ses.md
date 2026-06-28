@@ -47,7 +47,7 @@ Recommended for the Hail public cloud: `mail.hail.so`. Self-hosters: pick a subd
 
 ## 4. Set up the SES identity
 
-Operator setup, once per deployment. Hail does not configure SES on your behalf for the parent `HAIL_MAIL_BASE_DOMAIN` — that identity has to exist (and be verified) before the first `POST /emails`, and the MAIL FROM subdomain is also operator-configured. Custom tenant domains follow a separate flow (Hail calls `CreateEmailIdentity` for those; see §7).
+Operator setup, once per deployment. Hail does not configure SES on your behalf for the parent `HAIL_MAIL_BASE_DOMAIN` — that identity has to exist (and be verified) before the first `POST /emails`, and the MAIL FROM subdomain is also operator-configured. Custom tenant domains follow a separate, fully-automated flow (Hail calls `CreateEmailIdentity` **and** configures their MAIL FROM; see §7).
 
 1. **AWS Console → SES → Verified identities → Create identity → Domain**. Enter the bare subdomain (`mail.hail.so`). Enable **DKIM** (default; leave the bit-length at 2048).
 2. SES returns three CNAMEs of the form `<token>._domainkey.mail.hail.so → <token>.dkim.amazonses.com`. **Publish all three** at your DNS provider. Wait for SES to flip status to **Verified** (usually < 1 hour).
@@ -58,7 +58,7 @@ Operator setup, once per deployment. Hail does not configure SES on your behalf 
    ```
 4. Wait for the MAIL FROM domain to flip to **Success**.
 
-> The MAIL FROM subdomain is **operator-managed**, not provisioned by Hail. Hail's `POST /email-domains` (kind=`custom`) doesn't call `PutEmailIdentityMailFromAttributes`; if a tenant needs a custom MAIL FROM on their own domain they configure it in the AWS console and `POST /email-domains/{id}/verify` to pick up the value.
+> This MAIL FROM subdomain — `bounces.mail.hail.so` on the **operator parent** — is operator-managed: you configure it once, by hand, in the steps above. **Custom tenant domains are different**: Hail auto-configures their MAIL FROM. `POST /email-domains` (kind=`custom`) calls `PutEmailIdentityMailFromAttributes` for `send.<domain>` and returns the MX + SPF records to publish alongside the DKIM CNAMEs; `POST /email-domains/{id}/verify` then re-polls both DKIM and MAIL FROM status. See §7.
 
 ## 5. DMARC alignment (required for inbox delivery)
 
@@ -120,14 +120,25 @@ curl -X POST $HAIL_API_URL/email-domains \
   -d '{"kind":"custom","domain":"acme.com"}'
 ```
 
-The response includes three `_domainkey` CNAMEs to publish at DNS. After publishing, the tenant calls `POST /email-domains/{id}/verify` to re-poll SES.
+The response returns the full DNS record set to publish:
+
+- **three DKIM `_domainkey` CNAMEs** — `<token>._domainkey.acme.com → <token>.dkim.amazonses.com`;
+- **a MAIL FROM MX + SPF TXT on `send.acme.com`** — Hail configures the custom MAIL FROM automatically, so there is no AWS-console step for the tenant:
+  ```
+  send.acme.com  MX   10  feedback-smtp.<region>.amazonses.com
+  send.acme.com  TXT      "v=spf1 include:amazonses.com ~all"
+  ```
+
+After publishing all of them, the tenant calls `POST /email-domains/{id}/verify` to re-poll SES for **both** DKIM and MAIL FROM status.
 
 ```bash
-hail email email-domain register --kind custom --domain acme.com
-# → prints DKIM CNAMEs in a copy-pastable table
-hail email email-domain verify <id>
-# → re-polls SES; flips row to verified once CNAMEs are live
+hail email domain register --kind custom --domain acme.com
+# → prints the DKIM CNAMEs + the send.acme.com MAIL FROM records in a copy-pastable table
+hail email domain verify <id>
+# → re-polls SES; flips the row to verified once the records are live
 ```
+
+> Inbound on a custom domain: once the row is `verified`, enabling inbound (`forward_to` and/or a webhook) lets it receive — matched by identity, so each receiving domain yields its own inbound row + webhook. Receiving still relies on the operator's region-wide SES receipt rule (§10).
 
 ## 8. Send
 

@@ -2,6 +2,23 @@
 
 All notable changes to Hail are documented here. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and Hail adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.0] — 2026-06-28
+
+Custom sender domains milestone. Tenants can now send and receive on their own
+domain, with DKIM and a custom MAIL FROM configured automatically.
+
+### Custom sender domains — send and receive on your own domain
+
+- Register a tenant-controlled domain: `POST /email-domains` with `kind=custom` (or `hail email domain register --kind custom --domain acme.com`). Hail calls SES `CreateEmailIdentity` **and auto-configures a custom MAIL FROM** on `send.<domain>` via `PutEmailIdentityMailFromAttributes` — no AWS-console step for the tenant.
+- The registration response returns the full DNS record set to publish: three DKIM `_domainkey` CNAMEs **plus** the MAIL FROM `send.<domain>` MX (`feedback-smtp.<region>.amazonses.com`) and SPF TXT (`v=spf1 include:amazonses.com ~all`). `DnsRecord` gains an optional `priority` for MX rows.
+- `POST /email-domains/{id}/verify` re-polls SES for **both** DKIM and MAIL FROM, surfacing `mail_from_status` alongside `verification_status`. On-demand only — clients/console re-poll; there is no background poller.
+- Receive inbound mail on **verified** custom domains. Inbound is matched by the owning identity, so a message to two of an org's domains yields one inbound row + webhook **per matched domain**, with the domain name on the event payload.
+- New IAM grant `ses:PutEmailIdentityMailFromAttributes` for the production identity (`infra/terraform/iam.tf`) — required for the custom MAIL FROM call.
+
+### Auth
+
+- The managed console now authenticates to the API with a short-lived Better Auth **session JWT** (carrying `sub` and the session `activeOrganizationId`) rather than a cached per-browser API key. The API resolves the request's organization from the active-org claim, validated against membership — closing a cross-tenant write path.
+
 ## [0.5.0] — 2026-06-12
 
 Inbound email milestone. Hail can now receive mail at hail-mail addresses,

@@ -52,7 +52,7 @@ One mode per call.
 
 Outbound mail goes through AWS SES via the `EmailProvider` adapter in `core/hailhq/core/providers/email/`. Two flavors of sender identity, stored in `email_domains`:
 
-- **`kind='custom'`** — tenant-controlled DNS (e.g. `acme.com`). `POST /email-domains` registers the identity with SES and surfaces three DKIM CNAMEs verbatim; the tenant publishes them, then `POST /email-domains/{id}/verify` re-polls SES.
+- **`kind='custom'`** — tenant-controlled DNS (e.g. `acme.com`). `POST /email-domains` registers the identity with SES and auto-configures a custom MAIL FROM on `send.<domain>`; the response surfaces three DKIM CNAMEs **plus** the MAIL FROM MX/SPF records (each carrying an optional `priority`). The tenant publishes them, then `POST /email-domains/{id}/verify` re-polls SES for both DKIM and MAIL FROM status. Verified custom domains can also **receive** — inbound matches by identity, one row + webhook per matched domain.
 - **`kind='hail_mail'`** — per-org address under an operator-managed parent domain. The full sender is `<user>+<org>@<HAIL_MAIL_BASE_DOMAIN>` (e.g. `alice+acme@mail.hail.so`); the parent domain is pre-verified once by the operator out of band, so per-org rows land already-verified without ever calling SES.
 
 ### Self-hosted vs managed

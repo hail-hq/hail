@@ -82,8 +82,10 @@ Checked = shipped. Per-artifact changelogs (GitHub Releases for the CLI, PyPI re
 
 - Outbound
   - [x] AWS SES
+  - [x] Custom sender domains (own DNS, auto DKIM + MAIL FROM)
 - Inbound
-  - [ ] AWS SES
+  - [x] AWS SES
+  - [x] Custom domains (receive on verified domains)
 
 ### Voice pipeline
 
