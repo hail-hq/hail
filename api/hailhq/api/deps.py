@@ -167,6 +167,9 @@ async def _principal_from_apikey_table(token: str, db: AsyncSession) -> Principa
             OrganizationMember.user_id == cast(ApiKey.reference_id, PG_UUID),
         )
         .where(ApiKey.key == hashed)
+        # Deterministic org for a multi-org user (api keys carry no active-org
+        # hint) — mirrors the JWT path's fallback ordering.
+        .order_by(OrganizationMember.organization_id)
     )
     row = (await db.execute(stmt)).first()
     # The auth backend stores ``enabled`` as nullable with an application-level
@@ -271,17 +274,36 @@ async def _principal_from_jwt(token: str, db: AsyncSession) -> Principal:
     except ValueError as exc:
         raise _unauthorized("jwt sub is not a valid user id") from exc
 
+    # Prefer the session's *selected* org (the ``activeOrganizationId`` claim the
+    # console mints into its token), validated against membership. A user in
+    # several orgs would otherwise resolve to an arbitrary one — and a request
+    # could land in the wrong tenant. Fall back to the user's membership only
+    # when the claim is absent (e.g. a token minted without an active org).
     stmt = select(OrganizationMember.organization_id).where(
         OrganizationMember.user_id == user_uuid
     )
-    organization_id = (await db.execute(stmt)).scalar_one_or_none()
+    active_org_claim = claims.get("activeOrganizationId")
+    if active_org_claim:
+        try:
+            active_org_uuid = uuid.UUID(str(active_org_claim))
+        except ValueError as exc:
+            raise _unauthorized(
+                "jwt activeOrganizationId is not a valid org id"
+            ) from exc
+        stmt = stmt.where(OrganizationMember.organization_id == active_org_uuid)
+        not_member_detail = "user is not a member of the requested organization"
+    else:
+        # Deterministic single-row pick — never raise MultipleResultsFound for a
+        # multi-org user when no active org was supplied.
+        stmt = stmt.order_by(OrganizationMember.organization_id)
+        not_member_detail = (
+            "user not provisioned with an organization; "
+            "sign in to the dashboard to complete setup"
+        )
+    organization_id = (await db.execute(stmt.limit(1))).scalar_one_or_none()
     if organization_id is None:
         raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail=(
-                "user not provisioned with an organization; "
-                "sign in to the dashboard to complete setup"
-            ),
+            status_code=status.HTTP_403_FORBIDDEN, detail=not_member_detail
         )
 
     return Principal(
