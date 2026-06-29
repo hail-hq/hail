@@ -47,7 +47,7 @@ type tailFlags struct {
 // in lockstep so `hail tail --id sms:...` fails fast on the CLI in v1
 // without an HTTP round-trip. When a new channel lands on the API, add it
 // here in the same change.
-var supportedResourceTypes = []string{"call"}
+var supportedResourceTypes = []string{"call", "email"}
 
 // terminalCallStatuses are the values from the spec that mean "no more
 // events will arrive" — when `--id call:<uuid>` is set and the server
@@ -126,25 +126,45 @@ func newTailCmd(opts *Options) *cobra.Command {
 		Short: "Stream events from across the org (or one resource with --id)",
 		Long: `hail tail — follow the event stream
 
-Without --id, tail follows every event in the org, prefixing each line
-with a short call id ([c2a8f1d3]) so multiple in-flight conversations
-disambiguate at a glance. Runs until Ctrl-C.
+Without --id (or a positional), tail follows every event in the org,
+prefixing each line with a short id ([c2a8f1d3]) so multiple in-flight
+conversations disambiguate at a glance. Runs until Ctrl-C.
 
-With --id call:<uuid>, tail narrows to a single call and auto-exits when
-the call reaches a terminal status (completed/failed/busy/no_answer/
-canceled). The colon-form mirrors the audit_log resource_type/resource_id
-shape so SMS / email / conversation can join later without a rename.`,
-		Args: cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, _ []string) error {
+Narrow to one resource either way:
+
+  hail tail --id call:<uuid>
+  hail tail call:<uuid>
+
+Both forms accept '<type>:<uuid>' where <type> is one of: ` + strings.Join(supportedResourceTypes, ", ") + `.
+
+When narrowed to a call, tail auto-exits when the call reaches a terminal
+status (completed/failed/busy/no_answer/canceled). Email tails currently
+run until SIGINT.`,
+		Args: cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if len(args) == 1 {
+				if f.id != "" && args[0] != f.id {
+					return helpAndFail(cmd, "--id and positional disagree")
+				}
+				f.id = args[0]
+			}
 			return runTail(cmd.Context(), opts, f)
 		},
 	}
-	cmd.Flags().StringVar(&f.id, "id", "", "Narrow to one resource as '<type>:<uuid>' (e.g. 'call:abc-...'); v1 supports: call")
+	cmd.Flags().StringVar(&f.id, "id", "", "Narrow to one resource as '<type>:<uuid>' (e.g. 'call:abc-...'); supported: "+strings.Join(supportedResourceTypes, ", "))
+	registerTailFlags(cmd, f)
+	return cmd
+}
+
+// registerTailFlags binds the polling-shape flags (--kind, --interval,
+// --from-start, --no-follow) onto a cobra command. Shared by `hail tail`,
+// `hail call tail`, and `hail email tail` so the defaults and usage
+// strings stay locked.
+func registerTailFlags(cmd *cobra.Command, f *tailFlags) {
 	cmd.Flags().StringVar(&f.kind, "kind", "", "Filter by event kind (server-side, exact match)")
 	cmd.Flags().IntVar(&f.intervalMS, "interval", 500, "Poll interval in ms (100..10000)")
 	cmd.Flags().BoolVar(&f.fromStart, "from-start", false, "Fetch all historical events first (default: start from now)")
 	cmd.Flags().BoolVar(&f.noFollow, "no-follow", false, "Print one page and exit (no follow)")
-	return cmd
 }
 
 func runTail(ctx context.Context, opts *Options, f *tailFlags) error {
@@ -167,11 +187,6 @@ func runTail(ctx context.Context, opts *Options, f *tailFlags) error {
 		resourceType = rtype
 		idWire = fmt.Sprintf("%s:%s", rtype, rid.String())
 	}
-	// In v1 the only supported type is `call`; this also drives whether the
-	// renderer omits the short-id prefix and whether the loop watches for a
-	// terminal `call_status`.
-	singleCall := resourceType == "call"
-
 	// SIGINT cancels the poll loop. Exit 130 happens at Execute() — we just
 	// return errInterrupted from here.
 	tailCtx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
@@ -235,7 +250,7 @@ func runTail(ctx context.Context, opts *Options, f *tailFlags) error {
 		var lastEvent *client.CallEventResponse
 		for {
 			for i := range page.Items {
-				if err := renderEvent(opts, page.Items[i], singleCall, colorize); err != nil {
+				if err := renderEvent(opts, page.Items[i], resourceType != "", colorize); err != nil {
 					return err
 				}
 				lastEvent = &page.Items[i]
@@ -262,8 +277,10 @@ func runTail(ctx context.Context, opts *Options, f *tailFlags) error {
 		// Org-wide tail and non-call resource types run until SIGINT. Read
 		// the status off the first page to match the prior behavior — the
 		// inner drain loop may span seconds.
-		if singleCall && firstPage.CallStatus != nil &&
-			terminalCallStatuses[*firstPage.CallStatus] {
+		// Email auto-exit pending: EventStreamResponse does not yet expose an
+		// EmailStatus field on the generated client. Email tails run until SIGINT.
+		if resourceType == "call" &&
+			firstPage.CallStatus != nil && terminalCallStatuses[*firstPage.CallStatus] {
 			finalLine := fmt.Sprintf("call %s", string(*firstPage.CallStatus))
 			renderSystemLine(opts, time.Now().UTC(), finalLine, colorize)
 			return nil
@@ -280,10 +297,10 @@ func runTail(ctx context.Context, opts *Options, f *tailFlags) error {
 // renderEvent dispatches on event.Kind and writes one line to opts.Stdout.
 // In --json mode each event is emitted as a single JSON object per line.
 //
-// `singleCall` is true when --id call:<uuid> narrowed the stream; the
-// short-call-id prefix is omitted in that mode (every event belongs to the
-// same call, the prefix would be redundant noise).
-func renderEvent(opts *Options, ev client.CallEventResponse, singleCall, colorize bool) error {
+// `singleResource` is true when --id <type>:<uuid> narrowed the stream; the
+// short-id prefix is omitted in that mode (every event belongs to the same
+// resource, the prefix would be redundant noise).
+func renderEvent(opts *Options, ev client.CallEventResponse, singleResource, colorize bool) error {
 	if opts.JSON {
 		out, err := json.Marshal(ev)
 		if err != nil {
@@ -298,7 +315,7 @@ func renderEvent(opts *Options, ev client.CallEventResponse, singleCall, coloriz
 	if colorize {
 		label = colorFor(ev.Kind) + label + colorReset
 	}
-	if singleCall {
+	if singleResource {
 		fmt.Fprintf(opts.Stdout, "[%s] %-9s %s\n", ts, label, body)
 		return nil
 	}
@@ -425,13 +442,11 @@ func colorFor(kind string) string {
 	}
 }
 
-// shouldColorize returns true iff the writer is a *os.File pointing to a TTY
-// AND NO_COLOR is unset. Anything else (a bytes.Buffer in tests, a redirected
-// file, or a CI run with NO_COLOR=1) gets plain text.
-func shouldColorize(w io.Writer) bool {
-	if os.Getenv("NO_COLOR") != "" {
-		return false
-	}
+// isTTY reports whether the writer is a *os.File pointing at a terminal.
+// Anything else (a bytes.Buffer in tests, a redirected file, a pipe) is
+// not a TTY. Shared by color logic and by the binary-fetch commands that
+// refuse to dump bytes onto an interactive terminal.
+func isTTY(w io.Writer) bool {
 	f, ok := w.(*os.File)
 	if !ok {
 		return false
@@ -441,4 +456,12 @@ func shouldColorize(w io.Writer) bool {
 		return false
 	}
 	return (fi.Mode() & os.ModeCharDevice) != 0
+}
+
+// shouldColorize returns true iff the writer is a TTY and NO_COLOR is unset.
+func shouldColorize(w io.Writer) bool {
+	if os.Getenv("NO_COLOR") != "" {
+		return false
+	}
+	return isTTY(w)
 }

@@ -66,3 +66,20 @@ func saveCredentials(c Credentials) (string, error) {
 	}
 	return p, nil
 }
+
+// deleteCredentials removes the credentials file. Returns (false, nil)
+// if the file was already absent (idempotent), (true, nil) if it was
+// deleted, or (_, err) on any other I/O failure.
+func deleteCredentials() (existed bool, err error) {
+	p, err := credentialsPath()
+	if err != nil {
+		return false, err
+	}
+	if err := os.Remove(p); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return false, nil
+		}
+		return false, fmt.Errorf("remove %s: %w", p, err)
+	}
+	return true, nil
+}

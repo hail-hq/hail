@@ -204,6 +204,8 @@ Currently:
                     other CLIs (` + "`gh auth login`" + `, ` + "`gcloud auth login`" + `, …) works.`,
 	}
 	auth.AddCommand(newLoginCmd(opts))
+	auth.AddCommand(newAuthLogoutCmd(opts))
+	auth.AddCommand(newAuthTokenCmd(opts))
 	return auth
 }
 

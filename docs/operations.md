@@ -137,6 +137,18 @@ Save the value of `HAIL_API_KEY` — there's no recovery path. Then `export HAIL
 
 > **`hail login` is managed-cloud only.** It runs the auth backend's device flow against `hail-website` and writes the resulting `hl_live_*` key to `~/.hail/credentials.json`. In self-host there's no website to authorize against — set `HAIL_API_KEY` directly and you're done.
 
+#### `hail auth` subcommands
+
+For interactive sessions on a managed Hail deployment:
+
+- `hail login` — device-authorization flow, persists `~/.hail/credentials.json`.
+- `hail auth logout` — delete the local credentials file (idempotent).
+- `hail auth token` — print the bare API key; use in scripts as
+  `export HAIL_API_KEY=$(hail auth token)`.
+
+Self-hosters typically skip the device flow and set `HAIL_API_KEY`
+directly per the bootstrap section above.
+
 #### Phone number pool
 
 Pool numbers are unowned `phone_numbers` rows (`is_pool=TRUE`, `organization_id IS NULL`) that any org without its own active number falls back to on outbound calls. They're claimed atomically (`SELECT … FOR UPDATE SKIP LOCKED`, randomized order to spread carrier wear), bound to one call at a time via `reserved_call_id`, and released on call end. Implementation: `core/hailhq/core/pool.py`; sweeper backstop window is `HAIL_POOL_RELEASE_GRACE_SECONDS`.

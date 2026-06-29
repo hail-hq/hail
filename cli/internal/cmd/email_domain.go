@@ -2,7 +2,6 @@ package cmd
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"net/http"
 	"text/tabwriter"
@@ -78,7 +77,7 @@ Examples:
   hail email domain register --kind custom --domain acme.com`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			return runEmailDomainRegister(cmd.Context(), opts, f)
+			return runEmailDomainRegister(cmd.Context(), cmd, opts, f)
 		},
 	}
 	cmd.Flags().StringVar(&f.kind, "kind", "", "Identity kind: hail_mail or custom (required)")
@@ -86,17 +85,17 @@ Examples:
 	cmd.Flags().StringVar(&f.userPrefix, "local-prefix-user", "", "User-side local part for kind=hail_mail (falls back to HAIL_MAIL_DEFAULT_USER_PREFIX)")
 	cmd.Flags().StringVar(&f.orgPrefix, "local-prefix-org", "", "Org-side local part for kind=hail_mail (falls back to HAIL_MAIL_DEFAULT_ORG_PREFIX)")
 	cmd.Flags().StringVar(&f.idemKey, "idempotency-key", "", "Defaults to a fresh UUID")
-	if err := cmd.MarkFlagRequired("kind"); err != nil {
-		panic(err)
-	}
 	return cmd
 }
 
 func runEmailDomainRegister(
-	ctx context.Context, opts *Options, f *emailDomainRegisterFlags,
+	ctx context.Context, cmd *cobra.Command, opts *Options, f *emailDomainRegisterFlags,
 ) error {
+	if f.kind == "" {
+		return requireInputs(cmd, "--kind")
+	}
 	if f.kind != "hail_mail" && f.kind != "custom" {
-		return errors.New("--kind must be 'hail_mail' or 'custom'")
+		return helpAndFail(cmd, "--kind must be 'hail_mail' or 'custom'")
 	}
 
 	body := client.EmailDomainCreate{
@@ -183,7 +182,7 @@ func newEmailDomainGetCmd(opts *Options) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "get <id>",
 		Short: "Fetch one email domain by id (full UUID or 4+ char prefix)",
-		Args:  cobra.ExactArgs(1),
+		Args:  argsOrHelp(1, "<id>"),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			apiClient, err := opts.newClient()
 			if err != nil {
@@ -226,7 +225,7 @@ func newEmailDomainVerifyCmd(opts *Options) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "verify <id>",
 		Short: "Re-poll the email provider for a custom row's verification status (full UUID or 4+ char prefix)",
-		Args:  cobra.ExactArgs(1),
+		Args:  argsOrHelp(1, "<id>"),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			apiClient, err := opts.newClient()
 			if err != nil {
@@ -270,7 +269,7 @@ func newEmailDomainDeleteCmd(opts *Options) *cobra.Command {
 		Use:     "delete <id>",
 		Aliases: []string{"rm"},
 		Short:   "Delete an email domain (full UUID or 4+ char prefix). Also drops the SES identity for custom rows.",
-		Args:    cobra.ExactArgs(1),
+		Args:    argsOrHelp(1, "<id>"),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			apiClient, err := opts.newClient()
 			if err != nil {

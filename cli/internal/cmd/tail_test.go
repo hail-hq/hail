@@ -470,3 +470,62 @@ func TestTail_PropagatesCursorAcrossPolls(t *testing.T) {
 		t.Errorf("third poll cursor mismatch:\n want=%s\n  got=%s", wantCursor, gotCursor)
 	}
 }
+
+func TestTail_PositionalCall_Equiv_FlagID(t *testing.T) {
+	srv := newFakeServer(t, http.StatusOK, map[string]any{"items": []any{}, "next_cursor": nil})
+	id := "11111111-1111-1111-1111-111111111111"
+
+	_, _, err := runRoot(t,
+		map[string]string{"HAIL_API_KEY": "sk_test", "HAIL_API_URL": srv.URL},
+		"tail", "call:"+id, "--no-follow",
+	)
+	if err != nil {
+		t.Fatalf("positional: %v", err)
+	}
+	q := srv.lastReq.URL.Query().Get("id")
+	if q != "call:"+id {
+		t.Fatalf("expected id query, got %q", q)
+	}
+}
+
+func TestTail_PositionalEmail(t *testing.T) {
+	srv := newFakeServer(t, http.StatusOK, map[string]any{"items": []any{}, "next_cursor": nil})
+	id := "22222222-2222-2222-2222-222222222222"
+	_, _, err := runRoot(t,
+		map[string]string{"HAIL_API_KEY": "sk_test", "HAIL_API_URL": srv.URL},
+		"tail", "email:"+id, "--no-follow",
+	)
+	if err != nil {
+		t.Fatalf("email positional: %v", err)
+	}
+	q := srv.lastReq.URL.Query().Get("id")
+	if q != "email:"+id {
+		t.Fatalf("expected email id query, got %q", q)
+	}
+}
+
+func TestTail_PositionalAndFlagDisagree(t *testing.T) {
+	a := "11111111-1111-1111-1111-111111111111"
+	b := "22222222-2222-2222-2222-222222222222"
+	_, stderr, err := runRoot(t,
+		map[string]string{"HAIL_API_KEY": "sk_test"},
+		"tail", "call:"+a, "--id", "call:"+b, "--no-follow",
+	)
+	if !errors.Is(err, errInvalidInputs) {
+		t.Fatalf("want errInvalidInputs, got %v", err)
+	}
+	if !strings.Contains(stderr, "--id and positional disagree") {
+		t.Fatalf("missing reason: %q", stderr)
+	}
+}
+
+func TestTail_UnsupportedType(t *testing.T) {
+	id := "11111111-1111-1111-1111-111111111111"
+	_, _, err := runRoot(t,
+		map[string]string{"HAIL_API_KEY": "sk_test"},
+		"tail", "sms:"+id, "--no-follow",
+	)
+	if err == nil || !strings.Contains(err.Error(), "unsupported resource type") {
+		t.Fatalf("want unsupported-type rejection, got %v", err)
+	}
+}

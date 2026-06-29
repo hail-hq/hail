@@ -26,6 +26,22 @@ var (
 	buildDate = "unknown"
 )
 
+// errNotAuthenticated is returned by requireAuth when the resolved
+// Options carry no API key from any source (--api-key, $HAIL_API_KEY,
+// or credentials file). Execute() recognizes it and prints the canonical
+// "run hail login" hint before exiting 2.
+var errNotAuthenticated = errors.New("not authenticated")
+
+// requireAuth gates auth-requiring subcommands. Call it at the top of
+// RunE before any I/O; commands that tolerate no auth (login, version,
+// completion, mcp endpoint) skip it entirely.
+func requireAuth(opts *Options) error {
+	if opts.APIKey != "" {
+		return nil
+	}
+	return errNotAuthenticated
+}
+
 // DefaultAPIURL is the global API target when neither --api-url, $HAIL_API_URL,
 // nor a stored credentials file pin a value. The CLI talks to production by
 // default; self-hosters opt out explicitly via --api-url / $HAIL_API_URL.
@@ -125,6 +141,62 @@ or pass --api-key.`,
 	root.SetOut(stdout)
 	root.SetErr(stderr)
 
+	// Dynamic Long: the banner branches on whether creds resolved to anything.
+	// Cobra does NOT run PersistentPreRunE before printing help, so we resolve
+	// the auth state inline here. Keeps the help render free of side effects
+	// beyond reading creds.
+	//
+	// Capture cobra's default help func before overriding so subcommand --help
+	// can delegate without recursing into this closure (cmd.Root().HelpFunc()
+	// would otherwise return the closure itself).
+	defaultHelp := root.HelpFunc()
+	root.SetHelpFunc(func(cmd *cobra.Command, args []string) {
+		// Only customize the root help; subcommand --help paths stay default.
+		if cmd != root {
+			defaultHelp(cmd, args)
+			return
+		}
+		apiKey := opts.APIKey
+		apiURL := opts.APIURL
+		if apiKey == "" {
+			apiKey = getenv("HAIL_API_KEY")
+		}
+		if apiURL == "" {
+			apiURL = getenv("HAIL_API_URL")
+		}
+		if apiKey == "" || apiURL == "" {
+			if creds, _ := loadCredentials(); creds != nil {
+				if apiKey == "" {
+					apiKey = creds.APIKey
+				}
+				if apiURL == "" {
+					apiURL = creds.APIURL
+				}
+			}
+		}
+		if apiURL == "" {
+			apiURL = DefaultAPIURL
+		}
+
+		out := cmd.OutOrStdout()
+		fmt.Fprintln(out, "hail — universal communication platform for AI agents.")
+		fmt.Fprintln(out)
+		if apiKey == "" {
+			fmt.Fprintln(out, "Get started:")
+			fmt.Fprintln(out, "  hail login          Authenticate with Hail")
+		} else {
+			fmt.Fprintf(out, "Signed in as %s → %s\n", maskAPIKey(apiKey), apiURL)
+		}
+		fmt.Fprintln(out)
+		fmt.Fprintln(out, "Common:")
+		fmt.Fprintln(out, "  hail call +1...     Place an outbound call")
+		fmt.Fprintln(out, "  hail email send …   Send an email")
+		fmt.Fprintln(out, "  hail tail           Stream events across the org")
+		fmt.Fprintln(out)
+		fmt.Fprintln(out, "More:")
+		fmt.Fprintln(out, "  hail --help         Full command list")
+	})
+
 	root.PersistentFlags().StringVar(&opts.APIURL, "api-url", "", "API base URL (default: $HAIL_API_URL or ~/.hail/credentials.json or "+DefaultAPIURL+")")
 	root.PersistentFlags().StringVar(&opts.APIKey, "api-key", "", "API key (default: $HAIL_API_KEY or ~/.hail/credentials.json — see 'hail login')")
 	root.PersistentFlags().BoolVar(&opts.JSON, "json", false, "Output JSON instead of human-friendly text")
@@ -134,7 +206,9 @@ or pass --api-key.`,
 	root.AddCommand(newTailCmd(opts))
 	root.AddCommand(newLoginCmd(opts))
 	root.AddCommand(newAuthCmd(opts))
-	root.AddCommand(newWebhooksCmd(opts))
+	root.AddCommand(newMcpCmd(opts))
+	root.AddCommand(newVersionCmd(opts))
+	root.AddCommand(newCompletionCmd(opts))
 
 	return root
 }
@@ -143,8 +217,8 @@ or pass --api-key.`,
 // any extra request editors appended. Subcommands call it instead of
 // re-doing the empty-key check + ClientWithResponses dance.
 func (o *Options) newClient(extra ...client.RequestEditorFn) (*client.ClientWithResponses, error) {
-	if o.APIKey == "" {
-		return nil, errors.New("missing API key: run `hail login`, set HAIL_API_KEY, or pass --api-key")
+	if err := requireAuth(o); err != nil {
+		return nil, err
 	}
 	editors := append([]client.RequestEditorFn{authEditor(o.APIKey)}, extra...)
 	clientOpts := make([]client.ClientOption, len(editors))
@@ -181,16 +255,42 @@ func strPtr(s string) *string {
 // point and the only place that calls os.Exit, so subcommand handlers can
 // remain pure (return error, propagate up).
 //
-// SIGINT (Ctrl-C) during a long-running subcommand surfaces as
-// errInterrupted from that subcommand; we exit 130 (POSIX convention for
-// "killed by SIGINT") and skip the error message — no half-formed line.
+// Exit-code policy:
+//
+//	0  — success
+//	2  — input validation failed (errInvalidInputs) or unauthenticated
+//	     (errNotAuthenticated). Distinct from a generic failure so scripts
+//	     can branch on "user error" vs "everything else".
+//	130 — SIGINT (errInterrupted), POSIX convention.
+//	1  — generic error.
 func Execute() {
 	root := NewRootCmd(os.Stdout, os.Stderr, os.Getenv)
 	if err := root.Execute(); err != nil {
-		if errors.Is(err, errInterrupted) {
+		switch {
+		case errors.Is(err, errInterrupted):
 			os.Exit(130)
+		case errors.Is(err, errInvalidInputs):
+			// Reason + Help() were already printed by helpAndFail. Exit silently.
+			os.Exit(2)
+		case errors.Is(err, errNotAuthenticated):
+			fmt.Fprintln(os.Stderr, "hail: not authenticated.")
+			fmt.Fprintln(os.Stderr)
+			fmt.Fprintln(os.Stderr, "  Run `hail login` to authenticate, or set HAIL_API_KEY / pass --api-key.")
+			os.Exit(2)
+		default:
+			fmt.Fprintln(os.Stderr, "hail:", err)
+			os.Exit(1)
 		}
-		fmt.Fprintln(os.Stderr, "hail:", err)
-		os.Exit(1)
 	}
+}
+
+// maskAPIKey returns the prefix-•…-last4 form used in help banners.
+// Conservative: if the input is too short to mask safely, returns "(set)"
+// so we never leak a partial secret that would itself be useful.
+func maskAPIKey(k string) string {
+	if len(k) < 12 {
+		return "(set)"
+	}
+	// hl_live_ prefix is 8 chars; preserve it + suffix.
+	return k[:8] + "•…" + k[len(k)-4:]
 }

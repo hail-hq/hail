@@ -21,7 +21,7 @@ func newCallStatusCmd(opts *Options) *cobra.Command {
 shown by 'hail call list'). Prefix lookups scan the %d most recent calls
 and fail if the prefix is ambiguous or matches nothing — pass the full
 UUID to look up older calls unambiguously.`, recentPrefixWindow),
-		Args: cobra.ExactArgs(1),
+		Args: argsOrHelp(1, "<call-id>"),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runCallStatus(cmd.Context(), opts, args[0])
 		},

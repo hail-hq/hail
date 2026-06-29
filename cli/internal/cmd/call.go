@@ -3,7 +3,6 @@ package cmd
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -59,9 +58,9 @@ Subcommands:
   hail call list             List recent calls (cursor-paginated).
 
 To stream events, see ` + "`hail tail`" + ` (top-level).`,
-		Args: cobra.ExactArgs(1),
+		Args: argsOrHelp(1, "<to-number>"),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runCall(cmd.Context(), opts, f, args[0])
+			return runCall(cmd, opts, f, args[0])
 		},
 	}
 
@@ -75,14 +74,16 @@ To stream events, see ` + "`hail tail`" + ` (top-level).`,
 
 	cmd.AddCommand(newCallStatusCmd(opts))
 	cmd.AddCommand(newCallListCmd(opts))
+	cmd.AddCommand(newCallTailCmd(opts))
 
 	return cmd
 }
 
-func runCall(ctx context.Context, opts *Options, f *callFlags, toNumber string) error {
-	if err := validateMode(f); err != nil {
+func runCall(cmd *cobra.Command, opts *Options, f *callFlags, toNumber string) error {
+	if err := validateMode(cmd, f); err != nil {
 		return err
 	}
+	ctx := cmd.Context()
 
 	body := client.CallCreate{
 		To:           toNumber,
@@ -120,19 +121,19 @@ func runCall(ctx context.Context, opts *Options, f *callFlags, toNumber string) 
 }
 
 // validateMode enforces that exactly one of mode A or mode B is in play.
-func validateMode(f *callFlags) error {
+func validateMode(cmd *cobra.Command, f *callFlags) error {
 	hasPrompt := f.prompt != ""
 	hasAnyLLM := f.llmURL != "" || f.llmKey != "" || f.llmModel != ""
 	hasFullLLM := f.llmURL != "" && f.llmKey != "" && f.llmModel != ""
 
 	if hasPrompt && hasAnyLLM {
-		return errors.New("--prompt and --llm-* are mutually exclusive (use one mode)")
+		return helpAndFail(cmd, "--prompt and --llm-* are mutually exclusive (use one mode)")
 	}
 	if !hasPrompt && !hasAnyLLM {
-		return errors.New("must provide either --prompt or all of --llm-url --llm-key --llm-model")
+		return helpAndFail(cmd, "must provide either --prompt or all of --llm-url --llm-key --llm-model")
 	}
 	if hasAnyLLM && !hasFullLLM {
-		return errors.New("--llm-url, --llm-key, and --llm-model must all be supplied together")
+		return helpAndFail(cmd, "--llm-url, --llm-key, and --llm-model must all be supplied together")
 	}
 	return nil
 }

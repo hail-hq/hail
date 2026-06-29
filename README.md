@@ -20,15 +20,38 @@ Authenticate:
 - **Hail Cloud** (managed at hail.so): `hail login` runs the device-flow and saves an API key to `~/.hail/credentials.json`.
 - **Self-host**: seed an API key directly into your local stack — see [docs/operations.md](docs/operations.md) "First-run DB seed". Then export `HAIL_API_KEY` (or pass `--api-key`).
 
-Use it:
+Use it — CLI (for humans scripting Hail):
 
 ```bash
-# CLI (for humans scripting Hail)
-hail call +15551234567 --prompt "You are calling to confirm a reschedule."
-hail email send --to alice@example.com --subject "hi" --body "hello from Hail"
-hail tail                                # follow every event in your org
-hail tail --id call:<uuid>               # narrow to one call
+hail login                        # authenticate (device flow)
+hail auth logout                  # remove local credentials
+hail auth token                   # print bare API key for scripting
 
+hail call +14155550100 --prompt "be brief"
+hail call list
+hail call tail <id>               # follow events for one call
+
+hail email send --to a@b.com --subject hi --body "hello"
+hail email list
+hail email get <id>
+hail email tail <id>              # follow events for one email
+hail email raw <id>               # RFC 5322 source
+hail email attachment <id> <att-id> --output file.pdf
+hail email domain register --kind hail_mail
+hail email domain register --kind custom --domain acme.com  # send + receive on your own domain
+hail email domain list
+
+hail tail                         # cross-channel event stream
+hail tail call:<id>               # narrow by resource type
+
+hail mcp endpoint                 # Streamable HTTP URL for the MCP server
+hail completion zsh               # source <(hail completion zsh)
+hail version
+```
+
+Or over HTTP / MCP:
+
+```bash
 # HTTP
 curl -X POST http://localhost:8080/calls \
   -H "Authorization: Bearer $HAIL_API_KEY" \

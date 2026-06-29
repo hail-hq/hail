@@ -49,6 +49,9 @@ Subcommands:
 	cmd.AddCommand(newEmailSendCmd(opts))
 	cmd.AddCommand(newEmailListCmd(opts))
 	cmd.AddCommand(newEmailGetCmd(opts))
+	cmd.AddCommand(newEmailTailCmd(opts))
+	cmd.AddCommand(newEmailRawCmd(opts))
+	cmd.AddCommand(newEmailAttachmentCmd(opts))
 	cmd.AddCommand(newEmailDomainCmd(opts))
 	return cmd
 }
@@ -73,7 +76,7 @@ on your organization, or auto-mints a hail-mail address if one is
 configured. See docs/setup/aws-ses.md.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			return runEmailSend(cmd.Context(), opts, f)
+			return runEmailSend(cmd.Context(), cmd, opts, f)
 		},
 	}
 
@@ -89,22 +92,19 @@ configured. See docs/setup/aws-ses.md.`,
 	cmd.Flags().StringVar(&f.bodyHTMLFile, "body-html-file", "", "Read HTML body from this file (use '-' for stdin)")
 	cmd.Flags().StringVar(&f.idempotencyKey, "idempotency-key", "", "Defaults to a fresh UUID")
 
-	if err := cmd.MarkFlagRequired("subject"); err != nil {
-		// MarkFlagRequired only fails when the named flag doesn't exist; we
-		// just registered it above, so this can never trip outside of a bug.
-		panic(err)
-	}
-
 	return cmd
 }
 
-func runEmailSend(ctx context.Context, opts *Options, f *emailSendFlags) error {
+func runEmailSend(ctx context.Context, cmd *cobra.Command, opts *Options, f *emailSendFlags) error {
+	if f.subject == "" {
+		return requireInputs(cmd, "--subject")
+	}
 	to, err := normalizeRecipients(f.to)
 	if err != nil {
 		return err
 	}
 	if len(to) == 0 {
-		return fmt.Errorf("--to is required (at least one recipient)")
+		return requireInputs(cmd, "--to")
 	}
 
 	bodyText, err := resolveBody(f.body, f.bodyFile, opts)
@@ -116,7 +116,7 @@ func runEmailSend(ctx context.Context, opts *Options, f *emailSendFlags) error {
 		return fmt.Errorf("--body-html: %w", err)
 	}
 	if bodyText == "" && bodyHTML == "" {
-		return fmt.Errorf("must provide --body, --body-html, --body-file, or --body-html-file")
+		return requireInputs(cmd, "--body or --body-html or --body-file or --body-html-file")
 	}
 
 	cc, err := normalizeRecipients(f.cc)

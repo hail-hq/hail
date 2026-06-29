@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"path/filepath"
 	"strings"
@@ -93,15 +94,15 @@ func TestEmailSend_HappyPath(t *testing.T) {
 func TestEmailSend_RequiresBody(t *testing.T) {
 	srv := newFakeServer(t, http.StatusCreated, sampleEmailResponse())
 
-	_, _, err := runRoot(t,
+	_, stderr, err := runRoot(t,
 		map[string]string{"HAIL_API_KEY": "sk_test", "HAIL_API_URL": srv.URL},
 		"email", "send", "--to", "x@example.com", "--subject", "hi",
 	)
-	if err == nil {
-		t.Fatal("expected error when no body supplied")
+	if !errors.Is(err, errInvalidInputs) {
+		t.Fatalf("want errInvalidInputs, got %v", err)
 	}
-	if !strings.Contains(err.Error(), "body") {
-		t.Errorf("unexpected error: %v", err)
+	if !strings.Contains(stderr, "body") {
+		t.Errorf("stderr missing body mention: %q", stderr)
 	}
 	if got := atomic.LoadInt32(&srv.hits); got != 0 {
 		t.Fatalf("server should not have been called, got %d hits", got)
@@ -173,6 +174,23 @@ func TestEmailSend_BodyFile(t *testing.T) {
 	}
 	if body.BodyText == nil || *body.BodyText != "file body content" {
 		t.Fatalf("BodyText = %v", body.BodyText)
+	}
+}
+
+func TestEmailSend_MissingSubject_PrintsHelpAndFails(t *testing.T) {
+	srv := newFakeServer(t, http.StatusCreated, map[string]any{})
+	_, stderr, err := runRoot(t,
+		map[string]string{"HAIL_API_KEY": "sk_test", "HAIL_API_URL": srv.URL},
+		"email", "send", "--to", "a@b.com", "--body", "hi",
+	)
+	if !errors.Is(err, errInvalidInputs) {
+		t.Fatalf("want errInvalidInputs, got %v", err)
+	}
+	if !strings.Contains(stderr, "missing required: --subject") {
+		t.Fatalf("missing reason line: %q", stderr)
+	}
+	if !strings.Contains(stderr, "hail email send") {
+		t.Fatalf("expected Help() output in stderr: %q", stderr)
 	}
 }
 

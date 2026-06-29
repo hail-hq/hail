@@ -3,6 +3,7 @@ package cmd
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -159,7 +160,7 @@ func TestCallSubcommand_ModeB_BringYourOwnLLM(t *testing.T) {
 func TestCallSubcommand_RejectsBothModes(t *testing.T) {
 	srv := newFakeServer(t, http.StatusCreated, sampleResponse())
 
-	_, _, err := runRoot(t,
+	_, stderr, err := runRoot(t,
 		map[string]string{"HAIL_API_KEY": "sk_test", "HAIL_API_URL": srv.URL},
 		"call", "+15551234567",
 		"--prompt", "hi",
@@ -167,11 +168,11 @@ func TestCallSubcommand_RejectsBothModes(t *testing.T) {
 		"--llm-key", "k",
 		"--llm-model", "m",
 	)
-	if err == nil {
-		t.Fatal("expected error, got nil")
+	if !errors.Is(err, errInvalidInputs) {
+		t.Fatalf("want errInvalidInputs, got %v", err)
 	}
-	if !strings.Contains(err.Error(), "mutually exclusive") {
-		t.Errorf("error = %v", err)
+	if !strings.Contains(stderr, "mutually exclusive") {
+		t.Errorf("stderr = %q", stderr)
 	}
 	if hits := atomic.LoadInt32(&srv.hits); hits != 0 {
 		t.Errorf("expected 0 HTTP calls, got %d", hits)
@@ -181,15 +182,15 @@ func TestCallSubcommand_RejectsBothModes(t *testing.T) {
 func TestCallSubcommand_RejectsNeitherMode(t *testing.T) {
 	srv := newFakeServer(t, http.StatusCreated, sampleResponse())
 
-	_, _, err := runRoot(t,
+	_, stderr, err := runRoot(t,
 		map[string]string{"HAIL_API_KEY": "sk_test", "HAIL_API_URL": srv.URL},
 		"call", "+15551234567",
 	)
-	if err == nil {
-		t.Fatal("expected error, got nil")
+	if !errors.Is(err, errInvalidInputs) {
+		t.Fatalf("want errInvalidInputs, got %v", err)
 	}
-	if !strings.Contains(err.Error(), "either --prompt or") {
-		t.Errorf("error = %v", err)
+	if !strings.Contains(stderr, "either --prompt or") {
+		t.Errorf("stderr = %q", stderr)
 	}
 	if hits := atomic.LoadInt32(&srv.hits); hits != 0 {
 		t.Errorf("expected 0 HTTP calls, got %d", hits)
@@ -378,6 +379,16 @@ func TestPersistentFlags_PositionFlexibility(t *testing.T) {
 	}
 }
 
+func TestCallSubcommand_MissingPositional_PrintsHelp(t *testing.T) {
+	_, stderr, err := runRoot(t, map[string]string{"HAIL_API_KEY": "sk_test"}, "call")
+	if !errors.Is(err, errInvalidInputs) {
+		t.Fatalf("want errInvalidInputs, got %v", err)
+	}
+	if !strings.Contains(stderr, "missing required: <to-number>") {
+		t.Fatalf("missing arg name: %q", stderr)
+	}
+}
+
 func TestCallSubcommand_MissingAPIKey(t *testing.T) {
 	// loadCredentials falls back to ~/.hail/credentials.json via
 	// os.UserHomeDir(), which reads $HOME on unix. Point HOME at an empty
@@ -394,7 +405,7 @@ func TestCallSubcommand_MissingAPIKey(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
-	if !strings.Contains(err.Error(), "missing API key") {
+	if !errors.Is(err, errNotAuthenticated) {
 		t.Errorf("error = %v", err)
 	}
 	if hits := atomic.LoadInt32(&srv.hits); hits != 0 {
