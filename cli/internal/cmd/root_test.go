@@ -47,3 +47,27 @@ func TestRootHelp_Authenticated_ShowsSignedInLine(t *testing.T) {
 		t.Fatalf("did not expect get-started block: %q", stdout)
 	}
 }
+
+// Regression guard: the custom HelpFunc on root must NOT drop cobra's
+// auto-rendered "Available Commands:" listing. An earlier implementation
+// replaced the whole help body with a hand-written banner, so `hail --help`
+// silently hid mcp/auth/version/completion. We now compose the banner +
+// cmd.UsageString() so every top-level subcommand appears.
+func TestRootHelp_ListsAllTopLevelSubcommands(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	stdout, _, err := runRoot(t,
+		map[string]string{"HAIL_API_KEY": "sk_test", "HAIL_API_URL": "https://api.hail.so"},
+		"--help",
+	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(stdout, "Available Commands:") {
+		t.Fatalf("expected cobra's Available Commands block: %q", stdout)
+	}
+	for _, want := range []string{"auth", "call", "completion", "email", "mcp", "tail", "version"} {
+		if !strings.Contains(stdout, want) {
+			t.Errorf("expected subcommand %q in `hail --help`: %q", want, stdout)
+		}
+	}
+}

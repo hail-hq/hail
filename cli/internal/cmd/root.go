@@ -188,13 +188,12 @@ or pass --api-key.`,
 			fmt.Fprintf(out, "Signed in as %s → %s\n", maskAPIKey(apiKey), apiURL)
 		}
 		fmt.Fprintln(out)
-		fmt.Fprintln(out, "Common:")
-		fmt.Fprintln(out, "  hail call +1...     Place an outbound call")
-		fmt.Fprintln(out, "  hail email send …   Send an email")
-		fmt.Fprintln(out, "  hail tail           Stream events across the org")
-		fmt.Fprintln(out)
-		fmt.Fprintln(out, "More:")
-		fmt.Fprintln(out, "  hail --help         Full command list")
+		// Standard cobra usage block follows: Usage line, the full
+		// Available Commands listing (auth, call, completion, email,
+		// login, mcp, tail, version, ...), global flags, and the
+		// "Use `hail [command] --help`" footer. Anything we hand-roll
+		// here would drift from the actual subcommand tree.
+		fmt.Fprint(out, cmd.UsageString())
 	})
 
 	root.PersistentFlags().StringVar(&opts.APIURL, "api-url", "", "API base URL (default: $HAIL_API_URL or ~/.hail/credentials.json or "+DefaultAPIURL+")")

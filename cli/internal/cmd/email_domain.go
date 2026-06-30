@@ -29,14 +29,7 @@ Two flavors of identity (POST body 'kind' field):
   hail_mail   <user>+<org>@<HAIL_MAIL_BASE_DOMAIN> (operator-managed parent).
               Lands verified immediately; SES is never called.
   custom      Tenant DNS. SES returns 3 DKIM CNAMEs you must publish,
-              then call 'verify' to flip the row to verified.
-
-Subcommands:
-  register    Register a new email domain (hail_mail or custom).
-  list        List org-scoped email domains.
-  get         Fetch one email domain by id.
-  verify      Re-poll the email provider for a custom row's DKIM status.
-  delete      Remove an email domain (custom rows are deleted in SES too).`,
+              then call 'verify' to flip the row to verified.`,
 	}
 	cmd.AddCommand(newEmailDomainRegisterCmd(opts))
 	cmd.AddCommand(newEmailDomainListCmd(opts))

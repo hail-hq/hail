@@ -38,13 +38,11 @@ func newEmailCmd(opts *Options) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "email",
 		Short: "Email operations (inbound + outbound)",
-		Long: `hail email — email operations.
+		Long: `hail email — email operations (inbound + outbound).
 
-Subcommands:
-  hail email send             Send an outbound message.
-  hail email list             List recent emails (cursor-paginated; --direction to filter).
-  hail email get <id>         Fetch one email by id.
-  hail email domain ...       Manage email domain identities (send + receive).`,
+Inbound MIME attachments and the raw RFC 5322 source are exposed via
+` + "`hail email attachment`" + ` and ` + "`hail email raw`" + `; ` + "`hail email tail`" + ` streams
+events for a single message.`,
 	}
 	cmd.AddCommand(newEmailSendCmd(opts))
 	cmd.AddCommand(newEmailListCmd(opts))

@@ -12,11 +12,7 @@ func newMcpCmd(opts *Options) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "mcp",
 		Short: "MCP-related subcommands",
-		Long: `hail mcp — MCP-related subcommands.
-
-Subcommands:
-  endpoint    Print the Streamable HTTP URL of the MCP server fronting
-              the current API.`,
+		Long:  `hail mcp — MCP-related subcommands.`,
 	}
 	cmd.AddCommand(newMcpEndpointCmd(opts))
 	return cmd

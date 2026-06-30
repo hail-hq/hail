@@ -53,11 +53,8 @@ or all three of:
 
 Mode A and mode B are mutually exclusive; supply exactly one.
 
-Subcommands:
-  hail call status <id>      Fetch the current status of a call.
-  hail call list             List recent calls (cursor-paginated).
-
-To stream events, see ` + "`hail tail`" + ` (top-level).`,
+To stream events across the whole org, see ` + "`hail tail`" + ` (top-level);
+for one call, ` + "`hail call tail <id>`" + ` is sugar over the same loop.`,
 		Args: argsOrHelp(1, "<to-number>"),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runCall(cmd, opts, f, args[0])
