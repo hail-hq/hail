@@ -56,23 +56,24 @@ class Settings(BaseSettings):
     # Leave empty to disable hail-mail mode (only custom domains accepted).
     hail_mail_base_domain: str = ""
 
-    # Shortcut for self-hosters: one full address that the server splits
-    # into the user/org prefix pair internally. Wins over
-    # ``HAIL_MAIL_DEFAULT_*_PREFIX`` when set. Example:
+    # Shortcut for self-hosters running a SINGLE org: one full address the
+    # server splits into the user/org prefix pair internally. Wins over the
+    # per-org derived org prefix when set. Example:
     #   HAIL_MAIL_FROM=admin+selfhost@mail.hail.so
     # The domain portion must match ``HAIL_MAIL_BASE_DOMAIN`` (the
     # SES-verified parent); each side of the ``+`` must match the
     # ``^[a-z0-9]([a-z0-9-]{0,18}[a-z0-9])?$`` prefix regex.
+    # Do NOT set this on a multi-tenant deployment — a fixed org prefix is
+    # shared across orgs and only the first org can claim it.
     hail_mail_from: str = ""
 
-    # Default user/org prefixes used when ``POST /email-domains`` for
-    # ``kind='hail_mail'`` is called without explicit ``local_prefix_user``
-    # / ``local_prefix_org``. Two-variable form kept for managed-cloud
-    # operators who want to set deploy-time defaults independently of any
-    # single From address. Both must match
+    # Default USER prefix for ``POST /email-domains`` (``kind='hail_mail'``)
+    # when the request omits ``local_prefix_user``. The ORG prefix is never a
+    # deploy-wide constant — it is derived per-org from the organization id
+    # (see ``hailhq.core.hail_mail.org_prefix_from_id``) so two orgs can never
+    # share an address. Must match
     # ``^[a-z0-9]([a-z0-9-]{0,18}[a-z0-9])?$``.
     hail_mail_default_user_prefix: str = ""
-    hail_mail_default_org_prefix: str = ""
 
     # Inbound email (SES). Off by default so a misconfigured Lambda can't
     # write rows into a deployment that hasn't opted into inbound. The

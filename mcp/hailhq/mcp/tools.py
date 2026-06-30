@@ -422,12 +422,12 @@ def register_tools(
 
         ``from_`` is optional. When omitted, Hail picks the first
         verified sender domain on your organization, or — if the
-        operator configured ``HAIL_MAIL_BASE_DOMAIN`` plus a sender
-        identity (any of: ``HAIL_MAIL_FROM=<user>+<org>@<base>``,
-        the split ``HAIL_MAIL_DEFAULT_USER_PREFIX`` /
-        ``HAIL_MAIL_DEFAULT_ORG_PREFIX``, or an explicit row created
-        via ``POST /email-domains``) — auto-mints a hail-mail address
-        of the form ``<user>+<org>@<base>``. When supplied, it must
+        operator configured ``HAIL_MAIL_BASE_DOMAIN`` — auto-mints a
+        per-org hail-mail address of the form ``<user>+<org>@<base>``
+        (the ``<org>`` part is derived from your organization id; the
+        ``<user>`` part comes from ``HAIL_MAIL_FROM`` /
+        ``HAIL_MAIL_DEFAULT_USER_PREFIX``, or an explicit row created
+        via ``POST /email-domains``). When supplied, it must
         match a verified row already in ``email_domains`` (register
         one with the website console or ``POST /email-domains``).
 

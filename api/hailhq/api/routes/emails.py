@@ -160,10 +160,12 @@ async def _resolve_sender(
             ),
         )
 
-    # Last resort: mint a hail-mail row from the env-var defaults. Either
-    # helper bubbles a 503 if base/prefixes are unconfigured — exactly the
-    # right response for a tenant who hasn't registered anything yet.
-    user_prefix, org_prefix = resolve_hail_mail_prefixes(None, None)
+    # Last resort: mint a hail-mail row. The org prefix is derived per-org
+    # from the organization id, so each tenant auto-mints its OWN distinct
+    # address instead of colliding on one deployment-wide default. Either
+    # helper still bubbles a 503 if the base domain / user prefix is
+    # unconfigured — the right response for a tenant who hasn't set up mail.
+    user_prefix, org_prefix = resolve_hail_mail_prefixes(None, None, organization_id)
     address = compose_hail_mail_address(user_prefix, org_prefix)
     sd = EmailDomain(
         organization_id=organization_id,
@@ -206,11 +208,10 @@ async def _resolve_sender(
             raise HTTPException(
                 status_code=http_status.HTTP_409_CONFLICT,
                 detail=(
-                    f"the deployment's default hail-mail address {address!r} "
-                    "is already claimed by another organization; set distinct "
-                    "HAIL_MAIL_DEFAULT_USER_PREFIX/HAIL_MAIL_DEFAULT_ORG_PREFIX "
-                    "(or HAIL_MAIL_FROM) per organization, or register an "
-                    "explicit address via POST /email-domains"
+                    f"hail-mail address {address!r} is already claimed by "
+                    "another organization; register an explicit address via "
+                    "POST /email-domains with distinct local_prefix_user/"
+                    "local_prefix_org"
                 ),
             )
         return existing

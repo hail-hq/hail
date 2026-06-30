@@ -13,12 +13,14 @@ Two flavors of row land here:
   ``CreateEmailIdentity`` and surface the three DKIM CNAMEs they need to
   publish. The row stays ``verification_status='pending'`` until the
   caller hits the verify endpoint after publishing DNS.
-* ``kind='hail_mail'`` — caller supplies ``local_prefix_user`` +
-  ``local_prefix_org`` (or relies on the ``HAIL_MAIL_DEFAULT_*_PREFIX``
-  env vars). The server composes ``<user>+<org>@<HAIL_MAIL_BASE_DOMAIN>``,
+* ``kind='hail_mail'`` — caller may supply ``local_prefix_user`` +
+  ``local_prefix_org``; otherwise the user prefix falls back to
+  ``HAIL_MAIL_DEFAULT_USER_PREFIX`` (or ``HAIL_MAIL_FROM``) and the org
+  prefix is derived per-org from the organization id, so two orgs can never
+  share an address. The server composes ``<user>+<org>@<HAIL_MAIL_BASE_DOMAIN>``,
   lands the row ``verified`` immediately (the parent is pre-verified at
   SES out-of-band), and never calls SES. Org admins can later rename
-  through ``PATCH``; on self-hosted Hail the env vars are the only knob.
+  through ``PATCH``.
 """
 
 from __future__ import annotations
@@ -38,6 +40,7 @@ from hailhq.api.audit import write_audit_log
 from hailhq.api.deps import Principal, get_current_principal
 from hailhq.core.config import settings
 from hailhq.core.db import get_session
+from hailhq.core.hail_mail import org_prefix_from_id
 from hailhq.core.models import Email, EmailDomain
 from hailhq.core.providers.email import EmailProvider, SesEmailProvider
 from hailhq.core.schemas import (
@@ -129,41 +132,42 @@ def _parse_hail_mail_from(addr: str) -> tuple[str, str]:
 def resolve_hail_mail_prefixes(
     body_user: str | None,
     body_org: str | None,
+    organization_id: UUID,
 ) -> tuple[str, str]:
-    """Pick prefixes from the body or fall back to settings defaults.
+    """Pick the user/org prefixes for a hail-mail address.
 
-    Precedence (highest wins):
+    User-prefix precedence (highest wins):
 
-    1. Explicit ``body_user`` / ``body_org`` arguments (the POST body's
-       ``local_prefix_user`` / ``local_prefix_org`` fields).
+    1. Explicit ``body_user`` (the POST body's ``local_prefix_user``).
     2. ``HAIL_MAIL_FROM`` env var (single-shot ``<user>+<org>@<base>``).
-    3. ``HAIL_MAIL_DEFAULT_USER_PREFIX`` / ``HAIL_MAIL_DEFAULT_ORG_PREFIX``
-       env vars (split form, useful for managed-cloud deploys that want
-       per-prefix control without a fixed From address).
+    3. ``HAIL_MAIL_DEFAULT_USER_PREFIX`` env var.
 
-    Returns ``(user_prefix, org_prefix)``. Raises HTTPException 503 if a
-    prefix is required but no source supplied one.
+    Org-prefix precedence:
+
+    1. Explicit ``body_org``.
+    2. ``HAIL_MAIL_FROM`` org part — the single-tenant self-host opt-in.
+    3. ``org_prefix_from_id(organization_id)`` — derived per-org so a
+       multi-tenant deployment never mints one shared address. (This
+       replaced ``HAIL_MAIL_DEFAULT_ORG_PREFIX``, a deploy-wide constant
+       that every org collided on: the first org claimed it and the global
+       unique index 409'd the rest.)
+
+    Returns ``(user_prefix, org_prefix)``. Raises HTTPException 503 only if
+    the user prefix has no source — the org prefix is always derivable.
     """
     env_user, env_org = ("", "")
     if settings.hail_mail_from:
         env_user, env_org = _parse_hail_mail_from(settings.hail_mail_from)
 
     user = body_user or env_user or settings.hail_mail_default_user_prefix
-    org = body_org or env_org or settings.hail_mail_default_org_prefix
-    missing: list[str] = []
+    org = body_org or env_org or org_prefix_from_id(organization_id)
     if not user:
-        missing.append(
-            "local_prefix_user (or HAIL_MAIL_FROM / HAIL_MAIL_DEFAULT_USER_PREFIX)"
-        )
-    if not org:
-        missing.append(
-            "local_prefix_org (or HAIL_MAIL_FROM / HAIL_MAIL_DEFAULT_ORG_PREFIX)"
-        )
-    if missing:
         raise HTTPException(
             status_code=http_status.HTTP_503_SERVICE_UNAVAILABLE,
             detail=(
-                "hail-mail prefixes are not configured: missing " + ", ".join(missing)
+                "hail-mail prefixes are not configured: missing "
+                "local_prefix_user (or HAIL_MAIL_FROM / "
+                "HAIL_MAIL_DEFAULT_USER_PREFIX)"
             ),
         )
     return user, org
@@ -203,7 +207,9 @@ async def create_email_domain(
 ) -> EmailDomainResponse:
     if body.kind == "hail_mail":
         user_prefix, org_prefix = resolve_hail_mail_prefixes(
-            body.local_prefix_user, body.local_prefix_org
+            body.local_prefix_user,
+            body.local_prefix_org,
+            principal.organization_id,
         )
         address = compose_hail_mail_address(user_prefix, org_prefix)
         sd = EmailDomain(

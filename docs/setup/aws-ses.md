@@ -85,12 +85,12 @@ Field cheat-sheet: `p=none` reports but doesn't block (start here); `quarantine`
 ```bash
 HAIL_MAIL_BASE_DOMAIN=mail.hail.so
 
-# Single-variable form (recommended for self-hosters):
+# Single-variable form (self-hosters running a SINGLE org):
 HAIL_MAIL_FROM=admin+selfhost@mail.hail.so
 
-# Or, alternative split form (deploy-time defaults for managed cloud):
+# Multi-tenant: leave HAIL_MAIL_FROM unset. The org prefix is derived
+# per-org from the organization id; set only the default user prefix:
 # HAIL_MAIL_DEFAULT_USER_PREFIX=admin
-# HAIL_MAIL_DEFAULT_ORG_PREFIX=selfhost
 
 AWS_REGION=us-east-1
 ```
@@ -99,9 +99,8 @@ Hail-mail addresses always have the shape `<user>+<org>@<HAIL_MAIL_BASE_DOMAIN>`
 
 Precedence at send time (highest wins):
 
-1. Explicit `local_prefix_user` / `local_prefix_org` in the `POST /email-domains` body.
-2. `HAIL_MAIL_FROM` env var, split server-side.
-3. `HAIL_MAIL_DEFAULT_USER_PREFIX` + `HAIL_MAIL_DEFAULT_ORG_PREFIX` env vars.
+- **User prefix:** explicit `local_prefix_user` → `HAIL_MAIL_FROM` (user part) → `HAIL_MAIL_DEFAULT_USER_PREFIX`.
+- **Org prefix:** explicit `local_prefix_org` → `HAIL_MAIL_FROM` (org part, single-tenant) → derived per-org from the organization id. Never a deploy-wide constant — that would make every org collide on one address.
 
 ### Self-host vs managed
 

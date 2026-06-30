@@ -11,6 +11,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from hailhq.core.config import settings
+from hailhq.core.hail_mail import org_prefix_from_id
 from hailhq.core.models import ApiKey, AuditLog, Email, EmailDomain, UsageEvent
 
 from .conftest import insert_org_and_key  # noqa: F401
@@ -133,8 +134,7 @@ async def test_post_emails_auto_mints_hail_mail_when_no_sender_exists(
 ) -> None:
     monkeypatch.setattr(settings, "hail_mail_base_domain", "mail.hail.so")
     monkeypatch.setattr(settings, "hail_mail_default_user_prefix", "admin")
-    monkeypatch.setattr(settings, "hail_mail_default_org_prefix", "selfhost")
-    _, _, plain = org_and_key
+    org_id, _, plain = org_and_key
     resp = await client.post(
         "/emails",
         json={"to": ["alice@example.com"], "subject": "hi", "body_text": "body"},
@@ -142,13 +142,14 @@ async def test_post_emails_auto_mints_hail_mail_when_no_sender_exists(
     )
     assert resp.status_code == 201, resp.text
     body = resp.json()
-    assert body["from_address"] == "admin+selfhost@mail.hail.so"
+    expected_org = org_prefix_from_id(org_id)
+    assert body["from_address"] == f"admin+{expected_org}@mail.hail.so"
     # An EmailDomain row should have been created on the fly.
     sd = (await async_session.execute(select(EmailDomain))).scalar_one()
     assert sd.kind == "hail_mail"
     assert sd.verification_status == "verified"
     assert sd.local_prefix_user == "admin"
-    assert sd.local_prefix_org == "selfhost"
+    assert sd.local_prefix_org == expected_org
 
 
 async def test_post_emails_auto_mint_recovers_from_race(
@@ -168,16 +169,17 @@ async def test_post_emails_auto_mint_recovers_from_race(
 
     monkeypatch.setattr(settings, "hail_mail_base_domain", "mail.hail.so")
     monkeypatch.setattr(settings, "hail_mail_default_user_prefix", "admin")
-    monkeypatch.setattr(settings, "hail_mail_default_org_prefix", "selfhost")
     org_id, _, plain = org_and_key
+    expected_org = org_prefix_from_id(org_id)
+    address = f"admin+{expected_org}@mail.hail.so"
 
     # Pre-seed the row that the concurrent request would have committed first.
     winning = EmailDomain(
         organization_id=org_id,
         kind="hail_mail",
-        domain="admin+selfhost@mail.hail.so",
+        domain=address,
         local_prefix_user="admin",
-        local_prefix_org="selfhost",
+        local_prefix_org=expected_org,
         verification_status="verified",
         dns_records=[],
         mail_from_domain=None,
@@ -196,7 +198,7 @@ async def test_post_emails_auto_mint_recovers_from_race(
     # Without the IntegrityError guard this is 500. With it, the email lands
     # against the winning row.
     assert resp.status_code == 201, resp.text
-    assert resp.json()["from_address"] == "admin+selfhost@mail.hail.so"
+    assert resp.json()["from_address"] == address
 
     # Exactly one EmailDomain row — recovery used the existing one, didn't
     # create a duplicate.
@@ -205,49 +207,47 @@ async def test_post_emails_auto_mint_recovers_from_race(
     assert rows[0].id == winning.id
 
 
-async def test_post_emails_auto_mint_conflict_across_orgs_returns_409(
+async def test_post_emails_auto_mint_is_per_org_no_cross_org_conflict(
     client: httpx.AsyncClient,
     org_and_key: tuple,
     monkeypatch: pytest.MonkeyPatch,
     async_session: AsyncSession,
 ) -> None:
-    """Org B's first send must not 500 when org A already auto-minted the
-    deployment's default hail-mail address.
+    """Two orgs sending their first email each auto-mint their OWN address.
 
-    The global hail-mail unique index means only one org can hold a given
-    prefix pair. Org A's auto-mint wins; org B's flush hits IntegrityError
-    and the recovery must surface an actionable 409, not a 500.
+    Previously the org prefix was a deploy-wide constant, so org A claimed
+    the one address and org B's send 409'd on the global unique index. The
+    org prefix is now derived per-org, so both sends succeed against distinct
+    rows and no org can intercept another's mail.
     """
     monkeypatch.setattr(settings, "hail_mail_base_domain", "mail.hail.so")
     monkeypatch.setattr(settings, "hail_mail_default_user_prefix", "admin")
-    monkeypatch.setattr(settings, "hail_mail_default_org_prefix", "selfhost")
 
-    _, _, plain_a = org_and_key
-    _, _, plain_b = await insert_org_and_key(async_session)
+    org_a, _, plain_a = org_and_key
+    org_b, _, plain_b = await insert_org_and_key(async_session)
 
-    # Org A auto-mints the default address and sends fine.
     resp_a = await client.post(
         "/emails",
         json={"to": ["alice@example.com"], "subject": "hi", "body_text": "body"},
         headers={"Authorization": f"Bearer {plain_a}"},
     )
-    assert resp_a.status_code == 201, resp_a.text
-    assert resp_a.json()["from_address"] == "admin+selfhost@mail.hail.so"
-
-    # Org B collides with org A's row — clear 409, not a 500.
     resp_b = await client.post(
         "/emails",
         json={"to": ["bob@example.com"], "subject": "hi", "body_text": "body"},
         headers={"Authorization": f"Bearer {plain_b}"},
     )
-    assert resp_b.status_code == 409, resp_b.text
-    detail = resp_b.json()["detail"]
-    assert "another organization" in detail
-    assert "admin+selfhost@mail.hail.so" in detail
+    assert resp_a.status_code == 201, resp_a.text
+    assert resp_b.status_code == 201, resp_b.text
 
-    # Only org A's row exists — org B's failed insert left nothing behind.
+    from_a = resp_a.json()["from_address"]
+    from_b = resp_b.json()["from_address"]
+    assert from_a == f"admin+{org_prefix_from_id(org_a)}@mail.hail.so"
+    assert from_b == f"admin+{org_prefix_from_id(org_b)}@mail.hail.so"
+    assert from_a != from_b
+
+    # Each org got its own row — neither blocked the other.
     rows = (await async_session.execute(select(EmailDomain))).scalars().all()
-    assert len(rows) == 1
+    assert {r.organization_id for r in rows} == {org_a, org_b}
 
 
 async def test_post_emails_503_when_no_sender_and_no_hail_mail(

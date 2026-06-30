@@ -59,15 +59,15 @@ Outbound mail goes through AWS SES via the `EmailProvider` adapter in `core/hail
 
 The two surfaces differ in where the prefixes come from and where they're edited:
 
-|                       | Self-hosted Hail                                                                               | Managed Hail (hail.so)                                                                     |
-| --------------------- | ---------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
-| Auth                  | Shared `HAIL_API_KEY`; one sentinel "Self-hosted" org                                          | Per-user `hl_live_*` keys via the website's auth backend                                   |
-| Org concept           | None — single sentinel org                                                                     | Real orgs with members                                                                     |
-| Hail-mail base domain | `HAIL_MAIL_BASE_DOMAIN` (operator's `.env`)                                                    | `HAIL_MAIL_BASE_DOMAIN` (operator's deploy env)                                            |
-| Hail-mail prefixes    | `HAIL_MAIL_DEFAULT_USER_PREFIX` + `HAIL_MAIL_DEFAULT_ORG_PREFIX` (`.env` is the configuration) | Same env vars provide the deploy-time default; org admins override per-org via the console |
-| Where edits land      | Restart with new `.env` values                                                                 | `PATCH /email-domains/{id}` (console writes this)                                          |
-| SES production access | Operator's AWS account                                                                         | Operator's AWS account                                                                     |
-| Billing               | Off — `usage_events` accumulates as raw analytics                                              | Cloud rater applies cents/unit, debits `account_credits`                                   |
+|                       | Self-hosted Hail                                                                                                         | Managed Hail (hail.so)                                                                              |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------- |
+| Auth                  | Shared `HAIL_API_KEY`; one sentinel "Self-hosted" org                                                                    | Per-user `hl_live_*` keys via the website's auth backend                                            |
+| Org concept           | None — single sentinel org                                                                                               | Real orgs with members                                                                              |
+| Hail-mail base domain | `HAIL_MAIL_BASE_DOMAIN` (operator's `.env`)                                                                              | `HAIL_MAIL_BASE_DOMAIN` (operator's deploy env)                                                     |
+| Hail-mail prefixes    | User prefix from `HAIL_MAIL_FROM` / `HAIL_MAIL_DEFAULT_USER_PREFIX` (`.env`); org prefix derived per-org from the org id | Same: user prefix from env, org prefix derived per-org; org admins override per-org via the console |
+| Where edits land      | Restart with new `.env` values                                                                                           | `PATCH /email-domains/{id}` (console writes this)                                                   |
+| SES production access | Operator's AWS account                                                                                                   | Operator's AWS account                                                                              |
+| Billing               | Off — `usage_events` accumulates as raw analytics                                                                        | Cloud rater applies cents/unit, debits `account_credits`                                            |
 
 Both prefixes are validated against `^[a-z0-9]([a-z0-9-]{0,18}[a-z0-9])?$` (1–20 chars, lowercase alphanumeric + hyphen, no leading/trailing hyphen), so the full local part fits well under the RFC-5321 64-char budget.
 
