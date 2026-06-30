@@ -24,10 +24,13 @@ func newMcpEndpointCmd(opts *Options) *cobra.Command {
 		Short: "Print the MCP server's Streamable HTTP URL",
 		Long: `hail mcp endpoint — print the MCP server URL.
 
+The Streamable HTTP transport serves the MCP root path; there is no
+` + "`/mcp`" + ` suffix and no SSE. See docs/setup/mcp.md.
+
 Resolution order:
-  $HAIL_MCP_URL                                 (explicit override)
-  api.<host>.<tld> → mcp.<host>.<tld>/mcp       (cloud convention)
-  <api-url>                                     (self-host fallback)`,
+  $HAIL_MCP_URL                              (explicit override)
+  api.<host>.<tld> → mcp.<host>.<tld>        (cloud convention)
+  <api-url>                                  (self-host fallback)`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			endpoint := resolveMcpEndpoint(opts)
@@ -44,7 +47,9 @@ Resolution order:
 }
 
 // resolveMcpEndpoint derives the MCP URL from configured sources.
-// Order: HAIL_MCP_URL > api.<rest> → mcp.<rest>/mcp > the API URL itself.
+// Order: HAIL_MCP_URL > api.<rest> → mcp.<rest> > the API URL itself.
+// The Streamable HTTP transport serves at the root path (no /mcp suffix);
+// see docs/setup/mcp.md.
 func resolveMcpEndpoint(opts *Options) string {
 	if v := opts.Getenv("HAIL_MCP_URL"); v != "" {
 		return v
@@ -52,7 +57,7 @@ func resolveMcpEndpoint(opts *Options) string {
 	apiURL := opts.ResolvedAPIURL()
 	if u, err := url.Parse(apiURL); err == nil && strings.HasPrefix(u.Host, "api.") {
 		u.Host = "mcp." + strings.TrimPrefix(u.Host, "api.")
-		u.Path = "/mcp"
+		u.Path = ""
 		return u.String()
 	}
 	return apiURL

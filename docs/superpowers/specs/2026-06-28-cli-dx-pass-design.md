@@ -234,7 +234,7 @@ One subcommand that dispatches to cobra's built-in generators (`GenBashCompletio
 
 ### `hail mcp endpoint`
 
-Print the Streamable HTTP URL for the MCP service fronting the current API. Convention-based derivation from `Options.ResolvedAPIURL()` — cloud convention is `api.hail.so` → `mcp.hail.so/mcp`; verify against `docs/setup/mcp.md` before coding. Self-host: prints the value of an env var or sensible default.
+Print the Streamable HTTP URL for the MCP service fronting the current API. Convention-based derivation from `Options.ResolvedAPIURL()` — cloud convention is `api.hail.so` → `mcp.hail.so` (root path; no `/mcp` suffix — see `docs/setup/mcp.md`). Self-host: `$HAIL_MCP_URL` overrides; otherwise falls back to the API URL.
 
 Tolerates no auth. `--json` returns `{"url": "...", "transport": "streamable-http"}`.
 
