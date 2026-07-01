@@ -9,6 +9,9 @@ from __future__ import annotations
 
 import httpx
 
+from hailhq.core.config import settings
+from hailhq.core.providers.email import DkimRecord
+
 _DOH_URL = "https://dns.google/resolve"
 _MX_TYPE = 15
 
@@ -32,3 +35,23 @@ async def resolve_mx(domain: str) -> list[str]:
         if parts:
             hosts.append(parts[-1].rstrip(".").lower())
     return hosts
+
+
+def custom_dns_records(domain: str, dkim_records: list[DkimRecord]) -> list[dict]:
+    """Build the full DNS-record list for a custom domain.
+
+    Every DKIM CNAME + MAIL FROM MX/TXT returned by the provider, plus the
+    SES inbound-receipt MX the tenant adds at the apex so mail addressed to
+    the domain lands in SES Receiving. Shared by the ``POST /verify`` route
+    and the background verification worker so both persist the same records.
+    """
+    records: list[dict] = [r.model_dump() for r in dkim_records]
+    records.append(
+        {
+            "type": "MX",
+            "name": domain,
+            "value": ses_inbound_host(settings.aws_region),
+            "priority": 10,
+        }
+    )
+    return records

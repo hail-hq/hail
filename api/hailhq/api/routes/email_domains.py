@@ -40,10 +40,10 @@ from hailhq.api.audit import write_audit_log
 from hailhq.api.deps import Principal, get_current_principal
 from hailhq.core.config import settings
 from hailhq.core.db import get_session
-from hailhq.core.dns_lookup import resolve_mx, ses_inbound_host
+from hailhq.core.dns_lookup import custom_dns_records, resolve_mx, ses_inbound_host
 from hailhq.core.hail_mail import org_prefix_from_id
 from hailhq.core.models import Email, EmailDomain
-from hailhq.core.providers.email import DkimRecord, EmailProvider, SesEmailProvider
+from hailhq.core.providers.email import EmailProvider, SesEmailProvider
 from hailhq.core.schemas import (
     LOCAL_PREFIX,
     DomainCheckResponse,
@@ -82,25 +82,6 @@ async def get_email_provider() -> EmailProvider:
     if _email_provider_singleton is None:
         _email_provider_singleton = SesEmailProvider()
     return _email_provider_singleton
-
-
-def _custom_dns_records(domain: str, dkim_records: list[DkimRecord]) -> list[dict]:
-    """Build the full DNS-record list for a custom domain.
-
-    Includes every DKIM CNAME + MAIL FROM MX/TXT returned by the provider,
-    plus the SES inbound-receipt MX the tenant must add at the apex so
-    messages addressed to that domain land in SES Receiving.
-    """
-    records: list[dict] = [r.model_dump() for r in dkim_records]
-    records.append(
-        {
-            "type": "MX",
-            "name": domain,
-            "value": ses_inbound_host(settings.aws_region),
-            "priority": 10,
-        }
-    )
-    return records
 
 
 def _parse_hail_mail_from(addr: str) -> tuple[str, str]:
@@ -294,7 +275,7 @@ async def create_email_domain(
         kind="custom",
         domain=domain,
         verification_status=identity.verification_status,
-        dns_records=_custom_dns_records(domain, identity.dkim_records),
+        dns_records=custom_dns_records(domain, identity.dkim_records),
         mail_from_domain=identity.mail_from_domain,
         mail_from_status=identity.mail_from_status,
         provider="ses",
@@ -582,7 +563,7 @@ async def verify_email_domain(
     new_status = identity.verification_status
     values = dict(
         verification_status=new_status,
-        dns_records=_custom_dns_records(sd.domain, identity.dkim_records),
+        dns_records=custom_dns_records(sd.domain, identity.dkim_records),
         mail_from_domain=identity.mail_from_domain,
         mail_from_status=identity.mail_from_status,
         verified_at=verified_at,

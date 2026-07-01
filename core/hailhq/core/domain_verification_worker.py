@@ -17,6 +17,7 @@ from typing import Callable
 
 from sqlalchemy import select, update
 
+from hailhq.core.dns_lookup import custom_dns_records
 from hailhq.core.models import EmailDomain
 from hailhq.core.providers.email.base import EmailProvider
 
@@ -90,11 +91,16 @@ class DomainVerificationWorker:
                 continue
 
             if identity.verification_status == "verified":
+                # Same as the POST /verify endpoint: include the inbound-receipt
+                # MX in the records and turn receiving on automatically.
                 values = {
                     "verification_status": "verified",
                     "verified_at": now,
-                    "dns_records": [r.model_dump() for r in identity.dkim_records],
+                    "dns_records": custom_dns_records(
+                        row.domain, identity.dkim_records
+                    ),
                     "mail_from_status": identity.mail_from_status,
+                    "inbound_enabled": True,
                 }
             elif identity.verification_status == "failed":
                 values = {"verification_status": "failed"}
