@@ -12,6 +12,7 @@ dependencies = [
     "pydantic-settings>=2.6",
     "sqlalchemy>=2.0",
     "twilio>=9.3",
+    "httpx>=0.27",
 ]
 
 [project.optional-dependencies]

@@ -40,11 +40,13 @@ from hailhq.api.audit import write_audit_log
 from hailhq.api.deps import Principal, get_current_principal
 from hailhq.core.config import settings
 from hailhq.core.db import get_session
+from hailhq.core.dns_lookup import resolve_mx, ses_inbound_host
 from hailhq.core.hail_mail import org_prefix_from_id
 from hailhq.core.models import Email, EmailDomain
-from hailhq.core.providers.email import EmailProvider, SesEmailProvider
+from hailhq.core.providers.email import DkimRecord, EmailProvider, SesEmailProvider
 from hailhq.core.schemas import (
     LOCAL_PREFIX,
+    DomainCheckResponse,
     EmailDomainCreate,
     EmailDomainListResponse,
     EmailDomainPatch,
@@ -80,6 +82,25 @@ async def get_email_provider() -> EmailProvider:
     if _email_provider_singleton is None:
         _email_provider_singleton = SesEmailProvider()
     return _email_provider_singleton
+
+
+def _custom_dns_records(domain: str, dkim_records: list[DkimRecord]) -> list[dict]:
+    """Build the full DNS-record list for a custom domain.
+
+    Includes every DKIM CNAME + MAIL FROM MX/TXT returned by the provider,
+    plus the SES inbound-receipt MX the tenant must add at the apex so
+    messages addressed to that domain land in SES Receiving.
+    """
+    records: list[dict] = [r.model_dump() for r in dkim_records]
+    records.append(
+        {
+            "type": "MX",
+            "name": domain,
+            "value": ses_inbound_host(settings.aws_region),
+            "priority": 10,
+        }
+    )
+    return records
 
 
 def _parse_hail_mail_from(addr: str) -> tuple[str, str]:
@@ -273,7 +294,7 @@ async def create_email_domain(
         kind="custom",
         domain=domain,
         verification_status=identity.verification_status,
-        dns_records=[r.model_dump() for r in identity.dkim_records],
+        dns_records=_custom_dns_records(domain, identity.dkim_records),
         mail_from_domain=identity.mail_from_domain,
         mail_from_status=identity.mail_from_status,
         provider="ses",
@@ -342,6 +363,28 @@ async def list_email_domains(
     return EmailDomainListResponse(
         items=[EmailDomainResponse.model_validate(r) for r in rows],
         next_cursor=next_cursor,
+    )
+
+
+# --------------------------------------------------------------------------- #
+# GET /email-domains/check-domain
+# --------------------------------------------------------------------------- #
+
+
+@router.get("/check-domain", response_model=DomainCheckResponse)
+async def check_domain(
+    domain: str,
+    principal: Annotated[Principal, Depends(get_current_principal)],
+) -> DomainCheckResponse:
+    """Does this domain already receive mail? Drives apex-vs-prefix onboarding."""
+    apex = domain.strip().lower().lstrip(".")
+    mx = await resolve_mx(apex)
+    in_use = len(mx) > 0
+    return DomainCheckResponse(
+        domain=apex,
+        in_use=in_use,
+        existing_mx=mx,
+        suggested_domain=f"inbox.{apex}" if in_use else apex,
     )
 
 
@@ -426,15 +469,6 @@ async def patch_email_domain(
         updates["forward_to"] = body.forward_to or None
     if body.forward_rate_per_hour is not None:
         updates["forward_rate_per_hour"] = body.forward_rate_per_hour
-
-    # ---- post-merge invariant check (mirrors DB CHECK) ----
-    final_enabled = updates.get("inbound_enabled", sd.inbound_enabled)
-    final_forward = updates.get("forward_to", sd.forward_to)
-    if final_enabled and not final_forward:
-        raise HTTPException(
-            status_code=http_status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="inbound_enabled requires forward_to",
-        )
 
     if not updates:
         return EmailDomainResponse.model_validate(sd)
@@ -545,16 +579,20 @@ async def verify_email_domain(
         if identity.verification_status == "verified" and sd.verified_at is None
         else sd.verified_at
     )
+    new_status = identity.verification_status
+    values = dict(
+        verification_status=new_status,
+        dns_records=_custom_dns_records(sd.domain, identity.dkim_records),
+        mail_from_domain=identity.mail_from_domain,
+        mail_from_status=identity.mail_from_status,
+        verified_at=verified_at,
+    )
+    # Receiving turns on automatically once a custom domain verifies — no
+    # separate toggle. Idempotent: re-verifying a row already True keeps it True.
+    if sd.kind == "custom" and new_status == "verified":
+        values["inbound_enabled"] = True
     await db.execute(
-        update(EmailDomain)
-        .where(EmailDomain.id == sd.id)
-        .values(
-            verification_status=identity.verification_status,
-            dns_records=[r.model_dump() for r in identity.dkim_records],
-            mail_from_domain=identity.mail_from_domain,
-            mail_from_status=identity.mail_from_status,
-            verified_at=verified_at,
-        )
+        update(EmailDomain).where(EmailDomain.id == sd.id).values(**values)
     )
     await db.commit()
     await db.refresh(sd)
@@ -566,7 +604,22 @@ async def verify_email_domain(
         resource_id=sd.id,
         payload={"domain": sd.domain, "status": sd.verification_status},
     )
-    return EmailDomainResponse.model_validate(sd)
+    # Check whether the receive MX is live.  Placed after commit so a DNS
+    # error can't roll back the verified status we just persisted.
+    try:
+        receive_ready: bool | None = ses_inbound_host(
+            settings.aws_region
+        ) in await resolve_mx(sd.domain)
+    except Exception:
+        logger.warning(
+            "receive-MX lookup failed for domain=%s; reporting receive_ready=null",
+            sd.domain,
+            exc_info=True,
+        )
+        receive_ready = None
+    return EmailDomainResponse.model_validate(sd).model_copy(
+        update={"receive_ready": receive_ready}
+    )
 
 
 # --------------------------------------------------------------------------- #

@@ -519,6 +519,41 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HTTPValidationError"
+  /email-domains/check-domain:
+    get:
+      tags:
+        - email-domains
+      summary: Check Domain
+      description: Does this domain already receive mail? Drives apex-vs-prefix onboarding.
+      operationId: check_domain_email_domains_check_domain_get
+      parameters:
+        - name: domain
+          in: query
+          required: true
+          schema:
+            type: string
+            title: Domain
+        - name: authorization
+          in: header
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            title: Authorization
+      responses:
+        "200":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DomainCheckResponse"
+        "422":
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
   /email-domains/{domain_id}:
     get:
       tags:
@@ -1223,6 +1258,29 @@ components:
 
 
         Covers DKIM CNAMEs, MAIL FROM MX, and SPF TXT records."
+    DomainCheckResponse:
+      properties:
+        domain:
+          type: string
+          title: Domain
+        in_use:
+          type: boolean
+          title: In Use
+        existing_mx:
+          items:
+            type: string
+          type: array
+          title: Existing Mx
+        suggested_domain:
+          type: string
+          title: Suggested Domain
+      type: object
+      required:
+        - domain
+        - in_use
+        - existing_mx
+        - suggested_domain
+      title: DomainCheckResponse
     EmailAttachmentResponse:
       properties:
         id:
@@ -1508,6 +1566,11 @@ components:
           type: string
           format: date-time
           title: Updated At
+        receive_ready:
+          anyOf:
+            - type: boolean
+            - type: "null"
+          title: Receive Ready
       type: object
       required:
         - id

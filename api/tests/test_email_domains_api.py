@@ -37,7 +37,8 @@ async def test_post_custom_domain_returns_dkim_records(
     assert body["kind"] == "custom"
     assert body["domain"] == "acme.com"
     assert body["verification_status"] == "pending"
-    assert len(body["dns_records"]) == 3
+    # 3 from provider (1 DKIM CNAME + MAIL FROM MX + SPF TXT) + 1 receive MX
+    assert len(body["dns_records"]) == 4
     email_mock.create_identity.assert_awaited_once_with("acme.com")
 
 
@@ -641,7 +642,11 @@ async def test_verify_flips_status_from_pending_to_verified(
     client: httpx.AsyncClient,
     org_and_key: tuple,
     email_mock: AsyncMock,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    from hailhq.api.routes import email_domains as mod
+
+    monkeypatch.setattr(mod, "resolve_mx", AsyncMock(return_value=[]))
     _, _, plain = org_and_key
     headers = {"Authorization": f"Bearer {plain}"}
     created = await client.post(
@@ -657,6 +662,30 @@ async def test_verify_flips_status_from_pending_to_verified(
     body = resp.json()
     assert body["verification_status"] == "verified"
     assert body["verified_at"] is not None
+
+
+async def test_verify_custom_domain_auto_enables_inbound(
+    client: httpx.AsyncClient,
+    org_and_key: tuple,
+    email_mock: AsyncMock,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from hailhq.api.routes import email_domains as mod
+
+    monkeypatch.setattr(mod, "resolve_mx", AsyncMock(return_value=[]))
+    _, _, plain = org_and_key
+    headers = {"Authorization": f"Bearer {plain}"}
+    created = await client.post(
+        "/email-domains", json={"kind": "custom", "domain": "acme.com"}, headers=headers
+    )
+    domain_id = created.json()["id"]
+    # email_mock.get_identity is configured by the test fixture to return a
+    # verified ProviderIdentity; mirror the existing verify test's setup.
+    resp = await client.post(f"/email-domains/{domain_id}/verify", headers=headers)
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["verification_status"] == "verified"
+    assert body["inbound_enabled"] is True
 
 
 async def test_verify_hail_mail_is_a_noop(
@@ -1045,3 +1074,154 @@ async def test_duplicate_custom_domain_direct_insert_raises_integrity_error(
 
 
 _ = ApiKey  # re-exposed for type hint in fixtures
+
+
+# --------------------------------------------------------------------------- #
+# GET /email-domains/check-domain
+# --------------------------------------------------------------------------- #
+
+
+async def test_check_domain_free_suggests_apex(
+    client: httpx.AsyncClient, org_and_key: tuple, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from hailhq.api.routes import email_domains as mod
+
+    monkeypatch.setattr(mod, "resolve_mx", AsyncMock(return_value=[]))
+    _, _, plain = org_and_key
+    resp = await client.get(
+        "/email-domains/check-domain",
+        params={"domain": "acme.com"},
+        headers={"Authorization": f"Bearer {plain}"},
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["in_use"] is False
+    assert body["suggested_domain"] == "acme.com"
+
+
+async def test_check_domain_in_use_suggests_prefix(
+    client: httpx.AsyncClient, org_and_key: tuple, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from hailhq.api.routes import email_domains as mod
+
+    monkeypatch.setattr(
+        mod, "resolve_mx", AsyncMock(return_value=["aspmx.l.google.com"])
+    )
+    _, _, plain = org_and_key
+    resp = await client.get(
+        "/email-domains/check-domain",
+        params={"domain": "acme.com"},
+        headers={"Authorization": f"Bearer {plain}"},
+    )
+    body = resp.json()
+    assert body["in_use"] is True
+    assert body["existing_mx"] == ["aspmx.l.google.com"]
+    assert body["suggested_domain"] == "inbox.acme.com"
+
+
+async def test_patch_enables_inbound_without_forward_to(
+    client: httpx.AsyncClient,
+    org_and_key: tuple,
+    async_session: AsyncSession,
+    email_mock: AsyncMock,
+) -> None:
+    """Receiving can be turned on webhook-only — no forward_to required."""
+    _, _, plain = org_and_key
+    headers = {"Authorization": f"Bearer {plain}"}
+    created = await client.post(
+        "/email-domains", json={"kind": "custom", "domain": "acme.com"}, headers=headers
+    )
+    domain_id = created.json()["id"]
+    resp = await client.patch(
+        f"/email-domains/{domain_id}",
+        json={"inbound_enabled": True},
+        headers=headers,
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["inbound_enabled"] is True
+
+
+# --------------------------------------------------------------------------- #
+# Task 5: receive MX in record list + receive_ready on verify
+# --------------------------------------------------------------------------- #
+
+
+async def test_custom_domain_record_list_includes_receive_mx(
+    client: httpx.AsyncClient,
+    org_and_key: tuple,
+    email_mock: AsyncMock,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings, "aws_region", "eu-west-1")
+    _, _, plain = org_and_key
+    resp = await client.post(
+        "/email-domains",
+        json={"kind": "custom", "domain": "acme.com"},
+        headers={"Authorization": f"Bearer {plain}"},
+    )
+    assert resp.status_code == 201, resp.text
+    records = resp.json()["dns_records"]
+    mx = [r for r in records if r["type"] == "MX" and r["name"] == "acme.com"]
+    assert mx and mx[0]["value"] == "inbound-smtp.eu-west-1.amazonaws.com"
+    assert mx[0]["priority"] == 10
+
+
+async def test_verify_receive_ready_is_true_when_mx_matches(
+    client: httpx.AsyncClient,
+    org_and_key: tuple,
+    email_mock: AsyncMock,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from hailhq.api.routes import email_domains as mod
+
+    monkeypatch.setattr(settings, "aws_region", "eu-west-1")
+    monkeypatch.setattr(
+        mod,
+        "resolve_mx",
+        AsyncMock(return_value=["inbound-smtp.eu-west-1.amazonaws.com"]),
+    )
+    _, _, plain = org_and_key
+    headers = {"Authorization": f"Bearer {plain}"}
+    created = await client.post(
+        "/email-domains",
+        json={"kind": "custom", "domain": "acme.com"},
+        headers=headers,
+    )
+    domain_id = created.json()["id"]
+    resp = await client.post(f"/email-domains/{domain_id}/verify", headers=headers)
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["receive_ready"] is True
+
+
+async def test_verify_receive_ready_is_none_when_dns_lookup_raises(
+    client: httpx.AsyncClient,
+    org_and_key: tuple,
+    email_mock: AsyncMock,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """DNS failure after a successful verify must not 500 — degrades to None.
+
+    The verified status is already committed when resolve_mx is called; a DoH
+    timeout or provider outage must not retroactively surface as a 500 to the
+    caller.  receive_ready should be None and verification_status 'verified'.
+    """
+    from hailhq.api.routes import email_domains as mod
+
+    monkeypatch.setattr(
+        mod, "resolve_mx", AsyncMock(side_effect=RuntimeError("dns down"))
+    )
+    _, _, plain = org_and_key
+    headers = {"Authorization": f"Bearer {plain}"}
+    created = await client.post(
+        "/email-domains",
+        json={"kind": "custom", "domain": "acme.com"},
+        headers=headers,
+    )
+    assert created.status_code == 201, created.text
+    domain_id = created.json()["id"]
+
+    resp = await client.post(f"/email-domains/{domain_id}/verify", headers=headers)
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["verification_status"] == "verified"
+    assert body["receive_ready"] is None

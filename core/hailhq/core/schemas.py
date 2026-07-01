@@ -242,6 +242,13 @@ class DnsRecordSchema(BaseModel):
     priority: int | None = None
 
 
+class DomainCheckResponse(BaseModel):
+    domain: str
+    in_use: bool
+    existing_mx: list[str]
+    suggested_domain: str
+
+
 class EmailDomainCreate(BaseModel):
     """Request body for POST /email-domains.
 
@@ -400,6 +407,9 @@ class EmailDomainResponse(BaseModel):
     forward_rate_per_hour: int | None = None
     created_at: datetime
     updated_at: datetime
+    # Populated by POST /{id}/verify on custom domains only; None everywhere else.
+    # True when the domain's published MX points at the SES inbound host.
+    receive_ready: bool | None = None
 
 
 class EmailDomainListResponse(BaseModel):
