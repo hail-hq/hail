@@ -2,13 +2,25 @@
 
 All notable changes to Hail are documented here. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and Hail adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## Unreleased
+## [0.7.0] — 2026-07-02
 
-- Email deliverability tracking: `email_events` table, SES configuration-set
-  event ingestion (delivered/bounced/complained/rejected/delayed/opened/clicked),
-  `GET /emails/{id}/events`, `GET /emails/stats`, lifecycle webhook events,
-  email events on `GET /events`, `hail email events|stats`, MCP
-  `get_email_events`/`get_email_stats`.
+Email deliverability milestone. Every outbound email now has a tracked
+lifecycle — delivered, delayed, bounced, complained, rejected, opened,
+clicked — visible per message, aggregated per account, and pushed to
+customer webhooks.
+
+Component versions cut alongside this umbrella release:
+**`sdk-v0.4.0`** (PyPI: `hail-sdk==0.4.0`), **`cli-v0.7.0`** (Homebrew + GitHub Releases).
+
+### Deliverability tracking
+
+- New `email_events` table (append-only, migration `0020`); outbound sends write a synthetic `sent` event, and SES configuration-set events (Delivery, Bounce, Complaint, Reject, DeliveryDelay, Open, Click) are ingested via SNS → ingest Lambda → `POST /internal/ses-events`. Duplicate SNS deliveries are absorbed by a dedup constraint; status transitions are guarded so terminal states never regress. `emails.status` gains `delivered`.
+- `GET /emails/{id}/events` — per-email lifecycle timeline. `GET /emails/{id}` gains `last_event_at`.
+- `GET /emails/stats?from=&to=&bucket=hour|day` — account-level counts, rates (delivery, hard-bounce, complaint, unique open/click), and a zero-filled time series.
+- Email events join the unified `GET /events` stream (`source: "email"`, `id=email:<uuid>` filter).
+- Webhooks: `email.delivered`, `email.delivery_delayed`, `email.opened`, `email.clicked` are new; `email.bounced` and `email.complained` now actually fire.
+- CLI: `hail email events <id>`, `hail email stats`. SDK: `client.emails.events()`, `client.emails.stats()`. MCP: `get_email_events`, `get_email_stats`.
+- Infra: SES configuration set (`HAIL_SES_CONFIGURATION_SET`, Terraform default `hail-events`), SNS topic with explicit SES publish policy, subscription DLQ. Open/click tracking uses the default SES tracking domain in v1.
 
 ## [0.6.0] — 2026-06-28
 
