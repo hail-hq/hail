@@ -144,7 +144,9 @@ def _assert_head_schema(url: str) -> None:
         assert _table_exists(conn, "email_attachments")
         assert _constraint_exists(conn, "emails_direction_check")
         assert _constraint_exists(conn, "emails_outbound_has_domain")
-        assert _constraint_exists(conn, "email_domains_inbound_action")
+        # 0018 dropped the inbound-action requirement — enabling inbound no
+        # longer demands a forward_to. Head schema must NOT carry the CHECK.
+        assert not _constraint_exists(conn, "email_domains_inbound_action")
 
 
 def test_fresh_db_upgrade_head(empty_db: str) -> None:

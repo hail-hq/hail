@@ -41,6 +41,8 @@ def test_email_direction_check_constraint_present():
     assert "emails_outbound_has_domain" in names
 
 
-def test_email_domains_inbound_action_constraint_present():
+def test_email_domains_inbound_action_constraint_absent():
+    # 0018 dropped the inbound-action CHECK (forward_to is optional when
+    # inbound is enabled). The model must stay in sync with head schema.
     names = {c.name for c in EmailDomain.__table__.constraints}
-    assert "email_domains_inbound_action" in names
+    assert "email_domains_inbound_action" not in names

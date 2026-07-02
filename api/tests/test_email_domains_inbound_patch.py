@@ -73,17 +73,21 @@ async def test_patch_rejects_non_email_forward_targets(
 
 
 @pytest.mark.asyncio
-async def test_patch_inbound_enabled_without_action_returns_422(
+async def test_patch_inbound_enabled_without_action_succeeds(
     client: httpx.AsyncClient, org_id, hail_mail_domain
 ):
+    # 0018 dropped the forward_to requirement: enabling inbound with no
+    # forward action is valid (mail is persisted + webhooked, not forwarded).
     _, headers = org_id
     r = await client.patch(
         f"/email-domains/{hail_mail_domain.id}",
         json={"inbound_enabled": True},
         headers=headers,
     )
-    assert r.status_code == 422
-    assert "forward" in r.text
+    assert r.status_code == 200
+    body = r.json()
+    assert body["inbound_enabled"] is True
+    assert body["forward_to"] is None
 
 
 @pytest.mark.asyncio
