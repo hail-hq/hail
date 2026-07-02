@@ -2,6 +2,13 @@
 
 All notable changes to Hail are documented here. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and Hail adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## Unreleased
+
+- `GET /emails/{id}/events` is now cursor-paginated (`cursor`, `limit` 1..1000,
+  `next_cursor` in the response). `hail email events` gains
+  `--cursor/--limit/--all`; SDK `emails.events()` and MCP `get_email_events`
+  accept `cursor`/`limit`. Existing callers are unaffected (default limit 100).
+
 ## [0.7.0] — 2026-07-02
 
 Email deliverability milestone. Every outbound email now has a tracked

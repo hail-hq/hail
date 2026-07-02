@@ -240,9 +240,15 @@ async def get_email_attachment(
         return _format_api_error(exc)
 
 
-async def get_email_events(*, client: HailClient, email_id: str) -> dict[str, Any]:
+async def get_email_events(
+    *,
+    client: HailClient,
+    email_id: str,
+    cursor: str | None = None,
+    limit: int | None = None,
+) -> dict[str, Any]:
     try:
-        return await client.get_email_events(email_id)
+        return await client.get_email_events(email_id, cursor=cursor, limit=limit)
     except ValidationError as exc:
         return {"error": _validation_error_message(exc)}
     except HailAPIError as exc:
@@ -626,21 +632,30 @@ def register_tools(
             return {"error": str(exc)}
 
     @mcp_app.tool(name="get_email_events")
-    async def get_email_events_tool(ctx: Context, email_id: str) -> dict[str, Any]:
+    async def get_email_events_tool(
+        ctx: Context,
+        email_id: str,
+        cursor: str | None = None,
+        limit: int | None = None,
+    ) -> dict[str, Any]:
         """Delivery/engagement timeline (sent→delivered→opened…) for one email.
 
         Chronological lifecycle events for a single email — use this to see
         exactly what happened to one message (bounced? opened? clicked?)
         rather than the account-wide aggregates ``get_email_stats`` returns.
 
-        Returns ``{"items": [...]}`` where each item has ``kind`` (one of
-        sent, delivered, delivery_delayed, bounced, complained, rejected,
-        opened, clicked), ``payload``, and ``occurred_at``. On failure
-        returns ``{"error": "resource not found"}`` for an unknown id.
+        Returns ``{"items": [...], "next_cursor": ...}`` where each item has
+        ``kind`` (one of sent, delivered, delivery_delayed, bounced,
+        complained, rejected, opened, clicked), ``payload``, and
+        ``occurred_at``. Pass ``cursor`` from a previous ``next_cursor`` to
+        page (``limit`` 1..1000, default 100). On failure returns
+        ``{"error": "resource not found"}`` for an unknown id.
         """
         try:
             async with _client_for(ctx, mode=mode, singleton=singleton) as client:
-                return await get_email_events(client=client, email_id=email_id)
+                return await get_email_events(
+                    client=client, email_id=email_id, cursor=cursor, limit=limit
+                )
         except RuntimeError as exc:
             return {"error": str(exc)}
 

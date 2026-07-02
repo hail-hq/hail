@@ -147,6 +147,14 @@ def _assert_head_schema(url: str) -> None:
         # 0018 dropped the inbound-action requirement — enabling inbound no
         # longer demands a forward_to. Head schema must NOT carry the CHECK.
         assert not _constraint_exists(conn, "email_domains_inbound_action")
+        # 0019 widened amount_cents to NUMERIC(14,1) to preserve 0.1c ledger
+        # precision. Pin the exact type so a future migration can't regress it.
+        assert _column_data_type(conn, "account_credits", "amount_cents") == "numeric"
+        amount_cents_precision = conn.execute(
+            "SELECT numeric_precision, numeric_scale FROM information_schema.columns "
+            "WHERE table_name = 'account_credits' AND column_name = 'amount_cents'"
+        ).fetchone()
+        assert amount_cents_precision == (14, 1)
 
 
 def test_fresh_db_upgrade_head(empty_db: str) -> None:

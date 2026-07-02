@@ -282,8 +282,19 @@ class HailClient:
     # GET /emails/{id}/events
     # ------------------------------------------------------------------ #
 
-    async def get_email_events(self, email_id: str) -> dict[str, Any]:
-        resp = await self._client.get(f"/emails/{email_id}/events")
+    async def get_email_events(
+        self,
+        email_id: str,
+        *,
+        cursor: str | None = None,
+        limit: int | None = None,
+    ) -> dict[str, Any]:
+        params: dict[str, Any] = {}
+        if cursor is not None:
+            params["cursor"] = cursor
+        if limit is not None:
+            params["limit"] = limit
+        resp = await self._client.get(f"/emails/{email_id}/events", params=params)
         return EmailEventListResponse.model_validate(_decode(resp)).model_dump(
             mode="json"
         )

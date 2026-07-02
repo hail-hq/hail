@@ -680,6 +680,27 @@ async def test_get_email_events_maps_404_to_not_found(client: HailClient) -> Non
     assert result == {"error": "resource not found"}
 
 
+@respx.mock
+async def test_get_email_events_pagination_params(client: HailClient) -> None:
+    eid = str(uuid4())
+    route = respx.get(f"{_BASE_URL}/emails/{eid}/events").mock(
+        return_value=httpx.Response(200, json={"items": [], "next_cursor": "cur-2"})
+    )
+    result = await tools.get_email_events(
+        client=client, email_id=eid, cursor="cur-1", limit=50
+    )
+    assert result["next_cursor"] == "cur-2"
+    req = route.calls.last.request
+    assert req.url.params["cursor"] == "cur-1"
+    assert req.url.params["limit"] == "50"
+
+    # Omitted params must not be sent.
+    await tools.get_email_events(client=client, email_id=eid)
+    req2 = route.calls.last.request
+    assert "cursor" not in req2.url.params
+    assert "limit" not in req2.url.params
+
+
 # --------------------------------------------------------------------------- #
 # get_email_stats
 # --------------------------------------------------------------------------- #

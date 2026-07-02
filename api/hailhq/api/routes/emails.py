@@ -434,13 +434,23 @@ async def create_email(
 # --------------------------------------------------------------------------- #
 
 
+_DEFAULT_EVENTS_LIMIT = 100
+_MAX_EVENTS_LIMIT = 1000
+
+
 @router.get("/{email_id}/events", response_model=EmailEventListResponse)
 async def list_email_events(
     email_id: UUID,
     principal: Annotated[Principal, Depends(get_current_principal)],
     db: Annotated[AsyncSession, Depends(get_session)],
+    cursor: str | None = Query(default=None),
+    limit: int = Query(default=_DEFAULT_EVENTS_LIMIT, ge=1, le=_MAX_EVENTS_LIMIT),
 ) -> EmailEventListResponse:
-    """Chronological lifecycle events for one email (org-scoped)."""
+    """Chronological lifecycle events for one email (org-scoped).
+
+    Cursor-paginated with the same forward-walk shape as ``GET /events``:
+    strictly-greater on ``(occurred_at, id)``, ascending.
+    """
     exists = (
         await db.execute(
             select(Email.id).where(
@@ -454,19 +464,32 @@ async def list_email_events(
             status_code=http_status.HTTP_404_NOT_FOUND,
             detail="email not found",
         )
-    rows = (
-        (
-            await db.execute(
-                select(EmailEvent)
-                .where(EmailEvent.email_id == email_id)
-                .order_by(EmailEvent.occurred_at.asc(), EmailEvent.id.asc())
-            )
+    stmt = select(EmailEvent).where(EmailEvent.email_id == email_id)
+    if cursor is not None:
+        try:
+            cur_ts, cur_id = decode_cursor(cursor)
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=http_status.HTTP_400_BAD_REQUEST,
+                detail=str(exc),
+            ) from exc
+        stmt = stmt.where(
+            tuple_(EmailEvent.occurred_at, EmailEvent.id) > tuple_(cur_ts, cur_id)
         )
-        .scalars()
-        .all()
+    stmt = stmt.order_by(EmailEvent.occurred_at.asc(), EmailEvent.id.asc()).limit(
+        limit + 1
     )
+    rows = list((await db.execute(stmt)).scalars().all())
+
+    next_cursor: str | None = None
+    if len(rows) > limit:
+        last = rows[limit - 1]
+        next_cursor = encode_cursor(last.occurred_at, last.id)
+        rows = rows[:limit]
+
     return EmailEventListResponse(
-        items=[EmailEventResponse.model_validate(e) for e in rows]
+        items=[EmailEventResponse.model_validate(e) for e in rows],
+        next_cursor=next_cursor,
     )
 
 

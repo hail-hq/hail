@@ -210,10 +210,27 @@ class _EmailsResource:
         data = await self._http.request("GET", "/emails", params=params)
         return EmailListResponse.model_validate(data)
 
-    async def events(self, email_id: str | UUID) -> dict[str, Any]:
-        """Delivery/engagement timeline for one email."""
+    async def events(
+        self,
+        email_id: str | UUID,
+        *,
+        cursor: str | None = None,
+        limit: int | None = None,
+    ) -> dict[str, Any]:
+        """Delivery/engagement timeline for one email.
+
+        Cursor-paginated: pass ``cursor`` from a previous response's
+        ``next_cursor`` to fetch the next page.
+        """
         eid = str(email_id)
-        return await self._http.request("GET", f"/emails/{eid}/events")
+        params: dict[str, Any] = {}
+        if cursor is not None:
+            params["cursor"] = cursor
+        if limit is not None:
+            params["limit"] = limit
+        return await self._http.request(
+            "GET", f"/emails/{eid}/events", params=params or None
+        )
 
     async def stats(
         self,

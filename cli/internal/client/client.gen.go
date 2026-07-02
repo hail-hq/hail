@@ -783,7 +783,8 @@ type EmailDomainResponseVerificationStatus string
 
 // EmailEventListResponse defines model for EmailEventListResponse.
 type EmailEventListResponse struct {
-	Items []EmailEventResponse `json:"items"`
+	Items      []EmailEventResponse `json:"items"`
+	NextCursor *string              `json:"next_cursor,omitempty"`
 }
 
 // EmailEventResponse defines model for EmailEventResponse.
@@ -1176,6 +1177,8 @@ type GetEmailAttachmentEmailsEmailIdAttachmentsAttachmentIdGetParams struct {
 
 // ListEmailEventsEmailsEmailIdEventsGetParams defines parameters for ListEmailEventsEmailsEmailIdEventsGet.
 type ListEmailEventsEmailsEmailIdEventsGetParams struct {
+	Cursor        *string `form:"cursor,omitempty" json:"cursor,omitempty"`
+	Limit         *int    `form:"limit,omitempty" json:"limit,omitempty"`
 	Authorization *string `json:"authorization,omitempty"`
 }
 
@@ -3023,6 +3026,44 @@ func NewListEmailEventsEmailsEmailIdEventsGetRequest(server string, emailId open
 	queryURL, err := serverURL.Parse(operationPath)
 	if err != nil {
 		return nil, err
+	}
+
+	if params != nil {
+		queryValues := queryURL.Query()
+
+		if params.Cursor != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "cursor", *params.Cursor, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+				return nil, err
+			} else {
+				for k, v := range parsed {
+					for _, v2 := range v {
+						queryValues.Add(k, v2)
+					}
+				}
+			}
+
+		}
+
+		if params.Limit != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "limit", *params.Limit, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "integer", Format: ""}); err != nil {
+				return nil, err
+			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+				return nil, err
+			} else {
+				for k, v := range parsed {
+					for _, v2 := range v {
+						queryValues.Add(k, v2)
+					}
+				}
+			}
+
+		}
+
+		queryURL.RawQuery = queryValues.Encode()
 	}
 
 	req, err := http.NewRequest("GET", queryURL.String(), nil)

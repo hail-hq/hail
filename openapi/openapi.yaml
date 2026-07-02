@@ -272,7 +272,12 @@ paths:
       tags:
         - emails
       summary: List Email Events
-      description: Chronological lifecycle events for one email (org-scoped).
+      description: "Chronological lifecycle events for one email (org-scoped).
+
+
+        Cursor-paginated with the same forward-walk shape as ``GET /events``:
+
+        strictly-greater on ``(occurred_at, id)``, ascending."
       operationId: list_email_events_emails__email_id__events_get
       parameters:
         - name: email_id
@@ -282,6 +287,23 @@ paths:
             type: string
             format: uuid
             title: Email Id
+        - name: cursor
+          in: query
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            title: Cursor
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            maximum: 1000
+            minimum: 1
+            default: 100
+            title: Limit
         - name: authorization
           in: header
           required: false
@@ -1666,6 +1688,11 @@ components:
             $ref: "#/components/schemas/EmailEventResponse"
           type: array
           title: Items
+        next_cursor:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Next Cursor
       type: object
       required:
         - items

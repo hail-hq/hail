@@ -145,6 +145,23 @@ async def test_emails_events(base_url: str, api_key: str) -> None:
 
 
 @respx.mock
+async def test_emails_events_pagination_params(base_url: str, api_key: str) -> None:
+    payload = {"items": [], "next_cursor": None}
+    route = respx.get(f"{base_url}/emails/abc/events").mock(
+        return_value=httpx.Response(200, json=payload)
+    )
+    async with Client(api_key=api_key, base_url=base_url) as c:
+        await c.emails.events("abc", cursor="cur-2", limit=50)
+        await c.emails.events("abc")
+    first = route.calls[0].request.url
+    assert first.params["cursor"] == "cur-2"
+    assert first.params["limit"] == "50"
+    second = route.calls[1].request.url
+    assert "cursor" not in second.params
+    assert "limit" not in second.params
+
+
+@respx.mock
 async def test_emails_stats_default_bucket(base_url: str, api_key: str) -> None:
     payload = {"totals": {"sent": 10}}
     route = respx.get(f"{base_url}/emails/stats").mock(

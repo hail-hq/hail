@@ -117,3 +117,24 @@ async def test_legacy_envelope_inbound_disabled_503_with_valid_signature(client)
     raw, headers = _signed({"message_id": "m1", "recipients": ["bob@example.com"]})
     r = await client.post("/internal/ses-events", content=raw, headers=headers)
     assert r.status_code == 503
+
+
+async def test_delivery_envelope_missing_event_422(client):
+    raw, headers = _signed({"type": "delivery_event"})
+    r = await client.post("/internal/ses-events", content=raw, headers=headers)
+    assert r.status_code == 422
+
+
+async def test_delivery_envelope_non_dict_event_422(client):
+    raw, headers = _signed({"type": "delivery_event", "event": "garbage"})
+    r = await client.post("/internal/ses-events", content=raw, headers=headers)
+    assert r.status_code == 422
+
+
+async def test_delivery_envelope_malformed_inner_event_422(client):
+    # Tracked eventType but no "mail" section — parser raises KeyError.
+    raw, headers = _signed(
+        {"type": "delivery_event", "event": {"eventType": "Delivery"}}
+    )
+    r = await client.post("/internal/ses-events", content=raw, headers=headers)
+    assert r.status_code == 422

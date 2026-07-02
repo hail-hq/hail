@@ -437,3 +437,64 @@ async def test_get_events_kind_filter_email_and_call(
     assert all(i["kind"] == "call.queued" for i in items)
     assert all(i["source"] == "call" for i in items)
     assert all(i["call_id"] == call_id for i in items)
+
+
+async def test_stream_cursor_walk_crosses_sources(
+    client: httpx.AsyncClient, async_session: AsyncSession, add_phone_number
+) -> None:
+    """Cursor pagination must not drop or duplicate events when a page
+    boundary falls between a call event and an email event in the merged
+    stream."""
+    org_id, _, plain = await insert_org_and_key(async_session)
+    headers = {"Authorization": f"Bearer {plain}"}
+    await add_phone_number(async_session, org_id)
+    call_id = await _create_call_for_events(client, plain)
+
+    await _register_custom_verified(client, headers, domain="acme.com")
+    email_id = (await _send_email(client, plain))["id"]
+
+    # Interleave sources on the timeline: call@t1, email@t2, call@t3, email@t4.
+    from sqlalchemy import update
+
+    from hailhq.core.models import EmailEvent
+
+    t = lambda m: datetime(2026, 7, 1, 12, m, tzinfo=timezone.utc)  # noqa: E731
+    await _add_event(async_session, call_id, "call.queued", {}, occurred_at=t(1))
+    await async_session.execute(
+        update(EmailEvent)
+        .where(EmailEvent.email_id == email_id)
+        .values(occurred_at=t(2))
+    )
+    await _add_event(async_session, call_id, "call.ringing", {}, occurred_at=t(3))
+    async_session.add(
+        EmailEvent(
+            email_id=email_id,
+            organization_id=org_id,
+            kind="delivered",
+            payload={},
+            occurred_at=t(4),
+        )
+    )
+    await async_session.commit()
+
+    full = (
+        await client.get("/events", params={"limit": 1000}, headers=headers)
+    ).json()["items"]
+    assert len(full) >= 4
+    assert {i["source"] for i in full} == {"call", "email"}
+
+    walked: list[dict] = []
+    cursor = None
+    pages = 0
+    while True:
+        params: dict = {"limit": 2}
+        if cursor:
+            params["cursor"] = cursor
+        body = (await client.get("/events", params=params, headers=headers)).json()
+        walked.extend(body["items"])
+        cursor = body["next_cursor"]
+        pages += 1
+        if cursor is None:
+            break
+    assert pages >= 2
+    assert [i["id"] for i in walked] == [i["id"] for i in full]  # no dup, no loss

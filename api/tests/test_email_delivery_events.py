@@ -141,17 +141,43 @@ async def test_hard_bounce_overrides_delivered_but_not_complained(async_session)
 async def test_rejected_sets_failed_with_end_reason_and_no_fanout(async_session):
     email = await _mk_email(async_session, status="sent")
     fanout = AsyncMock(return_value=0)
-    await apply_delivery_event(
+    res = await apply_delivery_event(
         async_session,
         _ev(email.provider_message_id, "rejected", detail={"reason": "Bad content"}),
         fanout=fanout,
     )
     await async_session.commit()
+    assert res.email_id == email.id
+    assert res.inserted
+    assert res.status_changed
     await async_session.refresh(email)
     assert email.status == "failed"
     assert email.end_reason == "Bad content"
     assert email.failed_at is not None
     fanout.assert_not_awaited()
+
+
+async def test_delay_and_engagement_kinds_fan_out_without_status_change(
+    async_session,
+):
+    email = await _mk_email(async_session, status="delivered")
+    fanout = AsyncMock(return_value=1)
+    for kind in ("delivery_delayed", "opened", "clicked"):
+        res = await apply_delivery_event(
+            async_session,
+            _ev(email.provider_message_id, kind),
+            fanout=fanout,
+        )
+        await async_session.commit()
+        assert res.inserted
+        assert not res.status_changed
+    assert [c.kwargs["event_type"] for c in fanout.await_args_list] == [
+        "email.delivery_delayed",
+        "email.opened",
+        "email.clicked",
+    ]
+    await async_session.refresh(email)
+    assert email.status == "delivered"
 
 
 async def test_concurrent_status_change_yields_status_changed_false(

@@ -129,5 +129,7 @@ def test_sns_delivery_event_wrapped_and_signed(captured_request):
     body = json.loads(captured_request.data)
     assert body["type"] == "delivery_event"
     assert body["event"]["eventType"] == "Delivery"
-    sig = captured_request.headers["X-hail-signature"]
-    assert sig.startswith("sha256=")
+    # Exact HMAC over the wire bytes — a re-serialization before signing
+    # would produce a different digest and fail here.
+    expected = hmac.new(b"s3cret", captured_request.data, hashlib.sha256).hexdigest()
+    assert captured_request.headers["X-hail-signature"] == f"sha256={expected}"

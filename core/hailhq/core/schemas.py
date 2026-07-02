@@ -506,6 +506,7 @@ class EmailEventResponse(BaseModel):
 
 class EmailEventListResponse(BaseModel):
     items: list[EmailEventResponse]
+    next_cursor: str | None = None
 
 
 class EmailStatsCounts(BaseModel):
