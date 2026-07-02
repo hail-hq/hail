@@ -643,6 +643,117 @@ async def test_get_events_rejects_unsupported_type(client: HailClient) -> None:
 
 
 # --------------------------------------------------------------------------- #
+# get_email_events
+# --------------------------------------------------------------------------- #
+
+
+def _email_event(kind: str = "delivered", email_id: str | None = None) -> dict:
+    return {
+        "id": str(uuid4()),
+        "email_id": email_id or str(uuid4()),
+        "kind": kind,
+        "payload": {},
+        "occurred_at": "2026-06-28T10:00:00+00:00",
+    }
+
+
+@respx.mock
+async def test_get_email_events_happy_path(client: HailClient) -> None:
+    eid = str(uuid4())
+    respx.get(f"{_BASE_URL}/emails/{eid}/events").mock(
+        return_value=httpx.Response(
+            200, json={"items": [_email_event("delivered", eid)]}
+        )
+    )
+    result = await tools.get_email_events(client=client, email_id=eid)
+    assert "error" not in result, result
+    assert result["items"][0]["kind"] == "delivered"
+
+
+@respx.mock
+async def test_get_email_events_maps_404_to_not_found(client: HailClient) -> None:
+    eid = str(uuid4())
+    respx.get(f"{_BASE_URL}/emails/{eid}/events").mock(
+        return_value=httpx.Response(404, json={"detail": "email not found"})
+    )
+    result = await tools.get_email_events(client=client, email_id=eid)
+    assert result == {"error": "resource not found"}
+
+
+# --------------------------------------------------------------------------- #
+# get_email_stats
+# --------------------------------------------------------------------------- #
+
+
+def _email_stats(sent: int = 2) -> dict:
+    return {
+        "from": "2026-06-28T00:00:00+00:00",
+        "to": "2026-06-30T00:00:00+00:00",
+        "bucket": "day",
+        "totals": {"sent": sent, "delivered": 1},
+        "rates": {"delivery": 0.5},
+        "series": [],
+    }
+
+
+@respx.mock
+async def test_get_email_stats_passthrough(client: HailClient) -> None:
+    respx.get(f"{_BASE_URL}/emails/stats").mock(
+        return_value=httpx.Response(200, json=_email_stats(sent=2))
+    )
+    result = await tools.get_email_stats(client=client)
+    assert "error" not in result, result
+    assert result["totals"]["sent"] == 2
+
+
+@respx.mock
+async def test_get_email_stats_wires_from_to_bucket_params(client: HailClient) -> None:
+    captured: dict = {}
+
+    def _handler(request: httpx.Request) -> httpx.Response:
+        captured["url"] = str(request.url)
+        return httpx.Response(200, json=_email_stats())
+
+    respx.get(f"{_BASE_URL}/emails/stats").mock(side_effect=_handler)
+
+    await tools.get_email_stats(
+        client=client,
+        from_="2026-06-28T00:00:00Z",
+        to="2026-06-30T00:00:00Z",
+        bucket="hour",
+    )
+    assert "from=2026-06-28T00%3A00%3A00Z" in captured["url"]
+    assert "to=2026-06-30T00%3A00%3A00Z" in captured["url"]
+    assert "bucket=hour" in captured["url"]
+    assert "from_=" not in captured["url"]
+
+
+@respx.mock
+async def test_get_email_stats_defaults_bucket_day(client: HailClient) -> None:
+    captured: dict = {}
+
+    def _handler(request: httpx.Request) -> httpx.Response:
+        captured["url"] = str(request.url)
+        return httpx.Response(200, json=_email_stats())
+
+    respx.get(f"{_BASE_URL}/emails/stats").mock(side_effect=_handler)
+
+    await tools.get_email_stats(client=client)
+    assert "bucket=day" in captured["url"]
+    assert "from=" not in captured["url"]
+    assert "to=" not in captured["url"]
+
+
+@respx.mock
+async def test_get_email_stats_maps_422_to_error_detail(client: HailClient) -> None:
+    respx.get(f"{_BASE_URL}/emails/stats").mock(
+        return_value=httpx.Response(422, json={"detail": "'from' must be before 'to'"})
+    )
+    result = await tools.get_email_stats(client=client, from_="bad")
+    assert "must be before" in result["error"]
+
+
+# --------------------------------------------------------------------------- #
 # Error mapping
 # --------------------------------------------------------------------------- #
 

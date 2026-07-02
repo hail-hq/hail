@@ -4,7 +4,14 @@ from datetime import datetime
 from typing import Any, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import (
+    AliasChoices,
+    BaseModel,
+    ConfigDict,
+    Field,
+    field_validator,
+    model_validator,
+)
 
 E164 = re.compile(r"^\+[1-9]\d{1,14}$")
 
@@ -48,7 +55,7 @@ def decode_cursor(cursor: str) -> tuple[datetime, UUID]:
 # helper, the route, and (eventually) the SDK share one source.
 # --------------------------------------------------------------------------- #
 
-SUPPORTED_RESOURCE_TYPES: tuple[str, ...] = ("call",)
+SUPPORTED_RESOURCE_TYPES: tuple[str, ...] = ("call", "email")
 
 
 def parse_resource_id(value: str) -> tuple[str, UUID]:
@@ -173,18 +180,22 @@ class CallListResponse(BaseModel):
     next_cursor: str | None = None
 
 
-class CallEventResponse(BaseModel):
+class EventResponse(BaseModel):
+    """One event on the unified GET /events stream (call or email)."""
+
     model_config = ConfigDict(from_attributes=True)
 
     id: UUID
-    call_id: UUID
+    source: Literal["call", "email"]
+    call_id: UUID | None = None
+    email_id: UUID | None = None
     kind: str
     payload: dict[str, Any]
     occurred_at: datetime
 
 
 class EventStreamResponse(BaseModel):
-    items: list[CallEventResponse]
+    items: list[EventResponse]
     next_cursor: str | None = None
     # Only populated when the ``id`` query filter resolves to a call (e.g.
     # ``id=call:<uuid>``). Org-wide tails and non-call resource types leave
@@ -462,11 +473,84 @@ class EmailCreate(BaseModel):
         return self
 
 
-EmailStatus = Literal["queued", "sent", "failed", "bounced", "complained", "received"]
+EmailStatus = Literal[
+    "queued", "sent", "delivered", "failed", "bounced", "complained", "received"
+]
 
 TERMINAL_EMAIL_STATUSES: frozenset[str] = frozenset(
-    {"sent", "failed", "bounced", "complained"}
+    {"sent", "delivered", "failed", "bounced", "complained"}
 )
+
+
+EmailEventKind = Literal[
+    "sent",
+    "delivered",
+    "delivery_delayed",
+    "bounced",
+    "complained",
+    "rejected",
+    "opened",
+    "clicked",
+]
+
+
+class EmailEventResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    email_id: UUID
+    kind: EmailEventKind
+    payload: dict[str, Any]
+    occurred_at: datetime
+
+
+class EmailEventListResponse(BaseModel):
+    items: list[EmailEventResponse]
+
+
+class EmailStatsCounts(BaseModel):
+    sent: int = 0
+    delivered: int = 0
+    delivery_delayed: int = 0
+    bounced: int = 0
+    bounced_hard: int = 0
+    complained: int = 0
+    rejected: int = 0
+    opened: int = 0
+    clicked: int = 0
+    unique_opened: int = 0
+    unique_clicked: int = 0
+
+
+class EmailStatsBucket(EmailStatsCounts):
+    bucket_start: datetime
+
+
+class EmailStatsRates(BaseModel):
+    """All None when sent == 0 in the window."""
+
+    delivery: float | None = None
+    bounce: float | None = None  # hard bounces / sent
+    complaint: float | None = None
+    open: float | None = None  # unique_opened / sent
+    click: float | None = None  # unique_clicked / sent
+
+
+class EmailStatsResponse(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    from_ts: datetime = Field(
+        serialization_alias="from",
+        validation_alias=AliasChoices("from_ts", "from"),
+    )
+    to_ts: datetime = Field(
+        serialization_alias="to",
+        validation_alias=AliasChoices("to_ts", "to"),
+    )
+    bucket: Literal["hour", "day"]
+    totals: EmailStatsCounts
+    rates: EmailStatsRates
+    series: list[EmailStatsBucket]
 
 
 class EmailSummary(BaseModel):
@@ -542,6 +626,7 @@ class EmailResponse(EmailSummary):
     # the row but we don't expose internal storage paths on the wire.
     raw_url: str | None = None
     attachments: list[EmailAttachmentResponse] = []
+    last_event_at: datetime | None = None
 
 
 class EmailListResponse(BaseModel):
@@ -553,15 +638,18 @@ class EmailListResponse(BaseModel):
 # Webhook subscriptions + deliveries
 # --------------------------------------------------------------------------- #
 
-# email.bounced / email.complained are subscribable now but only emitted once
-# SES bounce/complaint ingestion lands (next milestone); documented in
-# docs/setup/aws-ses.md. email.received.suppressed fires with
-# data.reason ∈ {forward_loop, forward_rate_limit, inbound_rate_limit,
-# insufficient_funds}.
+# email.received.suppressed fires with data.reason ∈ {forward_loop,
+# forward_rate_limit, inbound_rate_limit, insufficient_funds}. SES
+# deliverability tracking includes email.delivered, email.delivery_delayed,
+# email.bounced, email.complained, email.opened, and email.clicked.
 WebhookEventType = Literal[
     "email.received",
+    "email.delivered",
+    "email.delivery_delayed",
     "email.bounced",
     "email.complained",
+    "email.opened",
+    "email.clicked",
     "email.received.suppressed",
 ]
 

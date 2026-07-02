@@ -210,6 +210,26 @@ class _EmailsResource:
         data = await self._http.request("GET", "/emails", params=params)
         return EmailListResponse.model_validate(data)
 
+    async def events(self, email_id: str | UUID) -> dict[str, Any]:
+        """Delivery/engagement timeline for one email."""
+        eid = str(email_id)
+        return await self._http.request("GET", f"/emails/{eid}/events")
+
+    async def stats(
+        self,
+        *,
+        from_: str | datetime | None = None,
+        to: str | datetime | None = None,
+        bucket: str = "day",
+    ) -> dict[str, Any]:
+        """Account-level deliverability stats for a time window."""
+        params: dict[str, Any] = {"bucket": bucket}
+        if from_ is not None:
+            params["from"] = from_.isoformat() if isinstance(from_, datetime) else from_
+        if to is not None:
+            params["to"] = to.isoformat() if isinstance(to, datetime) else to
+        return await self._http.request("GET", "/emails/stats", params=params)
+
 
 class _EmailDomainsResource:
     """``client.email_domains.*`` — manage SES identities."""

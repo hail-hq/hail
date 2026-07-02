@@ -18,14 +18,14 @@ from a tenant who hasn't registered a domain still goes out.
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Annotated, Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from fastapi import status as http_status
 from fastapi.responses import RedirectResponse
-from sqlalchemy import and_, or_, select, tuple_, update
+from sqlalchemy import and_, func, or_, select, text as text_sql, tuple_, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import defer
@@ -42,15 +42,22 @@ from hailhq.api.routes.email_domains import (
 )
 from hailhq.core.billing import has_funds
 from hailhq.core.db import get_session
+from hailhq.core.email_delivery_events import record_sent_event
 from hailhq.core.email_footer import FOOTER_SENT, append_footer
-from hailhq.core.models import Email, EmailAttachment, EmailDomain
+from hailhq.core.models import Email, EmailAttachment, EmailDomain, EmailEvent
 from hailhq.core.s3_inbound import S3InboundClient
 from hailhq.core.providers.email import EmailProvider
 from hailhq.core.schemas import (
     EmailAttachmentResponse,
     EmailCreate,
+    EmailEventListResponse,
+    EmailEventResponse,
     EmailListResponse,
     EmailResponse,
+    EmailStatsBucket,
+    EmailStatsCounts,
+    EmailStatsRates,
+    EmailStatsResponse,
     EmailStatus,
     EmailSummary,
     decode_cursor,
@@ -397,6 +404,9 @@ async def create_email(
             sent_at=now,
         )
     )
+    record_sent_event(
+        db, email_id=email.id, organization_id=email.organization_id, occurred_at=now
+    )
     await db.commit()
     await db.refresh(email)
 
@@ -420,6 +430,164 @@ async def create_email(
 
 
 # --------------------------------------------------------------------------- #
+# GET /emails/{id}/events
+# --------------------------------------------------------------------------- #
+
+
+@router.get("/{email_id}/events", response_model=EmailEventListResponse)
+async def list_email_events(
+    email_id: UUID,
+    principal: Annotated[Principal, Depends(get_current_principal)],
+    db: Annotated[AsyncSession, Depends(get_session)],
+) -> EmailEventListResponse:
+    """Chronological lifecycle events for one email (org-scoped)."""
+    exists = (
+        await db.execute(
+            select(Email.id).where(
+                Email.id == email_id,
+                Email.organization_id == principal.organization_id,
+            )
+        )
+    ).scalar_one_or_none()
+    if exists is None:
+        raise HTTPException(
+            status_code=http_status.HTTP_404_NOT_FOUND,
+            detail="email not found",
+        )
+    rows = (
+        (
+            await db.execute(
+                select(EmailEvent)
+                .where(EmailEvent.email_id == email_id)
+                .order_by(EmailEvent.occurred_at.asc(), EmailEvent.id.asc())
+            )
+        )
+        .scalars()
+        .all()
+    )
+    return EmailEventListResponse(
+        items=[EmailEventResponse.model_validate(e) for e in rows]
+    )
+
+
+# --------------------------------------------------------------------------- #
+# GET /emails/stats
+#
+# MUST be registered above GET /{email_id} — FastAPI matches routes in
+# registration order, and "stats" would otherwise be swallowed by the UUID
+# path param and 422 on parse.
+# --------------------------------------------------------------------------- #
+
+_STATS_MAX_RANGE_DAYS = 92
+_STATS_MAX_HOURLY_DAYS = 8
+
+# One pass over the (organization_id, occurred_at) range: the extra
+# ``(kind)`` grouping set yields window-level rows (bucket_start IS NULL)
+# whose distinct counts are correct across buckets — summing per-bucket
+# uniques would over-count an email that opened/clicked in more than one.
+_STATS_SQL = text_sql("""
+    SELECT
+      date_trunc(:bucket, occurred_at) AS bucket_start,
+      kind,
+      count(*) AS total,
+      count(DISTINCT email_id) AS unique_emails,
+      count(*) FILTER (WHERE payload->>'hard' = 'true') AS hard
+    FROM email_events
+    WHERE organization_id = :org
+      AND occurred_at >= :from_ts
+      AND occurred_at < :to_ts
+    GROUP BY GROUPING SETS ((date_trunc(:bucket, occurred_at), kind), (kind))
+    """)
+
+
+def _truncate(ts: datetime, bucket: str) -> datetime:
+    if bucket == "hour":
+        return ts.replace(minute=0, second=0, microsecond=0)
+    return ts.replace(hour=0, minute=0, second=0, microsecond=0)
+
+
+@router.get("/stats", response_model=EmailStatsResponse)
+async def get_email_stats(
+    principal: Annotated[Principal, Depends(get_current_principal)],
+    db: Annotated[AsyncSession, Depends(get_session)],
+    from_: Annotated[datetime | None, Query(alias="from")] = None,
+    to: Annotated[datetime | None, Query()] = None,
+    bucket: Literal["hour", "day"] = Query(default="day"),
+) -> EmailStatsResponse:
+    to_ts = to or datetime.now(timezone.utc)
+    from_ts = from_ or to_ts - timedelta(days=7)
+    if from_ts.tzinfo is None or to_ts.tzinfo is None:
+        raise HTTPException(422, detail="from/to must be timezone-aware ISO 8601")
+    # Normalize to UTC before any bucket math: Postgres date_trunc below runs
+    # in session UTC, so Python-side truncation/stepping must match it. A
+    # request expressed in another offset (spec-legal, e.g. +02:00) would
+    # otherwise produce bucket keys shifted from the SQL rows, silently
+    # zeroing every totals/series lookup.
+    from_ts = from_ts.astimezone(timezone.utc)
+    to_ts = to_ts.astimezone(timezone.utc)
+    if from_ts >= to_ts:
+        raise HTTPException(422, detail="'from' must be before 'to'")
+    span = to_ts - from_ts
+    if span > timedelta(days=_STATS_MAX_RANGE_DAYS):
+        raise HTTPException(422, detail=f"range exceeds {_STATS_MAX_RANGE_DAYS} days")
+    if bucket == "hour" and span > timedelta(days=_STATS_MAX_HOURLY_DAYS):
+        raise HTTPException(
+            422, detail=f"bucket=hour limited to {_STATS_MAX_HOURLY_DAYS} days"
+        )
+
+    rows = (
+        await db.execute(
+            _STATS_SQL,
+            {
+                "bucket": bucket,
+                "org": principal.organization_id,
+                "from_ts": from_ts,
+                "to_ts": to_ts,
+            },
+        )
+    ).all()
+
+    step = timedelta(hours=1) if bucket == "hour" else timedelta(days=1)
+    start = _truncate(from_ts, bucket)
+    buckets: dict[datetime, EmailStatsBucket] = {}
+    cur = start
+    while cur < to_ts:
+        buckets[cur] = EmailStatsBucket(bucket_start=cur)
+        cur += step
+
+    totals = EmailStatsCounts()
+    for bucket_start, kind, total, unique_emails, hard in rows:
+        # NULL bucket_start marks the window-level grouping set → totals.
+        b = totals if bucket_start is None else buckets.get(bucket_start)
+        if b is None:  # bucket before the truncated start edge
+            continue
+        setattr(b, kind, getattr(b, kind) + total)
+        if kind == "opened":
+            b.unique_opened += unique_emails
+        elif kind == "clicked":
+            b.unique_clicked += unique_emails
+        elif kind == "bounced":
+            b.bounced_hard += hard
+
+    rates = EmailStatsRates()
+    if totals.sent:
+        rates.delivery = totals.delivered / totals.sent
+        rates.bounce = totals.bounced_hard / totals.sent
+        rates.complaint = totals.complained / totals.sent
+        rates.open = totals.unique_opened / totals.sent
+        rates.click = totals.unique_clicked / totals.sent
+
+    return EmailStatsResponse(
+        from_ts=from_ts,
+        to_ts=to_ts,
+        bucket=bucket,
+        totals=totals,
+        rates=rates,
+        series=list(buckets.values()),  # inserted in ascending bucket order
+    )
+
+
+# --------------------------------------------------------------------------- #
 # GET /emails/{id}
 # --------------------------------------------------------------------------- #
 
@@ -431,17 +599,24 @@ async def get_email(
     principal: Annotated[Principal, Depends(get_current_principal)],
     db: Annotated[AsyncSession, Depends(get_session)],
 ) -> EmailResponse:
-    stmt = select(Email).where(
+    last_event_at = (
+        select(func.max(EmailEvent.occurred_at))
+        .where(EmailEvent.email_id == Email.id)
+        .scalar_subquery()
+    )
+    stmt = select(Email, last_event_at).where(
         Email.id == email_id,
         Email.organization_id == principal.organization_id,
     )
-    email = (await db.execute(stmt)).scalar_one_or_none()
-    if email is None:
+    row = (await db.execute(stmt)).one_or_none()
+    if row is None:
         raise HTTPException(
             status_code=http_status.HTTP_404_NOT_FOUND,
             detail="email not found",
         )
+    email, last_event = row
     resp = EmailResponse.model_validate(email)
+    resp.last_event_at = last_event
     base = str(request.base_url)
     if email.raw_s3_key:
         resp.raw_url = join_url(base, f"emails/{email.id}/raw")

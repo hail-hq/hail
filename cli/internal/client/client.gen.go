@@ -75,6 +75,27 @@ func (e CallResponseStatus) Valid() bool {
 	}
 }
 
+// Defines values for DnsRecordSchemaType.
+const (
+	CNAME DnsRecordSchemaType = "CNAME"
+	MX    DnsRecordSchemaType = "MX"
+	TXT   DnsRecordSchemaType = "TXT"
+)
+
+// Valid indicates whether the value is a known member of the DnsRecordSchemaType enum.
+func (e DnsRecordSchemaType) Valid() bool {
+	switch e {
+	case CNAME:
+		return true
+	case MX:
+		return true
+	case TXT:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for EmailDomainCreateKind.
 const (
 	EmailDomainCreateKindCustom   EmailDomainCreateKind = "custom"
@@ -132,6 +153,42 @@ func (e EmailDomainResponseVerificationStatus) Valid() bool {
 	}
 }
 
+// Defines values for EmailEventResponseKind.
+const (
+	EmailEventResponseKindBounced         EmailEventResponseKind = "bounced"
+	EmailEventResponseKindClicked         EmailEventResponseKind = "clicked"
+	EmailEventResponseKindComplained      EmailEventResponseKind = "complained"
+	EmailEventResponseKindDelivered       EmailEventResponseKind = "delivered"
+	EmailEventResponseKindDeliveryDelayed EmailEventResponseKind = "delivery_delayed"
+	EmailEventResponseKindOpened          EmailEventResponseKind = "opened"
+	EmailEventResponseKindRejected        EmailEventResponseKind = "rejected"
+	EmailEventResponseKindSent            EmailEventResponseKind = "sent"
+)
+
+// Valid indicates whether the value is a known member of the EmailEventResponseKind enum.
+func (e EmailEventResponseKind) Valid() bool {
+	switch e {
+	case EmailEventResponseKindBounced:
+		return true
+	case EmailEventResponseKindClicked:
+		return true
+	case EmailEventResponseKindComplained:
+		return true
+	case EmailEventResponseKindDelivered:
+		return true
+	case EmailEventResponseKindDeliveryDelayed:
+		return true
+	case EmailEventResponseKindOpened:
+		return true
+	case EmailEventResponseKindRejected:
+		return true
+	case EmailEventResponseKindSent:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for EmailResponseDirection.
 const (
 	EmailResponseDirectionInbound  EmailResponseDirection = "inbound"
@@ -154,6 +211,7 @@ func (e EmailResponseDirection) Valid() bool {
 const (
 	EmailResponseStatusBounced    EmailResponseStatus = "bounced"
 	EmailResponseStatusComplained EmailResponseStatus = "complained"
+	EmailResponseStatusDelivered  EmailResponseStatus = "delivered"
 	EmailResponseStatusFailed     EmailResponseStatus = "failed"
 	EmailResponseStatusQueued     EmailResponseStatus = "queued"
 	EmailResponseStatusReceived   EmailResponseStatus = "received"
@@ -167,6 +225,8 @@ func (e EmailResponseStatus) Valid() bool {
 		return true
 	case EmailResponseStatusComplained:
 		return true
+	case EmailResponseStatusDelivered:
+		return true
 	case EmailResponseStatusFailed:
 		return true
 	case EmailResponseStatusQueued:
@@ -174,6 +234,24 @@ func (e EmailResponseStatus) Valid() bool {
 	case EmailResponseStatusReceived:
 		return true
 	case EmailResponseStatusSent:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for EmailStatsResponseBucket.
+const (
+	EmailStatsResponseBucketDay  EmailStatsResponseBucket = "day"
+	EmailStatsResponseBucketHour EmailStatsResponseBucket = "hour"
+)
+
+// Valid indicates whether the value is a known member of the EmailStatsResponseBucket enum.
+func (e EmailStatsResponseBucket) Valid() bool {
+	switch e {
+	case EmailStatsResponseBucketDay:
+		return true
+	case EmailStatsResponseBucketHour:
 		return true
 	default:
 		return false
@@ -202,6 +280,7 @@ func (e EmailSummaryDirection) Valid() bool {
 const (
 	EmailSummaryStatusBounced    EmailSummaryStatus = "bounced"
 	EmailSummaryStatusComplained EmailSummaryStatus = "complained"
+	EmailSummaryStatusDelivered  EmailSummaryStatus = "delivered"
 	EmailSummaryStatusFailed     EmailSummaryStatus = "failed"
 	EmailSummaryStatusQueued     EmailSummaryStatus = "queued"
 	EmailSummaryStatusReceived   EmailSummaryStatus = "received"
@@ -215,6 +294,8 @@ func (e EmailSummaryStatus) Valid() bool {
 		return true
 	case EmailSummaryStatusComplained:
 		return true
+	case EmailSummaryStatusDelivered:
+		return true
 	case EmailSummaryStatusFailed:
 		return true
 	case EmailSummaryStatusQueued:
@@ -222,6 +303,24 @@ func (e EmailSummaryStatus) Valid() bool {
 	case EmailSummaryStatusReceived:
 		return true
 	case EmailSummaryStatusSent:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for EventResponseSource.
+const (
+	Call  EventResponseSource = "call"
+	Email EventResponseSource = "email"
+)
+
+// Valid indicates whether the value is a known member of the EventResponseSource enum.
+func (e EventResponseSource) Valid() bool {
+	switch e {
+	case Call:
+		return true
+	case Email:
 		return true
 	default:
 		return false
@@ -294,7 +393,11 @@ func (e WebhookDeliveryResponseStatus) Valid() bool {
 // Defines values for WebhookSubscriptionCreateEventTypes.
 const (
 	WebhookSubscriptionCreateEventTypesEmailBounced            WebhookSubscriptionCreateEventTypes = "email.bounced"
+	WebhookSubscriptionCreateEventTypesEmailClicked            WebhookSubscriptionCreateEventTypes = "email.clicked"
 	WebhookSubscriptionCreateEventTypesEmailComplained         WebhookSubscriptionCreateEventTypes = "email.complained"
+	WebhookSubscriptionCreateEventTypesEmailDelivered          WebhookSubscriptionCreateEventTypes = "email.delivered"
+	WebhookSubscriptionCreateEventTypesEmailDeliveryDelayed    WebhookSubscriptionCreateEventTypes = "email.delivery_delayed"
+	WebhookSubscriptionCreateEventTypesEmailOpened             WebhookSubscriptionCreateEventTypes = "email.opened"
 	WebhookSubscriptionCreateEventTypesEmailReceived           WebhookSubscriptionCreateEventTypes = "email.received"
 	WebhookSubscriptionCreateEventTypesEmailReceivedSuppressed WebhookSubscriptionCreateEventTypes = "email.received.suppressed"
 )
@@ -304,7 +407,15 @@ func (e WebhookSubscriptionCreateEventTypes) Valid() bool {
 	switch e {
 	case WebhookSubscriptionCreateEventTypesEmailBounced:
 		return true
+	case WebhookSubscriptionCreateEventTypesEmailClicked:
+		return true
 	case WebhookSubscriptionCreateEventTypesEmailComplained:
+		return true
+	case WebhookSubscriptionCreateEventTypesEmailDelivered:
+		return true
+	case WebhookSubscriptionCreateEventTypesEmailDeliveryDelayed:
+		return true
+	case WebhookSubscriptionCreateEventTypesEmailOpened:
 		return true
 	case WebhookSubscriptionCreateEventTypesEmailReceived:
 		return true
@@ -318,7 +429,11 @@ func (e WebhookSubscriptionCreateEventTypes) Valid() bool {
 // Defines values for WebhookSubscriptionPatchEventTypes.
 const (
 	WebhookSubscriptionPatchEventTypesEmailBounced            WebhookSubscriptionPatchEventTypes = "email.bounced"
+	WebhookSubscriptionPatchEventTypesEmailClicked            WebhookSubscriptionPatchEventTypes = "email.clicked"
 	WebhookSubscriptionPatchEventTypesEmailComplained         WebhookSubscriptionPatchEventTypes = "email.complained"
+	WebhookSubscriptionPatchEventTypesEmailDelivered          WebhookSubscriptionPatchEventTypes = "email.delivered"
+	WebhookSubscriptionPatchEventTypesEmailDeliveryDelayed    WebhookSubscriptionPatchEventTypes = "email.delivery_delayed"
+	WebhookSubscriptionPatchEventTypesEmailOpened             WebhookSubscriptionPatchEventTypes = "email.opened"
 	WebhookSubscriptionPatchEventTypesEmailReceived           WebhookSubscriptionPatchEventTypes = "email.received"
 	WebhookSubscriptionPatchEventTypesEmailReceivedSuppressed WebhookSubscriptionPatchEventTypes = "email.received.suppressed"
 )
@@ -328,7 +443,15 @@ func (e WebhookSubscriptionPatchEventTypes) Valid() bool {
 	switch e {
 	case WebhookSubscriptionPatchEventTypesEmailBounced:
 		return true
+	case WebhookSubscriptionPatchEventTypesEmailClicked:
+		return true
 	case WebhookSubscriptionPatchEventTypesEmailComplained:
+		return true
+	case WebhookSubscriptionPatchEventTypesEmailDelivered:
+		return true
+	case WebhookSubscriptionPatchEventTypesEmailDeliveryDelayed:
+		return true
+	case WebhookSubscriptionPatchEventTypesEmailOpened:
 		return true
 	case WebhookSubscriptionPatchEventTypesEmailReceived:
 		return true
@@ -416,28 +539,31 @@ func (e ListCallsCallsGetParamsStatus) Valid() bool {
 
 // Defines values for ListEmailsEmailsGetParamsStatus.
 const (
-	ListEmailsEmailsGetParamsStatusBounced    ListEmailsEmailsGetParamsStatus = "bounced"
-	ListEmailsEmailsGetParamsStatusComplained ListEmailsEmailsGetParamsStatus = "complained"
-	ListEmailsEmailsGetParamsStatusFailed     ListEmailsEmailsGetParamsStatus = "failed"
-	ListEmailsEmailsGetParamsStatusQueued     ListEmailsEmailsGetParamsStatus = "queued"
-	ListEmailsEmailsGetParamsStatusReceived   ListEmailsEmailsGetParamsStatus = "received"
-	ListEmailsEmailsGetParamsStatusSent       ListEmailsEmailsGetParamsStatus = "sent"
+	Bounced    ListEmailsEmailsGetParamsStatus = "bounced"
+	Complained ListEmailsEmailsGetParamsStatus = "complained"
+	Delivered  ListEmailsEmailsGetParamsStatus = "delivered"
+	Failed     ListEmailsEmailsGetParamsStatus = "failed"
+	Queued     ListEmailsEmailsGetParamsStatus = "queued"
+	Received   ListEmailsEmailsGetParamsStatus = "received"
+	Sent       ListEmailsEmailsGetParamsStatus = "sent"
 )
 
 // Valid indicates whether the value is a known member of the ListEmailsEmailsGetParamsStatus enum.
 func (e ListEmailsEmailsGetParamsStatus) Valid() bool {
 	switch e {
-	case ListEmailsEmailsGetParamsStatusBounced:
+	case Bounced:
 		return true
-	case ListEmailsEmailsGetParamsStatusComplained:
+	case Complained:
 		return true
-	case ListEmailsEmailsGetParamsStatusFailed:
+	case Delivered:
 		return true
-	case ListEmailsEmailsGetParamsStatusQueued:
+	case Failed:
 		return true
-	case ListEmailsEmailsGetParamsStatusReceived:
+	case Queued:
 		return true
-	case ListEmailsEmailsGetParamsStatusSent:
+	case Received:
+		return true
+	case Sent:
 		return true
 	default:
 		return false
@@ -462,6 +588,24 @@ func (e ListEmailsEmailsGetParamsDirection) Valid() bool {
 	}
 }
 
+// Defines values for GetEmailStatsEmailsStatsGetParamsBucket.
+const (
+	GetEmailStatsEmailsStatsGetParamsBucketDay  GetEmailStatsEmailsStatsGetParamsBucket = "day"
+	GetEmailStatsEmailsStatsGetParamsBucketHour GetEmailStatsEmailsStatsGetParamsBucket = "hour"
+)
+
+// Valid indicates whether the value is a known member of the GetEmailStatsEmailsStatsGetParamsBucket enum.
+func (e GetEmailStatsEmailsStatsGetParamsBucket) Valid() bool {
+	switch e {
+	case GetEmailStatsEmailsStatsGetParamsBucketDay:
+		return true
+	case GetEmailStatsEmailsStatsGetParamsBucketHour:
+		return true
+	default:
+		return false
+	}
+}
+
 // CallCreate defines model for CallCreate.
 type CallCreate struct {
 	ConversationId *openapi_types.UUID     `json:"conversation_id,omitempty"`
@@ -472,15 +616,6 @@ type CallCreate struct {
 	SystemPrompt   *string                 `json:"system_prompt,omitempty"`
 	To             string                  `json:"to"`
 	VoiceConfig    *VoiceConfig            `json:"voice_config,omitempty"`
-}
-
-// CallEventResponse defines model for CallEventResponse.
-type CallEventResponse struct {
-	CallId     openapi_types.UUID     `json:"call_id"`
-	Id         openapi_types.UUID     `json:"id"`
-	Kind       string                 `json:"kind"`
-	OccurredAt time.Time              `json:"occurred_at"`
-	Payload    map[string]interface{} `json:"payload"`
 }
 
 // CallListResponse defines model for CallListResponse.
@@ -515,12 +650,26 @@ type CallResponseDirection string
 // CallResponseStatus defines model for CallResponse.Status.
 type CallResponseStatus string
 
-// DkimRecordSchema One DNS CNAME the tenant must publish before SES verifies the domain.
-type DkimRecordSchema struct {
+// DnsRecordSchema One DNS record the tenant must publish for a sending domain.
+//
+// Covers DKIM CNAMEs, MAIL FROM MX, and SPF TXT records.
+type DnsRecordSchema struct {
 	Name                 string                 `json:"name"`
-	Type                 *string                `json:"type,omitempty"`
+	Priority             *int                   `json:"priority,omitempty"`
+	Type                 *DnsRecordSchemaType   `json:"type,omitempty"`
 	Value                string                 `json:"value"`
 	AdditionalProperties map[string]interface{} `json:"-"`
+}
+
+// DnsRecordSchemaType defines model for DnsRecordSchema.Type.
+type DnsRecordSchemaType string
+
+// DomainCheckResponse defines model for DomainCheckResponse.
+type DomainCheckResponse struct {
+	Domain          string   `json:"domain"`
+	ExistingMx      []string `json:"existing_mx"`
+	InUse           bool     `json:"in_use"`
+	SuggestedDomain string   `json:"suggested_domain"`
 }
 
 // EmailAttachmentResponse One inbound MIME attachment as exposed to API consumers.
@@ -581,11 +730,10 @@ type EmailDomainListResponse struct {
 //   - Hail-mail addressing — the user/org prefix pair (only valid on
 //     “kind='hail_mail'“ rows; the handler returns 422 if a tenant tries
 //     to PATCH these on a custom row).
-//   - Inbound action — “inbound_enabled“ + at least one of “forward_to“
-//     / “webhook_url“ + the optional “forward_rate_per_hour“ cap. These
-//     apply to either kind, but this milestone routes inbound only to
-//     “hail_mail“ rows; custom-domain inbound (MX delegation) is the
-//     next milestone.
+//   - Inbound action — “inbound_enabled“ + “forward_to“ + the optional
+//     “forward_rate_per_hour“ cap. These apply to either kind, but this
+//     milestone routes inbound only to “hail_mail“ rows; custom-domain
+//     inbound (MX delegation) is the next milestone.
 //
 // Every field is independently optional so “PATCH“ semantics work the
 // way callers expect: send only what you want to change. The route
@@ -593,31 +741,22 @@ type EmailDomainListResponse struct {
 // requires an action when “inbound_enabled“ is true) — we don't
 // re-implement it here because the patch may merge with existing row
 // state to satisfy the invariant.
-//
-// NOTE: the plaintext webhook secret is NOT a PATCH field. It's set at
-// create time and rotated via a dedicated endpoint that returns the new
-// plaintext exactly once. “webhook_secret_encrypted“ is server-managed and
-// never accepted on the wire.
 type EmailDomainPatch struct {
 	ForwardRatePerHour *int      `json:"forward_rate_per_hour,omitempty"`
 	ForwardTo          *[]string `json:"forward_to,omitempty"`
 	InboundEnabled     *bool     `json:"inbound_enabled,omitempty"`
 	LocalPrefixOrg     *string   `json:"local_prefix_org,omitempty"`
 	LocalPrefixUser    *string   `json:"local_prefix_user,omitempty"`
-	WebhookUrl         *string   `json:"webhook_url,omitempty"`
 }
 
 // EmailDomainResponse Read view for an email domain.
 //
 // The inbound-action fields (“inbound_enabled“, “forward_to“,
-// “webhook_url“, “forward_rate_per_hour“) surface what the row has
-// configured for incoming mail. “webhook_secret_encrypted“ is intentionally
-// NOT exposed — the plaintext secret is returned exactly once at create
-// or rotate via a dedicated endpoint, and the ciphertext that
-// sits on the row is server-internal.
+// “forward_rate_per_hour“) surface what the row has configured for
+// incoming mail.
 type EmailDomainResponse struct {
 	CreatedAt          time.Time                             `json:"created_at"`
-	DkimRecords        []DkimRecordSchema                    `json:"dkim_records"`
+	DnsRecords         []DnsRecordSchema                     `json:"dns_records"`
 	Domain             string                                `json:"domain"`
 	ForwardRatePerHour *int                                  `json:"forward_rate_per_hour,omitempty"`
 	ForwardTo          *[]string                             `json:"forward_to,omitempty"`
@@ -627,13 +766,13 @@ type EmailDomainResponse struct {
 	LocalPrefixOrg     *string                               `json:"local_prefix_org"`
 	LocalPrefixUser    *string                               `json:"local_prefix_user"`
 	MailFromDomain     *string                               `json:"mail_from_domain"`
+	MailFromStatus     *string                               `json:"mail_from_status,omitempty"`
 	OrganizationId     openapi_types.UUID                    `json:"organization_id"`
 	Provider           string                                `json:"provider"`
+	ReceiveReady       *bool                                 `json:"receive_ready,omitempty"`
 	UpdatedAt          time.Time                             `json:"updated_at"`
 	VerificationStatus EmailDomainResponseVerificationStatus `json:"verification_status"`
 	VerifiedAt         *time.Time                            `json:"verified_at"`
-	WebhookSecret      *string                               `json:"webhook_secret,omitempty"`
-	WebhookUrl         *string                               `json:"webhook_url,omitempty"`
 }
 
 // EmailDomainResponseKind defines model for EmailDomainResponse.Kind.
@@ -641,6 +780,23 @@ type EmailDomainResponseKind string
 
 // EmailDomainResponseVerificationStatus defines model for EmailDomainResponse.VerificationStatus.
 type EmailDomainResponseVerificationStatus string
+
+// EmailEventListResponse defines model for EmailEventListResponse.
+type EmailEventListResponse struct {
+	Items []EmailEventResponse `json:"items"`
+}
+
+// EmailEventResponse defines model for EmailEventResponse.
+type EmailEventResponse struct {
+	EmailId    openapi_types.UUID     `json:"email_id"`
+	Id         openapi_types.UUID     `json:"id"`
+	Kind       EmailEventResponseKind `json:"kind"`
+	OccurredAt time.Time              `json:"occurred_at"`
+	Payload    map[string]interface{} `json:"payload"`
+}
+
+// EmailEventResponseKind defines model for EmailEventResponse.Kind.
+type EmailEventResponseKind string
 
 // EmailListResponse defines model for EmailListResponse.
 type EmailListResponse struct {
@@ -665,6 +821,7 @@ type EmailResponse struct {
 	FromAddress        string                     `json:"from_address"`
 	Id                 openapi_types.UUID         `json:"id"`
 	InReplyTo          *string                    `json:"in_reply_to,omitempty"`
+	LastEventAt        *time.Time                 `json:"last_event_at,omitempty"`
 	MessageId          *string                    `json:"message_id,omitempty"`
 	Metadata           *map[string]interface{}    `json:"metadata,omitempty"`
 	OrganizationId     openapi_types.UUID         `json:"organization_id"`
@@ -688,6 +845,61 @@ type EmailResponseDirection string
 
 // EmailResponseStatus defines model for EmailResponse.Status.
 type EmailResponseStatus string
+
+// EmailStatsBucket defines model for EmailStatsBucket.
+type EmailStatsBucket struct {
+	Bounced         *int      `json:"bounced,omitempty"`
+	BouncedHard     *int      `json:"bounced_hard,omitempty"`
+	BucketStart     time.Time `json:"bucket_start"`
+	Clicked         *int      `json:"clicked,omitempty"`
+	Complained      *int      `json:"complained,omitempty"`
+	Delivered       *int      `json:"delivered,omitempty"`
+	DeliveryDelayed *int      `json:"delivery_delayed,omitempty"`
+	Opened          *int      `json:"opened,omitempty"`
+	Rejected        *int      `json:"rejected,omitempty"`
+	Sent            *int      `json:"sent,omitempty"`
+	UniqueClicked   *int      `json:"unique_clicked,omitempty"`
+	UniqueOpened    *int      `json:"unique_opened,omitempty"`
+}
+
+// EmailStatsCounts defines model for EmailStatsCounts.
+type EmailStatsCounts struct {
+	Bounced         *int `json:"bounced,omitempty"`
+	BouncedHard     *int `json:"bounced_hard,omitempty"`
+	Clicked         *int `json:"clicked,omitempty"`
+	Complained      *int `json:"complained,omitempty"`
+	Delivered       *int `json:"delivered,omitempty"`
+	DeliveryDelayed *int `json:"delivery_delayed,omitempty"`
+	Opened          *int `json:"opened,omitempty"`
+	Rejected        *int `json:"rejected,omitempty"`
+	Sent            *int `json:"sent,omitempty"`
+	UniqueClicked   *int `json:"unique_clicked,omitempty"`
+	UniqueOpened    *int `json:"unique_opened,omitempty"`
+}
+
+// EmailStatsRates All None when sent == 0 in the window.
+type EmailStatsRates struct {
+	Bounce    *float32 `json:"bounce,omitempty"`
+	Click     *float32 `json:"click,omitempty"`
+	Complaint *float32 `json:"complaint,omitempty"`
+	Delivery  *float32 `json:"delivery,omitempty"`
+	Open      *float32 `json:"open,omitempty"`
+}
+
+// EmailStatsResponse defines model for EmailStatsResponse.
+type EmailStatsResponse struct {
+	Bucket EmailStatsResponseBucket `json:"bucket"`
+	From   time.Time                `json:"from"`
+
+	// Rates All None when sent == 0 in the window.
+	Rates  EmailStatsRates    `json:"rates"`
+	Series []EmailStatsBucket `json:"series"`
+	To     time.Time          `json:"to"`
+	Totals EmailStatsCounts   `json:"totals"`
+}
+
+// EmailStatsResponseBucket defines model for EmailStatsResponse.Bucket.
+type EmailStatsResponseBucket string
 
 // EmailSummary Trimmed view for list endpoints — drops the message bodies.
 //
@@ -721,10 +933,24 @@ type EmailSummaryDirection string
 // EmailSummaryStatus defines model for EmailSummary.Status.
 type EmailSummaryStatus string
 
+// EventResponse One event on the unified GET /events stream (call or email).
+type EventResponse struct {
+	CallId     *openapi_types.UUID    `json:"call_id,omitempty"`
+	EmailId    *openapi_types.UUID    `json:"email_id,omitempty"`
+	Id         openapi_types.UUID     `json:"id"`
+	Kind       string                 `json:"kind"`
+	OccurredAt time.Time              `json:"occurred_at"`
+	Payload    map[string]interface{} `json:"payload"`
+	Source     EventResponseSource    `json:"source"`
+}
+
+// EventResponseSource defines model for EventResponse.Source.
+type EventResponseSource string
+
 // EventStreamResponse defines model for EventStreamResponse.
 type EventStreamResponse struct {
 	CallStatus *EventStreamResponseCallStatus `json:"call_status,omitempty"`
-	Items      []CallEventResponse            `json:"items"`
+	Items      []EventResponse                `json:"items"`
 	NextCursor *string                        `json:"next_cursor,omitempty"`
 }
 
@@ -795,11 +1021,6 @@ type WebhookDeliveryResponse struct {
 
 // WebhookDeliveryResponseStatus defines model for WebhookDeliveryResponse.Status.
 type WebhookDeliveryResponseStatus string
-
-// WebhookSecretResponse Plaintext webhook secret, returned exactly once (create/rotate).
-type WebhookSecretResponse struct {
-	WebhookSecret string `json:"webhook_secret"`
-}
 
 // WebhookSubscriptionCreate defines model for WebhookSubscriptionCreate.
 type WebhookSubscriptionCreate struct {
@@ -885,6 +1106,12 @@ type CreateEmailDomainEmailDomainsPostParams struct {
 	Authorization *string `json:"authorization,omitempty"`
 }
 
+// CheckDomainEmailDomainsCheckDomainGetParams defines parameters for CheckDomainEmailDomainsCheckDomainGet.
+type CheckDomainEmailDomainsCheckDomainGetParams struct {
+	Domain        string  `form:"domain" json:"domain"`
+	Authorization *string `json:"authorization,omitempty"`
+}
+
 // DeleteEmailDomainEmailDomainsDomainIdDeleteParams defines parameters for DeleteEmailDomainEmailDomainsDomainIdDelete.
 type DeleteEmailDomainEmailDomainsDomainIdDeleteParams struct {
 	Authorization *string `json:"authorization,omitempty"`
@@ -897,11 +1124,6 @@ type GetEmailDomainEmailDomainsDomainIdGetParams struct {
 
 // PatchEmailDomainEmailDomainsDomainIdPatchParams defines parameters for PatchEmailDomainEmailDomainsDomainIdPatch.
 type PatchEmailDomainEmailDomainsDomainIdPatchParams struct {
-	Authorization *string `json:"authorization,omitempty"`
-}
-
-// RotateWebhookSecretEmailDomainsDomainIdRotateWebhookSecretPostParams defines parameters for RotateWebhookSecretEmailDomainsDomainIdRotateWebhookSecretPost.
-type RotateWebhookSecretEmailDomainsDomainIdRotateWebhookSecretPostParams struct {
 	Authorization *string `json:"authorization,omitempty"`
 }
 
@@ -931,6 +1153,17 @@ type CreateEmailEmailsPostParams struct {
 	IdempotencyKey *string `json:"Idempotency-Key,omitempty"`
 }
 
+// GetEmailStatsEmailsStatsGetParams defines parameters for GetEmailStatsEmailsStatsGet.
+type GetEmailStatsEmailsStatsGetParams struct {
+	From          *time.Time                               `form:"from,omitempty" json:"from,omitempty"`
+	To            *time.Time                               `form:"to,omitempty" json:"to,omitempty"`
+	Bucket        *GetEmailStatsEmailsStatsGetParamsBucket `form:"bucket,omitempty" json:"bucket,omitempty"`
+	Authorization *string                                  `json:"authorization,omitempty"`
+}
+
+// GetEmailStatsEmailsStatsGetParamsBucket defines parameters for GetEmailStatsEmailsStatsGet.
+type GetEmailStatsEmailsStatsGetParamsBucket string
+
 // GetEmailEmailsEmailIdGetParams defines parameters for GetEmailEmailsEmailIdGet.
 type GetEmailEmailsEmailIdGetParams struct {
 	Authorization *string `json:"authorization,omitempty"`
@@ -938,6 +1171,11 @@ type GetEmailEmailsEmailIdGetParams struct {
 
 // GetEmailAttachmentEmailsEmailIdAttachmentsAttachmentIdGetParams defines parameters for GetEmailAttachmentEmailsEmailIdAttachmentsAttachmentIdGet.
 type GetEmailAttachmentEmailsEmailIdAttachmentsAttachmentIdGetParams struct {
+	Authorization *string `json:"authorization,omitempty"`
+}
+
+// ListEmailEventsEmailsEmailIdEventsGetParams defines parameters for ListEmailEventsEmailsEmailIdEventsGet.
+type ListEmailEventsEmailsEmailIdEventsGetParams struct {
 	Authorization *string `json:"authorization,omitempty"`
 }
 
@@ -1017,25 +1255,25 @@ type CreateSubscriptionWebhooksPostJSONRequestBody = WebhookSubscriptionCreate
 // PatchSubscriptionWebhooksSubIdPatchJSONRequestBody defines body for PatchSubscriptionWebhooksSubIdPatch for application/json ContentType.
 type PatchSubscriptionWebhooksSubIdPatchJSONRequestBody = WebhookSubscriptionPatch
 
-// Getter for additional properties for DkimRecordSchema. Returns the specified
+// Getter for additional properties for DnsRecordSchema. Returns the specified
 // element and whether it was found
-func (a DkimRecordSchema) Get(fieldName string) (value interface{}, found bool) {
+func (a DnsRecordSchema) Get(fieldName string) (value interface{}, found bool) {
 	if a.AdditionalProperties != nil {
 		value, found = a.AdditionalProperties[fieldName]
 	}
 	return
 }
 
-// Setter for additional properties for DkimRecordSchema
-func (a *DkimRecordSchema) Set(fieldName string, value interface{}) {
+// Setter for additional properties for DnsRecordSchema
+func (a *DnsRecordSchema) Set(fieldName string, value interface{}) {
 	if a.AdditionalProperties == nil {
 		a.AdditionalProperties = make(map[string]interface{})
 	}
 	a.AdditionalProperties[fieldName] = value
 }
 
-// Override default JSON handling for DkimRecordSchema to handle AdditionalProperties
-func (a *DkimRecordSchema) UnmarshalJSON(b []byte) error {
+// Override default JSON handling for DnsRecordSchema to handle AdditionalProperties
+func (a *DnsRecordSchema) UnmarshalJSON(b []byte) error {
 	object := make(map[string]json.RawMessage)
 	err := json.Unmarshal(b, &object)
 	if err != nil {
@@ -1048,6 +1286,14 @@ func (a *DkimRecordSchema) UnmarshalJSON(b []byte) error {
 			return fmt.Errorf("error reading 'name': %w", err)
 		}
 		delete(object, "name")
+	}
+
+	if raw, found := object["priority"]; found {
+		err = json.Unmarshal(raw, &a.Priority)
+		if err != nil {
+			return fmt.Errorf("error reading 'priority': %w", err)
+		}
+		delete(object, "priority")
 	}
 
 	if raw, found := object["type"]; found {
@@ -1080,14 +1326,21 @@ func (a *DkimRecordSchema) UnmarshalJSON(b []byte) error {
 	return nil
 }
 
-// Override default JSON handling for DkimRecordSchema to handle AdditionalProperties
-func (a DkimRecordSchema) MarshalJSON() ([]byte, error) {
+// Override default JSON handling for DnsRecordSchema to handle AdditionalProperties
+func (a DnsRecordSchema) MarshalJSON() ([]byte, error) {
 	var err error
 	object := make(map[string]json.RawMessage)
 
 	object["name"], err = json.Marshal(a.Name)
 	if err != nil {
 		return nil, fmt.Errorf("error marshaling 'name': %w", err)
+	}
+
+	if a.Priority != nil {
+		object["priority"], err = json.Marshal(a.Priority)
+		if err != nil {
+			return nil, fmt.Errorf("error marshaling 'priority': %w", err)
+		}
 	}
 
 	if a.Type != nil {
@@ -1265,6 +1518,9 @@ type ClientInterface interface {
 
 	CreateEmailDomainEmailDomainsPost(ctx context.Context, params *CreateEmailDomainEmailDomainsPostParams, body CreateEmailDomainEmailDomainsPostJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
+	// CheckDomainEmailDomainsCheckDomainGet request
+	CheckDomainEmailDomainsCheckDomainGet(ctx context.Context, params *CheckDomainEmailDomainsCheckDomainGetParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
 	// DeleteEmailDomainEmailDomainsDomainIdDelete request
 	DeleteEmailDomainEmailDomainsDomainIdDelete(ctx context.Context, domainId openapi_types.UUID, params *DeleteEmailDomainEmailDomainsDomainIdDeleteParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
@@ -1275,9 +1531,6 @@ type ClientInterface interface {
 	PatchEmailDomainEmailDomainsDomainIdPatchWithBody(ctx context.Context, domainId openapi_types.UUID, params *PatchEmailDomainEmailDomainsDomainIdPatchParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	PatchEmailDomainEmailDomainsDomainIdPatch(ctx context.Context, domainId openapi_types.UUID, params *PatchEmailDomainEmailDomainsDomainIdPatchParams, body PatchEmailDomainEmailDomainsDomainIdPatchJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
-
-	// RotateWebhookSecretEmailDomainsDomainIdRotateWebhookSecretPost request
-	RotateWebhookSecretEmailDomainsDomainIdRotateWebhookSecretPost(ctx context.Context, domainId openapi_types.UUID, params *RotateWebhookSecretEmailDomainsDomainIdRotateWebhookSecretPostParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// VerifyEmailDomainEmailDomainsDomainIdVerifyPost request
 	VerifyEmailDomainEmailDomainsDomainIdVerifyPost(ctx context.Context, domainId openapi_types.UUID, params *VerifyEmailDomainEmailDomainsDomainIdVerifyPostParams, reqEditors ...RequestEditorFn) (*http.Response, error)
@@ -1290,11 +1543,17 @@ type ClientInterface interface {
 
 	CreateEmailEmailsPost(ctx context.Context, params *CreateEmailEmailsPostParams, body CreateEmailEmailsPostJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
+	// GetEmailStatsEmailsStatsGet request
+	GetEmailStatsEmailsStatsGet(ctx context.Context, params *GetEmailStatsEmailsStatsGetParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
 	// GetEmailEmailsEmailIdGet request
 	GetEmailEmailsEmailIdGet(ctx context.Context, emailId openapi_types.UUID, params *GetEmailEmailsEmailIdGetParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// GetEmailAttachmentEmailsEmailIdAttachmentsAttachmentIdGet request
 	GetEmailAttachmentEmailsEmailIdAttachmentsAttachmentIdGet(ctx context.Context, emailId openapi_types.UUID, attachmentId openapi_types.UUID, params *GetEmailAttachmentEmailsEmailIdAttachmentsAttachmentIdGetParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// ListEmailEventsEmailsEmailIdEventsGet request
+	ListEmailEventsEmailsEmailIdEventsGet(ctx context.Context, emailId openapi_types.UUID, params *ListEmailEventsEmailsEmailIdEventsGetParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// GetEmailRawEmailsEmailIdRawGet request
 	GetEmailRawEmailsEmailIdRawGet(ctx context.Context, emailId openapi_types.UUID, params *GetEmailRawEmailsEmailIdRawGetParams, reqEditors ...RequestEditorFn) (*http.Response, error)
@@ -1418,6 +1677,18 @@ func (c *Client) CreateEmailDomainEmailDomainsPost(ctx context.Context, params *
 	return c.Client.Do(req)
 }
 
+func (c *Client) CheckDomainEmailDomainsCheckDomainGet(ctx context.Context, params *CheckDomainEmailDomainsCheckDomainGetParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewCheckDomainEmailDomainsCheckDomainGetRequest(c.Server, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
 func (c *Client) DeleteEmailDomainEmailDomainsDomainIdDelete(ctx context.Context, domainId openapi_types.UUID, params *DeleteEmailDomainEmailDomainsDomainIdDeleteParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewDeleteEmailDomainEmailDomainsDomainIdDeleteRequest(c.Server, domainId, params)
 	if err != nil {
@@ -1456,18 +1727,6 @@ func (c *Client) PatchEmailDomainEmailDomainsDomainIdPatchWithBody(ctx context.C
 
 func (c *Client) PatchEmailDomainEmailDomainsDomainIdPatch(ctx context.Context, domainId openapi_types.UUID, params *PatchEmailDomainEmailDomainsDomainIdPatchParams, body PatchEmailDomainEmailDomainsDomainIdPatchJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewPatchEmailDomainEmailDomainsDomainIdPatchRequest(c.Server, domainId, params, body)
-	if err != nil {
-		return nil, err
-	}
-	req = req.WithContext(ctx)
-	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
-		return nil, err
-	}
-	return c.Client.Do(req)
-}
-
-func (c *Client) RotateWebhookSecretEmailDomainsDomainIdRotateWebhookSecretPost(ctx context.Context, domainId openapi_types.UUID, params *RotateWebhookSecretEmailDomainsDomainIdRotateWebhookSecretPostParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewRotateWebhookSecretEmailDomainsDomainIdRotateWebhookSecretPostRequest(c.Server, domainId, params)
 	if err != nil {
 		return nil, err
 	}
@@ -1526,6 +1785,18 @@ func (c *Client) CreateEmailEmailsPost(ctx context.Context, params *CreateEmailE
 	return c.Client.Do(req)
 }
 
+func (c *Client) GetEmailStatsEmailsStatsGet(ctx context.Context, params *GetEmailStatsEmailsStatsGetParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetEmailStatsEmailsStatsGetRequest(c.Server, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
 func (c *Client) GetEmailEmailsEmailIdGet(ctx context.Context, emailId openapi_types.UUID, params *GetEmailEmailsEmailIdGetParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewGetEmailEmailsEmailIdGetRequest(c.Server, emailId, params)
 	if err != nil {
@@ -1540,6 +1811,18 @@ func (c *Client) GetEmailEmailsEmailIdGet(ctx context.Context, emailId openapi_t
 
 func (c *Client) GetEmailAttachmentEmailsEmailIdAttachmentsAttachmentIdGet(ctx context.Context, emailId openapi_types.UUID, attachmentId openapi_types.UUID, params *GetEmailAttachmentEmailsEmailIdAttachmentsAttachmentIdGetParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewGetEmailAttachmentEmailsEmailIdAttachmentsAttachmentIdGetRequest(c.Server, emailId, attachmentId, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) ListEmailEventsEmailsEmailIdEventsGet(ctx context.Context, emailId openapi_types.UUID, params *ListEmailEventsEmailsEmailIdEventsGetParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewListEmailEventsEmailsEmailIdEventsGetRequest(c.Server, emailId, params)
 	if err != nil {
 		return nil, err
 	}
@@ -2068,6 +2351,66 @@ func NewCreateEmailDomainEmailDomainsPostRequestWithBody(server string, params *
 	return req, nil
 }
 
+// NewCheckDomainEmailDomainsCheckDomainGetRequest generates requests for CheckDomainEmailDomainsCheckDomainGet
+func NewCheckDomainEmailDomainsCheckDomainGetRequest(server string, params *CheckDomainEmailDomainsCheckDomainGetParams) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/email-domains/check-domain")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+		queryValues := queryURL.Query()
+
+		if queryFrag, err := runtime.StyleParamWithOptions("form", true, "domain", params.Domain, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+			return nil, err
+		} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+			return nil, err
+		} else {
+			for k, v := range parsed {
+				for _, v2 := range v {
+					queryValues.Add(k, v2)
+				}
+			}
+		}
+
+		queryURL.RawQuery = queryValues.Encode()
+	}
+
+	req, err := http.NewRequest("GET", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+
+		if params.Authorization != nil {
+			var headerParam0 string
+
+			headerParam0, err = runtime.StyleParamWithOptions("simple", false, "authorization", *params.Authorization, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationHeader, Type: "string", Format: ""})
+			if err != nil {
+				return nil, err
+			}
+
+			req.Header.Set("authorization", headerParam0)
+		}
+
+	}
+
+	return req, nil
+}
+
 // NewDeleteEmailDomainEmailDomainsDomainIdDeleteRequest generates requests for DeleteEmailDomainEmailDomainsDomainIdDelete
 func NewDeleteEmailDomainEmailDomainsDomainIdDeleteRequest(server string, domainId openapi_types.UUID, params *DeleteEmailDomainEmailDomainsDomainIdDeleteParams) (*http.Request, error) {
 	var err error
@@ -2209,55 +2552,6 @@ func NewPatchEmailDomainEmailDomainsDomainIdPatchRequestWithBody(server string, 
 	}
 
 	req.Header.Add("Content-Type", contentType)
-
-	if params != nil {
-
-		if params.Authorization != nil {
-			var headerParam0 string
-
-			headerParam0, err = runtime.StyleParamWithOptions("simple", false, "authorization", *params.Authorization, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationHeader, Type: "string", Format: ""})
-			if err != nil {
-				return nil, err
-			}
-
-			req.Header.Set("authorization", headerParam0)
-		}
-
-	}
-
-	return req, nil
-}
-
-// NewRotateWebhookSecretEmailDomainsDomainIdRotateWebhookSecretPostRequest generates requests for RotateWebhookSecretEmailDomainsDomainIdRotateWebhookSecretPost
-func NewRotateWebhookSecretEmailDomainsDomainIdRotateWebhookSecretPostRequest(server string, domainId openapi_types.UUID, params *RotateWebhookSecretEmailDomainsDomainIdRotateWebhookSecretPostParams) (*http.Request, error) {
-	var err error
-
-	var pathParam0 string
-
-	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "domain_id", domainId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
-	if err != nil {
-		return nil, err
-	}
-
-	serverURL, err := url.Parse(server)
-	if err != nil {
-		return nil, err
-	}
-
-	operationPath := fmt.Sprintf("/email-domains/%s/rotate-webhook-secret", pathParam0)
-	if operationPath[0] == '/' {
-		operationPath = "." + operationPath
-	}
-
-	queryURL, err := serverURL.Parse(operationPath)
-	if err != nil {
-		return nil, err
-	}
-
-	req, err := http.NewRequest("POST", queryURL.String(), nil)
-	if err != nil {
-		return nil, err
-	}
 
 	if params != nil {
 
@@ -2504,6 +2798,102 @@ func NewCreateEmailEmailsPostRequestWithBody(server string, params *CreateEmailE
 	return req, nil
 }
 
+// NewGetEmailStatsEmailsStatsGetRequest generates requests for GetEmailStatsEmailsStatsGet
+func NewGetEmailStatsEmailsStatsGetRequest(server string, params *GetEmailStatsEmailsStatsGetParams) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/emails/stats")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+		queryValues := queryURL.Query()
+
+		if params.From != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "from", *params.From, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: "date-time"}); err != nil {
+				return nil, err
+			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+				return nil, err
+			} else {
+				for k, v := range parsed {
+					for _, v2 := range v {
+						queryValues.Add(k, v2)
+					}
+				}
+			}
+
+		}
+
+		if params.To != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "to", *params.To, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: "date-time"}); err != nil {
+				return nil, err
+			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+				return nil, err
+			} else {
+				for k, v := range parsed {
+					for _, v2 := range v {
+						queryValues.Add(k, v2)
+					}
+				}
+			}
+
+		}
+
+		if params.Bucket != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "bucket", *params.Bucket, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+				return nil, err
+			} else {
+				for k, v := range parsed {
+					for _, v2 := range v {
+						queryValues.Add(k, v2)
+					}
+				}
+			}
+
+		}
+
+		queryURL.RawQuery = queryValues.Encode()
+	}
+
+	req, err := http.NewRequest("GET", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+
+		if params.Authorization != nil {
+			var headerParam0 string
+
+			headerParam0, err = runtime.StyleParamWithOptions("simple", false, "authorization", *params.Authorization, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationHeader, Type: "string", Format: ""})
+			if err != nil {
+				return nil, err
+			}
+
+			req.Header.Set("authorization", headerParam0)
+		}
+
+	}
+
+	return req, nil
+}
+
 // NewGetEmailEmailsEmailIdGetRequest generates requests for GetEmailEmailsEmailIdGet
 func NewGetEmailEmailsEmailIdGetRequest(server string, emailId openapi_types.UUID, params *GetEmailEmailsEmailIdGetParams) (*http.Request, error) {
 	var err error
@@ -2577,6 +2967,55 @@ func NewGetEmailAttachmentEmailsEmailIdAttachmentsAttachmentIdGetRequest(server 
 	}
 
 	operationPath := fmt.Sprintf("/emails/%s/attachments/%s", pathParam0, pathParam1)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("GET", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+
+		if params.Authorization != nil {
+			var headerParam0 string
+
+			headerParam0, err = runtime.StyleParamWithOptions("simple", false, "authorization", *params.Authorization, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationHeader, Type: "string", Format: ""})
+			if err != nil {
+				return nil, err
+			}
+
+			req.Header.Set("authorization", headerParam0)
+		}
+
+	}
+
+	return req, nil
+}
+
+// NewListEmailEventsEmailsEmailIdEventsGetRequest generates requests for ListEmailEventsEmailsEmailIdEventsGet
+func NewListEmailEventsEmailsEmailIdEventsGetRequest(server string, emailId openapi_types.UUID, params *ListEmailEventsEmailsEmailIdEventsGetParams) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "email_id", emailId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/emails/%s/events", pathParam0)
 	if operationPath[0] == '/' {
 		operationPath = "." + operationPath
 	}
@@ -3346,6 +3785,9 @@ type ClientWithResponsesInterface interface {
 
 	CreateEmailDomainEmailDomainsPostWithResponse(ctx context.Context, params *CreateEmailDomainEmailDomainsPostParams, body CreateEmailDomainEmailDomainsPostJSONRequestBody, reqEditors ...RequestEditorFn) (*CreateEmailDomainEmailDomainsPostResponse, error)
 
+	// CheckDomainEmailDomainsCheckDomainGetWithResponse request
+	CheckDomainEmailDomainsCheckDomainGetWithResponse(ctx context.Context, params *CheckDomainEmailDomainsCheckDomainGetParams, reqEditors ...RequestEditorFn) (*CheckDomainEmailDomainsCheckDomainGetResponse, error)
+
 	// DeleteEmailDomainEmailDomainsDomainIdDeleteWithResponse request
 	DeleteEmailDomainEmailDomainsDomainIdDeleteWithResponse(ctx context.Context, domainId openapi_types.UUID, params *DeleteEmailDomainEmailDomainsDomainIdDeleteParams, reqEditors ...RequestEditorFn) (*DeleteEmailDomainEmailDomainsDomainIdDeleteResponse, error)
 
@@ -3356,9 +3798,6 @@ type ClientWithResponsesInterface interface {
 	PatchEmailDomainEmailDomainsDomainIdPatchWithBodyWithResponse(ctx context.Context, domainId openapi_types.UUID, params *PatchEmailDomainEmailDomainsDomainIdPatchParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*PatchEmailDomainEmailDomainsDomainIdPatchResponse, error)
 
 	PatchEmailDomainEmailDomainsDomainIdPatchWithResponse(ctx context.Context, domainId openapi_types.UUID, params *PatchEmailDomainEmailDomainsDomainIdPatchParams, body PatchEmailDomainEmailDomainsDomainIdPatchJSONRequestBody, reqEditors ...RequestEditorFn) (*PatchEmailDomainEmailDomainsDomainIdPatchResponse, error)
-
-	// RotateWebhookSecretEmailDomainsDomainIdRotateWebhookSecretPostWithResponse request
-	RotateWebhookSecretEmailDomainsDomainIdRotateWebhookSecretPostWithResponse(ctx context.Context, domainId openapi_types.UUID, params *RotateWebhookSecretEmailDomainsDomainIdRotateWebhookSecretPostParams, reqEditors ...RequestEditorFn) (*RotateWebhookSecretEmailDomainsDomainIdRotateWebhookSecretPostResponse, error)
 
 	// VerifyEmailDomainEmailDomainsDomainIdVerifyPostWithResponse request
 	VerifyEmailDomainEmailDomainsDomainIdVerifyPostWithResponse(ctx context.Context, domainId openapi_types.UUID, params *VerifyEmailDomainEmailDomainsDomainIdVerifyPostParams, reqEditors ...RequestEditorFn) (*VerifyEmailDomainEmailDomainsDomainIdVerifyPostResponse, error)
@@ -3371,11 +3810,17 @@ type ClientWithResponsesInterface interface {
 
 	CreateEmailEmailsPostWithResponse(ctx context.Context, params *CreateEmailEmailsPostParams, body CreateEmailEmailsPostJSONRequestBody, reqEditors ...RequestEditorFn) (*CreateEmailEmailsPostResponse, error)
 
+	// GetEmailStatsEmailsStatsGetWithResponse request
+	GetEmailStatsEmailsStatsGetWithResponse(ctx context.Context, params *GetEmailStatsEmailsStatsGetParams, reqEditors ...RequestEditorFn) (*GetEmailStatsEmailsStatsGetResponse, error)
+
 	// GetEmailEmailsEmailIdGetWithResponse request
 	GetEmailEmailsEmailIdGetWithResponse(ctx context.Context, emailId openapi_types.UUID, params *GetEmailEmailsEmailIdGetParams, reqEditors ...RequestEditorFn) (*GetEmailEmailsEmailIdGetResponse, error)
 
 	// GetEmailAttachmentEmailsEmailIdAttachmentsAttachmentIdGetWithResponse request
 	GetEmailAttachmentEmailsEmailIdAttachmentsAttachmentIdGetWithResponse(ctx context.Context, emailId openapi_types.UUID, attachmentId openapi_types.UUID, params *GetEmailAttachmentEmailsEmailIdAttachmentsAttachmentIdGetParams, reqEditors ...RequestEditorFn) (*GetEmailAttachmentEmailsEmailIdAttachmentsAttachmentIdGetResponse, error)
+
+	// ListEmailEventsEmailsEmailIdEventsGetWithResponse request
+	ListEmailEventsEmailsEmailIdEventsGetWithResponse(ctx context.Context, emailId openapi_types.UUID, params *ListEmailEventsEmailsEmailIdEventsGetParams, reqEditors ...RequestEditorFn) (*ListEmailEventsEmailsEmailIdEventsGetResponse, error)
 
 	// GetEmailRawEmailsEmailIdRawGetWithResponse request
 	GetEmailRawEmailsEmailIdRawGetWithResponse(ctx context.Context, emailId openapi_types.UUID, params *GetEmailRawEmailsEmailIdRawGetParams, reqEditors ...RequestEditorFn) (*GetEmailRawEmailsEmailIdRawGetResponse, error)
@@ -3530,6 +3975,29 @@ func (r CreateEmailDomainEmailDomainsPostResponse) StatusCode() int {
 	return 0
 }
 
+type CheckDomainEmailDomainsCheckDomainGetResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *DomainCheckResponse
+	JSON422      *HTTPValidationError
+}
+
+// Status returns HTTPResponse.Status
+func (r CheckDomainEmailDomainsCheckDomainGetResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r CheckDomainEmailDomainsCheckDomainGetResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
 type DeleteEmailDomainEmailDomainsDomainIdDeleteResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
@@ -3592,29 +4060,6 @@ func (r PatchEmailDomainEmailDomainsDomainIdPatchResponse) Status() string {
 
 // StatusCode returns HTTPResponse.StatusCode
 func (r PatchEmailDomainEmailDomainsDomainIdPatchResponse) StatusCode() int {
-	if r.HTTPResponse != nil {
-		return r.HTTPResponse.StatusCode
-	}
-	return 0
-}
-
-type RotateWebhookSecretEmailDomainsDomainIdRotateWebhookSecretPostResponse struct {
-	Body         []byte
-	HTTPResponse *http.Response
-	JSON200      *WebhookSecretResponse
-	JSON422      *HTTPValidationError
-}
-
-// Status returns HTTPResponse.Status
-func (r RotateWebhookSecretEmailDomainsDomainIdRotateWebhookSecretPostResponse) Status() string {
-	if r.HTTPResponse != nil {
-		return r.HTTPResponse.Status
-	}
-	return http.StatusText(0)
-}
-
-// StatusCode returns HTTPResponse.StatusCode
-func (r RotateWebhookSecretEmailDomainsDomainIdRotateWebhookSecretPostResponse) StatusCode() int {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.StatusCode
 	}
@@ -3690,6 +4135,29 @@ func (r CreateEmailEmailsPostResponse) StatusCode() int {
 	return 0
 }
 
+type GetEmailStatsEmailsStatsGetResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *EmailStatsResponse
+	JSON422      *HTTPValidationError
+}
+
+// Status returns HTTPResponse.Status
+func (r GetEmailStatsEmailsStatsGetResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetEmailStatsEmailsStatsGetResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
 type GetEmailEmailsEmailIdGetResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
@@ -3730,6 +4198,29 @@ func (r GetEmailAttachmentEmailsEmailIdAttachmentsAttachmentIdGetResponse) Statu
 
 // StatusCode returns HTTPResponse.StatusCode
 func (r GetEmailAttachmentEmailsEmailIdAttachmentsAttachmentIdGetResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type ListEmailEventsEmailsEmailIdEventsGetResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *EmailEventListResponse
+	JSON422      *HTTPValidationError
+}
+
+// Status returns HTTPResponse.Status
+func (r ListEmailEventsEmailsEmailIdEventsGetResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ListEmailEventsEmailsEmailIdEventsGetResponse) StatusCode() int {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.StatusCode
 	}
@@ -4048,6 +4539,15 @@ func (c *ClientWithResponses) CreateEmailDomainEmailDomainsPostWithResponse(ctx 
 	return ParseCreateEmailDomainEmailDomainsPostResponse(rsp)
 }
 
+// CheckDomainEmailDomainsCheckDomainGetWithResponse request returning *CheckDomainEmailDomainsCheckDomainGetResponse
+func (c *ClientWithResponses) CheckDomainEmailDomainsCheckDomainGetWithResponse(ctx context.Context, params *CheckDomainEmailDomainsCheckDomainGetParams, reqEditors ...RequestEditorFn) (*CheckDomainEmailDomainsCheckDomainGetResponse, error) {
+	rsp, err := c.CheckDomainEmailDomainsCheckDomainGet(ctx, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseCheckDomainEmailDomainsCheckDomainGetResponse(rsp)
+}
+
 // DeleteEmailDomainEmailDomainsDomainIdDeleteWithResponse request returning *DeleteEmailDomainEmailDomainsDomainIdDeleteResponse
 func (c *ClientWithResponses) DeleteEmailDomainEmailDomainsDomainIdDeleteWithResponse(ctx context.Context, domainId openapi_types.UUID, params *DeleteEmailDomainEmailDomainsDomainIdDeleteParams, reqEditors ...RequestEditorFn) (*DeleteEmailDomainEmailDomainsDomainIdDeleteResponse, error) {
 	rsp, err := c.DeleteEmailDomainEmailDomainsDomainIdDelete(ctx, domainId, params, reqEditors...)
@@ -4081,15 +4581,6 @@ func (c *ClientWithResponses) PatchEmailDomainEmailDomainsDomainIdPatchWithRespo
 		return nil, err
 	}
 	return ParsePatchEmailDomainEmailDomainsDomainIdPatchResponse(rsp)
-}
-
-// RotateWebhookSecretEmailDomainsDomainIdRotateWebhookSecretPostWithResponse request returning *RotateWebhookSecretEmailDomainsDomainIdRotateWebhookSecretPostResponse
-func (c *ClientWithResponses) RotateWebhookSecretEmailDomainsDomainIdRotateWebhookSecretPostWithResponse(ctx context.Context, domainId openapi_types.UUID, params *RotateWebhookSecretEmailDomainsDomainIdRotateWebhookSecretPostParams, reqEditors ...RequestEditorFn) (*RotateWebhookSecretEmailDomainsDomainIdRotateWebhookSecretPostResponse, error) {
-	rsp, err := c.RotateWebhookSecretEmailDomainsDomainIdRotateWebhookSecretPost(ctx, domainId, params, reqEditors...)
-	if err != nil {
-		return nil, err
-	}
-	return ParseRotateWebhookSecretEmailDomainsDomainIdRotateWebhookSecretPostResponse(rsp)
 }
 
 // VerifyEmailDomainEmailDomainsDomainIdVerifyPostWithResponse request returning *VerifyEmailDomainEmailDomainsDomainIdVerifyPostResponse
@@ -4127,6 +4618,15 @@ func (c *ClientWithResponses) CreateEmailEmailsPostWithResponse(ctx context.Cont
 	return ParseCreateEmailEmailsPostResponse(rsp)
 }
 
+// GetEmailStatsEmailsStatsGetWithResponse request returning *GetEmailStatsEmailsStatsGetResponse
+func (c *ClientWithResponses) GetEmailStatsEmailsStatsGetWithResponse(ctx context.Context, params *GetEmailStatsEmailsStatsGetParams, reqEditors ...RequestEditorFn) (*GetEmailStatsEmailsStatsGetResponse, error) {
+	rsp, err := c.GetEmailStatsEmailsStatsGet(ctx, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetEmailStatsEmailsStatsGetResponse(rsp)
+}
+
 // GetEmailEmailsEmailIdGetWithResponse request returning *GetEmailEmailsEmailIdGetResponse
 func (c *ClientWithResponses) GetEmailEmailsEmailIdGetWithResponse(ctx context.Context, emailId openapi_types.UUID, params *GetEmailEmailsEmailIdGetParams, reqEditors ...RequestEditorFn) (*GetEmailEmailsEmailIdGetResponse, error) {
 	rsp, err := c.GetEmailEmailsEmailIdGet(ctx, emailId, params, reqEditors...)
@@ -4143,6 +4643,15 @@ func (c *ClientWithResponses) GetEmailAttachmentEmailsEmailIdAttachmentsAttachme
 		return nil, err
 	}
 	return ParseGetEmailAttachmentEmailsEmailIdAttachmentsAttachmentIdGetResponse(rsp)
+}
+
+// ListEmailEventsEmailsEmailIdEventsGetWithResponse request returning *ListEmailEventsEmailsEmailIdEventsGetResponse
+func (c *ClientWithResponses) ListEmailEventsEmailsEmailIdEventsGetWithResponse(ctx context.Context, emailId openapi_types.UUID, params *ListEmailEventsEmailsEmailIdEventsGetParams, reqEditors ...RequestEditorFn) (*ListEmailEventsEmailsEmailIdEventsGetResponse, error) {
+	rsp, err := c.ListEmailEventsEmailsEmailIdEventsGet(ctx, emailId, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseListEmailEventsEmailsEmailIdEventsGetResponse(rsp)
 }
 
 // GetEmailRawEmailsEmailIdRawGetWithResponse request returning *GetEmailRawEmailsEmailIdRawGetResponse
@@ -4425,6 +4934,39 @@ func ParseCreateEmailDomainEmailDomainsPostResponse(rsp *http.Response) (*Create
 	return response, nil
 }
 
+// ParseCheckDomainEmailDomainsCheckDomainGetResponse parses an HTTP response from a CheckDomainEmailDomainsCheckDomainGetWithResponse call
+func ParseCheckDomainEmailDomainsCheckDomainGetResponse(rsp *http.Response) (*CheckDomainEmailDomainsCheckDomainGetResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &CheckDomainEmailDomainsCheckDomainGetResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest DomainCheckResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 422:
+		var dest HTTPValidationError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON422 = &dest
+
+	}
+
+	return response, nil
+}
+
 // ParseDeleteEmailDomainEmailDomainsDomainIdDeleteResponse parses an HTTP response from a DeleteEmailDomainEmailDomainsDomainIdDeleteWithResponse call
 func ParseDeleteEmailDomainEmailDomainsDomainIdDeleteResponse(rsp *http.Response) (*DeleteEmailDomainEmailDomainsDomainIdDeleteResponse, error) {
 	bodyBytes, err := io.ReadAll(rsp.Body)
@@ -4500,39 +5042,6 @@ func ParsePatchEmailDomainEmailDomainsDomainIdPatchResponse(rsp *http.Response) 
 	switch {
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
 		var dest EmailDomainResponse
-		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
-			return nil, err
-		}
-		response.JSON200 = &dest
-
-	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 422:
-		var dest HTTPValidationError
-		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
-			return nil, err
-		}
-		response.JSON422 = &dest
-
-	}
-
-	return response, nil
-}
-
-// ParseRotateWebhookSecretEmailDomainsDomainIdRotateWebhookSecretPostResponse parses an HTTP response from a RotateWebhookSecretEmailDomainsDomainIdRotateWebhookSecretPostWithResponse call
-func ParseRotateWebhookSecretEmailDomainsDomainIdRotateWebhookSecretPostResponse(rsp *http.Response) (*RotateWebhookSecretEmailDomainsDomainIdRotateWebhookSecretPostResponse, error) {
-	bodyBytes, err := io.ReadAll(rsp.Body)
-	defer func() { _ = rsp.Body.Close() }()
-	if err != nil {
-		return nil, err
-	}
-
-	response := &RotateWebhookSecretEmailDomainsDomainIdRotateWebhookSecretPostResponse{
-		Body:         bodyBytes,
-		HTTPResponse: rsp,
-	}
-
-	switch {
-	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
-		var dest WebhookSecretResponse
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err
 		}
@@ -4649,6 +5158,39 @@ func ParseCreateEmailEmailsPostResponse(rsp *http.Response) (*CreateEmailEmailsP
 	return response, nil
 }
 
+// ParseGetEmailStatsEmailsStatsGetResponse parses an HTTP response from a GetEmailStatsEmailsStatsGetWithResponse call
+func ParseGetEmailStatsEmailsStatsGetResponse(rsp *http.Response) (*GetEmailStatsEmailsStatsGetResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetEmailStatsEmailsStatsGetResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest EmailStatsResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 422:
+		var dest HTTPValidationError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON422 = &dest
+
+	}
+
+	return response, nil
+}
+
 // ParseGetEmailEmailsEmailIdGetResponse parses an HTTP response from a GetEmailEmailsEmailIdGetWithResponse call
 func ParseGetEmailEmailsEmailIdGetResponse(rsp *http.Response) (*GetEmailEmailsEmailIdGetResponse, error) {
 	bodyBytes, err := io.ReadAll(rsp.Body)
@@ -4698,6 +5240,39 @@ func ParseGetEmailAttachmentEmailsEmailIdAttachmentsAttachmentIdGetResponse(rsp 
 	switch {
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
 		var dest interface{}
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 422:
+		var dest HTTPValidationError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON422 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseListEmailEventsEmailsEmailIdEventsGetResponse parses an HTTP response from a ListEmailEventsEmailsEmailIdEventsGetWithResponse call
+func ParseListEmailEventsEmailsEmailIdEventsGetResponse(rsp *http.Response) (*ListEmailEventsEmailsEmailIdEventsGetResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ListEmailEventsEmailsEmailIdEventsGetResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest EmailEventListResponse
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err
 		}

@@ -75,6 +75,12 @@ class Settings(BaseSettings):
     # ``^[a-z0-9]([a-z0-9-]{0,18}[a-z0-9])?$``.
     hail_mail_default_user_prefix: str = ""
 
+    # SES configuration set attached to every outbound send. Provisioned by
+    # infra/terraform (event destinations → SNS → ingest Lambda → API); the
+    # name must match the Terraform variable. Empty = sends carry no config
+    # set and no delivery/engagement events are published.
+    hail_ses_configuration_set: str = ""
+
     # Inbound email (SES). Off by default so a misconfigured Lambda can't
     # write rows into a deployment that hasn't opted into inbound. The
     # Terraform module under ``infra/terraform/`` provisions S3 bucket,

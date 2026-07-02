@@ -320,14 +320,14 @@ func printEmailDomain(opts *Options, sd *client.EmailDomainResponse) error {
 		fmt.Fprintf(opts.Stdout, "  Org prefix:   %s\n", *sd.LocalPrefixOrg)
 	}
 	fmt.Fprintf(opts.Stdout, "  Verification: %s\n", string(sd.VerificationStatus))
-	if len(sd.DkimRecords) > 0 {
+	if len(sd.DnsRecords) > 0 {
 		fmt.Fprintln(opts.Stdout, "  Publish these CNAMEs at your DNS provider:")
 		w := tabwriter.NewWriter(opts.Stdout, 0, 0, 2, ' ', 0)
 		fmt.Fprintln(w, "    TYPE\tNAME\tVALUE")
-		for _, r := range sd.DkimRecords {
+		for _, r := range sd.DnsRecords {
 			typ := "CNAME"
 			if r.Type != nil {
-				typ = *r.Type
+				typ = string(*r.Type)
 			}
 			fmt.Fprintf(w, "    %s\t%s\t%s\n", typ, r.Name, r.Value)
 		}

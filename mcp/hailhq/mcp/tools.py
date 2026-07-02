@@ -1,6 +1,6 @@
 """MCP tool surface for Hail's outbound-call API.
 
-Exposes nine tools to the calling agent:
+Exposes eleven tools to the calling agent:
 
 * ``place_call`` — originate an outbound phone call
 * ``get_call`` — fetch the current state of one call
@@ -11,6 +11,8 @@ Exposes nine tools to the calling agent:
 * ``list_emails`` — page through emails (``direction="inbound"`` for replies)
 * ``get_email_raw`` — presigned URL for an inbound email's raw MIME
 * ``get_email_attachment`` — presigned URL for one inbound attachment
+* ``get_email_events`` — delivery/engagement timeline for one email
+* ``get_email_stats`` — account-level deliverability stats (counts, rates, series)
 
 The tool docstrings are the agent's only documentation, so each one
 spells out the contract (required vs optional fields, mutually exclusive
@@ -24,7 +26,7 @@ models (``CallCreate``, ``EmailCreate``) constructed inside
 an ``{"error": ...}`` dict. Only the ``<type>:<uuid>`` resource-id shape
 for ``get_events`` is still checked locally via ``parse_resource_id``.
 
-The nine tool functions are kept module-importable so unit tests can
+The eleven tool functions are kept module-importable so unit tests can
 call them directly with a constructed ``HailClient``; ``register_tools``
 is the FastMCP wiring step. Each registered tool closure accepts a
 FastMCP ``Context`` (auto-injected on dispatch) and uses the
@@ -238,6 +240,30 @@ async def get_email_attachment(
         return _format_api_error(exc)
 
 
+async def get_email_events(*, client: HailClient, email_id: str) -> dict[str, Any]:
+    try:
+        return await client.get_email_events(email_id)
+    except ValidationError as exc:
+        return {"error": _validation_error_message(exc)}
+    except HailAPIError as exc:
+        return _format_api_error(exc)
+
+
+async def get_email_stats(
+    *,
+    client: HailClient,
+    from_: str | None = None,
+    to: str | None = None,
+    bucket: str = "day",
+) -> dict[str, Any]:
+    try:
+        return await client.get_email_stats(from_=from_, to=to, bucket=bucket)
+    except ValidationError as exc:
+        return {"error": _validation_error_message(exc)}
+    except HailAPIError as exc:
+        return _format_api_error(exc)
+
+
 async def get_events(
     *,
     client: HailClient,
@@ -338,7 +364,7 @@ def register_tools(
     mode: AuthMode,
     singleton: HailClient | None,
 ) -> None:
-    """Register the nine Hail tools on a FastMCP app.
+    """Register the eleven Hail tools on a FastMCP app.
 
     Tools accept a FastMCP ``Context`` parameter (auto-injected). The
     ``_client_for`` helper picks the right HailClient for the active mode
@@ -599,6 +625,58 @@ def register_tools(
         except RuntimeError as exc:
             return {"error": str(exc)}
 
+    @mcp_app.tool(name="get_email_events")
+    async def get_email_events_tool(ctx: Context, email_id: str) -> dict[str, Any]:
+        """Delivery/engagement timeline (sent→delivered→opened…) for one email.
+
+        Chronological lifecycle events for a single email — use this to see
+        exactly what happened to one message (bounced? opened? clicked?)
+        rather than the account-wide aggregates ``get_email_stats`` returns.
+
+        Returns ``{"items": [...]}`` where each item has ``kind`` (one of
+        sent, delivered, delivery_delayed, bounced, complained, rejected,
+        opened, clicked), ``payload``, and ``occurred_at``. On failure
+        returns ``{"error": "resource not found"}`` for an unknown id.
+        """
+        try:
+            async with _client_for(ctx, mode=mode, singleton=singleton) as client:
+                return await get_email_events(client=client, email_id=email_id)
+        except RuntimeError as exc:
+            return {"error": str(exc)}
+
+    @mcp_app.tool(name="get_email_stats")
+    async def get_email_stats_tool(
+        ctx: Context,
+        from_: str | None = None,
+        to: str | None = None,
+        bucket: str = "day",
+    ) -> dict[str, Any]:
+        """Account-level email deliverability stats (counts, rates, time series).
+
+        Aggregates across your whole organization's outbound mail over a
+        window — use this for "how's deliverability doing" rather than
+        one message's history (``get_email_events`` covers that).
+
+        ``from_`` / ``to`` are ISO 8601 timestamps (defaults: last 7 days
+        ending now). ``bucket`` is ``"day"`` (default) or ``"hour"`` —
+        ``"hour"`` is limited to an 8-day span; any range is capped at 92
+        days.
+
+        Returns ``{"from": ..., "to": ..., "bucket": ..., "totals": {...},
+        "rates": {...}, "series": [...]}`` — ``totals``/each ``series``
+        bucket carry counts (sent, delivered, bounced, opened, ...) and
+        ``rates`` carries derived ratios (delivery, bounce, open, click),
+        each ``None`` when ``totals.sent`` is 0. On failure returns
+        ``{"error": "<message>"}`` instead.
+        """
+        try:
+            async with _client_for(ctx, mode=mode, singleton=singleton) as client:
+                return await get_email_stats(
+                    client=client, from_=from_, to=to, bucket=bucket
+                )
+        except RuntimeError as exc:
+            return {"error": str(exc)}
+
     @mcp_app.tool(name="get_events")
     async def get_events_tool(
         ctx: Context,
@@ -651,5 +729,7 @@ __all__ = [
     "list_emails",
     "get_email_raw",
     "get_email_attachment",
+    "get_email_events",
+    "get_email_stats",
     "get_events",
 ]

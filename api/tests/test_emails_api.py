@@ -37,6 +37,17 @@ async def _register_custom_verified(
     return created.json()["id"]
 
 
+async def _send_email(client: httpx.AsyncClient, plain: str) -> dict:
+    """POST one outbound email. Caller must have a verified sender already."""
+    resp = await client.post(
+        "/emails",
+        json={"to": ["bob@example.com"], "subject": "hi", "body_text": "hello"},
+        headers={"Authorization": f"Bearer {plain}"},
+    )
+    assert resp.status_code == 201, resp.text
+    return resp.json()
+
+
 # --------------------------------------------------------------------------- #
 # POST /emails — validation
 # --------------------------------------------------------------------------- #
@@ -627,6 +638,45 @@ async def test_post_emails_writes_audit_log(
 
 
 _ = ApiKey  # type hint passthrough
+
+
+# --------------------------------------------------------------------------- #
+# Synthetic sent event
+# --------------------------------------------------------------------------- #
+
+
+async def test_post_emails_writes_synthetic_sent_event(
+    client: httpx.AsyncClient,
+    org_and_key: tuple,
+    async_session: AsyncSession,
+) -> None:
+    """A successful send writes one EmailEvent(kind='sent') alongside the
+    status flip, mirroring the CallEvent pattern for calls."""
+    from hailhq.core.models import EmailEvent
+
+    _, _, plain = org_and_key
+    headers = {"Authorization": f"Bearer {plain}"}
+    await _register_custom_verified(client, headers, domain="acme.com")
+    resp = await client.post(
+        "/emails",
+        json={"to": ["bob@example.com"], "subject": "hi", "body_text": "hello"},
+        headers=headers,
+    )
+    assert resp.status_code == 201, resp.text
+    email_id = resp.json()["id"]
+
+    events = (
+        (
+            await async_session.execute(
+                select(EmailEvent).where(EmailEvent.email_id == UUID(email_id))
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert [e.kind for e in events] == ["sent"]
+    assert events[0].occurred_at is not None
+    assert events[0].payload == {}
 
 
 # --------------------------------------------------------------------------- #

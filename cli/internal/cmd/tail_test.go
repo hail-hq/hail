@@ -20,14 +20,25 @@ import (
 // callA / callB pin the call ids the org-wide tail tests assign so the
 // expected short-id prefixes are deterministic.
 var (
-	callA = openapi_types.UUID(uuid.MustParse("c2a8f1d3-1111-1111-1111-111111111111"))
-	callB = openapi_types.UUID(uuid.MustParse("d4e9b2c5-2222-2222-2222-222222222222"))
+	callA  = openapi_types.UUID(uuid.MustParse("c2a8f1d3-1111-1111-1111-111111111111"))
+	callB  = openapi_types.UUID(uuid.MustParse("d4e9b2c5-2222-2222-2222-222222222222"))
+	emailA = openapi_types.UUID(uuid.MustParse("e5f0c3d6-3333-3333-3333-333333333333"))
 )
 
-func sampleEventInCall(idStr string, callID openapi_types.UUID, kind string, payload map[string]interface{}, ts time.Time) client.CallEventResponse {
-	return client.CallEventResponse{
+func sampleEventInCall(idStr string, callID openapi_types.UUID, kind string, payload map[string]interface{}, ts time.Time) client.EventResponse {
+	return client.EventResponse{
 		Id:         openapi_types.UUID(uuid.MustParse(idStr)),
-		CallId:     callID,
+		CallId:     &callID,
+		Kind:       kind,
+		Payload:    payload,
+		OccurredAt: ts,
+	}
+}
+
+func sampleEventInEmail(idStr string, emailID openapi_types.UUID, kind string, payload map[string]interface{}, ts time.Time) client.EventResponse {
+	return client.EventResponse{
+		Id:         openapi_types.UUID(uuid.MustParse(idStr)),
+		EmailId:    &emailID,
 		Kind:       kind,
 		Payload:    payload,
 		OccurredAt: ts,
@@ -50,13 +61,13 @@ func dialingStatus() *client.EventStreamResponseCallStatus {
 // each prefixed with a short id; the loop runs until SIGINT.
 func TestTail_HappyPath_OrgWide(t *testing.T) {
 	t0 := time.Now().Add(time.Hour) // future-stamped so default "from now" still includes them
-	events1 := []client.CallEventResponse{
+	events1 := []client.EventResponse{
 		sampleEventInCall("11111111-1111-1111-1111-111111111111", callA, "state_change",
 			map[string]interface{}{"from": "queued", "to": "dialing"}, t0),
 		sampleEventInCall("22222222-2222-2222-2222-222222222221", callA, "agent_turn",
 			map[string]interface{}{"text": "Hi from A."}, t0.Add(time.Second)),
 	}
-	events2 := []client.CallEventResponse{
+	events2 := []client.EventResponse{
 		sampleEventInCall("33333333-3333-3333-3333-333333333331", callB, "state_change",
 			map[string]interface{}{"from": "queued", "to": "dialing"}, t0.Add(2*time.Second)),
 		sampleEventInCall("44444444-4444-4444-4444-444444444441", callB, "agent_turn",
@@ -78,7 +89,7 @@ func TestTail_HappyPath_OrgWide(t *testing.T) {
 		case 2:
 			_ = json.NewEncoder(w).Encode(client.EventStreamResponse{Items: events2})
 		default:
-			_ = json.NewEncoder(w).Encode(client.EventStreamResponse{Items: []client.CallEventResponse{}})
+			_ = json.NewEncoder(w).Encode(client.EventStreamResponse{Items: []client.EventResponse{}})
 			// Trigger SIGINT after the third response so the tail loop's
 			// signal handler returns errInterrupted.
 			go func() {
@@ -122,7 +133,7 @@ func TestTail_WithIdFlagFiltersAndAutoExits(t *testing.T) {
 	t0 := time.Now().Add(-time.Minute) // past-stamped is fine: the test uses --from-start below
 	srv := newSequenceServer(t, []sequenceResponse{
 		{http.StatusOK, client.EventStreamResponse{
-			Items: []client.CallEventResponse{
+			Items: []client.EventResponse{
 				sampleEventInCall("11111111-1111-1111-1111-111111111111", callA, "agent_turn",
 					map[string]interface{}{"text": "hello"}, t0),
 			},
@@ -217,7 +228,7 @@ func TestTail_RejectsUnsupportedType(t *testing.T) {
 func TestTail_NoFollowOneShot(t *testing.T) {
 	srv := newSequenceServer(t, []sequenceResponse{
 		{http.StatusOK, client.EventStreamResponse{
-			Items:      []client.CallEventResponse{},
+			Items:      []client.EventResponse{},
 			CallStatus: dialingStatus(),
 		}},
 	})
@@ -240,7 +251,7 @@ func TestTail_FromStartFetchesHistorical(t *testing.T) {
 	tPast := time.Date(2026, 4, 22, 12, 0, 0, 0, time.UTC) // well before time.Now()
 	srv := newSequenceServer(t, []sequenceResponse{
 		{http.StatusOK, client.EventStreamResponse{
-			Items: []client.CallEventResponse{
+			Items: []client.EventResponse{
 				sampleEventInCall("11111111-1111-1111-1111-111111111111", callA, "agent_turn",
 					map[string]interface{}{"text": "ancient"}, tPast),
 			},
@@ -267,7 +278,7 @@ func TestTail_FromStartFetchesHistorical(t *testing.T) {
 func TestTail_KindFilter(t *testing.T) {
 	srv := newSequenceServer(t, []sequenceResponse{
 		{http.StatusOK, client.EventStreamResponse{
-			Items:      []client.CallEventResponse{},
+			Items:      []client.EventResponse{},
 			CallStatus: completedStatus(),
 		}},
 	})
@@ -290,7 +301,7 @@ func TestTail_DefensiveOnUnknownKind(t *testing.T) {
 	tFuture := time.Now().Add(time.Hour)
 	srv := newSequenceServer(t, []sequenceResponse{
 		{http.StatusOK, client.EventStreamResponse{
-			Items: []client.CallEventResponse{
+			Items: []client.EventResponse{
 				sampleEventInCall("11111111-1111-1111-1111-111111111111", callA, "weird_event",
 					map[string]interface{}{"a": 1, "b": "two"}, tFuture),
 				sampleEventInCall("22222222-2222-2222-2222-222222222221", callA, "agent_turn",
@@ -324,7 +335,7 @@ func TestTail_NDJSONOutput(t *testing.T) {
 	tFuture := time.Now().Add(time.Hour)
 	srv := newSequenceServer(t, []sequenceResponse{
 		{http.StatusOK, client.EventStreamResponse{
-			Items: []client.CallEventResponse{
+			Items: []client.EventResponse{
 				sampleEventInCall("11111111-1111-1111-1111-111111111111", callA, "agent_turn",
 					map[string]interface{}{"text": "hi"}, tFuture),
 				sampleEventInCall("22222222-2222-2222-2222-222222222221", callA, "user_turn",
@@ -370,7 +381,7 @@ func TestTail_PrependsShortCallIdInOrgMode(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 		if n == 1 {
 			_ = json.NewEncoder(w).Encode(client.EventStreamResponse{
-				Items: []client.CallEventResponse{
+				Items: []client.EventResponse{
 					sampleEventInCall("11111111-1111-1111-1111-111111111111", callA, "agent_turn",
 						map[string]interface{}{"text": "hi A"}, tFuture),
 					sampleEventInCall("22222222-2222-2222-2222-222222222221", callB, "agent_turn",
@@ -378,7 +389,7 @@ func TestTail_PrependsShortCallIdInOrgMode(t *testing.T) {
 				},
 			})
 		} else {
-			_ = json.NewEncoder(w).Encode(client.EventStreamResponse{Items: []client.CallEventResponse{}})
+			_ = json.NewEncoder(w).Encode(client.EventStreamResponse{Items: []client.EventResponse{}})
 			go func() {
 				time.Sleep(20 * time.Millisecond)
 				_ = syscall.Kill(syscall.Getpid(), syscall.SIGINT)
@@ -402,13 +413,55 @@ func TestTail_PrependsShortCallIdInOrgMode(t *testing.T) {
 	}
 }
 
+// TestTail_RendersEmailSourceEvent: org-wide tail renders events from email
+// sources (EmailId set, CallId nil), prefixing with the email's short id.
+func TestTail_RendersEmailSourceEvent(t *testing.T) {
+	tFuture := time.Now().Add(time.Hour)
+	// Set up two responses: one with an email event, then signal SIGINT to exit.
+	var hits int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		n := atomic.AddInt32(&hits, 1)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		if n == 1 {
+			_ = json.NewEncoder(w).Encode(client.EventStreamResponse{
+				Items: []client.EventResponse{
+					sampleEventInEmail("55555555-5555-5555-5555-555555555555", emailA, "sent",
+						map[string]interface{}{"to": "recipient@example.com", "subject": "Test"}, tFuture),
+				},
+			})
+		} else {
+			_ = json.NewEncoder(w).Encode(client.EventStreamResponse{Items: []client.EventResponse{}})
+			go func() {
+				time.Sleep(20 * time.Millisecond)
+				_ = syscall.Kill(syscall.Getpid(), syscall.SIGINT)
+			}()
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	stdout, _, err := runRoot(t,
+		map[string]string{"HAIL_API_KEY": "sk_test", "HAIL_API_URL": srv.URL, "NO_COLOR": "1"},
+		"tail", "--interval", "100", "--from-start",
+	)
+	if err != nil && !errors.Is(err, errInterrupted) {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(stdout, "[e5f0c3d6]") {
+		t.Errorf("missing [e5f0c3d6] short id prefix for email:\n%s", stdout)
+	}
+	if !strings.Contains(stdout, "[sent]") {
+		t.Errorf("missing [sent] kind label:\n%s", stdout)
+	}
+}
+
 // TestTail_OmitsShortCallIdWhenIdFlagSet: --id call:<uuid> mode does NOT
 // prepend the short id (every event belongs to the same call).
 func TestTail_OmitsShortCallIdWhenIdFlagSet(t *testing.T) {
 	tFuture := time.Now().Add(time.Hour)
 	srv := newSequenceServer(t, []sequenceResponse{
 		{http.StatusOK, client.EventStreamResponse{
-			Items: []client.CallEventResponse{
+			Items: []client.EventResponse{
 				sampleEventInCall("11111111-1111-1111-1111-111111111111", callA, "agent_turn",
 					map[string]interface{}{"text": "hi"}, tFuture),
 			},
@@ -437,19 +490,19 @@ func TestTail_PropagatesCursorAcrossPolls(t *testing.T) {
 		map[string]interface{}{"text": "second-poll-last"}, tFuture.Add(2*time.Second))
 	srv := newSequenceServer(t, []sequenceResponse{
 		{http.StatusOK, client.EventStreamResponse{
-			Items: []client.CallEventResponse{
+			Items: []client.EventResponse{
 				sampleEventInCall("11111111-1111-1111-1111-111111111111", callA, "agent_turn",
 					map[string]interface{}{"text": "first"}, tFuture),
 			},
 			CallStatus: dialingStatus(),
 		}},
 		{http.StatusOK, client.EventStreamResponse{
-			Items:      []client.CallEventResponse{last2},
+			Items:      []client.EventResponse{last2},
 			CallStatus: dialingStatus(),
 		}},
 		// Poll 3: empty + completed → loop exits.
 		{http.StatusOK, client.EventStreamResponse{
-			Items:      []client.CallEventResponse{},
+			Items:      []client.EventResponse{},
 			CallStatus: completedStatus(),
 		}},
 	})

@@ -41,3 +41,7 @@ output "iam_secret_access_key" {
   value       = aws_iam_access_key.main.secret
   sensitive   = true
 }
+
+output "ses_configuration_set_name" {
+  value = aws_sesv2_configuration_set.events.configuration_set_name
+}

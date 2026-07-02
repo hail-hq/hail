@@ -2,6 +2,14 @@
 
 All notable changes to Hail are documented here. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and Hail adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## Unreleased
+
+- Email deliverability tracking: `email_events` table, SES configuration-set
+  event ingestion (delivered/bounced/complained/rejected/delayed/opened/clicked),
+  `GET /emails/{id}/events`, `GET /emails/stats`, lifecycle webhook events,
+  email events on `GET /events`, `hail email events|stats`, MCP
+  `get_email_events`/`get_email_stats`.
+
 ## [0.6.0] — 2026-06-28
 
 Custom sender domains milestone. Tenants can now send and receive on their own

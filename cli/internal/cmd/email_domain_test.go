@@ -26,7 +26,7 @@ func sampleEmailDomainResponse(kind string) client.EmailDomainResponse {
 		Kind:               client.EmailDomainResponseKind(kind),
 		Domain:             "alice+acme@mail.hail.so",
 		VerificationStatus: client.EmailDomainResponseVerificationStatusVerified,
-		DkimRecords:        []client.DkimRecordSchema{},
+		DnsRecords:         []client.DnsRecordSchema{},
 		Provider:           "ses",
 		CreatedAt:          now,
 		UpdatedAt:          now,
@@ -37,8 +37,8 @@ func sampleEmailDomainResponse(kind string) client.EmailDomainResponse {
 	} else {
 		resp.Domain = "acme.com"
 		resp.VerificationStatus = client.EmailDomainResponseVerificationStatusPending
-		typ := "CNAME"
-		resp.DkimRecords = []client.DkimRecordSchema{
+		typ := client.CNAME
+		resp.DnsRecords = []client.DnsRecordSchema{
 			{Name: "sel1._domainkey.acme.com", Value: "sel1.dkim.amazonses.com", Type: &typ},
 			{Name: "sel2._domainkey.acme.com", Value: "sel2.dkim.amazonses.com", Type: &typ},
 			{Name: "sel3._domainkey.acme.com", Value: "sel3.dkim.amazonses.com", Type: &typ},

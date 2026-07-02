@@ -47,3 +47,9 @@ variable "iam_user_name" {
   type        = string
   default     = "hail"
 }
+
+variable "ses_configuration_set_name" {
+  description = "SES configuration set attached to outbound sends (must match HAIL_SES_CONFIGURATION_SET in the API env)."
+  type        = string
+  default     = "hail-events"
+}

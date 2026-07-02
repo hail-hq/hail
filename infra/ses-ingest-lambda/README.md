@@ -28,3 +28,13 @@ The Lambda receives the standard SES event (envelope + receipt verdicts
   raw MIME from S3 itself — Lambda only carries the pointer.
 
 See [`docs/superpowers/specs/2026-06-06-inbound-email-design.md`](../../docs/superpowers/specs/2026-06-06-inbound-email-design.md) §1.
+
+## Delivery events
+
+`/internal/ses-events` also accepts a second, HMAC-signed envelope shape —
+`{"type": "delivery_event", "event": {<raw SES event>}}` — carrying SES
+configuration-set delivery/engagement notifications (Delivery, Bounce,
+Complaint, Reject, DeliveryDelay, Open, Click) straight from SNS, bypassing
+this Lambda's S3-pointer flow entirely. It works independently of
+`HAIL_INBOUND_ENABLED`, so a deployment can track delivery status without
+receiving inbound mail.

@@ -227,6 +227,7 @@ paths:
               - enum:
                   - queued
                   - sent
+                  - delivered
                   - failed
                   - bounced
                   - complained
@@ -260,6 +261,98 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/EmailListResponse"
+        "422":
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
+  /emails/{email_id}/events:
+    get:
+      tags:
+        - emails
+      summary: List Email Events
+      description: Chronological lifecycle events for one email (org-scoped).
+      operationId: list_email_events_emails__email_id__events_get
+      parameters:
+        - name: email_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+            title: Email Id
+        - name: authorization
+          in: header
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            title: Authorization
+      responses:
+        "200":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EmailEventListResponse"
+        "422":
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
+  /emails/stats:
+    get:
+      tags:
+        - emails
+      summary: Get Email Stats
+      operationId: get_email_stats_emails_stats_get
+      parameters:
+        - name: from
+          in: query
+          required: false
+          schema:
+            anyOf:
+              - type: string
+                format: date-time
+              - type: "null"
+            title: From
+        - name: to
+          in: query
+          required: false
+          schema:
+            anyOf:
+              - type: string
+                format: date-time
+              - type: "null"
+            title: To
+        - name: bucket
+          in: query
+          required: false
+          schema:
+            enum:
+              - hour
+              - day
+            type: string
+            default: day
+            title: Bucket
+        - name: authorization
+          in: header
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            title: Authorization
+      responses:
+        "200":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EmailStatsResponse"
         "422":
           description: Validation Error
           content:
@@ -1075,35 +1168,6 @@ components:
       required:
         - to
       title: CallCreate
-    CallEventResponse:
-      properties:
-        id:
-          type: string
-          format: uuid
-          title: Id
-        call_id:
-          type: string
-          format: uuid
-          title: Call Id
-        kind:
-          type: string
-          title: Kind
-        payload:
-          additionalProperties: true
-          type: object
-          title: Payload
-        occurred_at:
-          type: string
-          format: date-time
-          title: Occurred At
-      type: object
-      required:
-        - id
-        - call_id
-        - kind
-        - payload
-        - occurred_at
-      title: CallEventResponse
     CallListResponse:
       properties:
         items:
@@ -1595,6 +1659,55 @@ components:
         ``forward_rate_per_hour``) surface what the row has configured for
 
         incoming mail."
+    EmailEventListResponse:
+      properties:
+        items:
+          items:
+            $ref: "#/components/schemas/EmailEventResponse"
+          type: array
+          title: Items
+      type: object
+      required:
+        - items
+      title: EmailEventListResponse
+    EmailEventResponse:
+      properties:
+        id:
+          type: string
+          format: uuid
+          title: Id
+        email_id:
+          type: string
+          format: uuid
+          title: Email Id
+        kind:
+          type: string
+          enum:
+            - sent
+            - delivered
+            - delivery_delayed
+            - bounced
+            - complained
+            - rejected
+            - opened
+            - clicked
+          title: Kind
+        payload:
+          additionalProperties: true
+          type: object
+          title: Payload
+        occurred_at:
+          type: string
+          format: date-time
+          title: Occurred At
+      type: object
+      required:
+        - id
+        - email_id
+        - kind
+        - payload
+        - occurred_at
+      title: EmailEventResponse
     EmailListResponse:
       properties:
         items:
@@ -1675,6 +1788,7 @@ components:
           enum:
             - queued
             - sent
+            - delivered
             - failed
             - bounced
             - complained
@@ -1779,6 +1893,12 @@ components:
           type: array
           title: Attachments
           default: []
+        last_event_at:
+          anyOf:
+            - type: string
+              format: date-time
+            - type: "null"
+          title: Last Event At
       type: object
       required:
         - id
@@ -1800,6 +1920,172 @@ components:
         - body_text
         - body_html
       title: EmailResponse
+    EmailStatsBucket:
+      properties:
+        sent:
+          type: integer
+          title: Sent
+          default: 0
+        delivered:
+          type: integer
+          title: Delivered
+          default: 0
+        delivery_delayed:
+          type: integer
+          title: Delivery Delayed
+          default: 0
+        bounced:
+          type: integer
+          title: Bounced
+          default: 0
+        bounced_hard:
+          type: integer
+          title: Bounced Hard
+          default: 0
+        complained:
+          type: integer
+          title: Complained
+          default: 0
+        rejected:
+          type: integer
+          title: Rejected
+          default: 0
+        opened:
+          type: integer
+          title: Opened
+          default: 0
+        clicked:
+          type: integer
+          title: Clicked
+          default: 0
+        unique_opened:
+          type: integer
+          title: Unique Opened
+          default: 0
+        unique_clicked:
+          type: integer
+          title: Unique Clicked
+          default: 0
+        bucket_start:
+          type: string
+          format: date-time
+          title: Bucket Start
+      type: object
+      required:
+        - bucket_start
+      title: EmailStatsBucket
+    EmailStatsCounts:
+      properties:
+        sent:
+          type: integer
+          title: Sent
+          default: 0
+        delivered:
+          type: integer
+          title: Delivered
+          default: 0
+        delivery_delayed:
+          type: integer
+          title: Delivery Delayed
+          default: 0
+        bounced:
+          type: integer
+          title: Bounced
+          default: 0
+        bounced_hard:
+          type: integer
+          title: Bounced Hard
+          default: 0
+        complained:
+          type: integer
+          title: Complained
+          default: 0
+        rejected:
+          type: integer
+          title: Rejected
+          default: 0
+        opened:
+          type: integer
+          title: Opened
+          default: 0
+        clicked:
+          type: integer
+          title: Clicked
+          default: 0
+        unique_opened:
+          type: integer
+          title: Unique Opened
+          default: 0
+        unique_clicked:
+          type: integer
+          title: Unique Clicked
+          default: 0
+      type: object
+      title: EmailStatsCounts
+    EmailStatsRates:
+      properties:
+        delivery:
+          anyOf:
+            - type: number
+            - type: "null"
+          title: Delivery
+        bounce:
+          anyOf:
+            - type: number
+            - type: "null"
+          title: Bounce
+        complaint:
+          anyOf:
+            - type: number
+            - type: "null"
+          title: Complaint
+        open:
+          anyOf:
+            - type: number
+            - type: "null"
+          title: Open
+        click:
+          anyOf:
+            - type: number
+            - type: "null"
+          title: Click
+      type: object
+      title: EmailStatsRates
+      description: All None when sent == 0 in the window.
+    EmailStatsResponse:
+      properties:
+        from:
+          type: string
+          format: date-time
+          title: From
+        to:
+          type: string
+          format: date-time
+          title: To
+        bucket:
+          type: string
+          enum:
+            - hour
+            - day
+          title: Bucket
+        totals:
+          $ref: "#/components/schemas/EmailStatsCounts"
+        rates:
+          $ref: "#/components/schemas/EmailStatsRates"
+        series:
+          items:
+            $ref: "#/components/schemas/EmailStatsBucket"
+          type: array
+          title: Series
+      type: object
+      required:
+        - from
+        - to
+        - bucket
+        - totals
+        - rates
+        - series
+      title: EmailStatsResponse
     EmailSummary:
       properties:
         id:
@@ -1864,6 +2150,7 @@ components:
           enum:
             - queued
             - sent
+            - delivered
             - failed
             - bounced
             - complained
@@ -1923,11 +2210,55 @@ components:
         \nBodies can be large and contain PII; paging through a year of mail\nshouldn't\
         \ return every byte of every message just to render a list.\nUse ``EmailResponse``\
         \ (via ``GET /emails/{id}``) for the full row."
+    EventResponse:
+      properties:
+        id:
+          type: string
+          format: uuid
+          title: Id
+        source:
+          type: string
+          enum:
+            - call
+            - email
+          title: Source
+        call_id:
+          anyOf:
+            - type: string
+              format: uuid
+            - type: "null"
+          title: Call Id
+        email_id:
+          anyOf:
+            - type: string
+              format: uuid
+            - type: "null"
+          title: Email Id
+        kind:
+          type: string
+          title: Kind
+        payload:
+          additionalProperties: true
+          type: object
+          title: Payload
+        occurred_at:
+          type: string
+          format: date-time
+          title: Occurred At
+      type: object
+      required:
+        - id
+        - source
+        - kind
+        - payload
+        - occurred_at
+      title: EventResponse
+      description: One event on the unified GET /events stream (call or email).
     EventStreamResponse:
       properties:
         items:
           items:
-            $ref: "#/components/schemas/CallEventResponse"
+            $ref: "#/components/schemas/EventResponse"
           type: array
           title: Items
         next_cursor:
@@ -2131,8 +2462,12 @@ components:
             type: string
             enum:
               - email.received
+              - email.delivered
+              - email.delivery_delayed
               - email.bounced
               - email.complained
+              - email.opened
+              - email.clicked
               - email.received.suppressed
           type: array
           minItems: 1
@@ -2171,8 +2506,12 @@ components:
                 type: string
                 enum:
                   - email.received
+                  - email.delivered
+                  - email.delivery_delayed
                   - email.bounced
                   - email.complained
+                  - email.opened
+                  - email.clicked
                   - email.received.suppressed
               type: array
             - type: "null"

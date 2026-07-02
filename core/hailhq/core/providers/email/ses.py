@@ -202,6 +202,8 @@ class SesEmailProvider(EmailProvider):
                 "Destination": destination,
                 "Content": {"Raw": {"Data": raw}},
             }
+            if settings.hail_ses_configuration_set:
+                kwargs["ConfigurationSetName"] = settings.hail_ses_configuration_set
             response = await asyncio.to_thread(self._client.send_email, **kwargs)
             return ProviderSendResult(provider_message_id=response["MessageId"])
 
@@ -217,6 +219,8 @@ class SesEmailProvider(EmailProvider):
         }
         if reply_to:
             kwargs["ReplyToAddresses"] = [reply_to]
+        if settings.hail_ses_configuration_set:
+            kwargs["ConfigurationSetName"] = settings.hail_ses_configuration_set
 
         response = await asyncio.to_thread(self._client.send_email, **kwargs)
         return ProviderSendResult(provider_message_id=response["MessageId"])

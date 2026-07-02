@@ -37,6 +37,23 @@ def stub(ses_client):
         yield stubber
 
 
+class FakeClient:
+    """Captures ``send_email`` kwargs and returns a canned MessageId.
+
+    Used where the Stubber's exact-params matching can't pin the request
+    (raw MIME carries a nondeterministic multipart boundary) or where a
+    test asserts on the kwargs shape directly.
+    """
+
+    def __init__(self, message_id: str) -> None:
+        self.message_id = message_id
+        self.kwargs: dict | None = None
+
+    def send_email(self, **kwargs):
+        self.kwargs = kwargs
+        return {"MessageId": self.message_id}
+
+
 # ---------------------------------------------------------------- send_email
 
 
@@ -147,18 +164,7 @@ async def test_send_email_with_headers_uses_simple_headers(
 
 
 async def test_send_email_with_attachments_uses_raw_mime() -> None:
-    # Raw MIME bytes contain a nondeterministic multipart boundary, so the
-    # Stubber's exact-params matching can't pin them. Record the call shape
-    # with a fake client instead and assert on the raw payload directly.
-    class FakeClient:
-        def __init__(self) -> None:
-            self.kwargs: dict | None = None
-
-        def send_email(self, **kwargs):
-            self.kwargs = kwargs
-            return {"MessageId": "m-2"}
-
-    fake = FakeClient()
+    fake = FakeClient("m-2")
     provider = SesEmailProvider(client=fake)
     result = await provider.send_email(
         from_address="forwarder+acme@mail.hail.so",
@@ -207,6 +213,114 @@ async def test_send_email_requires_a_body(ses_client) -> None:
             body_text=None,
             body_html=None,
         )
+
+
+async def test_send_email_simple_path_with_configuration_set(
+    ses_client, stub: Stubber, monkeypatch
+) -> None:
+    from hailhq.core.config import settings
+
+    monkeypatch.setattr(settings, "hail_ses_configuration_set", "hail-events")
+    stub.add_response(
+        "send_email",
+        {"MessageId": "mid-123"},
+        {
+            "FromEmailAddress": "a@b.com",
+            "Destination": {"ToAddresses": ["c@d.com"]},
+            "Content": {
+                "Simple": {
+                    "Subject": {"Data": "s", "Charset": "UTF-8"},
+                    "Body": {"Text": {"Data": "t", "Charset": "UTF-8"}},
+                }
+            },
+            "ConfigurationSetName": "hail-events",
+        },
+    )
+
+    provider = SesEmailProvider(client=ses_client)
+    result = await provider.send_email(
+        from_address="a@b.com",
+        to_addresses=["c@d.com"],
+        subject="s",
+        body_text="t",
+        body_html=None,
+    )
+    assert result.provider_message_id == "mid-123"
+    stub.assert_no_pending_responses()
+
+
+async def test_send_email_raw_path_with_configuration_set(monkeypatch) -> None:
+    from hailhq.core.config import settings
+
+    monkeypatch.setattr(settings, "hail_ses_configuration_set", "hail-events")
+
+    fake = FakeClient("m-attach")
+    provider = SesEmailProvider(client=fake)
+    result = await provider.send_email(
+        from_address="forwarder+acme@mail.hail.so",
+        to_addresses=["ops@example.com"],
+        subject="Fwd: invoice",
+        body_text="see attached",
+        body_html=None,
+        attachments=[
+            ProviderAttachment(
+                filename="invoice.pdf",
+                content_type="application/pdf",
+                payload=b"%PDF-1.4",
+            )
+        ],
+    )
+
+    assert result.provider_message_id == "m-attach"
+    assert fake.kwargs is not None
+    assert "Raw" in fake.kwargs["Content"]
+    assert fake.kwargs.get("ConfigurationSetName") == "hail-events"
+
+
+async def test_send_email_without_configuration_set_simple_path(monkeypatch) -> None:
+    from hailhq.core.config import settings
+
+    monkeypatch.setattr(settings, "hail_ses_configuration_set", "")
+
+    fake = FakeClient("mid-no-config")
+    provider = SesEmailProvider(client=fake)
+    result = await provider.send_email(
+        from_address="a@b.com",
+        to_addresses=["c@d.com"],
+        subject="s",
+        body_text="t",
+        body_html=None,
+    )
+    assert result.provider_message_id == "mid-no-config"
+    assert fake.kwargs is not None
+    assert "ConfigurationSetName" not in fake.kwargs
+
+
+async def test_send_email_without_configuration_set_raw_path(monkeypatch) -> None:
+    from hailhq.core.config import settings
+
+    monkeypatch.setattr(settings, "hail_ses_configuration_set", "")
+
+    fake = FakeClient("m-no-config")
+    provider = SesEmailProvider(client=fake)
+    result = await provider.send_email(
+        from_address="forwarder+acme@mail.hail.so",
+        to_addresses=["ops@example.com"],
+        subject="Fwd: invoice",
+        body_text="see attached",
+        body_html=None,
+        attachments=[
+            ProviderAttachment(
+                filename="invoice.pdf",
+                content_type="application/pdf",
+                payload=b"%PDF-1.4",
+            )
+        ],
+    )
+
+    assert result.provider_message_id == "m-no-config"
+    assert fake.kwargs is not None
+    assert "ConfigurationSetName" not in fake.kwargs
 
 
 # ---------------------------------------------------------- create_identity

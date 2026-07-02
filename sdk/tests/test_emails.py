@@ -128,6 +128,70 @@ async def test_emails_list_filters_by_status(base_url: str, api_key: str) -> Non
 
 
 # --------------------------------------------------------------------------- #
+# emails.events / emails.stats
+# --------------------------------------------------------------------------- #
+
+
+@respx.mock
+async def test_emails_events(base_url: str, api_key: str) -> None:
+    payload = {"items": [{"kind": "delivered", "occurred_at": "2026-06-01T00:00:00Z"}]}
+    route = respx.get(f"{base_url}/emails/abc/events").mock(
+        return_value=httpx.Response(200, json=payload)
+    )
+    async with Client(api_key=api_key, base_url=base_url) as c:
+        out = await c.emails.events("abc")
+    assert out == payload
+    assert route.calls.last.request.url.path == "/emails/abc/events"
+
+
+@respx.mock
+async def test_emails_stats_default_bucket(base_url: str, api_key: str) -> None:
+    payload = {"totals": {"sent": 10}}
+    route = respx.get(f"{base_url}/emails/stats").mock(
+        return_value=httpx.Response(200, json=payload)
+    )
+    async with Client(api_key=api_key, base_url=base_url) as c:
+        out = await c.emails.stats()
+    assert out == payload
+    req = route.calls.last.request
+    assert req.url.params["bucket"] == "day"
+    assert "from" not in req.url.params
+    assert "to" not in req.url.params
+
+
+@respx.mock
+async def test_emails_stats_with_from_to_params(base_url: str, api_key: str) -> None:
+    payload = {"totals": {"sent": 0}}
+    route = respx.get(f"{base_url}/emails/stats").mock(
+        return_value=httpx.Response(200, json=payload)
+    )
+    async with Client(api_key=api_key, base_url=base_url) as c:
+        out = await c.emails.stats(
+            from_="2026-06-01T00:00:00Z", to="2026-06-30T00:00:00Z", bucket="hour"
+        )
+    assert out["totals"]["sent"] == 0
+    req = route.calls.last.request
+    assert req.url.params["bucket"] == "hour"
+    assert req.url.params["from"] == "2026-06-01T00:00:00Z"
+    assert req.url.params["to"] == "2026-06-30T00:00:00Z"
+
+
+@respx.mock
+async def test_emails_stats_accepts_datetime_args(base_url: str, api_key: str) -> None:
+    from datetime import datetime, timezone
+
+    payload = {"totals": {"sent": 0}}
+    route = respx.get(f"{base_url}/emails/stats").mock(
+        return_value=httpx.Response(200, json=payload)
+    )
+    dt = datetime(2026, 6, 1, tzinfo=timezone.utc)
+    async with Client(api_key=api_key, base_url=base_url) as c:
+        await c.emails.stats(from_=dt)
+    req = route.calls.last.request
+    assert req.url.params["from"] == dt.isoformat()
+
+
+# --------------------------------------------------------------------------- #
 # EmailCreate model — local validation
 # --------------------------------------------------------------------------- #
 

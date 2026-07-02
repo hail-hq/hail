@@ -47,8 +47,15 @@ def _make_payload(record: dict) -> dict:
 
 
 def handler(event: dict, _context) -> dict:
-    record = event["Records"][0]["ses"]
-    payload = _make_payload(record)
+    record = event["Records"][0]
+    if "Sns" in record:
+        # Config-set delivery/engagement event relayed through SNS.
+        payload = {
+            "type": "delivery_event",
+            "event": json.loads(record["Sns"]["Message"]),
+        }
+    else:
+        payload = _make_payload(record["ses"])
     body = json.dumps(payload, separators=(",", ":")).encode()
 
     secret = os.environ["HAIL_INBOUND_HMAC_SECRET"].encode()

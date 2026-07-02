@@ -79,16 +79,20 @@ The full set is the `WebhookEventType` enum in
   held back. `data.reason` is one of `forward_loop`, `forward_rate_limit`,
   `inbound_rate_limit`, `insufficient_funds`. One event fires _per reason_
   (a single message can produce more than one suppressed event).
-- **`email.bounced`**, **`email.complained`** — subscribable today, **not yet
-  emitted**. They land with SES bounce/complaint ingestion in the next
-  milestone; subscribing now is safe but you won't receive them until then.
+- **`email.delivered`** — SES accepted the message for delivery.
+- **`email.delivery_delayed`** — SES reports a transient delay.
+- **`email.bounced`** — the recipient mail server rejected the message (permanent or soft bounce).
+- **`email.complained`** — the recipient marked the message as spam.
+- **`email.opened`** — the recipient opened the message (image tracked, approximate).
+- **`email.clicked`** — the recipient clicked a tracked link.
 
 ## Payload
 
 Hail wraps every event in this envelope (assembled by `build_event_payload` in
 [`webhooks.py`](../../core/hailhq/core/webhooks.py)); the `data` shape comes from
-[`build_event_data`](../../core/hailhq/core/webhook_fanout.py) — that function is
-the source of truth, the example below is illustrative.
+the event type. Inbound events use [`build_event_data`](../../core/hailhq/core/webhook_fanout.py) for `email.received*`; delivery events use [`build_delivery_event_data`](../../core/hailhq/core/email_delivery_events.py) for the lifecycle events.
+
+**Inbound example** (`email.received`):
 
 ```json
 {
@@ -128,6 +132,35 @@ the source of truth, the example below is illustrative.
 presigned S3 URL on access. `email.received.suppressed` carries a trimmed `data`
 (`id`, `direction`, `from_address`, `to_addresses`, `subject`, `message_id`,
 `reason`) — no verdicts, `raw_url`, or attachments.
+
+**Outbound delivery example** (`email.bounced`):
+
+```json
+{
+  "id": "9f2c…",
+  "type": "email.bounced",
+  "api_version": "2026-06-06",
+  "created_at": "2026-07-02T12:00:05+00:00",
+  "organization_id": "org-uuid",
+  "data": {
+    "id": "em-uuid",
+    "kind": "bounced",
+    "occurred_at": "2026-07-01T12:00:05+00:00",
+    "from_address": "noreply@acme.com",
+    "to_addresses": ["bob@example.com"],
+    "subject": "Welcome",
+    "detail": {
+      "hard": true,
+      "bounce_type": "Permanent",
+      "bounce_sub_type": "General",
+      "recipients": ["bob@example.com"],
+      "diagnostic_code": "smtp; 550 5.1.1 user unknown"
+    }
+  }
+}
+```
+
+The `detail` field varies by event type: `bounced` and `complained` carry SES metadata; `delivered` and `delivery_delayed` carry SES status details; `opened` and `clicked` carry `ip_address` and `user_agent`, with `clicked` adding `link` (the event time is the sibling `occurred_at` field). For `bounced`, the provider-neutral `hard` flag distinguishes hard from soft bounces — only hard bounces move the email to `status=bounced` and count toward `bounced_hard` in `GET /emails/stats`.
 
 ## Retries
 

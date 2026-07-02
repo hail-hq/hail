@@ -32,6 +32,7 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from hailhq.core.email_delivery_events import record_sent_event
 from hailhq.core.models import Email, EmailAttachment
 from hailhq.core.providers.email.base import EmailProvider, ProviderAttachment
 from hailhq.core.s3_inbound import S3InboundClient
@@ -235,6 +236,12 @@ class OutboundForwardWorker:
         row.status = "sent"
         row.provider_message_id = result.provider_message_id
         row.sent_at = now
+        record_sent_event(
+            session,
+            email_id=row.id,
+            organization_id=row.organization_id,
+            occurred_at=now,
+        )
         return "sent"
 
     async def _load_attachments(

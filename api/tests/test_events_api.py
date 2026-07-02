@@ -20,6 +20,7 @@ from hailhq.core.models import (
     CallEvent,
 )
 from .conftest import insert_org_and_key
+from .test_emails_api import _register_custom_verified, _send_email
 
 # --------------------------------------------------------------------------- #
 # Helpers
@@ -191,7 +192,9 @@ async def test_get_events_id_filter_unsupported_type_returns_422(
     assert resp.status_code == 422
     detail = resp.json()["detail"]
     assert "unsupported resource type 'sms'" in detail
-    assert "supported: [call]" in detail
+    assert "supported:" in detail
+    assert "call" in detail
+    assert "email" in detail
 
 
 async def test_get_events_id_filter_malformed_returns_422(
@@ -328,3 +331,109 @@ async def test_get_events_org_wide_omits_call_status(
     # The contract: call_status is None for org-wide queries. The pydantic
     # default serializes the absent value as JSON null.
     assert body["call_status"] is None
+
+
+async def test_stream_merges_email_events(
+    client: httpx.AsyncClient, async_session: AsyncSession, add_phone_number
+) -> None:
+    org_id, _, plain = await insert_org_and_key(async_session)
+    headers = {"Authorization": f"Bearer {plain}"}
+    await add_phone_number(async_session, org_id)
+    call_id = await _create_call_for_events(client, plain)
+    await _add_event(async_session, call_id, "call.queued", {})
+
+    await _register_custom_verified(client, headers, domain="acme.com")
+    email_id = (await _send_email(client, plain))["id"]
+
+    r = await client.get("/events", headers=headers)
+    assert r.status_code == 200
+    items = r.json()["items"]
+    sources = {i["source"] for i in items}
+    assert sources == {"call", "email"}
+    email_items = [i for i in items if i["source"] == "email"]
+    assert email_items[0]["email_id"] == email_id
+    assert email_items[0]["call_id"] is None
+    # ascending (occurred_at, id) across both sources
+    keys = [(i["occurred_at"], i["id"]) for i in items]
+    assert keys == sorted(keys)
+
+
+async def test_stream_email_id_filter(
+    client: httpx.AsyncClient, async_session: AsyncSession
+) -> None:
+    org_id, _, plain = await insert_org_and_key(async_session)
+    headers = {"Authorization": f"Bearer {plain}"}
+    await _register_custom_verified(client, headers, domain="acme.com")
+    email_id = (await _send_email(client, plain))["id"]
+    r = await client.get(
+        "/events",
+        params={"id": f"email:{email_id}"},
+        headers=headers,
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert all(i["email_id"] == email_id for i in body["items"])
+    # call_status is a call-only concept — must stay None when the id
+    # resolves to an email.
+    assert body["call_status"] is None
+
+    # cross-org 404
+    _, _, other = await insert_org_and_key(async_session)
+    r2 = await client.get(
+        "/events",
+        params={"id": f"email:{email_id}"},
+        headers={"Authorization": f"Bearer {other}"},
+    )
+    assert r2.status_code == 404
+
+
+async def test_get_events_email_org_isolation(
+    client: httpx.AsyncClient, async_session: AsyncSession
+) -> None:
+    """Org-wide GET /events must never leak another org's email events."""
+    org_a_id, _, plain_a = await insert_org_and_key(async_session)
+    headers_a = {"Authorization": f"Bearer {plain_a}"}
+    await _register_custom_verified(client, headers_a, domain="acme.com")
+    email_id = (await _send_email(client, plain_a))["id"]
+
+    org_b_id, _, plain_b = await _make_second_org(async_session)
+    headers_b = {"Authorization": f"Bearer {plain_b}"}
+
+    resp = await client.get("/events", headers=headers_b)
+    assert resp.status_code == 200
+    items = resp.json()["items"]
+    # Org B sent no email, so it must see no email-source items at all, and
+    # in particular none carrying org A's email_id.
+    assert not any(i["source"] == "email" for i in items)
+    assert not any(i["email_id"] == email_id for i in items)
+
+
+async def test_get_events_kind_filter_email_and_call(
+    client: httpx.AsyncClient,
+    async_session: AsyncSession,
+    add_phone_number,
+) -> None:
+    org_id, _, plain = await insert_org_and_key(async_session)
+    headers = {"Authorization": f"Bearer {plain}"}
+    await add_phone_number(async_session, org_id)
+    call_id = await _create_call_for_events(client, plain)
+    await _add_event(async_session, call_id, "call.queued", {})
+
+    await _register_custom_verified(client, headers, domain="acme.com")
+    email_id = (await _send_email(client, plain))["id"]
+
+    resp = await client.get("/events?kind=sent", headers=headers)
+    assert resp.status_code == 200
+    items = resp.json()["items"]
+    assert items, "expected at least one 'sent' email event"
+    assert all(i["kind"] == "sent" for i in items)
+    assert all(i["source"] == "email" for i in items)
+    assert all(i["email_id"] == email_id for i in items)
+
+    resp = await client.get("/events?kind=call.queued", headers=headers)
+    assert resp.status_code == 200
+    items = resp.json()["items"]
+    assert items, "expected at least one 'call.queued' event"
+    assert all(i["kind"] == "call.queued" for i in items)
+    assert all(i["source"] == "call" for i in items)
+    assert all(i["call_id"] == call_id for i in items)

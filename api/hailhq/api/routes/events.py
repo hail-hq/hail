@@ -20,15 +20,15 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi import status as http_status
-from sqlalchemy import select, tuple_
+from sqlalchemy import literal, select, tuple_, union_all
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from hailhq.core.db import get_session
 from hailhq.api.deps import Principal, get_current_principal
-from hailhq.core.models import Call, CallEvent
+from hailhq.core.models import Call, CallEvent, Email, EmailEvent
 from hailhq.core.schemas import (
-    CallEventResponse,
     CallStatus,
+    EventResponse,
     EventStreamResponse,
     decode_cursor,
     encode_cursor,
@@ -39,6 +39,38 @@ router = APIRouter(prefix="/events", tags=["events"])
 
 _DEFAULT_EVENTS_LIMIT = 100
 _MAX_EVENTS_LIMIT = 1000
+
+
+def _call_select(kind: str | None):
+    """Per-source select; the optional ``kind`` filter is applied here, before
+    the union, so it stays sargable per table."""
+    stmt = select(
+        CallEvent.id.label("id"),
+        literal("call").label("source"),
+        CallEvent.call_id.label("call_id"),
+        literal(None).label("email_id"),
+        CallEvent.kind.label("kind"),
+        CallEvent.payload.label("payload"),
+        CallEvent.occurred_at.label("occurred_at"),
+    )
+    if kind is not None:
+        stmt = stmt.where(CallEvent.kind == kind)
+    return stmt
+
+
+def _email_select(kind: str | None):
+    stmt = select(
+        EmailEvent.id.label("id"),
+        literal("email").label("source"),
+        literal(None).label("call_id"),
+        EmailEvent.email_id.label("email_id"),
+        EmailEvent.kind.label("kind"),
+        EmailEvent.payload.label("payload"),
+        EmailEvent.occurred_at.label("occurred_at"),
+    )
+    if kind is not None:
+        stmt = stmt.where(EmailEvent.kind == kind)
+    return stmt
 
 
 # --------------------------------------------------------------------------- #
@@ -92,17 +124,35 @@ async def list_events(
                 status_code=http_status.HTTP_404_NOT_FOUND,
                 detail="call not found",
             )
-        stmt = select(CallEvent).where(CallEvent.call_id == resource_uuid)
+        selects = [_call_select(kind).where(CallEvent.call_id == resource_uuid)]
         call_status = call.status
-    else:
-        stmt = (
-            select(CallEvent)
-            .join(Call, Call.id == CallEvent.call_id)
-            .where(Call.organization_id == principal.organization_id)
+    elif resource_type == "email":
+        assert resource_uuid is not None  # narrowed by the parser
+        email_stmt = select(Email.id).where(
+            Email.id == resource_uuid,
+            Email.organization_id == principal.organization_id,
         )
+        email_row = (await db.execute(email_stmt)).scalar_one_or_none()
+        # 404 for both unknown-and-cross-org IDs — same shape as the call
+        # branch above so we don't leak existence.
+        if email_row is None:
+            raise HTTPException(
+                status_code=http_status.HTTP_404_NOT_FOUND,
+                detail="email not found",
+            )
+        selects = [_email_select(kind).where(EmailEvent.email_id == resource_uuid)]
+    else:
+        selects = [
+            _call_select(kind)
+            .join(Call, Call.id == CallEvent.call_id)
+            .where(Call.organization_id == principal.organization_id),
+            _email_select(kind).where(
+                EmailEvent.organization_id == principal.organization_id
+            ),
+        ]
 
-    if kind is not None:
-        stmt = stmt.where(CallEvent.kind == kind)
+    u = union_all(*selects).subquery() if len(selects) > 1 else selects[0].subquery()
+    stmt = select(u)
 
     if cursor is not None:
         try:
@@ -113,14 +163,10 @@ async def list_events(
                 detail=str(exc),
             ) from exc
         # Strictly-greater on (occurred_at, id) — forward walk in time.
-        stmt = stmt.where(
-            tuple_(CallEvent.occurred_at, CallEvent.id) > tuple_(cur_ts, cur_id)
-        )
+        stmt = stmt.where(tuple_(u.c.occurred_at, u.c.id) > tuple_(cur_ts, cur_id))
 
-    stmt = stmt.order_by(CallEvent.occurred_at.asc(), CallEvent.id.asc()).limit(
-        limit + 1
-    )
-    rows = list((await db.execute(stmt)).scalars().all())
+    stmt = stmt.order_by(u.c.occurred_at.asc(), u.c.id.asc()).limit(limit + 1)
+    rows = (await db.execute(stmt)).all()
 
     next_cursor: str | None = None
     if len(rows) > limit:
@@ -129,7 +175,7 @@ async def list_events(
         rows = rows[:limit]
 
     return EventStreamResponse(
-        items=[CallEventResponse.model_validate(e) for e in rows],
+        items=[EventResponse.model_validate(r, from_attributes=True) for r in rows],
         next_cursor=next_cursor,
         call_status=cast(CallStatus | None, call_status),
     )

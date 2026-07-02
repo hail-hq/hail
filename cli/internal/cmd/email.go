@@ -42,12 +42,16 @@ func newEmailCmd(opts *Options) *cobra.Command {
 
 Inbound MIME attachments and the raw RFC 5322 source are exposed via
 ` + "`hail email attachment`" + ` and ` + "`hail email raw`" + `; ` + "`hail email tail`" + ` streams
-events for a single message.`,
+events for a single message live, ` + "`hail email events`" + ` shows the
+same timeline already-happened, and ` + "`hail email stats`" + ` rolls
+deliverability up across your whole account.`,
 	}
 	cmd.AddCommand(newEmailSendCmd(opts))
 	cmd.AddCommand(newEmailListCmd(opts))
 	cmd.AddCommand(newEmailGetCmd(opts))
 	cmd.AddCommand(newEmailTailCmd(opts))
+	cmd.AddCommand(newEmailEventsCmd(opts))
+	cmd.AddCommand(newEmailStatsCmd(opts))
 	cmd.AddCommand(newEmailRawCmd(opts))
 	cmd.AddCommand(newEmailAttachmentCmd(opts))
 	cmd.AddCommand(newEmailDomainCmd(opts))

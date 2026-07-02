@@ -265,6 +265,38 @@ the `<name_prefix>-ingest-dlq` SQS queue (`ingest_dlq_url` terraform output) —
 replay by re-driving each message's body at `POST /internal/ses-events`; the raw
 MIME is still in S3.
 
+## Delivery & engagement events
+
+Outbound sends carry the SES configuration set named by
+`HAIL_SES_CONFIGURATION_SET` (Terraform default: `hail-events`). SES
+publishes Delivery / Bounce / Complaint / Reject / DeliveryDelay / Open /
+Click events to SNS; the ingest Lambda relays them to
+`POST /internal/ses-events`, which records them in `email_events`,
+advances `emails.status`, and fans out webhooks.
+
+Check a single email's timeline:
+
+```bash
+hail email events <email-id>
+```
+
+Account-level stats:
+
+```bash
+hail email stats --from 2026-06-01T00:00:00Z --bucket day
+```
+
+Notes:
+
+- Open/Click tracking rewrites links through the default SES tracking
+  domain. A custom tracking domain is not yet supported.
+- Open counts are approximate (image-proxying mail clients inflate them).
+- Events for mail sent outside Hail from the same SES account are
+  acknowledged and dropped (`status: unmatched` in the API log).
+- Forwarded inbound mail (see below) is re-sent as normal outbound — it
+  carries the config set and writes a synthetic `sent` event, so it counts
+  in `/emails/stats` like any other send.
+
 ### 10.5 Forwarding and webhooks
 
 Tenants configure routing per `email_domains` row:

@@ -1,5 +1,6 @@
 import uuid
 from datetime import datetime
+from decimal import Decimal
 
 from sqlalchemy import (
     ARRAY,
@@ -9,6 +10,7 @@ from sqlalchemy import (
     ForeignKey,
     Index,
     Integer,
+    Numeric,
     Text,
     UniqueConstraint,
     text,
@@ -68,7 +70,7 @@ class AccountCredit(Base):
     )
     kind: Mapped[str] = mapped_column(Text, nullable=False)
     channel: Mapped[str] = mapped_column(Text, nullable=False)
-    amount_cents: Mapped[int] = mapped_column(Integer, nullable=False)
+    amount_cents: Mapped[Decimal] = mapped_column(Numeric(14, 1), nullable=False)
     qty: Mapped[int | None] = mapped_column(Integer, nullable=True)
     ref: Mapped[str | None] = mapped_column(Text, nullable=True)
     source: Mapped[str] = mapped_column(Text, nullable=False)
@@ -345,6 +347,50 @@ class CallEvent(Base):
     )
 
 
+class EmailEvent(Base):
+    """Append-only email lifecycle event (mirrors CallEvent).
+
+    ``organization_id`` is denormalized from the parent email so stats
+    queries aggregate without a join. The (email_id, kind, occurred_at)
+    unique constraint absorbs SNS at-least-once redelivery — inserts use
+    ON CONFLICT DO NOTHING and skip fanout when nothing was inserted.
+    """
+
+    __tablename__ = "email_events"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    email_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("emails.id", ondelete="CASCADE"), nullable=False
+    )
+    organization_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), nullable=False
+    )
+    kind: Mapped[str] = mapped_column(Text, nullable=False)
+    payload: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    occurred_at: Mapped[datetime] = mapped_column(TS, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        TS, server_default=text("now()"), nullable=False
+    )
+
+    __table_args__ = (
+        # Tradeoff: two distinct events sharing (email_id, kind, occurred_at)
+        # — e.g. two clicks in the same millisecond — collapse to one row.
+        # Accepted because absorbing SNS at-least-once redelivery matters more.
+        UniqueConstraint(
+            "email_id", "kind", "occurred_at", name="email_events_dedup_uq"
+        ),
+        Index("email_events_email_occurred_idx", "email_id", "occurred_at"),
+        Index(
+            "email_events_org_occurred_kind_idx",
+            "organization_id",
+            "occurred_at",
+            "kind",
+        ),
+    )
+
+
 class IdempotencyKey(Base):
     __tablename__ = "idempotency_keys"
 
@@ -566,7 +612,8 @@ class Email(Base):
 
     __table_args__ = (
         CheckConstraint(
-            "status IN ('queued','sent','failed','bounced','complained','received')",
+            "status IN ('queued','sent','delivered','failed','bounced',"
+            "'complained','received')",
             name="emails_status_check",
         ),
         CheckConstraint(

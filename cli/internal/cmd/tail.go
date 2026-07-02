@@ -247,7 +247,7 @@ func runTail(ctx context.Context, opts *Options, f *tailFlags) error {
 		// exist beyond `limit`. In steady-state polling we drain everything in
 		// one fetch; we synthesize the next polling cursor from the last seen
 		// event so the next poll picks up after the events we just printed.
-		var lastEvent *client.CallEventResponse
+		var lastEvent *client.EventResponse
 		for {
 			for i := range page.Items {
 				if err := renderEvent(opts, page.Items[i], resourceType != "", colorize); err != nil {
@@ -300,7 +300,7 @@ func runTail(ctx context.Context, opts *Options, f *tailFlags) error {
 // `singleResource` is true when --id <type>:<uuid> narrowed the stream; the
 // short-id prefix is omitted in that mode (every event belongs to the same
 // resource, the prefix would be redundant noise).
-func renderEvent(opts *Options, ev client.CallEventResponse, singleResource, colorize bool) error {
+func renderEvent(opts *Options, ev client.EventResponse, singleResource, colorize bool) error {
 	if opts.JSON {
 		out, err := json.Marshal(ev)
 		if err != nil {
@@ -319,13 +319,28 @@ func renderEvent(opts *Options, ev client.CallEventResponse, singleResource, col
 		fmt.Fprintf(opts.Stdout, "[%s] %-9s %s\n", ts, label, body)
 		return nil
 	}
-	short := shortCallID(ev.CallId)
+	short := shortCallID(eventResourceID(ev))
 	prefix := fmt.Sprintf("[%s]", short)
 	if colorize {
 		prefix = shortIDColor(short) + prefix + colorReset
 	}
 	fmt.Fprintf(opts.Stdout, "[%s] %s %-9s %s\n", ts, prefix, label, body)
 	return nil
+}
+
+// eventResourceID picks the id (call or email) that owns this event, for
+// the per-resource short-id prefix in org-wide tail. EventResponse.CallId
+// and .EmailId are both optional now that the stream is unified across
+// sources; the server sets exactly one. Falls back to uuid.Nil if somehow
+// neither is set.
+func eventResourceID(ev client.EventResponse) openapi_types.UUID {
+	if ev.CallId != nil {
+		return *ev.CallId
+	}
+	if ev.EmailId != nil {
+		return *ev.EmailId
+	}
+	return openapi_types.UUID(uuid.Nil)
 }
 
 // shortCallID returns the first 8 hex chars of the UUID (no dashes
@@ -350,7 +365,7 @@ func shortIDColor(short string) string {
 // renderEventBody produces the (label, body) pair for a single event. The
 // label is bracketed (e.g. "[agent]") and the body is the human-readable
 // message. Always returns a non-crashing fallback even on missing fields.
-func renderEventBody(ev client.CallEventResponse) (label, body string) {
+func renderEventBody(ev client.EventResponse) (label, body string) {
 	switch ev.Kind {
 	case "state_change":
 		from, _ := ev.Payload["from"].(string)

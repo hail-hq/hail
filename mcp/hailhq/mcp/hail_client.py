@@ -32,8 +32,10 @@ from hailhq.core.schemas import (
     CallListResponse,
     CallResponse,
     EmailCreate,
+    EmailEventListResponse,
     EmailListResponse,
     EmailResponse,
+    EmailStatsResponse,
     EventStreamResponse,
 )
 
@@ -275,6 +277,39 @@ class HailClient:
             params["limit"] = limit
         resp = await self._client.get("/events", params=params)
         return EventStreamResponse.model_validate(_decode(resp)).model_dump(mode="json")
+
+    # ------------------------------------------------------------------ #
+    # GET /emails/{id}/events
+    # ------------------------------------------------------------------ #
+
+    async def get_email_events(self, email_id: str) -> dict[str, Any]:
+        resp = await self._client.get(f"/emails/{email_id}/events")
+        return EmailEventListResponse.model_validate(_decode(resp)).model_dump(
+            mode="json"
+        )
+
+    # ------------------------------------------------------------------ #
+    # GET /emails/stats
+    # ------------------------------------------------------------------ #
+
+    async def get_email_stats(
+        self,
+        *,
+        from_: str | None = None,
+        to: str | None = None,
+        bucket: str = "day",
+    ) -> dict[str, Any]:
+        """GET /emails/stats — account-level deliverability aggregates."""
+        params: dict[str, str] = {"bucket": bucket}
+        if from_:
+            params["from"] = from_
+        if to:
+            params["to"] = to
+        resp = await self._client.get("/emails/stats", params=params)
+        # by_alias keeps the wire-shaped ``from``/``to`` keys on the way out.
+        return EmailStatsResponse.model_validate(_decode(resp)).model_dump(
+            mode="json", by_alias=True
+        )
 
 
 def _decode(resp: httpx.Response) -> Any:
