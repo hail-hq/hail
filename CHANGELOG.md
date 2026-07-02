@@ -2,6 +2,19 @@
 
 All notable changes to Hail are documented here. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and Hail adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.1] — 2026-07-02
+
+Internal consolidation release. `cli-v0.8.1` cut alongside; the SDK is
+unchanged and stays at `hail-sdk==0.5.0`.
+
+- One shared cursor-pagination helper now backs every paginated API route
+  (was seven hand-copies) and one generic page-walker backs all three CLI
+  list commands. Wire contract unchanged, with one edge unified: an
+  empty-string `cursor` query param is now ignored everywhere instead of
+  returning 400 on some routes.
+- `hail email events --all` now emits the same walked-items stderr warning
+  as `call list --all` and `email list --all`.
+
 ## [0.8.0] — 2026-07-02
 
 Component versions cut alongside this umbrella release:
