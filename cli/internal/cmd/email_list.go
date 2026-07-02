@@ -45,49 +45,33 @@ func runEmailList(ctx context.Context, opts *Options, f *emailListFlags) error {
 		return err
 	}
 
-	cursor := f.cursor
-	limit := f.limit
-	var allItems []client.EmailSummary
-	warned := false
-	for {
-		params := &client.ListEmailsEmailsGetParams{
-			Limit:  &limit,
-			Cursor: strPtr(cursor),
-		}
-		if f.status != "" {
-			s := client.ListEmailsEmailsGetParamsStatus(f.status)
-			params.Status = &s
-		}
-		if f.direction != "" {
-			d := client.ListEmailsEmailsGetParamsDirection(f.direction)
-			params.Direction = &d
-		}
-
-		resp, err := apiClient.ListEmailsEmailsGetWithResponse(ctx, params)
-		if err != nil {
-			return fmt.Errorf("email API: %w", err)
-		}
-		if resp.HTTPResponse.StatusCode != http.StatusOK || resp.JSON200 == nil {
-			return apiError(resp.HTTPResponse.StatusCode, resp.Body)
-		}
-
-		allItems = append(allItems, resp.JSON200.Items...)
-		if !f.all {
-			// Single-page mode: caller paginates with --cursor manually.
-			return printEmailList(opts, resp.JSON200)
-		}
-
-		if !warned && len(allItems) > 1000 {
-			fmt.Fprintf(opts.Stderr, "warning: walked %d emails so far; ctrl-C to stop\n", len(allItems))
-			warned = true
-		}
-		if resp.JSON200.NextCursor == nil || *resp.JSON200.NextCursor == "" {
-			break
-		}
-		cursor = *resp.JSON200.NextCursor
+	items, next, err := walkCursor(f.all, f.cursor, opts.Stderr, "emails",
+		func(cursor string) (cursorPage[client.EmailSummary], error) {
+			params := &client.ListEmailsEmailsGetParams{
+				Limit:  &f.limit,
+				Cursor: strPtr(cursor),
+			}
+			if f.status != "" {
+				s := client.ListEmailsEmailsGetParamsStatus(f.status)
+				params.Status = &s
+			}
+			if f.direction != "" {
+				d := client.ListEmailsEmailsGetParamsDirection(f.direction)
+				params.Direction = &d
+			}
+			resp, err := apiClient.ListEmailsEmailsGetWithResponse(ctx, params)
+			if err != nil {
+				return cursorPage[client.EmailSummary]{}, fmt.Errorf("email API: %w", err)
+			}
+			if resp.HTTPResponse.StatusCode != http.StatusOK || resp.JSON200 == nil {
+				return cursorPage[client.EmailSummary]{}, apiError(resp.HTTPResponse.StatusCode, resp.Body)
+			}
+			return cursorPage[client.EmailSummary]{items: resp.JSON200.Items, nextCursor: resp.JSON200.NextCursor}, nil
+		})
+	if err != nil {
+		return err
 	}
-
-	return printEmailList(opts, &client.EmailListResponse{Items: allItems})
+	return printEmailList(opts, &client.EmailListResponse{Items: items, NextCursor: next})
 }
 
 func printEmailList(opts *Options, body *client.EmailListResponse) error {

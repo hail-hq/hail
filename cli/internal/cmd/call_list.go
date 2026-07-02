@@ -45,48 +45,30 @@ func runCallList(ctx context.Context, opts *Options, f *callListFlags) error {
 		return err
 	}
 
-	cursor := f.cursor
-	limit := f.limit
-	var allItems []client.CallResponse
-	warned := false
-	for {
-		params := &client.ListCallsCallsGetParams{
-			Limit:  &limit,
-			Cursor: strPtr(cursor),
-			To:     strPtr(f.to),
-		}
-		if f.status != "" {
-			s := client.ListCallsCallsGetParamsStatus(f.status)
-			params.Status = &s
-		}
-
-		resp, err := apiClient.ListCallsCallsGetWithResponse(ctx, params)
-		if err != nil {
-			return fmt.Errorf("call API: %w", err)
-		}
-		if resp.HTTPResponse.StatusCode != http.StatusOK || resp.JSON200 == nil {
-			return apiError(resp.HTTPResponse.StatusCode, resp.Body)
-		}
-
-		allItems = append(allItems, resp.JSON200.Items...)
-		if !f.all {
-			// Single-page mode: caller paginates with --cursor manually.
-			return printCallList(opts, resp.JSON200)
-		}
-
-		if !warned && len(allItems) > 1000 {
-			// Warning to stderr so `hail call list --all --json | jq` keeps
-			// working. Latched so we don't spam every page beyond the threshold.
-			fmt.Fprintf(opts.Stderr, "warning: walked %d calls so far; ctrl-C to stop\n", len(allItems))
-			warned = true
-		}
-		if resp.JSON200.NextCursor == nil || *resp.JSON200.NextCursor == "" {
-			break
-		}
-		cursor = *resp.JSON200.NextCursor
+	items, next, err := walkCursor(f.all, f.cursor, opts.Stderr, "calls",
+		func(cursor string) (cursorPage[client.CallResponse], error) {
+			params := &client.ListCallsCallsGetParams{
+				Limit:  &f.limit,
+				Cursor: strPtr(cursor),
+				To:     strPtr(f.to),
+			}
+			if f.status != "" {
+				s := client.ListCallsCallsGetParamsStatus(f.status)
+				params.Status = &s
+			}
+			resp, err := apiClient.ListCallsCallsGetWithResponse(ctx, params)
+			if err != nil {
+				return cursorPage[client.CallResponse]{}, fmt.Errorf("call API: %w", err)
+			}
+			if resp.HTTPResponse.StatusCode != http.StatusOK || resp.JSON200 == nil {
+				return cursorPage[client.CallResponse]{}, apiError(resp.HTTPResponse.StatusCode, resp.Body)
+			}
+			return cursorPage[client.CallResponse]{items: resp.JSON200.Items, nextCursor: resp.JSON200.NextCursor}, nil
+		})
+	if err != nil {
+		return err
 	}
-
-	return printCallList(opts, &client.CallListResponse{Items: allItems})
+	return printCallList(opts, &client.CallListResponse{Items: items, NextCursor: next})
 }
 
 // printCallList prints a CallListResponse: JSON or a table.

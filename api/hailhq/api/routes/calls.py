@@ -15,7 +15,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from fastapi import status as http_status
-from sqlalchemy import select, tuple_, update
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from hailhq.api.audit import write_audit_log
@@ -23,6 +23,7 @@ from hailhq.core.billing import has_funds
 from hailhq.core.call_end_reasons import CallEndReason
 from hailhq.core.db import get_session
 from hailhq.api.deps import Principal, get_current_principal
+from hailhq.api.pagination import fetch_cursor_page
 from hailhq.api.idempotency import IdempotencyContext, idempotency_dep
 from hailhq.core.config import settings
 from hailhq.core.livekit import LiveKitClient
@@ -37,8 +38,6 @@ from hailhq.core.schemas import (
     CallListResponse,
     CallResponse,
     CallStatus,
-    decode_cursor,
-    encode_cursor,
 )
 
 logger = logging.getLogger(__name__)
@@ -399,24 +398,15 @@ async def list_calls(
         stmt = stmt.where(Call.status == status)
     if to is not None:
         stmt = stmt.where(Call.to_e164 == to)
-    if cursor is not None:
-        try:
-            cur_ts, cur_id = decode_cursor(cursor)
-        except ValueError as exc:
-            raise HTTPException(
-                status_code=http_status.HTTP_400_BAD_REQUEST,
-                detail=str(exc),
-            ) from exc
-        stmt = stmt.where(tuple_(Call.created_at, Call.id) < tuple_(cur_ts, cur_id))
-
-    stmt = stmt.order_by(Call.created_at.desc(), Call.id.desc()).limit(limit + 1)
-    rows = list((await db.execute(stmt)).scalars().all())
-
-    next_cursor: str | None = None
-    if len(rows) > limit:
-        last = rows[limit - 1]
-        next_cursor = encode_cursor(last.created_at, last.id)
-        rows = rows[:limit]
+    rows, next_cursor = await fetch_cursor_page(
+        db,
+        stmt,
+        Call.created_at,
+        Call.id,
+        cursor=cursor,
+        limit=limit,
+        newest_first=True,
+    )
 
     return CallListResponse(
         items=[CallResponse.model_validate(c) for c in rows],

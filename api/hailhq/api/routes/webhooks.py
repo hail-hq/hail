@@ -24,11 +24,12 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from fastapi import status as http_status
-from sqlalchemy import select, tuple_, update
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from hailhq.api.audit import write_audit_log
 from hailhq.api.deps import Principal, get_current_principal
+from hailhq.api.pagination import fetch_cursor_page
 from hailhq.core.config import settings
 from hailhq.core.db import get_session
 from hailhq.core.http_post import validate_webhook_target
@@ -41,8 +42,6 @@ from hailhq.core.schemas import (
     WebhookSubscriptionListResponse,
     WebhookSubscriptionPatch,
     WebhookSubscriptionResponse,
-    decode_cursor,
-    encode_cursor,
 )
 
 router = APIRouter(prefix="/webhooks", tags=["webhooks"])
@@ -129,27 +128,15 @@ async def list_subscriptions(
     stmt = select(WebhookSubscription).where(
         WebhookSubscription.organization_id == principal.organization_id
     )
-    if cursor:
-        try:
-            cur_ts, cur_id = decode_cursor(cursor)
-        except ValueError as exc:
-            raise HTTPException(
-                status_code=http_status.HTTP_400_BAD_REQUEST,
-                detail=str(exc),
-            ) from exc
-        stmt = stmt.where(
-            tuple_(WebhookSubscription.created_at, WebhookSubscription.id)
-            < tuple_(cur_ts, cur_id)
-        )
-    stmt = stmt.order_by(
-        WebhookSubscription.created_at.desc(), WebhookSubscription.id.desc()
-    ).limit(limit + 1)
-    rows = list((await db.execute(stmt)).scalars().all())
-    next_cursor: str | None = None
-    if len(rows) > limit:
-        last = rows[limit - 1]
-        next_cursor = encode_cursor(last.created_at, last.id)
-        rows = rows[:limit]
+    rows, next_cursor = await fetch_cursor_page(
+        db,
+        stmt,
+        WebhookSubscription.created_at,
+        WebhookSubscription.id,
+        cursor=cursor,
+        limit=limit,
+        newest_first=True,
+    )
     return WebhookSubscriptionListResponse(
         items=[_to_response(s) for s in rows], next_cursor=next_cursor
     )
@@ -272,27 +259,15 @@ async def list_deliveries(
 ) -> WebhookDeliveryListResponse:
     await _load_owned(db, sub_id, principal.organization_id)  # auth gate
     stmt = select(WebhookDelivery).where(WebhookDelivery.subscription_id == sub_id)
-    if cursor:
-        try:
-            cur_ts, cur_id = decode_cursor(cursor)
-        except ValueError as exc:
-            raise HTTPException(
-                status_code=http_status.HTTP_400_BAD_REQUEST,
-                detail=str(exc),
-            ) from exc
-        stmt = stmt.where(
-            tuple_(WebhookDelivery.created_at, WebhookDelivery.id)
-            < tuple_(cur_ts, cur_id)
-        )
-    stmt = stmt.order_by(
-        WebhookDelivery.created_at.desc(), WebhookDelivery.id.desc()
-    ).limit(limit + 1)
-    rows = list((await db.execute(stmt)).scalars().all())
-    next_cursor: str | None = None
-    if len(rows) > limit:
-        last = rows[limit - 1]
-        next_cursor = encode_cursor(last.created_at, last.id)
-        rows = rows[:limit]
+    rows, next_cursor = await fetch_cursor_page(
+        db,
+        stmt,
+        WebhookDelivery.created_at,
+        WebhookDelivery.id,
+        cursor=cursor,
+        limit=limit,
+        newest_first=True,
+    )
     return WebhookDeliveryListResponse(
         items=[WebhookDeliveryResponse.model_validate(r) for r in rows],
         next_cursor=next_cursor,

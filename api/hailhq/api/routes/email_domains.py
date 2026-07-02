@@ -32,12 +32,13 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from fastapi import status as http_status
-from sqlalchemy import select, tuple_, update
+from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from hailhq.api.audit import write_audit_log
 from hailhq.api.deps import Principal, get_current_principal
+from hailhq.api.pagination import fetch_cursor_page
 from hailhq.core.config import settings
 from hailhq.core.db import get_session
 from hailhq.core.dns_lookup import custom_dns_records, resolve_mx, ses_inbound_host
@@ -51,8 +52,6 @@ from hailhq.core.schemas import (
     EmailDomainListResponse,
     EmailDomainPatch,
     EmailDomainResponse,
-    decode_cursor,
-    encode_cursor,
 )
 
 logger = logging.getLogger(__name__)
@@ -318,28 +317,15 @@ async def list_email_domains(
     stmt = select(EmailDomain).where(
         EmailDomain.organization_id == principal.organization_id
     )
-    if cursor is not None:
-        try:
-            cur_ts, cur_id = decode_cursor(cursor)
-        except ValueError as exc:
-            raise HTTPException(
-                status_code=http_status.HTTP_400_BAD_REQUEST,
-                detail=str(exc),
-            ) from exc
-        stmt = stmt.where(
-            tuple_(EmailDomain.created_at, EmailDomain.id) < tuple_(cur_ts, cur_id)
-        )
-
-    stmt = stmt.order_by(EmailDomain.created_at.desc(), EmailDomain.id.desc()).limit(
-        limit + 1
+    rows, next_cursor = await fetch_cursor_page(
+        db,
+        stmt,
+        EmailDomain.created_at,
+        EmailDomain.id,
+        cursor=cursor,
+        limit=limit,
+        newest_first=True,
     )
-    rows = list((await db.execute(stmt)).scalars().all())
-
-    next_cursor: str | None = None
-    if len(rows) > limit:
-        last = rows[limit - 1]
-        next_cursor = encode_cursor(last.created_at, last.id)
-        rows = rows[:limit]
 
     return EmailDomainListResponse(
         items=[EmailDomainResponse.model_validate(r) for r in rows],

@@ -20,18 +20,17 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi import status as http_status
-from sqlalchemy import literal, select, tuple_, union_all
+from sqlalchemy import literal, select, union_all
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from hailhq.core.db import get_session
 from hailhq.api.deps import Principal, get_current_principal
+from hailhq.api.pagination import fetch_cursor_page
 from hailhq.core.models import Call, CallEvent, Email, EmailEvent
 from hailhq.core.schemas import (
     CallStatus,
     EventResponse,
     EventStreamResponse,
-    decode_cursor,
-    encode_cursor,
     parse_resource_id,
 )
 
@@ -152,27 +151,17 @@ async def list_events(
         ]
 
     u = union_all(*selects).subquery() if len(selects) > 1 else selects[0].subquery()
-    stmt = select(u)
 
-    if cursor is not None:
-        try:
-            cur_ts, cur_id = decode_cursor(cursor)
-        except ValueError as exc:
-            raise HTTPException(
-                status_code=http_status.HTTP_400_BAD_REQUEST,
-                detail=str(exc),
-            ) from exc
-        # Strictly-greater on (occurred_at, id) — forward walk in time.
-        stmt = stmt.where(tuple_(u.c.occurred_at, u.c.id) > tuple_(cur_ts, cur_id))
-
-    stmt = stmt.order_by(u.c.occurred_at.asc(), u.c.id.asc()).limit(limit + 1)
-    rows = (await db.execute(stmt)).all()
-
-    next_cursor: str | None = None
-    if len(rows) > limit:
-        last = rows[limit - 1]
-        next_cursor = encode_cursor(last.occurred_at, last.id)
-        rows = rows[:limit]
+    # Forward walk in time: strictly-greater on (occurred_at, id).
+    rows, next_cursor = await fetch_cursor_page(
+        db,
+        select(u),
+        u.c.occurred_at,
+        u.c.id,
+        cursor=cursor,
+        limit=limit,
+        scalars=False,
+    )
 
     return EventStreamResponse(
         items=[EventResponse.model_validate(r, from_attributes=True) for r in rows],

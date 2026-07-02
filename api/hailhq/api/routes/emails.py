@@ -25,7 +25,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from fastapi import status as http_status
 from fastapi.responses import RedirectResponse
-from sqlalchemy import and_, func, or_, select, text as text_sql, tuple_, update
+from sqlalchemy import and_, func, or_, select, text as text_sql, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import defer
@@ -33,6 +33,7 @@ from sqlalchemy.orm import defer
 from hailhq.api.audit import write_audit_log
 from hailhq.core.urls import join_url
 from hailhq.api.deps import Principal, get_current_principal
+from hailhq.api.pagination import fetch_cursor_page
 from hailhq.api.idempotency import IdempotencyContext, idempotency_dep
 from hailhq.api.usage import write_usage_event
 from hailhq.api.routes.email_domains import (
@@ -60,8 +61,6 @@ from hailhq.core.schemas import (
     EmailStatsResponse,
     EmailStatus,
     EmailSummary,
-    decode_cursor,
-    encode_cursor,
 )
 
 logger = logging.getLogger(__name__)
@@ -464,28 +463,14 @@ async def list_email_events(
             status_code=http_status.HTTP_404_NOT_FOUND,
             detail="email not found",
         )
-    stmt = select(EmailEvent).where(EmailEvent.email_id == email_id)
-    if cursor is not None:
-        try:
-            cur_ts, cur_id = decode_cursor(cursor)
-        except ValueError as exc:
-            raise HTTPException(
-                status_code=http_status.HTTP_400_BAD_REQUEST,
-                detail=str(exc),
-            ) from exc
-        stmt = stmt.where(
-            tuple_(EmailEvent.occurred_at, EmailEvent.id) > tuple_(cur_ts, cur_id)
-        )
-    stmt = stmt.order_by(EmailEvent.occurred_at.asc(), EmailEvent.id.asc()).limit(
-        limit + 1
+    rows, next_cursor = await fetch_cursor_page(
+        db,
+        select(EmailEvent).where(EmailEvent.email_id == email_id),
+        EmailEvent.occurred_at,
+        EmailEvent.id,
+        cursor=cursor,
+        limit=limit,
     )
-    rows = list((await db.execute(stmt)).scalars().all())
-
-    next_cursor: str | None = None
-    if len(rows) > limit:
-        last = rows[limit - 1]
-        next_cursor = encode_cursor(last.occurred_at, last.id)
-        rows = rows[:limit]
 
     return EmailEventListResponse(
         items=[EmailEventResponse.model_validate(e) for e in rows],
@@ -743,24 +728,15 @@ async def list_emails(
         stmt = stmt.where(Email.status == status)
     if direction is not None:
         stmt = stmt.where(Email.direction == direction)
-    if cursor is not None:
-        try:
-            cur_ts, cur_id = decode_cursor(cursor)
-        except ValueError as exc:
-            raise HTTPException(
-                status_code=http_status.HTTP_400_BAD_REQUEST,
-                detail=str(exc),
-            ) from exc
-        stmt = stmt.where(tuple_(Email.created_at, Email.id) < tuple_(cur_ts, cur_id))
-
-    stmt = stmt.order_by(Email.created_at.desc(), Email.id.desc()).limit(limit + 1)
-    rows = list((await db.execute(stmt)).scalars().all())
-
-    next_cursor: str | None = None
-    if len(rows) > limit:
-        last = rows[limit - 1]
-        next_cursor = encode_cursor(last.created_at, last.id)
-        rows = rows[:limit]
+    rows, next_cursor = await fetch_cursor_page(
+        db,
+        stmt,
+        Email.created_at,
+        Email.id,
+        cursor=cursor,
+        limit=limit,
+        newest_first=True,
+    )
 
     return EmailListResponse(
         items=[EmailSummary.model_validate(e) for e in rows],

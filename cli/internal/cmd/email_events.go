@@ -53,35 +53,18 @@ func runEmailEvents(ctx context.Context, opts *Options, f *emailEventsFlags, inp
 		return err
 	}
 
-	// Single-page mode: one request; caller paginates with --cursor manually.
-	if !f.all {
-		page, err := fetchEmailEventsPage(ctx, apiClient, id, f.limit, f.cursor)
-		if err != nil {
-			return err
-		}
-		return printEmailEvents(opts, page)
+	items, next, err := walkCursor(f.all, f.cursor, opts.Stderr, "events",
+		func(cursor string) (cursorPage[client.EmailEventResponse], error) {
+			page, err := fetchEmailEventsPage(ctx, apiClient, id, f.limit, cursor)
+			if err != nil {
+				return cursorPage[client.EmailEventResponse]{}, err
+			}
+			return cursorPage[client.EmailEventResponse]{items: page.Items, nextCursor: page.NextCursor}, nil
+		})
+	if err != nil {
+		return err
 	}
-
-	cursor := f.cursor
-	var allItems []client.EmailEventResponse
-	warned := false
-	for {
-		page, err := fetchEmailEventsPage(ctx, apiClient, id, f.limit, cursor)
-		if err != nil {
-			return err
-		}
-		allItems = append(allItems, page.Items...)
-		if !warned && len(allItems) > 1000 {
-			fmt.Fprintf(opts.Stderr, "warning: walked %d events so far; ctrl-C to stop\n", len(allItems))
-			warned = true
-		}
-		if page.NextCursor == nil || *page.NextCursor == "" {
-			break
-		}
-		cursor = *page.NextCursor
-	}
-
-	return printEmailEvents(opts, &client.EmailEventListResponse{Items: allItems})
+	return printEmailEvents(opts, &client.EmailEventListResponse{Items: items, NextCursor: next})
 }
 
 func fetchEmailEventsPage(
