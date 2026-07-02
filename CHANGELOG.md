@@ -2,7 +2,10 @@
 
 All notable changes to Hail are documented here. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and Hail adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## Unreleased
+## [0.8.0] — 2026-07-02
+
+Component versions cut alongside this umbrella release:
+**`sdk-v0.5.0`** (PyPI: `hail-sdk==0.5.0`), **`cli-v0.8.0`** (Homebrew + GitHub Releases).
 
 - `GET /emails/{id}/events` is now cursor-paginated (`cursor`, `limit` 1..1000,
   `next_cursor` in the response). `hail email events` gains
