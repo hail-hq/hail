@@ -24,7 +24,12 @@ logger = logging.getLogger(__name__)
 
 
 async def get_balance_cents(db: AsyncSession, organization_id: uuid.UUID) -> int:
-    """Current balance for an org, in cents. SUM over the ledger."""
+    """Current balance for an org, in cents. SUM over the ledger.
+
+    The ledger stores NUMERIC(14,1) (0.1-cent precision); this truncates
+    toward zero, so 499.8 reads as 499 — sub-cent remainders never count
+    in the caller's favor, which keeps the has_funds gate conservative.
+    """
     stmt = select(func.coalesce(func.sum(AccountCredit.amount_cents), 0)).where(
         AccountCredit.organization_id == organization_id
     )

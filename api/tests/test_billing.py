@@ -9,6 +9,8 @@ Covers:
 
 from __future__ import annotations
 
+from decimal import Decimal
+
 import httpx
 import pytest
 from sqlalchemy import text
@@ -191,3 +193,67 @@ async def test_oss_missing_apikey_table_returns_401(
         headers={"Authorization": "Bearer not-the-master"},
     )
     assert resp.status_code == 401
+
+
+# --------------------------------------------------------------------------- #
+# Fractional cents (0.1¢-precision ledger)
+# --------------------------------------------------------------------------- #
+
+
+async def test_account_credits_accepts_fractional_debit(
+    async_session: AsyncSession,
+) -> None:
+    """A 0.2¢ email debit must round-trip exactly (NUMERIC(14,1) column)."""
+    org_id, _, _ = await insert_org_and_key(
+        async_session,
+        org_slug="fractional",
+        initial_credit_cents=500,
+    )
+    async_session.add(
+        AccountCredit(
+            organization_id=org_id,
+            kind="debit",
+            channel="email",
+            amount_cents=Decimal("-0.2"),
+            qty=1,
+            ref="usage_event:test-fractional-1",
+            source="usage_event",
+        )
+    )
+    await async_session.commit()
+
+    row = (
+        await async_session.execute(
+            text(
+                "SELECT amount_cents FROM account_credits "
+                "WHERE ref = 'usage_event:test-fractional-1'"
+            )
+        )
+    ).scalar_one()
+    assert Decimal(row) == Decimal("-0.2")
+
+
+async def test_get_balance_cents_truncates_fractional_sum(
+    async_session: AsyncSession,
+) -> None:
+    """500¢ credit − 0.2¢ debit = 499.8¢ → int 499 (conservative gate)."""
+    from hailhq.core.billing import get_balance_cents
+
+    org_id, _, _ = await insert_org_and_key(
+        async_session,
+        org_slug="fractional-sum",
+        initial_credit_cents=500,
+    )
+    async_session.add(
+        AccountCredit(
+            organization_id=org_id,
+            kind="debit",
+            channel="email",
+            amount_cents=Decimal("-0.2"),
+            qty=1,
+            ref="usage_event:test-fractional-2",
+            source="usage_event",
+        )
+    )
+    await async_session.commit()
+    assert await get_balance_cents(async_session, org_id) == 499
