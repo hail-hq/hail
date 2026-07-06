@@ -211,3 +211,64 @@ func TestEmailSend_APIError(t *testing.T) {
 		t.Errorf("error should reference status code: %v", err)
 	}
 }
+
+func TestEmailSendSubcommand_SendsConsentFlags(t *testing.T) {
+	srv := newFakeServer(t, http.StatusCreated, sampleEmailResponse())
+
+	_, _, err := runRoot(t,
+		map[string]string{"HAIL_API_KEY": "sk_test", "HAIL_API_URL": srv.URL},
+		"email", "send",
+		"--to", "a@example.com",
+		"--subject", "hi",
+		"--body", "hello",
+		"--recipient-consent",
+		"--consent-source", "signup_form",
+		"--message-type", "marketing",
+	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var body map[string]any
+	if err := json.Unmarshal(srv.lastBody, &body); err != nil {
+		t.Fatalf("bad request body: %v", err)
+	}
+	if body["recipient_consent"] != true {
+		t.Errorf("recipient_consent = %v, want true", body["recipient_consent"])
+	}
+	if body["consent_source"] != "signup_form" {
+		t.Errorf("consent_source = %v, want signup_form", body["consent_source"])
+	}
+}
+
+// TestEmailSendSubcommand_DefaultsRecipientConsentFalseWhenNotPassed mirrors
+// TestCallSubcommand_DefaultsRecipientConsentFalseWhenNotPassed in
+// call_test.go: EmailCreate.recipient_consent is likewise a required,
+// non-nullable boolean in openapi.yaml, so the generated field is a plain
+// `bool` with no `omitempty` and can never be truly absent from the JSON
+// body — only true or false.
+func TestEmailSendSubcommand_DefaultsRecipientConsentFalseWhenNotPassed(t *testing.T) {
+	srv := newFakeServer(t, http.StatusCreated, sampleEmailResponse())
+
+	_, _, err := runRoot(t,
+		map[string]string{"HAIL_API_KEY": "sk_test", "HAIL_API_URL": srv.URL},
+		"email", "send",
+		"--to", "a@example.com",
+		"--subject", "hi",
+		"--body", "hello",
+	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var body map[string]any
+	if err := json.Unmarshal(srv.lastBody, &body); err != nil {
+		t.Fatalf("bad request body: %v", err)
+	}
+	if v, ok := body["recipient_consent"]; !ok || v != false {
+		t.Errorf("recipient_consent = %v (present=%v), want false", v, ok)
+	}
+	if _, ok := body["consent_source"]; ok {
+		t.Errorf("consent_source should be omitted when --consent-source not passed, got %v", body["consent_source"])
+	}
+}

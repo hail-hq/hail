@@ -412,3 +412,71 @@ func TestCallSubcommand_MissingAPIKey(t *testing.T) {
 		t.Errorf("expected 0 HTTP calls, got %d", hits)
 	}
 }
+
+func TestCallSubcommand_SendsConsentFlags(t *testing.T) {
+	srv := newFakeServer(t, http.StatusCreated, sampleResponse())
+
+	_, _, err := runRoot(t,
+		map[string]string{"HAIL_API_KEY": "sk_test", "HAIL_API_URL": srv.URL},
+		"call", "+15551234567",
+		"--prompt", "you are a polite agent",
+		"--recipient-consent",
+		"--consent-source", "signup_form",
+		"--message-type", "marketing",
+	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var body map[string]any
+	if err := json.Unmarshal(srv.lastBody, &body); err != nil {
+		t.Fatalf("bad request body: %v", err)
+	}
+	if body["recipient_consent"] != true {
+		t.Errorf("recipient_consent = %v, want true", body["recipient_consent"])
+	}
+	if body["consent_source"] != "signup_form" {
+		t.Errorf("consent_source = %v, want signup_form", body["consent_source"])
+	}
+	if body["message_type"] != "marketing" {
+		t.Errorf("message_type = %v, want marketing", body["message_type"])
+	}
+}
+
+// TestCallSubcommand_DefaultsRecipientConsentFalseWhenNotPassed pins the
+// real behavior forced by the OpenAPI spec: CallCreate.recipient_consent is
+// listed under `required` and has no `anyOf [.., null]`, so oapi-codegen
+// emits a plain, non-pointer `bool` field with no `omitempty` — the key can
+// never be genuinely absent from the marshaled JSON body, only true or
+// false. (The task brief's draft test assumed the flag would be omitted
+// entirely when not passed, as if the field were optional/pointer; that
+// doesn't hold against the real generated client, so this test asserts the
+// spec-consistent behavior instead.) The CLI always reports its actual
+// consent status, defaulting to false, so an operator who forgets the flag
+// gets a clear "consent required" 422 from the API rather than a generic
+// "field required" validation error.
+func TestCallSubcommand_DefaultsRecipientConsentFalseWhenNotPassed(t *testing.T) {
+	srv := newFakeServer(t, http.StatusCreated, sampleResponse())
+
+	_, _, err := runRoot(t,
+		map[string]string{"HAIL_API_KEY": "sk_test", "HAIL_API_URL": srv.URL},
+		"call", "+15551234567", "--prompt", "you are a polite agent",
+	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var body map[string]any
+	if err := json.Unmarshal(srv.lastBody, &body); err != nil {
+		t.Fatalf("bad request body: %v", err)
+	}
+	if v, ok := body["recipient_consent"]; !ok || v != false {
+		t.Errorf("recipient_consent = %v (present=%v), want false", v, ok)
+	}
+	if _, ok := body["consent_source"]; ok {
+		t.Errorf("consent_source should be omitted when --consent-source not passed, got %v", body["consent_source"])
+	}
+	if _, ok := body["message_type"]; ok {
+		t.Errorf("message_type should be omitted when --message-type not passed, got %v", body["message_type"])
+	}
+}

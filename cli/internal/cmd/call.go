@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/spf13/cobra"
@@ -16,13 +17,17 @@ import (
 // callFlags are the values bound by `hail call` — kept as a struct so the test
 // suite can poke individual fields without leaking cobra wiring.
 type callFlags struct {
-	prompt         string
-	llmURL         string
-	llmKey         string
-	llmModel       string
-	from           string
-	firstMessage   string
-	idempotencyKey string
+	prompt            string
+	llmURL            string
+	llmKey            string
+	llmModel          string
+	from              string
+	firstMessage      string
+	idempotencyKey    string
+	recipientConsent  bool
+	consentSource     string
+	consentObtainedAt string
+	messageType       string
 }
 
 // newCallCmd builds the `call` command tree.
@@ -68,6 +73,10 @@ for one call, ` + "`hail call tail <id>`" + ` is sugar over the same loop.`,
 	cmd.Flags().StringVar(&f.from, "from", "", "Override the from-number (default: first active number on the org)")
 	cmd.Flags().StringVar(&f.firstMessage, "first-message", "", "Spoken on pickup before listening")
 	cmd.Flags().StringVar(&f.idempotencyKey, "idempotency-key", "", "Defaults to a fresh UUID")
+	cmd.Flags().BoolVar(&f.recipientConsent, "recipient-consent", false, "Confirm the recipient has consented to receive this call (required by the API)")
+	cmd.Flags().StringVar(&f.consentSource, "consent-source", "", "Where/how consent was obtained (required if --message-type=marketing)")
+	cmd.Flags().StringVar(&f.consentObtainedAt, "consent-obtained-at", "", "RFC 3339 timestamp consent was obtained at (optional)")
+	cmd.Flags().StringVar(&f.messageType, "message-type", "", "\"marketing\" or \"informational\" (default: informational)")
 
 	cmd.AddCommand(newCallStatusCmd(opts))
 	cmd.AddCommand(newCallListCmd(opts))
@@ -94,6 +103,22 @@ func runCall(cmd *cobra.Command, opts *Options, f *callFlags, toNumber string) e
 			ApiKey:  f.llmKey,
 			Model:   f.llmModel,
 		}
+	}
+
+	body.RecipientConsent = f.recipientConsent
+	if f.consentSource != "" {
+		body.ConsentSource = strPtr(f.consentSource)
+	}
+	if f.consentObtainedAt != "" {
+		t, err := time.Parse(time.RFC3339, f.consentObtainedAt)
+		if err != nil {
+			return fmt.Errorf("--consent-obtained-at: invalid RFC 3339 timestamp: %w", err)
+		}
+		body.ConsentObtainedAt = &t
+	}
+	if f.messageType != "" {
+		mt := client.CallCreateMessageType(f.messageType)
+		body.MessageType = &mt
 	}
 
 	idem := f.idempotencyKey

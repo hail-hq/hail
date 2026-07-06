@@ -18,6 +18,24 @@ import (
 	openapi_types "github.com/oapi-codegen/runtime/types"
 )
 
+// Defines values for CallCreateMessageType.
+const (
+	CallCreateMessageTypeInformational CallCreateMessageType = "informational"
+	CallCreateMessageTypeMarketing     CallCreateMessageType = "marketing"
+)
+
+// Valid indicates whether the value is a known member of the CallCreateMessageType enum.
+func (e CallCreateMessageType) Valid() bool {
+	switch e {
+	case CallCreateMessageTypeInformational:
+		return true
+	case CallCreateMessageTypeMarketing:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for CallResponseDirection.
 const (
 	CallResponseDirectionInbound  CallResponseDirection = "inbound"
@@ -90,6 +108,24 @@ func (e DnsRecordSchemaType) Valid() bool {
 	case MX:
 		return true
 	case TXT:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for EmailCreateMessageType.
+const (
+	EmailCreateMessageTypeInformational EmailCreateMessageType = "informational"
+	EmailCreateMessageTypeMarketing     EmailCreateMessageType = "marketing"
+)
+
+// Valid indicates whether the value is a known member of the EmailCreateMessageType enum.
+func (e EmailCreateMessageType) Valid() bool {
+	switch e {
+	case EmailCreateMessageTypeInformational:
+		return true
+	case EmailCreateMessageTypeMarketing:
 		return true
 	default:
 		return false
@@ -608,15 +644,22 @@ func (e GetEmailStatsEmailsStatsGetParamsBucket) Valid() bool {
 
 // CallCreate defines model for CallCreate.
 type CallCreate struct {
-	ConversationId *openapi_types.UUID     `json:"conversation_id,omitempty"`
-	FirstMessage   *string                 `json:"first_message,omitempty"`
-	From           *string                 `json:"from,omitempty"`
-	Llm            *LLMConfig              `json:"llm,omitempty"`
-	Metadata       *map[string]interface{} `json:"metadata,omitempty"`
-	SystemPrompt   *string                 `json:"system_prompt,omitempty"`
-	To             string                  `json:"to"`
-	VoiceConfig    *VoiceConfig            `json:"voice_config,omitempty"`
+	ConsentObtainedAt *time.Time              `json:"consent_obtained_at,omitempty"`
+	ConsentSource     *string                 `json:"consent_source,omitempty"`
+	ConversationId    *openapi_types.UUID     `json:"conversation_id,omitempty"`
+	FirstMessage      *string                 `json:"first_message,omitempty"`
+	From              *string                 `json:"from,omitempty"`
+	Llm               *LLMConfig              `json:"llm,omitempty"`
+	MessageType       *CallCreateMessageType  `json:"message_type,omitempty"`
+	Metadata          *map[string]interface{} `json:"metadata,omitempty"`
+	RecipientConsent  bool                    `json:"recipient_consent"`
+	SystemPrompt      *string                 `json:"system_prompt,omitempty"`
+	To                string                  `json:"to"`
+	VoiceConfig       *VoiceConfig            `json:"voice_config,omitempty"`
 }
+
+// CallCreateMessageType defines model for CallCreate.MessageType.
+type CallCreateMessageType string
 
 // CallListResponse defines model for CallListResponse.
 type CallListResponse struct {
@@ -687,17 +730,24 @@ type EmailAttachmentResponse struct {
 
 // EmailCreate defines model for EmailCreate.
 type EmailCreate struct {
-	Bcc            *[]string               `json:"bcc,omitempty"`
-	BodyHtml       *string                 `json:"body_html,omitempty"`
-	BodyText       *string                 `json:"body_text,omitempty"`
-	Cc             *[]string               `json:"cc,omitempty"`
-	ConversationId *openapi_types.UUID     `json:"conversation_id,omitempty"`
-	From           *string                 `json:"from,omitempty"`
-	Metadata       *map[string]interface{} `json:"metadata,omitempty"`
-	ReplyTo        *string                 `json:"reply_to,omitempty"`
-	Subject        string                  `json:"subject"`
-	To             []string                `json:"to"`
+	Bcc               *[]string               `json:"bcc,omitempty"`
+	BodyHtml          *string                 `json:"body_html,omitempty"`
+	BodyText          *string                 `json:"body_text,omitempty"`
+	Cc                *[]string               `json:"cc,omitempty"`
+	ConsentObtainedAt *time.Time              `json:"consent_obtained_at,omitempty"`
+	ConsentSource     *string                 `json:"consent_source,omitempty"`
+	ConversationId    *openapi_types.UUID     `json:"conversation_id,omitempty"`
+	From              *string                 `json:"from,omitempty"`
+	MessageType       *EmailCreateMessageType `json:"message_type,omitempty"`
+	Metadata          *map[string]interface{} `json:"metadata,omitempty"`
+	RecipientConsent  bool                    `json:"recipient_consent"`
+	ReplyTo           *string                 `json:"reply_to,omitempty"`
+	Subject           string                  `json:"subject"`
+	To                []string                `json:"to"`
 }
+
+// EmailCreateMessageType defines model for EmailCreate.MessageType.
+type EmailCreateMessageType string
 
 // EmailDomainCreate Request body for POST /email-domains.
 //
@@ -1196,6 +1246,11 @@ type ListEventsEventsGetParams struct {
 	Authorization *string `json:"authorization,omitempty"`
 }
 
+// UnsubscribeUnsubscribeGetParams defines parameters for UnsubscribeUnsubscribeGet.
+type UnsubscribeUnsubscribeGetParams struct {
+	Token string `form:"token" json:"token"`
+}
+
 // ListSubscriptionsWebhooksGetParams defines parameters for ListSubscriptionsWebhooksGet.
 type ListSubscriptionsWebhooksGetParams struct {
 	Cursor        *string `form:"cursor,omitempty" json:"cursor,omitempty"`
@@ -1567,6 +1622,9 @@ type ClientInterface interface {
 	// HealthzHealthzGet request
 	HealthzHealthzGet(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
 
+	// UnsubscribeUnsubscribeGet request
+	UnsubscribeUnsubscribeGet(ctx context.Context, params *UnsubscribeUnsubscribeGetParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
 	// ListSubscriptionsWebhooksGet request
 	ListSubscriptionsWebhooksGet(ctx context.Context, params *ListSubscriptionsWebhooksGetParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
@@ -1862,6 +1920,18 @@ func (c *Client) ListEventsEventsGet(ctx context.Context, params *ListEventsEven
 
 func (c *Client) HealthzHealthzGet(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewHealthzHealthzGetRequest(c.Server)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) UnsubscribeUnsubscribeGet(ctx context.Context, params *UnsubscribeUnsubscribeGetParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewUnsubscribeUnsubscribeGetRequest(c.Server, params)
 	if err != nil {
 		return nil, err
 	}
@@ -3277,6 +3347,51 @@ func NewHealthzHealthzGetRequest(server string) (*http.Request, error) {
 	return req, nil
 }
 
+// NewUnsubscribeUnsubscribeGetRequest generates requests for UnsubscribeUnsubscribeGet
+func NewUnsubscribeUnsubscribeGetRequest(server string, params *UnsubscribeUnsubscribeGetParams) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/unsubscribe")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+		queryValues := queryURL.Query()
+
+		if queryFrag, err := runtime.StyleParamWithOptions("form", true, "token", params.Token, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+			return nil, err
+		} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+			return nil, err
+		} else {
+			for k, v := range parsed {
+				for _, v2 := range v {
+					queryValues.Add(k, v2)
+				}
+			}
+		}
+
+		queryURL.RawQuery = queryValues.Encode()
+	}
+
+	req, err := http.NewRequest("GET", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
 // NewListSubscriptionsWebhooksGetRequest generates requests for ListSubscriptionsWebhooksGet
 func NewListSubscriptionsWebhooksGetRequest(server string, params *ListSubscriptionsWebhooksGetParams) (*http.Request, error) {
 	var err error
@@ -3872,6 +3987,9 @@ type ClientWithResponsesInterface interface {
 	// HealthzHealthzGetWithResponse request
 	HealthzHealthzGetWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*HealthzHealthzGetResponse, error)
 
+	// UnsubscribeUnsubscribeGetWithResponse request
+	UnsubscribeUnsubscribeGetWithResponse(ctx context.Context, params *UnsubscribeUnsubscribeGetParams, reqEditors ...RequestEditorFn) (*UnsubscribeUnsubscribeGetResponse, error)
+
 	// ListSubscriptionsWebhooksGetWithResponse request
 	ListSubscriptionsWebhooksGetWithResponse(ctx context.Context, params *ListSubscriptionsWebhooksGetParams, reqEditors ...RequestEditorFn) (*ListSubscriptionsWebhooksGetResponse, error)
 
@@ -4336,6 +4454,28 @@ func (r HealthzHealthzGetResponse) StatusCode() int {
 	return 0
 }
 
+type UnsubscribeUnsubscribeGetResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON422      *HTTPValidationError
+}
+
+// Status returns HTTPResponse.Status
+func (r UnsubscribeUnsubscribeGetResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r UnsubscribeUnsubscribeGetResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
 type ListSubscriptionsWebhooksGetResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
@@ -4720,6 +4860,15 @@ func (c *ClientWithResponses) HealthzHealthzGetWithResponse(ctx context.Context,
 		return nil, err
 	}
 	return ParseHealthzHealthzGetResponse(rsp)
+}
+
+// UnsubscribeUnsubscribeGetWithResponse request returning *UnsubscribeUnsubscribeGetResponse
+func (c *ClientWithResponses) UnsubscribeUnsubscribeGetWithResponse(ctx context.Context, params *UnsubscribeUnsubscribeGetParams, reqEditors ...RequestEditorFn) (*UnsubscribeUnsubscribeGetResponse, error) {
+	rsp, err := c.UnsubscribeUnsubscribeGet(ctx, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseUnsubscribeUnsubscribeGetResponse(rsp)
 }
 
 // ListSubscriptionsWebhooksGetWithResponse request returning *ListSubscriptionsWebhooksGetResponse
@@ -5417,6 +5566,32 @@ func ParseHealthzHealthzGetResponse(rsp *http.Response) (*HealthzHealthzGetRespo
 			return nil, err
 		}
 		response.JSON200 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseUnsubscribeUnsubscribeGetResponse parses an HTTP response from a UnsubscribeUnsubscribeGetWithResponse call
+func ParseUnsubscribeUnsubscribeGetResponse(rsp *http.Response) (*UnsubscribeUnsubscribeGetResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &UnsubscribeUnsubscribeGetResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 422:
+		var dest HTTPValidationError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON422 = &dest
 
 	}
 
