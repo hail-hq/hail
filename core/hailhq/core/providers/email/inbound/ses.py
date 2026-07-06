@@ -7,12 +7,11 @@ does not fetch it — that's the ingest endpoint's job.
 
 from __future__ import annotations
 
-import hashlib
-import hmac
 import json
 from collections.abc import Mapping
 from datetime import datetime
 
+from hailhq.core.hmac_signing import verify
 from hailhq.core.providers.email.inbound.base import (
     InboundMessage,
     InboundProvider,
@@ -25,17 +24,13 @@ class SesInboundProvider(InboundProvider):
     def __init__(self, *, hmac_secret: str) -> None:
         if not hmac_secret:
             raise ValueError("SesInboundProvider requires a non-empty hmac_secret")
-        self._secret = hmac_secret.encode()
+        self._secret = hmac_secret
 
     async def verify_notification(
         self, headers: Mapping[str, str], body: bytes
     ) -> bool:
         header = headers.get("X-Hail-Signature") or headers.get("x-hail-signature")
-        if not header or not header.startswith("sha256="):
-            return False
-        provided = header.split("=", 1)[1]
-        expected = hmac.new(self._secret, body, hashlib.sha256).hexdigest()
-        return hmac.compare_digest(provided.encode(), expected.encode())
+        return verify(header, body, self._secret)
 
     async def parse_notification(self, body: bytes) -> InboundMessage:
         data = json.loads(body)

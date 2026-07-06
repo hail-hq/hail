@@ -14,8 +14,6 @@ HMAC: SHA-256 of the request body, sent as ``X-Hail-Signature: sha256=<hex>``.
 from __future__ import annotations
 
 import asyncio
-import hashlib
-import hmac
 import json
 import logging
 from typing import Any
@@ -23,6 +21,7 @@ from typing import Any
 import aiohttp
 
 from hailhq.core.config import settings
+from hailhq.core.hmac_signing import sign
 
 logger = logging.getLogger(__name__)
 
@@ -30,11 +29,6 @@ _TIMEOUT_SECONDS = 5
 
 _session: aiohttp.ClientSession | None = None
 _pending_tasks: set[asyncio.Task[None]] = set()
-
-
-def _sign(body: bytes, secret: str) -> str:
-    digest = hmac.new(secret.encode("utf-8"), body, hashlib.sha256).hexdigest()
-    return f"sha256={digest}"
 
 
 def _get_session() -> aiohttp.ClientSession:
@@ -67,7 +61,7 @@ async def _post(path: str, payload: dict[str, Any]) -> None:
     body = json.dumps(payload, separators=(",", ":")).encode("utf-8")
     headers = {
         "Content-Type": "application/json",
-        "X-Hail-Signature": _sign(body, secret),
+        "X-Hail-Signature": sign(body, secret),
     }
     try:
         async with _get_session().post(url, data=body, headers=headers) as resp:
