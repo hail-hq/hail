@@ -86,6 +86,10 @@ class CallCreate(BaseModel):
     voice_config: VoiceConfig = Field(default_factory=VoiceConfig)
     conversation_id: UUID | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
+    recipient_consent: bool
+    consent_source: str | None = None
+    consent_obtained_at: datetime | None = None
+    message_type: Literal["marketing", "informational"] = "informational"
 
     @field_validator("to", "from_")
     @classmethod
@@ -204,6 +208,10 @@ class EmailCreate(BaseModel):
     body_html: str | None = None
     conversation_id: UUID | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
+    recipient_consent: bool
+    consent_source: str | None = None
+    consent_obtained_at: datetime | None = None
+    message_type: Literal["marketing", "informational"] = "informational"
 
     @field_validator("from_", "reply_to")
     @classmethod

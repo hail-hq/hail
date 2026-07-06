@@ -9,7 +9,9 @@ from hail.models import CallCreate, LLMConfig
 
 
 def test_call_create_mode_a_valid() -> None:
-    body = CallCreate(to="+14155551234", system_prompt="be polite")
+    body = CallCreate(
+        to="+14155551234", system_prompt="be polite", recipient_consent=True
+    )
     dumped = body.model_dump(by_alias=True, exclude_none=True)
     assert dumped["to"] == "+14155551234"
     assert dumped["system_prompt"] == "be polite"
@@ -19,6 +21,7 @@ def test_call_create_mode_a_valid() -> None:
 def test_call_create_mode_b_valid() -> None:
     body = CallCreate(
         to="+14155551234",
+        recipient_consent=True,
         llm=LLMConfig(
             base_url="https://api.openai.com/v1",
             api_key="sk-x",
@@ -35,6 +38,7 @@ def test_call_create_rejects_both_modes() -> None:
         CallCreate(
             to="+14155551234",
             system_prompt="be polite",
+            recipient_consent=True,
             llm=LLMConfig(
                 base_url="https://api.openai.com/v1",
                 api_key="sk-x",
@@ -46,13 +50,13 @@ def test_call_create_rejects_both_modes() -> None:
 
 def test_call_create_rejects_neither_mode() -> None:
     with pytest.raises(ValidationError) as exc:
-        CallCreate(to="+14155551234")
+        CallCreate(to="+14155551234", recipient_consent=True)
     assert "either system_prompt or" in str(exc.value)
 
 
 def test_call_create_rejects_non_e164() -> None:
     with pytest.raises(ValidationError) as exc:
-        CallCreate(to="not-a-number", system_prompt="hi")
+        CallCreate(to="not-a-number", system_prompt="hi", recipient_consent=True)
     assert "E.164" in str(exc.value)
 
 
@@ -62,6 +66,7 @@ def test_call_create_from_alias_python_kwarg() -> None:
         to="+14155551234",
         from_="+15550001111",
         system_prompt="hi",
+        recipient_consent=True,
     )
     dumped = body.model_dump(by_alias=True, exclude_none=True)
     assert dumped["from"] == "+15550001111"

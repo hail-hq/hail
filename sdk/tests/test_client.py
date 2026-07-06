@@ -55,6 +55,7 @@ async def test_calls_create_happy_path_mode_a(base_url: str, api_key: str) -> No
         call = await c.calls.create(
             to="+15555550123",
             system_prompt="be polite",
+            recipient_consent=True,
             idempotency_key="idem-fixed",
         )
     assert str(call.id) == payload["id"]
@@ -62,7 +63,49 @@ async def test_calls_create_happy_path_mode_a(base_url: str, api_key: str) -> No
     assert req.headers["Authorization"] == f"Bearer {api_key}"
     assert req.headers["Idempotency-Key"] == "idem-fixed"
     body = json.loads(req.content)
-    assert body == {"to": "+15555550123", "system_prompt": "be polite"}
+    assert body == {
+        "to": "+15555550123",
+        "system_prompt": "be polite",
+        "recipient_consent": True,
+    }
+
+
+@respx.mock
+async def test_calls_create_sends_consent_fields(base_url: str, api_key: str) -> None:
+    route = respx.post(f"{base_url}/calls").mock(
+        return_value=httpx.Response(201, json=make_call_response())
+    )
+    async with Client(api_key=api_key, base_url=base_url) as c:
+        await c.calls.create(
+            to="+15555550123",
+            system_prompt="be polite",
+            recipient_consent=True,
+            consent_source="signup_form",
+            message_type="marketing",
+        )
+    body = json.loads(route.calls.last.request.content)
+    assert body["recipient_consent"] is True
+    assert body["consent_source"] == "signup_form"
+    assert body["message_type"] == "marketing"
+
+
+@respx.mock
+async def test_calls_create_omits_optional_consent_fields_when_not_passed(
+    base_url: str, api_key: str
+) -> None:
+    route = respx.post(f"{base_url}/calls").mock(
+        return_value=httpx.Response(201, json=make_call_response())
+    )
+    async with Client(api_key=api_key, base_url=base_url) as c:
+        await c.calls.create(
+            to="+15555550123", system_prompt="be polite", recipient_consent=True
+        )
+    body = json.loads(route.calls.last.request.content)
+    assert body == {
+        "to": "+15555550123",
+        "system_prompt": "be polite",
+        "recipient_consent": True,
+    }
 
 
 @respx.mock
@@ -73,7 +116,9 @@ async def test_calls_create_auto_generates_idempotency_key(
         return_value=httpx.Response(201, json=make_call_response())
     )
     async with Client(api_key=api_key, base_url=base_url) as c:
-        await c.calls.create(to="+15555550123", system_prompt="be polite")
+        await c.calls.create(
+            to="+15555550123", system_prompt="be polite", recipient_consent=True
+        )
     raw = route.calls.last.request.headers["Idempotency-Key"]
     UUID(raw)  # raises if not a valid UUID
 
@@ -89,6 +134,7 @@ async def test_calls_create_propagates_explicit_idempotency_key(
         await c.calls.create(
             to="+15555550123",
             system_prompt="be polite",
+            recipient_consent=True,
             idempotency_key="caller-supplied",
         )
     assert route.calls.last.request.headers["Idempotency-Key"] == "caller-supplied"
@@ -102,6 +148,7 @@ async def test_calls_create_with_llm_block(base_url: str, api_key: str) -> None:
     async with Client(api_key=api_key, base_url=base_url) as c:
         await c.calls.create(
             to="+15555550123",
+            recipient_consent=True,
             llm={
                 "base_url": "https://api.openai.com/v1",
                 "api_key": "sk-x",
@@ -389,7 +436,9 @@ async def test_error_mapping_422(base_url: str, api_key: str) -> None:
     )
     async with Client(api_key=api_key, base_url=base_url) as c:
         with pytest.raises(HailValidationError) as exc:
-            await c.calls.create(to="+15555550123", system_prompt="hi")
+            await c.calls.create(
+                to="+15555550123", system_prompt="hi", recipient_consent=True
+            )
     assert exc.value.status_code == 422
     assert exc.value.detail == detail
 
@@ -401,7 +450,9 @@ async def test_error_mapping_409(base_url: str, api_key: str) -> None:
     )
     async with Client(api_key=api_key, base_url=base_url) as c:
         with pytest.raises(HailIdempotencyConflict) as exc:
-            await c.calls.create(to="+15555550123", system_prompt="hi")
+            await c.calls.create(
+                to="+15555550123", system_prompt="hi", recipient_consent=True
+            )
     assert exc.value.status_code == 409
 
 

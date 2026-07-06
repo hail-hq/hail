@@ -28,6 +28,7 @@ async def test_emails_create_happy_path(base_url: str, api_key: str) -> None:
             to=["recipient@example.com"],
             subject="test subject",
             body_text="test body",
+            recipient_consent=True,
             idempotency_key="idem-fixed",
         )
     assert str(email.id) == payload["id"]
@@ -42,7 +43,28 @@ async def test_emails_create_happy_path(base_url: str, api_key: str) -> None:
         "to": ["recipient@example.com"],
         "subject": "test subject",
         "body_text": "test body",
+        "recipient_consent": True,
     }
+
+
+@respx.mock
+async def test_emails_create_sends_consent_fields(base_url: str, api_key: str) -> None:
+    route = respx.post(f"{base_url}/emails").mock(
+        return_value=httpx.Response(201, json=make_email_response())
+    )
+    async with Client(api_key=api_key, base_url=base_url) as c:
+        await c.emails.create(
+            to=["a@example.com"],
+            subject="hi",
+            body_text="hello",
+            recipient_consent=True,
+            consent_source="signup_form",
+            message_type="marketing",
+        )
+    body = json.loads(route.calls.last.request.content)
+    assert body["recipient_consent"] is True
+    assert body["consent_source"] == "signup_form"
+    assert body["message_type"] == "marketing"
 
 
 @respx.mock
@@ -53,7 +75,9 @@ async def test_emails_create_auto_generates_idempotency_key(
         return_value=httpx.Response(201, json=make_email_response())
     )
     async with Client(api_key=api_key, base_url=base_url) as c:
-        await c.emails.create(to=["x@example.com"], subject="hi", body_text="body")
+        await c.emails.create(
+            to=["x@example.com"], subject="hi", body_text="body", recipient_consent=True
+        )
     raw = route.calls.last.request.headers["Idempotency-Key"]
     UUID(raw)  # raises if malformed
 
@@ -68,6 +92,7 @@ async def test_emails_create_serializes_from_alias(base_url: str, api_key: str) 
             to=["x@example.com"],
             subject="hi",
             body_text="body",
+            recipient_consent=True,
             from_="alerts@acme.com",
         )
     body = json.loads(route.calls.last.request.content)
@@ -85,6 +110,7 @@ async def test_emails_create_with_cc_bcc_reply_to(base_url: str, api_key: str) -
             to=["a@example.com"],
             subject="hi",
             body_text="body",
+            recipient_consent=True,
             cc=["b@example.com"],
             bcc=["c@example.com"],
             reply_to="replyto@example.com",
@@ -215,22 +241,36 @@ async def test_emails_stats_accepts_datetime_args(base_url: str, api_key: str) -
 
 def test_email_create_rejects_invalid_recipient() -> None:
     with pytest.raises(ValueError, match="invalid email"):
-        EmailCreate(to=["not-an-email"], subject="hi", body_text="body")
+        EmailCreate(
+            to=["not-an-email"],
+            subject="hi",
+            body_text="body",
+            recipient_consent=True,
+        )
 
 
 def test_email_create_requires_a_body() -> None:
     with pytest.raises(ValueError, match="body_text or body_html"):
-        EmailCreate(to=["x@example.com"], subject="hi")
+        EmailCreate(to=["x@example.com"], subject="hi", recipient_consent=True)
 
 
 def test_email_create_accepts_html_only() -> None:
-    e = EmailCreate(to=["x@example.com"], subject="hi", body_html="<p>x</p>")
+    e = EmailCreate(
+        to=["x@example.com"],
+        subject="hi",
+        body_html="<p>x</p>",
+        recipient_consent=True,
+    )
     assert e.body_html == "<p>x</p>"
 
 
 def test_email_create_serializes_from_alias() -> None:
     e = EmailCreate(
-        to=["x@example.com"], subject="hi", body_text="b", from_="alice@example.com"
+        to=["x@example.com"],
+        subject="hi",
+        body_text="b",
+        from_="alice@example.com",
+        recipient_consent=True,
     )
     dumped = e.model_dump(by_alias=True, exclude_none=True)
     assert dumped["from"] == "alice@example.com"

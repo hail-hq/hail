@@ -8,6 +8,7 @@ Usage::
         call = await client.calls.create(
             to="+15551234567",
             system_prompt="You are calling to confirm a reschedule.",
+            recipient_consent=True,
         )
         async for event in client.events.tail(id=f"call:{call.id}"):
             print(event)
@@ -70,11 +71,15 @@ class _CallsResource:
         self,
         *,
         to: str,
+        recipient_consent: bool,
         system_prompt: str | None = None,
         llm: LLMConfig | dict[str, Any] | None = None,
         from_: str | None = None,
         first_message: str | None = None,
         metadata: dict[str, Any] | None = None,
+        consent_source: str | None = None,
+        consent_obtained_at: datetime | None = None,
+        message_type: Literal["marketing", "informational"] | None = None,
         idempotency_key: str | None = None,
     ) -> CallResponse:
         """Originate an outbound call.
@@ -82,9 +87,10 @@ class _CallsResource:
         Exactly one of ``system_prompt`` (mode A) or a fully-populated
         ``llm`` block (mode B) must be provided — server enforces this with
         a 422; we don't pre-validate so SDK and API stay in lockstep on the
-        rule. ``idempotency_key`` defaults to a fresh UUIDv4.
+        rule. ``recipient_consent`` is required — the server 422s without
+        it. ``idempotency_key`` defaults to a fresh UUIDv4.
         """
-        body: dict[str, Any] = {"to": to}
+        body: dict[str, Any] = {"to": to, "recipient_consent": recipient_consent}
         if from_ is not None:
             body["from"] = from_
         if system_prompt is not None:
@@ -95,6 +101,12 @@ class _CallsResource:
             body["metadata"] = metadata
         if llm is not None:
             body["llm"] = llm.model_dump() if isinstance(llm, LLMConfig) else llm
+        if consent_source is not None:
+            body["consent_source"] = consent_source
+        if consent_obtained_at is not None:
+            body["consent_obtained_at"] = consent_obtained_at.isoformat()
+        if message_type is not None:
+            body["message_type"] = message_type
 
         key = idempotency_key or generate_idempotency_key()
         data = await self._http.request(
@@ -136,6 +148,7 @@ class _EmailsResource:
         *,
         to: list[str],
         subject: str,
+        recipient_consent: bool,
         body_text: str | None = None,
         body_html: str | None = None,
         from_: str | None = None,
@@ -144,12 +157,16 @@ class _EmailsResource:
         reply_to: str | None = None,
         conversation_id: UUID | str | None = None,
         metadata: dict[str, Any] | None = None,
+        consent_source: str | None = None,
+        consent_obtained_at: datetime | None = None,
+        message_type: Literal["marketing", "informational"] | None = None,
         idempotency_key: str | None = None,
     ) -> EmailResponse:
         """Send an outbound email.
 
         At least one of ``body_text`` / ``body_html`` is required; the
-        server returns 422 if neither is supplied. ``from_`` is optional:
+        server returns 422 if neither is supplied. ``recipient_consent``
+        is required — the server 422s without it. ``from_`` is optional:
         when omitted the server picks the first verified sender on the
         org or auto-mints a hail-mail address (operator-configured).
         ``idempotency_key`` defaults to a fresh UUIDv4.
@@ -159,7 +176,11 @@ class _EmailsResource:
         # the server-side validator accepts but the SDK one rejects (e.g.
         # a recipient with an unusual TLD); keeping pre-validation off
         # mirrors how _CallsResource defers to the server.
-        body: dict[str, Any] = {"to": list(to), "subject": subject}
+        body: dict[str, Any] = {
+            "to": list(to),
+            "subject": subject,
+            "recipient_consent": recipient_consent,
+        }
         if from_ is not None:
             body["from"] = from_
         if body_text is not None:
@@ -176,6 +197,12 @@ class _EmailsResource:
             body["conversation_id"] = str(conversation_id)
         if metadata is not None:
             body["metadata"] = metadata
+        if consent_source is not None:
+            body["consent_source"] = consent_source
+        if consent_obtained_at is not None:
+            body["consent_obtained_at"] = consent_obtained_at.isoformat()
+        if message_type is not None:
+            body["message_type"] = message_type
 
         key = idempotency_key or generate_idempotency_key()
         data = await self._http.request(
