@@ -74,6 +74,7 @@ async def test_place_call_mode_a_happy_path(client: HailClient) -> None:
 
     result = await tools.place_call(
         client=client,
+        recipient_consent=True,
         to="+14155559999",
         system_prompt="be polite",
     )
@@ -86,7 +87,12 @@ async def test_place_call_mode_a_happy_path(client: HailClient) -> None:
 
     # Mode A: system_prompt on the wire, no llm.
     body = httpx.Response(200, content=captured["body"]).json()
-    assert body == {"to": "+14155559999", "system_prompt": "be polite"}
+    assert body == {
+        "to": "+14155559999",
+        "system_prompt": "be polite",
+        "recipient_consent": True,
+        "message_type": "informational",
+    }
 
 
 @respx.mock
@@ -101,6 +107,7 @@ async def test_place_call_mode_b_byo_endpoint(client: HailClient) -> None:
 
     result = await tools.place_call(
         client=client,
+        recipient_consent=True,
         to="+14155559999",
         llm={
             "base_url": "https://api.openai.com/v1",
@@ -126,6 +133,7 @@ async def test_place_call_rejects_both_modes(client: HailClient) -> None:
     )
     result = await tools.place_call(
         client=client,
+        recipient_consent=True,
         to="+14155559999",
         system_prompt="be polite",
         llm={"base_url": "u", "api_key": "k", "model": "m"},
@@ -140,7 +148,9 @@ async def test_place_call_rejects_neither_mode(client: HailClient) -> None:
     route = respx.post(f"{_BASE_URL}/calls").mock(
         return_value=httpx.Response(201, json=_call_response())
     )
-    result = await tools.place_call(client=client, to="+14155559999")
+    result = await tools.place_call(
+        client=client, recipient_consent=True, to="+14155559999"
+    )
     assert "error" in result
     assert "either system_prompt or llm" in result["error"]
     assert not route.called
@@ -156,7 +166,9 @@ async def test_place_call_auto_generates_idempotency_key(client: HailClient) -> 
 
     respx.post(f"{_BASE_URL}/calls").mock(side_effect=_handler)
 
-    await tools.place_call(client=client, to="+14155559999", system_prompt="x")
+    await tools.place_call(
+        client=client, recipient_consent=True, to="+14155559999", system_prompt="x"
+    )
     assert captured["key"] is not None
     assert _UUID_RE.match(captured["key"]), captured["key"]
 
@@ -173,7 +185,9 @@ async def test_place_call_returns_idempotency_key_in_response(
 
     respx.post(f"{_BASE_URL}/calls").mock(side_effect=_handler)
 
-    result = await tools.place_call(client=client, to="+14155559999", system_prompt="x")
+    result = await tools.place_call(
+        client=client, recipient_consent=True, to="+14155559999", system_prompt="x"
+    )
     # The auto-generated key is surfaced so an agent can retry exactly.
     assert "idempotency_key" in result
     assert _UUID_RE.match(result["idempotency_key"])
@@ -195,6 +209,7 @@ async def test_place_call_propagates_explicit_idempotency_key(
     explicit = "deadbeef-dead-beef-dead-beefdeadbeef"
     result = await tools.place_call(
         client=client,
+        recipient_consent=True,
         to="+14155559999",
         system_prompt="x",
         idempotency_key=explicit,
@@ -210,6 +225,7 @@ async def test_place_call_llm_validation_rejects_partial(client: HailClient) -> 
     )
     result = await tools.place_call(
         client=client,
+        recipient_consent=True,
         to="+14155559999",
         llm={"base_url": "https://x", "api_key": "k"},  # missing model
     )
@@ -230,6 +246,7 @@ async def test_place_call_serializes_from_alias(client: HailClient) -> None:
 
     await tools.place_call(
         client=client,
+        recipient_consent=True,
         to="+14155559999",
         system_prompt="x",
         from_="+14155550000",
@@ -281,6 +298,7 @@ async def test_send_email_happy_path(client: HailClient) -> None:
 
     result = await tools.send_email(
         client=client,
+        recipient_consent=True,
         to=["x@example.com"],
         subject="hi",
         body_text="body",
@@ -299,7 +317,7 @@ async def test_send_email_happy_path(client: HailClient) -> None:
 async def test_send_email_rejects_empty_recipients(client: HailClient) -> None:
     respx.post(f"{_BASE_URL}/emails").mock(return_value=httpx.Response(201, json={}))
     result = await tools.send_email(
-        client=client, to=[], subject="hi", body_text="body"
+        client=client, recipient_consent=True, to=[], subject="hi", body_text="body"
     )
     assert "error" in result
     assert "at least 1" in result["error"]
@@ -310,7 +328,9 @@ async def test_send_email_rejects_empty_recipients(client: HailClient) -> None:
 @respx.mock
 async def test_send_email_requires_a_body(client: HailClient) -> None:
     respx.post(f"{_BASE_URL}/emails").mock(return_value=httpx.Response(201, json={}))
-    result = await tools.send_email(client=client, to=["x@example.com"], subject="hi")
+    result = await tools.send_email(
+        client=client, recipient_consent=True, to=["x@example.com"], subject="hi"
+    )
     assert "body_text or body_html" in result["error"]
     assert not respx.calls.called
 
@@ -327,6 +347,7 @@ async def test_send_email_serializes_from_alias(client: HailClient) -> None:
 
     await tools.send_email(
         client=client,
+        recipient_consent=True,
         to=["x@example.com"],
         subject="hi",
         body_text="body",
@@ -345,7 +366,11 @@ async def test_send_email_returns_idempotency_key_in_response(
         return_value=httpx.Response(201, json=_email_response())
     )
     result = await tools.send_email(
-        client=client, to=["x@example.com"], subject="hi", body_text="body"
+        client=client,
+        recipient_consent=True,
+        to=["x@example.com"],
+        subject="hi",
+        body_text="body",
     )
     assert _UUID_RE.match(result["idempotency_key"])
 
@@ -364,6 +389,7 @@ async def test_send_email_propagates_explicit_idempotency_key(
 
     result = await tools.send_email(
         client=client,
+        recipient_consent=True,
         to=["x@example.com"],
         subject="hi",
         body_text="body",
@@ -382,7 +408,11 @@ async def test_send_email_maps_503_to_error_detail(client: HailClient) -> None:
         )
     )
     result = await tools.send_email(
-        client=client, to=["x@example.com"], subject="hi", body_text="body"
+        client=client,
+        recipient_consent=True,
+        to=["x@example.com"],
+        subject="hi",
+        body_text="body",
     )
     assert "hail-mail prefixes" in result["error"]
 
@@ -784,7 +814,9 @@ async def test_api_error_mapping_401(client: HailClient) -> None:
     respx.post(f"{_BASE_URL}/calls").mock(
         return_value=httpx.Response(401, json={"detail": "bad key"})
     )
-    result = await tools.place_call(client=client, to="+14155559999", system_prompt="x")
+    result = await tools.place_call(
+        client=client, recipient_consent=True, to="+14155559999", system_prompt="x"
+    )
     assert result == {"error": "auth failed: token rejected by Hail API"}
 
 
@@ -807,6 +839,7 @@ async def test_api_error_mapping_422(client: HailClient) -> None:
     )
     result = await tools.place_call(
         client=client,
+        recipient_consent=True,
         to="+14155559999",
         system_prompt="x",
         from_="+14155550000",
@@ -835,7 +868,9 @@ async def test_api_error_mapping_503_surfaces_detail(client: HailClient) -> None
             503, json={"detail": "shared call line pool exhausted; try again shortly"}
         )
     )
-    result = await tools.place_call(client=client, to="+14155559999", system_prompt="x")
+    result = await tools.place_call(
+        client=client, recipient_consent=True, to="+14155559999", system_prompt="x"
+    )
     assert "pool exhausted" in result["error"]
 
 
@@ -846,6 +881,8 @@ async def test_api_error_mapping_409_idempotency(client: HailClient) -> None:
             409, json={"detail": "Idempotency-Key reused with different payload"}
         )
     )
-    result = await tools.place_call(client=client, to="+14155559999", system_prompt="x")
+    result = await tools.place_call(
+        client=client, recipient_consent=True, to="+14155559999", system_prompt="x"
+    )
     assert "error" in result
     assert "Idempotency-Key" in result["error"]

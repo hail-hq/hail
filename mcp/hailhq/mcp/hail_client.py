@@ -91,20 +91,29 @@ class HailClient:
         self,
         *,
         to: str,
+        recipient_consent: bool,
         system_prompt: str | None = None,
         llm: dict[str, Any] | None = None,
         from_: str | None = None,
         first_message: str | None = None,
         metadata: dict[str, Any] | None = None,
         idempotency_key: str | None = None,
+        consent_source: str | None = None,
+        consent_obtained_at: str | None = None,
+        message_type: str = "informational",
     ) -> dict[str, Any]:
         """POST /calls — originate an outbound call.
 
         Builds the body from :class:`CallCreate` (which enforces E.164,
-        system_prompt-XOR-llm, and ``LLMConfig`` completeness). Construction
-        raises ``pydantic.ValidationError`` before any HTTP on bad input.
+        system_prompt-XOR-llm, ``LLMConfig`` completeness, and consent
+        attestation). Construction raises ``pydantic.ValidationError``
+        before any HTTP on bad input.
         """
-        fields: dict[str, Any] = {"to": to}
+        fields: dict[str, Any] = {
+            "to": to,
+            "recipient_consent": recipient_consent,
+            "message_type": message_type,
+        }
         if from_ is not None:
             fields["from"] = from_  # alias key — CallCreate has no populate_by_name
         if system_prompt is not None:
@@ -115,6 +124,10 @@ class HailClient:
             fields["first_message"] = first_message
         if metadata is not None:
             fields["metadata"] = metadata
+        if consent_source is not None:
+            fields["consent_source"] = consent_source
+        if consent_obtained_at is not None:
+            fields["consent_obtained_at"] = consent_obtained_at
 
         body = CallCreate.model_validate(fields).model_dump(
             mode="json", by_alias=True, exclude_unset=True
@@ -164,6 +177,7 @@ class HailClient:
         *,
         to: list[str],
         subject: str,
+        recipient_consent: bool,
         body_text: str | None = None,
         body_html: str | None = None,
         from_: str | None = None,
@@ -172,13 +186,22 @@ class HailClient:
         reply_to: str | None = None,
         metadata: dict[str, Any] | None = None,
         idempotency_key: str | None = None,
+        consent_source: str | None = None,
+        consent_obtained_at: str | None = None,
+        message_type: str = "informational",
     ) -> dict[str, Any]:
         """POST /emails — send an outbound message.
 
         Builds the body from :class:`EmailCreate` (which enforces ≥1
-        recipient, a non-empty subject, body-required, and email formats).
+        recipient, a non-empty subject, body-required, email formats, and
+        consent attestation).
         """
-        fields: dict[str, Any] = {"to": list(to), "subject": subject}
+        fields: dict[str, Any] = {
+            "to": list(to),
+            "subject": subject,
+            "recipient_consent": recipient_consent,
+            "message_type": message_type,
+        }
         if from_ is not None:
             fields["from"] = from_
         if body_text is not None:
@@ -193,6 +216,10 @@ class HailClient:
             fields["reply_to"] = reply_to
         if metadata is not None:
             fields["metadata"] = metadata
+        if consent_source is not None:
+            fields["consent_source"] = consent_source
+        if consent_obtained_at is not None:
+            fields["consent_obtained_at"] = consent_obtained_at
 
         body = EmailCreate.model_validate(fields).model_dump(
             mode="json", by_alias=True, exclude_unset=True

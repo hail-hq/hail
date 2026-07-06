@@ -99,24 +99,32 @@ async def place_call(
     *,
     client: HailClient,
     to: str,
+    recipient_consent: bool,
     system_prompt: str | None = None,
     llm: dict[str, Any] | None = None,
     from_: str | None = None,
     first_message: str | None = None,
     metadata: dict[str, Any] | None = None,
     idempotency_key: str | None = None,
+    consent_source: str | None = None,
+    consent_obtained_at: str | None = None,
+    message_type: str = "informational",
 ) -> dict[str, Any]:
     if idempotency_key is None:
         idempotency_key = str(uuid.uuid4())
     try:
         result = await client.place_call(
             to=to,
+            recipient_consent=recipient_consent,
             system_prompt=system_prompt,
             llm=llm,
             from_=from_,
             first_message=first_message,
             metadata=metadata,
             idempotency_key=idempotency_key,
+            consent_source=consent_source,
+            consent_obtained_at=consent_obtained_at,
+            message_type=message_type,
         )
     except ValidationError as exc:
         return {"error": _validation_error_message(exc)}
@@ -135,6 +143,7 @@ async def send_email(
     client: HailClient,
     to: list[str],
     subject: str,
+    recipient_consent: bool,
     body_text: str | None = None,
     body_html: str | None = None,
     from_: str | None = None,
@@ -143,6 +152,9 @@ async def send_email(
     reply_to: str | None = None,
     metadata: dict[str, Any] | None = None,
     idempotency_key: str | None = None,
+    consent_source: str | None = None,
+    consent_obtained_at: str | None = None,
+    message_type: str = "informational",
 ) -> dict[str, Any]:
     if idempotency_key is None:
         idempotency_key = str(uuid.uuid4())
@@ -150,6 +162,7 @@ async def send_email(
         result = await client.send_email(
             to=to,
             subject=subject,
+            recipient_consent=recipient_consent,
             body_text=body_text,
             body_html=body_html,
             from_=from_,
@@ -158,6 +171,9 @@ async def send_email(
             reply_to=reply_to,
             metadata=metadata,
             idempotency_key=idempotency_key,
+            consent_source=consent_source,
+            consent_obtained_at=consent_obtained_at,
+            message_type=message_type,
         )
     except ValidationError as exc:
         return {"error": _validation_error_message(exc)}
@@ -381,12 +397,16 @@ def register_tools(
     async def place_call_tool(
         ctx: Context,
         to: str,
+        recipient_consent: bool,
         system_prompt: str | None = None,
         llm: dict[str, Any] | None = None,
         from_: str | None = None,
         first_message: str | None = None,
         metadata: dict[str, Any] | None = None,
         idempotency_key: str | None = None,
+        consent_source: str | None = None,
+        consent_obtained_at: str | None = None,
+        message_type: str = "informational",
     ) -> dict[str, Any]:
         """Originate an outbound phone call.
 
@@ -401,6 +421,16 @@ def register_tools(
         ``first_message`` is spoken on pickup before listening.
         ``metadata`` is free-form JSON attached to the call record.
 
+        ``recipient_consent`` is required: attest that you (the caller
+        triggering this request) have obtained the lawful consent needed
+        to contact this recipient. The API rejects the request (422) if
+        this is not ``true`` — Hail does not verify consent for you, you
+        are responsible for having a lawful basis (TCPA / ePrivacy / GDPR
+        as applicable). Set ``message_type="marketing"`` for promotional
+        calls (this additionally requires a non-empty ``consent_source``
+        describing how/where consent was obtained) — leave as the default
+        ``"informational"`` for transactional/service calls.
+
         ``idempotency_key`` defaults to a fresh UUID per invocation
         and is returned in the response under ``idempotency_key`` — to
         retry *this* exact request (rather than dispatch a second call),
@@ -408,6 +438,7 @@ def register_tools(
 
         Example:
             place_call(to="+14155551234",
+                       recipient_consent=True,
                        system_prompt="You are scheduling a haircut.",
                        first_message="Hi, I'm calling on behalf of Alex.")
 
@@ -420,12 +451,16 @@ def register_tools(
                 return await place_call(
                     client=client,
                     to=to,
+                    recipient_consent=recipient_consent,
                     system_prompt=system_prompt,
                     llm=llm,
                     from_=from_,
                     first_message=first_message,
                     metadata=metadata,
                     idempotency_key=idempotency_key,
+                    consent_source=consent_source,
+                    consent_obtained_at=consent_obtained_at,
+                    message_type=message_type,
                 )
         except RuntimeError as exc:
             return {"error": str(exc)}
@@ -435,6 +470,7 @@ def register_tools(
         ctx: Context,
         to: list[str],
         subject: str,
+        recipient_consent: bool,
         body_text: str | None = None,
         body_html: str | None = None,
         from_: str | None = None,
@@ -443,6 +479,9 @@ def register_tools(
         reply_to: str | None = None,
         metadata: dict[str, Any] | None = None,
         idempotency_key: str | None = None,
+        consent_source: str | None = None,
+        consent_obtained_at: str | None = None,
+        message_type: str = "informational",
     ) -> dict[str, Any]:
         """Send an outbound email through your configured SES sender.
 
@@ -451,6 +490,15 @@ def register_tools(
         is fine — multipart-alternative). ``cc``, ``bcc``, and
         ``reply_to`` are optional and follow the usual mail
         conventions.
+
+        ``recipient_consent`` is required: attest that you (the caller
+        triggering this request) have obtained the lawful consent needed
+        to email this recipient. The API rejects the request (422) if
+        this is not ``true`` — Hail does not verify consent for you. Set
+        ``message_type="marketing"`` for promotional email (this
+        additionally requires a non-empty ``consent_source`` describing
+        how/where consent was obtained) — leave as the default
+        ``"informational"`` for transactional/service email.
 
         ``from_`` is optional. When omitted, Hail picks the first
         verified sender domain on your organization, or — if the
@@ -473,6 +521,7 @@ def register_tools(
         Example:
             send_email(to=["alice@example.com"],
                        subject="Welcome",
+                       recipient_consent=True,
                        body_text="Thanks for signing up.")
 
         Returns the ``EmailResponse`` dict (id, status, from_address,
@@ -485,6 +534,7 @@ def register_tools(
                     client=client,
                     to=to,
                     subject=subject,
+                    recipient_consent=recipient_consent,
                     body_text=body_text,
                     body_html=body_html,
                     from_=from_,
@@ -493,6 +543,9 @@ def register_tools(
                     reply_to=reply_to,
                     metadata=metadata,
                     idempotency_key=idempotency_key,
+                    consent_source=consent_source,
+                    consent_obtained_at=consent_obtained_at,
+                    message_type=message_type,
                 )
         except RuntimeError as exc:
             return {"error": str(exc)}
