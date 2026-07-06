@@ -22,7 +22,11 @@ from hailhq.api.deps import SELF_HOSTED_ORG_ID
 from hailhq.core.models import AccountCredit
 from .conftest import insert_org_and_key
 
-_DEFAULT_BODY = {"to": "+14155559999", "system_prompt": "hi"}
+_DEFAULT_BODY = {
+    "to": "+14155559999",
+    "system_prompt": "hi",
+    "recipient_consent": True,
+}
 
 
 # --------------------------------------------------------------------------- #
@@ -64,7 +68,11 @@ async def test_post_calls_succeeds_per_user_key_positive_balance(
 
     resp = await client.post(
         "/calls",
-        json={"to": "+14155559999", "system_prompt": "hi"},
+        json={
+            "to": "+14155559999",
+            "system_prompt": "hi",
+            "recipient_consent": True,
+        },
         headers={"Authorization": f"Bearer {plain}"},
     )
     assert resp.status_code == 201
@@ -88,7 +96,11 @@ async def test_master_key_resolves_to_self_hosted_sentinel(
 
     resp = await client.post(
         "/calls",
-        json={"to": "+15555550042", "system_prompt": "hi"},
+        json={
+            "to": "+15555550042",
+            "system_prompt": "hi",
+            "recipient_consent": True,
+        },
         headers={"Authorization": f"Bearer {master}"},
     )
     assert resp.status_code == 201
@@ -121,7 +133,11 @@ async def test_post_calls_succeeds_master_key_with_zero_balance(
 
     resp = await client.post(
         "/calls",
-        json={"to": "+15555552222", "system_prompt": "hi"},
+        json={
+            "to": "+15555552222",
+            "system_prompt": "hi",
+            "recipient_consent": True,
+        },
         headers={"Authorization": f"Bearer {master}"},
     )
     assert resp.status_code == 201

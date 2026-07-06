@@ -1,0 +1,280 @@
+"""Pre-send compliance gate — suppression list, DNC scrub, premium-rate
+blocks, and velocity caps for outbound calls and emails.
+
+Exactly two call sites (``api/hailhq/api/routes/calls.py`` and
+``.../emails.py``'s ``create_call`` / ``create_email``) — that's the
+"two concrete uses" the repo's "no abstractions without two concrete
+uses" tenet asks for, so the five checks below live in one module
+instead of being scattered inline in each route.
+
+Call ``check_call_allowed`` / ``check_email_allowed`` right after the
+existing consent check (``hailhq.api.consent.enforce_consent``) and
+before any provider dial/send. On ``GateResult.allowed is False`` the
+route must 403 with ``reason`` and record an audit_log denial (this
+module intentionally has no dependency on the API's audit helper, to
+avoid a core→api import — the route owns that write). On
+``allowed is True`` the route should still fold ``GateResult.checks``
+into its own "call.create"/"email.create" audit payload, so a scrub
+result is logged for every send, not just blocked ones.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from datetime import datetime, timedelta, timezone
+from typing import Any
+from uuid import UUID
+
+from sqlalchemy import func, or_, select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from hailhq.core.config import settings
+from hailhq.core.models import Suppression, UsageEvent
+
+__all__ = [
+    "GateResult",
+    "check_call_allowed",
+    "check_email_allowed",
+    "check_national_dnc",
+    "add_suppression",
+    "normalize_recipient",
+]
+
+
+@dataclass
+class GateResult:
+    allowed: bool
+    reason: str | None = None
+    # Structured detail — which checks ran and what they found. Merged into
+    # the caller's audit-log payload regardless of ``allowed``, so a scrub
+    # result is on record for every send attempt, not only denials.
+    checks: dict[str, Any] = field(default_factory=dict)
+
+
+def normalize_recipient(recipient: str) -> str:
+    """Lowercase email addresses; leave E.164 numbers untouched (already
+    canonical — digits and a leading '+' have no case).
+
+    Exported (not module-private) so ``hailhq.core.dsar`` can match the
+    same ``suppressions.recipient`` normalization instead of maintaining
+    its own copy.
+    """
+    return recipient.strip().lower() if "@" in recipient else recipient.strip()
+
+
+async def _suppression_hit(
+    db: AsyncSession,
+    organization_id: UUID,
+    recipients: list[str],
+    channel: str,
+) -> Suppression | None:
+    """First matching suppression row for any of ``recipients``.
+
+    Matches ``(recipient, channel)`` OR ``(recipient, 'all')``, scoped to
+    this org OR a NULL (platform-wide) row.
+    """
+    if not recipients:
+        return None
+    stmt = (
+        select(Suppression)
+        .where(Suppression.recipient.in_(recipients))
+        .where(Suppression.channel.in_([channel, "all"]))
+        .where(
+            or_(
+                Suppression.organization_id == organization_id,
+                Suppression.organization_id.is_(None),
+            )
+        )
+        .limit(1)
+    )
+    return (await db.execute(stmt)).scalar_one_or_none()
+
+
+async def check_national_dnc(e164: str) -> bool:
+    """Check the US National Do Not Call registry (donotcall.gov).
+
+    STUB: there is no live vendor integration for the national DNC
+    registry today — a real check requires a paid subscription, which is
+    a Bucket-1/founder task, not something wireable with real credentials
+    here. Always returns ``False`` (not on the registry). Gated behind
+    ``settings.hail_national_dnc_enabled`` (default ``False``) by the
+    caller; flip that on and replace this body once a vendor contract +
+    credentials land.
+    """
+    return False
+
+
+async def _check_velocity(
+    db: AsyncSession,
+    organization_id: UUID,
+    channel: str,
+    *,
+    per_hour: int,
+    per_day: int,
+    unit: str,
+) -> tuple[dict[str, int], str | None]:
+    """Shared hour/day velocity check for both channels — one query covers
+    both windows (the day window is a superset of the hour window, so two
+    separate ``COUNT`` round-trips were redundant). Returns the
+    ``checks["velocity"]`` detail dict plus a deny reason, or ``None`` if
+    under both caps."""
+    now = datetime.now(timezone.utc)
+    hour_ago = now - timedelta(hours=1)
+    day_ago = now - timedelta(days=1)
+    stmt = (
+        select(
+            func.count().filter(UsageEvent.occurred_at >= hour_ago).label("hour_count"),
+            func.count().filter(UsageEvent.occurred_at >= day_ago).label("day_count"),
+        )
+        .select_from(UsageEvent)
+        .where(
+            UsageEvent.organization_id == organization_id,
+            UsageEvent.channel == channel,
+            UsageEvent.occurred_at >= day_ago,
+        )
+    )
+    row = (await db.execute(stmt)).one()
+    checks = {"hour_count": row.hour_count, "day_count": row.day_count}
+
+    if row.hour_count >= per_hour:
+        return checks, (
+            f"velocity cap exceeded: {row.hour_count} {unit} in the last hour "
+            f"(limit {per_hour})"
+        )
+    if row.day_count >= per_day:
+        return checks, (
+            f"velocity cap exceeded: {row.day_count} {unit} in the last day "
+            f"(limit {per_day})"
+        )
+    return checks, None
+
+
+def _parse_blocked_prefixes() -> list[str]:
+    return [
+        p.strip() for p in settings.hail_blocked_e164_prefixes.split(",") if p.strip()
+    ]
+
+
+async def check_call_allowed(
+    db: AsyncSession, organization_id: UUID, to_e164: str
+) -> GateResult:
+    """Pre-send checks for an outbound call: suppression/DNC, premium-rate
+    prefix block, then velocity cap.
+
+    Note on the velocity cap: it counts ``usage_events`` rows
+    (``channel='voice'``), which the voicebot writes at call *completion*
+    (see ``voicebot/hailhq/voicebot/agent.py``), not at dial time. It is
+    therefore a lagging signal against sustained abuse over the window,
+    not an instantaneous burst cap — acceptable for a flat "new-account"
+    cap, per the compliance-gate spec.
+    """
+    checks: dict[str, Any] = {}
+
+    hit = await _suppression_hit(db, organization_id, [to_e164], "voice")
+    checks["internal_dnc_checked"] = True
+    checks["internal_dnc_hit"] = hit is not None
+
+    national_hit = False
+    checks["national_dnc_checked"] = settings.hail_national_dnc_enabled
+    if settings.hail_national_dnc_enabled:
+        national_hit = await check_national_dnc(to_e164)
+    checks["national_dnc_hit"] = national_hit
+
+    if hit is not None:
+        return GateResult(
+            allowed=False,
+            reason=f"recipient is on the suppression list ({hit.reason})",
+            checks=checks,
+        )
+    if national_hit:
+        return GateResult(
+            allowed=False,
+            reason="recipient is on the national Do Not Call registry",
+            checks=checks,
+        )
+
+    blocked_prefixes = _parse_blocked_prefixes()
+    for prefix in blocked_prefixes:
+        if to_e164.startswith(prefix):
+            checks["premium_rate_blocked"] = True
+            return GateResult(
+                allowed=False,
+                reason=f"destination prefix {prefix!r} is blocked (premium-rate/high-risk)",
+                checks=checks,
+            )
+    checks["premium_rate_blocked"] = False
+
+    velocity_checks, reason = await _check_velocity(
+        db,
+        organization_id,
+        "voice",
+        per_hour=settings.hail_velocity_call_per_hour,
+        per_day=settings.hail_velocity_call_per_day,
+        unit="calls",
+    )
+    checks["velocity"] = velocity_checks
+    if reason is not None:
+        return GateResult(allowed=False, reason=reason, checks=checks)
+
+    return GateResult(allowed=True, checks=checks)
+
+
+async def check_email_allowed(
+    db: AsyncSession, organization_id: UUID, to_addresses: list[str]
+) -> GateResult:
+    """Pre-send checks for an outbound email: suppression, then velocity cap.
+
+    ``to_addresses`` should include every recipient the caller wants
+    screened (to/cc/bcc) — the gate blocks the whole send if any one of
+    them is suppressed.
+    """
+    checks: dict[str, Any] = {}
+    normalized = [normalize_recipient(a) for a in to_addresses]
+
+    hit = await _suppression_hit(db, organization_id, normalized, "email")
+    checks["suppression_checked"] = True
+    checks["suppression_hit"] = hit is not None
+    if hit is not None:
+        return GateResult(
+            allowed=False,
+            reason=f"recipient {hit.recipient!r} is suppressed ({hit.reason})",
+            checks=checks,
+        )
+
+    velocity_checks, reason = await _check_velocity(
+        db,
+        organization_id,
+        "email",
+        per_hour=settings.hail_velocity_email_per_hour,
+        per_day=settings.hail_velocity_email_per_day,
+        unit="emails",
+    )
+    checks["velocity"] = velocity_checks
+    if reason is not None:
+        return GateResult(allowed=False, reason=reason, checks=checks)
+
+    return GateResult(allowed=True, checks=checks)
+
+
+async def add_suppression(
+    db: AsyncSession,
+    *,
+    organization_id: UUID | None,
+    recipient: str,
+    channel: str,
+    reason: str,
+    source: str,
+) -> Suppression:
+    """Insert one suppression row. Flushes but does not commit — the
+    caller owns the transaction (matches the rest of this codebase's
+    session-handling convention, e.g. ``_resolve_sender`` in emails.py)."""
+    row = Suppression(
+        organization_id=organization_id,
+        recipient=normalize_recipient(recipient),
+        channel=channel,
+        reason=reason,
+        source=source,
+    )
+    db.add(row)
+    await db.flush()
+    return row

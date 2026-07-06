@@ -11,6 +11,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from hailhq.core.config import settings
+from hailhq.core.email_footer import AI_DISCLOSURE_LINE
 from hailhq.core.hail_mail import org_prefix_from_id
 from hailhq.core.models import ApiKey, AuditLog, Email, EmailDomain, UsageEvent
 
@@ -41,7 +42,12 @@ async def _send_email(client: httpx.AsyncClient, plain: str) -> dict:
     """POST one outbound email. Caller must have a verified sender already."""
     resp = await client.post(
         "/emails",
-        json={"to": ["bob@example.com"], "subject": "hi", "body_text": "hello"},
+        json={
+            "to": ["bob@example.com"],
+            "subject": "hi",
+            "body_text": "hello",
+            "recipient_consent": True,
+        },
         headers={"Authorization": f"Bearer {plain}"},
     )
     assert resp.status_code == 201, resp.text
@@ -58,7 +64,12 @@ async def test_post_emails_unauthenticated_returns_401(
 ) -> None:
     resp = await client.post(
         "/emails",
-        json={"to": ["x@example.com"], "subject": "hi", "body_text": "body"},
+        json={
+            "to": ["x@example.com"],
+            "subject": "hi",
+            "body_text": "body",
+            "recipient_consent": True,
+        },
     )
     assert resp.status_code == 401
 
@@ -83,7 +94,7 @@ async def test_post_emails_requires_a_body(
     _, _, plain = org_and_key
     resp = await client.post(
         "/emails",
-        json={"to": ["a@example.com"], "subject": "hi"},
+        json={"to": ["a@example.com"], "subject": "hi", "recipient_consent": True},
         headers={"Authorization": f"Bearer {plain}"},
     )
     assert resp.status_code == 422
@@ -104,6 +115,115 @@ async def test_post_emails_requires_at_least_one_recipient(
 
 
 # --------------------------------------------------------------------------- #
+# Consent attestation / marketing-vs-informational gate
+# --------------------------------------------------------------------------- #
+
+
+async def test_post_emails_rejects_missing_recipient_consent(
+    client: httpx.AsyncClient,
+    org_and_key: tuple,
+) -> None:
+    """``recipient_consent`` is required — omitting it is a 422, not a default."""
+    _, _, plain = org_and_key
+    resp = await client.post(
+        "/emails",
+        json={"to": ["x@example.com"], "subject": "hi", "body_text": "b"},
+        headers={"Authorization": f"Bearer {plain}"},
+    )
+    assert resp.status_code == 422
+
+
+async def test_post_emails_rejects_false_recipient_consent(
+    client: httpx.AsyncClient,
+    org_and_key: tuple,
+    async_session: AsyncSession,
+) -> None:
+    """``recipient_consent: false`` is rejected before any Email row is created."""
+    _, _, plain = org_and_key
+    headers = {"Authorization": f"Bearer {plain}"}
+    await _register_custom_verified(client, headers, domain="acme.com")
+
+    resp = await client.post(
+        "/emails",
+        json={
+            "to": ["x@example.com"],
+            "subject": "hi",
+            "body_text": "b",
+            "recipient_consent": False,
+        },
+        headers=headers,
+    )
+    assert resp.status_code == 422
+    assert "recipient_consent" in resp.json()["detail"]
+
+    rows = (await async_session.execute(select(Email))).scalars().all()
+    assert rows == []
+
+
+async def test_post_emails_rejects_marketing_without_consent_source(
+    client: httpx.AsyncClient,
+    org_and_key: tuple,
+    async_session: AsyncSession,
+) -> None:
+    """Marketing emails need a documented ``consent_source``, not just a bare boolean."""
+    _, _, plain = org_and_key
+    headers = {"Authorization": f"Bearer {plain}"}
+    await _register_custom_verified(client, headers, domain="acme.com")
+
+    resp = await client.post(
+        "/emails",
+        json={
+            "to": ["x@example.com"],
+            "subject": "hi",
+            "body_text": "b",
+            "recipient_consent": True,
+            "message_type": "marketing",
+        },
+        headers=headers,
+    )
+    assert resp.status_code == 422
+    assert "consent_source" in resp.json()["detail"]
+
+    rows = (await async_session.execute(select(Email))).scalars().all()
+    assert rows == []
+
+
+async def test_post_emails_marketing_with_consent_source_succeeds(
+    client: httpx.AsyncClient,
+    org_and_key: tuple,
+    async_session: AsyncSession,
+) -> None:
+    _, _, plain = org_and_key
+    headers = {"Authorization": f"Bearer {plain}"}
+    await _register_custom_verified(client, headers, domain="acme.com")
+
+    resp = await client.post(
+        "/emails",
+        json={
+            "to": ["x@example.com"],
+            "subject": "hi",
+            "body_text": "b",
+            "recipient_consent": True,
+            "message_type": "marketing",
+            "consent_source": "signup_form",
+            "consent_obtained_at": "2026-01-01T00:00:00Z",
+        },
+        headers=headers,
+    )
+    assert resp.status_code == 201, resp.text
+
+    audit = (
+        await async_session.execute(
+            select(AuditLog).where(AuditLog.action == "email.create")
+        )
+    ).scalar_one()
+    assert audit.payload["recipient_consent"] is True
+    assert audit.payload["consent_source"] == "signup_form"
+    assert audit.payload["consent_obtained_at"] == "2026-01-01T00:00:00+00:00"
+    assert audit.payload["message_type"] == "marketing"
+
+
+# --------------------------------------------------------------------------- #
 # POST /emails — sender resolution
 # --------------------------------------------------------------------------- #
 
@@ -120,7 +240,12 @@ async def test_post_emails_uses_verified_custom_domain_by_default(
 
     resp = await client.post(
         "/emails",
-        json={"to": ["alice@example.com"], "subject": "hi", "body_text": "body"},
+        json={
+            "to": ["alice@example.com"],
+            "subject": "hi",
+            "body_text": "body",
+            "recipient_consent": True,
+        },
         headers=headers,
     )
     assert resp.status_code == 201, resp.text
@@ -148,7 +273,12 @@ async def test_post_emails_auto_mints_hail_mail_when_no_sender_exists(
     org_id, _, plain = org_and_key
     resp = await client.post(
         "/emails",
-        json={"to": ["alice@example.com"], "subject": "hi", "body_text": "body"},
+        json={
+            "to": ["alice@example.com"],
+            "subject": "hi",
+            "body_text": "body",
+            "recipient_consent": True,
+        },
         headers={"Authorization": f"Bearer {plain}"},
     )
     assert resp.status_code == 201, resp.text
@@ -203,7 +333,12 @@ async def test_post_emails_auto_mint_recovers_from_race(
 
     resp = await client.post(
         "/emails",
-        json={"to": ["alice@example.com"], "subject": "hi", "body_text": "body"},
+        json={
+            "to": ["alice@example.com"],
+            "subject": "hi",
+            "body_text": "body",
+            "recipient_consent": True,
+        },
         headers={"Authorization": f"Bearer {plain}"},
     )
     # Without the IntegrityError guard this is 500. With it, the email lands
@@ -239,12 +374,22 @@ async def test_post_emails_auto_mint_is_per_org_no_cross_org_conflict(
 
     resp_a = await client.post(
         "/emails",
-        json={"to": ["alice@example.com"], "subject": "hi", "body_text": "body"},
+        json={
+            "to": ["alice@example.com"],
+            "subject": "hi",
+            "body_text": "body",
+            "recipient_consent": True,
+        },
         headers={"Authorization": f"Bearer {plain_a}"},
     )
     resp_b = await client.post(
         "/emails",
-        json={"to": ["bob@example.com"], "subject": "hi", "body_text": "body"},
+        json={
+            "to": ["bob@example.com"],
+            "subject": "hi",
+            "body_text": "body",
+            "recipient_consent": True,
+        },
         headers={"Authorization": f"Bearer {plain_b}"},
     )
     assert resp_a.status_code == 201, resp_a.text
@@ -270,7 +415,12 @@ async def test_post_emails_503_when_no_sender_and_no_hail_mail(
     _, _, plain = org_and_key
     resp = await client.post(
         "/emails",
-        json={"to": ["alice@example.com"], "subject": "hi", "body_text": "body"},
+        json={
+            "to": ["alice@example.com"],
+            "subject": "hi",
+            "body_text": "body",
+            "recipient_consent": True,
+        },
         headers={"Authorization": f"Bearer {plain}"},
     )
     assert resp.status_code == 503
@@ -290,6 +440,7 @@ async def test_post_emails_explicit_from_must_match_verified_domain(
             "to": ["alice@example.com"],
             "subject": "hi",
             "body_text": "body",
+            "recipient_consent": True,
         },
         headers=headers,
     )
@@ -312,6 +463,7 @@ async def test_post_emails_explicit_from_uses_local_part(
             "to": ["alice@example.com"],
             "subject": "hi",
             "body_text": "body",
+            "recipient_consent": True,
         },
         headers=headers,
     )
@@ -340,6 +492,7 @@ async def test_post_emails_explicit_from_is_case_insensitive_in_domain(
             "to": ["alice@example.com"],
             "subject": "hi",
             "body_text": "body",
+            "recipient_consent": True,
         },
         headers=headers,
     )
@@ -363,6 +516,7 @@ async def test_post_emails_to_is_case_insensitive_in_domain(
             "to": ["Alice@EXAMPLE.COM"],
             "subject": "hi",
             "body_text": "body",
+            "recipient_consent": True,
         },
         headers=headers,
     )
@@ -395,7 +549,12 @@ async def test_post_emails_does_not_send_through_pending_domain(
     # Do NOT verify — row stays pending.
     resp = await client.post(
         "/emails",
-        json={"to": ["x@example.com"], "subject": "hi", "body_text": "body"},
+        json={
+            "to": ["x@example.com"],
+            "subject": "hi",
+            "body_text": "body",
+            "recipient_consent": True,
+        },
         headers=headers,
     )
     assert resp.status_code == 422
@@ -422,7 +581,12 @@ async def test_post_emails_marks_failed_when_provider_raises(
 
     resp = await client.post(
         "/emails",
-        json={"to": ["x@example.com"], "subject": "hi", "body_text": "body"},
+        json={
+            "to": ["x@example.com"],
+            "subject": "hi",
+            "body_text": "body",
+            "recipient_consent": True,
+        },
         headers=headers,
     )
     assert resp.status_code == 502
@@ -464,7 +628,12 @@ async def test_post_emails_replays_with_same_idempotency_key(
     }
     await _register_custom_verified(client, headers, domain="acme.com")
 
-    payload = {"to": ["x@example.com"], "subject": "hi", "body_text": "body"}
+    payload = {
+        "to": ["x@example.com"],
+        "subject": "hi",
+        "body_text": "body",
+        "recipient_consent": True,
+    }
     r1 = await client.post("/emails", json=payload, headers=headers)
     assert r1.status_code == 201
     r2 = await client.post("/emails", json=payload, headers=headers)
@@ -494,7 +663,12 @@ async def test_get_emails_is_org_scoped(
     await _register_custom_verified(client, headers, domain="acme.com")
     created = await client.post(
         "/emails",
-        json={"to": ["x@example.com"], "subject": "hi", "body_text": "body"},
+        json={
+            "to": ["x@example.com"],
+            "subject": "hi",
+            "body_text": "body",
+            "recipient_consent": True,
+        },
         headers=headers,
     )
     email_id = created.json()["id"]
@@ -523,14 +697,24 @@ async def test_list_emails_filters_by_status(
     # One sent.
     await client.post(
         "/emails",
-        json={"to": ["x@example.com"], "subject": "ok", "body_text": "b"},
+        json={
+            "to": ["x@example.com"],
+            "subject": "ok",
+            "body_text": "b",
+            "recipient_consent": True,
+        },
         headers=headers,
     )
     # One failed.
     email_mock.send_email.side_effect = RuntimeError("nope")
     await client.post(
         "/emails",
-        json={"to": ["y@example.com"], "subject": "bad", "body_text": "b"},
+        json={
+            "to": ["y@example.com"],
+            "subject": "bad",
+            "body_text": "b",
+            "recipient_consent": True,
+        },
         headers=headers,
     )
     email_mock.send_email.side_effect = None  # reset for any later tests
@@ -563,6 +747,7 @@ async def test_list_emails_omits_message_bodies(
             "subject": "hi",
             "body_text": "the body that should NOT appear in list",
             "body_html": "<p>also should NOT appear</p>",
+            "recipient_consent": True,
         },
         headers=headers,
     )
@@ -603,6 +788,7 @@ async def test_post_emails_round_trips_metadata(
             "subject": "hi",
             "body_text": "body",
             "metadata": {"campaign_id": "spring-2026", "tier": "free"},
+            "recipient_consent": True,
         },
         headers=headers,
     )
@@ -621,7 +807,14 @@ async def test_post_emails_writes_audit_log(
     await _register_custom_verified(client, headers, domain="acme.com")
     await client.post(
         "/emails",
-        json={"to": ["x@example.com"], "subject": "hi", "body_text": "b"},
+        json={
+            "to": ["x@example.com"],
+            "subject": "hi",
+            "body_text": "b",
+            "recipient_consent": True,
+            "consent_source": "checkout_form",
+            "message_type": "marketing",
+        },
         headers=headers,
     )
 
@@ -635,6 +828,10 @@ async def test_post_emails_writes_audit_log(
         .all()
     )
     assert len(rows) == 1
+    payload = rows[0].payload
+    assert payload["recipient_consent"] is True
+    assert payload["consent_source"] == "checkout_form"
+    assert payload["message_type"] == "marketing"
 
 
 _ = ApiKey  # type hint passthrough
@@ -659,7 +856,12 @@ async def test_post_emails_writes_synthetic_sent_event(
     await _register_custom_verified(client, headers, domain="acme.com")
     resp = await client.post(
         "/emails",
-        json={"to": ["bob@example.com"], "subject": "hi", "body_text": "hello"},
+        json={
+            "to": ["bob@example.com"],
+            "subject": "hi",
+            "body_text": "hello",
+            "recipient_consent": True,
+        },
         headers=headers,
     )
     assert resp.status_code == 201, resp.text
@@ -704,7 +906,12 @@ async def test_post_emails_writes_usage_event(
     await _register_custom_verified(client, headers, domain="acme.com")
     resp = await client.post(
         "/emails",
-        json={"to": recipients, "subject": "hi", "body_text": "body"},
+        json={
+            "to": recipients,
+            "subject": "hi",
+            "body_text": "body",
+            "recipient_consent": True,
+        },
         headers=headers,
     )
     assert resp.status_code == 201, resp.text
@@ -740,7 +947,12 @@ async def test_post_emails_kicks_rater_after_usage_event(
     await _register_custom_verified(client, headers, domain="acme.com")
     resp = await client.post(
         "/emails",
-        json={"to": ["x@example.com"], "subject": "hi", "body_text": "body"},
+        json={
+            "to": ["x@example.com"],
+            "subject": "hi",
+            "body_text": "body",
+            "recipient_consent": True,
+        },
         headers=headers,
     )
     assert resp.status_code == 201, resp.text
@@ -770,6 +982,7 @@ async def test_outbound_email_meters_flat_one_unit(
             "bcc": ["dave@example.com"],
             "subject": "flat billing test",
             "body_text": "body",
+            "recipient_consent": True,
         },
         headers=headers,
     )
@@ -818,7 +1031,12 @@ async def test_post_emails_usage_event_failure_does_not_fail_send(
 
     resp = await client.post(
         "/emails",
-        json={"to": ["x@example.com"], "subject": "hi", "body_text": "body"},
+        json={
+            "to": ["x@example.com"],
+            "subject": "hi",
+            "body_text": "body",
+            "recipient_consent": True,
+        },
         headers=headers,
     )
     assert resp.status_code == 201, resp.text
@@ -855,6 +1073,7 @@ async def test_post_emails_appends_footer_on_wire_only(
             "subject": "hi",
             "body_text": "body",
             "body_html": "<p>body</p>",
+            "recipient_consent": True,
         },
         headers=headers,
     )
@@ -863,9 +1082,15 @@ async def test_post_emails_appends_footer_on_wire_only(
     call_kwargs = email_mock.send_email.call_args.kwargs
     assert call_kwargs["body_text"].startswith("body")
     assert "Sent by Hail.so" in call_kwargs["body_text"]
-    assert call_kwargs["body_text"].rstrip().endswith("(https://hail.so)")
     assert call_kwargs["body_html"].startswith("<p>body</p>")
     assert 'href="https://hail.so"' in call_kwargs["body_html"]
+    # AI disclosure rides the wire message too, after the branding footer —
+    # never part of the stored/returned body (see assertions below).
+    assert AI_DISCLOSURE_LINE in call_kwargs["body_text"]
+    assert AI_DISCLOSURE_LINE in call_kwargs["body_html"]
+    assert call_kwargs["body_text"].index("Sent by Hail.so") < call_kwargs[
+        "body_text"
+    ].index(AI_DISCLOSURE_LINE)
 
     # POST response and GET both return the original body, footer-free.
     assert resp.json()["body_text"] == "body"

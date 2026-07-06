@@ -59,7 +59,11 @@ async def test_post_calls_no_idempotency_header_normal_flow(
 
     resp = await client.post(
         "/calls",
-        json={"to": "+14155559999", "system_prompt": "hi"},
+        json={
+            "to": "+14155559999",
+            "system_prompt": "hi",
+            "recipient_consent": True,
+        },
         headers={"Authorization": f"Bearer {plain}"},
     )
     assert resp.status_code == 201
@@ -82,7 +86,11 @@ async def test_post_calls_idempotency_first_request_inserts_and_runs(
 
     resp = await client.post(
         "/calls",
-        json={"to": "+14155559999", "system_prompt": "hi"},
+        json={
+            "to": "+14155559999",
+            "system_prompt": "hi",
+            "recipient_consent": True,
+        },
         headers={
             "Authorization": f"Bearer {plain}",
             "Idempotency-Key": "first-key",
@@ -121,7 +129,7 @@ async def test_post_calls_idempotency_replay_returns_cached(
         "Authorization": f"Bearer {plain}",
         "Idempotency-Key": "rerun-me",
     }
-    body = {"to": "+14155559999", "system_prompt": "hi"}
+    body = {"to": "+14155559999", "system_prompt": "hi", "recipient_consent": True}
 
     first = await client.post("/calls", json=body, headers=headers)
     assert first.status_code == 201
@@ -159,14 +167,22 @@ async def test_post_calls_idempotency_different_body_returns_409(
 
     first = await client.post(
         "/calls",
-        json={"to": "+14155559999", "system_prompt": "hi"},
+        json={
+            "to": "+14155559999",
+            "system_prompt": "hi",
+            "recipient_consent": True,
+        },
         headers=headers,
     )
     assert first.status_code == 201
 
     second = await client.post(
         "/calls",
-        json={"to": "+14155558888", "system_prompt": "hi"},
+        json={
+            "to": "+14155558888",
+            "system_prompt": "hi",
+            "recipient_consent": True,
+        },
         headers=headers,
     )
     assert second.status_code == 409
@@ -183,7 +199,7 @@ async def test_post_calls_idempotency_in_flight_returns_409(
     org_id, _, plain = org_and_key
     await add_phone_number(async_session, org_id)
 
-    body = {"to": "+14155559999", "system_prompt": "hi"}
+    body = {"to": "+14155559999", "system_prompt": "hi", "recipient_consent": True}
     request_hash = hash_request_body(body)
 
     # Manually plant an in-flight row to simulate a concurrent worker.
@@ -232,7 +248,7 @@ async def test_post_calls_idempotency_isolated_per_org(
         provider_resource_id="PN_b",
     )
 
-    body = {"to": "+14155559999", "system_prompt": "hi"}
+    body = {"to": "+14155559999", "system_prompt": "hi", "recipient_consent": True}
     shared_key = "shared-key-across-orgs"
 
     a = await client.post(
@@ -278,7 +294,7 @@ async def test_post_calls_replay_emits_audit_log(
         "Authorization": f"Bearer {plain}",
         "Idempotency-Key": "replayed-audit-key",
     }
-    body = {"to": "+14155559999", "system_prompt": "hi"}
+    body = {"to": "+14155559999", "system_prompt": "hi", "recipient_consent": True}
 
     await client.post("/calls", json=body, headers=headers)
     await client.post("/calls", json=body, headers=headers)
@@ -308,7 +324,7 @@ async def test_post_calls_idempotency_caches_502_failure(
         "Authorization": f"Bearer {plain}",
         "Idempotency-Key": "fail-key",
     }
-    body = {"to": "+14155559999", "system_prompt": "hi"}
+    body = {"to": "+14155559999", "system_prompt": "hi", "recipient_consent": True}
 
     first = await client.post("/calls", json=body, headers=headers)
     assert first.status_code == 502

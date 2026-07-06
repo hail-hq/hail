@@ -30,7 +30,11 @@ from .test_emails_api import _register_custom_verified, _send_email
 async def _create_call_for_events(client: httpx.AsyncClient, plain: str) -> str:
     resp = await client.post(
         "/calls",
-        json={"to": "+14155559999", "system_prompt": "hi"},
+        json={
+            "to": "+14155559999",
+            "system_prompt": "hi",
+            "recipient_consent": True,
+        },
         headers={"Authorization": f"Bearer {plain}"},
     )
     assert resp.status_code == 201

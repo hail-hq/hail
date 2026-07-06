@@ -839,6 +839,7 @@ async def test_delete_with_linked_emails_returns_409_and_skips_provider(
             "to": ["dest@example.com"],
             "subject": "hi",
             "body_text": "hello",
+            "recipient_consent": True,
         },
         headers=headers,
     )

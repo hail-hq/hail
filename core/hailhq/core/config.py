@@ -178,6 +178,37 @@ class Settings(BaseSettings):
     # ``.well-known/oauth-protected-resource``. Empty in self-host.
     mcp_resource_url: str = ""
 
+    # --- Pre-send compliance gate (hailhq.core.compliance_gate) --------- #
+
+    # Signs GET /unsubscribe tokens (email + organization_id + expiry). A
+    # dedicated secret — deliberately NOT hail_internal_secret, which is a
+    # different concern (internal API<->website HMAC signing). Generate
+    # with: openssl rand -base64 32
+    hail_unsubscribe_secret: str = ""
+
+    # National Do Not Call registry (donotcall.gov) scrub. Off by default:
+    # there is no live vendor integration today (a real check requires a
+    # paid subscription — a Bucket-1/founder task). See
+    # ``compliance_gate.check_national_dnc`` for the stub this gates.
+    hail_national_dnc_enabled: bool = False
+
+    # CSV of E.164 prefixes to block outright (premium-rate / high-risk
+    # destinations), e.g. "+1900,+1976". Parsed at the use site — same
+    # convention as ``hail_auth_audiences`` (see api/hailhq/api/deps.py).
+    # Empty = no prefix blocking. Illustrative examples in .env.example;
+    # the complete list is an ops decision, not hardcoded here.
+    hail_blocked_e164_prefixes: str = ""
+
+    # Velocity / new-account caps — flat defaults for now; a per-tier
+    # scheme is out of scope. Counted against hailhq.core.models.UsageEvent
+    # rows in a rolling window (see compliance_gate for the voice-channel
+    # lag caveat: voice usage_events are written by the voicebot at call
+    # completion, not at dial time).
+    hail_velocity_call_per_hour: int = 20
+    hail_velocity_call_per_day: int = 200
+    hail_velocity_email_per_hour: int = 50
+    hail_velocity_email_per_day: int = 500
+
     @computed_field  # type: ignore[prop-decorator]
     @property
     def hail_inbound_bucket(self) -> str:

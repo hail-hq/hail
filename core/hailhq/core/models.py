@@ -138,6 +138,48 @@ class UsageEvent(Base):
     )
 
 
+class Suppression(Base):
+    """Do-not-contact entry — org-scoped, or global when ``organization_id``
+    is NULL.
+
+    Backs the pre-send compliance gate (``hailhq.core.compliance_gate``):
+    a send is blocked when a row matches ``(recipient, channel)`` or
+    ``(recipient, 'all')``, scoped to the sending org OR a NULL (platform-
+    wide) row. ``recipient`` is normalized — E.164 for voice, lowercased
+    for email — so lookups are a plain equality match.
+
+    A voice row IS an internal DNC entry; there is no separate DNC table.
+    Populated by the unsubscribe link (``GET /unsubscribe``,
+    ``source='unsubscribe_link'``), manual ops action
+    (``source='manual'``), or a future bounce/complaint handler
+    (``source='bounce'``).
+    """
+
+    __tablename__ = "suppressions"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    organization_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), nullable=True
+    )
+    recipient: Mapped[str] = mapped_column(Text, nullable=False)
+    channel: Mapped[str] = mapped_column(Text, nullable=False)
+    reason: Mapped[str] = mapped_column(Text, nullable=False)
+    source: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        TS, server_default=text("now()"), nullable=False
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "channel IN ('voice','email','all')",
+            name="suppressions_channel_check",
+        ),
+        Index("suppressions_recipient_channel_idx", "recipient", "channel"),
+    )
+
+
 class ApiKey(Base):
     """Read-only mirror of the auth backend's ``api_keys`` table.
 

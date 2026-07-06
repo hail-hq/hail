@@ -16,7 +16,7 @@ from hailhq.core.schemas import (
 
 
 def test_call_create_minimal_valid():
-    req = CallCreate(to="+14155551234", system_prompt="Hi")
+    req = CallCreate(to="+14155551234", system_prompt="Hi", recipient_consent=True)
     assert req.to == "+14155551234"
     assert req.system_prompt == "Hi"
     assert req.llm is None
@@ -26,6 +26,7 @@ def test_call_create_with_byo_endpoint():
     req = CallCreate(
         to="+14155551234",
         llm=LLMConfig(base_url="https://x.example/v1", api_key="k", model="m"),
+        recipient_consent=True,
     )
     assert req.llm is not None
     assert req.llm.base_url == "https://x.example/v1"
@@ -33,12 +34,12 @@ def test_call_create_with_byo_endpoint():
 
 def test_call_create_rejects_non_e164():
     with pytest.raises(ValidationError):
-        CallCreate(to="4155551234", system_prompt="Hi")
+        CallCreate(to="4155551234", system_prompt="Hi", recipient_consent=True)
 
 
 def test_call_create_requires_prompt_or_llm():
     with pytest.raises(ValidationError):
-        CallCreate(to="+14155551234")
+        CallCreate(to="+14155551234", recipient_consent=True)
 
 
 def test_call_create_rejects_prompt_and_llm_together():
@@ -47,7 +48,19 @@ def test_call_create_rejects_prompt_and_llm_together():
             to="+14155551234",
             system_prompt="Hi",
             llm=LLMConfig(base_url="https://x.example/v1", api_key="k", model="m"),
+            recipient_consent=True,
         )
+
+
+def test_call_create_requires_recipient_consent_field():
+    """``recipient_consent`` is required — no default — omitting it is a 422."""
+    with pytest.raises(ValidationError, match="recipient_consent"):
+        CallCreate(to="+14155551234", system_prompt="Hi")
+
+
+def test_call_create_message_type_defaults_to_informational():
+    req = CallCreate(to="+14155551234", system_prompt="Hi", recipient_consent=True)
+    assert req.message_type == "informational"
 
 
 def test_voice_config_defaults():

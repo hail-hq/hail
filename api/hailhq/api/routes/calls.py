@@ -19,8 +19,10 @@ from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from hailhq.api.audit import write_audit_log
+from hailhq.api.consent import enforce_consent, isoformat_or_none
 from hailhq.core.billing import has_funds
 from hailhq.core.call_end_reasons import CallEndReason
+from hailhq.core.compliance_gate import check_call_allowed
 from hailhq.core.db import get_session
 from hailhq.api.deps import Principal, get_current_principal
 from hailhq.api.pagination import fetch_cursor_page
@@ -156,6 +158,31 @@ async def create_call(
         response.headers["Location"] = f"/calls/{cached_id}"
         return CallResponse.model_validate(cached)
 
+    # Consent attestation gate — reject before any Call row is created.
+    enforce_consent(
+        recipient_consent=body.recipient_consent,
+        consent_source=body.consent_source,
+        message_type=body.message_type,
+    )
+
+    # Compliance gate — suppression/DNC, premium-rate prefix, velocity cap.
+    # Also before any Call row is created, so a denial has no resource to
+    # clean up; the audit entry below carries resource_id=None.
+    gate = await check_call_allowed(db, principal.organization_id, body.to)
+    if not gate.allowed:
+        await write_audit_log(
+            organization_id=principal.organization_id,
+            api_key_id=principal.api_key_id,
+            action="call.blocked",
+            resource_type="call",
+            resource_id=None,
+            payload={"to": body.to, "reason": gate.reason, "checks": gate.checks},
+        )
+        raise HTTPException(
+            status_code=http_status.HTTP_403_FORBIDDEN,
+            detail=gate.reason,
+        )
+
     # Cloud-only balance gate; shared-key auth lands on the unbilled
     # "Self-hosted" org and skips it (``api_key_id is None`` ⇒ HAIL_API_KEY path).
     if principal.api_key_id is not None:
@@ -236,7 +263,15 @@ async def create_call(
         action="call.create",
         resource_type="call",
         resource_id=call.id,
-        payload={"to": call.to_e164, "from": call.from_e164},
+        payload={
+            "to": call.to_e164,
+            "from": call.from_e164,
+            "recipient_consent": body.recipient_consent,
+            "consent_source": body.consent_source,
+            "consent_obtained_at": isoformat_or_none(body.consent_obtained_at),
+            "message_type": body.message_type,
+            "compliance": gate.checks,
+        },
     )
 
     # 4. External calls — best-effort with status reconciliation.

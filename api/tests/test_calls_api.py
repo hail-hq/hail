@@ -34,7 +34,11 @@ async def test_post_calls_unauthenticated_returns_401(
 ) -> None:
     resp = await client.post(
         "/calls",
-        json={"to": "+14155559999", "system_prompt": "hi"},
+        json={
+            "to": "+14155559999",
+            "system_prompt": "hi",
+            "recipient_consent": True,
+        },
     )
     assert resp.status_code == 401
 
@@ -67,11 +71,119 @@ async def test_post_calls_rejects_prompt_and_llm_together(
                 "api_key": "k",
                 "model": "m",
             },
+            "recipient_consent": True,
         },
         headers={"Authorization": f"Bearer {plain}"},
     )
     assert resp.status_code == 422
     assert "mutually exclusive" in resp.text
+
+
+# --------------------------------------------------------------------------- #
+# Consent attestation / marketing-vs-informational gate
+# --------------------------------------------------------------------------- #
+
+
+async def test_post_calls_rejects_missing_recipient_consent(
+    client: httpx.AsyncClient,
+    org_and_key: tuple[str, ApiKey, str],
+) -> None:
+    """``recipient_consent`` is required — omitting it is a 422, not a default."""
+    _, _, plain = org_and_key
+    resp = await client.post(
+        "/calls",
+        json={"to": "+14155559999", "system_prompt": "hi"},
+        headers={"Authorization": f"Bearer {plain}"},
+    )
+    assert resp.status_code == 422
+
+
+async def test_post_calls_rejects_false_recipient_consent(
+    client: httpx.AsyncClient,
+    async_session: AsyncSession,
+    org_and_key: tuple[str, ApiKey, str],
+    add_phone_number,
+) -> None:
+    """``recipient_consent: false`` is rejected before any Call row is created."""
+    org_id, _, plain = org_and_key
+    await add_phone_number(async_session, org_id)
+
+    resp = await client.post(
+        "/calls",
+        json={
+            "to": "+14155559999",
+            "system_prompt": "hi",
+            "recipient_consent": False,
+        },
+        headers={"Authorization": f"Bearer {plain}"},
+    )
+    assert resp.status_code == 422
+    assert "recipient_consent" in resp.json()["detail"]
+
+    rows = (await async_session.execute(select(Call))).scalars().all()
+    assert rows == []
+
+
+async def test_post_calls_rejects_marketing_without_consent_source(
+    client: httpx.AsyncClient,
+    async_session: AsyncSession,
+    org_and_key: tuple[str, ApiKey, str],
+    add_phone_number,
+) -> None:
+    """Marketing calls need a documented ``consent_source``, not just a bare boolean."""
+    org_id, _, plain = org_and_key
+    await add_phone_number(async_session, org_id)
+
+    resp = await client.post(
+        "/calls",
+        json={
+            "to": "+14155559999",
+            "system_prompt": "hi",
+            "recipient_consent": True,
+            "message_type": "marketing",
+        },
+        headers={"Authorization": f"Bearer {plain}"},
+    )
+    assert resp.status_code == 422
+    assert "consent_source" in resp.json()["detail"]
+
+    rows = (await async_session.execute(select(Call))).scalars().all()
+    assert rows == []
+
+
+async def test_post_calls_marketing_with_consent_source_succeeds(
+    client: httpx.AsyncClient,
+    org_and_key: tuple[str, ApiKey, str],
+    livekit_mock: AsyncMock,
+    add_phone_number,
+    async_session: AsyncSession,
+) -> None:
+    org_id, _, plain = org_and_key
+    await add_phone_number(async_session, org_id)
+
+    resp = await client.post(
+        "/calls",
+        json={
+            "to": "+14155559999",
+            "system_prompt": "hi",
+            "recipient_consent": True,
+            "message_type": "marketing",
+            "consent_source": "signup_form",
+            "consent_obtained_at": "2026-01-01T00:00:00Z",
+        },
+        headers={"Authorization": f"Bearer {plain}"},
+    )
+    assert resp.status_code == 201, resp.text
+
+    audit = (
+        await async_session.execute(
+            select(AuditLog).where(AuditLog.action == "call.create")
+        )
+    ).scalar_one()
+    assert audit.payload["recipient_consent"] is True
+    assert audit.payload["consent_source"] == "signup_form"
+    assert audit.payload["consent_obtained_at"] == "2026-01-01T00:00:00+00:00"
+    assert audit.payload["message_type"] == "marketing"
 
 
 async def test_post_calls_no_number_and_empty_pool_returns_503(
@@ -87,7 +199,11 @@ async def test_post_calls_no_number_and_empty_pool_returns_503(
     _, _, plain = org_and_key
     resp = await client.post(
         "/calls",
-        json={"to": "+14155559999", "system_prompt": "hi"},
+        json={
+            "to": "+14155559999",
+            "system_prompt": "hi",
+            "recipient_consent": True,
+        },
         headers={"Authorization": f"Bearer {plain}"},
     )
     assert resp.status_code == 503
@@ -106,7 +222,11 @@ async def test_post_calls_happy_path_201(
 
     resp = await client.post(
         "/calls",
-        json={"to": "+14155559999", "system_prompt": "Be brief."},
+        json={
+            "to": "+14155559999",
+            "system_prompt": "Be brief.",
+            "recipient_consent": True,
+        },
         headers={"Authorization": f"Bearer {plain}"},
     )
 
@@ -140,6 +260,10 @@ async def test_post_calls_happy_path_201(
     ).scalar_one()
     assert audit.api_key_id == api_key.id
     assert audit.payload["to"] == "+14155559999"
+    assert audit.payload["recipient_consent"] is True
+    assert audit.payload["consent_source"] is None
+    assert audit.payload["consent_obtained_at"] is None
+    assert audit.payload["message_type"] == "informational"
 
     # Exactly one call_events row (queued -> dialing).
     events = (await async_session.execute(select(CallEvent))).scalars().all()
@@ -162,7 +286,11 @@ async def test_post_calls_livekit_failure_marks_call_failed(
 
     resp = await client.post(
         "/calls",
-        json={"to": "+14155559999", "system_prompt": "hi"},
+        json={
+            "to": "+14155559999",
+            "system_prompt": "hi",
+            "recipient_consent": True,
+        },
         headers={"Authorization": f"Bearer {plain}"},
     )
 
@@ -210,7 +338,11 @@ async def test_post_calls_falls_back_to_pool_when_org_has_no_number(
 
     resp = await client.post(
         "/calls",
-        json={"to": "+14155559999", "system_prompt": "hi"},
+        json={
+            "to": "+14155559999",
+            "system_prompt": "hi",
+            "recipient_consent": True,
+        },
         headers={"Authorization": f"Bearer {plain}"},
     )
 
@@ -248,7 +380,11 @@ async def test_post_calls_skips_pool_when_org_has_active_number(
 
     resp = await client.post(
         "/calls",
-        json={"to": "+14155559999", "system_prompt": "hi"},
+        json={
+            "to": "+14155559999",
+            "system_prompt": "hi",
+            "recipient_consent": True,
+        },
         headers={"Authorization": f"Bearer {plain}"},
     )
 
@@ -282,7 +418,11 @@ async def test_post_calls_pool_exhausted_returns_503(
     # Pre-reserve the only pool row by inserting a placeholder Call.
     first_resp = await client.post(
         "/calls",
-        json={"to": "+14155559998", "system_prompt": "hi"},
+        json={
+            "to": "+14155559998",
+            "system_prompt": "hi",
+            "recipient_consent": True,
+        },
         headers={"Authorization": f"Bearer {plain}"},
     )
     assert first_resp.status_code == 201
@@ -292,7 +432,11 @@ async def test_post_calls_pool_exhausted_returns_503(
     # Second caller — same org, no number, pool empty → 503.
     resp = await client.post(
         "/calls",
-        json={"to": "+14155559997", "system_prompt": "hi"},
+        json={
+            "to": "+14155559997",
+            "system_prompt": "hi",
+            "recipient_consent": True,
+        },
         headers={"Authorization": f"Bearer {plain}"},
     )
     assert resp.status_code == 503
@@ -321,6 +465,7 @@ async def test_post_calls_explicit_from_cannot_address_pool(
             "to": "+14155559999",
             "from": pool_pn.e164,
             "system_prompt": "hi",
+            "recipient_consent": True,
         },
         headers={"Authorization": f"Bearer {plain}"},
     )
@@ -347,7 +492,11 @@ async def test_post_calls_pool_release_on_dispatch_failure(
 
     resp = await client.post(
         "/calls",
-        json={"to": "+14155559999", "system_prompt": "hi"},
+        json={
+            "to": "+14155559999",
+            "system_prompt": "hi",
+            "recipient_consent": True,
+        },
         headers={"Authorization": f"Bearer {plain}"},
     )
     assert resp.status_code == 502
@@ -388,6 +537,7 @@ async def test_post_calls_uses_explicit_from_e164(
             "to": "+14155559999",
             "from": chosen.e164,
             "system_prompt": "hi",
+            "recipient_consent": True,
         },
         headers={"Authorization": f"Bearer {plain}"},
     )
@@ -416,7 +566,11 @@ async def test_get_call_by_id_returns_200_for_owner(
 
     create = await client.post(
         "/calls",
-        json={"to": "+14155559999", "system_prompt": "hi"},
+        json={
+            "to": "+14155559999",
+            "system_prompt": "hi",
+            "recipient_consent": True,
+        },
         headers={"Authorization": f"Bearer {plain}"},
     )
     assert create.status_code == 201
@@ -441,7 +595,11 @@ async def test_get_call_by_id_returns_404_for_other_org(
 
     create = await client.post(
         "/calls",
-        json={"to": "+14155559999", "system_prompt": "hi"},
+        json={
+            "to": "+14155559999",
+            "system_prompt": "hi",
+            "recipient_consent": True,
+        },
         headers={"Authorization": f"Bearer {plain_a}"},
     )
     call_id = create.json()["id"]
@@ -483,7 +641,11 @@ async def test_list_calls_returns_pagination_cursor(
     for _ in range(3):
         resp = await client.post(
             "/calls",
-            json={"to": "+14155559999", "system_prompt": "hi"},
+            json={
+                "to": "+14155559999",
+                "system_prompt": "hi",
+                "recipient_consent": True,
+            },
             headers={"Authorization": f"Bearer {plain}"},
         )
         assert resp.status_code == 201
@@ -526,7 +688,11 @@ async def test_list_calls_filters_by_status(
     # First call: succeeds → status=dialing.
     r1 = await client.post(
         "/calls",
-        json={"to": "+14155559999", "system_prompt": "hi"},
+        json={
+            "to": "+14155559999",
+            "system_prompt": "hi",
+            "recipient_consent": True,
+        },
         headers={"Authorization": f"Bearer {plain}"},
     )
     assert r1.status_code == 201
@@ -535,7 +701,11 @@ async def test_list_calls_filters_by_status(
     livekit_mock.create_sip_participant.side_effect = RuntimeError("nope")
     r2 = await client.post(
         "/calls",
-        json={"to": "+14155559999", "system_prompt": "hi"},
+        json={
+            "to": "+14155559999",
+            "system_prompt": "hi",
+            "recipient_consent": True,
+        },
         headers={"Authorization": f"Bearer {plain}"},
     )
     assert r2.status_code == 502

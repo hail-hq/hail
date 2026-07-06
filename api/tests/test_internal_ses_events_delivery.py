@@ -48,7 +48,12 @@ async def test_delivery_event_applies_with_inbound_disabled(client, async_sessio
     _, _, plain = await insert_org_and_key(async_session)
     resp = await client.post(
         "/emails",
-        json={"to": ["bob@example.com"], "subject": "hi", "body_text": "hello"},
+        json={
+            "to": ["bob@example.com"],
+            "subject": "hi",
+            "body_text": "hello",
+            "recipient_consent": True,
+        },
         headers={"Authorization": f"Bearer {plain}"},
     )
     assert resp.status_code == 201
@@ -70,7 +75,12 @@ async def test_duplicate_delivery_event_reports_duplicate(client, async_session)
     _, _, plain = await insert_org_and_key(async_session)
     resp = await client.post(
         "/emails",
-        json={"to": ["bob@example.com"], "subject": "hi", "body_text": "hello"},
+        json={
+            "to": ["bob@example.com"],
+            "subject": "hi",
+            "body_text": "hello",
+            "recipient_consent": True,
+        },
         headers={"Authorization": f"Bearer {plain}"},
     )
     pmid = resp.json()["provider_message_id"]

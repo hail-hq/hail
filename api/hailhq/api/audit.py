@@ -14,7 +14,10 @@ Each entry pins:
 * ``action`` — dotted verb (``call.create``, ``email.create``,
   ``email_domain.patch``). Use the same vocabulary as the
   ``resource_type`` so callers can filter on either.
-* ``resource_type`` / ``resource_id`` — the row touched.
+* ``resource_type`` / ``resource_id`` — the row touched. ``resource_id``
+  is ``None`` for denials logged before any row exists (e.g. the
+  compliance-gate blocks — ``call.blocked`` / ``email.blocked`` — run
+  before the Call/Email row is created).
 * ``payload`` — arbitrary JSON; keep it small and grep-able. Don't
   dump message bodies or DKIM secrets here.
 """
@@ -36,7 +39,7 @@ async def write_audit_log(
     api_key_id: UUID | None,
     action: str,
     resource_type: str,
-    resource_id: UUID,
+    resource_id: UUID | None,
     payload: dict[str, Any],
 ) -> None:
     """Append an ``audit_log`` row in a fresh session. Never re-raises."""

@@ -25,6 +25,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from hailhq.core.models import Call, CallEvent, PhoneNumber, UsageEvent
 from hailhq.core.pool import CALL_META_FROM_POOL
 from hailhq.voicebot.agent import (
+    AI_DISCLOSURE_LINE,
     SIP_CALL_STATUS_ACTIVE,
     SIP_CALL_STATUS_ATTRIBUTE,
     SOFT_CAP_ANNOUNCEMENT,
@@ -38,6 +39,7 @@ from hailhq.voicebot.agent import (
     on_call_end,
     parse_metadata,
     soft_cap_announce_and_hangup,
+    speak_greeting,
 )
 
 from ._fakes import FakeAnnouncingSession, FakeJobContext, FakeLLM
@@ -853,6 +855,49 @@ async def test_on_call_end_no_override_defaults_to_normal_hangup(
     await async_session.refresh(refreshed)
     assert refreshed.status == "completed"
     assert refreshed.end_reason == "normal_hangup"
+
+
+# --------------------------------------------------------------------------- #
+# AI disclosure — proactive, real (not just prompt-hoped-for)
+# --------------------------------------------------------------------------- #
+
+
+async def test_speak_greeting_speaks_disclosure_before_first_message() -> None:
+    """The disclosure is always spoken, and always before ``first_message``."""
+    session = FakeAnnouncingSession()
+
+    await speak_greeting(session, {"first_message": "Hi, calling about your order."})
+
+    assert len(session.say_calls) == 2
+    first_text, first_allow_interruptions = session.say_calls[0]
+    second_text, _ = session.say_calls[1]
+    assert first_text == AI_DISCLOSURE_LINE
+    assert first_allow_interruptions is True
+    assert second_text == "Hi, calling about your order."
+
+
+async def test_speak_greeting_speaks_disclosure_when_no_first_message() -> None:
+    """No ``first_message`` in metadata → the disclosure is still spoken."""
+    session = FakeAnnouncingSession()
+
+    await speak_greeting(session, {})
+
+    assert session.say_calls == [(AI_DISCLOSURE_LINE, True)]
+
+
+async def test_speak_greeting_first_message_cannot_precede_disclosure() -> None:
+    """Even a caller-supplied ``first_message`` can't be spoken first —
+    the disclosure is not sourced from (and cannot be overridden by)
+    caller-controlled metadata like ``system_prompt`` or ``first_message``.
+    """
+    session = FakeAnnouncingSession()
+
+    await speak_greeting(
+        session, {"first_message": AI_DISCLOSURE_LINE + " (impersonated)"}
+    )
+
+    assert session.say_calls[0] == (AI_DISCLOSURE_LINE, True)
+    assert session.say_calls[0] != session.say_calls[1]
 
 
 # --------------------------------------------------------------------------- #

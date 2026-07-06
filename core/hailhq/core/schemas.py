@@ -114,6 +114,16 @@ class CallCreate(BaseModel):
     conversation_id: UUID | None = None
     metadata: dict = Field(default_factory=dict)
 
+    # --- Consent attestation -------------------------------------------- #
+    # Required, no default: every caller must explicitly state whether the
+    # recipient consented. ``message_type == "marketing"`` is held to a
+    # stricter bar (documented ``consent_source``) — enforced in the route,
+    # not here, so the 422 detail can explain which bar failed.
+    recipient_consent: bool
+    consent_source: str | None = None
+    consent_obtained_at: datetime | None = None
+    message_type: Literal["marketing", "informational"] = "informational"
+
     @field_validator("to", "from_")
     @classmethod
     def _validate_e164(cls, v: str | None) -> str | None:
@@ -442,6 +452,16 @@ class EmailCreate(BaseModel):
     body_html: str | None = None
     conversation_id: UUID | None = None
     metadata: dict = Field(default_factory=dict)
+
+    # --- Consent attestation -------------------------------------------- #
+    # Required, no default: every caller must explicitly state whether the
+    # recipient consented. ``message_type == "marketing"`` is held to a
+    # stricter bar (documented ``consent_source``) — enforced in the route,
+    # not here, so the 422 detail can explain which bar failed.
+    recipient_consent: bool
+    consent_source: str | None = None
+    consent_obtained_at: datetime | None = None
+    message_type: Literal["marketing", "informational"] = "informational"
 
     @field_validator("from_", "reply_to")
     @classmethod

@@ -106,6 +106,31 @@ def build_instructions(system_prompt: str | None) -> str:
     return f"{VOICE_PREAMBLE}\n\n# Caller instructions\n\n{caller}"
 
 
+# Proactive AI disclosure — spoken unconditionally as the first thing on
+# every call, immediately after session.start(). Unlike VOICE_PREAMBLE (LLM
+# instructions the model could ignore), this is a literal session.say() so
+# it is a real, enforced disclosure, not a prompt hope. Deliberately generic
+# (no per-org display name — the voicebot process has no clean lookup for
+# that) and not reachable/overridable via the public API: it never comes
+# from body.system_prompt or body.first_message.
+AI_DISCLOSURE_LINE = (
+    "Hi, this is an AI assistant calling on behalf of the person or "
+    "organization that requested this call."
+)
+
+
+async def speak_greeting(session: AgentSession, metadata: dict[str, Any]) -> None:
+    """Speak the mandatory AI disclosure, then the caller's ``first_message`` if set.
+
+    The disclosure is unconditional and always first — it is not reachable
+    via ``metadata``; it never comes from ``body.system_prompt`` or
+    ``body.first_message``. Call this right after ``session.start()``.
+    """
+    await session.say(AI_DISCLOSURE_LINE, allow_interruptions=True)
+    if metadata.get("first_message"):
+        await session.say(metadata["first_message"], allow_interruptions=True)
+
+
 # Soft-cap announcement spoken when a call hits HAIL_VOICE_MAX_DURATION_SECONDS.
 # Phrased like an honest operator note rather than a robotic cutoff so the
 # caller has a moment to say their goodbyes.
@@ -624,8 +649,7 @@ async def entrypoint(ctx: JobContext) -> None:
     agent = Agent(instructions=build_instructions(metadata.get("system_prompt")))
     await session.start(agent=agent, room=ctx.room)
 
-    if metadata.get("first_message"):
-        await session.say(metadata["first_message"], allow_interruptions=True)
+    await speak_greeting(session, metadata)
 
     room_name = ctx.room.name
 
@@ -668,6 +692,7 @@ async def entrypoint(ctx: JobContext) -> None:
 
 
 __all__ = [
+    "AI_DISCLOSURE_LINE",
     "SIP_CALL_STATUS_ACTIVE",
     "SIP_CALL_STATUS_ATTRIBUTE",
     "SOFT_CAP_ANNOUNCEMENT",
@@ -683,5 +708,6 @@ __all__ = [
     "parse_metadata",
     "prewarm",
     "soft_cap_announce_and_hangup",
+    "speak_greeting",
     "write_call_event",
 ]

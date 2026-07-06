@@ -31,6 +31,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import defer
 
 from hailhq.api.audit import write_audit_log
+from hailhq.api.consent import enforce_consent, isoformat_or_none
 from hailhq.core.urls import join_url
 from hailhq.api.deps import Principal, get_current_principal
 from hailhq.api.pagination import fetch_cursor_page
@@ -42,12 +43,14 @@ from hailhq.api.routes.email_domains import (
     resolve_hail_mail_prefixes,
 )
 from hailhq.core.billing import has_funds
+from hailhq.core.compliance_gate import check_email_allowed
 from hailhq.core.db import get_session
 from hailhq.core.email_delivery_events import record_sent_event
-from hailhq.core.email_footer import FOOTER_SENT, append_footer
+from hailhq.core.email_footer import FOOTER_SENT, append_disclosure, append_footer
 from hailhq.core.models import Email, EmailAttachment, EmailDomain, EmailEvent
 from hailhq.core.s3_inbound import S3InboundClient
 from hailhq.core.providers.email import EmailProvider
+from hailhq.core.unsubscribe import build_unsubscribe_url
 from hailhq.core.schemas import (
     EmailAttachmentResponse,
     EmailCreate,
@@ -294,6 +297,39 @@ async def create_email(
         response.headers["Location"] = f"/emails/{cached_id}"
         return EmailResponse.model_validate(cached)
 
+    # Consent attestation gate — reject before any Email row is created.
+    enforce_consent(
+        recipient_consent=body.recipient_consent,
+        consent_source=body.consent_source,
+        message_type=body.message_type,
+    )
+
+    # Compliance gate — suppression list, velocity cap. Screens every
+    # recipient (to/cc/bcc), not just `to`. Also before any Email row is
+    # created, so a denial has no resource to clean up; the audit entry
+    # below carries resource_id=None.
+    all_recipients = list(body.to) + list(body.cc or []) + list(body.bcc or [])
+    gate = await check_email_allowed(db, principal.organization_id, all_recipients)
+    if not gate.allowed:
+        await write_audit_log(
+            organization_id=principal.organization_id,
+            api_key_id=principal.api_key_id,
+            action="email.blocked",
+            resource_type="email",
+            resource_id=None,
+            payload={
+                "to": body.to,
+                "cc": body.cc,
+                "bcc": body.bcc,
+                "reason": gate.reason,
+                "checks": gate.checks,
+            },
+        )
+        raise HTTPException(
+            status_code=http_status.HTTP_403_FORBIDDEN,
+            detail=gate.reason,
+        )
+
     # Cloud-only balance gate; shared-key auth lands on the unbilled
     # "Self-hosted" org and skips it.
     if principal.api_key_id is not None:
@@ -335,17 +371,32 @@ async def create_email(
         payload={
             "from": email.from_address,
             "to": email.to_addresses,
+            "cc": email.cc_addresses,
+            "bcc": email.bcc_addresses,
             "subject": email.subject,
+            "recipient_consent": body.recipient_consent,
+            "consent_source": body.consent_source,
+            "consent_obtained_at": isoformat_or_none(body.consent_obtained_at),
+            "message_type": body.message_type,
+            "compliance": gate.checks,
         },
     )
 
     # Provider send — best-effort with status reconciliation. Synchronous
     # in v1: callers get back ``sent`` or ``failed`` on the response, no
     # background polling needed for the happy path.
-    # Branding footer rides the wire message only; the stored row keeps
-    # the tenant-authored body.
+    # Branding footer + AI disclosure ride the wire message only; the stored
+    # row keeps the tenant-authored body.
     wire_text, wire_html = append_footer(
         email.body_text, email.body_html, label=FOOTER_SENT
+    )
+    wire_text, wire_html = append_disclosure(wire_text, wire_html)
+    # One-click unsubscribe (RFC 8058) — minted per-send against the primary
+    # recipient. A single send can target multiple `to` addresses; the
+    # header necessarily picks one (the first) since SES/RFC only support
+    # one List-Unsubscribe target per message.
+    unsubscribe_url = build_unsubscribe_url(
+        email.to_addresses[0], principal.organization_id
     )
     try:
         result = await email_provider.send_email(
@@ -357,6 +408,10 @@ async def create_email(
             cc=email.cc_addresses,
             bcc=email.bcc_addresses,
             reply_to=email.reply_to,
+            headers={
+                "List-Unsubscribe": f"<{unsubscribe_url}>",
+                "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
+            },
         )
     except Exception as exc:
         logger.warning(

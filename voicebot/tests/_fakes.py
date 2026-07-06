@@ -112,6 +112,15 @@ class FakeSpeechHandle:
     async def wait_for_playout(self) -> None:
         self.played_out = True
 
+    def __await__(self) -> Any:
+        # Mirrors the real SpeechHandle being awaitable directly (the
+        # entrypoint does ``await session.say(...)`` without capturing a
+        # handle). Resolving immediately is enough for ordering assertions.
+        async def _resolve() -> "FakeSpeechHandle":
+            return self
+
+        return _resolve().__await__()
+
 
 class FakeAnnouncingSession:
     """Stand-in for AgentSession that records ``.say()`` calls.
