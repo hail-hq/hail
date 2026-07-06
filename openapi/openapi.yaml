@@ -1133,6 +1133,32 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HTTPValidationError"
+  /unsubscribe:
+    get:
+      tags:
+        - unsubscribe
+      summary: Unsubscribe
+      operationId: unsubscribe_unsubscribe_get
+      parameters:
+        - name: token
+          in: query
+          required: true
+          schema:
+            type: string
+            title: Token
+      responses:
+        "200":
+          description: Successful Response
+          content:
+            text/html:
+              schema:
+                type: string
+        "422":
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
   /healthz:
     get:
       summary: Healthz
@@ -1185,10 +1211,32 @@ components:
           additionalProperties: true
           type: object
           title: Metadata
+        recipient_consent:
+          type: boolean
+          title: Recipient Consent
+        consent_source:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Consent Source
+        consent_obtained_at:
+          anyOf:
+            - type: string
+              format: date-time
+            - type: "null"
+          title: Consent Obtained At
+        message_type:
+          type: string
+          enum:
+            - marketing
+            - informational
+          title: Message Type
+          default: informational
       additionalProperties: false
       type: object
       required:
         - to
+        - recipient_consent
       title: CallCreate
     CallListResponse:
       properties:
@@ -1459,11 +1507,33 @@ components:
           additionalProperties: true
           type: object
           title: Metadata
+        recipient_consent:
+          type: boolean
+          title: Recipient Consent
+        consent_source:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Consent Source
+        consent_obtained_at:
+          anyOf:
+            - type: string
+              format: date-time
+            - type: "null"
+          title: Consent Obtained At
+        message_type:
+          type: string
+          enum:
+            - marketing
+            - informational
+          title: Message Type
+          default: informational
       additionalProperties: false
       type: object
       required:
         - to
         - subject
+        - recipient_consent
       title: EmailCreate
     EmailDomainCreate:
       properties:

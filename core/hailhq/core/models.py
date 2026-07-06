@@ -180,6 +180,35 @@ class Suppression(Base):
     )
 
 
+class OrgClosure(Base):
+    """Local record that an org's account was closed/deleted on hail-website.
+
+    hail's own DB does not own account/org lifecycle — organizations live in
+    hail-website's separate Postgres (better-auth schema), cross-referenced
+    only by a bare ``organization_id`` with no FK (same posture as
+    ``OrganizationMember``/``ApiKey`` above). Without this table hail has no
+    way to tell whether/when an org closed, so it can't enforce the
+    retention policy (account duration + 12 months) on its own.
+
+    Populated by ``POST /internal/org-closures``, which hail-website calls
+    when it closes/deletes an account (see
+    ``api/hailhq/api/routes/internal/org_closures.py``). Read by
+    ``hailhq.core.retention.purge_expired_data``.
+    """
+
+    __tablename__ = "org_closures"
+
+    organization_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True
+    )
+    closed_at: Mapped[datetime] = mapped_column(TS, nullable=False)
+    # Free-form provenance of the closure notification, e.g. "hail_website".
+    source: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        TS, server_default=text("now()"), nullable=False
+    )
+
+
 class ApiKey(Base):
     """Read-only mirror of the auth backend's ``api_keys`` table.
 
