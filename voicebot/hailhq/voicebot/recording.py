@@ -1,5 +1,7 @@
 """Call-recording upload helpers.
 
+If you wire up real Egress recording here, update voicebot/tests/test_no_audio_storage.py (and the Privacy Policy claim it guards) first.
+
 v1 ships a stub: real LiveKit Egress wiring (track-composite egress to S3,
 completion webhooks, deferred metadata reconciliation) is non-trivial and
 deferred. The voicebot still calls :func:`upload_recording` on hangup so the
