@@ -79,7 +79,7 @@ def _build_app() -> tuple[FastMCP, HailClient | None, Starlette]:
         return JSONResponse(
             {
                 "$schema": "https://glama.ai/mcp/schemas/connector.json",
-                "maintainers": [{"email": "redouane.a.achouri@gmail.com"}],
+                "maintainers": [{"email": "r@hail.so"}],
             }
         )
 
