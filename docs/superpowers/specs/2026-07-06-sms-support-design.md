@@ -13,6 +13,24 @@ Repo: `hail/` (core/api/cli/sdk/mcp/openapi) + `hail-website/` (console UI + bil
 > rather than SMS-only, and adds an abuse-monitoring section for a
 > confirmed gap (no automated opt-out/complaint-rate enforcement exists
 > anywhere today — see "Abuse monitoring" below).
+>
+> **Revision (2026-07-07):** verified the shared-Brand/Campaign question
+> (previously Risk 1, "unconfirmed") directly against Twilio's live API and
+> official docs. Confirmed answer: Twilio does **not** support a fee-free
+> shared campaign across unrelated end-customer businesses — their
+> documented, recommended model is one subaccount + Brand + Campaign **per
+> org** (Twilio's "Architecture #1"), and explicitly flags the pooled
+> single-campaign model this spec uses as carrying real compliance exposure
+> (one org's bad traffic can get the whole shared registration, and every
+> other org's numbers riding on it, throttled or suspended by carriers).
+> **Decision: accept this as a known, documented v1 risk rather than build
+> full per-org registration now** — orgs still get real dedicated numbers
+> and send/receive real SMS via the API as designed; only the underlying
+> carrier-facing 10DLC registration is Hail's single identity, not each
+> org's. See Decision 2 and Risk 1 below for the reasoning and the
+> concrete mitigation this implies (abuse monitoring becomes load-bearing,
+> not optional). Per-org registration (Architecture #1) is real,
+> scoped future work — see "Future work."
 
 ## Goal
 
@@ -36,6 +54,16 @@ this spec closes that gap.
    selection, sticky-sender (same number replies to the same contact), and
    inbound webhook routing per Messaging Service — this offloads logic that
    would otherwise have to be hand-rolled in `core/providers/sms/`.
+   **Known, accepted tradeoff** (confirmed against Twilio's live account and
+   docs, 2026-07-07): this pools org-branded messaging under one carrier
+   registration, which Twilio explicitly documents as carrying real
+   compliance exposure — see Risk 1. Chosen anyway for v1 to avoid per-org
+   registration cost (~$1.50–10/mo + ~$20–60 one-time per org) and lead time
+   (~2–3 weeks per org, dominated by Twilio's 10–15 day campaign review) that
+   Architecture #1 (the fully-isolated, Twilio-recommended per-org model)
+   would impose on every single org before they could send their first SMS.
+   This is why the abuse-monitoring guardrail below is load-bearing, not a
+   nice-to-have: it's the actual mitigation for the accepted risk.
 3. **Geography: US and international from day one** — not a phased rollout.
 4. **Sender ID is outbound-only and international-only.** A literal
    alphanumeric ID (default `"HAIL"`, org-customizable) is never used for
@@ -361,12 +389,38 @@ list/get/set_capabilities` (generic, new).
 
 ## Risks & confirm-during-implementation
 
-1. 🟡 **Unconfirmed**: whether Twilio's ISV/shared-campaign model lets every
-   org's dedicated number attach to one platform-level campaign without
-   incremental per-number/per-org fees. If it doesn't, the "10DLC is a
-   negligible fixed platform cost" framing breaks and the $1/mo compliance
-   fee may need to scale with number count instead of staying flat — confirm
-   directly with Twilio/TCR before launch.
+1. 🛑 **Confirmed (2026-07-07), not just theoretical**: Twilio explicitly
+   documents the single-shared-campaign model (this spec's Decision 2) as
+   compliance-risky for pooling unrelated businesses — if one org's SMS
+   traffic looks abusive/non-compliant to carriers, Twilio may have to
+   throttle or suspend the shared registration, taking every other org's
+   numbers down with it. The fully-pooled variants of this pattern have been
+   outright incompatible with A2P 10DLC since 2023; the semi-pooled variant
+   this spec uses still works today but is explicitly flagged, not silently
+   tolerated. **Accepted for v1** given the cost/lead-time this avoids (see
+   Decision 2) — but this makes the "Abuse monitoring" section's guardrail a
+   hard launch dependency, not a parallel nice-to-have: ship SMS without it
+   and the platform has no defense against the exact failure mode Twilio
+   warns about.
+   - Concrete state on Hail's live Twilio account (verified via API,
+     2026-07-07): KYB/Trust Hub business profile already approved (SID
+     `BU67001392606cddd3e0a83fc874b2d157`); a second, unused duplicate
+     profile (`BUfc485de79738063a172680dc07fec64a`, still "in-review")
+     should be abandoned before building on the approved one; zero A2P Brand
+     Registrations and zero Campaigns exist yet; three US numbers
+     (`hail-1/2/3`) are provisioned and ready to attach once a Brand +
+     Campaign exist. Non-US numbers (Denmark, Sweden, UK) aren't subject to
+     A2P 10DLC at all and can ship independently of this timeline.
+   - Concrete next steps: verify the approved Trust Hub profile's Business
+     Identity type (confirm it's a standard business profile, not
+     accidentally something that would block a straightforward Brand
+     registration), register one Standard Brand (Opero Labs ApS is a
+     foreign/non-US entity, so Sole Proprietor registration doesn't apply),
+     register one Campaign under it, then attach `hail-1/2/3` to a
+     Messaging Service's Sender Pool. Budget **~2-3 weeks minimum**
+     end-to-end (Twilio's stated 10-15 day campaign review dominates) before
+     US SMS can go live — this gates the whole US launch date, independent
+     of implementation time.
 2. Carrier pass-through fees move without notice (T-Mobile raised its fee
    ~50% effective 2026-01-19) — needs periodic price review, not a one-time
    calculation.
@@ -419,3 +473,12 @@ list/get/set_capabilities` (generic, new).
   voice/email-specific thresholds (and wiring in email's existing
   bounce/complaint stats as a signal) is deliberately left for a fast-follow
   once the SMS version proves out.
+- **Per-org Twilio subaccount + Brand + Campaign registration** (Twilio's
+  recommended, fully-isolated "Architecture #1") — the compliant path that
+  removes the shared-fate risk accepted in Decision 2. Real future work, not
+  hypothetical: Hail would enroll as a Twilio ISV Reseller/Partner, then
+  orchestrate a subaccount + Secondary Customer Profile + Brand + Campaign
+  per org via Twilio's API, collecting each org's business info during
+  onboarding. Revisit this if the shared-campaign risk materializes (a
+  carrier action against the platform) or once volume/customer trust
+  justifies the added cost and ~2-3 week per-org lead time.
