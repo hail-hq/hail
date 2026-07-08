@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import httpx
 
+from hailhq.core.url_guard import UnsafeUrlError, assert_public_https_url
 from hailhq.core.urls import join_url
 
 _TIMEOUT = httpx.Timeout(10.0)
@@ -28,6 +29,10 @@ def _request_for(
         base_url = params.get("base_url") or ""
         if not base_url:
             return None
+        try:
+            base_url = assert_public_https_url(base_url)
+        except UnsafeUrlError:
+            return None  # -> validate_provider_key returns (False, unknown/unsafe)
         return join_url(base_url, "models"), {"Authorization": f"Bearer {api_key}"}
     if provider == "anthropic":
         return "https://api.anthropic.com/v1/models", {
@@ -63,6 +68,8 @@ async def validate_provider_key(
     """Return (ok, message). Never raises on provider/network failure."""
     req = _request_for(provider, api_key, params)
     if req is None:
+        if provider == "openai-compatible" and params.get("base_url"):
+            return False, "base_url is not a permitted public https endpoint"
         return False, f"unknown provider '{provider}' for layer '{layer}'"
     url, headers = req
 
