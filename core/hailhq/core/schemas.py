@@ -16,6 +16,15 @@ from pydantic import (
 E164 = re.compile(r"^\+[1-9]\d{1,14}$")
 
 
+def _e164_or_error(v: str | None) -> str | None:
+    """Shared to/from validator for the phone-channel create schemas
+    (``CallCreate``, ``SmsCreate``) — one place to tighten the rule or
+    reword the error."""
+    if v is not None and not E164.match(v):
+        raise ValueError("must be E.164 (e.g. +14155551234)")
+    return v
+
+
 # --------------------------------------------------------------------------- #
 # Cursor codec.
 #
@@ -50,12 +59,12 @@ def decode_cursor(cursor: str) -> tuple[datetime, UUID]:
 # convention so SMS / email / conversation can join later without a second
 # rename.
 #
-# v1 only resolves ``call``; unknown types fail closed with a 422 so a client
-# never silently gets back zero rows for a typo. The list lives here so the
-# helper, the route, and (eventually) the SDK share one source.
+# Unknown types fail closed with a 422 so a client never silently gets back
+# zero rows for a typo. The list lives here so the helper, the route, and
+# (eventually) the SDK share one source.
 # --------------------------------------------------------------------------- #
 
-SUPPORTED_RESOURCE_TYPES: tuple[str, ...] = ("call", "email")
+SUPPORTED_RESOURCE_TYPES: tuple[str, ...] = ("call", "email", "sms")
 
 
 def parse_resource_id(value: str) -> tuple[str, UUID]:
@@ -102,23 +111,14 @@ class VoiceConfig(BaseModel):
     turn_detection: Literal["livekit"] = "livekit"
 
 
-class CallCreate(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+class ConsentAttestationMixin(BaseModel):
+    """Shared consent-attestation fields for every outbound-send schema
+    (Call, Email, Sms). Extracted here once a third channel needed the
+    identical block — the repo's "no abstraction without two concrete
+    uses" tenet: two existing copies (Call, Email) plus this one crossed
+    that bar.
+    """
 
-    to: str
-    from_: str | None = Field(default=None, alias="from")
-    system_prompt: str | None = None
-    llm: LLMConfig | None = None
-    first_message: str | None = None
-    voice_config: VoiceConfig = Field(default_factory=VoiceConfig)
-    conversation_id: UUID | None = None
-    metadata: dict = Field(default_factory=dict)
-
-    # --- Consent attestation -------------------------------------------- #
-    # Required, no default: every caller must explicitly state whether the
-    # recipient consented. ``message_type == "marketing"`` is held to a
-    # stricter bar (documented ``consent_source``) — enforced in the route,
-    # not here, so the 422 detail can explain which bar failed.
     recipient_consent: bool = Field(
         description=(
             "Attestation that you have obtained the lawful consent required "
@@ -146,12 +146,20 @@ class CallCreate(BaseModel):
         ),
     )
 
-    @field_validator("to", "from_")
-    @classmethod
-    def _validate_e164(cls, v: str | None) -> str | None:
-        if v is not None and not E164.match(v):
-            raise ValueError("must be E.164 (e.g. +14155551234)")
-        return v
+
+class CallCreate(ConsentAttestationMixin):
+    model_config = ConfigDict(extra="forbid")
+
+    to: str
+    from_: str | None = Field(default=None, alias="from")
+    system_prompt: str | None = None
+    llm: LLMConfig | None = None
+    first_message: str | None = None
+    voice_config: VoiceConfig = Field(default_factory=VoiceConfig)
+    conversation_id: UUID | None = None
+    metadata: dict = Field(default_factory=dict)
+
+    _validate_e164 = field_validator("to", "from_")(_e164_or_error)
 
     @model_validator(mode="after")
     def _prompt_or_llm(self):
@@ -212,15 +220,52 @@ class CallListResponse(BaseModel):
     next_cursor: str | None = None
 
 
+class SmsCreate(ConsentAttestationMixin):
+    model_config = ConfigDict(extra="forbid")
+
+    to: str
+    from_: str | None = Field(default=None, alias="from")
+    body: str = Field(min_length=1, max_length=1600)
+    metadata: dict = Field(default_factory=dict)
+
+    _validate_e164 = field_validator("to", "from_")(_e164_or_error)
+
+
+SmsStatus = Literal["queued", "sent", "delivered", "failed", "undelivered", "received"]
+
+
+class SmsResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    organization_id: UUID
+    from_e164: str
+    to_e164: str
+    direction: Literal["outbound", "inbound"]
+    status: SmsStatus
+    body: str
+    provider_message_sid: str | None
+    segment_count: int
+    error_code: str | None
+    requested_at: datetime
+    sent_at: datetime | None
+
+
+class SmsListResponse(BaseModel):
+    items: list[SmsResponse]
+    next_cursor: str | None = None
+
+
 class EventResponse(BaseModel):
-    """One event on the unified GET /events stream (call or email)."""
+    """One event on the unified GET /events stream (call, email, or SMS)."""
 
     model_config = ConfigDict(from_attributes=True)
 
     id: UUID
-    source: Literal["call", "email"]
+    source: Literal["call", "email", "sms"]
     call_id: UUID | None = None
     email_id: UUID | None = None
+    sms_id: UUID | None = None
     kind: str
     payload: dict[str, Any]
     occurred_at: datetime
@@ -460,7 +505,7 @@ class EmailDomainListResponse(BaseModel):
     next_cursor: str | None = None
 
 
-class EmailCreate(BaseModel):
+class EmailCreate(ConsentAttestationMixin):
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
     # ``from`` is reserved; ``from_`` mirrors how CallCreate handles it.
@@ -474,38 +519,6 @@ class EmailCreate(BaseModel):
     body_html: str | None = None
     conversation_id: UUID | None = None
     metadata: dict = Field(default_factory=dict)
-
-    # --- Consent attestation -------------------------------------------- #
-    # Required, no default: every caller must explicitly state whether the
-    # recipient consented. ``message_type == "marketing"`` is held to a
-    # stricter bar (documented ``consent_source``) — enforced in the route,
-    # not here, so the 422 detail can explain which bar failed.
-    recipient_consent: bool = Field(
-        description=(
-            "Attestation that you have obtained the lawful consent required "
-            "to contact this recipient. Hail does not verify consent itself "
-            "— you are responsible for a lawful basis under TCPA/ePrivacy/"
-            "PECR/CAN-SPAM/GDPR as applicable. Rejected (422) if not true."
-        )
-    )
-    consent_source: str | None = Field(
-        default=None,
-        description=(
-            "Where/how consent was obtained (e.g. 'signup form', "
-            "'prior customer relationship'). Required (non-empty) when "
-            "message_type is 'marketing'."
-        ),
-    )
-    consent_obtained_at: datetime | None = Field(
-        default=None, description="When consent was obtained, if known."
-    )
-    message_type: Literal["marketing", "informational"] = Field(
-        default="informational",
-        description=(
-            "'marketing' additionally requires a non-empty consent_source. "
-            "Use 'informational' for transactional/service communications."
-        ),
-    )
 
     @field_validator("from_", "reply_to")
     @classmethod
