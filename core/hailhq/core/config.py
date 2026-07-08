@@ -108,6 +108,10 @@ class Settings(BaseSettings):
     # Fernet key for encrypting webhook secrets at rest. Generate with
     # `python -c "from hailhq.core.secret_cipher import generate_key; print(generate_key())"`.
     hail_webhook_secret_key: str = ""
+    # Fernet key for org provider API keys at rest (BYO keys). Dedicated —
+    # do NOT reuse hail_webhook_secret_key; rotating one must not break the
+    # other. Generate like the webhook key (see secret_cipher.generate_key).
+    hail_provider_secret_key: str = ""
 
     # Media
     livekit_url: str = ""
