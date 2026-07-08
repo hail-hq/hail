@@ -2,6 +2,38 @@
 
 All notable changes to Hail are documented here. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and Hail adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.0] — 2026-07-07
+
+**Breaking change.** Component versions cut alongside this release:
+**`sdk-v0.6.0`** (PyPI: `hail-sdk==0.6.0`), **`cli-v0.9.0`** (Homebrew + GitHub Releases).
+
+- `POST /calls` and `POST /emails` now **require** a `recipient_consent: bool`
+  field (rejected with 422 if missing or `false`). This attests that the
+  caller has obtained the lawful consent required to contact the recipient —
+  Hail does not verify consent itself. Optional `consent_source` and
+  `consent_obtained_at` fields record how/when consent was obtained; a
+  required non-empty `consent_source` is enforced when the new optional
+  `message_type: "marketing"` field is set (default remains
+  `"informational"`).
+  - **Every existing integration must add `recipient_consent: true` (or the
+    real attestation) to its calls/emails, or requests will start failing
+    with 422 the moment the API deploys this change.** The CLI (`--recipient-consent`),
+    SDK (`recipient_consent=` kwarg), and MCP tools (`recipient_consent`
+    param) all already require and forward it as of this release — pin to
+    `hail-sdk>=0.6.0` and `cli-v0.9.0`+ before or at the same time as
+    upgrading against a Hail API instance running this change.
+- Outbound voice calls now open with a fixed, non-configurable AI-disclosure
+  line spoken before anything else; outbound email carries an equivalent
+  disclosure appended at send time, outside the caller-authored body.
+- New global suppression list + one-click email unsubscribe
+  (`List-Unsubscribe`/`List-Unsubscribe-Post` headers); a pre-send
+  compliance gate blocks suppressed recipients, premium-rate destinations,
+  and per-org rate limits before any call or email goes out.
+- New data-retention purge job and DSAR (lookup/export/delete) tooling for
+  recipient data requests.
+- `/legal/*` pages (Terms of Use, AUP, Privacy Policy, DPA, sub-processors,
+  Cookie Policy) published on hail-website.
+
 ## [0.8.1] — 2026-07-02
 
 Internal consolidation release. `cli-v0.8.1` cut alongside; the SDK is
