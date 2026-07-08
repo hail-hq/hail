@@ -190,12 +190,12 @@ async def test_get_events_id_filter_unsupported_type_returns_422(
 ) -> None:
     _, _, plain = org_and_key
     resp = await client.get(
-        f"/events?id=sms:{uuid4()}",
+        f"/events?id=fax:{uuid4()}",
         headers={"Authorization": f"Bearer {plain}"},
     )
     assert resp.status_code == 422
     detail = resp.json()["detail"][0]["msg"]
-    assert "unsupported resource type 'sms'" in detail
+    assert "unsupported resource type 'fax'" in detail
     assert "supported:" in detail
     assert "call" in detail
     assert "email" in detail

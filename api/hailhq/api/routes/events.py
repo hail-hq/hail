@@ -1,33 +1,35 @@
 """Routes for the v1 events stream.
 
-GET /events — cursor-paginated forward stream of CallEvents, scoped to the
-caller's organization. Optional ``id`` (typed ``<type>:<uuid>``) narrows
-to a single resource; optional ``kind`` narrows to a single event kind.
+GET /events — cursor-paginated forward stream of call, email, and SMS
+events, scoped to the caller's organization. Optional ``id`` (typed
+``<type>:<uuid>``) narrows to a single resource; optional ``kind``
+narrows to a single event kind.
 
 The endpoint replaced ``GET /calls/{call_id}/events`` when tailing
 graduated to a top-level concern (``hail tail``). Hail is a universal
-communication platform: as SMS / email channels land they will surface
-through the same stream, so the route lives next to the channel-agnostic
-``Event`` concept rather than under ``/calls``. The ``id`` filter mirrors
-the ``audit_log`` ``resource_type`` / ``resource_id`` shape so additional
-channels join the surface without another rename.
+communication platform: every channel surfaces through the same stream,
+so the route lives next to the channel-agnostic ``Event`` concept rather
+than under ``/calls``. The ``id`` filter mirrors the ``audit_log``
+``resource_type`` / ``resource_id`` shape so additional channels join
+the surface without another rename.
 """
 
 from __future__ import annotations
 
-from typing import Annotated, cast
+from typing import Annotated, Any, cast
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi import status as http_status
 from sqlalchemy import literal, select, union_all
+from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from hailhq.core.db import get_session
 from hailhq.api.deps import Principal, get_current_principal
 from hailhq.api.errors import unprocessable
 from hailhq.api.pagination import fetch_cursor_page
-from hailhq.core.models import Call, CallEvent, Email, EmailEvent
+from hailhq.core.models import Call, CallEvent, Email, EmailEvent, Sms, SmsEvent
 from hailhq.core.schemas import (
     CallStatus,
     EventResponse,
@@ -36,6 +38,15 @@ from hailhq.core.schemas import (
 )
 
 router = APIRouter(prefix="/events", tags=["events"])
+
+
+# Typed NULL for the id columns a source doesn't own. An untyped
+# ``literal(None)`` resolves to ``text`` when two NULL arms of the 3-way
+# UNION pair up first, which then can't be matched against the uuid arm
+# (``UNION types text and uuid cannot be matched``).
+def _null_uuid():
+    return literal(None, type_=PG_UUID(as_uuid=True))
+
 
 _DEFAULT_EVENTS_LIMIT = 100
 _MAX_EVENTS_LIMIT = 1000
@@ -48,7 +59,8 @@ def _call_select(kind: str | None):
         CallEvent.id.label("id"),
         literal("call").label("source"),
         CallEvent.call_id.label("call_id"),
-        literal(None).label("email_id"),
+        _null_uuid().label("email_id"),
+        _null_uuid().label("sms_id"),
         CallEvent.kind.label("kind"),
         CallEvent.payload.label("payload"),
         CallEvent.occurred_at.label("occurred_at"),
@@ -62,8 +74,9 @@ def _email_select(kind: str | None):
     stmt = select(
         EmailEvent.id.label("id"),
         literal("email").label("source"),
-        literal(None).label("call_id"),
+        _null_uuid().label("call_id"),
         EmailEvent.email_id.label("email_id"),
+        _null_uuid().label("sms_id"),
         EmailEvent.kind.label("kind"),
         EmailEvent.payload.label("payload"),
         EmailEvent.occurred_at.label("occurred_at"),
@@ -71,6 +84,48 @@ def _email_select(kind: str | None):
     if kind is not None:
         stmt = stmt.where(EmailEvent.kind == kind)
     return stmt
+
+
+def _sms_select(kind: str | None):
+    stmt = select(
+        SmsEvent.id.label("id"),
+        literal("sms").label("source"),
+        _null_uuid().label("call_id"),
+        _null_uuid().label("email_id"),
+        SmsEvent.sms_id.label("sms_id"),
+        SmsEvent.kind.label("kind"),
+        SmsEvent.payload.label("payload"),
+        SmsEvent.occurred_at.label("occurred_at"),
+    )
+    if kind is not None:
+        stmt = stmt.where(SmsEvent.kind == kind)
+    return stmt
+
+
+async def _require_owned(
+    db: AsyncSession, model: Any, resource_uuid: UUID, principal: Principal, label: str
+) -> Any:
+    """Org-scoped existence check for the ``id`` filter, one per channel.
+
+    404 for both unknown-and-cross-org IDs — same shape as the resources'
+    own GET routes so we don't leak existence. The ``organization_id``
+    predicate lives here, in exactly one place, so a new channel branch
+    can't accidentally drop it.
+    """
+    row = (
+        await db.execute(
+            select(model).where(
+                model.id == resource_uuid,
+                model.organization_id == principal.organization_id,
+            )
+        )
+    ).scalar_one_or_none()
+    if row is None:
+        raise HTTPException(
+            status_code=http_status.HTTP_404_NOT_FOUND,
+            detail=f"{label} not found",
+        )
+    return row
 
 
 # --------------------------------------------------------------------------- #
@@ -109,35 +164,17 @@ async def list_events(
 
     if resource_type == "call":
         assert resource_uuid is not None  # narrowed by the parser
-        call_stmt = select(Call).where(
-            Call.id == resource_uuid,
-            Call.organization_id == principal.organization_id,
-        )
-        call = (await db.execute(call_stmt)).scalar_one_or_none()
-        # 404 for both unknown-and-cross-org IDs — same shape as get_call so
-        # we don't leak existence.
-        if call is None:
-            raise HTTPException(
-                status_code=http_status.HTTP_404_NOT_FOUND,
-                detail="call not found",
-            )
+        call = await _require_owned(db, Call, resource_uuid, principal, "call")
         selects = [_call_select(kind).where(CallEvent.call_id == resource_uuid)]
         call_status = call.status
     elif resource_type == "email":
         assert resource_uuid is not None  # narrowed by the parser
-        email_stmt = select(Email.id).where(
-            Email.id == resource_uuid,
-            Email.organization_id == principal.organization_id,
-        )
-        email_row = (await db.execute(email_stmt)).scalar_one_or_none()
-        # 404 for both unknown-and-cross-org IDs — same shape as the call
-        # branch above so we don't leak existence.
-        if email_row is None:
-            raise HTTPException(
-                status_code=http_status.HTTP_404_NOT_FOUND,
-                detail="email not found",
-            )
+        await _require_owned(db, Email, resource_uuid, principal, "email")
         selects = [_email_select(kind).where(EmailEvent.email_id == resource_uuid)]
+    elif resource_type == "sms":
+        assert resource_uuid is not None  # narrowed by the parser
+        await _require_owned(db, Sms, resource_uuid, principal, "sms")
+        selects = [_sms_select(kind).where(SmsEvent.sms_id == resource_uuid)]
     else:
         selects = [
             _call_select(kind)
@@ -145,6 +182,9 @@ async def list_events(
             .where(Call.organization_id == principal.organization_id),
             _email_select(kind).where(
                 EmailEvent.organization_id == principal.organization_id
+            ),
+            _sms_select(kind).where(
+                SmsEvent.organization_id == principal.organization_id
             ),
         ]
 
