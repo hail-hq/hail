@@ -44,10 +44,10 @@ type tailFlags struct {
 }
 
 // supportedResourceTypes mirrors core.schemas.SUPPORTED_RESOURCE_TYPES — kept
-// in lockstep so `hail tail --id sms:...` fails fast on the CLI in v1
-// without an HTTP round-trip. When a new channel lands on the API, add it
-// here in the same change.
-var supportedResourceTypes = []string{"call", "email"}
+// in lockstep so an unsupported `hail tail --id <type>:...` fails fast on
+// the CLI without an HTTP round-trip. When a new channel lands on the API,
+// add it here in the same change.
+var supportedResourceTypes = []string{"call", "email", "sms"}
 
 // terminalCallStatuses are the values from the spec that mean "no more
 // events will arrive" — when `--id call:<uuid>` is set and the server
@@ -328,17 +328,20 @@ func renderEvent(opts *Options, ev client.EventResponse, singleResource, coloriz
 	return nil
 }
 
-// eventResourceID picks the id (call or email) that owns this event, for
-// the per-resource short-id prefix in org-wide tail. EventResponse.CallId
-// and .EmailId are both optional now that the stream is unified across
-// sources; the server sets exactly one. Falls back to uuid.Nil if somehow
-// neither is set.
+// eventResourceID picks the id (call, email, or sms) that owns this event,
+// for the per-resource short-id prefix in org-wide tail.
+// EventResponse.CallId, .EmailId, and .SmsId are all optional now that the
+// stream is unified across sources; the server sets exactly one. Falls back
+// to uuid.Nil if somehow none is set.
 func eventResourceID(ev client.EventResponse) openapi_types.UUID {
 	if ev.CallId != nil {
 		return *ev.CallId
 	}
 	if ev.EmailId != nil {
 		return *ev.EmailId
+	}
+	if ev.SmsId != nil {
+		return *ev.SmsId
 	}
 	return openapi_types.UUID(uuid.Nil)
 }
