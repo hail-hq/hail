@@ -335,3 +335,65 @@ async def test_post_calls_idempotency_caches_502_failure(
 
     # The dispatch attempt happened exactly once even though we retried.
     assert livekit_mock.create_sip_participant.await_count == 1
+
+
+async def test_post_calls_idempotency_caches_pre_send_403(
+    client: httpx.AsyncClient,
+    async_session: AsyncSession,
+    org_and_key: tuple[str, ApiKey, str],
+    add_phone_number,
+) -> None:
+    """A pre-send 4xx (compliance 403) is cached — a same-key retry replays
+    the failure instead of 409ing on the in-flight sentinel forever."""
+    from hailhq.core.compliance_gate import add_suppression
+
+    org_id, _, plain = org_and_key
+    await add_phone_number(async_session, org_id)
+    await add_suppression(
+        async_session,
+        organization_id=org_id,
+        recipient="+14155559999",
+        channel="voice",
+        reason="recipient_request",
+        source="manual",
+    )
+    await async_session.commit()
+
+    headers = {
+        "Authorization": f"Bearer {plain}",
+        "Idempotency-Key": "blocked-key",
+    }
+    body = {"to": "+14155559999", "system_prompt": "hi", "recipient_consent": True}
+
+    first = await client.post("/calls", json=body, headers=headers)
+    assert first.status_code == 403
+
+    second = await client.post("/calls", json=body, headers=headers)
+    assert second.status_code == 403
+    assert second.headers.get("idempotency-replay") == "true"
+
+
+async def test_post_calls_idempotency_caches_body_validation_422(
+    client: httpx.AsyncClient,
+    async_session: AsyncSession,
+    org_and_key: tuple[str, ApiKey, str],
+    add_phone_number,
+) -> None:
+    """A Pydantic body-validation 422 raises after idempotency_dep claims
+    the slot; the app-level handler must cache it so a same-key retry
+    replays the 422 rather than 409 'still processing'."""
+    org_id, _, plain = org_and_key
+    await add_phone_number(async_session, org_id)
+
+    headers = {
+        "Authorization": f"Bearer {plain}",
+        "Idempotency-Key": "invalid-body-key",
+    }
+    body = {"to": "not-a-number", "system_prompt": "hi", "recipient_consent": True}
+
+    first = await client.post("/calls", json=body, headers=headers)
+    assert first.status_code == 422
+
+    second = await client.post("/calls", json=body, headers=headers)
+    assert second.status_code == 422
+    assert second.headers.get("idempotency-replay") == "true"
