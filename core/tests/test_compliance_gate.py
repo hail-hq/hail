@@ -30,7 +30,7 @@ async def test_check_call_allowed_passes_with_no_suppression(async_session):
     result = await check_call_allowed(async_session, org_id, "+14155559999")
     assert result.allowed is True
     assert result.reason is None
-    assert result.checks["internal_dnc_hit"] is False
+    assert result.checks["suppression_hit"] is False
 
 
 async def test_check_call_allowed_blocks_org_scoped_suppression(async_session):
@@ -48,7 +48,7 @@ async def test_check_call_allowed_blocks_org_scoped_suppression(async_session):
     result = await check_call_allowed(async_session, org_id, "+14155559999")
     assert result.allowed is False
     assert "suppression list" in result.reason
-    assert result.checks["internal_dnc_hit"] is True
+    assert result.checks["suppression_hit"] is True
 
 
 async def test_check_call_allowed_does_not_block_other_orgs(async_session):
@@ -237,4 +237,126 @@ async def test_velocity_cap_is_per_organization(
     await _seed_usage_events(async_session, org_id, "voice", 1)
 
     result = await check_call_allowed(async_session, other_org_id, "+14155559999")
+    assert result.allowed is True
+
+
+async def test_check_sms_allowed_blocks_suppressed_recipient(async_session) -> None:
+    import uuid
+
+    from hailhq.core.compliance_gate import add_suppression, check_sms_allowed
+
+    org_id = uuid.uuid4()
+    await add_suppression(
+        async_session,
+        organization_id=org_id,
+        recipient="+14155551234",
+        channel="sms",
+        reason="user opted out",
+        source="manual",
+    )
+    await async_session.commit()
+
+    result = await check_sms_allowed(async_session, org_id, "+14155551234")
+
+    assert result.allowed is False
+    assert "suppression" in result.reason.lower()
+
+
+async def test_check_sms_allowed_permits_clean_recipient(async_session) -> None:
+    import uuid
+
+    from hailhq.core.compliance_gate import check_sms_allowed
+
+    result = await check_sms_allowed(async_session, uuid.uuid4(), "+14155559999")
+
+    assert result.allowed is True
+    assert result.checks["suppression_hit"] is False
+
+
+async def test_check_sms_allowed_blocks_national_dnc_hit(
+    async_session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """SMS runs the same national-DNC scrub as voice — DNC/TSR rules cover
+    marketing texts too."""
+    import uuid
+
+    from hailhq.core import compliance_gate
+    from hailhq.core.compliance_gate import check_sms_allowed
+
+    monkeypatch.setattr(settings, "hail_national_dnc_enabled", True)
+
+    async def _on_registry(e164: str) -> bool:
+        return True
+
+    monkeypatch.setattr(compliance_gate, "check_national_dnc", _on_registry)
+
+    result = await check_sms_allowed(async_session, uuid.uuid4(), "+14155559999")
+
+    assert result.allowed is False
+    assert "Do Not Call" in result.reason
+    assert result.checks["national_dnc_checked"] is True
+    assert result.checks["national_dnc_hit"] is True
+
+
+async def _seed_sms_attempts(session, org_id, count: int, *, status: str) -> None:
+    """Seed ``count`` outbound sms rows (send attempts) for ``org_id``."""
+    from hailhq.core.models import PhoneNumber, Sms
+
+    number = PhoneNumber(
+        organization_id=org_id,
+        e164=f"+1415555{uuid.uuid4().hex[:4]}",
+        country_code="US",
+        number_type="local",
+        provider_resource_id="PNtest",
+        provisioning_state="active",
+    )
+    session.add(number)
+    await session.flush()
+
+    now = datetime.now(timezone.utc)
+    for _ in range(count):
+        session.add(
+            Sms(
+                organization_id=org_id,
+                from_number_id=number.id,
+                from_e164=number.e164,
+                to_e164="+14155550000",
+                direction="outbound",
+                status=status,
+                body="hi",
+                requested_at=now - timedelta(minutes=1),
+            )
+        )
+    await session.commit()
+
+
+async def test_check_sms_allowed_velocity_counts_failed_attempts(
+    async_session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The SMS velocity cap counts attempts (sms rows), not billed usage —
+    carrier-rejected sends must still trip it."""
+    from hailhq.core.compliance_gate import check_sms_allowed
+
+    monkeypatch.setattr(settings, "hail_velocity_sms_per_hour", 3)
+    org_id = uuid.uuid4()
+    await _seed_sms_attempts(async_session, org_id, 3, status="failed")
+
+    result = await check_sms_allowed(async_session, org_id, "+14155559999")
+
+    assert result.allowed is False
+    assert "velocity cap exceeded" in result.reason
+    assert result.checks["velocity"]["hour_count"] == 3
+
+
+async def test_check_sms_allowed_under_velocity_cap_passes(
+    async_session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from hailhq.core.compliance_gate import check_sms_allowed
+
+    monkeypatch.setattr(settings, "hail_velocity_sms_per_hour", 5)
+    org_id = uuid.uuid4()
+    await _seed_sms_attempts(async_session, org_id, 2, status="sent")
+
+    result = await check_sms_allowed(async_session, org_id, "+14155559999")
+
     assert result.allowed is True
