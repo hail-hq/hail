@@ -37,7 +37,7 @@ from uuid import UUID
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from hailhq.core.models import Call, Email, OrgClosure
+from hailhq.core.models import Call, Email, OrgClosure, Sms
 
 logger = logging.getLogger(__name__)
 
@@ -54,6 +54,7 @@ RETENTION_PERIOD_AFTER_CLOSURE = timedelta(days=365)
 class PurgeSummary:
     organizations_purged: list[UUID] = field(default_factory=list)
     calls_scrubbed: int = 0
+    sms_scrubbed: int = 0
     emails_scrubbed: int = 0
     # Rows that should already satisfy the transcript-only storage
     # guarantee (voicebot never persists audio) but didn't — logged as a
@@ -75,6 +76,9 @@ async def purge_expired_data(session: AsyncSession, now: datetime) -> PurgeSumma
       columns (clearing them wasn't part of the ask, and if they're
       unexpectedly populated that's a separate bug to chase down, not
       paper over here).
+    * ``Sms`` rows: ``body`` is set to ``""`` (the column is NOT NULL; an
+      empty string clears the content, same convention as
+      ``Email.body_text`` below).
     * ``Email`` rows: ``body_text``, ``body_html``, and ``raw_s3_key``
       (the stored-content fields on ``Email`` — see
       ``hailhq.core.models.Email``) are cleared. ``body_text`` is set to
@@ -133,6 +137,17 @@ async def purge_expired_data(session: AsyncSession, now: datetime) -> PurgeSumma
     )
     summary.calls_scrubbed = call_result.rowcount or 0
 
+    sms_result = await session.execute(
+        update(Sms)
+        .where(
+            Sms.organization_id.in_(org_ids),
+            Sms.body != "",
+        )
+        .values(body="")
+        .execution_options(synchronize_session=False)
+    )
+    summary.sms_scrubbed = sms_result.rowcount or 0
+
     email_result = await session.execute(
         update(Email)
         .where(
@@ -159,9 +174,11 @@ async def _main() -> None:
 
     logger.info(
         "retention sweep: %d org(s) past retention, %d call(s) scrubbed, "
-        "%d email(s) scrubbed, %d unexpected recording anomaly(ies)",
+        "%d sms scrubbed, %d email(s) scrubbed, "
+        "%d unexpected recording anomaly(ies)",
         len(summary.organizations_purged),
         summary.calls_scrubbed,
+        summary.sms_scrubbed,
         summary.emails_scrubbed,
         summary.calls_with_unexpected_recording,
     )

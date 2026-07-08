@@ -15,7 +15,7 @@ from hailhq.core.dsar import (
     export_recipient_data,
     lookup_recipient,
 )
-from hailhq.core.models import AuditLog, Call, Email, PhoneNumber, Suppression
+from hailhq.core.models import AuditLog, Call, Email, PhoneNumber, Sms, Suppression
 
 PHONE = "+14155551234"
 EMAIL_ADDR = "alice@example.com"
@@ -47,6 +47,33 @@ async def _make_call(session, organization_id, *, to_e164=PHONE) -> Call:
     session.add(call)
     await session.flush()
     return call
+
+
+async def _make_sms(session, organization_id, *, to_e164=PHONE) -> Sms:
+    pn = PhoneNumber(
+        organization_id=organization_id,
+        e164=f"+1415666{uuid.uuid4().int % 10000:04d}",
+        country_code="US",
+        number_type="local",
+        provider="twilio",
+        provider_resource_id=f"PN-{uuid.uuid4()}",
+        provisioning_state="active",
+    )
+    session.add(pn)
+    await session.flush()
+
+    sms = Sms(
+        organization_id=organization_id,
+        from_number_id=pn.id,
+        from_e164=pn.e164,
+        to_e164=to_e164,
+        direction="outbound",
+        status="sent",
+        body="your order shipped",
+    )
+    session.add(sms)
+    await session.flush()
+    return sms
 
 
 async def _make_email(session, organization_id, *, to=None, cc=None, bcc=None) -> Email:
@@ -82,6 +109,42 @@ async def test_lookup_recipient_finds_calls_and_emails_two_channels(async_sessio
     email_record = await lookup_recipient(async_session, EMAIL_ADDR)
     assert [e.id for e in email_record.emails] == [email.id]
     assert email_record.calls == []
+
+
+async def test_lookup_recipient_finds_sms(async_session):
+    org_id = uuid.uuid4()
+    await _make_sms(async_session, org_id)
+    await _make_sms(async_session, org_id, to_e164="+14155559999")
+    await async_session.commit()
+
+    record = await lookup_recipient(async_session, PHONE)
+    assert len(record.sms) == 1
+    assert record.sms[0].to_e164 == PHONE
+
+
+async def test_delete_recipient_data_scrubs_sms_body(async_session):
+    org_id = uuid.uuid4()
+    sms = await _make_sms(async_session, org_id)
+    await async_session.commit()
+
+    summary = await delete_recipient_data(async_session, PHONE)
+    assert summary.sms_scrubbed == 1
+
+    await async_session.refresh(sms)
+    assert sms.body == ""
+    # Row shell (recipient linkage, status) survives — content-only scrub.
+    assert sms.to_e164 == PHONE
+
+
+async def test_export_recipient_data_includes_sms(async_session):
+    org_id = uuid.uuid4()
+    await _make_sms(async_session, org_id)
+    await async_session.commit()
+
+    export = await export_recipient_data(async_session, PHONE)
+    assert len(export["sms"]) == 1
+    assert export["sms"][0]["to_e164"] == PHONE
+    json.dumps(export)  # JSON-able end to end
 
 
 async def test_lookup_recipient_finds_email_in_cc_and_bcc(async_session):
