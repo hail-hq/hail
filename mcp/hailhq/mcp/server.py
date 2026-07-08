@@ -4,6 +4,8 @@ The deployable artifact is ``app``. FastMCP serves Streamable HTTP at
 ``/`` (root — the service runs on a dedicated MCP subdomain so the
 endpoint is the bare host URL). ``/healthz`` is mounted on the same
 Starlette parent app so the compose healthcheck stays a one-line probe.
+``/.well-known/glama.json`` is mounted the same way, to verify ownership
+of the Glama MCP connector listing for this domain.
 
 Two boot modes (see ``hailhq.mcp.auth.select_auth_mode``):
 
@@ -73,6 +75,14 @@ def _build_app() -> tuple[FastMCP, HailClient | None, Starlette]:
     async def healthz(_request: Request) -> Response:
         return JSONResponse({"status": "ok"})
 
+    async def glama_connector_claim(_request: Request) -> Response:
+        return JSONResponse(
+            {
+                "$schema": "https://glama.ai/mcp/schemas/connector.json",
+                "maintainers": [{"email": "r@hail.so"}],
+            }
+        )
+
     @contextlib.asynccontextmanager
     async def lifespan(_app: Starlette) -> AsyncIterator[None]:
         async with mcp_app.session_manager.run():
@@ -85,7 +95,11 @@ def _build_app() -> tuple[FastMCP, HailClient | None, Starlette]:
     # parent app's middleware stack so 401-with-WWW-Authenticate fires
     # before any route resolution.
     app = Starlette(
-        routes=[Route("/healthz", healthz, methods=["GET"]), *http_app.routes],
+        routes=[
+            Route("/healthz", healthz, methods=["GET"]),
+            Route("/.well-known/glama.json", glama_connector_claim, methods=["GET"]),
+            *http_app.routes,
+        ],
         middleware=list(http_app.user_middleware),
         lifespan=lifespan,
     )
