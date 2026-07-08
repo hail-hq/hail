@@ -23,7 +23,6 @@ from hailhq.core.secret_cipher import SecretCipher
 
 __all__ = [
     "LAYERS",
-    "PROVIDERS_BY_LAYER",
     "LLMParams",
     "TTSParams",
     "STTParams",
@@ -34,12 +33,6 @@ __all__ = [
 ]
 
 LAYERS: tuple[str, ...] = ("llm", "tts", "stt")
-
-PROVIDERS_BY_LAYER: dict[str, tuple[str, ...]] = {
-    "llm": ("openai-compatible", "anthropic", "google"),
-    "tts": ("cartesia", "elevenlabs"),
-    "stt": ("deepgram",),
-}
 
 
 class LLMParams(BaseModel):

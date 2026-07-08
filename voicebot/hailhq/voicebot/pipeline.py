@@ -44,6 +44,7 @@ a private attribute of ``_house_llm()``.
 
 from __future__ import annotations
 
+import asyncio
 import dataclasses
 from typing import Any
 from uuid import UUID
@@ -109,7 +110,16 @@ class ResolvedLayer:
 async def resolve_org_configs(
     organization_id: UUID | None,
 ) -> dict[str, ResolvedLayer]:
-    """Load + decrypt the org's BYO rows. {} when org id absent or no rows."""
+    """Load + decrypt the org's BYO rows. {} when org id absent or no rows.
+
+    For the ``llm`` layer on ``openai-compatible``, also re-runs the
+    resolving SSRF guard here (off the event loop via ``asyncio.to_thread``)
+    rather than at LLM-build time in ``_org_llm``: a stored base_url could
+    have been written before the guard existed, or DNS could have
+    re-pointed since. Raising ``ProviderKeyError`` here means this always
+    runs inside the caller's guarded try/except (see ``agent.py``), which
+    funnels straight into clean provider_key_error finalization.
+    """
     if organization_id is None:
         return {}
     async with session_scope() as session:
@@ -119,10 +129,23 @@ async def resolve_org_configs(
         api_key: str | None = None
         if row.encrypted_api_key is not None:
             api_key = provider_cipher().decrypt(row.encrypted_api_key)
+        params = dict(row.params)
+        if layer == "llm" and row.provider == "openai-compatible":
+            stored_base_url = params.get("base_url")
+            if not stored_base_url:
+                raise ProviderKeyError("org llm config is missing base_url")
+            try:
+                params["base_url"] = await asyncio.to_thread(
+                    assert_public_https_url, stored_base_url
+                )
+            except UnsafeUrlError as exc:
+                raise ProviderKeyError(
+                    f"org llm base_url is not permitted: {exc}"
+                ) from exc
         resolved[layer] = ResolvedLayer(
             provider=row.provider,
             api_key=api_key,
-            params=dict(row.params),
+            params=params,
             fallback_enabled=row.fallback_enabled,
         )
     return resolved
@@ -161,17 +184,14 @@ def _org_llm(org: ResolvedLayer) -> agents_llm.LLM:
         raise ProviderKeyError("org llm config has no stored api key")
     model = org.params.get("model", "")
     if org.provider == "openai-compatible":
-        # SSRF guard at call time too: a stored base_url could have been
-        # written before the guard existed, or DNS could have re-pointed.
-        # A legacy/malformed row missing base_url would KeyError out of the
-        # ProviderKeyError contract, so fail fast explicitly instead.
-        stored_base_url = org.params.get("base_url")
-        if not stored_base_url:
+        # The resolving SSRF guard already ran (off the event loop) in
+        # resolve_org_configs, which normalizes org.params["base_url"] to
+        # the canonicalized, verified-public form. A legacy/malformed row
+        # missing base_url would KeyError out of the ProviderKeyError
+        # contract, so still fail fast explicitly on that.
+        base_url = org.params.get("base_url")
+        if not base_url:
             raise ProviderKeyError("org llm config is missing base_url")
-        try:
-            base_url = assert_public_https_url(stored_base_url)
-        except UnsafeUrlError as exc:
-            raise ProviderKeyError(f"org llm base_url is not permitted: {exc}") from exc
         return openai_plugin.LLM(base_url=base_url, api_key=org.api_key, model=model)
     if org.provider == "anthropic":
         return anthropic_plugin.LLM(api_key=org.api_key, model=model)
@@ -287,10 +307,14 @@ def build_stt(org: ResolvedLayer | None = None) -> agents_stt.STT:
 
     ``org`` present (mode C, deepgram only today): the org's key, with
     Hail's house Deepgram key appended as a fallback only if
-    ``org.fallback_enabled`` and a house key is configured. ``org`` absent
-    (mode A): Hail's house Deepgram key.
+    ``org.fallback_enabled`` and a house key is configured. An org row on
+    any other provider fails fast with ``ProviderKeyError`` (matching
+    ``_org_llm``/``_org_tts``) rather than silently billing Hail's key for
+    a BYO org. ``org`` absent (mode A): Hail's house Deepgram key.
     """
-    if org is not None and org.provider == "deepgram":
+    if org is not None:
+        if org.provider != "deepgram":
+            raise ProviderKeyError(f"unknown org stt provider '{org.provider}'")
         kwargs: dict[str, Any] = {
             "model": org.params.get("model") or settings.deepgram_model
         }

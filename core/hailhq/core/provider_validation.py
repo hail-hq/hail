@@ -1,10 +1,12 @@
 """Live provider-key validation: one cheap authenticated GET per provider.
 
-Used by the internal ``/validate`` route (console TEST KEY button) and by
-PUT-with-key. Proves the key (and, where the endpoint reflects it, the
-account) is live — model names stay free text and are exercised end-to-end
-by real calls, not here. Every check is a list/describe endpoint that costs
-nothing and mutates nothing.
+Triggered only by the explicit internal ``/validate`` route (the console
+TEST KEY button) — saving a key via PUT is a pure store with no live
+validation; that decision is deliberate (a PUT should not stall on a
+third-party network call). Proves the key (and, where the endpoint
+reflects it, the account) is live — model names stay free text and are
+exercised end-to-end by real calls, not here. Every check is a
+list/describe endpoint that costs nothing and mutates nothing.
 """
 
 from __future__ import annotations

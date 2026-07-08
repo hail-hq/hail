@@ -2,19 +2,23 @@
 
 from __future__ import annotations
 
+import uuid
 from dataclasses import dataclass
 
 import pytest
 
 from hailhq.core.config import settings
+from hailhq.core.models import OrgProviderConfig
 from hailhq.core.secret_cipher import generate_key
 from hailhq.voicebot import pipeline
 from hailhq.voicebot.pipeline import (
     ProviderKeyError,
     ResolvedLayer,
     build_llm,
+    build_stt,
     build_tts,
     decrypt_llm_metadata,
+    resolve_org_configs,
 )
 
 
@@ -150,6 +154,18 @@ def test_byo_layer_without_key_or_house_key_fails_fast(
         build_tts(org, voice_id_override=None)
 
 
+def test_build_stt_unknown_org_provider_fails_fast(captured_plugins) -> None:
+    """An org stt row on a provider other than deepgram must fail fast, not
+    silently bill Hail's house Deepgram key for a BYO org (parity with
+    _org_llm/_org_tts)."""
+    org = ResolvedLayer(
+        provider="whisper-cloud", api_key="org-key", params={}, fallback_enabled=False
+    )
+    with pytest.raises(ProviderKeyError):
+        build_stt(org)
+    assert "deepgram" not in captured_plugins
+
+
 def test_fallback_enabled_wraps_house_after_byo(captured_plugins) -> None:
     org = ResolvedLayer(
         provider="cartesia", api_key="org-key", params={}, fallback_enabled=True
@@ -159,6 +175,43 @@ def test_fallback_enabled_wraps_house_after_byo(captured_plugins) -> None:
     assert len(captured_plugins["cartesia"]) == 2
     assert captured_plugins["cartesia"][0].kwargs["api_key"] == "org-key"
     assert "api_key" not in captured_plugins["cartesia"][1].kwargs
+
+
+async def test_resolve_org_configs_rejects_unsafe_llm_base_url(async_session) -> None:
+    """The call-time SSRF guard runs inside resolve_org_configs (off the event
+    loop), not inside _org_llm — a stored base_url pointing at cloud metadata
+    must raise ProviderKeyError rather than build an LLM against it."""
+    org_id = uuid.uuid4()
+    async_session.add(
+        OrgProviderConfig(
+            organization_id=org_id,
+            layer="llm",
+            provider="openai-compatible",
+            params={"base_url": "https://169.254.169.254/v1", "model": "m"},
+        )
+    )
+    await async_session.commit()
+
+    with pytest.raises(ProviderKeyError):
+        await resolve_org_configs(org_id)
+
+
+async def test_resolve_org_configs_canonicalizes_safe_llm_base_url(
+    async_session,
+) -> None:
+    org_id = uuid.uuid4()
+    async_session.add(
+        OrgProviderConfig(
+            organization_id=org_id,
+            layer="llm",
+            provider="openai-compatible",
+            params={"base_url": "https://api.openai.com/v1/", "model": "m"},
+        )
+    )
+    await async_session.commit()
+
+    resolved = await resolve_org_configs(org_id)
+    assert resolved["llm"].params["base_url"] == "https://api.openai.com/v1"
 
 
 def test_decrypt_llm_metadata_roundtrip(monkeypatch) -> None:

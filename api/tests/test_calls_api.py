@@ -67,7 +67,7 @@ async def test_post_calls_rejects_prompt_and_llm_together(
             "to": "+14155559999",
             "system_prompt": "hi",
             "llm": {
-                "base_url": "https://api.openai.com/v1",
+                "base_url": "https://byo.example.com/v1",
                 "api_key": "k",
                 "model": "m",
             },
@@ -837,7 +837,7 @@ async def test_post_calls_rejects_unsafe_llm_base_url(
     client: httpx.AsyncClient,
     org_and_key: tuple[str, ApiKey, str],
 ) -> None:
-    """A per-call llm.base_url pointing at cloud metadata is a 422, not dispatched."""
+    """A non-https per-call llm.base_url is a 422 from the cheap schema check."""
     _, _, plain = org_and_key
     resp = await client.post(
         "/calls",
@@ -845,6 +845,29 @@ async def test_post_calls_rejects_unsafe_llm_base_url(
             "to": "+14155559999",
             "llm": {
                 "base_url": "http://169.254.169.254/v1",
+                "api_key": "sk-whatever",
+                "model": "gpt-5.4-mini",
+            },
+            "recipient_consent": True,
+        },
+        headers={"Authorization": f"Bearer {plain}"},
+    )
+    assert resp.status_code == 422
+
+
+async def test_post_calls_rejects_unsafe_llm_base_url_at_route(
+    client: httpx.AsyncClient,
+    org_and_key: tuple[str, ApiKey, str],
+) -> None:
+    """An https base_url on a literal metadata IP passes schema syntax checks
+    (no DNS needed) but is a 422 from the route's resolving SSRF guard."""
+    _, _, plain = org_and_key
+    resp = await client.post(
+        "/calls",
+        json={
+            "to": "+14155559999",
+            "llm": {
+                "base_url": "https://169.254.169.254/v1",
                 "api_key": "sk-whatever",
                 "model": "gpt-5.4-mini",
             },
