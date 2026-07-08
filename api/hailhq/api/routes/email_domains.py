@@ -38,6 +38,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from hailhq.api.audit import write_audit_log
 from hailhq.api.deps import Principal, get_current_principal
+from hailhq.api.errors import unprocessable
 from hailhq.api.pagination import fetch_cursor_page
 from hailhq.core.config import settings
 from hailhq.core.db import get_session
@@ -417,9 +418,9 @@ async def patch_email_domain(
     # ---- prefix edits (hail_mail only) ----
     if body.local_prefix_user is not None or body.local_prefix_org is not None:
         if sd.kind != "hail_mail":
-            raise HTTPException(
-                status_code=http_status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail="prefix edits are only allowed on kind='hail_mail' rows",
+            raise unprocessable(
+                "prefix edits are only allowed on kind='hail_mail' rows",
+                loc=["body", "local_prefix_user"],
             )
         new_user = body.local_prefix_user or sd.local_prefix_user
         new_org = body.local_prefix_org or sd.local_prefix_org
@@ -454,10 +455,7 @@ async def patch_email_domain(
                     f"hail-mail address {updates.get('domain')!r} is already registered"
                 ),
             ) from exc
-        raise HTTPException(
-            status_code=http_status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="patch violates a domain check constraint",
-        ) from exc
+        raise unprocessable("patch violates a domain check constraint") from exc
 
     await db.refresh(sd)
     await write_audit_log(

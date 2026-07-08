@@ -27,6 +27,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from fastapi import status as http_status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from hailhq.api.errors import unprocessable
 from hailhq.api.outbound_queue import enqueue_outbound_forward
 from hailhq.api.usage import write_usage_event
 from hailhq.core.billing import has_funds
@@ -166,16 +167,15 @@ async def _handle_delivery_event(db: AsyncSession, envelope: dict) -> dict:
     """
     raw_event = envelope.get("event")
     if not isinstance(raw_event, dict):
-        raise HTTPException(
-            status_code=http_status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="delivery_event envelope missing 'event' object",
+        raise unprocessable(
+            "delivery_event envelope missing 'event' object",
+            loc=["body", "event"],
         )
     try:
         event = parse_delivery_event(raw_event)
     except (KeyError, ValueError, TypeError) as exc:
-        raise HTTPException(
-            status_code=http_status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="malformed SES delivery event",
+        raise unprocessable(
+            "malformed SES delivery event", loc=["body", "event"]
         ) from exc
     if event is None:
         return {"status": "ignored"}

@@ -11,8 +11,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from fastapi import HTTPException
-from fastapi import status as http_status
+from hailhq.api.errors import unprocessable
 
 
 def isoformat_or_none(value: datetime | None) -> str | None:
@@ -32,16 +31,16 @@ def enforce_consent(
     Call before any Call/Email row is created — reject, don't insert-then-roll-back.
     """
     if recipient_consent is not True:
-        raise HTTPException(
-            status_code=http_status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="recipient_consent must be true to send",
+        raise unprocessable(
+            "recipient_consent must be true to send",
+            loc=["body", "recipient_consent"],
         )
     if message_type == "marketing" and not (
         consent_source is not None and consent_source.strip()
     ):
-        raise HTTPException(
-            status_code=http_status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="marketing sends require a non-empty consent_source",
+        raise unprocessable(
+            "marketing sends require a non-empty consent_source",
+            loc=["body", "consent_source"],
         )
 
 

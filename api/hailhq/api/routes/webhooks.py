@@ -29,6 +29,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from hailhq.api.audit import write_audit_log
 from hailhq.api.deps import Principal, get_current_principal
+from hailhq.api.errors import unprocessable
 from hailhq.api.pagination import fetch_cursor_page
 from hailhq.core.config import settings
 from hailhq.core.db import get_session
@@ -95,7 +96,7 @@ async def create_subscription(
             allow_private_networks=settings.hail_webhook_allow_private_networks,
         )
     except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc))
+        raise unprocessable(str(exc), loc=["body", "target_url"]) from exc
     secret = _new_secret()
     cipher = SecretCipher(settings.hail_webhook_secret_key)
     sub = WebhookSubscription(
@@ -168,7 +169,7 @@ async def patch_subscription(
                 allow_private_networks=settings.hail_webhook_allow_private_networks,
             )
         except ValueError as exc:
-            raise HTTPException(status_code=422, detail=str(exc))
+            raise unprocessable(str(exc), loc=["body", "target_url"]) from exc
         updates["target_url"] = body.target_url
     if body.event_types is not None:
         updates["event_types"] = list(body.event_types)

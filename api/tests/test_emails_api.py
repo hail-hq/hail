@@ -154,7 +154,7 @@ async def test_post_emails_rejects_false_recipient_consent(
         headers=headers,
     )
     assert resp.status_code == 422
-    assert "recipient_consent" in resp.json()["detail"]
+    assert "recipient_consent" in resp.json()["detail"][0]["msg"]
 
     rows = (await async_session.execute(select(Email))).scalars().all()
     assert rows == []
@@ -182,7 +182,7 @@ async def test_post_emails_rejects_marketing_without_consent_source(
         headers=headers,
     )
     assert resp.status_code == 422
-    assert "consent_source" in resp.json()["detail"]
+    assert "consent_source" in resp.json()["detail"][0]["msg"]
 
     rows = (await async_session.execute(select(Email))).scalars().all()
     assert rows == []
@@ -558,7 +558,7 @@ async def test_post_emails_does_not_send_through_pending_domain(
         headers=headers,
     )
     assert resp.status_code == 422
-    detail = resp.json()["detail"]
+    detail = resp.json()["detail"][0]["msg"]
     assert "pending.com" in detail
     assert "verify" in detail
 

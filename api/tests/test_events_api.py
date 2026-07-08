@@ -194,7 +194,7 @@ async def test_get_events_id_filter_unsupported_type_returns_422(
         headers={"Authorization": f"Bearer {plain}"},
     )
     assert resp.status_code == 422
-    detail = resp.json()["detail"]
+    detail = resp.json()["detail"][0]["msg"]
     assert "unsupported resource type 'sms'" in detail
     assert "supported:" in detail
     assert "call" in detail
@@ -211,22 +211,22 @@ async def test_get_events_id_filter_malformed_returns_422(
     # Missing colon altogether.
     resp = await client.get("/events?id=nocolon", headers=headers)
     assert resp.status_code == 422
-    assert "missing ':'" in resp.json()["detail"]
+    assert "missing ':'" in resp.json()["detail"][0]["msg"]
 
     # Non-UUID after a valid type.
     resp = await client.get("/events?id=call:not-a-uuid", headers=headers)
     assert resp.status_code == 422
-    assert "invalid uuid" in resp.json()["detail"]
+    assert "invalid uuid" in resp.json()["detail"][0]["msg"]
 
     # Bare colon — no type, no id.
     resp = await client.get("/events?id=:", headers=headers)
     assert resp.status_code == 422
-    assert "missing resource type" in resp.json()["detail"]
+    assert "missing resource type" in resp.json()["detail"][0]["msg"]
 
     # Empty after the colon.
     resp = await client.get("/events?id=call:", headers=headers)
     assert resp.status_code == 422
-    assert "missing resource id" in resp.json()["detail"]
+    assert "missing resource id" in resp.json()["detail"][0]["msg"]
 
 
 async def test_get_events_kind_filter(

@@ -34,6 +34,7 @@ from hailhq.api.audit import write_audit_log
 from hailhq.api.consent import enforce_consent, isoformat_or_none
 from hailhq.core.urls import join_url
 from hailhq.api.deps import Principal, get_current_principal
+from hailhq.api.errors import unprocessable
 from hailhq.api.pagination import fetch_cursor_page
 from hailhq.api.idempotency import IdempotencyContext, idempotency_dep
 from hailhq.api.usage import write_usage_event
@@ -101,9 +102,9 @@ async def _resolve_sender(
     if explicit_from is not None:
         _, _, dom = explicit_from.partition("@")
         if not dom:
-            raise HTTPException(
-                status_code=http_status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail="from address must be a valid email (local@domain.tld)",
+            raise unprocessable(
+                "from address must be a valid email (local@domain.tld)",
+                loc=["body", "from"],
             )
 
         # Hail-mail stores the full address as ``domain``; custom stores just
@@ -127,12 +128,10 @@ async def _resolve_sender(
         if sd is not None:
             return sd
 
-        raise HTTPException(
-            status_code=http_status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=(
-                f"from address {explicit_from!r} is not a verified sender for "
-                "this organization"
-            ),
+        raise unprocessable(
+            f"from address {explicit_from!r} is not a verified sender for "
+            "this organization",
+            loc=["body", "from"],
         )
 
     # No explicit `from` — prefer any verified domain, ordered by created_at.
@@ -160,13 +159,11 @@ async def _resolve_sender(
     )
     pending_domain = (await db.execute(pending_stmt)).scalar_one_or_none()
     if pending_domain is not None:
-        raise HTTPException(
-            status_code=http_status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=(
-                f"sender domain {pending_domain!r} is pending DKIM verification; "
-                "publish the DNS records and call POST /email-domains/{id}/verify, "
-                "or pass an explicit verified `from` address"
-            ),
+        raise unprocessable(
+            f"sender domain {pending_domain!r} is pending DKIM verification; "
+            "publish the DNS records and call POST /email-domains/{id}/verify, "
+            "or pass an explicit verified `from` address",
+            loc=["body", "from"],
         )
 
     # Last resort: mint a hail-mail row. The org prefix is derived per-org
@@ -580,7 +577,9 @@ async def get_email_stats(
     to_ts = to or datetime.now(timezone.utc)
     from_ts = from_ or to_ts - timedelta(days=7)
     if from_ts.tzinfo is None or to_ts.tzinfo is None:
-        raise HTTPException(422, detail="from/to must be timezone-aware ISO 8601")
+        raise unprocessable(
+            "from/to must be timezone-aware ISO 8601", loc=["query", "from"]
+        )
     # Normalize to UTC before any bucket math: Postgres date_trunc below runs
     # in session UTC, so Python-side truncation/stepping must match it. A
     # request expressed in another offset (spec-legal, e.g. +02:00) would
@@ -589,13 +588,16 @@ async def get_email_stats(
     from_ts = from_ts.astimezone(timezone.utc)
     to_ts = to_ts.astimezone(timezone.utc)
     if from_ts >= to_ts:
-        raise HTTPException(422, detail="'from' must be before 'to'")
+        raise unprocessable("'from' must be before 'to'", loc=["query", "from"])
     span = to_ts - from_ts
     if span > timedelta(days=_STATS_MAX_RANGE_DAYS):
-        raise HTTPException(422, detail=f"range exceeds {_STATS_MAX_RANGE_DAYS} days")
+        raise unprocessable(
+            f"range exceeds {_STATS_MAX_RANGE_DAYS} days", loc=["query", "to"]
+        )
     if bucket == "hour" and span > timedelta(days=_STATS_MAX_HOURLY_DAYS):
-        raise HTTPException(
-            422, detail=f"bucket=hour limited to {_STATS_MAX_HOURLY_DAYS} days"
+        raise unprocessable(
+            f"bucket=hour limited to {_STATS_MAX_HOURLY_DAYS} days",
+            loc=["query", "bucket"],
         )
 
     rows = (

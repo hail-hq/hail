@@ -118,7 +118,7 @@ async def test_post_calls_rejects_false_recipient_consent(
         headers={"Authorization": f"Bearer {plain}"},
     )
     assert resp.status_code == 422
-    assert "recipient_consent" in resp.json()["detail"]
+    assert "recipient_consent" in resp.json()["detail"][0]["msg"]
 
     rows = (await async_session.execute(select(Call))).scalars().all()
     assert rows == []
@@ -145,7 +145,7 @@ async def test_post_calls_rejects_marketing_without_consent_source(
         headers={"Authorization": f"Bearer {plain}"},
     )
     assert resp.status_code == 422
-    assert "consent_source" in resp.json()["detail"]
+    assert "consent_source" in resp.json()["detail"][0]["msg"]
 
     rows = (await async_session.execute(select(Call))).scalars().all()
     assert rows == []
@@ -470,7 +470,7 @@ async def test_post_calls_explicit_from_cannot_address_pool(
         headers={"Authorization": f"Bearer {plain}"},
     )
     assert resp.status_code == 422
-    assert "not registered to this organization" in resp.json()["detail"]
+    assert "not registered to this organization" in resp.json()["detail"][0]["msg"]
 
 
 async def test_post_calls_pool_release_on_dispatch_failure(

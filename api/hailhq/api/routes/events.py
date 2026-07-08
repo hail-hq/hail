@@ -25,6 +25,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from hailhq.core.db import get_session
 from hailhq.api.deps import Principal, get_current_principal
+from hailhq.api.errors import unprocessable
 from hailhq.api.pagination import fetch_cursor_page
 from hailhq.core.models import Call, CallEvent, Email, EmailEvent
 from hailhq.core.schemas import (
@@ -104,10 +105,7 @@ async def list_events(
             resource_type, resource_uuid = parse_resource_id(id)
         except ValueError as exc:
             # 422 with the specific issue — no silent empty result for typos.
-            raise HTTPException(
-                status_code=http_status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail=str(exc),
-            ) from exc
+            raise unprocessable(str(exc), loc=["query", "id"]) from exc
 
     if resource_type == "call":
         assert resource_uuid is not None  # narrowed by the parser

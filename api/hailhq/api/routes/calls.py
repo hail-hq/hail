@@ -20,6 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from hailhq.api.audit import write_audit_log
 from hailhq.api.consent import enforce_consent, isoformat_or_none
+from hailhq.api.errors import unprocessable
 from hailhq.core.billing import has_funds
 from hailhq.core.call_end_reasons import CallEndReason
 from hailhq.core.compliance_gate import check_call_allowed
@@ -203,9 +204,9 @@ async def create_call(
         )
         from_number = (await db.execute(stmt)).scalar_one_or_none()
         if from_number is None:
-            raise HTTPException(
-                status_code=http_status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail=f"phone number {body.from_} is not registered to this organization",
+            raise unprocessable(
+                f"phone number {body.from_} is not registered to this organization",
+                loc=["body", "from"],
             )
     else:
         stmt = (
