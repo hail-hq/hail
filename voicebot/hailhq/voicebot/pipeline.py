@@ -163,8 +163,13 @@ def _org_llm(org: ResolvedLayer) -> agents_llm.LLM:
     if org.provider == "openai-compatible":
         # SSRF guard at call time too: a stored base_url could have been
         # written before the guard existed, or DNS could have re-pointed.
+        # A legacy/malformed row missing base_url would KeyError out of the
+        # ProviderKeyError contract, so fail fast explicitly instead.
+        stored_base_url = org.params.get("base_url")
+        if not stored_base_url:
+            raise ProviderKeyError("org llm config is missing base_url")
         try:
-            base_url = assert_public_https_url(org.params["base_url"])
+            base_url = assert_public_https_url(stored_base_url)
         except UnsafeUrlError as exc:
             raise ProviderKeyError(f"org llm base_url is not permitted: {exc}") from exc
         return openai_plugin.LLM(base_url=base_url, api_key=org.api_key, model=model)

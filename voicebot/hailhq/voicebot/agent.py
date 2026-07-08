@@ -24,15 +24,18 @@ from datetime import datetime, timezone
 from typing import Any, Callable
 from uuid import UUID
 
+from cryptography.fernet import InvalidToken
 from livekit import rtc
 from livekit.agents import Agent, JobContext, JobProcess
 from livekit.agents.voice import AgentSession
 from livekit.plugins import silero
 from sqlalchemy import select, update
+from sqlalchemy.exc import SQLAlchemyError
 
 from hailhq.core.call_end_reasons import CallEndReason
 from hailhq.core.config import settings
 from hailhq.core.db import session_scope
+from hailhq.core.secret_cipher import SecretKeyMissing
 from hailhq.core.internal_webhook import notify_usage_event_recorded
 from hailhq.core.pool import release_pool_reservation
 from hailhq.core.models import Call, CallEvent, UsageEvent
@@ -632,11 +635,23 @@ async def entrypoint(ctx: JobContext) -> None:
         _maybe_mark_answered(_participant)
 
     vad = ctx.proc.userdata["vad"]
-    org_id_raw = metadata.get("organization_id")
-    org_cfgs = await resolve_org_configs(UUID(org_id_raw) if org_id_raw else None)
     voice_id_override = (metadata.get("voice_config") or {}).get("voice_id")
     try:
-        llm_cfg = decrypt_llm_metadata(metadata.get("llm"))
+        # Loading + decrypting the org's BYO config, and decrypting the
+        # per-call llm key, must sit inside this guard: a malformed org id
+        # (ValueError), a decrypt failure after a HAIL_PROVIDER_SECRET_KEY
+        # rotation (InvalidToken) or an unset key (SecretKeyMissing), and a
+        # DB error (SQLAlchemyError) are none of them ProviderKeyError, but
+        # they all mean "can't honor this call's provider config". Convert
+        # them so they fail fast through the same clean finalize path below
+        # instead of escaping entrypoint() raw and leaking the pool number.
+        try:
+            org_id_raw = metadata.get("organization_id")
+            org_id = UUID(org_id_raw) if org_id_raw else None
+            org_cfgs = await resolve_org_configs(org_id)
+            llm_cfg = decrypt_llm_metadata(metadata.get("llm"))
+        except (SecretKeyMissing, InvalidToken, ValueError, SQLAlchemyError) as exc:
+            raise ProviderKeyError(f"could not load provider config: {exc}") from exc
         session = build_session(
             llm_cfg, vad, org_cfgs=org_cfgs, voice_id_override=voice_id_override
         )

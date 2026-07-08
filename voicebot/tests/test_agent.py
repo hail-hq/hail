@@ -12,11 +12,13 @@ skip VAD/STT/TTS entirely — verified 2026-04-28 against
 from __future__ import annotations
 
 import asyncio
+import json
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from uuid import UUID
 
 import pytest
+from cryptography.fernet import InvalidToken
 from livekit import rtc
 from livekit.agents import Agent, AgentSession
 from sqlalchemy import select, update
@@ -34,6 +36,7 @@ from hailhq.voicebot.agent import (
     attach_event_handlers,
     build_instructions,
     disconnect_reason_to_status,
+    entrypoint,
     is_sip_answer_signal,
     mark_call_answered,
     on_call_end,
@@ -157,6 +160,79 @@ async def _make_call_row(session: AsyncSession) -> UUID:
     await session.commit()
     await session.refresh(call)
     return call.id
+
+
+class _FakeRoom:
+    """Minimal ctx.room: entrypoint registers event handlers and scans
+    current participants before the provider-config resolve we're testing."""
+
+    def __init__(self, name: str) -> None:
+        self.name = name
+        self.remote_participants: dict[str, object] = {}
+
+    def on(self, _event: str):
+        def _register(fn):
+            return fn
+
+        return _register
+
+
+class _FakeEntrypointCtx:
+    """Enough of JobContext to drive entrypoint() to the org-config resolve.
+
+    entrypoint reads ctx.job.metadata, awaits ctx.connect(), wires
+    ctx.room.on(...), scans ctx.room.remote_participants, reads
+    ctx.proc.userdata['vad'], and on the provider_key_error path calls
+    ctx.shutdown(reason=...). We record shutdown reasons to assert the
+    clean fail-fast path ran.
+    """
+
+    def __init__(self, metadata: str, room_name: str) -> None:
+        self.job = SimpleNamespace(metadata=metadata)
+        self.room = _FakeRoom(room_name)
+        self.proc = SimpleNamespace(userdata={"vad": object()})
+        self.shutdown_calls: list[str] = []
+
+    async def connect(self) -> None:
+        return None
+
+    def shutdown(self, reason: str = "") -> None:
+        self.shutdown_calls.append(reason)
+
+
+async def test_entrypoint_org_config_load_failure_finalizes_cleanly(
+    async_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A decrypt failure loading the org's BYO config (the real trigger being
+    a HAIL_PROVIDER_SECRET_KEY rotation invalidating stored ciphertext) must
+    fail fast as provider_key_error — finalizing the Call row via on_call_end
+    — and must NOT propagate raw out of entrypoint() and leak the number."""
+    from hailhq.voicebot import agent as agent_mod
+
+    org_id = UUID("11111111-2222-3333-4444-555555555555")
+    call_id = await _make_call_row(async_session)
+
+    async def _boom(_org_id: UUID | None) -> dict:
+        raise InvalidToken("stale ciphertext after key rotation")
+
+    monkeypatch.setattr(agent_mod, "resolve_org_configs", _boom)
+
+    ctx = _FakeEntrypointCtx(
+        metadata=json.dumps({"call_id": str(call_id), "organization_id": str(org_id)}),
+        room_name=f"hail-{call_id}",
+    )
+
+    # Returns cleanly (the InvalidToken is converted, not propagated).
+    await entrypoint(ctx)  # type: ignore[arg-type]
+
+    assert ctx.shutdown_calls == ["provider_key_error"]
+
+    refreshed = (
+        await async_session.execute(select(Call).where(Call.id == call_id))
+    ).scalar_one()
+    await async_session.refresh(refreshed)
+    assert refreshed.status == "failed"
+    assert refreshed.end_reason == "provider_key_error"
 
 
 async def test_agent_session_run_emits_assistant_message() -> None:
