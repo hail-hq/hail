@@ -29,6 +29,7 @@ from hailhq.api.routes import webhooks as webhooks_routes
 from hailhq.api.routes import unsubscribe as unsubscribe_routes
 from hailhq.api.routes.internal import dsar as internal_dsar
 from hailhq.api.routes.internal import org_closures as internal_org_closures
+from hailhq.api.routes.internal import provider_config as internal_provider_config
 from hailhq.api.routes.internal import ses_events as internal_ses_events
 from hailhq.api.usage import write_usage_event
 
@@ -216,6 +217,7 @@ app.include_router(webhooks_routes.router)
 app.include_router(unsubscribe_routes.router)
 app.include_router(internal_ses_events.router)
 app.include_router(internal_org_closures.router)
+app.include_router(internal_provider_config.router)
 app.include_router(internal_dsar.router)
 
 
