@@ -43,6 +43,9 @@ from hail.models import (
     LLMConfig,
     EmailDomainListResponse,
     EmailDomainResponse,
+    SmsListResponse,
+    SmsResponse,
+    SmsStatus,
     TERMINAL_CALL_STATUSES,
 )
 
@@ -135,6 +138,72 @@ class _CallsResource:
         params = {"limit": limit, "cursor": cursor, "status": status, "to": to}
         data = await self._http.request("GET", "/calls", params=params)
         return CallListResponse.model_validate(data)
+
+
+class _SmsResource:
+    """``client.sms.*`` — POST/GET/LIST against ``/sms``."""
+
+    def __init__(self, http: _HailHTTP) -> None:
+        self._http = http
+
+    async def create(
+        self,
+        *,
+        to: str,
+        body: str,
+        recipient_consent: bool,
+        from_: str | None = None,
+        metadata: dict[str, Any] | None = None,
+        consent_source: str | None = None,
+        consent_obtained_at: datetime | None = None,
+        message_type: Literal["marketing", "informational"] | None = None,
+        idempotency_key: str | None = None,
+    ) -> SmsResponse:
+        """Send an outbound SMS from the org's dedicated number.
+
+        ``recipient_consent`` is required — the server 422s without it.
+        ``idempotency_key`` defaults to a fresh UUIDv4.
+        """
+        fields: dict[str, Any] = {
+            "to": to,
+            "body": body,
+            "recipient_consent": recipient_consent,
+        }
+        if from_ is not None:
+            fields["from"] = from_
+        if metadata is not None:
+            fields["metadata"] = metadata
+        if consent_source is not None:
+            fields["consent_source"] = consent_source
+        if consent_obtained_at is not None:
+            fields["consent_obtained_at"] = consent_obtained_at.isoformat()
+        if message_type is not None:
+            fields["message_type"] = message_type
+
+        key = idempotency_key or generate_idempotency_key()
+        data = await self._http.request(
+            "POST", "/sms", json=fields, headers={"Idempotency-Key": key}
+        )
+        return SmsResponse.model_validate(data)
+
+    async def get(self, sms_id: str | UUID) -> SmsResponse:
+        """Fetch a single SMS by id."""
+        sid = str(sms_id)
+        data = await self._http.request("GET", f"/sms/{sid}")
+        return SmsResponse.model_validate(data)
+
+    async def list(
+        self,
+        *,
+        cursor: str | None = None,
+        limit: int = 50,
+        status: SmsStatus | None = None,
+        to: str | None = None,
+    ) -> SmsListResponse:
+        """Cursor-paginated list, scoped to the caller's organization."""
+        params = {"limit": limit, "cursor": cursor, "status": status, "to": to}
+        data = await self._http.request("GET", "/sms", params=params)
+        return SmsListResponse.model_validate(data)
 
 
 class _EmailsResource:
@@ -578,6 +647,7 @@ class Client:
             transport_client=_transport_client,
         )
         self.calls = _CallsResource(self._http)
+        self.sms = _SmsResource(self._http)
         self.emails = _EmailsResource(self._http)
         self.email_domains = _EmailDomainsResource(self._http)
         self.webhooks = _WebhooksResource(self._http)

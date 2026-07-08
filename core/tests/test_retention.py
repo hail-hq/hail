@@ -10,8 +10,35 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timedelta, timezone
 
-from hailhq.core.models import AuditLog, Call, Email, OrgClosure, PhoneNumber
+from hailhq.core.models import AuditLog, Call, Email, OrgClosure, PhoneNumber, Sms
 from hailhq.core.retention import purge_expired_data
+
+
+async def _make_sms(session, organization_id: uuid.UUID) -> Sms:
+    pn = PhoneNumber(
+        organization_id=organization_id,
+        e164=f"+1415666{uuid.uuid4().int % 10000:04d}",
+        country_code="US",
+        number_type="local",
+        provider="twilio",
+        provider_resource_id=f"PN-{uuid.uuid4()}",
+        provisioning_state="active",
+    )
+    session.add(pn)
+    await session.flush()
+
+    sms = Sms(
+        organization_id=organization_id,
+        from_number_id=pn.id,
+        from_e164=pn.e164,
+        to_e164="+14155551234",
+        direction="outbound",
+        status="sent",
+        body="your order shipped",
+    )
+    session.add(sms)
+    await session.flush()
+    return sms
 
 
 async def _make_call(session, organization_id: uuid.UUID, *, transcript=None) -> Call:
@@ -77,6 +104,7 @@ async def test_purge_expired_data_scrubs_org_past_cutoff(async_session):
     await session.flush()
 
     call = await _make_call(session, org_id)
+    sms = await _make_sms(session, org_id)
     email = await _make_email(session, org_id)
     await session.commit()
 
@@ -84,16 +112,20 @@ async def test_purge_expired_data_scrubs_org_past_cutoff(async_session):
 
     assert summary.organizations_purged == [org_id]
     assert summary.calls_scrubbed == 1
+    assert summary.sms_scrubbed == 1
     assert summary.emails_scrubbed == 1
     assert summary.calls_with_unexpected_recording == 0
 
     await session.refresh(call)
+    await session.refresh(sms)
     await session.refresh(email)
     assert call.transcript is None
+    assert sms.body == ""
     assert email.body_text == ""
     assert email.body_html is None
     assert email.raw_s3_key is None
     # Row shell stays intact.
+    assert sms.to_e164 == "+14155551234"
     assert email.to_addresses == ["ops@example.com"]
     assert email.status == "received"
 

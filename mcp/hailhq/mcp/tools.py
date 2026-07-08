@@ -1,6 +1,6 @@
 """MCP tool surface for Hail's outbound-call API.
 
-Exposes eleven tools to the calling agent:
+Exposes fourteen tools to the calling agent:
 
 * ``place_call`` — originate an outbound phone call
 * ``get_call`` — fetch the current state of one call
@@ -13,6 +13,9 @@ Exposes eleven tools to the calling agent:
 * ``get_email_attachment`` — presigned URL for one inbound attachment
 * ``get_email_events`` — delivery/engagement timeline for one email
 * ``get_email_stats`` — account-level deliverability stats (counts, rates, series)
+* ``send_sms`` — send an outbound SMS
+* ``get_sms`` — fetch the current state of one SMS
+* ``list_sms`` — page through recent SMS messages
 
 The tool docstrings are the agent's only documentation, so each one
 spells out the contract (required vs optional fields, mutually exclusive
@@ -21,12 +24,13 @@ modes, example invocation, terminal-status loop hint).
 Errors are returned as ``{"error": "<message>"}`` dicts rather than
 raised — agents read tool responses, not exception traces. Field and
 shape validation comes from the shared ``hailhq.core.schemas`` request
-models (``CallCreate``, ``EmailCreate``) constructed inside
-``hail_client``; a ``pydantic.ValidationError`` is caught and mapped to
-an ``{"error": ...}`` dict. Only the ``<type>:<uuid>`` resource-id shape
-for ``get_events`` is still checked locally via ``parse_resource_id``.
+models (``CallCreate``, ``EmailCreate``, ``SmsCreate``) constructed
+inside ``hail_client``; a ``pydantic.ValidationError`` is caught and
+mapped to an ``{"error": ...}`` dict. Only the ``<type>:<uuid>``
+resource-id shape for ``get_events`` is still checked locally via
+``parse_resource_id``.
 
-The eleven tool functions are kept module-importable so unit tests can
+The fourteen tool functions are kept module-importable so unit tests can
 call them directly with a constructed ``HailClient``; ``register_tools``
 is the FastMCP wiring step. Each registered tool closure accepts a
 FastMCP ``Context`` (auto-injected on dispatch) and uses the
@@ -203,6 +207,67 @@ async def list_calls(
 ) -> dict[str, Any]:
     try:
         return await client.list_calls(cursor=cursor, limit=limit, status=status, to=to)
+    except ValidationError as exc:
+        return {"error": _validation_error_message(exc)}
+    except HailAPIError as exc:
+        return _format_api_error(exc)
+
+
+async def send_sms(
+    *,
+    client: HailClient,
+    to: str,
+    body: str,
+    recipient_consent: bool,
+    from_: str | None = None,
+    metadata: dict[str, Any] | None = None,
+    idempotency_key: str | None = None,
+    consent_source: str | None = None,
+    consent_obtained_at: str | None = None,
+    message_type: str = "informational",
+) -> dict[str, Any]:
+    if idempotency_key is None:
+        idempotency_key = str(uuid.uuid4())
+    try:
+        result = await client.send_sms(
+            to=to,
+            body=body,
+            recipient_consent=recipient_consent,
+            from_=from_,
+            metadata=metadata,
+            idempotency_key=idempotency_key,
+            consent_source=consent_source,
+            consent_obtained_at=consent_obtained_at,
+            message_type=message_type,
+        )
+    except ValidationError as exc:
+        return {"error": _validation_error_message(exc)}
+    except HailAPIError as exc:
+        return _format_api_error(exc)
+    if isinstance(result, dict):
+        result.setdefault("idempotency_key", idempotency_key)
+    return result
+
+
+async def get_sms(*, client: HailClient, sms_id: str) -> dict[str, Any]:
+    try:
+        return await client.get_sms(sms_id)
+    except ValidationError as exc:
+        return {"error": _validation_error_message(exc)}
+    except HailAPIError as exc:
+        return _format_api_error(exc)
+
+
+async def list_sms(
+    *,
+    client: HailClient,
+    cursor: str | None = None,
+    limit: int = 50,
+    status: str | None = None,
+    to: str | None = None,
+) -> dict[str, Any]:
+    try:
+        return await client.list_sms(cursor=cursor, limit=limit, status=status, to=to)
     except ValidationError as exc:
         return {"error": _validation_error_message(exc)}
     except HailAPIError as exc:
@@ -386,7 +451,7 @@ def register_tools(
     mode: AuthMode,
     singleton: HailClient | None,
 ) -> None:
-    """Register the eleven Hail tools on a FastMCP app.
+    """Register the fourteen Hail tools on a FastMCP app.
 
     Tools accept a FastMCP ``Context`` parameter (auto-injected). The
     ``_client_for`` helper picks the right HailClient for the active mode
@@ -591,6 +656,100 @@ def register_tools(
         except RuntimeError as exc:
             return {"error": str(exc)}
 
+    @mcp_app.tool(name="send_sms")
+    async def send_sms_tool(
+        ctx: Context,
+        to: str,
+        body: str,
+        recipient_consent: bool,
+        from_: str | None = None,
+        metadata: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+        consent_source: str | None = None,
+        consent_obtained_at: str | None = None,
+        message_type: str = "informational",
+    ) -> dict[str, Any]:
+        """Send an outbound SMS from your organization's dedicated number.
+
+        ``to`` must be E.164 (e.g. ``+14155551234``). ``body`` is the
+        message text. SMS requires a dedicated phone number on your
+        organization — it does not use the shared voice-call pool.
+
+        ``recipient_consent`` is required: attest that you (the caller
+        triggering this request) have obtained the lawful consent needed
+        to text this recipient. The API rejects the request (422) if
+        this is not ``true`` — Hail does not verify consent for you. Set
+        ``message_type="marketing"`` for promotional texts (this
+        additionally requires a non-empty ``consent_source``) — leave as
+        the default ``"informational"`` for transactional/service texts.
+
+        ``idempotency_key`` defaults to a fresh UUID and is returned in
+        the response under ``idempotency_key`` — pass the same value on
+        a retry to replay rather than re-send.
+
+        Example:
+            send_sms(to="+14155551234", body="Your order shipped!",
+                     recipient_consent=True)
+
+        Returns the ``SmsResponse`` dict (id, status, from_e164,
+        to_e164, segment_count, ...). On failure returns
+        ``{"error": "<message>"}`` instead.
+        """
+        try:
+            async with _client_for(ctx, mode=mode, singleton=singleton) as client:
+                return await send_sms(
+                    client=client,
+                    to=to,
+                    body=body,
+                    recipient_consent=recipient_consent,
+                    from_=from_,
+                    metadata=metadata,
+                    idempotency_key=idempotency_key,
+                    consent_source=consent_source,
+                    consent_obtained_at=consent_obtained_at,
+                    message_type=message_type,
+                )
+        except RuntimeError as exc:
+            return {"error": str(exc)}
+
+    @mcp_app.tool(name="get_sms")
+    async def get_sms_tool(ctx: Context, sms_id: str) -> dict[str, Any]:
+        """Fetch the current state of one SMS by id.
+
+        Use this after ``send_sms`` to check delivery status.
+
+        Example:
+            get_sms(sms_id="...")
+        """
+        try:
+            async with _client_for(ctx, mode=mode, singleton=singleton) as client:
+                return await get_sms(client=client, sms_id=sms_id)
+        except RuntimeError as exc:
+            return {"error": str(exc)}
+
+    @mcp_app.tool(name="list_sms")
+    async def list_sms_tool(
+        ctx: Context,
+        cursor: str | None = None,
+        limit: int = 50,
+        status: str | None = None,
+        to: str | None = None,
+    ) -> dict[str, Any]:
+        """Page through recent SMS messages for your organization.
+
+        ``status`` filters to one of: queued, sent, delivered, failed,
+        undelivered, received. ``to`` filters to messages sent to a
+        specific E.164 number. Paginate with the returned
+        ``next_cursor``.
+        """
+        try:
+            async with _client_for(ctx, mode=mode, singleton=singleton) as client:
+                return await list_sms(
+                    client=client, cursor=cursor, limit=limit, status=status, to=to
+                )
+        except RuntimeError as exc:
+            return {"error": str(exc)}
+
     @mcp_app.tool(name="get_email")
     async def get_email_tool(ctx: Context, email_id: str) -> dict[str, Any]:
         """Fetch the full record of one email by id.
@@ -755,11 +914,12 @@ def register_tools(
     ) -> dict[str, Any]:
         """Page through events from across the org or one resource.
 
-        Pass ``id="call:<uuid>"`` to narrow to a single call; the
-        response then includes a ``call_status`` field reflecting the
-        call's current state. In v1 only the ``call`` resource type is
-        supported. Without ``id``, returns events from across the
-        whole org. ``kind`` filters server-side by event kind
+        Pass ``id="<type>:<uuid>"`` to narrow to a single resource —
+        supported types are ``call``, ``email``, and ``sms`` (e.g.
+        ``id="sms:<uuid>"`` after ``send_sms``). When narrowed to a
+        call, the response includes a ``call_status`` field reflecting
+        the call's current state. Without ``id``, returns events from
+        across the whole org. ``kind`` filters server-side by event kind
         (``state_change``, ``agent_turn``, ``user_turn``, ``tool_call``,
         ``error``, ...).
 
@@ -793,6 +953,9 @@ __all__ = [
     "send_email",
     "get_call",
     "list_calls",
+    "send_sms",
+    "get_sms",
+    "list_sms",
     "get_email",
     "list_emails",
     "get_email_raw",

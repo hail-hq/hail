@@ -20,7 +20,7 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from hailhq.core.compliance_gate import normalize_recipient
-from hailhq.core.models import AuditLog, Call, Email, Suppression
+from hailhq.core.models import AuditLog, Call, Email, Sms, Suppression
 
 __all__ = [
     "DSARRecord",
@@ -70,6 +70,7 @@ def _jsonb_array_contains_ci(payload, key: str, norm: str):
 class DSARRecord:
     identifier: str
     calls: list[Call] = field(default_factory=list)
+    sms: list[Sms] = field(default_factory=list)
     emails: list[Email] = field(default_factory=list)
     suppressions: list[Suppression] = field(default_factory=list)
     audit_logs: list[AuditLog] = field(default_factory=list)
@@ -79,12 +80,13 @@ class DSARRecord:
 class DeletionSummary:
     identifier: str
     calls_scrubbed: int = 0
+    sms_scrubbed: int = 0
     emails_scrubbed: int = 0
     suppressions_preserved: int = 0
 
 
 async def lookup_recipient(session: AsyncSession, identifier: str) -> DSARRecord:
-    """Find every row referencing ``identifier`` across calls, emails,
+    """Find every row referencing ``identifier`` across calls, sms, emails,
     suppressions, and audit_log."""
     norm = normalize_recipient(identifier)
 
@@ -92,6 +94,10 @@ async def lookup_recipient(session: AsyncSession, identifier: str) -> DSARRecord
         (await session.execute(select(Call).where(Call.to_e164 == norm)))
         .scalars()
         .all()
+    )
+
+    sms = list(
+        (await session.execute(select(Sms).where(Sms.to_e164 == norm))).scalars().all()
     )
 
     # Case-insensitive match against stored addresses: to_addresses/cc/bcc
@@ -155,6 +161,7 @@ async def lookup_recipient(session: AsyncSession, identifier: str) -> DSARRecord
     return DSARRecord(
         identifier=norm,
         calls=calls,
+        sms=sms,
         emails=emails,
         suppressions=suppressions,
         audit_logs=audit_logs,
@@ -192,6 +199,7 @@ async def export_recipient_data(session: AsyncSession, identifier: str) -> dict:
     return {
         "identifier": record.identifier,
         "calls": [_model_to_dict(c) for c in record.calls],
+        "sms": [_model_to_dict(s) for s in record.sms],
         "emails": [_model_to_dict(e) for e in record.emails],
         "suppressions": [_model_to_dict(s) for s in record.suppressions],
         "audit_logs": [_model_to_dict(a) for a in record.audit_logs],
@@ -201,8 +209,8 @@ async def export_recipient_data(session: AsyncSession, identifier: str) -> dict:
 async def delete_recipient_data(
     session: AsyncSession, identifier: str
 ) -> DeletionSummary:
-    """Scrub call transcripts and email body content for one recipient, on
-    request (GDPR Art. 17 "right to erasure").
+    """Scrub call transcripts, SMS bodies, and email body content for one
+    recipient, on request (GDPR Art. 17 "right to erasure").
 
     Same content-only scrub semantics as
     ``hailhq.core.retention.purge_expired_data`` — row shells stay intact.
@@ -225,6 +233,14 @@ async def delete_recipient_data(
             call.transcript = None
             calls_scrubbed += 1
 
+    sms_scrubbed = 0
+    for message in record.sms:
+        if message.body:
+            # sms.body is NOT NULL; "" clears the content while satisfying
+            # the constraint (same convention as Email.body_text below).
+            message.body = ""
+            sms_scrubbed += 1
+
     emails_scrubbed = 0
     for email in record.emails:
         if email.body_text or email.body_html or email.raw_s3_key:
@@ -240,6 +256,7 @@ async def delete_recipient_data(
     return DeletionSummary(
         identifier=record.identifier,
         calls_scrubbed=calls_scrubbed,
+        sms_scrubbed=sms_scrubbed,
         emails_scrubbed=emails_scrubbed,
         suppressions_preserved=len(record.suppressions),
     )

@@ -57,6 +57,29 @@ def make_call_response(
     }
 
 
+def make_sms_response(
+    *,
+    sms_id: UUID | None = None,
+    status: str = "sent",
+) -> dict:
+    """Server-shaped JSON for an SmsResponse."""
+    sid = sms_id or uuid4()
+    return {
+        "id": str(sid),
+        "organization_id": str(uuid4()),
+        "from_e164": "+15550001111",
+        "to_e164": "+15555550123",
+        "direction": "outbound",
+        "status": status,
+        "body": "test body",
+        "provider_message_sid": "SM_test",
+        "segment_count": 1,
+        "error_code": None,
+        "requested_at": datetime.now(timezone.utc).isoformat(),
+        "sent_at": datetime.now(timezone.utc).isoformat() if status == "sent" else None,
+    }
+
+
 def make_email_domain_response(
     *,
     domain_id: UUID | None = None,
@@ -131,6 +154,7 @@ def make_event(
 ) -> dict:
     return {
         "id": str(event_id or uuid4()),
+        "source": "call",
         "call_id": str(call_id),
         "kind": kind,
         "payload": payload if payload is not None else {"text": "hello"},

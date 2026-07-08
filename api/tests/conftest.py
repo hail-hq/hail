@@ -25,6 +25,7 @@ from hailhq.api.auth import hash_key
 from hailhq.api.main import app
 from hailhq.api.routes.calls import get_livekit
 from hailhq.api.routes.email_domains import get_email_provider
+from hailhq.api.routes.sms import get_sms_provider
 from hailhq.core.db import get_session
 from hailhq.core.livekit import LiveKitClient
 from hailhq.core.models import (
@@ -39,6 +40,7 @@ from hailhq.core.providers.email.base import (
     ProviderIdentity,
     ProviderSendResult,
 )
+from hailhq.core.providers.sms import ProviderSmsResult, SmsProvider
 from hailhq.core.testing.fixtures import (  # noqa: F401
     async_session,
     database_url,
@@ -215,10 +217,31 @@ def email_mock() -> AsyncMock:
 
 
 @pytest.fixture()
+def sms_mock() -> AsyncMock:
+    """Default mock SMS provider — happy-path send for every call."""
+    mock = AsyncMock(spec=SmsProvider)
+
+    counter = {"n": 0}
+
+    async def _send(**kwargs):
+        counter["n"] += 1
+        return ProviderSmsResult(
+            provider_message_sid=f"SM_test_{counter['n']}",
+            status="queued",
+            segment_count=1,
+            error_code=None,
+        )
+
+    mock.send_sms.side_effect = _send
+    return mock
+
+
+@pytest.fixture()
 async def client(
     async_session: AsyncSession,  # noqa: F811 (re-used as a fixture parameter name)
     livekit_mock: AsyncMock,
     email_mock: AsyncMock,
+    sms_mock: AsyncMock,
 ) -> AsyncIterator[httpx.AsyncClient]:
     async def override_get_session() -> AsyncIterator[AsyncSession]:
         yield async_session
@@ -226,6 +249,7 @@ async def client(
     app.dependency_overrides[get_session] = override_get_session
     app.dependency_overrides[get_livekit] = lambda: livekit_mock
     app.dependency_overrides[get_email_provider] = lambda: email_mock
+    app.dependency_overrides[get_sms_provider] = lambda: sms_mock
 
     transport = httpx.ASGITransport(app=app)
     try:
@@ -235,6 +259,7 @@ async def client(
         app.dependency_overrides.pop(get_session, None)
         app.dependency_overrides.pop(get_livekit, None)
         app.dependency_overrides.pop(get_email_provider, None)
+        app.dependency_overrides.pop(get_sms_provider, None)
 
 
 @pytest.fixture()

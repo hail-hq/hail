@@ -21,13 +21,19 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from hailhq.api.audit import write_audit_log
 from hailhq.api.consent import enforce_consent, isoformat_or_none
 from hailhq.api.errors import unprocessable
-from hailhq.core.billing import has_funds
+from hailhq.api.funds import require_funds
 from hailhq.core.call_end_reasons import CallEndReason
 from hailhq.core.compliance_gate import check_call_allowed
 from hailhq.core.db import get_session
 from hailhq.api.deps import Principal, get_current_principal
 from hailhq.api.pagination import fetch_cursor_page
-from hailhq.api.idempotency import IdempotencyContext, idempotency_dep
+from hailhq.api.idempotency import (
+    IdempotencyContext,
+    cache_failure,
+    idempotency_dep,
+    replay_cached,
+)
+from hailhq.api.numbers import resolve_org_number
 from hailhq.core.config import settings
 from hailhq.core.livekit import LiveKitClient
 from hailhq.core.models import Call, CallEvent, PhoneNumber
@@ -139,14 +145,7 @@ async def create_call(
 ) -> CallResponse:
     # Replay before any DB or LiveKit work — a retry must not re-dispatch.
     if idem is not None and idem.is_replay:
-        cached = idem.cached_response or {}
-        if idem.cached_status and idem.cached_status >= 400:
-            raise HTTPException(
-                status_code=idem.cached_status,
-                detail=cached.get("detail", "cached failure"),
-                headers={"Idempotency-Replay": "true"},
-            )
-        cached_id = UUID(cached["id"])
+        cached_id, cached = replay_cached(idem, response, resource_prefix="/calls")
         await write_audit_log(
             organization_id=principal.organization_id,
             api_key_id=principal.api_key_id,
@@ -155,16 +154,17 @@ async def create_call(
             resource_id=cached_id,
             payload={"to": cached.get("to_e164"), "from": cached.get("from_e164")},
         )
-        response.headers["Idempotency-Replay"] = "true"
-        response.headers["Location"] = f"/calls/{cached_id}"
         return CallResponse.model_validate(cached)
 
     # Consent attestation gate — reject before any Call row is created.
-    enforce_consent(
-        recipient_consent=body.recipient_consent,
-        consent_source=body.consent_source,
-        message_type=body.message_type,
-    )
+    try:
+        enforce_consent(
+            recipient_consent=body.recipient_consent,
+            consent_source=body.consent_source,
+            message_type=body.message_type,
+        )
+    except HTTPException as exc:
+        raise await cache_failure(idem, exc) from None
 
     # Compliance gate — suppression/DNC, premium-rate prefix, velocity cap.
     # Also before any Call row is created, so a denial has no resource to
@@ -179,54 +179,41 @@ async def create_call(
             resource_id=None,
             payload={"to": body.to, "reason": gate.reason, "checks": gate.checks},
         )
-        raise HTTPException(
-            status_code=http_status.HTTP_403_FORBIDDEN,
-            detail=gate.reason,
+        raise await cache_failure(
+            idem,
+            HTTPException(
+                status_code=http_status.HTTP_403_FORBIDDEN,
+                detail=gate.reason,
+            ),
         )
 
-    # Cloud-only balance gate; shared-key auth lands on the unbilled
-    # "Self-hosted" org and skips it (``api_key_id is None`` ⇒ HAIL_API_KEY path).
-    if principal.api_key_id is not None:
-        if not await has_funds(db, principal.organization_id):
-            raise HTTPException(
-                status_code=http_status.HTTP_402_PAYMENT_REQUIRED,
-                detail="insufficient credits; top up at https://hail.so/console/billing",
-            )
+    await require_funds(db, principal, idem)
 
     # 1. Resolve the from-number: explicit `from` → org-owned active → shared
     #    pool. Pool numbers are never explicitly addressable; naming one would
     #    let a caller grab a number that isn't theirs.
     pool_number: PhoneNumber | None = None
-    if body.from_ is not None:
-        stmt = select(PhoneNumber).where(
-            PhoneNumber.organization_id == principal.organization_id,
-            PhoneNumber.e164 == body.from_,
-        )
-        from_number = (await db.execute(stmt)).scalar_one_or_none()
-        if from_number is None:
-            raise unprocessable(
-                f"phone number {body.from_} is not registered to this organization",
-                loc=["body", "from"],
+    from_number = await resolve_org_number(db, principal.organization_id, body.from_)
+    if from_number is None:
+        if body.from_ is not None:
+            raise await cache_failure(
+                idem,
+                unprocessable(
+                    f"phone number {body.from_} is not registered to this "
+                    "organization or is not active",
+                    loc=["body", "from"],
+                ),
             )
-    else:
-        stmt = (
-            select(PhoneNumber)
-            .where(
-                PhoneNumber.organization_id == principal.organization_id,
-                PhoneNumber.provisioning_state == "active",
+        pool_number = await claim_pool_number(db)
+        if pool_number is None:
+            # Transient (no dispatch happened) — deliberately NOT cached
+            # under the idempotency key, so a same-key retry can succeed
+            # once the pool frees up.
+            raise HTTPException(
+                status_code=http_status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="shared call line pool exhausted; try again shortly",
             )
-            .order_by(PhoneNumber.created_at.asc())
-            .limit(1)
-        )
-        from_number = (await db.execute(stmt)).scalar_one_or_none()
-        if from_number is None:
-            pool_number = await claim_pool_number(db)
-            if pool_number is None:
-                raise HTTPException(
-                    status_code=http_status.HTTP_503_SERVICE_UNAVAILABLE,
-                    detail="shared call line pool exhausted; try again shortly",
-                )
-            from_number = pool_number
+        from_number = pool_number
 
     voice_config = body.voice_config.model_dump()
 

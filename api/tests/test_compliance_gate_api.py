@@ -80,7 +80,7 @@ async def test_post_calls_blocks_suppressed_recipient(
     ).scalar_one()
     assert audit.resource_id is None
     assert audit.payload["reason"] is not None
-    assert audit.payload["checks"]["internal_dnc_hit"] is True
+    assert audit.payload["checks"]["suppression_hit"] is True
 
 
 # --------------------------------------------------------------------------- #
