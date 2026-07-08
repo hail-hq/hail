@@ -68,16 +68,18 @@ Examples:
 
   # Custom domain (returns DKIM CNAMEs to publish):
   hail email domain register --kind custom --domain acme.com`,
-		Args: cobra.NoArgs,
+		Args:    cobra.NoArgs,
+		PreRunE: requireMarkedFlags,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return runEmailDomainRegister(cmd.Context(), cmd, opts, f)
 		},
 	}
-	cmd.Flags().StringVar(&f.kind, "kind", "", "Identity kind: hail_mail or custom (required)")
-	cmd.Flags().StringVar(&f.domain, "domain", "", "DNS domain (required for kind=custom; must be omitted for kind=hail_mail)")
+	cmd.Flags().StringVar(&f.kind, "kind", "", "Identity kind: hail_mail or custom")
+	cmd.Flags().StringVar(&f.domain, "domain", "", "DNS domain — required if --kind=custom; omit for --kind=hail_mail")
 	cmd.Flags().StringVar(&f.userPrefix, "local-prefix-user", "", "User-side local part for kind=hail_mail (falls back to HAIL_MAIL_DEFAULT_USER_PREFIX)")
 	cmd.Flags().StringVar(&f.orgPrefix, "local-prefix-org", "", "Org-side local part for kind=hail_mail (falls back to HAIL_MAIL_DEFAULT_ORG_PREFIX)")
 	cmd.Flags().StringVar(&f.idemKey, "idempotency-key", "", "Defaults to a fresh UUID")
+	cmd.MarkFlagRequired("kind")
 	return cmd
 }
 
@@ -89,6 +91,12 @@ func runEmailDomainRegister(
 	}
 	if f.kind != "hail_mail" && f.kind != "custom" {
 		return helpAndFail(cmd, "--kind must be 'hail_mail' or 'custom'")
+	}
+	if f.kind == "custom" && f.domain == "" {
+		return requireInputs(cmd, "--domain (required when --kind=custom)")
+	}
+	if f.kind == "custom" && (f.userPrefix != "" || f.orgPrefix != "") {
+		return helpAndFail(cmd, "--local-prefix-user/--local-prefix-org are not allowed with --kind=custom")
 	}
 
 	body := client.EmailDomainCreate{

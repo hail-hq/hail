@@ -2,6 +2,33 @@
 
 All notable changes to Hail are documented here. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and Hail adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.1] — 2026-07-08
+
+Component version cut alongside this release: **`cli-v0.9.1`** (Homebrew + GitHub Releases). No SDK change — `sdk-v0.6.0` is unaffected and still current.
+
+- Fixed a crash in the CLI (and any other strictly-typed OpenAPI client) when
+  the API rejected a request with a 422 whose `detail` was a plain string
+  instead of the OpenAPI-documented `HTTPValidationError` list shape —
+  surfaced as `json: cannot unmarshal string into Go struct field
+HTTPValidationError.detail of type []client.ValidationError` instead of
+  the actual validation message. Affected `POST /calls`, `POST /emails`
+  (including `/emails/stats`), and the webhooks endpoints; all hand-raised
+  422s across the API now go through a shared helper that matches the
+  documented shape.
+- The CLI now checks `--recipient-consent` client-side before making any
+  request: previously a bare bool flag defaulting `false` with no local
+  check, so an omitted or explicitly-`false` value always round-tripped to
+  the server before failing. Same treatment for `call`'s `--prompt`/
+  `--llm-*` mode group and `email send`'s `--body`/`--body-html`/
+  `--body-file`/`--body-html-file` group, plus previously-unenforced
+  conditional requirements (`--consent-source` when
+  `--message-type=marketing`, `--domain` when `--kind=custom`).
+- `--help` output now visually distinguishes unconditionally-required flags
+  (`Required flags:`) and one-of-N groups (`Required (one of):`) from
+  genuinely optional ones, instead of one undifferentiated alphabetical
+  list — falls back to the prior single `Flags:` block for every command
+  with neither.
+
 ## [0.9.0] — 2026-07-07
 
 **Breaking change.** Component versions cut alongside this release:

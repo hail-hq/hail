@@ -86,3 +86,29 @@ func TestRequireAuth_WithKeyReturnsNil(t *testing.T) {
 		t.Fatalf("want nil, got %v", err)
 	}
 }
+
+func TestRequireTrueFlag_TrueReturnsNil(t *testing.T) {
+	cmd := &cobra.Command{Use: "demo"}
+	if err := requireTrueFlag(cmd, true, "--recipient-consent"); err != nil {
+		t.Fatalf("want nil, got %v", err)
+	}
+}
+
+func TestRequireTrueFlag_FalseFailsWithReasonAndHelp(t *testing.T) {
+	cmd := &cobra.Command{Use: "demo", Long: "demo-long-text"}
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+
+	err := requireTrueFlag(cmd, false, "--recipient-consent")
+	if !errors.Is(err, errInvalidInputs) {
+		t.Fatalf("want errInvalidInputs, got %v", err)
+	}
+	got := out.String()
+	if !strings.Contains(got, "hail: --recipient-consent must be true") {
+		t.Fatalf("missing reason: %q", got)
+	}
+	if !strings.Contains(got, "demo-long-text") {
+		t.Fatalf("missing Help() output: %q", got)
+	}
+}

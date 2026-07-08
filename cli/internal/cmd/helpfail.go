@@ -53,3 +53,34 @@ func argsOrHelp(n int, want string) cobra.PositionalArgs {
 		return nil
 	}
 }
+
+// requireMarkedFlags runs cmd.ValidateRequiredFlags() (the check driven by
+// MarkFlagRequired) as a PreRunE, so a missing flag gets the same
+// reason+Help()+errInvalidInputs treatment as every other input-validation
+// failure in this CLI. Set as PreRunE, this runs before Cobra's own
+// automatic ValidateRequiredFlags call later in Command.execute(), so ours
+// wins — Cobra's generic "required flag(s) ... not set" (no help printed,
+// exit 1, not 2) never surfaces to the user.
+func requireMarkedFlags(cmd *cobra.Command, _ []string) error {
+	if err := cmd.ValidateRequiredFlags(); err != nil {
+		return helpAndFail(cmd, err.Error())
+	}
+	return nil
+}
+
+// requireTrueFlag closes the gap MarkFlagRequired leaves on bool flags:
+// ValidateRequiredFlags (driven by MarkFlagRequired, via requireMarkedFlags)
+// only checks pflag.Changed, so `--recipient-consent=false` satisfies it
+// even though the API requires the value to actually be true. Call this
+// from RunE — after requireMarkedFlags has already run in PreRunE — for
+// any bool flag that must not just be present but true. Mirrors the
+// existing --to shape: MarkFlagRequired catches omission, this (like
+// normalizeRecipients' empty check) catches "passed but not usable", and
+// both failure paths converge on the same reason+Help()+errInvalidInputs
+// treatment via helpAndFail.
+func requireTrueFlag(cmd *cobra.Command, value bool, name string) error {
+	if value {
+		return nil
+	}
+	return helpAndFail(cmd, name+" must be true — the API rejects this request otherwise")
+}

@@ -59,24 +59,30 @@ or all three of:
 Mode A and mode B are mutually exclusive; supply exactly one.
 
 To stream events across the whole org, see ` + "`hail tail`" + ` (top-level);
-for one call, ` + "`hail call tail <id>`" + ` is sugar over the same loop.`,
-		Args: argsOrHelp(1, "<to-number>"),
+for one call, ` + "`hail call tail <id>`" + ` is sugar over the same loop.
+
+Example (minimal):
+  hail call +15551234567 --prompt "You are a scheduling assistant." --recipient-consent`,
+		Args:    argsOrHelp(1, "<to-number>"),
+		PreRunE: requireMarkedFlags,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runCall(cmd, opts, f, args[0])
 		},
 	}
 
-	cmd.Flags().StringVar(&f.prompt, "prompt", "", "System prompt for the agent (mode A)")
-	cmd.Flags().StringVar(&f.llmURL, "llm-url", "", "OpenAI-compatible base URL (mode B)")
-	cmd.Flags().StringVar(&f.llmKey, "llm-key", "", "API key for the endpoint (mode B)")
-	cmd.Flags().StringVar(&f.llmModel, "llm-model", "", "Model name (mode B)")
+	cmd.Flags().StringVar(&f.prompt, "prompt", "", "System prompt for the agent — one of --prompt/--llm-* required (mode A)")
+	cmd.Flags().StringVar(&f.llmURL, "llm-url", "", "OpenAI-compatible base URL — one of --prompt/--llm-* required (mode B)")
+	cmd.Flags().StringVar(&f.llmKey, "llm-key", "", "API key for the endpoint — one of --prompt/--llm-* required (mode B)")
+	cmd.Flags().StringVar(&f.llmModel, "llm-model", "", "Model name — one of --prompt/--llm-* required (mode B)")
 	cmd.Flags().StringVar(&f.from, "from", "", "Override the from-number (default: first active number on the org)")
 	cmd.Flags().StringVar(&f.firstMessage, "first-message", "", "Spoken on pickup before listening")
 	cmd.Flags().StringVar(&f.idempotencyKey, "idempotency-key", "", "Defaults to a fresh UUID")
-	cmd.Flags().BoolVar(&f.recipientConsent, "recipient-consent", false, "Confirm the recipient has consented to receive this call (required by the API)")
-	cmd.Flags().StringVar(&f.consentSource, "consent-source", "", "Where/how consent was obtained (required if --message-type=marketing)")
-	cmd.Flags().StringVar(&f.consentObtainedAt, "consent-obtained-at", "", "RFC 3339 timestamp consent was obtained at (optional)")
+	cmd.Flags().BoolVar(&f.recipientConsent, "recipient-consent", false, "Confirm the recipient has consented to receive this call — required by the API")
+	cmd.Flags().StringVar(&f.consentSource, "consent-source", "", "Where/how consent was obtained — required if --message-type=marketing")
+	cmd.Flags().StringVar(&f.consentObtainedAt, "consent-obtained-at", "", "RFC 3339 timestamp consent was obtained at")
 	cmd.Flags().StringVar(&f.messageType, "message-type", "", "\"marketing\" or \"informational\" (default: informational)")
+	cmd.MarkFlagRequired("recipient-consent")
+	markOneOfRequired(cmd, "mode", "prompt", "llm-url", "llm-key", "llm-model")
 
 	cmd.AddCommand(newCallStatusCmd(opts))
 	cmd.AddCommand(newCallListCmd(opts))
@@ -86,8 +92,14 @@ for one call, ` + "`hail call tail <id>`" + ` is sugar over the same loop.`,
 }
 
 func runCall(cmd *cobra.Command, opts *Options, f *callFlags, toNumber string) error {
+	if err := requireTrueFlag(cmd, f.recipientConsent, "--recipient-consent"); err != nil {
+		return err
+	}
 	if err := validateMode(cmd, f); err != nil {
 		return err
+	}
+	if f.messageType == "marketing" && f.consentSource == "" {
+		return requireInputs(cmd, "--consent-source (required when --message-type=marketing)")
 	}
 	ctx := cmd.Context()
 

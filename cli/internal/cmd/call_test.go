@@ -87,7 +87,7 @@ func TestCallSubcommand_ModeA_HappyPath(t *testing.T) {
 
 	stdout, _, err := runRoot(t,
 		map[string]string{"HAIL_API_KEY": "sk_test", "HAIL_API_URL": srv.URL},
-		"call", "+15551234567", "--prompt", "you are a polite agent",
+		"call", "+15551234567", "--prompt", "you are a polite agent", "--recipient-consent",
 	)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -137,6 +137,7 @@ func TestCallSubcommand_ModeB_BringYourOwnLLM(t *testing.T) {
 		"--llm-url", "https://api.openai.com/v1",
 		"--llm-key", "sk-openai",
 		"--llm-model", "gpt-4o-mini",
+		"--recipient-consent",
 	)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -167,11 +168,12 @@ func TestCallSubcommand_RejectsBothModes(t *testing.T) {
 		"--llm-url", "https://api.openai.com/v1",
 		"--llm-key", "k",
 		"--llm-model", "m",
+		"--recipient-consent",
 	)
 	if !errors.Is(err, errInvalidInputs) {
 		t.Fatalf("want errInvalidInputs, got %v", err)
 	}
-	if !strings.Contains(stderr, "mutually exclusive") {
+	if !strings.Contains(stderr, "--prompt and --llm-* are mutually exclusive") {
 		t.Errorf("stderr = %q", stderr)
 	}
 	if hits := atomic.LoadInt32(&srv.hits); hits != 0 {
@@ -184,7 +186,7 @@ func TestCallSubcommand_RejectsNeitherMode(t *testing.T) {
 
 	_, stderr, err := runRoot(t,
 		map[string]string{"HAIL_API_KEY": "sk_test", "HAIL_API_URL": srv.URL},
-		"call", "+15551234567",
+		"call", "+15551234567", "--recipient-consent",
 	)
 	if !errors.Is(err, errInvalidInputs) {
 		t.Fatalf("want errInvalidInputs, got %v", err)
@@ -206,6 +208,7 @@ func TestCallSubcommand_FromAndFirstMessageFlow(t *testing.T) {
 		"--prompt", "hi",
 		"--from", "+14155550000",
 		"--first-message", "Hello, this is Hail.",
+		"--recipient-consent",
 	)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -228,7 +231,7 @@ func TestCallSubcommand_PropagatesIdempotencyKey(t *testing.T) {
 		srv := newFakeServer(t, http.StatusCreated, sampleResponse())
 		_, _, err := runRoot(t,
 			map[string]string{"HAIL_API_KEY": "sk_test", "HAIL_API_URL": srv.URL},
-			"call", "+15551234567", "--prompt", "hi", "--idempotency-key", "deadbeef-1234",
+			"call", "+15551234567", "--prompt", "hi", "--idempotency-key", "deadbeef-1234", "--recipient-consent",
 		)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
@@ -241,7 +244,7 @@ func TestCallSubcommand_PropagatesIdempotencyKey(t *testing.T) {
 		srv := newFakeServer(t, http.StatusCreated, sampleResponse())
 		_, _, err := runRoot(t,
 			map[string]string{"HAIL_API_KEY": "sk_test", "HAIL_API_URL": srv.URL},
-			"call", "+15551234567", "--prompt", "hi",
+			"call", "+15551234567", "--prompt", "hi", "--recipient-consent",
 		)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
@@ -265,7 +268,7 @@ func TestCallSubcommand_HandlesAPIError(t *testing.T) {
 
 	_, _, err := runRoot(t,
 		map[string]string{"HAIL_API_KEY": "sk_test", "HAIL_API_URL": srv.URL},
-		"call", "+15551234567", "--prompt", "hi",
+		"call", "+15551234567", "--prompt", "hi", "--recipient-consent",
 	)
 	if err == nil {
 		t.Fatal("expected error from server, got nil")
@@ -280,7 +283,7 @@ func TestCallSubcommand_JSONOutput(t *testing.T) {
 
 	stdout, _, err := runRoot(t,
 		map[string]string{"HAIL_API_KEY": "sk_test", "HAIL_API_URL": srv.URL},
-		"--json", "call", "+15551234567", "--prompt", "hi",
+		"--json", "call", "+15551234567", "--prompt", "hi", "--recipient-consent",
 	)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -351,13 +354,13 @@ func TestPersistentFlags_PositionFlexibility(t *testing.T) {
 		argsFor func(url string) []string
 	}{
 		{"before subcommand", func(u string) []string {
-			return []string{"--api-url", u, "--api-key", "sk_test", "call", "+15551234567", "--prompt", "hi"}
+			return []string{"--api-url", u, "--api-key", "sk_test", "call", "+15551234567", "--prompt", "hi", "--recipient-consent"}
 		}},
 		{"after subcommand", func(u string) []string {
-			return []string{"call", "--api-url", u, "--api-key", "sk_test", "+15551234567", "--prompt", "hi"}
+			return []string{"call", "--api-url", u, "--api-key", "sk_test", "+15551234567", "--prompt", "hi", "--recipient-consent"}
 		}},
 		{"after positional", func(u string) []string {
-			return []string{"call", "+15551234567", "--prompt", "hi", "--api-url", u, "--api-key", "sk_test"}
+			return []string{"call", "+15551234567", "--prompt", "hi", "--recipient-consent", "--api-url", u, "--api-key", "sk_test"}
 		}},
 	}
 
@@ -400,7 +403,7 @@ func TestCallSubcommand_MissingAPIKey(t *testing.T) {
 
 	_, _, err := runRoot(t,
 		map[string]string{"HAIL_API_URL": srv.URL}, // no HAIL_API_KEY
-		"call", "+15551234567", "--prompt", "hi",
+		"call", "+15551234567", "--prompt", "hi", "--recipient-consent",
 	)
 	if err == nil {
 		t.Fatal("expected error, got nil")
@@ -443,40 +446,46 @@ func TestCallSubcommand_SendsConsentFlags(t *testing.T) {
 	}
 }
 
-// TestCallSubcommand_DefaultsRecipientConsentFalseWhenNotPassed pins the
-// real behavior forced by the OpenAPI spec: CallCreate.recipient_consent is
-// listed under `required` and has no `anyOf [.., null]`, so oapi-codegen
-// emits a plain, non-pointer `bool` field with no `omitempty` — the key can
-// never be genuinely absent from the marshaled JSON body, only true or
-// false. (The task brief's draft test assumed the flag would be omitted
-// entirely when not passed, as if the field were optional/pointer; that
-// doesn't hold against the real generated client, so this test asserts the
-// spec-consistent behavior instead.) The CLI always reports its actual
-// consent status, defaulting to false, so an operator who forgets the flag
-// gets a clear "consent required" 422 from the API rather than a generic
-// "field required" validation error.
-func TestCallSubcommand_DefaultsRecipientConsentFalseWhenNotPassed(t *testing.T) {
+// TestCallSubcommand_RecipientConsent_OmittedFailsBeforeNetwork pins the
+// MarkFlagRequired("recipient-consent") gap: omitting the flag entirely
+// fails in PreRunE (requireMarkedFlags), before any HTTP request is made.
+func TestCallSubcommand_RecipientConsent_OmittedFailsBeforeNetwork(t *testing.T) {
 	srv := newFakeServer(t, http.StatusCreated, sampleResponse())
 
-	_, _, err := runRoot(t,
+	_, stderr, err := runRoot(t,
 		map[string]string{"HAIL_API_KEY": "sk_test", "HAIL_API_URL": srv.URL},
 		"call", "+15551234567", "--prompt", "you are a polite agent",
 	)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	if !errors.Is(err, errInvalidInputs) {
+		t.Fatalf("want errInvalidInputs, got %v", err)
 	}
+	if !strings.Contains(stderr, `required flag(s) "recipient-consent" not set`) {
+		t.Errorf("stderr missing reason: %q", stderr)
+	}
+	if hits := atomic.LoadInt32(&srv.hits); hits != 0 {
+		t.Errorf("expected 0 HTTP calls, got %d", hits)
+	}
+}
 
-	var body map[string]any
-	if err := json.Unmarshal(srv.lastBody, &body); err != nil {
-		t.Fatalf("bad request body: %v", err)
+// TestCallSubcommand_RecipientConsent_FalseFailsBeforeNetwork pins the gap
+// MarkFlagRequired alone cannot close: `--recipient-consent=false` sets
+// pflag.Changed, satisfying ValidateRequiredFlags, but the API requires the
+// value to actually be true. requireTrueFlag (called first in runCall)
+// catches this and fails before any HTTP request is made.
+func TestCallSubcommand_RecipientConsent_FalseFailsBeforeNetwork(t *testing.T) {
+	srv := newFakeServer(t, http.StatusCreated, sampleResponse())
+
+	_, stderr, err := runRoot(t,
+		map[string]string{"HAIL_API_KEY": "sk_test", "HAIL_API_URL": srv.URL},
+		"call", "+15551234567", "--prompt", "you are a polite agent", "--recipient-consent=false",
+	)
+	if !errors.Is(err, errInvalidInputs) {
+		t.Fatalf("want errInvalidInputs, got %v", err)
 	}
-	if v, ok := body["recipient_consent"]; !ok || v != false {
-		t.Errorf("recipient_consent = %v (present=%v), want false", v, ok)
+	if !strings.Contains(stderr, "--recipient-consent must be true") {
+		t.Errorf("stderr missing reason: %q", stderr)
 	}
-	if _, ok := body["consent_source"]; ok {
-		t.Errorf("consent_source should be omitted when --consent-source not passed, got %v", body["consent_source"])
-	}
-	if _, ok := body["message_type"]; ok {
-		t.Errorf("message_type should be omitted when --message-type not passed, got %v", body["message_type"])
+	if hits := atomic.LoadInt32(&srv.hits); hits != 0 {
+		t.Errorf("expected 0 HTTP calls, got %d", hits)
 	}
 }

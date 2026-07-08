@@ -48,6 +48,7 @@ func TestEmailSend_HappyPath(t *testing.T) {
 		"--to", "x@example.com",
 		"--subject", "hi",
 		"--body", "hello",
+		"--recipient-consent",
 	)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -96,12 +97,12 @@ func TestEmailSend_RequiresBody(t *testing.T) {
 
 	_, stderr, err := runRoot(t,
 		map[string]string{"HAIL_API_KEY": "sk_test", "HAIL_API_URL": srv.URL},
-		"email", "send", "--to", "x@example.com", "--subject", "hi",
+		"email", "send", "--to", "x@example.com", "--subject", "hi", "--recipient-consent",
 	)
 	if !errors.Is(err, errInvalidInputs) {
 		t.Fatalf("want errInvalidInputs, got %v", err)
 	}
-	if !strings.Contains(stderr, "body") {
+	if !strings.Contains(stderr, "--body or --body-html") {
 		t.Errorf("stderr missing body mention: %q", stderr)
 	}
 	if got := atomic.LoadInt32(&srv.hits); got != 0 {
@@ -114,7 +115,7 @@ func TestEmailSend_RequiresSubject(t *testing.T) {
 
 	_, _, err := runRoot(t,
 		map[string]string{"HAIL_API_KEY": "sk_test", "HAIL_API_URL": srv.URL},
-		"email", "send", "--to", "x@example.com", "--body", "hi",
+		"email", "send", "--to", "x@example.com", "--body", "hi", "--recipient-consent",
 	)
 	if err == nil {
 		t.Fatal("expected error when --subject omitted")
@@ -131,6 +132,7 @@ func TestEmailSend_MultipleRecipients(t *testing.T) {
 		"--cc", "c@example.com",
 		"--subject", "hi",
 		"--body", "hello",
+		"--recipient-consent",
 	)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -163,6 +165,7 @@ func TestEmailSend_BodyFile(t *testing.T) {
 		"--to", "x@example.com",
 		"--subject", "hi",
 		"--body-file", bodyPath,
+		"--recipient-consent",
 	)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -181,12 +184,12 @@ func TestEmailSend_MissingSubject_PrintsHelpAndFails(t *testing.T) {
 	srv := newFakeServer(t, http.StatusCreated, map[string]any{})
 	_, stderr, err := runRoot(t,
 		map[string]string{"HAIL_API_KEY": "sk_test", "HAIL_API_URL": srv.URL},
-		"email", "send", "--to", "a@b.com", "--body", "hi",
+		"email", "send", "--to", "a@b.com", "--body", "hi", "--recipient-consent",
 	)
 	if !errors.Is(err, errInvalidInputs) {
 		t.Fatalf("want errInvalidInputs, got %v", err)
 	}
-	if !strings.Contains(stderr, "missing required: --subject") {
+	if !strings.Contains(stderr, `required flag(s) "subject" not set`) {
 		t.Fatalf("missing reason line: %q", stderr)
 	}
 	if !strings.Contains(stderr, "hail email send") {
@@ -203,6 +206,7 @@ func TestEmailSend_APIError(t *testing.T) {
 		"--to", "x@example.com",
 		"--subject", "hi",
 		"--body", "hello",
+		"--recipient-consent",
 	)
 	if err == nil {
 		t.Fatal("expected error on 502")
@@ -241,34 +245,53 @@ func TestEmailSendSubcommand_SendsConsentFlags(t *testing.T) {
 	}
 }
 
-// TestEmailSendSubcommand_DefaultsRecipientConsentFalseWhenNotPassed mirrors
-// TestCallSubcommand_DefaultsRecipientConsentFalseWhenNotPassed in
-// call_test.go: EmailCreate.recipient_consent is likewise a required,
-// non-nullable boolean in openapi.yaml, so the generated field is a plain
-// `bool` with no `omitempty` and can never be truly absent from the JSON
-// body — only true or false.
-func TestEmailSendSubcommand_DefaultsRecipientConsentFalseWhenNotPassed(t *testing.T) {
+// TestEmailSendSubcommand_RecipientConsent_OmittedFailsBeforeNetwork pins
+// the MarkFlagRequired("recipient-consent") gap: omitting the flag entirely
+// fails in PreRunE (requireMarkedFlags), before any HTTP request is made.
+func TestEmailSendSubcommand_RecipientConsent_OmittedFailsBeforeNetwork(t *testing.T) {
 	srv := newFakeServer(t, http.StatusCreated, sampleEmailResponse())
 
-	_, _, err := runRoot(t,
+	_, stderr, err := runRoot(t,
 		map[string]string{"HAIL_API_KEY": "sk_test", "HAIL_API_URL": srv.URL},
 		"email", "send",
 		"--to", "a@example.com",
 		"--subject", "hi",
 		"--body", "hello",
 	)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	if !errors.Is(err, errInvalidInputs) {
+		t.Fatalf("want errInvalidInputs, got %v", err)
 	}
+	if !strings.Contains(stderr, `required flag(s) "recipient-consent" not set`) {
+		t.Errorf("stderr missing reason: %q", stderr)
+	}
+	if hits := atomic.LoadInt32(&srv.hits); hits != 0 {
+		t.Errorf("expected 0 HTTP calls, got %d", hits)
+	}
+}
 
-	var body map[string]any
-	if err := json.Unmarshal(srv.lastBody, &body); err != nil {
-		t.Fatalf("bad request body: %v", err)
+// TestEmailSendSubcommand_RecipientConsent_FalseFailsBeforeNetwork pins the
+// gap MarkFlagRequired alone cannot close: `--recipient-consent=false` sets
+// pflag.Changed, satisfying ValidateRequiredFlags, but the API requires the
+// value to actually be true. requireTrueFlag (called first in
+// runEmailSend) catches this and fails before any HTTP request is made.
+func TestEmailSendSubcommand_RecipientConsent_FalseFailsBeforeNetwork(t *testing.T) {
+	srv := newFakeServer(t, http.StatusCreated, sampleEmailResponse())
+
+	_, stderr, err := runRoot(t,
+		map[string]string{"HAIL_API_KEY": "sk_test", "HAIL_API_URL": srv.URL},
+		"email", "send",
+		"--to", "a@example.com",
+		"--subject", "hi",
+		"--body", "hello",
+		"--recipient-consent=false",
+	)
+	if !errors.Is(err, errInvalidInputs) {
+		t.Fatalf("want errInvalidInputs, got %v", err)
 	}
-	if v, ok := body["recipient_consent"]; !ok || v != false {
-		t.Errorf("recipient_consent = %v (present=%v), want false", v, ok)
+	if !strings.Contains(stderr, "--recipient-consent must be true") {
+		t.Errorf("stderr missing reason: %q", stderr)
 	}
-	if _, ok := body["consent_source"]; ok {
-		t.Errorf("consent_source should be omitted when --consent-source not passed, got %v", body["consent_source"])
+	if hits := atomic.LoadInt32(&srv.hits); hits != 0 {
+		t.Errorf("expected 0 HTTP calls, got %d", hits)
 	}
 }

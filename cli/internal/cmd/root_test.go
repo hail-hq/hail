@@ -71,3 +71,111 @@ func TestRootHelp_ListsAllTopLevelSubcommands(t *testing.T) {
 		}
 	}
 }
+
+// TestHelp_CallSplitsRequiredOneOfAndOptionalFlags pins the
+// splitRequiredFlags/markOneOfRequired template wiring for `hail call`:
+// --recipient-consent (MarkFlagRequired) renders under "Required flags:",
+// the mode A/B group (markOneOfRequired) renders under "Required (one
+// of):", and everything else stays under "Optional flags:".
+func TestHelp_CallSplitsRequiredOneOfAndOptionalFlags(t *testing.T) {
+	stdout, _, err := runRoot(t, map[string]string{}, "call", "--help")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	reqIdx := strings.Index(stdout, "Required flags:")
+	oneOfIdx := strings.Index(stdout, "Required (one of):")
+	optIdx := strings.Index(stdout, "Optional flags:")
+	if reqIdx == -1 || oneOfIdx == -1 || optIdx == -1 {
+		t.Fatalf("expected all three sections present: %q", stdout)
+	}
+	if !(reqIdx < oneOfIdx && oneOfIdx < optIdx) {
+		t.Fatalf("expected section order Required, Required (one of), Optional; got: %q", stdout)
+	}
+
+	required := stdout[reqIdx:oneOfIdx]
+	if !strings.Contains(required, "--recipient-consent") {
+		t.Errorf("expected --recipient-consent under Required flags: %q", required)
+	}
+
+	oneOf := stdout[oneOfIdx:optIdx]
+	for _, want := range []string{"--prompt", "--llm-url", "--llm-key", "--llm-model"} {
+		if !strings.Contains(oneOf, want) {
+			t.Errorf("expected %q under Required (one of): %q", want, oneOf)
+		}
+	}
+
+	optional := stdout[optIdx:]
+	for _, notWant := range []string{"--recipient-consent", "--prompt", "--llm-url", "--llm-key", "--llm-model"} {
+		if strings.Contains(optional, notWant) {
+			t.Errorf("did not expect %q under Optional flags: %q", notWant, optional)
+		}
+	}
+	for _, want := range []string{"--from", "--first-message", "--message-type"} {
+		if !strings.Contains(optional, want) {
+			t.Errorf("expected %q under Optional flags: %q", want, optional)
+		}
+	}
+}
+
+// TestHelp_EmailSendSplitsRequiredOneOfAndOptionalFlags mirrors the call
+// test above for `hail email send`'s body group.
+func TestHelp_EmailSendSplitsRequiredOneOfAndOptionalFlags(t *testing.T) {
+	stdout, _, err := runRoot(t, map[string]string{}, "email", "send", "--help")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	reqIdx := strings.Index(stdout, "Required flags:")
+	oneOfIdx := strings.Index(stdout, "Required (one of):")
+	optIdx := strings.Index(stdout, "Optional flags:")
+	if reqIdx == -1 || oneOfIdx == -1 || optIdx == -1 {
+		t.Fatalf("expected all three sections present: %q", stdout)
+	}
+	if !(reqIdx < oneOfIdx && oneOfIdx < optIdx) {
+		t.Fatalf("expected section order Required, Required (one of), Optional; got: %q", stdout)
+	}
+
+	required := stdout[reqIdx:oneOfIdx]
+	for _, want := range []string{"--recipient-consent", "--subject", "--to"} {
+		if !strings.Contains(required, want) {
+			t.Errorf("expected %q under Required flags: %q", want, required)
+		}
+	}
+
+	oneOf := stdout[oneOfIdx:optIdx]
+	for _, want := range []string{"--body ", "--body-html", "--body-file", "--body-html-file"} {
+		if !strings.Contains(oneOf, want) {
+			t.Errorf("expected %q under Required (one of): %q", want, oneOf)
+		}
+	}
+
+	optional := stdout[optIdx:]
+	for _, notWant := range []string{"--recipient-consent", "--subject", "--to "} {
+		if strings.Contains(optional, notWant) {
+			t.Errorf("did not expect %q under Optional flags: %q", notWant, optional)
+		}
+	}
+	for _, want := range []string{"--cc", "--bcc", "--from", "--reply-to"} {
+		if !strings.Contains(optional, want) {
+			t.Errorf("expected %q under Optional flags: %q", want, optional)
+		}
+	}
+}
+
+// TestHelp_NeitherRequiredNorOneOf_FallsBackToPlainFlagsSection pins the
+// unchanged-behavior guarantee: a command using neither MarkFlagRequired
+// nor markOneOfRequired (e.g. `call status`) still renders the single
+// alphabetical "Flags:" block, not the three-way split.
+func TestHelp_NeitherRequiredNorOneOf_FallsBackToPlainFlagsSection(t *testing.T) {
+	stdout, _, err := runRoot(t, map[string]string{}, "call", "status", "--help")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(stdout, "\nFlags:\n") {
+		t.Fatalf("expected plain Flags: section: %q", stdout)
+	}
+	if strings.Contains(stdout, "Required flags:") || strings.Contains(stdout, "Required (one of):") {
+		t.Fatalf("did not expect a required split for a command with no required/one-of flags: %q", stdout)
+	}
+}

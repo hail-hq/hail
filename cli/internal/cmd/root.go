@@ -7,11 +7,154 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 
 	"github.com/hail-hq/hail/cli/internal/client"
 )
+
+// splitRequiredFlags partitions fs into three rendered flag-usage blocks:
+// unconditionally-required (MarkFlagRequired), one-of-required
+// (markOneOfRequired, grouped by tag, each group its own FlagSet so groups
+// don't interleave alphabetically with each other), and everything else.
+// hasRequired / hasOneOf report whether each of the first two buckets is
+// non-empty, letting the usage template fall back to today's single
+// "Flags:" block when both are empty — unchanged behavior for every
+// command that uses neither mechanism.
+func splitRequiredFlags(fs *pflag.FlagSet) (required, oneOf, optional string, hasRequired, hasOneOf bool) {
+	req := pflag.NewFlagSet("required", pflag.ContinueOnError)
+	opt := pflag.NewFlagSet("optional", pflag.ContinueOnError)
+	var tagOrder []string
+	tagSets := map[string]*pflag.FlagSet{}
+	fs.VisitAll(func(f *pflag.Flag) {
+		if a, ok := f.Annotations[cobra.BashCompOneRequiredFlag]; ok && len(a) > 0 && a[0] == "true" {
+			req.AddFlag(f)
+			hasRequired = true
+			return
+		}
+		if a, ok := f.Annotations[oneOfRequiredAnnotation]; ok && len(a) > 0 && a[0] != "" {
+			tag := a[0]
+			ts, seen := tagSets[tag]
+			if !seen {
+				ts = pflag.NewFlagSet(tag, pflag.ContinueOnError)
+				tagSets[tag] = ts
+				tagOrder = append(tagOrder, tag)
+			}
+			ts.AddFlag(f)
+			hasOneOf = true
+			return
+		}
+		opt.AddFlag(f)
+	})
+	var oneOfBlocks []string
+	for _, tag := range tagOrder {
+		oneOfBlocks = append(oneOfBlocks, strings.TrimRight(tagSets[tag].FlagUsages(), "\n"))
+	}
+	return strings.TrimRight(req.FlagUsages(), "\n"),
+		strings.Join(oneOfBlocks, "\n\n"),
+		strings.TrimRight(opt.FlagUsages(), "\n"),
+		hasRequired, hasOneOf
+}
+
+// oneOfRequiredAnnotation is our own flag annotation (set via
+// cmd.Flags().SetAnnotation, not a cobra-recognized key) marking a flag as
+// a member of a "one of these is required" group. Cobra ships
+// MarkFlagsOneRequired, but the annotation key it writes is unexported
+// (verified against the vendored cobra source), so a custom usage template
+// cannot read group membership off it. This is display-only: it makes an
+// already-enforced rule visible in --help. It does not enforce anything
+// itself — actual one-of enforcement stays in each command's existing
+// hand-written check (validateMode for `call`, resolveBody+requireInputs
+// for `email send`).
+const oneOfRequiredAnnotation = "hail_one_of_required"
+
+// markOneOfRequired tags each of names on cmd's flag set with tag so they
+// render together under "Required (one of):" in --help instead of the
+// undifferentiated Optional/Flags bucket. Flags sharing the same tag
+// cluster together (blank-line separated from any other tag) regardless of
+// declaration order; call once per group, right after the flags in that
+// group are declared.
+func markOneOfRequired(cmd *cobra.Command, tag string, names ...string) {
+	for _, n := range names {
+		cmd.Flags().SetAnnotation(n, oneOfRequiredAnnotation, []string{tag})
+	}
+}
+
+func init() {
+	cobra.AddTemplateFunc("hasRequiredLocalFlags", func(c *cobra.Command) bool {
+		_, _, _, hasRequired, _ := splitRequiredFlags(c.LocalFlags())
+		return hasRequired
+	})
+	cobra.AddTemplateFunc("hasOneOfRequiredLocalFlags", func(c *cobra.Command) bool {
+		_, _, _, _, hasOneOf := splitRequiredFlags(c.LocalFlags())
+		return hasOneOf
+	})
+	cobra.AddTemplateFunc("requiredLocalFlagUsages", func(c *cobra.Command) string {
+		required, _, _, _, _ := splitRequiredFlags(c.LocalFlags())
+		return required
+	})
+	cobra.AddTemplateFunc("oneOfRequiredLocalFlagUsages", func(c *cobra.Command) string {
+		_, oneOf, _, _, _ := splitRequiredFlags(c.LocalFlags())
+		return oneOf
+	})
+	cobra.AddTemplateFunc("optionalLocalFlagUsages", func(c *cobra.Command) string {
+		_, _, optional, _, _ := splitRequiredFlags(c.LocalFlags())
+		return optional
+	})
+}
+
+// usageTemplate is Cobra's defaultUsageTemplate (command.go) with the
+// "Flags:" section replaced: commands with neither an unconditionally-
+// required flag (MarkFlagRequired) nor a one-of-required group
+// (markOneOfRequired) — the vast majority — render byte-identically to
+// before; commands with either get a split instead of one alphabetical
+// list: "Required flags:" for unconditional flags, "Required (one of):"
+// for one-of-required groups (each group blank-line separated), and
+// "Optional flags:" for everything else — so a skimmer sees what's
+// mandatory without reading the Long description. Keep this in sync with
+// Cobra's own template if the vendored version changes — see
+// UsageTemplate's own comment for the upstream copy this is derived from.
+const usageTemplate = `Usage:{{if .Runnable}}
+  {{.UseLine}}{{end}}{{if .HasAvailableSubCommands}}
+  {{.CommandPath}} [command]{{end}}{{if gt (len .Aliases) 0}}
+
+Aliases:
+  {{.NameAndAliases}}{{end}}{{if .HasExample}}
+
+Examples:
+{{.Example}}{{end}}{{if .HasAvailableSubCommands}}{{$cmds := .Commands}}{{if eq (len .Groups) 0}}
+
+Available Commands:{{range $cmds}}{{if (or .IsAvailableCommand (eq .Name "help"))}}
+  {{rpad .Name .NamePadding }} {{.Short}}{{end}}{{end}}{{else}}{{range $group := .Groups}}
+
+{{.Title}}{{range $cmds}}{{if (and (eq .GroupID $group.ID) (or .IsAvailableCommand (eq .Name "help")))}}
+  {{rpad .Name .NamePadding }} {{.Short}}{{end}}{{end}}{{end}}{{if not .AllChildCommandsHaveGroup}}
+
+Additional Commands:{{range $cmds}}{{if (and (eq .GroupID "") (or .IsAvailableCommand (eq .Name "help")))}}
+  {{rpad .Name .NamePadding }} {{.Short}}{{end}}{{end}}{{end}}{{end}}{{end}}{{if .HasAvailableLocalFlags}}{{if or (hasRequiredLocalFlags .) (hasOneOfRequiredLocalFlags .)}}{{if hasRequiredLocalFlags .}}
+
+Required flags:
+{{requiredLocalFlagUsages . | trimTrailingWhitespaces}}{{end}}{{if hasOneOfRequiredLocalFlags .}}
+
+Required (one of):
+{{oneOfRequiredLocalFlagUsages . | trimTrailingWhitespaces}}{{end}}
+
+Optional flags:
+{{optionalLocalFlagUsages . | trimTrailingWhitespaces}}{{else}}
+
+Flags:
+{{.LocalFlags.FlagUsages | trimTrailingWhitespaces}}{{end}}{{end}}{{if .HasAvailableInheritedFlags}}
+
+Global Flags:
+{{.InheritedFlags.FlagUsages | trimTrailingWhitespaces}}{{end}}{{if .HasHelpSubCommands}}
+
+Additional help topics:{{range .Commands}}{{if .IsAdditionalHelpTopicCommand}}
+  {{rpad .CommandPath .CommandPathPadding}} {{.Short}}{{end}}{{end}}{{end}}{{if .HasAvailableSubCommands}}
+
+Use "{{.CommandPath}} [command] --help" for more information about a command.{{end}}
+`
 
 // utcTSLayout is the wall-clock format used in human-readable CLI output.
 const utcTSLayout = "2006-01-02 15:04:05Z"
@@ -140,6 +283,7 @@ or pass --api-key.`,
 	root.Version = fmt.Sprintf("%s (commit %s, built %s)", version, commit, buildDate)
 	root.SetOut(stdout)
 	root.SetErr(stderr)
+	root.SetUsageTemplate(usageTemplate)
 
 	// Dynamic Long: the banner branches on whether creds resolved to anything.
 	// Cobra does NOT run PersistentPreRunE before printing help, so we resolve
