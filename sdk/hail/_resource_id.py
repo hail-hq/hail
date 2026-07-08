@@ -13,7 +13,7 @@ from uuid import UUID
 
 from hail._errors import HailMalformedResourceId
 
-SUPPORTED_RESOURCE_TYPES: tuple[str, ...] = ("call",)
+SUPPORTED_RESOURCE_TYPES: tuple[str, ...] = ("call", "email", "sms")
 
 
 def parse_resource_id(value: str) -> tuple[str, UUID]:

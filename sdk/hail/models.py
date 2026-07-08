@@ -139,11 +139,69 @@ class CallListResponse(BaseModel):
     next_cursor: str | None = None
 
 
-class CallEventResponse(BaseModel):
+class SmsCreate(BaseModel):
+    """Body shape for ``POST /sms``."""
+
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+    to: str
+    from_: str | None = Field(default=None, alias="from")
+    body: str = Field(min_length=1, max_length=1600)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    recipient_consent: bool
+    consent_source: str | None = None
+    consent_obtained_at: datetime | None = None
+    message_type: Literal["marketing", "informational"] = "informational"
+
+    @field_validator("to", "from_")
+    @classmethod
+    def _validate_e164(cls, v: str | None) -> str | None:
+        if v is not None and not E164.match(v):
+            raise ValueError("must be E.164 (e.g. +14155551234)")
+        return v
+
+
+SmsStatus = Literal["queued", "sent", "delivered", "failed", "undelivered", "received"]
+
+
+class SmsResponse(BaseModel):
+    """Shape returned by ``POST /sms`` and ``GET /sms/{id}``."""
+
     model_config = ConfigDict(from_attributes=True)
 
     id: UUID
-    call_id: UUID
+    organization_id: UUID
+    from_e164: str
+    to_e164: str
+    direction: Literal["outbound", "inbound"]
+    status: SmsStatus
+    body: str
+    provider_message_sid: str | None = None
+    segment_count: int
+    error_code: str | None = None
+    requested_at: datetime
+    sent_at: datetime | None = None
+
+
+class SmsListResponse(BaseModel):
+    items: list[SmsResponse]
+    next_cursor: str | None = None
+
+
+class CallEventResponse(BaseModel):
+    """One event on the unified ``GET /events`` stream (mirrors the API's
+    ``EventResponse``). The name predates the unified stream — it carries
+    call, email, and SMS events; kept for backwards compatibility. The
+    server sets exactly one of ``call_id`` / ``email_id`` / ``sms_id``.
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    source: Literal["call", "email", "sms"]
+    call_id: UUID | None = None
+    email_id: UUID | None = None
+    sms_id: UUID | None = None
     kind: str
     payload: dict[str, Any]
     occurred_at: datetime
@@ -500,6 +558,10 @@ __all__ = [
     "CallListResponse",
     "CallEventResponse",
     "EventStreamResponse",
+    "SmsStatus",
+    "SmsCreate",
+    "SmsResponse",
+    "SmsListResponse",
     "EmailCreate",
     "EmailAttachmentResponse",
     "EmailResponse",
