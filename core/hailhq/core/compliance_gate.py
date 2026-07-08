@@ -1,11 +1,14 @@
 """Pre-send compliance gate — suppression list, DNC scrub, premium-rate
-blocks, and velocity caps for outbound calls and emails.
+blocks, and velocity caps for outbound calls, SMS, and emails.
 
-Exactly two call sites (``api/hailhq/api/routes/calls.py`` and
-``.../emails.py``'s ``create_call`` / ``create_email``) — that's the
-"two concrete uses" the repo's "no abstractions without two concrete
-uses" tenet asks for, so the five checks below live in one module
-instead of being scattered inline in each route.
+Three call sites (``api/hailhq/api/routes/calls.py``, ``.../emails.py``,
+and ``.../sms.py``'s ``create_call`` / ``create_email`` / ``create_sms``)
+— that's the "two concrete uses" the repo's "no abstractions without two
+concrete uses" tenet asks for, so the five checks below live in one
+module instead of being scattered inline in each route. The two phone
+channels (voice, SMS) share ``_check_phone_destination`` so the
+destination scrubs — and their audit ``checks`` keys — cannot drift
+between them.
 
 Call ``check_call_allowed`` / ``check_email_allowed`` right after the
 existing consent check (``hailhq.api.consent.enforce_consent``) and
@@ -22,6 +25,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
+from functools import lru_cache
 from typing import Any
 from uuid import UUID
 
@@ -29,12 +33,13 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from hailhq.core.config import settings
-from hailhq.core.models import Suppression, UsageEvent
+from hailhq.core.models import Sms, Suppression, UsageEvent
 
 __all__ = [
     "GateResult",
     "check_call_allowed",
     "check_email_allowed",
+    "check_sms_allowed",
     "check_national_dnc",
     "add_suppression",
     "normalize_recipient",
@@ -106,31 +111,40 @@ async def check_national_dnc(e164: str) -> bool:
 
 async def _check_velocity(
     db: AsyncSession,
-    organization_id: UUID,
-    channel: str,
+    model: type[Any],
+    ts_col: Any,
     *,
+    organization_id: UUID,
+    extra_filters: list[Any] | None = None,
     per_hour: int,
     per_day: int,
     unit: str,
 ) -> tuple[dict[str, int], str | None]:
-    """Shared hour/day velocity check for both channels — one query covers
+    """Shared hour/day velocity check for all channels — one query covers
     both windows (the day window is a superset of the hour window, so two
-    separate ``COUNT`` round-trips were redundant). Returns the
-    ``checks["velocity"]`` detail dict plus a deny reason, or ``None`` if
-    under both caps."""
+    separate ``COUNT`` round-trips were redundant). ``model``/``ts_col``/
+    ``extra_filters`` name what to count: billed ``usage_events`` for voice
+    and email, ``sms`` attempt rows for SMS (see ``check_sms_allowed``).
+
+    Org scoping is applied here (``model.organization_id``), not left to
+    the caller's filters — a caller that forgot it would silently count
+    across all tenants and turn a per-org cap global.
+
+    Returns the ``checks["velocity"]`` detail dict plus a deny reason, or
+    ``None`` if under both caps."""
     now = datetime.now(timezone.utc)
     hour_ago = now - timedelta(hours=1)
     day_ago = now - timedelta(days=1)
     stmt = (
         select(
-            func.count().filter(UsageEvent.occurred_at >= hour_ago).label("hour_count"),
-            func.count().filter(UsageEvent.occurred_at >= day_ago).label("day_count"),
+            func.count().filter(ts_col >= hour_ago).label("hour_count"),
+            func.count().filter(ts_col >= day_ago).label("day_count"),
         )
-        .select_from(UsageEvent)
+        .select_from(model)
         .where(
-            UsageEvent.organization_id == organization_id,
-            UsageEvent.channel == channel,
-            UsageEvent.occurred_at >= day_ago,
+            model.organization_id == organization_id,
+            *(extra_filters or []),
+            ts_col >= day_ago,
         )
     )
     row = (await db.execute(stmt)).one()
@@ -149,17 +163,62 @@ async def _check_velocity(
     return checks, None
 
 
-def _parse_blocked_prefixes() -> list[str]:
-    return [
-        p.strip() for p in settings.hail_blocked_e164_prefixes.split(",") if p.strip()
-    ]
+@lru_cache(maxsize=8)
+def _split_prefixes(raw: str) -> tuple[str, ...]:
+    return tuple(p.strip() for p in raw.split(",") if p.strip())
+
+
+def _parse_blocked_prefixes() -> tuple[str, ...]:
+    # Cached on the raw CSV so the per-send hot paths don't re-split an
+    # unchanging setting; tests that monkeypatch the setting get a fresh
+    # parse via the changed cache key.
+    return _split_prefixes(settings.hail_blocked_e164_prefixes)
+
+
+async def _check_phone_destination(
+    db: AsyncSession,
+    organization_id: UUID,
+    to_e164: str,
+    channel: str,
+    checks: dict[str, Any],
+) -> str | None:
+    """Destination scrubs shared by the phone channels (voice, SMS):
+    suppression list, national DNC registry, premium-rate prefix block.
+
+    The national-DNC scrub applies to both phone channels — US DNC/TSR
+    rules cover marketing texts as well as calls, so enabling
+    ``hail_national_dnc_enabled`` covers them at once.
+
+    Mutates ``checks`` in place; returns a deny reason or ``None``.
+    """
+    hit = await _suppression_hit(db, organization_id, [to_e164], channel)
+    checks["suppression_checked"] = True
+    checks["suppression_hit"] = hit is not None
+
+    national_hit = False
+    checks["national_dnc_checked"] = settings.hail_national_dnc_enabled
+    if settings.hail_national_dnc_enabled:
+        national_hit = await check_national_dnc(to_e164)
+    checks["national_dnc_hit"] = national_hit
+
+    if hit is not None:
+        return f"recipient is on the suppression list ({hit.reason})"
+    if national_hit:
+        return "recipient is on the national Do Not Call registry"
+
+    for prefix in _parse_blocked_prefixes():
+        if to_e164.startswith(prefix):
+            checks["premium_rate_blocked"] = True
+            return f"destination prefix {prefix!r} is blocked (premium-rate/high-risk)"
+    checks["premium_rate_blocked"] = False
+    return None
 
 
 async def check_call_allowed(
     db: AsyncSession, organization_id: UUID, to_e164: str
 ) -> GateResult:
-    """Pre-send checks for an outbound call: suppression/DNC, premium-rate
-    prefix block, then velocity cap.
+    """Pre-send checks for an outbound call: suppression, national DNC,
+    premium-rate prefix block, then velocity cap.
 
     Note on the velocity cap: it counts ``usage_events`` rows
     (``channel='voice'``), which the voicebot writes at call *completion*
@@ -170,47 +229,63 @@ async def check_call_allowed(
     """
     checks: dict[str, Any] = {}
 
-    hit = await _suppression_hit(db, organization_id, [to_e164], "voice")
-    checks["internal_dnc_checked"] = True
-    checks["internal_dnc_hit"] = hit is not None
-
-    national_hit = False
-    checks["national_dnc_checked"] = settings.hail_national_dnc_enabled
-    if settings.hail_national_dnc_enabled:
-        national_hit = await check_national_dnc(to_e164)
-    checks["national_dnc_hit"] = national_hit
-
-    if hit is not None:
-        return GateResult(
-            allowed=False,
-            reason=f"recipient is on the suppression list ({hit.reason})",
-            checks=checks,
-        )
-    if national_hit:
-        return GateResult(
-            allowed=False,
-            reason="recipient is on the national Do Not Call registry",
-            checks=checks,
-        )
-
-    blocked_prefixes = _parse_blocked_prefixes()
-    for prefix in blocked_prefixes:
-        if to_e164.startswith(prefix):
-            checks["premium_rate_blocked"] = True
-            return GateResult(
-                allowed=False,
-                reason=f"destination prefix {prefix!r} is blocked (premium-rate/high-risk)",
-                checks=checks,
-            )
-    checks["premium_rate_blocked"] = False
+    reason = await _check_phone_destination(
+        db, organization_id, to_e164, "voice", checks
+    )
+    if reason is not None:
+        return GateResult(allowed=False, reason=reason, checks=checks)
 
     velocity_checks, reason = await _check_velocity(
         db,
-        organization_id,
-        "voice",
+        UsageEvent,
+        UsageEvent.occurred_at,
+        organization_id=organization_id,
+        extra_filters=[UsageEvent.channel == "voice"],
         per_hour=settings.hail_velocity_call_per_hour,
         per_day=settings.hail_velocity_call_per_day,
         unit="calls",
+    )
+    checks["velocity"] = velocity_checks
+    if reason is not None:
+        return GateResult(allowed=False, reason=reason, checks=checks)
+
+    return GateResult(allowed=True, checks=checks)
+
+
+async def check_sms_allowed(
+    db: AsyncSession, organization_id: UUID, to_e164: str
+) -> GateResult:
+    """Pre-send checks for an outbound SMS: suppression, national DNC,
+    premium-rate prefix block, then velocity cap. Mirrors
+    ``check_call_allowed``'s single-E.164 shape (not
+    ``check_email_allowed``'s list shape) — Twilio's Messages API is
+    single-recipient per call.
+
+    Unlike voice/email, the velocity cap counts ``sms`` rows (send
+    *attempts*, by ``created_at``) rather than billed ``usage_events``
+    — the route skips the usage write for carrier-rejected sends, so a
+    usage-based count would never trip on exactly the traffic pattern
+    (number-probing blasts that all fail) the cap exists to stop.
+    Gate-blocked attempts insert no row and rightly don't count.
+    """
+    checks: dict[str, Any] = {}
+
+    reason = await _check_phone_destination(db, organization_id, to_e164, "sms", checks)
+    if reason is not None:
+        return GateResult(allowed=False, reason=reason, checks=checks)
+
+    velocity_checks, reason = await _check_velocity(
+        db,
+        Sms,
+        # created_at, not requested_at: identical value for outbound rows
+        # (both server_default now() in the same INSERT) and covered by
+        # idx_sms_org_created — requested_at has no index.
+        Sms.created_at,
+        organization_id=organization_id,
+        extra_filters=[Sms.direction == "outbound"],
+        per_hour=settings.hail_velocity_sms_per_hour,
+        per_day=settings.hail_velocity_sms_per_day,
+        unit="texts",
     )
     checks["velocity"] = velocity_checks
     if reason is not None:
@@ -243,8 +318,10 @@ async def check_email_allowed(
 
     velocity_checks, reason = await _check_velocity(
         db,
-        organization_id,
-        "email",
+        UsageEvent,
+        UsageEvent.occurred_at,
+        organization_id=organization_id,
+        extra_filters=[UsageEvent.channel == "email"],
         per_hour=settings.hail_velocity_email_per_hour,
         per_day=settings.hail_velocity_email_per_day,
         unit="emails",
