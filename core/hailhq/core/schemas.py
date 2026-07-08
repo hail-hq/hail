@@ -119,10 +119,32 @@ class CallCreate(BaseModel):
     # recipient consented. ``message_type == "marketing"`` is held to a
     # stricter bar (documented ``consent_source``) — enforced in the route,
     # not here, so the 422 detail can explain which bar failed.
-    recipient_consent: bool
-    consent_source: str | None = None
-    consent_obtained_at: datetime | None = None
-    message_type: Literal["marketing", "informational"] = "informational"
+    recipient_consent: bool = Field(
+        description=(
+            "Attestation that you have obtained the lawful consent required "
+            "to contact this recipient. Hail does not verify consent itself "
+            "— you are responsible for a lawful basis under TCPA/ePrivacy/"
+            "PECR/CAN-SPAM/GDPR as applicable. Rejected (422) if not true."
+        )
+    )
+    consent_source: str | None = Field(
+        default=None,
+        description=(
+            "Where/how consent was obtained (e.g. 'signup form', "
+            "'prior customer relationship'). Required (non-empty) when "
+            "message_type is 'marketing'."
+        ),
+    )
+    consent_obtained_at: datetime | None = Field(
+        default=None, description="When consent was obtained, if known."
+    )
+    message_type: Literal["marketing", "informational"] = Field(
+        default="informational",
+        description=(
+            "'marketing' additionally requires a non-empty consent_source. "
+            "Use 'informational' for transactional/service communications."
+        ),
+    )
 
     @field_validator("to", "from_")
     @classmethod
@@ -458,10 +480,32 @@ class EmailCreate(BaseModel):
     # recipient consented. ``message_type == "marketing"`` is held to a
     # stricter bar (documented ``consent_source``) — enforced in the route,
     # not here, so the 422 detail can explain which bar failed.
-    recipient_consent: bool
-    consent_source: str | None = None
-    consent_obtained_at: datetime | None = None
-    message_type: Literal["marketing", "informational"] = "informational"
+    recipient_consent: bool = Field(
+        description=(
+            "Attestation that you have obtained the lawful consent required "
+            "to contact this recipient. Hail does not verify consent itself "
+            "— you are responsible for a lawful basis under TCPA/ePrivacy/"
+            "PECR/CAN-SPAM/GDPR as applicable. Rejected (422) if not true."
+        )
+    )
+    consent_source: str | None = Field(
+        default=None,
+        description=(
+            "Where/how consent was obtained (e.g. 'signup form', "
+            "'prior customer relationship'). Required (non-empty) when "
+            "message_type is 'marketing'."
+        ),
+    )
+    consent_obtained_at: datetime | None = Field(
+        default=None, description="When consent was obtained, if known."
+    )
+    message_type: Literal["marketing", "informational"] = Field(
+        default="informational",
+        description=(
+            "'marketing' additionally requires a non-empty consent_source. "
+            "Use 'informational' for transactional/service communications."
+        ),
+    )
 
     @field_validator("from_", "reply_to")
     @classmethod
