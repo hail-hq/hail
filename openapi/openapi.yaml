@@ -2481,6 +2481,11 @@ components:
           const: livekit
           title: Turn Detection
           default: livekit
+        voice_id:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Voice Id
       additionalProperties: false
       type: object
       title: VoiceConfig

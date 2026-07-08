@@ -36,12 +36,14 @@ from hailhq.core.pool import (
     claim_pool_number,
     release_pool_reservation,
 )
+from hailhq.core.provider_config import provider_cipher
 from hailhq.core.schemas import (
     CallCreate,
     CallListResponse,
     CallResponse,
     CallStatus,
 )
+from hailhq.core.secret_cipher import SecretKeyMissing
 
 logger = logging.getLogger(__name__)
 
@@ -282,14 +284,31 @@ async def create_call(
     try:
         room_name = await lk.create_room(call.id)
         setup_stage = "agent_dispatch"
+
+        llm_meta: dict | None = None
+        if body.llm is not None:
+            llm_meta = body.llm.model_dump()
+            try:
+                cipher = provider_cipher()
+                llm_meta["api_key_enc"] = cipher.encrypt(llm_meta.pop("api_key"))
+            except SecretKeyMissing:
+                # Legacy self-host without HAIL_PROVIDER_SECRET_KEY: keep the
+                # historical plaintext dispatch rather than breaking mode B.
+                logger.warning(
+                    "HAIL_PROVIDER_SECRET_KEY unset - per-call llm.api_key "
+                    "sent to LiveKit dispatch in plaintext for call_id=%s",
+                    call.id,
+                )
+
         dispatch_id = await lk.dispatch_agent(
             room_name=room_name,
             agent_name="hail-voicebot",
             metadata={
                 "call_id": str(call.id),
+                "organization_id": str(call.organization_id),
                 "voice_config": voice_config,
                 "system_prompt": body.system_prompt,
-                "llm": body.llm.model_dump() if body.llm else None,
+                "llm": llm_meta,
                 "first_message": body.first_message,
             },
         )

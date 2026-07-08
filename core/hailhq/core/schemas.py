@@ -13,6 +13,8 @@ from pydantic import (
     model_validator,
 )
 
+from hailhq.core.url_guard import UnsafeUrlError, assert_public_https_url
+
 E164 = re.compile(r"^\+[1-9]\d{1,14}$")
 
 
@@ -92,6 +94,14 @@ class LLMConfig(BaseModel):
     api_key: str
     model: str
 
+    @field_validator("base_url")
+    @classmethod
+    def _base_url_is_public_https(cls, v: str) -> str:
+        try:
+            return assert_public_https_url(v)
+        except UnsafeUrlError as exc:
+            raise ValueError(str(exc)) from exc
+
 
 class VoiceConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -100,6 +110,9 @@ class VoiceConfig(BaseModel):
     tts: Literal["cartesia"] = "cartesia"
     vad: Literal["silero"] = "silero"
     turn_detection: Literal["livekit"] = "livekit"
+    # Per-call TTS voice override. Applies to whichever TTS provider serves
+    # the call (org BYO config or Hail default). None → org/env default.
+    voice_id: str | None = None
 
 
 class CallCreate(BaseModel):
