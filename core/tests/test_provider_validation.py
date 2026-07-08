@@ -34,8 +34,15 @@ CASES = [
 
 @pytest.mark.parametrize("provider,layer,params,url_part,auth_header,prefix", CASES)
 async def test_valid_key_returns_ok(
-    provider, layer, params, url_part, auth_header, prefix
+    provider, layer, params, url_part, auth_header, prefix, monkeypatch
 ) -> None:
+    # The openai-compatible branch runs the SSRF guard, which resolves the
+    # host via DNS. Stub it to identity so this transport-mocked test never
+    # touches the network. (The guard's own resolution logic is covered in
+    # test_url_guard.py.)
+    monkeypatch.setattr(
+        "hailhq.core.provider_validation.assert_public_https_url", lambda u: u
+    )
     seen: dict = {}
 
     def handler(request: httpx.Request) -> httpx.Response:

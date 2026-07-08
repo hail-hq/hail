@@ -26,6 +26,12 @@ class UnsafeUrlError(ValueError):
 
 def _ip_is_public(ip: str) -> bool:
     addr = ipaddress.ip_address(ip)
+    # Judge IPv4-mapped IPv6 (::ffff:a.b.c.d) on the embedded IPv4 address:
+    # whether CPython's is_* checks see through the mapping is patch-level
+    # dependent, so normalize it ourselves.
+    mapped = getattr(addr, "ipv4_mapped", None)
+    if mapped is not None:
+        addr = mapped
     return not (
         addr.is_private
         or addr.is_loopback

@@ -9,6 +9,8 @@ nothing and mutates nothing.
 
 from __future__ import annotations
 
+import asyncio
+
 import httpx
 
 from hailhq.core.url_guard import UnsafeUrlError, assert_public_https_url
@@ -66,7 +68,9 @@ async def validate_provider_key(
     client: httpx.AsyncClient | None = None,
 ) -> tuple[bool, str]:
     """Return (ok, message). Never raises on provider/network failure."""
-    req = _request_for(provider, api_key, params)
+    # _request_for resolves the customer host via blocking socket.getaddrinfo;
+    # offload it so a slow attacker DNS can't stall the event loop.
+    req = await asyncio.to_thread(_request_for, provider, api_key, params)
     if req is None:
         if provider == "openai-compatible" and params.get("base_url"):
             return False, "base_url is not a permitted public https endpoint"
