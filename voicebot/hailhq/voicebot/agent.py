@@ -37,7 +37,12 @@ from hailhq.core.internal_webhook import notify_usage_event_recorded
 from hailhq.core.pool import release_pool_reservation
 from hailhq.core.models import Call, CallEvent, UsageEvent
 from hailhq.core.schemas import TERMINAL_CALL_STATUSES
-from hailhq.voicebot.pipeline import build_session
+from hailhq.voicebot.pipeline import (
+    ProviderKeyError,
+    build_session,
+    decrypt_llm_metadata,
+    resolve_org_configs,
+)
 from hailhq.voicebot.recording import upload_recording
 
 # Structured, non-overridable framing prepended to every agent's instructions,
@@ -627,7 +632,33 @@ async def entrypoint(ctx: JobContext) -> None:
         _maybe_mark_answered(_participant)
 
     vad = ctx.proc.userdata["vad"]
-    session = build_session(metadata.get("llm"), vad)
+    org_id_raw = metadata.get("organization_id")
+    org_cfgs = await resolve_org_configs(UUID(org_id_raw) if org_id_raw else None)
+    voice_id_override = (metadata.get("voice_config") or {}).get("voice_id")
+    try:
+        llm_cfg = decrypt_llm_metadata(metadata.get("llm"))
+        session = build_session(
+            llm_cfg, vad, org_cfgs=org_cfgs, voice_id_override=voice_id_override
+        )
+    except ProviderKeyError as exc:
+        logger.warning("provider key error for call_id=%s: %s", call_id, exc)
+        captured["end_reason"] = CallEndReason.PROVIDER_KEY_ERROR.value
+        captured["status"] = "failed"
+        await write_call_event(call_id, "provider_key_error", {"detail": str(exc)})
+        # `ctx.add_shutdown_callback(_shutdown)` below (which is what normally
+        # drives `on_call_end` -> status/end_reason write + pool release) has
+        # not been registered yet at this point in entrypoint — session build
+        # fails before we ever reach that line. Finalize directly here so a
+        # BYO build failure still releases the pool reservation and closes
+        # out the Call row, exactly like every other terminal path does.
+        await on_call_end(
+            call_id,
+            ctx.room.name,
+            status_override=captured["status"],
+            end_reason_override=captured["end_reason"],
+        )
+        ctx.shutdown(reason="provider_key_error")
+        return
     event_tasks = attach_event_handlers(session, call_id)
 
     # AgentSession-level close events that aren't already covered by the SIP
