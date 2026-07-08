@@ -37,6 +37,9 @@ from hailhq.core.schemas import (
     EmailResponse,
     EmailStatsResponse,
     EventStreamResponse,
+    SmsCreate,
+    SmsListResponse,
+    SmsResponse,
 )
 
 
@@ -167,6 +170,83 @@ class HailClient:
             params["to"] = to
         resp = await self._client.get("/calls", params=params)
         return CallListResponse.model_validate(_decode(resp)).model_dump(mode="json")
+
+    # ------------------------------------------------------------------ #
+    # POST /sms
+    # ------------------------------------------------------------------ #
+
+    async def send_sms(
+        self,
+        *,
+        to: str,
+        body: str,
+        recipient_consent: bool,
+        from_: str | None = None,
+        metadata: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+        consent_source: str | None = None,
+        consent_obtained_at: str | None = None,
+        message_type: str = "informational",
+    ) -> dict[str, Any]:
+        """POST /sms — send an outbound SMS.
+
+        Builds the body from :class:`SmsCreate` (E.164 + consent
+        attestation). Construction raises ``pydantic.ValidationError``
+        before any HTTP on bad input.
+        """
+        fields: dict[str, Any] = {
+            "to": to,
+            "body": body,
+            "recipient_consent": recipient_consent,
+            "message_type": message_type,
+        }
+        if from_ is not None:
+            fields["from"] = from_
+        if metadata is not None:
+            fields["metadata"] = metadata
+        if consent_source is not None:
+            fields["consent_source"] = consent_source
+        if consent_obtained_at is not None:
+            fields["consent_obtained_at"] = consent_obtained_at
+
+        body_dict = SmsCreate.model_validate(fields).model_dump(
+            mode="json", by_alias=True, exclude_unset=True
+        )
+        headers = {"Idempotency-Key": idempotency_key or str(uuid.uuid4())}
+        resp = await self._client.post("/sms", json=body_dict, headers=headers)
+        return SmsResponse.model_validate(_decode(resp)).model_dump(mode="json")
+
+    # ------------------------------------------------------------------ #
+    # GET /sms/{id}
+    # ------------------------------------------------------------------ #
+
+    async def get_sms(self, sms_id: str) -> dict[str, Any]:
+        resp = await self._client.get(f"/sms/{sms_id}")
+        return SmsResponse.model_validate(_decode(resp)).model_dump(mode="json")
+
+    # ------------------------------------------------------------------ #
+    # GET /sms
+    # ------------------------------------------------------------------ #
+
+    async def list_sms(
+        self,
+        *,
+        cursor: str | None = None,
+        limit: int | None = None,
+        status: str | None = None,
+        to: str | None = None,
+    ) -> dict[str, Any]:
+        params: dict[str, Any] = {}
+        if cursor is not None:
+            params["cursor"] = cursor
+        if limit is not None:
+            params["limit"] = limit
+        if status is not None:
+            params["status"] = status
+        if to is not None:
+            params["to"] = to
+        resp = await self._client.get("/sms", params=params)
+        return SmsListResponse.model_validate(_decode(resp)).model_dump(mode="json")
 
     # ------------------------------------------------------------------ #
     # POST /emails
