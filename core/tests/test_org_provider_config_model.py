@@ -1,0 +1,58 @@
+"""OrgProviderConfig model: shape, defaults, and the one-config-per-layer rule."""
+
+from __future__ import annotations
+
+import uuid
+
+import pytest
+from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
+
+from hailhq.core.models import OrgProviderConfig
+
+
+async def test_round_trip_defaults(async_session) -> None:
+    org_id = uuid.uuid4()
+    row = OrgProviderConfig(
+        organization_id=org_id,
+        layer="tts",
+        provider="cartesia",
+        params={"voice_id": "694f9389-aac1-45b6"},
+    )
+    async_session.add(row)
+    await async_session.commit()
+
+    got = (
+        await async_session.execute(
+            select(OrgProviderConfig).where(OrgProviderConfig.organization_id == org_id)
+        )
+    ).scalar_one()
+    assert got.layer == "tts"
+    assert got.provider == "cartesia"
+    assert got.encrypted_api_key is None
+    assert got.key_last4 is None
+    assert got.key_set_at is None
+    assert got.params == {"voice_id": "694f9389-aac1-45b6"}
+    assert got.fallback_enabled is False
+    assert got.created_at is not None
+
+
+async def test_one_config_per_org_and_layer(async_session) -> None:
+    org_id = uuid.uuid4()
+    async_session.add(
+        OrgProviderConfig(organization_id=org_id, layer="llm", provider="anthropic")
+    )
+    await async_session.commit()
+    async_session.add(
+        OrgProviderConfig(organization_id=org_id, layer="llm", provider="google")
+    )
+    with pytest.raises(IntegrityError):
+        await async_session.commit()
+
+
+async def test_layer_check_constraint(async_session) -> None:
+    async_session.add(
+        OrgProviderConfig(organization_id=uuid.uuid4(), layer="email", provider="ses")
+    )
+    with pytest.raises(IntegrityError):
+        await async_session.commit()
