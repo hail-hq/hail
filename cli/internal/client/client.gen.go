@@ -644,21 +644,28 @@ func (e GetEmailStatsEmailsStatsGetParamsBucket) Valid() bool {
 
 // CallCreate defines model for CallCreate.
 type CallCreate struct {
-	ConsentObtainedAt *time.Time              `json:"consent_obtained_at,omitempty"`
-	ConsentSource     *string                 `json:"consent_source,omitempty"`
-	ConversationId    *openapi_types.UUID     `json:"conversation_id,omitempty"`
-	FirstMessage      *string                 `json:"first_message,omitempty"`
-	From              *string                 `json:"from,omitempty"`
-	Llm               *LLMConfig              `json:"llm,omitempty"`
-	MessageType       *CallCreateMessageType  `json:"message_type,omitempty"`
-	Metadata          *map[string]interface{} `json:"metadata,omitempty"`
-	RecipientConsent  bool                    `json:"recipient_consent"`
-	SystemPrompt      *string                 `json:"system_prompt,omitempty"`
-	To                string                  `json:"to"`
-	VoiceConfig       *VoiceConfig            `json:"voice_config,omitempty"`
+	// ConsentObtainedAt When consent was obtained, if known.
+	ConsentObtainedAt *time.Time `json:"consent_obtained_at,omitempty"`
+
+	// ConsentSource Where/how consent was obtained (e.g. 'signup form', 'prior customer relationship'). Required (non-empty) when message_type is 'marketing'.
+	ConsentSource  *string             `json:"consent_source,omitempty"`
+	ConversationId *openapi_types.UUID `json:"conversation_id,omitempty"`
+	FirstMessage   *string             `json:"first_message,omitempty"`
+	From           *string             `json:"from,omitempty"`
+	Llm            *LLMConfig          `json:"llm,omitempty"`
+
+	// MessageType 'marketing' additionally requires a non-empty consent_source. Use 'informational' for transactional/service communications.
+	MessageType *CallCreateMessageType  `json:"message_type,omitempty"`
+	Metadata    *map[string]interface{} `json:"metadata,omitempty"`
+
+	// RecipientConsent Attestation that you have obtained the lawful consent required to contact this recipient. Hail does not verify consent itself — you are responsible for a lawful basis under TCPA/ePrivacy/PECR/CAN-SPAM/GDPR as applicable. Rejected (422) if not true.
+	RecipientConsent bool         `json:"recipient_consent"`
+	SystemPrompt     *string      `json:"system_prompt,omitempty"`
+	To               string       `json:"to"`
+	VoiceConfig      *VoiceConfig `json:"voice_config,omitempty"`
 }
 
-// CallCreateMessageType defines model for CallCreate.MessageType.
+// CallCreateMessageType 'marketing' additionally requires a non-empty consent_source. Use 'informational' for transactional/service communications.
 type CallCreateMessageType string
 
 // CallListResponse defines model for CallListResponse.
@@ -730,23 +737,31 @@ type EmailAttachmentResponse struct {
 
 // EmailCreate defines model for EmailCreate.
 type EmailCreate struct {
-	Bcc               *[]string               `json:"bcc,omitempty"`
-	BodyHtml          *string                 `json:"body_html,omitempty"`
-	BodyText          *string                 `json:"body_text,omitempty"`
-	Cc                *[]string               `json:"cc,omitempty"`
-	ConsentObtainedAt *time.Time              `json:"consent_obtained_at,omitempty"`
-	ConsentSource     *string                 `json:"consent_source,omitempty"`
-	ConversationId    *openapi_types.UUID     `json:"conversation_id,omitempty"`
-	From              *string                 `json:"from,omitempty"`
-	MessageType       *EmailCreateMessageType `json:"message_type,omitempty"`
-	Metadata          *map[string]interface{} `json:"metadata,omitempty"`
-	RecipientConsent  bool                    `json:"recipient_consent"`
-	ReplyTo           *string                 `json:"reply_to,omitempty"`
-	Subject           string                  `json:"subject"`
-	To                []string                `json:"to"`
+	Bcc      *[]string `json:"bcc,omitempty"`
+	BodyHtml *string   `json:"body_html,omitempty"`
+	BodyText *string   `json:"body_text,omitempty"`
+	Cc       *[]string `json:"cc,omitempty"`
+
+	// ConsentObtainedAt When consent was obtained, if known.
+	ConsentObtainedAt *time.Time `json:"consent_obtained_at,omitempty"`
+
+	// ConsentSource Where/how consent was obtained (e.g. 'signup form', 'prior customer relationship'). Required (non-empty) when message_type is 'marketing'.
+	ConsentSource  *string             `json:"consent_source,omitempty"`
+	ConversationId *openapi_types.UUID `json:"conversation_id,omitempty"`
+	From           *string             `json:"from,omitempty"`
+
+	// MessageType 'marketing' additionally requires a non-empty consent_source. Use 'informational' for transactional/service communications.
+	MessageType *EmailCreateMessageType `json:"message_type,omitempty"`
+	Metadata    *map[string]interface{} `json:"metadata,omitempty"`
+
+	// RecipientConsent Attestation that you have obtained the lawful consent required to contact this recipient. Hail does not verify consent itself — you are responsible for a lawful basis under TCPA/ePrivacy/PECR/CAN-SPAM/GDPR as applicable. Rejected (422) if not true.
+	RecipientConsent bool     `json:"recipient_consent"`
+	ReplyTo          *string  `json:"reply_to,omitempty"`
+	Subject          string   `json:"subject"`
+	To               []string `json:"to"`
 }
 
-// EmailCreateMessageType defines model for EmailCreate.MessageType.
+// EmailCreateMessageType 'marketing' additionally requires a non-empty consent_source. Use 'informational' for transactional/service communications.
 type EmailCreateMessageType string
 
 // EmailDomainCreate Request body for POST /email-domains.
@@ -1046,6 +1061,7 @@ type VoiceConfig struct {
 	Tts           *string `json:"tts,omitempty"`
 	TurnDetection *string `json:"turn_detection,omitempty"`
 	Vad           *string `json:"vad,omitempty"`
+	VoiceId       *string `json:"voice_id,omitempty"`
 }
 
 // WebhookDeliveryListResponse defines model for WebhookDeliveryListResponse.
