@@ -97,7 +97,7 @@ Checked = shipped. Per-artifact changelogs (GitHub Releases for the CLI, PyPI re
 ### SMS
 
 - Outbound
-  - [ ] Twilio
+  - [x] Twilio
 - Inbound
   - [ ] Twilio
 
