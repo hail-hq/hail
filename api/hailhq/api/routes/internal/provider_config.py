@@ -14,9 +14,11 @@ from datetime import datetime, timezone
 from typing import Annotated
 from uuid import UUID
 
+from cryptography.fernet import InvalidToken
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, ConfigDict, ValidationError
 from sqlalchemy import delete, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from hailhq.api.routes.internal.auth import verify_internal_request
@@ -71,6 +73,10 @@ def _check_layer(layer: str) -> None:
 
 
 def _validated_params(layer: str, provider: str, params: dict) -> dict:
+    if "provider" in params:
+        raise HTTPException(
+            status_code=422, detail="params must not include 'provider'"
+        )
     try:
         model = PARAMS_BY_LAYER[layer](provider=provider, **params)
     except ValidationError as exc:
@@ -126,6 +132,14 @@ async def upsert_provider_config(
             organization_id=organization_id, layer=layer, provider=body.provider
         )
         db.add(row)
+    elif row.provider != body.provider and body.api_key is None:
+        # The stored key was encrypted for the OLD provider's auth scheme —
+        # carrying it over onto the new provider would let it be silently
+        # decrypted and sent to a provider it was never issued for. Clear it
+        # so the org must supply a fresh key for the new provider.
+        row.encrypted_api_key = None
+        row.key_last4 = None
+        row.key_set_at = None
     row.provider = body.provider
     row.params = params
     row.fallback_enabled = body.fallback_enabled
@@ -139,7 +153,14 @@ async def upsert_provider_config(
         row.key_last4 = last4(body.api_key)
         row.key_set_at = datetime.now(timezone.utc)
 
-    await db.commit()
+    try:
+        await db.commit()
+    except IntegrityError as exc:
+        await db.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail=f"provider config for layer {layer!r} changed concurrently; retry",
+        ) from exc
     await db.refresh(row)
     return _serialize(row)
 
@@ -180,7 +201,7 @@ async def validate_provider_config(
             )
         try:
             api_key = provider_cipher().decrypt(row.encrypted_api_key)
-        except SecretKeyMissing as exc:
+        except (SecretKeyMissing, InvalidToken) as exc:
             raise HTTPException(status_code=503, detail=str(exc)) from exc
     if provider is None:
         raise HTTPException(
