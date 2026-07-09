@@ -5,8 +5,8 @@ One row per message, mirroring ``calls``' shape (single plain-text
 analog). ``provider_message_sid`` is unique but nullable until the
 provider call returns.
 
-Revision ID: 0023
-Revises: 0022
+Revision ID: 0025
+Revises: 0024
 """
 
 from __future__ import annotations
@@ -17,8 +17,8 @@ import sqlalchemy as sa
 from alembic import op
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 
-revision: str = "0023"
-down_revision: Union[str, None] = "0022"
+revision: str = "0025"
+down_revision: Union[str, None] = "0024"
 branch_labels = None
 depends_on = None
 

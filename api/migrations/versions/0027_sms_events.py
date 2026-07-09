@@ -6,8 +6,8 @@ at-least-once provider status callbacks). Written today by the SMS route
 on status transitions; the planned Twilio delivery-status webhook appends
 to the same table.
 
-Revision ID: 0025
-Revises: 0024
+Revision ID: 0027
+Revises: 0026
 """
 
 from __future__ import annotations
@@ -18,8 +18,8 @@ import sqlalchemy as sa
 from alembic import op
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 
-revision: str = "0025"
-down_revision: Union[str, None] = "0024"
+revision: str = "0027"
+down_revision: Union[str, None] = "0026"
 branch_labels = None
 depends_on = None
 
