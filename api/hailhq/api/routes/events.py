@@ -103,7 +103,13 @@ def _sms_select(kind: str | None):
 
 
 async def _require_owned(
-    db: AsyncSession, model: Any, resource_uuid: UUID, principal: Principal, label: str
+    db: AsyncSession,
+    model: Any,
+    resource_uuid: UUID,
+    principal: Principal,
+    label: str,
+    *,
+    load: Any = None,
 ) -> Any:
     """Org-scoped existence check for the ``id`` filter, one per channel.
 
@@ -111,15 +117,20 @@ async def _require_owned(
     own GET routes so we don't leak existence. The ``organization_id``
     predicate lives here, in exactly one place, so a new channel branch
     can't accidentally drop it.
+
+    Selects only the primary key (plus ``load``, e.g. ``Call.status``, when a
+    caller needs one extra column) — never the whole ORM row, so a ``hail
+    tail`` poll's existence check doesn't hydrate large body columns.
     """
+    columns = (model.id,) if load is None else (model.id, load)
     row = (
         await db.execute(
-            select(model).where(
+            select(*columns).where(
                 model.id == resource_uuid,
                 model.organization_id == principal.organization_id,
             )
         )
-    ).scalar_one_or_none()
+    ).one_or_none()
     if row is None:
         raise HTTPException(
             status_code=http_status.HTTP_404_NOT_FOUND,
@@ -164,7 +175,9 @@ async def list_events(
 
     if resource_type == "call":
         assert resource_uuid is not None  # narrowed by the parser
-        call = await _require_owned(db, Call, resource_uuid, principal, "call")
+        call = await _require_owned(
+            db, Call, resource_uuid, principal, "call", load=Call.status
+        )
         selects = [_call_select(kind).where(CallEvent.call_id == resource_uuid)]
         call_status = call.status
     elif resource_type == "email":

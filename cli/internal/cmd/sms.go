@@ -79,12 +79,7 @@ func runSms(ctx context.Context, cmd *cobra.Command, opts *Options, f *smsFlags,
 		body.MessageType = &mt
 	}
 
-	idem := f.idempotencyKey
-	if idem == "" {
-		idem = uuid.NewString()
-	}
-
-	apiClient, err := opts.newClient(idempotencyEditor(idem))
+	apiClient, err := opts.newClientWithIdempotency(f.idempotencyKey)
 	if err != nil {
 		return err
 	}

@@ -31,6 +31,15 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 E164 = re.compile(r"^\+[1-9]\d{1,14}$")
 
 
+def _e164_or_error(v: str | None) -> str | None:
+    """Shared to/from validator for the phone-channel create schemas
+    (``CallCreate``, ``SmsCreate``) — one place to tighten the rule or
+    reword the error. Mirrors ``core.schemas._e164_or_error``."""
+    if v is not None and not E164.match(v):
+        raise ValueError("must be E.164 (e.g. +14155551234)")
+    return v
+
+
 class LLMConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -91,12 +100,7 @@ class CallCreate(BaseModel):
     consent_obtained_at: datetime | None = None
     message_type: Literal["marketing", "informational"] = "informational"
 
-    @field_validator("to", "from_")
-    @classmethod
-    def _validate_e164(cls, v: str | None) -> str | None:
-        if v is not None and not E164.match(v):
-            raise ValueError("must be E.164 (e.g. +14155551234)")
-        return v
+    _validate_e164 = field_validator("to", "from_")(_e164_or_error)
 
     @model_validator(mode="after")
     def _exactly_one_mode(self) -> "CallCreate":
@@ -153,12 +157,7 @@ class SmsCreate(BaseModel):
     consent_obtained_at: datetime | None = None
     message_type: Literal["marketing", "informational"] = "informational"
 
-    @field_validator("to", "from_")
-    @classmethod
-    def _validate_e164(cls, v: str | None) -> str | None:
-        if v is not None and not E164.match(v):
-            raise ValueError("must be E.164 (e.g. +14155551234)")
-        return v
+    _validate_e164 = field_validator("to", "from_")(_e164_or_error)
 
 
 SmsStatus = Literal["queued", "sent", "delivered", "failed", "undelivered", "received"]

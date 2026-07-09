@@ -25,7 +25,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
-from functools import lru_cache
 from typing import Any
 from uuid import UUID
 
@@ -163,16 +162,9 @@ async def _check_velocity(
     return checks, None
 
 
-@lru_cache(maxsize=8)
-def _split_prefixes(raw: str) -> tuple[str, ...]:
-    return tuple(p.strip() for p in raw.split(",") if p.strip())
-
-
 def _parse_blocked_prefixes() -> tuple[str, ...]:
-    # Cached on the raw CSV so the per-send hot paths don't re-split an
-    # unchanging setting; tests that monkeypatch the setting get a fresh
-    # parse via the changed cache key.
-    return _split_prefixes(settings.hail_blocked_e164_prefixes)
+    raw = settings.hail_blocked_e164_prefixes
+    return tuple(p.strip() for p in raw.split(",") if p.strip())
 
 
 async def _check_phone_destination(

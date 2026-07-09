@@ -7,7 +7,6 @@ import (
 	"os"
 	"strings"
 
-	"github.com/google/uuid"
 	"github.com/spf13/cobra"
 
 	"github.com/hail-hq/hail/cli/internal/client"
@@ -168,12 +167,7 @@ func runEmailSend(ctx context.Context, cmd *cobra.Command, opts *Options, f *ema
 		body.MessageType = &mt
 	}
 
-	idem := f.idempotencyKey
-	if idem == "" {
-		idem = uuid.NewString()
-	}
-
-	apiClient, err := opts.newClient(idempotencyEditor(idem))
+	apiClient, err := opts.newClientWithIdempotency(f.idempotencyKey)
 	if err != nil {
 		return err
 	}

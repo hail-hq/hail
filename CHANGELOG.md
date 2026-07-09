@@ -17,6 +17,7 @@ Component versions cut alongside this umbrella release:
 - Requires a dedicated, SMS-capable phone number on the organization — unlike calls, SMS does **not** fall back to a shared pool number, since a pool number cannot provide unambiguous number-to-org routing for a channel with no forced voice-menu context.
 - A carrier-level rejection (e.g. an unregistered or filtered number) is recorded as a failed, unbilled send with the carrier's `error_code` — not a false "sent" status, and not charged.
 - `Suppression.channel` CHECK widened to include `sms`; new `check_sms_allowed` gate mirrors the existing call/email checks. SMS velocity caps count attempted sends rather than billed sends, so a burst of carrier-rejected probing still trips the cap.
+- **Audit-log shape change (calls):** generalizing the phone-channel compliance gate to cover SMS renamed the call `audit_log.payload.checks` keys `internal_dnc_checked` / `internal_dnc_hit` to `suppression_checked` / `suppression_hit` (voice and SMS now share one destination scrub). Update any external queries or dashboards that match the old key names; existing rows are not backfilled.
 - SMS content is now covered by the existing DSAR export/delete and account-closure retention flows, on the same schedule as call transcripts and email content.
 
 ### API

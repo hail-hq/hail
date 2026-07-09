@@ -106,12 +106,7 @@ func runEmailDomainRegister(
 		LocalPrefixOrg:  strPtr(f.orgPrefix),
 	}
 
-	idem := f.idemKey
-	if idem == "" {
-		idem = uuid.NewString()
-	}
-
-	apiClient, err := opts.newClient(idempotencyEditor(idem))
+	apiClient, err := opts.newClientWithIdempotency(f.idemKey)
 	if err != nil {
 		return err
 	}
