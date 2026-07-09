@@ -200,13 +200,8 @@ app = FastAPI(
 
 @app.exception_handler(SecretKeyMissing)
 async def _secret_key_missing(_request: Request, exc: SecretKeyMissing) -> JSONResponse:
-    """Webhook routes need HAIL_WEBHOOK_SECRET_KEY; without it they 503, not 500."""
-    return JSONResponse(
-        status_code=503,
-        content={
-            "detail": "webhooks unavailable: server is missing HAIL_WEBHOOK_SECRET_KEY"
-        },
-    )
+    """A Fernet secret key (webhooks or provider keys) is unset/invalid; 503, not 500."""
+    return JSONResponse(status_code=503, content={"detail": str(exc)})
 
 
 app.include_router(calls_routes.router)
