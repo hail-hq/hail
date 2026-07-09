@@ -13,6 +13,7 @@ from sqlalchemy import (
     Numeric,
     Text,
     UniqueConstraint,
+    func,
     text,
 )
 from sqlalchemy.dialects.postgresql import INET, JSONB, UUID
@@ -916,4 +917,53 @@ class WebhookDelivery(Base):
             "status IN ('pending','succeeded','failed','dead')",
             name="webhook_deliveries_status_check",
         ),
+    )
+
+
+class OrgProviderConfig(Base):
+    """Per-org BYO provider config for one voice-pipeline layer.
+
+    Cloud-console feature (managed via ``routes/internal/provider_config``,
+    never the public API). ``encrypted_api_key`` is Fernet ciphertext under
+    ``HAIL_PROVIDER_SECRET_KEY`` (see ``hailhq.core.secret_cipher``) — same
+    at-rest posture as ``WebhookSubscription.secret_encrypted``. A row with
+    ``encrypted_api_key IS NULL`` is a params-only override (e.g. a custom
+    voice_id spoken through Hail's own TTS key). ``params`` shape is
+    validated per layer by ``hailhq.core.provider_config``.
+    """
+
+    __tablename__ = "org_provider_config"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    organization_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), nullable=False
+    )
+    layer: Mapped[str] = mapped_column(Text, nullable=False)
+    provider: Mapped[str] = mapped_column(Text, nullable=False)
+    encrypted_api_key: Mapped[str | None] = mapped_column(Text, nullable=True)
+    key_last4: Mapped[str | None] = mapped_column(Text, nullable=True)
+    key_set_at: Mapped[datetime | None] = mapped_column(TS, nullable=True)
+    params: Mapped[dict] = mapped_column(
+        JSONB, server_default=text("'{}'::jsonb"), nullable=False
+    )
+    fallback_enabled: Mapped[bool] = mapped_column(
+        Boolean, server_default=text("false"), nullable=False
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        TS, server_default=text("now()"), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        TS, server_default=text("now()"), onupdate=func.now(), nullable=False
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "layer IN ('llm','tts','stt')", name="org_provider_config_layer_check"
+        ),
+        UniqueConstraint(
+            "organization_id", "layer", name="org_provider_config_org_layer_key"
+        ),
+        Index("org_provider_config_org_idx", "organization_id"),
     )

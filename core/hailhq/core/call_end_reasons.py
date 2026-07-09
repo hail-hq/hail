@@ -41,6 +41,10 @@ class CallEndReason(StrEnum):
     # voicebot-side anomalies
     AGENT_ERROR = "agent_error"
     WORKER_SHUTDOWN = "worker_shutdown"
+    # A BYO provider key was rejected at session build (v1 only classifies
+    # session-build failures; a mid-call provider failure maps to
+    # agent_error) and the org had fallback disabled - fails fast by design.
+    PROVIDER_KEY_ERROR = "provider_key_error"
 
     # backstop (sweeper force-released the call after max_duration + grace)
     SWEEPER_TIMEOUT = "sweeper_timeout"

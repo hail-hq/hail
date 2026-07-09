@@ -19,7 +19,7 @@ __all__ = ["SecretCipher", "SecretKeyMissing", "generate_key"]
 
 
 class SecretKeyMissing(RuntimeError):
-    """HAIL_WEBHOOK_SECRET_KEY is unset but a secret op was attempted."""
+    """A Fernet secret key is unset but a secret op was attempted."""
 
 
 def generate_key() -> str:
@@ -30,13 +30,14 @@ class SecretCipher:
     def __init__(self, key: str) -> None:
         if not key:
             raise SecretKeyMissing(
-                "HAIL_WEBHOOK_SECRET_KEY must be set to use webhooks"
+                "a Fernet secret key must be set (HAIL_WEBHOOK_SECRET_KEY for webhooks, "
+                "HAIL_PROVIDER_SECRET_KEY for provider keys)"
             )
         try:
             self._fernet = Fernet(key.encode())
         except (ValueError, TypeError) as exc:
             raise SecretKeyMissing(
-                "HAIL_WEBHOOK_SECRET_KEY is set but is not a valid Fernet key. "
+                "a Fernet secret key is set but is not a valid Fernet key. "
                 "Generate one with: python -c "
                 '"from hailhq.core.secret_cipher import generate_key; print(generate_key())"'
             ) from exc

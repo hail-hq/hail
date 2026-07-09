@@ -1,0 +1,133 @@
+"""Internal provider-config routes: HMAC gate, write-only keys, upsert semantics."""
+
+from __future__ import annotations
+
+import uuid
+
+import pytest
+from sqlalchemy import select
+
+from hailhq.core.config import settings
+from hailhq.core.models import OrgProviderConfig
+from hailhq.core.secret_cipher import generate_key
+
+from .test_internal_dsar import _signed, internal_secret_set  # noqa: F401
+
+ORG = str(uuid.uuid4())
+BASE = f"/internal/orgs/{ORG}/providers"
+
+
+@pytest.fixture()
+def provider_key_set(monkeypatch):
+    monkeypatch.setattr(settings, "hail_provider_secret_key", generate_key())
+
+
+async def test_requires_signature(client, internal_secret_set) -> None:  # noqa: F811
+    resp = await client.get(BASE)
+    assert resp.status_code == 401
+
+
+async def test_put_get_roundtrip_masks_key(
+    client, async_session, internal_secret_set, provider_key_set  # noqa: F811
+) -> None:
+    body = (
+        b'{"provider":"cartesia","api_key":"sk-cart-ABCD",'
+        b'"params":{"voice_id":"v-1"},"fallback_enabled":false}'
+    )
+    resp = await client.put(f"{BASE}/tts", content=body, headers=_signed(body))
+    assert resp.status_code == 200, resp.text
+    got = resp.json()
+    assert got["key_last4"] == "ABCD"
+    assert "api_key" not in got and "encrypted_api_key" not in got
+
+    resp = await client.get(BASE, headers=_signed(b""))
+    providers = resp.json()["providers"]
+    assert providers == [
+        {
+            "layer": "tts",
+            "provider": "cartesia",
+            "key_last4": "ABCD",
+            "key_set_at": providers[0]["key_set_at"],
+            "params": {"voice_id": "v-1"},
+            "fallback_enabled": False,
+        }
+    ]
+    assert providers[0]["key_set_at"] is not None
+
+    row = (await async_session.execute(select(OrgProviderConfig))).scalar_one()
+    assert row.encrypted_api_key != "sk-cart-ABCD"  # stored encrypted
+
+
+async def test_put_without_key_keeps_stored_key(
+    client, internal_secret_set, provider_key_set  # noqa: F811
+) -> None:
+    b1 = b'{"provider":"cartesia","api_key":"sk-1-AAAA","params":{},"fallback_enabled":false}'
+    await client.put(f"{BASE}/tts", content=b1, headers=_signed(b1))
+    b2 = b'{"provider":"cartesia","params":{"voice_id":"v-2"},"fallback_enabled":true}'
+    resp = await client.put(f"{BASE}/tts", content=b2, headers=_signed(b2))
+    got = resp.json()
+    assert got["key_last4"] == "AAAA"  # key survived the params-only update
+    assert got["fallback_enabled"] is True
+
+
+async def test_put_rejects_wrong_provider_and_bad_params(
+    client, internal_secret_set, provider_key_set  # noqa: F811
+) -> None:
+    bad_provider = b'{"provider":"deepgram","params":{},"fallback_enabled":false}'
+    resp = await client.put(
+        f"{BASE}/tts", content=bad_provider, headers=_signed(bad_provider)
+    )
+    assert resp.status_code == 422
+
+    bad_params = (
+        b'{"provider":"openai-compatible","api_key":"sk-x",'
+        b'"params":{"model":"gpt-5.4-mini"},"fallback_enabled":false}'
+    )  # missing base_url
+    resp = await client.put(
+        f"{BASE}/llm", content=bad_params, headers=_signed(bad_params)
+    )
+    assert resp.status_code == 422
+
+
+async def test_put_key_without_cipher_key_is_503(
+    client, internal_secret_set, monkeypatch  # noqa: F811
+) -> None:
+    monkeypatch.setattr(settings, "hail_provider_secret_key", "")
+    body = (
+        b'{"provider":"deepgram","api_key":"sk-d","params":{},"fallback_enabled":false}'
+    )
+    resp = await client.put(f"{BASE}/stt", content=body, headers=_signed(body))
+    assert resp.status_code == 503
+
+
+async def test_delete_reverts_to_default(
+    client, internal_secret_set, provider_key_set  # noqa: F811
+) -> None:
+    b1 = b'{"provider":"deepgram","api_key":"sk-d-XY12","params":{},"fallback_enabled":false}'
+    await client.put(f"{BASE}/stt", content=b1, headers=_signed(b1))
+    resp = await client.delete(f"{BASE}/stt", headers=_signed(b""))
+    assert resp.status_code == 204
+    resp = await client.get(BASE, headers=_signed(b""))
+    assert resp.json()["providers"] == []
+
+
+async def test_validate_uses_stored_key(
+    client, internal_secret_set, provider_key_set, monkeypatch  # noqa: F811
+) -> None:
+    async def fake_validate(layer, provider, api_key, params, client=None):
+        return api_key == "sk-good", "checked"
+
+    monkeypatch.setattr(
+        "hailhq.api.routes.internal.provider_config.validate_provider_key",
+        fake_validate,
+    )
+    b1 = b'{"provider":"deepgram","api_key":"sk-good","params":{},"fallback_enabled":false}'
+    await client.put(f"{BASE}/stt", content=b1, headers=_signed(b1))
+    resp = await client.post(
+        f"{BASE}/stt/validate", content=b"{}", headers=_signed(b"{}")
+    )
+    assert resp.json() == {"ok": True, "message": "checked"}
+
+    b2 = b'{"api_key":"sk-bad"}'
+    resp = await client.post(f"{BASE}/stt/validate", content=b2, headers=_signed(b2))
+    assert resp.json()["ok"] is False

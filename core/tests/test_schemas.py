@@ -25,11 +25,11 @@ def test_call_create_minimal_valid():
 def test_call_create_with_byo_endpoint():
     req = CallCreate(
         to="+14155551234",
-        llm=LLMConfig(base_url="https://x.example/v1", api_key="k", model="m"),
+        llm=LLMConfig(base_url="https://byo.example.com/v1", api_key="k", model="m"),
         recipient_consent=True,
     )
     assert req.llm is not None
-    assert req.llm.base_url == "https://x.example/v1"
+    assert req.llm.base_url == "https://byo.example.com/v1"
 
 
 def test_call_create_rejects_non_e164():
@@ -47,7 +47,9 @@ def test_call_create_rejects_prompt_and_llm_together():
         CallCreate(
             to="+14155551234",
             system_prompt="Hi",
-            llm=LLMConfig(base_url="https://x.example/v1", api_key="k", model="m"),
+            llm=LLMConfig(
+                base_url="https://byo.example.com/v1", api_key="k", model="m"
+            ),
             recipient_consent=True,
         )
 

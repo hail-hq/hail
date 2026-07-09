@@ -86,3 +86,6 @@ infra/terraform/*.tfplan
 **/.terragrunt-cache/
 # The S3 backend stub Terragrunt drops into the module dir at runtime.
 infra/terraform/backend.tf
+
+# SDD scratch ledgers (dot-prefixed; not the tracked docs/superpowers/ docs)
+.superpowers/

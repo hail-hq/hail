@@ -67,7 +67,7 @@ async def test_post_calls_rejects_prompt_and_llm_together(
             "to": "+14155559999",
             "system_prompt": "hi",
             "llm": {
-                "base_url": "https://example.invalid/v1",
+                "base_url": "https://byo.example.com/v1",
                 "api_key": "k",
                 "model": "m",
             },
@@ -727,3 +727,152 @@ async def test_list_calls_filters_by_status(
     items = resp.json()["items"]
     assert len(items) == 1
     assert items[0]["status"] == "failed"
+
+
+# --------------------------------------------------------------------------- #
+# Dispatch hardening: org id in metadata, encrypted per-call LLM key,
+# per-call voice_id, base_url SSRF guard.
+# --------------------------------------------------------------------------- #
+
+
+async def test_dispatch_metadata_has_org_id_and_no_plaintext_key(
+    client: httpx.AsyncClient,
+    async_session: AsyncSession,
+    org_and_key: tuple[str, ApiKey, str],
+    livekit_mock: AsyncMock,
+    add_phone_number,
+    monkeypatch,
+) -> None:
+    from hailhq.core.config import settings
+    from hailhq.core.provider_config import provider_cipher
+    from hailhq.core.secret_cipher import generate_key
+
+    monkeypatch.setattr(settings, "hail_provider_secret_key", generate_key())
+
+    org_id, _, plain = org_and_key
+    await add_phone_number(async_session, org_id)
+
+    resp = await client.post(
+        "/calls",
+        json={
+            "to": "+14155559999",
+            "llm": {
+                "base_url": "https://api.openai.com/v1",
+                "api_key": "sk-SECRET-PLAINTEXT",
+                "model": "gpt-5.4-mini",
+            },
+            "recipient_consent": True,
+        },
+        headers={"Authorization": f"Bearer {plain}"},
+    )
+    assert resp.status_code == 201, resp.text
+
+    metadata = livekit_mock.dispatch_agent.await_args.kwargs["metadata"]
+    assert metadata["organization_id"] == str(org_id)
+    assert "sk-SECRET-PLAINTEXT" not in str(metadata)
+    llm_meta = metadata["llm"]
+    assert "api_key" not in llm_meta
+    assert provider_cipher().decrypt(llm_meta["api_key_enc"]) == "sk-SECRET-PLAINTEXT"
+
+
+async def test_dispatch_falls_back_to_plaintext_without_cipher_key(
+    client: httpx.AsyncClient,
+    async_session: AsyncSession,
+    org_and_key: tuple[str, ApiKey, str],
+    livekit_mock: AsyncMock,
+    add_phone_number,
+    monkeypatch,
+) -> None:
+    from hailhq.core.config import settings
+
+    monkeypatch.setattr(settings, "hail_provider_secret_key", "")
+
+    org_id, _, plain = org_and_key
+    await add_phone_number(async_session, org_id)
+
+    resp = await client.post(
+        "/calls",
+        json={
+            "to": "+14155559999",
+            "llm": {
+                "base_url": "https://api.openai.com/v1",
+                "api_key": "sk-legacy",
+                "model": "gpt-5.4-mini",
+            },
+            "recipient_consent": True,
+        },
+        headers={"Authorization": f"Bearer {plain}"},
+    )
+    assert resp.status_code == 201, resp.text
+    llm_meta = livekit_mock.dispatch_agent.await_args.kwargs["metadata"]["llm"]
+    assert llm_meta["api_key"] == "sk-legacy"  # legacy self-host path
+
+
+async def test_per_call_voice_id_rides_in_voice_config(
+    client: httpx.AsyncClient,
+    async_session: AsyncSession,
+    org_and_key: tuple[str, ApiKey, str],
+    livekit_mock: AsyncMock,
+    add_phone_number,
+) -> None:
+    org_id, _, plain = org_and_key
+    await add_phone_number(async_session, org_id)
+
+    resp = await client.post(
+        "/calls",
+        json={
+            "to": "+14155559999",
+            "system_prompt": "hi",
+            "voice_config": {"voice_id": "v-custom-1"},
+            "recipient_consent": True,
+        },
+        headers={"Authorization": f"Bearer {plain}"},
+    )
+    assert resp.status_code == 201, resp.text
+    metadata = livekit_mock.dispatch_agent.await_args.kwargs["metadata"]
+    assert metadata["voice_config"]["voice_id"] == "v-custom-1"
+
+
+async def test_post_calls_rejects_unsafe_llm_base_url(
+    client: httpx.AsyncClient,
+    org_and_key: tuple[str, ApiKey, str],
+) -> None:
+    """A non-https per-call llm.base_url is a 422 from the cheap schema check."""
+    _, _, plain = org_and_key
+    resp = await client.post(
+        "/calls",
+        json={
+            "to": "+14155559999",
+            "llm": {
+                "base_url": "http://169.254.169.254/v1",
+                "api_key": "sk-whatever",
+                "model": "gpt-5.4-mini",
+            },
+            "recipient_consent": True,
+        },
+        headers={"Authorization": f"Bearer {plain}"},
+    )
+    assert resp.status_code == 422
+
+
+async def test_post_calls_rejects_unsafe_llm_base_url_at_route(
+    client: httpx.AsyncClient,
+    org_and_key: tuple[str, ApiKey, str],
+) -> None:
+    """An https base_url on a literal metadata IP passes schema syntax checks
+    (no DNS needed) but is a 422 from the route's resolving SSRF guard."""
+    _, _, plain = org_and_key
+    resp = await client.post(
+        "/calls",
+        json={
+            "to": "+14155559999",
+            "llm": {
+                "base_url": "https://169.254.169.254/v1",
+                "api_key": "sk-whatever",
+                "model": "gpt-5.4-mini",
+            },
+            "recipient_consent": True,
+        },
+        headers={"Authorization": f"Bearer {plain}"},
+    )
+    assert resp.status_code == 422
