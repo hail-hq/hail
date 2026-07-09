@@ -40,6 +40,7 @@ from hailhq.core.internal_webhook import notify_usage_event_recorded
 from hailhq.core.pool import release_pool_reservation
 from hailhq.core.models import Call, CallEvent, UsageEvent
 from hailhq.core.schemas import TERMINAL_CALL_STATUSES
+from hailhq.core.url_guard import assert_public_https_url
 from hailhq.voicebot.pipeline import (
     ProviderKeyError,
     build_session,
@@ -645,11 +646,22 @@ async def entrypoint(ctx: JobContext) -> None:
         # they all mean "can't honor this call's provider config". Convert
         # them so they fail fast through the same clean finalize path below
         # instead of escaping entrypoint() raw and leaking the pool number.
+        # UnsafeUrlError (raised by assert_public_https_url) is itself a
+        # ValueError subclass, so it's covered by the tuple below.
         try:
             org_id_raw = metadata.get("organization_id")
             org_id = UUID(org_id_raw) if org_id_raw else None
-            org_cfgs = await resolve_org_configs(org_id)
             llm_cfg = decrypt_llm_metadata(metadata.get("llm"))
+            if llm_cfg is not None:
+                # A per-call BYO base_url was only resolved once, at POST
+                # /calls time — re-check here (off the event loop) so a DNS
+                # rebind between then and now can't slip a private/metadata
+                # address past the guard the way the org BYO path already
+                # re-checks in resolve_org_configs below.
+                llm_cfg["base_url"] = await asyncio.to_thread(
+                    assert_public_https_url, llm_cfg["base_url"]
+                )
+            org_cfgs = await resolve_org_configs(org_id, skip_llm=llm_cfg is not None)
         except (SecretKeyMissing, InvalidToken, ValueError, SQLAlchemyError) as exc:
             raise ProviderKeyError(f"could not load provider config: {exc}") from exc
         session = build_session(

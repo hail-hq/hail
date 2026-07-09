@@ -212,7 +212,7 @@ async def test_entrypoint_org_config_load_failure_finalizes_cleanly(
     org_id = UUID("11111111-2222-3333-4444-555555555555")
     call_id = await _make_call_row(async_session)
 
-    async def _boom(_org_id: UUID | None) -> dict:
+    async def _boom(_org_id: UUID | None, *, skip_llm: bool = False) -> dict:
         raise InvalidToken("stale ciphertext after key rotation")
 
     monkeypatch.setattr(agent_mod, "resolve_org_configs", _boom)

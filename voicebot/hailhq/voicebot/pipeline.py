@@ -109,6 +109,8 @@ class ResolvedLayer:
 
 async def resolve_org_configs(
     organization_id: UUID | None,
+    *,
+    skip_llm: bool = False,
 ) -> dict[str, ResolvedLayer]:
     """Load + decrypt the org's BYO rows. {} when org id absent or no rows.
 
@@ -119,6 +121,13 @@ async def resolve_org_configs(
     re-pointed since. Raising ``ProviderKeyError`` here means this always
     runs inside the caller's guarded try/except (see ``agent.py``), which
     funnels straight into clean provider_key_error finalization.
+
+    ``skip_llm`` is set when a per-call llm override (mode B) is already
+    present — mode B always wins over the org's llm config (see
+    ``build_llm``), so decrypting/re-validating it here would be wasted
+    work, and worse, could fail an otherwise-valid override call on an
+    unrelated, unused org llm config problem (a stale base_url, or a key a
+    ``HAIL_PROVIDER_SECRET_KEY`` rotation invalidated).
     """
     if organization_id is None:
         return {}
@@ -126,6 +135,8 @@ async def resolve_org_configs(
         rows = await load_org_provider_configs(session, organization_id)
     resolved: dict[str, ResolvedLayer] = {}
     for layer, row in rows.items():
+        if layer == "llm" and skip_llm:
+            continue
         api_key: str | None = None
         if row.encrypted_api_key is not None:
             api_key = provider_cipher().decrypt(row.encrypted_api_key)
@@ -180,10 +191,12 @@ def _house_llm() -> agents_llm.LLM:
 
 
 def _org_llm(org: ResolvedLayer) -> agents_llm.LLM:
-    if org.api_key is None:
-        raise ProviderKeyError("org llm config has no stored api key")
     model = org.params.get("model", "")
     if org.provider == "openai-compatible":
+        # openai-compatible has no house equivalent — base_url is inherently
+        # customer-specific, so a missing org key always fails fast here.
+        if org.api_key is None:
+            raise ProviderKeyError("org llm config has no stored api key")
         # The resolving SSRF guard already ran (off the event loop) in
         # resolve_org_configs, which normalizes org.params["base_url"] to
         # the canonicalized, verified-public form. A legacy/malformed row
@@ -194,9 +207,19 @@ def _org_llm(org: ResolvedLayer) -> agents_llm.LLM:
             raise ProviderKeyError("org llm config is missing base_url")
         return openai_plugin.LLM(base_url=base_url, api_key=org.api_key, model=model)
     if org.provider == "anthropic":
-        return anthropic_plugin.LLM(api_key=org.api_key, model=model)
+        kwargs: dict[str, Any] = {"model": model}
+        if org.api_key is not None:
+            kwargs["api_key"] = org.api_key
+        elif not settings.anthropic_api_key:
+            raise ProviderKeyError("no org or house anthropic key available")
+        return anthropic_plugin.LLM(**kwargs)
     if org.provider == "google":
-        return google_plugin.LLM(api_key=org.api_key, model=model)
+        kwargs = {"model": model}
+        if org.api_key is not None:
+            kwargs["api_key"] = org.api_key
+        elif not settings.google_api_key:
+            raise ProviderKeyError("no org or house google key available")
+        return google_plugin.LLM(**kwargs)
     raise ProviderKeyError(f"unknown org llm provider '{org.provider}'")
 
 
@@ -320,6 +343,8 @@ def build_stt(org: ResolvedLayer | None = None) -> agents_stt.STT:
         }
         if org.api_key is not None:
             kwargs["api_key"] = org.api_key
+        elif not settings.deepgram_api_key:
+            raise ProviderKeyError("no org or house deepgram key available")
         byo = deepgram_plugin.STT(**kwargs)
         if org.fallback_enabled and settings.deepgram_api_key:
             return agents_stt.FallbackAdapter(
