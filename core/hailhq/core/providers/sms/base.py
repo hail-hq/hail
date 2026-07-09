@@ -22,7 +22,10 @@ __all__ = ["ProviderSmsResult", "SmsProvider"]
 class ProviderSmsResult(BaseModel):
     """The carrier's immediate response to a send request."""
 
-    provider_message_sid: str
+    # ``None`` when the carrier rejected the send at create time (no message
+    # resource was created — e.g. an invalid number); populated once the
+    # carrier accepts and mints a message id.
+    provider_message_sid: str | None = None
     status: str
     segment_count: int
     error_code: str | None = None

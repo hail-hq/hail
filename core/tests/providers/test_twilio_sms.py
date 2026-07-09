@@ -117,6 +117,57 @@ async def test_send_sms_carrier_rejection(provider: TwilioSmsProvider) -> None:
     assert result.status == "failed"
 
 
+@responses.activate
+async def test_send_sms_invalid_number_returns_failed_result(
+    provider: TwilioSmsProvider,
+) -> None:
+    # Twilio raises TwilioRestException (HTTP 4xx + a 21xxx code) at create
+    # time for an invalid/unreachable recipient — no message resource is
+    # created. Per the SmsProvider contract this comes back as a failed
+    # ProviderSmsResult (not an exception) so the route records an unbilled
+    # failed send rather than a 502 transport error.
+    responses.add(
+        responses.POST,
+        f"{API_BASE}/Messages.json",
+        json={
+            "code": 21211,
+            "message": "The 'To' number +1000 is not a valid phone number.",
+            "more_info": "https://www.twilio.com/docs/errors/21211",
+            "status": 400,
+        },
+        status=400,
+    )
+
+    result = await provider.send_sms(
+        from_e164="+14155559999", to_e164="+1000", body="Hello"
+    )
+
+    assert isinstance(result, ProviderSmsResult)
+    assert result.status == "failed"
+    assert result.error_code == "21211"
+    assert result.provider_message_sid is None
+
+
+@responses.activate
+async def test_send_sms_auth_failure_raises(provider: TwilioSmsProvider) -> None:
+    # Account-level failures (auth, rate-limit) and 5xx are transport failures:
+    # they propagate so the route surfaces a 502, not a per-recipient "failed"
+    # (an auth failure means every send fails — not the recipient's fault).
+    from twilio.base.exceptions import TwilioRestException
+
+    responses.add(
+        responses.POST,
+        f"{API_BASE}/Messages.json",
+        json={"code": 20003, "message": "Authentication Error", "status": 401},
+        status=401,
+    )
+
+    with pytest.raises(TwilioRestException):
+        await provider.send_sms(
+            from_e164="+14155559999", to_e164="+14155551234", body="Hello"
+        )
+
+
 def test_constructor_raises_without_creds() -> None:
     with pytest.raises(ValueError, match="requires twilio_account_sid"):
         TwilioSmsProvider(account_sid="", auth_token="")

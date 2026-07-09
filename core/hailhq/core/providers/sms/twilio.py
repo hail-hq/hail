@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 
+from twilio.base.exceptions import TwilioRestException
 from twilio.rest import Client as TwilioClient
 
 from hailhq.core.config import settings
@@ -40,12 +41,29 @@ class TwilioSmsProvider(SmsProvider):
     async def send_sms(
         self, from_e164: str, to_e164: str, body: str
     ) -> ProviderSmsResult:
-        message = await asyncio.to_thread(
-            self._client.messages.create,
-            to=to_e164,
-            from_=from_e164,
-            body=body,
-        )
+        try:
+            message = await asyncio.to_thread(
+                self._client.messages.create,
+                to=to_e164,
+                from_=from_e164,
+                body=body,
+            )
+        except TwilioRestException as exc:
+            # A carrier/recipient-level rejection (invalid number, unsubscribed,
+            # unverified, unreachable) is raised by the SDK at create time with
+            # a 4xx status and a 21xxx error code and no message resource. Per
+            # the SmsProvider contract that is returned as a failed result, not
+            # raised. Account/auth/rate-limit (20xxx) and 5xx are transport
+            # failures and propagate (the route maps them to a 502).
+            code = exc.code or 0
+            if not (exc.status and 400 <= exc.status < 500 and 21000 <= code < 22000):
+                raise
+            return ProviderSmsResult(
+                provider_message_sid=None,
+                status="failed",
+                segment_count=0,
+                error_code=str(exc.code),
+            )
         raw_segments = getattr(message, "num_segments", None)
         segment_count = int(raw_segments) if raw_segments is not None else 1
         raw_error_code = getattr(message, "error_code", None)

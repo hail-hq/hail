@@ -184,7 +184,14 @@ async def create_sms(
             ),
         ) from exc
 
-    carrier_rejected = result.error_code is not None
+    # A carrier rejection surfaces via error_code AND/OR a failure status
+    # (base.ProviderSmsResult contract: "status reflecting the failure").
+    # Check both so a provider that reports failure by status alone isn't
+    # recorded as sent and billed.
+    carrier_rejected = result.error_code is not None or result.status.lower() in {
+        "failed",
+        "undelivered",
+    }
     new_status = "failed" if carrier_rejected else "sent"
     sms.status = new_status
     sms.provider_message_sid = result.provider_message_sid
