@@ -174,9 +174,16 @@ async def create_call(
                 assert_public_https_url, body.llm.base_url
             )
         except UnsafeUrlError as exc:
-            raise HTTPException(
-                status_code=http_status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail=str(exc),
+            # Deterministic failure — cache it so a same-key retry replays the
+            # 422 rather than 409ing on the in-flight sentinel idempotency_dep
+            # committed on acquire (matches the consent/compliance/funds/number
+            # gates below).
+            raise await cache_failure(
+                idem,
+                HTTPException(
+                    status_code=http_status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail=str(exc),
+                ),
             ) from exc
 
     # Consent attestation gate — reject before any Call row is created.
@@ -216,22 +223,28 @@ async def create_call(
     #    pool. Pool numbers are never explicitly addressable; naming one would
     #    let a caller grab a number that isn't theirs.
     pool_number: PhoneNumber | None = None
-    from_number = await resolve_org_number(db, principal.organization_id, body.from_)
+    from_number = await resolve_org_number(
+        db, principal.organization_id, body.from_, capability="voice"
+    )
     if from_number is None:
         if body.from_ is not None:
             raise await cache_failure(
                 idem,
                 unprocessable(
                     f"phone number {body.from_} is not registered to this "
-                    "organization or is not active",
+                    "organization, is not active, or lacks the voice capability",
                     loc=["body", "from"],
                 ),
             )
         pool_number = await claim_pool_number(db)
         if pool_number is None:
-            # Transient (no dispatch happened) — deliberately NOT cached
-            # under the idempotency key, so a same-key retry can succeed
-            # once the pool frees up.
+            # Transient (no dispatch happened): release the in-flight
+            # idempotency sentinel so a same-key retry can succeed once the
+            # pool frees up. Without this, the sentinel idempotency_dep
+            # committed on acquire would 409 "still processing" on every retry
+            # until the 24h TTL — the opposite of the intended behavior.
+            if idem is not None:
+                await idem.release()
             raise HTTPException(
                 status_code=http_status.HTTP_503_SERVICE_UNAVAILABLE,
                 detail="shared call line pool exhausted; try again shortly",

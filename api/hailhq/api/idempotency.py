@@ -31,7 +31,7 @@ from uuid import UUID
 
 from fastapi import Depends, Header, HTTPException, Request, Response
 from fastapi import status as http_status
-from sqlalchemy import select, update
+from sqlalchemy import delete, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from hailhq.core.db import session_scope
@@ -128,6 +128,24 @@ class IdempotencyContext:
                 update(IdempotencyKey)
                 .where(IdempotencyKey.key == self.storage_key)
                 .values(response_status=status_code, response_body=body)
+            )
+            await session.commit()
+
+    async def release(self) -> None:
+        """Delete the in-flight sentinel so a same-key retry can re-attempt.
+
+        For a deliberately-uncached *transient* pre-send failure (e.g. the
+        shared-pool-exhausted 503): the sentinel this context committed on
+        acquire would otherwise 409 "still processing" on every retry until
+        the 24h TTL. Scoped to ``response_status == _IN_FLIGHT_STATUS`` so it
+        is a no-op once a real response has been stored — it can never clobber
+        a cached success or failure."""
+        async with session_scope() as session:
+            await session.execute(
+                delete(IdempotencyKey).where(
+                    IdempotencyKey.key == self.storage_key,
+                    IdempotencyKey.response_status == _IN_FLIGHT_STATUS,
+                )
             )
             await session.commit()
 
