@@ -11,9 +11,10 @@ pair works, never a hardcoded list.
 from __future__ import annotations
 
 from typing import Literal
+from urllib.parse import urlsplit
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, model_validator
+from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -41,6 +42,28 @@ class LLMParams(BaseModel):
     provider: Literal["openai-compatible", "anthropic", "google"]
     base_url: str | None = None
     model: str
+
+    @field_validator("base_url")
+    @classmethod
+    def _base_url_is_public_https(cls, v: str | None) -> str | None:
+        """Cheap syntactic check only — no name resolution.
+
+        Mirrors ``LLMConfig``'s check in ``core/hailhq/core/schemas.py``: it
+        catches an obviously-unsafe value immediately on save. The full
+        resolving SSRF check (``assert_public_https_url``) is deliberately
+        NOT run here — this validator runs synchronously on whichever event
+        loop calls it, and that check does blocking DNS. The resolving check
+        still runs, off the event loop, in ``resolve_org_configs`` before
+        this config is ever used to build an LLM.
+        """
+        if v is None:
+            return v
+        parts = urlsplit(v)
+        if parts.scheme != "https":
+            raise ValueError(f"base_url must use https, got '{parts.scheme or v}'")
+        if not parts.hostname:
+            raise ValueError("base_url has no host")
+        return v
 
     @model_validator(mode="after")
     def _base_url_matches_provider(self) -> "LLMParams":
