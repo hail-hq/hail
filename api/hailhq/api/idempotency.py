@@ -29,9 +29,9 @@ from datetime import datetime, timedelta, timezone
 from typing import Annotated, Any
 from uuid import UUID
 
-from fastapi import Depends, Header, HTTPException, Request
+from fastapi import Depends, Header, HTTPException, Request, Response
 from fastapi import status as http_status
-from sqlalchemy import select, update
+from sqlalchemy import delete, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from hailhq.core.db import session_scope
@@ -57,6 +57,46 @@ def hash_request_body(payload: dict[str, Any]) -> str:
     """
     canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+async def cache_failure(
+    idem: IdempotencyContext | None, exc: HTTPException
+) -> HTTPException:
+    """Cache a pre-send failure under the idempotency key (when one was
+    supplied), then hand the exception back to raise.
+
+    Without this, an early 4xx leaves the idempotency row at the in-flight
+    sentinel and every same-key retry 409s "still processing" until the
+    row expires — failures must be stored just like successes (module
+    docstring). Usage: ``raise await cache_failure(idem, exc)``.
+    """
+    if idem is not None:
+        await idem.store(status_code=exc.status_code, body={"detail": exc.detail})
+    return exc
+
+
+def replay_cached(
+    idem: IdempotencyContext, response: Response, *, resource_prefix: str
+) -> tuple[UUID, dict[str, Any]]:
+    """Shared replay choreography for the create routes.
+
+    Re-raises a cached failure (status >= 400) with the Idempotency-Replay
+    header; otherwise sets the Idempotency-Replay + Location headers and
+    returns ``(cached_id, cached_body)`` for the route to audit and
+    model-validate. ``resource_prefix`` is the Location path prefix, e.g.
+    ``"/sms"``.
+    """
+    cached = idem.cached_response or {}
+    if idem.cached_status and idem.cached_status >= 400:
+        raise HTTPException(
+            status_code=idem.cached_status,
+            detail=cached.get("detail", "cached failure"),
+            headers={"Idempotency-Replay": "true"},
+        )
+    cached_id = UUID(cached["id"])
+    response.headers["Idempotency-Replay"] = "true"
+    response.headers["Location"] = f"{resource_prefix}/{cached_id}"
+    return cached_id, cached
 
 
 class IdempotencyContext:
@@ -88,6 +128,24 @@ class IdempotencyContext:
                 update(IdempotencyKey)
                 .where(IdempotencyKey.key == self.storage_key)
                 .values(response_status=status_code, response_body=body)
+            )
+            await session.commit()
+
+    async def release(self) -> None:
+        """Delete the in-flight sentinel so a same-key retry can re-attempt.
+
+        For a deliberately-uncached *transient* pre-send failure (e.g. the
+        shared-pool-exhausted 503): the sentinel this context committed on
+        acquire would otherwise 409 "still processing" on every retry until
+        the 24h TTL. Scoped to ``response_status == _IN_FLIGHT_STATUS`` so it
+        is a no-op once a real response has been stored — it can never clobber
+        a cached success or failure."""
+        async with session_scope() as session:
+            await session.execute(
+                delete(IdempotencyKey).where(
+                    IdempotencyKey.key == self.storage_key,
+                    IdempotencyKey.response_status == _IN_FLIGHT_STATUS,
+                )
             )
             await session.commit()
 
@@ -166,10 +224,16 @@ async def idempotency_dep(
     )
 
     if existing is None:
-        return IdempotencyContext(
+        ctx = IdempotencyContext(
             storage_key=storage_key,
             request_hash=request_hash,
         )
+        # Stashed so the app-level RequestValidationError handler (main.py)
+        # can cache a body-validation 422 — those raise after this dep has
+        # claimed the slot but before the route body runs, so the route's
+        # own failure caching never gets a chance.
+        request.state.idempotency_ctx = ctx
+        return ctx
 
     if existing.request_hash != request_hash:
         raise HTTPException(
@@ -183,16 +247,23 @@ async def idempotency_dep(
             detail="request with this idempotency key is still processing",
         )
 
-    return IdempotencyContext(
+    ctx = IdempotencyContext(
         storage_key=storage_key,
         request_hash=request_hash,
         cached_response=dict(existing.response_body),
         cached_status=existing.response_status,
     )
+    # Also stashed on replays: a cached body-validation 422 never reaches
+    # the route (the same invalid body fails validation again), so the
+    # main.py handler replays it from here.
+    request.state.idempotency_ctx = ctx
+    return ctx
 
 
 __all__ = [
     "IdempotencyContext",
+    "cache_failure",
     "hash_request_body",
     "idempotency_dep",
+    "replay_cached",
 ]

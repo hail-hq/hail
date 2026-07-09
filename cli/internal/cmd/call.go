@@ -6,9 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
-	"time"
 
-	"github.com/google/uuid"
 	"github.com/spf13/cobra"
 
 	"github.com/hail-hq/hail/cli/internal/client"
@@ -17,17 +15,14 @@ import (
 // callFlags are the values bound by `hail call` — kept as a struct so the test
 // suite can poke individual fields without leaking cobra wiring.
 type callFlags struct {
-	prompt            string
-	llmURL            string
-	llmKey            string
-	llmModel          string
-	from              string
-	firstMessage      string
-	idempotencyKey    string
-	recipientConsent  bool
-	consentSource     string
-	consentObtainedAt string
-	messageType       string
+	consentFlags
+	prompt         string
+	llmURL         string
+	llmKey         string
+	llmModel       string
+	from           string
+	firstMessage   string
+	idempotencyKey string
 }
 
 // newCallCmd builds the `call` command tree.
@@ -77,11 +72,7 @@ Example (minimal):
 	cmd.Flags().StringVar(&f.from, "from", "", "Override the from-number (default: first active number on the org)")
 	cmd.Flags().StringVar(&f.firstMessage, "first-message", "", "Spoken on pickup before listening")
 	cmd.Flags().StringVar(&f.idempotencyKey, "idempotency-key", "", "Defaults to a fresh UUID")
-	cmd.Flags().BoolVar(&f.recipientConsent, "recipient-consent", false, "Confirm the recipient has consented to receive this call — required by the API")
-	cmd.Flags().StringVar(&f.consentSource, "consent-source", "", "Where/how consent was obtained — required if --message-type=marketing")
-	cmd.Flags().StringVar(&f.consentObtainedAt, "consent-obtained-at", "", "RFC 3339 timestamp consent was obtained at")
-	cmd.Flags().StringVar(&f.messageType, "message-type", "", "\"marketing\" or \"informational\" (default: informational)")
-	cmd.MarkFlagRequired("recipient-consent")
+	f.registerConsentFlags(cmd, "call")
 	markOneOfRequired(cmd, "mode", "prompt", "llm-url", "llm-key", "llm-model")
 
 	cmd.AddCommand(newCallStatusCmd(opts))
@@ -92,14 +83,12 @@ Example (minimal):
 }
 
 func runCall(cmd *cobra.Command, opts *Options, f *callFlags, toNumber string) error {
-	if err := requireTrueFlag(cmd, f.recipientConsent, "--recipient-consent"); err != nil {
+	consentObtainedAt, err := f.validateConsent(cmd)
+	if err != nil {
 		return err
 	}
 	if err := validateMode(cmd, f); err != nil {
 		return err
-	}
-	if f.messageType == "marketing" && f.consentSource == "" {
-		return requireInputs(cmd, "--consent-source (required when --message-type=marketing)")
 	}
 	ctx := cmd.Context()
 
@@ -121,24 +110,13 @@ func runCall(cmd *cobra.Command, opts *Options, f *callFlags, toNumber string) e
 	if f.consentSource != "" {
 		body.ConsentSource = strPtr(f.consentSource)
 	}
-	if f.consentObtainedAt != "" {
-		t, err := time.Parse(time.RFC3339, f.consentObtainedAt)
-		if err != nil {
-			return fmt.Errorf("--consent-obtained-at: invalid RFC 3339 timestamp: %w", err)
-		}
-		body.ConsentObtainedAt = &t
-	}
+	body.ConsentObtainedAt = consentObtainedAt
 	if f.messageType != "" {
 		mt := client.CallCreateMessageType(f.messageType)
 		body.MessageType = &mt
 	}
 
-	idem := f.idempotencyKey
-	if idem == "" {
-		idem = uuid.NewString()
-	}
-
-	apiClient, err := opts.newClient(idempotencyEditor(idem))
+	apiClient, err := opts.newClientWithIdempotency(f.idempotencyKey)
 	if err != nil {
 		return err
 	}

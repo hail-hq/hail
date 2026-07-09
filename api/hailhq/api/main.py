@@ -6,7 +6,10 @@ from contextlib import asynccontextmanager
 from typing import AsyncIterator
 
 from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse
+from fastapi.encoders import jsonable_encoder
+from fastapi.exception_handlers import request_validation_exception_handler
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse, Response
 
 from functools import partial
 
@@ -26,6 +29,7 @@ from hailhq.api.routes import emails as emails_routes
 from hailhq.api.routes import events as events_routes
 from hailhq.api.routes import email_domains as email_domains_routes
 from hailhq.api.routes import webhooks as webhooks_routes
+from hailhq.api.routes import sms as sms_routes
 from hailhq.api.routes import unsubscribe as unsubscribe_routes
 from hailhq.api.routes.internal import dsar as internal_dsar
 from hailhq.api.routes.internal import org_closures as internal_org_closures
@@ -204,12 +208,38 @@ async def _secret_key_missing(_request: Request, exc: SecretKeyMissing) -> JSONR
     return JSONResponse(status_code=503, content={"detail": str(exc)})
 
 
+@app.exception_handler(RequestValidationError)
+async def _cache_422_for_idempotent_retry(
+    request: Request, exc: RequestValidationError
+) -> Response:
+    """Body-validation 422s raise after ``idempotency_dep`` has claimed the
+    key's slot but before the route body runs, so the route can never cache
+    them — without this, a same-key retry of the same invalid body 409s
+    "still processing" until the row expires. Store the 422 so retries
+    replay it, then defer to FastAPI's stock handler for the response."""
+    idem = getattr(request.state, "idempotency_ctx", None)
+    if idem is not None:
+        if idem.is_replay:
+            # The same invalid body fails validation again before the route's
+            # replay block can run — replay the cached 422 from here.
+            return JSONResponse(
+                status_code=idem.cached_status or 422,
+                content=idem.cached_response,
+                headers={"Idempotency-Replay": "true"},
+            )
+        await idem.store(
+            status_code=422, body={"detail": jsonable_encoder(exc.errors())}
+        )
+    return await request_validation_exception_handler(request, exc)
+
+
 app.include_router(calls_routes.router)
 app.include_router(emails_routes.router)
 app.include_router(events_routes.router)
 app.include_router(email_domains_routes.router)
 app.include_router(webhooks_routes.router)
 app.include_router(unsubscribe_routes.router)
+app.include_router(sms_routes.router)
 app.include_router(internal_ses_events.router)
 app.include_router(internal_org_closures.router)
 app.include_router(internal_provider_config.router)

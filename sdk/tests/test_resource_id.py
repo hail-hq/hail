@@ -17,10 +17,18 @@ def test_parse_resource_id_call_uuid_ok() -> None:
     assert str(rid) == "abc12345-6789-4abc-9def-012345678901"
 
 
+def test_parse_resource_id_supports_all_channels() -> None:
+    for rtype in ("call", "email", "sms"):
+        parsed_type, _ = parse_resource_id(
+            f"{rtype}:abc12345-6789-4abc-9def-012345678901"
+        )
+        assert parsed_type == rtype
+
+
 def test_parse_resource_id_unknown_type_raises() -> None:
     with pytest.raises(HailMalformedResourceId) as exc:
-        parse_resource_id("sms:abc12345-6789-4abc-9def-012345678901")
-    assert "unsupported resource type 'sms'" in str(exc.value)
+        parse_resource_id("fax:abc12345-6789-4abc-9def-012345678901")
+    assert "unsupported resource type 'fax'" in str(exc.value)
 
 
 def test_parse_resource_id_malformed_raises() -> None:

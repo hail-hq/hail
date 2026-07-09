@@ -61,6 +61,7 @@ async def dsar_delete(
     return {
         "identifier": summary.identifier,
         "calls_scrubbed": summary.calls_scrubbed,
+        "sms_scrubbed": summary.sms_scrubbed,
         "emails_scrubbed": summary.emails_scrubbed,
         "suppressions_preserved": summary.suppressions_preserved,
     }

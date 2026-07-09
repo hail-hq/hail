@@ -9,6 +9,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/google/uuid"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 
@@ -345,6 +346,7 @@ or pass --api-key.`,
 	root.PersistentFlags().BoolVar(&opts.JSON, "json", false, "Output JSON instead of human-friendly text")
 
 	root.AddCommand(newCallCmd(opts))
+	root.AddCommand(newSmsCmd(opts))
 	root.AddCommand(newEmailCmd(opts))
 	root.AddCommand(newTailCmd(opts))
 	root.AddCommand(newLoginCmd(opts))
@@ -373,6 +375,17 @@ func (o *Options) newClient(extra ...client.RequestEditorFn) (*client.ClientWith
 		return nil, fmt.Errorf("client init: %w", err)
 	}
 	return c, nil
+}
+
+// newClientWithIdempotency builds an API client whose mutating requests carry
+// an Idempotency-Key, defaulting an empty key to a fresh UUID. One home for the
+// default-key policy shared by every create command (call, email, email domain,
+// sms) so it can't drift between them.
+func (o *Options) newClientWithIdempotency(key string) (*client.ClientWithResponses, error) {
+	if key == "" {
+		key = uuid.NewString()
+	}
+	return o.newClient(idempotencyEditor(key))
 }
 
 // printJSON emits an indented JSON encoding of v on the writer.

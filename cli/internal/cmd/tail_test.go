@@ -197,13 +197,13 @@ func TestTail_RejectsMalformedId(t *testing.T) {
 	}
 }
 
-// TestTail_RejectsUnsupportedType: --id sms:<uuid> fails fast on the CLI
+// TestTail_RejectsUnsupportedType: --id fax:<uuid> fails fast on the CLI
 // before any HTTP, with the supported-types message.
 func TestTail_RejectsUnsupportedType(t *testing.T) {
 	srv := newFakeServer(t, http.StatusOK, client.EventStreamResponse{})
 	_, _, err := runRoot(t,
 		map[string]string{"HAIL_API_KEY": "sk_test", "HAIL_API_URL": srv.URL, "NO_COLOR": "1"},
-		"tail", "--id", "sms:"+uuid.UUID(callA).String(),
+		"tail", "--id", "fax:"+uuid.UUID(callA).String(),
 	)
 	if err == nil {
 		t.Fatal("expected error, got nil")
@@ -212,10 +212,10 @@ func TestTail_RejectsUnsupportedType(t *testing.T) {
 	if !strings.Contains(msg, "unsupported resource type") {
 		t.Errorf("error %q missing 'unsupported resource type'", msg)
 	}
-	if !strings.Contains(msg, "\"sms\"") {
+	if !strings.Contains(msg, "\"fax\"") {
 		t.Errorf("error %q missing the offending type token", msg)
 	}
-	if !strings.Contains(msg, "supported: call") {
+	if !strings.Contains(msg, "supported: call, email, sms") {
 		t.Errorf("error %q missing supported-types list", msg)
 	}
 	if hits := atomic.LoadInt32(&srv.hits); hits != 0 {
@@ -576,7 +576,7 @@ func TestTail_UnsupportedType(t *testing.T) {
 	id := "11111111-1111-1111-1111-111111111111"
 	_, _, err := runRoot(t,
 		map[string]string{"HAIL_API_KEY": "sk_test"},
-		"tail", "sms:"+id, "--no-follow",
+		"tail", "fax:"+id, "--no-follow",
 	)
 	if err == nil || !strings.Contains(err.Error(), "unsupported resource type") {
 		t.Fatalf("want unsupported-type rejection, got %v", err)

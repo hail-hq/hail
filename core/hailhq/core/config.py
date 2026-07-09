@@ -212,6 +212,8 @@ class Settings(BaseSettings):
     hail_velocity_call_per_day: int = 200
     hail_velocity_email_per_hour: int = 50
     hail_velocity_email_per_day: int = 500
+    hail_velocity_sms_per_hour: int = 100
+    hail_velocity_sms_per_day: int = 1000
 
     @computed_field  # type: ignore[prop-decorator]
     @property

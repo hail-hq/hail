@@ -174,7 +174,7 @@ class Suppression(Base):
 
     __table_args__ = (
         CheckConstraint(
-            "channel IN ('voice','email','all')",
+            "channel IN ('voice','email','sms','all')",
             name="suppressions_channel_check",
         ),
         Index("suppressions_recipient_channel_idx", "recipient", "channel"),
@@ -416,6 +416,98 @@ class CallEvent(Base):
     payload: Mapped[dict] = mapped_column(JSONB, nullable=False)
     occurred_at: Mapped[datetime] = mapped_column(
         TS, server_default=text("now()"), nullable=False
+    )
+
+
+class Sms(Base):
+    __tablename__ = "sms"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    organization_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), nullable=False
+    )
+    from_number_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("phone_numbers.id"), nullable=False
+    )
+    from_e164: Mapped[str] = mapped_column(Text, nullable=False)
+    to_e164: Mapped[str] = mapped_column(Text, nullable=False)
+    direction: Mapped[str] = mapped_column(
+        Text, server_default="outbound", nullable=False
+    )
+    status: Mapped[str] = mapped_column(Text, server_default="queued", nullable=False)
+    body: Mapped[str] = mapped_column(Text, nullable=False)
+    provider: Mapped[str] = mapped_column(Text, server_default="twilio", nullable=False)
+    provider_message_sid: Mapped[str | None] = mapped_column(
+        Text, unique=True, nullable=True
+    )
+    segment_count: Mapped[int] = mapped_column(
+        Integer, server_default="1", nullable=False
+    )
+    error_code: Mapped[str | None] = mapped_column(Text, nullable=True)
+    requested_at: Mapped[datetime] = mapped_column(
+        TS, server_default=text("now()"), nullable=False
+    )
+    sent_at: Mapped[datetime | None] = mapped_column(TS, nullable=True)
+    metadata_: Mapped[dict] = mapped_column(
+        "metadata", JSONB, server_default=text("'{}'::jsonb"), nullable=False
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        TS, server_default=text("now()"), nullable=False
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "direction IN ('outbound','inbound')",
+            name="sms_direction_check",
+        ),
+        CheckConstraint(
+            "status IN ('queued','sent','delivered','failed','undelivered','received')",
+            name="sms_status_check",
+        ),
+    )
+
+
+class SmsEvent(Base):
+    """Append-only SMS lifecycle event (mirrors CallEvent/EmailEvent).
+
+    ``organization_id`` is denormalized from the parent sms row so the
+    org-wide ``GET /events`` stream filters without a join. The
+    (sms_id, kind, occurred_at) unique constraint is sized for the
+    planned Twilio status-callback ingest (at-least-once redelivery,
+    same absorption strategy as ``EmailEvent``).
+    """
+
+    __tablename__ = "sms_events"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    sms_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("sms.id", ondelete="CASCADE"), nullable=False
+    )
+    organization_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), nullable=False
+    )
+    kind: Mapped[str] = mapped_column(Text, nullable=False)
+    payload: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    occurred_at: Mapped[datetime] = mapped_column(
+        TS, server_default=text("now()"), nullable=False
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        TS, server_default=text("now()"), nullable=False
+    )
+
+    __table_args__ = (
+        UniqueConstraint("sms_id", "kind", "occurred_at", name="sms_events_dedup_uq"),
+        Index("sms_events_sms_occurred_idx", "sms_id", "occurred_at"),
+        Index(
+            "sms_events_org_occurred_kind_idx",
+            "organization_id",
+            "occurred_at",
+            "kind",
+        ),
     )
 
 

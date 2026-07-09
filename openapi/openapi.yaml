@@ -1159,6 +1159,150 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HTTPValidationError"
+  /sms:
+    post:
+      tags:
+        - sms
+      summary: Create Sms
+      operationId: create_sms_sms_post
+      parameters:
+        - name: authorization
+          in: header
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            title: Authorization
+        - name: Idempotency-Key
+          in: header
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            title: Idempotency-Key
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SmsCreate"
+      responses:
+        "201":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SmsResponse"
+        "422":
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
+    get:
+      tags:
+        - sms
+      summary: List Sms
+      operationId: list_sms_sms_get
+      parameters:
+        - name: cursor
+          in: query
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            title: Cursor
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            maximum: 200
+            minimum: 1
+            default: 50
+            title: Limit
+        - name: status
+          in: query
+          required: false
+          schema:
+            anyOf:
+              - enum:
+                  - queued
+                  - sent
+                  - delivered
+                  - failed
+                  - undelivered
+                  - received
+                type: string
+              - type: "null"
+            title: Status
+        - name: to
+          in: query
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            title: To
+        - name: authorization
+          in: header
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            title: Authorization
+      responses:
+        "200":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SmsListResponse"
+        "422":
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
+  /sms/{sms_id}:
+    get:
+      tags:
+        - sms
+      summary: Get Sms
+      operationId: get_sms_sms__sms_id__get
+      parameters:
+        - name: sms_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+            title: Sms Id
+        - name: authorization
+          in: header
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            title: Authorization
+      responses:
+        "200":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SmsResponse"
+        "422":
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
   /healthz:
     get:
       summary: Healthz
@@ -1177,6 +1321,39 @@ components:
   schemas:
     CallCreate:
       properties:
+        recipient_consent:
+          type: boolean
+          title: Recipient Consent
+          description:
+            "Attestation that you have obtained the lawful consent required\
+            \ to contact this recipient. Hail does not verify consent itself \u2014\
+            \ you are responsible for a lawful basis under TCPA/ePrivacy/PECR/CAN-SPAM/GDPR\
+            \ as applicable. Rejected (422) if not true."
+        consent_source:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Consent Source
+          description:
+            Where/how consent was obtained (e.g. 'signup form', 'prior
+            customer relationship'). Required (non-empty) when message_type is 'marketing'.
+        consent_obtained_at:
+          anyOf:
+            - type: string
+              format: date-time
+            - type: "null"
+          title: Consent Obtained At
+          description: When consent was obtained, if known.
+        message_type:
+          type: string
+          enum:
+            - marketing
+            - informational
+          title: Message Type
+          description:
+            "'marketing' additionally requires a non-empty consent_source.
+            Use 'informational' for transactional/service communications."
+          default: informational
         to:
           type: string
           title: To
@@ -1211,44 +1388,11 @@ components:
           additionalProperties: true
           type: object
           title: Metadata
-        recipient_consent:
-          type: boolean
-          title: Recipient Consent
-          description:
-            "Attestation that you have obtained the lawful consent required\
-            \ to contact this recipient. Hail does not verify consent itself \u2014\
-            \ you are responsible for a lawful basis under TCPA/ePrivacy/PECR/CAN-SPAM/GDPR\
-            \ as applicable. Rejected (422) if not true."
-        consent_source:
-          anyOf:
-            - type: string
-            - type: "null"
-          title: Consent Source
-          description:
-            Where/how consent was obtained (e.g. 'signup form', 'prior
-            customer relationship'). Required (non-empty) when message_type is 'marketing'.
-        consent_obtained_at:
-          anyOf:
-            - type: string
-              format: date-time
-            - type: "null"
-          title: Consent Obtained At
-          description: When consent was obtained, if known.
-        message_type:
-          type: string
-          enum:
-            - marketing
-            - informational
-          title: Message Type
-          description:
-            "'marketing' additionally requires a non-empty consent_source.
-            Use 'informational' for transactional/service communications."
-          default: informational
       additionalProperties: false
       type: object
       required:
-        - to
         - recipient_consent
+        - to
       title: CallCreate
     CallListResponse:
       properties:
@@ -1464,6 +1608,39 @@ components:
         \ on access \u2014 see GET /emails/{id}/attachments/{aid}."
     EmailCreate:
       properties:
+        recipient_consent:
+          type: boolean
+          title: Recipient Consent
+          description:
+            "Attestation that you have obtained the lawful consent required\
+            \ to contact this recipient. Hail does not verify consent itself \u2014\
+            \ you are responsible for a lawful basis under TCPA/ePrivacy/PECR/CAN-SPAM/GDPR\
+            \ as applicable. Rejected (422) if not true."
+        consent_source:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Consent Source
+          description:
+            Where/how consent was obtained (e.g. 'signup form', 'prior
+            customer relationship'). Required (non-empty) when message_type is 'marketing'.
+        consent_obtained_at:
+          anyOf:
+            - type: string
+              format: date-time
+            - type: "null"
+          title: Consent Obtained At
+          description: When consent was obtained, if known.
+        message_type:
+          type: string
+          enum:
+            - marketing
+            - informational
+          title: Message Type
+          description:
+            "'marketing' additionally requires a non-empty consent_source.
+            Use 'informational' for transactional/service communications."
+          default: informational
         from:
           anyOf:
             - type: string
@@ -1519,45 +1696,12 @@ components:
           additionalProperties: true
           type: object
           title: Metadata
-        recipient_consent:
-          type: boolean
-          title: Recipient Consent
-          description:
-            "Attestation that you have obtained the lawful consent required\
-            \ to contact this recipient. Hail does not verify consent itself \u2014\
-            \ you are responsible for a lawful basis under TCPA/ePrivacy/PECR/CAN-SPAM/GDPR\
-            \ as applicable. Rejected (422) if not true."
-        consent_source:
-          anyOf:
-            - type: string
-            - type: "null"
-          title: Consent Source
-          description:
-            Where/how consent was obtained (e.g. 'signup form', 'prior
-            customer relationship'). Required (non-empty) when message_type is 'marketing'.
-        consent_obtained_at:
-          anyOf:
-            - type: string
-              format: date-time
-            - type: "null"
-          title: Consent Obtained At
-          description: When consent was obtained, if known.
-        message_type:
-          type: string
-          enum:
-            - marketing
-            - informational
-          title: Message Type
-          description:
-            "'marketing' additionally requires a non-empty consent_source.
-            Use 'informational' for transactional/service communications."
-          default: informational
       additionalProperties: false
       type: object
       required:
+        - recipient_consent
         - to
         - subject
-        - recipient_consent
       title: EmailCreate
     EmailDomainCreate:
       properties:
@@ -2342,6 +2486,7 @@ components:
           enum:
             - call
             - email
+            - sms
           title: Source
         call_id:
           anyOf:
@@ -2355,6 +2500,12 @@ components:
               format: uuid
             - type: "null"
           title: Email Id
+        sms_id:
+          anyOf:
+            - type: string
+              format: uuid
+            - type: "null"
+          title: Sms Id
         kind:
           type: string
           title: Kind
@@ -2374,7 +2525,7 @@ components:
         - payload
         - occurred_at
       title: EventResponse
-      description: One event on the unified GET /events stream (call or email).
+      description: One event on the unified GET /events stream (call, email, or SMS).
     EventStreamResponse:
       properties:
         items:
@@ -2433,6 +2584,154 @@ components:
         - api_key
         - model
       title: LLMConfig
+    SmsCreate:
+      properties:
+        recipient_consent:
+          type: boolean
+          title: Recipient Consent
+          description:
+            "Attestation that you have obtained the lawful consent required\
+            \ to contact this recipient. Hail does not verify consent itself \u2014\
+            \ you are responsible for a lawful basis under TCPA/ePrivacy/PECR/CAN-SPAM/GDPR\
+            \ as applicable. Rejected (422) if not true."
+        consent_source:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Consent Source
+          description:
+            Where/how consent was obtained (e.g. 'signup form', 'prior
+            customer relationship'). Required (non-empty) when message_type is 'marketing'.
+        consent_obtained_at:
+          anyOf:
+            - type: string
+              format: date-time
+            - type: "null"
+          title: Consent Obtained At
+          description: When consent was obtained, if known.
+        message_type:
+          type: string
+          enum:
+            - marketing
+            - informational
+          title: Message Type
+          description:
+            "'marketing' additionally requires a non-empty consent_source.
+            Use 'informational' for transactional/service communications."
+          default: informational
+        to:
+          type: string
+          title: To
+        from:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: From
+        body:
+          type: string
+          maxLength: 1600
+          minLength: 1
+          title: Body
+        metadata:
+          additionalProperties: true
+          type: object
+          title: Metadata
+      additionalProperties: false
+      type: object
+      required:
+        - recipient_consent
+        - to
+        - body
+      title: SmsCreate
+    SmsListResponse:
+      properties:
+        items:
+          items:
+            $ref: "#/components/schemas/SmsResponse"
+          type: array
+          title: Items
+        next_cursor:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Next Cursor
+      type: object
+      required:
+        - items
+      title: SmsListResponse
+    SmsResponse:
+      properties:
+        id:
+          type: string
+          format: uuid
+          title: Id
+        organization_id:
+          type: string
+          format: uuid
+          title: Organization Id
+        from_e164:
+          type: string
+          title: From E164
+        to_e164:
+          type: string
+          title: To E164
+        direction:
+          type: string
+          enum:
+            - outbound
+            - inbound
+          title: Direction
+        status:
+          type: string
+          enum:
+            - queued
+            - sent
+            - delivered
+            - failed
+            - undelivered
+            - received
+          title: Status
+        body:
+          type: string
+          title: Body
+        provider_message_sid:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Provider Message Sid
+        segment_count:
+          type: integer
+          title: Segment Count
+        error_code:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Error Code
+        requested_at:
+          type: string
+          format: date-time
+          title: Requested At
+        sent_at:
+          anyOf:
+            - type: string
+              format: date-time
+            - type: "null"
+          title: Sent At
+      type: object
+      required:
+        - id
+        - organization_id
+        - from_e164
+        - to_e164
+        - direction
+        - status
+        - body
+        - provider_message_sid
+        - segment_count
+        - error_code
+        - requested_at
+        - sent_at
+      title: SmsResponse
     ValidationError:
       properties:
         loc:

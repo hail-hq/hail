@@ -43,10 +43,14 @@ from hail.models import (
     EventStreamResponse,
     LLMConfig,
     NumberType,
+    SmsCreate,
+    SmsListResponse,
+    SmsResponse,
+    SmsStatus,
     VoiceConfig,
 )
 
-__version__ = "0.6.0"
+__version__ = "0.7.0"
 
 __all__ = [
     "Client",
@@ -73,6 +77,10 @@ __all__ = [
     "EventStreamResponse",
     "LLMConfig",
     "NumberType",
+    "SmsCreate",
+    "SmsListResponse",
+    "SmsResponse",
+    "SmsStatus",
     "TERMINAL_CALL_STATUSES",
     "TERMINAL_EMAIL_STATUSES",
     "VoiceConfig",

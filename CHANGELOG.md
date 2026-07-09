@@ -2,6 +2,53 @@
 
 All notable changes to Hail are documented here. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and Hail adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.0] — 2026-07-09
+
+SMS outbound milestone. Hail can now send SMS via Twilio, gated by the same
+consent, suppression, and velocity-cap infrastructure as calls and email.
+
+Component versions cut alongside this umbrella release:
+**`sdk-v0.7.0`** (PyPI: `hail-sdk==0.7.0`), **`cli-v0.10.0`** (Homebrew + GitHub Releases).
+
+### SMS outbound
+
+- `SmsProvider` interface in `core/hailhq/core/providers/sms/` with `TwilioSmsProvider` shipping.
+- `Sms` model (`sms` table) and `SmsEvent` model (`sms_events` table, feeding the unified event stream below).
+- Requires a dedicated, SMS-capable phone number on the organization — unlike calls, SMS does **not** fall back to a shared pool number, since a pool number cannot provide unambiguous number-to-org routing for a channel with no forced voice-menu context.
+- A carrier-level rejection (e.g. an unregistered or filtered number) is recorded as a failed, unbilled send with the carrier's `error_code` — not a false "sent" status, and not charged.
+- `Suppression.channel` CHECK widened to include `sms`; new `check_sms_allowed` gate mirrors the existing call/email checks. SMS velocity caps count attempted sends rather than billed sends, so a burst of carrier-rejected probing still trips the cap.
+- **Audit-log shape change (calls):** generalizing the phone-channel compliance gate to cover SMS renamed the call `audit_log.payload.checks` keys `internal_dnc_checked` / `internal_dnc_hit` to `suppression_checked` / `suppression_hit` (voice and SMS now share one destination scrub). Update any external queries or dashboards that match the old key names; existing rows are not backfilled.
+- SMS content is now covered by the existing DSAR export/delete and account-closure retention flows, on the same schedule as call transcripts and email content.
+
+### API
+
+- `POST /sms`, `GET /sms/{id}`, `GET /sms`.
+- Unified `/events` stream (`GET /events`) extended to a three-way union across calls, email, and SMS; `EventResponse.source` now includes `sms`.
+- Fixed: a same-idempotency-key retry of a request that failed pre-send validation (e.g. a malformed body, or a 403 from the consent/compliance/balance gates) previously replayed as "still processing" until the idempotency key expired, instead of replaying the original failure. Affects `/calls`, `/emails`, and `/sms`.
+
+### CLI (`cli-v0.10.0`)
+
+- New `hail sms send / status / list` subcommand.
+- `hail tail` (unified event stream) surfaces `sms:` resource IDs alongside `call:` and `email:`.
+
+### SDK (`sdk-v0.7.0`)
+
+- `client.sms.create / get / list` resource added.
+- Resource-ID parsing (`client.events.get`) widened to accept `sms:` alongside `call:` and `email:`.
+
+### MCP
+
+- `send_sms`, `get_sms`, `list_sms` tools added (eleven → fourteen tools total).
+
+### Deferred to next milestone
+
+- Inbound SMS: webhook receipt, STOP/HELP/START opt-out keyword processing.
+- Self-serve dedicated-number provisioning — today, assigning a number to an organization is a manual database operation; see `docs/operations.md`.
+- Custom per-org Sender ID (international, outbound-only corridors).
+- Console UI for SMS activity, numbers, and suppression management.
+
+[0.10.0]: https://github.com/hail-hq/hail/releases/tag/v0.10.0
+
 ## [0.9.1] — 2026-07-08
 
 Component version cut alongside this release: **`cli-v0.9.1`** (Homebrew + GitHub Releases). No SDK change — `sdk-v0.6.0` is unaffected and still current.

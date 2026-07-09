@@ -349,6 +349,7 @@ func (e EmailSummaryStatus) Valid() bool {
 const (
 	Call  EventResponseSource = "call"
 	Email EventResponseSource = "email"
+	Sms   EventResponseSource = "sms"
 )
 
 // Valid indicates whether the value is a known member of the EventResponseSource enum.
@@ -357,6 +358,8 @@ func (e EventResponseSource) Valid() bool {
 	case Call:
 		return true
 	case Email:
+		return true
+	case Sms:
 		return true
 	default:
 		return false
@@ -396,6 +399,72 @@ func (e EventStreamResponseCallStatus) Valid() bool {
 	case EventStreamResponseCallStatusQueued:
 		return true
 	case EventStreamResponseCallStatusRinging:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for SmsCreateMessageType.
+const (
+	Informational SmsCreateMessageType = "informational"
+	Marketing     SmsCreateMessageType = "marketing"
+)
+
+// Valid indicates whether the value is a known member of the SmsCreateMessageType enum.
+func (e SmsCreateMessageType) Valid() bool {
+	switch e {
+	case Informational:
+		return true
+	case Marketing:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for SmsResponseDirection.
+const (
+	SmsResponseDirectionInbound  SmsResponseDirection = "inbound"
+	SmsResponseDirectionOutbound SmsResponseDirection = "outbound"
+)
+
+// Valid indicates whether the value is a known member of the SmsResponseDirection enum.
+func (e SmsResponseDirection) Valid() bool {
+	switch e {
+	case SmsResponseDirectionInbound:
+		return true
+	case SmsResponseDirectionOutbound:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for SmsResponseStatus.
+const (
+	SmsResponseStatusDelivered   SmsResponseStatus = "delivered"
+	SmsResponseStatusFailed      SmsResponseStatus = "failed"
+	SmsResponseStatusQueued      SmsResponseStatus = "queued"
+	SmsResponseStatusReceived    SmsResponseStatus = "received"
+	SmsResponseStatusSent        SmsResponseStatus = "sent"
+	SmsResponseStatusUndelivered SmsResponseStatus = "undelivered"
+)
+
+// Valid indicates whether the value is a known member of the SmsResponseStatus enum.
+func (e SmsResponseStatus) Valid() bool {
+	switch e {
+	case SmsResponseStatusDelivered:
+		return true
+	case SmsResponseStatusFailed:
+		return true
+	case SmsResponseStatusQueued:
+		return true
+	case SmsResponseStatusReceived:
+		return true
+	case SmsResponseStatusSent:
+		return true
+	case SmsResponseStatusUndelivered:
 		return true
 	default:
 		return false
@@ -575,31 +644,31 @@ func (e ListCallsCallsGetParamsStatus) Valid() bool {
 
 // Defines values for ListEmailsEmailsGetParamsStatus.
 const (
-	Bounced    ListEmailsEmailsGetParamsStatus = "bounced"
-	Complained ListEmailsEmailsGetParamsStatus = "complained"
-	Delivered  ListEmailsEmailsGetParamsStatus = "delivered"
-	Failed     ListEmailsEmailsGetParamsStatus = "failed"
-	Queued     ListEmailsEmailsGetParamsStatus = "queued"
-	Received   ListEmailsEmailsGetParamsStatus = "received"
-	Sent       ListEmailsEmailsGetParamsStatus = "sent"
+	ListEmailsEmailsGetParamsStatusBounced    ListEmailsEmailsGetParamsStatus = "bounced"
+	ListEmailsEmailsGetParamsStatusComplained ListEmailsEmailsGetParamsStatus = "complained"
+	ListEmailsEmailsGetParamsStatusDelivered  ListEmailsEmailsGetParamsStatus = "delivered"
+	ListEmailsEmailsGetParamsStatusFailed     ListEmailsEmailsGetParamsStatus = "failed"
+	ListEmailsEmailsGetParamsStatusQueued     ListEmailsEmailsGetParamsStatus = "queued"
+	ListEmailsEmailsGetParamsStatusReceived   ListEmailsEmailsGetParamsStatus = "received"
+	ListEmailsEmailsGetParamsStatusSent       ListEmailsEmailsGetParamsStatus = "sent"
 )
 
 // Valid indicates whether the value is a known member of the ListEmailsEmailsGetParamsStatus enum.
 func (e ListEmailsEmailsGetParamsStatus) Valid() bool {
 	switch e {
-	case Bounced:
+	case ListEmailsEmailsGetParamsStatusBounced:
 		return true
-	case Complained:
+	case ListEmailsEmailsGetParamsStatusComplained:
 		return true
-	case Delivered:
+	case ListEmailsEmailsGetParamsStatusDelivered:
 		return true
-	case Failed:
+	case ListEmailsEmailsGetParamsStatusFailed:
 		return true
-	case Queued:
+	case ListEmailsEmailsGetParamsStatusQueued:
 		return true
-	case Received:
+	case ListEmailsEmailsGetParamsStatusReceived:
 		return true
-	case Sent:
+	case ListEmailsEmailsGetParamsStatusSent:
 		return true
 	default:
 		return false
@@ -608,16 +677,16 @@ func (e ListEmailsEmailsGetParamsStatus) Valid() bool {
 
 // Defines values for ListEmailsEmailsGetParamsDirection.
 const (
-	ListEmailsEmailsGetParamsDirectionInbound  ListEmailsEmailsGetParamsDirection = "inbound"
-	ListEmailsEmailsGetParamsDirectionOutbound ListEmailsEmailsGetParamsDirection = "outbound"
+	Inbound  ListEmailsEmailsGetParamsDirection = "inbound"
+	Outbound ListEmailsEmailsGetParamsDirection = "outbound"
 )
 
 // Valid indicates whether the value is a known member of the ListEmailsEmailsGetParamsDirection enum.
 func (e ListEmailsEmailsGetParamsDirection) Valid() bool {
 	switch e {
-	case ListEmailsEmailsGetParamsDirectionInbound:
+	case Inbound:
 		return true
-	case ListEmailsEmailsGetParamsDirectionOutbound:
+	case Outbound:
 		return true
 	default:
 		return false
@@ -636,6 +705,36 @@ func (e GetEmailStatsEmailsStatsGetParamsBucket) Valid() bool {
 	case GetEmailStatsEmailsStatsGetParamsBucketDay:
 		return true
 	case GetEmailStatsEmailsStatsGetParamsBucketHour:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ListSmsSmsGetParamsStatus.
+const (
+	Delivered   ListSmsSmsGetParamsStatus = "delivered"
+	Failed      ListSmsSmsGetParamsStatus = "failed"
+	Queued      ListSmsSmsGetParamsStatus = "queued"
+	Received    ListSmsSmsGetParamsStatus = "received"
+	Sent        ListSmsSmsGetParamsStatus = "sent"
+	Undelivered ListSmsSmsGetParamsStatus = "undelivered"
+)
+
+// Valid indicates whether the value is a known member of the ListSmsSmsGetParamsStatus enum.
+func (e ListSmsSmsGetParamsStatus) Valid() bool {
+	switch e {
+	case Delivered:
+		return true
+	case Failed:
+		return true
+	case Queued:
+		return true
+	case Received:
+		return true
+	case Sent:
+		return true
+	case Undelivered:
 		return true
 	default:
 		return false
@@ -999,7 +1098,7 @@ type EmailSummaryDirection string
 // EmailSummaryStatus defines model for EmailSummary.Status.
 type EmailSummaryStatus string
 
-// EventResponse One event on the unified GET /events stream (call or email).
+// EventResponse One event on the unified GET /events stream (call, email, or SMS).
 type EventResponse struct {
 	CallId     *openapi_types.UUID    `json:"call_id,omitempty"`
 	EmailId    *openapi_types.UUID    `json:"email_id,omitempty"`
@@ -1007,6 +1106,7 @@ type EventResponse struct {
 	Kind       string                 `json:"kind"`
 	OccurredAt time.Time              `json:"occurred_at"`
 	Payload    map[string]interface{} `json:"payload"`
+	SmsId      *openapi_types.UUID    `json:"sms_id,omitempty"`
 	Source     EventResponseSource    `json:"source"`
 }
 
@@ -1034,6 +1134,57 @@ type LLMConfig struct {
 	BaseUrl string `json:"base_url"`
 	Model   string `json:"model"`
 }
+
+// SmsCreate defines model for SmsCreate.
+type SmsCreate struct {
+	Body string `json:"body"`
+
+	// ConsentObtainedAt When consent was obtained, if known.
+	ConsentObtainedAt *time.Time `json:"consent_obtained_at,omitempty"`
+
+	// ConsentSource Where/how consent was obtained (e.g. 'signup form', 'prior customer relationship'). Required (non-empty) when message_type is 'marketing'.
+	ConsentSource *string `json:"consent_source,omitempty"`
+	From          *string `json:"from,omitempty"`
+
+	// MessageType 'marketing' additionally requires a non-empty consent_source. Use 'informational' for transactional/service communications.
+	MessageType *SmsCreateMessageType   `json:"message_type,omitempty"`
+	Metadata    *map[string]interface{} `json:"metadata,omitempty"`
+
+	// RecipientConsent Attestation that you have obtained the lawful consent required to contact this recipient. Hail does not verify consent itself — you are responsible for a lawful basis under TCPA/ePrivacy/PECR/CAN-SPAM/GDPR as applicable. Rejected (422) if not true.
+	RecipientConsent bool   `json:"recipient_consent"`
+	To               string `json:"to"`
+}
+
+// SmsCreateMessageType 'marketing' additionally requires a non-empty consent_source. Use 'informational' for transactional/service communications.
+type SmsCreateMessageType string
+
+// SmsListResponse defines model for SmsListResponse.
+type SmsListResponse struct {
+	Items      []SmsResponse `json:"items"`
+	NextCursor *string       `json:"next_cursor,omitempty"`
+}
+
+// SmsResponse defines model for SmsResponse.
+type SmsResponse struct {
+	Body               string               `json:"body"`
+	Direction          SmsResponseDirection `json:"direction"`
+	ErrorCode          *string              `json:"error_code"`
+	FromE164           string               `json:"from_e164"`
+	Id                 openapi_types.UUID   `json:"id"`
+	OrganizationId     openapi_types.UUID   `json:"organization_id"`
+	ProviderMessageSid *string              `json:"provider_message_sid"`
+	RequestedAt        time.Time            `json:"requested_at"`
+	SegmentCount       int                  `json:"segment_count"`
+	SentAt             *time.Time           `json:"sent_at"`
+	Status             SmsResponseStatus    `json:"status"`
+	ToE164             string               `json:"to_e164"`
+}
+
+// SmsResponseDirection defines model for SmsResponse.Direction.
+type SmsResponseDirection string
+
+// SmsResponseStatus defines model for SmsResponse.Status.
+type SmsResponseStatus string
 
 // ValidationError defines model for ValidationError.
 type ValidationError struct {
@@ -1262,6 +1413,29 @@ type ListEventsEventsGetParams struct {
 	Authorization *string `json:"authorization,omitempty"`
 }
 
+// ListSmsSmsGetParams defines parameters for ListSmsSmsGet.
+type ListSmsSmsGetParams struct {
+	Cursor        *string                    `form:"cursor,omitempty" json:"cursor,omitempty"`
+	Limit         *int                       `form:"limit,omitempty" json:"limit,omitempty"`
+	Status        *ListSmsSmsGetParamsStatus `form:"status,omitempty" json:"status,omitempty"`
+	To            *string                    `form:"to,omitempty" json:"to,omitempty"`
+	Authorization *string                    `json:"authorization,omitempty"`
+}
+
+// ListSmsSmsGetParamsStatus defines parameters for ListSmsSmsGet.
+type ListSmsSmsGetParamsStatus string
+
+// CreateSmsSmsPostParams defines parameters for CreateSmsSmsPost.
+type CreateSmsSmsPostParams struct {
+	Authorization  *string `json:"authorization,omitempty"`
+	IdempotencyKey *string `json:"Idempotency-Key,omitempty"`
+}
+
+// GetSmsSmsSmsIdGetParams defines parameters for GetSmsSmsSmsIdGet.
+type GetSmsSmsSmsIdGetParams struct {
+	Authorization *string `json:"authorization,omitempty"`
+}
+
 // UnsubscribeUnsubscribeGetParams defines parameters for UnsubscribeUnsubscribeGet.
 type UnsubscribeUnsubscribeGetParams struct {
 	Token string `form:"token" json:"token"`
@@ -1322,6 +1496,9 @@ type PatchEmailDomainEmailDomainsDomainIdPatchJSONRequestBody = EmailDomainPatch
 
 // CreateEmailEmailsPostJSONRequestBody defines body for CreateEmailEmailsPost for application/json ContentType.
 type CreateEmailEmailsPostJSONRequestBody = EmailCreate
+
+// CreateSmsSmsPostJSONRequestBody defines body for CreateSmsSmsPost for application/json ContentType.
+type CreateSmsSmsPostJSONRequestBody = SmsCreate
 
 // CreateSubscriptionWebhooksPostJSONRequestBody defines body for CreateSubscriptionWebhooksPost for application/json ContentType.
 type CreateSubscriptionWebhooksPostJSONRequestBody = WebhookSubscriptionCreate
@@ -1638,6 +1815,17 @@ type ClientInterface interface {
 	// HealthzHealthzGet request
 	HealthzHealthzGet(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
 
+	// ListSmsSmsGet request
+	ListSmsSmsGet(ctx context.Context, params *ListSmsSmsGetParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// CreateSmsSmsPostWithBody request with any body
+	CreateSmsSmsPostWithBody(ctx context.Context, params *CreateSmsSmsPostParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	CreateSmsSmsPost(ctx context.Context, params *CreateSmsSmsPostParams, body CreateSmsSmsPostJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// GetSmsSmsSmsIdGet request
+	GetSmsSmsSmsIdGet(ctx context.Context, smsId openapi_types.UUID, params *GetSmsSmsSmsIdGetParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
 	// UnsubscribeUnsubscribeGet request
 	UnsubscribeUnsubscribeGet(ctx context.Context, params *UnsubscribeUnsubscribeGetParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
@@ -1936,6 +2124,54 @@ func (c *Client) ListEventsEventsGet(ctx context.Context, params *ListEventsEven
 
 func (c *Client) HealthzHealthzGet(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewHealthzHealthzGetRequest(c.Server)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) ListSmsSmsGet(ctx context.Context, params *ListSmsSmsGetParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewListSmsSmsGetRequest(c.Server, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) CreateSmsSmsPostWithBody(ctx context.Context, params *CreateSmsSmsPostParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewCreateSmsSmsPostRequestWithBody(c.Server, params, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) CreateSmsSmsPost(ctx context.Context, params *CreateSmsSmsPostParams, body CreateSmsSmsPostJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewCreateSmsSmsPostRequest(c.Server, params, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) GetSmsSmsSmsIdGet(ctx context.Context, smsId openapi_types.UUID, params *GetSmsSmsSmsIdGetParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetSmsSmsSmsIdGetRequest(c.Server, smsId, params)
 	if err != nil {
 		return nil, err
 	}
@@ -3363,6 +3599,233 @@ func NewHealthzHealthzGetRequest(server string) (*http.Request, error) {
 	return req, nil
 }
 
+// NewListSmsSmsGetRequest generates requests for ListSmsSmsGet
+func NewListSmsSmsGetRequest(server string, params *ListSmsSmsGetParams) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/sms")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+		queryValues := queryURL.Query()
+
+		if params.Cursor != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "cursor", *params.Cursor, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+				return nil, err
+			} else {
+				for k, v := range parsed {
+					for _, v2 := range v {
+						queryValues.Add(k, v2)
+					}
+				}
+			}
+
+		}
+
+		if params.Limit != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "limit", *params.Limit, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "integer", Format: ""}); err != nil {
+				return nil, err
+			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+				return nil, err
+			} else {
+				for k, v := range parsed {
+					for _, v2 := range v {
+						queryValues.Add(k, v2)
+					}
+				}
+			}
+
+		}
+
+		if params.Status != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "status", *params.Status, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+				return nil, err
+			} else {
+				for k, v := range parsed {
+					for _, v2 := range v {
+						queryValues.Add(k, v2)
+					}
+				}
+			}
+
+		}
+
+		if params.To != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "to", *params.To, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+				return nil, err
+			} else {
+				for k, v := range parsed {
+					for _, v2 := range v {
+						queryValues.Add(k, v2)
+					}
+				}
+			}
+
+		}
+
+		queryURL.RawQuery = queryValues.Encode()
+	}
+
+	req, err := http.NewRequest("GET", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+
+		if params.Authorization != nil {
+			var headerParam0 string
+
+			headerParam0, err = runtime.StyleParamWithOptions("simple", false, "authorization", *params.Authorization, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationHeader, Type: "string", Format: ""})
+			if err != nil {
+				return nil, err
+			}
+
+			req.Header.Set("authorization", headerParam0)
+		}
+
+	}
+
+	return req, nil
+}
+
+// NewCreateSmsSmsPostRequest calls the generic CreateSmsSmsPost builder with application/json body
+func NewCreateSmsSmsPostRequest(server string, params *CreateSmsSmsPostParams, body CreateSmsSmsPostJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewCreateSmsSmsPostRequestWithBody(server, params, "application/json", bodyReader)
+}
+
+// NewCreateSmsSmsPostRequestWithBody generates requests for CreateSmsSmsPost with any type of body
+func NewCreateSmsSmsPostRequestWithBody(server string, params *CreateSmsSmsPostParams, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/sms")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("POST", queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	if params != nil {
+
+		if params.Authorization != nil {
+			var headerParam0 string
+
+			headerParam0, err = runtime.StyleParamWithOptions("simple", false, "authorization", *params.Authorization, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationHeader, Type: "string", Format: ""})
+			if err != nil {
+				return nil, err
+			}
+
+			req.Header.Set("authorization", headerParam0)
+		}
+
+		if params.IdempotencyKey != nil {
+			var headerParam1 string
+
+			headerParam1, err = runtime.StyleParamWithOptions("simple", false, "Idempotency-Key", *params.IdempotencyKey, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationHeader, Type: "string", Format: ""})
+			if err != nil {
+				return nil, err
+			}
+
+			req.Header.Set("Idempotency-Key", headerParam1)
+		}
+
+	}
+
+	return req, nil
+}
+
+// NewGetSmsSmsSmsIdGetRequest generates requests for GetSmsSmsSmsIdGet
+func NewGetSmsSmsSmsIdGetRequest(server string, smsId openapi_types.UUID, params *GetSmsSmsSmsIdGetParams) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "sms_id", smsId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/sms/%s", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("GET", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+
+		if params.Authorization != nil {
+			var headerParam0 string
+
+			headerParam0, err = runtime.StyleParamWithOptions("simple", false, "authorization", *params.Authorization, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationHeader, Type: "string", Format: ""})
+			if err != nil {
+				return nil, err
+			}
+
+			req.Header.Set("authorization", headerParam0)
+		}
+
+	}
+
+	return req, nil
+}
+
 // NewUnsubscribeUnsubscribeGetRequest generates requests for UnsubscribeUnsubscribeGet
 func NewUnsubscribeUnsubscribeGetRequest(server string, params *UnsubscribeUnsubscribeGetParams) (*http.Request, error) {
 	var err error
@@ -4003,6 +4466,17 @@ type ClientWithResponsesInterface interface {
 	// HealthzHealthzGetWithResponse request
 	HealthzHealthzGetWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*HealthzHealthzGetResponse, error)
 
+	// ListSmsSmsGetWithResponse request
+	ListSmsSmsGetWithResponse(ctx context.Context, params *ListSmsSmsGetParams, reqEditors ...RequestEditorFn) (*ListSmsSmsGetResponse, error)
+
+	// CreateSmsSmsPostWithBodyWithResponse request with any body
+	CreateSmsSmsPostWithBodyWithResponse(ctx context.Context, params *CreateSmsSmsPostParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CreateSmsSmsPostResponse, error)
+
+	CreateSmsSmsPostWithResponse(ctx context.Context, params *CreateSmsSmsPostParams, body CreateSmsSmsPostJSONRequestBody, reqEditors ...RequestEditorFn) (*CreateSmsSmsPostResponse, error)
+
+	// GetSmsSmsSmsIdGetWithResponse request
+	GetSmsSmsSmsIdGetWithResponse(ctx context.Context, smsId openapi_types.UUID, params *GetSmsSmsSmsIdGetParams, reqEditors ...RequestEditorFn) (*GetSmsSmsSmsIdGetResponse, error)
+
 	// UnsubscribeUnsubscribeGetWithResponse request
 	UnsubscribeUnsubscribeGetWithResponse(ctx context.Context, params *UnsubscribeUnsubscribeGetParams, reqEditors ...RequestEditorFn) (*UnsubscribeUnsubscribeGetResponse, error)
 
@@ -4470,6 +4944,75 @@ func (r HealthzHealthzGetResponse) StatusCode() int {
 	return 0
 }
 
+type ListSmsSmsGetResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *SmsListResponse
+	JSON422      *HTTPValidationError
+}
+
+// Status returns HTTPResponse.Status
+func (r ListSmsSmsGetResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ListSmsSmsGetResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type CreateSmsSmsPostResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON201      *SmsResponse
+	JSON422      *HTTPValidationError
+}
+
+// Status returns HTTPResponse.Status
+func (r CreateSmsSmsPostResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r CreateSmsSmsPostResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type GetSmsSmsSmsIdGetResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *SmsResponse
+	JSON422      *HTTPValidationError
+}
+
+// Status returns HTTPResponse.Status
+func (r GetSmsSmsSmsIdGetResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetSmsSmsSmsIdGetResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
 type UnsubscribeUnsubscribeGetResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
@@ -4876,6 +5419,41 @@ func (c *ClientWithResponses) HealthzHealthzGetWithResponse(ctx context.Context,
 		return nil, err
 	}
 	return ParseHealthzHealthzGetResponse(rsp)
+}
+
+// ListSmsSmsGetWithResponse request returning *ListSmsSmsGetResponse
+func (c *ClientWithResponses) ListSmsSmsGetWithResponse(ctx context.Context, params *ListSmsSmsGetParams, reqEditors ...RequestEditorFn) (*ListSmsSmsGetResponse, error) {
+	rsp, err := c.ListSmsSmsGet(ctx, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseListSmsSmsGetResponse(rsp)
+}
+
+// CreateSmsSmsPostWithBodyWithResponse request with arbitrary body returning *CreateSmsSmsPostResponse
+func (c *ClientWithResponses) CreateSmsSmsPostWithBodyWithResponse(ctx context.Context, params *CreateSmsSmsPostParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CreateSmsSmsPostResponse, error) {
+	rsp, err := c.CreateSmsSmsPostWithBody(ctx, params, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseCreateSmsSmsPostResponse(rsp)
+}
+
+func (c *ClientWithResponses) CreateSmsSmsPostWithResponse(ctx context.Context, params *CreateSmsSmsPostParams, body CreateSmsSmsPostJSONRequestBody, reqEditors ...RequestEditorFn) (*CreateSmsSmsPostResponse, error) {
+	rsp, err := c.CreateSmsSmsPost(ctx, params, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseCreateSmsSmsPostResponse(rsp)
+}
+
+// GetSmsSmsSmsIdGetWithResponse request returning *GetSmsSmsSmsIdGetResponse
+func (c *ClientWithResponses) GetSmsSmsSmsIdGetWithResponse(ctx context.Context, smsId openapi_types.UUID, params *GetSmsSmsSmsIdGetParams, reqEditors ...RequestEditorFn) (*GetSmsSmsSmsIdGetResponse, error) {
+	rsp, err := c.GetSmsSmsSmsIdGet(ctx, smsId, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetSmsSmsSmsIdGetResponse(rsp)
 }
 
 // UnsubscribeUnsubscribeGetWithResponse request returning *UnsubscribeUnsubscribeGetResponse
@@ -5582,6 +6160,105 @@ func ParseHealthzHealthzGetResponse(rsp *http.Response) (*HealthzHealthzGetRespo
 			return nil, err
 		}
 		response.JSON200 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseListSmsSmsGetResponse parses an HTTP response from a ListSmsSmsGetWithResponse call
+func ParseListSmsSmsGetResponse(rsp *http.Response) (*ListSmsSmsGetResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ListSmsSmsGetResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest SmsListResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 422:
+		var dest HTTPValidationError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON422 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseCreateSmsSmsPostResponse parses an HTTP response from a CreateSmsSmsPostWithResponse call
+func ParseCreateSmsSmsPostResponse(rsp *http.Response) (*CreateSmsSmsPostResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &CreateSmsSmsPostResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 201:
+		var dest SmsResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON201 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 422:
+		var dest HTTPValidationError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON422 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseGetSmsSmsSmsIdGetResponse parses an HTTP response from a GetSmsSmsSmsIdGetWithResponse call
+func ParseGetSmsSmsSmsIdGetResponse(rsp *http.Response) (*GetSmsSmsSmsIdGetResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetSmsSmsSmsIdGetResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest SmsResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 422:
+		var dest HTTPValidationError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON422 = &dest
 
 	}
 

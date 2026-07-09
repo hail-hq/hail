@@ -454,6 +454,194 @@ async def test_list_calls_pagination(client: HailClient) -> None:
 
 
 # --------------------------------------------------------------------------- #
+# send_sms
+# --------------------------------------------------------------------------- #
+
+
+def _sms_response(sms_id: str | None = None, status: str = "sent") -> dict:
+    """Return a minimal SmsResponse-shaped dict for mocked 201s."""
+    sid = sms_id or str(uuid4())
+    return {
+        "id": sid,
+        "organization_id": str(uuid4()),
+        "from_e164": "+14155550000",
+        "to_e164": "+14155551234",
+        "direction": "outbound",
+        "status": status,
+        "body": "hi",
+        "provider_message_sid": "SM_test",
+        "segment_count": 1,
+        "error_code": None,
+        "requested_at": "2026-07-08T00:00:00+00:00",
+        "sent_at": None,
+    }
+
+
+@respx.mock
+async def test_send_sms_happy_path(client: HailClient) -> None:
+    captured: dict = {}
+
+    def _handler(request: httpx.Request) -> httpx.Response:
+        captured["headers"] = dict(request.headers)
+        captured["body"] = request.read().decode("utf-8")
+        return httpx.Response(201, json=_sms_response())
+
+    respx.post(f"{_BASE_URL}/sms").mock(side_effect=_handler)
+
+    result = await tools.send_sms(
+        client=client,
+        to="+14155551234",
+        body="hi",
+        recipient_consent=True,
+    )
+    assert "error" not in result, result
+    assert result["status"] == "sent"
+
+    # Auth + Idempotency-Key auto-injected.
+    assert captured["headers"]["authorization"] == f"Bearer {_API_KEY}"
+    assert _UUID_RE.match(captured["headers"]["idempotency-key"])
+
+    body = httpx.Response(200, content=captured["body"]).json()
+    assert body == {
+        "to": "+14155551234",
+        "body": "hi",
+        "recipient_consent": True,
+        "message_type": "informational",
+    }
+
+
+@respx.mock
+async def test_send_sms_returns_idempotency_key_in_response(client: HailClient) -> None:
+    captured: dict = {}
+
+    def _handler(request: httpx.Request) -> httpx.Response:
+        captured["key"] = request.headers.get("idempotency-key")
+        return httpx.Response(201, json=_sms_response())
+
+    respx.post(f"{_BASE_URL}/sms").mock(side_effect=_handler)
+
+    result = await tools.send_sms(
+        client=client, to="+14155551234", body="hi", recipient_consent=True
+    )
+    assert "idempotency_key" in result
+    assert result["idempotency_key"] == captured["key"]
+
+
+@respx.mock
+async def test_send_sms_propagates_explicit_idempotency_key(client: HailClient) -> None:
+    captured: dict = {}
+
+    def _handler(request: httpx.Request) -> httpx.Response:
+        captured["key"] = request.headers.get("idempotency-key")
+        return httpx.Response(201, json=_sms_response())
+
+    respx.post(f"{_BASE_URL}/sms").mock(side_effect=_handler)
+
+    explicit = "deadbeef-dead-beef-dead-beefdeadbeef"
+    result = await tools.send_sms(
+        client=client,
+        to="+14155551234",
+        body="hi",
+        recipient_consent=True,
+        idempotency_key=explicit,
+    )
+    assert captured["key"] == explicit
+    assert result["idempotency_key"] == explicit
+
+
+@respx.mock
+async def test_send_sms_serializes_from_alias(client: HailClient) -> None:
+    captured: dict = {}
+
+    def _handler(request: httpx.Request) -> httpx.Response:
+        captured["body"] = request.read().decode("utf-8")
+        return httpx.Response(201, json=_sms_response())
+
+    respx.post(f"{_BASE_URL}/sms").mock(side_effect=_handler)
+
+    await tools.send_sms(
+        client=client,
+        to="+14155551234",
+        body="hi",
+        recipient_consent=True,
+        from_="+14155550000",
+    )
+    body = httpx.Response(200, content=captured["body"]).json()
+    assert body["from"] == "+14155550000"
+    assert "from_" not in body
+
+
+@respx.mock
+async def test_send_sms_rejects_bad_e164(client: HailClient) -> None:
+    route = respx.post(f"{_BASE_URL}/sms").mock(
+        return_value=httpx.Response(201, json=_sms_response())
+    )
+    result = await tools.send_sms(
+        client=client, to="not-a-number", body="hi", recipient_consent=True
+    )
+    assert "error" in result
+    assert not route.called  # short-circuited before HTTP
+
+
+@respx.mock
+async def test_send_sms_api_error(client: HailClient) -> None:
+    respx.post(f"{_BASE_URL}/sms").mock(
+        return_value=httpx.Response(403, json={"detail": "blocked"})
+    )
+    result = await tools.send_sms(
+        client=client, to="+14155551234", body="hi", recipient_consent=True
+    )
+    assert result == {"error": "hail api error 403: blocked"}
+
+
+# --------------------------------------------------------------------------- #
+# get_sms
+# --------------------------------------------------------------------------- #
+
+
+@respx.mock
+async def test_get_sms_happy_path(client: HailClient) -> None:
+    sid = str(uuid4())
+    respx.get(f"{_BASE_URL}/sms/{sid}").mock(
+        return_value=httpx.Response(200, json=_sms_response(sid, status="delivered"))
+    )
+    result = await tools.get_sms(client=client, sms_id=sid)
+    assert result["id"] == sid
+    assert result["status"] == "delivered"
+
+
+@respx.mock
+async def test_get_sms_maps_404_to_not_found(client: HailClient) -> None:
+    sid = str(uuid4())
+    respx.get(f"{_BASE_URL}/sms/{sid}").mock(
+        return_value=httpx.Response(404, json={"detail": "sms not found"})
+    )
+    result = await tools.get_sms(client=client, sms_id=sid)
+    assert result == {"error": "resource not found"}
+
+
+# --------------------------------------------------------------------------- #
+# list_sms
+# --------------------------------------------------------------------------- #
+
+
+@respx.mock
+async def test_list_sms_pagination(client: HailClient) -> None:
+    captured: dict = {}
+
+    def _handler(request: httpx.Request) -> httpx.Response:
+        captured["url"] = str(request.url)
+        return httpx.Response(200, json={"items": [], "next_cursor": None})
+
+    respx.get(f"{_BASE_URL}/sms").mock(side_effect=_handler)
+
+    result = await tools.list_sms(client=client, cursor="cur-abc", limit=25)
+    assert result["items"] == []
+    assert "cursor=cur-abc" in captured["url"]
+    assert "limit=25" in captured["url"]
+
+
+# --------------------------------------------------------------------------- #
 # get_email
 # --------------------------------------------------------------------------- #
 
@@ -662,11 +850,21 @@ async def test_get_events_rejects_malformed_id(client: HailClient) -> None:
 
 
 @respx.mock
-async def test_get_events_rejects_unsupported_type(client: HailClient) -> None:
+async def test_get_events_accepts_sms_resource_type(client: HailClient) -> None:
     route = respx.get(f"{_BASE_URL}/events").mock(
         return_value=httpx.Response(200, json={"items": [], "next_cursor": None})
     )
     result = await tools.get_events(client=client, id=f"sms:{uuid4()}")
+    assert "error" not in result
+    assert route.called
+
+
+@respx.mock
+async def test_get_events_rejects_unsupported_type(client: HailClient) -> None:
+    route = respx.get(f"{_BASE_URL}/events").mock(
+        return_value=httpx.Response(200, json={"items": [], "next_cursor": None})
+    )
+    result = await tools.get_events(client=client, id=f"fax:{uuid4()}")
     assert "error" in result
     assert "unsupported resource type" in result["error"]
     assert not route.called

@@ -85,9 +85,16 @@ def test_parse_resource_id_missing_colon():
         parse_resource_id("nocolon")
 
 
+def test_parse_resource_id_supports_sms():
+    u = uuid4()
+    rtype, rid = parse_resource_id(f"sms:{u}")
+    assert rtype == "sms"
+    assert rid == u
+
+
 def test_parse_resource_id_unsupported_type():
-    with pytest.raises(ValueError, match=r"unsupported resource type 'sms'"):
-        parse_resource_id(f"sms:{uuid4()}")
+    with pytest.raises(ValueError, match=r"unsupported resource type 'fax'"):
+        parse_resource_id(f"fax:{uuid4()}")
 
 
 def test_parse_resource_id_empty_type():
@@ -170,3 +177,55 @@ def test_email_summary_omits_bodies_keeps_metadata_alias():
     assert "body_text" not in dumped
     assert "body_html" not in dumped
     assert dumped["metadata"] == {"tier": "free"}
+
+
+def test_sms_create_requires_consent() -> None:
+    import pytest
+    from pydantic import ValidationError
+
+    from hailhq.core.schemas import SmsCreate
+
+    with pytest.raises(ValidationError):
+        SmsCreate(to="+14155551234", body="hi")  # missing recipient_consent
+
+
+def test_sms_create_validates_e164() -> None:
+    import pytest
+    from pydantic import ValidationError
+
+    from hailhq.core.schemas import SmsCreate
+
+    with pytest.raises(ValidationError):
+        SmsCreate(to="not-a-number", body="hi", recipient_consent=True)
+
+
+def test_sms_create_happy_path() -> None:
+    from hailhq.core.schemas import SmsCreate
+
+    sms = SmsCreate(to="+14155551234", body="hi", recipient_consent=True)
+    assert sms.to == "+14155551234"
+    assert sms.message_type == "informational"
+
+
+def test_call_create_still_requires_consent_after_mixin_refactor() -> None:
+    """Regression: CallCreate moving onto ConsentAttestationMixin must not
+    change its externally-visible required-field behavior."""
+    import pytest
+    from pydantic import ValidationError
+
+    from hailhq.core.schemas import CallCreate
+
+    with pytest.raises(ValidationError):
+        CallCreate(to="+14155551234", system_prompt="hi")  # missing recipient_consent
+
+
+def test_email_create_still_requires_consent_after_mixin_refactor() -> None:
+    import pytest
+    from pydantic import ValidationError
+
+    from hailhq.core.schemas import EmailCreate
+
+    with pytest.raises(ValidationError):
+        EmailCreate(
+            to=["a@example.com"], subject="hi", body_text="hi"
+        )  # missing recipient_consent

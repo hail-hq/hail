@@ -36,14 +36,19 @@ from hailhq.core.urls import join_url
 from hailhq.api.deps import Principal, get_current_principal
 from hailhq.api.errors import unprocessable
 from hailhq.api.pagination import fetch_cursor_page
-from hailhq.api.idempotency import IdempotencyContext, idempotency_dep
+from hailhq.api.idempotency import (
+    IdempotencyContext,
+    cache_failure,
+    idempotency_dep,
+    replay_cached,
+)
 from hailhq.api.usage import write_usage_event
 from hailhq.api.routes.email_domains import (
     compose_hail_mail_address,
     get_email_provider,
     resolve_hail_mail_prefixes,
 )
-from hailhq.core.billing import has_funds
+from hailhq.api.funds import require_funds
 from hailhq.core.compliance_gate import check_email_allowed
 from hailhq.core.db import get_session
 from hailhq.core.email_delivery_events import record_sent_event
@@ -282,24 +287,18 @@ async def create_email(
 ) -> EmailResponse:
     # Idempotency replay first — never re-send.
     if idem is not None and idem.is_replay:
-        cached = idem.cached_response or {}
-        if idem.cached_status and idem.cached_status >= 400:
-            raise HTTPException(
-                status_code=idem.cached_status,
-                detail=cached.get("detail", "cached failure"),
-                headers={"Idempotency-Replay": "true"},
-            )
-        cached_id = UUID(cached["id"])
-        response.headers["Idempotency-Replay"] = "true"
-        response.headers["Location"] = f"/emails/{cached_id}"
+        _, cached = replay_cached(idem, response, resource_prefix="/emails")
         return EmailResponse.model_validate(cached)
 
     # Consent attestation gate — reject before any Email row is created.
-    enforce_consent(
-        recipient_consent=body.recipient_consent,
-        consent_source=body.consent_source,
-        message_type=body.message_type,
-    )
+    try:
+        enforce_consent(
+            recipient_consent=body.recipient_consent,
+            consent_source=body.consent_source,
+            message_type=body.message_type,
+        )
+    except HTTPException as exc:
+        raise await cache_failure(idem, exc) from None
 
     # Compliance gate — suppression list, velocity cap. Screens every
     # recipient (to/cc/bcc), not just `to`. Also before any Email row is
@@ -322,21 +321,20 @@ async def create_email(
                 "checks": gate.checks,
             },
         )
-        raise HTTPException(
-            status_code=http_status.HTTP_403_FORBIDDEN,
-            detail=gate.reason,
+        raise await cache_failure(
+            idem,
+            HTTPException(
+                status_code=http_status.HTTP_403_FORBIDDEN,
+                detail=gate.reason,
+            ),
         )
 
-    # Cloud-only balance gate; shared-key auth lands on the unbilled
-    # "Self-hosted" org and skips it.
-    if principal.api_key_id is not None:
-        if not await has_funds(db, principal.organization_id):
-            raise HTTPException(
-                status_code=http_status.HTTP_402_PAYMENT_REQUIRED,
-                detail="insufficient credits; top up at https://hail.so/console/billing",
-            )
+    await require_funds(db, principal, idem)
 
-    sd = await _resolve_sender(db, principal.organization_id, body.from_)
+    try:
+        sd = await _resolve_sender(db, principal.organization_id, body.from_)
+    except HTTPException as exc:
+        raise await cache_failure(idem, exc) from None
     from_address = _from_address_for(sd, body.from_)
 
     email = Email(

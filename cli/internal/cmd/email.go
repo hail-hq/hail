@@ -6,9 +6,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
-	"time"
 
-	"github.com/google/uuid"
 	"github.com/spf13/cobra"
 
 	"github.com/hail-hq/hail/cli/internal/client"
@@ -17,21 +15,18 @@ import (
 // emailSendFlags are the values bound by `hail email send` — kept as a struct
 // so tests can poke individual fields without leaking cobra wiring.
 type emailSendFlags struct {
-	to                []string
-	cc                []string
-	bcc               []string
-	from              string
-	replyTo           string
-	subject           string
-	body              string
-	bodyHTML          string
-	bodyFile          string
-	bodyHTMLFile      string
-	idempotencyKey    string
-	recipientConsent  bool
-	consentSource     string
-	consentObtainedAt string
-	messageType       string
+	consentFlags
+	to             []string
+	cc             []string
+	bcc            []string
+	from           string
+	replyTo        string
+	subject        string
+	body           string
+	bodyHTML       string
+	bodyFile       string
+	bodyHTMLFile   string
+	idempotencyKey string
 }
 
 // newEmailCmd builds the `email` command tree.
@@ -102,24 +97,18 @@ Example (minimal):
 	cmd.Flags().StringVar(&f.bodyFile, "body-file", "", "Read plain-text body from this file (use '-' for stdin); exclusive with --body")
 	cmd.Flags().StringVar(&f.bodyHTMLFile, "body-html-file", "", "Read HTML body from this file (use '-' for stdin); exclusive with --body-html")
 	cmd.Flags().StringVar(&f.idempotencyKey, "idempotency-key", "", "Defaults to a fresh UUID")
-	cmd.Flags().BoolVar(&f.recipientConsent, "recipient-consent", false, "Confirm the recipient has consented to receive this email — required by the API")
-	cmd.Flags().StringVar(&f.consentSource, "consent-source", "", "Where/how consent was obtained — required if --message-type=marketing")
-	cmd.Flags().StringVar(&f.consentObtainedAt, "consent-obtained-at", "", "RFC 3339 timestamp consent was obtained at")
-	cmd.Flags().StringVar(&f.messageType, "message-type", "", "\"marketing\" or \"informational\" (default: informational)")
+	f.registerConsentFlags(cmd, "email")
 	cmd.MarkFlagRequired("to")
 	cmd.MarkFlagRequired("subject")
-	cmd.MarkFlagRequired("recipient-consent")
 	markOneOfRequired(cmd, "body", "body", "body-html", "body-file", "body-html-file")
 
 	return cmd
 }
 
 func runEmailSend(ctx context.Context, cmd *cobra.Command, opts *Options, f *emailSendFlags) error {
-	if err := requireTrueFlag(cmd, f.recipientConsent, "--recipient-consent"); err != nil {
+	consentObtainedAt, err := f.validateConsent(cmd)
+	if err != nil {
 		return err
-	}
-	if f.messageType == "marketing" && f.consentSource == "" {
-		return requireInputs(cmd, "--consent-source (required when --message-type=marketing)")
 	}
 	if f.subject == "" {
 		return requireInputs(cmd, "--subject")
@@ -172,24 +161,13 @@ func runEmailSend(ctx context.Context, cmd *cobra.Command, opts *Options, f *ema
 	if f.consentSource != "" {
 		body.ConsentSource = strPtr(f.consentSource)
 	}
-	if f.consentObtainedAt != "" {
-		t, err := time.Parse(time.RFC3339, f.consentObtainedAt)
-		if err != nil {
-			return fmt.Errorf("--consent-obtained-at: invalid RFC 3339 timestamp: %w", err)
-		}
-		body.ConsentObtainedAt = &t
-	}
+	body.ConsentObtainedAt = consentObtainedAt
 	if f.messageType != "" {
 		mt := client.EmailCreateMessageType(f.messageType)
 		body.MessageType = &mt
 	}
 
-	idem := f.idempotencyKey
-	if idem == "" {
-		idem = uuid.NewString()
-	}
-
-	apiClient, err := opts.newClient(idempotencyEditor(idem))
+	apiClient, err := opts.newClientWithIdempotency(f.idempotencyKey)
 	if err != nil {
 		return err
 	}
