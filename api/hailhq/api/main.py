@@ -33,6 +33,7 @@ from hailhq.api.routes import sms as sms_routes
 from hailhq.api.routes import unsubscribe as unsubscribe_routes
 from hailhq.api.routes.internal import dsar as internal_dsar
 from hailhq.api.routes.internal import org_closures as internal_org_closures
+from hailhq.api.routes.internal import provider_config as internal_provider_config
 from hailhq.api.routes.internal import ses_events as internal_ses_events
 from hailhq.api.usage import write_usage_event
 
@@ -203,13 +204,8 @@ app = FastAPI(
 
 @app.exception_handler(SecretKeyMissing)
 async def _secret_key_missing(_request: Request, exc: SecretKeyMissing) -> JSONResponse:
-    """Webhook routes need HAIL_WEBHOOK_SECRET_KEY; without it they 503, not 500."""
-    return JSONResponse(
-        status_code=503,
-        content={
-            "detail": "webhooks unavailable: server is missing HAIL_WEBHOOK_SECRET_KEY"
-        },
-    )
+    """A Fernet secret key (webhooks or provider keys) is unset/invalid; 503, not 500."""
+    return JSONResponse(status_code=503, content={"detail": str(exc)})
 
 
 @app.exception_handler(RequestValidationError)
@@ -246,6 +242,7 @@ app.include_router(unsubscribe_routes.router)
 app.include_router(sms_routes.router)
 app.include_router(internal_ses_events.router)
 app.include_router(internal_org_closures.router)
+app.include_router(internal_provider_config.router)
 app.include_router(internal_dsar.router)
 
 

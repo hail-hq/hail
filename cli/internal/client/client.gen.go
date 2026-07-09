@@ -1212,6 +1212,7 @@ type VoiceConfig struct {
 	Tts           *string `json:"tts,omitempty"`
 	TurnDetection *string `json:"turn_detection,omitempty"`
 	Vad           *string `json:"vad,omitempty"`
+	VoiceId       *string `json:"voice_id,omitempty"`
 }
 
 // WebhookDeliveryListResponse defines model for WebhookDeliveryListResponse.

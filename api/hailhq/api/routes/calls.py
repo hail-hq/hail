@@ -8,6 +8,7 @@ GET /calls - cursor-paginated list (org-scoped, optional status / to filters).
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import datetime, timezone
 from typing import Annotated
@@ -42,12 +43,16 @@ from hailhq.core.pool import (
     claim_pool_number,
     release_pool_reservation,
 )
+from hailhq.core.provider_config import provider_cipher
 from hailhq.core.schemas import (
+    TERMINAL_CALL_STATUSES,
     CallCreate,
     CallListResponse,
     CallResponse,
     CallStatus,
 )
+from hailhq.core.secret_cipher import SecretKeyMissing
+from hailhq.core.url_guard import UnsafeUrlError, assert_public_https_url
 
 logger = logging.getLogger(__name__)
 
@@ -155,6 +160,24 @@ async def create_call(
             payload={"to": cached.get("to_e164"), "from": cached.get("from_e164")},
         )
         return CallResponse.model_validate(cached)
+
+    # SSRF guard for a per-call BYO llm.base_url — the full resolving check
+    # (DNS + private/loopback/link-local/reserved address rejection), off the
+    # event loop so a slow-resolving attacker domain can't stall the worker.
+    # LLMConfig's pydantic validator only does cheap https/host syntax checks;
+    # this is what actually proves the endpoint is public. Runs before any
+    # Call row or LiveKit side effects so a bad URL 422s clean.
+    llm_base_url: str | None = None
+    if body.llm is not None:
+        try:
+            llm_base_url = await asyncio.to_thread(
+                assert_public_https_url, body.llm.base_url
+            )
+        except UnsafeUrlError as exc:
+            raise HTTPException(
+                status_code=http_status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=str(exc),
+            ) from exc
 
     # Consent attestation gate — reject before any Call row is created.
     try:
@@ -269,14 +292,32 @@ async def create_call(
     try:
         room_name = await lk.create_room(call.id)
         setup_stage = "agent_dispatch"
+
+        llm_meta: dict | None = None
+        if body.llm is not None:
+            llm_meta = body.llm.model_dump()
+            llm_meta["base_url"] = llm_base_url  # canonicalized by the guard above
+            try:
+                cipher = provider_cipher()
+                llm_meta["api_key_enc"] = cipher.encrypt(llm_meta.pop("api_key"))
+            except SecretKeyMissing:
+                # Legacy self-host without HAIL_PROVIDER_SECRET_KEY: keep the
+                # historical plaintext dispatch rather than breaking mode B.
+                logger.warning(
+                    "HAIL_PROVIDER_SECRET_KEY unset - per-call llm.api_key "
+                    "sent to LiveKit dispatch in plaintext for call_id=%s",
+                    call.id,
+                )
+
         dispatch_id = await lk.dispatch_agent(
             room_name=room_name,
             agent_name="hail-voicebot",
             metadata={
                 "call_id": str(call.id),
+                "organization_id": str(call.organization_id),
                 "voice_config": voice_config,
                 "system_prompt": body.system_prompt,
-                "llm": body.llm.model_dump() if body.llm else None,
+                "llm": llm_meta,
                 "first_message": body.first_message,
             },
         )
@@ -300,26 +341,32 @@ async def create_call(
         # Coerce via CallEndReason so an unrecognized stage name fails here
         # rather than at the DB ENUM boundary.
         failure_code = CallEndReason(f"{setup_stage}_failed").value
-        await db.execute(
+        # Guard on a non-terminal status: the voicebot's own dispatch can race
+        # this LiveKit-failure path and already finalize the row (e.g.
+        # provider_key_error on a BYO session-build failure). This write must
+        # lose cleanly rather than clobber that outcome. rowcount gates the
+        # event below.
+        result = await db.execute(
             update(Call)
-            .where(Call.id == call.id)
+            .where(Call.id == call.id, Call.status.not_in(TERMINAL_CALL_STATUSES))
             .values(
                 status="failed",
                 end_reason=failure_code,
                 ended_at=now,
             )
         )
-        db.add(
-            CallEvent(
-                call_id=call.id,
-                kind="state_change",
-                payload={
-                    "from": "queued",
-                    "to": "failed",
-                    "reason": failure_code,
-                },
+        if (result.rowcount or 0) > 0:
+            db.add(
+                CallEvent(
+                    call_id=call.id,
+                    kind="state_change",
+                    payload={
+                        "from": "queued",
+                        "to": "failed",
+                        "reason": failure_code,
+                    },
+                )
             )
-        )
         # No-op when this call didn't hold a pool reservation.
         await release_pool_reservation(db, call_id=call.id)
         await db.commit()

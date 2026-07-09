@@ -2,6 +2,7 @@ import base64
 import re
 from datetime import datetime
 from typing import Any, Literal
+from urllib.parse import urlsplit
 from uuid import UUID
 
 from pydantic import (
@@ -101,6 +102,25 @@ class LLMConfig(BaseModel):
     api_key: str
     model: str
 
+    @field_validator("base_url")
+    @classmethod
+    def _base_url_is_public_https(cls, v: str) -> str:
+        """Cheap syntactic check only — no name resolution.
+
+        This runs synchronously inside pydantic body validation on the API
+        worker's event loop. Resolving the host (``assert_public_https_url``)
+        does blocking DNS and must never run here — a slow-resolving
+        attacker-controlled domain would stall the whole worker. The full
+        resolving SSRF guard runs later, off the loop, in the route (see
+        ``api/routes/calls.py``) and again at call time in the voicebot.
+        """
+        parts = urlsplit(v)
+        if parts.scheme != "https":
+            raise ValueError(f"base_url must use https, got '{parts.scheme or v}'")
+        if not parts.hostname:
+            raise ValueError("base_url has no host")
+        return v
+
 
 class VoiceConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -109,6 +129,9 @@ class VoiceConfig(BaseModel):
     tts: Literal["cartesia"] = "cartesia"
     vad: Literal["silero"] = "silero"
     turn_detection: Literal["livekit"] = "livekit"
+    # Per-call TTS voice override. Applies to whichever TTS provider serves
+    # the call (org BYO config or Hail default). None → org/env default.
+    voice_id: str | None = None
 
 
 class ConsentAttestationMixin(BaseModel):
