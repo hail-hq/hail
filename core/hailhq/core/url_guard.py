@@ -24,6 +24,13 @@ class UnsafeUrlError(ValueError):
     """A customer URL is not a public HTTPS endpoint."""
 
 
+# RFC 6598 carrier-grade NAT space. Not private/loopback/link-local/reserved/
+# unspecified per ipaddress's own classification, but not internet-routable
+# either — the same kind of provider-internal address the metadata/RFC1918
+# checks below exist to block.
+_CGNAT_V4 = ipaddress.ip_network("100.64.0.0/10")
+
+
 def _ip_is_public(ip: str) -> bool:
     addr = ipaddress.ip_address(ip)
     # Judge IPv4-mapped IPv6 (::ffff:a.b.c.d) on the embedded IPv4 address:
@@ -32,6 +39,8 @@ def _ip_is_public(ip: str) -> bool:
     mapped = getattr(addr, "ipv4_mapped", None)
     if mapped is not None:
         addr = mapped
+    if isinstance(addr, ipaddress.IPv4Address) and addr in _CGNAT_V4:
+        return False
     return not (
         addr.is_private
         or addr.is_loopback
@@ -57,7 +66,12 @@ def assert_public_https_url(url: str) -> str:
         raise UnsafeUrlError("base_url has no host")
 
     try:
-        infos = socket.getaddrinfo(host, parts.port or 443, proto=socket.IPPROTO_TCP)
+        port = parts.port or 443
+    except ValueError as exc:
+        raise UnsafeUrlError(f"base_url has an invalid port: {exc}") from exc
+
+    try:
+        infos = socket.getaddrinfo(host, port, proto=socket.IPPROTO_TCP)
     except socket.gaierror as exc:
         raise UnsafeUrlError(f"base_url host does not resolve: {host}") from exc
 
