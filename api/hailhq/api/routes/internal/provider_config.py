@@ -20,6 +20,7 @@ from pydantic import BaseModel, ConfigDict, ValidationError
 from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm.exc import StaleDataError
 
 from hailhq.api.routes.internal.auth import verify_internal_request
 from hailhq.core.db import get_session
@@ -214,7 +215,7 @@ async def upsert_provider_config(
         await db.flush()
         await _set_active(db, organization_id, layer, body.provider)
         await db.commit()
-    except IntegrityError as exc:
+    except (IntegrityError, StaleDataError) as exc:
         await db.rollback()
         raise HTTPException(
             status_code=409,
@@ -250,7 +251,14 @@ async def delete_provider_config(
                     OrgProviderConfig.organization_id == organization_id,
                     OrgProviderConfig.layer == layer,
                 )
-                .order_by(OrgProviderConfig.updated_at.desc())
+                # provider is the deterministic tiebreak: two siblings written
+                # in one transaction share updated_at (Postgres now() is
+                # tx-start), so ORDER BY updated_at alone would promote an
+                # arbitrary row.
+                .order_by(
+                    OrgProviderConfig.updated_at.desc(),
+                    OrgProviderConfig.provider.asc(),
+                )
                 .limit(1)
             )
         ).scalar_one_or_none()
@@ -259,7 +267,7 @@ async def delete_provider_config(
 
     try:
         await db.commit()
-    except IntegrityError as exc:
+    except (IntegrityError, StaleDataError) as exc:
         await db.rollback()
         raise HTTPException(
             status_code=409,
@@ -285,13 +293,22 @@ async def activate_provider_config(
     try:
         await _set_active(db, organization_id, layer, body.provider)
         await db.commit()
-    except IntegrityError as exc:
+    except (IntegrityError, StaleDataError) as exc:
         await db.rollback()
         raise HTTPException(
             status_code=409,
             detail=f"provider config for layer {layer!r} changed concurrently; retry",
         ) from exc
-    await db.refresh(row)
+    # Re-fetch rather than refresh(): if the target row was deleted between the
+    # existence check and commit, _set_active's UPDATE matched 0 rows (no error)
+    # and refresh() would raise ObjectDeletedError (500). A None result here is
+    # the concurrent-delete case → 404.
+    row = await _get_row(db, organization_id, layer, body.provider)
+    if row is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"no saved config for provider {body.provider!r} in layer {layer!r}",
+        )
     return _serialize(row)
 
 
@@ -303,7 +320,13 @@ async def validate_provider_config(
     db: Annotated[AsyncSession, Depends(get_session)],
 ) -> dict:
     _check_layer(layer)
-    row = await _get_active_row(db, organization_id, layer)
+    # Honor an explicit provider (test THAT provider's saved key/config, even
+    # if it isn't the active one); fall back to the active row otherwise.
+    row = (
+        await _get_row(db, organization_id, layer, body.provider)
+        if body.provider
+        else await _get_active_row(db, organization_id, layer)
+    )
 
     if body.api_key is not None:
         # In-flight: validate the typed key against the drawer's provider+params.

@@ -292,6 +292,36 @@ async def test_validate_uses_stored_key(
     assert resp.json()["status"] == "invalid"
 
 
+async def test_validate_honors_explicit_provider_over_active(
+    client, internal_secret_set, provider_key_set, monkeypatch  # noqa: F811
+) -> None:
+    # cartesia saved+active, then elevenlabs saved (now active, cartesia
+    # inactive). Validating cartesia by name with no api_key must test
+    # cartesia's stored key — not the active elevenlabs row.
+    seen = {}
+
+    async def fake_validate(layer, provider, api_key, params, client=None):
+        seen.update(provider=provider, api_key=api_key)
+        return "valid", "checked"
+
+    monkeypatch.setattr(
+        "hailhq.api.routes.internal.provider_config.validate_provider_key",
+        fake_validate,
+    )
+    b1 = b'{"provider":"cartesia","api_key":"sk-cart","params":{},"fallback_enabled":false}'
+    await client.put(f"{BASE}/tts", content=b1, headers=_signed(b1))
+    b2 = b'{"provider":"elevenlabs","api_key":"sk-eleven","params":{},"fallback_enabled":false}'
+    await client.put(f"{BASE}/tts", content=b2, headers=_signed(b2))
+
+    body = b'{"provider":"cartesia"}'
+    resp = await client.post(
+        f"{BASE}/tts/validate", content=body, headers=_signed(body)
+    )
+    assert resp.json()["status"] == "valid"
+    assert seen["provider"] == "cartesia"
+    assert seen["api_key"] == "sk-cart"
+
+
 async def test_validate_inflight_key_without_stored_row(
     client, internal_secret_set, provider_key_set, monkeypatch  # noqa: F811
 ) -> None:
