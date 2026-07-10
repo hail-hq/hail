@@ -6,8 +6,11 @@ everyone throttled, so a targeted pause on just that org+channel is the
 mitigation. Distinct from org_closures (whole-account) and suppressions
 (per-recipient).
 
-Revision ID: 0028
-Revises: 0027
+Revision ID: 0029
+Revises: 0028
+
+NOTE: originally authored as 0028; renumbered to 0029 to sit after the
+parallel-branch 0028 (org_provider_config) that took the 0028 slot on main.
 """
 
 from __future__ import annotations
@@ -18,8 +21,8 @@ import sqlalchemy as sa
 from alembic import op
 from sqlalchemy.dialects.postgresql import UUID
 
-revision: str = "0028"
-down_revision: Union[str, None] = "0027"
+revision: str = "0029"
+down_revision: Union[str, None] = "0028"
 branch_labels = None
 depends_on = None
 

@@ -250,6 +250,7 @@ async def create_sms(
 async def receive_inbound_sms(
     request: Request,
     db: Annotated[AsyncSession, Depends(get_session)],
+    provider: Annotated[SmsProvider, Depends(get_sms_provider)],
 ) -> Response:
     form = await request.form()
     params = {k: str(v) for k, v in form.items()}
@@ -268,6 +269,7 @@ async def receive_inbound_sms(
         body=params.get("Body", ""),
         provider_message_sid=params.get("MessageSid") or None,
         opt_out_type=params.get("OptOutType"),
+        provider=provider,
     )
     await db.commit()
     return Response(status_code=http_status.HTTP_200_OK)

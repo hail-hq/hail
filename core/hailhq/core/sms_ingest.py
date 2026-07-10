@@ -20,7 +20,9 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from hailhq.core.compliance_gate import add_suppression, remove_suppression
+from hailhq.core.config import settings
 from hailhq.core.models import PhoneNumber, Sms, SmsEvent
+from hailhq.core.providers.sms import ProviderSmsResult, SmsProvider
 from hailhq.core.webhook_fanout import fanout_sms_event
 
 logger = logging.getLogger(__name__)
@@ -40,6 +42,7 @@ _SMS_SID_UNIQUE = "sms_provider_message_sid_key"
 # is honored as corroboration when present.
 _STOP_KEYWORDS = frozenset({"STOP", "STOPALL", "UNSUBSCRIBE", "CANCEL", "END", "QUIT"})
 _START_KEYWORDS = frozenset({"START", "YES", "UNSTOP"})
+_HELP_KEYWORDS = frozenset({"HELP", "INFO"})
 
 
 @dataclass
@@ -49,14 +52,64 @@ class IngestResult:
 
 
 def _opt_out_action(body: str, opt_out_type: str | None) -> str | None:
-    """Return 'STOP', 'START', or None from the body keyword (with Twilio's
-    OptOutType as corroboration)."""
+    """Return 'STOP', 'START', 'HELP', or None from the body keyword (with
+    Twilio's OptOutType as corroboration)."""
     keyword = body.strip().upper()
     if opt_out_type == "STOP" or keyword in _STOP_KEYWORDS:
         return "STOP"
     if opt_out_type == "START" or keyword in _START_KEYWORDS:
         return "START"
+    if opt_out_type == "HELP" or keyword in _HELP_KEYWORDS:
+        return "HELP"
     return None
+
+
+async def _send_compliance_reply(
+    db: AsyncSession,
+    provider: SmsProvider,
+    *,
+    org_number: PhoneNumber,
+    sender_e164: str,
+    body: str,
+) -> None:
+    """Send a single carrier-mandated compliance reply and persist it as an
+    outbound Sms row for audit. Bypasses check_sms_allowed / usage / funds.
+    Failures are logged and swallowed so the webhook still returns 200."""
+    try:
+        result: ProviderSmsResult = await provider.send_sms(
+            from_e164=org_number.e164, to_e164=sender_e164, body=body
+        )
+    except Exception:
+        logger.exception("compliance reply send failed to %s", sender_e164)
+        return
+    # Normalize the provider's raw status into the sms_status_check set
+    # (queued|sent|delivered|failed|undelivered|received) exactly as the
+    # outbound send path does — Twilio returns non-terminal statuses like
+    # "accepted"/"sending" that would otherwise violate the CHECK and abort
+    # the whole webhook transaction (rolling back the inbound row + STOP
+    # suppression) on the flush below.
+    carrier_rejected = result.error_code is not None or result.status.lower() in {
+        "failed",
+        "undelivered",
+    }
+    reply_status = "failed" if carrier_rejected else "sent"
+    db.add(
+        Sms(
+            organization_id=org_number.organization_id,
+            from_number_id=org_number.id,
+            to_number_id=None,
+            from_e164=org_number.e164,
+            to_e164=sender_e164,
+            direction="outbound",
+            status=reply_status,
+            body=body,
+            provider=org_number.provider,
+            provider_message_sid=result.provider_message_sid,
+            segment_count=result.segment_count,
+            error_code=result.error_code,
+        )
+    )
+    await db.flush()
 
 
 async def _resolve_org_for_number(db: AsyncSession, to_e164: str) -> PhoneNumber | None:
@@ -76,6 +129,7 @@ async def ingest_inbound_sms(
     body: str,
     provider_message_sid: str | None,
     opt_out_type: str | None,
+    provider: SmsProvider | None = None,
 ) -> IngestResult:
     number = await _resolve_org_for_number(db, to_e164)
     if number is None or number.organization_id is None:
@@ -98,16 +152,13 @@ async def ingest_inbound_sms(
     # rolls back to the savepoint on error; calling db.rollback() from
     # inside the block would close the transaction the context manager
     # still expects to manage, breaking the next nested-transaction call.
-    # NOTE: for inbound rows `from_number_id` holds the org's *receiving*
-    # number (the Twilio `To`), while `from_e164` is the external sender —
-    # so the outbound invariant `from_number_id.e164 == from_e164` does NOT
-    # hold here. The Sms table has no `to_number_id` column yet; until one
-    # exists this FK records "which of our numbers this conversation touched".
-    # Per-number analytics keyed on `from_number_id` must special-case
-    # direction. See docs/operations.md "Carry-forwards" for the fix.
+    # Inbound: the external sender has no PhoneNumber row, so from_number_id is
+    # NULL; the org's receiving number (Twilio `To`) is recorded in to_number_id.
+    # Outbound sends do the mirror (from_number_id set, to_number_id NULL).
     sms = Sms(
         organization_id=organization_id,
-        from_number_id=number.id,
+        from_number_id=None,
+        to_number_id=number.id,
         from_e164=from_e164,
         to_e164=to_e164,
         direction="inbound",
@@ -131,6 +182,7 @@ async def ingest_inbound_sms(
         return IngestResult(sms_id=existing.id if existing else None)
 
     action = _opt_out_action(body, opt_out_type)
+    reply_body: str | None = None
     if action == "STOP":
         await add_suppression(
             db,
@@ -140,9 +192,22 @@ async def ingest_inbound_sms(
             reason="recipient replied STOP",
             source="stop_keyword",
         )
+        reply_body = settings.hail_sms_stop_reply
     elif action == "START":
         await remove_suppression(
             db, organization_id=organization_id, recipient=from_e164, channel="sms"
+        )
+        reply_body = settings.hail_sms_start_reply
+    elif action == "HELP":
+        reply_body = settings.hail_sms_help_reply
+
+    if (
+        reply_body is not None
+        and provider is not None
+        and settings.hail_sms_compliance_replies_enabled
+    ):
+        await _send_compliance_reply(
+            db, provider, org_number=number, sender_e164=from_e164, body=reply_body
         )
 
     # Record a lifecycle event so the inbound message surfaces on the

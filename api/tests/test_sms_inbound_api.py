@@ -99,6 +99,28 @@ async def test_inbound_accepts_valid_signature_and_creates_row(
     assert row.from_e164 == "+14155551234"
 
 
+async def test_inbound_help_sends_reply_when_enabled(
+    client, async_session, monkeypatch, sms_mock
+) -> None:
+    from hailhq.core.config import settings
+
+    monkeypatch.setattr(settings, "twilio_auth_token", AUTH_TOKEN)
+    monkeypatch.setattr(settings, "hail_api_url", "http://t")
+    monkeypatch.setattr(settings, "hail_sms_compliance_replies_enabled", True)
+    await _seed_number(async_session, uuid.uuid4())
+
+    params = {
+        "From": "+14155551234",
+        "To": "+14155559999",
+        "Body": "HELP",
+        "MessageSid": "SM_help_api",
+    }
+    form, headers = _signed_form(params)
+    resp = await client.post("/sms/inbound", data=form, headers=headers)
+    assert resp.status_code == 200
+    sms_mock.send_sms.assert_awaited()
+
+
 async def test_inbound_unknown_number_still_returns_200(client, monkeypatch) -> None:
     from hailhq.core.config import settings
 

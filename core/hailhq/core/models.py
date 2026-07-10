@@ -462,8 +462,11 @@ class Sms(Base):
     organization_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), nullable=False
     )
-    from_number_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("phone_numbers.id"), nullable=False
+    from_number_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("phone_numbers.id"), nullable=True
+    )
+    to_number_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("phone_numbers.id"), nullable=True
     )
     from_e164: Mapped[str] = mapped_column(Text, nullable=False)
     to_e164: Mapped[str] = mapped_column(Text, nullable=False)
