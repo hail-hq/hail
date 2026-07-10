@@ -221,6 +221,9 @@ class Settings(BaseSettings):
     hail_sms_abuse_window_hours: int = 24
     hail_sms_abuse_min_sends: int = 20  # floor: don't flag low-volume orgs
     hail_sms_abuse_max_opt_out_rate: float = 0.05  # 5% opt-out rate trips it
+    # Poll cadence (seconds) for the AbuseMonitorWorker's coarse-grained batch
+    # check — hourly by default, not a per-send check. Set 0 to disable.
+    hail_abuse_monitor_poll_seconds: int = 3600
 
     @computed_field  # type: ignore[prop-decorator]
     @property
