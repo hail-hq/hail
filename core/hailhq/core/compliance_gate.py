@@ -28,11 +28,11 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from hailhq.core.config import settings
-from hailhq.core.models import Sms, Suppression, UsageEvent
+from hailhq.core.models import ChannelSuspension, Sms, Suppression, UsageEvent
 
 __all__ = [
     "GateResult",
@@ -41,6 +41,8 @@ __all__ = [
     "check_sms_allowed",
     "check_national_dnc",
     "add_suppression",
+    "remove_suppression",
+    "check_channel_suspended",
     "normalize_recipient",
 ]
 
@@ -262,6 +264,15 @@ async def check_sms_allowed(
     """
     checks: dict[str, Any] = {}
 
+    if await check_channel_suspended(db, organization_id, "sms"):
+        checks["channel_suspended"] = True
+        return GateResult(
+            allowed=False,
+            reason="SMS sending is suspended for this organization (contact support)",
+            checks=checks,
+        )
+    checks["channel_suspended"] = False
+
     reason = await _check_phone_destination(db, organization_id, to_e164, "sms", checks)
     if reason is not None:
         return GateResult(allowed=False, reason=reason, checks=checks)
@@ -347,3 +358,43 @@ async def add_suppression(
     db.add(row)
     await db.flush()
     return row
+
+
+async def remove_suppression(
+    db: AsyncSession, *, organization_id: UUID | None, recipient: str, channel: str
+) -> bool:
+    """Delete all suppression rows matching (recipient, channel), scoped to
+    this org OR a platform-wide (NULL org) row — the mirror of
+    ``add_suppression`` for the STOP->START re-subscribe flow.
+
+    ``suppressions`` has no unique constraint on (recipient, channel,
+    organization_id), so more than one row can match here — e.g. a
+    duplicate org-scoped row, or an org-scoped row alongside a
+    platform-wide (NULL org) one. A single-row delete would leave the
+    recipient still suppressed by the leftover row and silently defeat
+    the re-subscribe; this deletes every matching row instead. Flushes
+    but does not commit, matching this module's session convention.
+    Returns True iff at least one row was deleted."""
+    normalized = normalize_recipient(recipient)
+    stmt = delete(Suppression).where(
+        Suppression.recipient == normalized,
+        Suppression.channel == channel,
+        or_(
+            Suppression.organization_id == organization_id,
+            Suppression.organization_id.is_(None),
+        ),
+    )
+    result = await db.execute(stmt)
+    await db.flush()
+    return result.rowcount > 0
+
+
+async def check_channel_suspended(
+    db: AsyncSession, organization_id: UUID, channel: str
+) -> bool:
+    """True iff this org has an active ChannelSuspension for this channel."""
+    stmt = select(ChannelSuspension).where(
+        ChannelSuspension.organization_id == organization_id,
+        ChannelSuspension.channel == channel,
+    )
+    return (await db.execute(stmt)).scalar_one_or_none() is not None

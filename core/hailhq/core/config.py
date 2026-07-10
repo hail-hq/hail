@@ -215,6 +215,13 @@ class Settings(BaseSettings):
     hail_velocity_sms_per_hour: int = 100
     hail_velocity_sms_per_day: int = 1000
 
+    # Abuse-monitoring guardrail (SMS opt-out rate -> ChannelSuspension).
+    # Conservative starting thresholds per the design spec's own caution
+    # that these are unvalidated pending real traffic data — tune post-launch.
+    hail_sms_abuse_window_hours: int = 24
+    hail_sms_abuse_min_sends: int = 20  # floor: don't flag low-volume orgs
+    hail_sms_abuse_max_opt_out_rate: float = 0.05  # 5% opt-out rate trips it
+
     @computed_field  # type: ignore[prop-decorator]
     @property
     def hail_inbound_bucket(self) -> str:
