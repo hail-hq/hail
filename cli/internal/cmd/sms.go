@@ -54,6 +54,7 @@ Example (minimal):
 
 	cmd.AddCommand(newSmsStatusCmd(opts))
 	cmd.AddCommand(newSmsListCmd(opts))
+	cmd.AddCommand(newSmsSuppressionsCmd(opts))
 
 	return cmd
 }
@@ -245,4 +246,69 @@ func printSmsList(opts *Options, body *client.SmsListResponse) error {
 		fmt.Fprintf(opts.Stdout, "\nmore: --cursor %s\n", *body.NextCursor)
 	}
 	return nil
+}
+
+// newSmsSuppressionsCmd builds the `sms suppressions` subcommand tree —
+// list/delete against the opt-out (STOP/START) suppression list.
+func newSmsSuppressionsCmd(opts *Options) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "suppressions",
+		Short: "Manage the SMS opt-out (suppression) list",
+	}
+	cmd.AddCommand(newSmsSuppressionsListCmd(opts))
+	cmd.AddCommand(newSmsSuppressionsDeleteCmd(opts))
+	return cmd
+}
+
+func newSmsSuppressionsListCmd(opts *Options) *cobra.Command {
+	return &cobra.Command{
+		Use:   "list",
+		Short: "List opted-out numbers",
+		Args:  argsOrHelp(0, ""),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			ctx := cmd.Context()
+			apiClient, err := opts.newClient()
+			if err != nil {
+				return err
+			}
+			resp, err := apiClient.ListSmsSuppressionsSmsSuppressionsGetWithResponse(ctx, &client.ListSmsSuppressionsSmsSuppressionsGetParams{})
+			if err != nil {
+				return fmt.Errorf("sms suppressions API: %w", err)
+			}
+			if resp.HTTPResponse.StatusCode != http.StatusOK || resp.JSON200 == nil {
+				return apiError(resp.HTTPResponse.StatusCode, resp.Body)
+			}
+			if opts.JSON {
+				return printJSON(opts.Stdout, resp.JSON200)
+			}
+			for _, s := range resp.JSON200.Items {
+				fmt.Fprintf(opts.Stdout, "%s  %s  %s\n", s.Recipient, s.Reason, s.Source)
+			}
+			return nil
+		},
+	}
+}
+
+func newSmsSuppressionsDeleteCmd(opts *Options) *cobra.Command {
+	return &cobra.Command{
+		Use:   "delete <number>",
+		Short: "Remove a number from the opt-out list (manual correction only)",
+		Args:  argsOrHelp(1, "<number>"),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			ctx := cmd.Context()
+			apiClient, err := opts.newClient()
+			if err != nil {
+				return err
+			}
+			resp, err := apiClient.DeleteSmsSuppressionSmsSuppressionsNumberDeleteWithResponse(ctx, args[0], &client.DeleteSmsSuppressionSmsSuppressionsNumberDeleteParams{})
+			if err != nil {
+				return fmt.Errorf("sms suppressions API: %w", err)
+			}
+			if resp.HTTPResponse.StatusCode != http.StatusNoContent {
+				return apiError(resp.HTTPResponse.StatusCode, resp.Body)
+			}
+			fmt.Fprintf(opts.Stdout, "Removed %s from the opt-out list.\n", args[0])
+			return nil
+		},
+	}
 }

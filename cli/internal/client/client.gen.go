@@ -1186,6 +1186,22 @@ type SmsResponseDirection string
 // SmsResponseStatus defines model for SmsResponse.Status.
 type SmsResponseStatus string
 
+// SuppressionListResponse defines model for SuppressionListResponse.
+type SuppressionListResponse struct {
+	Items      []SuppressionResponse `json:"items"`
+	NextCursor *string               `json:"next_cursor,omitempty"`
+}
+
+// SuppressionResponse defines model for SuppressionResponse.
+type SuppressionResponse struct {
+	Channel   string             `json:"channel"`
+	CreatedAt time.Time          `json:"created_at"`
+	Id        openapi_types.UUID `json:"id"`
+	Reason    string             `json:"reason"`
+	Recipient string             `json:"recipient"`
+	Source    string             `json:"source"`
+}
+
 // ValidationError defines model for ValidationError.
 type ValidationError struct {
 	Ctx   *map[string]interface{}    `json:"ctx,omitempty"`
@@ -1429,6 +1445,18 @@ type ListSmsSmsGetParamsStatus string
 type CreateSmsSmsPostParams struct {
 	Authorization  *string `json:"authorization,omitempty"`
 	IdempotencyKey *string `json:"Idempotency-Key,omitempty"`
+}
+
+// ListSmsSuppressionsSmsSuppressionsGetParams defines parameters for ListSmsSuppressionsSmsSuppressionsGet.
+type ListSmsSuppressionsSmsSuppressionsGetParams struct {
+	Cursor        *string `form:"cursor,omitempty" json:"cursor,omitempty"`
+	Limit         *int    `form:"limit,omitempty" json:"limit,omitempty"`
+	Authorization *string `json:"authorization,omitempty"`
+}
+
+// DeleteSmsSuppressionSmsSuppressionsNumberDeleteParams defines parameters for DeleteSmsSuppressionSmsSuppressionsNumberDelete.
+type DeleteSmsSuppressionSmsSuppressionsNumberDeleteParams struct {
+	Authorization *string `json:"authorization,omitempty"`
 }
 
 // GetSmsSmsSmsIdGetParams defines parameters for GetSmsSmsSmsIdGet.
@@ -1823,6 +1851,12 @@ type ClientInterface interface {
 
 	CreateSmsSmsPost(ctx context.Context, params *CreateSmsSmsPostParams, body CreateSmsSmsPostJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
+	// ListSmsSuppressionsSmsSuppressionsGet request
+	ListSmsSuppressionsSmsSuppressionsGet(ctx context.Context, params *ListSmsSuppressionsSmsSuppressionsGetParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// DeleteSmsSuppressionSmsSuppressionsNumberDelete request
+	DeleteSmsSuppressionSmsSuppressionsNumberDelete(ctx context.Context, number string, params *DeleteSmsSuppressionSmsSuppressionsNumberDeleteParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
 	// GetSmsSmsSmsIdGet request
 	GetSmsSmsSmsIdGet(ctx context.Context, smsId openapi_types.UUID, params *GetSmsSmsSmsIdGetParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
@@ -2160,6 +2194,30 @@ func (c *Client) CreateSmsSmsPostWithBody(ctx context.Context, params *CreateSms
 
 func (c *Client) CreateSmsSmsPost(ctx context.Context, params *CreateSmsSmsPostParams, body CreateSmsSmsPostJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewCreateSmsSmsPostRequest(c.Server, params, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) ListSmsSuppressionsSmsSuppressionsGet(ctx context.Context, params *ListSmsSuppressionsSmsSuppressionsGetParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewListSmsSuppressionsSmsSuppressionsGetRequest(c.Server, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) DeleteSmsSuppressionSmsSuppressionsNumberDelete(ctx context.Context, number string, params *DeleteSmsSuppressionSmsSuppressionsNumberDeleteParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewDeleteSmsSuppressionSmsSuppressionsNumberDeleteRequest(c.Server, number, params)
 	if err != nil {
 		return nil, err
 	}
@@ -3777,6 +3835,135 @@ func NewCreateSmsSmsPostRequestWithBody(server string, params *CreateSmsSmsPostP
 	return req, nil
 }
 
+// NewListSmsSuppressionsSmsSuppressionsGetRequest generates requests for ListSmsSuppressionsSmsSuppressionsGet
+func NewListSmsSuppressionsSmsSuppressionsGetRequest(server string, params *ListSmsSuppressionsSmsSuppressionsGetParams) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/sms/suppressions")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+		queryValues := queryURL.Query()
+
+		if params.Cursor != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "cursor", *params.Cursor, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+				return nil, err
+			} else {
+				for k, v := range parsed {
+					for _, v2 := range v {
+						queryValues.Add(k, v2)
+					}
+				}
+			}
+
+		}
+
+		if params.Limit != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "limit", *params.Limit, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "integer", Format: ""}); err != nil {
+				return nil, err
+			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+				return nil, err
+			} else {
+				for k, v := range parsed {
+					for _, v2 := range v {
+						queryValues.Add(k, v2)
+					}
+				}
+			}
+
+		}
+
+		queryURL.RawQuery = queryValues.Encode()
+	}
+
+	req, err := http.NewRequest("GET", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+
+		if params.Authorization != nil {
+			var headerParam0 string
+
+			headerParam0, err = runtime.StyleParamWithOptions("simple", false, "authorization", *params.Authorization, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationHeader, Type: "string", Format: ""})
+			if err != nil {
+				return nil, err
+			}
+
+			req.Header.Set("authorization", headerParam0)
+		}
+
+	}
+
+	return req, nil
+}
+
+// NewDeleteSmsSuppressionSmsSuppressionsNumberDeleteRequest generates requests for DeleteSmsSuppressionSmsSuppressionsNumberDelete
+func NewDeleteSmsSuppressionSmsSuppressionsNumberDeleteRequest(server string, number string, params *DeleteSmsSuppressionSmsSuppressionsNumberDeleteParams) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "number", number, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/sms/suppressions/%s", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("DELETE", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+
+		if params.Authorization != nil {
+			var headerParam0 string
+
+			headerParam0, err = runtime.StyleParamWithOptions("simple", false, "authorization", *params.Authorization, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationHeader, Type: "string", Format: ""})
+			if err != nil {
+				return nil, err
+			}
+
+			req.Header.Set("authorization", headerParam0)
+		}
+
+	}
+
+	return req, nil
+}
+
 // NewGetSmsSmsSmsIdGetRequest generates requests for GetSmsSmsSmsIdGet
 func NewGetSmsSmsSmsIdGetRequest(server string, smsId openapi_types.UUID, params *GetSmsSmsSmsIdGetParams) (*http.Request, error) {
 	var err error
@@ -4474,6 +4661,12 @@ type ClientWithResponsesInterface interface {
 
 	CreateSmsSmsPostWithResponse(ctx context.Context, params *CreateSmsSmsPostParams, body CreateSmsSmsPostJSONRequestBody, reqEditors ...RequestEditorFn) (*CreateSmsSmsPostResponse, error)
 
+	// ListSmsSuppressionsSmsSuppressionsGetWithResponse request
+	ListSmsSuppressionsSmsSuppressionsGetWithResponse(ctx context.Context, params *ListSmsSuppressionsSmsSuppressionsGetParams, reqEditors ...RequestEditorFn) (*ListSmsSuppressionsSmsSuppressionsGetResponse, error)
+
+	// DeleteSmsSuppressionSmsSuppressionsNumberDeleteWithResponse request
+	DeleteSmsSuppressionSmsSuppressionsNumberDeleteWithResponse(ctx context.Context, number string, params *DeleteSmsSuppressionSmsSuppressionsNumberDeleteParams, reqEditors ...RequestEditorFn) (*DeleteSmsSuppressionSmsSuppressionsNumberDeleteResponse, error)
+
 	// GetSmsSmsSmsIdGetWithResponse request
 	GetSmsSmsSmsIdGetWithResponse(ctx context.Context, smsId openapi_types.UUID, params *GetSmsSmsSmsIdGetParams, reqEditors ...RequestEditorFn) (*GetSmsSmsSmsIdGetResponse, error)
 
@@ -4990,6 +5183,51 @@ func (r CreateSmsSmsPostResponse) StatusCode() int {
 	return 0
 }
 
+type ListSmsSuppressionsSmsSuppressionsGetResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *SuppressionListResponse
+	JSON422      *HTTPValidationError
+}
+
+// Status returns HTTPResponse.Status
+func (r ListSmsSuppressionsSmsSuppressionsGetResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ListSmsSuppressionsSmsSuppressionsGetResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type DeleteSmsSuppressionSmsSuppressionsNumberDeleteResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON422      *HTTPValidationError
+}
+
+// Status returns HTTPResponse.Status
+func (r DeleteSmsSuppressionSmsSuppressionsNumberDeleteResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r DeleteSmsSuppressionSmsSuppressionsNumberDeleteResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
 type GetSmsSmsSmsIdGetResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
@@ -5445,6 +5683,24 @@ func (c *ClientWithResponses) CreateSmsSmsPostWithResponse(ctx context.Context, 
 		return nil, err
 	}
 	return ParseCreateSmsSmsPostResponse(rsp)
+}
+
+// ListSmsSuppressionsSmsSuppressionsGetWithResponse request returning *ListSmsSuppressionsSmsSuppressionsGetResponse
+func (c *ClientWithResponses) ListSmsSuppressionsSmsSuppressionsGetWithResponse(ctx context.Context, params *ListSmsSuppressionsSmsSuppressionsGetParams, reqEditors ...RequestEditorFn) (*ListSmsSuppressionsSmsSuppressionsGetResponse, error) {
+	rsp, err := c.ListSmsSuppressionsSmsSuppressionsGet(ctx, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseListSmsSuppressionsSmsSuppressionsGetResponse(rsp)
+}
+
+// DeleteSmsSuppressionSmsSuppressionsNumberDeleteWithResponse request returning *DeleteSmsSuppressionSmsSuppressionsNumberDeleteResponse
+func (c *ClientWithResponses) DeleteSmsSuppressionSmsSuppressionsNumberDeleteWithResponse(ctx context.Context, number string, params *DeleteSmsSuppressionSmsSuppressionsNumberDeleteParams, reqEditors ...RequestEditorFn) (*DeleteSmsSuppressionSmsSuppressionsNumberDeleteResponse, error) {
+	rsp, err := c.DeleteSmsSuppressionSmsSuppressionsNumberDelete(ctx, number, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseDeleteSmsSuppressionSmsSuppressionsNumberDeleteResponse(rsp)
 }
 
 // GetSmsSmsSmsIdGetWithResponse request returning *GetSmsSmsSmsIdGetResponse
@@ -6220,6 +6476,65 @@ func ParseCreateSmsSmsPostResponse(rsp *http.Response) (*CreateSmsSmsPostRespons
 		}
 		response.JSON201 = &dest
 
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 422:
+		var dest HTTPValidationError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON422 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseListSmsSuppressionsSmsSuppressionsGetResponse parses an HTTP response from a ListSmsSuppressionsSmsSuppressionsGetWithResponse call
+func ParseListSmsSuppressionsSmsSuppressionsGetResponse(rsp *http.Response) (*ListSmsSuppressionsSmsSuppressionsGetResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ListSmsSuppressionsSmsSuppressionsGetResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest SuppressionListResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 422:
+		var dest HTTPValidationError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON422 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseDeleteSmsSuppressionSmsSuppressionsNumberDeleteResponse parses an HTTP response from a DeleteSmsSuppressionSmsSuppressionsNumberDeleteWithResponse call
+func ParseDeleteSmsSuppressionSmsSuppressionsNumberDeleteResponse(rsp *http.Response) (*DeleteSmsSuppressionSmsSuppressionsNumberDeleteResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &DeleteSmsSuppressionSmsSuppressionsNumberDeleteResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 422:
 		var dest HTTPValidationError
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {

@@ -80,6 +80,24 @@ def make_sms_response(
     }
 
 
+def make_suppression_response(
+    *,
+    suppression_id: UUID | None = None,
+    recipient: str = "+15555550123",
+    reason: str = "stop_keyword",
+    source: str = "inbound_sms",
+) -> dict:
+    """Server-shaped JSON for a SuppressionResponse."""
+    return {
+        "id": str(suppression_id or uuid4()),
+        "recipient": recipient,
+        "channel": "sms",
+        "reason": reason,
+        "source": source,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+
 def make_email_domain_response(
     *,
     domain_id: UUID | None = None,

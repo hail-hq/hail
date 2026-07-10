@@ -417,3 +417,127 @@ func TestSmsList_StatusFilter(t *testing.T) {
 		t.Errorf("?status = %q, want delivered", got)
 	}
 }
+
+// sampleSuppression returns a SuppressionResponse populated with realistic
+// data, mirroring sampleSms's shape.
+func sampleSuppression(idStr, recipient, reason, source string) client.SuppressionResponse {
+	id := openapi_types.UUID(uuid.MustParse(idStr))
+	now := time.Date(2026, 4, 22, 12, 0, 0, 0, time.UTC)
+	return client.SuppressionResponse{
+		Id:        id,
+		Recipient: recipient,
+		Channel:   "sms",
+		Reason:    reason,
+		Source:    source,
+		CreatedAt: now,
+	}
+}
+
+func TestSmsSuppressionsList_RendersRows(t *testing.T) {
+	items := []client.SuppressionResponse{
+		sampleSuppression("11111111-1111-1111-1111-111111111111", "+15551110001", "stop_keyword", "inbound_sms"),
+		sampleSuppression("22222222-2222-2222-2222-222222222221", "+15551110002", "manual", "api"),
+	}
+	srv := newFakeServer(t, http.StatusOK, client.SuppressionListResponse{Items: items})
+
+	stdout, _, err := runRoot(t,
+		map[string]string{"HAIL_API_KEY": "sk_test", "HAIL_API_URL": srv.URL},
+		"sms", "suppressions", "list",
+	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if srv.lastReq.Method != http.MethodGet || srv.lastReq.URL.Path != "/sms/suppressions" {
+		t.Fatalf("unexpected route: %s %s", srv.lastReq.Method, srv.lastReq.URL.Path)
+	}
+	for _, want := range []string{"+15551110001", "stop_keyword", "inbound_sms", "+15551110002", "manual", "api"} {
+		if !strings.Contains(stdout, want) {
+			t.Errorf("missing %q in stdout:\n%s", want, stdout)
+		}
+	}
+}
+
+func TestSmsSuppressionsList_Empty(t *testing.T) {
+	srv := newFakeServer(t, http.StatusOK, client.SuppressionListResponse{Items: nil})
+
+	stdout, _, err := runRoot(t,
+		map[string]string{"HAIL_API_KEY": "sk_test", "HAIL_API_URL": srv.URL},
+		"sms", "suppressions", "list",
+	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if strings.TrimSpace(stdout) != "" {
+		t.Errorf("expected no rows, got: %q", stdout)
+	}
+}
+
+func TestSmsSuppressionsList_JSONOutput(t *testing.T) {
+	items := []client.SuppressionResponse{
+		sampleSuppression("11111111-1111-1111-1111-111111111111", "+15551110001", "stop_keyword", "inbound_sms"),
+	}
+	srv := newFakeServer(t, http.StatusOK, client.SuppressionListResponse{Items: items})
+
+	stdout, _, err := runRoot(t,
+		map[string]string{"HAIL_API_KEY": "sk_test", "HAIL_API_URL": srv.URL},
+		"--json", "sms", "suppressions", "list",
+	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	var got client.SuppressionListResponse
+	if err := json.Unmarshal([]byte(stdout), &got); err != nil {
+		t.Fatalf("stdout is not valid JSON: %v\n%s", err, stdout)
+	}
+	if len(got.Items) != 1 || got.Items[0].Recipient != "+15551110001" {
+		t.Errorf("unexpected JSON payload: %+v", got)
+	}
+}
+
+func TestSmsSuppressionsDelete_HappyPath(t *testing.T) {
+	srv := newFakeServer(t, http.StatusNoContent, nil)
+
+	stdout, _, err := runRoot(t,
+		map[string]string{"HAIL_API_KEY": "sk_test", "HAIL_API_URL": srv.URL},
+		"sms", "suppressions", "delete", "+15551110001",
+	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if srv.lastReq.Method != http.MethodDelete || srv.lastReq.URL.Path != "/sms/suppressions/+15551110001" {
+		t.Fatalf("unexpected route: %s %s", srv.lastReq.Method, srv.lastReq.URL.Path)
+	}
+	if !strings.Contains(stdout, "Removed +15551110001") {
+		t.Errorf("stdout missing confirmation: %q", stdout)
+	}
+}
+
+func TestSmsSuppressionsDelete_NotFound(t *testing.T) {
+	srv := newFakeServer(t, http.StatusNotFound, map[string]string{"detail": "suppression not found"})
+
+	_, _, err := runRoot(t,
+		map[string]string{"HAIL_API_KEY": "sk_test", "HAIL_API_URL": srv.URL},
+		"sms", "suppressions", "delete", "+15551110001",
+	)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "not found") {
+		t.Errorf("error = %v", err)
+	}
+}
+
+func TestSmsSuppressionsDelete_MissingArg(t *testing.T) {
+	srv := newFakeServer(t, http.StatusNoContent, nil)
+
+	_, _, err := runRoot(t,
+		map[string]string{"HAIL_API_KEY": "sk_test", "HAIL_API_URL": srv.URL},
+		"sms", "suppressions", "delete",
+	)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if hits := atomic.LoadInt32(&srv.hits); hits != 0 {
+		t.Errorf("expected 0 HTTP calls, got %d", hits)
+	}
+}
