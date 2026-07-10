@@ -54,6 +54,8 @@ class ValidateIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     api_key: str | None = None
+    provider: str | None = None
+    params: dict = {}
 
 
 def _serialize(row: OrgProviderConfig) -> dict:
@@ -191,10 +193,15 @@ async def validate_provider_config(
     _check_layer(layer)
     row = await _get_row(db, organization_id, layer)
 
-    api_key = body.api_key
-    provider = row.provider if row else None
-    params = dict(row.params) if row else {}
-    if api_key is None:
+    if body.api_key is not None:
+        # In-flight: validate the typed key against the drawer's provider+params.
+        provider = body.provider or (row.provider if row else None)
+        if provider is None:
+            raise HTTPException(status_code=422, detail="pick a provider to test")
+        params = _validated_params(layer, provider, body.params)
+        api_key = body.api_key
+    else:
+        # Stored: validate the saved key against its saved provider.
         if row is None or row.encrypted_api_key is None:
             raise HTTPException(
                 status_code=422, detail="no api_key given and none stored"
@@ -203,10 +210,8 @@ async def validate_provider_config(
             api_key = provider_cipher().decrypt(row.encrypted_api_key)
         except (SecretKeyMissing, InvalidToken) as exc:
             raise HTTPException(status_code=503, detail=str(exc)) from exc
-    if provider is None:
-        raise HTTPException(
-            status_code=422, detail="no stored config for this layer; save first"
-        )
+        provider = row.provider
+        params = dict(row.params)
 
     status, message = await validate_provider_key(layer, provider, api_key, params)
     return {"status": status, "message": message}
