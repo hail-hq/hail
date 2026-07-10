@@ -18,7 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from hailhq.core.models import WebhookDelivery, WebhookSubscription
 
-__all__ = ["build_event_data", "fanout_email_event"]
+__all__ = ["build_event_data", "fanout_email_event", "fanout_sms_event"]
 
 
 def build_event_data(
@@ -89,6 +89,50 @@ async def fanout_email_event(
             WebhookDelivery(
                 subscription_id=sub.id,
                 email_domain_id=email_domain_id,
+                event_type=event_type,
+                event_id=event_id,
+                payload=_payload(organization_id, data),
+            )
+        )
+        inserted += 1
+
+    if inserted:
+        await db.flush()
+    return inserted
+
+
+async def fanout_sms_event(
+    db: AsyncSession,
+    *,
+    organization_id: UUID,
+    event_type: str,
+    event_id: UUID,
+    data: dict[str, Any],
+) -> int:
+    """Insert one WebhookDelivery row per active subscription whose
+    event_types includes event_type. Thin SMS-shaped wrapper around the
+    same delivery mechanism fanout_email_event uses — email_domain_id is
+    always None here (SMS has no domain concept)."""
+    subs = (
+        (
+            await db.execute(
+                select(WebhookSubscription).where(
+                    WebhookSubscription.organization_id == organization_id,
+                    WebhookSubscription.status == "active",
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    inserted = 0
+    for sub in subs:
+        if event_type not in (sub.event_types or []):
+            continue
+        db.add(
+            WebhookDelivery(
+                subscription_id=sub.id,
+                email_domain_id=None,
                 event_type=event_type,
                 event_id=event_id,
                 payload=_payload(organization_id, data),
