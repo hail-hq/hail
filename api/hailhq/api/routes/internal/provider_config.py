@@ -239,6 +239,10 @@ async def delete_provider_config(
     await db.delete(row)
 
     if was_active:
+        # The select below autoflushes the pending delete, so the DELETE hits
+        # Postgres before the promote UPDATE — required, else activating a
+        # sibling while the old active row still exists trips the partial-unique
+        # index. Do NOT reorder the promote before db.delete/this query.
         remaining = (
             await db.execute(
                 select(OrgProviderConfig)
