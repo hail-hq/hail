@@ -732,10 +732,3 @@ positives.
   reverse path (see "SMS abuse monitor" above); add a `hail sms suspensions
   lift <org>` command / operator route and/or an automatic cooldown column
   so recovery is not raw SQL.
-- **Inbound SMS `from_number_id` semantics** — on inbound rows `from_number_id`
-  points at the org's *receiving* number (the `To`), not the external sender
-  in `from_e164`, so the `from_number_id.e164 == from_e164` invariant that
-  holds for outbound rows is violated. Any per-number analytics keyed on the
-  FK mis-attributes inbound traffic. Resolve by adding a nullable
-  `to_number_id` FK and leaving `from_number_id` NULL for inbound (see
-  `sms_ingest.py`).
