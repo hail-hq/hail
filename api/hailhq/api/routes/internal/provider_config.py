@@ -126,10 +126,16 @@ async def _set_active(
 ) -> None:
     """Make ``provider``'s row the sole active row for (org, layer).
 
-    Deactivates every other row first, then activates the target — in that
-    order, so the partial-unique index (``UNIQUE(org, layer) WHERE
+    Deactivates the currently-active row first, then activates the target —
+    in that order, so the partial-unique index (``UNIQUE(org, layer) WHERE
     is_active``) never sees two active rows for the same layer at once. The
     caller commits; both statements land in the caller's transaction.
+
+    The deactivate is scoped to ``is_active`` rows only (never the whole
+    sibling set): ``updated_at`` is ``onupdate=now()``, so touching an
+    already-inactive row would reset its timestamp and destroy the recency
+    ordering that DELETE-promotion depends on. Only the row genuinely
+    leaving active — and the target row gaining it — should move.
     """
     await db.execute(
         update(OrgProviderConfig)
@@ -137,6 +143,7 @@ async def _set_active(
             OrgProviderConfig.organization_id == organization_id,
             OrgProviderConfig.layer == layer,
             OrgProviderConfig.provider != provider,
+            OrgProviderConfig.is_active.is_(True),
         )
         .values(is_active=False)
     )

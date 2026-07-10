@@ -203,6 +203,55 @@ async def test_delete_active_promotes_most_recently_updated_remaining(
     assert providers[0]["is_active"] is True
 
 
+async def test_deactivation_preserves_inactive_siblings_updated_at(
+    client, async_session, internal_secret_set, provider_key_set  # noqa: F811
+) -> None:
+    """Activating one provider must not bump inactive siblings' updated_at.
+
+    Regression: the deactivate leg of _set_active once matched every
+    sibling (provider != target), so on each activation it rewrote
+    updated_at on rows that were already inactive too — collapsing every
+    row to one timestamp and destroying the recency ordering that
+    DELETE-promotion relies on. Only the row leaving active (and the target
+    gaining it) should move.
+
+    Uses the llm layer — the only one with three valid providers. Each PUT
+    is its own request/transaction, so now() advances between them: after
+    the three PUTs, anthropic was last written when google was activated,
+    google was last written when openai-compatible was activated, so with
+    the fix anthropic is strictly older than google. Under the bug the
+    openai-compatible PUT bumps both, tying them.
+    """
+    bodies = [
+        b'{"provider":"anthropic","api_key":"sk-AAAA","params":{"model":"m"}}',
+        b'{"provider":"google","api_key":"sk-BBBB","params":{"model":"m"}}',
+        b'{"provider":"openai-compatible","api_key":"sk-CCCC",'
+        b'"params":{"model":"m","base_url":"https://api.example.com"}}',
+    ]
+    for b in bodies:
+        resp = await client.put(f"{BASE}/llm", content=b, headers=_signed(b))
+        assert resp.status_code == 200, resp.text
+
+    # expire_all() drops the identity-map cache so we read the committed DB
+    # timestamps, not the stale values this shared test session loaded.
+    async_session.expire_all()
+    rows = {
+        r.provider: r.updated_at
+        for r in (await async_session.execute(select(OrgProviderConfig)))
+        .scalars()
+        .all()
+    }
+    assert rows["anthropic"] < rows["google"], rows
+
+    # DELETE the active row (openai-compatible) → promotion must pick the
+    # most-recently-updated survivor, google, not an arbitrary tie-break.
+    resp = await client.delete(f"{BASE}/llm/openai-compatible", headers=_signed(b""))
+    assert resp.status_code == 204
+    resp = await client.get(BASE, headers=_signed(b""))
+    active = [p for p in resp.json()["providers"] if p["is_active"]]
+    assert [p["provider"] for p in active] == ["google"]
+
+
 async def test_delete_inactive_provider_leaves_active_alone(
     client, internal_secret_set, provider_key_set  # noqa: F811
 ) -> None:
