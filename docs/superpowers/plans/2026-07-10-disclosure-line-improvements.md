@@ -12,7 +12,7 @@
 
 ## Global Constraints
 
-- Two git repos are involved. Tasks 1, 2, 4, 5, 6 commit in `/Users/r/playground/hail`; Task 3 commits in `/Users/r/playground/hail-website`. Never mix.
+- Two git repos are involved. Tasks 1, 2, 4, 5, 6 commit in `/Users/r/playground/hail/.claude/worktrees/disclosure-line-improvements`; Task 3 commits in `/Users/r/playground/hail-website`. Never mix.
 - Email sent-footer copy, verbatim: text body `Sent via Hail.so (https://hail.so), an AI communication platform.` — HTML body `Sent via <a href="https://hail.so">Hail.so</a>, an AI communication platform.` (hyperlinked in HTML, plain in text).
 - Voice generic fallback line, verbatim: `Hi, this is an AI assistant calling on behalf of whoever requested this call.`
 - Voice named line, verbatim template: `Hi, this is an AI assistant calling on behalf of {org_name}.`
@@ -89,7 +89,7 @@ def test_sent_footer_text_constant_is_the_wire_line():
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `cd /Users/r/playground/hail/core && uv run pytest -q tests/test_email_footer.py`
+Run: `cd /Users/r/playground/hail/.claude/worktrees/disclosure-line-improvements/core && uv run pytest -q tests/test_email_footer.py`
 Expected: FAIL — `ImportError: cannot import name 'SENT_FOOTER_TEXT'`
 
 - [ ] **Step 3: Rewrite the module**
@@ -175,14 +175,14 @@ def append_sent_footer(
 
 - [ ] **Step 4: Run core tests**
 
-Run: `cd /Users/r/playground/hail/core && uv run pytest -q tests/test_email_footer.py tests/test_email_forwarding.py`
+Run: `cd /Users/r/playground/hail/.claude/worktrees/disclosure-line-improvements/core && uv run pytest -q tests/test_email_footer.py tests/test_email_forwarding.py`
 Expected: PASS (footer tests green; forwarding path untouched and still green). If `tests/test_email_forwarding.py` doesn't exist under that exact name, run `uv run pytest -q` for the whole package instead.
 
 - [ ] **Step 5: Lint and commit (do NOT run the api suite yet — Task 2 fixes its call site)**
 
 ```bash
-cd /Users/r/playground/hail/core && uv run ruff check hailhq/core/email_footer.py tests/test_email_footer.py
-cd /Users/r/playground/hail
+cd /Users/r/playground/hail/.claude/worktrees/disclosure-line-improvements/core && uv run ruff check hailhq/core/email_footer.py tests/test_email_footer.py
+cd /Users/r/playground/hail/.claude/worktrees/disclosure-line-improvements
 git add core/hailhq/core/email_footer.py core/tests/test_email_footer.py
 git commit -m "feat(core): blend email branding footer and AI disclosure into one line"
 ```
@@ -248,7 +248,7 @@ and replace it with:
 
 - [ ] **Step 2: Run the touched test to verify it fails**
 
-Run: `cd /Users/r/playground/hail/api && uv run pytest -q tests/test_emails_api.py -k "footer or disclosure"`
+Run: `cd /Users/r/playground/hail/.claude/worktrees/disclosure-line-improvements/api && uv run pytest -q tests/test_emails_api.py -k "footer or disclosure"`
 Expected: FAIL (the route still emits the old two-paragraph layout; also the old import may error until Step 3). If `-k` matches nothing, run the specific test containing the block above (find it with `grep -n "SENT_FOOTER_TEXT" tests/test_emails_api.py` and run that test by name).
 
 - [ ] **Step 3: Update the route**
@@ -286,19 +286,19 @@ to:
 
 - [ ] **Step 4: Run the full api suite**
 
-Run: `cd /Users/r/playground/hail/api && uv run pytest -q`
+Run: `cd /Users/r/playground/hail/.claude/worktrees/disclosure-line-improvements/api && uv run pytest -q`
 Expected: PASS (276+ tests).
 
 - [ ] **Step 5: Verify no stragglers reference the removed names**
 
-Run: `cd /Users/r/playground/hail && grep -rn "FOOTER_SENT\|append_disclosure\|Sent by Hail" --include="*.py" api core voicebot mcp | grep -v __pycache__`
+Run: `cd /Users/r/playground/hail/.claude/worktrees/disclosure-line-improvements && grep -rn "FOOTER_SENT\|append_disclosure\|Sent by Hail" --include="*.py" api core voicebot mcp | grep -v __pycache__`
 Expected: no output. If anything appears, update it to the new names/copy before committing.
 
 - [ ] **Step 6: Lint and commit**
 
 ```bash
-cd /Users/r/playground/hail/api && uv run ruff check hailhq/api/routes/emails.py tests/test_emails_api.py
-cd /Users/r/playground/hail
+cd /Users/r/playground/hail/.claude/worktrees/disclosure-line-improvements/api && uv run ruff check hailhq/api/routes/emails.py tests/test_emails_api.py
+cd /Users/r/playground/hail/.claude/worktrees/disclosure-line-improvements
 git add api/hailhq/api/routes/emails.py api/tests/test_emails_api.py
 git commit -m "feat(api): emit the blended single-line email footer on the wire"
 ```
@@ -664,7 +664,7 @@ Note: `core/tests` runs with `asyncio_mode = auto` (matching the existing suite)
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `cd /Users/r/playground/hail/core && uv run pytest -q tests/test_internal_webhook.py`
+Run: `cd /Users/r/playground/hail/.claude/worktrees/disclosure-line-improvements/core && uv run pytest -q tests/test_internal_webhook.py`
 Expected: FAIL — `ImportError: cannot import name 'fetch_organization_name'`
 
 - [ ] **Step 3: Implement**
@@ -738,14 +738,14 @@ async def fetch_organization_name(organization_id: str) -> str | None:
 
 - [ ] **Step 4: Run tests**
 
-Run: `cd /Users/r/playground/hail/core && uv run pytest -q tests/test_internal_webhook.py`
+Run: `cd /Users/r/playground/hail/.claude/worktrees/disclosure-line-improvements/core && uv run pytest -q tests/test_internal_webhook.py`
 Expected: PASS, 6 tests.
 
 - [ ] **Step 5: Full core suite, lint, commit**
 
 ```bash
-cd /Users/r/playground/hail/core && uv run pytest -q && uv run ruff check hailhq/core/internal_webhook.py tests/test_internal_webhook.py
-cd /Users/r/playground/hail
+cd /Users/r/playground/hail/.claude/worktrees/disclosure-line-improvements/core && uv run pytest -q && uv run ruff check hailhq/core/internal_webhook.py tests/test_internal_webhook.py
+cd /Users/r/playground/hail/.claude/worktrees/disclosure-line-improvements
 git add core/hailhq/core/internal_webhook.py core/tests/test_internal_webhook.py
 git commit -m "feat(core): fail-safe org-name lookup against hail-website"
 ```
@@ -831,7 +831,7 @@ async def test_post_calls_dispatch_metadata_org_name_none_on_lookup_failure(
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `cd /Users/r/playground/hail/api && uv run pytest -q tests/test_calls_api.py -k org_name`
+Run: `cd /Users/r/playground/hail/.claude/worktrees/disclosure-line-improvements/api && uv run pytest -q tests/test_calls_api.py -k org_name`
 Expected: FAIL — `AttributeError: ... has no attribute 'fetch_organization_name'` (monkeypatch target doesn't exist yet).
 
 - [ ] **Step 3: Wire the route**
@@ -873,7 +873,7 @@ In `api/hailhq/api/main.py`: add `from hailhq.core import internal_webhook` to t
 
 - [ ] **Step 5: Run the full api suite**
 
-Run: `cd /Users/r/playground/hail/api && uv run pytest -q`
+Run: `cd /Users/r/playground/hail/.claude/worktrees/disclosure-line-improvements/api && uv run pytest -q`
 Expected: PASS. Existing calls tests are unaffected: in the test environment `hail_base_url` is unset, so the un-monkeypatched `fetch_organization_name` returns `None` immediately with no network attempt.
 
 - [ ] **Step 6: Regenerate nothing — confirm no OpenAPI change, lint, commit**
@@ -881,15 +881,15 @@ Expected: PASS. Existing calls tests are unaffected: in the test environment `ha
 `POST /calls`'s request/response schemas are untouched (dispatch metadata is internal), so `openapi/openapi.yaml` must NOT change. Verify:
 
 ```bash
-cd /Users/r/playground/hail
+cd /Users/r/playground/hail/.claude/worktrees/disclosure-line-improvements
 git status --porcelain openapi/
 ```
 
 Expected: no output.
 
 ```bash
-cd /Users/r/playground/hail/api && uv run ruff check hailhq/api/routes/calls.py hailhq/api/main.py tests/test_calls_api.py
-cd /Users/r/playground/hail
+cd /Users/r/playground/hail/.claude/worktrees/disclosure-line-improvements/api && uv run ruff check hailhq/api/routes/calls.py hailhq/api/main.py tests/test_calls_api.py
+cd /Users/r/playground/hail/.claude/worktrees/disclosure-line-improvements
 git add api/hailhq/api/routes/calls.py api/hailhq/api/main.py api/tests/test_calls_api.py
 git commit -m "feat(api): resolve org name at call creation for the spoken disclosure"
 ```
@@ -934,7 +934,7 @@ async def test_speak_greeting_blank_or_missing_org_name_falls_back_to_generic() 
 
 - [ ] **Step 2: Run tests to verify the new ones fail and pin the old text**
 
-Run: `cd /Users/r/playground/hail/voicebot && uv run pytest -q tests/test_agent.py -k speak_greeting`
+Run: `cd /Users/r/playground/hail/.claude/worktrees/disclosure-line-improvements/voicebot && uv run pytest -q tests/test_agent.py -k speak_greeting`
 Expected: the two new tests FAIL (`org_name` ignored today → generic line spoken / old 17-word text); the three existing ones PASS.
 
 - [ ] **Step 3: Implement**
@@ -998,14 +998,14 @@ In `__all__` (~line 753), add `"disclosure_line",` next to `"AI_DISCLOSURE_LINE"
 
 - [ ] **Step 4: Run the voicebot suite**
 
-Run: `cd /Users/r/playground/hail/voicebot && uv run pytest -q`
+Run: `cd /Users/r/playground/hail/.claude/worktrees/disclosure-line-improvements/voicebot && uv run pytest -q`
 Expected: PASS (57 + 2 new). The three pre-existing greeting tests pass unchanged because they assert against the `AI_DISCLOSURE_LINE` constant, whose _text_ changed but whose role (what's spoken with no org_name) did not.
 
 - [ ] **Step 5: Lint and commit**
 
 ```bash
-cd /Users/r/playground/hail/voicebot && uv run ruff check hailhq/voicebot/agent.py tests/test_agent.py
-cd /Users/r/playground/hail
+cd /Users/r/playground/hail/.claude/worktrees/disclosure-line-improvements/voicebot && uv run ruff check hailhq/voicebot/agent.py tests/test_agent.py
+cd /Users/r/playground/hail/.claude/worktrees/disclosure-line-improvements
 git add voicebot/hailhq/voicebot/agent.py voicebot/tests/test_agent.py
 git commit -m "feat(voicebot): speak the org name in the AI disclosure, tighten fallback"
 ```
@@ -1022,10 +1022,10 @@ git commit -m "feat(voicebot): speak the org name in the AI disclosure, tighten 
 - [ ] **Step 1: Full suites, both repos**
 
 ```bash
-cd /Users/r/playground/hail/core && uv run pytest -q
-cd /Users/r/playground/hail/api && uv run pytest -q
-cd /Users/r/playground/hail/voicebot && uv run pytest -q
-cd /Users/r/playground/hail/mcp && uv run pytest -q
+cd /Users/r/playground/hail/.claude/worktrees/disclosure-line-improvements/core && uv run pytest -q
+cd /Users/r/playground/hail/.claude/worktrees/disclosure-line-improvements/api && uv run pytest -q
+cd /Users/r/playground/hail/.claude/worktrees/disclosure-line-improvements/voicebot && uv run pytest -q
+cd /Users/r/playground/hail/.claude/worktrees/disclosure-line-improvements/mcp && uv run pytest -q
 cd /Users/r/playground/hail-website && npm test
 ```
 
