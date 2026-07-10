@@ -188,6 +188,7 @@ async def test_resolve_org_configs_rejects_unsafe_llm_base_url(async_session) ->
             layer="llm",
             provider="openai-compatible",
             params={"base_url": "https://169.254.169.254/v1", "model": "m"},
+            is_active=True,
         )
     )
     await async_session.commit()
@@ -206,6 +207,7 @@ async def test_resolve_org_configs_canonicalizes_safe_llm_base_url(
             layer="llm",
             provider="openai-compatible",
             params={"base_url": "https://api.openai.com/v1/", "model": "m"},
+            is_active=True,
         )
     )
     await async_session.commit()
