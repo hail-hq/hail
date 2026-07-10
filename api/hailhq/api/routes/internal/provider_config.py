@@ -17,7 +17,7 @@ from uuid import UUID
 from cryptography.fernet import InvalidToken
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, ConfigDict, ValidationError
-from sqlalchemy import delete, select
+from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -58,6 +58,12 @@ class ValidateIn(BaseModel):
     params: dict = {}
 
 
+class ActivateIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    provider: str
+
+
 def _serialize(row: OrgProviderConfig) -> dict:
     return {
         "layer": row.layer,
@@ -66,6 +72,7 @@ def _serialize(row: OrgProviderConfig) -> dict:
         "key_set_at": row.key_set_at.isoformat() if row.key_set_at else None,
         "params": row.params,
         "fallback_enabled": row.fallback_enabled,
+        "is_active": row.is_active,
     }
 
 
@@ -86,7 +93,7 @@ def _validated_params(layer: str, provider: str, params: dict) -> dict:
     return model.model_dump(exclude={"provider"}, exclude_none=True)
 
 
-async def _get_row(
+async def _get_active_row(
     db: AsyncSession, organization_id: UUID, layer: str
 ) -> OrgProviderConfig | None:
     return (
@@ -94,9 +101,54 @@ async def _get_row(
             select(OrgProviderConfig).where(
                 OrgProviderConfig.organization_id == organization_id,
                 OrgProviderConfig.layer == layer,
+                OrgProviderConfig.is_active.is_(True),
             )
         )
     ).scalar_one_or_none()
+
+
+async def _get_row(
+    db: AsyncSession, organization_id: UUID, layer: str, provider: str
+) -> OrgProviderConfig | None:
+    return (
+        await db.execute(
+            select(OrgProviderConfig).where(
+                OrgProviderConfig.organization_id == organization_id,
+                OrgProviderConfig.layer == layer,
+                OrgProviderConfig.provider == provider,
+            )
+        )
+    ).scalar_one_or_none()
+
+
+async def _set_active(
+    db: AsyncSession, organization_id: UUID, layer: str, provider: str
+) -> None:
+    """Make ``provider``'s row the sole active row for (org, layer).
+
+    Deactivates every other row first, then activates the target — in that
+    order, so the partial-unique index (``UNIQUE(org, layer) WHERE
+    is_active``) never sees two active rows for the same layer at once. The
+    caller commits; both statements land in the caller's transaction.
+    """
+    await db.execute(
+        update(OrgProviderConfig)
+        .where(
+            OrgProviderConfig.organization_id == organization_id,
+            OrgProviderConfig.layer == layer,
+            OrgProviderConfig.provider != provider,
+        )
+        .values(is_active=False)
+    )
+    await db.execute(
+        update(OrgProviderConfig)
+        .where(
+            OrgProviderConfig.organization_id == organization_id,
+            OrgProviderConfig.layer == layer,
+            OrgProviderConfig.provider == provider,
+        )
+        .values(is_active=True)
+    )
 
 
 @router.get("/orgs/{organization_id}/providers")
@@ -109,7 +161,7 @@ async def list_provider_configs(
             await db.execute(
                 select(OrgProviderConfig)
                 .where(OrgProviderConfig.organization_id == organization_id)
-                .order_by(OrgProviderConfig.layer)
+                .order_by(OrgProviderConfig.layer, OrgProviderConfig.provider)
             )
         )
         .scalars()
@@ -128,21 +180,12 @@ async def upsert_provider_config(
     _check_layer(layer)
     params = _validated_params(layer, body.provider, body.params)
 
-    row = await _get_row(db, organization_id, layer)
+    row = await _get_row(db, organization_id, layer, body.provider)
     if row is None:
         row = OrgProviderConfig(
             organization_id=organization_id, layer=layer, provider=body.provider
         )
         db.add(row)
-    elif row.provider != body.provider and body.api_key is None:
-        # The stored key was encrypted for the OLD provider's auth scheme —
-        # carrying it over onto the new provider would let it be silently
-        # decrypted and sent to a provider it was never issued for. Clear it
-        # so the org must supply a fresh key for the new provider.
-        row.encrypted_api_key = None
-        row.key_last4 = None
-        row.key_set_at = None
-    row.provider = body.provider
     row.params = params
     row.fallback_enabled = body.fallback_enabled
 
@@ -155,7 +198,14 @@ async def upsert_provider_config(
         row.key_last4 = last4(body.api_key)
         row.key_set_at = datetime.now(timezone.utc)
 
+    # Flush the upsert first so _set_active's UPDATEs (raw SQL, bypassing
+    # the identity map) see this row — then flip it active in the same
+    # transaction as the upsert. Postgres checks the partial-unique index
+    # per-statement (not deferred), so a concurrent activation can raise
+    # IntegrityError out of _set_active itself, not just out of commit().
     try:
+        await db.flush()
+        await _set_active(db, organization_id, layer, body.provider)
         await db.commit()
     except IntegrityError as exc:
         await db.rollback()
@@ -167,20 +217,71 @@ async def upsert_provider_config(
     return _serialize(row)
 
 
-@router.delete("/orgs/{organization_id}/providers/{layer}", status_code=204)
+@router.delete("/orgs/{organization_id}/providers/{layer}/{provider}", status_code=204)
 async def delete_provider_config(
     organization_id: UUID,
     layer: str,
+    provider: str,
     db: Annotated[AsyncSession, Depends(get_session)],
 ) -> None:
     _check_layer(layer)
-    await db.execute(
-        delete(OrgProviderConfig).where(
-            OrgProviderConfig.organization_id == organization_id,
-            OrgProviderConfig.layer == layer,
+    row = await _get_row(db, organization_id, layer, provider)
+    if row is None:
+        return
+    was_active = row.is_active
+    await db.delete(row)
+
+    if was_active:
+        remaining = (
+            await db.execute(
+                select(OrgProviderConfig)
+                .where(
+                    OrgProviderConfig.organization_id == organization_id,
+                    OrgProviderConfig.layer == layer,
+                )
+                .order_by(OrgProviderConfig.updated_at.desc())
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+        if remaining is not None:
+            remaining.is_active = True
+
+    try:
+        await db.commit()
+    except IntegrityError as exc:
+        await db.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail=f"provider config for layer {layer!r} changed concurrently; retry",
+        ) from exc
+
+
+@router.post("/orgs/{organization_id}/providers/{layer}/activate")
+async def activate_provider_config(
+    organization_id: UUID,
+    layer: str,
+    body: ActivateIn,
+    db: Annotated[AsyncSession, Depends(get_session)],
+) -> dict:
+    _check_layer(layer)
+    row = await _get_row(db, organization_id, layer, body.provider)
+    if row is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"no saved config for provider {body.provider!r} in layer {layer!r}",
         )
-    )
-    await db.commit()
+
+    try:
+        await _set_active(db, organization_id, layer, body.provider)
+        await db.commit()
+    except IntegrityError as exc:
+        await db.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail=f"provider config for layer {layer!r} changed concurrently; retry",
+        ) from exc
+    await db.refresh(row)
+    return _serialize(row)
 
 
 @router.post("/orgs/{organization_id}/providers/{layer}/validate")
@@ -191,7 +292,7 @@ async def validate_provider_config(
     db: Annotated[AsyncSession, Depends(get_session)],
 ) -> dict:
     _check_layer(layer)
-    row = await _get_row(db, organization_id, layer)
+    row = await _get_active_row(db, organization_id, layer)
 
     if body.api_key is not None:
         # In-flight: validate the typed key against the drawer's provider+params.

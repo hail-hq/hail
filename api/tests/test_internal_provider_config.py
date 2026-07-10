@@ -6,6 +6,7 @@ import uuid
 
 import pytest
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 
 from hailhq.core.config import settings
 from hailhq.core.models import OrgProviderConfig
@@ -50,6 +51,7 @@ async def test_put_get_roundtrip_masks_key(
             "key_set_at": providers[0]["key_set_at"],
             "params": {"voice_id": "v-1"},
             "fallback_enabled": False,
+            "is_active": True,
         }
     ]
     assert providers[0]["key_set_at"] is not None
@@ -105,10 +107,118 @@ async def test_delete_reverts_to_default(
 ) -> None:
     b1 = b'{"provider":"deepgram","api_key":"sk-d-XY12","params":{},"fallback_enabled":false}'
     await client.put(f"{BASE}/stt", content=b1, headers=_signed(b1))
-    resp = await client.delete(f"{BASE}/stt", headers=_signed(b""))
+    resp = await client.delete(f"{BASE}/stt/deepgram", headers=_signed(b""))
     assert resp.status_code == 204
     resp = await client.get(BASE, headers=_signed(b""))
     assert resp.json()["providers"] == []
+
+
+async def test_put_second_provider_becomes_active_first_becomes_inactive(
+    client, internal_secret_set, provider_key_set  # noqa: F811
+) -> None:
+    b1 = b'{"provider":"cartesia","api_key":"sk-1-AAAA","params":{},"fallback_enabled":false}'
+    resp1 = await client.put(f"{BASE}/tts", content=b1, headers=_signed(b1))
+    assert resp1.json()["is_active"] is True
+
+    b2 = b'{"provider":"elevenlabs","api_key":"sk-2-BBBB","params":{},"fallback_enabled":false}'
+    resp2 = await client.put(f"{BASE}/tts", content=b2, headers=_signed(b2))
+    assert resp2.status_code == 200, resp2.text
+    assert resp2.json()["is_active"] is True
+
+    resp = await client.get(BASE, headers=_signed(b""))
+    providers = {p["provider"]: p for p in resp.json()["providers"]}
+    assert len(providers) == 2
+    assert providers["cartesia"]["is_active"] is False
+    assert providers["elevenlabs"]["is_active"] is True
+
+
+async def test_activate_flips_active_provider(
+    client, internal_secret_set, provider_key_set  # noqa: F811
+) -> None:
+    b1 = b'{"provider":"cartesia","api_key":"sk-1-AAAA","params":{},"fallback_enabled":false}'
+    await client.put(f"{BASE}/tts", content=b1, headers=_signed(b1))
+    b2 = b'{"provider":"elevenlabs","api_key":"sk-2-BBBB","params":{},"fallback_enabled":false}'
+    await client.put(f"{BASE}/tts", content=b2, headers=_signed(b2))
+    # elevenlabs is active after the second PUT; flip back to cartesia.
+    body = b'{"provider":"cartesia"}'
+    resp = await client.post(
+        f"{BASE}/tts/activate", content=body, headers=_signed(body)
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["provider"] == "cartesia"
+    assert resp.json()["is_active"] is True
+
+    resp = await client.get(BASE, headers=_signed(b""))
+    providers = {p["provider"]: p for p in resp.json()["providers"]}
+    assert providers["cartesia"]["is_active"] is True
+    assert providers["elevenlabs"]["is_active"] is False
+
+
+async def test_activate_unknown_provider_404(
+    client, internal_secret_set, provider_key_set  # noqa: F811
+) -> None:
+    b1 = b'{"provider":"cartesia","api_key":"sk-1-AAAA","params":{},"fallback_enabled":false}'
+    await client.put(f"{BASE}/tts", content=b1, headers=_signed(b1))
+    body = b'{"provider":"elevenlabs"}'
+    resp = await client.post(
+        f"{BASE}/tts/activate", content=body, headers=_signed(body)
+    )
+    assert resp.status_code == 404
+
+
+async def test_activate_race_returns_409(
+    client, internal_secret_set, provider_key_set, monkeypatch  # noqa: F811
+) -> None:
+    b1 = b'{"provider":"cartesia","api_key":"sk-1-AAAA","params":{},"fallback_enabled":false}'
+    await client.put(f"{BASE}/tts", content=b1, headers=_signed(b1))
+
+    async def fake_set_active(db, organization_id, layer, provider):
+        raise IntegrityError("UPDATE", {}, Exception("race"))
+
+    monkeypatch.setattr(
+        "hailhq.api.routes.internal.provider_config._set_active", fake_set_active
+    )
+    body = b'{"provider":"cartesia"}'
+    resp = await client.post(
+        f"{BASE}/tts/activate", content=body, headers=_signed(body)
+    )
+    assert resp.status_code == 409
+
+
+async def test_delete_active_promotes_most_recently_updated_remaining(
+    client, internal_secret_set, provider_key_set  # noqa: F811
+) -> None:
+    b1 = b'{"provider":"cartesia","api_key":"sk-1-AAAA","params":{},"fallback_enabled":false}'
+    await client.put(f"{BASE}/tts", content=b1, headers=_signed(b1))
+    b2 = b'{"provider":"elevenlabs","api_key":"sk-2-BBBB","params":{},"fallback_enabled":false}'
+    await client.put(f"{BASE}/tts", content=b2, headers=_signed(b2))
+    # elevenlabs is now active (most recently written); delete it.
+    resp = await client.delete(f"{BASE}/tts/elevenlabs", headers=_signed(b""))
+    assert resp.status_code == 204
+
+    resp = await client.get(BASE, headers=_signed(b""))
+    providers = resp.json()["providers"]
+    assert len(providers) == 1
+    assert providers[0]["provider"] == "cartesia"
+    assert providers[0]["is_active"] is True
+
+
+async def test_delete_inactive_provider_leaves_active_alone(
+    client, internal_secret_set, provider_key_set  # noqa: F811
+) -> None:
+    b1 = b'{"provider":"cartesia","api_key":"sk-1-AAAA","params":{},"fallback_enabled":false}'
+    await client.put(f"{BASE}/tts", content=b1, headers=_signed(b1))
+    b2 = b'{"provider":"elevenlabs","api_key":"sk-2-BBBB","params":{},"fallback_enabled":false}'
+    await client.put(f"{BASE}/tts", content=b2, headers=_signed(b2))
+    # cartesia is inactive; deleting it should not disturb elevenlabs.
+    resp = await client.delete(f"{BASE}/tts/cartesia", headers=_signed(b""))
+    assert resp.status_code == 204
+
+    resp = await client.get(BASE, headers=_signed(b""))
+    providers = resp.json()["providers"]
+    assert len(providers) == 1
+    assert providers[0]["provider"] == "elevenlabs"
+    assert providers[0]["is_active"] is True
 
 
 async def test_validate_uses_stored_key(
