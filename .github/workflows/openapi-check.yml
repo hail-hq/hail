@@ -25,7 +25,11 @@ jobs:
         run: |
           set -euo pipefail
           changed=$(git diff --name-only "$BASE_SHA"..."$HEAD_SHA")
-          api_changed=$(printf '%s\n' "$changed" | grep -E '^api/' | grep -vE '^api/(tests/|README|.*\.md$)' || true)
+          # Internal routes carry include_in_schema=False (see docs/setup + the
+          # routes/internal/ convention), so they never appear in the public
+          # openapi.yaml — changing them can't require a spec regen. Exempt them
+          # to avoid a false failure on internal-only PRs.
+          api_changed=$(printf '%s\n' "$changed" | grep -E '^api/' | grep -vE '^api/(tests/|README|.*\.md$)' | grep -vE '^api/hailhq/api/routes/internal/' || true)
           openapi_changed=$(printf '%s\n' "$changed" | grep -E '^openapi/openapi\.yaml$' || true)
           if [ -n "$api_changed" ] && [ -z "$openapi_changed" ]; then
             echo "::error::api/ changes detected without a matching openapi/openapi.yaml update."

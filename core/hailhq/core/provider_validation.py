@@ -11,6 +11,19 @@ are designed but unverified pending test keys — a KNOWN GAP.
 
 Result is tri-state: 'valid' | 'invalid' | 'indeterminate'. A transient
 429/5xx/network is 'indeterminate' ("couldn't verify"), never 'invalid'.
+
+Adding a provider (this does NOT auto-scale — each needs a hand-written,
+verified probe):
+
+1. Add it to the params model for its layer in ``provider_config.py``.
+2. Add a ``_probe_for`` branch here. Prefer a ``capability`` probe (call the
+   real endpoint with deliberately-bad params so nothing runs/bills); fall
+   back to an ``auth`` probe (a cheap authenticated GET) if the provider has
+   no safe capability probe.
+3. EMPIRICALLY VERIFY the ordering before trusting a capability probe: a bad
+   key must return 401/403, and a valid key with bad params must return a
+   post-auth 4xx (404/400/422). If auth is NOT checked before params, the
+   ``capability`` mode would mark a bad key valid — use ``auth`` mode instead.
 """
 
 from __future__ import annotations
