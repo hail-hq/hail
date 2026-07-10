@@ -138,6 +138,15 @@ async def test_capability_mode_400_is_valid() -> None:
     assert status == "valid"
 
 
+async def test_capability_mode_3xx_is_indeterminate() -> None:
+    # A redirect proves neither auth nor capability — not a valid key.
+    client = httpx.AsyncClient(
+        transport=httpx.MockTransport(lambda r: httpx.Response(302, json={}))
+    )
+    status, _ = await validate_provider_key("tts", "elevenlabs", "k", {}, client=client)
+    assert status == "indeterminate"
+
+
 async def test_network_error_is_indeterminate() -> None:
     def handler(req: httpx.Request) -> httpx.Response:
         raise httpx.ConnectError("boom", request=req)
@@ -174,3 +183,23 @@ async def test_elevenlabs_body_never_uses_a_real_voice() -> None:
         "tts", "elevenlabs", "k", {"voice_id": "real-voice-xyz"}, client=client
     )
     assert "real-voice-xyz" not in seen["url"]
+
+
+async def test_cartesia_body_never_uses_a_real_voice() -> None:
+    # Cartesia's voice id rides in the JSON body (voice.id), not the URL — the
+    # exact spot a future edit might plug in a stored voice_id → synthesis →
+    # billing. The probe body must carry the sentinel uuid, never the real id.
+    seen = {}
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        seen["url"] = str(req.url)
+        seen["body"] = req.content.decode()
+        return httpx.Response(404, json={})
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    await validate_provider_key(
+        "tts", "cartesia", "k", {"voice_id": "real-voice-xyz"}, client=client
+    )
+    assert "real-voice-xyz" not in seen["body"]
+    assert "real-voice-xyz" not in seen["url"]
+    assert "00000000-0000-0000-0000-000000000000" in seen["body"]

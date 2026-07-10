@@ -117,9 +117,10 @@ def _classify(mode: str, status: int) -> ValidationStatus:
         return "invalid"
     if mode == "auth":
         return "valid" if status in (200, 206) else "indeterminate"
-    # capability: we sent bad params, so a post-auth 4xx (not auth/ratelimit)
-    # proves the key authenticated AND had the capability permission.
-    if 200 <= status < 500 and status != 429:
+    # capability: we sent bad params, so a 2xx or a post-auth 4xx (not auth/
+    # ratelimit) proves the key authenticated AND had the capability permission.
+    # A 3xx redirect proves neither, so it stays indeterminate.
+    if (200 <= status < 300) or (400 <= status < 500 and status not in (401, 403, 429)):
         return "valid"
     return "indeterminate"
 
