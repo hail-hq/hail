@@ -2,6 +2,55 @@
 
 All notable changes to Hail are documented here. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and Hail adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.0] — 2026-07-10
+
+Bring-your-own provider keys. Cloud organizations can now supply their own API
+keys and parameters for each layer of the voice pipeline — STT, LLM, and TTS —
+instead of using Hail's bundled providers. Transport (Twilio + LiveKit) and the
+pipeline stay Hail's; the brain and voice become yours.
+
+No component versions were cut alongside this release: the feature is served
+entirely by internal HMAC routes (`include_in_schema=False`), so the public
+OpenAPI spec, CLI, and SDK are unchanged.
+
+### BYO provider keys
+
+- Per-organization provider config (`org_provider_config` table) storing keys
+  **Fernet-encrypted at rest** under a dedicated `HAIL_PROVIDER_SECRET_KEY`.
+  Keys are write-only — only a last-4 and a set-at timestamp are ever read
+  back. Providers: STT (Deepgram), LLM (OpenAI-compatible / Anthropic /
+  Google), TTS (Cartesia / ElevenLabs, with voice id).
+- Managed via internal HMAC-signed routes under
+  `/internal/orgs/{org}/providers` (list / upsert / delete / validate /
+  activate). The customer-facing console lives in the hail-website repo.
+- Runtime resolution: the voicebot loads and decrypts the org's **active**
+  provider per layer at call time; precedence is per-call params → org config →
+  deployment env. A per-call `llm` key is now encrypted in transit through
+  LiveKit dispatch metadata rather than sent in plaintext.
+- **Failure semantics:** a bad or revoked BYO key fails the call fast with a
+  new `provider_key_error` end reason, unless the org opts into falling back to
+  Hail's keys for that layer.
+
+### Capability-based key validation
+
+- The key check probes each provider's real capability endpoint with
+  deliberately-invalid parameters, so auth **and** the specific permission are
+  exercised without running (or billing) a synthesis/transcription. This
+  catches granular-permission keys (common with ElevenLabs / Cartesia /
+  Deepgram) that authenticate but lack the needed capability — which a plain
+  auth probe silently passes.
+- Tri-state result — **valid / invalid / couldn't-verify** — so a transient
+  429 / 5xx / network error no longer reads as a bad key. Customer
+  `openai-compatible` base URLs are SSRF-guarded (public HTTPS only, private/
+  loopback/metadata ranges rejected).
+
+### Multiple providers per layer
+
+- A layer can hold several saved provider configs with exactly one **active**
+  per layer, DB-enforced by a partial unique index. Switching the active
+  provider is a single action; the voicebot always resolves the active one.
+  Existing single-provider rows are backfilled to active.
+
 ## [0.10.0] — 2026-07-09
 
 SMS outbound milestone. Hail can now send SMS via Twilio, gated by the same
