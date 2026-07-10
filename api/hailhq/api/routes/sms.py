@@ -50,7 +50,7 @@ from hailhq.core.schemas import (
 )
 from hailhq.core.sms_ingest import ingest_inbound_sms
 from hailhq.core.twilio_signature import verify_twilio_signature
-from hailhq.core.urls import canonical_url
+from hailhq.core.urls import join_url
 
 logger = logging.getLogger(__name__)
 
@@ -254,7 +254,7 @@ async def receive_inbound_sms(
     form = await request.form()
     params = {k: str(v) for k, v in form.items()}
     signature = request.headers.get("X-Twilio-Signature")
-    url = canonical_url(str(request.url))
+    url = join_url(settings.hail_api_url, "sms/inbound")
 
     if not verify_twilio_signature(url, params, signature, settings.twilio_auth_token):
         raise HTTPException(

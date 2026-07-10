@@ -46,12 +46,27 @@ async def test_inbound_rejects_bad_signature(client, monkeypatch) -> None:
     assert resp.status_code == 403
 
 
+async def test_inbound_rejects_missing_signature_header(client, monkeypatch) -> None:
+    from hailhq.core.config import settings
+
+    monkeypatch.setattr(settings, "twilio_auth_token", AUTH_TOKEN)
+    params = {
+        "From": "+14155551234",
+        "To": "+14155559999",
+        "Body": "hi",
+        "MessageSid": "SM_no_sig",
+    }
+    resp = await client.post("/sms/inbound", data=params)
+    assert resp.status_code == 403
+
+
 async def test_inbound_accepts_valid_signature_and_creates_row(
     client, async_session, monkeypatch
 ) -> None:
     from hailhq.core.config import settings
 
     monkeypatch.setattr(settings, "twilio_auth_token", AUTH_TOKEN)
+    monkeypatch.setattr(settings, "hail_api_url", "http://t")
     org_id = uuid.uuid4()
     await _seed_number(async_session, org_id)
 
@@ -70,6 +85,7 @@ async def test_inbound_unknown_number_still_returns_200(client, monkeypatch) -> 
     from hailhq.core.config import settings
 
     monkeypatch.setattr(settings, "twilio_auth_token", AUTH_TOKEN)
+    monkeypatch.setattr(settings, "hail_api_url", "http://t")
     params = {
         "From": "+14155551234",
         "To": "+19999999999",
