@@ -51,6 +51,32 @@ def upgrade() -> None:
         ),
     )
 
+    # Supporting indexes for the query shapes this feature introduces, so
+    # they range-scan instead of seq-scanning tables that grow unbounded:
+    #  - GET /sms/suppressions keyset-paginates per org+channel on created_at
+    #    (mirrors idx_sms_org_created on the sms table).
+    #  - the abuse monitor's hourly aggregates window on (channel, source,
+    #    created_at) over suppressions and (channel, occurred_at) over the
+    #    append-only usage_events table.
+    op.create_index(
+        "idx_suppressions_org_channel_created",
+        "suppressions",
+        ["organization_id", "channel", sa.text("created_at DESC")],
+    )
+    op.create_index(
+        "idx_suppressions_channel_source_created",
+        "suppressions",
+        ["channel", "source", "created_at"],
+    )
+    op.create_index(
+        "idx_usage_events_channel_time",
+        "usage_events",
+        ["channel", "occurred_at"],
+    )
+
 
 def downgrade() -> None:
+    op.drop_index("idx_usage_events_channel_time", table_name="usage_events")
+    op.drop_index("idx_suppressions_channel_source_created", table_name="suppressions")
+    op.drop_index("idx_suppressions_org_channel_created", table_name="suppressions")
     op.drop_table("channel_suspensions")
