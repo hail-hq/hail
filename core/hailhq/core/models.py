@@ -1013,10 +1013,13 @@ class WebhookDelivery(Base):
 
 
 class OrgProviderConfig(Base):
-    """Per-org BYO provider config for one voice-pipeline layer.
+    """Per-org BYO provider config for a voice-pipeline layer.
 
     Cloud-console feature (managed via ``routes/internal/provider_config``,
-    never the public API). ``encrypted_api_key`` is Fernet ciphertext under
+    never the public API). An org may hold multiple saved configs per layer
+    (one per provider — unique on org+layer+provider), with at most one
+    marked ``is_active`` per (org, layer); the voicebot uses the active row.
+    ``encrypted_api_key`` is Fernet ciphertext under
     ``HAIL_PROVIDER_SECRET_KEY`` (see ``hailhq.core.secret_cipher``) — same
     at-rest posture as ``WebhookSubscription.secret_encrypted``. A row with
     ``encrypted_api_key IS NULL`` is a params-only override (e.g. a custom
@@ -1043,6 +1046,9 @@ class OrgProviderConfig(Base):
     fallback_enabled: Mapped[bool] = mapped_column(
         Boolean, server_default=text("false"), nullable=False
     )
+    is_active: Mapped[bool] = mapped_column(
+        Boolean, server_default=text("false"), nullable=False
+    )
     created_at: Mapped[datetime] = mapped_column(
         TS, server_default=text("now()"), nullable=False
     )
@@ -1055,7 +1061,17 @@ class OrgProviderConfig(Base):
             "layer IN ('llm','tts','stt')", name="org_provider_config_layer_check"
         ),
         UniqueConstraint(
-            "organization_id", "layer", name="org_provider_config_org_layer_key"
+            "organization_id",
+            "layer",
+            "provider",
+            name="org_provider_config_org_layer_provider_key",
+        ),
+        Index(
+            "org_provider_config_one_active_idx",
+            "organization_id",
+            "layer",
+            unique=True,
+            postgresql_where=text("is_active"),
         ),
         Index("org_provider_config_org_idx", "organization_id"),
     )
