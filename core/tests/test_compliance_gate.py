@@ -405,14 +405,17 @@ async def test_remove_suppression_no_match_returns_false(async_session) -> None:
     assert removed is False
 
 
-async def test_remove_suppression_deletes_all_matching_rows(async_session) -> None:
+async def test_remove_suppression_deletes_all_org_rows_but_spares_platform_row(
+    async_session,
+) -> None:
     """``suppressions`` has no unique constraint on (recipient, channel,
-    organization_id) — a recipient can have both an org-scoped row AND a
-    platform-wide (organization_id IS NULL) row that ``remove_suppression``'s
-    ``or_`` deliberately matches. With 2+ matching rows,
-    ``scalar_one_or_none()`` used to raise ``MultipleResultsFound``; this
-    proves the bulk-delete fix instead removes every matching row and
-    reports success."""
+    organization_id), so an org can accrue more than one row for the same
+    recipient — ``remove_suppression`` must delete every org-scoped one (a
+    single-row delete would leave the recipient suppressed). It must NOT,
+    however, touch a platform-wide (``organization_id IS NULL``) row: those
+    are operator-owned global blocks (spam traps, etc.), and letting a
+    tenant-authority path delete one would un-suppress that number for every
+    org on the platform."""
     import uuid
 
     from sqlalchemy import select as sa_select
@@ -426,14 +429,15 @@ async def test_remove_suppression_deletes_all_matching_rows(async_session) -> No
 
     org_id = uuid.uuid4()
     recipient = "+14155551234"
-    await add_suppression(
-        async_session,
-        organization_id=org_id,
-        recipient=recipient,
-        channel="sms",
-        reason="user opted out",
-        source="stop_keyword",
-    )
+    for reason in ("user opted out", "duplicate opt-out"):
+        await add_suppression(
+            async_session,
+            organization_id=org_id,
+            recipient=recipient,
+            channel="sms",
+            reason=reason,
+            source="stop_keyword",
+        )
     await add_suppression(
         async_session,
         organization_id=None,
@@ -463,7 +467,8 @@ async def test_remove_suppression_deletes_all_matching_rows(async_session) -> No
         .scalars()
         .all()
     )
-    assert remaining == []
+    # Only the platform-wide (NULL-org) row survives; both org rows are gone.
+    assert [r.organization_id for r in remaining] == [None]
 
 
 async def test_check_channel_suspended_blocks_when_suspended(async_session) -> None:

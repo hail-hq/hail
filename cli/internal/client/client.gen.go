@@ -505,6 +505,7 @@ const (
 	WebhookSubscriptionCreateEventTypesEmailOpened             WebhookSubscriptionCreateEventTypes = "email.opened"
 	WebhookSubscriptionCreateEventTypesEmailReceived           WebhookSubscriptionCreateEventTypes = "email.received"
 	WebhookSubscriptionCreateEventTypesEmailReceivedSuppressed WebhookSubscriptionCreateEventTypes = "email.received.suppressed"
+	WebhookSubscriptionCreateEventTypesSmsReceived             WebhookSubscriptionCreateEventTypes = "sms.received"
 )
 
 // Valid indicates whether the value is a known member of the WebhookSubscriptionCreateEventTypes enum.
@@ -526,6 +527,8 @@ func (e WebhookSubscriptionCreateEventTypes) Valid() bool {
 		return true
 	case WebhookSubscriptionCreateEventTypesEmailReceivedSuppressed:
 		return true
+	case WebhookSubscriptionCreateEventTypesSmsReceived:
+		return true
 	default:
 		return false
 	}
@@ -541,6 +544,7 @@ const (
 	WebhookSubscriptionPatchEventTypesEmailOpened             WebhookSubscriptionPatchEventTypes = "email.opened"
 	WebhookSubscriptionPatchEventTypesEmailReceived           WebhookSubscriptionPatchEventTypes = "email.received"
 	WebhookSubscriptionPatchEventTypesEmailReceivedSuppressed WebhookSubscriptionPatchEventTypes = "email.received.suppressed"
+	WebhookSubscriptionPatchEventTypesSmsReceived             WebhookSubscriptionPatchEventTypes = "sms.received"
 )
 
 // Valid indicates whether the value is a known member of the WebhookSubscriptionPatchEventTypes enum.
@@ -561,6 +565,8 @@ func (e WebhookSubscriptionPatchEventTypes) Valid() bool {
 	case WebhookSubscriptionPatchEventTypesEmailReceived:
 		return true
 	case WebhookSubscriptionPatchEventTypesEmailReceivedSuppressed:
+		return true
+	case WebhookSubscriptionPatchEventTypesSmsReceived:
 		return true
 	default:
 		return false

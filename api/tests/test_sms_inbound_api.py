@@ -80,6 +80,24 @@ async def test_inbound_accepts_valid_signature_and_creates_row(
     resp = await client.post("/sms/inbound", data=form, headers=headers)
     assert resp.status_code == 200
 
+    # The route commits on the same session the test holds (get_session is
+    # overridden to async_session), so assert the message was actually
+    # persisted — a 200 alone can't distinguish "stored" from "dropped".
+    from sqlalchemy import select
+
+    from hailhq.core.models import Sms
+
+    row = (
+        await async_session.execute(
+            select(Sms).where(Sms.provider_message_sid == "SM_ok")
+        )
+    ).scalar_one_or_none()
+    assert row is not None
+    assert row.direction == "inbound"
+    assert row.status == "received"
+    assert row.organization_id == org_id
+    assert row.from_e164 == "+14155551234"
+
 
 async def test_inbound_unknown_number_still_returns_200(client, monkeypatch) -> None:
     from hailhq.core.config import settings

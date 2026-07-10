@@ -3016,6 +3016,7 @@ components:
               - email.opened
               - email.clicked
               - email.received.suppressed
+              - sms.received
           type: array
           minItems: 1
           title: Event Types
@@ -3060,6 +3061,7 @@ components:
                   - email.opened
                   - email.clicked
                   - email.received.suppressed
+                  - sms.received
               type: array
             - type: "null"
           title: Event Types

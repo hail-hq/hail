@@ -261,14 +261,13 @@ async def receive_inbound_sms(
             status_code=http_status.HTTP_403_FORBIDDEN, detail="invalid signature"
         )
 
-    opt_out_type = params.get("OptOutType")
     await ingest_inbound_sms(
         db,
         from_e164=params.get("From", ""),
         to_e164=params.get("To", ""),
         body=params.get("Body", ""),
-        provider_message_sid=params.get("MessageSid", ""),
-        opt_out_type=opt_out_type,
+        provider_message_sid=params.get("MessageSid") or None,
+        opt_out_type=params.get("OptOutType"),
     )
     await db.commit()
     return Response(status_code=http_status.HTTP_200_OK)

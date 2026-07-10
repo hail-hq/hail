@@ -24,6 +24,7 @@ import base64
 import os
 from datetime import datetime
 from typing import Any, AsyncIterator, Literal
+from urllib.parse import quote
 from uuid import UUID
 
 import httpx
@@ -216,7 +217,12 @@ class _SmsResource:
 
     async def delete_suppression(self, number: str) -> None:
         """Remove a number from the opt-out list (manual correction only)."""
-        await self._http.request("DELETE", f"/sms/suppressions/{number}")
+        # Percent-encode the number so reserved delimiters ('#', '?', space)
+        # land in the path instead of being parsed as a fragment/query; '+'
+        # is path-legal and kept literal so E.164 numbers pass through as-is.
+        await self._http.request(
+            "DELETE", f"/sms/suppressions/{quote(number, safe='+')}"
+        )
 
 
 class _EmailsResource:

@@ -363,26 +363,26 @@ async def add_suppression(
 async def remove_suppression(
     db: AsyncSession, *, organization_id: UUID | None, recipient: str, channel: str
 ) -> bool:
-    """Delete all suppression rows matching (recipient, channel), scoped to
-    this org OR a platform-wide (NULL org) row — the mirror of
-    ``add_suppression`` for the STOP->START re-subscribe flow.
+    """Delete all suppression rows matching (recipient, channel) that belong
+    to this org — the mirror of ``add_suppression`` for the STOP->START
+    re-subscribe flow.
 
-    ``suppressions`` has no unique constraint on (recipient, channel,
-    organization_id), so more than one row can match here — e.g. a
-    duplicate org-scoped row, or an org-scoped row alongside a
-    platform-wide (NULL org) one. A single-row delete would leave the
-    recipient still suppressed by the leftover row and silently defeat
-    the re-subscribe; this deletes every matching row instead. Flushes
-    but does not commit, matching this module's session convention.
-    Returns True iff at least one row was deleted."""
+    The match is scoped strictly to ``organization_id`` (which for the
+    STOP/START and tenant-DELETE callers is a concrete org, never NULL):
+    platform-wide rows (``organization_id IS NULL``, e.g. operator-owned
+    spam-trap / global blocks) are deliberately NOT removable through a
+    tenant-authority path — a tenant deleting one would un-suppress that
+    number for every org on the platform. ``suppressions`` has no unique
+    constraint on (recipient, channel, organization_id), so more than one
+    org-scoped row can still match; this deletes every one so no leftover
+    row silently defeats the re-subscribe. Flushes but does not commit,
+    matching this module's session convention. Returns True iff at least
+    one row was deleted."""
     normalized = normalize_recipient(recipient)
     stmt = delete(Suppression).where(
         Suppression.recipient == normalized,
         Suppression.channel == channel,
-        or_(
-            Suppression.organization_id == organization_id,
-            Suppression.organization_id.is_(None),
-        ),
+        Suppression.organization_id == organization_id,
     )
     result = await db.execute(stmt)
     await db.flush()

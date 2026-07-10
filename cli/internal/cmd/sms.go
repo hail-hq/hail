@@ -261,9 +261,13 @@ func newSmsSuppressionsCmd(opts *Options) *cobra.Command {
 }
 
 func newSmsSuppressionsListCmd(opts *Options) *cobra.Command {
-	return &cobra.Command{
+	var (
+		limit  int
+		cursor string
+	)
+	cmd := &cobra.Command{
 		Use:   "list",
-		Short: "List opted-out numbers",
+		Short: "List opted-out numbers (cursor-paginated)",
 		Args:  argsOrHelp(0, ""),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
@@ -271,7 +275,10 @@ func newSmsSuppressionsListCmd(opts *Options) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			resp, err := apiClient.ListSmsSuppressionsSmsSuppressionsGetWithResponse(ctx, &client.ListSmsSuppressionsSmsSuppressionsGetParams{})
+			resp, err := apiClient.ListSmsSuppressionsSmsSuppressionsGetWithResponse(ctx, &client.ListSmsSuppressionsSmsSuppressionsGetParams{
+				Limit:  &limit,
+				Cursor: strPtr(cursor),
+			})
 			if err != nil {
 				return fmt.Errorf("sms suppressions API: %w", err)
 			}
@@ -284,9 +291,15 @@ func newSmsSuppressionsListCmd(opts *Options) *cobra.Command {
 			for _, s := range resp.JSON200.Items {
 				fmt.Fprintf(opts.Stdout, "%s  %s  %s\n", s.Recipient, s.Reason, s.Source)
 			}
+			if resp.JSON200.NextCursor != nil && *resp.JSON200.NextCursor != "" {
+				fmt.Fprintf(opts.Stdout, "\nmore: --cursor %s\n", *resp.JSON200.NextCursor)
+			}
 			return nil
 		},
 	}
+	cmd.Flags().IntVar(&limit, "limit", 50, "Page size (1..200)")
+	cmd.Flags().StringVar(&cursor, "cursor", "", "Resume from a previous next_cursor")
+	return cmd
 }
 
 func newSmsSuppressionsDeleteCmd(opts *Options) *cobra.Command {

@@ -38,32 +38,31 @@ async def check_and_suspend_abusive_orgs(db: AsyncSession) -> int:
         hours=settings.hail_sms_abuse_window_hours
     )
 
-    send_counts = dict(
-        (
-            await db.execute(
-                select(UsageEvent.organization_id, func.count())
-                .where(
-                    UsageEvent.channel == "sms", UsageEvent.occurred_at >= window_start
-                )
-                .group_by(UsageEvent.organization_id)
-            )
-        ).all()
+    send_stmt = (
+        select(UsageEvent.organization_id, func.count())
+        .where(UsageEvent.channel == "sms", UsageEvent.occurred_at >= window_start)
+        .group_by(UsageEvent.organization_id)
     )
+    send_counts = dict((await db.execute(send_stmt)).all())
 
-    opt_out_counts = dict(
-        (
-            await db.execute(
-                select(Suppression.organization_id, func.count())
-                .where(
-                    Suppression.channel == "sms",
-                    Suppression.source == "stop_keyword",
-                    Suppression.created_at >= window_start,
-                    Suppression.organization_id.is_not(None),
-                )
-                .group_by(Suppression.organization_id)
-            )
-        ).all()
+    # Count DISTINCT opted-out recipients, not raw suppression rows: a single
+    # recipient can text STOP repeatedly (each a new row, no unique
+    # constraint), and rows-not-recipients would let one persistent recipient
+    # push an org over the threshold and suspend its whole channel.
+    opt_out_stmt = (
+        select(
+            Suppression.organization_id,
+            func.count(func.distinct(Suppression.recipient)),
+        )
+        .where(
+            Suppression.channel == "sms",
+            Suppression.source == "stop_keyword",
+            Suppression.created_at >= window_start,
+            Suppression.organization_id.is_not(None),
+        )
+        .group_by(Suppression.organization_id)
     )
+    opt_out_counts = dict((await db.execute(opt_out_stmt)).all())
 
     already_suspended = set(
         (

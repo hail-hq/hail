@@ -768,6 +768,7 @@ WebhookEventType = Literal[
     "email.opened",
     "email.clicked",
     "email.received.suppressed",
+    "sms.received",
 ]
 
 WebhookSubscriptionStatus = Literal["active", "disabled"]

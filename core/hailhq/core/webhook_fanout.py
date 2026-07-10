@@ -113,36 +113,14 @@ async def fanout_sms_event(
     event_types includes event_type. Thin SMS-shaped wrapper around the
     same delivery mechanism fanout_email_event uses — email_domain_id is
     always None here (SMS has no domain concept)."""
-    subs = (
-        (
-            await db.execute(
-                select(WebhookSubscription).where(
-                    WebhookSubscription.organization_id == organization_id,
-                    WebhookSubscription.status == "active",
-                )
-            )
-        )
-        .scalars()
-        .all()
+    return await fanout_email_event(
+        db,
+        organization_id=organization_id,
+        email_domain_id=None,
+        event_type=event_type,
+        event_id=event_id,
+        data=data,
     )
-    inserted = 0
-    for sub in subs:
-        if event_type not in (sub.event_types or []):
-            continue
-        db.add(
-            WebhookDelivery(
-                subscription_id=sub.id,
-                email_domain_id=None,
-                event_type=event_type,
-                event_id=event_id,
-                payload=_payload(organization_id, data),
-            )
-        )
-        inserted += 1
-
-    if inserted:
-        await db.flush()
-    return inserted
 
 
 def _payload(organization_id: UUID, data: dict[str, Any]) -> dict[str, Any]:
