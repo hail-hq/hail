@@ -208,5 +208,5 @@ async def validate_provider_config(
             status_code=422, detail="no stored config for this layer; save first"
         )
 
-    ok, message = await validate_provider_key(layer, provider, api_key, params)
-    return {"ok": ok, "message": message}
+    status, message = await validate_provider_key(layer, provider, api_key, params)
+    return {"status": status, "message": message}

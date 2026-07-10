@@ -115,7 +115,7 @@ async def test_validate_uses_stored_key(
     client, internal_secret_set, provider_key_set, monkeypatch  # noqa: F811
 ) -> None:
     async def fake_validate(layer, provider, api_key, params, client=None):
-        return api_key == "sk-good", "checked"
+        return ("valid" if api_key == "sk-good" else "invalid", "checked")
 
     monkeypatch.setattr(
         "hailhq.api.routes.internal.provider_config.validate_provider_key",
@@ -126,8 +126,8 @@ async def test_validate_uses_stored_key(
     resp = await client.post(
         f"{BASE}/stt/validate", content=b"{}", headers=_signed(b"{}")
     )
-    assert resp.json() == {"ok": True, "message": "checked"}
+    assert resp.json() == {"status": "valid", "message": "checked"}
 
     b2 = b'{"api_key":"sk-bad"}'
     resp = await client.post(f"{BASE}/stt/validate", content=b2, headers=_signed(b2))
-    assert resp.json()["ok"] is False
+    assert resp.json()["status"] == "invalid"
