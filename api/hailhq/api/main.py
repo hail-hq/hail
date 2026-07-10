@@ -16,6 +16,7 @@ from functools import partial
 from hailhq.core.config import settings
 from hailhq.core.db import dispose_engine, session_scope
 from hailhq.core.http_post import httpx_post
+from hailhq.core import internal_webhook
 from hailhq.core.domain_verification_worker import DomainVerificationWorker
 from hailhq.core.outbound_worker import OutboundForwardWorker
 from hailhq.core.pool import sweep_pool_reservations
@@ -186,6 +187,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
             await _stop_worker(forward_worker, forward_task)
         if verify_worker is not None and verify_task is not None:
             await _stop_worker(verify_worker, verify_task)
+        await internal_webhook.aclose()
         await calls_routes.close_livekit_singleton()
         await dispose_engine()
 

@@ -876,3 +876,58 @@ async def test_post_calls_rejects_unsafe_llm_base_url_at_route(
         headers={"Authorization": f"Bearer {plain}"},
     )
     assert resp.status_code == 422
+
+
+async def test_post_calls_dispatch_metadata_carries_org_name(
+    client: httpx.AsyncClient,
+    async_session: AsyncSession,
+    org_and_key: tuple[str, ApiKey, str],
+    livekit_mock: AsyncMock,
+    add_phone_number,
+    monkeypatch,
+) -> None:
+    """The resolved org name rides the (server-built) dispatch metadata."""
+    org_id, _, plain = org_and_key
+    await add_phone_number(async_session, org_id)
+
+    async def fake_lookup(organization_id: str) -> str | None:
+        assert organization_id == str(org_id)
+        return "Acme Corp"
+
+    monkeypatch.setattr("hailhq.api.routes.calls.fetch_organization_name", fake_lookup)
+
+    resp = await client.post(
+        "/calls",
+        json={"to": "+14155559999", "system_prompt": "hi", "recipient_consent": True},
+        headers={"Authorization": f"Bearer {plain}"},
+    )
+    assert resp.status_code == 201
+    dispatch_kwargs = livekit_mock.dispatch_agent.await_args.kwargs
+    assert dispatch_kwargs["metadata"]["org_name"] == "Acme Corp"
+
+
+async def test_post_calls_dispatch_metadata_org_name_none_on_lookup_failure(
+    client: httpx.AsyncClient,
+    async_session: AsyncSession,
+    org_and_key: tuple[str, ApiKey, str],
+    livekit_mock: AsyncMock,
+    add_phone_number,
+    monkeypatch,
+) -> None:
+    """Lookup failure degrades to org_name=None — the call still goes out."""
+    org_id, _, plain = org_and_key
+    await add_phone_number(async_session, org_id)
+
+    async def fake_lookup(organization_id: str) -> str | None:
+        return None
+
+    monkeypatch.setattr("hailhq.api.routes.calls.fetch_organization_name", fake_lookup)
+
+    resp = await client.post(
+        "/calls",
+        json={"to": "+14155559999", "system_prompt": "hi", "recipient_consent": True},
+        headers={"Authorization": f"Bearer {plain}"},
+    )
+    assert resp.status_code == 201
+    dispatch_kwargs = livekit_mock.dispatch_agent.await_args.kwargs
+    assert dispatch_kwargs["metadata"]["org_name"] is None
