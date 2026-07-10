@@ -687,6 +687,37 @@ describe-active-receipt-rule-set`.
   3-hop counter. If it isn't, raise `HAIL_FORWARD_MAX_HOPS` or
   blacklist the target by clearing `forward_to`.
 
+## SMS abuse monitor & channel suspensions
+
+All orgs share one Hail-owned A2P 10DLC campaign, so one org's high opt-out
+rate can get the whole platform throttled by carriers. `AbuseMonitorWorker`
+(hourly by default; `HAIL_ABUSE_MONITOR_POLL_SECONDS`) computes each org's
+rolling opt-out rate and, past the threshold
+(`HAIL_SMS_ABUSE_*` — window, min sends, max rate), inserts a
+`channel_suspensions` row. `check_sms_allowed` then blocks that org's
+outbound SMS. Thresholds are unvalidated starting guesses — expect to tune
+them once real traffic lands.
+
+**Lifting a suspension is manual for now — there is no CLI/route/expiry.**
+An auto-suspended org stays blocked until an operator runs raw SQL. Inspect
+and lift:
+
+```bash
+# See who is suspended and why
+psql "$DATABASE_URL" -c \
+  "SELECT organization_id, channel, reason, suspended_at FROM channel_suspensions;"
+
+# Lift one org's SMS suspension (re-enables outbound immediately)
+psql "$DATABASE_URL" -c \
+  "DELETE FROM channel_suspensions WHERE organization_id = '<org-uuid>' AND channel = 'sms';"
+```
+
+Before lifting, confirm the opt-out spike was benign (a burst of legitimate
+STOPs, not abuse) — otherwise the next hourly tick re-suspends. There is no
+cooldown/backoff yet, so a persistently-abusive org will re-trip on the next
+run. Tune `HAIL_SMS_ABUSE_MAX_OPT_OUT_RATE` up if you are seeing false
+positives.
+
 ## Carry-forwards / open work
 
 (See `CHANGELOG.md` "Deferred to v1.x" for the canonical list.)
@@ -697,3 +728,14 @@ describe-active-receipt-rule-set`.
 - SMS, Email channels
 - `hail bootstrap` admin CLI (closes the manual DB-seed step above)
 - CallEvent dedupe across voicebot redispatch
+- **Un-suspend tooling for `channel_suspensions`** — auto-suspend has no
+  reverse path (see "SMS abuse monitor" above); add a `hail sms suspensions
+  lift <org>` command / operator route and/or an automatic cooldown column
+  so recovery is not raw SQL.
+- **Inbound SMS `from_number_id` semantics** — on inbound rows `from_number_id`
+  points at the org's *receiving* number (the `To`), not the external sender
+  in `from_e164`, so the `from_number_id.e164 == from_e164` invariant that
+  holds for outbound rows is violated. Any per-number analytics keyed on the
+  FK mis-attributes inbound traffic. Resolve by adding a nullable
+  `to_number_id` FK and leaving `from_number_id` NULL for inbound (see
+  `sms_ingest.py`).
