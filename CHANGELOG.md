@@ -24,7 +24,8 @@ Component versions cut alongside this umbrella release:
 
 - `POST /sms`, `GET /sms/{id}`, `GET /sms`.
 - Unified `/events` stream (`GET /events`) extended to a three-way union across calls, email, and SMS; `EventResponse.source` now includes `sms`.
-- Fixed: a same-idempotency-key retry of a request that failed pre-send validation (e.g. a malformed body, or a 403 from the consent/compliance/balance gates) previously replayed as "still processing" until the idempotency key expired, instead of replaying the original failure. Affects `/calls`, `/emails`, and `/sms`.
+- Fixed: a same-idempotency-key retry of a request that failed pre-send validation (e.g. a malformed body, or a 403 from the consent/compliance/balance gates) previously replayed as "still processing" until the idempotency key expired, instead of replaying the original failure. Now also covers the per-call BYO `llm.base_url` safety rejection; the shared-pool-exhausted `503` on `/calls` releases the key instead, so a same-key retry can go through once capacity frees. Affects `/calls`, `/emails`, and `/sms`.
+- Fixed: an outbound voice call with no explicit `from` could select an SMS-only number; `/calls` now resolves a from-number carrying the `voice` capability (mirroring `/sms`'s `sms` requirement) and falls back to the shared voice pool otherwise.
 
 ### CLI (`cli-v0.10.0`)
 
