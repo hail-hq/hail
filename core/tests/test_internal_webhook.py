@@ -62,6 +62,7 @@ async def test_returns_name_on_200(monkeypatch, configured):
     url, kwargs = session.calls[0]
     assert url == "https://hail.so/api/internal/organizations/lookup"
     assert kwargs["headers"]["X-Hail-Signature"].startswith("sha256=")
+    assert kwargs["timeout"].total == 1.0
 
 
 async def test_unset_config_returns_none_without_any_network_call(monkeypatch):
