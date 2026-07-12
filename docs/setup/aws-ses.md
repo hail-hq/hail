@@ -166,12 +166,53 @@ The `from` field is optional. Resolution order:
 
 If none of those resolve, the call returns `503` pointing at how to register a domain.
 
+## 8a. Attachments
+
+Upload files once and attach them to as many sends as you like. File size limit is 10MB per upload; total message size (including all attachments) is capped at SES's 10MB raw-message limit.
+
+### Upload a file
+
+```bash
+curl -s -X POST $HAIL_API_URL/email-attachments \
+  -H "Authorization: Bearer $HAIL_API_KEY" \
+  -F "file=@invoice.pdf" | jq -r .id
+# → "3fa85f64-5717-4562-b3fc-2c963f66afa6"
+```
+
+The response is a JSON object with an `id` field (UUID). Store this id to reference the attachment in sends.
+
+### Attach to a send
+
+Pass `attachment_ids` (a list of UUIDs) in the `POST /emails` payload:
+
+```bash
+curl -X POST $HAIL_API_URL/emails \
+  -H "Authorization: Bearer $HAIL_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "to": ["alice@example.com"],
+    "subject": "Invoice",
+    "body_text": "See attached.",
+    "recipient_consent": true,
+    "attachment_ids": ["3fa85f64-5717-4562-b3fc-2c963f66afa6"]
+  }'
+```
+
+You can attach the same uploaded file to multiple sends without re-uploading. CLI shortcut — upload and attach in one step:
+
+```bash
+hail email send --to alice@example.com --subject "Invoice" --body "See attached." --attach invoice.pdf
+```
+
+### Lifecycle
+
+Unused uploads (not attached to any send) are garbage-collected 24 hours after upload. Once attached to a send, the file is retained indefinitely and reusable across as many messages as you want.
+
 ## 9. What v1 doesn't do
 
 Skip these until later milestones — they're called out so you don't reach for SES features that aren't wired yet:
 
 - **Templates** — the API takes raw `body_text` / `body_html`. SES templates are a v2 ask.
-- **Attachments on outbound** — `Content.Simple` only; raw MIME is not exposed. Inbound attachments _are_ stored (see §10).
 - **Cloud-agnostic inbound** — the SMTP listener is stubbed at [`docs/setup/smtp-inbound.md`](smtp-inbound.md); inbound currently runs on AWS only.
 
 ## 10. Inbound email
