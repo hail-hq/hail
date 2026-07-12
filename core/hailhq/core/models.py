@@ -739,6 +739,56 @@ class EmailDomain(Base):
     )
 
 
+class EmailAccount(Base):
+    """A tenant-connected external mailbox (Gmail in v1).
+
+    Unlike ``EmailDomain`` (a DNS identity verified with SES), a row here is
+    an OAuth grant: Hail sends *as* the user's own address through the
+    provider's API and reads the mailbox live; nothing received is ever
+    persisted. ``encrypted_refresh_token`` is Fernet ciphertext under
+    ``HAIL_PROVIDER_SECRET_KEY`` (see ``hailhq.core.secret_cipher``) — same
+    at-rest posture as ``OrgProviderConfig.encrypted_api_key``. OAuth
+    secrets live only in this table so ``email_domains`` serializers can
+    never leak them.
+    """
+
+    __tablename__ = "email_accounts"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    organization_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), nullable=False
+    )
+    provider: Mapped[str] = mapped_column(Text, server_default="gmail", nullable=False)
+    email_address: Mapped[str] = mapped_column(Text, nullable=False)
+    display_name: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # OIDC ``sub`` from the provider — stable across address renames; used to
+    # reject a reconnect performed with a different Google account.
+    provider_user_id: Mapped[str] = mapped_column(Text, nullable=False)
+    scopes: Mapped[list[str]] = mapped_column(ARRAY(Text), nullable=False)
+    encrypted_refresh_token: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(Text, server_default="active", nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        TS, server_default=text("now()"), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        TS, server_default=text("now()"), onupdate=func.now(), nullable=False
+    )
+
+    __table_args__ = (
+        CheckConstraint("provider IN ('gmail')", name="email_accounts_provider_check"),
+        CheckConstraint(
+            "status IN ('active','reauth_required','disabled')",
+            name="email_accounts_status_check",
+        ),
+        # One connection per mailbox across the whole deployment — two orgs
+        # sharing one inbox would let either read the other's threads.
+        Index("email_accounts_address_global_uq", "email_address", unique=True),
+        Index("email_accounts_org_idx", "organization_id"),
+    )
+
+
 class Email(Base):
     """A single email message, outbound or inbound.
 
@@ -766,6 +816,16 @@ class Email(Base):
         ForeignKey("email_domains.id", ondelete="RESTRICT"),
         nullable=True,
     )
+    email_account_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("email_accounts.id", ondelete="RESTRICT"),
+        nullable=True,
+    )
+    # Gmail threadId for rows sent through a connected account. Replying
+    # resolves the thread from ``in_reply_to`` at send time, so this is
+    # informational/audit — but cheap to keep and needed if persisted
+    # inbound ever lands.
+    provider_thread_id: Mapped[str | None] = mapped_column(Text, nullable=True)
     from_address: Mapped[str] = mapped_column(Text, nullable=False)
     to_addresses: Mapped[list[str]] = mapped_column(ARRAY(Text), nullable=False)
     cc_addresses: Mapped[list[str] | None] = mapped_column(ARRAY(Text), nullable=True)
@@ -830,9 +890,16 @@ class Email(Base):
             name="emails_direction_check",
         ),
         CheckConstraint(
-            "direction = 'inbound' OR email_domain_id IS NOT NULL",
-            name="emails_outbound_has_domain",
+            "direction = 'inbound' OR email_domain_id IS NOT NULL "
+            "OR email_account_id IS NOT NULL",
+            name="emails_outbound_has_sender",
         ),
+        # A row is sent through a domain identity XOR a connected account.
+        CheckConstraint(
+            "email_domain_id IS NULL OR email_account_id IS NULL",
+            name="emails_one_sender_kind",
+        ),
+        Index("emails_email_account_id_idx", "email_account_id"),
         Index(
             "emails_provider_message_id_outbound_uq",
             "provider_message_id",

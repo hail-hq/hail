@@ -143,7 +143,12 @@ def _assert_head_schema(url: str) -> None:
         # 0007 added the inbound-email schema additions.
         assert _table_exists(conn, "email_attachments")
         assert _constraint_exists(conn, "emails_direction_check")
-        assert _constraint_exists(conn, "emails_outbound_has_domain")
+        assert _constraint_exists(conn, "emails_outbound_has_sender")
+        assert _constraint_exists(conn, "emails_one_sender_kind")
+        # 0031 added the email_accounts table for connected Gmail mailboxes.
+        assert _table_exists(conn, "email_accounts")
+        assert _constraint_exists(conn, "email_accounts_provider_check")
+        assert _constraint_exists(conn, "email_accounts_status_check")
         # 0018 dropped the inbound-action requirement — enabling inbound no
         # longer demands a forward_to. Head schema must NOT carry the CHECK.
         assert not _constraint_exists(conn, "email_domains_inbound_action")
