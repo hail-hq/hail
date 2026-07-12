@@ -50,11 +50,12 @@ from hailhq.api.routes.email_domains import (
 )
 from hailhq.api.funds import require_funds
 from hailhq.core.compliance_gate import check_email_allowed
+from hailhq.core.config import settings
 from hailhq.core.db import get_session
 from hailhq.core.email_delivery_events import record_sent_event
 from hailhq.core.email_footer import FOOTER_SENT, append_disclosure, append_footer
 from hailhq.core.models import Email, EmailAttachment, EmailDomain, EmailEvent
-from hailhq.core.s3_inbound import S3InboundClient
+from hailhq.core.s3_mail import S3MailClient
 from hailhq.core.providers.email import EmailProvider
 from hailhq.core.unsubscribe import build_unsubscribe_url
 from hailhq.core.schemas import (
@@ -79,6 +80,10 @@ router = APIRouter(prefix="/emails", tags=["emails"])
 _DEFAULT_LIST_LIMIT = 50
 _MAX_LIST_LIMIT = 200
 _SEND_FAILED_DETAIL = "email send failed"
+
+
+def _get_s3_mail() -> S3MailClient:
+    return S3MailClient(bucket=settings.hail_mail_bucket)
 
 
 # --------------------------------------------------------------------------- #
@@ -711,18 +716,12 @@ async def get_email(
 # --------------------------------------------------------------------------- #
 
 
-def _get_s3_inbound() -> S3InboundClient:
-    from hailhq.core.config import settings as _s
-
-    return S3InboundClient(bucket=_s.hail_inbound_bucket)
-
-
 @router.get("/{email_id}/raw")
 async def get_email_raw(
     email_id: UUID,
     principal: Annotated[Principal, Depends(get_current_principal)],
     db: Annotated[AsyncSession, Depends(get_session)],
-    s3: Annotated[S3InboundClient, Depends(_get_s3_inbound)],
+    s3: Annotated[S3MailClient, Depends(_get_s3_mail)],
 ) -> Response:
     """302 → presigned S3 URL for the raw inbound MIME (404 for outbound)."""
     stmt = select(Email).where(
@@ -745,7 +744,7 @@ async def get_email_attachment(
     attachment_id: UUID,
     principal: Annotated[Principal, Depends(get_current_principal)],
     db: Annotated[AsyncSession, Depends(get_session)],
-    s3: Annotated[S3InboundClient, Depends(_get_s3_inbound)],
+    s3: Annotated[S3MailClient, Depends(_get_s3_mail)],
 ) -> Response:
     """302 → presigned S3 URL for one attachment."""
     stmt = (

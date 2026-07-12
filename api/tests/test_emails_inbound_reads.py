@@ -16,7 +16,7 @@ import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from hailhq.api.main import app
-from hailhq.api.routes.emails import _get_s3_inbound
+from hailhq.api.routes.emails import _get_s3_mail
 from hailhq.core.models import Email, EmailAttachment, EmailDomain
 
 
@@ -32,11 +32,11 @@ async def auth_headers(async_session: AsyncSession) -> tuple[uuid.UUID, dict[str
 def s3_mock():
     s3 = AsyncMock()
     s3.presign_get.return_value = "https://signed.example.com/object"
-    app.dependency_overrides[_get_s3_inbound] = lambda: s3
+    app.dependency_overrides[_get_s3_mail] = lambda: s3
     try:
         yield s3
     finally:
-        app.dependency_overrides.pop(_get_s3_inbound, None)
+        app.dependency_overrides.pop(_get_s3_mail, None)
 
 
 async def _make_inbound_pair(

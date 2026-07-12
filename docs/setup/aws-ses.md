@@ -211,7 +211,7 @@ the AWS CLI one-liners, and [`docs/operations.md`](../operations.md) →
 Outputs:
 
 - `inbound_mx_record` — publish at DNS for `HAIL_MAIL_BASE_DOMAIN`.
-- `inbound_bucket` — set as `HAIL_INBOUND_BUCKET` in the API `.env`.
+- `inbound_bucket` — this is `${HAIL_MAIL_NAME_PREFIX}-mail`; set `HAIL_MAIL_NAME_PREFIX` in the API `.env` to match the Terraform `name_prefix` var (not settable directly — there is no `HAIL_MAIL_BUCKET` var).
 - `activate_command` — the `aws sesv2 set-active-receipt-rule-set ...` to run once.
 
 The bare Terraform module at `infra/terraform/` is provider-vanilla and
@@ -243,7 +243,7 @@ In the API service `.env`:
 
 ```bash
 HAIL_INBOUND_ENABLED=true
-HAIL_INBOUND_BUCKET=hail-inbound-prod-raw      # from terraform output
+HAIL_MAIL_NAME_PREFIX=hail-inbound-prod         # matches Terraform `name_prefix`; bucket = ${prefix}-mail
 HAIL_INBOUND_HMAC_SECRET=<same as Terraform var>
 ```
 

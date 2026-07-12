@@ -22,7 +22,7 @@ from hailhq.core.outbound_worker import OutboundForwardWorker
 from hailhq.core.pool import sweep_pool_reservations
 from hailhq.core.providers.email.ses import SesEmailProvider
 from hailhq.core.reconcile import sweep_stale_calls
-from hailhq.core.s3_inbound import S3InboundClient
+from hailhq.core.s3_mail import S3MailClient
 from hailhq.core.secret_cipher import SecretCipher, SecretKeyMissing
 from hailhq.core.webhook_worker import WebhookWorker
 from hailhq.api.routes import calls as calls_routes
@@ -150,11 +150,11 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     # when inbound is on — direct POST /emails sends are inline in the route.
     forward_worker: OutboundForwardWorker | None = None
     forward_task: asyncio.Task | None = None
-    if settings.hail_inbound_enabled and settings.hail_inbound_bucket:
+    if settings.hail_inbound_enabled and settings.hail_mail_bucket:
         forward_worker = OutboundForwardWorker(
             session_factory=session_scope,
             provider_factory=SesEmailProvider,
-            s3_factory=lambda: S3InboundClient(bucket=settings.hail_inbound_bucket),
+            s3_factory=lambda: S3MailClient(bucket=settings.hail_mail_bucket),
             usage_callback=_meter_forward_send,
         )
         forward_task = asyncio.create_task(
