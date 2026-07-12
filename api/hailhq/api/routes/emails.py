@@ -357,17 +357,23 @@ async def create_email(
         found_ids = {row.id for row in attachment_rows}
         missing = [str(aid) for aid in body.attachment_ids if aid not in found_ids]
         if missing:
-            raise HTTPException(
-                status_code=http_status.HTTP_404_NOT_FOUND,
-                detail=f"attachment(s) not found: {', '.join(missing)}",
+            raise await cache_failure(
+                idem,
+                HTTPException(
+                    status_code=http_status.HTTP_404_NOT_FOUND,
+                    detail=f"attachment(s) not found: {', '.join(missing)}",
+                ),
             )
         total_bytes = sum(row.size_bytes for row in attachment_rows)
         total_bytes += len((body.body_text or "").encode("utf-8"))
         total_bytes += len((body.body_html or "").encode("utf-8"))
         if total_bytes > MAX_EMAIL_ATTACHMENT_BYTES:
-            raise HTTPException(
-                status_code=http_status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail=ATTACHMENT_TOO_LARGE_DETAIL,
+            raise await cache_failure(
+                idem,
+                HTTPException(
+                    status_code=http_status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail=ATTACHMENT_TOO_LARGE_DETAIL,
+                ),
             )
 
     try:

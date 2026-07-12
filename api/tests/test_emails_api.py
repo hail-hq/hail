@@ -177,6 +177,41 @@ async def test_post_emails_rejects_attachment_from_another_org(
     email_mock.send_email.assert_not_awaited()
 
 
+async def test_post_emails_missing_attachment_replays_404_not_409(
+    client: httpx.AsyncClient,
+    org_and_key: tuple,
+    email_mock: AsyncMock,
+) -> None:
+    """A 404 from the attachment-id check must be cached like every other
+    pre-send failure. Without routing it through ``cache_failure``, the
+    idempotency row stays at the in-flight sentinel and a same-key retry
+    gets a 409 "still processing" instead of the real 404."""
+    _, _, plain = org_and_key
+    headers = {
+        "Authorization": f"Bearer {plain}",
+        "Idempotency-Key": "test-attachment-404-key",
+    }
+    await _register_custom_verified(client, headers, domain="acme.com")
+
+    fake_id = "00000000-0000-0000-0000-000000000000"
+    payload = {
+        "to": ["alice@example.com"],
+        "subject": "hi",
+        "body_text": "body",
+        "recipient_consent": True,
+        "attachment_ids": [fake_id],
+    }
+
+    r1 = await client.post("/emails", json=payload, headers=headers)
+    assert r1.status_code == 404
+
+    r2 = await client.post("/emails", json=payload, headers=headers)
+    assert r2.status_code == 404
+    assert r2.headers.get("idempotency-replay") == "true"
+    assert r2.json()["detail"] == r1.json()["detail"]
+    email_mock.send_email.assert_not_awaited()
+
+
 # --------------------------------------------------------------------------- #
 # POST /emails — validation
 # --------------------------------------------------------------------------- #
