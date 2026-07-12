@@ -816,3 +816,75 @@ class WebhookDeliveryResponse(BaseModel):
 class WebhookDeliveryListResponse(BaseModel):
     items: list[WebhookDeliveryResponse]
     next_cursor: str | None = None
+
+
+# --------------------------------------------------------------------------- #
+# Contacts — computed union of org members and manual rows
+# (hailhq.core.contacts.search_contacts) plus the manual-contact CRUD schemas.
+# --------------------------------------------------------------------------- #
+
+
+def _email_or_error(v: str | None) -> str | None:
+    """Shared optional-email validator for the contacts schemas — same rule
+    as ``EmailCreate``'s from_/reply_to, reusing EMAIL_ADDR/_normalize_domain
+    instead of duplicating the regex."""
+    if v is None:
+        return v
+    if not EMAIL_ADDR.match(v):
+        raise ValueError("must be a valid email address (local@domain.tld)")
+    return _normalize_domain(v)
+
+
+class ContactEntry(BaseModel):
+    """One row in the computed contacts union — an org member or a manual
+    contact. ``id`` is ``member:<user_id>`` for members, the contact row's
+    UUID (as str) for manual rows."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    kind: Literal["member", "manual"]
+    name: str
+    phone_e164: str | None = None
+    email: str | None = None
+    role: str | None = None
+
+
+class ContactCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(min_length=1)
+    phone_e164: str | None = None
+    email: str | None = None
+
+    _validate_phone = field_validator("phone_e164")(_e164_or_error)
+    _validate_email = field_validator("email")(_email_or_error)
+
+    @model_validator(mode="after")
+    def _phone_or_email(self) -> "ContactCreate":
+        if self.phone_e164 is None and self.email is None:
+            raise ValueError("provide at least one of phone_e164 or email")
+        return self
+
+
+class ContactPatch(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str | None = Field(default=None, min_length=1)
+    phone_e164: str | None = None
+    email: str | None = None
+
+    _validate_phone = field_validator("phone_e164")(_e164_or_error)
+    _validate_email = field_validator("email")(_email_or_error)
+
+
+class ContactListResponse(BaseModel):
+    items: list[ContactEntry]
+
+
+class MemberPhonePut(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    phone_e164: str
+
+    _validate_phone = field_validator("phone_e164")(_e164_or_error)

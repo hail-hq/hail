@@ -91,7 +91,7 @@ class Contact(Base):
         TS, server_default=text("now()"), nullable=False
     )
     updated_at: Mapped[datetime] = mapped_column(
-        TS, server_default=text("now()"), nullable=False
+        TS, server_default=text("now()"), onupdate=func.now(), nullable=False
     )
 
     __table_args__ = (
