@@ -558,6 +558,7 @@ class EmailCreate(ConsentAttestationMixin):
     body_html: str | None = None
     conversation_id: UUID | None = None
     metadata: dict = Field(default_factory=dict)
+    attachment_ids: list[UUID] | None = None
 
     @field_validator("from_", "reply_to")
     @classmethod
@@ -717,6 +718,22 @@ class EmailAttachmentResponse(BaseModel):
     size_bytes: int
     content_id: str | None = None
     url: str
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class EmailAttachmentUploadResponse(BaseModel):
+    """Returned by POST /email-attachments.
+
+    ``id`` is reusable across many ``POST /emails`` calls via
+    ``EmailCreate.attachment_ids`` until Hail garbage-collects it (24h
+    if never referenced by a send).
+    """
+
+    id: UUID
+    filename: str
+    content_type: str
+    size_bytes: int
 
     model_config = ConfigDict(from_attributes=True)
 
