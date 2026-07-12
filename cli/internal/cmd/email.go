@@ -7,6 +7,8 @@ import (
 	"os"
 	"strings"
 
+	"github.com/google/uuid"
+	openapi_types "github.com/oapi-codegen/runtime/types"
 	"github.com/spf13/cobra"
 
 	"github.com/hail-hq/hail/cli/internal/client"
@@ -27,6 +29,8 @@ type emailSendFlags struct {
 	bodyFile       string
 	bodyHTMLFile   string
 	idempotencyKey string
+	attach         []string
+	attachIDs      []string
 }
 
 // newEmailCmd builds the `email` command tree.
@@ -54,6 +58,7 @@ deliverability up across your whole account.`,
 	cmd.AddCommand(newEmailStatsCmd(opts))
 	cmd.AddCommand(newEmailRawCmd(opts))
 	cmd.AddCommand(newEmailAttachmentCmd(opts))
+	cmd.AddCommand(newEmailAttachmentUploadCmd(opts))
 	cmd.AddCommand(newEmailDomainCmd(opts))
 	return cmd
 }
@@ -71,7 +76,9 @@ The recipient flag may be repeated, or comma-separated:
   --to alice@example.com,bob@example.com
 
 Either --body or --body-html (or both) must be supplied. --body-file
-and --body-html-file read content from disk.
+and --body-html-file read content from disk. --attach uploads a local
+file and attaches it (repeatable); --attach-id attaches a file already
+uploaded via ` + "`hail email attachment-upload`" + ` (repeatable).
 
 If --from is omitted, the API picks the first verified sender domain
 on your organization, or auto-mints a hail-mail address if one is
@@ -97,6 +104,8 @@ Example (minimal):
 	cmd.Flags().StringVar(&f.bodyFile, "body-file", "", "Read plain-text body from this file (use '-' for stdin); exclusive with --body")
 	cmd.Flags().StringVar(&f.bodyHTMLFile, "body-html-file", "", "Read HTML body from this file (use '-' for stdin); exclusive with --body-html")
 	cmd.Flags().StringVar(&f.idempotencyKey, "idempotency-key", "", "Defaults to a fresh UUID")
+	cmd.Flags().StringArrayVar(&f.attach, "attach", nil, "Local file path to upload and attach (repeatable)")
+	cmd.Flags().StringArrayVar(&f.attachIDs, "attach-id", nil, "Pre-uploaded attachment id from `hail email attachment-upload` (repeatable)")
 	f.registerConsentFlags(cmd, "email")
 	cmd.MarkFlagRequired("to")
 	cmd.MarkFlagRequired("subject")
@@ -142,6 +151,11 @@ func runEmailSend(ctx context.Context, cmd *cobra.Command, opts *Options, f *ema
 		return fmt.Errorf("--bcc: %w", err)
 	}
 
+	apiClient, err := opts.newClientWithIdempotency(f.idempotencyKey)
+	if err != nil {
+		return err
+	}
+
 	body := client.EmailCreate{
 		To:       to,
 		Subject:  f.subject,
@@ -167,9 +181,29 @@ func runEmailSend(ctx context.Context, cmd *cobra.Command, opts *Options, f *ema
 		body.MessageType = &mt
 	}
 
-	apiClient, err := opts.newClientWithIdempotency(f.idempotencyKey)
-	if err != nil {
-		return err
+	var attachmentIDs []string
+	attachmentIDs = append(attachmentIDs, f.attachIDs...)
+	for _, path := range f.attach {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return fmt.Errorf("--attach %s: %w", path, err)
+		}
+		att, err := uploadEmailAttachment(ctx, apiClient, path, data)
+		if err != nil {
+			return fmt.Errorf("--attach %s: %w", path, err)
+		}
+		attachmentIDs = append(attachmentIDs, att.Id.String())
+	}
+	if len(attachmentIDs) > 0 {
+		ids := make([]openapi_types.UUID, 0, len(attachmentIDs))
+		for _, s := range attachmentIDs {
+			id, err := uuid.Parse(s)
+			if err != nil {
+				return fmt.Errorf("--attach-id %q: not a valid UUID: %w", s, err)
+			}
+			ids = append(ids, openapi_types.UUID(id))
+		}
+		body.AttachmentIds = &ids
 	}
 
 	resp, err := apiClient.CreateEmailEmailsPostWithResponse(

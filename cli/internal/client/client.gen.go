@@ -747,6 +747,11 @@ func (e ListSmsSmsGetParamsStatus) Valid() bool {
 	}
 }
 
+// BodyUploadEmailAttachment defines model for Body_upload_email_attachment.
+type BodyUploadEmailAttachment struct {
+	File string `json:"file"`
+}
+
 // CallCreate defines model for CallCreate.
 type CallCreate struct {
 	// ConsentObtainedAt When consent was obtained, if known.
@@ -840,12 +845,25 @@ type EmailAttachmentResponse struct {
 	Url         string             `json:"url"`
 }
 
+// EmailAttachmentUploadResponse Returned by POST /email-attachments.
+//
+// “id“ is reusable across many “POST /emails“ calls via
+// “EmailCreate.attachment_ids“ until Hail garbage-collects it (24h
+// if never referenced by a send).
+type EmailAttachmentUploadResponse struct {
+	ContentType string             `json:"content_type"`
+	Filename    string             `json:"filename"`
+	Id          openapi_types.UUID `json:"id"`
+	SizeBytes   int                `json:"size_bytes"`
+}
+
 // EmailCreate defines model for EmailCreate.
 type EmailCreate struct {
-	Bcc      *[]string `json:"bcc,omitempty"`
-	BodyHtml *string   `json:"body_html,omitempty"`
-	BodyText *string   `json:"body_text,omitempty"`
-	Cc       *[]string `json:"cc,omitempty"`
+	AttachmentIds *[]openapi_types.UUID `json:"attachment_ids,omitempty"`
+	Bcc           *[]string             `json:"bcc,omitempty"`
+	BodyHtml      *string               `json:"body_html,omitempty"`
+	BodyText      *string               `json:"body_text,omitempty"`
+	Cc            *[]string             `json:"cc,omitempty"`
 
 	// ConsentObtainedAt When consent was obtained, if known.
 	ConsentObtainedAt *time.Time `json:"consent_obtained_at,omitempty"`
@@ -1334,6 +1352,11 @@ type GetCallCallsCallIdGetParams struct {
 	Authorization *string `json:"authorization,omitempty"`
 }
 
+// UploadEmailAttachmentParams defines parameters for UploadEmailAttachment.
+type UploadEmailAttachmentParams struct {
+	Authorization *string `json:"authorization,omitempty"`
+}
+
 // ListEmailDomainsEmailDomainsGetParams defines parameters for ListEmailDomainsEmailDomainsGet.
 type ListEmailDomainsEmailDomainsGetParams struct {
 	Cursor        *string `form:"cursor,omitempty" json:"cursor,omitempty"`
@@ -1521,6 +1544,9 @@ type RotateSecretWebhooksSubIdRotateSecretPostParams struct {
 
 // CreateCallCallsPostJSONRequestBody defines body for CreateCallCallsPost for application/json ContentType.
 type CreateCallCallsPostJSONRequestBody = CallCreate
+
+// UploadEmailAttachmentMultipartRequestBody defines body for UploadEmailAttachment for multipart/form-data ContentType.
+type UploadEmailAttachmentMultipartRequestBody = BodyUploadEmailAttachment
 
 // CreateEmailDomainEmailDomainsPostJSONRequestBody defines body for CreateEmailDomainEmailDomainsPost for application/json ContentType.
 type CreateEmailDomainEmailDomainsPostJSONRequestBody = EmailDomainCreate
@@ -1795,6 +1821,9 @@ type ClientInterface interface {
 	// GetCallCallsCallIdGet request
 	GetCallCallsCallIdGet(ctx context.Context, callId openapi_types.UUID, params *GetCallCallsCallIdGetParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
+	// UploadEmailAttachmentWithBody request with any body
+	UploadEmailAttachmentWithBody(ctx context.Context, params *UploadEmailAttachmentParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
 	// ListEmailDomainsEmailDomainsGet request
 	ListEmailDomainsEmailDomainsGet(ctx context.Context, params *ListEmailDomainsEmailDomainsGetParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
@@ -1936,6 +1965,18 @@ func (c *Client) CreateCallCallsPost(ctx context.Context, params *CreateCallCall
 
 func (c *Client) GetCallCallsCallIdGet(ctx context.Context, callId openapi_types.UUID, params *GetCallCallsCallIdGetParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewGetCallCallsCallIdGetRequest(c.Server, callId, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) UploadEmailAttachmentWithBody(ctx context.Context, params *UploadEmailAttachmentParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewUploadEmailAttachmentRequestWithBody(c.Server, params, contentType, body)
 	if err != nil {
 		return nil, err
 	}
@@ -2586,6 +2627,50 @@ func NewGetCallCallsCallIdGetRequest(server string, callId openapi_types.UUID, p
 	if err != nil {
 		return nil, err
 	}
+
+	if params != nil {
+
+		if params.Authorization != nil {
+			var headerParam0 string
+
+			headerParam0, err = runtime.StyleParamWithOptions("simple", false, "authorization", *params.Authorization, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationHeader, Type: "string", Format: ""})
+			if err != nil {
+				return nil, err
+			}
+
+			req.Header.Set("authorization", headerParam0)
+		}
+
+	}
+
+	return req, nil
+}
+
+// NewUploadEmailAttachmentRequestWithBody generates requests for UploadEmailAttachment with any type of body
+func NewUploadEmailAttachmentRequestWithBody(server string, params *UploadEmailAttachmentParams, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/email-attachments")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("POST", queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
 
 	if params != nil {
 
@@ -4605,6 +4690,9 @@ type ClientWithResponsesInterface interface {
 	// GetCallCallsCallIdGetWithResponse request
 	GetCallCallsCallIdGetWithResponse(ctx context.Context, callId openapi_types.UUID, params *GetCallCallsCallIdGetParams, reqEditors ...RequestEditorFn) (*GetCallCallsCallIdGetResponse, error)
 
+	// UploadEmailAttachmentWithBodyWithResponse request with any body
+	UploadEmailAttachmentWithBodyWithResponse(ctx context.Context, params *UploadEmailAttachmentParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*UploadEmailAttachmentResponse, error)
+
 	// ListEmailDomainsEmailDomainsGetWithResponse request
 	ListEmailDomainsEmailDomainsGetWithResponse(ctx context.Context, params *ListEmailDomainsEmailDomainsGetParams, reqEditors ...RequestEditorFn) (*ListEmailDomainsEmailDomainsGetResponse, error)
 
@@ -4771,6 +4859,29 @@ func (r GetCallCallsCallIdGetResponse) Status() string {
 
 // StatusCode returns HTTPResponse.StatusCode
 func (r GetCallCallsCallIdGetResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type UploadEmailAttachmentResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON201      *EmailAttachmentUploadResponse
+	JSON422      *HTTPValidationError
+}
+
+// Status returns HTTPResponse.Status
+func (r UploadEmailAttachmentResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r UploadEmailAttachmentResponse) StatusCode() int {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.StatusCode
 	}
@@ -5497,6 +5608,15 @@ func (c *ClientWithResponses) GetCallCallsCallIdGetWithResponse(ctx context.Cont
 	return ParseGetCallCallsCallIdGetResponse(rsp)
 }
 
+// UploadEmailAttachmentWithBodyWithResponse request with arbitrary body returning *UploadEmailAttachmentResponse
+func (c *ClientWithResponses) UploadEmailAttachmentWithBodyWithResponse(ctx context.Context, params *UploadEmailAttachmentParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*UploadEmailAttachmentResponse, error) {
+	rsp, err := c.UploadEmailAttachmentWithBody(ctx, params, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseUploadEmailAttachmentResponse(rsp)
+}
+
 // ListEmailDomainsEmailDomainsGetWithResponse request returning *ListEmailDomainsEmailDomainsGetResponse
 func (c *ClientWithResponses) ListEmailDomainsEmailDomainsGetWithResponse(ctx context.Context, params *ListEmailDomainsEmailDomainsGetParams, reqEditors ...RequestEditorFn) (*ListEmailDomainsEmailDomainsGetResponse, error) {
 	rsp, err := c.ListEmailDomainsEmailDomainsGet(ctx, params, reqEditors...)
@@ -5901,6 +6021,39 @@ func ParseGetCallCallsCallIdGetResponse(rsp *http.Response) (*GetCallCallsCallId
 			return nil, err
 		}
 		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 422:
+		var dest HTTPValidationError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON422 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseUploadEmailAttachmentResponse parses an HTTP response from a UploadEmailAttachmentWithResponse call
+func ParseUploadEmailAttachmentResponse(rsp *http.Response) (*UploadEmailAttachmentResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &UploadEmailAttachmentResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 201:
+		var dest EmailAttachmentUploadResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON201 = &dest
 
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 422:
 		var dest HTTPValidationError
