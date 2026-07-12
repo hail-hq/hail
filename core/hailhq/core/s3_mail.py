@@ -1,8 +1,9 @@
-"""S3 client wrapper for inbound MIME + attachment objects.
+"""S3 client wrapper for mail MIME + attachment objects.
 
 boto3 is sync; every call is dropped into ``asyncio.to_thread`` so
 FastAPI handlers can ``await`` without blocking the event loop. Same
-pattern as ``SesEmailProvider``.
+pattern as ``SesEmailProvider``. Backs both inbound (raw MIME + parsed
+attachments) and outbound (uploaded attachment) storage in one bucket.
 """
 
 from __future__ import annotations
@@ -14,7 +15,7 @@ import boto3
 
 from hailhq.core.config import settings
 
-__all__ = ["S3InboundClient", "build_default_client"]
+__all__ = ["S3MailClient", "build_default_client"]
 
 
 def build_default_client() -> Any:
@@ -26,10 +27,10 @@ def build_default_client() -> Any:
     )
 
 
-class S3InboundClient:
+class S3MailClient:
     def __init__(self, *, client: Any | None = None, bucket: str) -> None:
         if not bucket:
-            raise ValueError("S3InboundClient requires a bucket")
+            raise ValueError("S3MailClient requires a bucket")
         self._client = client if client is not None else build_default_client()
         self._bucket = bucket
 

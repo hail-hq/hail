@@ -3,7 +3,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from hailhq.core.s3_inbound import S3InboundClient
+from hailhq.core.s3_mail import S3MailClient
 
 
 def _stub_client(payload: bytes) -> MagicMock:
@@ -17,12 +17,12 @@ def _stub_client(payload: bytes) -> MagicMock:
 
 def test_constructor_rejects_empty_bucket():
     with pytest.raises(ValueError):
-        S3InboundClient(client=MagicMock(), bucket="")
+        S3MailClient(client=MagicMock(), bucket="")
 
 
 def test_fetch_raw_returns_bytes():
     stub = _stub_client(b"raw bytes")
-    client = S3InboundClient(client=stub, bucket="hail-inbound")
+    client = S3MailClient(client=stub, bucket="hail-inbound")
     result = asyncio.run(client.fetch_raw("raw/abc"))
     assert result == b"raw bytes"
     stub.get_object.assert_called_with(Bucket="hail-inbound", Key="raw/abc")
@@ -30,7 +30,7 @@ def test_fetch_raw_returns_bytes():
 
 def test_put_attachment_writes():
     stub = _stub_client(b"")
-    client = S3InboundClient(client=stub, bucket="hail-inbound")
+    client = S3MailClient(client=stub, bucket="hail-inbound")
     asyncio.run(
         client.put_attachment("attachments/e/1", b"pdfbytes", "application/pdf")
     )
@@ -44,7 +44,7 @@ def test_put_attachment_writes():
 
 def test_presign_returns_url():
     stub = _stub_client(b"")
-    client = S3InboundClient(client=stub, bucket="hail-inbound")
+    client = S3MailClient(client=stub, bucket="hail-inbound")
     url = asyncio.run(client.presign_get("raw/abc", ttl_seconds=300))
     assert url == "https://signed.example/foo"
     stub.generate_presigned_url.assert_called_with(

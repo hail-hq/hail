@@ -93,9 +93,11 @@ class Settings(BaseSettings):
 
     hail_inbound_enabled: bool = False
     # Single source of truth for both the Terraform module and the API.
-    # The raw-MIME bucket name is derived as ``{prefix}-raw``; SES Lambda
-    # writes there, the API reads back from it. Set in .env / .env.example.
-    hail_inbound_email_name_prefix: str = ""
+    # The mail bucket name is derived as ``{prefix}-mail``; SES Lambda
+    # writes inbound raw MIME there, outbound sends write uploaded
+    # attachments there, and the API reads both back. Set in .env /
+    # .env.example.
+    hail_mail_name_prefix: str = ""
     hail_inbound_hmac_secret: str = ""
     # Forwarding controls — see docs spec §6.2.
     hail_forward_max_hops: int = 3
@@ -246,11 +248,11 @@ class Settings(BaseSettings):
 
     @computed_field  # type: ignore[prop-decorator]
     @property
-    def hail_inbound_bucket(self) -> str:
-        """Raw-MIME bucket name. Derived to match Terraform's `${prefix}-raw`."""
-        if not self.hail_inbound_email_name_prefix:
+    def hail_mail_bucket(self) -> str:
+        """Shared mail bucket name. Derived to match Terraform's `${prefix}-mail`."""
+        if not self.hail_mail_name_prefix:
             return ""
-        return f"{self.hail_inbound_email_name_prefix}-raw"
+        return f"{self.hail_mail_name_prefix}-mail"
 
 
 settings = Settings()
