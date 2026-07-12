@@ -279,6 +279,29 @@ class SmsListResponse(BaseModel):
     next_cursor: str | None = None
 
 
+SENDER_ID_RE = re.compile(r"^[A-Za-z0-9]{2,11}$")
+
+
+class SenderIdPatch(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    custom_sender_id: str | None = None
+
+    @field_validator("custom_sender_id")
+    @classmethod
+    def _validate_sender_id(cls, v: str | None) -> str | None:
+        if v is not None and not SENDER_ID_RE.match(v):
+            raise ValueError(
+                "must be 2-11 alphanumeric characters, no spaces or symbols"
+            )
+        return v
+
+
+class SenderIdResponse(BaseModel):
+    custom_sender_id: str | None
+    effective_default: str = "HAIL"
+
+
 class NumberAcquireRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 

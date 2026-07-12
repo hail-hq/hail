@@ -38,9 +38,11 @@ from hailhq.api.funds import require_funds
 from hailhq.core.compliance_gate import check_sms_allowed, remove_suppression
 from hailhq.core.config import settings
 from hailhq.core.db import get_session
-from hailhq.core.models import Sms, SmsEvent, Suppression
+from hailhq.core.models import Sms, SmsEvent, SmsSenderIdentity, Suppression
 from hailhq.core.providers.sms import SmsProvider, TwilioSmsProvider
 from hailhq.core.schemas import (
+    SenderIdPatch,
+    SenderIdResponse,
     SmsCreate,
     SmsListResponse,
     SmsResponse,
@@ -59,6 +61,7 @@ router = APIRouter(prefix="/sms", tags=["sms"])
 _DEFAULT_LIST_LIMIT = 50
 _MAX_LIST_LIMIT = 200
 _SMS_SEND_FAILED_DETAIL = "sms send failed"
+_PLATFORM_DEFAULT_SENDER_ID = "HAIL"
 
 
 _sms_provider_singleton: SmsProvider | None = None
@@ -315,6 +318,55 @@ async def delete_sms_suppression(
             status_code=http_status.HTTP_404_NOT_FOUND, detail="suppression not found"
         )
     await db.commit()
+
+
+@router.get("/sender-id", response_model=SenderIdResponse)
+async def get_sender_id(
+    principal: Annotated[Principal, Depends(get_current_principal)],
+    db: Annotated[AsyncSession, Depends(get_session)],
+) -> SenderIdResponse:
+    stmt = select(SmsSenderIdentity).where(
+        SmsSenderIdentity.organization_id == principal.organization_id
+    )
+    row = (await db.execute(stmt)).scalar_one_or_none()
+    return SenderIdResponse(
+        custom_sender_id=row.custom_sender_id if row else None,
+        effective_default=_PLATFORM_DEFAULT_SENDER_ID,
+    )
+
+
+@router.patch("/sender-id", response_model=SenderIdResponse)
+async def patch_sender_id(
+    body: SenderIdPatch,
+    principal: Annotated[Principal, Depends(get_current_principal)],
+    db: Annotated[AsyncSession, Depends(get_session)],
+) -> SenderIdResponse:
+    stmt = select(SmsSenderIdentity).where(
+        SmsSenderIdentity.organization_id == principal.organization_id
+    )
+    row = (await db.execute(stmt)).scalar_one_or_none()
+
+    if body.custom_sender_id is None:
+        if row is not None:
+            await db.delete(row)
+            await db.commit()
+        return SenderIdResponse(
+            custom_sender_id=None, effective_default=_PLATFORM_DEFAULT_SENDER_ID
+        )
+
+    if row is None:
+        row = SmsSenderIdentity(
+            organization_id=principal.organization_id,
+            custom_sender_id=body.custom_sender_id,
+        )
+        db.add(row)
+    else:
+        row.custom_sender_id = body.custom_sender_id
+    await db.commit()
+    return SenderIdResponse(
+        custom_sender_id=body.custom_sender_id,
+        effective_default=_PLATFORM_DEFAULT_SENDER_ID,
+    )
 
 
 @router.get("/{sms_id}", response_model=SmsResponse)

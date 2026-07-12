@@ -549,6 +549,26 @@ class SmsEvent(Base):
     )
 
 
+class SmsSenderIdentity(Base):
+    """One row per org with a custom Sender ID set — absence of a row
+    means the org uses the platform default ("HAIL"). Keyed by
+    organization_id with no FK, matching OrgClosure's convention (hail's
+    DB doesn't own the Organization table)."""
+
+    __tablename__ = "sms_sender_identities"
+
+    organization_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True
+    )
+    custom_sender_id: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        TS, server_default=text("now()"), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        TS, server_default=text("now()"), nullable=False
+    )
+
+
 class EmailEvent(Base):
     """Append-only email lifecycle event (mirrors CallEvent).
 
