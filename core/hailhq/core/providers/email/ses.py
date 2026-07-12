@@ -13,7 +13,6 @@ The SESv2 surface is much cleaner than v1 for identity management:
 from __future__ import annotations
 
 import asyncio
-from email.message import EmailMessage
 from typing import Any
 
 import boto3
@@ -28,6 +27,7 @@ from hailhq.core.providers.email.base import (
     ProviderIdentity,
     ProviderSendResult,
 )
+from hailhq.core.providers.email.mime import build_raw_mime
 
 
 def _build_default_client() -> Any:
@@ -98,51 +98,6 @@ def _mail_from_records(domain: str) -> list[DkimRecord]:
     ]
 
 
-def _build_raw_mime(
-    *,
-    from_address: str,
-    to_addresses: list[str],
-    subject: str,
-    body_text: str | None,
-    body_html: str | None,
-    cc: list[str] | None,
-    reply_to: str | None,
-    headers: dict[str, str],
-    attachments: list[ProviderAttachment],
-) -> bytes:
-    """Render a multipart MIME message for SES ``Content.Raw``.
-
-    SESv2 Simple content can't carry attachments, so any send with files
-    goes through this path instead.
-    """
-    msg = EmailMessage()
-    msg["From"] = from_address
-    msg["To"] = ", ".join(to_addresses)
-    if cc:
-        msg["Cc"] = ", ".join(cc)
-    if reply_to:
-        msg["Reply-To"] = reply_to
-    msg["Subject"] = subject
-    for name, value in headers.items():
-        if value:
-            msg[name] = value
-    if body_text is not None:
-        msg.set_content(body_text)
-        if body_html is not None:
-            msg.add_alternative(body_html, subtype="html")
-    elif body_html is not None:
-        msg.set_content(body_html, subtype="html")
-    for att in attachments:
-        maintype, _, subtype = att.content_type.partition("/")
-        msg.add_attachment(
-            att.payload,
-            maintype=maintype or "application",
-            subtype=subtype or "octet-stream",
-            filename=att.filename,
-        )
-    return msg.as_bytes()
-
-
 class SesEmailProvider(EmailProvider):
     """SESv2-backed adapter."""
 
@@ -186,7 +141,7 @@ class SesEmailProvider(EmailProvider):
         }
 
         if attachments:
-            raw = _build_raw_mime(
+            raw = build_raw_mime(
                 from_address=from_address,
                 to_addresses=to_addresses,
                 subject=subject,

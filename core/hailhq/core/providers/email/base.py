@@ -24,6 +24,7 @@ __all__ = [
     "DkimRecord",
     "DnsRecord",
     "EmailProvider",
+    "EmailSender",
     "IdentityVerificationStatus",
     "ProviderAttachment",
     "ProviderIdentity",
@@ -87,10 +88,12 @@ class ProviderSendResult(BaseModel):
     """
 
     provider_message_id: str
+    # Gmail threadId for connected-account sends; None for SES.
+    provider_thread_id: str | None = None
 
 
-class EmailProvider(ABC):
-    """Abstract email provider."""
+class EmailSender(ABC):
+    """Abstract sender — the minimal surface every provider adapter offers."""
 
     @abstractmethod
     async def send_email(
@@ -113,6 +116,10 @@ class EmailProvider(ABC):
         Auto-Submitted, References). ``attachments`` force the raw-MIME
         path on providers whose simple-content API can't carry files.
         """
+
+
+class EmailProvider(EmailSender):
+    """Abstract email provider — adds sending-domain identity management."""
 
     @abstractmethod
     async def create_identity(self, domain: str) -> ProviderIdentity:
