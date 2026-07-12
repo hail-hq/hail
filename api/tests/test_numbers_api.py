@@ -45,3 +45,50 @@ async def test_list_numbers_scoped_to_org(client, async_session, org_and_key) ->
     resp = await client.get("/numbers", headers={"Authorization": f"Bearer {plaintext}"})
     assert resp.status_code == 200
     assert len(resp.json()["items"]) == 1
+
+
+async def test_enable_sms_rejects_number_without_sms_capability(
+    client, async_session, org_and_key
+) -> None:
+    from hailhq.core.models import PhoneNumber
+
+    org_id, _, plaintext = org_and_key
+    pn = PhoneNumber(
+        organization_id=org_id, e164="+14155552222", country_code="US", number_type="local",
+        provider_resource_id="PN_voice_only", provisioning_state="active",
+        capabilities=["voice"],  # no sms
+    )
+    async_session.add(pn)
+    await async_session.commit()
+
+    resp = await client.post(
+        f"/numbers/{pn.id}/enable-sms", headers={"Authorization": f"Bearer {plaintext}"}
+    )
+    assert resp.status_code == 422
+    assert "does not support sms" in resp.json()["detail"].lower()
+
+
+async def test_enable_sms_creates_messaging_service_and_attaches(
+    client, async_session, org_and_key, sms_mock
+) -> None:
+    from hailhq.core.models import PhoneNumber
+
+    org_id, _, plaintext = org_and_key
+    pn = PhoneNumber(
+        organization_id=org_id, e164="+14155553333", country_code="US", number_type="local",
+        provider_resource_id="PN_sms_ok", provisioning_state="active",
+        capabilities=["voice", "sms"],
+    )
+    async_session.add(pn)
+    await async_session.commit()
+
+    sms_mock.ensure_messaging_service.return_value = "MG_new_service"
+
+    resp = await client.post(
+        f"/numbers/{pn.id}/enable-sms", headers={"Authorization": f"Bearer {plaintext}"}
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["messaging_service_sid"] == "MG_new_service"
+    sms_mock.attach_number.assert_awaited_once_with(
+        messaging_service_sid="MG_new_service", provider_resource_id="PN_sms_ok"
+    )

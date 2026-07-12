@@ -1,10 +1,11 @@
 """Routes for generic, cross-channel dedicated-number provisioning.
 
 Not SMS-specific: a dedicated PhoneNumber is a shared resource across
-voice, SMS, and (later) MMS. This module only covers acquisition and
-listing; SMS-specific activation (`POST /numbers/{id}/enable-sms`) lives
-in `routes/sms.py` since it's SMS-shaped (Messaging Service attachment),
-not because numbers themselves are SMS-only.
+voice, SMS, and (later) MMS. Acquisition and listing live here alongside
+`POST /numbers/{id}/enable-sms`: the route is SMS-shaped (Messaging
+Service attachment) but operates on a PhoneNumber resource by id, so it
+stays with the rest of the `/numbers` router rather than splitting onto
+`routes/sms.py`.
 """
 
 from __future__ import annotations
@@ -19,8 +20,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from hailhq.api.deps import Principal, get_current_principal
 from hailhq.api.pagination import fetch_cursor_page
+from hailhq.api.routes.sms import get_sms_provider
 from hailhq.core.db import get_session
 from hailhq.core.models import PhoneNumber
+from hailhq.core.providers.sms import SmsProvider
 from hailhq.core.providers.voice import VoiceProvider
 from hailhq.core.schemas import (
     NumberAcquireRequest,
@@ -117,6 +120,43 @@ async def list_numbers(
         items=[PhoneNumberResponse.model_validate(r) for r in rows],
         next_cursor=next_cursor,
     )
+
+
+@router.post("/{number_id}/enable-sms", response_model=PhoneNumberResponse)
+async def enable_sms(
+    number_id: UUID,
+    principal: Annotated[Principal, Depends(get_current_principal)],
+    db: Annotated[AsyncSession, Depends(get_session)],
+    provider: Annotated[SmsProvider, Depends(get_sms_provider)],
+) -> PhoneNumberResponse:
+    stmt = select(PhoneNumber).where(
+        PhoneNumber.id == number_id, PhoneNumber.organization_id == principal.organization_id
+    )
+    number = (await db.execute(stmt)).scalar_one_or_none()
+    if number is None:
+        raise HTTPException(status_code=http_status.HTTP_404_NOT_FOUND, detail="number not found")
+
+    if "sms" not in number.capabilities:
+        raise HTTPException(
+            status_code=http_status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=(
+                "this number does not support sms (fixed at purchase time by the "
+                "carrier); acquire a new number with sms capability instead"
+            ),
+        )
+
+    messaging_service_sid = await provider.ensure_messaging_service(
+        organization_id=principal.organization_id, existing_sid=number.messaging_service_sid
+    )
+    await provider.attach_number(
+        messaging_service_sid=messaging_service_sid,
+        provider_resource_id=number.provider_resource_id,
+    )
+
+    number.messaging_service_sid = messaging_service_sid
+    await db.commit()
+    await db.refresh(number)
+    return PhoneNumberResponse.model_validate(number)
 
 
 __all__ = ["router", "get_voice_provider"]

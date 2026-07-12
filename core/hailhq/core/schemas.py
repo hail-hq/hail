@@ -296,6 +296,7 @@ class PhoneNumberResponse(BaseModel):
     capabilities: list[str]
     provisioning_state: str
     is_dedicated: bool = Field(validation_alias="is_pool", serialization_alias="is_dedicated")
+    messaging_service_sid: str | None = None
 
     @field_validator("is_dedicated", mode="before")
     @classmethod
