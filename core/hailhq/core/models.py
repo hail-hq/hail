@@ -84,9 +84,9 @@ class Contact(Base):
     name: Mapped[str] = mapped_column(Text, nullable=False)
     phone_e164: Mapped[str | None] = mapped_column(Text, nullable=True)
     email: Mapped[str | None] = mapped_column(Text, nullable=True)
-    created_by: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
-    )
+    # created_by intentionally has no FK — users is website-owned (see 0001/0029);
+    # keys and rows may outlive their creator.
+    created_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         TS, server_default=text("now()"), nullable=False
     )

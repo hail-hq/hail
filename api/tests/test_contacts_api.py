@@ -63,19 +63,6 @@ def _install_test_jwks(monkeypatch: pytest.MonkeyPatch, jwks_client_factory) -> 
     monkeypatch.setattr(_auth, "_jwks_cache", test_cache)
 
 
-async def _seed_owner(session: AsyncSession, api_key) -> uuid.UUID:
-    """``create_contact`` sets ``created_by = principal.user_id`` (FK ->
-    users.id). ``insert_org_and_key`` only backs the api-key owner with an
-    OrganizationMember row, not a users row, so any test that POSTs through
-    the owner's key needs one seeded or the FK violation on insert gets
-    caught by the generic IntegrityError handler and misreported as a 409
-    duplicate."""
-    uid = uuid.UUID(api_key.reference_id)
-    session.add(User(id=uid, name="Owner", email=f"{uid}@acme.com"))
-    await session.commit()
-    return uid
-
-
 async def _create_manual(
     client: httpx.AsyncClient, headers: dict, **fields
 ) -> dict:
@@ -136,11 +123,10 @@ async def test_list_q_filter(
 
 
 async def test_create_manual_phone_only(
-    client: httpx.AsyncClient, org_and_key: tuple, async_session: AsyncSession
+    client: httpx.AsyncClient, org_and_key: tuple
 ) -> None:
-    _, api_key, plain = org_and_key
+    _, _api_key, plain = org_and_key
     headers = {"Authorization": f"Bearer {plain}"}
-    await _seed_owner(async_session, api_key)
     body = await _create_manual(
         client, headers, name="Bob", phone_e164="+14155550100"
     )
@@ -150,11 +136,10 @@ async def test_create_manual_phone_only(
 
 
 async def test_create_email_only(
-    client: httpx.AsyncClient, org_and_key: tuple, async_session: AsyncSession
+    client: httpx.AsyncClient, org_and_key: tuple
 ) -> None:
-    _, api_key, plain = org_and_key
+    _, _api_key, plain = org_and_key
     headers = {"Authorization": f"Bearer {plain}"}
-    await _seed_owner(async_session, api_key)
     body = await _create_manual(client, headers, name="Bob", email="bob@x.com")
     assert body["kind"] == "manual"
     assert body["email"] == "bob@x.com"
@@ -171,11 +156,10 @@ async def test_create_neither_422(
 
 
 async def test_create_duplicate_phone_409(
-    client: httpx.AsyncClient, org_and_key: tuple, async_session: AsyncSession
+    client: httpx.AsyncClient, org_and_key: tuple
 ) -> None:
-    _, api_key, plain = org_and_key
+    _, _api_key, plain = org_and_key
     headers = {"Authorization": f"Bearer {plain}"}
-    await _seed_owner(async_session, api_key)
     await _create_manual(client, headers, name="Bob", phone_e164="+14155550100")
     resp = await client.post(
         "/contacts",
@@ -186,16 +170,35 @@ async def test_create_duplicate_phone_409(
 
 
 async def test_create_duplicate_email_409(
-    client: httpx.AsyncClient, org_and_key: tuple, async_session: AsyncSession
+    client: httpx.AsyncClient, org_and_key: tuple
 ) -> None:
-    _, api_key, plain = org_and_key
+    _, _api_key, plain = org_and_key
     headers = {"Authorization": f"Bearer {plain}"}
-    await _seed_owner(async_session, api_key)
     await _create_manual(client, headers, name="Bob", email="bob@x.com")
     resp = await client.post(
         "/contacts", json={"name": "Bob 2", "email": "bob@x.com"}, headers=headers
     )
     assert resp.status_code == 409
+
+
+async def test_create_with_dangling_owner_key_succeeds(
+    client: httpx.AsyncClient, org_and_key: tuple, async_session: AsyncSession
+) -> None:
+    """``insert_org_and_key`` backs the api-key owner with a members row but
+    no users row (keys legitimately outlive their creator's users row — see
+    migrations 0001/0023/0029). ``created_by`` carries no FK to users, so
+    POST /contacts through that key must still succeed."""
+    _, api_key, plain = org_and_key
+    headers = {"Authorization": f"Bearer {plain}"}
+    body = await _create_manual(
+        client, headers, name="Bob", phone_e164="+14155550100"
+    )
+    row = (
+        await async_session.execute(
+            select(Contact).where(Contact.id == uuid.UUID(body["id"]))
+        )
+    ).scalar_one()
+    assert row.created_by == uuid.UUID(api_key.reference_id)
 
 
 # --------------------------------------------------------------------------- #
@@ -204,11 +207,10 @@ async def test_create_duplicate_email_409(
 
 
 async def test_patch_manual(
-    client: httpx.AsyncClient, org_and_key: tuple, async_session: AsyncSession
+    client: httpx.AsyncClient, org_and_key: tuple
 ) -> None:
-    _, api_key, plain = org_and_key
+    _, _api_key, plain = org_and_key
     headers = {"Authorization": f"Bearer {plain}"}
-    await _seed_owner(async_session, api_key)
     created = await _create_manual(
         client, headers, name="Bob", phone_e164="+14155550100"
     )
@@ -233,11 +235,10 @@ async def test_patch_member_422(
 
 
 async def test_patch_clear_both_422(
-    client: httpx.AsyncClient, org_and_key: tuple, async_session: AsyncSession
+    client: httpx.AsyncClient, org_and_key: tuple
 ) -> None:
-    _, api_key, plain = org_and_key
+    _, _api_key, plain = org_and_key
     headers = {"Authorization": f"Bearer {plain}"}
-    await _seed_owner(async_session, api_key)
     created = await _create_manual(
         client, headers, name="Bob", phone_e164="+14155550100"
     )
@@ -253,19 +254,19 @@ async def test_patch_clear_both_422(
 
 
 async def test_delete_manual_204_and_gone(
-    client: httpx.AsyncClient, org_and_key: tuple, async_session: AsyncSession
+    client: httpx.AsyncClient, org_and_key: tuple
 ) -> None:
-    _, api_key, plain = org_and_key
+    _, _api_key, plain = org_and_key
     headers = {"Authorization": f"Bearer {plain}"}
-    await _seed_owner(async_session, api_key)
     created = await _create_manual(
         client, headers, name="Bob", phone_e164="+14155550100"
     )
     resp = await client.delete(f"/contacts/{created['id']}", headers=headers)
     assert resp.status_code == 204
 
-    # The owner (seeded above so create_contact's created_by FK resolves) is
-    # itself a member and stays in the union; only the manual row is gone.
+    # No users row was seeded for the key owner (see
+    # test_create_with_dangling_owner_key_succeeds), so the member union has
+    # nothing to show; just confirm the manual row is gone.
     listed = await client.get("/contacts", headers=headers)
     ids = [item["id"] for item in listed.json()["items"]]
     assert created["id"] not in ids

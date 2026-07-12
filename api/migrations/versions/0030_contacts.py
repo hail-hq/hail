@@ -30,10 +30,11 @@ def upgrade() -> None:
         sa.Column("name", sa.Text(), nullable=False),
         sa.Column("phone_e164", sa.Text(), nullable=True),
         sa.Column("email", sa.Text(), nullable=True),
+        # created_by intentionally has no FK — users is website-owned (see 0001/0029);
+        # keys and rows may outlive their creator.
         sa.Column(
             "created_by",
             UUID(as_uuid=True),
-            sa.ForeignKey("users.id", ondelete="SET NULL"),
             nullable=True,
         ),
         sa.Column(
