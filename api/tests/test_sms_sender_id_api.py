@@ -51,6 +51,18 @@ async def test_patch_sender_id_rejects_non_alphanumeric(client, org_and_key) -> 
     assert resp.status_code == 422
 
 
+async def test_patch_sender_id_rejects_trailing_newline(client, org_and_key) -> None:
+    # Python's ``$`` matches before a trailing ``\n``; ``\Z`` must reject it so a
+    # malformed Sender ID can't be stored and later fail every alphanumeric send.
+    _, _, plaintext = org_and_key
+    resp = await client.patch(
+        "/sms/sender-id",
+        json={"custom_sender_id": "ACME\n"},
+        headers={"Authorization": f"Bearer {plaintext}"},
+    )
+    assert resp.status_code == 422
+
+
 async def test_patch_sender_id_clears_with_null(client, org_and_key) -> None:
     _, _, plaintext = org_and_key
     await client.patch(

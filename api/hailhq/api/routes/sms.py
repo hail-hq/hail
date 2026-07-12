@@ -40,7 +40,7 @@ from hailhq.core.config import settings
 from hailhq.core.db import get_session
 from hailhq.core.models import Sms, SmsEvent, SmsSenderIdentity, Suppression
 from hailhq.core.providers.sms import SmsProvider, TwilioSmsProvider
-from hailhq.core.sender_id import resolve_sender
+from hailhq.core.sender_id import PLATFORM_DEFAULT_SENDER_ID, resolve_sender
 from hailhq.core.schemas import (
     SenderIdPatch,
     SenderIdResponse,
@@ -62,7 +62,6 @@ router = APIRouter(prefix="/sms", tags=["sms"])
 _DEFAULT_LIST_LIMIT = 50
 _MAX_LIST_LIMIT = 200
 _SMS_SEND_FAILED_DETAIL = "sms send failed"
-_PLATFORM_DEFAULT_SENDER_ID = "HAIL"
 
 
 _sms_provider_singleton: SmsProvider | None = None
@@ -130,21 +129,32 @@ async def create_sms(
     # corridor (Task 5). For alphanumeric-eligible corridors with no explicit
     # ``from``, the org's Sender ID is used and NO dedicated number is needed;
     # otherwise a dedicated SMS-capable number is still required (Decision 6).
-    sender_id_row = (
-        await db.execute(
-            select(SmsSenderIdentity).where(
-                SmsSenderIdentity.organization_id == principal.organization_id
-            )
-        )
-    ).scalar_one_or_none()
-    resolution = resolve_sender(
-        body.to,
-        custom_sender_id=sender_id_row.custom_sender_id if sender_id_row else None,
-    )
-
+    #
+    # An explicit ``from`` always resolves a dedicated number regardless of
+    # corridor, so the Sender ID lookup is skipped entirely in that case — no
+    # SmsSenderIdentity query on explicit-``from`` sends.
     from_number = None
     from_e164 = None
-    if body.from_ is not None or resolution.kind == "dedicated_number_required":
+    if body.from_ is None:
+        sender_id_row = (
+            await db.execute(
+                select(SmsSenderIdentity).where(
+                    SmsSenderIdentity.organization_id == principal.organization_id
+                )
+            )
+        ).scalar_one_or_none()
+        resolution = resolve_sender(
+            body.to,
+            custom_sender_id=sender_id_row.custom_sender_id if sender_id_row else None,
+        )
+        if resolution.kind == "alphanumeric":
+            # Alphanumeric corridor with no explicit ``from`` → send from the
+            # resolved Sender ID; no dedicated number is provisioned.
+            from_e164 = resolution.sender_id
+
+    if from_e164 is None:
+        # Explicit ``from``, or a corridor that still requires a dedicated
+        # SMS-capable number.
         from_number = await resolve_org_number(
             db, principal.organization_id, body.from_, capability="sms"
         )
@@ -161,10 +171,6 @@ async def create_sms(
                 )
             raise await cache_failure(idem, unprocessable(msg, loc=["body", "from"]))
         from_e164 = from_number.e164
-    else:
-        # Alphanumeric corridor with no explicit ``from`` → send from the
-        # resolved Sender ID; no dedicated number is provisioned.
-        from_e164 = resolution.sender_id
 
     sms = Sms(
         organization_id=principal.organization_id,
@@ -355,7 +361,7 @@ async def get_sender_id(
     row = (await db.execute(stmt)).scalar_one_or_none()
     return SenderIdResponse(
         custom_sender_id=row.custom_sender_id if row else None,
-        effective_default=_PLATFORM_DEFAULT_SENDER_ID,
+        effective_default=PLATFORM_DEFAULT_SENDER_ID,
     )
 
 
@@ -375,7 +381,7 @@ async def patch_sender_id(
             await db.delete(row)
             await db.commit()
         return SenderIdResponse(
-            custom_sender_id=None, effective_default=_PLATFORM_DEFAULT_SENDER_ID
+            custom_sender_id=None, effective_default=PLATFORM_DEFAULT_SENDER_ID
         )
 
     if row is None:
@@ -389,7 +395,7 @@ async def patch_sender_id(
     await db.commit()
     return SenderIdResponse(
         custom_sender_id=body.custom_sender_id,
-        effective_default=_PLATFORM_DEFAULT_SENDER_ID,
+        effective_default=PLATFORM_DEFAULT_SENDER_ID,
     )
 
 

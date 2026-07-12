@@ -343,6 +343,16 @@ class PhoneNumber(Base):
         ),
     )
 
+    @property
+    def is_dedicated(self) -> bool:
+        """A dedicated number is org-owned — the inverse of a shared pool number.
+
+        Exposed under this friendlier name for API responses; reading it (rather
+        than an inverting alias on the schema) keeps ``PhoneNumberResponse``
+        round-trippable through ``model_dump``/``model_validate``.
+        """
+        return not self.is_pool
+
 
 class Conversation(Base):
     __tablename__ = "conversations"

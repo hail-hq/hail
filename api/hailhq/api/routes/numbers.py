@@ -70,18 +70,7 @@ async def acquire_number(
 ) -> PhoneNumberResponse:
     if idem is not None and idem.is_replay:
         cached_id, cached = replay_cached(idem, response, resource_prefix="/numbers")
-        # PhoneNumberResponse.is_dedicated is populated from the ORM's
-        # `is_pool` attribute (validation_alias="is_pool") and inverted by a
-        # before-validator. The cached body was produced by model_dump(),
-        # which serializes under the field's own name ("is_dedicated"), so
-        # re-validating it directly would 404 on the missing "is_pool" key
-        # and, if aliased to accept "is_dedicated" too, would double-invert
-        # the value. Translate the key back to "is_pool" (undoing the
-        # invert) so the same validator round-trips correctly.
-        replay_payload = dict(cached)
-        if "is_dedicated" in replay_payload:
-            replay_payload["is_pool"] = not replay_payload.pop("is_dedicated")
-        return PhoneNumberResponse.model_validate(replay_payload)
+        return PhoneNumberResponse.model_validate(cached)
 
     try:
         acquired = await provider.acquire_number(
@@ -90,12 +79,16 @@ async def acquire_number(
             capabilities=["voice", "sms"],
         )
     except LookupError as exc:
-        raise await cache_failure(
-            idem,
-            HTTPException(
-                status_code=http_status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail=str(exc),
-            ),
+        # Transient: the carrier has no matching inventory right now. Release the
+        # in-flight idempotency sentinel (rather than caching the 503) so a
+        # same-key retry can succeed once inventory returns — mirroring the
+        # shared-pool-exhausted path in calls.py. Caching it would freeze the
+        # 503 under this key for the full 24h TTL.
+        if idem is not None:
+            await idem.release()
+        raise HTTPException(
+            status_code=http_status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=str(exc),
         ) from exc
 
     number = PhoneNumber(
@@ -110,7 +103,9 @@ async def acquire_number(
     )
     db.add(number)
     await db.commit()
-    await db.refresh(number)
+    # No refresh: `id` (the PK) is populated via the INSERT's implicit RETURNING
+    # and expire_on_commit=False keeps it live; PhoneNumberResponse reads no
+    # other server-generated column.
 
     response.headers["Location"] = f"/numbers/{number.id}"
     number_response = PhoneNumberResponse.model_validate(number)
@@ -178,8 +173,28 @@ async def enable_sms(
             loc=["path", "number_id"],
         )
 
+    # Idempotent: an already-enabled number is attached to its Messaging
+    # Service; re-attaching would error at Twilio. Return the current state.
+    if number.messaging_service_sid is not None:
+        return PhoneNumberResponse.model_validate(number)
+
+    # One Messaging Service per org (a shared sender pool). Reuse the org's
+    # existing service if any of its numbers already has one; only when the org
+    # has none does ensure_messaging_service create a fresh one — otherwise
+    # every enabled number would spawn its own orphan Messaging Service.
+    existing_sid = (
+        await db.execute(
+            select(PhoneNumber.messaging_service_sid)
+            .where(
+                PhoneNumber.organization_id == principal.organization_id,
+                PhoneNumber.messaging_service_sid.is_not(None),
+            )
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+
     messaging_service_sid = await provider.ensure_messaging_service(
-        organization_id=principal.organization_id, existing_sid=number.messaging_service_sid
+        organization_id=principal.organization_id, existing_sid=existing_sid
     )
     await provider.attach_number(
         messaging_service_sid=messaging_service_sid,
@@ -193,7 +208,6 @@ async def enable_sms(
     # that wiring has it ready.
     number.messaging_service_sid = messaging_service_sid
     await db.commit()
-    await db.refresh(number)
     return PhoneNumberResponse.model_validate(number)
 
 

@@ -14,6 +14,8 @@ from pydantic import (
     model_validator,
 )
 
+from hailhq.core.sender_id import PLATFORM_DEFAULT_SENDER_ID
+
 E164 = re.compile(r"^\+[1-9]\d{1,14}$")
 
 
@@ -279,7 +281,10 @@ class SmsListResponse(BaseModel):
     next_cursor: str | None = None
 
 
-SENDER_ID_RE = re.compile(r"^[A-Za-z0-9]{2,11}$")
+# ``\Z`` (not ``$``) so a trailing newline is rejected: in Python ``$`` also
+# matches just before a final ``\n``, which would let "ACME\n" through and be
+# stored as a malformed Sender ID.
+SENDER_ID_RE = re.compile(r"^[A-Za-z0-9]{2,11}\Z")
 
 
 class SenderIdPatch(BaseModel):
@@ -299,7 +304,7 @@ class SenderIdPatch(BaseModel):
 
 class SenderIdResponse(BaseModel):
     custom_sender_id: str | None
-    effective_default: str = "HAIL"
+    effective_default: str = PLATFORM_DEFAULT_SENDER_ID
 
 
 class NumberAcquireRequest(BaseModel):
@@ -318,13 +323,8 @@ class PhoneNumberResponse(BaseModel):
     number_type: str
     capabilities: list[str]
     provisioning_state: str
-    is_dedicated: bool = Field(validation_alias="is_pool", serialization_alias="is_dedicated")
+    is_dedicated: bool
     messaging_service_sid: str | None = None
-
-    @field_validator("is_dedicated", mode="before")
-    @classmethod
-    def _invert_is_pool(cls, v: bool) -> bool:
-        return not v
 
 
 class PhoneNumberListResponse(BaseModel):
