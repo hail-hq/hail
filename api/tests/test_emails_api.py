@@ -58,16 +58,20 @@ async def _send_email(client: httpx.AsyncClient, plain: str) -> dict:
 
 
 @pytest.fixture()
-def s3_mail_mock():
+def s3_mail_mock(monkeypatch: pytest.MonkeyPatch):
     s3 = AsyncMock()
     s3.fetch_raw.return_value = b"pdf bytes"
+    # `POST /email-attachments` still resolves `_get_s3_mail` through FastAPI's
+    # DI, so a dependency_overrides entry works there. `POST /emails` calls
+    # `_get_s3_mail()` as a plain function (lazily, only when attachments are
+    # present) rather than via `Depends(...)`, so it never consults
+    # `app.dependency_overrides` — patch the module-level name directly.
     app.dependency_overrides[email_attachments._get_s3_mail] = lambda: s3
-    app.dependency_overrides[emails_routes._get_s3_mail] = lambda: s3
+    monkeypatch.setattr(emails_routes, "_get_s3_mail", lambda: s3)
     try:
         yield s3
     finally:
         app.dependency_overrides.pop(email_attachments._get_s3_mail, None)
-        app.dependency_overrides.pop(emails_routes._get_s3_mail, None)
 
 
 async def _upload_attachment(

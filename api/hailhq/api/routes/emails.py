@@ -299,7 +299,6 @@ async def create_email(
     principal: Annotated[Principal, Depends(get_current_principal)],
     db: Annotated[AsyncSession, Depends(get_session)],
     email_provider: Annotated[EmailProvider, Depends(get_email_provider)],
-    s3: Annotated[S3MailClient, Depends(_get_s3_mail)],
     idem: Annotated[IdempotencyContext | None, Depends(idempotency_dep)] = None,
 ) -> EmailResponse:
     # Idempotency replay first — never re-send.
@@ -434,14 +433,17 @@ async def create_email(
     unsubscribe_url = build_unsubscribe_url(
         email.to_addresses[0], principal.organization_id
     )
-    provider_attachments: list[ProviderAttachment] = [
-        ProviderAttachment(
-            filename=row.filename,
-            content_type=row.content_type,
-            payload=await s3.fetch_raw(row.s3_key),
-        )
-        for row in attachment_rows
-    ]
+    provider_attachments: list[ProviderAttachment] = []
+    if attachment_rows:
+        s3 = _get_s3_mail()
+        provider_attachments = [
+            ProviderAttachment(
+                filename=row.filename,
+                content_type=row.content_type,
+                payload=await s3.fetch_raw(row.s3_key),
+            )
+            for row in attachment_rows
+        ]
     try:
         result = await email_provider.send_email(
             from_address=email.from_address,
