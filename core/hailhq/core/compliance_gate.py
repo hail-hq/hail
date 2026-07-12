@@ -393,8 +393,12 @@ async def check_channel_suspended(
     db: AsyncSession, organization_id: UUID, channel: str
 ) -> bool:
     """True iff this org has an active ChannelSuspension for this channel."""
-    stmt = select(ChannelSuspension).where(
-        ChannelSuspension.organization_id == organization_id,
-        ChannelSuspension.channel == channel,
+    stmt = (
+        select(ChannelSuspension.id)
+        .where(
+            ChannelSuspension.organization_id == organization_id,
+            ChannelSuspension.channel == channel,
+        )
+        .limit(1)
     )
-    return (await db.execute(stmt)).scalar_one_or_none() is not None
+    return (await db.execute(stmt)).first() is not None
