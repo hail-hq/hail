@@ -556,6 +556,324 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HTTPValidationError"
+  /email-accounts/connect:
+    post:
+      tags:
+        - email-accounts
+      summary: Connect Email Account
+      operationId: connect_email_account_email_accounts_connect_post
+      parameters:
+        - name: authorization
+          in: header
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            title: Authorization
+      responses:
+        "200":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EmailAccountConnectResponse"
+        "422":
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
+  /email-accounts/{account_id}/reconnect:
+    post:
+      tags:
+        - email-accounts
+      summary: Reconnect Email Account
+      operationId: reconnect_email_account_email_accounts__account_id__reconnect_post
+      parameters:
+        - name: account_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+            title: Account Id
+        - name: authorization
+          in: header
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            title: Authorization
+      responses:
+        "200":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EmailAccountConnectResponse"
+        "422":
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
+  /email-accounts:
+    get:
+      tags:
+        - email-accounts
+      summary: List Email Accounts
+      operationId: list_email_accounts_email_accounts_get
+      parameters:
+        - name: cursor
+          in: query
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            title: Cursor
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            maximum: 200
+            minimum: 1
+            default: 50
+            title: Limit
+        - name: authorization
+          in: header
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            title: Authorization
+      responses:
+        "200":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EmailAccountListResponse"
+        "422":
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
+  /email-accounts/{account_id}:
+    get:
+      tags:
+        - email-accounts
+      summary: Get Email Account
+      operationId: get_email_account_email_accounts__account_id__get
+      parameters:
+        - name: account_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+            title: Account Id
+        - name: authorization
+          in: header
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            title: Authorization
+      responses:
+        "200":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EmailAccountResponse"
+        "422":
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
+    patch:
+      tags:
+        - email-accounts
+      summary: Patch Email Account
+      operationId: patch_email_account_email_accounts__account_id__patch
+      parameters:
+        - name: account_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+            title: Account Id
+        - name: authorization
+          in: header
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            title: Authorization
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EmailAccountPatch"
+      responses:
+        "200":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EmailAccountResponse"
+        "422":
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
+    delete:
+      tags:
+        - email-accounts
+      summary: Delete Email Account
+      operationId: delete_email_account_email_accounts__account_id__delete
+      parameters:
+        - name: account_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+            title: Account Id
+        - name: authorization
+          in: header
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            title: Authorization
+      responses:
+        "204":
+          description: Successful Response
+        "422":
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
+  /email-accounts/{account_id}/messages:
+    get:
+      tags:
+        - email-accounts
+      summary: List Mailbox Messages
+      description:
+        "Live Gmail search/list \u2014 proxied, never persisted (spec \xA7\
+        4)."
+      operationId: list_mailbox_messages_email_accounts__account_id__messages_get
+      parameters:
+        - name: account_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+            title: Account Id
+        - name: q
+          in: query
+          required: false
+          schema:
+            anyOf:
+              - type: string
+                maxLength: 1000
+              - type: "null"
+            title: Q
+        - name: max_results
+          in: query
+          required: false
+          schema:
+            type: integer
+            maximum: 100
+            minimum: 1
+            default: 25
+            title: Max Results
+        - name: page_token
+          in: query
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            title: Page Token
+        - name: authorization
+          in: header
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            title: Authorization
+      responses:
+        "200":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MailboxMessageListResponse"
+        "422":
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
+  /email-accounts/{account_id}/messages/{message_id}:
+    get:
+      tags:
+        - email-accounts
+      summary: Get Mailbox Message
+      operationId: get_mailbox_message_email_accounts__account_id__messages__message_id__get
+      parameters:
+        - name: account_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+            title: Account Id
+        - name: message_id
+          in: path
+          required: true
+          schema:
+            type: string
+            title: Message Id
+        - name: authorization
+          in: header
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            title: Authorization
+      responses:
+        "200":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MailboxMessageDetail"
+        "422":
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
   /email-domains:
     post:
       tags:
@@ -1646,6 +1964,93 @@ components:
         - existing_mx
         - suggested_domain
       title: DomainCheckResponse
+    EmailAccountConnectResponse:
+      properties:
+        authorization_url:
+          type: string
+          title: Authorization Url
+      type: object
+      required:
+        - authorization_url
+      title: EmailAccountConnectResponse
+    EmailAccountListResponse:
+      properties:
+        items:
+          items:
+            $ref: "#/components/schemas/EmailAccountResponse"
+          type: array
+          title: Items
+        next_cursor:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Next Cursor
+      type: object
+      required:
+        - items
+      title: EmailAccountListResponse
+    EmailAccountPatch:
+      properties:
+        status:
+          type: string
+          enum:
+            - active
+            - disabled
+          title: Status
+      additionalProperties: false
+      type: object
+      required:
+        - status
+      title: EmailAccountPatch
+    EmailAccountResponse:
+      properties:
+        id:
+          type: string
+          format: uuid
+          title: Id
+        provider:
+          type: string
+          title: Provider
+        email_address:
+          type: string
+          title: Email Address
+        display_name:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Display Name
+        status:
+          type: string
+          enum:
+            - active
+            - reauth_required
+            - disabled
+          title: Status
+        scopes:
+          items:
+            type: string
+          type: array
+          title: Scopes
+        created_at:
+          type: string
+          format: date-time
+          title: Created At
+        updated_at:
+          type: string
+          format: date-time
+          title: Updated At
+      type: object
+      required:
+        - id
+        - provider
+        - email_address
+        - display_name
+        - status
+        - scopes
+        - created_at
+        - updated_at
+      title: EmailAccountResponse
+      description: A connected external mailbox. NEVER includes token material.
     EmailAttachmentResponse:
       properties:
         id:
@@ -1746,6 +2151,12 @@ components:
             - type: string
             - type: "null"
           title: Reply To
+        in_reply_to:
+          anyOf:
+            - type: string
+              maxLength: 998
+            - type: "null"
+          title: In Reply To
         subject:
           type: string
           maxLength: 998
@@ -2086,6 +2497,17 @@ components:
               format: uuid
             - type: "null"
           title: Email Domain Id
+        email_account_id:
+          anyOf:
+            - type: string
+              format: uuid
+            - type: "null"
+          title: Email Account Id
+        provider_thread_id:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Provider Thread Id
         direction:
           type: string
           enum:
@@ -2448,6 +2870,17 @@ components:
               format: uuid
             - type: "null"
           title: Email Domain Id
+        email_account_id:
+          anyOf:
+            - type: string
+              format: uuid
+            - type: "null"
+          title: Email Account Id
+        provider_thread_id:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Provider Thread Id
         direction:
           type: string
           enum:
@@ -2659,6 +3092,158 @@ components:
         - api_key
         - model
       title: LLMConfig
+    MailboxAttachment:
+      properties:
+        filename:
+          type: string
+          title: Filename
+        content_type:
+          type: string
+          title: Content Type
+        size_bytes:
+          type: integer
+          title: Size Bytes
+        attachment_id:
+          type: string
+          title: Attachment Id
+      type: object
+      required:
+        - filename
+        - content_type
+        - size_bytes
+        - attachment_id
+      title: MailboxAttachment
+    MailboxMessageDetail:
+      properties:
+        id:
+          type: string
+          title: Id
+        thread_id:
+          type: string
+          title: Thread Id
+        from_address:
+          type: string
+          title: From Address
+        to_addresses:
+          items:
+            type: string
+          type: array
+          title: To Addresses
+        cc_addresses:
+          items:
+            type: string
+          type: array
+          title: Cc Addresses
+        subject:
+          type: string
+          title: Subject
+        date:
+          type: string
+          title: Date
+        snippet:
+          type: string
+          title: Snippet
+        message_id:
+          type: string
+          title: Message Id
+        body_text:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Body Text
+        body_html:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Body Html
+        in_reply_to:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: In Reply To
+        attachments:
+          items:
+            $ref: "#/components/schemas/MailboxAttachment"
+          type: array
+          title: Attachments
+      type: object
+      required:
+        - id
+        - thread_id
+        - from_address
+        - to_addresses
+        - cc_addresses
+        - subject
+        - date
+        - snippet
+        - message_id
+        - body_text
+        - body_html
+        - in_reply_to
+        - attachments
+      title: MailboxMessageDetail
+    MailboxMessageListResponse:
+      properties:
+        items:
+          items:
+            $ref: "#/components/schemas/MailboxMessageSummary"
+          type: array
+          title: Items
+        next_page_token:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Next Page Token
+      type: object
+      required:
+        - items
+      title: MailboxMessageListResponse
+    MailboxMessageSummary:
+      properties:
+        id:
+          type: string
+          title: Id
+        thread_id:
+          type: string
+          title: Thread Id
+        from_address:
+          type: string
+          title: From Address
+        to_addresses:
+          items:
+            type: string
+          type: array
+          title: To Addresses
+        cc_addresses:
+          items:
+            type: string
+          type: array
+          title: Cc Addresses
+        subject:
+          type: string
+          title: Subject
+        date:
+          type: string
+          title: Date
+        snippet:
+          type: string
+          title: Snippet
+        message_id:
+          type: string
+          title: Message Id
+      type: object
+      required:
+        - id
+        - thread_id
+        - from_address
+        - to_addresses
+        - cc_addresses
+        - subject
+        - date
+        - snippet
+        - message_id
+      title: MailboxMessageSummary
+      description: A live-read Gmail message. Never persisted (ephemeral by design).
     SmsCreate:
       properties:
         recipient_consent:

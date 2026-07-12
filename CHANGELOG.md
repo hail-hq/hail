@@ -2,6 +2,31 @@
 
 All notable changes to Hail are documented here. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and Hail adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.13.0] — 2026-07-12
+
+Gmail account connection. Organizations can now connect a real Gmail
+mailbox via OAuth and send as themselves — no DNS/domain verification
+required — plus read that mailbox's messages live. API-only release; no
+CLI/SDK changes.
+
+### Connect Gmail accounts
+
+- `POST /email-accounts/connect` (and `/{id}/reconnect`) mint a Google
+  OAuth consent URL; `GET /email-accounts/oauth/callback` completes the
+  grant and stores an encrypted refresh token. `GET/PATCH/DELETE
+/email-accounts[/{id}]` manage connected accounts (cursor-paginated
+  list, enable/disable, revoke-at-Google-and-delete).
+- `POST /emails` now resolves a connected account first when `from`
+  matches its address, sending through Gmail instead of SES — same
+  request shape, plus a new `in_reply_to` field (an RFC 2822 Message-ID)
+  to reply inside an existing Gmail thread.
+- `GET /email-accounts/{id}/messages` and `/messages/{message_id}` proxy
+  live Gmail reads (search, list, single-message detail with
+  attachments) — nothing is persisted; every read hits Gmail directly.
+- New MCP tools: `list_email_accounts`, `search_mailbox`,
+  `read_mailbox_message`.
+- Setup: [`docs/setup/gmail-accounts.md`](docs/setup/gmail-accounts.md).
+
 ## [0.12.0] — 2026-07-10
 
 SMS inbound & compliance milestone. Hail now receives inbound SMS, routes each
