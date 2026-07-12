@@ -31,12 +31,15 @@ from hailhq.core.schemas import (
     CallCreate,
     CallListResponse,
     CallResponse,
+    EmailAccountListResponse,
     EmailCreate,
     EmailEventListResponse,
     EmailListResponse,
     EmailResponse,
     EmailStatsResponse,
     EventStreamResponse,
+    MailboxMessageDetail,
+    MailboxMessageListResponse,
     SmsCreate,
     SmsListResponse,
     SmsResponse,
@@ -264,6 +267,7 @@ class HailClient:
         cc: list[str] | None = None,
         bcc: list[str] | None = None,
         reply_to: str | None = None,
+        in_reply_to: str | None = None,
         metadata: dict[str, Any] | None = None,
         idempotency_key: str | None = None,
         consent_source: str | None = None,
@@ -274,7 +278,9 @@ class HailClient:
 
         Builds the body from :class:`EmailCreate` (which enforces ≥1
         recipient, a non-empty subject, body-required, email formats, and
-        consent attestation).
+        consent attestation). ``in_reply_to`` (an RFC 2822 Message-ID from
+        ``read_mailbox_message``) threads a connected-account send into the
+        matching Gmail thread.
         """
         fields: dict[str, Any] = {
             "to": list(to),
@@ -294,6 +300,8 @@ class HailClient:
             fields["bcc"] = list(bcc)
         if reply_to is not None:
             fields["reply_to"] = reply_to
+        if in_reply_to is not None:
+            fields["in_reply_to"] = in_reply_to
         if metadata is not None:
             fields["metadata"] = metadata
         if consent_source is not None:
@@ -427,6 +435,53 @@ class HailClient:
         # by_alias keeps the wire-shaped ``from``/``to`` keys on the way out.
         return EmailStatsResponse.model_validate(_decode(resp)).model_dump(
             mode="json", by_alias=True
+        )
+
+    # ------------------------------------------------------------------ #
+    # GET /email-accounts
+    # ------------------------------------------------------------------ #
+
+    async def list_email_accounts(self) -> dict[str, Any]:
+        resp = await self._client.get("/email-accounts")
+        return EmailAccountListResponse.model_validate(_decode(resp)).model_dump(
+            mode="json"
+        )
+
+    # ------------------------------------------------------------------ #
+    # GET /email-accounts/{id}/messages
+    # ------------------------------------------------------------------ #
+
+    async def search_mailbox(
+        self,
+        account_id: str,
+        q: str | None = None,
+        max_results: int = 25,
+        page_token: str | None = None,
+    ) -> dict[str, Any]:
+        params: dict[str, Any] = {"max_results": max_results}
+        if q:
+            params["q"] = q
+        if page_token:
+            params["page_token"] = page_token
+        resp = await self._client.get(
+            f"/email-accounts/{account_id}/messages", params=params
+        )
+        return MailboxMessageListResponse.model_validate(_decode(resp)).model_dump(
+            mode="json"
+        )
+
+    # ------------------------------------------------------------------ #
+    # GET /email-accounts/{id}/messages/{message_id}
+    # ------------------------------------------------------------------ #
+
+    async def read_mailbox_message(
+        self, account_id: str, message_id: str
+    ) -> dict[str, Any]:
+        resp = await self._client.get(
+            f"/email-accounts/{account_id}/messages/{message_id}"
+        )
+        return MailboxMessageDetail.model_validate(_decode(resp)).model_dump(
+            mode="json"
         )
 
 

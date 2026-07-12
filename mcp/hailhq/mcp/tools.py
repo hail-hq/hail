@@ -1,6 +1,6 @@
 """MCP tool surface for Hail's outbound-call API.
 
-Exposes fourteen tools to the calling agent:
+Exposes seventeen tools to the calling agent:
 
 * ``place_call`` — originate an outbound phone call
 * ``get_call`` — fetch the current state of one call
@@ -16,6 +16,9 @@ Exposes fourteen tools to the calling agent:
 * ``send_sms`` — send an outbound SMS
 * ``get_sms`` — fetch the current state of one SMS
 * ``list_sms`` — page through recent SMS messages
+* ``list_email_accounts`` — list the org's connected mailboxes (Gmail accounts)
+* ``search_mailbox`` — live-search a connected mailbox
+* ``read_mailbox_message`` — read one live mailbox message
 
 The tool docstrings are the agent's only documentation, so each one
 spells out the contract (required vs optional fields, mutually exclusive
@@ -30,7 +33,7 @@ mapped to an ``{"error": ...}`` dict. Only the ``<type>:<uuid>``
 resource-id shape for ``get_events`` is still checked locally via
 ``parse_resource_id``.
 
-The fourteen tool functions are kept module-importable so unit tests can
+The seventeen tool functions are kept module-importable so unit tests can
 call them directly with a constructed ``HailClient``; ``register_tools``
 is the FastMCP wiring step. Each registered tool closure accepts a
 FastMCP ``Context`` (auto-injected on dispatch) and uses the
@@ -154,6 +157,7 @@ async def send_email(
     cc: list[str] | None = None,
     bcc: list[str] | None = None,
     reply_to: str | None = None,
+    in_reply_to: str | None = None,
     metadata: dict[str, Any] | None = None,
     idempotency_key: str | None = None,
     consent_source: str | None = None,
@@ -173,6 +177,7 @@ async def send_email(
             cc=cc,
             bcc=bcc,
             reply_to=reply_to,
+            in_reply_to=in_reply_to,
             metadata=metadata,
             idempotency_key=idempotency_key,
             consent_source=consent_source,
@@ -372,6 +377,44 @@ async def get_events(
         return _format_api_error(exc)
 
 
+async def list_email_accounts(*, client: HailClient) -> dict[str, Any]:
+    try:
+        return await client.list_email_accounts()
+    except ValidationError as exc:
+        return {"error": _validation_error_message(exc)}
+    except HailAPIError as exc:
+        return _format_api_error(exc)
+
+
+async def search_mailbox(
+    *,
+    client: HailClient,
+    account_id: str,
+    q: str | None = None,
+    max_results: int = 25,
+    page_token: str | None = None,
+) -> dict[str, Any]:
+    try:
+        return await client.search_mailbox(
+            account_id, q=q, max_results=max_results, page_token=page_token
+        )
+    except ValidationError as exc:
+        return {"error": _validation_error_message(exc)}
+    except HailAPIError as exc:
+        return _format_api_error(exc)
+
+
+async def read_mailbox_message(
+    *, client: HailClient, account_id: str, message_id: str
+) -> dict[str, Any]:
+    try:
+        return await client.read_mailbox_message(account_id, message_id)
+    except ValidationError as exc:
+        return {"error": _validation_error_message(exc)}
+    except HailAPIError as exc:
+        return _format_api_error(exc)
+
+
 # --------------------------------------------------------------------------- #
 # Per-tool-call client helper.
 #
@@ -451,7 +494,7 @@ def register_tools(
     mode: AuthMode,
     singleton: HailClient | None,
 ) -> None:
-    """Register the fourteen Hail tools on a FastMCP app.
+    """Register the seventeen Hail tools on a FastMCP app.
 
     Tools accept a FastMCP ``Context`` parameter (auto-injected). The
     ``_client_for`` helper picks the right HailClient for the active mode
@@ -542,6 +585,7 @@ def register_tools(
         cc: list[str] | None = None,
         bcc: list[str] | None = None,
         reply_to: str | None = None,
+        in_reply_to: str | None = None,
         metadata: dict[str, Any] | None = None,
         idempotency_key: str | None = None,
         consent_source: str | None = None,
@@ -555,6 +599,12 @@ def register_tools(
         is fine — multipart-alternative). ``cc``, ``bcc``, and
         ``reply_to`` are optional and follow the usual mail
         conventions.
+
+        ``in_reply_to`` is the RFC 2822 Message-ID of a message you're
+        replying to — pass the ``message_id`` a ``read_mailbox_message``
+        (or ``search_mailbox``) call returned to thread this send into
+        the same Gmail conversation on a connected account. Omit it for
+        a new, unthreaded message.
 
         ``recipient_consent`` is required: attest that you (the caller
         triggering this request) have obtained the lawful consent needed
@@ -606,6 +656,7 @@ def register_tools(
                     cc=cc,
                     bcc=bcc,
                     reply_to=reply_to,
+                    in_reply_to=in_reply_to,
                     metadata=metadata,
                     idempotency_key=idempotency_key,
                     consent_source=consent_source,
@@ -946,6 +997,79 @@ def register_tools(
         except RuntimeError as exc:
             return {"error": str(exc)}
 
+    @mcp_app.tool(name="list_email_accounts")
+    async def list_email_accounts_tool(ctx: Context) -> dict[str, Any]:
+        """List the org's connected mailboxes (Gmail accounts).
+
+        Each item's ``email_address`` can be used as ``from_`` in
+        ``send_email``; each ``id`` is the ``account_id`` for
+        ``search_mailbox`` / ``read_mailbox_message``. Accounts with
+        ``status="reauth_required"`` need the user to reconnect before use.
+
+        Returns ``{"items": [...], "next_cursor": <str|None>}`` on success,
+        or ``{"error": "<message>"}`` instead.
+        """
+        try:
+            async with _client_for(ctx, mode=mode, singleton=singleton) as client:
+                return await list_email_accounts(client=client)
+        except RuntimeError as exc:
+            return {"error": str(exc)}
+
+    @mcp_app.tool(name="search_mailbox")
+    async def search_mailbox_tool(
+        ctx: Context,
+        account_id: str,
+        q: str | None = None,
+        max_results: int = 25,
+        page_token: str | None = None,
+    ) -> dict[str, Any]:
+        """Live-search a connected mailbox (nothing is stored in Hail).
+
+        ``account_id`` is an id from ``list_email_accounts``. ``q`` uses
+        Gmail query syntax, e.g. ``"in:inbox newer_than:2d"`` for "check my
+        last emails", or ``"from:bob@example.com"`` for a sender.
+        ``max_results`` is 1..100 (default 25). Page with the previous
+        response's ``next_page_token`` passed back as ``page_token``.
+
+        Returns message summaries (no body) — fetch a body with
+        ``read_mailbox_message``. Response shape:
+        ``{"items": [...], "next_page_token": <str|None>}``, or
+        ``{"error": "<message>"}`` instead.
+        """
+        try:
+            async with _client_for(ctx, mode=mode, singleton=singleton) as client:
+                return await search_mailbox(
+                    client=client,
+                    account_id=account_id,
+                    q=q,
+                    max_results=max_results,
+                    page_token=page_token,
+                )
+        except RuntimeError as exc:
+            return {"error": str(exc)}
+
+    @mcp_app.tool(name="read_mailbox_message")
+    async def read_mailbox_message_tool(
+        ctx: Context, account_id: str, message_id: str
+    ) -> dict[str, Any]:
+        """Read one mailbox message (live from Gmail, not stored).
+
+        ``account_id`` is an id from ``list_email_accounts``; ``message_id``
+        comes from a ``search_mailbox`` item's ``id``. The response's
+        ``message_id`` (RFC 2822) can be passed as ``in_reply_to`` to
+        ``send_email`` to reply inside the same thread.
+
+        Returns the full message (subject, from/to, body, attachments), or
+        ``{"error": "resource not found"}`` for an unknown id.
+        """
+        try:
+            async with _client_for(ctx, mode=mode, singleton=singleton) as client:
+                return await read_mailbox_message(
+                    client=client, account_id=account_id, message_id=message_id
+                )
+        except RuntimeError as exc:
+            return {"error": str(exc)}
+
 
 __all__ = [
     "register_tools",
@@ -963,4 +1087,7 @@ __all__ = [
     "get_email_events",
     "get_email_stats",
     "get_events",
+    "list_email_accounts",
+    "search_mailbox",
+    "read_mailbox_message",
 ]
