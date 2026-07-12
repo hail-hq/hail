@@ -152,12 +152,10 @@ async def test_gmail_5xx_returns_502_not_500(client, org_and_key, async_session)
     assert resp.status_code != 500
 
 
-async def test_gmail_429_returns_502_not_500(client, org_and_key, async_session):
-    # Rate limiting is a transient/server-side condition, not a caller
-    # mistake — spec maps everything >=500 (and transport errors, which are
-    # also raised as GmailApiError) to 502; 429 falls under 4xx -> 400 per
-    # the exception's own .status, which this test also protects against a
-    # 500 leaking through.
+async def test_gmail_429_returns_429(client, org_and_key, async_session):
+    # Rate limiting must surface as 429 (not folded into the generic 4xx ->
+    # 400 mapping) so callers can distinguish "back off and retry" from a
+    # caller mistake.
     org_id, _, plain = org_and_key
     acct = await _insert_account(async_session, org_id)
     fake = FakeGmail(api_error=GmailApiError(429, "rate limited"))
@@ -169,7 +167,7 @@ async def test_gmail_429_returns_502_not_500(client, org_and_key, async_session)
         )
     finally:
         app.dependency_overrides.pop(get_gmail_client_builder, None)
-    assert resp.status_code != 500
+    assert resp.status_code == 429
 
 
 async def test_gmail_400_returns_400(client, org_and_key, async_session):

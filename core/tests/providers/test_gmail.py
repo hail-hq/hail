@@ -100,6 +100,20 @@ async def test_transport_error_surfaces_as_gmail_api_error() -> None:
     assert not isinstance(exc_info.value, GmailAuthError)
 
 
+async def test_token_refresh_transport_error_surfaces_as_gmail_api_error() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.host == "oauth2.googleapis.com":
+            raise httpx.ConnectError("connection refused", request=request)
+        raise AssertionError("should not reach the Gmail API without a token")
+
+    http = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    client = GmailClient(refresh_token="rt", http=http)
+    with pytest.raises(GmailApiError) as exc_info:
+        await client.get_profile()
+    assert exc_info.value.status == 502
+    assert not isinstance(exc_info.value, GmailAuthError)
+
+
 async def test_get_message_parses_multipart_body() -> None:
     def b64(s: str) -> str:
         return base64.urlsafe_b64encode(s.encode()).decode()

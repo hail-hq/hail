@@ -23,6 +23,7 @@ from hailhq.core.providers.email.base import (
     ProviderSendResult,
 )
 from hailhq.core.providers.email.gmail_oauth import (
+    GmailOAuthError,
     GmailReauthRequired,
     refresh_access_token,
 )
@@ -88,6 +89,10 @@ class GmailClient:
                 )
             except GmailReauthRequired as exc:
                 raise GmailAuthError(401, str(exc)) from exc
+            except httpx.HTTPError as exc:
+                raise GmailApiError(502, str(exc)) from exc
+            except GmailOAuthError as exc:
+                raise GmailApiError(502, str(exc)) from exc
             self._access_token = token
             self._token_expiry = time.time() + expires_in
         return self._access_token

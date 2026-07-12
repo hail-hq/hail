@@ -432,12 +432,18 @@ async def _flag_reauth(db: AsyncSession, account: EmailAccount) -> HTTPException
 
 
 def _gmail_api_error_to_http(exc: GmailApiError) -> HTTPException:
-    status = (
-        http_status.HTTP_502_BAD_GATEWAY
-        if exc.status >= 500
-        else http_status.HTTP_400_BAD_REQUEST
+    if exc.status == 429:
+        return HTTPException(
+            status_code=http_status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=f"Gmail rate limit exceeded: {exc.detail}",
+        )
+    if 400 <= exc.status < 500:
+        return HTTPException(
+            status_code=http_status.HTTP_400_BAD_REQUEST, detail=exc.detail
+        )
+    return HTTPException(
+        status_code=http_status.HTTP_502_BAD_GATEWAY, detail=exc.detail
     )
-    return HTTPException(status_code=status, detail=exc.detail)
 
 
 _CORRUPT_CREDENTIALS_DETAIL = "stored credentials are corrupted; reconnect"
