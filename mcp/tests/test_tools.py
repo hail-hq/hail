@@ -256,6 +256,47 @@ async def test_place_call_serializes_from_alias(client: HailClient) -> None:
     assert "from_" not in body
 
 
+@respx.mock
+async def test_place_call_passes_tools_to_request_body(client: HailClient) -> None:
+    captured: dict = {}
+
+    def _handler(request: httpx.Request) -> httpx.Response:
+        captured["body"] = request.read().decode("utf-8")
+        return httpx.Response(201, json=_call_response())
+
+    respx.post(f"{_BASE_URL}/calls").mock(side_effect=_handler)
+
+    await tools.place_call(
+        client=client,
+        recipient_consent=True,
+        to="+14155559999",
+        system_prompt="x",
+        tools=["send_sms"],
+    )
+    body = httpx.Response(200, content=captured["body"]).json()
+    assert body["tools"] == ["send_sms"]
+
+
+@respx.mock
+async def test_place_call_omits_tools_when_none(client: HailClient) -> None:
+    captured: dict = {}
+
+    def _handler(request: httpx.Request) -> httpx.Response:
+        captured["body"] = request.read().decode("utf-8")
+        return httpx.Response(201, json=_call_response())
+
+    respx.post(f"{_BASE_URL}/calls").mock(side_effect=_handler)
+
+    await tools.place_call(
+        client=client,
+        recipient_consent=True,
+        to="+14155559999",
+        system_prompt="x",
+    )
+    body = httpx.Response(200, content=captured["body"]).json()
+    assert "tools" not in body
+
+
 # --------------------------------------------------------------------------- #
 # send_email
 # --------------------------------------------------------------------------- #

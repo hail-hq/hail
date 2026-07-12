@@ -109,6 +109,7 @@ async def place_call(
     from_: str | None = None,
     first_message: str | None = None,
     metadata: dict[str, Any] | None = None,
+    tools: list[str] | None = None,
     idempotency_key: str | None = None,
     consent_source: str | None = None,
     consent_obtained_at: str | None = None,
@@ -125,6 +126,7 @@ async def place_call(
             from_=from_,
             first_message=first_message,
             metadata=metadata,
+            tools=tools,
             idempotency_key=idempotency_key,
             consent_source=consent_source,
             consent_obtained_at=consent_obtained_at,
@@ -468,6 +470,7 @@ def register_tools(
         from_: str | None = None,
         first_message: str | None = None,
         metadata: dict[str, Any] | None = None,
+        tools: list[str] | None = None,
         idempotency_key: str | None = None,
         consent_source: str | None = None,
         consent_obtained_at: str | None = None,
@@ -485,6 +488,8 @@ def register_tools(
         optional and defaults to the first active number on your org.
         ``first_message`` is spoken on pickup before listening.
         ``metadata`` is free-form JSON attached to the call record.
+        ``tools`` are the agent tools to allow on this call. Omit for all
+        available; pass ``[]`` to disable.
 
         ``recipient_consent`` is required: attest that you (the caller
         triggering this request) have obtained the lawful consent needed
@@ -522,6 +527,7 @@ def register_tools(
                     from_=from_,
                     first_message=first_message,
                     metadata=metadata,
+                    tools=tools,
                     idempotency_key=idempotency_key,
                     consent_source=consent_source,
                     consent_obtained_at=consent_obtained_at,
