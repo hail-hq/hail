@@ -1003,6 +1003,84 @@ async def test_get_email_stats_maps_422_to_error_detail(client: HailClient) -> N
 
 
 # --------------------------------------------------------------------------- #
+# contacts
+# --------------------------------------------------------------------------- #
+
+
+def _contact_entry(
+    contact_id: str | None = None,
+    kind: str = "manual",
+    name: str = "Maya Chen",
+    phone_e164: str | None = "+14155551234",
+    email: str | None = None,
+) -> dict:
+    return {
+        "id": contact_id or str(uuid4()),
+        "kind": kind,
+        "name": name,
+        "phone_e164": phone_e164,
+        "email": email,
+        "role": None,
+    }
+
+
+@respx.mock
+async def test_list_contacts_calls_get_contacts(client: HailClient) -> None:
+    captured: dict = {}
+
+    def _handler(request: httpx.Request) -> httpx.Response:
+        captured["url"] = str(request.url)
+        return httpx.Response(200, json={"items": [_contact_entry()]})
+
+    respx.get(f"{_BASE_URL}/contacts").mock(side_effect=_handler)
+
+    result = await tools.list_contacts(client=client)
+    assert "error" not in result, result
+    assert result["items"][0]["name"] == "Maya Chen"
+    assert captured["url"] == f"{_BASE_URL}/contacts"
+
+
+@respx.mock
+async def test_lookup_contact_passes_q_and_limit_10(client: HailClient) -> None:
+    captured: dict = {}
+
+    def _handler(request: httpx.Request) -> httpx.Response:
+        captured["url"] = str(request.url)
+        return httpx.Response(200, json={"items": [_contact_entry(name="maya")]})
+
+    respx.get(f"{_BASE_URL}/contacts").mock(side_effect=_handler)
+
+    result = await tools.lookup_contact(client=client, query="maya")
+    assert "error" not in result, result
+    assert "q=maya" in captured["url"]
+    assert "limit=10" in captured["url"]
+
+
+@respx.mock
+async def test_create_contact_posts_body_and_surfaces_409(client: HailClient) -> None:
+    captured: dict = {}
+
+    def _handler(request: httpx.Request) -> httpx.Response:
+        captured["body"] = request.read().decode("utf-8")
+        return httpx.Response(
+            409, json={"detail": "a contact with that phone or email already exists"}
+        )
+
+    respx.post(f"{_BASE_URL}/contacts").mock(side_effect=_handler)
+
+    result = await tools.create_contact(
+        client=client, name="Maya Chen", phone_e164="+14155551234"
+    )
+
+    body = httpx.Response(200, content=captured["body"]).json()
+    assert body == {"name": "Maya Chen", "phone_e164": "+14155551234"}
+
+    assert result == {
+        "error": "a contact with that phone or email already exists"
+    }
+
+
+# --------------------------------------------------------------------------- #
 # Error mapping
 # --------------------------------------------------------------------------- #
 

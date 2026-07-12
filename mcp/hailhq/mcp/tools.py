@@ -1,6 +1,6 @@
 """MCP tool surface for Hail's outbound-call API.
 
-Exposes fourteen tools to the calling agent:
+Exposes seventeen tools to the calling agent:
 
 * ``place_call`` — originate an outbound phone call
 * ``get_call`` — fetch the current state of one call
@@ -16,6 +16,9 @@ Exposes fourteen tools to the calling agent:
 * ``send_sms`` — send an outbound SMS
 * ``get_sms`` — fetch the current state of one SMS
 * ``list_sms`` — page through recent SMS messages
+* ``list_contacts`` — page through the workspace's contacts (members + manual)
+* ``lookup_contact`` — find a contact by name/email/phone fragment
+* ``create_contact`` — save a manual contact (phone and/or email)
 
 The tool docstrings are the agent's only documentation, so each one
 spells out the contract (required vs optional fields, mutually exclusive
@@ -372,6 +375,46 @@ async def get_events(
         return _format_api_error(exc)
 
 
+async def list_contacts(
+    *,
+    client: HailClient,
+    q: str | None = None,
+    limit: int | None = None,
+) -> dict[str, Any]:
+    try:
+        return await client.list_contacts(q=q, limit=limit)
+    except ValidationError as exc:
+        return {"error": _validation_error_message(exc)}
+    except HailAPIError as exc:
+        return _format_api_error(exc)
+
+
+async def lookup_contact(*, client: HailClient, query: str) -> dict[str, Any]:
+    try:
+        return await client.list_contacts(q=query, limit=10)
+    except ValidationError as exc:
+        return {"error": _validation_error_message(exc)}
+    except HailAPIError as exc:
+        return _format_api_error(exc)
+
+
+async def create_contact(
+    *,
+    client: HailClient,
+    name: str,
+    phone_e164: str | None = None,
+    email: str | None = None,
+) -> dict[str, Any]:
+    try:
+        return await client.create_contact(
+            name=name, phone_e164=phone_e164, email=email
+        )
+    except ValidationError as exc:
+        return {"error": _validation_error_message(exc)}
+    except HailAPIError as exc:
+        return _format_api_error(exc)
+
+
 # --------------------------------------------------------------------------- #
 # Per-tool-call client helper.
 #
@@ -451,7 +494,7 @@ def register_tools(
     mode: AuthMode,
     singleton: HailClient | None,
 ) -> None:
-    """Register the fourteen Hail tools on a FastMCP app.
+    """Register the seventeen Hail tools on a FastMCP app.
 
     Tools accept a FastMCP ``Context`` parameter (auto-injected). The
     ``_client_for`` helper picks the right HailClient for the active mode
@@ -946,6 +989,72 @@ def register_tools(
         except RuntimeError as exc:
             return {"error": str(exc)}
 
+    @mcp_app.tool(name="list_contacts")
+    async def list_contacts_tool(
+        ctx: Context,
+        q: str | None = None,
+        limit: int | None = None,
+    ) -> dict[str, Any]:
+        """List the workspace's contacts: org members (with their phone/email)
+        plus manually saved contacts. Use ``lookup_contact`` for name searches.
+
+        ``q`` optionally filters server-side (matches name/email/phone).
+        ``limit`` caps the page (server default 100, max 500).
+
+        Returns ``{"items": [{"id", "kind", "name", "phone_e164", "email",
+        "role"}, ...]}`` — ``kind`` is ``"member"`` (id ``member:<user_id>``,
+        ``role`` set) or ``"manual"`` (id is the contact's UUID, ``role``
+        null).
+        """
+        try:
+            async with _client_for(ctx, mode=mode, singleton=singleton) as client:
+                return await list_contacts(client=client, q=q, limit=limit)
+        except RuntimeError as exc:
+            return {"error": str(exc)}
+
+    @mcp_app.tool(name="lookup_contact")
+    async def lookup_contact_tool(ctx: Context, query: str) -> dict[str, Any]:
+        """Find a contact by name, email, or phone fragment. Resolve a person
+        to their ``phone_e164``/``email`` BEFORE calling ``place_call``,
+        ``send_sms``, or ``send_email`` — do not guess a contact's number.
+
+        Returns up to 10 matches, same item shape as ``list_contacts``.
+
+        Example:
+            lookup_contact(query="maya")
+        """
+        try:
+            async with _client_for(ctx, mode=mode, singleton=singleton) as client:
+                return await lookup_contact(client=client, query=query)
+        except RuntimeError as exc:
+            return {"error": str(exc)}
+
+    @mcp_app.tool(name="create_contact")
+    async def create_contact_tool(
+        ctx: Context,
+        name: str,
+        phone_e164: str | None = None,
+        email: str | None = None,
+    ) -> dict[str, Any]:
+        """Save a new contact for the workspace. Provide at least one of
+        ``phone_e164`` (E.164, e.g. ``+14155551234``) or ``email`` — the API
+        rejects (422) a contact with neither. A duplicate phone or email on
+        an existing contact returns 409.
+
+        Example:
+            create_contact(name="Maya Chen", phone_e164="+14155551234")
+
+        Returns the created contact entry as a dict. On failure returns
+        ``{"error": "<message>"}`` instead.
+        """
+        try:
+            async with _client_for(ctx, mode=mode, singleton=singleton) as client:
+                return await create_contact(
+                    client=client, name=name, phone_e164=phone_e164, email=email
+                )
+        except RuntimeError as exc:
+            return {"error": str(exc)}
+
 
 __all__ = [
     "register_tools",
@@ -963,4 +1072,7 @@ __all__ = [
     "get_email_events",
     "get_email_stats",
     "get_events",
+    "list_contacts",
+    "lookup_contact",
+    "create_contact",
 ]

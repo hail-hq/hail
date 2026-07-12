@@ -31,6 +31,9 @@ from hailhq.core.schemas import (
     CallCreate,
     CallListResponse,
     CallResponse,
+    ContactCreate,
+    ContactEntry,
+    ContactListResponse,
     EmailCreate,
     EmailEventListResponse,
     EmailListResponse,
@@ -170,6 +173,52 @@ class HailClient:
             params["to"] = to
         resp = await self._client.get("/calls", params=params)
         return CallListResponse.model_validate(_decode(resp)).model_dump(mode="json")
+
+    # ------------------------------------------------------------------ #
+    # GET /contacts
+    # ------------------------------------------------------------------ #
+
+    async def list_contacts(
+        self,
+        *,
+        q: str | None = None,
+        limit: int | None = None,
+    ) -> dict[str, Any]:
+        params: dict[str, Any] = {}
+        if q is not None:
+            params["q"] = q
+        if limit is not None:
+            params["limit"] = limit
+        resp = await self._client.get("/contacts", params=params)
+        return ContactListResponse.model_validate(_decode(resp)).model_dump(mode="json")
+
+    # ------------------------------------------------------------------ #
+    # POST /contacts
+    # ------------------------------------------------------------------ #
+
+    async def create_contact(
+        self,
+        *,
+        name: str,
+        phone_e164: str | None = None,
+        email: str | None = None,
+    ) -> dict[str, Any]:
+        """POST /contacts — save a manual contact.
+
+        Builds the body from :class:`ContactCreate` (which enforces a
+        non-empty name and phone_e164-or-email). Construction raises
+        ``pydantic.ValidationError`` before any HTTP on bad input.
+        """
+        fields: dict[str, Any] = {"name": name}
+        if phone_e164 is not None:
+            fields["phone_e164"] = phone_e164
+        if email is not None:
+            fields["email"] = email
+        body = ContactCreate.model_validate(fields).model_dump(
+            mode="json", exclude_unset=True
+        )
+        resp = await self._client.post("/contacts", json=body)
+        return ContactEntry.model_validate(_decode(resp)).model_dump(mode="json")
 
     # ------------------------------------------------------------------ #
     # POST /sms
