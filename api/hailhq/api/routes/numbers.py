@@ -152,6 +152,11 @@ async def enable_sms(
         provider_resource_id=number.provider_resource_id,
     )
 
+    # Stored for future send routing: this provisions and records the org's
+    # Messaging Service, but POST /sms does not yet send *through* it (it sends
+    # with an explicit from_e164 / alphanumeric sender). Routing outbound SMS
+    # via the Messaging Service is a later phase — the SID is persisted now so
+    # that wiring has it ready.
     number.messaging_service_sid = messaging_service_sid
     await db.commit()
     await db.refresh(number)
