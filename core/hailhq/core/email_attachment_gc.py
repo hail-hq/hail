@@ -64,37 +64,57 @@ class EmailAttachmentGcWorker:
         self._stop.set()
 
     async def tick(self) -> int:
-        """Delete stale never-used uploads (S3 object + row). Returns count deleted."""
+        """Delete stale never-used uploads (S3 object + row). Returns count deleted.
+
+        Each row's S3 delete and DB row-delete commit together, one row at a
+        time — a crash between rows leaves already-processed rows fully gone
+        from both S3 and the DB, and untouched rows intact for the next tick
+        to retry (see ``OutboundForwardWorker``'s module docstring for the
+        same "commit per row" rationale).
+
+        Unlike that worker, GC isn't racing other GC replicas over who
+        "claims" a row — a duplicate ``s3.delete`` and a duplicate
+        ``DELETE ... WHERE id = x`` are both harmless no-ops — so there's no
+        need for ``FOR UPDATE SKIP LOCKED`` or a re-query per row. The batch
+        of stale candidates is listed once, up front, in its own short-lived
+        session, then processed one row (its own S3 delete + DB delete +
+        commit) at a time.
+        """
         cutoff = datetime.now(timezone.utc) - UNUSED_TTL
         async with self._session_factory() as session:
             stmt = (
-                select(EmailAttachmentUpload)
+                select(EmailAttachmentUpload.id, EmailAttachmentUpload.s3_key)
                 .where(EmailAttachmentUpload.first_used_at.is_(None))
                 .where(EmailAttachmentUpload.created_at < cutoff)
+                .order_by(EmailAttachmentUpload.created_at.asc())
                 .limit(GC_BATCH)
             )
-            rows = (await session.execute(stmt)).scalars().all()
-            if not rows:
-                return 0
-            s3 = self._get_s3()
-            for row in rows:
-                try:
-                    await s3.delete(row.s3_key)
-                except Exception:
-                    logger.warning(
-                        "GC: failed to delete S3 object for upload_id=%s; "
-                        "skipping row deletion this tick",
-                        row.id,
-                        exc_info=True,
-                    )
-                    continue
+            candidates = (await session.execute(stmt)).all()
+        if not candidates:
+            return 0
+
+        s3 = self._get_s3()
+        deleted = 0
+        for row_id, s3_key in candidates:
+            try:
+                await s3.delete(s3_key)
+            except Exception:
+                logger.warning(
+                    "GC: failed to delete S3 object for upload_id=%s; "
+                    "skipping row deletion this tick",
+                    row_id,
+                    exc_info=True,
+                )
+                continue
+            async with self._session_factory() as session:
                 await session.execute(
                     delete(EmailAttachmentUpload).where(
-                        EmailAttachmentUpload.id == row.id
+                        EmailAttachmentUpload.id == row_id
                     )
                 )
-            await session.commit()
-            return len(rows)
+                await session.commit()
+            deleted += 1
+        return deleted
 
 
 __all__ = ["EmailAttachmentGcWorker", "UNUSED_TTL"]

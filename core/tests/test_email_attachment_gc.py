@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock
 from uuid import uuid4
@@ -34,6 +35,21 @@ async def _make_row(
     return row
 
 
+def _worker(async_session: AsyncSession, s3) -> EmailAttachmentGcWorker:
+    """Build a worker whose ``session_factory`` yields the shared test
+    session on every call — mirroring ``OutboundForwardWorker``'s test
+    helper (``test_outbound_worker.py::_worker``) so ``tick()`` can open a
+    fresh ``async with self._session_factory() as session:`` block per row
+    without the underlying session actually being torn down between rows.
+    """
+
+    @asynccontextmanager
+    async def session_factory():
+        yield async_session
+
+    return EmailAttachmentGcWorker(session_factory=session_factory, s3_factory=lambda: s3)
+
+
 @pytest.mark.asyncio
 async def test_tick_deletes_only_stale_unused_rows(async_session: AsyncSession) -> None:
     now = datetime.now(timezone.utc)
@@ -45,11 +61,8 @@ async def test_tick_deletes_only_stale_unused_rows(async_session: AsyncSession) 
         first_used_at=now - timedelta(hours=47),
     )
 
-    def session_factory():
-        return async_session  # type: ignore[return-value]
-
     s3 = AsyncMock()
-    worker = EmailAttachmentGcWorker(session_factory=lambda: async_session, s3_factory=lambda: s3)
+    worker = _worker(async_session, s3)
 
     processed = await worker.tick()
 
@@ -62,3 +75,36 @@ async def test_tick_deletes_only_stale_unused_rows(async_session: AsyncSession) 
     assert stale_unused.id not in remaining_ids
     assert fresh_unused.id in remaining_ids
     assert stale_used.id in remaining_ids
+
+
+@pytest.mark.asyncio
+async def test_tick_commits_each_row_independently_of_mid_batch_failure(
+    async_session: AsyncSession,
+) -> None:
+    """A failing S3 delete on one row in the batch must not roll back or
+    block the per-row commits for rows processed before or after it — each
+    row's S3 delete + DB delete + commit happens on its own, so a crash (or,
+    here, a permanent S3 error) affecting one row leaves the others'
+    already-committed state untouched."""
+    now = datetime.now(timezone.utc)
+    row1 = await _make_row(async_session, created_at=now - timedelta(hours=30))
+    row2 = await _make_row(async_session, created_at=now - timedelta(hours=29))
+    row3 = await _make_row(async_session, created_at=now - timedelta(hours=28))
+
+    s3 = AsyncMock()
+    s3.delete.side_effect = [None, RuntimeError("s3 down"), None]
+    worker = _worker(async_session, s3)
+
+    processed = await worker.tick()
+
+    assert processed == 2
+    assert s3.delete.await_count == 3
+
+    remaining_ids = set(
+        (await async_session.execute(select(EmailAttachmentUpload.id))).scalars().all()
+    )
+    # row1 and row3 (S3 delete succeeded) are fully gone from the DB; row2
+    # (S3 delete raised) is left untouched for the next tick to retry.
+    assert row1.id not in remaining_ids
+    assert row2.id in remaining_ids
+    assert row3.id not in remaining_ids
