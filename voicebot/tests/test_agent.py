@@ -36,6 +36,7 @@ from hailhq.voicebot.agent import (
     VOICE_PREAMBLE,
     attach_event_handlers,
     build_instructions,
+    build_tools_safely,
     disconnect_reason_to_status,
     entrypoint,
     is_sip_answer_signal,
@@ -1055,3 +1056,54 @@ async def test_agent_hangup_marks_normal_hangup() -> None:
     assert captured["end_reason"] == CallEndReason.NORMAL_HANGUP.value
     assert captured["status"] is None
     assert ctx.shutdown_calls == ["agent_end_call"]
+
+
+async def test_build_tools_safely_degrades_on_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A tool-layer startup failure must never kill the call.
+
+    `build_tools_safely` is the entrypoint's guard around `build_agent_tools`:
+    any exception (e.g. a DB rollback on a dead connection) degrades to
+    `([], None)` — no tools beats a dead call.
+    """
+    from hailhq.voicebot import agent as agent_mod
+
+    async def _boom(_metadata: dict, *, call_id: UUID, hangup: object) -> tuple:
+        raise RuntimeError("dead connection during availability checks")
+
+    monkeypatch.setattr(agent_mod, "build_agent_tools", _boom)
+
+    async def _hangup() -> None:
+        return None
+
+    call_id = UUID("11111111-2222-3333-4444-555555555557")
+    # Must not raise.
+    tools, api = await build_tools_safely({}, call_id, _hangup)
+
+    assert tools == []
+    assert api is None
+
+
+async def test_build_tools_safely_passes_through_on_success(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The happy path is a pure passthrough of `build_agent_tools`' result."""
+    from hailhq.voicebot import agent as agent_mod
+
+    sentinel_tools = [object()]
+    sentinel_api = object()
+
+    async def _ok(_metadata: dict, *, call_id: UUID, hangup: object) -> tuple:
+        return sentinel_tools, sentinel_api
+
+    monkeypatch.setattr(agent_mod, "build_agent_tools", _ok)
+
+    async def _hangup() -> None:
+        return None
+
+    call_id = UUID("11111111-2222-3333-4444-555555555558")
+    tools, api = await build_tools_safely({}, call_id, _hangup)
+
+    assert tools is sentinel_tools
+    assert api is sentinel_api
