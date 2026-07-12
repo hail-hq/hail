@@ -4,7 +4,7 @@ provider "aws" {
 }
 
 locals {
-  bucket_name    = "${var.name_prefix}-raw"
+  bucket_name    = "${var.name_prefix}-mail"
   rule_set_name  = "${var.name_prefix}-rules"
   rule_name      = "${var.name_prefix}-deliver"
   lambda_name    = "${var.name_prefix}-ingest"

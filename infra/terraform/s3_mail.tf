@@ -34,6 +34,17 @@ resource "aws_s3_bucket_lifecycle_configuration" "inbound" {
       days = var.raw_object_expiration_days
     }
   }
+
+  rule {
+    id     = "expire-outbound-attachments"
+    status = "Enabled"
+    filter {
+      prefix = "outbound-attachments/"
+    }
+    expiration {
+      days = var.raw_object_expiration_days
+    }
+  }
 }
 
 data "aws_iam_policy_document" "ses_write" {
