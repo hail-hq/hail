@@ -70,7 +70,13 @@ async def build_agent_tools(
     if raw_org is None:
         logger.warning("dispatch metadata has no organization_id; agent tools disabled")
         return [], None
-    organization_id = UUID(str(raw_org))
+    try:
+        organization_id = UUID(str(raw_org))
+    except ValueError:
+        logger.warning(
+            "dispatch metadata has malformed organization_id; agent tools disabled"
+        )
+        return [], None
 
     allowed = metadata.get("tools")  # None ⇒ all available
     specs = [s for s in all_tools() if allowed is None or s.name in allowed]
@@ -93,6 +99,11 @@ async def build_agent_tools(
                     available.append(spec)
             except Exception:
                 logger.exception("availability check failed for tool %s", spec.name)
+                # Load-bearing: a failed statement leaves the shared session's
+                # transaction aborted; without this rollback every later
+                # is_available check raises PendingRollbackError and gets
+                # swallowed too, silently disabling available tools.
+                await session.rollback()
 
     return [_wrap(s, tctx) for s in available], api
 
