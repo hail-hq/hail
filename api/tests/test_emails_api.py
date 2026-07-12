@@ -10,6 +10,9 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from hailhq.api.main import app
+from hailhq.api.routes import email_attachments
+from hailhq.api.routes import emails as emails_routes
 from hailhq.core.config import settings
 from hailhq.core.email_footer import AI_DISCLOSURE_LINE
 from hailhq.core.hail_mail import org_prefix_from_id
@@ -52,6 +55,122 @@ async def _send_email(client: httpx.AsyncClient, plain: str) -> dict:
     )
     assert resp.status_code == 201, resp.text
     return resp.json()
+
+
+@pytest.fixture()
+def s3_mail_mock():
+    s3 = AsyncMock()
+    s3.fetch_raw.return_value = b"pdf bytes"
+    app.dependency_overrides[email_attachments._get_s3_mail] = lambda: s3
+    app.dependency_overrides[emails_routes._get_s3_mail] = lambda: s3
+    try:
+        yield s3
+    finally:
+        app.dependency_overrides.pop(email_attachments._get_s3_mail, None)
+        app.dependency_overrides.pop(emails_routes._get_s3_mail, None)
+
+
+async def _upload_attachment(
+    client: httpx.AsyncClient, headers: dict, content: bytes = b"pdf bytes"
+) -> str:
+    resp = await client.post(
+        "/email-attachments",
+        files={"file": ("invoice.pdf", content, "application/pdf")},
+        headers=headers,
+    )
+    assert resp.status_code == 201, resp.text
+    return resp.json()["id"]
+
+
+async def test_post_emails_with_attachment_ids_attaches_and_lists(
+    client: httpx.AsyncClient,
+    org_and_key: tuple,
+    email_mock: AsyncMock,
+    async_session: AsyncSession,
+    s3_mail_mock: AsyncMock,
+) -> None:
+    _, _, plain = org_and_key
+    headers = {"Authorization": f"Bearer {plain}"}
+    await _register_custom_verified(client, headers, domain="acme.com")
+    att_id = await _upload_attachment(client, headers)
+
+    resp = await client.post(
+        "/emails",
+        json={
+            "to": ["alice@example.com"],
+            "subject": "hi",
+            "body_text": "body",
+            "recipient_consent": True,
+            "attachment_ids": [att_id],
+        },
+        headers=headers,
+    )
+    assert resp.status_code == 201, resp.text
+    email_id = resp.json()["id"]
+
+    email_mock.send_email.assert_awaited_once()
+    call_kwargs = email_mock.send_email.call_args.kwargs
+    assert len(call_kwargs["attachments"]) == 1
+    assert call_kwargs["attachments"][0].filename == "invoice.pdf"
+
+    get_resp = await client.get(f"/emails/{email_id}", headers=headers)
+    assert get_resp.status_code == 200
+    attachments = get_resp.json()["attachments"]
+    assert len(attachments) == 1
+    assert attachments[0]["filename"] == "invoice.pdf"
+
+
+async def test_post_emails_rejects_oversize_aggregate_attachments(
+    client: httpx.AsyncClient,
+    org_and_key: tuple,
+    email_mock: AsyncMock,
+    s3_mail_mock: AsyncMock,
+) -> None:
+    _, _, plain = org_and_key
+    headers = {"Authorization": f"Bearer {plain}"}
+    await _register_custom_verified(client, headers, domain="acme.com")
+    big = b"x" * (10 * 1024 * 1024)
+    att_id = await _upload_attachment(client, headers, content=big)
+
+    resp = await client.post(
+        "/emails",
+        json={
+            "to": ["alice@example.com"],
+            "subject": "hi",
+            "body_text": "this pushes it over the 10MB cap",
+            "recipient_consent": True,
+            "attachment_ids": [att_id],
+        },
+        headers=headers,
+    )
+    assert resp.status_code == 422
+    assert "link" in resp.json()["detail"]
+    email_mock.send_email.assert_not_awaited()
+
+
+async def test_post_emails_rejects_attachment_from_another_org(
+    client: httpx.AsyncClient,
+    org_and_key: tuple,
+    email_mock: AsyncMock,
+) -> None:
+    _, _, plain = org_and_key
+    headers = {"Authorization": f"Bearer {plain}"}
+    await _register_custom_verified(client, headers, domain="acme.com")
+
+    fake_id = "00000000-0000-0000-0000-000000000000"
+    resp = await client.post(
+        "/emails",
+        json={
+            "to": ["alice@example.com"],
+            "subject": "hi",
+            "body_text": "body",
+            "recipient_consent": True,
+            "attachment_ids": [fake_id],
+        },
+        headers=headers,
+    )
+    assert resp.status_code == 404
+    email_mock.send_email.assert_not_awaited()
 
 
 # --------------------------------------------------------------------------- #

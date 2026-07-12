@@ -23,6 +23,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from hailhq.api import auth as _auth_module
 from hailhq.api.auth import hash_key
 from hailhq.api.main import app
+from hailhq.api.routes import email_attachments as _email_attachments_routes
+from hailhq.api.routes import emails as _emails_routes
 from hailhq.api.routes.calls import get_livekit
 from hailhq.api.routes.email_domains import get_email_provider
 from hailhq.api.routes.sms import get_sms_provider
@@ -250,6 +252,20 @@ async def client(
     app.dependency_overrides[get_livekit] = lambda: livekit_mock
     app.dependency_overrides[get_email_provider] = lambda: email_mock
     app.dependency_overrides[get_sms_provider] = lambda: sms_mock
+    # POST /emails unconditionally depends on _get_s3_mail (it's needed to
+    # fetch attachment bytes), and settings.hail_mail_bucket is unset in the
+    # test environment (no .env / HAIL_MAIL_NAME_PREFIX), so the real
+    # S3MailClient() factory would raise ValueError for *every* send, not
+    # just attachment-bearing ones. Default both modules' _get_s3_mail to a
+    # benign AsyncMock here — same happy-path-by-default pattern as
+    # email_mock/sms_mock/livekit_mock above. Tests that care about
+    # fetch_raw/put_attachment/presign_get behavior override again locally.
+    default_s3_mail_mock = AsyncMock()
+    default_s3_mail_mock.fetch_raw.return_value = b""
+    app.dependency_overrides[_emails_routes._get_s3_mail] = lambda: default_s3_mail_mock
+    app.dependency_overrides[_email_attachments_routes._get_s3_mail] = (
+        lambda: default_s3_mail_mock
+    )
 
     transport = httpx.ASGITransport(app=app)
     try:
@@ -260,6 +276,8 @@ async def client(
         app.dependency_overrides.pop(get_livekit, None)
         app.dependency_overrides.pop(get_email_provider, None)
         app.dependency_overrides.pop(get_sms_provider, None)
+        app.dependency_overrides.pop(_emails_routes._get_s3_mail, None)
+        app.dependency_overrides.pop(_email_attachments_routes._get_s3_mail, None)
 
 
 @pytest.fixture()

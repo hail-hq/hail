@@ -52,11 +52,22 @@ from hailhq.api.funds import require_funds
 from hailhq.core.compliance_gate import check_email_allowed
 from hailhq.core.config import settings
 from hailhq.core.db import get_session
+from hailhq.core.email_attachment_limits import (
+    ATTACHMENT_TOO_LARGE_DETAIL,
+    MAX_EMAIL_ATTACHMENT_BYTES,
+)
 from hailhq.core.email_delivery_events import record_sent_event
 from hailhq.core.email_footer import FOOTER_SENT, append_disclosure, append_footer
-from hailhq.core.models import Email, EmailAttachment, EmailDomain, EmailEvent
+from hailhq.core.models import (
+    Email,
+    EmailAttachment,
+    EmailAttachmentUpload,
+    EmailDomain,
+    EmailEvent,
+)
 from hailhq.core.s3_mail import S3MailClient
 from hailhq.core.providers.email import EmailProvider
+from hailhq.core.providers.email.base import ProviderAttachment
 from hailhq.core.unsubscribe import build_unsubscribe_url
 from hailhq.core.schemas import (
     EmailAttachmentResponse,
@@ -288,6 +299,7 @@ async def create_email(
     principal: Annotated[Principal, Depends(get_current_principal)],
     db: Annotated[AsyncSession, Depends(get_session)],
     email_provider: Annotated[EmailProvider, Depends(get_email_provider)],
+    s3: Annotated[S3MailClient, Depends(_get_s3_mail)],
     idem: Annotated[IdempotencyContext | None, Depends(idempotency_dep)] = None,
 ) -> EmailResponse:
     # Idempotency replay first — never re-send.
@@ -336,6 +348,29 @@ async def create_email(
 
     await require_funds(db, principal, idem)
 
+    attachment_rows: list[EmailAttachmentUpload] = []
+    if body.attachment_ids:
+        stmt = select(EmailAttachmentUpload).where(
+            EmailAttachmentUpload.id.in_(body.attachment_ids),
+            EmailAttachmentUpload.organization_id == principal.organization_id,
+        )
+        attachment_rows = list((await db.execute(stmt)).scalars().all())
+        found_ids = {row.id for row in attachment_rows}
+        missing = [str(aid) for aid in body.attachment_ids if aid not in found_ids]
+        if missing:
+            raise HTTPException(
+                status_code=http_status.HTTP_404_NOT_FOUND,
+                detail=f"attachment(s) not found: {', '.join(missing)}",
+            )
+        total_bytes = sum(row.size_bytes for row in attachment_rows)
+        total_bytes += len((body.body_text or "").encode("utf-8"))
+        total_bytes += len((body.body_html or "").encode("utf-8"))
+        if total_bytes > MAX_EMAIL_ATTACHMENT_BYTES:
+            raise HTTPException(
+                status_code=http_status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=ATTACHMENT_TOO_LARGE_DETAIL,
+            )
+
     try:
         sd = await _resolve_sender(db, principal.organization_id, body.from_)
     except HTTPException as exc:
@@ -379,6 +414,7 @@ async def create_email(
             "consent_obtained_at": isoformat_or_none(body.consent_obtained_at),
             "message_type": body.message_type,
             "compliance": gate.checks,
+            "attachment_ids": [str(a) for a in (body.attachment_ids or [])],
         },
     )
 
@@ -398,6 +434,14 @@ async def create_email(
     unsubscribe_url = build_unsubscribe_url(
         email.to_addresses[0], principal.organization_id
     )
+    provider_attachments: list[ProviderAttachment] = [
+        ProviderAttachment(
+            filename=row.filename,
+            content_type=row.content_type,
+            payload=await s3.fetch_raw(row.s3_key),
+        )
+        for row in attachment_rows
+    ]
     try:
         result = await email_provider.send_email(
             from_address=email.from_address,
@@ -412,6 +456,7 @@ async def create_email(
                 "List-Unsubscribe": f"<{unsubscribe_url}>",
                 "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
             },
+            attachments=provider_attachments or None,
         )
     except Exception as exc:
         logger.warning(
@@ -463,6 +508,23 @@ async def create_email(
     )
     await db.commit()
     await db.refresh(email)
+
+    now_used = datetime.now(timezone.utc)
+    for row in attachment_rows:
+        db.add(
+            EmailAttachment(
+                email_id=email.id,
+                filename=row.filename,
+                content_type=row.content_type,
+                size_bytes=row.size_bytes,
+                s3_key=row.s3_key,
+            )
+        )
+        if row.first_used_at is None:
+            row.first_used_at = now_used
+    if attachment_rows:
+        await db.commit()
+        await db.refresh(email)
 
     # Flat 1¢ per send regardless of recipient count.
     await _write_usage_event(
