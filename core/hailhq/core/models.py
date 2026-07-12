@@ -54,6 +54,24 @@ class OrganizationMember(Base):
     created_at: Mapped[datetime] = mapped_column(TS, nullable=False)
 
 
+class User(Base):
+    """Read-only mirror of the website's ``users`` table (better-auth).
+
+    Same posture as :class:`OrganizationMember`: the website owns the
+    schema; hail only reads it. Columns verified 2026-07-11 against
+    hail-website's better-auth migrations (users: id / name / email /
+    email_verified / image / timestamps); only the columns hail reads
+    are mapped.
+    """
+
+    __tablename__ = "users"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    email: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(TS, nullable=False)
+
+
 class AccountCredit(Base):
     """Append-only ledger; balance = SUM(amount_cents) per org.
 
