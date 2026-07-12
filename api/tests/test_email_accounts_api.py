@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import uuid
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -204,3 +205,100 @@ async def test_reconnect_rejects_different_google_account(
             params={"code": "c", "state": mint_state(org_id, acct.id)},
         )
     assert resp.status_code == 409
+
+
+async def test_callback_same_org_same_address_refreshes_in_place(
+    client, org_and_key, async_session
+):
+    org_id, _, _ = org_and_key
+    acct = await _insert_account(async_session, org_id, status="reauth_required")
+    old_ciphertext = acct.encrypted_refresh_token
+    grant = TokenGrant(access_token="at", refresh_token="rt-new", expires_in=3599)
+    info = Userinfo(sub="sub-1", email="alice@gmail.com", name="Alice")
+    with (
+        patch(
+            "hailhq.api.routes.email_accounts.exchange_code",
+            new=AsyncMock(return_value=grant),
+        ),
+        patch(
+            "hailhq.api.routes.email_accounts.fetch_userinfo",
+            new=AsyncMock(return_value=info),
+        ),
+    ):
+        resp = await client.get(
+            "/email-accounts/oauth/callback",
+            params={"code": "c", "state": mint_state(org_id, None)},
+        )
+    assert resp.status_code == 200
+    rows = (
+        (
+            await async_session.execute(
+                select(EmailAccount).where(EmailAccount.organization_id == org_id)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert len(rows) == 1  # refreshed in place, no duplicate row
+    row = rows[0]
+    await async_session.refresh(row)
+    assert row.encrypted_refresh_token != old_ciphertext
+    assert row.status == "active"
+
+
+async def test_callback_409_when_address_connected_to_other_org(
+    client, org_and_key, async_session
+):
+    org_a, _, _ = org_and_key
+    acct = await _insert_account(async_session, org_a)
+    old_ciphertext = acct.encrypted_refresh_token
+    org_b = uuid.uuid4()
+    grant = TokenGrant(access_token="at", refresh_token="rt-b", expires_in=3599)
+    info = Userinfo(sub="sub-1", email="alice@gmail.com")
+    with (
+        patch(
+            "hailhq.api.routes.email_accounts.exchange_code",
+            new=AsyncMock(return_value=grant),
+        ),
+        patch(
+            "hailhq.api.routes.email_accounts.fetch_userinfo",
+            new=AsyncMock(return_value=info),
+        ),
+    ):
+        resp = await client.get(
+            "/email-accounts/oauth/callback",
+            params={"code": "c", "state": mint_state(org_b, None)},
+        )
+    assert resp.status_code == 409
+    await async_session.refresh(acct)
+    assert acct.organization_id == org_a  # org A's row untouched
+    assert acct.encrypted_refresh_token == old_ciphertext
+    assert acct.status == "active"
+
+
+async def test_callback_reconnect_success_updates_token_and_status(
+    client, org_and_key, async_session
+):
+    org_id, _, _ = org_and_key
+    acct = await _insert_account(async_session, org_id, status="reauth_required")
+    old_ciphertext = acct.encrypted_refresh_token
+    grant = TokenGrant(access_token="at", refresh_token="rt-re", expires_in=3599)
+    info = Userinfo(sub="sub-1", email="alice@gmail.com")  # same Google account
+    with (
+        patch(
+            "hailhq.api.routes.email_accounts.exchange_code",
+            new=AsyncMock(return_value=grant),
+        ),
+        patch(
+            "hailhq.api.routes.email_accounts.fetch_userinfo",
+            new=AsyncMock(return_value=info),
+        ),
+    ):
+        resp = await client.get(
+            "/email-accounts/oauth/callback",
+            params={"code": "c", "state": mint_state(org_id, acct.id)},
+        )
+    assert resp.status_code == 200
+    await async_session.refresh(acct)
+    assert acct.status == "active"
+    assert acct.encrypted_refresh_token != old_ciphertext

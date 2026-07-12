@@ -217,6 +217,7 @@ async def oauth_callback(
         account.email_address = info.email
         account.scopes = scopes or account.scopes
         account.status = "active"
+        affected = account
     else:
         existing = (
             await db.execute(
@@ -236,26 +237,29 @@ async def oauth_callback(
             existing.provider_user_id = info.sub
             existing.scopes = scopes or existing.scopes
             existing.status = "active"
+            affected = existing
         else:
-            db.add(
-                EmailAccount(
-                    organization_id=organization_id,
-                    provider="gmail",
-                    email_address=info.email,
-                    display_name=info.name,
-                    provider_user_id=info.sub,
-                    scopes=scopes,
-                    encrypted_refresh_token=encrypted,
-                    status="active",
-                )
+            affected = EmailAccount(
+                organization_id=organization_id,
+                provider="gmail",
+                email_address=info.email,
+                display_name=info.name,
+                provider_user_id=info.sub,
+                scopes=scopes,
+                encrypted_refresh_token=encrypted,
+                status="active",
             )
+            db.add(affected)
+            # Populate the server-generated id before commit expires the row.
+            await db.flush()
+    affected_id = affected.id
     await db.commit()
     await write_audit_log(
         organization_id=organization_id,
         api_key_id=None,
         action="email_account.connected",
         resource_type="email_account",
-        resource_id=account_id,
+        resource_id=affected_id,
         payload={"email_address": info.email},
     )
     if settings.hail_email_connect_success_url:
