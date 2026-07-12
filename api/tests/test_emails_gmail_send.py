@@ -157,6 +157,34 @@ async def test_auth_failure_marks_account_and_email(client, org_and_key, async_s
     assert row.status == "failed"
 
 
+async def test_builder_failure_marks_email_failed_and_stores_idempotency(
+    client, org_and_key, async_session
+):
+    """The REAL builder (no dependency override) blows up at send time on
+    corrupted ciphertext — the row must go failed and a supplied
+    Idempotency-Key must not be left stuck at the in-flight sentinel."""
+    org_id, _, plain = org_and_key
+    acct = await _insert_account(async_session, org_id)
+    acct.encrypted_refresh_token = "not-fernet-ciphertext"
+    await async_session.commit()
+
+    headers = {"Authorization": f"Bearer {plain}", "Idempotency-Key": "gm-builder"}
+    first = await client.post("/emails", json=_send_body(), headers=headers)
+    assert first.status_code == 502, first.text
+
+    row = (
+        await async_session.execute(
+            select(Email).where(Email.organization_id == org_id)
+        )
+    ).scalar_one()
+    assert row.status == "failed"
+
+    # Retry replays the cached failure instead of 409 "still processing".
+    second = await client.post("/emails", json=_send_body(), headers=headers)
+    assert second.status_code == 502
+    assert second.headers.get("idempotency-replay") == "true"
+
+
 async def test_ses_default_path_untouched(client, org_and_key, async_session):
     """No connected account matches → the existing domain/hail-mail flow runs."""
     _, _, plain = org_and_key

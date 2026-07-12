@@ -433,14 +433,18 @@ async def create_email(
     unsubscribe_url = build_unsubscribe_url(
         email.to_addresses[0], principal.organization_id
     )
-    # Connected-account sends go through Gmail's REST API; everyone else
-    # keeps using the injected SES-backed provider. Thread resolution from
-    # `in_reply_to` happens only inside GmailEmailProvider — SES has no
-    # concept of a Gmail threadId.
-    send_provider: EmailSender = (
-        GmailEmailProvider(gmail_builder(sd)) if is_account else email_provider
-    )
     try:
+        # Connected-account sends go through Gmail's REST API; everyone else
+        # keeps using the injected SES-backed provider. Thread resolution
+        # from `in_reply_to` happens only inside GmailEmailProvider — SES has
+        # no concept of a Gmail threadId. Construction stays INSIDE the try:
+        # the builder decrypts the stored refresh token and can itself raise
+        # (503 config error, corrupted/rotated ciphertext) — any such failure
+        # must flow through the shared failed-row + idempotency bookkeeping
+        # below or the queued row and in-flight idempotency key leak.
+        send_provider: EmailSender = (
+            GmailEmailProvider(gmail_builder(sd)) if is_account else email_provider
+        )
         result = await send_provider.send_email(
             from_address=email.from_address,
             to_addresses=email.to_addresses,
@@ -505,6 +509,15 @@ async def create_email(
                 status_code=http_status.HTTP_409_CONFLICT,
                 detail=detail,
             ) from exc
+        if isinstance(exc, HTTPException):
+            # e.g. the builder's 503 "HAIL_PROVIDER_SECRET_KEY must be set" —
+            # keep the actionable status/detail instead of a generic 502.
+            if idem is not None:
+                await idem.store(
+                    status_code=exc.status_code,
+                    body={"detail": exc.detail},
+                )
+            raise exc
         if idem is not None:
             await idem.store(
                 status_code=http_status.HTTP_502_BAD_GATEWAY,
