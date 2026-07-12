@@ -927,6 +927,50 @@ class EmailAttachment(Base):
     )
 
 
+class EmailAttachmentUpload(Base):
+    """A caller-uploaded file, pre-send, awaiting reference from a `send`.
+
+    Distinct from ``EmailAttachment`` (which is always 1:1 with an
+    already-received inbound email, created once at ingest, never reused).
+    This row is org-owned, reusable across many outbound sends until
+    referenced or garbage-collected — see
+    ``hailhq.core.email_attachment_gc.EmailAttachmentGcWorker``, which
+    deletes rows where ``first_used_at`` is still null 24h after upload.
+    Rows that have been used at least once are kept indefinitely.
+    """
+
+    __tablename__ = "email_attachment_uploads"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        server_default=text("gen_random_uuid()"),
+    )
+    organization_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), nullable=False
+    )
+    filename: Mapped[str] = mapped_column(Text, nullable=False)
+    content_type: Mapped[str] = mapped_column(Text, nullable=False)
+    size_bytes: Mapped[int] = mapped_column(Integer, nullable=False)
+    s3_key: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        TS, server_default=text("now()"), nullable=False
+    )
+    first_used_at: Mapped[datetime | None] = mapped_column(TS, nullable=True)
+
+    __table_args__ = (
+        Index(
+            "email_attachment_uploads_gc_idx",
+            "created_at",
+            postgresql_where=text("first_used_at IS NULL"),
+        ),
+        Index(
+            "email_attachment_uploads_org_idx",
+            "organization_id",
+        ),
+    )
+
+
 class AuditLog(Base):
     __tablename__ = "audit_log"
 
