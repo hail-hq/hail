@@ -544,6 +544,38 @@ class EmailDomainListResponse(BaseModel):
     next_cursor: str | None = None
 
 
+class EmailAccountResponse(BaseModel):
+    """A connected external mailbox. NEVER includes token material."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    provider: str
+    email_address: str
+    display_name: str | None
+    status: Literal["active", "reauth_required", "disabled"]
+    scopes: list[str]
+    created_at: datetime
+    updated_at: datetime
+
+
+class EmailAccountListResponse(BaseModel):
+    items: list[EmailAccountResponse]
+    next_cursor: str | None = None
+
+
+class EmailAccountConnectResponse(BaseModel):
+    authorization_url: str
+
+
+class EmailAccountPatch(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    # reauth_required is server-managed: it is set by send/read failures and
+    # cleared only by a successful reconnect callback — PATCH can't fake it.
+    status: Literal["active", "disabled"]
+
+
 class EmailCreate(ConsentAttestationMixin):
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
 

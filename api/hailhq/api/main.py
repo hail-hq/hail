@@ -28,6 +28,7 @@ from hailhq.core.webhook_worker import WebhookWorker
 from hailhq.api.routes import calls as calls_routes
 from hailhq.api.routes import emails as emails_routes
 from hailhq.api.routes import events as events_routes
+from hailhq.api.routes import email_accounts as email_accounts_routes
 from hailhq.api.routes import email_domains as email_domains_routes
 from hailhq.api.routes import webhooks as webhooks_routes
 from hailhq.api.routes import sms as sms_routes
@@ -250,6 +251,7 @@ async def _cache_422_for_idempotent_retry(
 app.include_router(calls_routes.router)
 app.include_router(emails_routes.router)
 app.include_router(events_routes.router)
+app.include_router(email_accounts_routes.router)
 app.include_router(email_domains_routes.router)
 app.include_router(webhooks_routes.router)
 app.include_router(unsubscribe_routes.router)
