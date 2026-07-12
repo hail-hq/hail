@@ -285,6 +285,7 @@ class EmailCreate(BaseModel):
     body_html: str | None = None
     conversation_id: UUID | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
+    attachment_ids: list[UUID] | None = None
     recipient_consent: bool
     consent_source: str | None = None
     consent_obtained_at: datetime | None = None
@@ -365,6 +366,23 @@ class EmailAttachmentResponse(BaseModel):
     size_bytes: int
     content_id: str | None = None
     url: str
+
+
+class EmailAttachmentUploadResponse(BaseModel):
+    """Returned by ``client.email_attachments.create(...)``.
+
+    Mirrors ``core/hailhq/core/schemas.py:EmailAttachmentUploadResponse``.
+    The returned ``id`` is reusable across many
+    ``emails.create(attachment_ids=...)`` calls until Hail garbage-collects
+    it (24h if never referenced by a send).
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    filename: str
+    content_type: str
+    size_bytes: int
 
 
 class EmailResponse(EmailSummary):
@@ -585,6 +603,7 @@ __all__ = [
     "SuppressionListResponse",
     "EmailCreate",
     "EmailAttachmentResponse",
+    "EmailAttachmentUploadResponse",
     "EmailResponse",
     "EmailSummary",
     "EmailListResponse",

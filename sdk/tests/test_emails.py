@@ -350,6 +350,43 @@ def test_email_response_inbound_fields_parse() -> None:
     assert att.size_bytes == 4096
 
 
+@respx.mock
+async def test_email_attachments_create(base_url: str, api_key: str) -> None:
+    payload = {
+        "id": "11111111-1111-1111-1111-111111111111",
+        "filename": "invoice.pdf",
+        "content_type": "application/pdf",
+        "size_bytes": 3,
+    }
+    route = respx.post(f"{base_url}/email-attachments").mock(
+        return_value=httpx.Response(201, json=payload)
+    )
+    async with Client(api_key=api_key, base_url=base_url) as c:
+        att = await c.email_attachments.create(
+            filename="invoice.pdf", content=b"abc", content_type="application/pdf"
+        )
+    assert att.filename == "invoice.pdf"
+    assert att.size_bytes == 3
+    assert route.calls.last.request.url.path == "/email-attachments"
+
+
+@respx.mock
+async def test_emails_create_with_attachment_ids(base_url: str, api_key: str) -> None:
+    route = respx.post(f"{base_url}/emails").mock(
+        return_value=httpx.Response(201, json=make_email_response())
+    )
+    async with Client(api_key=api_key, base_url=base_url) as c:
+        await c.emails.create(
+            to=["a@example.com"],
+            subject="hi",
+            body_text="body",
+            recipient_consent=True,
+            attachment_ids=["11111111-1111-1111-1111-111111111111"],
+        )
+    body = json.loads(route.calls.last.request.content)
+    assert body["attachment_ids"] == ["11111111-1111-1111-1111-111111111111"]
+
+
 def test_email_response_outbound_keeps_defaults() -> None:
     """Outbound EmailResponse (no inbound fields in payload) still parses cleanly."""
     from hail.models import EmailResponse
