@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import uuid
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from uuid import UUID
@@ -24,7 +25,15 @@ from livekit.agents import Agent, AgentSession
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from hailhq.core.models import Call, CallEvent, PhoneNumber, UsageEvent
+from hailhq.core.models import (
+    Call,
+    CallEvent,
+    Contact,
+    OrganizationMember,
+    PhoneNumber,
+    UsageEvent,
+    User,
+)
 from hailhq.core.pool import CALL_META_FROM_POOL
 from hailhq.voicebot.agent import (
     AI_DISCLOSURE_LINE,
@@ -35,6 +44,7 @@ from hailhq.voicebot.agent import (
     VOICE_PREAMBLE,
     attach_event_handlers,
     build_instructions,
+    build_lookup_contact_tool,
     disconnect_reason_to_status,
     entrypoint,
     is_sip_answer_signal,
@@ -160,6 +170,67 @@ async def _make_call_row(session: AsyncSession) -> UUID:
     await session.commit()
     await session.refresh(call)
     return call.id
+
+
+async def _seed_member(
+    session: AsyncSession,
+    org_id: UUID,
+    *,
+    name: str,
+    email: str,
+    phone: str | None = None,
+    role: str = "member",
+) -> UUID:
+    """Insert a User + OrganizationMember row, mirroring
+    api/tests/test_contacts_core.py's seeding helper."""
+    uid = uuid.uuid4()
+    session.add(User(id=uid, name=name, email=email, phone_number=phone))
+    session.add(
+        OrganizationMember(
+            id=uuid.uuid4(),
+            organization_id=org_id,
+            user_id=uid,
+            role=role,
+            created_at=datetime.now(timezone.utc),
+        )
+    )
+    await session.commit()
+    return uid
+
+
+# --------------------------------------------------------------------------- #
+# lookup_contact function tool — org-scoped contact lookup for live calls
+# --------------------------------------------------------------------------- #
+
+
+async def test_lookup_contact_tool_org_scoped(async_session: AsyncSession) -> None:
+    """The tool returns matches from the target org only, with name + phone
+    in the output, and never leaks a same-name contact from another org."""
+    org_id = uuid.uuid4()
+    await _seed_member(
+        async_session, org_id, name="Maya", email="maya@acme.com", phone="+14155550100"
+    )
+
+    other_org = uuid.uuid4()
+    async_session.add(
+        Contact(organization_id=other_org, name="Maya Other", email="x@y.z")
+    )
+    await async_session.commit()
+
+    tool = build_lookup_contact_tool(org_id)
+    out = await tool("maya")
+
+    assert "Maya" in out and "+14155550100" in out
+    assert "Maya Other" not in out
+
+
+async def test_lookup_contact_tool_no_match(async_session: AsyncSession) -> None:
+    """A query that matches nobody in the org returns the fixed miss string."""
+    org_id = uuid.uuid4()
+
+    tool = build_lookup_contact_tool(org_id)
+
+    assert await tool("nobody") == "no contacts matched"
 
 
 class _FakeRoom:

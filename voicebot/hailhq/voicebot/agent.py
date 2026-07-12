@@ -26,7 +26,7 @@ from uuid import UUID
 
 from cryptography.fernet import InvalidToken
 from livekit import rtc
-from livekit.agents import Agent, JobContext, JobProcess
+from livekit.agents import Agent, JobContext, JobProcess, function_tool
 from livekit.agents.voice import AgentSession
 from livekit.plugins import silero
 from sqlalchemy import select, update
@@ -34,6 +34,7 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from hailhq.core.call_end_reasons import CallEndReason
 from hailhq.core.config import settings
+from hailhq.core.contacts import search_contacts
 from hailhq.core.db import session_scope
 from hailhq.core.secret_cipher import SecretKeyMissing
 from hailhq.core.internal_webhook import notify_usage_event_recorded
@@ -274,6 +275,32 @@ async def write_call_event(call_id: UUID, kind: str, payload: dict[str, Any]) ->
             kind,
             exc_info=True,
         )
+
+
+def build_lookup_contact_tool(org_id: UUID) -> Any:
+    """Build an org-scoped ``lookup_contact`` function tool for a live call.
+
+    Uses the same ``core.contacts`` union the API exposes, so a caller can
+    ask the agent to look someone up by name, email, or phone fragment and
+    get back a short spoken-friendly summary. Scoped to ``org_id`` for the
+    lifetime of the call — one tool instance per call, never shared across
+    organizations.
+    """
+
+    @function_tool()
+    async def lookup_contact(query: str) -> str:
+        """Look up a person in this workspace's contacts by name, email, or
+        phone fragment. Returns up to 5 matches as `name · phone · email`."""
+        async with session_scope() as session:
+            entries = await search_contacts(session, org_id, q=query, limit=5)
+        if not entries:
+            return "no contacts matched"
+        return "\n".join(
+            f"{e.name} · {e.phone_e164 or 'no phone'} · {e.email or 'no email'}"
+            for e in entries
+        )
+
+    return lookup_contact
 
 
 async def soft_cap_announce_and_hangup(
@@ -704,7 +731,31 @@ async def entrypoint(ctx: JobContext) -> None:
             captured["end_reason"] = CallEndReason.WORKER_SHUTDOWN.value
             captured["status"] = "failed"
 
-    agent = Agent(instructions=build_instructions(metadata.get("system_prompt")))
+    # Resolve the call's org once from the authoritative Call row (not the
+    # dispatch metadata) so the lookup_contact tool is scoped to the org that
+    # actually owns this call. A missing row (deleted/bad call_id) must not
+    # block the call — it just proceeds without the tool.
+    async with session_scope() as session_for_org:
+        contact_org_id = (
+            await session_for_org.execute(
+                select(Call.organization_id).where(Call.id == call_id)
+            )
+        ).scalar_one_or_none()
+
+    if contact_org_id is None:
+        logger.warning(
+            "call_id=%s has no matching Call row; proceeding without "
+            "lookup_contact tool",
+            call_id,
+        )
+        tools = []
+    else:
+        tools = [build_lookup_contact_tool(contact_org_id)]
+
+    agent = Agent(
+        instructions=build_instructions(metadata.get("system_prompt")),
+        tools=tools,
+    )
     await session.start(agent=agent, room=ctx.room)
 
     await speak_greeting(session, metadata)
@@ -758,6 +809,7 @@ __all__ = [
     "VOICE_PREAMBLE",
     "attach_event_handlers",
     "build_instructions",
+    "build_lookup_contact_tool",
     "disconnect_reason_to_status",
     "entrypoint",
     "is_sip_answer_signal",
