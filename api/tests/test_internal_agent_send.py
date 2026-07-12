@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from hailhq.api.main import app
 from hailhq.core import hmac_signing
+from hailhq.core.compliance_gate import add_suppression
 from hailhq.core.db import get_session
 from hailhq.core.billing import CALL_META_BILLED
 from hailhq.core.config import settings
@@ -317,6 +318,49 @@ async def test_send_sms_concurrent_same_invocation_sends_once(
     assert r1.json()["ok"] is True and r2.json()["ok"] is True
     rows = (await async_session.execute(Sms.__table__.select())).fetchall()
     assert len(rows) == 1
+
+
+async def test_send_sms_suppression_blocks_agent_send(client, async_session):
+    org = uuid.uuid4()
+    call = await _insert_live_call(async_session, org, to_e164="+14155550123")
+    await add_suppression(
+        async_session,
+        organization_id=org,
+        recipient="+14155550123",
+        channel="sms",
+        reason="recipient_request",
+        source="manual",
+    )
+    await async_session.commit()
+
+    body = _sms_payload(call.id)
+    resp = await client.post(
+        "/internal/agent/send-sms", content=body, headers=_signed(body)
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["ok"] is False
+    assert "+14155550123" not in data["spoken"]
+    assert "suppress" not in data["spoken"].lower()
+
+    rows = (await async_session.execute(Sms.__table__.select())).fetchall()
+    assert rows == []
+
+
+async def test_send_sms_denied_when_org_has_no_funds(client, async_session):
+    org = uuid.uuid4()
+    call = await _insert_live_call(async_session, org, billed=True)
+    # No account_credits rows for this org — balance defaults to zero.
+    body = _sms_payload(call.id)
+    resp = await client.post(
+        "/internal/agent/send-sms", content=body, headers=_signed(body)
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["ok"] is False
+
+    rows = (await async_session.execute(Sms.__table__.select())).fetchall()
+    assert rows == []
 
 
 async def test_send_sms_rejects_when_secret_unconfigured(

@@ -347,7 +347,7 @@ async def add_suppression(
 ) -> Suppression:
     """Insert one suppression row. Flushes but does not commit — the
     caller owns the transaction (matches the rest of this codebase's
-    session-handling convention, e.g. ``_resolve_sender`` in emails.py)."""
+    session-handling convention, e.g. ``resolve_sender`` in emails.py)."""
     row = Suppression(
         organization_id=organization_id,
         recipient=normalize_recipient(recipient),

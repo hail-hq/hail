@@ -18,6 +18,7 @@ from hailhq.core.agent_tools.spec import ToolContext, ToolSpec
 from hailhq.core.config import settings
 from hailhq.core.models import EmailDomain
 
+MAX_RECIPIENT_NAME_CHARS = 200  # route schema (AgentSendEmailRequest) max
 MAX_SUBJECT_CHARS = 200
 MAX_BODY_CHARS = 5000
 
@@ -46,7 +47,9 @@ async def _execute(ctx: ToolContext, args: dict[str, Any]) -> str:
         {
             "call_id": str(ctx.call_id),
             "tool_invocation_id": str(uuid.uuid4()),
-            "recipient_name": str(args.get("recipient_name", "")).strip(),
+            "recipient_name": str(args.get("recipient_name", "")).strip()[
+                :MAX_RECIPIENT_NAME_CHARS
+            ],
             "subject": str(args.get("subject", ""))[:MAX_SUBJECT_CHARS],
             "body_text": str(args.get("body_text", ""))[:MAX_BODY_CHARS],
         },

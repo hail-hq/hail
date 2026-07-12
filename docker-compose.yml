@@ -54,6 +54,8 @@ services:
       context: .
       dockerfile: voicebot/Dockerfile
     env_file: .env
+    environment:
+      HAIL_API_URL: http://api:8080
 
   mcp:
     build:

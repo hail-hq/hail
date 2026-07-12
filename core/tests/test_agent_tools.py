@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import subprocess
+import sys
 import uuid
 
 from hailhq.core.agent_tools.registry import all_tools
@@ -69,6 +71,26 @@ async def test_end_call_and_list_contacts_always_available(async_session):
     org = uuid.uuid4()
     assert await tools["end_call"].is_available(org, async_session) is True
     assert await tools["list_contacts"].is_available(org, async_session) is True
+
+
+async def test_list_contacts_degrades_when_directory_tables_are_missing(
+    monkeypatch,
+):
+    """Self-host: `users`/`members` are website-owned tables a pure
+    self-host deployment never creates. list_contacts must degrade to an
+    empty-directory answer instead of surfacing the DB error."""
+    from sqlalchemy.exc import ProgrammingError
+
+    import hailhq.core.agent_tools.list_contacts as list_contacts_module
+
+    async def _raise(_session, _org_id):
+        raise ProgrammingError("stmt", {}, Exception("UndefinedTable"))
+
+    monkeypatch.setattr(list_contacts_module, "list_directory", _raise)
+    tools = {t.name: t for t in all_tools()}
+    ctx = _ctx()
+    spoken = await tools["list_contacts"].execute(ctx, {})
+    assert spoken == "There are no contacts available."
 
 
 class FakeApi:
@@ -174,3 +196,20 @@ async def test_send_tools_degrade_without_api_client():
             {"recipient_name": "A", "subject": "s", "body_text": "b"},
         )
     )
+
+
+def test_agent_tools_package_is_livekit_free():
+    """The agent-tools registry must be importable without any livekit SDK.
+
+    core ships livekit-api for SIP/room management (hailhq.core.livekit),
+    so this must run in a fresh interpreter: in-process sys.modules is
+    already polluted by test_livekit.py at collection time.
+    """
+    code = (
+        "import sys; import hailhq.core.agent_tools.registry; "
+        "mods = [m for m in sys.modules if m == 'livekit' or "
+        "m.startswith('livekit.')]; "
+        "sys.exit(1 if mods else 0)"
+    )
+    result = subprocess.run([sys.executable, "-c", code], capture_output=True)
+    assert result.returncode == 0, result.stderr.decode()
