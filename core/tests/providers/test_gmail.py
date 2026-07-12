@@ -103,7 +103,10 @@ async def test_get_message_parses_multipart_body() -> None:
                     "mimeType": "multipart/mixed",
                     "headers": [
                         {"name": "From", "value": "Bob <bob@example.com>"},
-                        {"name": "To", "value": "alice@gmail.com"},
+                        {
+                            "name": "To",
+                            "value": '"Doe, John" <john@example.com>, alice@example.com',
+                        },
                         {"name": "Subject", "value": "hi"},
                         {"name": "Date", "value": "Sat, 12 Jul 2026 10:00:00 +0000"},
                         {"name": "Message-ID", "value": "<xyz@mail.example>"},
@@ -126,6 +129,9 @@ async def test_get_message_parses_multipart_body() -> None:
     msg = await _client(handler).get_message("m3")
     assert msg["body_text"] == "hello there"
     assert msg["message_id"] == "<xyz@mail.example>"
+    # Bare addresses only — display names stripped, quoted commas respected.
+    assert msg["from_address"] == "bob@example.com"
+    assert msg["to_addresses"] == ["john@example.com", "alice@example.com"]
     assert msg["attachments"] == [
         {
             "filename": "doc.pdf",

@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import base64
 import time
+from email.utils import getaddresses
 from typing import Any
 
 import httpx
@@ -150,8 +151,16 @@ def _headers_map(payload: dict[str, Any]) -> dict[str, str]:
     return {h["name"].lower(): h["value"] for h in payload.get("headers") or []}
 
 
-def _split_addresses(value: str | None) -> list[str]:
-    return [part.strip() for part in value.split(",")] if value else []
+def _bare_addresses(value: str | None) -> list[str]:
+    """Bare addresses from a raw header value — display names stripped.
+
+    ``getaddresses`` handles quoted display-name commas
+    (``"Doe, John" <john@example.com>``), matching the codebase convention
+    for these field names (see ``hailhq.core.email_mime``).
+    """
+    if not value:
+        return []
+    return [addr for _name, addr in getaddresses([value]) if addr]
 
 
 def _walk_parts(part: dict[str, Any], out: dict[str, Any]) -> None:
@@ -181,9 +190,9 @@ def _parse_message(data: dict[str, Any], *, include_body: bool) -> dict[str, Any
     parsed: dict[str, Any] = {
         "id": data["id"],
         "thread_id": data.get("threadId", ""),
-        "from_address": headers.get("from", ""),
-        "to_addresses": _split_addresses(headers.get("to")),
-        "cc_addresses": _split_addresses(headers.get("cc")),
+        "from_address": next(iter(_bare_addresses(headers.get("from"))), ""),
+        "to_addresses": _bare_addresses(headers.get("to")),
+        "cc_addresses": _bare_addresses(headers.get("cc")),
         "subject": headers.get("subject", ""),
         "date": headers.get("date", ""),
         "snippet": data.get("snippet", ""),
