@@ -9,6 +9,7 @@ import httpx
 import pytest
 
 from hailhq.core.providers.email.gmail import (
+    GmailApiError,
     GmailAuthError,
     GmailClient,
     GmailEmailProvider,
@@ -86,6 +87,17 @@ async def test_gmail_401_raises_auth_error() -> None:
     client = _client(handler)
     with pytest.raises(GmailAuthError):
         await client.get_profile()
+
+
+async def test_transport_error_surfaces_as_gmail_api_error() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("connection refused", request=request)
+
+    client = _client(handler)
+    with pytest.raises(GmailApiError) as exc_info:
+        await client.get_profile()
+    assert exc_info.value.status == 502
+    assert not isinstance(exc_info.value, GmailAuthError)
 
 
 async def test_get_message_parses_multipart_body() -> None:

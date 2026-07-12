@@ -46,6 +46,23 @@ class GmailAuthError(GmailApiError):
     """Grant revoked/expired — surface as reauth_required upstream."""
 
 
+_shared_http_client: httpx.AsyncClient | None = None
+
+
+def _shared_http() -> httpx.AsyncClient:
+    """Process-wide ``httpx.AsyncClient`` for accounts that don't inject one.
+
+    Lazily created on first use and reused across ``GmailClient`` instances
+    so connections are pooled instead of a fresh (never-closed) client per
+    request. Tests always inject their own client, so this path only runs
+    in the real app.
+    """
+    global _shared_http_client
+    if _shared_http_client is None:
+        _shared_http_client = httpx.AsyncClient(timeout=30.0)
+    return _shared_http_client
+
+
 def _b64url(raw: bytes) -> str:
     return base64.urlsafe_b64encode(raw).rstrip(b"=").decode("ascii")
 
@@ -59,7 +76,7 @@ class GmailClient:
         self, *, refresh_token: str, http: httpx.AsyncClient | None = None
     ) -> None:
         self._refresh_token = refresh_token
-        self._http = http or httpx.AsyncClient(timeout=30.0)
+        self._http = http or _shared_http()
         self._access_token: str | None = None
         self._token_expiry = 0.0
 
@@ -84,9 +101,16 @@ class GmailClient:
         json_body: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         headers = {"Authorization": f"Bearer {await self._token()}"}
-        resp = await self._http.request(
-            method, f"{GMAIL_API}{path}", params=params, json=json_body, headers=headers
-        )
+        try:
+            resp = await self._http.request(
+                method,
+                f"{GMAIL_API}{path}",
+                params=params,
+                json=json_body,
+                headers=headers,
+            )
+        except httpx.HTTPError as exc:
+            raise GmailApiError(502, str(exc)) from exc
         if resp.status_code == 401:
             raise GmailAuthError(401, resp.text)
         if resp.status_code >= 400:

@@ -10,7 +10,7 @@ from sqlalchemy import func, select
 from hailhq.api.main import app
 from hailhq.api.routes.email_accounts import get_gmail_client_builder
 from hailhq.core.models import Email
-from hailhq.core.providers.email.gmail import GmailAuthError
+from hailhq.core.providers.email.gmail import GmailApiError, GmailAuthError
 
 from tests.test_email_accounts_api import _insert_account  # reuse row helper
 
@@ -27,12 +27,17 @@ def _secret_key_settings(monkeypatch):
 
 
 class FakeGmail:
-    def __init__(self, *, fail_auth: bool = False) -> None:
+    def __init__(
+        self, *, fail_auth: bool = False, api_error: GmailApiError | None = None
+    ) -> None:
         self.fail_auth = fail_auth
+        self.api_error = api_error
 
     async def list_messages(self, *, q=None, max_results=25, page_token=None):
         if self.fail_auth:
             raise GmailAuthError(401, "revoked")
+        if self.api_error is not None:
+            raise self.api_error
         summary = {
             "id": "m1",
             "thread_id": "t1",
@@ -47,6 +52,10 @@ class FakeGmail:
         return [summary], None
 
     async def get_message(self, message_id):
+        if self.fail_auth:
+            raise GmailAuthError(401, "revoked")
+        if self.api_error is not None:
+            raise self.api_error
         return {
             "id": message_id,
             "thread_id": "t1",
@@ -125,6 +134,72 @@ async def test_auth_error_flags_reauth_required(client, org_and_key, async_sessi
     assert resp.status_code == 409
     await async_session.refresh(acct)
     assert acct.status == "reauth_required"
+
+
+async def test_gmail_5xx_returns_502_not_500(client, org_and_key, async_session):
+    org_id, _, plain = org_and_key
+    acct = await _insert_account(async_session, org_id)
+    fake = FakeGmail(api_error=GmailApiError(500, "backend error"))
+    app.dependency_overrides[get_gmail_client_builder] = lambda: (lambda a: fake)
+    try:
+        resp = await client.get(
+            f"/email-accounts/{acct.id}/messages",
+            headers={"Authorization": f"Bearer {plain}"},
+        )
+    finally:
+        app.dependency_overrides.pop(get_gmail_client_builder, None)
+    assert resp.status_code == 502
+    assert resp.status_code != 500
+
+
+async def test_gmail_429_returns_502_not_500(client, org_and_key, async_session):
+    # Rate limiting is a transient/server-side condition, not a caller
+    # mistake — spec maps everything >=500 (and transport errors, which are
+    # also raised as GmailApiError) to 502; 429 falls under 4xx -> 400 per
+    # the exception's own .status, which this test also protects against a
+    # 500 leaking through.
+    org_id, _, plain = org_and_key
+    acct = await _insert_account(async_session, org_id)
+    fake = FakeGmail(api_error=GmailApiError(429, "rate limited"))
+    app.dependency_overrides[get_gmail_client_builder] = lambda: (lambda a: fake)
+    try:
+        resp = await client.get(
+            f"/email-accounts/{acct.id}/messages",
+            headers={"Authorization": f"Bearer {plain}"},
+        )
+    finally:
+        app.dependency_overrides.pop(get_gmail_client_builder, None)
+    assert resp.status_code != 500
+
+
+async def test_gmail_400_returns_400(client, org_and_key, async_session):
+    org_id, _, plain = org_and_key
+    acct = await _insert_account(async_session, org_id)
+    fake = FakeGmail(api_error=GmailApiError(400, "bad request"))
+    app.dependency_overrides[get_gmail_client_builder] = lambda: (lambda a: fake)
+    try:
+        resp = await client.get(
+            f"/email-accounts/{acct.id}/messages/m1",
+            headers={"Authorization": f"Bearer {plain}"},
+        )
+    finally:
+        app.dependency_overrides.pop(get_gmail_client_builder, None)
+    assert resp.status_code == 400
+
+
+async def test_corrupted_credentials_returns_502(client, org_and_key, async_session):
+    org_id, _, plain = org_and_key
+    acct = await _insert_account(async_session, org_id)
+    # Corrupt the ciphertext post-insert so the builder's cipher.decrypt()
+    # raises cryptography.fernet.InvalidToken.
+    acct.encrypted_refresh_token = "not-valid-fernet-ciphertext"
+    await async_session.commit()
+    resp = await client.get(
+        f"/email-accounts/{acct.id}/messages",
+        headers={"Authorization": f"Bearer {plain}"},
+    )
+    assert resp.status_code == 502
+    assert "reconnect" in resp.json()["detail"]
 
 
 async def test_other_org_account_404(client, org_and_key, async_session, fake_gmail):

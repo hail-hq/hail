@@ -9,7 +9,12 @@ import pytest
 from sqlalchemy import select
 
 from hailhq.core.models import Email, EmailAccount
-from hailhq.core.providers.email.gmail_oauth import TokenGrant, Userinfo, mint_state
+from hailhq.core.providers.email.gmail_oauth import (
+    GmailOAuthError,
+    TokenGrant,
+    Userinfo,
+    mint_state,
+)
 from hailhq.core.secret_cipher import SecretCipher
 
 
@@ -102,6 +107,41 @@ async def test_callback_creates_account(client, org_and_key, async_session):
     assert row.encrypted_refresh_token != "rt"  # stored encrypted, not plaintext
 
 
+async def test_callback_exchange_code_expired_returns_400_not_500(client, org_and_key):
+    org_id, _, _ = org_and_key
+    with patch(
+        "hailhq.api.routes.email_accounts.exchange_code",
+        new=AsyncMock(side_effect=GmailOAuthError("boom")),
+    ):
+        resp = await client.get(
+            "/email-accounts/oauth/callback",
+            params={"code": "c0de", "state": mint_state(org_id, None)},
+        )
+    assert resp.status_code == 400
+    assert resp.status_code != 500
+
+
+async def test_callback_fetch_userinfo_failure_returns_400_not_500(client, org_and_key):
+    org_id, _, _ = org_and_key
+    grant = TokenGrant(access_token="at", refresh_token="rt", expires_in=3599)
+    with (
+        patch(
+            "hailhq.api.routes.email_accounts.exchange_code",
+            new=AsyncMock(return_value=grant),
+        ),
+        patch(
+            "hailhq.api.routes.email_accounts.fetch_userinfo",
+            new=AsyncMock(side_effect=GmailOAuthError("boom")),
+        ),
+    ):
+        resp = await client.get(
+            "/email-accounts/oauth/callback",
+            params={"code": "c0de", "state": mint_state(org_id, None)},
+        )
+    assert resp.status_code == 400
+    assert resp.status_code != 500
+
+
 async def test_callback_rejects_bad_state(client):
     resp = await client.get(
         "/email-accounts/oauth/callback", params={"code": "x", "state": "garbage"}
@@ -143,6 +183,63 @@ async def test_patch_disable_and_enable(client, org_and_key, async_session):
     assert resp.json()["status"] == "disabled"
 
 
+async def test_patch_reauth_to_active_returns_409(client, org_and_key, async_session):
+    org_id, _, plain = org_and_key
+    acct = await _insert_account(async_session, org_id, status="reauth_required")
+    resp = await client.patch(
+        f"/email-accounts/{acct.id}",
+        json={"status": "active"},
+        headers={"Authorization": f"Bearer {plain}"},
+    )
+    assert resp.status_code == 409
+    assert "reconnect" in resp.json()["detail"]
+    await async_session.refresh(acct)
+    assert acct.status == "reauth_required"  # PATCH did not clear it
+
+
+async def test_patch_reauth_to_disabled_stays_allowed(
+    client, org_and_key, async_session
+):
+    org_id, _, plain = org_and_key
+    acct = await _insert_account(async_session, org_id, status="reauth_required")
+    resp = await client.patch(
+        f"/email-accounts/{acct.id}",
+        json={"status": "disabled"},
+        headers={"Authorization": f"Bearer {plain}"},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "disabled"
+
+
+async def test_get_other_org_account_404(client, org_and_key, async_session):
+    _, _, plain = org_and_key
+    other = await _insert_account(async_session, uuid.uuid4(), address="x@gmail.com")
+    resp = await client.get(
+        f"/email-accounts/{other.id}", headers={"Authorization": f"Bearer {plain}"}
+    )
+    assert resp.status_code == 404
+
+
+async def test_patch_other_org_account_404(client, org_and_key, async_session):
+    _, _, plain = org_and_key
+    other = await _insert_account(async_session, uuid.uuid4(), address="x@gmail.com")
+    resp = await client.patch(
+        f"/email-accounts/{other.id}",
+        json={"status": "disabled"},
+        headers={"Authorization": f"Bearer {plain}"},
+    )
+    assert resp.status_code == 404
+
+
+async def test_delete_other_org_account_404(client, org_and_key, async_session):
+    _, _, plain = org_and_key
+    other = await _insert_account(async_session, uuid.uuid4(), address="x@gmail.com")
+    resp = await client.delete(
+        f"/email-accounts/{other.id}", headers={"Authorization": f"Bearer {plain}"}
+    )
+    assert resp.status_code == 404
+
+
 async def test_delete_revokes_and_deletes(client, org_and_key, async_session):
     org_id, _, plain = org_and_key
     acct = await _insert_account(async_session, org_id)
@@ -171,11 +268,14 @@ async def test_delete_409_when_emails_reference(client, org_and_key, async_sessi
         )
     )
     await async_session.commit()
-    with patch("hailhq.api.routes.email_accounts.revoke_token", new=AsyncMock()):
+    with patch(
+        "hailhq.api.routes.email_accounts.revoke_token", new=AsyncMock()
+    ) as revoke:
         resp = await client.delete(
             f"/email-accounts/{acct.id}", headers={"Authorization": f"Bearer {plain}"}
         )
     assert resp.status_code == 409
+    revoke.assert_not_called()  # must not revoke at Google before the delete can commit
 
 
 async def test_reconnect_rejects_different_google_account(

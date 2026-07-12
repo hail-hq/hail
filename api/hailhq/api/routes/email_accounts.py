@@ -21,10 +21,11 @@ import logging
 from typing import Annotated, Callable
 from uuid import UUID
 
+from cryptography.fernet import InvalidToken
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi import status as http_status
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -33,9 +34,10 @@ from hailhq.api.deps import Principal, get_current_principal
 from hailhq.api.pagination import fetch_cursor_page
 from hailhq.core.config import settings
 from hailhq.core.db import get_session
-from hailhq.core.models import EmailAccount
-from hailhq.core.providers.email.gmail import GmailAuthError, GmailClient
+from hailhq.core.models import Email, EmailAccount
+from hailhq.core.providers.email.gmail import GmailApiError, GmailAuthError, GmailClient
 from hailhq.core.providers.email.gmail_oauth import (
+    GmailOAuthError,
     InvalidStateToken,
     build_authorization_url,
     exchange_code,
@@ -189,7 +191,18 @@ async def oauth_callback(
     except InvalidStateToken:
         return HTMLResponse("<h1>Invalid or expired state token</h1>", 400)
 
-    grant = await exchange_code(code=code, redirect_uri=_redirect_uri())
+    try:
+        grant = await exchange_code(code=code, redirect_uri=_redirect_uri())
+    except GmailOAuthError:
+        return HTMLResponse(
+            "<h1>"
+            + html.escape(
+                "Connection failed — the authorization may have expired. "
+                "Retry the connect link."
+            )
+            + "</h1>",
+            400,
+        )
     if not grant.refresh_token:
         return HTMLResponse(
             "<h1>Google returned no refresh token</h1>"
@@ -197,7 +210,18 @@ async def oauth_callback(
             "and connect again.</p>",
             400,
         )
-    info = await fetch_userinfo(access_token=grant.access_token)
+    try:
+        info = await fetch_userinfo(access_token=grant.access_token)
+    except GmailOAuthError:
+        return HTMLResponse(
+            "<h1>"
+            + html.escape(
+                "Connection failed — the authorization may have expired. "
+                "Retry the connect link."
+            )
+            + "</h1>",
+            400,
+        )
     cipher = _cipher()
     encrypted = cipher.encrypt(grant.refresh_token)
     scopes = grant.scope.split() if grant.scope else []
@@ -317,6 +341,15 @@ async def patch_email_account(
     db: Annotated[AsyncSession, Depends(get_session)],
 ) -> EmailAccountResponse:
     account = await require_account(db, principal.organization_id, account_id)
+    if account.status == "reauth_required" and body.status == "active":
+        raise HTTPException(
+            status_code=http_status.HTTP_409_CONFLICT,
+            detail=(
+                f"email account {account.email_address!r} needs reauthorization; "
+                f"reconnect via POST /email-accounts/{account.id}/reconnect "
+                "instead of setting status directly"
+            ),
+        )
     account.status = body.status
     await db.commit()
     await db.refresh(account)
@@ -330,6 +363,19 @@ async def delete_email_account(
     db: Annotated[AsyncSession, Depends(get_session)],
 ) -> Response:
     account = await require_account(db, principal.organization_id, account_id)
+    referencing = (
+        await db.execute(
+            select(func.count(Email.id)).where(Email.email_account_id == account_id)
+        )
+    ).scalar_one()
+    if referencing > 0:
+        raise HTTPException(
+            status_code=http_status.HTTP_409_CONFLICT,
+            detail=(
+                "email account has sent emails referencing it; disable it "
+                'instead (PATCH {"status": "disabled"})'
+            ),
+        )
     cipher = _cipher()
     try:
         await revoke_token(token=cipher.decrypt(account.encrypted_refresh_token))
@@ -385,6 +431,18 @@ async def _flag_reauth(db: AsyncSession, account: EmailAccount) -> HTTPException
     )
 
 
+def _gmail_api_error_to_http(exc: GmailApiError) -> HTTPException:
+    status = (
+        http_status.HTTP_502_BAD_GATEWAY
+        if exc.status >= 500
+        else http_status.HTTP_400_BAD_REQUEST
+    )
+    return HTTPException(status_code=status, detail=exc.detail)
+
+
+_CORRUPT_CREDENTIALS_DETAIL = "stored credentials are corrupted; reconnect"
+
+
 @router.get("/{account_id}/messages", response_model=MailboxMessageListResponse)
 async def list_mailbox_messages(
     account_id: UUID,
@@ -406,6 +464,13 @@ async def list_mailbox_messages(
         )
     except GmailAuthError:
         raise await _flag_reauth(db, account) from None
+    except GmailApiError as exc:
+        raise _gmail_api_error_to_http(exc) from None
+    except InvalidToken:
+        raise HTTPException(
+            status_code=http_status.HTTP_502_BAD_GATEWAY,
+            detail=_CORRUPT_CREDENTIALS_DETAIL,
+        ) from None
     return MailboxMessageListResponse(
         items=[MailboxMessageSummary.model_validate(i) for i in items],
         next_page_token=next_token,
@@ -428,4 +493,11 @@ async def get_mailbox_message(
         msg = await builder(account).get_message(message_id)
     except GmailAuthError:
         raise await _flag_reauth(db, account) from None
+    except GmailApiError as exc:
+        raise _gmail_api_error_to_http(exc) from None
+    except InvalidToken:
+        raise HTTPException(
+            status_code=http_status.HTTP_502_BAD_GATEWAY,
+            detail=_CORRUPT_CREDENTIALS_DETAIL,
+        ) from None
     return MailboxMessageDetail.model_validate(msg)

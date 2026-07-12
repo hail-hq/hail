@@ -592,7 +592,8 @@ def register_tools(
         consent_obtained_at: str | None = None,
         message_type: str = "informational",
     ) -> dict[str, Any]:
-        """Send an outbound email through your configured SES sender.
+        """Send an outbound email through a verified sender domain or a
+        connected mailbox.
 
         ``to`` is a non-empty list of RFC-style email addresses. At
         least one of ``body_text`` / ``body_html`` is required (both
@@ -622,9 +623,12 @@ def register_tools(
         (the ``<org>`` part is derived from your organization id; the
         ``<user>`` part comes from ``HAIL_MAIL_FROM`` /
         ``HAIL_MAIL_DEFAULT_USER_PREFIX``, or an explicit row created
-        via ``POST /email-domains``). When supplied, it must
+        via ``POST /email-domains``). When supplied, it must either
         match a verified row already in ``email_domains`` (register
-        one with the website console or ``POST /email-domains``).
+        one with the website console or ``POST /email-domains``) or
+        be the address of a connected mailbox (``POST
+        /email-accounts/connect``), in which case the send goes out
+        through that account's own Gmail API grant instead of SES.
 
         ``metadata`` is free-form JSON attached to the email record.
 
