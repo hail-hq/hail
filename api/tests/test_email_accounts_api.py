@@ -108,6 +108,15 @@ async def test_callback_rejects_bad_state(client):
     assert resp.status_code == 400
 
 
+async def test_callback_escapes_error_param(client):
+    resp = await client.get(
+        "/email-accounts/oauth/callback",
+        params={"error": "<script>alert(1)</script>"},
+    )
+    assert resp.status_code == 400
+    assert "<script>" not in resp.text  # escaped (&lt;script&gt;), never raw HTML
+
+
 async def test_list_never_leaks_tokens(client, org_and_key, async_session):
     org_id, _, plain = org_and_key
     await _insert_account(async_session, org_id)

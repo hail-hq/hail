@@ -16,6 +16,7 @@ docs/superpowers/specs/2026-07-12-gmail-account-connection-design.md
 
 from __future__ import annotations
 
+import html
 import logging
 from typing import Annotated, Callable
 from uuid import UUID
@@ -169,7 +170,9 @@ async def oauth_callback(
     binds the browser back to the initiating org."""
     _require_configured()
     if error:
-        return HTMLResponse(f"<h1>Connection cancelled</h1><p>{error}</p>", 400)
+        return HTMLResponse(
+            f"<h1>Connection cancelled</h1><p>{html.escape(error)}</p>", 400
+        )
     if not code or not state:
         return HTMLResponse("<h1>Missing code or state</h1>", 400)
     try:
@@ -205,8 +208,9 @@ async def oauth_callback(
         if account.provider_user_id != info.sub:
             return HTMLResponse(
                 "<h1>Wrong Google account</h1>"
-                f"<p>This connection belongs to {account.email_address}; you "
-                f"authorized {info.email}. Retry with the right account.</p>",
+                f"<p>This connection belongs to {html.escape(account.email_address)}; "
+                f"you authorized {html.escape(info.email)}. Retry with the right "
+                "account.</p>",
                 409,
             )
         account.encrypted_refresh_token = encrypted
@@ -223,7 +227,8 @@ async def oauth_callback(
             if existing.organization_id != organization_id:
                 return HTMLResponse(
                     "<h1>Already connected elsewhere</h1>"
-                    f"<p>{info.email} is connected to a different organization.</p>",
+                    f"<p>{html.escape(info.email)} is connected to a different "
+                    "organization.</p>",
                     409,
                 )
             # Same org re-connecting the same mailbox — refresh in place.
@@ -255,7 +260,7 @@ async def oauth_callback(
     )
     if settings.hail_email_connect_success_url:
         return RedirectResponse(settings.hail_email_connect_success_url, 303)
-    return HTMLResponse(_SUCCESS_HTML.format(address=info.email))
+    return HTMLResponse(_SUCCESS_HTML.format(address=html.escape(info.email)))
 
 
 @router.get("", response_model=EmailAccountListResponse)
