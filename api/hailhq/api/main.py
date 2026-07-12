@@ -18,6 +18,7 @@ from hailhq.core.config import settings
 from hailhq.core.db import dispose_engine, session_scope
 from hailhq.core.http_post import httpx_post
 from hailhq.core.domain_verification_worker import DomainVerificationWorker
+from hailhq.core.email_attachment_gc import EmailAttachmentGcWorker
 from hailhq.core.outbound_worker import OutboundForwardWorker
 from hailhq.core.pool import sweep_pool_reservations
 from hailhq.core.providers.email.ses import SesEmailProvider
@@ -162,6 +163,17 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
             forward_worker.run_forever(), name="outbound-forward-worker"
         )
 
+    attachment_gc_worker: EmailAttachmentGcWorker | None = None
+    attachment_gc_task: asyncio.Task | None = None
+    if settings.hail_mail_bucket:
+        attachment_gc_worker = EmailAttachmentGcWorker(
+            session_factory=session_scope,
+            s3_factory=lambda: S3MailClient(bucket=settings.hail_mail_bucket),
+        )
+        attachment_gc_task = asyncio.create_task(
+            attachment_gc_worker.run_forever(), name="email-attachment-gc-worker"
+        )
+
     verify_worker: DomainVerificationWorker | None = None
     verify_task: asyncio.Task | None = None
     if settings.hail_domain_verify_poll_seconds > 0:
@@ -197,6 +209,8 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
             await _stop_worker(webhook_worker, webhook_task)
         if forward_worker is not None and forward_task is not None:
             await _stop_worker(forward_worker, forward_task)
+        if attachment_gc_worker is not None and attachment_gc_task is not None:
+            await _stop_worker(attachment_gc_worker, attachment_gc_task)
         if verify_worker is not None and verify_task is not None:
             await _stop_worker(verify_worker, verify_task)
         if abuse_worker is not None and abuse_task is not None:

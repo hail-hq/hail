@@ -50,6 +50,11 @@ class S3MailClient:
             ContentType=content_type,
         )
 
+    async def delete(self, key: str) -> None:
+        await asyncio.to_thread(
+            self._client.delete_object, Bucket=self._bucket, Key=key
+        )
+
     async def presign_get(self, key: str, *, ttl_seconds: int = 300) -> str:
         def _do() -> str:
             return self._client.generate_presigned_url(
