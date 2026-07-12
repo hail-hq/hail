@@ -928,6 +928,48 @@ async def test_post_calls_forwards_tools_in_dispatch_metadata(
     assert metadata["tools"] == ["end_call"]
 
 
+async def test_post_calls_tools_empty_and_omitted_passthrough(
+    client: httpx.AsyncClient,
+    async_session: AsyncSession,
+    org_and_key: tuple[str, ApiKey, str],
+    livekit_mock: AsyncMock,
+    add_phone_number,
+) -> None:
+    """`tools: []` dispatches as [] (no tools); omitted dispatches as None
+    (all tools). Pins the []-vs-None distinction so a refactor to a
+    truthiness check (`if body.tools:`) can't silently collapse [] into
+    the None path."""
+    org_id, _, plain = org_and_key
+    await add_phone_number(async_session, org_id)
+
+    resp = await client.post(
+        "/calls",
+        json={
+            "to": "+14155559999",
+            "system_prompt": "hi",
+            "recipient_consent": True,
+            "tools": [],
+        },
+        headers={"Authorization": f"Bearer {plain}"},
+    )
+    assert resp.status_code == 201, resp.text
+    metadata = livekit_mock.dispatch_agent.await_args.kwargs["metadata"]
+    assert metadata["tools"] == []
+
+    resp = await client.post(
+        "/calls",
+        json={
+            "to": "+14155559999",
+            "system_prompt": "hi",
+            "recipient_consent": True,
+        },
+        headers={"Authorization": f"Bearer {plain}"},
+    )
+    assert resp.status_code == 201, resp.text
+    metadata = livekit_mock.dispatch_agent.await_args.kwargs["metadata"]
+    assert metadata["tools"] is None
+
+
 async def test_post_calls_stamps_billed_flag(
     client: httpx.AsyncClient,
     async_session: AsyncSession,
