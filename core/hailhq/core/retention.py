@@ -20,9 +20,10 @@ not customer content — see ``hailhq.core.models.AuditLog``.
 
 Also hard-deletes ``contacts`` rows for closed orgs. The contacts-v2 design
 originally specced ``contacts.organization_id`` as
-``references organizations(id) on delete cascade``; ``organizations`` lives
-in the separate hail-website Postgres, so no real FK — let alone a cascade —
-is possible (see ``hailhq.core.models.Contact`` / the no-FK convention this
+``references organizations(id) on delete cascade``; ``organizations`` is a
+website-owned table in the shared Postgres, and this repo's convention is no
+FKs to website-owned tables (see ``hailhq.core.models.Contact`` / the same
+convention this
 module's docstring already leans on for ``org_closures``). This sweep is the
 explicit replacement for that cascade. Unlike Call/Sms/Email, contacts have
 no separate "content" field to scrub — a ``Contact`` row *is* identifying
