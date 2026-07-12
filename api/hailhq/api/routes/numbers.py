@@ -19,6 +19,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from hailhq.api.deps import Principal, get_current_principal
+from hailhq.api.errors import unprocessable
 from hailhq.api.pagination import fetch_cursor_page
 from hailhq.api.routes.sms import get_sms_provider
 from hailhq.core.db import get_session
@@ -137,12 +138,10 @@ async def enable_sms(
         raise HTTPException(status_code=http_status.HTTP_404_NOT_FOUND, detail="number not found")
 
     if "sms" not in number.capabilities:
-        raise HTTPException(
-            status_code=http_status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=(
-                "this number does not support sms (fixed at purchase time by the "
-                "carrier); acquire a new number with sms capability instead"
-            ),
+        raise unprocessable(
+            "this number does not support sms (fixed at purchase time by the "
+            "carrier); acquire a new number with sms capability instead",
+            loc=["path", "number_id"],
         )
 
     messaging_service_sid = await provider.ensure_messaging_service(

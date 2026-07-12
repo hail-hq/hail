@@ -65,7 +65,7 @@ async def test_enable_sms_rejects_number_without_sms_capability(
         f"/numbers/{pn.id}/enable-sms", headers={"Authorization": f"Bearer {plaintext}"}
     )
     assert resp.status_code == 422
-    assert "does not support sms" in resp.json()["detail"].lower()
+    assert "does not support sms" in resp.json()["detail"][0]["msg"].lower()
 
 
 async def test_enable_sms_creates_messaging_service_and_attaches(
