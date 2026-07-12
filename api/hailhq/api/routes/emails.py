@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timedelta, timezone
-from typing import Annotated, Literal
+from typing import Annotated, Callable, Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
@@ -49,13 +49,25 @@ from hailhq.api.routes.email_domains import (
     resolve_hail_mail_prefixes,
 )
 from hailhq.api.funds import require_funds
+from hailhq.api.routes.email_accounts import get_gmail_client_builder
 from hailhq.core.compliance_gate import check_email_allowed
 from hailhq.core.db import get_session
 from hailhq.core.email_delivery_events import record_sent_event
 from hailhq.core.email_footer import FOOTER_SENT, append_disclosure, append_footer
-from hailhq.core.models import Email, EmailAttachment, EmailDomain, EmailEvent
+from hailhq.core.models import (
+    Email,
+    EmailAccount,
+    EmailAttachment,
+    EmailDomain,
+    EmailEvent,
+)
 from hailhq.core.s3_inbound import S3InboundClient
-from hailhq.core.providers.email import EmailProvider
+from hailhq.core.providers.email import EmailProvider, EmailSender
+from hailhq.core.providers.email.gmail import (
+    GmailAuthError,
+    GmailClient,
+    GmailEmailProvider,
+)
 from hailhq.core.unsubscribe import build_unsubscribe_url
 from hailhq.core.schemas import (
     EmailAttachmentResponse,
@@ -90,12 +102,14 @@ async def _resolve_sender(
     db: AsyncSession,
     organization_id: UUID,
     explicit_from: str | None,
-) -> EmailDomain:
-    """Find the EmailDomain row to send through, in priority order.
+) -> EmailDomain | EmailAccount:
+    """Find the EmailDomain/EmailAccount row to send through, in priority order.
 
-    1. Explicit ``from``: look up by full address (hail-mail row's
-       ``domain`` is the full address; custom row's ``domain`` is the
-       parent so we match by suffix).
+    1. Explicit ``from``: a connected ``email_accounts`` row matching the
+       address exactly wins first (Gmail send-as-yourself); then fall back
+       to the domain lookup below (hail-mail row's ``domain`` is the full
+       address; custom row's ``domain`` is the parent so we match by
+       suffix).
     2. First verified org-owned domain by ``created_at`` (deterministic
        across retries — newest-last so the "default sender" stays
        stable as orgs add more).
@@ -105,6 +119,26 @@ async def _resolve_sender(
     Raises ``HTTPException`` if nothing resolves.
     """
     if explicit_from is not None:
+        account = (
+            await db.execute(
+                select(EmailAccount).where(
+                    EmailAccount.organization_id == organization_id,
+                    EmailAccount.email_address == explicit_from,
+                )
+            )
+        ).scalar_one_or_none()
+        if account is not None:
+            if account.status != "active":
+                raise HTTPException(
+                    status_code=http_status.HTTP_409_CONFLICT,
+                    detail=(
+                        f"connected account {explicit_from!r} is "
+                        f"{account.status}; reconnect via POST "
+                        f"/email-accounts/{account.id}/reconnect"
+                    ),
+                )
+            return account
+
         _, _, dom = explicit_from.partition("@")
         if not dom:
             raise unprocessable(
@@ -283,6 +317,9 @@ async def create_email(
     principal: Annotated[Principal, Depends(get_current_principal)],
     db: Annotated[AsyncSession, Depends(get_session)],
     email_provider: Annotated[EmailProvider, Depends(get_email_provider)],
+    gmail_builder: Annotated[
+        Callable[[EmailAccount], GmailClient], Depends(get_gmail_client_builder)
+    ],
     idem: Annotated[IdempotencyContext | None, Depends(idempotency_dep)] = None,
 ) -> EmailResponse:
     # Idempotency replay first — never re-send.
@@ -335,12 +372,15 @@ async def create_email(
         sd = await _resolve_sender(db, principal.organization_id, body.from_)
     except HTTPException as exc:
         raise await cache_failure(idem, exc) from None
-    from_address = _from_address_for(sd, body.from_)
+    is_account = isinstance(sd, EmailAccount)
+    from_address = sd.email_address if is_account else _from_address_for(sd, body.from_)
 
     email = Email(
         organization_id=principal.organization_id,
         conversation_id=body.conversation_id,
-        email_domain_id=sd.id,
+        email_domain_id=None if is_account else sd.id,
+        email_account_id=sd.id if is_account else None,
+        in_reply_to=body.in_reply_to,
         from_address=from_address,
         to_addresses=list(body.to),
         cc_addresses=list(body.cc) if body.cc else None,
@@ -350,7 +390,7 @@ async def create_email(
         body_text=body.body_text,
         body_html=body.body_html,
         status="queued",
-        provider="ses",
+        provider="gmail" if is_account else "ses",
         metadata_=dict(body.metadata),
     )
     db.add(email)
@@ -393,8 +433,15 @@ async def create_email(
     unsubscribe_url = build_unsubscribe_url(
         email.to_addresses[0], principal.organization_id
     )
+    # Connected-account sends go through Gmail's REST API; everyone else
+    # keeps using the injected SES-backed provider. Thread resolution from
+    # `in_reply_to` happens only inside GmailEmailProvider — SES has no
+    # concept of a Gmail threadId.
+    send_provider: EmailSender = (
+        GmailEmailProvider(gmail_builder(sd)) if is_account else email_provider
+    )
     try:
-        result = await email_provider.send_email(
+        result = await send_provider.send_email(
             from_address=email.from_address,
             to_addresses=email.to_addresses,
             subject=email.subject,
@@ -406,15 +453,26 @@ async def create_email(
             headers={
                 "List-Unsubscribe": f"<{unsubscribe_url}>",
                 "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
+                **(
+                    {"In-Reply-To": body.in_reply_to, "References": body.in_reply_to}
+                    if body.in_reply_to
+                    else {}
+                ),
             },
         )
     except Exception as exc:
         logger.warning(
-            "ses send_email failed for email_id=%s",
+            "%s send_email failed for email_id=%s",
+            email.provider,
             email.id,
             exc_info=True,
         )
         now = datetime.now(timezone.utc)
+        gmail_auth_failure = isinstance(exc, GmailAuthError) and is_account
+        if gmail_auth_failure:
+            # Same db session that persists the failed Email row below —
+            # one commit covers both mutations.
+            sd.status = "reauth_required"
         await db.execute(
             update(Email)
             .where(Email.id == email.id)
@@ -433,6 +491,20 @@ async def create_email(
             resource_id=email.id,
             payload={"end_reason": type(exc).__name__},
         )
+        if gmail_auth_failure:
+            detail = (
+                "Google rejected the stored credentials; reconnect via "
+                f"POST /email-accounts/{sd.id}/reconnect"
+            )
+            if idem is not None:
+                await idem.store(
+                    status_code=http_status.HTTP_409_CONFLICT,
+                    body={"detail": detail},
+                )
+            raise HTTPException(
+                status_code=http_status.HTTP_409_CONFLICT,
+                detail=detail,
+            ) from exc
         if idem is not None:
             await idem.store(
                 status_code=http_status.HTTP_502_BAD_GATEWAY,
@@ -450,6 +522,7 @@ async def create_email(
         .values(
             status="sent",
             provider_message_id=result.provider_message_id,
+            provider_thread_id=result.provider_thread_id,
             sent_at=now,
         )
     )

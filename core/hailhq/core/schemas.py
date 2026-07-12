@@ -620,6 +620,9 @@ class EmailCreate(ConsentAttestationMixin):
     cc: list[str] | None = None
     bcc: list[str] | None = None
     reply_to: str | None = None
+    # RFC 2822 Message-ID this send replies to. For connected-account sends
+    # the Gmail thread is resolved from it so the reply lands in-thread.
+    in_reply_to: str | None = Field(default=None, max_length=998)
     subject: str = Field(min_length=1, max_length=998)
     body_text: str | None = None
     body_html: str | None = None
@@ -751,6 +754,8 @@ class EmailSummary(BaseModel):
     organization_id: UUID
     conversation_id: UUID | None
     email_domain_id: UUID | None
+    email_account_id: UUID | None = None
+    provider_thread_id: str | None = None
     direction: Literal["outbound", "inbound"] = "outbound"
     from_address: str
     to_addresses: list[str]

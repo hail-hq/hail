@@ -94,11 +94,17 @@ def _redirect_uri() -> str:
 
 
 def get_gmail_client_builder() -> Callable[[EmailAccount], GmailClient]:
-    """Build a ``GmailClient`` from an account row. Overridable in tests."""
+    """Build a ``GmailClient`` from an account row. Overridable in tests.
 
-    cipher = _cipher()
+    Cipher construction is deferred to ``build()`` rather than done eagerly
+    here: this dependency is also injected into ``POST /emails``, which
+    handles both SES and Gmail sends, so resolving it must not require
+    ``HAIL_PROVIDER_SECRET_KEY``/OAuth config on every plain SES send —
+    only on sends that actually go through a connected account.
+    """
 
     def build(account: EmailAccount) -> GmailClient:
+        cipher = _cipher()
         return GmailClient(
             refresh_token=cipher.decrypt(account.encrypted_refresh_token)
         )
