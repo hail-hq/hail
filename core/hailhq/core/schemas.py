@@ -279,6 +279,35 @@ class SmsListResponse(BaseModel):
     next_cursor: str | None = None
 
 
+class NumberAcquireRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    country_code: str = Field(min_length=2, max_length=2)
+    number_type: NumberType = "local"
+
+
+class PhoneNumberResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    e164: str
+    country_code: str
+    number_type: str
+    capabilities: list[str]
+    provisioning_state: str
+    is_dedicated: bool = Field(validation_alias="is_pool", serialization_alias="is_dedicated")
+
+    @field_validator("is_dedicated", mode="before")
+    @classmethod
+    def _invert_is_pool(cls, v: bool) -> bool:
+        return not v
+
+
+class PhoneNumberListResponse(BaseModel):
+    items: list[PhoneNumberResponse]
+    next_cursor: str | None = None
+
+
 class SuppressionResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

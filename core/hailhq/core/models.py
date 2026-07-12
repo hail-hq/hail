@@ -297,6 +297,7 @@ class PhoneNumber(Base):
     provisioning_metadata: Mapped[dict] = mapped_column(
         JSONB, server_default=text("'{}'::jsonb"), nullable=False
     )
+    messaging_service_sid: Mapped[str | None] = mapped_column(Text, nullable=True)
     acquired_at: Mapped[datetime | None] = mapped_column(TS, nullable=True)
     released_at: Mapped[datetime | None] = mapped_column(TS, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
