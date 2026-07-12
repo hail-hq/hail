@@ -13,13 +13,19 @@ from __future__ import annotations
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from fastapi import status as http_status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from hailhq.api.deps import Principal, get_current_principal
 from hailhq.api.errors import unprocessable
+from hailhq.api.idempotency import (
+    IdempotencyContext,
+    cache_failure,
+    idempotency_dep,
+    replay_cached,
+)
 from hailhq.api.pagination import fetch_cursor_page
 from hailhq.api.routes.sms import get_sms_provider
 from hailhq.core.db import get_session
@@ -56,10 +62,27 @@ def get_voice_provider() -> VoiceProvider:
 @router.post("", response_model=PhoneNumberResponse, status_code=http_status.HTTP_201_CREATED)
 async def acquire_number(
     body: NumberAcquireRequest,
+    response: Response,
     principal: Annotated[Principal, Depends(get_current_principal)],
     db: Annotated[AsyncSession, Depends(get_session)],
     provider: Annotated[VoiceProvider, Depends(get_voice_provider)],
+    idem: Annotated[IdempotencyContext | None, Depends(idempotency_dep)] = None,
 ) -> PhoneNumberResponse:
+    if idem is not None and idem.is_replay:
+        cached_id, cached = replay_cached(idem, response, resource_prefix="/numbers")
+        # PhoneNumberResponse.is_dedicated is populated from the ORM's
+        # `is_pool` attribute (validation_alias="is_pool") and inverted by a
+        # before-validator. The cached body was produced by model_dump(),
+        # which serializes under the field's own name ("is_dedicated"), so
+        # re-validating it directly would 404 on the missing "is_pool" key
+        # and, if aliased to accept "is_dedicated" too, would double-invert
+        # the value. Translate the key back to "is_pool" (undoing the
+        # invert) so the same validator round-trips correctly.
+        replay_payload = dict(cached)
+        if "is_dedicated" in replay_payload:
+            replay_payload["is_pool"] = not replay_payload.pop("is_dedicated")
+        return PhoneNumberResponse.model_validate(replay_payload)
+
     try:
         acquired = await provider.acquire_number(
             country_code=body.country_code,
@@ -67,9 +90,12 @@ async def acquire_number(
             capabilities=["voice", "sms"],
         )
     except LookupError as exc:
-        raise HTTPException(
-            status_code=http_status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=str(exc),
+        raise await cache_failure(
+            idem,
+            HTTPException(
+                status_code=http_status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail=str(exc),
+            ),
         ) from exc
 
     number = PhoneNumber(
@@ -85,7 +111,15 @@ async def acquire_number(
     db.add(number)
     await db.commit()
     await db.refresh(number)
-    return PhoneNumberResponse.model_validate(number)
+
+    response.headers["Location"] = f"/numbers/{number.id}"
+    number_response = PhoneNumberResponse.model_validate(number)
+    if idem is not None:
+        await idem.store(
+            status_code=http_status.HTTP_201_CREATED,
+            body=number_response.model_dump(mode="json"),
+        )
+    return number_response
 
 
 @router.get("/{number_id}", response_model=PhoneNumberResponse)

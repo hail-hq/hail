@@ -24,6 +24,30 @@ async def test_acquire_number_happy_path(client, org_and_key, voice_provider_moc
     assert "sms" in body["capabilities"] or "voice" in body["capabilities"]
 
 
+async def test_acquire_number_idempotent_replay(
+    client, org_and_key, voice_provider_mock
+) -> None:
+    """Same Idempotency-Key on a retried acquire must NOT purchase a second
+    number — the replay returns the cached number without re-invoking the
+    provider."""
+    _, _, plaintext = org_and_key
+    headers = {
+        "Authorization": f"Bearer {plaintext}",
+        "Idempotency-Key": "acquire-retry-key",
+    }
+    body = {"country_code": "US", "number_type": "local"}
+
+    first = await client.post("/numbers", json=body, headers=headers)
+    assert first.status_code == 201, first.text
+
+    second = await client.post("/numbers", json=body, headers=headers)
+    assert second.status_code == 201, second.text
+    assert second.headers.get("idempotency-replay") == "true"
+
+    assert second.json()["id"] == first.json()["id"]
+    voice_provider_mock.acquire_number.assert_awaited_once()
+
+
 async def test_get_number_not_found(client, org_and_key) -> None:
     _, _, plaintext = org_and_key
     resp = await client.get(f"/numbers/{uuid.uuid4()}", headers={"Authorization": f"Bearer {plaintext}"})
