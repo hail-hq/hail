@@ -54,6 +54,69 @@ class OrganizationMember(Base):
     created_at: Mapped[datetime] = mapped_column(TS, nullable=False)
 
 
+class User(Base):
+    """Better-auth's users table (owned by hail-website). Mapped read-mostly;
+    the ONLY column this codebase writes is phone_number."""
+
+    __tablename__ = "users"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    email: Mapped[str] = mapped_column(Text, nullable=False)
+    phone_number: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class Contact(Base):
+    """Manual org contact — phone and/or email (CHECK enforces at least one).
+
+    organization_id carries no FK: organizations lives in the website DB (see
+    the module docstring convention on OrganizationMember / migration 0001).
+    """
+
+    __tablename__ = "contacts"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    organization_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), nullable=False
+    )
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    phone_e164: Mapped[str | None] = mapped_column(Text, nullable=True)
+    email: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        TS, server_default=text("now()"), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        TS, server_default=text("now()"), nullable=False
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "phone_e164 IS NOT NULL OR email IS NOT NULL",
+            name="contacts_phone_or_email",
+        ),
+        Index(
+            "contacts_org_phone_key",
+            "organization_id",
+            "phone_e164",
+            unique=True,
+            postgresql_where=text("phone_e164 IS NOT NULL"),
+        ),
+        Index(
+            "contacts_org_email_key",
+            "organization_id",
+            "email",
+            unique=True,
+            postgresql_where=text("email IS NOT NULL"),
+        ),
+        Index("contacts_org_idx", "organization_id"),
+    )
+
+
 class AccountCredit(Base):
     """Append-only ledger; balance = SUM(amount_cents) per org.
 

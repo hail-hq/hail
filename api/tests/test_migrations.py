@@ -54,6 +54,23 @@ def _wipe_public_schema(url: str) -> None:
         conn.execute("GRANT ALL ON SCHEMA public TO public")
 
 
+def _seed_website_owned_tables(url: str) -> None:
+    """Stand in for the better-auth ``users`` table hail/api's migrations
+    don't own (see migration 0001's header and 0029's docstring).
+
+    In production this table already exists — better-auth's own migration
+    history creates it before hail/api's migrations ever run. A real
+    ``alembic upgrade head`` never hits an empty database on this front;
+    only this test's from-scratch fixture does, so it must seed the same
+    minimal shape 0029's ``ALTER TABLE users`` and 0030's FK depend on.
+    """
+    with psycopg.connect(_to_libpq_url(to_sync_url(url)), autocommit=True) as conn:
+        conn.execute(
+            "CREATE TABLE users ("
+            "id UUID PRIMARY KEY, name TEXT NOT NULL, email TEXT NOT NULL)"
+        )
+
+
 def _run_alembic(url: str, args: list[str]) -> None:
     env = os.environ.copy()
     env["DATABASE_URL"] = url
@@ -80,6 +97,7 @@ def empty_db(database_url: str) -> Iterator[str]:  # noqa: F811
     fixture's effects either way.
     """
     _wipe_public_schema(database_url)
+    _seed_website_owned_tables(database_url)
     yield database_url
     _wipe_public_schema(database_url)
 
