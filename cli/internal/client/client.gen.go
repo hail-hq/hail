@@ -1526,7 +1526,8 @@ type ListNumbersNumbersGetParams struct {
 
 // AcquireNumberNumbersPostParams defines parameters for AcquireNumberNumbersPost.
 type AcquireNumberNumbersPostParams struct {
-	Authorization *string `json:"authorization,omitempty"`
+	Authorization  *string `json:"authorization,omitempty"`
+	IdempotencyKey *string `json:"Idempotency-Key,omitempty"`
 }
 
 // GetNumberNumbersNumberIdGetParams defines parameters for GetNumberNumbersNumberIdGet.
@@ -4091,6 +4092,17 @@ func NewAcquireNumberNumbersPostRequestWithBody(server string, params *AcquireNu
 			}
 
 			req.Header.Set("authorization", headerParam0)
+		}
+
+		if params.IdempotencyKey != nil {
+			var headerParam1 string
+
+			headerParam1, err = runtime.StyleParamWithOptions("simple", false, "Idempotency-Key", *params.IdempotencyKey, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationHeader, Type: "string", Format: ""})
+			if err != nil {
+				return nil, err
+			}
+
+			req.Header.Set("Idempotency-Key", headerParam1)
 		}
 
 	}

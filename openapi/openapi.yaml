@@ -870,6 +870,14 @@ paths:
               - type: string
               - type: "null"
             title: Authorization
+        - name: Idempotency-Key
+          in: header
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            title: Idempotency-Key
       requestBody:
         required: true
         content:
