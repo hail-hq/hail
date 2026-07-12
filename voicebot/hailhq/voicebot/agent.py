@@ -733,24 +733,40 @@ async def entrypoint(ctx: JobContext) -> None:
 
     # Resolve the call's org once from the authoritative Call row (not the
     # dispatch metadata) so the lookup_contact tool is scoped to the org that
-    # actually owns this call. A missing row (deleted/bad call_id) must not
-    # block the call — it just proceeds without the tool.
-    async with session_scope() as session_for_org:
-        contact_org_id = (
-            await session_for_org.execute(
-                select(Call.organization_id).where(Call.id == call_id)
+    # actually owns this call. Guarded like the provider-config resolution
+    # above: this runs BEFORE ctx.add_shutdown_callback is registered, so an
+    # escaping DB error would leak the pool reservation and strand the Call
+    # row. The lookup gates only the optional lookup_contact tool — a missing
+    # row (deleted/bad call_id) or a transient DB blip degrades to a toolless
+    # agent; it never blocks the call.
+    contact_org_id: UUID | None
+    try:
+        async with session_scope() as session_for_org:
+            contact_org_id = (
+                await session_for_org.execute(
+                    select(Call.organization_id).where(Call.id == call_id)
+                )
+            ).scalar_one_or_none()
+        if contact_org_id is None:
+            logger.warning(
+                "call_id=%s has no matching Call row; proceeding without "
+                "lookup_contact tool",
+                call_id,
             )
-        ).scalar_one_or_none()
-
-    if contact_org_id is None:
+    except SQLAlchemyError:
         logger.warning(
-            "call_id=%s has no matching Call row; proceeding without "
+            "call_id=%s org lookup failed; proceeding without "
             "lookup_contact tool",
             call_id,
+            exc_info=True,
         )
-        tools = []
-    else:
-        tools = [build_lookup_contact_tool(contact_org_id)]
+        contact_org_id = None
+
+    tools = (
+        [build_lookup_contact_tool(contact_org_id)]
+        if contact_org_id is not None
+        else []
+    )
 
     agent = Agent(
         instructions=build_instructions(metadata.get("system_prompt")),

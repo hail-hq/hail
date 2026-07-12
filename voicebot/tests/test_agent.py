@@ -23,6 +23,7 @@ from cryptography.fernet import InvalidToken
 from livekit import rtc
 from livekit.agents import Agent, AgentSession
 from sqlalchemy import select, update
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from hailhq.core.models import (
@@ -263,12 +264,16 @@ class _FakeEntrypointCtx:
         self.room = _FakeRoom(room_name)
         self.proc = SimpleNamespace(userdata={"vad": object()})
         self.shutdown_calls: list[str] = []
+        self.shutdown_callbacks: list[object] = []
 
     async def connect(self) -> None:
         return None
 
     def shutdown(self, reason: str = "") -> None:
         self.shutdown_calls.append(reason)
+
+    def add_shutdown_callback(self, fn: object) -> None:
+        self.shutdown_callbacks.append(fn)
 
 
 async def test_entrypoint_org_config_load_failure_finalizes_cleanly(
@@ -304,6 +309,77 @@ async def test_entrypoint_org_config_load_failure_finalizes_cleanly(
     await async_session.refresh(refreshed)
     assert refreshed.status == "failed"
     assert refreshed.end_reason == "provider_key_error"
+
+
+class _FakeStartableSession(FakeAnnouncingSession):
+    """FakeAnnouncingSession + the ``on``/``start`` surface entrypoint needs
+    once the session builds successfully (event registration, agent start)."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.handlers: dict[str, object] = {}
+        self.started_agent: object | None = None
+
+    def on(self, event_name: str):
+        def _register(fn):
+            self.handlers[event_name] = fn
+            return fn
+
+        return _register
+
+    async def start(self, *, agent: object, room: object) -> None:
+        self.started_agent = agent
+
+
+async def test_entrypoint_org_lookup_db_error_proceeds_toolless(
+    async_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Mirror of the provider-config guard, for the contact-org lookup: a
+    transient DB error resolving the call's org must NOT propagate out of
+    entrypoint() — the lookup runs before ctx.add_shutdown_callback is
+    registered, so an escaping error would leak the pool reservation and
+    strand the Call row. Instead the call proceeds with a toolless agent."""
+    from hailhq.voicebot import agent as agent_mod
+
+    call_id = await _make_call_row(async_session)
+    fake_session = _FakeStartableSession()
+
+    async def _ok_org_cfgs(_org_id: UUID | None, *, skip_llm: bool = False) -> dict:
+        return {}
+
+    monkeypatch.setattr(agent_mod, "resolve_org_configs", _ok_org_cfgs)
+    monkeypatch.setattr(agent_mod, "build_session", lambda *a, **k: fake_session)
+    # Disable the soft-cap timer so no background task outlives the test.
+    monkeypatch.setattr(agent_mod.settings, "hail_voice_max_duration_seconds", 0)
+
+    class _BoomScope:
+        async def __aenter__(self) -> object:
+            raise SQLAlchemyError("db down")
+
+        async def __aexit__(self, *exc: object) -> bool:
+            return False
+
+    # In this flow session_scope is only reached by the org lookup —
+    # resolve_org_configs is patched out above and no call events fire.
+    monkeypatch.setattr(agent_mod, "session_scope", lambda: _BoomScope())
+
+    ctx = _FakeEntrypointCtx(
+        metadata=json.dumps({"call_id": str(call_id)}),
+        room_name=f"hail-{call_id}",
+    )
+
+    # Must return cleanly — the SQLAlchemyError is swallowed, not propagated.
+    await entrypoint(ctx)  # type: ignore[arg-type]
+
+    # Not the fail-fast path: no shutdown fired, shutdown callback registered.
+    assert ctx.shutdown_calls == []
+    assert len(ctx.shutdown_callbacks) == 1
+    # The agent started — toolless.
+    agent = fake_session.started_agent
+    assert agent is not None
+    assert list(agent.tools) == []
+    # The call proceeded normally: the AI disclosure was still spoken.
+    assert fake_session.say_calls[0] == (AI_DISCLOSURE_LINE, True)
 
 
 async def test_agent_session_run_emits_assistant_message() -> None:
