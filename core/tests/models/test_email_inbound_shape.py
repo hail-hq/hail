@@ -38,7 +38,8 @@ def test_email_attachments_table_exists():
 def test_email_direction_check_constraint_present():
     names = {c.name for c in Email.__table__.constraints}
     assert "emails_direction_check" in names
-    assert "emails_outbound_has_domain" in names
+    assert "emails_outbound_has_sender" in names
+    assert "emails_one_sender_kind" in names
 
 
 def test_email_domains_inbound_action_constraint_absent():
