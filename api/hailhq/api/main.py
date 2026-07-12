@@ -25,6 +25,7 @@ from hailhq.core.s3_inbound import S3InboundClient
 from hailhq.core.secret_cipher import SecretCipher, SecretKeyMissing
 from hailhq.core.webhook_worker import WebhookWorker
 from hailhq.api.routes import calls as calls_routes
+from hailhq.api.routes import contacts as contacts_routes
 from hailhq.api.routes import emails as emails_routes
 from hailhq.api.routes import events as events_routes
 from hailhq.api.routes import email_domains as email_domains_routes
@@ -240,6 +241,7 @@ app.include_router(email_domains_routes.router)
 app.include_router(webhooks_routes.router)
 app.include_router(unsubscribe_routes.router)
 app.include_router(sms_routes.router)
+app.include_router(contacts_routes.router)
 app.include_router(internal_ses_events.router)
 app.include_router(internal_org_closures.router)
 app.include_router(internal_provider_config.router)
