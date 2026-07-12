@@ -855,6 +855,154 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HTTPValidationError"
+  /numbers:
+    post:
+      tags:
+        - numbers
+      summary: Acquire Number
+      operationId: acquire_number_numbers_post
+      parameters:
+        - name: authorization
+          in: header
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            title: Authorization
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/NumberAcquireRequest"
+      responses:
+        "201":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PhoneNumberResponse"
+        "422":
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
+    get:
+      tags:
+        - numbers
+      summary: List Numbers
+      operationId: list_numbers_numbers_get
+      parameters:
+        - name: cursor
+          in: query
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            title: Cursor
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            maximum: 200
+            minimum: 1
+            default: 50
+            title: Limit
+        - name: authorization
+          in: header
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            title: Authorization
+      responses:
+        "200":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PhoneNumberListResponse"
+        "422":
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
+  /numbers/{number_id}:
+    get:
+      tags:
+        - numbers
+      summary: Get Number
+      operationId: get_number_numbers__number_id__get
+      parameters:
+        - name: number_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+            title: Number Id
+        - name: authorization
+          in: header
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            title: Authorization
+      responses:
+        "200":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PhoneNumberResponse"
+        "422":
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
+  /numbers/{number_id}/enable-sms:
+    post:
+      tags:
+        - numbers
+      summary: Enable Sms
+      operationId: enable_sms_numbers__number_id__enable_sms_post
+      parameters:
+        - name: number_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+            title: Number Id
+        - name: authorization
+          in: header
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            title: Authorization
+      responses:
+        "200":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PhoneNumberResponse"
+        "422":
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
   /webhooks:
     post:
       tags:
@@ -1371,6 +1519,67 @@ paths:
       responses:
         "204":
           description: Successful Response
+        "422":
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
+  /sms/sender-id:
+    get:
+      tags:
+        - sms
+      summary: Get Sender Id
+      operationId: get_sender_id_sms_sender_id_get
+      parameters:
+        - name: authorization
+          in: header
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            title: Authorization
+      responses:
+        "200":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SenderIdResponse"
+        "422":
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
+    patch:
+      tags:
+        - sms
+      summary: Patch Sender Id
+      operationId: patch_sender_id_sms_sender_id_patch
+      parameters:
+        - name: authorization
+          in: header
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            title: Authorization
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SenderIdPatch"
+      responses:
+        "200":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SenderIdResponse"
         "422":
           description: Validation Error
           content:
@@ -2741,6 +2950,108 @@ components:
         - api_key
         - model
       title: LLMConfig
+    NumberAcquireRequest:
+      properties:
+        country_code:
+          type: string
+          maxLength: 2
+          minLength: 2
+          title: Country Code
+        number_type:
+          type: string
+          enum:
+            - local
+            - mobile
+            - toll_free
+          title: Number Type
+          default: local
+      additionalProperties: false
+      type: object
+      required:
+        - country_code
+      title: NumberAcquireRequest
+    PhoneNumberListResponse:
+      properties:
+        items:
+          items:
+            $ref: "#/components/schemas/PhoneNumberResponse"
+          type: array
+          title: Items
+        next_cursor:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Next Cursor
+      type: object
+      required:
+        - items
+      title: PhoneNumberListResponse
+    PhoneNumberResponse:
+      properties:
+        id:
+          type: string
+          format: uuid
+          title: Id
+        e164:
+          type: string
+          title: E164
+        country_code:
+          type: string
+          title: Country Code
+        number_type:
+          type: string
+          title: Number Type
+        capabilities:
+          items:
+            type: string
+          type: array
+          title: Capabilities
+        provisioning_state:
+          type: string
+          title: Provisioning State
+        is_dedicated:
+          type: boolean
+          title: Is Dedicated
+        messaging_service_sid:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Messaging Service Sid
+      type: object
+      required:
+        - id
+        - e164
+        - country_code
+        - number_type
+        - capabilities
+        - provisioning_state
+        - is_dedicated
+      title: PhoneNumberResponse
+    SenderIdPatch:
+      properties:
+        custom_sender_id:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Custom Sender Id
+      additionalProperties: false
+      type: object
+      title: SenderIdPatch
+    SenderIdResponse:
+      properties:
+        custom_sender_id:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Custom Sender Id
+        effective_default:
+          type: string
+          title: Effective Default
+          default: HAIL
+      type: object
+      required:
+        - custom_sender_id
+      title: SenderIdResponse
     SmsCreate:
       properties:
         recipient_consent:

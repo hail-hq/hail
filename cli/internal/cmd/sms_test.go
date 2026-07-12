@@ -541,3 +541,123 @@ func TestSmsSuppressionsDelete_MissingArg(t *testing.T) {
 		t.Errorf("expected 0 HTTP calls, got %d", hits)
 	}
 }
+
+func sampleSenderId(custom *string, effective string) client.SenderIdResponse {
+	return client.SenderIdResponse{
+		CustomSenderId:   custom,
+		EffectiveDefault: &effective,
+	}
+}
+
+func TestSmsSenderIdGet_ShowsCustomAndDefault(t *testing.T) {
+	custom := "ACME"
+	srv := newFakeServer(t, http.StatusOK, sampleSenderId(&custom, "HAIL"))
+
+	stdout, _, err := runRoot(t,
+		map[string]string{"HAIL_API_KEY": "sk_test", "HAIL_API_URL": srv.URL},
+		"sms", "sender-id", "get",
+	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if srv.lastReq.Method != http.MethodGet || srv.lastReq.URL.Path != "/sms/sender-id" {
+		t.Fatalf("unexpected route: %s %s", srv.lastReq.Method, srv.lastReq.URL.Path)
+	}
+	if !strings.Contains(stdout, "ACME") || !strings.Contains(stdout, "HAIL") {
+		t.Errorf("stdout missing values: %q", stdout)
+	}
+}
+
+func TestSmsSenderIdGet_NoneWhenUnset(t *testing.T) {
+	srv := newFakeServer(t, http.StatusOK, sampleSenderId(nil, "HAIL"))
+
+	stdout, _, err := runRoot(t,
+		map[string]string{"HAIL_API_KEY": "sk_test", "HAIL_API_URL": srv.URL},
+		"sms", "sender-id", "get",
+	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(stdout, "(none)") {
+		t.Errorf("stdout missing '(none)': %q", stdout)
+	}
+}
+
+func TestSmsSenderIdSet_SendsValue(t *testing.T) {
+	custom := "ACME"
+	srv := newFakeServer(t, http.StatusOK, sampleSenderId(&custom, "HAIL"))
+
+	stdout, _, err := runRoot(t,
+		map[string]string{"HAIL_API_KEY": "sk_test", "HAIL_API_URL": srv.URL},
+		"sms", "sender-id", "set", "ACME",
+	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if srv.lastReq.Method != http.MethodPatch || srv.lastReq.URL.Path != "/sms/sender-id" {
+		t.Fatalf("unexpected route: %s %s", srv.lastReq.Method, srv.lastReq.URL.Path)
+	}
+	var body client.SenderIdPatch
+	if err := json.Unmarshal(srv.lastBody, &body); err != nil {
+		t.Fatalf("body parse: %v; raw=%s", err, srv.lastBody)
+	}
+	if body.CustomSenderId == nil || *body.CustomSenderId != "ACME" {
+		t.Fatalf("CustomSenderId = %v", body.CustomSenderId)
+	}
+	if !strings.Contains(stdout, "set to ACME") {
+		t.Errorf("stdout missing confirmation: %q", stdout)
+	}
+}
+
+func TestSmsSenderIdSet_ClearFlagSendsNull(t *testing.T) {
+	srv := newFakeServer(t, http.StatusOK, sampleSenderId(nil, "HAIL"))
+
+	stdout, _, err := runRoot(t,
+		map[string]string{"HAIL_API_KEY": "sk_test", "HAIL_API_URL": srv.URL},
+		"sms", "sender-id", "set", "--clear",
+	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// omitempty on a nil pointer -> custom_sender_id absent -> server clears.
+	var raw map[string]any
+	if err := json.Unmarshal(srv.lastBody, &raw); err != nil {
+		t.Fatalf("body parse: %v; raw=%s", err, srv.lastBody)
+	}
+	if v, present := raw["custom_sender_id"]; present && v != nil {
+		t.Errorf("custom_sender_id should be absent or null for a clear, got %v", v)
+	}
+	if !strings.Contains(stdout, "cleared") {
+		t.Errorf("stdout missing 'cleared': %q", stdout)
+	}
+}
+
+func TestSmsSenderIdSet_EmptyStringClears(t *testing.T) {
+	srv := newFakeServer(t, http.StatusOK, sampleSenderId(nil, "HAIL"))
+
+	stdout, _, err := runRoot(t,
+		map[string]string{"HAIL_API_KEY": "sk_test", "HAIL_API_URL": srv.URL},
+		"sms", "sender-id", "set", "",
+	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(stdout, "cleared") {
+		t.Errorf("stdout missing 'cleared': %q", stdout)
+	}
+}
+
+func TestSmsSenderIdSet_MissingValueFailsBeforeNetwork(t *testing.T) {
+	srv := newFakeServer(t, http.StatusOK, sampleSenderId(nil, "HAIL"))
+
+	_, _, err := runRoot(t,
+		map[string]string{"HAIL_API_KEY": "sk_test", "HAIL_API_URL": srv.URL},
+		"sms", "sender-id", "set",
+	)
+	if err == nil {
+		t.Fatal("expected error on missing value")
+	}
+	if hits := atomic.LoadInt32(&srv.hits); hits != 0 {
+		t.Errorf("expected 0 HTTP calls, got %d", hits)
+	}
+}
