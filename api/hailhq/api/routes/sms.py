@@ -40,6 +40,7 @@ from hailhq.core.config import settings
 from hailhq.core.db import get_session
 from hailhq.core.models import Sms, SmsEvent, SmsSenderIdentity, Suppression
 from hailhq.core.providers.sms import SmsProvider, TwilioSmsProvider
+from hailhq.core.sender_id import resolve_sender
 from hailhq.core.schemas import (
     SenderIdPatch,
     SenderIdResponse,
@@ -125,27 +126,50 @@ async def create_sms(
 
     await require_funds(db, principal, idem)
 
-    # No pool fallback for SMS — a dedicated number is required (Decision 6).
-    from_number = await resolve_org_number(
-        db, principal.organization_id, body.from_, capability="sms"
+    # The dedicated-number requirement is conditional on the destination
+    # corridor (Task 5). For alphanumeric-eligible corridors with no explicit
+    # ``from``, the org's Sender ID is used and NO dedicated number is needed;
+    # otherwise a dedicated SMS-capable number is still required (Decision 6).
+    sender_id_row = (
+        await db.execute(
+            select(SmsSenderIdentity).where(
+                SmsSenderIdentity.organization_id == principal.organization_id
+            )
+        )
+    ).scalar_one_or_none()
+    resolution = resolve_sender(
+        body.to,
+        custom_sender_id=sender_id_row.custom_sender_id if sender_id_row else None,
     )
-    if from_number is None:
-        if body.from_ is not None:
-            msg = (
-                f"phone number {body.from_} is not registered to this "
-                "organization, is not active, or lacks the sms capability"
-            )
-        else:
-            msg = (
-                "no dedicated SMS-capable phone number on this organization; "
-                "SMS requires a dedicated number, not the shared voice pool"
-            )
-        raise await cache_failure(idem, unprocessable(msg, loc=["body", "from"]))
+
+    from_number = None
+    from_e164 = None
+    if body.from_ is not None or resolution.kind == "dedicated_number_required":
+        from_number = await resolve_org_number(
+            db, principal.organization_id, body.from_, capability="sms"
+        )
+        if from_number is None:
+            if body.from_ is not None:
+                msg = (
+                    f"phone number {body.from_} is not registered to this "
+                    "organization, is not active, or lacks the sms capability"
+                )
+            else:
+                msg = (
+                    "no dedicated SMS-capable phone number on this organization; "
+                    "SMS requires a dedicated number, not the shared voice pool"
+                )
+            raise await cache_failure(idem, unprocessable(msg, loc=["body", "from"]))
+        from_e164 = from_number.e164
+    else:
+        # Alphanumeric corridor with no explicit ``from`` → send from the
+        # resolved Sender ID; no dedicated number is provisioned.
+        from_e164 = resolution.sender_id
 
     sms = Sms(
         organization_id=principal.organization_id,
-        from_number_id=from_number.id,
-        from_e164=from_number.e164,
+        from_number_id=from_number.id if from_number is not None else None,
+        from_e164=from_e164,
         to_e164=body.to,
         direction="outbound",
         status="queued",
