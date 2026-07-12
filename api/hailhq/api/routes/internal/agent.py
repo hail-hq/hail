@@ -90,8 +90,15 @@ def _meta(req: AgentSendBase) -> dict[str, str]:
 
 
 async def _load_live_call(db: AsyncSession, call_id: UUID) -> Call | None:
+    # FOR UPDATE on the call row serializes concurrent agent sends for one
+    # call: the dedupe SELECT and the cap COUNT both run under this lock, so
+    # a timeout-retry racing the original can't double-send or blow past
+    # AGENT_SEND_CAP. The commit that releases the lock also publishes the
+    # row the next request's dedupe will see; never hold the lock across
+    # deliver_* — the Sms/Email INSERT + commit happens before the slow
+    # provider send.
     call = (
-        await db.execute(select(Call).where(Call.id == call_id))
+        await db.execute(select(Call).where(Call.id == call_id).with_for_update())
     ).scalar_one_or_none()
     if call is None or call.status != "in_progress":
         return None
@@ -123,17 +130,19 @@ async def _sends_this_call(db: AsyncSession, org_id: UUID, call_id: UUID) -> int
     return int(emails) + int(sms)
 
 
-async def _shared_denial(db: AsyncSession, call: Call) -> str | None:
+async def _shared_denial(db: AsyncSession, call: Call) -> tuple[str, str] | None:
     """Cap + funds checks shared by both send routes.
 
-    Returns a spoken denial or None when the send may proceed.
+    Returns ``(spoken, audit_reason)`` on denial or None when the send may
+    proceed. The audit reason distinguishes which gate fired; the spoken
+    text stays vague for the callee.
     """
     if await _sends_this_call(db, call.organization_id, call.id) >= AGENT_SEND_CAP:
-        return _SPOKEN_CAP
+        return _SPOKEN_CAP, "send_cap"
     if call.metadata_.get(CALL_META_BILLED) and not await has_funds(
         db, call.organization_id
     ):
-        return _SPOKEN_NOT_ALLOWED
+        return _SPOKEN_NOT_ALLOWED, "insufficient_funds"
     return None
 
 
@@ -159,22 +168,27 @@ async def agent_send_sms(
         )
     ).scalar_one_or_none()
     if prior is not None:
-        ok = prior.status in ("sent", "delivered")
+        # queued = committed-but-in-flight (the concurrent original holds
+        # it between commit and delivery reconciliation); optimistic
+        # success avoids the duplicate-send failure mode, which is the
+        # worse error on a live call.
+        ok = prior.status not in ("failed", "undelivered")
         return AgentSendResponse(
             ok=ok, spoken=_SPOKEN_SMS_SENT if ok else _SPOKEN_SMS_FAILED
         )
 
     denial = await _shared_denial(db, call)
     if denial is not None:
+        spoken, reason = denial
         await write_audit_log(
             organization_id=org,
             api_key_id=None,
             action="agent.sms.blocked",
             resource_type="sms",
             resource_id=None,
-            payload={**_meta(body), "reason": "cap_or_funds"},
+            payload={**_meta(body), "reason": reason},
         )
-        return AgentSendResponse(ok=False, spoken=denial)
+        return AgentSendResponse(ok=False, spoken=spoken)
 
     gate = await check_sms_allowed(db, org, call.to_e164)
     if not gate.allowed:
@@ -247,22 +261,29 @@ async def agent_send_email(
         )
     ).scalar_one_or_none()
     if prior is not None:
-        ok = prior.status == "sent"
+        # Not just "sent": "delivered" is reachable via the SES delivery
+        # webhook (core/hailhq/core/email_delivery_events.py), and
+        # queued = committed-but-in-flight (the concurrent original holds
+        # it between commit and delivery reconciliation). Optimistic
+        # success avoids the duplicate-send failure mode, which is the
+        # worse error on a live call.
+        ok = prior.status != "failed"
         return AgentSendResponse(
             ok=ok, spoken=_SPOKEN_EMAIL_SENT if ok else _SPOKEN_EMAIL_FAILED
         )
 
     denial = await _shared_denial(db, call)
     if denial is not None:
+        spoken, reason = denial
         await write_audit_log(
             organization_id=org,
             api_key_id=None,
             action="agent.email.blocked",
             resource_type="email",
             resource_id=None,
-            payload={**_meta(body), "reason": "cap_or_funds"},
+            payload={**_meta(body), "reason": reason},
         )
-        return AgentSendResponse(ok=False, spoken=denial)
+        return AgentSendResponse(ok=False, spoken=spoken)
 
     matches = await resolve_member_emails(db, org, body.recipient_name)
     if not matches:

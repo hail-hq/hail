@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import uuid
 from datetime import datetime, timezone
@@ -10,7 +11,9 @@ import httpx
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from hailhq.api.main import app
 from hailhq.core import hmac_signing
+from hailhq.core.db import get_session
 from hailhq.core.billing import CALL_META_BILLED
 from hailhq.core.config import settings
 from hailhq.core.models import (
@@ -270,6 +273,50 @@ async def test_send_email_happy_path_stamps_call_id(client, async_session, email
     assert len(rows) == 1
     assert rows[0].to_addresses == ["sarah@a.test"]
     assert rows[0].metadata["call_id"] == str(call.id)
+
+
+async def test_send_sms_concurrent_same_invocation_sends_once(
+    client, async_session, session_factory, sms_mock
+):
+    """Two racing requests with one tool_invocation_id: exactly one row.
+
+    The client fixture's get_session override yields one shared session,
+    which would serialize the requests artificially (and break on
+    concurrent use). Swap in a per-request session for the gather so the
+    two handlers hold independent transactions and the call-row FOR UPDATE
+    lock is what serializes them — this runs against real Postgres.
+    """
+    org = uuid.uuid4()
+    call = await _insert_live_call(async_session, org)
+    payload = {
+        "call_id": str(call.id),
+        "tool_invocation_id": str(uuid.uuid4()),
+        "body": "hi",
+    }
+    body = json.dumps(payload).encode()
+
+    async def per_request_session():
+        async with session_factory() as s:
+            yield s
+
+    saved = app.dependency_overrides[get_session]
+    app.dependency_overrides[get_session] = per_request_session
+    try:
+        r1, r2 = await asyncio.gather(
+            client.post(
+                "/internal/agent/send-sms", content=body, headers=_signed(body)
+            ),
+            client.post(
+                "/internal/agent/send-sms", content=body, headers=_signed(body)
+            ),
+        )
+    finally:
+        app.dependency_overrides[get_session] = saved
+
+    assert r1.status_code == 200 and r2.status_code == 200
+    assert r1.json()["ok"] is True and r2.json()["ok"] is True
+    rows = (await async_session.execute(Sms.__table__.select())).fetchall()
+    assert len(rows) == 1
 
 
 async def test_send_sms_rejects_when_secret_unconfigured(
