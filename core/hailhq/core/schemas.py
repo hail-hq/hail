@@ -576,6 +576,41 @@ class EmailAccountPatch(BaseModel):
     status: Literal["active", "disabled"]
 
 
+class MailboxAttachment(BaseModel):
+    filename: str
+    content_type: str
+    size_bytes: int
+    attachment_id: str
+
+
+class MailboxMessageSummary(BaseModel):
+    """A live-read Gmail message. Never persisted (ephemeral by design)."""
+
+    id: str
+    thread_id: str
+    from_address: str
+    to_addresses: list[str]
+    cc_addresses: list[str]
+    subject: str
+    date: str
+    snippet: str
+    # RFC 2822 Message-ID — pass as ``in_reply_to`` on POST /emails to reply
+    # inside this thread.
+    message_id: str
+
+
+class MailboxMessageDetail(MailboxMessageSummary):
+    body_text: str | None
+    body_html: str | None
+    in_reply_to: str | None
+    attachments: list[MailboxAttachment]
+
+
+class MailboxMessageListResponse(BaseModel):
+    items: list[MailboxMessageSummary]
+    next_page_token: str | None = None
+
+
 class EmailCreate(ConsentAttestationMixin):
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
 

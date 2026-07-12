@@ -34,7 +34,7 @@ from hailhq.api.pagination import fetch_cursor_page
 from hailhq.core.config import settings
 from hailhq.core.db import get_session
 from hailhq.core.models import EmailAccount
-from hailhq.core.providers.email.gmail import GmailClient
+from hailhq.core.providers.email.gmail import GmailAuthError, GmailClient
 from hailhq.core.providers.email.gmail_oauth import (
     InvalidStateToken,
     build_authorization_url,
@@ -49,6 +49,9 @@ from hailhq.core.schemas import (
     EmailAccountListResponse,
     EmailAccountPatch,
     EmailAccountResponse,
+    MailboxMessageDetail,
+    MailboxMessageListResponse,
+    MailboxMessageSummary,
 )
 from hailhq.core.secret_cipher import SecretCipher, SecretKeyMissing
 from hailhq.core.urls import join_url
@@ -349,3 +352,74 @@ async def delete_email_account(
         payload={"email_address": account.email_address},
     )
     return Response(status_code=http_status.HTTP_204_NO_CONTENT)
+
+
+def _require_active(account: EmailAccount) -> None:
+    if account.status != "active":
+        raise HTTPException(
+            status_code=http_status.HTTP_409_CONFLICT,
+            detail=(
+                f"email account {account.email_address!r} is "
+                f"{account.status}; reconnect via POST "
+                f"/email-accounts/{account.id}/reconnect"
+            ),
+        )
+
+
+async def _flag_reauth(db: AsyncSession, account: EmailAccount) -> HTTPException:
+    account.status = "reauth_required"
+    await db.commit()
+    return HTTPException(
+        status_code=http_status.HTTP_409_CONFLICT,
+        detail=(
+            f"Google rejected the stored credentials for "
+            f"{account.email_address!r}; reconnect via POST "
+            f"/email-accounts/{account.id}/reconnect"
+        ),
+    )
+
+
+@router.get("/{account_id}/messages", response_model=MailboxMessageListResponse)
+async def list_mailbox_messages(
+    account_id: UUID,
+    principal: Annotated[Principal, Depends(get_current_principal)],
+    db: Annotated[AsyncSession, Depends(get_session)],
+    builder: Annotated[
+        Callable[[EmailAccount], GmailClient], Depends(get_gmail_client_builder)
+    ],
+    q: str | None = Query(default=None, max_length=1000),
+    max_results: int = Query(default=25, ge=1, le=100),
+    page_token: str | None = Query(default=None),
+) -> MailboxMessageListResponse:
+    """Live Gmail search/list — proxied, never persisted (spec §4)."""
+    account = await require_account(db, principal.organization_id, account_id)
+    _require_active(account)
+    try:
+        items, next_token = await builder(account).list_messages(
+            q=q, max_results=max_results, page_token=page_token
+        )
+    except GmailAuthError:
+        raise await _flag_reauth(db, account) from None
+    return MailboxMessageListResponse(
+        items=[MailboxMessageSummary.model_validate(i) for i in items],
+        next_page_token=next_token,
+    )
+
+
+@router.get("/{account_id}/messages/{message_id}", response_model=MailboxMessageDetail)
+async def get_mailbox_message(
+    account_id: UUID,
+    message_id: str,
+    principal: Annotated[Principal, Depends(get_current_principal)],
+    db: Annotated[AsyncSession, Depends(get_session)],
+    builder: Annotated[
+        Callable[[EmailAccount], GmailClient], Depends(get_gmail_client_builder)
+    ],
+) -> MailboxMessageDetail:
+    account = await require_account(db, principal.organization_id, account_id)
+    _require_active(account)
+    try:
+        msg = await builder(account).get_message(message_id)
+    except GmailAuthError:
+        raise await _flag_reauth(db, account) from None
+    return MailboxMessageDetail.model_validate(msg)
