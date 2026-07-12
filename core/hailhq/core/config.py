@@ -113,6 +113,19 @@ class Settings(BaseSettings):
     # other. Generate like the webhook key (see secret_cipher.generate_key).
     hail_provider_secret_key: str = ""
 
+    # Gmail account connection (docs/superpowers/specs/
+    # 2026-07-12-gmail-account-connection-design.md). OAuth client
+    # credentials of the operator's Google Cloud app; the hosted app is
+    # verified for the gmail.send + gmail.readonly restricted scopes.
+    # Self-hosters register their own client (an "internal"-type Workspace
+    # app needs no Google review). Empty = the /email-accounts connect
+    # endpoints return 503.
+    google_oauth_client_id: str = ""
+    google_oauth_client_secret: str = ""
+    # Where the browser lands after a successful connect. Empty = the API
+    # renders a minimal HTML success page (fine for CLI/MCP-driven flows).
+    hail_email_connect_success_url: str = ""
+
     # Media
     livekit_url: str = ""
     livekit_api_key: str = ""
