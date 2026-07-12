@@ -181,6 +181,15 @@ class CallCreate(ConsentAttestationMixin):
     voice_config: VoiceConfig = Field(default_factory=VoiceConfig)
     conversation_id: UUID | None = None
     metadata: dict = Field(default_factory=dict)
+    tools: list[str] | None = Field(
+        default=None,
+        description=(
+            "Agent tools to allow on this call. Omitted: every tool the "
+            "organization's configured channels support (new channels appear "
+            "automatically). Empty list: no tools. Tool names are validated "
+            "against the server's registry."
+        ),
+    )
 
     _validate_e164 = field_validator("to", "from_")(_e164_or_error)
 
