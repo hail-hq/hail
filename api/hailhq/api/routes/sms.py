@@ -16,7 +16,7 @@ from datetime import datetime, timezone
 from typing import Annotated, Any
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from fastapi import status as http_status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -35,11 +35,22 @@ from hailhq.api.numbers import resolve_org_number
 from hailhq.api.pagination import fetch_cursor_page
 from hailhq.api.usage import write_usage_event
 from hailhq.api.funds import require_funds
-from hailhq.core.compliance_gate import check_sms_allowed
+from hailhq.core.compliance_gate import check_sms_allowed, remove_suppression
+from hailhq.core.config import settings
 from hailhq.core.db import get_session
-from hailhq.core.models import Sms, SmsEvent
+from hailhq.core.models import Sms, SmsEvent, Suppression
 from hailhq.core.providers.sms import SmsProvider, TwilioSmsProvider
-from hailhq.core.schemas import SmsCreate, SmsListResponse, SmsResponse, SmsStatus
+from hailhq.core.schemas import (
+    SmsCreate,
+    SmsListResponse,
+    SmsResponse,
+    SmsStatus,
+    SuppressionListResponse,
+    SuppressionResponse,
+)
+from hailhq.core.sms_ingest import ingest_inbound_sms
+from hailhq.core.twilio_signature import verify_twilio_signature
+from hailhq.core.urls import join_url
 
 logger = logging.getLogger(__name__)
 
@@ -233,6 +244,77 @@ async def create_sms(
         )
 
     return sms_response
+
+
+@router.post("/inbound", include_in_schema=False)
+async def receive_inbound_sms(
+    request: Request,
+    db: Annotated[AsyncSession, Depends(get_session)],
+    provider: Annotated[SmsProvider, Depends(get_sms_provider)],
+) -> Response:
+    form = await request.form()
+    params = {k: str(v) for k, v in form.items()}
+    signature = request.headers.get("X-Twilio-Signature")
+    url = join_url(settings.hail_api_url, "sms/inbound")
+
+    if not verify_twilio_signature(url, params, signature, settings.twilio_auth_token):
+        raise HTTPException(
+            status_code=http_status.HTTP_403_FORBIDDEN, detail="invalid signature"
+        )
+
+    await ingest_inbound_sms(
+        db,
+        from_e164=params.get("From", ""),
+        to_e164=params.get("To", ""),
+        body=params.get("Body", ""),
+        provider_message_sid=params.get("MessageSid") or None,
+        opt_out_type=params.get("OptOutType"),
+        provider=provider,
+    )
+    await db.commit()
+    return Response(status_code=http_status.HTTP_200_OK)
+
+
+@router.get("/suppressions", response_model=SuppressionListResponse)
+async def list_sms_suppressions(
+    principal: Annotated[Principal, Depends(get_current_principal)],
+    db: Annotated[AsyncSession, Depends(get_session)],
+    cursor: str | None = Query(default=None),
+    limit: int = Query(default=_DEFAULT_LIST_LIMIT, ge=1, le=_MAX_LIST_LIMIT),
+) -> SuppressionListResponse:
+    stmt = select(Suppression).where(
+        Suppression.organization_id == principal.organization_id,
+        Suppression.channel == "sms",
+    )
+    rows, next_cursor = await fetch_cursor_page(
+        db,
+        stmt,
+        Suppression.created_at,
+        Suppression.id,
+        cursor=cursor,
+        limit=limit,
+        newest_first=True,
+    )
+    return SuppressionListResponse(
+        items=[SuppressionResponse.model_validate(r) for r in rows],
+        next_cursor=next_cursor,
+    )
+
+
+@router.delete("/suppressions/{number}", status_code=http_status.HTTP_204_NO_CONTENT)
+async def delete_sms_suppression(
+    number: str,
+    principal: Annotated[Principal, Depends(get_current_principal)],
+    db: Annotated[AsyncSession, Depends(get_session)],
+) -> None:
+    removed = await remove_suppression(
+        db, organization_id=principal.organization_id, recipient=number, channel="sms"
+    )
+    if not removed:
+        raise HTTPException(
+            status_code=http_status.HTTP_404_NOT_FOUND, detail="suppression not found"
+        )
+    await db.commit()
 
 
 @router.get("/{sms_id}", response_model=SmsResponse)

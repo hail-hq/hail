@@ -279,6 +279,22 @@ class SmsListResponse(BaseModel):
     next_cursor: str | None = None
 
 
+class SuppressionResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    recipient: str
+    channel: str
+    reason: str
+    source: str
+    created_at: datetime
+
+
+class SuppressionListResponse(BaseModel):
+    items: list[SuppressionResponse]
+    next_cursor: str | None = None
+
+
 class EventResponse(BaseModel):
     """One event on the unified GET /events stream (call, email, or SMS)."""
 
@@ -752,6 +768,7 @@ WebhookEventType = Literal[
     "email.opened",
     "email.clicked",
     "email.received.suppressed",
+    "sms.received",
 ]
 
 WebhookSubscriptionStatus = Literal["active", "disabled"]
