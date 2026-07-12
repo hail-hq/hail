@@ -71,9 +71,14 @@ class Principal(BaseModel):
 
     ``api_key_id`` is ``None`` on shared-key (``HAIL_API_KEY``) and JWT
     requests — neither corresponds to a row in ``api_keys``.
+
+    ``user_id`` is the caller's user id: the api-key owner's user uuid on the
+    api-key path, the JWT ``sub`` on the JWT path, and ``None`` on the
+    shared-key (``HAIL_API_KEY``) path, which carries no caller identity.
     """
 
     api_key_id: uuid.UUID | None
+    user_id: uuid.UUID | None
     organization_id: uuid.UUID
     scopes: list[str]
 
@@ -201,8 +206,15 @@ async def _principal_from_apikey_table(token: str, db: AsyncSession) -> Principa
     if api_key.last_request is None or now - api_key.last_request > _LAST_USED_THROTTLE:
         await _stamp_last_used(api_key.id, now)
 
+    try:
+        user_id = uuid.UUID(api_key.reference_id)
+    except ValueError:
+        # reference_id is opaque TEXT upstream; not every value is a UUID.
+        user_id = None
+
     return Principal(
         api_key_id=api_key.id,
+        user_id=user_id,
         organization_id=organization_id,
         scopes=_scopes_from_permissions(api_key.permissions),
     )
@@ -308,6 +320,7 @@ async def _principal_from_jwt(token: str, db: AsyncSession) -> Principal:
 
     return Principal(
         api_key_id=None,
+        user_id=user_uuid,
         organization_id=organization_id,
         scopes=_scopes_from_jwt(claims),
     )
@@ -322,6 +335,7 @@ async def get_current_principal(
     if _check_shared_key(token):
         return Principal(
             api_key_id=None,
+            user_id=None,
             organization_id=SELF_HOSTED_ORG_ID,
             scopes=["*"],
         )

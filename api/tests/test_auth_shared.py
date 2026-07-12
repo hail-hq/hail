@@ -41,6 +41,9 @@ def _build_app(session: AsyncSession) -> FastAPI:
                 str(principal.api_key_id) if principal.api_key_id is not None else None
             ),
             "organization_id": str(principal.organization_id),
+            "user_id": (
+                str(principal.user_id) if principal.user_id is not None else None
+            ),
         }
 
     async def override_get_session() -> AsyncIterator[AsyncSession]:
@@ -77,6 +80,19 @@ async def test_shared_key_returns_principal_with_null_api_key_id(
     body = resp.json()
     assert body["api_key_id"] is None
     assert body["organization_id"] == str(SELF_HOSTED_ORG_ID)
+
+
+async def test_shared_key_principal_has_null_user_id(
+    client: httpx.AsyncClient,
+    shared_key_set: str,
+) -> None:
+    """Shared-key (HAIL_API_KEY) requests carry no caller identity."""
+    resp = await client.get(
+        "/whoami",
+        headers={"Authorization": f"Bearer {shared_key_set}"},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["user_id"] is None
 
 
 async def test_wrong_shared_key_returns_401(
