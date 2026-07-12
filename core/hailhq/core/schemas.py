@@ -853,7 +853,7 @@ class ContactEntry(BaseModel):
 class ContactCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    name: str = Field(min_length=1)
+    name: str = Field(min_length=1, max_length=200)
     phone_e164: str | None = None
     email: str | None = None
 
@@ -870,7 +870,7 @@ class ContactCreate(BaseModel):
 class ContactPatch(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    name: str | None = Field(default=None, min_length=1)
+    name: str | None = Field(default=None, min_length=1, max_length=200)
     phone_e164: str | None = None
     email: str | None = None
 

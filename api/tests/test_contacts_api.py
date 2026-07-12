@@ -155,6 +155,19 @@ async def test_create_neither_422(
     assert resp.status_code == 422
 
 
+async def test_create_name_too_long_422(
+    client: httpx.AsyncClient, org_and_key: tuple
+) -> None:
+    _, _, plain = org_and_key
+    headers = {"Authorization": f"Bearer {plain}"}
+    resp = await client.post(
+        "/contacts",
+        json={"name": "x" * 201, "phone_e164": "+14155550100"},
+        headers=headers,
+    )
+    assert resp.status_code == 422
+
+
 async def test_create_duplicate_phone_409(
     client: httpx.AsyncClient, org_and_key: tuple
 ) -> None:
@@ -244,6 +257,23 @@ async def test_patch_clear_both_422(
     )
     resp = await client.patch(
         f"/contacts/{created['id']}", json={"phone_e164": None}, headers=headers
+    )
+    assert resp.status_code == 422
+
+
+async def test_patch_null_name_422(
+    client: httpx.AsyncClient, org_and_key: tuple
+) -> None:
+    """An explicit `{"name": null}` must be rejected as a 422, not fall
+    through to the DB's NOT NULL constraint and get 409-mislabeled as a
+    phone/email uniqueness conflict."""
+    _, _api_key, plain = org_and_key
+    headers = {"Authorization": f"Bearer {plain}"}
+    created = await _create_manual(
+        client, headers, name="Bob", phone_e164="+14155550100"
+    )
+    resp = await client.patch(
+        f"/contacts/{created['id']}", json={"name": None}, headers=headers
     )
     assert resp.status_code == 422
 

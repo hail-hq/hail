@@ -116,6 +116,11 @@ async def patch_contact(
 ) -> ContactEntry:
     row = await _get_manual_or_404(db, principal.organization_id, contact_id)
     data = body.model_dump(exclude_unset=True)
+    if "name" in data and data["name"] is None:
+        # name is NOT NULL; an explicit `{"name": null}` would otherwise
+        # reach the DB and surface as a 409 (indistinguishable from a
+        # phone/email uniqueness conflict) instead of a clear 422.
+        raise unprocessable("name cannot be null", loc=["body", "name"])
     next_phone = data.get("phone_e164", row.phone_e164)
     next_email = data.get("email", row.email)
     if next_phone is None and next_email is None:

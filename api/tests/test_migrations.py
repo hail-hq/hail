@@ -62,7 +62,9 @@ def _seed_website_owned_tables(url: str) -> None:
     history creates it before hail/api's migrations ever run. A real
     ``alembic upgrade head`` never hits an empty database on this front;
     only this test's from-scratch fixture does, so it must seed the same
-    minimal shape 0029's ``ALTER TABLE users`` and 0030's FK depend on.
+    minimal shape 0029's ``ALTER TABLE users`` depends on. (0030 adds
+    ``contacts.created_by`` with no FK to ``users`` — see 7f01779 — so it
+    has no dependency on this table's shape.)
     """
     with psycopg.connect(_to_libpq_url(to_sync_url(url)), autocommit=True) as conn:
         conn.execute(

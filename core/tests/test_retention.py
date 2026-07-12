@@ -10,7 +10,17 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timedelta, timezone
 
-from hailhq.core.models import AuditLog, Call, Email, OrgClosure, PhoneNumber, Sms
+from sqlalchemy import select
+
+from hailhq.core.models import (
+    AuditLog,
+    Call,
+    Contact,
+    Email,
+    OrgClosure,
+    PhoneNumber,
+    Sms,
+)
 from hailhq.core.retention import purge_expired_data
 
 
@@ -128,6 +138,43 @@ async def test_purge_expired_data_scrubs_org_past_cutoff(async_session):
     assert sms.to_e164 == "+14155551234"
     assert email.to_addresses == ["ops@example.com"]
     assert email.status == "received"
+
+
+async def test_purge_expired_data_deletes_contacts_of_closed_org_only(async_session):
+    """The contacts-v2 design specced organization_id as an FK with ON
+    DELETE CASCADE; no real FK is possible across the two databases (see
+    module docstring), so this sweep is the explicit replacement — contacts
+    of a closed-past-cutoff org are hard-deleted, contacts of a live org
+    are left untouched."""
+    closed_org = uuid.uuid4()
+    live_org = uuid.uuid4()
+    now = datetime.now(timezone.utc)
+    session = async_session
+
+    session.add(
+        OrgClosure(
+            organization_id=closed_org,
+            closed_at=now - timedelta(days=400),
+            source="hail_website",
+        )
+    )
+    closed_contact = Contact(
+        organization_id=closed_org, name="Closed Org Contact", phone_e164="+14155551234"
+    )
+    live_contact = Contact(
+        organization_id=live_org, name="Live Org Contact", phone_e164="+14155555678"
+    )
+    session.add(closed_contact)
+    session.add(live_contact)
+    await session.commit()
+
+    summary = await purge_expired_data(session, now)
+
+    assert summary.organizations_purged == [closed_org]
+    assert summary.contacts_deleted == 1
+
+    remaining = (await session.execute(select(Contact.organization_id))).scalars().all()
+    assert remaining == [live_org]
 
 
 async def test_purge_expired_data_leaves_org_within_window_untouched(async_session):
