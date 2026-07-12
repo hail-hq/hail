@@ -24,6 +24,7 @@ from livekit.agents import Agent, AgentSession
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from hailhq.core.call_end_reasons import CallEndReason
 from hailhq.core.models import Call, CallEvent, PhoneNumber, UsageEvent
 from hailhq.core.pool import CALL_META_FROM_POOL
 from hailhq.voicebot.agent import (
@@ -38,6 +39,7 @@ from hailhq.voicebot.agent import (
     disconnect_reason_to_status,
     entrypoint,
     is_sip_answer_signal,
+    make_agent_hangup,
     mark_call_answered,
     on_call_end,
     parse_metadata,
@@ -119,6 +121,17 @@ def test_voice_preamble_frames_the_channel() -> None:
     # No emoji — the real TTS fix (stripping the stored transcript would not
     # change what the LLM hands the TTS engine).
     assert "emoji" in low
+
+
+def test_voice_preamble_requires_confirmation_before_sending() -> None:
+    """Guardrails must require the agent to confirm before sending a message.
+
+    Regression for an agent tool (send_sms/send_email) firing without the
+    other party ever agreeing to what would be sent.
+    """
+    lowered = VOICE_PREAMBLE.lower()
+    assert "before sending" in lowered
+    assert "confirmation" in lowered
 
 
 class _FakeSession:
@@ -1017,3 +1030,28 @@ async def test_soft_cap_cancelled_before_firing_does_not_speak() -> None:
 
     assert session.say_calls == []
     assert ctx.shutdown_calls == []
+
+
+# --------------------------------------------------------------------------- #
+# Agent-initiated hangup (end_call tool) — must finalize as a normal hangup,
+# not a worker_shutdown/failed (Task 9)
+# --------------------------------------------------------------------------- #
+
+
+async def test_agent_hangup_marks_normal_hangup() -> None:
+    """The end_call tool's hangup handle stamps end_reason BEFORE shutdown.
+
+    Without the stamp, `_on_session_close` would map the resulting bare
+    `job_shutdown` to `worker_shutdown`/`failed`, mis-recording a deliberate,
+    successful agent-initiated hangup. Status must stay None so
+    `on_call_end` falls back to its `"completed"` default.
+    """
+    captured: dict[str, str | None] = {"status": None, "end_reason": None}
+    ctx = FakeJobContext()
+    hangup = make_agent_hangup(ctx, captured)  # type: ignore[arg-type]
+
+    await hangup()
+
+    assert captured["end_reason"] == CallEndReason.NORMAL_HANGUP.value
+    assert captured["status"] is None
+    assert ctx.shutdown_calls == ["agent_end_call"]
