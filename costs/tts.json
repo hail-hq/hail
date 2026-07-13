@@ -21,7 +21,7 @@
         "alaw_8000"
       ],
       "time_to_first_byte_ms": 75,
-      "last_verified": "2026-07-02",
+      "last_verified": "2026-07-13",
       "last_changed_at": "2026-05-05",
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",
@@ -38,7 +38,7 @@
       "languages": "29+",
       "ssml_supported": false,
       "voice_cloning": true,
-      "last_verified": "2026-07-02",
+      "last_verified": "2026-07-13",
       "last_changed_at": "2026-05-19",
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",
@@ -56,7 +56,7 @@
       "ssml_supported": false,
       "emotion_control_supported": true,
       "voice_cloning": true,
-      "last_verified": "2026-07-02",
+      "last_verified": "2026-07-13",
       "last_changed_at": "2026-05-19",
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",
@@ -75,7 +75,7 @@
       "voice_cloning": true,
       "deprecated_at": "2026-05-19",
       "replaced_by_model_id": "eleven_flash_v2_5",
-      "last_verified": "2026-07-02",
+      "last_verified": "2026-07-13",
       "last_changed_at": "2026-05-19",
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",
@@ -93,7 +93,7 @@
       "ssml_supported": false,
       "voice_cloning": true,
       "time_to_first_byte_ms": 75,
-      "last_verified": "2026-07-02",
+      "last_verified": "2026-07-13",
       "last_changed_at": "2026-07-02",
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",
@@ -110,12 +110,12 @@
       "languages": ["en"],
       "ssml_supported": false,
       "voice_cloning": false,
-      "last_verified": "2026-07-02",
+      "last_verified": "2026-07-13",
       "last_changed_at": "2026-05-05",
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",
       "source_url": "https://developers.openai.com/api/docs/models/tts-1",
-      "notes": "Standard quality. Price unchanged at $15/1M chars as of 2026-07-02 refresh; confirmed via model detail page (openai.com/api/pricing/ now redirects through platform.openai.com/docs/models to developers.openai.com)."
+      "notes": "Standard quality. Price unchanged at $15/1M chars as of 2026-07-13 refresh; confirmed via model detail page (openai.com/api/pricing/ now redirects through platform.openai.com/docs/models to developers.openai.com)."
     },
     {
       "provider": "OpenAI",
@@ -127,12 +127,12 @@
       "languages": ["en"],
       "ssml_supported": false,
       "voice_cloning": false,
-      "last_verified": "2026-07-02",
+      "last_verified": "2026-07-13",
       "last_changed_at": "2026-05-05",
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",
       "source_url": "https://developers.openai.com/api/docs/models/tts-1-hd",
-      "notes": "High-definition tier — 2x the price of tts-1 for higher quality output. Price unchanged at $30/1M chars as of 2026-07-02 refresh; confirmed via model detail page (openai.com/api/pricing/ now redirects through platform.openai.com/docs/models to developers.openai.com)."
+      "notes": "High-definition tier — 2x the price of tts-1 for higher quality output. Price unchanged at $30/1M chars as of 2026-07-13 refresh; confirmed via model detail page (openai.com/api/pricing/ now redirects through platform.openai.com/docs/models to developers.openai.com)."
     },
     {
       "provider": "OpenAI",
@@ -144,12 +144,12 @@
       "languages": ["en"],
       "ssml_supported": false,
       "voice_cloning": false,
-      "last_verified": "2026-07-02",
+      "last_verified": "2026-07-13",
       "last_changed_at": "2026-05-19",
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",
       "source_url": "https://developers.openai.com/api/docs/models/gpt-4o-mini-tts",
-      "notes": "OpenAI's newer GPT-4o-based TTS. Native pricing is token-based — $0.60/1M text-input tokens + $12/1M audio-output tokens — not per character. OpenAI's published estimate is ~$0.015 per minute of audio; converted to ~$20/1M chars assuming ~150 WPM (~750 chars/min) for consistency with the Cartesia row. Actual $/1M chars varies with speech rate and language. Supports voice steering via natural-language instructions (style/emotion) instead of SSML. Latest snapshot gpt-4o-mini-tts-2025-12-15; unchanged as of 2026-07-02 refresh. Only the older gpt-4o-mini-tts-2025-03-20 snapshot is marked deprecated — the default model_id remains active. Max input 2,000 tokens per request."
+      "notes": "OpenAI's newer GPT-4o-based TTS. Native pricing is token-based — $0.60/1M text-input tokens + $12/1M audio-output tokens — not per character. OpenAI's published estimate is ~$0.015 per minute of audio; converted to ~$20/1M chars assuming ~150 WPM (~750 chars/min) for consistency with the Cartesia row. Actual $/1M chars varies with speech rate and language. Supports voice steering via natural-language instructions (style/emotion) instead of SSML. Latest snapshot gpt-4o-mini-tts-2025-12-15; unchanged as of 2026-07-13 refresh. Only the older gpt-4o-mini-tts-2025-03-20 snapshot is marked deprecated — the default model_id remains active. Max input 2,000 tokens per request."
     },
     {
       "provider": "Cartesia",
@@ -170,12 +170,12 @@
         "mp3"
       ],
       "time_to_first_byte_ms": 90,
-      "last_verified": "2026-07-02",
+      "last_verified": "2026-07-13",
       "last_changed_at": "2026-05-05",
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",
       "source_url": "https://cartesia.ai/pricing",
-      "notes": "Cartesia publishes Sonic pricing as $1 per 25 minutes of audio output (~$0.04/min). Converted to ~$50/1M chars assuming ~150 WPM (~750 chars/min). Actual $/1M chars varies with speech rate; verify by sampling. IVC voice cloning included (no clone fee). 90ms TTFB. SSML speed/volume tags confirmed available on sonic-3.5 per https://docs.cartesia.ai/build-with-cartesia/sonic-3/ssml-tags (re-checked 2026-07-02); previously logged as temporarily disabled, now re-enabled upstream. Emotion tags remain beta."
+      "notes": "Cartesia publishes Sonic pricing as $1 per 25 minutes of audio output (~$0.04/min). Converted to ~$50/1M chars assuming ~150 WPM (~750 chars/min). Actual $/1M chars varies with speech rate; verify by sampling. IVC voice cloning included (no clone fee). 90ms TTFB. SSML speed/volume tags confirmed available on sonic-3.5 per https://docs.cartesia.ai/build-with-cartesia/sonic-3/ssml-tags (re-checked 2026-07-02); previously logged as temporarily disabled, now re-enabled upstream. Emotion tags remain beta. Re-verified 2026-07-13: still Cartesia's current-recommended model, pricing page still credit/subscription-based with no published per-char rate (no structured price change)."
     },
     {
       "provider": "Cartesia",
@@ -189,12 +189,12 @@
       "voice_cloning": true,
       "replaced_by_model_id": "sonic-3.5",
       "confidence": "medium",
-      "last_verified": "2026-07-02",
+      "last_verified": "2026-07-13",
       "last_changed_at": "2026-07-02",
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",
       "source_url": "https://docs.cartesia.ai/build-with-cartesia/tts-models/older-models",
-      "notes": "Newly added row: predecessor to sonic-3.5, still stable and a valid model_id on the TTS API. Latest snapshot sonic-3-2026-01-12; 43 languages. Cartesia recommends sonic-3.5 for best results, most languages, and naturalness. SSML speed/volume tags confirmed available per https://docs.cartesia.ai/build-with-cartesia/sonic-3/ssml-tags. TTFB not published for this specific snapshot. Pricing assumed equal to sonic-3.5 (15 credits/sec of audio); confidence medium because Cartesia does not publish a separate per-model rate on the pricing page. Verify by sampling if cost-critical."
+      "notes": "Predecessor to sonic-3.5, still stable and a valid model_id on the TTS API. Latest snapshot sonic-3-2026-01-12; 43 languages. Cartesia recommends sonic-3.5 for best results, most languages, and naturalness. SSML speed/volume tags confirmed available per https://docs.cartesia.ai/build-with-cartesia/sonic-3/ssml-tags. TTFB not published for this specific snapshot. Pricing assumed equal to sonic-3.5 (15 credits/sec of audio); confidence medium because Cartesia does not publish a separate per-model rate on the pricing page. Verify by sampling if cost-critical. Re-verified 2026-07-13: still stable, same 43-language count, no price change."
     },
     {
       "provider": "Cartesia",
@@ -209,12 +209,12 @@
       "time_to_first_byte_ms": 90,
       "replaced_by_model_id": "sonic-3.5",
       "confidence": "medium",
-      "last_verified": "2026-07-02",
+      "last_verified": "2026-07-13",
       "last_changed_at": "2026-05-19",
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",
       "source_url": "https://docs.cartesia.ai/build-with-cartesia/tts-models/older-models",
-      "notes": "Predecessor to sonic-3.5; still stable and callable, but Cartesia recommends sonic-3.5 for new builds. Latest snapshot sonic-2-2025-06-11, supporting 8 core languages (en, fr, de, es, pt, zh, ja, ko). The 7 additional languages previously carrying a 2026-06-01 EOL are no longer listed as supported on this snapshot as of 2026-07-02; languages field reduced from 15+ accordingly. 90ms model latency. Higher-fidelity voice cloning capability. Pricing assumed equal to sonic-3.5 (15 credits/sec of audio); confidence medium because Cartesia did not publish a separate per-model rate. Verify by sampling if cost-critical."
+      "notes": "Predecessor to sonic-3.5; still stable and callable, but Cartesia recommends sonic-3.5 for new builds. Latest snapshot sonic-2-2025-06-11, supporting 8 core languages (en, fr, de, es, pt, zh, ja, ko). The 7 additional languages previously carrying a 2026-06-01 EOL are no longer listed as supported on this snapshot as of 2026-07-02; languages field reduced from 15+ accordingly. 90ms model latency. Higher-fidelity voice cloning capability. Pricing assumed equal to sonic-3.5 (15 credits/sec of audio); confidence medium because Cartesia did not publish a separate per-model rate. Verify by sampling if cost-critical. Re-verified 2026-07-13: snapshot and 8-language count unchanged, no price change."
     },
     {
       "provider": "Cartesia",
@@ -229,12 +229,12 @@
       "time_to_first_byte_ms": 40,
       "replaced_by_model_id": "sonic-3.5",
       "confidence": "medium",
-      "last_verified": "2026-07-02",
+      "last_verified": "2026-07-13",
       "last_changed_at": "2026-05-19",
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",
       "source_url": "https://docs.cartesia.ai/build-with-cartesia/tts-models/older-models",
-      "notes": "Lowest-latency Sonic variant (~40ms TTFB). Still stable and callable, but Cartesia recommends sonic-3.5 for new builds. Latest snapshot sonic-turbo-2025-06-04, supporting 9 languages (en, fr, de, es, pt, zh, ja, hi, ko). The 6 additional languages previously carrying a 2026-06-01 EOL are no longer listed as supported on this snapshot as of 2026-07-02; languages field reduced from 15+ accordingly. Pricing assumed equal to sonic-3.5 (15 credits/sec of audio); confidence medium because Cartesia did not publish a separate per-model rate. Verify by sampling if cost-critical."
+      "notes": "Lowest-latency Sonic variant (~40ms TTFB). Still stable and callable, but Cartesia recommends sonic-3.5 for new builds. Latest snapshot sonic-turbo-2025-06-04, supporting 9 languages (en, fr, de, es, pt, zh, ja, hi, ko). The 6 additional languages previously carrying a 2026-06-01 EOL are no longer listed as supported on this snapshot as of 2026-07-02; languages field reduced from 15+ accordingly. Pricing assumed equal to sonic-3.5 (15 credits/sec of audio); confidence medium because Cartesia did not publish a separate per-model rate. Verify by sampling if cost-critical. Re-verified 2026-07-13: snapshot and 9-language count unchanged, no price change."
     },
     {
       "provider": "Groq",
@@ -244,12 +244,12 @@
       "price_per_1m_chars_usd": "22.0",
       "voice_quality": "neural",
       "languages": ["en"],
-      "last_verified": "2026-07-02",
+      "last_verified": "2026-07-13",
       "last_changed_at": "2026-05-05",
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",
       "source_url": "https://groq.com/pricing/",
-      "notes": "Hosted on Groq. Output speed ~100 characters/second. Vendor API model_id is canopylabs/orpheus-v1-english per console.groq.com/docs/models; this row keeps the pre-existing Hail slug for stability."
+      "notes": "Hosted on Groq. Output speed ~100 characters/second. Vendor API model_id is canopylabs/orpheus-v1-english per console.groq.com/docs/models; this row keeps the pre-existing Hail slug for stability. Re-verified 2026-07-13 against groq.com/pricing and console.groq.com/docs/models: price and model_id unchanged; still listed as a preview model."
     },
     {
       "provider": "Groq",
@@ -259,12 +259,12 @@
       "price_per_1m_chars_usd": "40.0",
       "voice_quality": "neural",
       "languages": ["ar-SA"],
-      "last_verified": "2026-07-02",
+      "last_verified": "2026-07-13",
       "last_changed_at": "2026-05-05",
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",
       "source_url": "https://groq.com/pricing/",
-      "notes": "Hosted on Groq. Saudi Arabic variant. Output speed ~100 characters/second. Vendor API model_id is canopylabs/orpheus-arabic-saudi per console.groq.com/docs/models; this row keeps the pre-existing Hail slug for stability."
+      "notes": "Hosted on Groq. Saudi Arabic variant. Output speed ~100 characters/second. Vendor API model_id is canopylabs/orpheus-arabic-saudi per console.groq.com/docs/models; this row keeps the pre-existing Hail slug for stability. Re-verified 2026-07-13 against groq.com/pricing and console.groq.com/docs/models: price and model_id unchanged; still listed as a preview model."
     },
     {
       "provider": "Google",
@@ -278,12 +278,12 @@
       "voice_cloning": false,
       "deployment_options": ["native", "vertex"],
       "confidence": "medium",
-      "last_verified": "2026-07-02",
+      "last_verified": "2026-07-13",
       "last_changed_at": "2026-05-19",
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",
       "source_url": "https://cloud.google.com/text-to-speech/pricing",
-      "notes": "Google's premium TTS tier for professional media production (long-form narration, advertising). Vendor price $0.000160/char = $160/1M chars; the single-speaker Studio class is GA and the multispeaker class is experimental per https://docs.cloud.google.com/text-to-speech/docs/voices. SSML supported except <mark>, <emphasis>, <prosody pitch>, and <lang>. Model_id is a Hail-coined tier slug (Google bills per-voice-tier rather than per API model name). Free tier: first 100K chars/month included (not representable as tokens_per_day in schema). 2026-07-02: primary pricing page returned truncated/nav-heavy content via WebFetch on 5 retries (no pricing table extracted); tier confirmed still active and GA/experimental split unchanged via secondary docs.cloud.google.com/text-to-speech/docs/voices, and price cross-checked against third-party aggregator costbench.com (matches $160). confidence downgraded to medium pending a clean primary-source refetch."
+      "notes": "Google's premium TTS tier for professional media production (long-form narration, advertising). Vendor price $0.000160/char = $160/1M chars; the single-speaker Studio class is GA and the multispeaker class is experimental per https://docs.cloud.google.com/text-to-speech/docs/voices. SSML supported except <mark>, <emphasis>, <prosody pitch>, and <lang>. Model_id is a Hail-coined tier slug (Google bills per-voice-tier rather than per API model name). Free tier: first 100K chars/month included (not representable as tokens_per_day in schema). 2026-07-13 refresh: primary pricing page again returned truncated/nav-heavy content via WebFetch (2 retries, no pricing table extracted); tier confirmed still active and GA/experimental split unchanged via secondary docs.cloud.google.com/text-to-speech/docs/voices (re-fetched, unchanged), and price cross-checked via search-indexed vendor/aggregator content (costbench.com, both confirm $160/1M). confidence remains medium pending a clean primary-source refetch. Price unchanged."
     },
     {
       "provider": "Google",
@@ -297,12 +297,12 @@
       "voice_cloning": false,
       "deployment_options": ["native", "vertex"],
       "confidence": "medium",
-      "last_verified": "2026-07-02",
+      "last_verified": "2026-07-13",
       "last_changed_at": "2026-05-19",
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",
       "source_url": "https://cloud.google.com/text-to-speech/pricing",
-      "notes": "Google's recommended general-purpose neural tier; same per-char rate as WaveNet but newer architecture. Vendor price $0.000016/char = $16/1M chars. SSML fully supported. Model_id is a Hail-coined tier slug (Google bills per-voice-tier rather than per API model name). Free tier: first 1M chars/month included (not representable as tokens_per_day in schema). 2026-07-02: primary pricing page returned truncated/nav-heavy content via WebFetch on 5 retries (no pricing table extracted); tier confirmed still active via secondary docs.cloud.google.com/text-to-speech/docs/voices, and price cross-checked against third-party aggregator costbench.com (matches $16). confidence downgraded to medium pending a clean primary-source refetch."
+      "notes": "Google's recommended general-purpose neural tier; same per-char rate as WaveNet but newer architecture. Vendor price $0.000016/char = $16/1M chars. SSML fully supported. Model_id is a Hail-coined tier slug (Google bills per-voice-tier rather than per API model name). Free tier: first 1M chars/month included (not representable as tokens_per_day in schema). 2026-07-13 refresh: primary pricing page again returned truncated/nav-heavy content via WebFetch (2 retries, no pricing table extracted); tier confirmed still active via secondary docs.cloud.google.com/text-to-speech/docs/voices (re-fetched, unchanged), and price cross-checked via search-indexed vendor/aggregator content (costbench.com, matches $16). confidence remains medium pending a clean primary-source refetch. Price unchanged."
     },
     {
       "provider": "Google",
@@ -316,12 +316,12 @@
       "voice_cloning": false,
       "deployment_options": ["native", "vertex"],
       "confidence": "medium",
-      "last_verified": "2026-05-19",
+      "last_verified": "2026-07-13",
       "last_changed_at": "2026-05-19",
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",
       "source_url": "https://cloud.google.com/text-to-speech/pricing",
-      "notes": "Original neural-net voice family from DeepMind; not deprecated as of 2026-05-19 per Cloud TTS release notes (https://docs.cloud.google.com/text-to-speech/docs/release-notes) but Google recommends Neural2 for new projects at the same $16/1M chars rate. SSML fully supported. Model_id is a Hail-coined tier slug. Free tier: first 1M chars/month included. 2026-07-02 refresh: DEFERRED, last_verified intentionally NOT bumped. Primary pricing page returned truncated/nav-heavy content via WebFetch (5 retries, no pricing table extracted). Secondary docs.cloud.google.com/text-to-speech/docs/voices confirms tier still active, SSML support unchanged, no deprecation banner. However two independent third-party aggregators (costbench.com, and a search-engine snippet of cloud.google.com/text-to-speech/pricing) both state WaveNet is priced at $4/1M chars with a 4M-char free tier grouped with Standard voices, not $16/1M chars with a 1M-char free tier as currently recorded — a conflict with this row's existing figures that a vendor-primary refetch must resolve before changing the price field. Kept existing $16 value; do not treat this as confirmed."
+      "notes": "Original neural-net voice family from DeepMind; not deprecated as of 2026-05-19 per Cloud TTS release notes (https://docs.cloud.google.com/text-to-speech/docs/release-notes) but Google recommends Neural2 for new projects at the same $16/1M chars rate. SSML fully supported. Model_id is a Hail-coined tier slug. Free tier: first 1M chars/month included. 2026-07-13 refresh: primary pricing page again returned truncated/nav-heavy content via WebFetch (2 retries, no pricing table extracted). Secondary docs.cloud.google.com/text-to-speech/docs/voices confirms tier still active (GA), SSML support unchanged, no deprecation banner. Prior week's conflict resolved: the 2026-07-02 aggregator claim of $4/1M (grouped with Standard voices) was a mismatch of tiers — Google's own WaveNet doc page (docs.cloud.google.com/text-to-speech/docs/wavenet, surfaced via search) states WaveNet voices get 1M free chars/month then bill at $16.00/1M, matching this row's existing figures; the $4/1M rate belongs to the separate Standard voice tier, not WaveNet. Treating $16/1M chars and the 1M-char free tier as confirmed via secondary + search-indexed vendor doc; last_verified bumped, price unchanged."
     },
     {
       "provider": "Google",
@@ -336,19 +336,19 @@
       "voice_cloning": false,
       "deployment_options": ["native", "vertex"],
       "confidence": "medium",
-      "last_verified": "2026-07-02",
+      "last_verified": "2026-07-13",
       "last_changed_at": "2026-05-19",
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",
       "source_url": "https://cloud.google.com/text-to-speech/pricing",
-      "notes": "Google's newest-generation TTS family with 30 voice styles in 30+ languages. Vendor price $0.000030/char = $30/1M chars. Per https://docs.cloud.google.com/text-to-speech/docs/chirp3-hd, Chirp 3: HD explicitly does NOT support SSML, speaking-rate adjustments, or pitch parameters; streaming synthesis IS supported. Model_id is a Hail-coined tier slug. Free tier: first 1M chars/month included. 2026-07-02: primary pricing page returned truncated/nav-heavy content via WebFetch on 5 retries (no pricing table extracted); tier confirmed still active with unchanged SSML/streaming behavior via secondary docs.cloud.google.com/text-to-speech/docs/voices, and price cross-checked against third-party aggregator costbench.com (matches $30). confidence downgraded to medium pending a clean primary-source refetch."
+      "notes": "Google's newest-generation TTS family with 30 voice styles in 30+ languages. Vendor price $0.000030/char = $30/1M chars. Per https://docs.cloud.google.com/text-to-speech/docs/chirp3-hd, Chirp 3: HD explicitly does NOT support SSML, speaking-rate adjustments, or pitch parameters; streaming synthesis IS supported. Model_id is a Hail-coined tier slug. Free tier: first 1M chars/month included. 2026-07-13 refresh: primary pricing page again returned truncated/nav-heavy content via WebFetch (2 retries, no pricing table extracted); tier confirmed still active (GA) with unchanged SSML/streaming behavior via secondary docs.cloud.google.com/text-to-speech/docs/voices (re-fetched, unchanged), and price cross-checked via search-indexed vendor/aggregator content (costbench.com, matches $30). confidence remains medium pending a clean primary-source refetch. Price unchanged."
     },
     {
       "provider": "Microsoft Azure",
       "provider_url": "https://azure.microsoft.com",
       "model_id": "azure-tts-neural",
       "display_name": "Azure AI Speech — Neural",
-      "price_per_1m_chars_usd": "16.0",
+      "price_per_1m_chars_usd": "15.0",
       "voice_quality": "neural",
       "languages": "100+",
       "ssml_supported": true,
@@ -356,12 +356,12 @@
       "voice_cloning": false,
       "deployment_options": ["azure"],
       "confidence": "medium",
-      "last_verified": "2026-07-02",
-      "last_changed_at": "2026-05-19",
+      "last_verified": "2026-07-13",
+      "last_changed_at": "2026-07-13",
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",
       "source_url": "https://azure.microsoft.com/en-us/pricing/details/cognitive-services/speech-services/",
-      "notes": "Azure's standard neural TTS tier (called 'Neural' on the pricing page; 'Standard voice' in docs). 500+ prebuilt voices across 100+ locales per https://learn.microsoft.com/en-us/azure/ai-services/speech-service/text-to-speech. S0 pay-as-you-go price $16/1M chars for both real-time and batch synthesis (HD, AOAI, Custom Neural Voice, and Personal Voice priced separately). Full SSML support. Chinese characters counted as 2 chars for billing. Free tier (F0): 500K chars/month. 2026-07-02 refresh: primary pricing page unreachable via WebFetch (ETIMEDOUT/ECONNREFUSED across 7 attempts on multiple URL variants — likely a session-side connectivity issue with azure.microsoft.com, not a vendor-side change). Price cross-checked and confirmed unchanged at $16/1M via two independent third-party aggregators (costbench.com/software/ai-voice-tools/microsoft-speech/, last-verified-on-page Apr 24 2026; texttolab.com/blog/azure-text-to-speech-pricing) plus a search-engine snippet quoting the vendor page directly. Free tier (500K chars/month) also corroborated by both aggregators. confidence downgraded to medium pending a clean primary-source refetch."
+      "notes": "Azure's standard neural TTS tier (called 'Neural' on the pricing page; 'Standard voice' in docs). 500+ prebuilt voices across 100+ locales per https://learn.microsoft.com/en-us/azure/ai-services/speech-service/text-to-speech (reconfirmed 2026-07-13: 100+ languages/locales, full SSML support, unchanged). S0 pay-as-you-go price for both real-time and batch synthesis (HD, AOAI, Custom Neural Voice, and Personal Voice priced separately). Chinese characters counted as 2 chars for billing. Free tier (F0): 500K chars/month. 2026-07-13 refresh: primary marketing pricing page again unreachable via WebFetch (timeout across 4 attempts, multiple URL variants — same persistent issue noted in the 2026-07-02 refresh). Queried Microsoft's own public Azure Retail Prices API directly (https://prices.azure.com/api/retail/prices, meterName 'S1 Neural Text To Speech Characters', productName 'Azure Speech', meterId 0f98e708-a16c-407b-8089-a0ed9e14ab49): retailPrice is $15.00/1M chars for the Global meter and all commercial regions (US Gov regions bill $18.75/1M), with effectiveStartDate 2024-02-01 — i.e. this rate has been continuously in effect since Feb 2024, not a fresh vendor price change this week. This is Microsoft's own first-party billing-meter API, more authoritative than the marketing page or any third-party recap. price_per_1m_chars_usd corrected from '16.0' to '15.0' to match the live meter — this appears to fix a stale figure carried forward from earlier refreshes. Note: multiple third-party aggregators (costbench.com, texttolab.com) and general web search still report '$16/1M' as of mid-2026, apparently echoing each other or a stale marketing-page snapshot rather than the live billing meter; none could be reconciled against prices.azure.com. confidence held at medium pending a clean fetch of the live marketing pricing page to confirm its displayed sticker price matches the billing meter."
     },
     {
       "provider": "Microsoft Azure",
@@ -379,12 +379,12 @@
       "voice_cloning": false,
       "deployment_options": ["azure"],
       "confidence": "medium",
-      "last_verified": "2026-07-02",
+      "last_verified": "2026-07-13",
       "last_changed_at": "2026-03-01",
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",
       "source_url": "https://azure.microsoft.com/en-us/pricing/details/cognitive-services/speech-services/",
-      "notes": "Azure's premium HD neural tier (DragonHD architecture, 30+ GA voices). Per https://techcommunity.microsoft.com/blog/azure-ai-foundry-blog/azure-speech-%E2%80%93-neural-hd-text-to-speech-recent-voice-updates/4505380, Azure reduced Neural HD pricing to $22/1M chars effective March 2026 (down from $30/1M). Latency <300ms, real-time only. SSML support is partial (no <prosody>, <emphasis>, <break>); we mark ssml_supported=false because the elements most callers want are unsupported. Automatic emotion/sentiment detection drives delivery (emotion_control_supported=true). DragonHDOmni (700+ voices, mixed GA/preview) and DragonHDFlash (en-US/zh-CN only) are distinct models tracked separately if added later. Confidence medium because the pricing-page value was sourced via third-party recap (techcommunity blog) — verify on the live Azure pricing page before high-volume use. 2026-07-02 refresh: primary pricing page still unreachable via WebFetch (ETIMEDOUT across 7 attempts, multiple URL variants). $22/1M price and 30+ voice count reconfirmed unchanged via two independent third-party aggregators (costbench.com, texttolab.com — both explicitly state '$22/1M, reduced from $30 in March 2026') plus learn.microsoft.com/en-us/azure/ai-services/speech-service/high-definition-voices, which confirms voice count ('30+ fine-tuned voices'), the en-US/de-DE/es-ES/fr-FR/ja-JP/zh-CN locale set, and partial SSML support (no <prosody> or <emphasis>) are all unchanged. DragonHD Omni (700+ voices) and DragonHD Flash (zh-CN/en-US optimized variants) confirmed to exist and be documented as of this refresh, but no vendor or third-party pricing was found for either — deferred as new rows pending a priced, in-file-verifiable model_id."
+      "notes": "Azure's premium HD neural tier (DragonHD architecture, 30+ GA voices). Per https://techcommunity.microsoft.com/blog/azure-ai-foundry-blog/azure-speech-%E2%80%93-neural-hd-text-to-speech-recent-voice-updates/4505380, Azure reduced Neural HD pricing to $22/1M chars effective March 2026 (down from $30/1M). Latency <300ms, real-time only. SSML support is partial; per the current supported/unsupported SSML table at learn.microsoft.com/en-us/azure/ai-services/speech-service/high-definition-voices, DragonHD (non-Omni) supports <voice>, <lang>, <phoneme>, <lexicon> (alias only), <say-as>, <sub>, <break>, <p>, <s>, but NOT <mstts:express-as>, <prosody>, <emphasis>, <audio>, <mstts:audioduration>, <mstts:backgroundaudio>, <math>, <bookmark>, <mstts:silence>, <mstts:viseme>; we mark ssml_supported=false because <prosody>/<emphasis>, the elements most callers want, are unsupported (2026-07-13: corrected note — <break> IS actually supported for DragonHD per the current doc table, unlike what a prior refresh's note implied). Automatic emotion/sentiment detection drives delivery (emotion_control_supported=true). DragonHDOmni (700+ voices, mixed GA/preview) and DragonHDFlash (en-US/zh-CN only) are distinct models tracked separately if added later. Confidence medium because the pricing-page value was originally sourced via third-party recap (techcommunity blog) — verify on the live Azure pricing page before high-volume use. 2026-07-13 refresh: primary marketing pricing page again unreachable via WebFetch (timeout across 4 attempts, multiple URL variants — same persistent issue as 2026-07-02). $22/1M reconfirmed unchanged via Microsoft's own Azure Retail Prices API (https://prices.azure.com/api/retail/prices, meterName 'Neural HD Text to Speech Characters', productName 'Azure Speech', meterId ad55d150-6182-5565-acf9-364d6ed979fb): retailPrice $22.00/1M chars (Global meter), effectiveStartDate 2026-03-01 — matches the March 2026 cut recorded here exactly, confirming no further change since. 30+ voice count, the en-US/de-DE/es-ES/fr-FR/ja-JP/zh-CN locale set, and the SSML support table reconfirmed via a direct fetch of learn.microsoft.com/en-us/azure/ai-services/speech-service/high-definition-voices (28 named DragonHD voices listed, 3 of them Preview status; six locales exactly matching this row). DragonHD Omni (700+ voices) and DragonHD Flash (zh-CN/en-US optimized variants, confirmed via the same doc to list 17 named Flash voices) still have no distinct billing meter in the Azure Retail Prices API (checked directly, no 'Omni' or 'Flash' Speech meters found) — deferred as new rows pending a priced, in-file-verifiable model_id."
     },
     {
       "provider": "Inworld",
@@ -397,12 +397,12 @@
       "streaming_supported": true,
       "voice_cloning": true,
       "deployment_options": ["native"],
-      "last_verified": "2026-07-02",
+      "last_verified": "2026-07-13",
       "last_changed_at": "2026-07-02",
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",
       "source_url": "https://inworld.ai/pricing",
-      "notes": "Inworld's flagship Realtime TTS-2 model with natural-language steering and 100+ language support (docs.inworld.ai cites 200+ languages/locales). Pricing tiers restructured since last check: On-Demand (PAYG) rate now $25/1M chars (was $35), Creator $20, Builder $17.50, Developer $15, Growth $12.50, Enterprise as low as $5/1M. Instant voice cloning, custom pronunciation, and enhanced timestamp/viseme alignment included. The older inworld-tts-1 and inworld-tts-1-max were discontinued June 15, 2026 per docs.inworld.ai/tts/tts-models (auto-rerouted to inworld-tts-1.5-mini and inworld-tts-1.5-max respectively, neither of which was previously tracked — added as separate rows this pass)."
+      "notes": "Inworld's flagship Realtime TTS-2 model with natural-language steering and 100+ language support (docs.inworld.ai cites 200+ languages/locales). Pricing tiers restructured since last check: On-Demand (PAYG) rate now $25/1M chars (was $35), Creator $20, Builder $17.50, Developer $15, Growth $12.50, Enterprise as low as $5/1M. Instant voice cloning, custom pronunciation, and enhanced timestamp/viseme alignment included. The older inworld-tts-1 and inworld-tts-1-max were discontinued June 15, 2026 per docs.inworld.ai/tts/tts-models (auto-rerouted to inworld-tts-1.5-mini and inworld-tts-1.5-max respectively, neither of which was previously tracked — added as separate rows this pass). 2026-07-13 refresh: pricing page and docs re-verified via WebFetch, all tiers and rates unchanged; no new models launched; no further deprecation activity."
     },
     {
       "provider": "Inworld",
@@ -431,12 +431,12 @@
       "streaming_supported": true,
       "voice_cloning": true,
       "deployment_options": ["native"],
-      "last_verified": "2026-07-02",
+      "last_verified": "2026-07-13",
       "last_changed_at": "2026-07-02",
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",
       "source_url": "https://inworld.ai/pricing",
-      "notes": "Active alternative to TTS-2, tuned for maximum stability across 15 languages. Vendor-reported <200ms median latency. On-Demand (PAYG) rate $35/1M chars; Creator $25, Builder $22.50, Developer $20, Growth $17.50, Enterprise custom. Instant voice cloning and enhanced timestamps included. Successor to discontinued inworld-tts-1-max per https://docs.inworld.ai/tts/tts-models."
+      "notes": "Active alternative to TTS-2, tuned for maximum stability across 15 languages. Vendor-reported <200ms median latency. On-Demand (PAYG) rate $35/1M chars; Creator $25, Builder $22.50, Developer $20, Growth $17.50, Enterprise custom. Instant voice cloning and enhanced timestamps included. Successor to discontinued inworld-tts-1-max per https://docs.inworld.ai/tts/tts-models. 2026-07-13 refresh: rate and language list reconfirmed unchanged via pricing page and docs."
     },
     {
       "provider": "Inworld",
@@ -465,12 +465,12 @@
       "streaming_supported": true,
       "voice_cloning": true,
       "deployment_options": ["native"],
-      "last_verified": "2026-07-02",
+      "last_verified": "2026-07-13",
       "last_changed_at": "2026-07-02",
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",
       "source_url": "https://inworld.ai/pricing",
-      "notes": "Low-latency tier across the same 15 languages as 1.5 Max. Vendor-reported ~120ms median latency (~160ms P90 first-chunk). On-Demand (PAYG) rate $15/1M chars; Creator $10, Builder $9, Developer $8, Growth $7, Enterprise custom. Instant voice cloning and enhanced timestamps included; also available for on-premises deployment. Successor to discontinued inworld-tts-1 per https://docs.inworld.ai/tts/tts-models."
+      "notes": "Low-latency tier across the same 15 languages as 1.5 Max. Vendor-reported ~120ms median latency (~160ms P90 first-chunk). On-Demand (PAYG) rate $15/1M chars; Creator $10, Builder $9, Developer $8, Growth $7, Enterprise custom. Instant voice cloning and enhanced timestamps included; also available for on-premises deployment. Successor to discontinued inworld-tts-1 per https://docs.inworld.ai/tts/tts-models. 2026-07-13 refresh: rate and language list reconfirmed unchanged via pricing page and docs."
     },
     {
       "provider": "Smallest.ai",
@@ -502,12 +502,12 @@
       "time_to_first_byte_ms": 200,
       "deployment_options": ["native"],
       "confidence": "medium",
-      "last_verified": "2026-07-02",
+      "last_verified": "2026-07-13",
       "last_changed_at": "2026-07-02",
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",
       "source_url": "https://smallest.ai/pricing",
-      "notes": "Smallest.ai's current standard TTS model (44.1 kHz native, ~200ms TTFB at 40 concurrent requests). 2026-07-02 refresh: canonical API model_id corrected from 'lightning-v3.1' (hyphen, Hail-coined) to 'lightning_v3.1' (underscore) per exact string confirmed in code samples on https://docs.smallest.ai/waves/model-cards/text-to-speech/lightning-v-3-1 ('\"model\": \"lightning_v3.1\"'); old id kept as alias. Price dropped from $25/1M to $17.5/1M chars (~$0.175/10k chars), confirmed via rendered pricing-page text (both AI-summarized and raw-HTML grep of the live page); note the page's stale JSON-LD schema.org markup still advertises the old ~$0.25/10k figure for its 'Pro' *subscription* tier description, so confidence downgraded to medium pending a secondary source that states the exact number (docs.smallest.ai defers pricing to the pricing page and does not restate figures). Output formats corrected to match vendor's exact list (added alaw; mulaw renamed to ulaw per vendor terminology) — sample rates and voice/language counts unchanged. New sibling model added this refresh: lightning_v3.1_pro. Lightning v2 and lightning-large remain deprecated per https://docs.smallest.ai/waves/documentation/getting-started/models — new integrations should use lightning_v3.1 or lightning_v3.1_pro. WebSocket streaming for real-time/conversational use. Instant + professional voice cloning supported. On-prem available on Enterprise plan."
+      "notes": "Smallest.ai's current standard TTS model (44.1 kHz native, ~200ms TTFB at 40 concurrent requests). 2026-07-02 refresh: canonical API model_id corrected from 'lightning-v3.1' (hyphen, Hail-coined) to 'lightning_v3.1' (underscore) per exact string confirmed in code samples on https://docs.smallest.ai/waves/model-cards/text-to-speech/lightning-v-3-1 ('\"model\": \"lightning_v3.1\"'); old id kept as alias. Price dropped from $25/1M to $17.5/1M chars (~$0.175/10k chars), confirmed via rendered pricing-page text (both AI-summarized and raw-HTML grep of the live page); note the page's stale JSON-LD schema.org markup still advertises the old ~$0.25/10k figure for its 'Pro' *subscription* tier description, so confidence downgraded to medium pending a secondary source that states the exact number (docs.smallest.ai defers pricing to the pricing page and does not restate figures). Output formats corrected to match vendor's exact list (added alaw; mulaw renamed to ulaw per vendor terminology) — sample rates and voice/language counts unchanged. New sibling model added this refresh: lightning_v3.1_pro. Lightning v2 and lightning-large remain deprecated per https://docs.smallest.ai/waves/documentation/getting-started/models — new integrations should use lightning_v3.1 or lightning_v3.1_pro. WebSocket streaming for real-time/conversational use. Instant + professional voice cloning supported. On-prem available on Enterprise plan. 2026-07-13 refresh: re-verified via smallest.ai/pricing ($17.5/1M chars unchanged, no deprecation banner) and docs.smallest.ai model card (12-language list, voice cloning support, sample rates/output formats, 200ms TTFB all unchanged). Vendor's getting-started/models catalog still lists only lightning_v3.1 and lightning_v3.1_pro as active — no new TTS model launches found."
     },
     {
       "provider": "Smallest.ai",
@@ -516,7 +516,37 @@
       "display_name": "Lightning v3.1 Pro",
       "price_per_1m_chars_usd": "19.5",
       "voice_quality": "neural",
-      "languages": ["en", "hi"],
+      "languages": [
+        "en",
+        "hi",
+        "mr",
+        "ta",
+        "ml",
+        "te",
+        "kn",
+        "pa",
+        "bn",
+        "or",
+        "gu",
+        "ar",
+        "zh",
+        "id",
+        "ja",
+        "ko",
+        "ms",
+        "tr",
+        "vi",
+        "de",
+        "es",
+        "fr",
+        "it",
+        "pt",
+        "ru",
+        "el",
+        "fi",
+        "no",
+        "pl"
+      ],
       "streaming_supported": true,
       "voice_cloning": false,
       "output_formats": ["pcm", "mp3", "wav", "ulaw", "alaw"],
@@ -524,12 +554,12 @@
       "time_to_first_byte_ms": 200,
       "deployment_options": ["native"],
       "confidence": "medium",
-      "last_verified": "2026-07-02",
+      "last_verified": "2026-07-13",
       "last_changed_at": "2026-07-02",
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",
       "source_url": "https://smallest.ai/pricing",
-      "notes": "New row: premium 44.1 kHz-native pool with a curated voice catalog (American, British, and Indian accents), same ~200ms TTFB latency profile as standard Lightning v3.1. Only English (UK+American accent) and Hindi (Indian-English + Hindi code-switching) supported, vs. 12 languages on the standard model; omitting the language param defaults to en+hi. Voice cloning explicitly NOT available on the Pro pool per https://docs.smallest.ai/waves/model-cards/text-to-speech/lightning-v-3-1-pro ('No voice cloning. Voice cloning is not available on the Pro pool.'). Model_id 'lightning_v3.1_pro' confirmed verbatim in both the pricing page audio-sample caption and the docs model card. Vendor rate ~$0.195/10k chars = $19.5/1M chars, confirmed via rendered pricing-page text (AI-summarized + raw-HTML grep); confidence medium because the secondary docs source does not restate the exact price (defers to pricing page). voices_count omitted — vendor describes a 'curated catalog' without publishing an exact number for this pool."
+      "notes": "New row (2026-07-02): premium 44.1 kHz-native pool with a curated voice catalog (American, British, and Indian accents), same ~200ms TTFB latency profile as standard Lightning v3.1. Voice cloning explicitly NOT available on the Pro pool per https://docs.smallest.ai/waves/model-cards/text-to-speech/lightning-v-3-1-pro ('No voice cloning. Voice cloning is not available on the Pro pool.'). Model_id 'lightning_v3.1_pro' confirmed verbatim in both the pricing page audio-sample caption and the docs model card. Vendor rate ~$0.195/10k chars = $19.5/1M chars, confirmed via rendered pricing-page text (AI-summarized + raw-HTML grep); confidence medium because the secondary docs source does not restate the exact price (defers to pricing page). voices_count omitted — vendor describes a 'curated catalog' without publishing an exact number for this pool. 2026-07-13 refresh: languages field corrected 2->29 — the docs model card (docs.smallest.ai/waves/model-cards/text-to-speech/lightning-v-3-1-pro) now states 'English + Hindi, plus 27 more (9 Indian, 8 Asian & Middle Eastern, 10 European)' vs. the en/hi-only description recorded at row creation; not a price change so last_changed_at not bumped. Price ($19.5/1M), voice-cloning-unavailable status, sample rates/formats, and 200ms TTFB reconfirmed unchanged via smallest.ai/pricing and the docs model card."
     },
     {
       "provider": "Rime",
@@ -545,12 +575,12 @@
       "time_to_first_byte_ms": 37,
       "deployment_options": ["native"],
       "confidence": "medium",
-      "last_verified": "2026-07-02",
+      "last_verified": "2026-07-13",
       "last_changed_at": "2026-05-19",
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",
       "source_url": "https://rime.ai/pricing",
-      "notes": "Rime's current Mist-family flagship; English-only. Model_id, capabilities, voice count (94), and lack of custom pronunciation/pauses on mistv3 reconfirmed unchanged via https://docs.rime.ai/api-reference/models, which now quotes '~37ms P50' TTFA/TTFB for Mist v3 (tightened from the prior 'sub-100ms' figure; time_to_first_byte_ms updated 100->37, not a price field so last_changed_at not bumped). 2026-07-02 refresh: rime.ai/pricing was restructured (page timestamp Jul 1, 2026) from the old per-model $/char table to a flat 'Starter: $0.05/1K characters, Enterprise: custom' layout with no per-model breakdown visible for Mist/Coda/Arcana; three separate fetches of the live page and a web search found no text attributing $0.05/1K specifically to mistv3. A Mar 2025 Rime blog post (rime.ai/resources/new-pricing) shows an unrelated subscription-tier ladder ($5/100k, $19/500k, $99/3M, $249/10M chars/mo) that also doesn't differentiate by model, while an older post (rime.ai/resources/introducing-new-pricing) restates the legacy per-model figures matching this row's existing $30/1M for Mist alongside Arcana $40/1M and Coda $50/1M -- consistent with the value on file but not a fresh primary-source confirmation. Given the primary source no longer states a model-specific rate, kept the existing $30/1M value rather than guess; confidence downgraded to medium pending a vendor page that re-publishes per-model pricing or direct sales confirmation. Coda (184 voices, 6 languages incl. ES/FR/PT/DE/JA) and Arcana (now at v3, 94 voices, multilingual; Rime recommends migrating Arcana deployments to Coda) remain distinct models tracked separately if added later -- deferred again this refresh for the same pricing-opacity reason. Voice cloning not documented for Mist; available via Enterprise plan for custom voices."
+      "notes": "Rime's current Mist-family flagship; English-only. Model_id, capabilities, voice count (94), and lack of custom pronunciation/pauses on mistv3 reconfirmed unchanged via https://docs.rime.ai/api-reference/models, which now quotes '~37ms P50' TTFA/TTFB for Mist v3 (tightened from the prior 'sub-100ms' figure; time_to_first_byte_ms updated 100->37, not a price field so last_changed_at not bumped). 2026-07-02 refresh: rime.ai/pricing was restructured (page timestamp Jul 1, 2026) from the old per-model $/char table to a flat 'Starter: $0.05/1K characters, Enterprise: custom' layout with no per-model breakdown visible for Mist/Coda/Arcana; three separate fetches of the live page and a web search found no text attributing $0.05/1K specifically to mistv3. A Mar 2025 Rime blog post (rime.ai/resources/new-pricing) shows an unrelated subscription-tier ladder ($5/100k, $19/500k, $99/3M, $249/10M chars/mo) that also doesn't differentiate by model, while an older post (rime.ai/resources/introducing-new-pricing) restates the legacy per-model figures matching this row's existing $30/1M for Mist alongside Arcana $40/1M and Coda $50/1M -- consistent with the value on file but not a fresh primary-source confirmation. Given the primary source no longer states a model-specific rate, kept the existing $30/1M value rather than guess; confidence downgraded to medium pending a vendor page that re-publishes per-model pricing or direct sales confirmation. Coda (184 voices, 6 languages incl. ES/FR/PT/DE/JA) and Arcana (now at v3, 94 voices, multilingual; Rime recommends migrating Arcana deployments to Coda) remain distinct models tracked separately if added later -- deferred again this refresh for the same pricing-opacity reason. Voice cloning not documented for Mist; available via Enterprise plan for custom voices. 2026-07-13 refresh: rime.ai/pricing (fetched, page timestamp Jul 10, 2026 6:27pm UTC) still shows only the flat Starter $0.05/1K-chars / Enterprise-custom layout with zero per-model breakdown -- same opacity as the 2026-07-02 pass, so the existing $30/1M value is kept unverified-by-primary and confidence stays medium. docs.rime.ai/api-reference/models reconfirms mistv3 as 'Current (Mar 2026)' with model_id, 94 voices, EN-only, streaming, no voice cloning, and ~37ms P50 latency all unchanged, and additionally documents two more models not in this dataset: mistv2 (model_id 'mistv2', 94 voices, EN+ES, ~70ms on-prem, supports custom pronunciation) and legacy 'mist' (model_id 'mist', deprecated in favor of v2/v3) -- neither is added this pass because, like Coda/Arcana, no source states a per-model price and the two-source price rule can't be met. No deprecation banner on mistv3 itself."
     },
     {
       "provider": "LMNT",
@@ -564,12 +594,12 @@
       "voice_cloning": true,
       "deployment_options": ["native"],
       "confidence": "medium",
-      "last_verified": "2026-07-02",
+      "last_verified": "2026-07-13",
       "last_changed_at": "2026-05-19",
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",
       "source_url": "https://www.lmnt.com/pricing",
-      "notes": "LMNT's flagship Blizzard 2.0 model (canonical model_id 'blizzard' per https://docs.lmnt.com/models/overview). 31 languages with accent control, word timestamps, streaming, voice cloning, and speech sessions. Confidence medium because LMNT publishes plan-bundled pricing (Indie $10/mo for 200K chars + $0.05/1K overage; Pro $49/mo + $0.045/1K overage; Premium $199/mo + $0.035/1K overage) rather than a standalone PAYG per-char rate — $50/1M shown here is the Indie-tier overage rate. Free tier includes 15K characters/month with no overage rate (not representable as tokens_per_day in schema). Premium tier overage is $0.035/1K = $35/1M — large customers should benchmark on their own plan. 2026-07-02 refresh: re-verified via www.lmnt.com/pricing and docs.lmnt.com/models/overview — Indie/Pro/Premium plan pricing, overage rates, and Blizzard 2.0 as sole canonical model_id all unchanged; no new model_ids or deprecation notices found."
+      "notes": "LMNT's flagship Blizzard 2.0 model (canonical model_id 'blizzard' per https://docs.lmnt.com/models/overview). 31 languages with accent control, word timestamps, streaming, voice cloning, and speech sessions. Confidence medium because LMNT publishes plan-bundled pricing (Indie $10/mo for 200K chars + $0.05/1K overage; Pro $49/mo + $0.045/1K overage; Premium $199/mo + $0.035/1K overage) rather than a standalone PAYG per-char rate — $50/1M shown here is the Indie-tier overage rate. Free tier includes 15K characters/month with no overage rate (not representable as tokens_per_day in schema). Premium tier overage is $0.035/1K = $35/1M — large customers should benchmark on their own plan. 2026-07-02 refresh: re-verified via www.lmnt.com/pricing and docs.lmnt.com/models/overview — Indie/Pro/Premium plan pricing, overage rates, and Blizzard 2.0 as sole canonical model_id all unchanged; no new model_ids or deprecation notices found. 2026-07-13 refresh: re-verified via both sources again — Free $0/15K chars, Indie $10/mo+$0.05/1K, Pro $49/mo+$0.045/1K, Premium $199/mo+$0.035/1K, Blizzard 2.0 (model_id 'blizzard') as sole canonical model_id, 31-language/streaming/voice-cloning feature set, all unchanged; no new model_ids or deprecation notices found."
     },
     {
       "provider": "Deepgram",
@@ -583,12 +613,12 @@
       "voice_cloning": false,
       "output_formats": ["wav", "mp3", "linear16", "mulaw", "alaw", "opus"],
       "deployment_options": ["native"],
-      "last_verified": "2026-07-02",
+      "last_verified": "2026-07-13",
       "last_changed_at": "2026-05-19",
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",
       "source_url": "https://deepgram.com/pricing",
-      "notes": "Deepgram's current TTS family, addressed as 'aura-2-<voice>-<lang>' (e.g., aura-2-thalia-en) per https://developers.deepgram.com/docs/tts-models. Vendor rate $0.030/1K chars = $30/1M chars on Pay-As-You-Go; Growth tier $0.027/1K = $27/1M. Voice counts by language (90 total): en 40, es 17, nl 9, fr 2, de 7, it 10, ja 5. Free tier ships $200 of signup credit applicable to all products (not representable as tokens_per_day in schema). Aura 1 (legacy, 'aura-<voice>-<lang>', English-only, $0.0150/1K PAYG) remains callable but Deepgram recommends Aura 2 for new integrations; not tracked as a separate row (not a new launch)."
+      "notes": "Deepgram's current TTS family, addressed as 'aura-2-<voice>-<lang>' (e.g., aura-2-thalia-en) per https://developers.deepgram.com/docs/tts-models. Vendor rate $0.030/1K chars = $30/1M chars on Pay-As-You-Go; Growth tier $0.027/1K = $27/1M. Voice counts by language (90 total): en 40, es 17, nl 9, fr 2, de 7, it 10, ja 5. Free tier ships $200 of signup credit applicable to all products (not representable as tokens_per_day in schema). Aura 1 (legacy, 'aura-<voice>-<lang>', English-only, $0.0150/1K PAYG) remains callable but Deepgram recommends Aura 2 for new integrations; not tracked as a separate row (not a new launch). 2026-07-13 refresh: re-verified via deepgram.com/pricing and developers.deepgram.com/docs/tts-models — PAYG/Growth rates, 7-language/90-voice count, output formats, and streaming support all unchanged; no new Deepgram TTS model_ids found and no deprecation notice for Aura 1 or Aura 2."
     },
     {
       "provider": "Resemble AI",
@@ -601,12 +631,12 @@
       "voice_cloning": true,
       "deployment_options": ["native"],
       "confidence": "medium",
-      "last_verified": "2026-07-02",
+      "last_verified": "2026-07-13",
       "last_changed_at": "2026-05-26",
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",
       "source_url": "https://www.resemble.ai/pricing",
-      "notes": "Resemble bills TTS per second of generated audio at a flat $0.0005/sec on their Flex (pay-as-you-go) plan; the rate is not split per model. Chatterbox Turbo is Resemble's flagship English TTS per https://www.resemble.ai (also open-sourced at https://github.com/resemble-ai/chatterbox, 'SoTA open-source TTS'). Confidence medium because the pricing page lists the rate against the service category 'Text-to-speech' rather than naming Chatterbox Turbo specifically, and the API's exact 'model' parameter slug was not verified against live docs. Multilingual ('Chatterbox Multilingual') and dramatic-read ('DramaBox') variants are marketed separately; modeled here as the English flagship only. Re-verified 2026-07-02: rate unchanged at $0.0005/sec, model still listed as active on both resemble.ai/pricing and github.com/resemble-ai/chatterbox; no per-model pricing split found, so the model-id ambiguity noted above persists."
+      "notes": "Resemble bills TTS per second of generated audio at a flat $0.0005/sec on their Flex (pay-as-you-go) plan; the rate is not split per model. Chatterbox Turbo is Resemble's flagship English TTS per https://www.resemble.ai (also open-sourced at https://github.com/resemble-ai/chatterbox, 'SoTA open-source TTS'). Confidence medium because the pricing page lists the rate against the service category 'Text-to-speech' rather than naming Chatterbox Turbo specifically, and the API's exact 'model' parameter slug was not verified against live docs. Multilingual ('Chatterbox Multilingual') and dramatic-read ('DramaBox') variants are marketed separately; modeled here as the English flagship only. Re-verified 2026-07-02: rate unchanged at $0.0005/sec, model still listed as active on both resemble.ai/pricing and github.com/resemble-ai/chatterbox; no per-model pricing split found, so the model-id ambiguity noted above persists. Re-verified 2026-07-13: rate still $0.0005/sec flat on resemble.ai/pricing; Chatterbox Turbo (350M params, English, paralinguistic tags) confirmed still current per github.com/resemble-ai/chatterbox. Also checked docs.resemble.ai (TTS overview + API reference) for a documented 'model' request parameter that would resolve the model-id ambiguity — none found; no per-model pricing split exists. Pricing/marketing copy also names 'Chatterbox Nano' and 'Chatterbox Flash' alongside Turbo/Multilingual/DramaBox, but none have a discoverable canonical API model_id or distinct price, so not added as rows per the two-source + canonical-model_id rule."
     }
   ]
 }
