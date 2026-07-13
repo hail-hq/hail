@@ -209,7 +209,12 @@ async def _principal_from_apikey_table(token: str, db: AsyncSession) -> Principa
     try:
         user_id = uuid.UUID(api_key.reference_id)
     except ValueError:
-        # reference_id is opaque TEXT upstream; not every value is a UUID.
+        # Defense-in-depth only: reference_id is opaque TEXT upstream, but
+        # the members-join in the stmt above already CASTs it to PG_UUID in
+        # SQL — a non-UUID reference_id 500s there before this parse ever
+        # runs (pre-existing, outside this branch). This guard would only
+        # bite if that cast is ever loosened (e.g. an outerjoin condition
+        # rewritten to tolerate non-UUID reference_ids).
         user_id = None
 
     return Principal(

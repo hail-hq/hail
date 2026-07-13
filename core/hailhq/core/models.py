@@ -86,7 +86,9 @@ class Contact(Base):
     email: Mapped[str | None] = mapped_column(Text, nullable=True)
     # created_by intentionally has no FK — users is website-owned (see 0001/0029);
     # keys and rows may outlive their creator.
-    created_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    created_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(
         TS, server_default=text("now()"), nullable=False
     )
@@ -106,6 +108,10 @@ class Contact(Base):
             unique=True,
             postgresql_where=text("phone_e164 IS NOT NULL"),
         ),
+        # Case-sensitive index; correctness relies on write-time full
+        # lowercasing in schemas.py's ``_normalize_contact_email`` (used by
+        # ContactCreate/ContactPatch) so this dedupes "Bob@x.com" against
+        # "bob@x.com" instead of admitting both.
         Index(
             "contacts_org_email_key",
             "organization_id",

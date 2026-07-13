@@ -824,15 +824,23 @@ class WebhookDeliveryListResponse(BaseModel):
 # --------------------------------------------------------------------------- #
 
 
-def _email_or_error(v: str | None) -> str | None:
-    """Shared optional-email validator for the contacts schemas — same rule
-    as ``EmailCreate``'s from_/reply_to, reusing EMAIL_ADDR/_normalize_domain
-    instead of duplicating the regex."""
+def _normalize_contact_email(v: str | None) -> str | None:
+    """Contacts-only email validator: fully lowercased at write time (unlike
+    the shared ``_email_or_error``/``_normalize_domain`` rule elsewhere,
+    which only lowercases the domain). Contacts stores are looked up
+    case-insensitively in two places that must agree on what "the same
+    email" means — the ``contacts_org_email_key`` unique index (which is
+    case-sensitive, so it only dedupes ``Bob@x.com``/``bob@x.com`` if both
+    are stored lowercase) and DSAR's ``func.lower(Contact.email)`` match
+    (``hailhq.core.dsar.lookup_recipient``). Full lowercasing at write time
+    makes both correct without a case-insensitive index. The ``contacts``
+    table is unreleased (migration 0030, no production rows) so this needs
+    no backfill."""
     if v is None:
         return v
     if not EMAIL_ADDR.match(v):
         raise ValueError("must be a valid email address (local@domain.tld)")
-    return _normalize_domain(v)
+    return _normalize_domain(v).lower()
 
 
 class ContactEntry(BaseModel):
@@ -858,7 +866,7 @@ class ContactCreate(BaseModel):
     email: str | None = None
 
     _validate_phone = field_validator("phone_e164")(_e164_or_error)
-    _validate_email = field_validator("email")(_email_or_error)
+    _validate_email = field_validator("email")(_normalize_contact_email)
 
     @model_validator(mode="after")
     def _phone_or_email(self) -> "ContactCreate":
@@ -875,11 +883,23 @@ class ContactPatch(BaseModel):
     email: str | None = None
 
     _validate_phone = field_validator("phone_e164")(_e164_or_error)
-    _validate_email = field_validator("email")(_email_or_error)
+    _validate_email = field_validator("email")(_normalize_contact_email)
+
+    @model_validator(mode="after")
+    def _name_not_null(self) -> "ContactPatch":
+        # name is NOT NULL on the row; an explicit `{"name": null}` would
+        # otherwise reach the DB and surface as a 409 (indistinguishable
+        # from a phone/email uniqueness conflict) instead of a clear 422.
+        # `model_fields_set` distinguishes an explicit null from an omitted
+        # field (both parse to `self.name is None`).
+        if "name" in self.model_fields_set and self.name is None:
+            raise ValueError("name cannot be null")
+        return self
 
 
 class ContactListResponse(BaseModel):
     items: list[ContactEntry]
+    next_cursor: str | None = None
 
 
 class MemberPhonePut(BaseModel):

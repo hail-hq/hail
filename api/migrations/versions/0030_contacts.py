@@ -61,6 +61,8 @@ def upgrade() -> None:
         unique=True,
         postgresql_where=sa.text("phone_e164 IS NOT NULL"),
     )
+    # Case-sensitive index; correctness relies on write-time full lowercasing
+    # in schemas.py's _normalize_contact_email (ContactCreate/ContactPatch).
     op.create_index(
         "contacts_org_email_key",
         "contacts",
