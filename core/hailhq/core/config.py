@@ -120,8 +120,8 @@ class Settings(BaseSettings):
     # Self-hosters register their own client (an "internal"-type Workspace
     # app needs no Google review). Empty = the /email-accounts connect
     # endpoints return 503.
-    google_oauth_client_id: str = ""
-    google_oauth_client_secret: str = ""
+    google_client_id: str = ""
+    google_client_secret: str = ""
     # Where the browser lands after a successful connect. Empty = the API
     # renders a minimal HTML success page (fine for CLI/MCP-driven flows).
     hail_email_connect_success_url: str = ""

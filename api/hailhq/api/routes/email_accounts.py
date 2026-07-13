@@ -82,12 +82,12 @@ _REQUIRED_GMAIL_SCOPES = frozenset(
 
 
 def _require_configured() -> None:
-    if not settings.google_oauth_client_id or not settings.google_oauth_client_secret:
+    if not settings.google_client_id or not settings.google_client_secret:
         raise HTTPException(
             status_code=http_status.HTTP_503_SERVICE_UNAVAILABLE,
             detail=(
                 "Gmail account connection is not configured on this server; "
-                "set GOOGLE_OAUTH_CLIENT_ID and GOOGLE_OAUTH_CLIENT_SECRET"
+                "set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET"
             ),
         )
     if not settings.hail_provider_secret_key:

@@ -29,8 +29,8 @@ _GRANTED_SCOPES = (
 def _feature_settings(monkeypatch):
     from hailhq.core import config
 
-    monkeypatch.setattr(config.settings, "google_oauth_client_id", "cid")
-    monkeypatch.setattr(config.settings, "google_oauth_client_secret", "csecret")
+    monkeypatch.setattr(config.settings, "google_client_id", "cid")
+    monkeypatch.setattr(config.settings, "google_client_secret", "csecret")
     monkeypatch.setattr(
         config.settings,
         "hail_provider_secret_key",
@@ -80,7 +80,7 @@ async def test_connect_returns_google_url(client, org_and_key):
 async def test_connect_503_when_unconfigured(client, org_and_key, monkeypatch):
     from hailhq.core import config
 
-    monkeypatch.setattr(config.settings, "google_oauth_client_id", "")
+    monkeypatch.setattr(config.settings, "google_client_id", "")
     _, _, plain = org_and_key
     resp = await client.post(
         "/email-accounts/connect", headers={"Authorization": f"Bearer {plain}"}

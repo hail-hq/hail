@@ -21,8 +21,8 @@ def _feature_settings(monkeypatch):
     from hailhq.core import config
     from hailhq.core.secret_cipher import generate_key
 
-    monkeypatch.setattr(config.settings, "google_oauth_client_id", "cid")
-    monkeypatch.setattr(config.settings, "google_oauth_client_secret", "csecret")
+    monkeypatch.setattr(config.settings, "google_client_id", "cid")
+    monkeypatch.setattr(config.settings, "google_client_secret", "csecret")
     monkeypatch.setattr(config.settings, "hail_provider_secret_key", generate_key())
 
 

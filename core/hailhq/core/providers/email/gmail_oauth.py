@@ -79,7 +79,7 @@ class Userinfo(BaseModel):
 
 def build_authorization_url(*, state: str, redirect_uri: str) -> str:
     params = {
-        "client_id": settings.google_oauth_client_id,
+        "client_id": settings.google_client_id,
         "redirect_uri": redirect_uri,
         "response_type": "code",
         "scope": " ".join(GMAIL_SCOPES),
@@ -107,8 +107,8 @@ async def exchange_code(
     resp = await _post(
         GOOGLE_TOKEN_URL,
         {
-            "client_id": settings.google_oauth_client_id,
-            "client_secret": settings.google_oauth_client_secret,
+            "client_id": settings.google_client_id,
+            "client_secret": settings.google_client_secret,
             "code": code,
             "grant_type": "authorization_code",
             "redirect_uri": redirect_uri,
@@ -140,8 +140,8 @@ async def refresh_access_token(
     resp = await _post(
         GOOGLE_TOKEN_URL,
         {
-            "client_id": settings.google_oauth_client_id,
-            "client_secret": settings.google_oauth_client_secret,
+            "client_id": settings.google_client_id,
+            "client_secret": settings.google_client_secret,
             "refresh_token": refresh_token,
             "grant_type": "refresh_token",
         },
@@ -164,7 +164,7 @@ async def revoke_token(*, token: str, http: httpx.AsyncClient | None = None) -> 
 
 def _sign(payload: str) -> str:
     mac = hmac.new(
-        settings.google_oauth_client_secret.encode("utf-8"),
+        settings.google_client_secret.encode("utf-8"),
         payload.encode("utf-8"),
         sha256,
     ).digest()

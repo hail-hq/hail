@@ -22,9 +22,9 @@ from hailhq.core.providers.email.gmail_oauth import (
 @pytest.fixture(autouse=True)
 def _oauth_settings(monkeypatch):
     monkeypatch.setattr(
-        gmail_oauth.settings, "google_oauth_client_id", "cid.apps.googleusercontent.com"
+        gmail_oauth.settings, "google_client_id", "cid.apps.googleusercontent.com"
     )
-    monkeypatch.setattr(gmail_oauth.settings, "google_oauth_client_secret", "csecret")
+    monkeypatch.setattr(gmail_oauth.settings, "google_client_secret", "csecret")
 
 
 def test_authorization_url_carries_scopes_and_state() -> None:
