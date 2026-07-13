@@ -177,7 +177,9 @@ async def purge_expired_data(session: AsyncSession, now: datetime) -> PurgeSumma
     summary.emails_scrubbed = email_result.rowcount or 0
 
     contact_result = await session.execute(
-        delete(Contact).where(Contact.organization_id.in_(org_ids))
+        delete(Contact)
+        .where(Contact.organization_id.in_(org_ids))
+        .execution_options(synchronize_session=False)
     )
     summary.contacts_deleted = contact_result.rowcount or 0
 

@@ -15,7 +15,16 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import case, cast, exists, func, inspect as sa_inspect, or_, select
+from sqlalchemy import (
+    case,
+    cast,
+    delete,
+    exists,
+    func,
+    inspect as sa_inspect,
+    or_,
+    select,
+)
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -279,10 +288,21 @@ async def delete_recipient_data(
             email.raw_s3_key = None
             emails_scrubbed += 1
 
-    contacts_deleted = 0
-    for contact in record.contacts:
-        await session.delete(contact)
-        contacts_deleted += 1
+    # Bulk delete on the same predicate lookup_recipient used to find these
+    # rows (phone_e164 exact / email case-insensitive), rather than a
+    # per-row session.delete() loop over record.contacts — same bulk
+    # pattern as hailhq.core.retention's purge sweep.
+    contact_result = await session.execute(
+        delete(Contact)
+        .where(
+            or_(
+                Contact.phone_e164 == record.identifier,
+                func.lower(Contact.email) == record.identifier,
+            )
+        )
+        .execution_options(synchronize_session=False)
+    )
+    contacts_deleted = contact_result.rowcount or 0
 
     await session.commit()
 

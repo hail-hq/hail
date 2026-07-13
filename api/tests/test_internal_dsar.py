@@ -12,7 +12,7 @@ import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from hailhq.core.config import settings
-from hailhq.core.models import Call, PhoneNumber, Suppression
+from hailhq.core.models import Call, Contact, PhoneNumber, Suppression
 
 HMAC_SECRET = "test-internal-secret"
 PHONE = "+14155551234"
@@ -62,6 +62,7 @@ async def _seed(session: AsyncSession, org_id: uuid.UUID) -> None:
             source="manual",
         )
     )
+    session.add(Contact(organization_id=org_id, name="Match", phone_e164=PHONE))
     await session.commit()
 
 
@@ -142,6 +143,7 @@ async def test_delete_clears_content_preserves_suppression(
     assert resp.status_code == 200
     data = resp.json()
     assert data["calls_scrubbed"] == 1
+    assert data["contacts_deleted"] == 1
     assert data["suppressions_preserved"] == 1
 
     lookup_body = json.dumps({"identifier": PHONE}).encode()
