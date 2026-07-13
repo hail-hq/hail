@@ -20,6 +20,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 from datetime import datetime, timezone
 from typing import Any, Callable
 from uuid import UUID
@@ -277,6 +278,21 @@ async def write_call_event(call_id: UUID, kind: str, payload: dict[str, Any]) ->
         )
 
 
+# Strip ASCII control characters (including \n) and the '·' row delimiter
+# from every rendered field before it goes into the tool's output string.
+# lookup_contact's output is read by the LLM as trusted structured data
+# during a live call ("name · phone · email" per line) — an attacker who
+# controls a stored contact field (a name typed into a web form, say)
+# could otherwise embed "\n<forged name> · <forged phone> · <forged email>"
+# and inject a phantom row the LLM has no way to distinguish from a real
+# match.
+_CONTROL_CHARS = re.compile(r"[\x00-\x1f]")
+
+
+def _sanitize_field(value: str) -> str:
+    return _CONTROL_CHARS.sub("", value).replace("·", "-")
+
+
 def build_lookup_contact_tool(org_id: UUID) -> Any:
     """Build an org-scoped ``lookup_contact`` function tool for a live call.
 
@@ -291,12 +307,19 @@ def build_lookup_contact_tool(org_id: UUID) -> Any:
     async def lookup_contact(query: str) -> str:
         """Look up a person in this workspace's contacts by name, email, or
         phone fragment. Returns up to 5 matches as `name · phone · email`."""
+        if not query or not query.strip():
+            return "provide a name, email, or phone fragment to search for"
         async with session_scope() as session:
             entries = await search_contacts(session, org_id, q=query, limit=5)
         if not entries:
             return "no contacts matched"
+
+        def _fmt(value: str | None, fallback: str) -> str:
+            return _sanitize_field(value) if value else fallback
+
         return "\n".join(
-            f"{e.name} · {e.phone_e164 or 'no phone'} · {e.email or 'no email'}"
+            f"{_sanitize_field(e.name)} · {_fmt(e.phone_e164, 'no phone')} · "
+            f"{_fmt(e.email, 'no email')}"
             for e in entries
         )
 
@@ -753,10 +776,23 @@ async def entrypoint(ctx: JobContext) -> None:
                 "lookup_contact tool",
                 call_id,
             )
+        elif org_id is not None and org_id != contact_org_id:
+            # PLAUSIBLE split-brain: the dispatch metadata's organization_id
+            # (org_id, resolved above for the BYO provider-config lookup)
+            # disagrees with the Call row's own organization_id. Observability
+            # only — the lookup_contact tool is scoped to contact_org_id (the
+            # authoritative Call row), not metadata, so this doesn't change
+            # behavior; it's a signal worth investigating if it ever fires.
+            logger.warning(
+                "call_id=%s metadata organization_id=%s differs from Call "
+                "row organization_id=%s (possible org split-brain)",
+                call_id,
+                org_id,
+                contact_org_id,
+            )
     except SQLAlchemyError:
         logger.warning(
-            "call_id=%s org lookup failed; proceeding without "
-            "lookup_contact tool",
+            "call_id=%s org lookup failed; proceeding without " "lookup_contact tool",
             call_id,
             exc_info=True,
         )

@@ -1057,6 +1057,18 @@ async def test_lookup_contact_passes_q_and_limit_10(client: HailClient) -> None:
 
 
 @respx.mock
+async def test_lookup_contact_blank_query_rejected_before_client(
+    client: HailClient,
+) -> None:
+    """A blank/whitespace query must not hit the API at all — no route
+    mocked here, so a request escaping the guard would fail the test."""
+    result = await tools.lookup_contact(client=client, query="   ")
+    assert result == {
+        "error": "query must be a non-empty name, email, or phone fragment"
+    }
+
+
+@respx.mock
 async def test_create_contact_posts_body_and_surfaces_409(client: HailClient) -> None:
     captured: dict = {}
 
@@ -1075,9 +1087,7 @@ async def test_create_contact_posts_body_and_surfaces_409(client: HailClient) ->
     body = httpx.Response(200, content=captured["body"]).json()
     assert body == {"name": "Maya Chen", "phone_e164": "+14155551234"}
 
-    assert result == {
-        "error": "a contact with that phone or email already exists"
-    }
+    assert result == {"error": "a contact with that phone or email already exists"}
 
 
 # --------------------------------------------------------------------------- #

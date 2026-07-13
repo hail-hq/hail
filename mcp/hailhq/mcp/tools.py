@@ -390,6 +390,8 @@ async def list_contacts(
 
 
 async def lookup_contact(*, client: HailClient, query: str) -> dict[str, Any]:
+    if not query or not query.strip():
+        return {"error": "query must be a non-empty name, email, or phone fragment"}
     try:
         return await client.list_contacts(q=query, limit=10)
     except ValidationError as exc:
