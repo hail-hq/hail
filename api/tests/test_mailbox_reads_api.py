@@ -185,6 +185,24 @@ async def test_gmail_400_returns_400(client, org_and_key, async_session):
     assert resp.status_code == 400
 
 
+async def test_gmail_404_unknown_message_returns_404(
+    client, org_and_key, async_session
+):
+    org_id, _, plain = org_and_key
+    acct = await _insert_account(async_session, org_id)
+    fake = FakeGmail(api_error=GmailApiError(404, "Requested entity was not found"))
+    app.dependency_overrides[get_gmail_client_builder] = lambda: (lambda a: fake)
+    try:
+        resp = await client.get(
+            f"/email-accounts/{acct.id}/messages/nope",
+            headers={"Authorization": f"Bearer {plain}"},
+        )
+    finally:
+        app.dependency_overrides.pop(get_gmail_client_builder, None)
+    # An unknown message id is a 404, not the generic 400 for other Gmail 4xx.
+    assert resp.status_code == 404
+
+
 async def test_corrupted_credentials_returns_502(client, org_and_key, async_session):
     org_id, _, plain = org_and_key
     acct = await _insert_account(async_session, org_id)

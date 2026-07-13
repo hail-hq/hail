@@ -377,9 +377,11 @@ async def get_events(
         return _format_api_error(exc)
 
 
-async def list_email_accounts(*, client: HailClient) -> dict[str, Any]:
+async def list_email_accounts(
+    *, client: HailClient, cursor: str | None = None, limit: int = 50
+) -> dict[str, Any]:
     try:
-        return await client.list_email_accounts()
+        return await client.list_email_accounts(cursor=cursor, limit=limit)
     except ValidationError as exc:
         return {"error": _validation_error_message(exc)}
     except HailAPIError as exc:
@@ -1002,7 +1004,9 @@ def register_tools(
             return {"error": str(exc)}
 
     @mcp_app.tool(name="list_email_accounts")
-    async def list_email_accounts_tool(ctx: Context) -> dict[str, Any]:
+    async def list_email_accounts_tool(
+        ctx: Context, cursor: str | None = None, limit: int = 50
+    ) -> dict[str, Any]:
         """List the org's connected mailboxes (Gmail accounts).
 
         Each item's ``email_address`` can be used as ``from_`` in
@@ -1011,11 +1015,14 @@ def register_tools(
         ``status="reauth_required"`` need the user to reconnect before use.
 
         Returns ``{"items": [...], "next_cursor": <str|None>}`` on success,
-        or ``{"error": "<message>"}`` instead.
+        or ``{"error": "<message>"}`` instead. Pass the returned
+        ``next_cursor`` back as ``cursor`` to page through more accounts.
         """
         try:
             async with _client_for(ctx, mode=mode, singleton=singleton) as client:
-                return await list_email_accounts(client=client)
+                return await list_email_accounts(
+                    client=client, cursor=cursor, limit=limit
+                )
         except RuntimeError as exc:
             return {"error": str(exc)}
 

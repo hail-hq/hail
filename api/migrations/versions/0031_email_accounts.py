@@ -89,6 +89,12 @@ def upgrade() -> None:
 def downgrade() -> None:
     op.drop_constraint("emails_one_sender_kind", "emails", type_="check")
     op.drop_constraint("emails_outbound_has_sender", "emails", type_="check")
+    # Connected-account sends are outbound rows with email_domain_id NULL —
+    # they violate the pre-feature emails_outbound_has_domain check and only
+    # exist because of this feature, so drop them before restoring the old
+    # constraint (otherwise this downgrade is irreversible once any Gmail
+    # send has been recorded).
+    op.execute("DELETE FROM emails WHERE email_account_id IS NOT NULL")
     op.create_check_constraint(
         "emails_outbound_has_domain",
         "emails",

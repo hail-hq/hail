@@ -102,7 +102,19 @@ class SesEmailProvider(EmailProvider):
     """SESv2-backed adapter."""
 
     def __init__(self, *, client: Any | None = None) -> None:
-        self._client = client if client is not None else _build_default_client()
+        # Defer boto3 client construction to first actual SES call. Merely
+        # resolving this provider — e.g. as the FastAPI dependency on
+        # POST /emails, which now also serves connected-Gmail sends — must not
+        # require an AWS region/credentials on a deployment that only sends
+        # through connected mailboxes (boto3.client raises NoRegionError at
+        # construction time with no region configured).
+        self._client_obj = client
+
+    @property
+    def _client(self) -> Any:
+        if self._client_obj is None:
+            self._client_obj = _build_default_client()
+        return self._client_obj
 
     async def send_email(
         self,

@@ -22,6 +22,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Annotated, Callable, Literal
 from uuid import UUID
 
+from cryptography.fernet import InvalidToken
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from fastapi import status as http_status
 from fastapi.responses import RedirectResponse
@@ -49,7 +50,11 @@ from hailhq.api.routes.email_domains import (
     resolve_hail_mail_prefixes,
 )
 from hailhq.api.funds import require_funds
-from hailhq.api.routes.email_accounts import get_gmail_client_builder
+from hailhq.api.routes.email_accounts import (
+    _CORRUPT_CREDENTIALS_DETAIL,
+    _gmail_api_error_to_http,
+    get_gmail_client_builder,
+)
 from hailhq.core.compliance_gate import check_email_allowed
 from hailhq.core.db import get_session
 from hailhq.core.email_delivery_events import record_sent_event
@@ -64,6 +69,7 @@ from hailhq.core.models import (
 from hailhq.core.s3_inbound import S3InboundClient
 from hailhq.core.providers.email import EmailProvider, EmailSender
 from hailhq.core.providers.email.gmail import (
+    GmailApiError,
     GmailAuthError,
     GmailClient,
     GmailEmailProvider,
@@ -123,7 +129,10 @@ async def _resolve_sender(
             await db.execute(
                 select(EmailAccount).where(
                     EmailAccount.organization_id == organization_id,
-                    EmailAccount.email_address == explicit_from,
+                    # Google stores/returns addresses lowercased; the request's
+                    # `from` may arrive mixed-case. Match case-insensitively so
+                    # `Alice@Gmail.com` still resolves to the connected account.
+                    func.lower(EmailAccount.email_address) == explicit_from.lower(),
                 )
             )
         ).scalar_one_or_none()
@@ -518,6 +527,29 @@ async def create_email(
                     body={"detail": exc.detail},
                 )
             raise exc
+        if isinstance(exc, GmailApiError):
+            # Non-auth Gmail failure (rate limit, invalid argument, 5xx) —
+            # translate to the same status the read routes use instead of a
+            # blanket 502, so a 429 stays a 429 and a 400 stays a 400.
+            mapped = _gmail_api_error_to_http(exc)
+            if idem is not None:
+                await idem.store(
+                    status_code=mapped.status_code,
+                    body={"detail": mapped.detail},
+                )
+            raise mapped from exc
+        if isinstance(exc, InvalidToken):
+            # Corrupted/rotated ciphertext — same actionable detail the read
+            # routes give (still a 502; the row is already marked failed).
+            if idem is not None:
+                await idem.store(
+                    status_code=http_status.HTTP_502_BAD_GATEWAY,
+                    body={"detail": _CORRUPT_CREDENTIALS_DETAIL},
+                )
+            raise HTTPException(
+                status_code=http_status.HTTP_502_BAD_GATEWAY,
+                detail=_CORRUPT_CREDENTIALS_DETAIL,
+            ) from exc
         if idem is not None:
             await idem.store(
                 status_code=http_status.HTTP_502_BAD_GATEWAY,

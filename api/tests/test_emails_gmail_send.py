@@ -123,6 +123,22 @@ async def test_reply_threads_into_gmail(client, org_and_key, async_session, fake
     assert "In-Reply-To: <orig@mail.example>" in raw
 
 
+async def test_in_reply_to_rejects_header_injection(
+    client, org_and_key, async_session, fake_gmail
+):
+    """A CR/LF-bearing in_reply_to is rejected at validation (422), not deep
+    in the send path where it would poison the idempotency key."""
+    org_id, _, plain = org_and_key
+    await _insert_account(async_session, org_id)
+    resp = await client.post(
+        "/emails",
+        json=_send_body(in_reply_to="<a@b>\r\nBcc: victim@evil.com"),
+        headers={"Authorization": f"Bearer {plain}"},
+    )
+    assert resp.status_code == 422
+    assert not fake_gmail.sent  # never reached the provider
+
+
 async def test_reauth_required_account_409(
     client, org_and_key, async_session, fake_gmail
 ):

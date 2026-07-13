@@ -25,7 +25,7 @@ from cryptography.fernet import InvalidToken
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi import status as http_status
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -65,6 +65,21 @@ router = APIRouter(prefix="/email-accounts", tags=["email-accounts"])
 _DEFAULT_LIST_LIMIT = 50
 _MAX_LIST_LIMIT = 200
 
+_DELETE_REFERENCED_DETAIL = (
+    "email account has sent emails referencing it; disable it "
+    'instead (PATCH {"status": "disabled"})'
+)
+
+# Restricted scopes the app cannot function without. Google lets a user
+# untick individual scopes on the consent screen, so a granted set missing
+# either of these means the account can't send or read and must be rejected.
+_REQUIRED_GMAIL_SCOPES = frozenset(
+    {
+        "https://www.googleapis.com/auth/gmail.send",
+        "https://www.googleapis.com/auth/gmail.readonly",
+    }
+)
+
 
 def _require_configured() -> None:
     if not settings.google_oauth_client_id or not settings.google_oauth_client_secret:
@@ -82,13 +97,26 @@ def _require_configured() -> None:
         )
 
 
+_cipher_cache: dict[str, SecretCipher] = {}
+
+
 def _cipher() -> SecretCipher:
+    # Cache by key value: constructing a Fernet re-derives the AES/HMAC key
+    # objects from the base64 key on every call, and this runs on the hot path
+    # (every mailbox read and every Gmail send). Keyed by the secret so a key
+    # rotation without a restart still takes effect.
+    key = settings.hail_provider_secret_key
+    cached = _cipher_cache.get(key)
+    if cached is not None:
+        return cached
     try:
-        return SecretCipher(settings.hail_provider_secret_key)
+        cipher = SecretCipher(key)
     except SecretKeyMissing as exc:
         raise HTTPException(
             status_code=http_status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)
         ) from exc
+    _cipher_cache[key] = cipher
+    return cipher
 
 
 def _redirect_uri() -> str:
@@ -161,6 +189,26 @@ async def reconnect_email_account(
     )
 
 
+def _oauth_expired_html() -> HTMLResponse:
+    return HTMLResponse(
+        "<h1>"
+        + html.escape(
+            "Connection failed — the authorization may have expired. "
+            "Retry the connect link."
+        )
+        + "</h1>",
+        400,
+    )
+
+
+async def _revoke_quietly(token: str) -> None:
+    """Best-effort revoke of a grant we minted but won't keep."""
+    try:
+        await revoke_token(token=token)
+    except Exception:
+        logger.warning("google token revoke failed during callback", exc_info=True)
+
+
 _SUCCESS_HTML = """<!doctype html><meta charset="utf-8">
 <title>Mailbox connected</title>
 <body style="font-family: system-ui; margin: 4rem auto; max-width: 30rem">
@@ -194,15 +242,7 @@ async def oauth_callback(
     try:
         grant = await exchange_code(code=code, redirect_uri=_redirect_uri())
     except GmailOAuthError:
-        return HTMLResponse(
-            "<h1>"
-            + html.escape(
-                "Connection failed — the authorization may have expired. "
-                "Retry the connect link."
-            )
-            + "</h1>",
-            400,
-        )
+        return _oauth_expired_html()
     if not grant.refresh_token:
         return HTMLResponse(
             "<h1>Google returned no refresh token</h1>"
@@ -210,21 +250,27 @@ async def oauth_callback(
             "and connect again.</p>",
             400,
         )
-    try:
-        info = await fetch_userinfo(access_token=grant.access_token)
-    except GmailOAuthError:
+    scopes = grant.scope.split() if grant.scope else []
+    if not _REQUIRED_GMAIL_SCOPES.issubset(scopes):
+        # The user unticked a required scope on the consent screen; the tokens
+        # are useless to us. Revoke the grant we just minted (best-effort) so
+        # we don't leave a live half-authorized grant dangling.
+        await _revoke_quietly(grant.refresh_token)
         return HTMLResponse(
             "<h1>"
             + html.escape(
-                "Connection failed — the authorization may have expired. "
-                "Retry the connect link."
+                "Connection failed — Hail needs permission to both send and "
+                "read Gmail. Retry and leave every box checked."
             )
             + "</h1>",
             400,
         )
+    try:
+        info = await fetch_userinfo(access_token=grant.access_token)
+    except GmailOAuthError:
+        return _oauth_expired_html()
     cipher = _cipher()
     encrypted = cipher.encrypt(grant.refresh_token)
-    scopes = grant.scope.split() if grant.scope else []
 
     if account_id is not None:
         # Reconnect of a known row — must be the same Google account.
@@ -237,8 +283,12 @@ async def oauth_callback(
             )
         ).scalar_one_or_none()
         if account is None:
+            await _revoke_quietly(grant.refresh_token)
             return HTMLResponse("<h1>Unknown account</h1>", 404)
         if account.provider_user_id != info.sub:
+            # Rejecting this grant — revoke it so a wrong-account authorization
+            # doesn't leave a live refresh token we never store.
+            await _revoke_quietly(grant.refresh_token)
             return HTMLResponse(
                 "<h1>Wrong Google account</h1>"
                 f"<p>This connection belongs to {html.escape(account.email_address)}; "
@@ -259,6 +309,7 @@ async def oauth_callback(
         ).scalar_one_or_none()
         if existing is not None:
             if existing.organization_id != organization_id:
+                await _revoke_quietly(grant.refresh_token)
                 return HTMLResponse(
                     "<h1>Already connected elsewhere</h1>"
                     f"<p>{html.escape(info.email)} is connected to a different "
@@ -286,7 +337,20 @@ async def oauth_callback(
             # Populate the server-generated id before commit expires the row.
             await db.flush()
     affected_id = affected.id
-    await db.commit()
+    try:
+        await db.commit()
+    except IntegrityError:
+        # Raced against a concurrent connect of the same address, or a
+        # Google-side rename collided with the global uniqueness index. The
+        # grant we just minted won't be stored, so revoke it.
+        await db.rollback()
+        await _revoke_quietly(grant.refresh_token)
+        return HTMLResponse(
+            "<h1>Already connected</h1>"
+            f"<p>{html.escape(info.email)} is already connected. If this is "
+            "unexpected, refresh and try again.</p>",
+            409,
+        )
     await write_audit_log(
         organization_id=organization_id,
         api_key_id=None,
@@ -316,6 +380,7 @@ async def list_email_accounts(
         EmailAccount.id,
         cursor=cursor,
         limit=limit,
+        newest_first=True,
     )
     return EmailAccountListResponse(
         items=[EmailAccountResponse.model_validate(r) for r in rows],
@@ -365,16 +430,13 @@ async def delete_email_account(
     account = await require_account(db, principal.organization_id, account_id)
     referencing = (
         await db.execute(
-            select(func.count(Email.id)).where(Email.email_account_id == account_id)
+            select(Email.id).where(Email.email_account_id == account_id).limit(1)
         )
-    ).scalar_one()
-    if referencing > 0:
+    ).scalar_one_or_none()
+    if referencing is not None:
         raise HTTPException(
             status_code=http_status.HTTP_409_CONFLICT,
-            detail=(
-                "email account has sent emails referencing it; disable it "
-                'instead (PATCH {"status": "disabled"})'
-            ),
+            detail=_DELETE_REFERENCED_DETAIL,
         )
     cipher = _cipher()
     try:
@@ -387,13 +449,12 @@ async def delete_email_account(
     try:
         await db.commit()
     except IntegrityError:
+        # A send raced in between the pre-check and the commit and inserted a
+        # referencing row — the FK RESTRICT catches it.
         await db.rollback()
         raise HTTPException(
             status_code=http_status.HTTP_409_CONFLICT,
-            detail=(
-                "email account has sent emails referencing it; disable it "
-                'instead (PATCH {"status": "disabled"})'
-            ),
+            detail=_DELETE_REFERENCED_DETAIL,
         ) from None
     await write_audit_log(
         organization_id=principal.organization_id,
@@ -436,6 +497,13 @@ def _gmail_api_error_to_http(exc: GmailApiError) -> HTTPException:
         return HTTPException(
             status_code=http_status.HTTP_429_TOO_MANY_REQUESTS,
             detail=f"Gmail rate limit exceeded: {exc.detail}",
+        )
+    if exc.status == 404:
+        # An unknown/deleted message id — surface as 404, not a generic 400,
+        # so callers (and the MCP read_mailbox_message tool, whose docstring
+        # promises "resource not found") can distinguish it.
+        return HTTPException(
+            status_code=http_status.HTTP_404_NOT_FOUND, detail="message not found"
         )
     if 400 <= exc.status < 500:
         return HTTPException(

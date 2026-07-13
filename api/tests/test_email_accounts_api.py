@@ -6,7 +6,7 @@ import uuid
 from unittest.mock import AsyncMock, patch
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from hailhq.core.models import Email, EmailAccount
 from hailhq.core.providers.email.gmail_oauth import (
@@ -16,6 +16,13 @@ from hailhq.core.providers.email.gmail_oauth import (
     mint_state,
 )
 from hailhq.core.secret_cipher import SecretCipher
+
+# What Google echoes back when the user leaves every consent box checked —
+# the callback rejects a grant missing gmail.send or gmail.readonly.
+_GRANTED_SCOPES = (
+    "https://www.googleapis.com/auth/gmail.send "
+    "https://www.googleapis.com/auth/gmail.readonly openid email"
+)
 
 
 @pytest.fixture(autouse=True)
@@ -32,6 +39,9 @@ def _feature_settings(monkeypatch):
             "hailhq.core.secret_cipher", fromlist=["generate_key"]
         ).generate_key(),
     )
+    # The callback revokes grants it rejects (wrong account, scope-short, etc.);
+    # keep that off the network in tests.
+    monkeypatch.setattr("hailhq.api.routes.email_accounts.revoke_token", AsyncMock())
 
 
 async def _insert_account(session, org_id, address="alice@gmail.com", status="active"):
@@ -80,7 +90,9 @@ async def test_connect_503_when_unconfigured(client, org_and_key, monkeypatch):
 
 async def test_callback_creates_account(client, org_and_key, async_session):
     org_id, _, _ = org_and_key
-    grant = TokenGrant(access_token="at", refresh_token="rt", expires_in=3599)
+    grant = TokenGrant(
+        access_token="at", refresh_token="rt", expires_in=3599, scope=_GRANTED_SCOPES
+    )
     info = Userinfo(sub="sub-1", email="alice@gmail.com", name="Alice")
     with (
         patch(
@@ -123,7 +135,9 @@ async def test_callback_exchange_code_expired_returns_400_not_500(client, org_an
 
 async def test_callback_fetch_userinfo_failure_returns_400_not_500(client, org_and_key):
     org_id, _, _ = org_and_key
-    grant = TokenGrant(access_token="at", refresh_token="rt", expires_in=3599)
+    grant = TokenGrant(
+        access_token="at", refresh_token="rt", expires_in=3599, scope=_GRANTED_SCOPES
+    )
     with (
         patch(
             "hailhq.api.routes.email_accounts.exchange_code",
@@ -140,6 +154,37 @@ async def test_callback_fetch_userinfo_failure_returns_400_not_500(client, org_a
         )
     assert resp.status_code == 400
     assert resp.status_code != 500
+
+
+async def test_callback_rejects_partial_scope(client, org_and_key, async_session):
+    """A grant missing gmail.readonly is rejected — no account is created."""
+    org_id, _, _ = org_and_key
+    partial = TokenGrant(
+        access_token="at",
+        refresh_token="rt",
+        expires_in=3599,
+        scope="https://www.googleapis.com/auth/gmail.send openid email",
+    )
+    info = Userinfo(sub="sub-1", email="alice@gmail.com", name="Alice")
+    with (
+        patch(
+            "hailhq.api.routes.email_accounts.exchange_code",
+            new=AsyncMock(return_value=partial),
+        ),
+        patch(
+            "hailhq.api.routes.email_accounts.fetch_userinfo",
+            new=AsyncMock(return_value=info),
+        ),
+    ):
+        resp = await client.get(
+            "/email-accounts/oauth/callback",
+            params={"code": "c0de", "state": mint_state(org_id, None)},
+        )
+    assert resp.status_code == 400
+    count = (
+        await async_session.execute(select(func.count(EmailAccount.id)))
+    ).scalar_one()
+    assert count == 0  # nothing saved for a half-authorized grant
 
 
 async def test_callback_rejects_bad_state(client):
@@ -288,7 +333,9 @@ async def test_reconnect_rejects_different_google_account(
         headers={"Authorization": f"Bearer {plain}"},
     )
     assert resp.status_code == 200
-    grant = TokenGrant(access_token="at", refresh_token="rt2", expires_in=3599)
+    grant = TokenGrant(
+        access_token="at", refresh_token="rt2", expires_in=3599, scope=_GRANTED_SCOPES
+    )
     other = Userinfo(sub="DIFFERENT-sub", email="alice@gmail.com")
     with (
         patch(
@@ -313,7 +360,12 @@ async def test_callback_same_org_same_address_refreshes_in_place(
     org_id, _, _ = org_and_key
     acct = await _insert_account(async_session, org_id, status="reauth_required")
     old_ciphertext = acct.encrypted_refresh_token
-    grant = TokenGrant(access_token="at", refresh_token="rt-new", expires_in=3599)
+    grant = TokenGrant(
+        access_token="at",
+        refresh_token="rt-new",
+        expires_in=3599,
+        scope=_GRANTED_SCOPES,
+    )
     info = Userinfo(sub="sub-1", email="alice@gmail.com", name="Alice")
     with (
         patch(
@@ -353,7 +405,9 @@ async def test_callback_409_when_address_connected_to_other_org(
     acct = await _insert_account(async_session, org_a)
     old_ciphertext = acct.encrypted_refresh_token
     org_b = uuid.uuid4()
-    grant = TokenGrant(access_token="at", refresh_token="rt-b", expires_in=3599)
+    grant = TokenGrant(
+        access_token="at", refresh_token="rt-b", expires_in=3599, scope=_GRANTED_SCOPES
+    )
     info = Userinfo(sub="sub-1", email="alice@gmail.com")
     with (
         patch(
@@ -382,7 +436,9 @@ async def test_callback_reconnect_success_updates_token_and_status(
     org_id, _, _ = org_and_key
     acct = await _insert_account(async_session, org_id, status="reauth_required")
     old_ciphertext = acct.encrypted_refresh_token
-    grant = TokenGrant(access_token="at", refresh_token="rt-re", expires_in=3599)
+    grant = TokenGrant(
+        access_token="at", refresh_token="rt-re", expires_in=3599, scope=_GRANTED_SCOPES
+    )
     info = Userinfo(sub="sub-1", email="alice@gmail.com")  # same Google account
     with (
         patch(

@@ -441,8 +441,13 @@ class HailClient:
     # GET /email-accounts
     # ------------------------------------------------------------------ #
 
-    async def list_email_accounts(self) -> dict[str, Any]:
-        resp = await self._client.get("/email-accounts")
+    async def list_email_accounts(
+        self, cursor: str | None = None, limit: int = 50
+    ) -> dict[str, Any]:
+        params: dict[str, Any] = {"limit": limit}
+        if cursor:
+            params["cursor"] = cursor
+        resp = await self._client.get("/email-accounts", params=params)
         return EmailAccountListResponse.model_validate(_decode(resp)).model_dump(
             mode="json"
         )

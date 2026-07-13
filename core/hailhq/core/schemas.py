@@ -327,6 +327,10 @@ class EventStreamResponse(BaseModel):
 # mistakes (no @, whitespace, missing TLD) without rejecting things SES
 # would accept. SES does its own validation at send time.
 EMAIL_ADDR = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
+# RFC 2822 Message-ID for the ``in_reply_to`` field. Angle brackets optional
+# (some senders omit them); the point is that it carries an ``@`` and no
+# whitespace/control characters that could inject a header or break a lookup.
+MESSAGE_ID = re.compile(r"^<?[^<>@\s\x00-\x1f\x7f]+@[^<>@\s\x00-\x1f\x7f]+>?$")
 DOMAIN_NAME = re.compile(
     r"^([a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$"
 )
@@ -637,6 +641,23 @@ class EmailCreate(ConsentAttestationMixin):
         if not EMAIL_ADDR.match(v):
             raise ValueError("must be a valid email address (local@domain.tld)")
         return _normalize_domain(v)
+
+    @field_validator("in_reply_to")
+    @classmethod
+    def _validate_in_reply_to(cls, v: str | None) -> str | None:
+        # An RFC 2822 Message-ID rides into the ``In-Reply-To``/``References``
+        # wire headers and a Gmail ``rfc822msgid:`` search. Whitespace/control
+        # chars would either inject extra headers (CR/LF) or silently break the
+        # thread lookup, and only blow up deep in the send path (poisoning the
+        # idempotency key), so reject them at the edge with a 422.
+        if v is None:
+            return v
+        if not MESSAGE_ID.match(v):
+            raise ValueError(
+                "in_reply_to must be an RFC 2822 Message-ID "
+                "(e.g. <abc123@mail.example.com>), no spaces or control chars"
+            )
+        return v
 
     @field_validator("to", "cc", "bcc")
     @classmethod
