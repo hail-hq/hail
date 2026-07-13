@@ -38,6 +38,7 @@ from hailhq.core.config import settings
 from hailhq.core.urls import url_variants
 from hailhq.core.db import get_session, session_scope
 from hailhq.core.models import ApiKey, OrganizationMember
+from hailhq.core.s3_mail import S3MailClient
 
 # Throttle ``lastRequest`` writes so chatty agent traffic doesn't generate one
 # no-op UPDATE per request.
@@ -339,3 +340,9 @@ async def get_current_principal(
         return await _principal_from_apikey_table(token, db)
 
     raise _unauthorized("invalid API key")
+
+
+def get_s3_mail() -> S3MailClient:
+    """Shared mail-bucket S3 client, used by every route touching an
+    attachment (inbound reads, outbound uploads, outbound sends)."""
+    return S3MailClient(bucket=settings.hail_mail_bucket)

@@ -7,8 +7,8 @@ from unittest.mock import AsyncMock
 import httpx
 import pytest
 
+from hailhq.api.deps import get_s3_mail
 from hailhq.api.main import app
-from hailhq.api.routes import email_attachments
 
 from .conftest import insert_org_and_key  # noqa: F401
 
@@ -16,11 +16,11 @@ from .conftest import insert_org_and_key  # noqa: F401
 @pytest.fixture()
 def s3_mail_mock():
     s3 = AsyncMock()
-    app.dependency_overrides[email_attachments._get_s3_mail] = lambda: s3
+    app.dependency_overrides[get_s3_mail] = lambda: s3
     try:
         yield s3
     finally:
-        app.dependency_overrides.pop(email_attachments._get_s3_mail, None)
+        app.dependency_overrides.pop(get_s3_mail, None)
 
 
 async def test_upload_returns_id_and_metadata(

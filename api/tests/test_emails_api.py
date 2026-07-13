@@ -10,8 +10,8 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from hailhq.api.deps import get_s3_mail
 from hailhq.api.main import app
-from hailhq.api.routes import email_attachments
 from hailhq.api.routes import emails as emails_routes
 from hailhq.core.config import settings
 from hailhq.core.email_footer import AI_DISCLOSURE_LINE
@@ -61,17 +61,18 @@ async def _send_email(client: httpx.AsyncClient, plain: str) -> dict:
 def s3_mail_mock(monkeypatch: pytest.MonkeyPatch):
     s3 = AsyncMock()
     s3.fetch_raw.return_value = b"pdf bytes"
-    # `POST /email-attachments` still resolves `_get_s3_mail` through FastAPI's
-    # DI, so a dependency_overrides entry works there. `POST /emails` calls
-    # `_get_s3_mail()` as a plain function (lazily, only when attachments are
-    # present) rather than via `Depends(...)`, so it never consults
-    # `app.dependency_overrides` — patch the module-level name directly.
-    app.dependency_overrides[email_attachments._get_s3_mail] = lambda: s3
-    monkeypatch.setattr(emails_routes, "_get_s3_mail", lambda: s3)
+    # `POST /email-attachments` still resolves the shared `get_s3_mail`
+    # dependency through FastAPI's DI, so a dependency_overrides entry works
+    # there. `POST /emails` calls it as a plain function (lazily, only when
+    # attachments are present) rather than via `Depends(...)`, so it never
+    # consults `app.dependency_overrides` — patch `emails.py`'s own
+    # module-level binding of the name directly.
+    app.dependency_overrides[get_s3_mail] = lambda: s3
+    monkeypatch.setattr(emails_routes, "get_s3_mail", lambda: s3)
     try:
         yield s3
     finally:
-        app.dependency_overrides.pop(email_attachments._get_s3_mail, None)
+        app.dependency_overrides.pop(get_s3_mail, None)
 
 
 async def _upload_attachment(
@@ -210,6 +211,62 @@ async def test_post_emails_missing_attachment_replays_404_not_409(
     assert r2.headers.get("idempotency-replay") == "true"
     assert r2.json()["detail"] == r1.json()["detail"]
     email_mock.send_email.assert_not_awaited()
+
+
+async def test_post_emails_handles_missing_s3_object_at_send_time(
+    client: httpx.AsyncClient,
+    org_and_key: tuple,
+    email_mock: AsyncMock,
+    async_session: AsyncSession,
+    s3_mail_mock: AsyncMock,
+) -> None:
+    """A concurrently-deleted attachment (e.g. a GC-worker race) must fail
+    the send cleanly, not crash unhandled. Before the fix, `s3.fetch_raw`
+    was called outside the try/except wrapping the provider send, so a
+    missing object left the Email row stuck at 'queued' forever and, with
+    an explicit Idempotency-Key, the key stuck at the in-flight sentinel
+    for its full TTL instead of returning the same 502 every other send
+    failure produces."""
+    _, _, plain = org_and_key
+    headers = {
+        "Authorization": f"Bearer {plain}",
+        "Idempotency-Key": "test-missing-s3-object-key",
+    }
+    await _register_custom_verified(client, headers, domain="acme.com")
+    att_id = await _upload_attachment(client, headers)
+    s3_mail_mock.fetch_raw.side_effect = Exception("NoSuchKey")
+
+    resp = await client.post(
+        "/emails",
+        json={
+            "to": ["alice@example.com"],
+            "subject": "hi",
+            "body_text": "body",
+            "recipient_consent": True,
+            "attachment_ids": [att_id],
+        },
+        headers=headers,
+    )
+    assert resp.status_code == 502, resp.text
+    email_mock.send_email.assert_not_awaited()
+
+    stmt = select(Email).where(Email.organization_id == org_and_key[0])
+    email = (await async_session.execute(stmt)).scalar_one()
+    assert email.status == "failed"
+
+    retry = await client.post(
+        "/emails",
+        json={
+            "to": ["alice@example.com"],
+            "subject": "hi",
+            "body_text": "body",
+            "recipient_consent": True,
+            "attachment_ids": [att_id],
+        },
+        headers=headers,
+    )
+    assert retry.status_code == 502
+    assert retry.headers.get("idempotency-replay") == "true"
 
 
 # --------------------------------------------------------------------------- #

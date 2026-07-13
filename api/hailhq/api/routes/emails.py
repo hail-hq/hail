@@ -33,7 +33,7 @@ from sqlalchemy.orm import defer
 from hailhq.api.audit import write_audit_log
 from hailhq.api.consent import enforce_consent, isoformat_or_none
 from hailhq.core.urls import join_url
-from hailhq.api.deps import Principal, get_current_principal
+from hailhq.api.deps import Principal, get_current_principal, get_s3_mail
 from hailhq.api.errors import unprocessable
 from hailhq.api.pagination import fetch_cursor_page
 from hailhq.api.idempotency import (
@@ -50,7 +50,6 @@ from hailhq.api.routes.email_domains import (
 )
 from hailhq.api.funds import require_funds
 from hailhq.core.compliance_gate import check_email_allowed
-from hailhq.core.config import settings
 from hailhq.core.db import get_session
 from hailhq.core.email_attachment_limits import (
     ATTACHMENT_TOO_LARGE_DETAIL,
@@ -91,10 +90,6 @@ router = APIRouter(prefix="/emails", tags=["emails"])
 _DEFAULT_LIST_LIMIT = 50
 _MAX_LIST_LIMIT = 200
 _SEND_FAILED_DETAIL = "email send failed"
-
-
-def _get_s3_mail() -> S3MailClient:
-    return S3MailClient(bucket=settings.hail_mail_bucket)
 
 
 # --------------------------------------------------------------------------- #
@@ -440,17 +435,23 @@ async def create_email(
         email.to_addresses[0], principal.organization_id
     )
     provider_attachments: list[ProviderAttachment] = []
-    if attachment_rows:
-        s3 = _get_s3_mail()
-        provider_attachments = [
-            ProviderAttachment(
-                filename=row.filename,
-                content_type=row.content_type,
-                payload=await s3.fetch_raw(row.s3_key),
-            )
-            for row in attachment_rows
-        ]
     try:
+        if attachment_rows:
+            # Fetching payloads inside this try: a concurrently-deleted S3
+            # object (e.g. a GC-worker race) fails the send cleanly via the
+            # except block below rather than raising unhandled — which would
+            # otherwise leave the Email row stuck at 'queued' and, with an
+            # explicit Idempotency-Key, that key stuck at the in-flight
+            # sentinel for its full TTL.
+            s3 = get_s3_mail()
+            provider_attachments = [
+                ProviderAttachment(
+                    filename=row.filename,
+                    content_type=row.content_type,
+                    payload=await s3.fetch_raw(row.s3_key),
+                )
+                for row in attachment_rows
+            ]
         result = await email_provider.send_email(
             from_address=email.from_address,
             to_addresses=email.to_addresses,
@@ -514,10 +515,10 @@ async def create_email(
     record_sent_event(
         db, email_id=email.id, organization_id=email.organization_id, occurred_at=now
     )
-    await db.commit()
-    await db.refresh(email)
-
-    now_used = datetime.now(timezone.utc)
+    # Attachment bookkeeping rides the same commit as the status update —
+    # a crash between two separate commits here would leave an email marked
+    # 'sent' with no EmailAttachment rows, which the GC worker would then
+    # (incorrectly) reclaim as an unused upload.
     for row in attachment_rows:
         db.add(
             EmailAttachment(
@@ -529,10 +530,9 @@ async def create_email(
             )
         )
         if row.first_used_at is None:
-            row.first_used_at = now_used
-    if attachment_rows:
-        await db.commit()
-        await db.refresh(email)
+            row.first_used_at = now
+    await db.commit()
+    await db.refresh(email)
 
     # Flat 1¢ per send regardless of recipient count.
     await _write_usage_event(
@@ -791,7 +791,7 @@ async def get_email_raw(
     email_id: UUID,
     principal: Annotated[Principal, Depends(get_current_principal)],
     db: Annotated[AsyncSession, Depends(get_session)],
-    s3: Annotated[S3MailClient, Depends(_get_s3_mail)],
+    s3: Annotated[S3MailClient, Depends(get_s3_mail)],
 ) -> Response:
     """302 → presigned S3 URL for the raw inbound MIME (404 for outbound)."""
     stmt = select(Email).where(
@@ -814,7 +814,7 @@ async def get_email_attachment(
     attachment_id: UUID,
     principal: Annotated[Principal, Depends(get_current_principal)],
     db: Annotated[AsyncSession, Depends(get_session)],
-    s3: Annotated[S3MailClient, Depends(_get_s3_mail)],
+    s3: Annotated[S3MailClient, Depends(get_s3_mail)],
 ) -> Response:
     """302 → presigned S3 URL for one attachment."""
     stmt = (
