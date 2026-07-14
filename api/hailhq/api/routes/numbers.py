@@ -22,7 +22,6 @@ from hailhq.api.deps import Principal, get_current_principal
 from hailhq.api.errors import unprocessable
 from hailhq.api.idempotency import (
     IdempotencyContext,
-    cache_failure,
     idempotency_dep,
     replay_cached,
 )
