@@ -58,7 +58,9 @@ def get_voice_provider() -> VoiceProvider:
     return _voice_provider_singleton
 
 
-@router.post("", response_model=PhoneNumberResponse, status_code=http_status.HTTP_201_CREATED)
+@router.post(
+    "", response_model=PhoneNumberResponse, status_code=http_status.HTTP_201_CREATED
+)
 async def acquire_number(
     body: NumberAcquireRequest,
     response: Response,
@@ -123,11 +125,14 @@ async def get_number(
     db: Annotated[AsyncSession, Depends(get_session)],
 ) -> PhoneNumberResponse:
     stmt = select(PhoneNumber).where(
-        PhoneNumber.id == number_id, PhoneNumber.organization_id == principal.organization_id
+        PhoneNumber.id == number_id,
+        PhoneNumber.organization_id == principal.organization_id,
     )
     number = (await db.execute(stmt)).scalar_one_or_none()
     if number is None:
-        raise HTTPException(status_code=http_status.HTTP_404_NOT_FOUND, detail="number not found")
+        raise HTTPException(
+            status_code=http_status.HTTP_404_NOT_FOUND, detail="number not found"
+        )
     return PhoneNumberResponse.model_validate(number)
 
 
@@ -143,7 +148,13 @@ async def list_numbers(
         PhoneNumber.is_pool.is_(False),
     )
     rows, next_cursor = await fetch_cursor_page(
-        db, stmt, PhoneNumber.created_at, PhoneNumber.id, cursor=cursor, limit=limit, newest_first=True
+        db,
+        stmt,
+        PhoneNumber.created_at,
+        PhoneNumber.id,
+        cursor=cursor,
+        limit=limit,
+        newest_first=True,
     )
     return PhoneNumberListResponse(
         items=[PhoneNumberResponse.model_validate(r) for r in rows],
@@ -159,11 +170,14 @@ async def enable_sms(
     provider: Annotated[SmsProvider, Depends(get_sms_provider)],
 ) -> PhoneNumberResponse:
     stmt = select(PhoneNumber).where(
-        PhoneNumber.id == number_id, PhoneNumber.organization_id == principal.organization_id
+        PhoneNumber.id == number_id,
+        PhoneNumber.organization_id == principal.organization_id,
     )
     number = (await db.execute(stmt)).scalar_one_or_none()
     if number is None:
-        raise HTTPException(status_code=http_status.HTTP_404_NOT_FOUND, detail="number not found")
+        raise HTTPException(
+            status_code=http_status.HTTP_404_NOT_FOUND, detail="number not found"
+        )
 
     if "sms" not in number.capabilities:
         raise unprocessable(

@@ -18,7 +18,9 @@ depends_on = None
 
 
 def upgrade() -> None:
-    op.add_column("phone_numbers", sa.Column("messaging_service_sid", sa.Text(), nullable=True))
+    op.add_column(
+        "phone_numbers", sa.Column("messaging_service_sid", sa.Text(), nullable=True)
+    )
 
 
 def downgrade() -> None:
