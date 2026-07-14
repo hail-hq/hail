@@ -1,7 +1,7 @@
 """Add messaging_service_sid to phone_numbers.
 
 Revision ID: 0032
-Revises: 0030
+Revises: 0031
 """
 
 from __future__ import annotations
@@ -12,7 +12,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision: str = "0032"
-down_revision: Union[str, None] = "0030"
+down_revision: Union[str, None] = "0031"
 branch_labels = None
 depends_on = None
 
