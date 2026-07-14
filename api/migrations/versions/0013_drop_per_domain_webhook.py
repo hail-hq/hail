@@ -22,7 +22,7 @@ from __future__ import annotations
 from typing import Sequence, Union
 
 import sqlalchemy as sa
-from alembic import op
+from alembic import context, op
 
 revision: str = "0013"
 down_revision: Union[str, None] = "0012"
@@ -31,16 +31,21 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    conn = op.get_bind()
     # Guard: refuse to drop if any per-domain webhook is actually configured.
-    n = conn.execute(
-        sa.text("SELECT count(*) FROM email_domains WHERE webhook_url IS NOT NULL")
-    ).scalar_one()
-    if n:
-        raise RuntimeError(
-            f"{n} email_domains row(s) still use webhook_url; migrate them to "
-            "WebhookSubscription before dropping per-domain webhooks."
-        )
+    # Skipped in offline mode (`alembic upgrade head --sql`, used for the
+    # deploy dry-print): there's no live connection to query there, and the
+    # check is meaningless for a SQL preview — it only needs to run against
+    # a real database.
+    if not context.is_offline_mode():
+        conn = op.get_bind()
+        n = conn.execute(
+            sa.text("SELECT count(*) FROM email_domains WHERE webhook_url IS NOT NULL")
+        ).scalar_one()
+        if n:
+            raise RuntimeError(
+                f"{n} email_domains row(s) still use webhook_url; migrate them to "
+                "WebhookSubscription before dropping per-domain webhooks."
+            )
 
     # Re-express the inbound-action invariant without webhook_url.
     op.drop_constraint("email_domains_inbound_action", "email_domains", type_="check")
