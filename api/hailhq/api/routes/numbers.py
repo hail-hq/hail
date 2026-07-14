@@ -15,7 +15,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from fastapi import status as http_status
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from hailhq.api.deps import Principal, get_current_principal
@@ -191,6 +191,23 @@ async def enable_sms(
 
     # Idempotent: an already-enabled number is attached to its Messaging
     # Service; re-attaching would error at Twilio. Return the current state.
+    if number.messaging_service_sid is not None:
+        return PhoneNumberResponse.model_validate(number)
+
+    # Serialize concurrent enable-sms within an org. Provisioning the org's
+    # shared Messaging Service is a get-or-create: two parallel enables would
+    # otherwise both observe no existing service and each create one (leaving
+    # orphaned duplicates). A transaction-scoped advisory lock keyed on the org
+    # (auto-released at commit/rollback) makes any waiter see the first
+    # request's committed result. No other code path takes advisory locks, so
+    # the org-derived key can't collide.
+    await db.execute(
+        text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))"),
+        {"key": str(principal.organization_id)},
+    )
+    # Re-read under the lock: a concurrent enable of THIS number may have just
+    # attached it (its SID was NULL when the row was first loaded).
+    await db.refresh(number, ["messaging_service_sid"])
     if number.messaging_service_sid is not None:
         return PhoneNumberResponse.model_validate(number)
 
