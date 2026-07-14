@@ -3,7 +3,9 @@ package cmd
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
 	"mime/multipart"
 	"net/http"
 	"os"
@@ -77,22 +79,43 @@ func uploadEmailAttachment(
 		return nil, fmt.Errorf("build upload: %w", err)
 	}
 
-	// UploadEmailAttachmentWithBodyWithResponse takes an extra *params
-	// argument beyond what the task brief predicted — oapi-codegen v2
-	// generates one for every route carrying the shared optional
-	// `authorization` header parameter (see UploadEmailAttachmentParams),
-	// the same shape CreateCallCallsPostWithResponse and
-	// CreateEmailEmailsPostWithResponse already take elsewhere in this
-	// package. Real auth goes through the request-editor-injected
-	// Authorization header on the client, so this is always the zero value.
-	resp, err := apiClient.UploadEmailAttachmentWithBodyWithResponse(
+	// Deliberately the raw (non-WithResponse) client method here, not
+	// UploadEmailAttachmentWithBodyWithResponse: its generated parser
+	// (ParseUploadEmailAttachmentResponse) eagerly unmarshals ANY non-2xx
+	// JSON body into the OpenAPI-declared HTTPValidationError shape
+	// ({"detail": []ValidationError}) and discards the raw body if that
+	// unmarshal fails — which it always does for this endpoint's size-cap
+	// rejection, since that returns a plain string detail
+	// ({"detail": "..."}) instead. That mismatch surfaced as a raw Go
+	// `json: cannot unmarshal string into ... []client.ValidationError`
+	// error instead of the actual "too large" message. Parsing the
+	// response ourselves keeps the real body available for apiError's
+	// safe (already-handles-both-shapes) fallback.
+	//
+	// UploadEmailAttachmentWithBody takes an extra *params argument beyond
+	// what the task brief predicted — oapi-codegen v2 generates one for
+	// every route carrying the shared optional `authorization` header
+	// parameter (see UploadEmailAttachmentParams), the same shape other
+	// routes take elsewhere in this package. Real auth goes through the
+	// request-editor-injected Authorization header on the client, so this
+	// is always the zero value.
+	httpResp, err := apiClient.UploadEmailAttachmentWithBody(
 		ctx, &client.UploadEmailAttachmentParams{}, w.FormDataContentType(), &buf,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("attachment upload API: %w", err)
 	}
-	if resp.HTTPResponse.StatusCode != http.StatusCreated || resp.JSON201 == nil {
-		return nil, apiError(resp.HTTPResponse.StatusCode, resp.Body)
+	defer httpResp.Body.Close()
+	body, err := io.ReadAll(httpResp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("attachment upload API: read response: %w", err)
 	}
-	return resp.JSON201, nil
+	if httpResp.StatusCode != http.StatusCreated {
+		return nil, apiError(httpResp.StatusCode, body)
+	}
+	var att client.EmailAttachmentUploadResponse
+	if err := json.Unmarshal(body, &att); err != nil {
+		return nil, fmt.Errorf("attachment upload API: parse response: %w", err)
+	}
+	return &att, nil
 }

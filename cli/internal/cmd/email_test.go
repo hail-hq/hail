@@ -218,6 +218,37 @@ func TestEmailSend_APIError(t *testing.T) {
 	}
 }
 
+// TestEmailSend_OversizeAttachmentRejection guards against a real bug: the
+// server's attachment size-cap rejection returns a plain string `detail`
+// ({"detail": "..."}), not FastAPI's list-shaped validation-error detail
+// that the generated WithResponse parser expects for every 422. Using that
+// generated parser directly made the real "too large" message get replaced
+// by a raw Go json.Unmarshal error. This must surface the actual server
+// message instead.
+func TestEmailSend_OversizeAttachmentRejection(t *testing.T) {
+	srv := newFakeServer(t, http.StatusUnprocessableEntity, map[string]string{
+		"detail": "attachment(s) too large — host the file externally and include a link in the body instead",
+	})
+
+	_, _, err := runRoot(t,
+		map[string]string{"HAIL_API_KEY": "sk_test", "HAIL_API_URL": srv.URL},
+		"email", "send",
+		"--to", "x@example.com",
+		"--subject", "hi",
+		"--body", "hello",
+		"--recipient-consent",
+	)
+	if err == nil {
+		t.Fatal("expected error on 422")
+	}
+	if strings.Contains(err.Error(), "cannot unmarshal") {
+		t.Fatalf("leaked raw json unmarshal error instead of the server message: %v", err)
+	}
+	if !strings.Contains(err.Error(), "too large") {
+		t.Fatalf("expected the real oversize message, got: %v", err)
+	}
+}
+
 func TestEmailSendSubcommand_SendsConsentFlags(t *testing.T) {
 	srv := newFakeServer(t, http.StatusCreated, sampleEmailResponse())
 

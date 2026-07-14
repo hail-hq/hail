@@ -2,7 +2,9 @@ package cmd
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"strings"
@@ -206,17 +208,36 @@ func runEmailSend(ctx context.Context, cmd *cobra.Command, opts *Options, f *ema
 		body.AttachmentIds = &ids
 	}
 
-	resp, err := apiClient.CreateEmailEmailsPostWithResponse(
+	// Deliberately the raw (non-WithResponse) client method here, not
+	// CreateEmailEmailsPostWithResponse: its generated parser eagerly
+	// unmarshals ANY non-2xx JSON body into the OpenAPI-declared
+	// HTTPValidationError shape ({"detail": []ValidationError}) and
+	// discards the raw body if that unmarshal fails — which it does for
+	// any of this route's plain-string-detail 422s (the attachment
+	// size-cap rejection, "not a verified sender", "pending DKIM
+	// verification", etc.), surfacing a raw Go json.Unmarshal error
+	// instead of the real message. Parsing the response ourselves keeps
+	// the real body available for apiError's safe fallback.
+	httpResp, err := apiClient.CreateEmailEmailsPost(
 		ctx, &client.CreateEmailEmailsPostParams{}, body,
 	)
 	if err != nil {
 		return fmt.Errorf("email API: %w", err)
 	}
-	if resp.HTTPResponse.StatusCode != http.StatusCreated || resp.JSON201 == nil {
-		return apiError(resp.HTTPResponse.StatusCode, resp.Body)
+	defer httpResp.Body.Close()
+	respBody, err := io.ReadAll(httpResp.Body)
+	if err != nil {
+		return fmt.Errorf("email API: read response: %w", err)
+	}
+	if httpResp.StatusCode != http.StatusCreated {
+		return apiError(httpResp.StatusCode, respBody)
+	}
+	var email client.EmailResponse
+	if err := json.Unmarshal(respBody, &email); err != nil {
+		return fmt.Errorf("email API: parse response: %w", err)
 	}
 
-	return printEmail(opts, resp.JSON201)
+	return printEmail(opts, &email)
 }
 
 // normalizeRecipients trims whitespace from each entry and drops empty
