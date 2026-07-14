@@ -10,7 +10,7 @@ locals {
   state_region          = run_cmd("--terragrunt-quiet", "bash", "-c", "source ${local.env_file} && echo -n \"$${HAIL_TERRAFORM_STATE_REGION:-$${AWS_REGION:-us-east-1}}\"")
   state_bucket          = run_cmd("--terragrunt-quiet", "bash", "-c", "source ${local.env_file} && echo -n \"$HAIL_TERRAFORM_STATE_BUCKET\"")
   lock_table            = run_cmd("--terragrunt-quiet", "bash", "-c", "source ${local.env_file} && echo -n \"$HAIL_TERRAFORM_LOCK_TABLE\"")
-  name_prefix           = run_cmd("--terragrunt-quiet", "bash", "-c", "source ${local.env_file} && echo -n \"$HAIL_INBOUND_EMAIL_NAME_PREFIX\"")
+  name_prefix           = run_cmd("--terragrunt-quiet", "bash", "-c", "source ${local.env_file} && echo -n \"$HAIL_MAIL_NAME_PREFIX\"")
   iam_user_name         = run_cmd("--terragrunt-quiet", "bash", "-c", "source ${local.env_file} && echo -n \"$HAIL_IAM_USER_NAME\"")
   hail_api_url          = run_cmd("--terragrunt-quiet", "bash", "-c", "source ${local.env_file} && echo -n \"$HAIL_API_URL\"")
   hail_inbound_secret   = run_cmd("--terragrunt-quiet", "bash", "-c", "source ${local.env_file} && echo -n \"$HAIL_INBOUND_HMAC_SECRET\"")
