@@ -2,10 +2,13 @@
 
 All notable changes to Hail are documented here. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and Hail adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.13.0] — 2026-07-14
 
 Outbound email attachments. Upload a file once, reference its id from as
 many sends as you like.
+
+Component versions cut alongside this release:
+**`sdk-v0.9.0`** (PyPI: `hail-sdk==0.9.0`), **`cli-v0.12.0`** (Homebrew + GitHub Releases).
 
 - `POST /email-attachments` — upload a file (multipart/form-data,
   ≤10MB), get back a reusable id. `POST /emails` gains
