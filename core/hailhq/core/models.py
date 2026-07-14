@@ -181,6 +181,40 @@ class Suppression(Base):
     )
 
 
+class ChannelSuspension(Base):
+    """A targeted per-org, per-channel sending pause — distinct from
+    ``OrgClosure`` (whole-account closure) and from ``Suppression``
+    (per-recipient opt-out). Backs the abuse-monitoring guardrail: when an
+    org's opt-out rate on a channel crosses a threshold, a row here blocks
+    further sends on that channel until an operator lifts it (or, later,
+    an automated cooldown expires).
+    """
+
+    __tablename__ = "channel_suspensions"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    organization_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), nullable=False
+    )
+    channel: Mapped[str] = mapped_column(Text, nullable=False)
+    reason: Mapped[str] = mapped_column(Text, nullable=False)
+    suspended_at: Mapped[datetime] = mapped_column(
+        TS, server_default=text("now()"), nullable=False
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "channel IN ('sms','voice','email')",
+            name="channel_suspensions_channel_check",
+        ),
+        UniqueConstraint(
+            "organization_id", "channel", name="channel_suspensions_org_channel_uniq"
+        ),
+    )
+
+
 class OrgClosure(Base):
     """Local record that an org's account was closed/deleted on hail-website.
 
@@ -428,8 +462,11 @@ class Sms(Base):
     organization_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), nullable=False
     )
-    from_number_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("phone_numbers.id"), nullable=False
+    from_number_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("phone_numbers.id"), nullable=True
+    )
+    to_number_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("phone_numbers.id"), nullable=True
     )
     from_e164: Mapped[str] = mapped_column(Text, nullable=False)
     to_e164: Mapped[str] = mapped_column(Text, nullable=False)
@@ -1013,10 +1050,13 @@ class WebhookDelivery(Base):
 
 
 class OrgProviderConfig(Base):
-    """Per-org BYO provider config for one voice-pipeline layer.
+    """Per-org BYO provider config for a voice-pipeline layer.
 
     Cloud-console feature (managed via ``routes/internal/provider_config``,
-    never the public API). ``encrypted_api_key`` is Fernet ciphertext under
+    never the public API). An org may hold multiple saved configs per layer
+    (one per provider — unique on org+layer+provider), with at most one
+    marked ``is_active`` per (org, layer); the voicebot uses the active row.
+    ``encrypted_api_key`` is Fernet ciphertext under
     ``HAIL_PROVIDER_SECRET_KEY`` (see ``hailhq.core.secret_cipher``) — same
     at-rest posture as ``WebhookSubscription.secret_encrypted``. A row with
     ``encrypted_api_key IS NULL`` is a params-only override (e.g. a custom
@@ -1043,6 +1083,9 @@ class OrgProviderConfig(Base):
     fallback_enabled: Mapped[bool] = mapped_column(
         Boolean, server_default=text("false"), nullable=False
     )
+    is_active: Mapped[bool] = mapped_column(
+        Boolean, server_default=text("false"), nullable=False
+    )
     created_at: Mapped[datetime] = mapped_column(
         TS, server_default=text("now()"), nullable=False
     )
@@ -1055,7 +1098,17 @@ class OrgProviderConfig(Base):
             "layer IN ('llm','tts','stt')", name="org_provider_config_layer_check"
         ),
         UniqueConstraint(
-            "organization_id", "layer", name="org_provider_config_org_layer_key"
+            "organization_id",
+            "layer",
+            "provider",
+            name="org_provider_config_org_layer_provider_key",
+        ),
+        Index(
+            "org_provider_config_one_active_idx",
+            "organization_id",
+            "layer",
+            unique=True,
+            postgresql_where=text("is_active"),
         ),
         Index("org_provider_config_org_idx", "organization_id"),
     )

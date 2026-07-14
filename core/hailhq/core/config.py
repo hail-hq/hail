@@ -215,6 +215,35 @@ class Settings(BaseSettings):
     hail_velocity_sms_per_hour: int = 100
     hail_velocity_sms_per_day: int = 1000
 
+    # Abuse-monitoring guardrail (SMS opt-out rate -> ChannelSuspension).
+    # Conservative starting thresholds per the design spec's own caution
+    # that these are unvalidated pending real traffic data — tune post-launch.
+    hail_sms_abuse_window_hours: int = 24
+    hail_sms_abuse_min_sends: int = 20  # floor: don't flag low-volume orgs
+    hail_sms_abuse_max_opt_out_rate: float = 0.05  # 5% opt-out rate trips it
+    # Poll cadence (seconds) for the AbuseMonitorWorker's coarse-grained batch
+    # check — hourly by default, not a per-send check. Set 0 to disable.
+    hail_abuse_monitor_poll_seconds: int = 3600
+
+    # SMS compliance auto-replies (HELP/STOP/START). OFF by default: Twilio's
+    # own opt-out handling already auto-replies to these keywords, so enabling
+    # Hail replies on top would double-text. Enable only when Twilio's default
+    # filtering is disabled (account-wide Support ticket) or on a non-Twilio
+    # provider. The suppression record is written regardless of this flag.
+    hail_sms_compliance_replies_enabled: bool = False
+    hail_sms_stop_reply: str = (
+        "You replied STOP and are unsubscribed from Hail messages and will receive no more. "
+        "Reply START to resubscribe. Help: hi@hail.so"
+    )
+    hail_sms_help_reply: str = (
+        "Hail: for help contact hi@hail.so. Msg&data rates may apply. "
+        "Reply STOP to unsubscribe."
+    )
+    hail_sms_start_reply: str = (
+        "You are resubscribed to Hail messages. Reply STOP to unsubscribe, "
+        "HELP for help."
+    )
+
     @computed_field  # type: ignore[prop-decorator]
     @property
     def hail_inbound_bucket(self) -> str:

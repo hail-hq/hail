@@ -1268,6 +1268,81 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HTTPValidationError"
+  /sms/suppressions:
+    get:
+      tags:
+        - sms
+      summary: List Sms Suppressions
+      operationId: list_sms_suppressions_sms_suppressions_get
+      parameters:
+        - name: cursor
+          in: query
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            title: Cursor
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            maximum: 200
+            minimum: 1
+            default: 50
+            title: Limit
+        - name: authorization
+          in: header
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            title: Authorization
+      responses:
+        "200":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuppressionListResponse"
+        "422":
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
+  /sms/suppressions/{number}:
+    delete:
+      tags:
+        - sms
+      summary: Delete Sms Suppression
+      operationId: delete_sms_suppression_sms_suppressions__number__delete
+      parameters:
+        - name: number
+          in: path
+          required: true
+          schema:
+            type: string
+            title: Number
+        - name: authorization
+          in: header
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            title: Authorization
+      responses:
+        "204":
+          description: Successful Response
+        "422":
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
   /sms/{sms_id}:
     get:
       tags:
@@ -2732,6 +2807,53 @@ components:
         - requested_at
         - sent_at
       title: SmsResponse
+    SuppressionListResponse:
+      properties:
+        items:
+          items:
+            $ref: "#/components/schemas/SuppressionResponse"
+          type: array
+          title: Items
+        next_cursor:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Next Cursor
+      type: object
+      required:
+        - items
+      title: SuppressionListResponse
+    SuppressionResponse:
+      properties:
+        id:
+          type: string
+          format: uuid
+          title: Id
+        recipient:
+          type: string
+          title: Recipient
+        channel:
+          type: string
+          title: Channel
+        reason:
+          type: string
+          title: Reason
+        source:
+          type: string
+          title: Source
+        created_at:
+          type: string
+          format: date-time
+          title: Created At
+      type: object
+      required:
+        - id
+        - recipient
+        - channel
+        - reason
+        - source
+        - created_at
+      title: SuppressionResponse
     ValidationError:
       properties:
         loc:
@@ -2894,6 +3016,7 @@ components:
               - email.opened
               - email.clicked
               - email.received.suppressed
+              - sms.received
           type: array
           minItems: 1
           title: Event Types
@@ -2938,6 +3061,7 @@ components:
                   - email.opened
                   - email.clicked
                   - email.received.suppressed
+                  - sms.received
               type: array
             - type: "null"
           title: Event Types

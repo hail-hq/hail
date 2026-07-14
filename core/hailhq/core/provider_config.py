@@ -112,7 +112,8 @@ async def load_org_provider_configs(
         (
             await session.execute(
                 select(OrgProviderConfig).where(
-                    OrgProviderConfig.organization_id == organization_id
+                    OrgProviderConfig.organization_id == organization_id,
+                    OrgProviderConfig.is_active,
                 )
             )
         )

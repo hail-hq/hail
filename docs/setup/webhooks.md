@@ -85,6 +85,9 @@ The full set is the `WebhookEventType` enum in
 - **`email.complained`** — the recipient marked the message as spam.
 - **`email.opened`** — the recipient opened the message (image tracked, approximate).
 - **`email.clicked`** — the recipient clicked a tracked link.
+- **`sms.received`** — an inbound SMS arrived and was accepted. Delivered through
+  the same signed, retried webhook worker as the email events (`X-Hail-Signature`,
+  `X-Hail-Event`, `X-Hail-Delivery`); the `X-Hail-Email-Domain` header is omitted.
 
 ## Payload
 
@@ -124,6 +127,24 @@ the event type. Inbound events use [`build_event_data`](../../core/hailhq/core/w
         "url": "https://…"
       }
     ]
+  }
+}
+```
+
+**Inbound example** (`sms.received`):
+
+```json
+{
+  "id": "7a1b…",
+  "type": "sms.received",
+  "api_version": "2026-06-06",
+  "created_at": "2026-07-10T12:00:00+00:00",
+  "organization_id": "org-uuid",
+  "data": {
+    "id": "sms-uuid",
+    "from": "+14155551234",
+    "to": "+14155559999",
+    "body": "hello back"
   }
 }
 ```

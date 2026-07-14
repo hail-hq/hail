@@ -72,12 +72,20 @@ async def test_load_org_provider_configs(async_session, monkeypatch) -> None:
     other_org = uuid.uuid4()
     async_session.add_all(
         [
-            OrgProviderConfig(organization_id=org_id, layer="tts", provider="cartesia"),
             OrgProviderConfig(
-                organization_id=org_id, layer="llm", provider="anthropic"
+                organization_id=org_id, layer="tts", provider="cartesia", is_active=True
             ),
             OrgProviderConfig(
-                organization_id=other_org, layer="stt", provider="deepgram"
+                organization_id=org_id,
+                layer="llm",
+                provider="anthropic",
+                is_active=True,
+            ),
+            OrgProviderConfig(
+                organization_id=other_org,
+                layer="stt",
+                provider="deepgram",
+                is_active=True,
             ),
         ]
     )
@@ -86,3 +94,29 @@ async def test_load_org_provider_configs(async_session, monkeypatch) -> None:
     got = await load_org_provider_configs(async_session, org_id)
     assert set(got) == {"tts", "llm"}
     assert got["llm"].provider == "anthropic"
+
+
+async def test_load_org_provider_configs_returns_only_active(
+    async_session, monkeypatch
+) -> None:
+    """Returns only the active config per layer, ignoring inactive ones."""
+    org_id = uuid.uuid4()
+    async_session.add_all(
+        [
+            # Two TTS configs for the same org, one active, one inactive
+            OrgProviderConfig(
+                organization_id=org_id, layer="tts", provider="cartesia", is_active=True
+            ),
+            OrgProviderConfig(
+                organization_id=org_id,
+                layer="tts",
+                provider="elevenlabs",
+                is_active=False,
+            ),
+        ]
+    )
+    await async_session.commit()
+
+    got = await load_org_provider_configs(async_session, org_id)
+    assert set(got) == {"tts"}
+    assert got["tts"].provider == "cartesia"
