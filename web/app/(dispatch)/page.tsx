@@ -36,7 +36,7 @@ export default function CostsPage() {
             <span className="dot">●</span> HAIL.SO / DISPATCH · {today} · MODEL COSTS
           </div>
           <div className="right">
-            FILE: <b>COSTS</b> · CC-BY-4.0 · v0.1.0
+            FILE: <b>COSTS</b> · CC-BY-4.0 · v0.2.0
           </div>
         </div>
       </div>

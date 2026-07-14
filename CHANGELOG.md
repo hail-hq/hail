@@ -26,6 +26,63 @@ attachment_ids=...)`.
   outbound attachment uploads. No data migration; self-hosters recreate
   the bucket under the new prefix.
 
+## [0.12.0] — 2026-07-10
+
+SMS inbound & compliance milestone. Hail now receives inbound SMS, routes each
+message to the owning organization, fans it out to that org's webhook
+subscribers, and honors STOP/HELP/START opt-out signals — plus an
+abuse-monitoring guardrail that protects the shared A2P 10DLC campaign.
+
+Component versions cut alongside this release:
+**`sdk-v0.8.0`** (PyPI: `hail-sdk==0.8.0`), **`cli-v0.11.0`** (Homebrew + GitHub Releases).
+
+### Inbound SMS & opt-out
+
+- `POST /sms/inbound` — the Twilio inbound webhook. Verified with Twilio's own
+  `X-Twilio-Signature` (HMAC-SHA1) scheme against the configured public API
+  URL, not the raw request URL, so it stays correct behind a TLS-terminating
+  proxy. Returns `200` even for numbers Hail doesn't own, so Twilio never
+  retries a drop.
+- Org resolution is by the `To` number (dedicated numbers only, no pool
+  fallback). Inbound and outbound number foreign keys are now split
+  (`from_number_id` / `to_number_id`).
+- Inbound messages are idempotent on Twilio's `MessageSid` (a retried delivery
+  never creates a second row) and delivered to subscribers as an
+  `sms.received` webhook event.
+- Opt-out keywords write/clear rows in the shared `Suppression` list
+  (`channel='sms'`, checked before every send): STOP-family opts out,
+  START-family re-subscribes, HELP is recognized. Optional Hail-sent
+  compliance auto-replies (`HAIL_SMS_COMPLIANCE_REPLIES_ENABLED`, off by
+  default, with STOP/HELP/START templates) for deployments that disable
+  Twilio's built-in opt-out handling.
+
+### Suppression management
+
+- `GET /sms/suppressions` (cursor-paginated, org-scoped) and
+  `DELETE /sms/suppressions/{number}` — manual review and correction of the
+  opt-out list. No MCP tool: suppression management is account configuration,
+  not an agent-facing action.
+
+### Abuse monitoring
+
+- New `channel_suspensions` table and an `AbuseMonitorWorker` (runs in the API
+  lifespan, hourly by default via `HAIL_ABUSE_MONITOR_POLL_SECONDS`). It
+  computes each org's rolling SMS opt-out rate over a window and suspends the
+  channel when it crosses a threshold (`HAIL_SMS_ABUSE_WINDOW_HOURS` /
+  `_MIN_SENDS` / `_MAX_OPT_OUT_RATE`) — the mitigation for the shared-campaign
+  risk where one org's abuse can get the whole platform throttled. A
+  suspension blocks further SMS sends via `check_sms_allowed` until an operator
+  lifts it. Thresholds are conservative starting values, expected to be tuned
+  post-launch.
+
+### CLI (`cli-v0.11.0`)
+
+- New `hail sms suppressions list` / `hail sms suppressions delete <number>`.
+
+### SDK (`sdk-v0.8.0`)
+
+- `client.sms.list_suppressions` / `client.sms.delete_suppression` added.
+
 ## [0.11.0] — 2026-07-10
 
 Bring-your-own provider keys. Cloud organizations can now supply their own API
