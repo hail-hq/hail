@@ -187,6 +187,26 @@ class SmsListResponse(BaseModel):
     next_cursor: str | None = None
 
 
+class SuppressionResponse(BaseModel):
+    """Shape returned by ``GET /sms/suppressions`` items — one opted-out
+    recipient. Mirrors ``core/hailhq/core/schemas.py:SuppressionResponse``.
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    recipient: str
+    channel: str
+    reason: str
+    source: str
+    created_at: datetime
+
+
+class SuppressionListResponse(BaseModel):
+    items: list[SuppressionResponse]
+    next_cursor: str | None = None
+
+
 class CallEventResponse(BaseModel):
     """One event on the unified ``GET /events`` stream (mirrors the API's
     ``EventResponse``). The name predates the unified stream — it carries
@@ -561,6 +581,8 @@ __all__ = [
     "SmsCreate",
     "SmsResponse",
     "SmsListResponse",
+    "SuppressionResponse",
+    "SuppressionListResponse",
     "EmailCreate",
     "EmailAttachmentResponse",
     "EmailResponse",

@@ -13,6 +13,7 @@ from fastapi.responses import JSONResponse, Response
 
 from functools import partial
 
+from hailhq.core.abuse_monitor import AbuseMonitorWorker
 from hailhq.core.config import settings
 from hailhq.core.db import dispose_engine, session_scope
 from hailhq.core.http_post import httpx_post
@@ -173,6 +174,17 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
             verify_worker.run_forever(), name="domain-verification-worker"
         )
 
+    abuse_worker: AbuseMonitorWorker | None = None
+    abuse_task: asyncio.Task | None = None
+    if settings.hail_abuse_monitor_poll_seconds > 0:
+        abuse_worker = AbuseMonitorWorker(
+            session_factory=session_scope,
+            poll_interval=settings.hail_abuse_monitor_poll_seconds,
+        )
+        abuse_task = asyncio.create_task(
+            abuse_worker.run_forever(), name="abuse-monitor"
+        )
+
     try:
         yield
     finally:
@@ -187,6 +199,8 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
             await _stop_worker(forward_worker, forward_task)
         if verify_worker is not None and verify_task is not None:
             await _stop_worker(verify_worker, verify_task)
+        if abuse_worker is not None and abuse_task is not None:
+            await _stop_worker(abuse_worker, abuse_task)
         await calls_routes.close_livekit_singleton()
         await dispose_engine()
 

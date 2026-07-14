@@ -250,6 +250,40 @@ class Suppression(Base):
     )
 
 
+class ChannelSuspension(Base):
+    """A targeted per-org, per-channel sending pause — distinct from
+    ``OrgClosure`` (whole-account closure) and from ``Suppression``
+    (per-recipient opt-out). Backs the abuse-monitoring guardrail: when an
+    org's opt-out rate on a channel crosses a threshold, a row here blocks
+    further sends on that channel until an operator lifts it (or, later,
+    an automated cooldown expires).
+    """
+
+    __tablename__ = "channel_suspensions"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    organization_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), nullable=False
+    )
+    channel: Mapped[str] = mapped_column(Text, nullable=False)
+    reason: Mapped[str] = mapped_column(Text, nullable=False)
+    suspended_at: Mapped[datetime] = mapped_column(
+        TS, server_default=text("now()"), nullable=False
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "channel IN ('sms','voice','email')",
+            name="channel_suspensions_channel_check",
+        ),
+        UniqueConstraint(
+            "organization_id", "channel", name="channel_suspensions_org_channel_uniq"
+        ),
+    )
+
+
 class OrgClosure(Base):
     """Local record that an org's account was closed/deleted on hail-website.
 
@@ -497,8 +531,11 @@ class Sms(Base):
     organization_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), nullable=False
     )
-    from_number_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("phone_numbers.id"), nullable=False
+    from_number_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("phone_numbers.id"), nullable=True
+    )
+    to_number_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("phone_numbers.id"), nullable=True
     )
     from_e164: Mapped[str] = mapped_column(Text, nullable=False)
     to_e164: Mapped[str] = mapped_column(Text, nullable=False)

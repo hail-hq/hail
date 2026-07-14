@@ -360,3 +360,147 @@ async def test_check_sms_allowed_under_velocity_cap_passes(
     result = await check_sms_allowed(async_session, org_id, "+14155559999")
 
     assert result.allowed is True
+
+
+async def test_remove_suppression_deletes_matching_row(async_session) -> None:
+    import uuid
+
+    from hailhq.core.compliance_gate import add_suppression, remove_suppression
+
+    org_id = uuid.uuid4()
+    await add_suppression(
+        async_session,
+        organization_id=org_id,
+        recipient="+14155551234",
+        channel="sms",
+        reason="user opted out",
+        source="stop_keyword",
+    )
+    await async_session.commit()
+
+    removed = await remove_suppression(
+        async_session, organization_id=org_id, recipient="+14155551234", channel="sms"
+    )
+    await async_session.commit()
+
+    assert removed is True
+
+    from hailhq.core.compliance_gate import check_sms_allowed
+
+    result = await check_sms_allowed(async_session, org_id, "+14155551234")
+    assert result.allowed is True
+
+
+async def test_remove_suppression_no_match_returns_false(async_session) -> None:
+    import uuid
+
+    from hailhq.core.compliance_gate import remove_suppression
+
+    removed = await remove_suppression(
+        async_session,
+        organization_id=uuid.uuid4(),
+        recipient="+14155559999",
+        channel="sms",
+    )
+    assert removed is False
+
+
+async def test_remove_suppression_deletes_all_org_rows_but_spares_platform_row(
+    async_session,
+) -> None:
+    """``suppressions`` has no unique constraint on (recipient, channel,
+    organization_id), so an org can accrue more than one row for the same
+    recipient — ``remove_suppression`` must delete every org-scoped one (a
+    single-row delete would leave the recipient suppressed). It must NOT,
+    however, touch a platform-wide (``organization_id IS NULL``) row: those
+    are operator-owned global blocks (spam traps, etc.), and letting a
+    tenant-authority path delete one would un-suppress that number for every
+    org on the platform."""
+    import uuid
+
+    from sqlalchemy import select as sa_select
+
+    from hailhq.core.compliance_gate import (
+        add_suppression,
+        normalize_recipient,
+        remove_suppression,
+    )
+    from hailhq.core.models import Suppression
+
+    org_id = uuid.uuid4()
+    recipient = "+14155551234"
+    for reason in ("user opted out", "duplicate opt-out"):
+        await add_suppression(
+            async_session,
+            organization_id=org_id,
+            recipient=recipient,
+            channel="sms",
+            reason=reason,
+            source="stop_keyword",
+        )
+    await add_suppression(
+        async_session,
+        organization_id=None,
+        recipient=recipient,
+        channel="sms",
+        reason="known_spam_trap",
+        source="manual",
+    )
+    await async_session.commit()
+
+    removed = await remove_suppression(
+        async_session, organization_id=org_id, recipient=recipient, channel="sms"
+    )
+    await async_session.commit()
+
+    assert removed is True
+
+    remaining = (
+        (
+            await async_session.execute(
+                sa_select(Suppression).where(
+                    Suppression.recipient == normalize_recipient(recipient),
+                    Suppression.channel == "sms",
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    # Only the platform-wide (NULL-org) row survives; both org rows are gone.
+    assert [r.organization_id for r in remaining] == [None]
+
+
+async def test_check_channel_suspended_blocks_when_suspended(async_session) -> None:
+    import uuid
+
+    from hailhq.core.compliance_gate import check_channel_suspended
+    from hailhq.core.models import ChannelSuspension
+
+    org_id = uuid.uuid4()
+    async_session.add(
+        ChannelSuspension(
+            organization_id=org_id, channel="sms", reason="high opt-out rate"
+        )
+    )
+    await async_session.commit()
+
+    assert await check_channel_suspended(async_session, org_id, "sms") is True
+    assert await check_channel_suspended(async_session, org_id, "voice") is False
+
+
+async def test_check_sms_allowed_blocks_when_channel_suspended(async_session) -> None:
+    import uuid
+
+    from hailhq.core.compliance_gate import check_sms_allowed
+    from hailhq.core.models import ChannelSuspension
+
+    org_id = uuid.uuid4()
+    async_session.add(
+        ChannelSuspension(organization_id=org_id, channel="sms", reason="abuse")
+    )
+    await async_session.commit()
+
+    result = await check_sms_allowed(async_session, org_id, "+14155551234")
+    assert result.allowed is False
+    assert "suspend" in result.reason.lower()

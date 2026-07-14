@@ -24,6 +24,7 @@ import base64
 import os
 from datetime import datetime
 from typing import Any, AsyncIterator, Literal
+from urllib.parse import quote
 from uuid import UUID
 
 import httpx
@@ -46,6 +47,7 @@ from hail.models import (
     SmsListResponse,
     SmsResponse,
     SmsStatus,
+    SuppressionListResponse,
     TERMINAL_CALL_STATUSES,
 )
 
@@ -204,6 +206,23 @@ class _SmsResource:
         params = {"limit": limit, "cursor": cursor, "status": status, "to": to}
         data = await self._http.request("GET", "/sms", params=params)
         return SmsListResponse.model_validate(data)
+
+    async def list_suppressions(
+        self, *, cursor: str | None = None, limit: int = 50
+    ) -> SuppressionListResponse:
+        """List opted-out (STOP/START) numbers, cursor-paginated."""
+        params = {"limit": limit, "cursor": cursor}
+        data = await self._http.request("GET", "/sms/suppressions", params=params)
+        return SuppressionListResponse.model_validate(data)
+
+    async def delete_suppression(self, number: str) -> None:
+        """Remove a number from the opt-out list (manual correction only)."""
+        # Percent-encode the number so reserved delimiters ('#', '?', space)
+        # land in the path instead of being parsed as a fragment/query; '+'
+        # is path-legal and kept literal so E.164 numbers pass through as-is.
+        await self._http.request(
+            "DELETE", f"/sms/suppressions/{quote(number, safe='+')}"
+        )
 
 
 class _EmailsResource:

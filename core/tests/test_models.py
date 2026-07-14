@@ -90,3 +90,23 @@ async def test_sms_status_check_constraint(async_session) -> None:
     async_session.add(sms)
     with pytest.raises(IntegrityError):
         await async_session.commit()
+
+
+async def test_channel_suspension_unique_per_org_and_channel(async_session) -> None:
+    import uuid
+
+    from sqlalchemy.exc import IntegrityError
+
+    from hailhq.core.models import ChannelSuspension
+
+    org_id = uuid.uuid4()
+    async_session.add(
+        ChannelSuspension(organization_id=org_id, channel="sms", reason="a")
+    )
+    await async_session.commit()
+
+    async_session.add(
+        ChannelSuspension(organization_id=org_id, channel="sms", reason="b")
+    )
+    with pytest.raises(IntegrityError):
+        await async_session.commit()
