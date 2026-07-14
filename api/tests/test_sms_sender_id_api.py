@@ -29,6 +29,22 @@ async def test_patch_sender_id_sets_custom_value(client, org_and_key) -> None:
     assert resp.json()["custom_sender_id"] == "ACME"
 
 
+async def test_patch_sender_id_updates_existing(client, org_and_key) -> None:
+    # Exercises the upsert's on-conflict UPDATE branch: a second set overwrites.
+    _, _, plaintext = org_and_key
+    headers = {"Authorization": f"Bearer {plaintext}"}
+    await client.patch(
+        "/sms/sender-id", json={"custom_sender_id": "ACME"}, headers=headers
+    )
+    resp = await client.patch(
+        "/sms/sender-id", json={"custom_sender_id": "BETA"}, headers=headers
+    )
+    assert resp.status_code == 200
+    assert resp.json()["custom_sender_id"] == "BETA"
+    resp = await client.get("/sms/sender-id", headers=headers)
+    assert resp.json()["custom_sender_id"] == "BETA"
+
+
 async def test_patch_sender_id_rejects_too_long(client, org_and_key) -> None:
     _, _, plaintext = org_and_key
     resp = await client.patch(

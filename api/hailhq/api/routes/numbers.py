@@ -58,6 +58,25 @@ def get_voice_provider() -> VoiceProvider:
     return _voice_provider_singleton
 
 
+async def _get_org_number_or_404(
+    db: AsyncSession, number_id: UUID, organization_id: UUID
+) -> PhoneNumber:
+    """Fetch an org-scoped PhoneNumber by id, or raise 404."""
+    number = (
+        await db.execute(
+            select(PhoneNumber).where(
+                PhoneNumber.id == number_id,
+                PhoneNumber.organization_id == organization_id,
+            )
+        )
+    ).scalar_one_or_none()
+    if number is None:
+        raise HTTPException(
+            status_code=http_status.HTTP_404_NOT_FOUND, detail="number not found"
+        )
+    return number
+
+
 @router.post(
     "", response_model=PhoneNumberResponse, status_code=http_status.HTTP_201_CREATED
 )
@@ -124,15 +143,7 @@ async def get_number(
     principal: Annotated[Principal, Depends(get_current_principal)],
     db: Annotated[AsyncSession, Depends(get_session)],
 ) -> PhoneNumberResponse:
-    stmt = select(PhoneNumber).where(
-        PhoneNumber.id == number_id,
-        PhoneNumber.organization_id == principal.organization_id,
-    )
-    number = (await db.execute(stmt)).scalar_one_or_none()
-    if number is None:
-        raise HTTPException(
-            status_code=http_status.HTTP_404_NOT_FOUND, detail="number not found"
-        )
+    number = await _get_org_number_or_404(db, number_id, principal.organization_id)
     return PhoneNumberResponse.model_validate(number)
 
 
@@ -169,15 +180,7 @@ async def enable_sms(
     db: Annotated[AsyncSession, Depends(get_session)],
     provider: Annotated[SmsProvider, Depends(get_sms_provider)],
 ) -> PhoneNumberResponse:
-    stmt = select(PhoneNumber).where(
-        PhoneNumber.id == number_id,
-        PhoneNumber.organization_id == principal.organization_id,
-    )
-    number = (await db.execute(stmt)).scalar_one_or_none()
-    if number is None:
-        raise HTTPException(
-            status_code=http_status.HTTP_404_NOT_FOUND, detail="number not found"
-        )
+    number = await _get_org_number_or_404(db, number_id, principal.organization_id)
 
     if "sms" not in number.capabilities:
         raise unprocessable(

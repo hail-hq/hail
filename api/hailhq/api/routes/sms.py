@@ -18,7 +18,8 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from fastapi import status as http_status
-from sqlalchemy import select
+from sqlalchemy import delete, func, select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from hailhq.api.audit import write_audit_log
@@ -371,27 +372,33 @@ async def patch_sender_id(
     principal: Annotated[Principal, Depends(get_current_principal)],
     db: Annotated[AsyncSession, Depends(get_session)],
 ) -> SenderIdResponse:
-    stmt = select(SmsSenderIdentity).where(
-        SmsSenderIdentity.organization_id == principal.organization_id
-    )
-    row = (await db.execute(stmt)).scalar_one_or_none()
-
     if body.custom_sender_id is None:
-        if row is not None:
-            await db.delete(row)
-            await db.commit()
+        # Clear: unconditional delete (a no-op when no row exists), so there is
+        # no read-then-delete window.
+        await db.execute(
+            delete(SmsSenderIdentity).where(
+                SmsSenderIdentity.organization_id == principal.organization_id
+            )
+        )
+        await db.commit()
         return SenderIdResponse(
             custom_sender_id=None, effective_default=PLATFORM_DEFAULT_SENDER_ID
         )
 
-    if row is None:
-        row = SmsSenderIdentity(
+    # Set: atomic upsert keyed on the org PK, so two concurrent first-writes
+    # can't both INSERT and 500 on a duplicate-key IntegrityError (one round
+    # trip instead of SELECT-then-INSERT/UPDATE).
+    await db.execute(
+        pg_insert(SmsSenderIdentity)
+        .values(
             organization_id=principal.organization_id,
             custom_sender_id=body.custom_sender_id,
         )
-        db.add(row)
-    else:
-        row.custom_sender_id = body.custom_sender_id
+        .on_conflict_do_update(
+            index_elements=["organization_id"],
+            set_={"custom_sender_id": body.custom_sender_id, "updated_at": func.now()},
+        )
+    )
     await db.commit()
     return SenderIdResponse(
         custom_sender_id=body.custom_sender_id,
