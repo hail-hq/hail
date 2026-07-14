@@ -11,7 +11,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from hailhq.core.config import settings
-from hailhq.core.email_footer import AI_DISCLOSURE_LINE
+from hailhq.core.email_footer import SENT_FOOTER_TEXT
 from hailhq.core.hail_mail import org_prefix_from_id
 from hailhq.core.models import ApiKey, AuditLog, Email, EmailDomain, UsageEvent
 
@@ -1081,16 +1081,13 @@ async def test_post_emails_appends_footer_on_wire_only(
 
     call_kwargs = email_mock.send_email.call_args.kwargs
     assert call_kwargs["body_text"].startswith("body")
-    assert "Sent by Hail.so" in call_kwargs["body_text"]
+    assert SENT_FOOTER_TEXT in call_kwargs["body_text"]
     assert call_kwargs["body_html"].startswith("<p>body</p>")
     assert 'href="https://hail.so"' in call_kwargs["body_html"]
-    # AI disclosure rides the wire message too, after the branding footer —
-    # never part of the stored/returned body (see assertions below).
-    assert AI_DISCLOSURE_LINE in call_kwargs["body_text"]
-    assert AI_DISCLOSURE_LINE in call_kwargs["body_html"]
-    assert call_kwargs["body_text"].index("Sent by Hail.so") < call_kwargs[
-        "body_text"
-    ].index(AI_DISCLOSURE_LINE)
+    # Branding + AI disclosure are one blended footer line on the wire
+    # message — never part of the stored/returned body (see below).
+    assert "an AI communication platform" in call_kwargs["body_html"]
+    assert "Sent by Hail.so" not in call_kwargs["body_text"]
 
     # POST response and GET both return the original body, footer-free.
     assert resp.json()["body_text"] == "body"

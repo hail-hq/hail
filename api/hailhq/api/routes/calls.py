@@ -26,6 +26,7 @@ from hailhq.api.funds import require_funds
 from hailhq.core.call_end_reasons import CallEndReason
 from hailhq.core.compliance_gate import check_call_allowed
 from hailhq.core.db import get_session
+from hailhq.core.internal_webhook import fetch_organization_name
 from hailhq.api.deps import Principal, get_current_principal
 from hailhq.api.pagination import fetch_cursor_page
 from hailhq.api.idempotency import (
@@ -298,6 +299,17 @@ async def create_call(
         },
     )
 
+    # Resolve the org's display name for the spoken TCPA identity
+    # disclosure (47 CFR 64.1200(b)(1)). Fail-safe: any lookup failure →
+    # None → the voicebot speaks the generic fallback line instead. Run as
+    # a task so the up-to-1s lookup overlaps the LiveKit room creation
+    # below (only the dispatch metadata needs the result) instead of
+    # adding its latency serially; the task never raises, so an abandoned
+    # result on the failure path is inert.
+    org_name_task = asyncio.create_task(
+        fetch_organization_name(str(call.organization_id))
+    )
+
     # 4. External calls — best-effort with status reconciliation.
     room_name: str | None = None
     dispatch_id: str | None = None
@@ -332,6 +344,7 @@ async def create_call(
                 "system_prompt": body.system_prompt,
                 "llm": llm_meta,
                 "first_message": body.first_message,
+                "org_name": await org_name_task,
             },
         )
         setup_stage = "sip_participant"

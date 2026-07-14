@@ -730,5 +730,5 @@ positives.
 - CallEvent dedupe across voicebot redispatch
 - **Un-suspend tooling for `channel_suspensions`** — auto-suspend has no
   reverse path (see "SMS abuse monitor" above); add a `hail sms suspensions
-  lift <org>` command / operator route and/or an automatic cooldown column
+lift <org>` command / operator route and/or an automatic cooldown column
   so recovery is not raw SQL.
