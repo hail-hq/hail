@@ -82,10 +82,7 @@ async def test_upload_email_attachment_posts_multipart(client: HailClient) -> No
     assert result["size_bytes"] == 3
     assert captured["url_path"] == "/email-attachments"
     # Verify Authorization header is present
-    assert (
-        captured["request"].headers.get("authorization")
-        == f"Bearer {_API_KEY}"
-    )
+    assert captured["request"].headers.get("authorization") == f"Bearer {_API_KEY}"
 
 
 # --------------------------------------------------------------------------- #

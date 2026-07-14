@@ -47,7 +47,9 @@ def _worker(async_session: AsyncSession, s3) -> EmailAttachmentGcWorker:
     async def session_factory():
         yield async_session
 
-    return EmailAttachmentGcWorker(session_factory=session_factory, s3_factory=lambda: s3)
+    return EmailAttachmentGcWorker(
+        session_factory=session_factory, s3_factory=lambda: s3
+    )
 
 
 @pytest.mark.asyncio

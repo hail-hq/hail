@@ -239,9 +239,7 @@ class _HailHTTP:
         }
         if headers:
             merged_headers.update(headers)
-        resp = await client.request(
-            method, path, files=files, headers=merged_headers
-        )
+        resp = await client.request(method, path, files=files, headers=merged_headers)
         _raise_for_status(resp)
         if resp.status_code == 204 or not resp.content:
             return None
