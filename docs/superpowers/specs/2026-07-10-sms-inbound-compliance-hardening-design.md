@@ -11,7 +11,7 @@ The inbound-SMS compliance work shipped the receive → suppress → fan-out loo
 a review + investigation surfaced four gaps that this design closes:
 
 1. **Number FK semantics.** On inbound `Sms` rows, `from_number_id` points at the
-   org's *receiving* number (the Twilio `To`), while `from_e164` is the external
+   org's _receiving_ number (the Twilio `To`), while `from_e164` is the external
    sender. The outbound invariant `from_number_id.e164 == from_e164` is violated.
    `from_number_id` is currently **write-only for SMS** (nothing reads/joins/filters
    on it), so the defect is latent — it bites the first per-number analytics query.
@@ -31,10 +31,11 @@ disabling the account's default STOP filtering requires a **support ticket** and
 applies **account-wide**. Therefore, out of the box **Twilio itself auto-replies to
 STOP/HELP/START and carrier-blocks opted-out numbers**, while still forwarding the
 inbound message (with an `OptOutType` param) to our webhook so our suppression record
-works. Consequence: if Hail *also* sends its own replies by default, recipients get
+works. Consequence: if Hail _also_ sends its own replies by default, recipients get
 **double replies**. So Hail-sent replies must be **opt-in**, not the default.
 
 Sources:
+
 - https://help.twilio.com/articles/223134027-Twilio-support-for-opt-out-keywords-SMS-STOP-filtering-
 - https://help.twilio.com/articles/360034798533-Getting-Started-with-Advanced-Opt-Out-for-Messaging-Services
 
@@ -42,14 +43,15 @@ Sources:
 
 Four independently-shippable workstreams across two repos:
 
-| # | Workstream | Repo |
-|---|---|---|
-| 1 | Split inbound/outbound number FKs (`to_number_id`) | `hail` |
-| 2 | HELP/STOP/START replies (opt-in) + keyword completeness | `hail` |
-| 3 | Webhook + Twilio setup docs | `hail` |
-| 4 | Legal `sms.md` consumer disclosures (draft, review-flagged) | `hail-website` |
+| #   | Workstream                                                  | Repo           |
+| --- | ----------------------------------------------------------- | -------------- |
+| 1   | Split inbound/outbound number FKs (`to_number_id`)          | `hail`         |
+| 2   | HELP/STOP/START replies (opt-in) + keyword completeness     | `hail`         |
+| 3   | Webhook + Twilio setup docs                                 | `hail`         |
+| 4   | Legal `sms.md` consumer disclosures (draft, review-flagged) | `hail-website` |
 
 Out of scope (log as carry-forwards, not built here):
+
 - Outbound SMS **delivery-status callbacks** (`sms.delivered/sent/failed`) — email
   has 7 lifecycle events; SMS has only `sms.received`. Separate feature.
 - Un-suspend tooling for `channel_suspensions` (already a carry-forward in
@@ -60,6 +62,7 @@ Out of scope (log as carry-forwards, not built here):
 ## Workstream 1 — Number FKs (option A)
 
 ### Data model
+
 - **Migration `0029`** (Revises `0028`):
   - Add `to_number_id UUID NULL REFERENCES phone_numbers(id)`.
   - `ALTER COLUMN from_number_id ... DROP NOT NULL` (make nullable).
@@ -73,6 +76,7 @@ Out of scope (log as carry-forwards, not built here):
   - Add `to_number_id: Mapped[uuid.UUID | None]` FK → `phone_numbers.id`.
 
 ### Write sites
+
 - **Outbound** (`api/hailhq/api/routes/sms.py` `create_sms`): unchanged —
   `from_number_id = sender.id`, `to_number_id` stays `None` (destination is external).
 - **Inbound** (`core/hailhq/core/sms_ingest.py`): set `from_number_id = None`
@@ -80,10 +84,12 @@ Out of scope (log as carry-forwards, not built here):
   receiving number). Delete the temporary wart comment.
 
 ### Interface impact
+
 - **None.** `SmsResponse`/`SmsCreate` expose `from_e164`/`to_e164` as strings, not the
   FKs. No SDK/CLI/openapi change. No `relationship()`/`joinedload` to untangle.
 
 ### Tests
+
 - Update the single existing `from_number_id=` write in `core/tests/test_compliance_gate.py`.
 - Inbound ingest test: assert `to_number_id == receiving number.id` and
   `from_number_id is None`.
@@ -94,6 +100,7 @@ Out of scope (log as carry-forwards, not built here):
 ## Workstream 2 — HELP/STOP/START replies (opt-in)
 
 ### Keyword handling (`core/hailhq/core/sms_ingest.py`)
+
 - Add `_HELP_KEYWORDS = frozenset({"HELP", "INFO"})`.
 - `_opt_out_action(body, opt_out_type)` returns `"STOP" | "START" | "HELP" | None`
   (add the HELP branch; keep `OptOutType` as corroboration).
@@ -104,6 +111,7 @@ Out of scope (log as carry-forwards, not built here):
   only the outbound reply is gated.
 
 ### Reply mechanism
+
 - New helper `send_compliance_reply(provider, *, from_e164, to_e164, body)`:
   - `from_e164` = the org's receiving number (inbound `to_e164`);
     `to_e164` = the sender (inbound `from_e164`).
@@ -118,6 +126,7 @@ Out of scope (log as carry-forwards, not built here):
   the suppression/record persists.
 
 ### Feature flag + templates (`core/hailhq/core/config.py`, `.env.example`)
+
 - `hail_sms_compliance_replies_enabled: bool = False` (env
   `HAIL_SMS_COMPLIANCE_REPLIES_ENABLED`). Default **false**: Twilio's own opt-out
   handling covers the default deployment; enabling Hail's replies on top of it would
@@ -133,6 +142,7 @@ Out of scope (log as carry-forwards, not built here):
   - START: `You are resubscribed to Hail messages. Reply STOP to unsubscribe, HELP for help.`
 
 ### Sub-decisions (recorded)
+
 1. **Persist auto-replies as outbound `Sms` rows** — yes, a minimal `direction=outbound`
    row per reply, for an audit trail. Reuses the number FKs from Workstream 1
    (`from_number_id` = org number, `to_number_id` = None).
@@ -141,6 +151,7 @@ Out of scope (log as carry-forwards, not built here):
 3. **HELP synonyms** — `HELP, INFO` only.
 
 ### Tests
+
 - HELP body → HELP reply dispatched, no suppression change (mock provider).
 - STOP → suppression written + confirmation reply dispatched.
 - START → suppression removed + reply dispatched.
@@ -203,5 +214,5 @@ Out of scope (log as carry-forwards, not built here):
   filtering being disabled — an account-wide manual step. The flag defaults off so the
   default deployment is correct without it.
 - Making `from_number_id` nullable is safe today (no code dereferences it assuming
-  non-null), but any *future* reader must treat it as optional.
+  non-null), but any _future_ reader must treat it as optional.
 - Legal copy must not ship on the model's say-so; the spec flags it for human review.

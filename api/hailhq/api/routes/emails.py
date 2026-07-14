@@ -56,7 +56,7 @@ from hailhq.core.email_attachment_limits import (
     MAX_EMAIL_ATTACHMENT_BYTES,
 )
 from hailhq.core.email_delivery_events import record_sent_event
-from hailhq.core.email_footer import FOOTER_SENT, append_disclosure, append_footer
+from hailhq.core.email_footer import append_sent_footer
 from hailhq.core.models import (
     Email,
     EmailAttachment,
@@ -421,12 +421,9 @@ async def create_email(
     # Provider send — best-effort with status reconciliation. Synchronous
     # in v1: callers get back ``sent`` or ``failed`` on the response, no
     # background polling needed for the happy path.
-    # Branding footer + AI disclosure ride the wire message only; the stored
-    # row keeps the tenant-authored body.
-    wire_text, wire_html = append_footer(
-        email.body_text, email.body_html, label=FOOTER_SENT
-    )
-    wire_text, wire_html = append_disclosure(wire_text, wire_html)
+    # Blended branding + AI-disclosure footer rides the wire message only;
+    # the stored row keeps the tenant-authored body.
+    wire_text, wire_html = append_sent_footer(email.body_text, email.body_html)
     # One-click unsubscribe (RFC 8058) — minted per-send against the primary
     # recipient. A single send can target multiple `to` addresses; the
     # header necessarily picks one (the first) since SES/RFC only support

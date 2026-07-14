@@ -118,24 +118,38 @@ def build_instructions(system_prompt: str | None) -> str:
 # Proactive AI disclosure — spoken unconditionally as the first thing on
 # every call, immediately after session.start(). Unlike VOICE_PREAMBLE (LLM
 # instructions the model could ignore), this is a literal session.say() so
-# it is a real, enforced disclosure, not a prompt hope. Deliberately generic
-# (no per-org display name — the voicebot process has no clean lookup for
-# that) and not reachable/overridable via the public API: it never comes
-# from body.system_prompt or body.first_message.
-AI_DISCLOSURE_LINE = (
-    "Hi, this is an AI assistant calling on behalf of the person or "
-    "organization that requested this call."
-)
+# it is a real, enforced disclosure, not a prompt hope. When the API
+# resolved the requesting organization's display name, the line names it —
+# 47 CFR 64.1200(b)(1) requires identifying the initiating business at the
+# start of an artificial-voice call — otherwise it falls back to generic
+# wording. Only the name is interpolated; the template is hardcoded and
+# not reachable/overridable via the public API: org_name arrives in the
+# server-built dispatch metadata (resolved from the org record), never
+# from body.system_prompt, body.first_message, or body.metadata.
+_DISCLOSURE_PREFIX = "Hi, this is an AI assistant calling on behalf of "
+
+AI_DISCLOSURE_LINE = _DISCLOSURE_PREFIX + "whoever requested this call."
+
+
+def disclosure_line(org_name: str | None) -> str:
+    """The exact disclosure to speak — named when the org name resolved."""
+    if org_name and org_name.strip():
+        return f"{_DISCLOSURE_PREFIX}{org_name.strip()}."
+    return AI_DISCLOSURE_LINE
 
 
 async def speak_greeting(session: AgentSession, metadata: dict[str, Any]) -> None:
     """Speak the mandatory AI disclosure, then the caller's ``first_message`` if set.
 
-    The disclosure is unconditional and always first — it is not reachable
-    via ``metadata``; it never comes from ``body.system_prompt`` or
-    ``body.first_message``. Call this right after ``session.start()``.
+    The disclosure is unconditional and always first. Its template is not
+    reachable via caller-controlled fields (``body.system_prompt`` /
+    ``body.first_message``); only ``org_name`` — resolved server-side by
+    the API from the organization record — is interpolated into it. Call
+    this right after ``session.start()``.
     """
-    await session.say(AI_DISCLOSURE_LINE, allow_interruptions=True)
+    await session.say(
+        disclosure_line(metadata.get("org_name")), allow_interruptions=True
+    )
     if metadata.get("first_message"):
         await session.say(metadata["first_message"], allow_interruptions=True)
 
@@ -244,7 +258,8 @@ def parse_metadata(raw: str | None) -> dict[str, Any]:
 
     Required: ``call_id`` (returned as a parsed :class:`UUID`). Optional:
     ``voice_config``, ``system_prompt``, ``llm`` (None → mode A fallback
-    chain), ``first_message``.
+    chain), ``first_message``, ``org_name`` (server-resolved display name
+    spoken in the AI disclosure; absent/None → generic wording).
     """
     payload = json.loads(raw) if raw else {}
     if "call_id" not in payload:
@@ -751,6 +766,7 @@ async def entrypoint(ctx: JobContext) -> None:
 
 __all__ = [
     "AI_DISCLOSURE_LINE",
+    "disclosure_line",
     "SIP_CALL_STATUS_ACTIVE",
     "SIP_CALL_STATUS_ATTRIBUTE",
     "SOFT_CAP_ANNOUNCEMENT",

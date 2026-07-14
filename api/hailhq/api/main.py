@@ -17,6 +17,7 @@ from hailhq.core.abuse_monitor import AbuseMonitorWorker
 from hailhq.core.config import settings
 from hailhq.core.db import dispose_engine, session_scope
 from hailhq.core.http_post import httpx_post
+from hailhq.core import internal_webhook
 from hailhq.core.domain_verification_worker import DomainVerificationWorker
 from hailhq.core.email_attachment_gc import EmailAttachmentGcWorker
 from hailhq.core.outbound_worker import OutboundForwardWorker
@@ -215,6 +216,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
             await _stop_worker(verify_worker, verify_task)
         if abuse_worker is not None and abuse_task is not None:
             await _stop_worker(abuse_worker, abuse_task)
+        await internal_webhook.aclose()
         await calls_routes.close_livekit_singleton()
         await dispose_engine()
 

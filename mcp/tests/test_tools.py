@@ -137,7 +137,7 @@ async def test_place_call_rejects_both_modes(client: HailClient) -> None:
         recipient_consent=True,
         to="+14155559999",
         system_prompt="be polite",
-        llm={"base_url": "u", "api_key": "k", "model": "m"},
+        llm={"base_url": "https://api.example.com/v1", "api_key": "k", "model": "m"},
     )
     assert "error" in result
     assert "mutually exclusive" in result["error"]
