@@ -399,6 +399,7 @@ terragrunt init
 terragrunt plan
 terragrunt apply
 # Capture outputs: inbound_mx_record, inbound_bucket, activate_command, lambda_function_arn
+#   (inbound_bucket confirms ${HAIL_MAIL_NAME_PREFIX}-mail — not independently settable)
 #
 # First time only: pre-create the state bucket + DynamoDB lock table once
 # per AWS account — terragrunt can't bootstrap them. See the comment
@@ -414,7 +415,7 @@ dig MX mail.hail.so                                   # wait for propagation
 
 # ── 6. Flip the inbound flag in API .env, restart ──────────────────────────
 # Add: HAIL_INBOUND_ENABLED=true
-#      HAIL_INBOUND_BUCKET=<terraform output inbound_bucket>
+#      HAIL_MAIL_NAME_PREFIX=<terraform var name_prefix — same value, bucket derives as ${prefix}-mail>
 #      HAIL_INBOUND_HMAC_SECRET=<same as tfvars>
 #      HAIL_WEBHOOK_SECRET_KEY=$(uv run --directory core python -c "from hailhq.core.secret_cipher import generate_key; print(generate_key())")
 docker compose up -d api                              # picks up new env
@@ -555,7 +556,7 @@ terragrunt apply
 Outputs to capture:
 
 - `inbound_mx_record` — publish at DNS for `HAIL_MAIL_BASE_DOMAIN`.
-- `inbound_bucket` — goes into `HAIL_INBOUND_BUCKET` on the API.
+- `inbound_bucket` — confirms `${HAIL_MAIL_NAME_PREFIX}-mail`; set `HAIL_MAIL_NAME_PREFIX` (not `inbound_bucket` itself) on the API.
 - `activate_command` — the `aws sesv2 set-active-receipt-rule-set ...`
   to run after apply.
 
@@ -594,7 +595,7 @@ Add to the API service `.env`:
 
 ```bash
 HAIL_INBOUND_ENABLED=true
-HAIL_INBOUND_BUCKET=<terraform output>
+HAIL_MAIL_NAME_PREFIX=<terraform var name_prefix>
 HAIL_INBOUND_HMAC_SECRET=<same value Terraform got>
 HAIL_WEBHOOK_SECRET_KEY=<generate with `uv run --directory core python -c "from hailhq.core.secret_cipher import generate_key; print(generate_key())"`>
 ```

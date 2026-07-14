@@ -2,6 +2,30 @@
 
 All notable changes to Hail are documented here. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and Hail adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+Outbound email attachments. Upload a file once, reference its id from as
+many sends as you like.
+
+- `POST /email-attachments` — upload a file (multipart/form-data,
+  ≤10MB), get back a reusable id. `POST /emails` gains
+  `attachment_ids` to attach one or more uploaded files; oversize
+  requests (body + attachments combined, matching SES's 10MB raw-message
+  cap) get a clear 422 suggesting a hosted link instead. Unused uploads
+  are garbage-collected 24h after upload; used ones are kept
+  indefinitely and reusable across sends.
+- MCP: new `upload_email_attachment` tool; `send_email` gains
+  `attachment_ids`.
+- SDK: `client.email_attachments.create()`; `client.emails.create(...,
+attachment_ids=...)`.
+- CLI: `hail email attachment-upload <file>`; `hail email send` gains
+  `--attach <file>` (upload + attach in one step) and `--attach-id <id>`.
+- Internal: the S3 bucket/client backing inbound mail storage is renamed
+  from "inbound" to a generic "mail" name (`HAIL_MAIL_NAME_PREFIX`
+  replaces `HAIL_INBOUND_EMAIL_NAME_PREFIX`) since it now also holds
+  outbound attachment uploads. No data migration; self-hosters recreate
+  the bucket under the new prefix.
+
 ## [0.12.0] — 2026-07-10
 
 SMS inbound & compliance milestone. Hail now receives inbound SMS, routes each

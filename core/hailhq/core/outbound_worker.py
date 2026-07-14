@@ -35,7 +35,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from hailhq.core.email_delivery_events import record_sent_event
 from hailhq.core.models import Email, EmailAttachment
 from hailhq.core.providers.email.base import EmailProvider, ProviderAttachment
-from hailhq.core.s3_inbound import S3InboundClient
+from hailhq.core.s3_mail import S3MailClient
 
 logger = logging.getLogger(__name__)
 
@@ -70,7 +70,7 @@ class OutboundForwardWorker:
         *,
         session_factory: SessionFactory,
         provider_factory: Callable[[], EmailProvider],
-        s3_factory: Callable[[], S3InboundClient],
+        s3_factory: Callable[[], S3MailClient],
         usage_callback: UsageCallback | None = None,
         poll_interval: float = 1.0,
     ) -> None:
@@ -79,7 +79,7 @@ class OutboundForwardWorker:
         self._s3_factory = s3_factory
         self._usage_callback = usage_callback
         self._provider: EmailProvider | None = None
-        self._s3: S3InboundClient | None = None
+        self._s3: S3MailClient | None = None
         self._poll_interval = poll_interval
         self._stop = asyncio.Event()
 
@@ -88,7 +88,7 @@ class OutboundForwardWorker:
             self._provider = self._provider_factory()
         return self._provider
 
-    def _get_s3(self) -> S3InboundClient:
+    def _get_s3(self) -> S3MailClient:
         if self._s3 is None:
             self._s3 = self._s3_factory()
         return self._s3

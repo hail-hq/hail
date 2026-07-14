@@ -19,14 +19,16 @@ from hailhq.core.db import dispose_engine, session_scope
 from hailhq.core.http_post import httpx_post
 from hailhq.core import internal_webhook
 from hailhq.core.domain_verification_worker import DomainVerificationWorker
+from hailhq.core.email_attachment_gc import EmailAttachmentGcWorker
 from hailhq.core.outbound_worker import OutboundForwardWorker
 from hailhq.core.pool import sweep_pool_reservations
 from hailhq.core.providers.email.ses import SesEmailProvider
 from hailhq.core.reconcile import sweep_stale_calls
-from hailhq.core.s3_inbound import S3InboundClient
+from hailhq.core.s3_mail import S3MailClient
 from hailhq.core.secret_cipher import SecretCipher, SecretKeyMissing
 from hailhq.core.webhook_worker import WebhookWorker
 from hailhq.api.routes import calls as calls_routes
+from hailhq.api.routes import email_attachments as email_attachments_routes
 from hailhq.api.routes import emails as emails_routes
 from hailhq.api.routes import events as events_routes
 from hailhq.api.routes import email_domains as email_domains_routes
@@ -151,15 +153,26 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     # when inbound is on — direct POST /emails sends are inline in the route.
     forward_worker: OutboundForwardWorker | None = None
     forward_task: asyncio.Task | None = None
-    if settings.hail_inbound_enabled and settings.hail_inbound_bucket:
+    if settings.hail_inbound_enabled and settings.hail_mail_bucket:
         forward_worker = OutboundForwardWorker(
             session_factory=session_scope,
             provider_factory=SesEmailProvider,
-            s3_factory=lambda: S3InboundClient(bucket=settings.hail_inbound_bucket),
+            s3_factory=lambda: S3MailClient(bucket=settings.hail_mail_bucket),
             usage_callback=_meter_forward_send,
         )
         forward_task = asyncio.create_task(
             forward_worker.run_forever(), name="outbound-forward-worker"
+        )
+
+    attachment_gc_worker: EmailAttachmentGcWorker | None = None
+    attachment_gc_task: asyncio.Task | None = None
+    if settings.hail_mail_bucket:
+        attachment_gc_worker = EmailAttachmentGcWorker(
+            session_factory=session_scope,
+            s3_factory=lambda: S3MailClient(bucket=settings.hail_mail_bucket),
+        )
+        attachment_gc_task = asyncio.create_task(
+            attachment_gc_worker.run_forever(), name="email-attachment-gc-worker"
         )
 
     verify_worker: DomainVerificationWorker | None = None
@@ -197,6 +210,8 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
             await _stop_worker(webhook_worker, webhook_task)
         if forward_worker is not None and forward_task is not None:
             await _stop_worker(forward_worker, forward_task)
+        if attachment_gc_worker is not None and attachment_gc_task is not None:
+            await _stop_worker(attachment_gc_worker, attachment_gc_task)
         if verify_worker is not None and verify_task is not None:
             await _stop_worker(verify_worker, verify_task)
         if abuse_worker is not None and abuse_task is not None:
@@ -250,6 +265,7 @@ async def _cache_422_for_idempotent_retry(
 
 
 app.include_router(calls_routes.router)
+app.include_router(email_attachments_routes.router)
 app.include_router(emails_routes.router)
 app.include_router(events_routes.router)
 app.include_router(email_domains_routes.router)

@@ -4,7 +4,7 @@ output "inbound_mx_record" {
 }
 
 output "inbound_bucket" {
-  description = "Set as HAIL_INBOUND_BUCKET in .env."
+  description = "Confirms $${HAIL_MAIL_NAME_PREFIX}-mail; set HAIL_MAIL_NAME_PREFIX (not this value directly) in .env."
   value       = aws_s3_bucket.inbound.bucket
 }
 

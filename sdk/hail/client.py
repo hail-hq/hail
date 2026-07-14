@@ -37,6 +37,7 @@ from hail.models import (
     CallListResponse,
     CallResponse,
     CallStatus,
+    EmailAttachmentUploadResponse,
     EmailListResponse,
     EmailResponse,
     EmailStatus,
@@ -248,6 +249,7 @@ class _EmailsResource:
         consent_source: str | None = None,
         consent_obtained_at: datetime | None = None,
         message_type: Literal["marketing", "informational"] | None = None,
+        attachment_ids: list[str | UUID] | None = None,
         idempotency_key: str | None = None,
     ) -> EmailResponse:
         """Send an outbound email.
@@ -291,6 +293,8 @@ class _EmailsResource:
             body["consent_obtained_at"] = consent_obtained_at.isoformat()
         if message_type is not None:
             body["message_type"] = message_type
+        if attachment_ids:
+            body["attachment_ids"] = [str(a) for a in attachment_ids]
 
         key = idempotency_key or generate_idempotency_key()
         data = await self._http.request(
@@ -361,6 +365,24 @@ class _EmailsResource:
         if to is not None:
             params["to"] = to.isoformat() if isinstance(to, datetime) else to
         return await self._http.request("GET", "/emails/stats", params=params)
+
+
+class _EmailAttachmentsResource:
+    """``client.email_attachments.*`` — upload files to attach to outbound email."""
+
+    def __init__(self, http: _HailHTTP) -> None:
+        self._http = http
+
+    async def create(
+        self, *, filename: str, content: bytes, content_type: str
+    ) -> EmailAttachmentUploadResponse:
+        """Upload a file; returns a reusable id for ``emails.create(attachment_ids=...)``."""
+        data = await self._http.request_multipart(
+            "POST",
+            "/email-attachments",
+            files={"file": (filename, content, content_type)},
+        )
+        return EmailAttachmentUploadResponse.model_validate(data)
 
 
 class _EmailDomainsResource:
@@ -668,6 +690,7 @@ class Client:
         self.calls = _CallsResource(self._http)
         self.sms = _SmsResource(self._http)
         self.emails = _EmailsResource(self._http)
+        self.email_attachments = _EmailAttachmentsResource(self._http)
         self.email_domains = _EmailDomainsResource(self._http)
         self.webhooks = _WebhooksResource(self._http)
         self.events = _EventsResource(self._http)

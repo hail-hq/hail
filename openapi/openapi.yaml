@@ -154,6 +154,40 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HTTPValidationError"
+  /email-attachments:
+    post:
+      tags:
+        - email-attachments
+      summary: Create Email Attachment
+      operationId: upload_email_attachment
+      parameters:
+        - name: authorization
+          in: header
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            title: Authorization
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              $ref: "#/components/schemas/Body_upload_email_attachment"
+      responses:
+        "201":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EmailAttachmentUploadResponse"
+        "422":
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
   /emails:
     post:
       tags:
@@ -1394,6 +1428,16 @@ paths:
                 title: Response Healthz Healthz Get
 components:
   schemas:
+    Body_upload_email_attachment:
+      properties:
+        file:
+          type: string
+          contentMediaType: application/octet-stream
+          title: File
+      type: object
+      required:
+        - file
+      title: Body_upload_email_attachment
     CallCreate:
       properties:
         recipient_consent:
@@ -1681,6 +1725,36 @@ components:
         "One inbound MIME attachment as exposed to API consumers.\n\n``url``\
         \ is the stable Hail API endpoint that 302-redirects to a\npresigned S3 URL\
         \ on access \u2014 see GET /emails/{id}/attachments/{aid}."
+    EmailAttachmentUploadResponse:
+      properties:
+        id:
+          type: string
+          format: uuid
+          title: Id
+        filename:
+          type: string
+          title: Filename
+        content_type:
+          type: string
+          title: Content Type
+        size_bytes:
+          type: integer
+          title: Size Bytes
+      type: object
+      required:
+        - id
+        - filename
+        - content_type
+        - size_bytes
+      title: EmailAttachmentUploadResponse
+      description: "Returned by POST /email-attachments.
+
+
+        ``id`` is reusable across many ``POST /emails`` calls via
+
+        ``EmailCreate.attachment_ids`` until Hail garbage-collects it (24h
+
+        if never referenced by a send)."
     EmailCreate:
       properties:
         recipient_consent:
@@ -1771,6 +1845,14 @@ components:
           additionalProperties: true
           type: object
           title: Metadata
+        attachment_ids:
+          anyOf:
+            - items:
+                type: string
+                format: uuid
+              type: array
+            - type: "null"
+          title: Attachment Ids
       additionalProperties: false
       type: object
       required:
