@@ -103,3 +103,29 @@ async def test_malformed_body_returns_none(monkeypatch, configured):
     for payload in ({"nope": 1}, {"name": ""}, {"name": "   "}, ["x"], None):
         _install(monkeypatch, _FakeSession(response=_FakeResponse(200, payload)))
         assert await fetch_organization_name("org-123") is None
+
+
+async def test_aclose_waits_for_pending_notifier_tasks(monkeypatch):
+    """aclose drains in-flight fire-and-forget tasks before closing the
+    session — a shutdown mid-POST must not abort the send or let a
+    late task lazily create a session nothing closes."""
+    started = asyncio.Event()
+    release = asyncio.Event()
+    finished = asyncio.Event()
+
+    async def slow_post():
+        started.set()
+        await release.wait()
+        finished.set()
+
+    task = asyncio.create_task(slow_post())
+    internal_webhook._pending_tasks.add(task)
+    task.add_done_callback(internal_webhook._pending_tasks.discard)
+    await started.wait()
+
+    # Let aclose's drain complete promptly once it starts waiting.
+    asyncio.get_running_loop().call_later(0.01, release.set)
+    await internal_webhook.aclose()
+
+    assert finished.is_set(), "aclose returned before the pending task finished"
+    assert not internal_webhook._pending_tasks

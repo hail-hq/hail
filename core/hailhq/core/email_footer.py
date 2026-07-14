@@ -15,46 +15,55 @@ message, not AI-generated content, so no AI disclosure applies.
 from __future__ import annotations
 
 __all__ = [
-    "FOOTER_FORWARDED",
     "SENT_FOOTER_TEXT",
-    "append_footer",
+    "append_forwarded_footer",
     "append_sent_footer",
 ]
 
 _LINK = "https://hail.so"
 
-FOOTER_FORWARDED = "Forwarded by Hail.so"
-
 # The single blended branding + AI-disclosure line for direct sends.
 # Text form carries the literal URL; the HTML form hyperlinks "Hail.so".
 SENT_FOOTER_TEXT = f"Sent via Hail.so ({_LINK}), an AI communication platform."
-_SENT_FOOTER_HTML = (
-    '<p style="margin-top:16px;font-size:12px;color:#8a8a8a;">'
-    f'--<br>Sent via <a href="{_LINK}">Hail.so</a>, '
-    "an AI communication platform.</p>"
+
+_FORWARDED_FOOTER_TEXT = f"Forwarded by Hail.so ({_LINK})"
+_FORWARDED_FOOTER_HTML_INNER = f'Forwarded by <a href="{_LINK}">Hail.so</a>'
+_SENT_FOOTER_HTML_INNER = (
+    f'Sent via <a href="{_LINK}">Hail.so</a>, an AI communication platform.'
 )
 
 
-def _text_footer(label: str) -> str:
-    return f"\n\n--\n{label} ({_LINK})"
-
-
-def _html_footer(label: str) -> str:
+def _html_footer(inner: str) -> str:
+    """The one <p> wrapper both footers share — style changes land here once."""
     return (
-        '<p style="margin-top:16px;font-size:12px;color:#8a8a8a;">'
-        f'--<br>{label} (<a href="{_LINK}">hail.so</a>)</p>'
+        '<p style="margin-top:16px;font-size:12px;color:#8a8a8a;">' f"--<br>{inner}</p>"
     )
 
 
-def append_footer(
-    body_text: str | None, body_html: str | None, *, label: str
+def _append(
+    body_text: str | None,
+    body_html: str | None,
+    *,
+    text_line: str,
+    html_inner: str,
 ) -> tuple[str | None, str | None]:
-    """Append the labeled branding footer (forwards) to whichever parts exist."""
     if body_text is not None:
-        body_text = body_text + _text_footer(label)
+        body_text = body_text + f"\n\n--\n{text_line}"
     if body_html is not None:
-        body_html = body_html + _html_footer(label)
+        body_html = body_html + _html_footer(html_inner)
     return body_text, body_html
+
+
+def append_forwarded_footer(
+    body_text: str | None, body_html: str | None
+) -> tuple[str | None, str | None]:
+    """Append the forwarded-mail branding footer to whichever parts exist."""
+    return _append(
+        body_text,
+        body_html,
+        text_line=_FORWARDED_FOOTER_TEXT,
+        html_inner=_FORWARDED_FOOTER_HTML_INNER,
+    )
 
 
 def append_sent_footer(
@@ -65,8 +74,9 @@ def append_sent_footer(
     Applied at the send boundary so the line always rides the wire
     message, never the stored row.
     """
-    if body_text is not None:
-        body_text = body_text + f"\n\n--\n{SENT_FOOTER_TEXT}"
-    if body_html is not None:
-        body_html = body_html + _SENT_FOOTER_HTML
-    return body_text, body_html
+    return _append(
+        body_text,
+        body_html,
+        text_line=SENT_FOOTER_TEXT,
+        html_inner=_SENT_FOOTER_HTML_INNER,
+    )

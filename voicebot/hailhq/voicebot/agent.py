@@ -126,17 +126,15 @@ def build_instructions(system_prompt: str | None) -> str:
 # not reachable/overridable via the public API: org_name arrives in the
 # server-built dispatch metadata (resolved from the org record), never
 # from body.system_prompt, body.first_message, or body.metadata.
-AI_DISCLOSURE_LINE = (
-    "Hi, this is an AI assistant calling on behalf of whoever requested " "this call."
-)
+_DISCLOSURE_PREFIX = "Hi, this is an AI assistant calling on behalf of "
+
+AI_DISCLOSURE_LINE = _DISCLOSURE_PREFIX + "whoever requested this call."
 
 
 def disclosure_line(org_name: str | None) -> str:
     """The exact disclosure to speak — named when the org name resolved."""
     if org_name and org_name.strip():
-        return (
-            "Hi, this is an AI assistant calling on behalf of " f"{org_name.strip()}."
-        )
+        return f"{_DISCLOSURE_PREFIX}{org_name.strip()}."
     return AI_DISCLOSURE_LINE
 
 
