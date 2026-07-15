@@ -247,3 +247,36 @@ async def test_list_sms_empty(client, org_and_key) -> None:
     resp = await client.get("/sms", headers={"Authorization": f"Bearer {plaintext}"})
     assert resp.status_code == 200
     assert resp.json() == {"items": [], "next_cursor": None}
+
+
+async def test_create_sms_to_germany_uses_platform_default_without_dedicated_number(
+    client, org_and_key, sms_mock
+) -> None:
+    """No dedicated number needed at all for a no-registration corridor —
+    the send goes out under the platform-default Sender ID."""
+    _, _, plaintext = org_and_key
+    resp = await client.post(
+        "/sms",
+        json={"to": "+491701234567", "body": "hallo", "recipient_consent": True},
+        headers={"Authorization": f"Bearer {plaintext}"},
+    )
+    assert resp.status_code == 201, resp.text
+    assert resp.json()["from_e164"] == "HAIL"
+
+
+async def test_create_sms_to_india_still_requires_dedicated_number(
+    client, org_and_key
+) -> None:
+    """An excluded corridor keeps the dedicated-number requirement — without
+    one the send 422s with the documented HTTPValidationError shape."""
+    _, _, plaintext = org_and_key
+    resp = await client.post(
+        "/sms",
+        json={"to": "+919876543210", "body": "hi", "recipient_consent": True},
+        headers={"Authorization": f"Bearer {plaintext}"},
+    )
+    assert resp.status_code == 422
+    detail = resp.json()["detail"]
+    assert isinstance(detail, list)
+    assert detail[0]["loc"] == ["body", "from"]
+    assert "dedicated" in detail[0]["msg"]

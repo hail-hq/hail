@@ -55,6 +55,7 @@ Example (minimal):
 	cmd.AddCommand(newSmsStatusCmd(opts))
 	cmd.AddCommand(newSmsListCmd(opts))
 	cmd.AddCommand(newSmsSuppressionsCmd(opts))
+	cmd.AddCommand(newSmsSenderIdCmd(opts))
 
 	return cmd
 }
@@ -300,6 +301,122 @@ func newSmsSuppressionsListCmd(opts *Options) *cobra.Command {
 	cmd.Flags().IntVar(&limit, "limit", 50, "Page size (1..200)")
 	cmd.Flags().StringVar(&cursor, "cursor", "", "Resume from a previous next_cursor")
 	return cmd
+}
+
+// newSmsSenderIdCmd builds the `sms sender-id` subcommand tree — read and
+// set the org's custom alphanumeric sender ID (the branded "from" label
+// shown on supported destinations, where regulations permit).
+func newSmsSenderIdCmd(opts *Options) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "sender-id",
+		Short: "Manage the org's custom SMS sender ID",
+	}
+	cmd.AddCommand(newSmsSenderIdGetCmd(opts))
+	cmd.AddCommand(newSmsSenderIdSetCmd(opts))
+	return cmd
+}
+
+func newSmsSenderIdGetCmd(opts *Options) *cobra.Command {
+	return &cobra.Command{
+		Use:   "get",
+		Short: "Show the current sender ID (custom value and effective default)",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			ctx := cmd.Context()
+			apiClient, err := opts.newClient()
+			if err != nil {
+				return err
+			}
+			resp, err := apiClient.GetSenderIdSmsSenderIdGetWithResponse(ctx, &client.GetSenderIdSmsSenderIdGetParams{})
+			if err != nil {
+				return fmt.Errorf("sms sender-id API: %w", err)
+			}
+			if resp.HTTPResponse.StatusCode != http.StatusOK || resp.JSON200 == nil {
+				return apiError(resp.HTTPResponse.StatusCode, resp.Body)
+			}
+			return printSenderId(opts, resp.JSON200, false)
+		},
+	}
+}
+
+func newSmsSenderIdSetCmd(opts *Options) *cobra.Command {
+	var clear bool
+	cmd := &cobra.Command{
+		Use:   "set <value>",
+		Short: "Set (or clear) the custom sender ID",
+		Long: `hail sms sender-id set — set the org's custom alphanumeric sender ID.
+
+The value must be 2-11 alphanumeric characters (no spaces or symbols).
+Clear the custom sender ID (reverting to the platform default) with
+either an empty value or --clear:
+
+  hail sms sender-id set ACME
+  hail sms sender-id set ""
+  hail sms sender-id set --clear`,
+		Args: cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			ctx := cmd.Context()
+
+			var value *string
+			switch {
+			case clear:
+				if len(args) == 1 && args[0] != "" {
+					return helpAndFail(cmd, "pass either a value or --clear, not both")
+				}
+				value = nil
+			case len(args) == 1 && args[0] != "":
+				value = &args[0]
+			case len(args) == 1: // explicit empty string — clears
+				value = nil
+			default:
+				return requireInputs(cmd, "<value> (or --clear)")
+			}
+
+			apiClient, err := opts.newClient()
+			if err != nil {
+				return err
+			}
+			body := client.SenderIdPatch{CustomSenderId: value}
+			resp, err := apiClient.PatchSenderIdSmsSenderIdPatchWithResponse(ctx, &client.PatchSenderIdSmsSenderIdPatchParams{}, body)
+			if err != nil {
+				return fmt.Errorf("sms sender-id API: %w", err)
+			}
+			if resp.HTTPResponse.StatusCode != http.StatusOK || resp.JSON200 == nil {
+				return apiError(resp.HTTPResponse.StatusCode, resp.Body)
+			}
+			return printSenderId(opts, resp.JSON200, true)
+		},
+	}
+	cmd.Flags().BoolVar(&clear, "clear", false, "Clear the custom sender ID (revert to the platform default)")
+	return cmd
+}
+
+// printSenderId renders a SenderIdResponse. When justSet, leads with a
+// confirmation banner reflecting whether a custom value is now in effect.
+func printSenderId(opts *Options, s *client.SenderIdResponse, justSet bool) error {
+	if opts.JSON {
+		return printJSON(opts.Stdout, s)
+	}
+	custom := ""
+	if s.CustomSenderId != nil {
+		custom = *s.CustomSenderId
+	}
+	if justSet {
+		if custom == "" {
+			fmt.Fprintln(opts.Stdout, "✓ Custom sender ID cleared")
+		} else {
+			fmt.Fprintf(opts.Stdout, "✓ Custom sender ID set to %s\n", custom)
+		}
+	}
+	if custom == "" {
+		fmt.Fprintln(opts.Stdout, "  Custom:  (none)")
+	} else {
+		fmt.Fprintf(opts.Stdout, "  Custom:  %s\n", custom)
+	}
+	if s.EffectiveDefault != nil {
+		fmt.Fprintf(opts.Stdout, "  Default: %s\n", *s.EffectiveDefault)
+	}
+	return nil
 }
 
 func newSmsSuppressionsDeleteCmd(opts *Options) *cobra.Command {

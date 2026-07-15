@@ -138,6 +138,23 @@ func resolveEmailID(ctx context.Context, apiClient *client.ClientWithResponses, 
 	return id, err
 }
 
+func resolveNumberID(ctx context.Context, apiClient *client.ClientWithResponses, input string) (uuid.UUID, error) {
+	id, _, err := resolveIDPrefix(ctx, input, "number",
+		func(ctx context.Context, limit int) ([]client.PhoneNumberResponse, error) {
+			resp, err := apiClient.ListNumbersNumbersGetWithResponse(ctx, &client.ListNumbersNumbersGetParams{Limit: &limit})
+			if err != nil {
+				return nil, err
+			}
+			if resp.HTTPResponse.StatusCode != http.StatusOK || resp.JSON200 == nil {
+				return nil, apiError(resp.HTTPResponse.StatusCode, resp.Body)
+			}
+			return resp.JSON200.Items, nil
+		},
+		func(n client.PhoneNumberResponse) openapi_types.UUID { return n.Id },
+	)
+	return id, err
+}
+
 func resolveEmailDomainID(ctx context.Context, apiClient *client.ClientWithResponses, input string) (uuid.UUID, error) {
 	id, _, err := resolveIDPrefix(ctx, input, "email-domain",
 		func(ctx context.Context, limit int) ([]client.EmailDomainResponse, error) {
