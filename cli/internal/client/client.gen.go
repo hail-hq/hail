@@ -405,6 +405,27 @@ func (e EventStreamResponseCallStatus) Valid() bool {
 	}
 }
 
+// Defines values for NumberAcquireRequestNumberType.
+const (
+	Local    NumberAcquireRequestNumberType = "local"
+	Mobile   NumberAcquireRequestNumberType = "mobile"
+	TollFree NumberAcquireRequestNumberType = "toll_free"
+)
+
+// Valid indicates whether the value is a known member of the NumberAcquireRequestNumberType enum.
+func (e NumberAcquireRequestNumberType) Valid() bool {
+	switch e {
+	case Local:
+		return true
+	case Mobile:
+		return true
+	case TollFree:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for SmsCreateMessageType.
 const (
 	Informational SmsCreateMessageType = "informational"
@@ -1159,6 +1180,44 @@ type LLMConfig struct {
 	Model   string `json:"model"`
 }
 
+// NumberAcquireRequest defines model for NumberAcquireRequest.
+type NumberAcquireRequest struct {
+	CountryCode string                          `json:"country_code"`
+	NumberType  *NumberAcquireRequestNumberType `json:"number_type,omitempty"`
+}
+
+// NumberAcquireRequestNumberType defines model for NumberAcquireRequest.NumberType.
+type NumberAcquireRequestNumberType string
+
+// PhoneNumberListResponse defines model for PhoneNumberListResponse.
+type PhoneNumberListResponse struct {
+	Items      []PhoneNumberResponse `json:"items"`
+	NextCursor *string               `json:"next_cursor,omitempty"`
+}
+
+// PhoneNumberResponse defines model for PhoneNumberResponse.
+type PhoneNumberResponse struct {
+	Capabilities        []string           `json:"capabilities"`
+	CountryCode         string             `json:"country_code"`
+	E164                string             `json:"e164"`
+	Id                  openapi_types.UUID `json:"id"`
+	IsDedicated         bool               `json:"is_dedicated"`
+	MessagingServiceSid *string            `json:"messaging_service_sid,omitempty"`
+	NumberType          string             `json:"number_type"`
+	ProvisioningState   string             `json:"provisioning_state"`
+}
+
+// SenderIdPatch defines model for SenderIdPatch.
+type SenderIdPatch struct {
+	CustomSenderId *string `json:"custom_sender_id,omitempty"`
+}
+
+// SenderIdResponse defines model for SenderIdResponse.
+type SenderIdResponse struct {
+	CustomSenderId   *string `json:"custom_sender_id"`
+	EffectiveDefault *string `json:"effective_default,omitempty"`
+}
+
 // SmsCreate defines model for SmsCreate.
 type SmsCreate struct {
 	Body string `json:"body"`
@@ -1458,6 +1517,29 @@ type ListEventsEventsGetParams struct {
 	Authorization *string `json:"authorization,omitempty"`
 }
 
+// ListNumbersNumbersGetParams defines parameters for ListNumbersNumbersGet.
+type ListNumbersNumbersGetParams struct {
+	Cursor        *string `form:"cursor,omitempty" json:"cursor,omitempty"`
+	Limit         *int    `form:"limit,omitempty" json:"limit,omitempty"`
+	Authorization *string `json:"authorization,omitempty"`
+}
+
+// AcquireNumberNumbersPostParams defines parameters for AcquireNumberNumbersPost.
+type AcquireNumberNumbersPostParams struct {
+	Authorization  *string `json:"authorization,omitempty"`
+	IdempotencyKey *string `json:"Idempotency-Key,omitempty"`
+}
+
+// GetNumberNumbersNumberIdGetParams defines parameters for GetNumberNumbersNumberIdGet.
+type GetNumberNumbersNumberIdGetParams struct {
+	Authorization *string `json:"authorization,omitempty"`
+}
+
+// EnableSmsNumbersNumberIdEnableSmsPostParams defines parameters for EnableSmsNumbersNumberIdEnableSmsPost.
+type EnableSmsNumbersNumberIdEnableSmsPostParams struct {
+	Authorization *string `json:"authorization,omitempty"`
+}
+
 // ListSmsSmsGetParams defines parameters for ListSmsSmsGet.
 type ListSmsSmsGetParams struct {
 	Cursor        *string                    `form:"cursor,omitempty" json:"cursor,omitempty"`
@@ -1474,6 +1556,16 @@ type ListSmsSmsGetParamsStatus string
 type CreateSmsSmsPostParams struct {
 	Authorization  *string `json:"authorization,omitempty"`
 	IdempotencyKey *string `json:"Idempotency-Key,omitempty"`
+}
+
+// GetSenderIdSmsSenderIdGetParams defines parameters for GetSenderIdSmsSenderIdGet.
+type GetSenderIdSmsSenderIdGetParams struct {
+	Authorization *string `json:"authorization,omitempty"`
+}
+
+// PatchSenderIdSmsSenderIdPatchParams defines parameters for PatchSenderIdSmsSenderIdPatch.
+type PatchSenderIdSmsSenderIdPatchParams struct {
+	Authorization *string `json:"authorization,omitempty"`
 }
 
 // ListSmsSuppressionsSmsSuppressionsGetParams defines parameters for ListSmsSuppressionsSmsSuppressionsGet.
@@ -1557,8 +1649,14 @@ type PatchEmailDomainEmailDomainsDomainIdPatchJSONRequestBody = EmailDomainPatch
 // CreateEmailEmailsPostJSONRequestBody defines body for CreateEmailEmailsPost for application/json ContentType.
 type CreateEmailEmailsPostJSONRequestBody = EmailCreate
 
+// AcquireNumberNumbersPostJSONRequestBody defines body for AcquireNumberNumbersPost for application/json ContentType.
+type AcquireNumberNumbersPostJSONRequestBody = NumberAcquireRequest
+
 // CreateSmsSmsPostJSONRequestBody defines body for CreateSmsSmsPost for application/json ContentType.
 type CreateSmsSmsPostJSONRequestBody = SmsCreate
+
+// PatchSenderIdSmsSenderIdPatchJSONRequestBody defines body for PatchSenderIdSmsSenderIdPatch for application/json ContentType.
+type PatchSenderIdSmsSenderIdPatchJSONRequestBody = SenderIdPatch
 
 // CreateSubscriptionWebhooksPostJSONRequestBody defines body for CreateSubscriptionWebhooksPost for application/json ContentType.
 type CreateSubscriptionWebhooksPostJSONRequestBody = WebhookSubscriptionCreate
@@ -1878,6 +1976,20 @@ type ClientInterface interface {
 	// HealthzHealthzGet request
 	HealthzHealthzGet(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
 
+	// ListNumbersNumbersGet request
+	ListNumbersNumbersGet(ctx context.Context, params *ListNumbersNumbersGetParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// AcquireNumberNumbersPostWithBody request with any body
+	AcquireNumberNumbersPostWithBody(ctx context.Context, params *AcquireNumberNumbersPostParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	AcquireNumberNumbersPost(ctx context.Context, params *AcquireNumberNumbersPostParams, body AcquireNumberNumbersPostJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// GetNumberNumbersNumberIdGet request
+	GetNumberNumbersNumberIdGet(ctx context.Context, numberId openapi_types.UUID, params *GetNumberNumbersNumberIdGetParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// EnableSmsNumbersNumberIdEnableSmsPost request
+	EnableSmsNumbersNumberIdEnableSmsPost(ctx context.Context, numberId openapi_types.UUID, params *EnableSmsNumbersNumberIdEnableSmsPostParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
 	// ListSmsSmsGet request
 	ListSmsSmsGet(ctx context.Context, params *ListSmsSmsGetParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
@@ -1885,6 +1997,14 @@ type ClientInterface interface {
 	CreateSmsSmsPostWithBody(ctx context.Context, params *CreateSmsSmsPostParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	CreateSmsSmsPost(ctx context.Context, params *CreateSmsSmsPostParams, body CreateSmsSmsPostJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// GetSenderIdSmsSenderIdGet request
+	GetSenderIdSmsSenderIdGet(ctx context.Context, params *GetSenderIdSmsSenderIdGetParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// PatchSenderIdSmsSenderIdPatchWithBody request with any body
+	PatchSenderIdSmsSenderIdPatchWithBody(ctx context.Context, params *PatchSenderIdSmsSenderIdPatchParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	PatchSenderIdSmsSenderIdPatch(ctx context.Context, params *PatchSenderIdSmsSenderIdPatchParams, body PatchSenderIdSmsSenderIdPatchJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// ListSmsSuppressionsSmsSuppressionsGet request
 	ListSmsSuppressionsSmsSuppressionsGet(ctx context.Context, params *ListSmsSuppressionsSmsSuppressionsGetParams, reqEditors ...RequestEditorFn) (*http.Response, error)
@@ -2215,6 +2335,66 @@ func (c *Client) HealthzHealthzGet(ctx context.Context, reqEditors ...RequestEdi
 	return c.Client.Do(req)
 }
 
+func (c *Client) ListNumbersNumbersGet(ctx context.Context, params *ListNumbersNumbersGetParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewListNumbersNumbersGetRequest(c.Server, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) AcquireNumberNumbersPostWithBody(ctx context.Context, params *AcquireNumberNumbersPostParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewAcquireNumberNumbersPostRequestWithBody(c.Server, params, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) AcquireNumberNumbersPost(ctx context.Context, params *AcquireNumberNumbersPostParams, body AcquireNumberNumbersPostJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewAcquireNumberNumbersPostRequest(c.Server, params, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) GetNumberNumbersNumberIdGet(ctx context.Context, numberId openapi_types.UUID, params *GetNumberNumbersNumberIdGetParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetNumberNumbersNumberIdGetRequest(c.Server, numberId, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) EnableSmsNumbersNumberIdEnableSmsPost(ctx context.Context, numberId openapi_types.UUID, params *EnableSmsNumbersNumberIdEnableSmsPostParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewEnableSmsNumbersNumberIdEnableSmsPostRequest(c.Server, numberId, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
 func (c *Client) ListSmsSmsGet(ctx context.Context, params *ListSmsSmsGetParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewListSmsSmsGetRequest(c.Server, params)
 	if err != nil {
@@ -2241,6 +2421,42 @@ func (c *Client) CreateSmsSmsPostWithBody(ctx context.Context, params *CreateSms
 
 func (c *Client) CreateSmsSmsPost(ctx context.Context, params *CreateSmsSmsPostParams, body CreateSmsSmsPostJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewCreateSmsSmsPostRequest(c.Server, params, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) GetSenderIdSmsSenderIdGet(ctx context.Context, params *GetSenderIdSmsSenderIdGetParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetSenderIdSmsSenderIdGetRequest(c.Server, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) PatchSenderIdSmsSenderIdPatchWithBody(ctx context.Context, params *PatchSenderIdSmsSenderIdPatchParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewPatchSenderIdSmsSenderIdPatchRequestWithBody(c.Server, params, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) PatchSenderIdSmsSenderIdPatch(ctx context.Context, params *PatchSenderIdSmsSenderIdPatchParams, body PatchSenderIdSmsSenderIdPatchJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewPatchSenderIdSmsSenderIdPatchRequest(c.Server, params, body)
 	if err != nil {
 		return nil, err
 	}
@@ -3748,6 +3964,250 @@ func NewHealthzHealthzGetRequest(server string) (*http.Request, error) {
 	return req, nil
 }
 
+// NewListNumbersNumbersGetRequest generates requests for ListNumbersNumbersGet
+func NewListNumbersNumbersGetRequest(server string, params *ListNumbersNumbersGetParams) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/numbers")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+		queryValues := queryURL.Query()
+
+		if params.Cursor != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "cursor", *params.Cursor, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+				return nil, err
+			} else {
+				for k, v := range parsed {
+					for _, v2 := range v {
+						queryValues.Add(k, v2)
+					}
+				}
+			}
+
+		}
+
+		if params.Limit != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "limit", *params.Limit, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "integer", Format: ""}); err != nil {
+				return nil, err
+			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+				return nil, err
+			} else {
+				for k, v := range parsed {
+					for _, v2 := range v {
+						queryValues.Add(k, v2)
+					}
+				}
+			}
+
+		}
+
+		queryURL.RawQuery = queryValues.Encode()
+	}
+
+	req, err := http.NewRequest("GET", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+
+		if params.Authorization != nil {
+			var headerParam0 string
+
+			headerParam0, err = runtime.StyleParamWithOptions("simple", false, "authorization", *params.Authorization, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationHeader, Type: "string", Format: ""})
+			if err != nil {
+				return nil, err
+			}
+
+			req.Header.Set("authorization", headerParam0)
+		}
+
+	}
+
+	return req, nil
+}
+
+// NewAcquireNumberNumbersPostRequest calls the generic AcquireNumberNumbersPost builder with application/json body
+func NewAcquireNumberNumbersPostRequest(server string, params *AcquireNumberNumbersPostParams, body AcquireNumberNumbersPostJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewAcquireNumberNumbersPostRequestWithBody(server, params, "application/json", bodyReader)
+}
+
+// NewAcquireNumberNumbersPostRequestWithBody generates requests for AcquireNumberNumbersPost with any type of body
+func NewAcquireNumberNumbersPostRequestWithBody(server string, params *AcquireNumberNumbersPostParams, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/numbers")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("POST", queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	if params != nil {
+
+		if params.Authorization != nil {
+			var headerParam0 string
+
+			headerParam0, err = runtime.StyleParamWithOptions("simple", false, "authorization", *params.Authorization, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationHeader, Type: "string", Format: ""})
+			if err != nil {
+				return nil, err
+			}
+
+			req.Header.Set("authorization", headerParam0)
+		}
+
+		if params.IdempotencyKey != nil {
+			var headerParam1 string
+
+			headerParam1, err = runtime.StyleParamWithOptions("simple", false, "Idempotency-Key", *params.IdempotencyKey, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationHeader, Type: "string", Format: ""})
+			if err != nil {
+				return nil, err
+			}
+
+			req.Header.Set("Idempotency-Key", headerParam1)
+		}
+
+	}
+
+	return req, nil
+}
+
+// NewGetNumberNumbersNumberIdGetRequest generates requests for GetNumberNumbersNumberIdGet
+func NewGetNumberNumbersNumberIdGetRequest(server string, numberId openapi_types.UUID, params *GetNumberNumbersNumberIdGetParams) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "number_id", numberId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/numbers/%s", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("GET", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+
+		if params.Authorization != nil {
+			var headerParam0 string
+
+			headerParam0, err = runtime.StyleParamWithOptions("simple", false, "authorization", *params.Authorization, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationHeader, Type: "string", Format: ""})
+			if err != nil {
+				return nil, err
+			}
+
+			req.Header.Set("authorization", headerParam0)
+		}
+
+	}
+
+	return req, nil
+}
+
+// NewEnableSmsNumbersNumberIdEnableSmsPostRequest generates requests for EnableSmsNumbersNumberIdEnableSmsPost
+func NewEnableSmsNumbersNumberIdEnableSmsPostRequest(server string, numberId openapi_types.UUID, params *EnableSmsNumbersNumberIdEnableSmsPostParams) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "number_id", numberId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/numbers/%s/enable-sms", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("POST", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+
+		if params.Authorization != nil {
+			var headerParam0 string
+
+			headerParam0, err = runtime.StyleParamWithOptions("simple", false, "authorization", *params.Authorization, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationHeader, Type: "string", Format: ""})
+			if err != nil {
+				return nil, err
+			}
+
+			req.Header.Set("authorization", headerParam0)
+		}
+
+	}
+
+	return req, nil
+}
+
 // NewListSmsSmsGetRequest generates requests for ListSmsSmsGet
 func NewListSmsSmsGetRequest(server string, params *ListSmsSmsGetParams) (*http.Request, error) {
 	var err error
@@ -3919,6 +4379,103 @@ func NewCreateSmsSmsPostRequestWithBody(server string, params *CreateSmsSmsPostP
 			}
 
 			req.Header.Set("Idempotency-Key", headerParam1)
+		}
+
+	}
+
+	return req, nil
+}
+
+// NewGetSenderIdSmsSenderIdGetRequest generates requests for GetSenderIdSmsSenderIdGet
+func NewGetSenderIdSmsSenderIdGetRequest(server string, params *GetSenderIdSmsSenderIdGetParams) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/sms/sender-id")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("GET", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+
+		if params.Authorization != nil {
+			var headerParam0 string
+
+			headerParam0, err = runtime.StyleParamWithOptions("simple", false, "authorization", *params.Authorization, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationHeader, Type: "string", Format: ""})
+			if err != nil {
+				return nil, err
+			}
+
+			req.Header.Set("authorization", headerParam0)
+		}
+
+	}
+
+	return req, nil
+}
+
+// NewPatchSenderIdSmsSenderIdPatchRequest calls the generic PatchSenderIdSmsSenderIdPatch builder with application/json body
+func NewPatchSenderIdSmsSenderIdPatchRequest(server string, params *PatchSenderIdSmsSenderIdPatchParams, body PatchSenderIdSmsSenderIdPatchJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewPatchSenderIdSmsSenderIdPatchRequestWithBody(server, params, "application/json", bodyReader)
+}
+
+// NewPatchSenderIdSmsSenderIdPatchRequestWithBody generates requests for PatchSenderIdSmsSenderIdPatch with any type of body
+func NewPatchSenderIdSmsSenderIdPatchRequestWithBody(server string, params *PatchSenderIdSmsSenderIdPatchParams, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/sms/sender-id")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("PATCH", queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	if params != nil {
+
+		if params.Authorization != nil {
+			var headerParam0 string
+
+			headerParam0, err = runtime.StyleParamWithOptions("simple", false, "authorization", *params.Authorization, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationHeader, Type: "string", Format: ""})
+			if err != nil {
+				return nil, err
+			}
+
+			req.Header.Set("authorization", headerParam0)
 		}
 
 	}
@@ -4747,6 +5304,20 @@ type ClientWithResponsesInterface interface {
 	// HealthzHealthzGetWithResponse request
 	HealthzHealthzGetWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*HealthzHealthzGetResponse, error)
 
+	// ListNumbersNumbersGetWithResponse request
+	ListNumbersNumbersGetWithResponse(ctx context.Context, params *ListNumbersNumbersGetParams, reqEditors ...RequestEditorFn) (*ListNumbersNumbersGetResponse, error)
+
+	// AcquireNumberNumbersPostWithBodyWithResponse request with any body
+	AcquireNumberNumbersPostWithBodyWithResponse(ctx context.Context, params *AcquireNumberNumbersPostParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*AcquireNumberNumbersPostResponse, error)
+
+	AcquireNumberNumbersPostWithResponse(ctx context.Context, params *AcquireNumberNumbersPostParams, body AcquireNumberNumbersPostJSONRequestBody, reqEditors ...RequestEditorFn) (*AcquireNumberNumbersPostResponse, error)
+
+	// GetNumberNumbersNumberIdGetWithResponse request
+	GetNumberNumbersNumberIdGetWithResponse(ctx context.Context, numberId openapi_types.UUID, params *GetNumberNumbersNumberIdGetParams, reqEditors ...RequestEditorFn) (*GetNumberNumbersNumberIdGetResponse, error)
+
+	// EnableSmsNumbersNumberIdEnableSmsPostWithResponse request
+	EnableSmsNumbersNumberIdEnableSmsPostWithResponse(ctx context.Context, numberId openapi_types.UUID, params *EnableSmsNumbersNumberIdEnableSmsPostParams, reqEditors ...RequestEditorFn) (*EnableSmsNumbersNumberIdEnableSmsPostResponse, error)
+
 	// ListSmsSmsGetWithResponse request
 	ListSmsSmsGetWithResponse(ctx context.Context, params *ListSmsSmsGetParams, reqEditors ...RequestEditorFn) (*ListSmsSmsGetResponse, error)
 
@@ -4754,6 +5325,14 @@ type ClientWithResponsesInterface interface {
 	CreateSmsSmsPostWithBodyWithResponse(ctx context.Context, params *CreateSmsSmsPostParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CreateSmsSmsPostResponse, error)
 
 	CreateSmsSmsPostWithResponse(ctx context.Context, params *CreateSmsSmsPostParams, body CreateSmsSmsPostJSONRequestBody, reqEditors ...RequestEditorFn) (*CreateSmsSmsPostResponse, error)
+
+	// GetSenderIdSmsSenderIdGetWithResponse request
+	GetSenderIdSmsSenderIdGetWithResponse(ctx context.Context, params *GetSenderIdSmsSenderIdGetParams, reqEditors ...RequestEditorFn) (*GetSenderIdSmsSenderIdGetResponse, error)
+
+	// PatchSenderIdSmsSenderIdPatchWithBodyWithResponse request with any body
+	PatchSenderIdSmsSenderIdPatchWithBodyWithResponse(ctx context.Context, params *PatchSenderIdSmsSenderIdPatchParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*PatchSenderIdSmsSenderIdPatchResponse, error)
+
+	PatchSenderIdSmsSenderIdPatchWithResponse(ctx context.Context, params *PatchSenderIdSmsSenderIdPatchParams, body PatchSenderIdSmsSenderIdPatchJSONRequestBody, reqEditors ...RequestEditorFn) (*PatchSenderIdSmsSenderIdPatchResponse, error)
 
 	// ListSmsSuppressionsSmsSuppressionsGetWithResponse request
 	ListSmsSuppressionsSmsSuppressionsGetWithResponse(ctx context.Context, params *ListSmsSuppressionsSmsSuppressionsGetParams, reqEditors ...RequestEditorFn) (*ListSmsSuppressionsSmsSuppressionsGetResponse, error)
@@ -5254,6 +5833,98 @@ func (r HealthzHealthzGetResponse) StatusCode() int {
 	return 0
 }
 
+type ListNumbersNumbersGetResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *PhoneNumberListResponse
+	JSON422      *HTTPValidationError
+}
+
+// Status returns HTTPResponse.Status
+func (r ListNumbersNumbersGetResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ListNumbersNumbersGetResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type AcquireNumberNumbersPostResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON201      *PhoneNumberResponse
+	JSON422      *HTTPValidationError
+}
+
+// Status returns HTTPResponse.Status
+func (r AcquireNumberNumbersPostResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r AcquireNumberNumbersPostResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type GetNumberNumbersNumberIdGetResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *PhoneNumberResponse
+	JSON422      *HTTPValidationError
+}
+
+// Status returns HTTPResponse.Status
+func (r GetNumberNumbersNumberIdGetResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetNumberNumbersNumberIdGetResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type EnableSmsNumbersNumberIdEnableSmsPostResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *PhoneNumberResponse
+	JSON422      *HTTPValidationError
+}
+
+// Status returns HTTPResponse.Status
+func (r EnableSmsNumbersNumberIdEnableSmsPostResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r EnableSmsNumbersNumberIdEnableSmsPostResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
 type ListSmsSmsGetResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
@@ -5294,6 +5965,52 @@ func (r CreateSmsSmsPostResponse) Status() string {
 
 // StatusCode returns HTTPResponse.StatusCode
 func (r CreateSmsSmsPostResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type GetSenderIdSmsSenderIdGetResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *SenderIdResponse
+	JSON422      *HTTPValidationError
+}
+
+// Status returns HTTPResponse.Status
+func (r GetSenderIdSmsSenderIdGetResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetSenderIdSmsSenderIdGetResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type PatchSenderIdSmsSenderIdPatchResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *SenderIdResponse
+	JSON422      *HTTPValidationError
+}
+
+// Status returns HTTPResponse.Status
+func (r PatchSenderIdSmsSenderIdPatchResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r PatchSenderIdSmsSenderIdPatchResponse) StatusCode() int {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.StatusCode
 	}
@@ -5785,6 +6502,50 @@ func (c *ClientWithResponses) HealthzHealthzGetWithResponse(ctx context.Context,
 	return ParseHealthzHealthzGetResponse(rsp)
 }
 
+// ListNumbersNumbersGetWithResponse request returning *ListNumbersNumbersGetResponse
+func (c *ClientWithResponses) ListNumbersNumbersGetWithResponse(ctx context.Context, params *ListNumbersNumbersGetParams, reqEditors ...RequestEditorFn) (*ListNumbersNumbersGetResponse, error) {
+	rsp, err := c.ListNumbersNumbersGet(ctx, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseListNumbersNumbersGetResponse(rsp)
+}
+
+// AcquireNumberNumbersPostWithBodyWithResponse request with arbitrary body returning *AcquireNumberNumbersPostResponse
+func (c *ClientWithResponses) AcquireNumberNumbersPostWithBodyWithResponse(ctx context.Context, params *AcquireNumberNumbersPostParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*AcquireNumberNumbersPostResponse, error) {
+	rsp, err := c.AcquireNumberNumbersPostWithBody(ctx, params, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseAcquireNumberNumbersPostResponse(rsp)
+}
+
+func (c *ClientWithResponses) AcquireNumberNumbersPostWithResponse(ctx context.Context, params *AcquireNumberNumbersPostParams, body AcquireNumberNumbersPostJSONRequestBody, reqEditors ...RequestEditorFn) (*AcquireNumberNumbersPostResponse, error) {
+	rsp, err := c.AcquireNumberNumbersPost(ctx, params, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseAcquireNumberNumbersPostResponse(rsp)
+}
+
+// GetNumberNumbersNumberIdGetWithResponse request returning *GetNumberNumbersNumberIdGetResponse
+func (c *ClientWithResponses) GetNumberNumbersNumberIdGetWithResponse(ctx context.Context, numberId openapi_types.UUID, params *GetNumberNumbersNumberIdGetParams, reqEditors ...RequestEditorFn) (*GetNumberNumbersNumberIdGetResponse, error) {
+	rsp, err := c.GetNumberNumbersNumberIdGet(ctx, numberId, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetNumberNumbersNumberIdGetResponse(rsp)
+}
+
+// EnableSmsNumbersNumberIdEnableSmsPostWithResponse request returning *EnableSmsNumbersNumberIdEnableSmsPostResponse
+func (c *ClientWithResponses) EnableSmsNumbersNumberIdEnableSmsPostWithResponse(ctx context.Context, numberId openapi_types.UUID, params *EnableSmsNumbersNumberIdEnableSmsPostParams, reqEditors ...RequestEditorFn) (*EnableSmsNumbersNumberIdEnableSmsPostResponse, error) {
+	rsp, err := c.EnableSmsNumbersNumberIdEnableSmsPost(ctx, numberId, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseEnableSmsNumbersNumberIdEnableSmsPostResponse(rsp)
+}
+
 // ListSmsSmsGetWithResponse request returning *ListSmsSmsGetResponse
 func (c *ClientWithResponses) ListSmsSmsGetWithResponse(ctx context.Context, params *ListSmsSmsGetParams, reqEditors ...RequestEditorFn) (*ListSmsSmsGetResponse, error) {
 	rsp, err := c.ListSmsSmsGet(ctx, params, reqEditors...)
@@ -5809,6 +6570,32 @@ func (c *ClientWithResponses) CreateSmsSmsPostWithResponse(ctx context.Context, 
 		return nil, err
 	}
 	return ParseCreateSmsSmsPostResponse(rsp)
+}
+
+// GetSenderIdSmsSenderIdGetWithResponse request returning *GetSenderIdSmsSenderIdGetResponse
+func (c *ClientWithResponses) GetSenderIdSmsSenderIdGetWithResponse(ctx context.Context, params *GetSenderIdSmsSenderIdGetParams, reqEditors ...RequestEditorFn) (*GetSenderIdSmsSenderIdGetResponse, error) {
+	rsp, err := c.GetSenderIdSmsSenderIdGet(ctx, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetSenderIdSmsSenderIdGetResponse(rsp)
+}
+
+// PatchSenderIdSmsSenderIdPatchWithBodyWithResponse request with arbitrary body returning *PatchSenderIdSmsSenderIdPatchResponse
+func (c *ClientWithResponses) PatchSenderIdSmsSenderIdPatchWithBodyWithResponse(ctx context.Context, params *PatchSenderIdSmsSenderIdPatchParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*PatchSenderIdSmsSenderIdPatchResponse, error) {
+	rsp, err := c.PatchSenderIdSmsSenderIdPatchWithBody(ctx, params, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParsePatchSenderIdSmsSenderIdPatchResponse(rsp)
+}
+
+func (c *ClientWithResponses) PatchSenderIdSmsSenderIdPatchWithResponse(ctx context.Context, params *PatchSenderIdSmsSenderIdPatchParams, body PatchSenderIdSmsSenderIdPatchJSONRequestBody, reqEditors ...RequestEditorFn) (*PatchSenderIdSmsSenderIdPatchResponse, error) {
+	rsp, err := c.PatchSenderIdSmsSenderIdPatch(ctx, params, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParsePatchSenderIdSmsSenderIdPatchResponse(rsp)
 }
 
 // ListSmsSuppressionsSmsSuppressionsGetWithResponse request returning *ListSmsSuppressionsSmsSuppressionsGetResponse
@@ -6581,6 +7368,138 @@ func ParseHealthzHealthzGetResponse(rsp *http.Response) (*HealthzHealthzGetRespo
 	return response, nil
 }
 
+// ParseListNumbersNumbersGetResponse parses an HTTP response from a ListNumbersNumbersGetWithResponse call
+func ParseListNumbersNumbersGetResponse(rsp *http.Response) (*ListNumbersNumbersGetResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ListNumbersNumbersGetResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest PhoneNumberListResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 422:
+		var dest HTTPValidationError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON422 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseAcquireNumberNumbersPostResponse parses an HTTP response from a AcquireNumberNumbersPostWithResponse call
+func ParseAcquireNumberNumbersPostResponse(rsp *http.Response) (*AcquireNumberNumbersPostResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &AcquireNumberNumbersPostResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 201:
+		var dest PhoneNumberResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON201 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 422:
+		var dest HTTPValidationError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON422 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseGetNumberNumbersNumberIdGetResponse parses an HTTP response from a GetNumberNumbersNumberIdGetWithResponse call
+func ParseGetNumberNumbersNumberIdGetResponse(rsp *http.Response) (*GetNumberNumbersNumberIdGetResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetNumberNumbersNumberIdGetResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest PhoneNumberResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 422:
+		var dest HTTPValidationError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON422 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseEnableSmsNumbersNumberIdEnableSmsPostResponse parses an HTTP response from a EnableSmsNumbersNumberIdEnableSmsPostWithResponse call
+func ParseEnableSmsNumbersNumberIdEnableSmsPostResponse(rsp *http.Response) (*EnableSmsNumbersNumberIdEnableSmsPostResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &EnableSmsNumbersNumberIdEnableSmsPostResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest PhoneNumberResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 422:
+		var dest HTTPValidationError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON422 = &dest
+
+	}
+
+	return response, nil
+}
+
 // ParseListSmsSmsGetResponse parses an HTTP response from a ListSmsSmsGetWithResponse call
 func ParseListSmsSmsGetResponse(rsp *http.Response) (*ListSmsSmsGetResponse, error) {
 	bodyBytes, err := io.ReadAll(rsp.Body)
@@ -6634,6 +7553,72 @@ func ParseCreateSmsSmsPostResponse(rsp *http.Response) (*CreateSmsSmsPostRespons
 			return nil, err
 		}
 		response.JSON201 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 422:
+		var dest HTTPValidationError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON422 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseGetSenderIdSmsSenderIdGetResponse parses an HTTP response from a GetSenderIdSmsSenderIdGetWithResponse call
+func ParseGetSenderIdSmsSenderIdGetResponse(rsp *http.Response) (*GetSenderIdSmsSenderIdGetResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetSenderIdSmsSenderIdGetResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest SenderIdResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 422:
+		var dest HTTPValidationError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON422 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParsePatchSenderIdSmsSenderIdPatchResponse parses an HTTP response from a PatchSenderIdSmsSenderIdPatchWithResponse call
+func ParsePatchSenderIdSmsSenderIdPatchResponse(rsp *http.Response) (*PatchSenderIdSmsSenderIdPatchResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &PatchSenderIdSmsSenderIdPatchResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest SenderIdResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
 
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 422:
 		var dest HTTPValidationError

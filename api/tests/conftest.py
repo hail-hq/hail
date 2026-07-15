@@ -25,6 +25,7 @@ from hailhq.api.auth import hash_key
 from hailhq.api.main import app
 from hailhq.api.routes.calls import get_livekit
 from hailhq.api.routes.email_domains import get_email_provider
+from hailhq.api.routes.numbers import get_voice_provider
 from hailhq.api.routes.sms import get_sms_provider
 from hailhq.core.db import get_session
 from hailhq.core.livekit import LiveKitClient
@@ -237,11 +238,28 @@ def sms_mock() -> AsyncMock:
 
 
 @pytest.fixture()
+def voice_provider_mock() -> AsyncMock:
+    """Default mock voice provider — happy-path number acquisition."""
+    from hailhq.core.providers.voice import ProviderNumber, VoiceProvider
+
+    mock = AsyncMock(spec=VoiceProvider)
+    mock.acquire_number.return_value = ProviderNumber(
+        provider_resource_id="PN_test_acquired",
+        e164="+14155550001",
+        country_code="US",
+        capabilities=["voice", "sms"],
+        number_type="local",
+    )
+    return mock
+
+
+@pytest.fixture()
 async def client(
     async_session: AsyncSession,  # noqa: F811 (re-used as a fixture parameter name)
     livekit_mock: AsyncMock,
     email_mock: AsyncMock,
     sms_mock: AsyncMock,
+    voice_provider_mock: AsyncMock,
 ) -> AsyncIterator[httpx.AsyncClient]:
     async def override_get_session() -> AsyncIterator[AsyncSession]:
         yield async_session
@@ -250,6 +268,7 @@ async def client(
     app.dependency_overrides[get_livekit] = lambda: livekit_mock
     app.dependency_overrides[get_email_provider] = lambda: email_mock
     app.dependency_overrides[get_sms_provider] = lambda: sms_mock
+    app.dependency_overrides[get_voice_provider] = lambda: voice_provider_mock
 
     transport = httpx.ASGITransport(app=app)
     try:
@@ -260,6 +279,7 @@ async def client(
         app.dependency_overrides.pop(get_livekit, None)
         app.dependency_overrides.pop(get_email_provider, None)
         app.dependency_overrides.pop(get_sms_provider, None)
+        app.dependency_overrides.pop(get_voice_provider, None)
 
 
 @pytest.fixture()
