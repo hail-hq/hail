@@ -16,9 +16,19 @@ alphanumeric Sender ID with no dedicated number.
   destinations that need one (US/Canada/India); UK and Germany send via the
   Sender ID with no dedicated number.
 - CLI: `hail numbers acquire|list|get|enable-sms` and `hail sms sender-id
-  get|set`.
+get|set`.
 - SDK: `client.numbers` (acquire/list/get/enable_sms) and
   `client.sms.sender_id` (get/set).
+
+## [0.13.1] — 2026-07-14
+
+Bug fix. `cli-v0.12.1` cut alongside; the SDK is unchanged and stays at
+`hail-sdk==0.9.0`.
+
+- `hail email attachment-upload` and `hail email send` no longer swallow
+  the server's real error message behind a raw JSON-unmarshal error when
+  the API returns a plain-string `detail` (e.g. the attachment size-cap
+  rejection) instead of FastAPI's list-shaped validation-error detail.
 
 ## [0.13.0] — 2026-07-14
 
