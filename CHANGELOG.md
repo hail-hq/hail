@@ -2,6 +2,24 @@
 
 All notable changes to Hail are documented here. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and Hail adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+SMS dedicated numbers & Sender ID. Provision a number, attach it to a
+per-org Messaging Service, and send to no-registration corridors via an
+alphanumeric Sender ID with no dedicated number.
+
+- `POST /numbers` (idempotent acquire), `GET /numbers`, `GET /numbers/{id}`;
+  `POST /numbers/{id}/enable-sms` attaches the number to the org's Twilio
+  Messaging Service.
+- `GET`/`PATCH /sms/sender-id` — org-level custom alphanumeric Sender ID
+  (2–11 chars). `POST /sms` now requires a dedicated number only for
+  destinations that need one (US/Canada/India); UK and Germany send via the
+  Sender ID with no dedicated number.
+- CLI: `hail numbers acquire|list|get|enable-sms` and `hail sms sender-id
+  get|set`.
+- SDK: `client.numbers` (acquire/list/get/enable_sms) and
+  `client.sms.sender_id` (get/set).
+
 ## [0.13.0] — 2026-07-14
 
 Outbound email attachments. Upload a file once, reference its id from as
