@@ -95,6 +95,10 @@ async def test_create_sms_explicit_from_requires_active_number(
 async def test_create_sms_happy_path(
     client, async_session, org_and_key, sms_mock
 ) -> None:
+    from sqlalchemy import select
+
+    from hailhq.core.models import UsageEvent
+
     org_id, _, plaintext = org_and_key
     await _seed_dedicated_number(async_session, org_id)
 
@@ -110,6 +114,11 @@ async def test_create_sms_happy_path(
     assert body["to_e164"] == "+14155551234"
     assert body["segment_count"] == 1
     sms_mock.send_sms.assert_awaited_once()
+
+    row = (
+        await async_session.execute(select(UsageEvent).where(UsageEvent.channel == "sms"))
+    ).scalar_one()
+    assert row.ref == f"sms:{body['id']}:us"  # +14155551234 is a US number
 
 
 async def test_create_sms_carrier_rejection_not_billed(
@@ -143,7 +152,7 @@ async def test_create_sms_carrier_rejection_not_billed(
     # A rejected message was never sent — sent_at stays null.
     assert body["sent_at"] is None
 
-    stmt = select(UsageEvent).where(UsageEvent.ref == f"sms:{body['id']}")
+    stmt = select(UsageEvent).where(UsageEvent.ref == f"sms:{body['id']}:us")
     rows = (await async_session.execute(stmt)).scalars().all()
     assert rows == []
 
