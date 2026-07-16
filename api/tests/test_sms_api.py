@@ -116,7 +116,9 @@ async def test_create_sms_happy_path(
     sms_mock.send_sms.assert_awaited_once()
 
     row = (
-        await async_session.execute(select(UsageEvent).where(UsageEvent.channel == "sms"))
+        await async_session.execute(
+            select(UsageEvent).where(UsageEvent.channel == "sms")
+        )
     ).scalar_one()
     assert row.ref == f"sms:{body['id']}:us"  # +14155551234 is a US number
 
