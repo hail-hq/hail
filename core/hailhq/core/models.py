@@ -1187,3 +1187,63 @@ class OrgProviderConfig(Base):
         ),
         Index("org_provider_config_org_idx", "organization_id"),
     )
+
+
+class Organization(Base):
+    """Read-only mapping of the website-owned ``organizations`` table.
+
+    hail-website's better-auth migrations own the schema (same posture as
+    ``members``/``OrganizationMember``); hail/api only reads ``origin`` to
+    decide whether agent velocity caps apply. Never written from Python.
+    """
+
+    __tablename__ = "organizations"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    origin: Mapped[str] = mapped_column(Text, nullable=False, server_default="human")
+
+
+class AgentSendLog(Base):
+    """One row per allowed agent-origin send attempt — the counter behind
+    the velocity caps in agent_caps.py. Written by the gate itself at
+    check time (counts attempts, uniform across channels)."""
+
+    __tablename__ = "agent_send_log"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    organization_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), nullable=False
+    )
+    channel: Mapped[str] = mapped_column(
+        Text, nullable=False
+    )  # 'email' | 'sms' | 'voice'
+    recipient: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        TS, nullable=False, server_default=text("now()")
+    )
+
+    __table_args__ = (
+        Index(
+            "agent_send_log_org_channel_created_idx",
+            "organization_id",
+            "channel",
+            "created_at",
+        ),
+        Index("agent_send_log_channel_created_idx", "channel", "created_at"),
+    )
+
+
+class PlatformFlag(Base):
+    """Platform-wide runtime flags. v1 has exactly one consumer:
+    ``agent_outbound_disabled`` — the agent-traffic kill switch
+    (see agent_caps.py). Toggled via psql; see docs runbook."""
+
+    __tablename__ = "platform_flags"
+
+    key: Mapped[str] = mapped_column(Text, primary_key=True)
+    value: Mapped[str] = mapped_column(Text, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        TS, nullable=False, server_default=text("now()")
+    )
