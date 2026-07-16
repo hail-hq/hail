@@ -18,7 +18,7 @@ here, scoped to the call's org.
 
 from __future__ import annotations
 
-from typing import Annotated
+from typing import Annotated, Any
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -32,6 +32,12 @@ from hailhq.api.routes.email_domains import get_email_provider
 from hailhq.api.routes.emails import deliver_email, from_address_for, resolve_sender
 from hailhq.api.routes.internal.auth import verify_internal_request
 from hailhq.api.routes.sms import deliver_sms, get_sms_provider
+from hailhq.core.agent_tools.send_email import (
+    MAX_BODY_CHARS as EMAIL_MAX_BODY_CHARS,
+    MAX_RECIPIENT_NAME_CHARS,
+    MAX_SUBJECT_CHARS,
+)
+from hailhq.core.agent_tools.send_sms import MAX_BODY_CHARS as SMS_MAX_BODY_CHARS
 from hailhq.core.billing import CALL_META_BILLED, has_funds
 from hailhq.core.compliance_gate import check_email_allowed, check_sms_allowed
 from hailhq.core.db import get_session
@@ -68,13 +74,13 @@ class AgentSendBase(BaseModel):
 
 
 class AgentSendSmsRequest(AgentSendBase):
-    body: str = Field(min_length=1, max_length=480)
+    body: str = Field(min_length=1, max_length=SMS_MAX_BODY_CHARS)
 
 
 class AgentSendEmailRequest(AgentSendBase):
-    recipient_name: str = Field(min_length=1, max_length=200)
-    subject: str = Field(min_length=1, max_length=200)
-    body_text: str = Field(min_length=1, max_length=5000)
+    recipient_name: str = Field(min_length=1, max_length=MAX_RECIPIENT_NAME_CHARS)
+    subject: str = Field(min_length=1, max_length=MAX_SUBJECT_CHARS)
+    body_text: str = Field(min_length=1, max_length=EMAIL_MAX_BODY_CHARS)
 
 
 class AgentSendResponse(BaseModel):
@@ -89,7 +95,7 @@ def _meta(req: AgentSendBase) -> dict[str, str]:
     }
 
 
-async def _load_live_call(db: AsyncSession, call_id: UUID) -> Call | None:
+async def _load_call_for_update(db: AsyncSession, call_id: UUID) -> Call | None:
     # FOR UPDATE on the call row serializes concurrent agent sends for one
     # call: the dedupe SELECT and the cap COUNT both run under this lock, so
     # a timeout-retry racing the original can't double-send or blow past
@@ -97,37 +103,89 @@ async def _load_live_call(db: AsyncSession, call_id: UUID) -> Call | None:
     # row the next request's dedupe will see; never hold the lock across
     # deliver_* — the Sms/Email INSERT + commit happens before the slow
     # provider send.
-    call = (
+    #
+    # Status is intentionally NOT checked here (that used to live in this
+    # function, under the name ``_load_live_call``): the original request
+    # can still be mid-provider-send when the call finalizes, so a retry
+    # that arrives just after must hit the tool_invocation_id dedupe branch
+    # in the caller, not a liveness denial that would misreport a send that
+    # actually succeeded (or is still in flight). None only means the call
+    # row itself doesn't exist.
+    return (
         await db.execute(select(Call).where(Call.id == call_id).with_for_update())
     ).scalar_one_or_none()
-    if call is None or call.status != "in_progress":
-        return None
-    return call
 
 
 async def _sends_this_call(db: AsyncSession, org_id: UUID, call_id: UUID) -> int:
     key = str(call_id)
-    emails = (
+    email_count = (
+        select(func.count())
+        .select_from(Email)
+        .where(
+            Email.organization_id == org_id,
+            Email.metadata_["call_id"].astext == key,
+        )
+        .scalar_subquery()
+    )
+    sms_count = (
+        select(func.count())
+        .select_from(Sms)
+        .where(
+            Sms.organization_id == org_id,
+            Sms.metadata_["call_id"].astext == key,
+        )
+        .scalar_subquery()
+    )
+    # One round trip: two scalar subqueries summed in a single SELECT,
+    # instead of two sequential COUNT queries.
+    total = (await db.execute(select(email_count + sms_count))).scalar_one()
+    return int(total)
+
+
+async def _prior_send(
+    db: AsyncSession,
+    model: type[Sms] | type[Email],
+    org_id: UUID,
+    tool_invocation_id: UUID,
+) -> Sms | Email | None:
+    """Look up an existing Sms/Email row stamped with this tool_invocation_id.
+
+    Shared by both routes' idempotent-replay checks — a retry (timeout or
+    connection-drop, see ``core/hailhq/core/agent_tools/client.py``) posts
+    the exact same id, and this is how it learns the true outcome instead of
+    sending again.
+    """
+    return (
         await db.execute(
-            select(func.count())
-            .select_from(Email)
-            .where(
-                Email.organization_id == org_id,
-                Email.metadata_["call_id"].astext == key,
+            select(model).where(
+                model.organization_id == org_id,
+                model.metadata_["tool_invocation_id"].astext == str(tool_invocation_id),
             )
         )
-    ).scalar_one()
-    sms = (
-        await db.execute(
-            select(func.count())
-            .select_from(Sms)
-            .where(
-                Sms.organization_id == org_id,
-                Sms.metadata_["call_id"].astext == key,
-            )
-        )
-    ).scalar_one()
-    return int(emails) + int(sms)
+    ).scalar_one_or_none()
+
+
+async def _deny(
+    org_id: UUID,
+    *,
+    action: str,
+    resource_type: str,
+    spoken: str,
+    payload: dict[str, Any],
+) -> AgentSendResponse:
+    """Write a denial audit row (api_key_id=None, resource_id=None) and
+    return the ``ok=False`` spoken response. Collapses the audit-then-deny
+    shape shared by the cap/funds and compliance-gate denials in both
+    routes."""
+    await write_audit_log(
+        organization_id=org_id,
+        api_key_id=None,
+        action=action,
+        resource_type=resource_type,
+        resource_id=None,
+        payload=payload,
+    )
+    return AgentSendResponse(ok=False, spoken=spoken)
 
 
 async def _shared_denial(db: AsyncSession, call: Call) -> tuple[str, str] | None:
@@ -152,21 +210,17 @@ async def agent_send_sms(
     db: Annotated[AsyncSession, Depends(get_session)],
     provider: Annotated[SmsProvider, Depends(get_sms_provider)],
 ) -> AgentSendResponse:
-    call = await _load_live_call(db, body.call_id)
+    call = await _load_call_for_update(db, body.call_id)
     if call is None:
         return AgentSendResponse(ok=False, spoken=_SPOKEN_CALL_UNAVAILABLE)
     org = call.organization_id
 
-    # Idempotent replay: the voicebot retries timeouts with the same id.
-    prior = (
-        await db.execute(
-            select(Sms).where(
-                Sms.organization_id == org,
-                Sms.metadata_["tool_invocation_id"].astext
-                == str(body.tool_invocation_id),
-            )
-        )
-    ).scalar_one_or_none()
+    # Idempotent replay: the voicebot retries timeouts/connection-drops with
+    # the same id. Checked BEFORE the liveness gate below — the original
+    # request can still be mid-provider-send when the call finalizes, so a
+    # retry that arrives just after must learn the true outcome here rather
+    # than being denied as "call ended".
+    prior = await _prior_send(db, Sms, org, body.tool_invocation_id)
     if prior is not None:
         # queued = committed-but-in-flight (the concurrent original holds
         # it between commit and delivery reconciliation); optimistic
@@ -177,30 +231,29 @@ async def agent_send_sms(
             ok=ok, spoken=_SPOKEN_SMS_SENT if ok else _SPOKEN_SMS_FAILED
         )
 
+    if call.status != "in_progress":
+        return AgentSendResponse(ok=False, spoken=_SPOKEN_CALL_UNAVAILABLE)
+
     denial = await _shared_denial(db, call)
     if denial is not None:
         spoken, reason = denial
-        await write_audit_log(
-            organization_id=org,
-            api_key_id=None,
+        return await _deny(
+            org,
             action="agent.sms.blocked",
             resource_type="sms",
-            resource_id=None,
+            spoken=spoken,
             payload={**_meta(body), "reason": reason},
         )
-        return AgentSendResponse(ok=False, spoken=spoken)
 
     gate = await check_sms_allowed(db, org, call.to_e164)
     if not gate.allowed:
-        await write_audit_log(
-            organization_id=org,
-            api_key_id=None,
+        return await _deny(
+            org,
             action="agent.sms.blocked",
             resource_type="sms",
-            resource_id=None,
+            spoken=_SPOKEN_NOT_ALLOWED,
             payload={**_meta(body), "reason": gate.reason, "checks": gate.checks},
         )
-        return AgentSendResponse(ok=False, spoken=_SPOKEN_NOT_ALLOWED)
 
     from_number = await resolve_org_number(db, org, None, capability="sms")
     if from_number is None:
@@ -236,6 +289,14 @@ async def agent_send_sms(
 
     err = await deliver_sms(db, provider, sms)
     if err is not None:
+        await write_audit_log(
+            organization_id=org,
+            api_key_id=None,
+            action="agent.sms.send_failed",
+            resource_type="sms",
+            resource_id=sms.id,
+            payload={**_meta(body), "end_reason": err},
+        )
         return AgentSendResponse(ok=False, spoken=_SPOKEN_SMS_FAILED)
     return AgentSendResponse(ok=True, spoken=_SPOKEN_SMS_SENT)
 
@@ -246,44 +307,45 @@ async def agent_send_email(
     db: Annotated[AsyncSession, Depends(get_session)],
     email_provider: Annotated[EmailProvider, Depends(get_email_provider)],
 ) -> AgentSendResponse:
-    call = await _load_live_call(db, body.call_id)
+    call = await _load_call_for_update(db, body.call_id)
     if call is None:
         return AgentSendResponse(ok=False, spoken=_SPOKEN_CALL_UNAVAILABLE)
     org = call.organization_id
 
-    prior = (
-        await db.execute(
-            select(Email).where(
-                Email.organization_id == org,
-                Email.metadata_["tool_invocation_id"].astext
-                == str(body.tool_invocation_id),
-            )
-        )
-    ).scalar_one_or_none()
+    # Idempotent replay: checked BEFORE the liveness gate below — the
+    # original request can still be mid-provider-send when the call
+    # finalizes, so a retry that arrives just after must learn the true
+    # outcome here rather than being denied as "call ended".
+    prior = await _prior_send(db, Email, org, body.tool_invocation_id)
     if prior is not None:
         # Not just "sent": "delivered" is reachable via the SES delivery
         # webhook (core/hailhq/core/email_delivery_events.py), and
         # queued = committed-but-in-flight (the concurrent original holds
         # it between commit and delivery reconciliation). Optimistic
         # success avoids the duplicate-send failure mode, which is the
-        # worse error on a live call.
-        ok = prior.status != "failed"
+        # worse error on a live call. "bounced" is excluded too — the SES
+        # webhook can flip sent→bounced between retry attempts, and a
+        # bounce means the message didn't reach the recipient. "complained"
+        # stays ok: the send itself succeeded, the recipient just flagged it
+        # afterward. Mirrors the SMS path's failed/undelivered exclusion.
+        ok = prior.status not in ("failed", "bounced")
         return AgentSendResponse(
             ok=ok, spoken=_SPOKEN_EMAIL_SENT if ok else _SPOKEN_EMAIL_FAILED
         )
 
+    if call.status != "in_progress":
+        return AgentSendResponse(ok=False, spoken=_SPOKEN_CALL_UNAVAILABLE)
+
     denial = await _shared_denial(db, call)
     if denial is not None:
         spoken, reason = denial
-        await write_audit_log(
-            organization_id=org,
-            api_key_id=None,
+        return await _deny(
+            org,
             action="agent.email.blocked",
             resource_type="email",
-            resource_id=None,
+            spoken=spoken,
             payload={**_meta(body), "reason": reason},
         )
-        return AgentSendResponse(ok=False, spoken=spoken)
 
     matches = await resolve_member_emails(db, org, body.recipient_name)
     if not matches:
@@ -303,15 +365,13 @@ async def agent_send_email(
 
     gate = await check_email_allowed(db, org, [recipient])
     if not gate.allowed:
-        await write_audit_log(
-            organization_id=org,
-            api_key_id=None,
+        return await _deny(
+            org,
             action="agent.email.blocked",
             resource_type="email",
-            resource_id=None,
+            spoken=_SPOKEN_NOT_ALLOWED,
             payload={**_meta(body), "reason": gate.reason, "checks": gate.checks},
         )
-        return AgentSendResponse(ok=False, spoken=_SPOKEN_NOT_ALLOWED)
 
     try:
         sd = await resolve_sender(db, org, None)
@@ -351,6 +411,14 @@ async def agent_send_email(
 
     err = await deliver_email(db, email_provider, email)
     if err is not None:
+        await write_audit_log(
+            organization_id=org,
+            api_key_id=None,
+            action="agent.email.send_failed",
+            resource_type="email",
+            resource_id=email.id,
+            payload={**_meta(body), "end_reason": err},
+        )
         return AgentSendResponse(ok=False, spoken=_SPOKEN_EMAIL_FAILED)
     return AgentSendResponse(ok=True, spoken=_SPOKEN_EMAIL_SENT)
 

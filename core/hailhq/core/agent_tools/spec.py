@@ -18,6 +18,12 @@ from hailhq.core.agent_tools.client import AgentApiClient
 
 RiskTier = Literal["read_only", "session_control", "outbound_send"]
 
+# Shared spoken fallback when the internal route's response carries no
+# ``spoken`` text (defensive — the route always sets one today). Both send
+# tools and the voicebot's own tool-failure path use this exact string so
+# the callee hears one consistent apology regardless of where it originates.
+SPOKEN_FALLBACK = "Sorry, that didn't work."
+
 
 @dataclass
 class ToolContext:
@@ -43,4 +49,4 @@ class ToolSpec:
     execute: Callable[[ToolContext, dict[str, Any]], Awaitable[str]]
 
 
-__all__ = ["RiskTier", "ToolContext", "ToolSpec"]
+__all__ = ["RiskTier", "SPOKEN_FALLBACK", "ToolContext", "ToolSpec"]

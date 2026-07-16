@@ -14,11 +14,12 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from hailhq.core.agent_tools.spec import ToolContext, ToolSpec
+from hailhq.core.agent_tools.spec import SPOKEN_FALLBACK, ToolContext, ToolSpec
 from hailhq.core.config import settings
 from hailhq.core.models import EmailDomain
 
-MAX_RECIPIENT_NAME_CHARS = 200  # route schema (AgentSendEmailRequest) max
+# The internal route (AgentSendEmailRequest) imports these as its Field caps.
+MAX_RECIPIENT_NAME_CHARS = 200
 MAX_SUBJECT_CHARS = 200
 MAX_BODY_CHARS = 5000
 
@@ -36,25 +37,49 @@ async def _is_available(organization_id: uuid.UUID, session: AsyncSession) -> bo
         )
         .limit(1)
     )
-    return (await session.execute(stmt)).first() is not None
+    if (await session.execute(stmt)).first() is not None:
+        return True
+    # No verified domain yet doesn't mean unavailable: routes/emails.py
+    # resolve_sender() falls back to auto-minting a hail-mail EmailDomain
+    # on the tenant's first send. Mirror that mint branch's requirements
+    # exactly (resolve_hail_mail_prefixes / compose_hail_mail_address in
+    # routes/email_domains.py) rather than just checking for existing rows:
+    # HAIL_MAIL_BASE_DOMAIN must be configured, and a user prefix must be
+    # resolvable from HAIL_MAIL_FROM or HAIL_MAIL_DEFAULT_USER_PREFIX (the
+    # org prefix is always derivable from organization_id, so it never
+    # blocks the mint).
+    return bool(settings.hail_mail_base_domain) and bool(
+        settings.hail_mail_from or settings.hail_mail_default_user_prefix
+    )
 
 
 async def _execute(ctx: ToolContext, args: dict[str, Any]) -> str:
     if ctx.api is None:
         return _UNAVAILABLE
+    recipient_name = str(args.get("recipient_name", "")).strip()[
+        :MAX_RECIPIENT_NAME_CHARS
+    ]
+    subject = str(args.get("subject", ""))[:MAX_SUBJECT_CHARS]
+    body_text = str(args.get("body_text", ""))[:MAX_BODY_CHARS]
+    # Raw LiveKit tool calls aren't schema-validated the way the internal
+    # route's Pydantic model is (min_length=1) — an empty string would sail
+    # through and 422 at the route, surfacing only a generic apology. Catch
+    # it here with tailored, actionable prompts instead of posting at all.
+    if not recipient_name:
+        return "I need the recipient's name before I can send the email."
+    if not subject.strip() or not body_text.strip():
+        return "I need a subject and a message before I can send the email."
     resp = await ctx.api.post(
         "/internal/agent/send-email",
         {
             "call_id": str(ctx.call_id),
             "tool_invocation_id": str(uuid.uuid4()),
-            "recipient_name": str(args.get("recipient_name", "")).strip()[
-                :MAX_RECIPIENT_NAME_CHARS
-            ],
-            "subject": str(args.get("subject", ""))[:MAX_SUBJECT_CHARS],
-            "body_text": str(args.get("body_text", ""))[:MAX_BODY_CHARS],
+            "recipient_name": recipient_name,
+            "subject": subject,
+            "body_text": body_text,
         },
     )
-    return str(resp.get("spoken", "Sorry, that didn't work."))
+    return str(resp.get("spoken", SPOKEN_FALLBACK))
 
 
 SPEC = ToolSpec(

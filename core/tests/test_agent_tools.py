@@ -141,6 +141,8 @@ async def test_send_email_available_only_with_verified_domain(
     async_session, monkeypatch
 ):
     monkeypatch.setattr(settings, "hail_internal_secret", "s3cret")
+    # No verified domain AND no hail-mail mint fallback available.
+    monkeypatch.setattr(settings, "hail_mail_base_domain", "")
     tools = {t.name: t for t in all_tools()}
     org = uuid.uuid4()
     assert await tools["send_email"].is_available(org, async_session) is False
@@ -154,6 +156,20 @@ async def test_send_email_available_only_with_verified_domain(
         )
     )
     await async_session.commit()
+    assert await tools["send_email"].is_available(org, async_session) is True
+
+
+async def test_send_email_available_via_hail_mail_mint_fallback(
+    async_session, monkeypatch
+):
+    """No verified domain, but HAIL_MAIL_BASE_DOMAIN + a user prefix are
+    configured: resolve_sender's auto-mint path would succeed on first
+    send, so the tool must report available (mirrors routes/emails.py)."""
+    monkeypatch.setattr(settings, "hail_internal_secret", "s3cret")
+    monkeypatch.setattr(settings, "hail_mail_base_domain", "mail.hail.so")
+    monkeypatch.setattr(settings, "hail_mail_default_user_prefix", "agent")
+    tools = {t.name: t for t in all_tools()}
+    org = uuid.uuid4()
     assert await tools["send_email"].is_available(org, async_session) is True
 
 
@@ -183,6 +199,43 @@ async def test_send_email_posts_recipient_name_not_address():
     assert path == "/internal/agent/send-email"
     assert payload["recipient_name"] == "Sarah Chen"
     assert "@" not in str(payload.get("recipient_name"))
+
+
+async def test_send_sms_empty_body_gets_tailored_error_and_never_posts():
+    api = FakeApi(spoken="Text sent.")
+    tools = {t.name: t for t in all_tools()}
+    ctx = _ctx(api=api)
+    spoken = await tools["send_sms"].execute(ctx, {"body": "   "})
+    assert spoken == "I need the message text before I can send it."
+    assert api.posts == []  # raw LiveKit args aren't schema-validated; must not 422
+
+
+async def test_send_email_empty_recipient_name_gets_tailored_error():
+    api = FakeApi(spoken="Email sent.")
+    tools = {t.name: t for t in all_tools()}
+    ctx = _ctx(api=api)
+    spoken = await tools["send_email"].execute(
+        ctx, {"recipient_name": "  ", "subject": "s", "body_text": "b"}
+    )
+    assert spoken == "I need the recipient's name before I can send the email."
+    assert api.posts == []
+
+
+async def test_send_email_empty_subject_or_body_gets_tailored_error():
+    api = FakeApi(spoken="Email sent.")
+    tools = {t.name: t for t in all_tools()}
+    ctx = _ctx(api=api)
+
+    spoken = await tools["send_email"].execute(
+        ctx, {"recipient_name": "Sarah Chen", "subject": "  ", "body_text": "b"}
+    )
+    assert spoken == "I need a subject and a message before I can send the email."
+
+    spoken = await tools["send_email"].execute(
+        ctx, {"recipient_name": "Sarah Chen", "subject": "s", "body_text": "  "}
+    )
+    assert spoken == "I need a subject and a message before I can send the email."
+    assert api.posts == []
 
 
 async def test_send_tools_degrade_without_api_client():

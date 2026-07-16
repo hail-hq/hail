@@ -15,11 +15,11 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from hailhq.core.agent_tools.spec import ToolContext, ToolSpec
+from hailhq.core.agent_tools.spec import SPOKEN_FALLBACK, ToolContext, ToolSpec
 from hailhq.core.config import settings
 from hailhq.core.models import PhoneNumber
 
-MAX_BODY_CHARS = 480  # ~3 SMS segments; matches the internal route's cap
+MAX_BODY_CHARS = 480  # ~3 SMS segments; the internal route imports this as its cap
 
 _UNAVAILABLE = "Text messaging is not available right now."
 
@@ -42,15 +42,22 @@ async def _is_available(organization_id: uuid.UUID, session: AsyncSession) -> bo
 async def _execute(ctx: ToolContext, args: dict[str, Any]) -> str:
     if ctx.api is None:
         return _UNAVAILABLE
+    body_text = str(args.get("body", ""))[:MAX_BODY_CHARS]
+    # Raw LiveKit tool calls aren't schema-validated the way the internal
+    # route's Pydantic model is (min_length=1) — an empty string would sail
+    # through and 422 at the route, surfacing only a generic apology. Catch
+    # it here with a tailored, actionable prompt instead of posting at all.
+    if not body_text.strip():
+        return "I need the message text before I can send it."
     resp = await ctx.api.post(
         "/internal/agent/send-sms",
         {
             "call_id": str(ctx.call_id),
             "tool_invocation_id": str(uuid.uuid4()),
-            "body": str(args.get("body", ""))[:MAX_BODY_CHARS],
+            "body": body_text,
         },
     )
-    return str(resp.get("spoken", "Sorry, that didn't work."))
+    return str(resp.get("spoken", SPOKEN_FALLBACK))
 
 
 SPEC = ToolSpec(

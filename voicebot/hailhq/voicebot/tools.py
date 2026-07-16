@@ -20,13 +20,13 @@ from livekit.agents.voice import RunContext
 
 from hailhq.core.agent_tools.client import AgentApiClient
 from hailhq.core.agent_tools.registry import all_tools
-from hailhq.core.agent_tools.spec import ToolContext, ToolSpec
+from hailhq.core.agent_tools.spec import SPOKEN_FALLBACK, ToolContext, ToolSpec
 from hailhq.core.config import settings
 from hailhq.core.db import session_scope
 
 logger = logging.getLogger("hailhq.voicebot")
 
-SPOKEN_TOOL_FAILURE = "Sorry, that didn't work."
+SPOKEN_TOOL_FAILURE = SPOKEN_FALLBACK
 
 
 def _make_handler(spec: ToolSpec, tctx: ToolContext):
@@ -79,6 +79,16 @@ async def build_agent_tools(
         return [], None
 
     allowed = metadata.get("tools")  # None ⇒ all available
+    if allowed is not None and not isinstance(allowed, list):
+        # Malformed dispatch metadata (e.g. a bare string instead of a
+        # list) — `s.name in allowed` would silently do substring
+        # matching on a string instead of list membership. Fail closed,
+        # matching the malformed-organization_id posture above.
+        logger.warning(
+            "dispatch metadata 'tools' is not a list (%r); agent tools disabled",
+            type(allowed).__name__,
+        )
+        return [], None
     specs = [s for s in all_tools() if allowed is None or s.name in allowed]
     if not specs:
         return [], None

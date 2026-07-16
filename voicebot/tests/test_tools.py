@@ -74,6 +74,16 @@ async def test_malformed_organization_id_disables_tools():
     assert api is None
 
 
+async def test_malformed_tools_field_disables_tools():
+    tools, api = await build_agent_tools(
+        {"organization_id": str(uuid.uuid4()), "tools": "send_sms"},
+        call_id=uuid.uuid4(),
+        hangup=None,
+    )
+    assert tools == []
+    assert api is None
+
+
 async def test_wrapper_isolates_tool_exceptions():
     async def explode(_ctx, _args):
         raise RuntimeError("kaboom")

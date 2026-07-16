@@ -6,6 +6,7 @@ LLM (they could be read aloud or leak into the stored transcript).
 
 from __future__ import annotations
 
+import logging
 import uuid
 from typing import Any
 
@@ -15,6 +16,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from hailhq.core.agent_tools.spec import ToolContext, ToolSpec
 from hailhq.core.db import session_scope
 from hailhq.core.directory import list_directory
+
+logger = logging.getLogger("hailhq.core.agent_tools")
 
 _NO_CONTACTS = "There are no contacts available."
 
@@ -27,12 +30,16 @@ async def _execute(ctx: ToolContext, _args: dict[str, Any]) -> str:
     try:
         async with session_scope() as session:
             entries = await list_directory(session, ctx.organization_id)
-    except ProgrammingError:
+    except ProgrammingError as exc:
         # Self-host posture: `users`/`members` are website-owned tables that
         # a pure self-host deployment never creates. Their absence means
         # there is no directory to show, not a server error — degrade to an
         # empty-directory answer instead of raising UndefinedTable on every
         # call.
+        logger.warning(
+            "list_contacts directory lookup failed (schema missing or drifted): %s",
+            exc,
+        )
         return _NO_CONTACTS
     if not entries:
         return _NO_CONTACTS

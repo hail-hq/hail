@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 
 import httpx
 import pytest
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from hailhq.api.main import app
@@ -18,11 +19,11 @@ from hailhq.core.db import get_session
 from hailhq.core.billing import CALL_META_BILLED
 from hailhq.core.config import settings
 from hailhq.core.models import (
+    AuditLog,
     Call,
     Email,
     EmailDomain,
     OrganizationMember,
-    PhoneNumber,
     Sms,
     User,
 )
@@ -43,24 +44,18 @@ def _internal_secret(monkeypatch):
 
 
 async def _insert_live_call(
-    session: AsyncSession, org_id, *, to_e164="+14155550123", billed=False
+    session: AsyncSession,
+    org_id,
+    add_phone_number,
+    *,
+    to_e164="+14155550123",
+    billed=False,
 ) -> Call:
-    # Follow test_calls_api.py / test_internal_dsar.py's Call-row insertion
-    # pattern for required columns (from_number_id needs a PhoneNumber row;
-    # PhoneNumber itself requires country_code/number_type/
-    # provider_resource_id — all NOT NULL with no server default).
-    number = PhoneNumber(
-        organization_id=org_id,
-        e164="+14155550100",
-        country_code="US",
-        number_type="local",
-        provider_resource_id=f"PN-{uuid.uuid4()}",
-        capabilities=["voice", "sms"],
-        provisioning_state="active",
-        is_pool=False,
-    )
-    session.add(number)
-    await session.flush()
+    # add_phone_number (conftest.py factory fixture, see test_calls_api.py)
+    # covers the same required columns this used to hand-roll: PhoneNumber
+    # needs country_code/number_type/provider_resource_id, all NOT NULL with
+    # no server default.
+    number = await add_phone_number(session, org_id)
     call = Call(
         organization_id=org_id,
         from_number_id=number.id,
@@ -108,9 +103,9 @@ async def test_send_sms_unknown_call_is_spoken_denial(client, async_session):
     assert data["spoken"]
 
 
-async def test_send_sms_ended_call_is_denied(client, async_session):
+async def test_send_sms_ended_call_is_denied(client, async_session, add_phone_number):
     org = uuid.uuid4()
-    call = await _insert_live_call(async_session, org)
+    call = await _insert_live_call(async_session, org, add_phone_number)
     call.status = "completed"
     call.end_reason = "normal_hangup"
     await async_session.commit()
@@ -121,9 +116,13 @@ async def test_send_sms_ended_call_is_denied(client, async_session):
     assert resp.json()["ok"] is False
 
 
-async def test_send_sms_happy_path_targets_counterpart(client, async_session, sms_mock):
+async def test_send_sms_happy_path_targets_counterpart(
+    client, async_session, sms_mock, add_phone_number
+):
     org = uuid.uuid4()
-    call = await _insert_live_call(async_session, org, to_e164="+14155550123")
+    call = await _insert_live_call(
+        async_session, org, add_phone_number, to_e164="+14155550123"
+    )
     body = _sms_payload(call.id, body="Your code is 42.")
     resp = await client.post(
         "/internal/agent/send-sms", content=body, headers=_signed(body)
@@ -139,10 +138,10 @@ async def test_send_sms_happy_path_targets_counterpart(client, async_session, sm
 
 
 async def test_send_sms_replays_same_invocation_without_double_send(
-    client, async_session, sms_mock
+    client, async_session, sms_mock, add_phone_number
 ):
     org = uuid.uuid4()
-    call = await _insert_live_call(async_session, org)
+    call = await _insert_live_call(async_session, org, add_phone_number)
     payload = {
         "call_id": str(call.id),
         "tool_invocation_id": str(uuid.uuid4()),
@@ -160,9 +159,11 @@ async def test_send_sms_replays_same_invocation_without_double_send(
     assert count == 1
 
 
-async def test_send_sms_cap_blocks_sixth_send(client, async_session, sms_mock):
+async def test_send_sms_cap_blocks_sixth_send(
+    client, async_session, sms_mock, add_phone_number
+):
     org = uuid.uuid4()
-    call = await _insert_live_call(async_session, org)
+    call = await _insert_live_call(async_session, org, add_phone_number)
     for _ in range(5):
         body = _sms_payload(call.id)
         assert (
@@ -178,10 +179,10 @@ async def test_send_sms_cap_blocks_sixth_send(client, async_session, sms_mock):
 
 
 async def test_send_email_resolves_member_and_never_crosses_orgs(
-    client, async_session, email_mock
+    client, async_session, email_mock, add_phone_number
 ):
     org_a, org_b = uuid.uuid4(), uuid.uuid4()
-    call = await _insert_live_call(async_session, org_a)
+    call = await _insert_live_call(async_session, org_a, add_phone_number)
     async_session.add(
         EmailDomain(
             organization_id=org_a,
@@ -228,9 +229,11 @@ async def test_send_email_resolves_member_and_never_crosses_orgs(
     assert rows == []
 
 
-async def test_send_email_happy_path_stamps_call_id(client, async_session, email_mock):
+async def test_send_email_happy_path_stamps_call_id(
+    client, async_session, email_mock, add_phone_number
+):
     org = uuid.uuid4()
-    call = await _insert_live_call(async_session, org)
+    call = await _insert_live_call(async_session, org, add_phone_number)
     async_session.add(
         EmailDomain(
             organization_id=org,
@@ -277,7 +280,7 @@ async def test_send_email_happy_path_stamps_call_id(client, async_session, email
 
 
 async def test_send_sms_concurrent_same_invocation_sends_once(
-    client, async_session, session_factory, sms_mock
+    client, async_session, session_factory, sms_mock, add_phone_number
 ):
     """Two racing requests with one tool_invocation_id: exactly one row.
 
@@ -288,7 +291,7 @@ async def test_send_sms_concurrent_same_invocation_sends_once(
     lock is what serializes them — this runs against real Postgres.
     """
     org = uuid.uuid4()
-    call = await _insert_live_call(async_session, org)
+    call = await _insert_live_call(async_session, org, add_phone_number)
     payload = {
         "call_id": str(call.id),
         "tool_invocation_id": str(uuid.uuid4()),
@@ -320,9 +323,13 @@ async def test_send_sms_concurrent_same_invocation_sends_once(
     assert len(rows) == 1
 
 
-async def test_send_sms_suppression_blocks_agent_send(client, async_session):
+async def test_send_sms_suppression_blocks_agent_send(
+    client, async_session, add_phone_number
+):
     org = uuid.uuid4()
-    call = await _insert_live_call(async_session, org, to_e164="+14155550123")
+    call = await _insert_live_call(
+        async_session, org, add_phone_number, to_e164="+14155550123"
+    )
     await add_suppression(
         async_session,
         organization_id=org,
@@ -347,9 +354,11 @@ async def test_send_sms_suppression_blocks_agent_send(client, async_session):
     assert rows == []
 
 
-async def test_send_sms_denied_when_org_has_no_funds(client, async_session):
+async def test_send_sms_denied_when_org_has_no_funds(
+    client, async_session, add_phone_number
+):
     org = uuid.uuid4()
-    call = await _insert_live_call(async_session, org, billed=True)
+    call = await _insert_live_call(async_session, org, add_phone_number, billed=True)
     # No account_credits rows for this org — balance defaults to zero.
     body = _sms_payload(call.id)
     resp = await client.post(
@@ -372,3 +381,126 @@ async def test_send_sms_rejects_when_secret_unconfigured(
         "/internal/agent/send-sms", content=body, headers=_signed(body)
     )
     assert resp.status_code == 503
+
+
+async def test_send_sms_retry_after_call_ended_still_dedupes(
+    client, async_session, sms_mock, add_phone_number
+):
+    """A retry with the SAME tool_invocation_id must hit the dedupe branch
+    even after the call has finalized — the original send may have still
+    been mid-flight when the call ended. Regression test for reordering
+    the dedupe lookup ahead of the liveness check."""
+    org = uuid.uuid4()
+    call = await _insert_live_call(async_session, org, add_phone_number)
+    payload = {
+        "call_id": str(call.id),
+        "tool_invocation_id": str(uuid.uuid4()),
+        "body": "hi",
+    }
+    body = json.dumps(payload).encode()
+    r1 = await client.post(
+        "/internal/agent/send-sms", content=body, headers=_signed(body)
+    )
+    assert r1.json()["ok"] is True
+
+    call.status = "completed"
+    call.end_reason = "normal_hangup"
+    await async_session.commit()
+
+    r2 = await client.post(
+        "/internal/agent/send-sms", content=body, headers=_signed(body)
+    )
+    assert r2.status_code == 200
+    assert r2.json()["ok"] is True
+
+    rows = (await async_session.execute(Sms.__table__.select())).fetchall()
+    assert len(rows) == 1
+
+
+async def test_send_email_replay_bounced_is_not_ok(
+    client, async_session, email_mock, add_phone_number
+):
+    """Replay must reflect a bounce that landed between attempts (the SES
+    webhook can flip sent→bounced), mirroring the SMS path's failed/
+    undelivered exclusion."""
+    org = uuid.uuid4()
+    call = await _insert_live_call(async_session, org, add_phone_number)
+    async_session.add(
+        EmailDomain(
+            organization_id=org,
+            kind="custom",
+            domain="mail.a.test",
+            verification_status="verified",
+        )
+    )
+    user = User(
+        id=uuid.uuid4(),
+        name="Sarah Chen",
+        email="sarah@a.test",
+        created_at=datetime.now(timezone.utc),
+    )
+    async_session.add(user)
+    async_session.add(
+        OrganizationMember(
+            id=uuid.uuid4(),
+            user_id=user.id,
+            organization_id=org,
+            role="member",
+            created_at=datetime.now(timezone.utc),
+        )
+    )
+    await async_session.commit()
+
+    payload = json.dumps(
+        {
+            "call_id": str(call.id),
+            "tool_invocation_id": str(uuid.uuid4()),
+            "recipient_name": "Sarah Chen",
+            "subject": "Call summary",
+            "body_text": "Hello from the call.",
+        }
+    ).encode()
+    r1 = await client.post(
+        "/internal/agent/send-email", content=payload, headers=_signed(payload)
+    )
+    assert r1.json()["ok"] is True
+
+    await async_session.execute(
+        Email.__table__.update().values(status="bounced", end_reason="bounced")
+    )
+    await async_session.commit()
+
+    r2 = await client.post(
+        "/internal/agent/send-email", content=payload, headers=_signed(payload)
+    )
+    assert r2.status_code == 200
+    assert r2.json()["ok"] is False
+
+    rows = (await async_session.execute(Email.__table__.select())).fetchall()
+    assert len(rows) == 1  # still no second row — this was a replay
+
+
+async def test_send_sms_provider_failure_writes_send_failed_audit(
+    client, async_session, sms_mock, add_phone_number
+):
+    sms_mock.send_sms.side_effect = Exception("carrier down")
+    org = uuid.uuid4()
+    call = await _insert_live_call(async_session, org, add_phone_number)
+    body = _sms_payload(call.id)
+    resp = await client.post(
+        "/internal/agent/send-sms", content=body, headers=_signed(body)
+    )
+    assert resp.json()["ok"] is False
+
+    rows = (
+        (
+            await async_session.execute(
+                select(AuditLog).where(AuditLog.action == "agent.sms.send_failed")
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert len(rows) == 1
+    assert rows[0].organization_id == org
+    assert rows[0].payload["end_reason"] == "provider_error"

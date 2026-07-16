@@ -2,8 +2,10 @@
 
 Same signing scheme as everywhere else in this repo
 (``hailhq.core.hmac_signing``): HMAC-SHA256 over the raw request body in
-``X-Hail-Signature``. One retry on timeout is safe because every payload
-carries its own ``tool_invocation_id`` and the routes dedupe on it.
+``X-Hail-Signature``. One retry on timeout OR connection drop (e.g. a
+mid-response ``ServerDisconnectedError``) is safe because the retry resends
+the exact same signed body/``tool_invocation_id`` and the routes dedupe on
+that id — so the resend can never become a duplicate send.
 """
 
 from __future__ import annotations
@@ -37,23 +39,41 @@ class AgentApiClient:
         return self._session
 
     async def post(self, path: str, payload: dict[str, Any]) -> dict[str, Any]:
+        """POST a signed payload, retrying once on timeout or connection drop.
+
+        ``asyncio.TimeoutError`` covers request timeouts (and
+        ``aiohttp.ServerTimeoutError``, which subclasses it).
+        ``aiohttp.ClientConnectionError`` covers connection-level failures
+        such as ``ServerDisconnectedError`` or ``ClientConnectorError`` —
+        cases where the request may never have reached the server, or the
+        response was lost in flight. Both are safe to retry with the same
+        body because the route dedupes on ``tool_invocation_id``. A received
+        error response (``aiohttp.ClientResponseError`` from
+        ``raise_for_status``) is NOT retried — that's a real answer from the
+        server, not a lost request.
+        """
         body = json.dumps(payload).encode()
         headers = {
             "Content-Type": "application/json",
             "X-Hail-Signature": hmac_signing.sign(body, self._secret),
         }
         url = join_url(self._base_url, path)
-        last_exc: Exception = RuntimeError("unreachable")
-        for _attempt in range(2):
+        for attempt in range(2):
             try:
                 session = self._get_session()
                 async with session.post(url, data=body, headers=headers) as resp:
                     resp.raise_for_status()
                     return await resp.json()
-            except asyncio.TimeoutError as exc:
-                last_exc = exc
-                continue
-        raise last_exc
+            except (asyncio.TimeoutError, aiohttp.ClientConnectionError) as exc:
+                if attempt == 1:
+                    raise
+                logger.warning(
+                    "agent api post to %s failed (%s); retrying with same "
+                    "tool_invocation_id",
+                    path,
+                    type(exc).__name__,
+                )
+        raise AssertionError("unreachable")
 
     async def aclose(self) -> None:
         if self._session is not None and not self._session.closed:
