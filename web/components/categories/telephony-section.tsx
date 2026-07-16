@@ -53,6 +53,7 @@ export function TelephonySection({ data }: { data: TelephonyNumberRow[] }) {
       data={data}
       columns={columns}
       defaultSort={{ id: 'price', desc: false }}
+      noun="number"
     />
   );
 }

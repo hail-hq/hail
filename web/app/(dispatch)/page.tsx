@@ -11,7 +11,7 @@ export const dynamic = 'force-static';
 export const metadata = {
   title: 'Model costs — Hail',
   description:
-    'Public, validated pricing and capability data for AI model providers — LLMs, speech-to-text, and text-to-speech. Schema-validated, CC-BY-4.0, refreshed weekly.',
+    'Public, validated pricing and capability data for AI model providers — LLMs, speech-to-text, text-to-speech, and telephony. Schema-validated, CC-BY-4.0, refreshed weekly.',
   alternates: {
     types: {
       'text/markdown': '/costs.md',
