@@ -40,6 +40,7 @@ from hailhq.core.compliance_gate import check_sms_allowed, remove_suppression
 from hailhq.core.config import settings
 from hailhq.core.db import get_session
 from hailhq.core.models import Sms, SmsEvent, SmsSenderIdentity, Suppression
+from hailhq.core.pricing_tier import classify_pricing_tier
 from hailhq.core.providers.sms import SmsProvider, TwilioSmsProvider
 from hailhq.core.sender_id import PLATFORM_DEFAULT_SENDER_ID, resolve_sender
 from hailhq.core.schemas import (
@@ -261,11 +262,12 @@ async def create_sms(
     await db.commit()
 
     if not carrier_rejected:
+        tier = classify_pricing_tier(sms.to_e164)
         await write_usage_event(
             organization_id=principal.organization_id,
             channel="sms",
             units=sms.segment_count,
-            ref=f"sms:{sms.id}",
+            ref=f"sms:{sms.id}:{tier}",
         )
 
     response.headers["Location"] = f"/sms/{sms.id}"
