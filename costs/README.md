@@ -1,6 +1,6 @@
 # Model Costs
 
-Public, validated cost and capability data for AI model providers — LLMs, speech-to-text, and text-to-speech.
+Public, validated cost and capability data for AI model providers — LLMs, speech-to-text, text-to-speech, and telephony (phone-number COGS and A2P 10DLC fees).
 
 The JSON files in this directory are the source of truth. Each row is validated against a JSON Schema in [`schema/`](./schema/) on every pull request. Schema version is `2`.
 
@@ -11,16 +11,20 @@ Programmatic consumers (agents, scripts, dashboards) should fetch directly:
 - LLMs: <https://raw.githubusercontent.com/hail-hq/hail/main/costs/llm.json>
 - STT: <https://raw.githubusercontent.com/hail-hq/hail/main/costs/stt.json>
 - TTS: <https://raw.githubusercontent.com/hail-hq/hail/main/costs/tts.json>
+- Telephony: <https://raw.githubusercontent.com/hail-hq/hail/main/costs/telephony.json>
 
 Schemas are served at their `$id` URLs:
 
 - <https://hail.so/costs/schema/llm.json>
 - <https://hail.so/costs/schema/stt.json>
 - <https://hail.so/costs/schema/tts.json>
+- <https://hail.so/costs/schema/telephony.json>
+
+**Note:** The interactive `web/` compare view and `costs.md` markdown export do not yet include telephony data (out of scope; a later PR).
 
 ## How AI agents should use this
 
-The data files share a common envelope: `{ version, license, models[] }`. Every model row has `provider`, `model_id`, `display_name`, primary price fields (as decimal strings, e.g. `"5.0"`), `last_verified`, `last_changed_at`, `verification_method`, `verified_by`, and `source_url`. See the JSON Schemas above for the exact shape per category.
+Model files (llm/stt/tts) share a common envelope: `{ version, license, models[] }`. Every model row has `provider`, `model_id`, `display_name`, primary price fields (as decimal strings, e.g. `"5.0"`), `last_verified`, `last_changed_at`, `verification_method`, `verified_by`, and `source_url`. The `telephony.json` file instead carries `numbers[]` and `a2p_10dlc[]`, since a phone number is not a model. See the JSON Schemas above for the exact shape per category.
 
 Canonical fetch pattern:
 
