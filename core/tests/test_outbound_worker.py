@@ -11,7 +11,14 @@ import pytest
 from botocore.exceptions import ClientError
 from sqlalchemy import select
 
-from hailhq.core.models import Email, EmailAttachment, EmailDomain
+from hailhq.core.agent_caps import AGENT_OUTBOUND_DISABLED_FLAG
+from hailhq.core.models import (
+    Email,
+    EmailAttachment,
+    EmailDomain,
+    Organization,
+    PlatformFlag,
+)
 from hailhq.core.outbound_worker import OutboundForwardWorker
 from hailhq.core.providers.email.base import ProviderSendResult
 
@@ -85,6 +92,53 @@ async def test_tick_sends_queued_forward_and_marks_sent(async_session):
     assert refreshed.provider_message_id == "ses-1"
     kwargs = provider.send_email.await_args.kwargs
     assert kwargs["headers"]["X-Hail-Forward-Hops"] == "1"
+
+
+@pytest.mark.asyncio
+async def test_kill_switch_defers_agent_org_forward(async_session):
+    """The agent-outbound kill switch halts inbound-forward relay for
+    agent-origin orgs: the row stays queued (deferred, not failed) and the
+    provider is never called, so it resumes when the switch is cleared."""
+    org_id = uuid.uuid4()
+    async_session.add(Organization(id=org_id, origin="agent"))
+    async_session.add(PlatformFlag(key=AGENT_OUTBOUND_DISABLED_FLAG, value="true"))
+    dom = _domain(org_id)
+    async_session.add(dom)
+    await async_session.flush()
+    row = _queued_forward(org_id, dom.id, uuid.uuid4())
+    async_session.add(row)
+    await async_session.commit()
+
+    provider = AsyncMock()
+    processed = await _worker(async_session, provider).tick()
+
+    assert processed == 0  # deferred, not counted as processed
+    provider.send_email.assert_not_awaited()
+    refreshed = (
+        await async_session.execute(select(Email).where(Email.id == row.id))
+    ).scalar_one()
+    assert refreshed.status == "queued"
+
+
+@pytest.mark.asyncio
+async def test_kill_switch_does_not_touch_human_org_forward(async_session):
+    """A human-origin org's forward is unaffected by the kill switch flag."""
+    org_id = uuid.uuid4()
+    async_session.add(Organization(id=org_id, origin="human"))
+    async_session.add(PlatformFlag(key=AGENT_OUTBOUND_DISABLED_FLAG, value="true"))
+    dom = _domain(org_id)
+    async_session.add(dom)
+    await async_session.flush()
+    row = _queued_forward(org_id, dom.id, uuid.uuid4())
+    async_session.add(row)
+    await async_session.commit()
+
+    provider = AsyncMock()
+    provider.send_email.return_value = ProviderSendResult(provider_message_id="ses-1")
+    processed = await _worker(async_session, provider).tick()
+
+    assert processed == 1
+    provider.send_email.assert_awaited_once()
 
 
 @pytest.mark.asyncio

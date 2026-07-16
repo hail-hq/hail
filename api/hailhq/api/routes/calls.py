@@ -22,6 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from hailhq.api.audit import write_audit_log
 from hailhq.api.consent import enforce_consent, isoformat_or_none
 from hailhq.api.errors import unprocessable
+from hailhq.api.agent_gate import require_agent_send_allowed
 from hailhq.api.funds import require_funds
 from hailhq.core.call_end_reasons import CallEndReason
 from hailhq.core.compliance_gate import check_call_allowed
@@ -219,6 +220,7 @@ async def create_call(
         )
 
     await require_funds(db, principal, idem)
+    await require_agent_send_allowed(db, principal, "voice", [body.to], idem)
 
     # 1. Resolve the from-number: explicit `from` → org-owned active → shared
     #    pool. Pool numbers are never explicitly addressable; naming one would

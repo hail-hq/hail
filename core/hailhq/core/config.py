@@ -227,6 +227,23 @@ class Settings(BaseSettings):
     # check — hourly by default, not a per-send check. Set 0 to disable.
     hail_abuse_monitor_poll_seconds: int = 3600
 
+    # Agent self-signup velocity caps (spec: 2026-07-14-agent-self-signup-design).
+    # Per agent-origin org:
+    agent_email_per_hour: int = 20
+    agent_email_per_day: int = 50
+    agent_sms_per_hour: int = 5
+    agent_sms_per_day: int = 15
+    agent_voice_per_hour: int = 3
+    agent_voice_per_day: int = 10
+    # Distinct recipients per org, per channel, per day:
+    agent_email_recipients_per_day: int = 10
+    agent_sms_recipients_per_day: int = 5
+    agent_voice_recipients_per_day: int = 5
+    # Global ceilings across ALL agent-origin orgs, per channel, per hour:
+    agent_global_email_per_hour: int = 200
+    agent_global_sms_per_hour: int = 30
+    agent_global_voice_per_hour: int = 15
+
     # SMS compliance auto-replies (HELP/STOP/START). OFF by default: Twilio's
     # own opt-out handling already auto-replies to these keywords, so enabling
     # Hail replies on top would double-text. Enable only when Twilio's default

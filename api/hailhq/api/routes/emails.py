@@ -48,8 +48,9 @@ from hailhq.api.routes.email_domains import (
     get_email_provider,
     resolve_hail_mail_prefixes,
 )
+from hailhq.api.agent_gate import require_agent_send_allowed
 from hailhq.api.funds import require_funds
-from hailhq.core.compliance_gate import check_email_allowed
+from hailhq.core.compliance_gate import check_email_allowed, normalize_recipient
 from hailhq.core.db import get_session
 from hailhq.core.email_attachment_limits import (
     ATTACHMENT_TOO_LARGE_DETAIL,
@@ -341,6 +342,13 @@ async def create_email(
         )
 
     await require_funds(db, principal, idem)
+    # Same normalized set the compliance gate above screened (to+cc+bcc,
+    # deduped) — every recipient counts toward the agent caps, not just
+    # the first `to` address (a cc/bcc fan-out would otherwise defeat them).
+    agent_recipients = list(
+        dict.fromkeys(normalize_recipient(r) for r in all_recipients)
+    )
+    await require_agent_send_allowed(db, principal, "email", agent_recipients, idem)
 
     attachment_rows: list[EmailAttachmentUpload] = []
     if body.attachment_ids:

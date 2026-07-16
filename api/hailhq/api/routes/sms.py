@@ -35,6 +35,7 @@ from hailhq.api.idempotency import (
 from hailhq.api.numbers import resolve_org_number
 from hailhq.api.pagination import fetch_cursor_page
 from hailhq.api.usage import write_usage_event
+from hailhq.api.agent_gate import require_agent_send_allowed
 from hailhq.api.funds import require_funds
 from hailhq.core.compliance_gate import check_sms_allowed, remove_suppression
 from hailhq.core.config import settings
@@ -126,6 +127,7 @@ async def create_sms(
         )
 
     await require_funds(db, principal, idem)
+    await require_agent_send_allowed(db, principal, "sms", [body.to], idem)
 
     # The dedicated-number requirement is conditional on the destination
     # corridor (Task 5). For alphanumeric-eligible corridors with no explicit

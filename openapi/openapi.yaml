@@ -49,6 +49,23 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HTTPValidationError"
+        "429":
+          description: >-
+            Rate limited. The agent-origin workspace exceeded a per-channel
+            velocity cap, or the platform kill switch is on. Retry after the
+            Retry-After header (seconds).
+          headers:
+            Retry-After:
+              description: Seconds to wait before retrying.
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  detail:
+                    type: string
     get:
       tags:
         - calls
@@ -230,6 +247,23 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HTTPValidationError"
+        "429":
+          description: >-
+            Rate limited. The agent-origin workspace exceeded a per-channel
+            velocity cap, or the platform kill switch is on. Retry after the
+            Retry-After header (seconds).
+          headers:
+            Retry-After:
+              description: Seconds to wait before retrying.
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  detail:
+                    type: string
     get:
       tags:
         - emails
@@ -1391,6 +1425,23 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HTTPValidationError"
+        "429":
+          description: >-
+            Rate limited. The agent-origin workspace exceeded a per-channel
+            velocity cap, or the platform kill switch is on. Retry after the
+            Retry-After header (seconds).
+          headers:
+            Retry-After:
+              description: Seconds to wait before retrying.
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  detail:
+                    type: string
     get:
       tags:
         - sms
