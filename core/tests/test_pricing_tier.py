@@ -58,6 +58,7 @@ def test_foreign_nanp_country_is_row_tier(npa: str, country: str) -> None:
 @pytest.mark.parametrize(
     "npa, region",
     [
+        ("257", "BC province-wide overlay"),
         ("263", "Montreal QC"),
         ("354", "QC 450/579 overlay"),
         ("367", "QC 418/581 overlay"),

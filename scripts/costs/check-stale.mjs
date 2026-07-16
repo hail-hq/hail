@@ -78,7 +78,8 @@ async function main() {
       (Date.now() - new Date(row.last_verified + 'T00:00:00Z').getTime()) / MS_PER_DAY,
     );
     const label = row.model_id || row.display_name || row.carrier || '(row)';
-    console.log(`- [${row.category}] ${row.provider ?? ''} ${label} — last verified ${row.last_verified} (${days} days ago)`.replace(/\s+/g, ' '));
+    const name = [row.provider, label].filter(Boolean).join(' / ');
+    console.log(`- [${row.category}] ${name} — last verified ${row.last_verified} (${days} days ago)`);
   }
   process.exit(1);
 }

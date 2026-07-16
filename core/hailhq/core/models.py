@@ -109,6 +109,13 @@ class UsageEvent(Base):
     to ``account_credits``, then stamps ``priced_at`` here. Self-host
     operators never run the rater — this table accumulates as a raw
     analytics primitive they can query directly.
+
+    ``ref`` formats (the rater's parsing contract):
+      * voice: bare call UUID
+      * sms:   ``sms:{uuid}:{tier}`` where tier is us/ca/row
+               (rows written before the tiered rates shipped are bare
+               ``sms:{uuid}``; the rater must treat those as ``us``)
+      * email: ``email:{uuid}``; forwards use ``email-forward:{id}``
     """
 
     __tablename__ = "usage_events"

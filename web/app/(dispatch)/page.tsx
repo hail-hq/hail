@@ -27,7 +27,7 @@ export default function CostsPage() {
   for (const m of [...llm.models, ...stt.models, ...tts.models]) {
     providers.add(m.provider);
   }
-  const verified = mostRecent(llm.models, stt.models, tts.models);
+  const verified = mostRecent(llm.models, stt.models, tts.models, telephony.numbers, telephony.a2p_10dlc);
 
   return (
     <>

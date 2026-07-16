@@ -154,7 +154,9 @@ async def test_create_sms_carrier_rejection_not_billed(
     # A rejected message was never sent — sent_at stays null.
     assert body["sent_at"] is None
 
-    stmt = select(UsageEvent).where(UsageEvent.ref == f"sms:{body['id']}:us")
+    # Filter on channel, not an exact ref string: a regression that bills the
+    # rejected send under any ref shape must still fail this assertion.
+    stmt = select(UsageEvent).where(UsageEvent.channel == "sms")
     rows = (await async_session.execute(stmt)).scalars().all()
     assert rows == []
 

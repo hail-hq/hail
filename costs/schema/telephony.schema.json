@@ -9,28 +9,37 @@
   "properties": {
     "version": { "const": 2 },
     "license": { "const": "CC-BY-4.0" },
-    "numbers": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/number" } },
-    "a2p_10dlc": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/fee" } }
+    "numbers": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/number" }
+    },
+    "a2p_10dlc": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/fee" }
+    }
   },
   "$defs": {
-    "decimal": { "type": "string", "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]{1,8})?$" },
-    "date": { "type": "string", "format": "date" },
-    "provenance": {
-      "type": "object",
-      "required": ["last_verified", "last_changed_at", "verification_method", "verified_by", "source_url"],
-      "properties": {
-        "last_verified": { "$ref": "#/$defs/date" },
-        "last_changed_at": { "$ref": "#/$defs/date" },
-        "verification_method": { "enum": ["manual-confirmed", "community-pr"] },
-        "verified_by": { "type": "string", "pattern": "^[a-zA-Z0-9](?:[a-zA-Z0-9]|-(?=[a-zA-Z0-9])){0,38}$" },
-        "source_url": { "type": "string", "format": "uri" },
-        "notes": { "type": "string" }
-      }
+    "decimal": {
+      "type": "string",
+      "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]{1,8})?$"
     },
+    "date": { "type": "string", "format": "date" },
     "number": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["country_code", "number_type", "display_name", "usd_per_month", "last_verified", "last_changed_at", "verification_method", "verified_by", "source_url"],
+      "required": [
+        "country_code",
+        "number_type",
+        "display_name",
+        "usd_per_month",
+        "last_verified",
+        "last_changed_at",
+        "verification_method",
+        "verified_by",
+        "source_url"
+      ],
       "properties": {
         "country_code": { "type": "string", "pattern": "^[A-Z]{2}$" },
         "number_type": { "enum": ["local", "mobile", "toll_free"] },
@@ -39,7 +48,10 @@
         "last_verified": { "$ref": "#/$defs/date" },
         "last_changed_at": { "$ref": "#/$defs/date" },
         "verification_method": { "enum": ["manual-confirmed", "community-pr"] },
-        "verified_by": { "type": "string", "pattern": "^[a-zA-Z0-9](?:[a-zA-Z0-9]|-(?=[a-zA-Z0-9])){0,38}$" },
+        "verified_by": {
+          "type": "string",
+          "pattern": "^[a-zA-Z0-9](?:[a-zA-Z0-9]|-(?=[a-zA-Z0-9])){0,38}$"
+        },
         "source_url": { "type": "string", "format": "uri" },
         "notes": { "type": "string" }
       }
@@ -47,10 +59,30 @@
     "fee": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["carrier", "fee_kind", "direction", "last_verified", "last_changed_at", "verification_method", "verified_by", "source_url"],
+      "required": [
+        "carrier",
+        "fee_kind",
+        "direction",
+        "last_verified",
+        "last_changed_at",
+        "verification_method",
+        "verified_by",
+        "source_url"
+      ],
+      "anyOf": [
+        { "required": ["usd_per_message"] },
+        { "required": ["usd_per_month"] },
+        { "required": ["usd_one_time"] }
+      ],
       "properties": {
         "carrier": { "type": "string", "minLength": 1 },
-        "fee_kind": { "enum": ["carrier_passthrough", "tcr_registration", "tcr_campaign_monthly"] },
+        "fee_kind": {
+          "enum": [
+            "carrier_passthrough",
+            "tcr_registration",
+            "tcr_campaign_monthly"
+          ]
+        },
         "direction": { "enum": ["outbound", "inbound", "na"] },
         "usd_per_message": { "$ref": "#/$defs/decimal" },
         "usd_per_month": { "$ref": "#/$defs/decimal" },
@@ -58,7 +90,10 @@
         "last_verified": { "$ref": "#/$defs/date" },
         "last_changed_at": { "$ref": "#/$defs/date" },
         "verification_method": { "enum": ["manual-confirmed", "community-pr"] },
-        "verified_by": { "type": "string", "pattern": "^[a-zA-Z0-9](?:[a-zA-Z0-9]|-(?=[a-zA-Z0-9])){0,38}$" },
+        "verified_by": {
+          "type": "string",
+          "pattern": "^[a-zA-Z0-9](?:[a-zA-Z0-9]|-(?=[a-zA-Z0-9])){0,38}$"
+        },
         "source_url": { "type": "string", "format": "uri" },
         "notes": { "type": "string" }
       }
