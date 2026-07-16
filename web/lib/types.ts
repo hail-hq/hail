@@ -125,6 +125,41 @@ export type TTSRow = CommonFields & {
   aggregators?: Aggregator[];
 };
 
+export interface TelephonyNumberRow {
+  country_code: string;
+  number_type: 'local' | 'mobile' | 'toll_free';
+  display_name: string;
+  usd_per_month: string;
+  last_verified: string;
+  last_changed_at: string;
+  verification_method: 'manual-confirmed' | 'community-pr';
+  verified_by: string;
+  source_url: string;
+  notes?: string;
+}
+
+export interface TelephonyFeeRow {
+  carrier: string;
+  fee_kind: 'carrier_passthrough' | 'tcr_registration' | 'tcr_campaign_monthly';
+  direction: 'outbound' | 'inbound' | 'na';
+  usd_per_message?: string;
+  usd_per_month?: string;
+  usd_one_time?: string;
+  last_verified: string;
+  last_changed_at: string;
+  verification_method: 'manual-confirmed' | 'community-pr';
+  verified_by: string;
+  source_url: string;
+  notes?: string;
+}
+
+export interface TelephonyFile {
+  version: number;
+  license: string;
+  numbers: TelephonyNumberRow[];
+  a2p_10dlc: TelephonyFeeRow[];
+}
+
 export type CostsFile<T> = {
   version: 2;
   license: 'CC-BY-4.0';
