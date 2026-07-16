@@ -1,0 +1,88 @@
+{
+  "version": 2,
+  "license": "CC-BY-4.0",
+  "numbers": [
+    {
+      "country_code": "US",
+      "number_type": "local",
+      "display_name": "US local (10DLC long code)",
+      "usd_per_month": "1.15",
+      "last_verified": "2026-07-15",
+      "last_changed_at": "2026-07-15",
+      "verification_method": "manual-confirmed",
+      "verified_by": "r13i",
+      "source_url": "https://www.twilio.com/en-us/sms/pricing/us",
+      "notes": "At-cost pass-through of Twilio's US long-code monthly rental. No markup."
+    },
+    {
+      "country_code": "US",
+      "number_type": "toll_free",
+      "display_name": "US toll-free",
+      "usd_per_month": "2.15",
+      "last_verified": "2026-07-15",
+      "last_changed_at": "2026-07-15",
+      "verification_method": "manual-confirmed",
+      "verified_by": "r13i",
+      "source_url": "https://www.twilio.com/en-us/sms/pricing/us",
+      "notes": "At-cost pass-through of Twilio's US toll-free monthly rental."
+    }
+  ],
+  "a2p_10dlc": [
+    {
+      "carrier": "AT&T",
+      "fee_kind": "carrier_passthrough",
+      "direction": "outbound",
+      "usd_per_message": "0.0035",
+      "last_verified": "2026-07-15",
+      "last_changed_at": "2026-07-15",
+      "verification_method": "manual-confirmed",
+      "verified_by": "r13i",
+      "source_url": "https://www.twilio.com/en-us/sms/pricing/us"
+    },
+    {
+      "carrier": "T-Mobile",
+      "fee_kind": "carrier_passthrough",
+      "direction": "outbound",
+      "usd_per_message": "0.0045",
+      "last_verified": "2026-07-15",
+      "last_changed_at": "2026-07-15",
+      "verification_method": "manual-confirmed",
+      "verified_by": "r13i",
+      "source_url": "https://www.twilio.com/en-us/sms/pricing/us"
+    },
+    {
+      "carrier": "Verizon",
+      "fee_kind": "carrier_passthrough",
+      "direction": "outbound",
+      "usd_per_message": "0.0045",
+      "last_verified": "2026-07-15",
+      "last_changed_at": "2026-07-15",
+      "verification_method": "manual-confirmed",
+      "verified_by": "r13i",
+      "source_url": "https://www.twilio.com/en-us/sms/pricing/us"
+    },
+    {
+      "carrier": "Verizon",
+      "fee_kind": "carrier_passthrough",
+      "direction": "inbound",
+      "usd_per_message": "0.007",
+      "last_verified": "2026-07-15",
+      "last_changed_at": "2026-07-15",
+      "verification_method": "manual-confirmed",
+      "verified_by": "r13i",
+      "source_url": "https://www.twilio.com/en-us/sms/pricing/us"
+    },
+    {
+      "carrier": "TCR",
+      "fee_kind": "tcr_campaign_monthly",
+      "direction": "na",
+      "usd_per_month": "10.0",
+      "last_verified": "2026-07-15",
+      "last_changed_at": "2026-07-15",
+      "verification_method": "manual-confirmed",
+      "verified_by": "r13i",
+      "source_url": "https://support.telnyx.com/en/articles/5634625-10dlc-fees-and-charges",
+      "notes": "Standard-volume shared campaign, platform-wide total (not per-org). Amortizes to ~0/segment; absorbed into the US per-segment rate, not billed as a line item."
+    }
+  ]
+}
