@@ -8,6 +8,33 @@ const DATA_DIR = join(REPO_ROOT, 'costs');
 
 const MS_PER_DAY = 1000 * 60 * 60 * 24;
 
+// Which array(s) hold staleable rows in each costs file. An unrecognized
+// file is a hard error, not a silent skip: silently skipping is exactly how a
+// price file could rot unnoticed while the invoice keeps citing it.
+const ROW_ARRAYS = {
+  llm: ['models'],
+  stt: ['models'],
+  tts: ['models'],
+  telephony: ['numbers', 'a2p_10dlc'],
+};
+
+export function rowsForFile(filename, data) {
+  const category = filename.replace(/\.json$/, '');
+  const keys = ROW_ARRAYS[category];
+  if (!keys) {
+    throw new Error(`unknown costs file: ${filename} (add it to ROW_ARRAYS)`);
+  }
+  const rows = [];
+  for (const key of keys) {
+    const arr = data?.[key];
+    if (!Array.isArray(arr)) {
+      throw new Error(`${filename}: expected array at \`${key}\``);
+    }
+    for (const row of arr) rows.push({ category, ...row });
+  }
+  return rows;
+}
+
 export function findStale(rows, maxAgeDays, now = new Date()) {
   const cutoffMs = now.getTime() - maxAgeDays * MS_PER_DAY;
   return rows.filter((row) => {
@@ -33,13 +60,9 @@ async function main() {
 
   const perFile = await Promise.all(
     files.map(async (file) => {
-      const category = file.replace(/\.json$/, '');
       const data = JSON.parse(await readFile(join(DATA_DIR, file), 'utf-8'));
-      if (!Array.isArray(data?.models)) {
-        console.error(`skip: ${file} has no \`models\` array`);
-        return [];
-      }
-      return findStale(data.models, maxAge).map((row) => ({ category, ...row }));
+      const rows = rowsForFile(file, data);
+      return findStale(rows, maxAge);
     }),
   );
   const results = perFile.flat();
@@ -54,7 +77,8 @@ async function main() {
     const days = Math.floor(
       (Date.now() - new Date(row.last_verified + 'T00:00:00Z').getTime()) / MS_PER_DAY,
     );
-    console.log(`- [${row.category}] ${row.provider} / ${row.model_id} — last verified ${row.last_verified} (${days} days ago)`);
+    const label = row.model_id || row.display_name || row.carrier || '(row)';
+    console.log(`- [${row.category}] ${row.provider ?? ''} ${label} — last verified ${row.last_verified} (${days} days ago)`.replace(/\s+/g, ' '));
   }
   process.exit(1);
 }
