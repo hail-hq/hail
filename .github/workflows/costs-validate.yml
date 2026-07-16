@@ -27,6 +27,11 @@ jobs:
         run: check-jsonschema --schemafile costs/schema/stt.schema.json costs/stt.json
       - name: Validate TTS data
         run: check-jsonschema --schemafile costs/schema/tts.schema.json costs/tts.json
+      - name: Validate Telephony data
+        run: check-jsonschema --schemafile costs/schema/telephony.schema.json costs/telephony.json
+      # Cross-field checks below are model-shaped (aliases, replaced_by_model_id)
+      # and apply only to llm/stt/tts. telephony.json has no models[] and is
+      # covered by its own schema validation step above.
       - name: Cross-field validity checks (aliases unique, replaced_by_model_id resolves)
         run: |
           for f in costs/llm.json costs/stt.json costs/tts.json; do
