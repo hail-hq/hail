@@ -15,6 +15,13 @@ OFF:
 UPDATE platform_flags SET value = 'false', updated_at = now()
 WHERE key = 'agent_outbound_disabled';
 
+Covers direct sends (POST /emails, /sms, /calls) AND inbound-forward relay for
+agent-origin orgs — both check the flag before hitting a provider. While the
+switch is ON, an agent-origin org's queued forwards defer (stay queued, resume
+when you flip it OFF); a queued agent forward at the head of the shared forward
+queue can briefly delay other orgs' forwards until the switch clears — expected
+during a short emergency stop.
+
 ## One abusive org (targeted, not the kill switch)
 
 Use the existing per-org channel suspension. `reason` is NOT NULL — always
@@ -47,9 +54,10 @@ SELECT organization_id, count(\*) FROM agent_send_log
 WHERE created_at > now() - interval '24 hours'
 GROUP BY organization_id ORDER BY 2 DESC LIMIT 20;
 
--- signup funnel by source
+-- signup funnel by source (completed signups only — rows with a NULL user_id
+-- are throttle-accounting entries for rejected/duplicate attempts, not signups)
 SELECT ref, count(\*) FROM agent_signups
-WHERE created_at > now() - interval '7 days' GROUP BY ref;
+WHERE user_id IS NOT NULL AND created_at > now() - interval '7 days' GROUP BY ref;
 
 -- signup grants to agent-origin orgs, last 7 days
 -- (grant_signup fires for every signup, human and agent alike, with
@@ -61,6 +69,13 @@ JOIN organizations o ON o.id = ac.organization_id
 WHERE o.origin = 'agent' AND ac.source = 'grant_signup'
 AND ac.created_at > now() - interval '7 days'
 GROUP BY ac.organization_id ORDER BY 2 DESC;
+
+## Retention (agent_send_log grows unbounded)
+
+The gate only ever queries the last hour/day, so rows older than ~24h have no
+runtime value; the monitoring queries above cap at 7 days. Prune periodically to
+bound table + autovacuum cost (e.g. a daily job):
+DELETE FROM agent_send_log WHERE created_at < now() - interval '30 days';
 
 ## Accepted risk (from the spec)
 
