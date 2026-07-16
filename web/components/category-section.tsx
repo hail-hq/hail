@@ -21,7 +21,7 @@ export interface CategorySectionProps<T> {
   defaultSort?: { id: string; desc: boolean };
 }
 
-export function CategorySection<T extends { provider: string }>({
+export function CategorySection<T>({
   id,
   num,
   title,
