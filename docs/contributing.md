@@ -53,6 +53,13 @@ curl -s http://localhost:8080/openapi.json \
 
 The Go CLI codegens its client from this file, so commit the update in the same PR as the route change.
 
+Do not hand-edit `openapi/openapi.yaml` — CI regenerates it from the live app
+and compares (see `.github/workflows/openapi-check.yml`), so any manual change
+that the app does not also produce fails as "stale". A status raised via
+`raise HTTPException(...)` will **not** appear in the spec unless the route
+decorator declares it (e.g. `responses={429: {...}}`); add it there, then
+regenerate.
+
 ## Commit style
 
 [Conventional Commits](https://www.conventionalcommits.org):

@@ -48,7 +48,10 @@ from hailhq.api.routes.email_domains import (
     get_email_provider,
     resolve_hail_mail_prefixes,
 )
-from hailhq.api.agent_gate import require_agent_send_allowed
+from hailhq.api.agent_gate import (
+    RATE_LIMITED_RESPONSES,
+    require_agent_send_allowed,
+)
 from hailhq.api.funds import require_funds
 from hailhq.core.compliance_gate import check_email_allowed, normalize_recipient
 from hailhq.core.db import get_session
@@ -288,6 +291,7 @@ async def _write_usage_event(
     "",
     response_model=EmailResponse,
     status_code=http_status.HTTP_201_CREATED,
+    responses=RATE_LIMITED_RESPONSES,
 )
 async def create_email(
     body: EmailCreate,

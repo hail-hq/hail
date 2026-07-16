@@ -59,13 +59,6 @@ paths:
               description: Seconds to wait before retrying.
               schema:
                 type: integer
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  detail:
-                    type: string
     get:
       tags:
         - calls
@@ -257,13 +250,6 @@ paths:
               description: Seconds to wait before retrying.
               schema:
                 type: integer
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  detail:
-                    type: string
     get:
       tags:
         - emails
@@ -1435,13 +1421,6 @@ paths:
               description: Seconds to wait before retrying.
               schema:
                 type: integer
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  detail:
-                    type: string
     get:
       tags:
         - sms

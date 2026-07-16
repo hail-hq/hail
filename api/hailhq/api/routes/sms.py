@@ -35,7 +35,10 @@ from hailhq.api.idempotency import (
 from hailhq.api.numbers import resolve_org_number
 from hailhq.api.pagination import fetch_cursor_page
 from hailhq.api.usage import write_usage_event
-from hailhq.api.agent_gate import require_agent_send_allowed
+from hailhq.api.agent_gate import (
+    RATE_LIMITED_RESPONSES,
+    require_agent_send_allowed,
+)
 from hailhq.api.funds import require_funds
 from hailhq.core.compliance_gate import check_sms_allowed, remove_suppression
 from hailhq.core.config import settings
@@ -79,7 +82,12 @@ def get_sms_provider() -> SmsProvider:
     return _sms_provider_singleton
 
 
-@router.post("", response_model=SmsResponse, status_code=http_status.HTTP_201_CREATED)
+@router.post(
+    "",
+    response_model=SmsResponse,
+    status_code=http_status.HTTP_201_CREATED,
+    responses=RATE_LIMITED_RESPONSES,
+)
 async def create_sms(
     body: SmsCreate,
     response: Response,
