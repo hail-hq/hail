@@ -71,6 +71,37 @@ async def test_calls_create_happy_path_mode_a(base_url: str, api_key: str) -> No
 
 
 @respx.mock
+async def test_calls_create_tools_passthrough(base_url: str, api_key: str) -> None:
+    """tools=[] is meaningful (disable all agent tools) and must reach the
+    body; omitted tools must not appear at all."""
+    route = respx.post(f"{base_url}/calls").mock(
+        return_value=httpx.Response(201, json=make_call_response())
+    )
+    async with Client(api_key=api_key, base_url=base_url) as c:
+        await c.calls.create(
+            to="+15555550123",
+            system_prompt="be polite",
+            recipient_consent=True,
+            tools=[],
+        )
+        await c.calls.create(
+            to="+15555550123",
+            system_prompt="be polite",
+            recipient_consent=True,
+            tools=["end_call", "send_sms"],
+        )
+        await c.calls.create(
+            to="+15555550123",
+            system_prompt="be polite",
+            recipient_consent=True,
+        )
+    bodies = [json.loads(call.request.content) for call in route.calls]
+    assert bodies[0]["tools"] == []
+    assert bodies[1]["tools"] == ["end_call", "send_sms"]
+    assert "tools" not in bodies[2]
+
+
+@respx.mock
 async def test_calls_create_sends_consent_fields(base_url: str, api_key: str) -> None:
     route = respx.post(f"{base_url}/calls").mock(
         return_value=httpx.Response(201, json=make_call_response())

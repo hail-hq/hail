@@ -226,6 +226,66 @@ func TestCallSubcommand_FromAndFirstMessageFlow(t *testing.T) {
 	}
 }
 
+func TestCallSubcommand_ToolsFlag(t *testing.T) {
+	t.Run("explicit list", func(t *testing.T) {
+		srv := newFakeServer(t, http.StatusCreated, sampleResponse())
+		_, _, err := runRoot(t,
+			map[string]string{"HAIL_API_KEY": "sk_test", "HAIL_API_URL": srv.URL},
+			"call", "+15551234567", "--prompt", "hi", "--recipient-consent",
+			"--tools", "end_call,send_sms",
+		)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		var body client.CallCreate
+		if err := json.Unmarshal(srv.lastBody, &body); err != nil {
+			t.Fatalf("body parse: %v", err)
+		}
+		if body.Tools == nil || len(*body.Tools) != 2 || (*body.Tools)[0] != "end_call" || (*body.Tools)[1] != "send_sms" {
+			t.Errorf("Tools = %v, want [end_call send_sms]", body.Tools)
+		}
+	})
+	t.Run("none disables all", func(t *testing.T) {
+		srv := newFakeServer(t, http.StatusCreated, sampleResponse())
+		_, _, err := runRoot(t,
+			map[string]string{"HAIL_API_KEY": "sk_test", "HAIL_API_URL": srv.URL},
+			"call", "+15551234567", "--prompt", "hi", "--recipient-consent",
+			"--tools", "none",
+		)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		var raw map[string]any
+		if err := json.Unmarshal(srv.lastBody, &raw); err != nil {
+			t.Fatalf("body parse: %v", err)
+		}
+		tools, present := raw["tools"]
+		if !present {
+			t.Fatalf("tools missing from body, want []")
+		}
+		if list, ok := tools.([]any); !ok || len(list) != 0 {
+			t.Errorf("tools = %v, want []", tools)
+		}
+	})
+	t.Run("omitted stays absent", func(t *testing.T) {
+		srv := newFakeServer(t, http.StatusCreated, sampleResponse())
+		_, _, err := runRoot(t,
+			map[string]string{"HAIL_API_KEY": "sk_test", "HAIL_API_URL": srv.URL},
+			"call", "+15551234567", "--prompt", "hi", "--recipient-consent",
+		)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		var raw map[string]any
+		if err := json.Unmarshal(srv.lastBody, &raw); err != nil {
+			t.Fatalf("body parse: %v", err)
+		}
+		if _, present := raw["tools"]; present {
+			t.Errorf("tools should be omitted when flag not passed")
+		}
+	})
+}
+
 func TestCallSubcommand_PropagatesIdempotencyKey(t *testing.T) {
 	t.Run("explicit", func(t *testing.T) {
 		srv := newFakeServer(t, http.StatusCreated, sampleResponse())
