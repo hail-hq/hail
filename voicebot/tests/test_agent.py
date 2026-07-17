@@ -1075,6 +1075,26 @@ async def test_agent_hangup_marks_normal_hangup() -> None:
     assert captured["end_reason"] == CallEndReason.NORMAL_HANGUP.value
     assert captured["status"] is None
     assert ctx.shutdown_calls == ["agent_end_call"]
+    # ctx.shutdown() only ends the agent job — per LiveKit docs the SIP
+    # participant keeps hearing silence until the ROOM is deleted. The
+    # hangup handle must delete the room to actually end the phone call.
+    assert ctx.delete_room_calls == 1
+
+
+async def test_agent_hangup_still_shuts_down_when_delete_room_fails() -> None:
+    """A delete_room failure (API blip) must not strand the job: shutdown
+    still runs so on_call_end finalizes the row; the room then dies via
+    LiveKit's empty-timeout instead."""
+    captured: dict[str, str | None] = {"status": None, "end_reason": None}
+    ctx = FakeJobContext()
+    ctx.delete_room_error = RuntimeError("twirp unavailable")
+    hangup = make_agent_hangup(ctx, captured)  # type: ignore[arg-type]
+
+    await hangup()
+
+    assert captured["end_reason"] == CallEndReason.NORMAL_HANGUP.value
+    assert ctx.delete_room_calls == 1
+    assert ctx.shutdown_calls == ["agent_end_call"]
 
 
 async def test_build_tools_safely_degrades_on_failure(
