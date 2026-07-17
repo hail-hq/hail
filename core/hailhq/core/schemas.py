@@ -225,7 +225,7 @@ TERMINAL_CALL_STATUSES: frozenset[str] = frozenset(
 )
 
 
-NumberType = Literal["local", "mobile", "toll_free"]
+NumberType = Literal["local", "mobile", "toll_free", "national"]
 
 
 class CallResponse(BaseModel):

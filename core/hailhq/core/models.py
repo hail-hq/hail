@@ -354,7 +354,7 @@ class PhoneNumber(Base):
 
     __table_args__ = (
         CheckConstraint(
-            "number_type IN ('local','mobile','toll_free')",
+            "number_type IN ('local','mobile','toll_free','national')",
             name="phone_numbers_number_type_check",
         ),
         CheckConstraint(
