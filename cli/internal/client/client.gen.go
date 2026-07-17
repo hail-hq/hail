@@ -409,6 +409,7 @@ func (e EventStreamResponseCallStatus) Valid() bool {
 const (
 	Local    NumberAcquireRequestNumberType = "local"
 	Mobile   NumberAcquireRequestNumberType = "mobile"
+	National NumberAcquireRequestNumberType = "national"
 	TollFree NumberAcquireRequestNumberType = "toll_free"
 )
 
@@ -418,6 +419,8 @@ func (e NumberAcquireRequestNumberType) Valid() bool {
 	case Local:
 		return true
 	case Mobile:
+		return true
+	case National:
 		return true
 	case TollFree:
 		return true
