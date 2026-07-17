@@ -57,6 +57,51 @@ attachment_ids=...)`.
   outbound attachment uploads. No data migration; self-hosters recreate
   the bucket under the new prefix.
 
+## [0.13.0] — 2026-07-17
+
+Voicebot agent tools milestone. The voice agent can now act mid-call — text
+the person it's talking to, email a directory contact, and hang up on its
+own — through a channel-agnostic tool registry that picks up new modalities
+automatically. Alongside: agent workspace self-signup with platform abuse
+guardrails, and the contacts directory.
+
+Component versions cut alongside this release:
+**`sdk-v0.9.0`** (PyPI: `hail-sdk==0.9.0`), **`cli-v0.12.0`** (Homebrew + GitHub Releases).
+
+### Voicebot agent tools
+
+- Four in-call tools, on by default per configured channel: `send_sms` (call
+  counterpart only), `send_email` (directory recipients only), `end_call`,
+  and `list_contacts`. The agent never handles raw addresses — tool schemas
+  accept directory names only; resolution happens server-side.
+- `POST /calls` gains an optional `tools` field (omit = all available,
+  `[]` = none, names validated against the registry) — propagated through
+  the OpenAPI spec, SDK (`calls.create(tools=...)`), CLI
+  (`hail call --tools end_call,send_sms`, `--tools none` to disable), and
+  MCP `place_call`.
+- Sends execute through HMAC-signed internal routes that reuse the full
+  outbound stack — suppression/velocity gates, funds, audit
+  (`agent.sms.send` / `agent.email.send`, plus `send_failed` reconciliation),
+  AI-disclosure footer, and usage billing (same refs/rates as API sends).
+- Guardrails: per-call send cap (5, serialized under a row lock with
+  idempotent retries), platform agent caps + kill switch enforced on
+  voicebot sends, confirm-before-send prompt rule, and a mandatory verbal
+  goodbye before `end_call` deletes the room (actually dropping the SIP leg).
+
+### Contacts directory
+
+- Manual contacts and org-member phone numbers join the voicebot directory;
+  `list_contacts` and email/SMS recipient resolution draw from both sources,
+  always scoped to the calling org.
+
+### Agent workspaces & abuse guardrails
+
+- Agent-origin workspace self-signup, with per-recipient velocity caps,
+  per-channel hourly/daily limits, and a platform kill switch on all
+  agent-origin sends (`429` + `Retry-After` on the create routes).
+- SMS pricing tiers: usage events now carry a per-destination tier
+  (`sms:<id>:<tier>`) for corridor-accurate billing.
+
 ## [0.12.0] — 2026-07-10
 
 SMS inbound & compliance milestone. Hail now receives inbound SMS, routes each
