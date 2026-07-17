@@ -8,6 +8,8 @@ Import the fixtures you need from here in each package's ``conftest.py``::
 from __future__ import annotations
 
 import os
+import uuid
+from datetime import datetime, timezone
 from typing import AsyncGenerator, AsyncIterator, Iterator
 
 import pytest
@@ -20,6 +22,7 @@ from sqlalchemy.ext.asyncio import (
 
 from hailhq.core import db as core_db
 from hailhq.core.db import to_async_url
+from hailhq.core.models import OrganizationMember, User
 
 
 @pytest.fixture(scope="session")
@@ -90,3 +93,43 @@ async def async_session(
     """
     async with session_factory() as session:
         yield session
+
+
+async def seed_member(
+    session: AsyncSession,
+    org_id: uuid.UUID,
+    *,
+    name: str,
+    email: str,
+    phone: str | None = None,
+    role: str = "member",
+) -> uuid.UUID:
+    """Insert a users + members row for contacts-union tests.
+
+    Shared by api/tests/test_contacts_api.py, api/tests/test_contacts_core.py,
+    and voicebot/tests/test_agent.py — previously three near-identical local
+    copies. ``created_at`` is stamped explicitly (rather than left to a
+    server default) so seeded members sort predictably relative to
+    manual-contact rows created moments later in the same test.
+    """
+    uid = uuid.uuid4()
+    session.add(
+        User(
+            id=uid,
+            name=name,
+            email=email,
+            phone_number=phone,
+            created_at=datetime.now(timezone.utc),
+        )
+    )
+    session.add(
+        OrganizationMember(
+            id=uuid.uuid4(),
+            organization_id=org_id,
+            user_id=uid,
+            role=role,
+            created_at=datetime.now(timezone.utc),
+        )
+    )
+    await session.commit()
+    return uid

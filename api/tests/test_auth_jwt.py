@@ -293,6 +293,7 @@ def _whoami_app(session: AsyncSession) -> FastAPI:
             "api_key_id": str(principal.api_key_id) if principal.api_key_id else None,
             "organization_id": str(principal.organization_id),
             "scopes": principal.scopes,
+            "user_id": str(principal.user_id) if principal.user_id else None,
         }
 
     async def override_get_session() -> AsyncIterator[AsyncSession]:
@@ -370,6 +371,28 @@ async def test_jwt_path_happy_resolves_to_org(
     assert body["organization_id"] == str(organization_id)
     assert body["api_key_id"] is None
     assert body["scopes"] == ["*"]
+
+
+async def test_jwt_principal_carries_sub_as_user_id(
+    monkeypatch,
+    jwks_client_factory,
+    base_claims,
+    sign_jwt,
+    jwt_member_pair,
+    async_session: AsyncSession,
+):
+    """The JWT principal's user_id is the token's ``sub`` claim."""
+    _configure_env(monkeypatch)
+    _install_test_jwks(monkeypatch, jwks_client_factory)
+
+    user_id, _organization_id = jwt_member_pair
+    token = sign_jwt(base_claims(sub=str(user_id), aud="https://api.example.com"))
+
+    transport = httpx.ASGITransport(app=_whoami_app(async_session))
+    async with httpx.AsyncClient(transport=transport, base_url="http://t") as client:
+        resp = await client.get("/whoami", headers={"Authorization": f"Bearer {token}"})
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["user_id"] == str(user_id)
 
 
 async def test_jwt_path_accepts_trailing_slash_audience(

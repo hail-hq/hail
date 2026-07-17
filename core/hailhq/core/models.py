@@ -61,7 +61,9 @@ class User(Base):
     schema; hail only reads it. Columns verified 2026-07-11 against
     hail-website's better-auth migrations (users: id / name / email /
     email_verified / image / timestamps); only the columns hail reads
-    are mapped.
+    are mapped. ``phone_number`` is the one exception — it's the only
+    column this codebase writes (migration 0035), named for a
+    migration-free upgrade to better-auth's phone-number plugin.
     """
 
     __tablename__ = "users"
@@ -70,6 +72,64 @@ class User(Base):
     name: Mapped[str] = mapped_column(Text, nullable=False)
     email: Mapped[str] = mapped_column(Text, nullable=False)
     created_at: Mapped[datetime] = mapped_column(TS, nullable=False)
+    phone_number: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class Contact(Base):
+    """Manual org contact — phone and/or email (CHECK enforces at least one).
+
+    organization_id carries no FK: organizations lives in the website DB (see
+    the module docstring convention on OrganizationMember / migration 0001).
+    """
+
+    __tablename__ = "contacts"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    organization_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), nullable=False
+    )
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    phone_e164: Mapped[str | None] = mapped_column(Text, nullable=True)
+    email: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # created_by intentionally has no FK — users is website-owned (see 0001/0029);
+    # keys and rows may outlive their creator.
+    created_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        TS, server_default=text("now()"), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        TS, server_default=text("now()"), onupdate=func.now(), nullable=False
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "phone_e164 IS NOT NULL OR email IS NOT NULL",
+            name="contacts_phone_or_email",
+        ),
+        Index(
+            "contacts_org_phone_key",
+            "organization_id",
+            "phone_e164",
+            unique=True,
+            postgresql_where=text("phone_e164 IS NOT NULL"),
+        ),
+        # Case-sensitive index; correctness relies on write-time full
+        # lowercasing in schemas.py's ``_normalize_contact_email`` (used by
+        # ContactCreate/ContactPatch) so this dedupes "Bob@x.com" against
+        # "bob@x.com" instead of admitting both.
+        Index(
+            "contacts_org_email_key",
+            "organization_id",
+            "email",
+            unique=True,
+            postgresql_where=text("email IS NOT NULL"),
+        ),
+        Index("contacts_org_idx", "organization_id"),
+    )
 
 
 class AccountCredit(Base):

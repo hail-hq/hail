@@ -56,6 +56,9 @@ def _build_app(session: AsyncSession) -> FastAPI:
                 str(principal.api_key_id) if principal.api_key_id is not None else None
             ),
             "organization_id": str(principal.organization_id),
+            "user_id": (
+                str(principal.user_id) if principal.user_id is not None else None
+            ),
         }
 
     async def override_get_session() -> AsyncIterator[AsyncSession]:
@@ -104,6 +107,25 @@ async def test_valid_key_returns_principal(
     body = resp.json()
     assert body["api_key_id"] == str(api_key.id)
     assert body["organization_id"] == str(org_id)
+
+
+async def test_api_key_principal_carries_user_id(
+    client: httpx.AsyncClient,
+    org_and_key: tuple[uuid.UUID, ApiKey, str],
+) -> None:
+    """The api-key principal's user_id is the key owner's user uuid.
+
+    ``api_keys.reference_id`` (opaque TEXT upstream) is the auth backend's
+    user id, minted as a UUID string by ``insert_org_and_key`` — the same
+    value the members join already casts to UUID to resolve the org.
+    """
+    _, api_key, plain = org_and_key
+    resp = await client.get(
+        "/whoami",
+        headers={"Authorization": f"Bearer {plain}"},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["user_id"] == str(uuid.UUID(api_key.reference_id))
 
 
 async def test_expired_key_returns_403(

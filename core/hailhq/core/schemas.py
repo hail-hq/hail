@@ -912,3 +912,95 @@ class WebhookDeliveryResponse(BaseModel):
 class WebhookDeliveryListResponse(BaseModel):
     items: list[WebhookDeliveryResponse]
     next_cursor: str | None = None
+
+
+# --------------------------------------------------------------------------- #
+# Contacts — computed union of org members and manual rows
+# (hailhq.core.contacts.search_contacts) plus the manual-contact CRUD schemas.
+# --------------------------------------------------------------------------- #
+
+
+def _normalize_contact_email(v: str | None) -> str | None:
+    """Contacts-only email validator: fully lowercased at write time (unlike
+    the shared ``_email_or_error``/``_normalize_domain`` rule elsewhere,
+    which only lowercases the domain). Contacts stores are looked up
+    case-insensitively in two places that must agree on what "the same
+    email" means — the ``contacts_org_email_key`` unique index (which is
+    case-sensitive, so it only dedupes ``Bob@x.com``/``bob@x.com`` if both
+    are stored lowercase) and DSAR's ``func.lower(Contact.email)`` match
+    (``hailhq.core.dsar.lookup_recipient``). Full lowercasing at write time
+    makes both correct without a case-insensitive index. The ``contacts``
+    table is unreleased (migration 0030, no production rows) so this needs
+    no backfill."""
+    if v is None:
+        return v
+    if not EMAIL_ADDR.match(v):
+        raise ValueError("must be a valid email address (local@domain.tld)")
+    return _normalize_domain(v).lower()
+
+
+class ContactEntry(BaseModel):
+    """One row in the computed contacts union — an org member or a manual
+    contact. ``id`` is ``member:<user_id>`` for members, the contact row's
+    UUID (as str) for manual rows."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    kind: Literal["member", "manual"]
+    name: str
+    phone_e164: str | None = None
+    email: str | None = None
+    role: str | None = None
+
+
+class ContactCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(min_length=1, max_length=200)
+    phone_e164: str | None = None
+    email: str | None = None
+
+    _validate_phone = field_validator("phone_e164")(_e164_or_error)
+    _validate_email = field_validator("email")(_normalize_contact_email)
+
+    @model_validator(mode="after")
+    def _phone_or_email(self) -> "ContactCreate":
+        if self.phone_e164 is None and self.email is None:
+            raise ValueError("provide at least one of phone_e164 or email")
+        return self
+
+
+class ContactPatch(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str | None = Field(default=None, min_length=1, max_length=200)
+    phone_e164: str | None = None
+    email: str | None = None
+
+    _validate_phone = field_validator("phone_e164")(_e164_or_error)
+    _validate_email = field_validator("email")(_normalize_contact_email)
+
+    @model_validator(mode="after")
+    def _name_not_null(self) -> "ContactPatch":
+        # name is NOT NULL on the row; an explicit `{"name": null}` would
+        # otherwise reach the DB and surface as a 409 (indistinguishable
+        # from a phone/email uniqueness conflict) instead of a clear 422.
+        # `model_fields_set` distinguishes an explicit null from an omitted
+        # field (both parse to `self.name is None`).
+        if "name" in self.model_fields_set and self.name is None:
+            raise ValueError("name cannot be null")
+        return self
+
+
+class ContactListResponse(BaseModel):
+    items: list[ContactEntry]
+    next_cursor: str | None = None
+
+
+class MemberPhonePut(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    phone_e164: str
+
+    _validate_phone = field_validator("phone_e164")(_e164_or_error)
