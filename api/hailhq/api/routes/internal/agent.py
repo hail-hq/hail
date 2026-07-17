@@ -38,8 +38,13 @@ from hailhq.core.agent_tools.send_email import (
     MAX_SUBJECT_CHARS,
 )
 from hailhq.core.agent_tools.send_sms import MAX_BODY_CHARS as SMS_MAX_BODY_CHARS
+from hailhq.core.agent_caps import check_agent_send_allowed
 from hailhq.core.billing import CALL_META_BILLED, has_funds
-from hailhq.core.compliance_gate import check_email_allowed, check_sms_allowed
+from hailhq.core.compliance_gate import (
+    check_email_allowed,
+    check_sms_allowed,
+    normalize_recipient,
+)
 from hailhq.core.db import get_session
 from hailhq.core.directory import resolve_member_emails
 from hailhq.core.models import Call, Email, Sms
@@ -255,6 +260,23 @@ async def agent_send_sms(
             payload={**_meta(body), "reason": gate.reason, "checks": gate.checks},
         )
 
+    # Platform agent-caps gate (velocity + kill switch): voicebot sends must
+    # count toward the same per-recipient caps the public routes enforce —
+    # no-op for human-origin orgs. Same recipient set as the gate above.
+    cap_denial = await check_agent_send_allowed(db, org, "sms", [call.to_e164])
+    if cap_denial is not None:
+        return await _deny(
+            org,
+            action="agent.sms.blocked",
+            resource_type="sms",
+            spoken=_SPOKEN_NOT_ALLOWED,
+            payload={
+                **_meta(body),
+                "reason": "agent_caps",
+                "detail": cap_denial.reason,
+            },
+        )
+
     from_number = await resolve_org_number(db, org, None, capability="sms")
     if from_number is None:
         return AgentSendResponse(ok=False, spoken=_SPOKEN_SMS_UNCONFIGURED)
@@ -371,6 +393,24 @@ async def agent_send_email(
             resource_type="email",
             spoken=_SPOKEN_NOT_ALLOWED,
             payload={**_meta(body), "reason": gate.reason, "checks": gate.checks},
+        )
+
+    # Same agent-caps gate as the public /emails route — one normalized
+    # recipient for voicebot sends (no cc/bcc fan-out on this path).
+    cap_denial = await check_agent_send_allowed(
+        db, org, "email", [normalize_recipient(recipient)]
+    )
+    if cap_denial is not None:
+        return await _deny(
+            org,
+            action="agent.email.blocked",
+            resource_type="email",
+            spoken=_SPOKEN_NOT_ALLOWED,
+            payload={
+                **_meta(body),
+                "reason": "agent_caps",
+                "detail": cap_denial.reason,
+            },
         )
 
     try:
