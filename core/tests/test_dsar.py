@@ -10,12 +10,22 @@ from __future__ import annotations
 import json
 import uuid
 
+from sqlalchemy import select
+
 from hailhq.core.dsar import (
     delete_recipient_data,
     export_recipient_data,
     lookup_recipient,
 )
-from hailhq.core.models import AuditLog, Call, Email, PhoneNumber, Sms, Suppression
+from hailhq.core.models import (
+    AuditLog,
+    Call,
+    Contact,
+    Email,
+    PhoneNumber,
+    Sms,
+    Suppression,
+)
 
 PHONE = "+14155551234"
 EMAIL_ADDR = "alice@example.com"
@@ -338,3 +348,49 @@ async def test_delete_recipient_data_clears_email_content(async_session):
     assert email.body_html is None
     assert email.raw_s3_key is None
     assert email.to_addresses == [EMAIL_ADDR]  # row shell intact
+
+
+async def test_lookup_recipient_finds_contact_by_phone_and_email(async_session):
+    """A manual contact card is DSAR-discoverable by either identifier it
+    carries — matched independently, same as the Call/Email sweeps."""
+    org_id = uuid.uuid4()
+    async_session.add(Contact(organization_id=org_id, name="Alice", phone_e164=PHONE))
+    async_session.add(Contact(organization_id=org_id, name="Bob", email=EMAIL_ADDR))
+    await async_session.commit()
+
+    phone_record = await lookup_recipient(async_session, PHONE)
+    assert [c.name for c in phone_record.contacts] == ["Alice"]
+    assert phone_record.calls == []
+
+    email_record = await lookup_recipient(async_session, EMAIL_ADDR)
+    assert [c.name for c in email_record.contacts] == ["Bob"]
+
+
+async def test_lookup_recipient_matches_contact_mixed_case_email(async_session):
+    org_id = uuid.uuid4()
+    async_session.add(
+        Contact(organization_id=org_id, name="Alice", email="Alice@example.com")
+    )
+    await async_session.commit()
+
+    record = await lookup_recipient(async_session, "alice@example.com")
+    assert [c.name for c in record.contacts] == ["Alice"]
+
+
+async def test_delete_recipient_data_removes_contact(async_session):
+    """Unlike calls/sms/emails, a Contact row is deleted outright — its
+    entire content *is* the recipient's identifying data, so there's no
+    row shell worth preserving once that's gone."""
+    org_id = uuid.uuid4()
+    contact = Contact(organization_id=org_id, name="Alice", phone_e164=PHONE)
+    async_session.add(contact)
+    await async_session.commit()
+    contact_id = contact.id
+
+    summary = await delete_recipient_data(async_session, PHONE)
+    assert summary.contacts_deleted == 1
+
+    remaining = (
+        await async_session.execute(select(Contact).where(Contact.id == contact_id))
+    ).scalar_one_or_none()
+    assert remaining is None

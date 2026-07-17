@@ -16,6 +16,7 @@ output, we'll need to vendor a fake TTS too.
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 
 from livekit.agents.llm import (
@@ -145,15 +146,27 @@ class FakeAnnouncingSession:
 class FakeJobContext:
     """Stand-in for livekit.agents.JobContext.
 
-    Verified shape against .venv/lib/python3.11/site-packages/livekit/agents/job.py:
-    we only need ``ctx.shutdown(reason=…)``.
+    Verified shape against livekit/agents/job.py: we need
+    ``ctx.shutdown(reason=…)`` and ``ctx.delete_room()`` (returns an
+    awaitable resolving to the DeleteRoomResponse; a completed Future here).
     """
 
     def __init__(self) -> None:
         self.shutdown_calls: list[str] = []
+        self.delete_room_calls: int = 0
+        self.delete_room_error: Exception | None = None
 
     def shutdown(self, reason: str = "") -> None:
         self.shutdown_calls.append(reason)
+
+    def delete_room(self) -> "asyncio.Future[None]":
+        self.delete_room_calls += 1
+        fut: asyncio.Future[None] = asyncio.get_event_loop().create_future()
+        if self.delete_room_error is not None:
+            fut.set_exception(self.delete_room_error)
+        else:
+            fut.set_result(None)
+        return fut
 
 
 __all__ = [

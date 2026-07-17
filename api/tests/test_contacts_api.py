@@ -1,0 +1,511 @@
+"""Integration tests for the /contacts and /members/{id}/phone routes."""
+
+from __future__ import annotations
+
+import uuid
+
+import httpx
+import pytest
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from hailhq.api import deps
+from hailhq.core.models import Contact, User
+from hailhq.core.testing.fixtures import seed_member as _seed_member
+
+from .conftest import insert_org_and_key  # noqa: F401
+
+# --------------------------------------------------------------------------- #
+# Helpers.
+# --------------------------------------------------------------------------- #
+
+
+def _configure_jwt_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(deps.settings, "hail_auth_url", "https://issuer.example.com")
+    monkeypatch.setattr(
+        deps.settings,
+        "hail_auth_audiences",
+        "https://api.example.com,https://mcp.example.com",
+    )
+
+
+def _install_test_jwks(monkeypatch: pytest.MonkeyPatch, jwks_client_factory) -> None:
+    from hailhq.api import auth as _auth
+
+    test_cache = _auth.JWKSCache(
+        "https://issuer.example.com/jwks", client_factory=jwks_client_factory
+    )
+    monkeypatch.setattr(_auth, "_jwks_cache", test_cache)
+
+
+async def _create_manual(client: httpx.AsyncClient, headers: dict, **fields) -> dict:
+    resp = await client.post("/contacts", json=fields, headers=headers)
+    assert resp.status_code == 201, resp.text
+    return resp.json()
+
+
+# --------------------------------------------------------------------------- #
+# GET /contacts
+# --------------------------------------------------------------------------- #
+
+
+async def test_list_union(
+    client: httpx.AsyncClient, org_and_key: tuple, async_session: AsyncSession
+) -> None:
+    org_id, _api_key, plain = org_and_key
+    headers = {"Authorization": f"Bearer {plain}"}
+    uid = await _seed_member(
+        async_session, org_id, name="Ada", email="ada@acme.com", phone="+15550001001"
+    )
+    async_session.add(Contact(organization_id=org_id, name="Maya", email="maya@x.com"))
+    await async_session.commit()
+
+    resp = await client.get("/contacts", headers=headers)
+    assert resp.status_code == 200, resp.text
+    items = resp.json()["items"]
+    assert len(items) == 2
+    assert items[0]["kind"] == "member"
+    assert items[0]["id"] == f"member:{uid}"
+    assert items[1]["kind"] == "manual"
+    # Manual id is a bare uuid, not member-prefixed.
+    uuid.UUID(items[1]["id"])
+
+
+async def test_list_q_filter(
+    client: httpx.AsyncClient, org_and_key: tuple, async_session: AsyncSession
+) -> None:
+    org_id, _api_key, plain = org_and_key
+    headers = {"Authorization": f"Bearer {plain}"}
+    await _seed_member(
+        async_session, org_id, name="Ada", email="ada@acme.com", phone="+15550001001"
+    )
+    async_session.add(Contact(organization_id=org_id, name="Maya", email="maya@x.com"))
+    await async_session.commit()
+
+    resp = await client.get("/contacts?q=maya", headers=headers)
+    assert resp.status_code == 200, resp.text
+    items = resp.json()["items"]
+    assert len(items) == 1
+    assert items[0]["kind"] == "manual"
+    assert items[0]["name"] == "Maya"
+
+
+async def test_list_pagination_three_pages(
+    client: httpx.AsyncClient, org_and_key: tuple, async_session: AsyncSession
+) -> None:
+    org_id, _api_key, plain = org_and_key
+    headers = {"Authorization": f"Bearer {plain}"}
+    for i in range(5):
+        async_session.add(
+            Contact(organization_id=org_id, name=f"Contact {i}", email=f"c{i}@x.com")
+        )
+    await async_session.commit()
+
+    seen_ids: list[str] = []
+    cursor: str | None = None
+    pages = 0
+    while True:
+        url = "/contacts?limit=2"
+        if cursor:
+            url += f"&cursor={cursor}"
+        resp = await client.get(url, headers=headers)
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert len(body["items"]) <= 2
+        seen_ids.extend(item["id"] for item in body["items"])
+        pages += 1
+        cursor = body["next_cursor"]
+        if not cursor:
+            break
+
+    assert pages == 3
+    assert len(seen_ids) == 5
+    assert len(set(seen_ids)) == 5
+
+
+# --------------------------------------------------------------------------- #
+# POST /contacts
+# --------------------------------------------------------------------------- #
+
+
+async def test_create_manual_phone_only(
+    client: httpx.AsyncClient, org_and_key: tuple
+) -> None:
+    _, _api_key, plain = org_and_key
+    headers = {"Authorization": f"Bearer {plain}"}
+    body = await _create_manual(client, headers, name="Bob", phone_e164="+14155550100")
+    assert body["kind"] == "manual"
+    assert body["phone_e164"] == "+14155550100"
+    assert body["email"] is None
+
+
+async def test_create_email_only(client: httpx.AsyncClient, org_and_key: tuple) -> None:
+    _, _api_key, plain = org_and_key
+    headers = {"Authorization": f"Bearer {plain}"}
+    body = await _create_manual(client, headers, name="Bob", email="bob@x.com")
+    assert body["kind"] == "manual"
+    assert body["email"] == "bob@x.com"
+    assert body["phone_e164"] is None
+
+
+async def test_create_neither_422(
+    client: httpx.AsyncClient, org_and_key: tuple
+) -> None:
+    _, _, plain = org_and_key
+    headers = {"Authorization": f"Bearer {plain}"}
+    resp = await client.post("/contacts", json={"name": "Bob"}, headers=headers)
+    assert resp.status_code == 422
+
+
+async def test_create_name_too_long_422(
+    client: httpx.AsyncClient, org_and_key: tuple
+) -> None:
+    _, _, plain = org_and_key
+    headers = {"Authorization": f"Bearer {plain}"}
+    resp = await client.post(
+        "/contacts",
+        json={"name": "x" * 201, "phone_e164": "+14155550100"},
+        headers=headers,
+    )
+    assert resp.status_code == 422
+
+
+async def test_create_duplicate_phone_409(
+    client: httpx.AsyncClient, org_and_key: tuple
+) -> None:
+    _, _api_key, plain = org_and_key
+    headers = {"Authorization": f"Bearer {plain}"}
+    await _create_manual(client, headers, name="Bob", phone_e164="+14155550100")
+    resp = await client.post(
+        "/contacts",
+        json={"name": "Bob 2", "phone_e164": "+14155550100"},
+        headers=headers,
+    )
+    assert resp.status_code == 409
+
+
+async def test_create_duplicate_email_409(
+    client: httpx.AsyncClient, org_and_key: tuple
+) -> None:
+    _, _api_key, plain = org_and_key
+    headers = {"Authorization": f"Bearer {plain}"}
+    await _create_manual(client, headers, name="Bob", email="bob@x.com")
+    resp = await client.post(
+        "/contacts", json={"name": "Bob 2", "email": "bob@x.com"}, headers=headers
+    )
+    assert resp.status_code == 409
+
+
+async def test_create_email_stored_lowercase(
+    client: httpx.AsyncClient, org_and_key: tuple
+) -> None:
+    _, _api_key, plain = org_and_key
+    headers = {"Authorization": f"Bearer {plain}"}
+    body = await _create_manual(client, headers, name="Bob", email="Bob@X.com")
+    assert body["email"] == "bob@x.com"
+
+
+async def test_create_duplicate_email_differing_case_409(
+    client: httpx.AsyncClient, org_and_key: tuple
+) -> None:
+    _, _api_key, plain = org_and_key
+    headers = {"Authorization": f"Bearer {plain}"}
+    await _create_manual(client, headers, name="Bob", email="bob@x.com")
+    resp = await client.post(
+        "/contacts", json={"name": "Bob 2", "email": "Bob@X.com"}, headers=headers
+    )
+    assert resp.status_code == 409
+
+
+async def test_create_with_dangling_owner_key_succeeds(
+    client: httpx.AsyncClient, org_and_key: tuple, async_session: AsyncSession
+) -> None:
+    """``insert_org_and_key`` backs the api-key owner with a members row but
+    no users row (keys legitimately outlive their creator's users row — see
+    migrations 0001/0023/0029). ``created_by`` carries no FK to users, so
+    POST /contacts through that key must still succeed."""
+    _, api_key, plain = org_and_key
+    headers = {"Authorization": f"Bearer {plain}"}
+    body = await _create_manual(client, headers, name="Bob", phone_e164="+14155550100")
+    row = (
+        await async_session.execute(
+            select(Contact).where(Contact.id == uuid.UUID(body["id"]))
+        )
+    ).scalar_one()
+    assert row.created_by == uuid.UUID(api_key.reference_id)
+
+
+# --------------------------------------------------------------------------- #
+# PATCH /contacts/{id}
+# --------------------------------------------------------------------------- #
+
+
+async def test_patch_manual(client: httpx.AsyncClient, org_and_key: tuple) -> None:
+    _, _api_key, plain = org_and_key
+    headers = {"Authorization": f"Bearer {plain}"}
+    created = await _create_manual(
+        client, headers, name="Bob", phone_e164="+14155550100"
+    )
+    resp = await client.patch(
+        f"/contacts/{created['id']}", json={"name": "Bobby"}, headers=headers
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["name"] == "Bobby"
+
+
+async def test_patch_member_422(
+    client: httpx.AsyncClient, org_and_key: tuple, async_session: AsyncSession
+) -> None:
+    org_id, _, plain = org_and_key
+    headers = {"Authorization": f"Bearer {plain}"}
+    uid = await _seed_member(async_session, org_id, name="Ada", email="ada@acme.com")
+    resp = await client.patch(
+        f"/contacts/member:{uid}", json={"name": "Ada 2"}, headers=headers
+    )
+    assert resp.status_code == 422
+    assert "membership" in str(resp.json()["detail"])
+
+
+async def test_patch_clear_both_422(
+    client: httpx.AsyncClient, org_and_key: tuple
+) -> None:
+    _, _api_key, plain = org_and_key
+    headers = {"Authorization": f"Bearer {plain}"}
+    created = await _create_manual(
+        client, headers, name="Bob", phone_e164="+14155550100"
+    )
+    resp = await client.patch(
+        f"/contacts/{created['id']}", json={"phone_e164": None}, headers=headers
+    )
+    assert resp.status_code == 422
+
+
+async def test_patch_null_name_422(
+    client: httpx.AsyncClient, org_and_key: tuple
+) -> None:
+    """An explicit `{"name": null}` must be rejected as a 422, not fall
+    through to the DB's NOT NULL constraint and get 409-mislabeled as a
+    phone/email uniqueness conflict."""
+    _, _api_key, plain = org_and_key
+    headers = {"Authorization": f"Bearer {plain}"}
+    created = await _create_manual(
+        client, headers, name="Bob", phone_e164="+14155550100"
+    )
+    resp = await client.patch(
+        f"/contacts/{created['id']}", json={"name": None}, headers=headers
+    )
+    assert resp.status_code == 422
+
+
+# --------------------------------------------------------------------------- #
+# DELETE /contacts/{id}
+# --------------------------------------------------------------------------- #
+
+
+async def test_delete_manual_204_and_gone(
+    client: httpx.AsyncClient, org_and_key: tuple
+) -> None:
+    _, _api_key, plain = org_and_key
+    headers = {"Authorization": f"Bearer {plain}"}
+    created = await _create_manual(
+        client, headers, name="Bob", phone_e164="+14155550100"
+    )
+    resp = await client.delete(f"/contacts/{created['id']}", headers=headers)
+    assert resp.status_code == 204
+
+    # No users row was seeded for the key owner (see
+    # test_create_with_dangling_owner_key_succeeds), so the member union has
+    # nothing to show; just confirm the manual row is gone.
+    listed = await client.get("/contacts", headers=headers)
+    ids = [item["id"] for item in listed.json()["items"]]
+    assert created["id"] not in ids
+    assert all(i.startswith("member:") for i in ids)
+
+
+async def test_delete_member_422(
+    client: httpx.AsyncClient, org_and_key: tuple, async_session: AsyncSession
+) -> None:
+    org_id, _, plain = org_and_key
+    headers = {"Authorization": f"Bearer {plain}"}
+    uid = await _seed_member(async_session, org_id, name="Ada", email="ada@acme.com")
+    resp = await client.delete(f"/contacts/member:{uid}", headers=headers)
+    assert resp.status_code == 422
+
+
+async def test_patch_non_uuid_contact_id_422_path_loc(
+    client: httpx.AsyncClient, org_and_key: tuple
+) -> None:
+    _, _api_key, plain = org_and_key
+    headers = {"Authorization": f"Bearer {plain}"}
+    resp = await client.patch(
+        "/contacts/not-a-uuid", json={"name": "X"}, headers=headers
+    )
+    assert resp.status_code == 422
+    assert resp.json()["detail"][0]["loc"] == ["path", "contact_id"]
+
+
+async def test_other_org_contact_404(
+    client: httpx.AsyncClient, org_and_key: tuple, async_session: AsyncSession
+) -> None:
+    _, _, plain_a = org_and_key
+    headers_a = {"Authorization": f"Bearer {plain_a}"}
+    other_org = uuid.uuid4()
+    row = Contact(organization_id=other_org, name="OrgB Contact", email="b@x.com")
+    async_session.add(row)
+    await async_session.commit()
+    await async_session.refresh(row)
+
+    patch_resp = await client.patch(
+        f"/contacts/{row.id}", json={"name": "Hijacked"}, headers=headers_a
+    )
+    assert patch_resp.status_code == 404
+
+    delete_resp = await client.delete(f"/contacts/{row.id}", headers=headers_a)
+    assert delete_resp.status_code == 404
+
+
+# --------------------------------------------------------------------------- #
+# PUT/DELETE /members/{user_id}/phone
+# --------------------------------------------------------------------------- #
+
+
+async def test_put_own_phone_via_me(
+    monkeypatch: pytest.MonkeyPatch,
+    jwks_client_factory,
+    base_claims,
+    sign_jwt,
+    client: httpx.AsyncClient,
+    org_and_key: tuple,
+    async_session: AsyncSession,
+) -> None:
+    _configure_jwt_env(monkeypatch)
+    _install_test_jwks(monkeypatch, jwks_client_factory)
+    org_id, _, _ = org_and_key
+    uid = await _seed_member(async_session, org_id, name="Ada", email="ada@acme.com")
+    token = sign_jwt(base_claims(sub=str(uid), aud="https://api.example.com"))
+
+    resp = await client.put(
+        "/members/me/phone",
+        json={"phone_e164": "+14155550199"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["user_id"] == str(uid)
+    assert body["phone_e164"] == "+14155550199"
+
+    row = (await async_session.execute(select(User).where(User.id == uid))).scalar_one()
+    assert row.phone_number == "+14155550199"
+
+
+async def test_admin_sets_other_phone(
+    client: httpx.AsyncClient, org_and_key: tuple, async_session: AsyncSession
+) -> None:
+    org_id, _, plain = org_and_key  # org_and_key seeds caller with role="owner"
+    headers = {"Authorization": f"Bearer {plain}"}
+    other_uid = await _seed_member(
+        async_session, org_id, name="Bob", email="bob@acme.com", role="member"
+    )
+
+    resp = await client.put(
+        f"/members/{other_uid}/phone",
+        json={"phone_e164": "+14155550200"},
+        headers=headers,
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["phone_e164"] == "+14155550200"
+
+    row = (
+        await async_session.execute(select(User).where(User.id == other_uid))
+    ).scalar_one()
+    assert row.phone_number == "+14155550200"
+
+
+async def test_member_cannot_set_other_403(
+    monkeypatch: pytest.MonkeyPatch,
+    jwks_client_factory,
+    base_claims,
+    sign_jwt,
+    client: httpx.AsyncClient,
+    org_and_key: tuple,
+    async_session: AsyncSession,
+) -> None:
+    _configure_jwt_env(monkeypatch)
+    _install_test_jwks(monkeypatch, jwks_client_factory)
+    org_id, _, _ = org_and_key
+    caller_uid = await _seed_member(
+        async_session, org_id, name="Caller", email="caller@acme.com", role="member"
+    )
+    other_uid = await _seed_member(
+        async_session, org_id, name="Other", email="other@acme.com", role="member"
+    )
+    token = sign_jwt(base_claims(sub=str(caller_uid), aud="https://api.example.com"))
+
+    resp = await client.put(
+        f"/members/{other_uid}/phone",
+        json={"phone_e164": "+14155550201"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 403
+
+
+async def test_phone_target_not_in_org_404(
+    client: httpx.AsyncClient, org_and_key: tuple, async_session: AsyncSession
+) -> None:
+    _, _, plain = org_and_key
+    headers = {"Authorization": f"Bearer {plain}"}
+    other_org = uuid.uuid4()
+    other_org_member = await _seed_member(
+        async_session, other_org, name="Stranger", email="stranger@other.com"
+    )
+
+    resp = await client.put(
+        f"/members/{other_org_member}/phone",
+        json={"phone_e164": "+14155550202"},
+        headers=headers,
+    )
+    assert resp.status_code == 404
+
+
+async def test_put_phone_non_uuid_user_id_422_path_loc(
+    client: httpx.AsyncClient, org_and_key: tuple
+) -> None:
+    _, _, plain = org_and_key
+    headers = {"Authorization": f"Bearer {plain}"}
+    resp = await client.put(
+        "/members/not-a-uuid/phone",
+        json={"phone_e164": "+14155550100"},
+        headers=headers,
+    )
+    assert resp.status_code == 422
+    assert resp.json()["detail"][0]["loc"] == ["path", "user_id"]
+
+
+async def test_delete_phone_clears(
+    monkeypatch: pytest.MonkeyPatch,
+    jwks_client_factory,
+    base_claims,
+    sign_jwt,
+    client: httpx.AsyncClient,
+    org_and_key: tuple,
+    async_session: AsyncSession,
+) -> None:
+    _configure_jwt_env(monkeypatch)
+    _install_test_jwks(monkeypatch, jwks_client_factory)
+    org_id, _, _ = org_and_key
+    uid = await _seed_member(
+        async_session,
+        org_id,
+        name="Ada",
+        email="ada@acme.com",
+        phone="+14155550100",
+    )
+    token = sign_jwt(base_claims(sub=str(uid), aud="https://api.example.com"))
+
+    resp = await client.delete(
+        "/members/me/phone", headers={"Authorization": f"Bearer {token}"}
+    )
+    assert resp.status_code == 204
+
+    row = (await async_session.execute(select(User).where(User.id == uid))).scalar_one()
+    assert row.phone_number is None

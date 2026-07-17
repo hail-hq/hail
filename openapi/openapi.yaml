@@ -1659,6 +1659,233 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HTTPValidationError"
+  /contacts:
+    get:
+      tags:
+        - contacts
+      summary: List Contacts
+      operationId: list_contacts_contacts_get
+      parameters:
+        - name: q
+          in: query
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            title: Q
+        - name: cursor
+          in: query
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            title: Cursor
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            maximum: 500
+            minimum: 1
+            default: 100
+            title: Limit
+        - name: authorization
+          in: header
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            title: Authorization
+      responses:
+        "200":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ContactListResponse"
+        "422":
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
+    post:
+      tags:
+        - contacts
+      summary: Create Contact
+      operationId: create_contact_contacts_post
+      parameters:
+        - name: authorization
+          in: header
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            title: Authorization
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ContactCreate"
+      responses:
+        "201":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ContactEntry"
+        "422":
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
+  /contacts/{contact_id}:
+    patch:
+      tags:
+        - contacts
+      summary: Patch Contact
+      operationId: patch_contact_contacts__contact_id__patch
+      parameters:
+        - name: contact_id
+          in: path
+          required: true
+          schema:
+            type: string
+            title: Contact Id
+        - name: authorization
+          in: header
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            title: Authorization
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ContactPatch"
+      responses:
+        "200":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ContactEntry"
+        "422":
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
+    delete:
+      tags:
+        - contacts
+      summary: Delete Contact
+      operationId: delete_contact_contacts__contact_id__delete
+      parameters:
+        - name: contact_id
+          in: path
+          required: true
+          schema:
+            type: string
+            title: Contact Id
+        - name: authorization
+          in: header
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            title: Authorization
+      responses:
+        "204":
+          description: Successful Response
+        "422":
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
+  /members/{user_id}/phone:
+    put:
+      tags:
+        - contacts
+      summary: Put Member Phone
+      operationId: put_member_phone_members__user_id__phone_put
+      parameters:
+        - name: user_id
+          in: path
+          required: true
+          schema:
+            type: string
+            title: User Id
+        - name: authorization
+          in: header
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            title: Authorization
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MemberPhonePut"
+      responses:
+        "200":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties:
+                  type: string
+                title: Response Put Member Phone Members  User Id  Phone Put
+        "422":
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
+    delete:
+      tags:
+        - contacts
+      summary: Delete Member Phone
+      operationId: delete_member_phone_members__user_id__phone_delete
+      parameters:
+        - name: user_id
+          in: path
+          required: true
+          schema:
+            type: string
+            title: User Id
+        - name: authorization
+          in: header
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            title: Authorization
+      responses:
+        "204":
+          description: Successful Response
+        "422":
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
   /healthz:
     get:
       summary: Healthz
@@ -1894,6 +2121,105 @@ components:
         - answered_at
         - ended_at
       title: CallResponse
+    ContactCreate:
+      properties:
+        name:
+          type: string
+          maxLength: 200
+          minLength: 1
+          title: Name
+        phone_e164:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Phone E164
+        email:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Email
+      additionalProperties: false
+      type: object
+      required:
+        - name
+      title: ContactCreate
+    ContactEntry:
+      properties:
+        id:
+          type: string
+          title: Id
+        kind:
+          type: string
+          enum:
+            - member
+            - manual
+          title: Kind
+        name:
+          type: string
+          title: Name
+        phone_e164:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Phone E164
+        email:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Email
+        role:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Role
+      type: object
+      required:
+        - id
+        - kind
+        - name
+      title: ContactEntry
+      description:
+        "One row in the computed contacts union \u2014 an org member or\
+        \ a manual\ncontact. ``id`` is ``member:<user_id>`` for members, the contact\
+        \ row's\nUUID (as str) for manual rows."
+    ContactListResponse:
+      properties:
+        items:
+          items:
+            $ref: "#/components/schemas/ContactEntry"
+          type: array
+          title: Items
+        next_cursor:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Next Cursor
+      type: object
+      required:
+        - items
+      title: ContactListResponse
+    ContactPatch:
+      properties:
+        name:
+          anyOf:
+            - type: string
+              maxLength: 200
+              minLength: 1
+            - type: "null"
+          title: Name
+        phone_e164:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Phone E164
+        email:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Email
+      additionalProperties: false
+      type: object
+      title: ContactPatch
     DnsRecordSchema:
       properties:
         name:
@@ -2999,6 +3325,16 @@ components:
         - api_key
         - model
       title: LLMConfig
+    MemberPhonePut:
+      properties:
+        phone_e164:
+          type: string
+          title: Phone E164
+      additionalProperties: false
+      type: object
+      required:
+        - phone_e164
+      title: MemberPhonePut
     NumberAcquireRequest:
       properties:
         country_code:

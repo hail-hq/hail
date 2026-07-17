@@ -22,6 +22,7 @@ type callFlags struct {
 	llmModel       string
 	from           string
 	firstMessage   string
+	tools          []string
 	idempotencyKey string
 }
 
@@ -71,6 +72,7 @@ Example (minimal):
 	cmd.Flags().StringVar(&f.llmModel, "llm-model", "", "Model name — one of --prompt/--llm-* required (mode B)")
 	cmd.Flags().StringVar(&f.from, "from", "", "Override the from-number (default: first active number on the org)")
 	cmd.Flags().StringVar(&f.firstMessage, "first-message", "", "Spoken on pickup before listening")
+	cmd.Flags().StringSliceVar(&f.tools, "tools", nil, "Agent tools to allow (comma-separated or repeated); omit for all available, 'none' to disable all")
 	cmd.Flags().StringVar(&f.idempotencyKey, "idempotency-key", "", "Defaults to a fresh UUID")
 	f.registerConsentFlags(cmd, "call")
 	markOneOfRequired(cmd, "mode", "prompt", "llm-url", "llm-key", "llm-model")
@@ -97,6 +99,15 @@ func runCall(cmd *cobra.Command, opts *Options, f *callFlags, toNumber string) e
 		SystemPrompt: strPtr(f.prompt),
 		From:         strPtr(f.from),
 		FirstMessage: strPtr(f.firstMessage),
+	}
+	if cmd.Flags().Changed("tools") {
+		// [] disables all agent tools; the sentinel word "none" maps to []
+		// because cobra cannot express an empty list on the command line.
+		tools := f.tools
+		if len(tools) == 1 && tools[0] == "none" {
+			tools = []string{}
+		}
+		body.Tools = &tools
 	}
 	if f.llmURL != "" {
 		body.Llm = &client.LLMConfig{

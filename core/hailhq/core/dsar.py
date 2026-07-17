@@ -15,12 +15,21 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import case, cast, exists, func, inspect as sa_inspect, or_, select
+from sqlalchemy import (
+    case,
+    cast,
+    delete,
+    exists,
+    func,
+    inspect as sa_inspect,
+    or_,
+    select,
+)
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from hailhq.core.compliance_gate import normalize_recipient
-from hailhq.core.models import AuditLog, Call, Email, Sms, Suppression
+from hailhq.core.models import AuditLog, Call, Contact, Email, Sms, Suppression
 
 __all__ = [
     "DSARRecord",
@@ -72,6 +81,7 @@ class DSARRecord:
     calls: list[Call] = field(default_factory=list)
     sms: list[Sms] = field(default_factory=list)
     emails: list[Email] = field(default_factory=list)
+    contacts: list[Contact] = field(default_factory=list)
     suppressions: list[Suppression] = field(default_factory=list)
     audit_logs: list[AuditLog] = field(default_factory=list)
 
@@ -82,12 +92,13 @@ class DeletionSummary:
     calls_scrubbed: int = 0
     sms_scrubbed: int = 0
     emails_scrubbed: int = 0
+    contacts_deleted: int = 0
     suppressions_preserved: int = 0
 
 
 async def lookup_recipient(session: AsyncSession, identifier: str) -> DSARRecord:
     """Find every row referencing ``identifier`` across calls, sms, emails,
-    suppressions, and audit_log."""
+    contacts, suppressions, and audit_log."""
     norm = normalize_recipient(identifier)
 
     calls = list(
@@ -111,6 +122,25 @@ async def lookup_recipient(session: AsyncSession, identifier: str) -> DSARRecord
                         _array_contains_ci(Email.to_addresses, norm),
                         _array_contains_ci(Email.cc_addresses, norm),
                         _array_contains_ci(Email.bcc_addresses, norm),
+                    )
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+
+    # contacts.phone_e164 is stored E.164-exact (same convention as
+    # Call/Sms.to_e164). contacts.email only has its domain lowercased at
+    # write time (see schemas.py's _email_or_error/_normalize_domain), so
+    # match it case-insensitively, mirroring the Email-table match above.
+    contacts = list(
+        (
+            await session.execute(
+                select(Contact).where(
+                    or_(
+                        Contact.phone_e164 == norm,
+                        func.lower(Contact.email) == norm,
                     )
                 )
             )
@@ -163,6 +193,7 @@ async def lookup_recipient(session: AsyncSession, identifier: str) -> DSARRecord
         calls=calls,
         sms=sms,
         emails=emails,
+        contacts=contacts,
         suppressions=suppressions,
         audit_logs=audit_logs,
     )
@@ -201,6 +232,7 @@ async def export_recipient_data(session: AsyncSession, identifier: str) -> dict:
         "calls": [_model_to_dict(c) for c in record.calls],
         "sms": [_model_to_dict(s) for s in record.sms],
         "emails": [_model_to_dict(e) for e in record.emails],
+        "contacts": [_model_to_dict(c) for c in record.contacts],
         "suppressions": [_model_to_dict(s) for s in record.suppressions],
         "audit_logs": [_model_to_dict(a) for a in record.audit_logs],
     }
@@ -210,10 +242,15 @@ async def delete_recipient_data(
     session: AsyncSession, identifier: str
 ) -> DeletionSummary:
     """Scrub call transcripts, SMS bodies, and email body content for one
-    recipient, on request (GDPR Art. 17 "right to erasure").
+    recipient, on request (GDPR Art. 17 "right to erasure"). Manual contact
+    rows for this recipient are deleted outright, not scrubbed — unlike a
+    call/sms/email row, a ``Contact`` row's entire content *is* the
+    recipient's identifying data (name, phone, email); there is no separate
+    "shell" left worth keeping once that's gone.
 
     Same content-only scrub semantics as
-    ``hailhq.core.retention.purge_expired_data`` — row shells stay intact.
+    ``hailhq.core.retention.purge_expired_data`` — row shells stay intact
+    for calls/sms/emails.
 
     Deliberately preserves two things, do not "fix" this to remove them:
 
@@ -251,6 +288,22 @@ async def delete_recipient_data(
             email.raw_s3_key = None
             emails_scrubbed += 1
 
+    # Bulk delete on the same predicate lookup_recipient used to find these
+    # rows (phone_e164 exact / email case-insensitive), rather than a
+    # per-row session.delete() loop over record.contacts — same bulk
+    # pattern as hailhq.core.retention's purge sweep.
+    contact_result = await session.execute(
+        delete(Contact)
+        .where(
+            or_(
+                Contact.phone_e164 == record.identifier,
+                func.lower(Contact.email) == record.identifier,
+            )
+        )
+        .execution_options(synchronize_session=False)
+    )
+    contacts_deleted = contact_result.rowcount or 0
+
     await session.commit()
 
     return DeletionSummary(
@@ -258,5 +311,6 @@ async def delete_recipient_data(
         calls_scrubbed=calls_scrubbed,
         sms_scrubbed=sms_scrubbed,
         emails_scrubbed=emails_scrubbed,
+        contacts_deleted=contacts_deleted,
         suppressions_preserved=len(record.suppressions),
     )
