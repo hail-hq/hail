@@ -32,3 +32,20 @@ test('prices are decimal strings, not numbers', () => {
   const { rows } = mapCsvToNumbers(CSV);
   assert.equal(typeof rows[0].usd_per_month, 'string');
 });
+
+test('parses quoted CSV fields with commas', () => {
+  const csvWithQuotedComma =
+    'ISO,Country,Country Code,Phone Number Type,Voice Enabled,Trunking Enabled,SMS Enabled,MMS Enabled,Domestic Voice Only,Domestic SMS Only,Phone Number Price / month\n' +
+    'US,United States,1,Local,Yes,Yes,Yes,Yes,No,N/A,1.15\n' +
+    'VI,"Virgin Islands, U.S.",1340,Local,Yes,Yes,Yes,No,No,N/A,1.15\n';
+  const { rows } = mapCsvToNumbers(csvWithQuotedComma);
+  const vi = rows.find((r) => r.country_code === 'VI');
+  assert.ok(vi, 'VI row should be present');
+  assert.equal(vi.country_code, 'VI');
+  assert.equal(vi.dial_code, '1340');
+  assert.equal(vi.number_type, 'local');
+  assert.equal(vi.usd_per_month, '1.15');
+  assert.equal(vi.voice, true);
+  assert.equal(vi.sms, true);
+  assert.equal(vi.mms, false);
+});

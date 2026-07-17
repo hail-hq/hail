@@ -15,13 +15,46 @@ const CSV_URL =
 const TYPE_MAP = { Local: 'local', Mobile: 'mobile', 'Toll Free': 'toll_free', National: 'national' };
 const COUNTRY_FLOOR = 40; // never shrink the allow-list below this — see plan's data-safety invariant
 
-// Minimal CSV parser adequate for Twilio's quote-free numeric feed.
+// Parse a single CSV line, respecting double-quoted fields (which may contain commas).
+// Escaped quotes within a field are represented as "" (two consecutive quotes).
+function parseCSVLine(line) {
+  const cells = [];
+  let current = '';
+  let inQuotes = false;
+
+  for (let i = 0; i < line.length; i++) {
+    const char = line[i];
+    const nextChar = line[i + 1];
+
+    if (char === '"') {
+      if (inQuotes && nextChar === '"') {
+        // Escaped quote: add one quote and skip the next character
+        current += '"';
+        i++;
+      } else {
+        // Toggle quote state
+        inQuotes = !inQuotes;
+      }
+    } else if (char === ',' && !inQuotes) {
+      // Field delimiter (only outside quotes)
+      cells.push(current.trim());
+      current = '';
+    } else {
+      current += char;
+    }
+  }
+
+  cells.push(current.trim());
+  return cells;
+}
+
+// Minimal CSV parser that respects quoted fields per RFC 4180.
 function parseCsv(text) {
   const lines = text.trim().split(/\r?\n/);
-  const header = lines[0].split(',');
+  const header = parseCSVLine(lines[0]);
   return lines.slice(1).map((line) => {
-    const cells = line.split(',');
-    return Object.fromEntries(header.map((h, i) => [h.trim(), (cells[i] ?? '').trim()]));
+    const cells = parseCSVLine(line);
+    return Object.fromEntries(header.map((h, i) => [h, (cells[i] ?? '').trim()]));
   });
 }
 
@@ -36,7 +69,7 @@ export function mapCsvToNumbers(csvText) {
     const mms = r['MMS Enabled'] === 'Yes';
     if (!voice && !sms) continue; // a number must do something
     const priceRaw = r['Phone Number Price / month'];
-    if (!/^\d+(\.\d+)?$/.test(priceRaw)) continue;
+    if (!/^(0|[1-9][0-9]*)(\.[0-9]{1,8})?$/.test(priceRaw)) continue;
     const iso = r['ISO'];
     countries.add(iso);
     rows.push({
