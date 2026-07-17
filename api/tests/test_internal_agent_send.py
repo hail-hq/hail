@@ -16,6 +16,7 @@ from hailhq.api.main import app
 from hailhq.core import hmac_signing
 from hailhq.core.compliance_gate import add_suppression
 from hailhq.core.db import get_session
+from hailhq.core.agent_caps import AGENT_OUTBOUND_DISABLED_FLAG
 from hailhq.core.billing import CALL_META_BILLED
 from hailhq.core.config import settings
 from hailhq.core.models import (
@@ -23,7 +24,9 @@ from hailhq.core.models import (
     Call,
     Email,
     EmailDomain,
+    Organization,
     OrganizationMember,
+    PlatformFlag,
     Sms,
     User,
 )
@@ -504,3 +507,44 @@ async def test_send_sms_provider_failure_writes_send_failed_audit(
     assert len(rows) == 1
     assert rows[0].organization_id == org
     assert rows[0].payload["end_reason"] == "provider_error"
+
+
+async def test_send_sms_blocked_by_agent_kill_switch(
+    client, async_session, sms_mock, add_phone_number
+):
+    """Voicebot sends must honor the platform agent caps: an agent-origin
+    org with the kill switch on gets a vague spoken denial and no row."""
+    org = uuid.uuid4()
+    call = await _insert_live_call(async_session, org, add_phone_number)
+    async_session.add(Organization(id=org, origin="agent"))
+    async_session.add(PlatformFlag(key=AGENT_OUTBOUND_DISABLED_FLAG, value="true"))
+    await async_session.commit()
+
+    body = _sms_payload(call.id)
+    resp = await client.post(
+        "/internal/agent/send-sms", content=body, headers=_signed(body)
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["ok"] is False
+    assert "kill" not in data["spoken"].lower()
+    assert "disabled" not in data["spoken"].lower()
+    rows = (await async_session.execute(Sms.__table__.select())).fetchall()
+    assert rows == []
+
+
+async def test_send_sms_agent_caps_noop_for_human_org(
+    client, async_session, sms_mock, add_phone_number
+):
+    """Kill switch on, but the org is human-origin: send goes through."""
+    org = uuid.uuid4()
+    call = await _insert_live_call(async_session, org, add_phone_number)
+    async_session.add(Organization(id=org, origin="human"))
+    async_session.add(PlatformFlag(key=AGENT_OUTBOUND_DISABLED_FLAG, value="true"))
+    await async_session.commit()
+
+    body = _sms_payload(call.id)
+    resp = await client.post(
+        "/internal/agent/send-sms", content=body, headers=_signed(body)
+    )
+    assert resp.json()["ok"] is True
