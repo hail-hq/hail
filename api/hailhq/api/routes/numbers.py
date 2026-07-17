@@ -100,11 +100,15 @@ async def acquire_number(
             loc=["body", "number_type"],
         )
 
+    caps = telephony_catalog.capabilities(body.country_code, body.number_type)
+    # caps is non-None: is_acquirable above guarantees the row exists.
+    requested_caps = [c for c in ("voice", "sms") if caps[c]]
+
     try:
         acquired = await provider.acquire_number(
             country_code=body.country_code,
             number_type=body.number_type,
-            capabilities=["voice", "sms"],
+            capabilities=requested_caps,
         )
     except LookupError as exc:
         # Transient: the carrier has no matching inventory right now. Release the

@@ -79,6 +79,41 @@ async def test_acquire_allows_listed_country_type(
     voice_provider_mock.acquire_number.assert_awaited_once()
 
 
+async def test_acquire_sms_only_country_requests_sms_capability_only(
+    client, org_and_key, voice_provider_mock
+):
+    """SE/mobile is SMS-only in costs/telephony.json (voice=False, sms=True).
+    The route must request only the capabilities the catalog row advertises,
+    not the hardcoded ["voice", "sms"] — otherwise the Twilio adapter's AND
+    filter matches nothing and acquisition 503s."""
+    _, _, plaintext = org_and_key
+    resp = await client.post(
+        "/numbers",
+        json={"country_code": "SE", "number_type": "mobile"},
+        headers={"Authorization": f"Bearer {plaintext}"},
+    )
+    assert resp.status_code == 201, resp.text
+    voice_provider_mock.acquire_number.assert_awaited_once()
+    _, kwargs = voice_provider_mock.acquire_number.call_args
+    assert kwargs["capabilities"] == ["sms"]
+
+
+async def test_acquire_voice_and_sms_country_requests_both_capabilities(
+    client, org_and_key, voice_provider_mock
+):
+    """US/local supports both voice and sms — both must still be requested."""
+    _, _, plaintext = org_and_key
+    resp = await client.post(
+        "/numbers",
+        json={"country_code": "US", "number_type": "local"},
+        headers={"Authorization": f"Bearer {plaintext}"},
+    )
+    assert resp.status_code == 201, resp.text
+    voice_provider_mock.acquire_number.assert_awaited_once()
+    _, kwargs = voice_provider_mock.acquire_number.call_args
+    assert kwargs["capabilities"] == ["voice", "sms"]
+
+
 async def test_get_number_not_found(client, org_and_key) -> None:
     _, _, plaintext = org_and_key
     resp = await client.get(
