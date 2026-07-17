@@ -1754,6 +1754,17 @@ components:
           additionalProperties: true
           type: object
           title: Metadata
+        tools:
+          anyOf:
+            - items:
+                type: string
+              type: array
+            - type: "null"
+          title: Tools
+          description:
+            "Agent tools to allow on this call. Omitted: every tool the
+            organization's configured channels support (new channels appear automatically).
+            Empty list: no tools. Tool names are validated against the server's registry."
       additionalProperties: false
       type: object
       required:

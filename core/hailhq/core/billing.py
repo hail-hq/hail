@@ -22,6 +22,16 @@ from hailhq.core.models import AccountCredit
 
 logger = logging.getLogger(__name__)
 
+# Key stamped into calls.metadata at create time: True when the call was
+# created by a billed principal (org API key), False for the self-host
+# shared-key path. The internal agent-send routes read it to decide
+# whether to run the funds gate mid-call — same posture as
+# require_funds' api_key_id check. Same visible-metadata precedent as
+# pool.CALL_META_FROM_POOL.
+CALL_META_BILLED = "billed"
+
+__all__ = ["get_balance_cents", "has_funds", "CALL_META_BILLED"]
+
 
 async def get_balance_cents(db: AsyncSession, organization_id: uuid.UUID) -> int:
     """Current balance for an org, in cents. SUM over the ledger.

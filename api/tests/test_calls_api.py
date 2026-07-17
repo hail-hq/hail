@@ -8,6 +8,7 @@ database without any FastAPI dep override.
 
 from __future__ import annotations
 
+import uuid
 from uuid import uuid4
 
 import httpx
@@ -876,6 +877,120 @@ async def test_post_calls_rejects_unsafe_llm_base_url_at_route(
         headers={"Authorization": f"Bearer {plain}"},
     )
     assert resp.status_code == 422
+
+
+# --------------------------------------------------------------------------- #
+# Per-call agent tools opt-out + billed stamp
+# --------------------------------------------------------------------------- #
+
+
+async def test_post_calls_rejects_unknown_tool(
+    client: httpx.AsyncClient,
+    org_and_key: tuple[str, ApiKey, str],
+) -> None:
+    _, _, plain = org_and_key
+    resp = await client.post(
+        "/calls",
+        json={
+            "to": "+14155559999",
+            "system_prompt": "hi",
+            "recipient_consent": True,
+            "tools": ["send_sms", "launch_rocket"],
+        },
+        headers={"Authorization": f"Bearer {plain}"},
+    )
+    assert resp.status_code == 422
+    assert "launch_rocket" in resp.text
+
+
+async def test_post_calls_forwards_tools_in_dispatch_metadata(
+    client: httpx.AsyncClient,
+    async_session: AsyncSession,
+    org_and_key: tuple[str, ApiKey, str],
+    livekit_mock: AsyncMock,
+    add_phone_number,
+) -> None:
+    org_id, _, plain = org_and_key
+    await add_phone_number(async_session, org_id)
+
+    resp = await client.post(
+        "/calls",
+        json={
+            "to": "+14155559999",
+            "system_prompt": "hi",
+            "recipient_consent": True,
+            "tools": ["end_call"],
+        },
+        headers={"Authorization": f"Bearer {plain}"},
+    )
+    assert resp.status_code == 201, resp.text
+    metadata = livekit_mock.dispatch_agent.await_args.kwargs["metadata"]
+    assert metadata["tools"] == ["end_call"]
+
+
+async def test_post_calls_tools_empty_and_omitted_passthrough(
+    client: httpx.AsyncClient,
+    async_session: AsyncSession,
+    org_and_key: tuple[str, ApiKey, str],
+    livekit_mock: AsyncMock,
+    add_phone_number,
+) -> None:
+    """`tools: []` dispatches as [] (no tools); omitted dispatches as None
+    (all tools). Pins the []-vs-None distinction so a refactor to a
+    truthiness check (`if body.tools:`) can't silently collapse [] into
+    the None path."""
+    org_id, _, plain = org_and_key
+    await add_phone_number(async_session, org_id)
+
+    resp = await client.post(
+        "/calls",
+        json={
+            "to": "+14155559999",
+            "system_prompt": "hi",
+            "recipient_consent": True,
+            "tools": [],
+        },
+        headers={"Authorization": f"Bearer {plain}"},
+    )
+    assert resp.status_code == 201, resp.text
+    metadata = livekit_mock.dispatch_agent.await_args.kwargs["metadata"]
+    assert metadata["tools"] == []
+
+    resp = await client.post(
+        "/calls",
+        json={
+            "to": "+14155559999",
+            "system_prompt": "hi",
+            "recipient_consent": True,
+        },
+        headers={"Authorization": f"Bearer {plain}"},
+    )
+    assert resp.status_code == 201, resp.text
+    metadata = livekit_mock.dispatch_agent.await_args.kwargs["metadata"]
+    assert metadata["tools"] is None
+
+
+async def test_post_calls_stamps_billed_flag(
+    client: httpx.AsyncClient,
+    async_session: AsyncSession,
+    org_and_key: tuple[str, ApiKey, str],
+    livekit_mock: AsyncMock,
+    add_phone_number,
+) -> None:
+    from hailhq.core.billing import CALL_META_BILLED
+
+    org_id, _, plain = org_and_key
+    await add_phone_number(async_session, org_id)
+
+    resp = await client.post(
+        "/calls",
+        json={"to": "+14155559999", "system_prompt": "hi", "recipient_consent": True},
+        headers={"Authorization": f"Bearer {plain}"},
+    )
+    assert resp.status_code == 201, resp.text
+    call_id = resp.json()["id"]
+    row = await async_session.get(Call, uuid.UUID(call_id))
+    assert row.metadata_[CALL_META_BILLED] is True  # org API key => billed
 
 
 async def test_post_calls_dispatch_metadata_carries_org_name(

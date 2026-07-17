@@ -100,6 +100,7 @@ class HailClient:
         from_: str | None = None,
         first_message: str | None = None,
         metadata: dict[str, Any] | None = None,
+        tools: list[str] | None = None,
         idempotency_key: str | None = None,
         consent_source: str | None = None,
         consent_obtained_at: str | None = None,
@@ -127,6 +128,8 @@ class HailClient:
             fields["first_message"] = first_message
         if metadata is not None:
             fields["metadata"] = metadata
+        if tools is not None:
+            fields["tools"] = tools
         if consent_source is not None:
             fields["consent_source"] = consent_source
         if consent_obtained_at is not None:

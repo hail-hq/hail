@@ -13,7 +13,7 @@ model was implemented against semantics the code no longer has.**
 
 - `lib/monthly-fee-rater.ts` gates both fees on `is_pool = FALSE AND 'sms' = ANY(capabilities)`.
   That predicate is correct against the 2026-07-06 spec, where `capabilities` is the
-  org's *choice* of enabled channels. But the shipped `enable_sms` treats capabilities
+  org's _choice_ of enabled channels. But the shipped `enable_sms` treats capabilities
   as **carrier-fixed at purchase** (`numbers.py:187`), and the Twilio search hardcodes
   `sms_enabled=True`, so every acquired number carries `"sms"`. The predicate is
   effectively `is_pool = FALSE`. The column's meaning drifted underneath the predicate.
@@ -51,15 +51,15 @@ dissolve; they do not need fixes.
 
    **This amends 2026-07-06 Decision 12** ("itemized to customers as a small, separate
    line item... matching how Twilio/Vonage/Bandwidth itemize 10DLC too"). That analogy
-   does not hold: those providers itemize because *each of their customers has their own
-   brand/campaign* — a genuine per-org pass-through. Hail's does not.
+   does not hold: those providers itemize because _each of their customers has their own
+   brand/campaign_ — a genuine per-org pass-through. Hail's does not.
 
    The decisive argument for absorbing it, confirmed by research (below): **the real
    recurring 10DLC cost is a per-message carrier pass-through that scales with volume**
    (~0.42¢/segment), not the flat TCR campaign fee ($1.50–10/mo platform-wide total,
    which amortizes to zero). A flat $1/mo per org could never track a per-segment cost —
    an org sending 10k US segments/mo incurs ~$42 of carrier fees, not $1. The old model
-   therefore billed 10DLC *twice*: once correctly inside the per-segment rate (which
+   therefore billed 10DLC _twice_: once correctly inside the per-segment rate (which
    already carries the carrier fee), and once as a flat fee that mapped only to the
    trivial registration cost and was ~pure margin mislabeled "compliance." Folding the
    whole 10DLC concept into the per-segment rate is the only structure that matches how
@@ -69,11 +69,11 @@ dissolve; they do not need fixes.
 4. **No US rate change; 2.5¢ holds at ~50% margin.** Verified against Twilio's own US
    pricing page (`twilio.com/en-us/sms/pricing/us`, fetched 2026-07-15; see Research):
 
-   | Layer | Outbound | Inbound |
-   | --- | --- | --- |
-   | Twilio base | 0.83¢ | 0.83¢ |
-   | Carrier pass-through, blended | ~0.42¢ | ~0.44¢ |
-   | **All-in COGS** | **~1.25¢** | **~1.27¢** |
+   | Layer                         | Outbound   | Inbound    |
+   | ----------------------------- | ---------- | ---------- |
+   | Twilio base                   | 0.83¢      | 0.83¢      |
+   | Carrier pass-through, blended | ~0.42¢     | ~0.44¢     |
+   | **All-in COGS**               | **~1.25¢** | **~1.27¢** |
 
    At 2.5¢ that is **~50% / ~49% gross margin** (outbound / inbound). The 2026-07-06
    spec's ~1.23¢ figure is **confirmed**, marginally conservative. So absorbing 10DLC
@@ -117,7 +117,7 @@ dissolve; they do not need fixes.
 
 8. **The rater carries a durable backlog.** It enumerates every unbilled month per
    number since acquisition, not just the current month. This is what makes a missed run
-   *late* rather than *lost*, and it mirrors what already makes the usage rater safe
+   _late_ rather than _lost_, and it mirrors what already makes the usage rater safe
    (a push trigger plus a `WHERE priced_at IS NULL` backlog).
 
 ## What does NOT change
@@ -133,13 +133,13 @@ dissolve; they do not need fixes.
 
 **No migration.** Every column needed already exists:
 
-| Column | State today | Use |
-| --- | --- | --- |
-| `phone_numbers.country_code` | written, `NOT NULL` | lookup key into `telephony.json` |
-| `phone_numbers.number_type` | written, `NOT NULL` | lookup key into `telephony.json` |
-| `phone_numbers.acquired_at` | **declared, never written** | backlog anchor |
-| `phone_numbers.released_at` | **declared, never written** | stops the fee |
-| `phone_numbers.provisioning_state` | written (`'active'` only) | `'released'` on release |
+| Column                             | State today                 | Use                              |
+| ---------------------------------- | --------------------------- | -------------------------------- |
+| `phone_numbers.country_code`       | written, `NOT NULL`         | lookup key into `telephony.json` |
+| `phone_numbers.number_type`        | written, `NOT NULL`         | lookup key into `telephony.json` |
+| `phone_numbers.acquired_at`        | **declared, never written** | backlog anchor                   |
+| `phone_numbers.released_at`        | **declared, never written** | stops the fee                    |
+| `phone_numbers.provisioning_state` | written (`'active'` only)   | `'released'` on release          |
 
 `acquired_at` is NULL on every existing row. Rather than a backfill migration, the rater
 anchors on `COALESCE(acquired_at, created_at)` — `created_at` is `NOT NULL` with a
@@ -190,7 +190,7 @@ against Twilio's published pricing.
 > **Without this the file rots unnoticed while the invoice keeps citing it.**
 >
 > Fix: give each file an explicit row-array key (a `ROW_KEY` map, `{ llm: "models",
-> telephony: "numbers", … }`), so an unrecognized file is a **hard error rather than a
+telephony: "numbers", … }`), so an unrecognized file is a **hard error rather than a
 > `skip:` line**. The current `skip`-and-continue behaviour is what would let this pass
 > silently. Two tests required: `telephony.json` is staleness-checked, and an unknown
 > data file fails the run instead of being skipped.
@@ -236,13 +236,13 @@ is replaced by one module, `lib/telephony-costs.ts`, which fetches and caches
 - `numberPriceUsdPerMonth(countryCode, numberType)` — the exact price for one number.
 - `cheapestNumberPriceUsd()` — the "from $X" figure for marketing surfaces.
 
-| Caller | Today | After |
-| --- | --- | --- |
-| `lib/monthly-fee-rater.ts:78` | `fees.dedicatedNumberUsdPerMonth` | `numberPriceUsdPerMonth(row.country_code, row.number_type)` |
-| `app/console/sms/page.tsx:24` | flat `$2.15` in the acquire confirm | the **price map**, passed to `NumbersPanel` — see below |
-| `app/(marketing)/pricing/page.tsx:35` | `$1.15/mo + $1.00/mo` | "from `cheapestNumberPriceUsd()`/mo — you pay what the carrier charges", linking `/costs` |
-| `app/components/CostComparison.tsx:30` | `$2.15/mo` SMS number line | same "from $X, at cost" framing |
-| `lib/__tests__/private-rates.test.ts:49,52` | pins `1.15` / `1.0` | move to `telephony-costs` tests; the 10DLC assertion is deleted outright |
+| Caller                                      | Today                               | After                                                                                     |
+| ------------------------------------------- | ----------------------------------- | ----------------------------------------------------------------------------------------- |
+| `lib/monthly-fee-rater.ts:78`               | `fees.dedicatedNumberUsdPerMonth`   | `numberPriceUsdPerMonth(row.country_code, row.number_type)`                               |
+| `app/console/sms/page.tsx:24`               | flat `$2.15` in the acquire confirm | the **price map**, passed to `NumbersPanel` — see below                                   |
+| `app/(marketing)/pricing/page.tsx:35`       | `$1.15/mo + $1.00/mo`               | "from `cheapestNumberPriceUsd()`/mo — you pay what the carrier charges", linking `/costs` |
+| `app/components/CostComparison.tsx:30`      | `$2.15/mo` SMS number line          | same "from $X, at cost" framing                                                           |
+| `lib/__tests__/private-rates.test.ts:49,52` | pins `1.15` / `1.0`                 | move to `telephony-costs` tests; the 10DLC assertion is deleted outright                  |
 
 One module, one fetch path, one source — used by the rater, the console, and the
 marketing pages alike.
@@ -250,8 +250,8 @@ marketing pages alike.
 **The acquire confirm needs the map, not a scalar.** `NumbersPanel` is a client component
 (`"use client"`) holding the `countryCode` the user is typing, while `page.tsx` is a
 server component. A single price cannot reach it. The server component passes the
-`numbers[]` price map as a prop, and the panel resolves the price for the *currently
-selected* `(country, type)` when it builds the confirm text — so an org acquiring a UK
+`numbers[]` price map as a prop, and the panel resolves the price for the _currently
+selected_ `(country, type)` when it builds the confirm text — so an org acquiring a UK
 toll-free number is quoted the UK toll-free price, not a US local one. If the selected
 pair is absent from the map, the acquire button is disabled with "we don't have a price
 for that country yet" rather than quoting a wrong figure.

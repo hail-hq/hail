@@ -27,6 +27,8 @@ from hailhq.api.agent_gate import (
     require_agent_send_allowed,
 )
 from hailhq.api.funds import require_funds
+from hailhq.core.agent_tools.registry import all_tools
+from hailhq.core.billing import CALL_META_BILLED
 from hailhq.core.call_end_reasons import CallEndReason
 from hailhq.core.compliance_gate import check_call_allowed
 from hailhq.core.db import get_session
@@ -202,6 +204,20 @@ async def create_call(
     except HTTPException as exc:
         raise await cache_failure(idem, exc) from None
 
+    # Tool allowlist gate — reject unknown tool names before any Call row is
+    # created. `None` (omitted) means "all tools"; `[]` means "no tools" and
+    # is passed through as-is below.
+    if body.tools is not None:
+        known = {t.name for t in all_tools()}
+        unknown = sorted(set(body.tools) - known)
+        if unknown:
+            raise await cache_failure(
+                idem,
+                unprocessable(
+                    f"unknown tools: {', '.join(unknown)}", loc=["body", "tools"]
+                ),
+            )
+
     # Compliance gate — suppression/DNC, premium-rate prefix, velocity cap.
     # Also before any Call row is created, so a denial has no resource to
     # clean up; the audit entry below carries resource_id=None.
@@ -265,6 +281,7 @@ async def create_call(
     call_metadata = dict(body.metadata)
     if pool_number is not None:
         call_metadata[CALL_META_FROM_POOL] = True
+    call_metadata[CALL_META_BILLED] = principal.api_key_id is not None
 
     call = Call(
         organization_id=principal.organization_id,
@@ -350,6 +367,7 @@ async def create_call(
                 "system_prompt": body.system_prompt,
                 "llm": llm_meta,
                 "first_message": body.first_message,
+                "tools": body.tools,
                 "org_name": await org_name_task,
             },
         )

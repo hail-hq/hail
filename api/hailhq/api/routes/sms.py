@@ -82,6 +82,76 @@ def get_sms_provider() -> SmsProvider:
     return _sms_provider_singleton
 
 
+async def deliver_sms(db: AsyncSession, provider: SmsProvider, sms: Sms) -> str | None:
+    """Wire-send one queued Sms row and reconcile its status.
+
+    Shared by POST /sms and the internal agent-send route. Returns None
+    when the carrier accepted (status='sent', usage billed),
+    'provider_error' on transport failure, or the carrier error code on
+    rejection. Never raises — the caller owns HTTP semantics.
+    """
+    try:
+        result = await provider.send_sms(
+            from_e164=sms.from_e164, to_e164=sms.to_e164, body=sms.body
+        )
+    except Exception:
+        logger.warning("sms send failed for sms_id=%s", sms.id, exc_info=True)
+        sms.status = "failed"
+        db.add(
+            SmsEvent(
+                sms_id=sms.id,
+                organization_id=sms.organization_id,
+                kind="state_change",
+                payload={"from": "queued", "to": "failed", "reason": "provider_error"},
+            )
+        )
+        await db.commit()
+        return "provider_error"
+
+    # A carrier rejection surfaces via error_code AND/OR a failure status
+    # (base.ProviderSmsResult contract: "status reflecting the failure").
+    # Check both so a provider that reports failure by status alone isn't
+    # recorded as sent and billed.
+    carrier_rejected = result.error_code is not None or result.status.lower() in {
+        "failed",
+        "undelivered",
+    }
+    new_status = "failed" if carrier_rejected else "sent"
+    sms.status = new_status
+    sms.provider_message_sid = result.provider_message_sid
+    sms.segment_count = result.segment_count
+    sms.error_code = result.error_code
+    # ``sent_at`` means "the carrier accepted the message" — a rejected
+    # send keeps it NULL, matching emails (sent_at only with status='sent')
+    # and this route's own transport-failure branch above.
+    if not carrier_rejected:
+        sms.sent_at = datetime.now(timezone.utc)
+    event_payload: dict[str, Any] = {"from": "queued", "to": new_status}
+    if carrier_rejected:
+        event_payload["error_code"] = result.error_code
+    db.add(
+        SmsEvent(
+            sms_id=sms.id,
+            organization_id=sms.organization_id,
+            kind="state_change",
+            payload=event_payload,
+        )
+    )
+    await db.commit()
+
+    if carrier_rejected:
+        return result.error_code or "carrier_rejected"
+
+    tier = classify_pricing_tier(sms.to_e164)
+    await write_usage_event(
+        organization_id=sms.organization_id,
+        channel="sms",
+        units=sms.segment_count,
+        ref=f"sms:{sms.id}:{tier}",
+    )
+    return None
+
+
 @router.post(
     "",
     response_model=SmsResponse,
@@ -216,69 +286,18 @@ async def create_sms(
         },
     )
 
-    try:
-        result = await provider.send_sms(
-            from_e164=sms.from_e164, to_e164=sms.to_e164, body=sms.body
-        )
-    except Exception as exc:
-        logger.warning("sms send failed for sms_id=%s", sms.id, exc_info=True)
-        sms.status = "failed"
-        db.add(
-            SmsEvent(
-                sms_id=sms.id,
-                organization_id=sms.organization_id,
-                kind="state_change",
-                payload={"from": "queued", "to": "failed", "reason": "provider_error"},
-            )
-        )
-        await db.commit()
+    # Provider send — best-effort with status reconciliation.
+    err = await deliver_sms(db, provider, sms)
+    if err == "provider_error":
         raise await cache_failure(
             idem,
             HTTPException(
                 status_code=http_status.HTTP_502_BAD_GATEWAY,
                 detail=_SMS_SEND_FAILED_DETAIL,
             ),
-        ) from exc
-
-    # A carrier rejection surfaces via error_code AND/OR a failure status
-    # (base.ProviderSmsResult contract: "status reflecting the failure").
-    # Check both so a provider that reports failure by status alone isn't
-    # recorded as sent and billed.
-    carrier_rejected = result.error_code is not None or result.status.lower() in {
-        "failed",
-        "undelivered",
-    }
-    new_status = "failed" if carrier_rejected else "sent"
-    sms.status = new_status
-    sms.provider_message_sid = result.provider_message_sid
-    sms.segment_count = result.segment_count
-    sms.error_code = result.error_code
-    # ``sent_at`` means "the carrier accepted the message" — a rejected
-    # send keeps it NULL, matching emails (sent_at only with status='sent')
-    # and this route's own transport-failure branch above.
-    if not carrier_rejected:
-        sms.sent_at = datetime.now(timezone.utc)
-    event_payload: dict[str, Any] = {"from": "queued", "to": new_status}
-    if carrier_rejected:
-        event_payload["error_code"] = result.error_code
-    db.add(
-        SmsEvent(
-            sms_id=sms.id,
-            organization_id=sms.organization_id,
-            kind="state_change",
-            payload=event_payload,
         )
-    )
-    await db.commit()
-
-    if not carrier_rejected:
-        tier = classify_pricing_tier(sms.to_e164)
-        await write_usage_event(
-            organization_id=principal.organization_id,
-            channel="sms",
-            units=sms.segment_count,
-            ref=f"sms:{sms.id}:{tier}",
-        )
+    # carrier rejection: row already reconciled to failed; fall through and
+    # return the SmsResponse exactly as before.
 
     response.headers["Location"] = f"/sms/{sms.id}"
     sms_response = SmsResponse.model_validate(sms)
@@ -459,4 +478,4 @@ async def list_sms(
     )
 
 
-__all__ = ["router", "get_sms_provider"]
+__all__ = ["router", "get_sms_provider", "deliver_sms"]

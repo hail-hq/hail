@@ -790,10 +790,13 @@ type CallCreate struct {
 	Metadata    *map[string]interface{} `json:"metadata,omitempty"`
 
 	// RecipientConsent Attestation that you have obtained the lawful consent required to contact this recipient. Hail does not verify consent itself — you are responsible for a lawful basis under TCPA/ePrivacy/PECR/CAN-SPAM/GDPR as applicable. Rejected (422) if not true.
-	RecipientConsent bool         `json:"recipient_consent"`
-	SystemPrompt     *string      `json:"system_prompt,omitempty"`
-	To               string       `json:"to"`
-	VoiceConfig      *VoiceConfig `json:"voice_config,omitempty"`
+	RecipientConsent bool    `json:"recipient_consent"`
+	SystemPrompt     *string `json:"system_prompt,omitempty"`
+	To               string  `json:"to"`
+
+	// Tools Agent tools to allow on this call. Omitted: every tool the organization's configured channels support (new channels appear automatically). Empty list: no tools. Tool names are validated against the server's registry.
+	Tools       *[]string    `json:"tools,omitempty"`
+	VoiceConfig *VoiceConfig `json:"voice_config,omitempty"`
 }
 
 // CallCreateMessageType 'marketing' additionally requires a non-empty consent_source. Use 'informational' for transactional/service communications.

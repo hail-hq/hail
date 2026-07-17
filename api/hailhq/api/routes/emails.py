@@ -101,7 +101,7 @@ _SEND_FAILED_DETAIL = "email send failed"
 # --------------------------------------------------------------------------- #
 
 
-async def _resolve_sender(
+async def resolve_sender(
     db: AsyncSession,
     organization_id: UUID,
     explicit_from: str | None,
@@ -247,7 +247,7 @@ async def _resolve_sender(
     return sd
 
 
-def _from_address_for(sd: EmailDomain, explicit: str | None) -> str:
+def from_address_for(sd: EmailDomain, explicit: str | None) -> str:
     """Resolve the wire ``From:`` for a send.
 
     Hail-mail: ``sd.domain`` is the full address.
@@ -280,6 +280,133 @@ async def _write_usage_event(
     await write_usage_event(
         organization_id=organization_id, channel="email", units=units, ref=ref
     )
+
+
+# --------------------------------------------------------------------------- #
+# Wire delivery
+# --------------------------------------------------------------------------- #
+
+
+async def deliver_email(
+    db: AsyncSession,
+    email_provider: EmailProvider,
+    email: Email,
+    attachment_rows: list[EmailAttachmentUpload] | None = None,
+) -> str | None:
+    """Wire-send one queued Email row and reconcile its status.
+
+    Shared by POST /emails and the internal agent-send route (spec:
+    docs/superpowers/specs/2026-07-11-voicebot-agent-tools-design.md).
+    Appends the blended branding + AI-disclosure footer, mints the
+    one-click unsubscribe header, sends (with ``attachment_rows``
+    payloads when the caller resolved any), and writes sent/failed back.
+    Bills the flat 1¢ usage event on success. Returns None on success or
+    the exception class name on transport failure — the caller owns HTTP
+    semantics (502 + audit for the public route, a spoken sentence for
+    the agent route). Never raises for provider errors.
+    """
+    attachment_rows = attachment_rows or []
+    # Blended branding + AI-disclosure footer rides the wire message only;
+    # the stored row keeps the tenant-authored body.
+    wire_text, wire_html = append_sent_footer(email.body_text, email.body_html)
+    # One-click unsubscribe (RFC 8058) — minted per-send against the primary
+    # recipient. A single send can target multiple `to` addresses; the
+    # header necessarily picks one (the first) since SES/RFC only support
+    # one List-Unsubscribe target per message.
+    unsubscribe_url = build_unsubscribe_url(
+        email.to_addresses[0], email.organization_id
+    )
+    provider_attachments: list[ProviderAttachment] = []
+    try:
+        if attachment_rows:
+            # Fetching payloads inside this try: a concurrently-deleted S3
+            # object (e.g. a GC-worker race) fails the send cleanly via the
+            # except block below rather than raising unhandled — which would
+            # otherwise leave the Email row stuck at 'queued' and, with an
+            # explicit Idempotency-Key, that key stuck at the in-flight
+            # sentinel for its full TTL.
+            s3 = get_s3_mail()
+            provider_attachments = [
+                ProviderAttachment(
+                    filename=row.filename,
+                    content_type=row.content_type,
+                    payload=await s3.fetch_raw(row.s3_key),
+                )
+                for row in attachment_rows
+            ]
+        result = await email_provider.send_email(
+            from_address=email.from_address,
+            to_addresses=email.to_addresses,
+            subject=email.subject,
+            body_text=wire_text,
+            body_html=wire_html,
+            cc=email.cc_addresses,
+            bcc=email.bcc_addresses,
+            reply_to=email.reply_to,
+            headers={
+                "List-Unsubscribe": f"<{unsubscribe_url}>",
+                "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
+            },
+            attachments=provider_attachments or None,
+        )
+    except Exception as exc:
+        logger.warning(
+            "ses send_email failed for email_id=%s",
+            email.id,
+            exc_info=True,
+        )
+        now = datetime.now(timezone.utc)
+        await db.execute(
+            update(Email)
+            .where(Email.id == email.id)
+            .values(
+                status="failed",
+                end_reason=type(exc).__name__,
+                failed_at=now,
+            )
+        )
+        await db.commit()
+        return type(exc).__name__
+
+    now = datetime.now(timezone.utc)
+    await db.execute(
+        update(Email)
+        .where(Email.id == email.id)
+        .values(
+            status="sent",
+            provider_message_id=result.provider_message_id,
+            sent_at=now,
+        )
+    )
+    record_sent_event(
+        db, email_id=email.id, organization_id=email.organization_id, occurred_at=now
+    )
+    # Attachment bookkeeping rides the same commit as the status update —
+    # a crash between two separate commits here would leave an email marked
+    # 'sent' with no EmailAttachment rows, which the GC worker would then
+    # (incorrectly) reclaim as an unused upload.
+    for row in attachment_rows:
+        db.add(
+            EmailAttachment(
+                email_id=email.id,
+                filename=row.filename,
+                content_type=row.content_type,
+                size_bytes=row.size_bytes,
+                s3_key=row.s3_key,
+            )
+        )
+        if row.first_used_at is None:
+            row.first_used_at = now
+    await db.commit()
+    await db.refresh(email)
+
+    # Flat 1¢ per send regardless of recipient count.
+    await _write_usage_event(
+        organization_id=email.organization_id,
+        units=1,
+        ref=f"email:{email.id}",
+    )
+    return None
 
 
 # --------------------------------------------------------------------------- #
@@ -384,10 +511,10 @@ async def create_email(
             )
 
     try:
-        sd = await _resolve_sender(db, principal.organization_id, body.from_)
+        sd = await resolve_sender(db, principal.organization_id, body.from_)
     except HTTPException as exc:
         raise await cache_failure(idem, exc) from None
-    from_address = _from_address_for(sd, body.from_)
+    from_address = from_address_for(sd, body.from_)
 
     email = Email(
         organization_id=principal.organization_id,
@@ -433,73 +560,15 @@ async def create_email(
     # Provider send — best-effort with status reconciliation. Synchronous
     # in v1: callers get back ``sent`` or ``failed`` on the response, no
     # background polling needed for the happy path.
-    # Blended branding + AI-disclosure footer rides the wire message only;
-    # the stored row keeps the tenant-authored body.
-    wire_text, wire_html = append_sent_footer(email.body_text, email.body_html)
-    # One-click unsubscribe (RFC 8058) — minted per-send against the primary
-    # recipient. A single send can target multiple `to` addresses; the
-    # header necessarily picks one (the first) since SES/RFC only support
-    # one List-Unsubscribe target per message.
-    unsubscribe_url = build_unsubscribe_url(
-        email.to_addresses[0], principal.organization_id
-    )
-    provider_attachments: list[ProviderAttachment] = []
-    try:
-        if attachment_rows:
-            # Fetching payloads inside this try: a concurrently-deleted S3
-            # object (e.g. a GC-worker race) fails the send cleanly via the
-            # except block below rather than raising unhandled — which would
-            # otherwise leave the Email row stuck at 'queued' and, with an
-            # explicit Idempotency-Key, that key stuck at the in-flight
-            # sentinel for its full TTL.
-            s3 = get_s3_mail()
-            provider_attachments = [
-                ProviderAttachment(
-                    filename=row.filename,
-                    content_type=row.content_type,
-                    payload=await s3.fetch_raw(row.s3_key),
-                )
-                for row in attachment_rows
-            ]
-        result = await email_provider.send_email(
-            from_address=email.from_address,
-            to_addresses=email.to_addresses,
-            subject=email.subject,
-            body_text=wire_text,
-            body_html=wire_html,
-            cc=email.cc_addresses,
-            bcc=email.bcc_addresses,
-            reply_to=email.reply_to,
-            headers={
-                "List-Unsubscribe": f"<{unsubscribe_url}>",
-                "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
-            },
-            attachments=provider_attachments or None,
-        )
-    except Exception as exc:
-        logger.warning(
-            "ses send_email failed for email_id=%s",
-            email.id,
-            exc_info=True,
-        )
-        now = datetime.now(timezone.utc)
-        await db.execute(
-            update(Email)
-            .where(Email.id == email.id)
-            .values(
-                status="failed",
-                end_reason=type(exc).__name__,
-                failed_at=now,
-            )
-        )
-        await db.commit()
+    err = await deliver_email(db, email_provider, email, attachment_rows)
+    if err is not None:
         await write_audit_log(
             organization_id=principal.organization_id,
             api_key_id=principal.api_key_id,
             action="email.send_failed",
             resource_type="email",
             resource_id=email.id,
-            payload={"end_reason": type(exc).__name__},
+            payload={"end_reason": err},
         )
         if idem is not None:
             await idem.store(
@@ -509,46 +578,7 @@ async def create_email(
         raise HTTPException(
             status_code=http_status.HTTP_502_BAD_GATEWAY,
             detail=_SEND_FAILED_DETAIL,
-        ) from exc
-
-    now = datetime.now(timezone.utc)
-    await db.execute(
-        update(Email)
-        .where(Email.id == email.id)
-        .values(
-            status="sent",
-            provider_message_id=result.provider_message_id,
-            sent_at=now,
         )
-    )
-    record_sent_event(
-        db, email_id=email.id, organization_id=email.organization_id, occurred_at=now
-    )
-    # Attachment bookkeeping rides the same commit as the status update —
-    # a crash between two separate commits here would leave an email marked
-    # 'sent' with no EmailAttachment rows, which the GC worker would then
-    # (incorrectly) reclaim as an unused upload.
-    for row in attachment_rows:
-        db.add(
-            EmailAttachment(
-                email_id=email.id,
-                filename=row.filename,
-                content_type=row.content_type,
-                size_bytes=row.size_bytes,
-                s3_key=row.s3_key,
-            )
-        )
-        if row.first_used_at is None:
-            row.first_used_at = now
-    await db.commit()
-    await db.refresh(email)
-
-    # Flat 1¢ per send regardless of recipient count.
-    await _write_usage_event(
-        organization_id=principal.organization_id,
-        units=1,
-        ref=f"email:{email.id}",
-    )
 
     response.headers["Location"] = f"/emails/{email.id}"
     email_response = EmailResponse.model_validate(email)
@@ -877,4 +907,4 @@ async def list_emails(
     )
 
 
-__all__ = ["router"]
+__all__ = ["router", "resolve_sender", "from_address_for", "deliver_email"]

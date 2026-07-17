@@ -25,10 +25,12 @@
 ### Task 1: `POST /numbers/{id}/release` endpoint (hail)
 
 **Files:**
+
 - Modify: `api/hailhq/api/routes/numbers.py`
 - Test: `api/tests/test_numbers_api.py`
 
 **Interfaces:**
+
 - Consumes: `get_voice_provider` (existing, `numbers.py:49-58`), `_get_org_number_or_404` (existing, `numbers.py:61-77`), `VoiceProvider.release_number(provider_resource_id)` (existing).
 - Produces: `POST /numbers/{id}/release` → releases at carrier, sets `released_at`/`provisioning_state='released'`, returns `PhoneNumberResponse`. Idempotent on an already-released number; 404 for another org's number.
 
@@ -164,9 +166,11 @@ git commit -m "feat(api): POST /numbers/{id}/release to release a dedicated numb
 ### Task 2: Regenerate OpenAPI (hail)
 
 **Files:**
+
 - Modify: `openapi/openapi.yaml`
 
 **Interfaces:**
+
 - Produces: `openapi.yaml` includes the `/numbers/{number_id}/release` path so `openapi-check.yml` passes and the Go CLI codegen sees it.
 
 - [ ] **Step 1: Start the API locally**
@@ -177,11 +181,13 @@ Expected: server starts on :8080.
 - [ ] **Step 2: Regenerate the spec**
 
 Run (in another shell, from repo root), the command documented in `docs/contributing.md`:
+
 ```bash
 curl -s http://localhost:8080/openapi.json \
   | python -c "import json, sys, yaml; yaml.safe_dump(json.load(sys.stdin), sys.stdout, sort_keys=False)" \
   > openapi/openapi.yaml
 ```
+
 Expected: `openapi/openapi.yaml` now contains a `/numbers/{number_id}/release` entry. Stop the server.
 
 - [ ] **Step 3: Verify the diff is only the new path**
@@ -206,16 +212,19 @@ git commit -m "docs(openapi): regenerate for POST /numbers/{id}/release"
 ### Task 3: Surface `provisioning_state` in `getNumbers` (hail-website)
 
 **Files:**
+
 - Modify: `lib/sms-queries.ts`
 - Test: `lib/__tests__/` (add if a sms-queries test exists; otherwise this is exercised via the panel — see note)
 
 **Interfaces:**
+
 - Consumes: the `phone_numbers.provisioning_state` column.
 - Produces: `PhoneNumberRow` gains `provisioningState: string`; `getNumbers` selects it. Lets the panel hide/label released numbers and gate the Release control.
 
 - [ ] **Step 1: Add the column to the query and type**
 
 In `lib/sms-queries.ts`, `getNumbers(orgId)` selects `id, e164, country_code, capabilities, messaging_service_sid, created_at`. Add `provisioning_state` to the SELECT and `released_at`:
+
 ```sql
 SELECT id, e164, country_code, capabilities, messaging_service_sid,
        provisioning_state, created_at
@@ -223,6 +232,7 @@ SELECT id, e164, country_code, capabilities, messaging_service_sid,
  WHERE organization_id = $1 AND is_pool = FALSE
  ORDER BY created_at ASC
 ```
+
 Add to the `PhoneNumberRow` type: `provisioningState: string;` and map `provisioning_state` → `provisioningState` in the row mapper.
 
 - [ ] **Step 2: Build to typecheck**
@@ -242,9 +252,11 @@ git commit -m "feat(console): expose provisioning_state on number rows"
 ### Task 4: `releaseNumberAction` server action (hail-website)
 
 **Files:**
+
 - Modify: `app/console/sms/actions.ts`
 
 **Interfaces:**
+
 - Consumes: `orgApiAction` (existing helper, `actions.ts:29-39`) — admin-gates, calls the hail API as the org, folds the response.
 - Produces: `releaseNumberAction(numberId: string)` → `POST /numbers/{id}/release`, mirroring `enableSmsOnNumberAction`.
 
@@ -278,24 +290,35 @@ git commit -m "feat(console): releaseNumberAction server action"
 ### Task 5: Release control in `NumbersPanel` (hail-website)
 
 **Files:**
+
 - Modify: `app/console/sms/NumbersPanel.tsx`
 
 **Interfaces:**
+
 - Consumes: `releaseNumberAction` (Task 4), `provisioningState` on `PhoneNumberRow` (Task 3).
 - Produces: a confirm-gated "Release" button per active dedicated number; released numbers render as released and show no Release button.
 
 - [ ] **Step 1: Add release state + handler**
 
 In `NumbersPanel.tsx`, mirror the Enable-SMS transition pattern and the `SuppressionPanel` confirm pattern. Add near the other `useTransition`/`useState` hooks:
+
 ```tsx
 const [releasing, startRelease] = useTransition();
 const [releasingId, setReleasingId] = useState<string | null>(null);
 ```
+
 Import the action:
+
 ```tsx
-import { acquireNumberAction, enableSmsOnNumberAction, releaseNumberAction } from "./actions";
+import {
+  acquireNumberAction,
+  enableSmsOnNumberAction,
+  releaseNumberAction,
+} from "./actions";
 ```
+
 Add the handler (confirm-gated, like `SuppressionPanel.onRemove`):
+
 ```tsx
 function onRelease(numberId: string, e164: string) {
   if (
@@ -320,17 +343,21 @@ function onRelease(numberId: string, e164: string) {
 - [ ] **Step 2: Render the button**
 
 In the row actions (`<div className="c-row-actions">`), add a Release button for active dedicated numbers (not already released), styled destructive like `SuppressionPanel`'s (`className="danger"`). Gate on `canManage` and `n.provisioningState !== "released"`:
+
 ```tsx
-{canManage && n.provisioningState !== "released" && (
-  <button
-    className="danger"
-    disabled={releasing && releasingId === n.id}
-    onClick={() => onRelease(n.id, n.e164)}
-  >
-    {releasing && releasingId === n.id ? "Releasing…" : "Release"}
-  </button>
-)}
+{
+  canManage && n.provisioningState !== "released" && (
+    <button
+      className="danger"
+      disabled={releasing && releasingId === n.id}
+      onClick={() => onRelease(n.id, n.e164)}
+    >
+      {releasing && releasingId === n.id ? "Releasing…" : "Release"}
+    </button>
+  );
+}
 ```
+
 Optionally, for a released row, render a muted "Released" label instead of the action buttons (mirror how the panel shows non-actionable state elsewhere).
 
 - [ ] **Step 3: Build**
@@ -354,6 +381,7 @@ git commit -m "feat(console): confirm-gated Release control for dedicated number
 ## Self-Review
 
 **Spec coverage** (against the design spec's "Release path" section and Decision 5):
+
 - `POST /numbers/{id}/release` → Task 1 (via voice provider; idempotent; 404 cross-org — all three tested). ✓
 - `released_at` + `provisioning_state='released'` writes → Task 1. ✓
 - OpenAPI regen in same PR → Task 2 (documented command + CI-parity check). ✓

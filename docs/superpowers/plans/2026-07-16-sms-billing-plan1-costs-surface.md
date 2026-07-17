@@ -24,11 +24,13 @@
 ### Task 1: Telephony schema + seed data file
 
 **Files:**
+
 - Create: `costs/schema/telephony.schema.json`
 - Create: `costs/telephony.json`
 - Test: manual `check-jsonschema` run (no unit-test framework for schemas; validation is the test)
 
 **Interfaces:**
+
 - Produces: `costs/telephony.json` with shape `{ version: 2, license: "CC-BY-4.0", numbers: NumberRow[], a2p_10dlc: FeeRow[] }`.
   - `NumberRow`: `{ country_code, number_type, display_name, usd_per_month, last_verified, last_changed_at, verification_method, verified_by, source_url, notes? }` where `country_code` is ISO-2 (`"US"`), `number_type` ∈ `local|mobile|toll_free`, `usd_per_month` is a decimal string.
   - `FeeRow`: `{ carrier, fee_kind, direction, usd_per_message?, usd_per_month?, last_verified, last_changed_at, verification_method, verified_by, source_url, notes? }` where `direction` ∈ `outbound|inbound|na`.
@@ -50,20 +52,40 @@ Create `costs/schema/telephony.schema.json` (modeled on `costs/schema/stt.schema
   "properties": {
     "version": { "const": 2 },
     "license": { "const": "CC-BY-4.0" },
-    "numbers": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/number" } },
-    "a2p_10dlc": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/fee" } }
+    "numbers": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/number" }
+    },
+    "a2p_10dlc": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/fee" }
+    }
   },
   "$defs": {
-    "decimal": { "type": "string", "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]{1,8})?$" },
+    "decimal": {
+      "type": "string",
+      "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]{1,8})?$"
+    },
     "date": { "type": "string", "format": "date" },
     "provenance": {
       "type": "object",
-      "required": ["last_verified", "last_changed_at", "verification_method", "verified_by", "source_url"],
+      "required": [
+        "last_verified",
+        "last_changed_at",
+        "verification_method",
+        "verified_by",
+        "source_url"
+      ],
       "properties": {
         "last_verified": { "$ref": "#/$defs/date" },
         "last_changed_at": { "$ref": "#/$defs/date" },
         "verification_method": { "enum": ["manual-confirmed", "community-pr"] },
-        "verified_by": { "type": "string", "pattern": "^[a-zA-Z0-9](?:[a-zA-Z0-9]|-(?=[a-zA-Z0-9])){0,38}$" },
+        "verified_by": {
+          "type": "string",
+          "pattern": "^[a-zA-Z0-9](?:[a-zA-Z0-9]|-(?=[a-zA-Z0-9])){0,38}$"
+        },
         "source_url": { "type": "string", "format": "uri" },
         "notes": { "type": "string" }
       }
@@ -71,7 +93,17 @@ Create `costs/schema/telephony.schema.json` (modeled on `costs/schema/stt.schema
     "number": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["country_code", "number_type", "display_name", "usd_per_month", "last_verified", "last_changed_at", "verification_method", "verified_by", "source_url"],
+      "required": [
+        "country_code",
+        "number_type",
+        "display_name",
+        "usd_per_month",
+        "last_verified",
+        "last_changed_at",
+        "verification_method",
+        "verified_by",
+        "source_url"
+      ],
       "properties": {
         "country_code": { "type": "string", "pattern": "^[A-Z]{2}$" },
         "number_type": { "enum": ["local", "mobile", "toll_free"] },
@@ -80,7 +112,10 @@ Create `costs/schema/telephony.schema.json` (modeled on `costs/schema/stt.schema
         "last_verified": { "$ref": "#/$defs/date" },
         "last_changed_at": { "$ref": "#/$defs/date" },
         "verification_method": { "enum": ["manual-confirmed", "community-pr"] },
-        "verified_by": { "type": "string", "pattern": "^[a-zA-Z0-9](?:[a-zA-Z0-9]|-(?=[a-zA-Z0-9])){0,38}$" },
+        "verified_by": {
+          "type": "string",
+          "pattern": "^[a-zA-Z0-9](?:[a-zA-Z0-9]|-(?=[a-zA-Z0-9])){0,38}$"
+        },
         "source_url": { "type": "string", "format": "uri" },
         "notes": { "type": "string" }
       }
@@ -88,10 +123,25 @@ Create `costs/schema/telephony.schema.json` (modeled on `costs/schema/stt.schema
     "fee": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["carrier", "fee_kind", "direction", "last_verified", "last_changed_at", "verification_method", "verified_by", "source_url"],
+      "required": [
+        "carrier",
+        "fee_kind",
+        "direction",
+        "last_verified",
+        "last_changed_at",
+        "verification_method",
+        "verified_by",
+        "source_url"
+      ],
       "properties": {
         "carrier": { "type": "string", "minLength": 1 },
-        "fee_kind": { "enum": ["carrier_passthrough", "tcr_registration", "tcr_campaign_monthly"] },
+        "fee_kind": {
+          "enum": [
+            "carrier_passthrough",
+            "tcr_registration",
+            "tcr_campaign_monthly"
+          ]
+        },
         "direction": { "enum": ["outbound", "inbound", "na"] },
         "usd_per_message": { "$ref": "#/$defs/decimal" },
         "usd_per_month": { "$ref": "#/$defs/decimal" },
@@ -99,7 +149,10 @@ Create `costs/schema/telephony.schema.json` (modeled on `costs/schema/stt.schema
         "last_verified": { "$ref": "#/$defs/date" },
         "last_changed_at": { "$ref": "#/$defs/date" },
         "verification_method": { "enum": ["manual-confirmed", "community-pr"] },
-        "verified_by": { "type": "string", "pattern": "^[a-zA-Z0-9](?:[a-zA-Z0-9]|-(?=[a-zA-Z0-9])){0,38}$" },
+        "verified_by": {
+          "type": "string",
+          "pattern": "^[a-zA-Z0-9](?:[a-zA-Z0-9]|-(?=[a-zA-Z0-9])){0,38}$"
+        },
         "source_url": { "type": "string", "format": "uri" },
         "notes": { "type": "string" }
       }
@@ -225,10 +278,12 @@ git commit -m "feat(costs): add telephony category schema and seed data"
 ### Task 2: Wire per-category validation (root script + CI)
 
 **Files:**
+
 - Modify: `package.json` (root, the `costs:validate` script)
 - Modify: `.github/workflows/costs-validate.yml:24-29` (add a validate step) and `:32` (the cross-field loop)
 
 **Interfaces:**
+
 - Consumes: `costs/telephony.json` + `costs/schema/telephony.schema.json` from Task 1.
 - Produces: `telephony.json` is validated on every PR that touches `costs/**`, and by `pnpm costs:validate` locally.
 
@@ -239,7 +294,9 @@ In the root `package.json`, the `costs:validate` script currently chains three `
 ```
 "costs:validate": "pipx run check-jsonschema --schemafile costs/schema/llm.schema.json costs/llm.json && pipx run check-jsonschema --schemafile costs/schema/stt.schema.json costs/stt.json && pipx run check-jsonschema --schemafile costs/schema/tts.schema.json costs/tts.json"
 ```
+
 to add, at the end (same `&&` chain, same `pipx run` prefix used by the existing calls):
+
 ```
  && pipx run check-jsonschema --schemafile costs/schema/telephony.schema.json costs/telephony.json
 ```
@@ -254,8 +311,8 @@ Expected: four `ok -- validation done` lines, exit 0.
 In `.github/workflows/costs-validate.yml`, after the `Validate TTS data` step (line 29), add:
 
 ```yaml
-      - name: Validate Telephony data
-        run: check-jsonschema --schemafile costs/schema/telephony.schema.json costs/telephony.json
+- name: Validate Telephony data
+  run: check-jsonschema --schemafile costs/schema/telephony.schema.json costs/telephony.json
 ```
 
 - [ ] **Step 4: Extend the cross-field loop**
@@ -263,10 +320,10 @@ In `.github/workflows/costs-validate.yml`, after the `Validate TTS data` step (l
 In the same file, the `Cross-field validity checks` step iterates `for f in costs/llm.json costs/stt.json costs/tts.json; do`. That loop's `jq` reads `.models[]` (aliases + `replaced_by_model_id`), which telephony does not have. **Do not add telephony to this loop** — it has no `models`/`aliases`/`replaced_by_model_id`, so the `jq` would error on a missing `.models`. Leave the loop as-is. Add a comment above the loop to record why telephony is excluded:
 
 ```yaml
-      # Cross-field checks below are model-shaped (aliases, replaced_by_model_id)
-      # and apply only to llm/stt/tts. telephony.json has no models[] and is
-      # covered by its own schema validation step above.
-      - name: Cross-field validity checks (aliases unique, replaced_by_model_id resolves)
+# Cross-field checks below are model-shaped (aliases, replaced_by_model_id)
+# and apply only to llm/stt/tts. telephony.json has no models[] and is
+# covered by its own schema validation step above.
+- name: Cross-field validity checks (aliases unique, replaced_by_model_id resolves)
 ```
 
 - [ ] **Step 5: Commit**
@@ -281,10 +338,12 @@ git commit -m "ci(costs): validate telephony.json on PR and via costs:validate"
 ### Task 3: Generalize the staleness script for multi-array files
 
 **Files:**
+
 - Modify: `scripts/costs/check-stale.mjs`
 - Test: `scripts/costs/check-stale.test.mjs`
 
 **Interfaces:**
+
 - Consumes: nothing new (reads `costs/*.json` off disk).
 - Produces: `check-stale.mjs` staleness-checks `telephony.json`'s `numbers[]` and `a2p_10dlc[]` rows, and treats an unknown data file as a **hard error**, not a silent skip.
 - The current script (`check-stale.mjs:36-42`) derives `category` from the filename and hardcodes `data?.models`. This task replaces the hardcoded `.models` with a `ROW_ARRAYS` map keyed by category, each mapping to a list of array keys.
@@ -294,24 +353,29 @@ git commit -m "ci(costs): validate telephony.json on PR and via costs:validate"
 `scripts/costs/check-stale.test.mjs` uses `node:test` + `node:assert/strict` and tests the pure `findStale(rows, maxAgeDays, now)`. Add tests for a new pure helper `rowsForFile(filename, data)` that this task introduces (returns the flat list of staleable rows across all of a file's arrays, or throws on an unknown file). Append to the existing test file:
 
 ```javascript
-import { rowsForFile } from './check-stale.mjs';
+import { rowsForFile } from "./check-stale.mjs";
 
-test('rowsForFile flattens a model-shaped file', () => {
-  const rows = rowsForFile('llm.json', { models: [{ model_id: 'a', last_verified: '2026-01-01' }] });
+test("rowsForFile flattens a model-shaped file", () => {
+  const rows = rowsForFile("llm.json", {
+    models: [{ model_id: "a", last_verified: "2026-01-01" }],
+  });
   assert.equal(rows.length, 1);
-  assert.equal(rows[0].model_id, 'a');
+  assert.equal(rows[0].model_id, "a");
 });
 
-test('rowsForFile flattens telephony across both arrays', () => {
-  const rows = rowsForFile('telephony.json', {
-    numbers: [{ display_name: 'US local', last_verified: '2026-01-01' }],
-    a2p_10dlc: [{ carrier: 'AT&T', last_verified: '2026-01-02' }],
+test("rowsForFile flattens telephony across both arrays", () => {
+  const rows = rowsForFile("telephony.json", {
+    numbers: [{ display_name: "US local", last_verified: "2026-01-01" }],
+    a2p_10dlc: [{ carrier: "AT&T", last_verified: "2026-01-02" }],
   });
   assert.equal(rows.length, 2);
 });
 
-test('rowsForFile throws on an unknown data file', () => {
-  assert.throws(() => rowsForFile('mystery.json', { foo: [] }), /unknown costs file/);
+test("rowsForFile throws on an unknown data file", () => {
+  assert.throws(
+    () => rowsForFile("mystery.json", { foo: [] }),
+    /unknown costs file/,
+  );
 });
 ```
 
@@ -329,14 +393,14 @@ In `scripts/costs/check-stale.mjs`, add the map + helper near the top (after the
 // file is a hard error, not a silent skip: silently skipping is exactly how a
 // price file could rot unnoticed while the invoice keeps citing it.
 const ROW_ARRAYS = {
-  llm: ['models'],
-  stt: ['models'],
-  tts: ['models'],
-  telephony: ['numbers', 'a2p_10dlc'],
+  llm: ["models"],
+  stt: ["models"],
+  tts: ["models"],
+  telephony: ["numbers", "a2p_10dlc"],
 };
 
 export function rowsForFile(filename, data) {
-  const category = filename.replace(/\.json$/, '');
+  const category = filename.replace(/\.json$/, "");
   const keys = ROW_ARRAYS[category];
   if (!keys) {
     throw new Error(`unknown costs file: ${filename} (add it to ROW_ARRAYS)`);
@@ -366,8 +430,13 @@ Then change the per-file block in `main()` (currently lines 35-42) from the hard
 Note: `rowsForFile` already stamps `category`, so the `.map((row) => ({ category, ...row }))` that previously added it is redundant but harmless; simplify it to `findStale(rows, maxAge)` and let the printed rows keep the `category` they already carry. The printout at line 57 reads `row.provider / row.model_id` — telephony rows have neither, so make the label fall back:
 
 ```javascript
-    const label = row.model_id || row.display_name || row.carrier || '(row)';
-    console.log(`- [${row.category}] ${row.provider ?? ''} ${label} — last verified ${row.last_verified} (${days} days ago)`.replace(/\s+/g, ' '));
+const label = row.model_id || row.display_name || row.carrier || "(row)";
+console.log(
+  `- [${row.category}] ${row.provider ?? ""} ${label} — last verified ${row.last_verified} (${days} days ago)`.replace(
+    /\s+/g,
+    " ",
+  ),
+);
 ```
 
 - [ ] **Step 4: Run tests to verify they pass**
@@ -392,10 +461,12 @@ git commit -m "feat(costs): staleness-check telephony arrays, error on unknown f
 ### Task 4: `web/` types and costs exports for telephony
 
 **Files:**
+
 - Modify: `web/lib/types.ts` (add `TelephonyNumberRow`, `TelephonyFeeRow`)
 - Modify: `web/lib/costs.ts` (import + export `telephony`, `telephonySchema`)
 
 **Interfaces:**
+
 - Consumes: `costs/telephony.json`, `costs/schema/telephony.schema.json`.
 - Produces: `telephony: CostsFile<...>` and `telephonySchema` exports for Task 5/6/7. `CostsFile<Row>` is the existing generic `{ version, license, models: Row[] }` — but telephony has `numbers`/`a2p_10dlc`, not `models`. So telephony gets its **own** file type rather than reusing `CostsFile`.
 
@@ -406,12 +477,12 @@ In `web/lib/types.ts`, after the `STTRow` type, add:
 ```typescript
 export interface TelephonyNumberRow {
   country_code: string;
-  number_type: 'local' | 'mobile' | 'toll_free';
+  number_type: "local" | "mobile" | "toll_free";
   display_name: string;
   usd_per_month: string;
   last_verified: string;
   last_changed_at: string;
-  verification_method: 'manual-confirmed' | 'community-pr';
+  verification_method: "manual-confirmed" | "community-pr";
   verified_by: string;
   source_url: string;
   notes?: string;
@@ -419,14 +490,14 @@ export interface TelephonyNumberRow {
 
 export interface TelephonyFeeRow {
   carrier: string;
-  fee_kind: 'carrier_passthrough' | 'tcr_registration' | 'tcr_campaign_monthly';
-  direction: 'outbound' | 'inbound' | 'na';
+  fee_kind: "carrier_passthrough" | "tcr_registration" | "tcr_campaign_monthly";
+  direction: "outbound" | "inbound" | "na";
   usd_per_message?: string;
   usd_per_month?: string;
   usd_one_time?: string;
   last_verified: string;
   last_changed_at: string;
-  verification_method: 'manual-confirmed' | 'community-pr';
+  verification_method: "manual-confirmed" | "community-pr";
   verified_by: string;
   source_url: string;
   notes?: string;
@@ -445,11 +516,13 @@ export interface TelephonyFile {
 Add to `web/lib/costs.ts` (mirroring the existing `stt` lines):
 
 ```typescript
-import telephonyJson from '../../costs/telephony.json';
-import telephonySchemaJson from '../../costs/schema/telephony.schema.json';
-import type { CostsFile, LLMRow, STTRow, TTSRow, TelephonyFile } from './types';
+import telephonyJson from "../../costs/telephony.json";
+import telephonySchemaJson from "../../costs/schema/telephony.schema.json";
+import type { CostsFile, LLMRow, STTRow, TTSRow, TelephonyFile } from "./types";
 ```
+
 (extend the existing `import type` line to add `TelephonyFile`), and at the bottom:
+
 ```typescript
 export const telephony = telephonyJson as TelephonyFile;
 export const telephonySchema = telephonySchemaJson;
@@ -472,9 +545,11 @@ git commit -m "feat(web): telephony types and costs exports"
 ### Task 5: Telephony render section
 
 **Files:**
+
 - Create: `web/components/categories/telephony-section.tsx`
 
 **Interfaces:**
+
 - Consumes: `TelephonyNumberRow[]` from Task 4.
 - Produces: `<TelephonySection data={TelephonyNumberRow[]} />` for Task 6. Renders the **numbers** table (the customer-facing "what a number costs at cost" view); the `a2p_10dlc[]` fees are documentation-only and not rendered as a table here.
 
@@ -483,19 +558,19 @@ git commit -m "feat(web): telephony types and costs exports"
 Modeled verbatim on `web/components/categories/stt-section.tsx` (a `'use client'` component defining a `ColumnDef[]` and rendering `<CategorySection>`). `usd(value, decimals)` and `priceRange(values, sigA, sigB, unit)` are from `@/lib/format`.
 
 ```tsx
-'use client';
+"use client";
 
-import type { ColumnDef } from '@tanstack/react-table';
-import type { TelephonyNumberRow } from '@/lib/types';
-import { CategorySection } from '../category-section';
-import { VerifiedCell } from '../verified-cell';
-import { priceRange, usd } from '@/lib/format';
+import type { ColumnDef } from "@tanstack/react-table";
+import type { TelephonyNumberRow } from "@/lib/types";
+import { CategorySection } from "../category-section";
+import { VerifiedCell } from "../verified-cell";
+import { priceRange, usd } from "@/lib/format";
 
 const columns: ColumnDef<TelephonyNumberRow>[] = [
   {
-    id: 'number',
-    accessorKey: 'display_name',
-    header: 'Number',
+    id: "number",
+    accessorKey: "display_name",
+    header: "Number",
     cell: ({ row }) => (
       <div>
         <div style={{ fontWeight: 700 }}>{row.original.display_name}</div>
@@ -506,19 +581,19 @@ const columns: ColumnDef<TelephonyNumberRow>[] = [
     ),
   },
   {
-    id: 'price',
+    id: "price",
     accessorFn: (row) => Number(row.usd_per_month),
-    header: '$/mo (at cost)',
+    header: "$/mo (at cost)",
     cell: ({ row }) => usd(row.original.usd_per_month, 2),
-    sortingFn: 'basic',
+    sortingFn: "basic",
     meta: { num: true, killer: true },
   },
   {
-    id: 'verified',
-    accessorKey: 'last_verified',
-    header: 'Verified',
+    id: "verified",
+    accessorKey: "last_verified",
+    header: "Verified",
     cell: ({ row }) => <VerifiedCell date={row.original.last_verified} />,
-    sortingFn: 'alphanumeric',
+    sortingFn: "alphanumeric",
     meta: { num: true },
   },
 ];
@@ -534,10 +609,15 @@ export function TelephonySection({ data }: { data: TelephonyNumberRow[] }) {
         </>
       }
       count={data.length}
-      rangeLabel={priceRange(data.map((r) => r.usd_per_month), 2, 2, 'mo')}
+      rangeLabel={priceRange(
+        data.map((r) => r.usd_per_month),
+        2,
+        2,
+        "mo",
+      )}
       data={data}
       columns={columns}
-      defaultSort={{ id: 'price', desc: false }}
+      defaultSort={{ id: "price", desc: false }}
     />
   );
 }
@@ -560,9 +640,11 @@ git commit -m "feat(web): telephony numbers render section"
 ### Task 6: Wire telephony into the main costs page
 
 **Files:**
+
 - Modify: `web/app/(dispatch)/page.tsx`
 
 **Interfaces:**
+
 - Consumes: `telephony` (Task 4), `TelephonySection` (Task 5).
 - Produces: the telephony section renders on `hail.so/costs`, in the toolbar, in the summary strip, and in the programmatic-access URL list.
 
@@ -571,8 +653,8 @@ git commit -m "feat(web): telephony numbers render section"
 At the top of `web/app/(dispatch)/page.tsx`, extend the imports:
 
 ```tsx
-import { llm, stt, tts, telephony } from '@/lib/costs';
-import { TelephonySection } from '@/components/categories/telephony-section';
+import { llm, stt, tts, telephony } from "@/lib/costs";
+import { TelephonySection } from "@/components/categories/telephony-section";
 ```
 
 - [ ] **Step 2: Include telephony in providers/verified aggregates**
@@ -587,9 +669,18 @@ In the summary strip (the `.stat` blocks, ~lines 90-115), add a telephony tile a
 <div className="stat">
   <div className="stat-n">{telephony.numbers.length}</div>
   <div className="stat-l">Numbers</div>
-  <div className="stat-cap">{priceRange(telephony.numbers.map((r) => r.usd_per_month), 2, 2, 'mo')} · at cost</div>
+  <div className="stat-cap">
+    {priceRange(
+      telephony.numbers.map((r) => r.usd_per_month),
+      2,
+      2,
+      "mo",
+    )}{" "}
+    · at cost
+  </div>
 </div>
 ```
+
 (`priceRange` is already imported on this page for the other tiles; if not, add it to the `@/lib/format` import.)
 
 - [ ] **Step 4: Add the toolbar category**
@@ -614,8 +705,10 @@ In the `<ul>` listing raw JSON URLs (~lines 167-197), add a telephony `<li>` mir
 
 ```tsx
 <li>
-  Telephony (number COGS + 10DLC fees):{' '}
-  <code>https://raw.githubusercontent.com/hail-hq/hail/main/costs/telephony.json</code>
+  Telephony (number COGS + 10DLC fees):{" "}
+  <code>
+    https://raw.githubusercontent.com/hail-hq/hail/main/costs/telephony.json
+  </code>
 </li>
 ```
 
@@ -636,9 +729,11 @@ git commit -m "feat(web): render telephony section on the costs page"
 ### Task 7: Serve the telephony schema
 
 **Files:**
+
 - Modify: `web/app/schema/[name]/route.ts`
 
 **Interfaces:**
+
 - Consumes: `telephonySchema` (Task 4).
 - Produces: `GET hail.so/costs/schema/telephony.json` serves the schema (its `$id`), matching the URL the schema declares.
 
@@ -647,13 +742,13 @@ git commit -m "feat(web): render telephony section on the costs page"
 In `web/app/schema/[name]/route.ts`, the `SCHEMAS` object maps `'llm.json' | 'stt.json' | 'tts.json'` to their schema objects and `generateStaticParams` derives from its keys. Add the telephony entry:
 
 ```typescript
-import { llmSchema, sttSchema, ttsSchema, telephonySchema } from '@/lib/costs';
+import { llmSchema, sttSchema, ttsSchema, telephonySchema } from "@/lib/costs";
 
 const SCHEMAS: Record<string, unknown> = {
-  'llm.json': llmSchema,
-  'stt.json': sttSchema,
-  'tts.json': ttsSchema,
-  'telephony.json': telephonySchema,
+  "llm.json": llmSchema,
+  "stt.json": sttSchema,
+  "tts.json": ttsSchema,
+  "telephony.json": telephonySchema,
 };
 ```
 
@@ -674,14 +769,17 @@ git commit -m "feat(web): serve telephony schema at its \$id url"
 ### Task 8: Reframe the costs README
 
 **Files:**
+
 - Modify: `costs/README.md`
 
 **Interfaces:**
-- Produces: the README documents telephony as a first-class category and stops asserting the `{ version, license, models[] }` envelope holds for *every* file.
+
+- Produces: the README documents telephony as a first-class category and stops asserting the `{ version, license, models[] }` envelope holds for _every_ file.
 
 - [ ] **Step 1: Widen the framing**
 
 In `costs/README.md`:
+
 - Line 3 intro ("cost and capability data for AI model providers — LLMs, speech-to-text, and text-to-speech") → add telephony: "...text-to-speech, and telephony (phone-number COGS and A2P 10DLC fees)."
 - The "common envelope `{ version, license, models[] }`" sentence → note the exception: "Model files (llm/stt/tts) share `{ version, license, models[] }`; `telephony.json` instead carries `numbers[]` and `a2p_10dlc[]`, since a phone number is not a model."
 - The Canonical URLs list → add the telephony raw URL and its schema `$id` URL.
@@ -699,6 +797,7 @@ git commit -m "docs(costs): document the telephony category and its two-array sh
 ## Self-Review
 
 **Spec coverage** (against the `costs/telephony.json` section of the design spec):
+
 - `costs/telephony.json` (numbers[] + a2p_10dlc[] only, no SMS wholesale) → Task 1. ✓
 - `costs/schema/telephony.schema.json` modeled on stt → Task 1. ✓
 - `costs-validate.yml` step + cross-field loop → Task 2 (loop deliberately not extended — telephony is not model-shaped; documented). ✓
