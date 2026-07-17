@@ -1,0 +1,33 @@
+name: costs-sync-telephony
+
+on:
+  schedule:
+    - cron: "0 8 * * 1" # Mondays 08:00 UTC, before the stale check
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Sync telephony catalog from Twilio
+        run: node scripts/costs/sync-telephony.mjs
+      - name: Validate
+        run: pipx run check-jsonschema==0.29.4 --schemafile costs/schema/telephony.schema.json costs/telephony.json
+      - name: Open PR on change
+        uses: peter-evans/create-pull-request@v6
+        with:
+          branch: costs/telephony-sync
+          title: "chore(costs): telephony catalog sync"
+          commit-message: "chore(costs): telephony catalog sync"
+          body: |
+            Automated sync of `costs/telephony.json` from Twilio's numbers dataset.
+            Review price/capability changes before merging — this is the acquire allow-list.
+          labels: costs-sync
