@@ -29,6 +29,27 @@ const columns: ColumnDef<TelephonyNumberRow>[] = [
     meta: { num: true, killer: true },
   },
   {
+    id: 'calls',
+    header: 'Calls',
+    accessorKey: 'voice',
+    cell: ({ row }) => (row.original.voice ? '✓' : '—'),
+    meta: { num: true },
+  },
+  {
+    id: 'texts',
+    header: 'Texts',
+    accessorKey: 'sms',
+    cell: ({ row }) => (row.original.sms ? '✓' : '—'),
+    meta: { num: true },
+  },
+  {
+    id: 'mms',
+    header: 'MMS',
+    accessorKey: 'mms',
+    cell: ({ row }) => (row.original.mms ? '✓' : '—'),
+    meta: { num: true },
+  },
+  {
     id: 'verified',
     accessorKey: 'last_verified',
     header: 'Verified',
