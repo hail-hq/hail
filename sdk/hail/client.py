@@ -90,6 +90,7 @@ class _CallsResource:
         consent_source: str | None = None,
         consent_obtained_at: datetime | None = None,
         message_type: Literal["marketing", "informational"] | None = None,
+        tools: list[str] | None = None,
         idempotency_key: str | None = None,
     ) -> CallResponse:
         """Originate an outbound call.
@@ -117,6 +118,10 @@ class _CallsResource:
             body["consent_obtained_at"] = consent_obtained_at.isoformat()
         if message_type is not None:
             body["message_type"] = message_type
+        # tools=[] is meaningful (disable all agent tools), so include the
+        # key for [] too — only omit when the caller left it None.
+        if tools is not None:
+            body["tools"] = tools
 
         key = idempotency_key or generate_idempotency_key()
         data = await self._http.request(
