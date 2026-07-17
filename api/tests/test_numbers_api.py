@@ -52,6 +52,33 @@ async def test_acquire_number_idempotent_replay(
     voice_provider_mock.acquire_number.assert_awaited_once()
 
 
+async def test_acquire_rejects_unlisted_country_type(
+    client, org_and_key, voice_provider_mock
+):
+    _, _, plaintext = org_and_key
+    resp = await client.post(
+        "/numbers",
+        json={"country_code": "ZZ", "number_type": "local"},
+        headers={"Authorization": f"Bearer {plaintext}"},
+    )
+    assert resp.status_code == 422, resp.text
+    voice_provider_mock.acquire_number.assert_not_awaited()  # guarded before the provider
+
+
+async def test_acquire_allows_listed_country_type(
+    client, org_and_key, voice_provider_mock
+):
+    _, _, plaintext = org_and_key
+    # US/local is in the seeded catalog; the provider mock returns a fake number.
+    resp = await client.post(
+        "/numbers",
+        json={"country_code": "US", "number_type": "local"},
+        headers={"Authorization": f"Bearer {plaintext}"},
+    )
+    assert resp.status_code == 201, resp.text
+    voice_provider_mock.acquire_number.assert_awaited_once()
+
+
 async def test_get_number_not_found(client, org_and_key) -> None:
     _, _, plaintext = org_and_key
     resp = await client.get(

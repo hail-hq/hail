@@ -43,22 +43,22 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/CallResponse"
+        "429":
+          description:
+            Rate limited. The agent-origin workspace exceeded a per-channel
+            velocity cap, or the platform kill switch is on. Retry after the Retry-After
+            header (seconds).
+          headers:
+            Retry-After:
+              description: Seconds to wait before retrying.
+              schema:
+                type: integer
         "422":
           description: Validation Error
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/HTTPValidationError"
-        "429":
-          description: >-
-            Rate limited. The agent-origin workspace exceeded a per-channel
-            velocity cap, or the platform kill switch is on. Retry after the
-            Retry-After header (seconds).
-          headers:
-            Retry-After:
-              description: Seconds to wait before retrying.
-              schema:
-                type: integer
     get:
       tags:
         - calls
@@ -234,22 +234,22 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/EmailResponse"
+        "429":
+          description:
+            Rate limited. The agent-origin workspace exceeded a per-channel
+            velocity cap, or the platform kill switch is on. Retry after the Retry-After
+            header (seconds).
+          headers:
+            Retry-After:
+              description: Seconds to wait before retrying.
+              schema:
+                type: integer
         "422":
           description: Validation Error
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/HTTPValidationError"
-        "429":
-          description: >-
-            Rate limited. The agent-origin workspace exceeded a per-channel
-            velocity cap, or the platform kill switch is on. Retry after the
-            Retry-After header (seconds).
-          headers:
-            Retry-After:
-              description: Seconds to wait before retrying.
-              schema:
-                type: integer
     get:
       tags:
         - emails
@@ -1405,22 +1405,22 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/SmsResponse"
+        "429":
+          description:
+            Rate limited. The agent-origin workspace exceeded a per-channel
+            velocity cap, or the platform kill switch is on. Retry after the Retry-After
+            header (seconds).
+          headers:
+            Retry-After:
+              description: Seconds to wait before retrying.
+              schema:
+                type: integer
         "422":
           description: Validation Error
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/HTTPValidationError"
-        "429":
-          description: >-
-            Rate limited. The agent-origin workspace exceeded a per-channel
-            velocity cap, or the platform kill switch is on. Retry after the
-            Retry-After header (seconds).
-          headers:
-            Retry-After:
-              description: Seconds to wait before retrying.
-              schema:
-                type: integer
     get:
       tags:
         - sms
@@ -3012,6 +3012,7 @@ components:
             - local
             - mobile
             - toll_free
+            - national
           title: Number Type
           default: local
       additionalProperties: false

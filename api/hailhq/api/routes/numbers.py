@@ -92,6 +92,14 @@ async def acquire_number(
         cached_id, cached = replay_cached(idem, response, resource_prefix="/numbers")
         return PhoneNumberResponse.model_validate(cached)
 
+    from hailhq.core import telephony_catalog
+
+    if not telephony_catalog.is_acquirable(body.country_code, body.number_type):
+        raise unprocessable(
+            f"we don't offer a {body.number_type} number in {body.country_code} yet",
+            loc=["body", "number_type"],
+        )
+
     try:
         acquired = await provider.acquire_number(
             country_code=body.country_code,
