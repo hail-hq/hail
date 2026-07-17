@@ -16,29 +16,27 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - name: Verify openapi.yaml regenerated on api/ changes
-        env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+      - uses: astral-sh/setup-uv@v3
+      - name: Verify openapi.yaml matches the code
         run: |
           set -euo pipefail
-          changed=$(git diff --name-only "$BASE_SHA"..."$HEAD_SHA")
-          # Internal routes carry include_in_schema=False (see docs/setup + the
-          # routes/internal/ convention), so they never appear in the public
-          # openapi.yaml — changing them can't require a spec regen. Exempt them
-          # to avoid a false failure on internal-only PRs.
-          # Exempt paths that can't change the public spec: tests, docs, the
-          # internal routes (include_in_schema=False), and alembic migrations
-          # (DB schema, not the API surface).
-          api_changed=$(printf '%s\n' "$changed" | grep -E '^api/' | grep -vE '^api/(tests/|README|.*\.md$)' | grep -vE '^api/hailhq/api/routes/internal/' | grep -vE '^api/migrations/' || true)
-          openapi_changed=$(printf '%s\n' "$changed" | grep -E '^openapi/openapi\.yaml$' || true)
-          if [ -n "$api_changed" ] && [ -z "$openapi_changed" ]; then
-            echo "::error::api/ changes detected without a matching openapi/openapi.yaml update."
-            echo "Per CLAUDE.md: after any API route change, regenerate openapi/openapi.yaml in the same PR."
-            echo "Changed under api/:"
-            printf '%s\n' "$api_changed" | sed 's/^/  - /'
-            exit 1
-          fi
-          echo "openapi.yaml gate OK"
+          # Regenerate the spec from the live routes and compare it
+          # SEMANTICALLY (parsed objects, not text) against the committed
+          # file. Formatter-agnostic: a spec-neutral api/ change produces an
+          # identical spec and passes; a real route change that forgot to
+          # regenerate openapi.yaml fails.
+          uv sync --all-packages --all-extras
+          uv run --directory api python - <<'PY'
+          import json, sys, yaml
+          from hailhq.api.main import app
+
+          committed = yaml.safe_load(open("../openapi/openapi.yaml"))
+          generated = json.loads(json.dumps(app.openapi()))
+          if committed != generated:
+              print(
+                  "::error::openapi/openapi.yaml is stale — regenerate it in "
+                  "this PR (see docs/contributing.md)."
+              )
+              sys.exit(1)
+          print("openapi.yaml gate OK")
+          PY

@@ -34,6 +34,12 @@ resource "aws_s3_bucket_lifecycle_configuration" "inbound" {
       days = var.raw_object_expiration_days
     }
   }
+
+  # No bucket-wide expiration rule for outbound-attachments/: those objects
+  # are retained per the app-level contract (used attachments are kept
+  # indefinitely and reusable across sends; only never-used uploads expire,
+  # 24h after upload, via EmailAttachmentGcWorker). A blanket time-based S3
+  # rule here would silently delete objects still backing sent emails.
 }
 
 data "aws_iam_policy_document" "ses_write" {

@@ -2,6 +2,61 @@
 
 All notable changes to Hail are documented here. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and Hail adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+SMS dedicated numbers & Sender ID. Provision a number, attach it to a
+per-org Messaging Service, and send to no-registration corridors via an
+alphanumeric Sender ID with no dedicated number.
+
+- `POST /numbers` (idempotent acquire), `GET /numbers`, `GET /numbers/{id}`;
+  `POST /numbers/{id}/enable-sms` attaches the number to the org's Twilio
+  Messaging Service.
+- `GET`/`PATCH /sms/sender-id` — org-level custom alphanumeric Sender ID
+  (2–11 chars). `POST /sms` now requires a dedicated number only for
+  destinations that need one (US/Canada/India); UK and Germany send via the
+  Sender ID with no dedicated number.
+- CLI: `hail numbers acquire|list|get|enable-sms` and `hail sms sender-id
+get|set`.
+- SDK: `client.numbers` (acquire/list/get/enable_sms) and
+  `client.sms.sender_id` (get/set).
+
+## [0.13.1] — 2026-07-14
+
+Bug fix. `cli-v0.12.1` cut alongside; the SDK is unchanged and stays at
+`hail-sdk==0.9.0`.
+
+- `hail email attachment-upload` and `hail email send` no longer swallow
+  the server's real error message behind a raw JSON-unmarshal error when
+  the API returns a plain-string `detail` (e.g. the attachment size-cap
+  rejection) instead of FastAPI's list-shaped validation-error detail.
+
+## [0.13.0] — 2026-07-14
+
+Outbound email attachments. Upload a file once, reference its id from as
+many sends as you like.
+
+Component versions cut alongside this release:
+**`sdk-v0.9.0`** (PyPI: `hail-sdk==0.9.0`), **`cli-v0.12.0`** (Homebrew + GitHub Releases).
+
+- `POST /email-attachments` — upload a file (multipart/form-data,
+  ≤10MB), get back a reusable id. `POST /emails` gains
+  `attachment_ids` to attach one or more uploaded files; oversize
+  requests (body + attachments combined, matching SES's 10MB raw-message
+  cap) get a clear 422 suggesting a hosted link instead. Unused uploads
+  are garbage-collected 24h after upload; used ones are kept
+  indefinitely and reusable across sends.
+- MCP: new `upload_email_attachment` tool; `send_email` gains
+  `attachment_ids`.
+- SDK: `client.email_attachments.create()`; `client.emails.create(...,
+attachment_ids=...)`.
+- CLI: `hail email attachment-upload <file>`; `hail email send` gains
+  `--attach <file>` (upload + attach in one step) and `--attach-id <id>`.
+- Internal: the S3 bucket/client backing inbound mail storage is renamed
+  from "inbound" to a generic "mail" name (`HAIL_MAIL_NAME_PREFIX`
+  replaces `HAIL_INBOUND_EMAIL_NAME_PREFIX`) since it now also holds
+  outbound attachment uploads. No data migration; self-hosters recreate
+  the bucket under the new prefix.
+
 ## [0.12.0] — 2026-07-10
 
 SMS inbound & compliance milestone. Hail now receives inbound SMS, routes each

@@ -95,6 +95,10 @@ async def test_create_sms_explicit_from_requires_active_number(
 async def test_create_sms_happy_path(
     client, async_session, org_and_key, sms_mock
 ) -> None:
+    from sqlalchemy import select
+
+    from hailhq.core.models import UsageEvent
+
     org_id, _, plaintext = org_and_key
     await _seed_dedicated_number(async_session, org_id)
 
@@ -110,6 +114,13 @@ async def test_create_sms_happy_path(
     assert body["to_e164"] == "+14155551234"
     assert body["segment_count"] == 1
     sms_mock.send_sms.assert_awaited_once()
+
+    row = (
+        await async_session.execute(
+            select(UsageEvent).where(UsageEvent.channel == "sms")
+        )
+    ).scalar_one()
+    assert row.ref == f"sms:{body['id']}:us"  # +14155551234 is a US number
 
 
 async def test_create_sms_carrier_rejection_not_billed(
@@ -143,7 +154,9 @@ async def test_create_sms_carrier_rejection_not_billed(
     # A rejected message was never sent — sent_at stays null.
     assert body["sent_at"] is None
 
-    stmt = select(UsageEvent).where(UsageEvent.ref == f"sms:{body['id']}")
+    # Filter on channel, not an exact ref string: a regression that bills the
+    # rejected send under any ref shape must still fail this assertion.
+    stmt = select(UsageEvent).where(UsageEvent.channel == "sms")
     rows = (await async_session.execute(stmt)).scalars().all()
     assert rows == []
 
@@ -247,3 +260,36 @@ async def test_list_sms_empty(client, org_and_key) -> None:
     resp = await client.get("/sms", headers={"Authorization": f"Bearer {plaintext}"})
     assert resp.status_code == 200
     assert resp.json() == {"items": [], "next_cursor": None}
+
+
+async def test_create_sms_to_germany_uses_platform_default_without_dedicated_number(
+    client, org_and_key, sms_mock
+) -> None:
+    """No dedicated number needed at all for a no-registration corridor —
+    the send goes out under the platform-default Sender ID."""
+    _, _, plaintext = org_and_key
+    resp = await client.post(
+        "/sms",
+        json={"to": "+491701234567", "body": "hallo", "recipient_consent": True},
+        headers={"Authorization": f"Bearer {plaintext}"},
+    )
+    assert resp.status_code == 201, resp.text
+    assert resp.json()["from_e164"] == "HAIL"
+
+
+async def test_create_sms_to_india_still_requires_dedicated_number(
+    client, org_and_key
+) -> None:
+    """An excluded corridor keeps the dedicated-number requirement — without
+    one the send 422s with the documented HTTPValidationError shape."""
+    _, _, plaintext = org_and_key
+    resp = await client.post(
+        "/sms",
+        json={"to": "+919876543210", "body": "hi", "recipient_consent": True},
+        headers={"Authorization": f"Bearer {plaintext}"},
+    )
+    assert resp.status_code == 422
+    detail = resp.json()["detail"]
+    assert isinstance(detail, list)
+    assert detail[0]["loc"] == ["body", "from"]
+    assert "dedicated" in detail[0]["msg"]

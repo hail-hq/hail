@@ -9,6 +9,7 @@ we test directly.
 
 from __future__ import annotations
 
+import base64
 import re
 from uuid import uuid4
 
@@ -136,7 +137,7 @@ async def test_place_call_rejects_both_modes(client: HailClient) -> None:
         recipient_consent=True,
         to="+14155559999",
         system_prompt="be polite",
-        llm={"base_url": "u", "api_key": "k", "model": "m"},
+        llm={"base_url": "https://api.example.com/v1", "api_key": "k", "model": "m"},
     )
     assert "error" in result
     assert "mutually exclusive" in result["error"]
@@ -456,6 +457,100 @@ async def test_send_email_maps_503_to_error_detail(client: HailClient) -> None:
         body_text="body",
     )
     assert "hail-mail prefixes" in result["error"]
+
+
+@respx.mock
+async def test_send_email_passes_attachment_ids(client: HailClient) -> None:
+    captured: dict = {}
+    aid = str(uuid4())
+
+    def _handler(request: httpx.Request) -> httpx.Response:
+        captured["body"] = request.read().decode("utf-8")
+        return httpx.Response(201, json=_email_response())
+
+    respx.post(f"{_BASE_URL}/emails").mock(side_effect=_handler)
+
+    await tools.send_email(
+        client=client,
+        recipient_consent=True,
+        to=["x@example.com"],
+        subject="hi",
+        body_text="body",
+        attachment_ids=[aid],
+    )
+    body = httpx.Response(200, content=captured["body"]).json()
+    assert body["attachment_ids"] == [aid]
+
+
+# --------------------------------------------------------------------------- #
+# upload_email_attachment
+# --------------------------------------------------------------------------- #
+
+
+def _attachment_response(attachment_id: str | None = None) -> dict:
+    return {
+        "id": attachment_id or str(uuid4()),
+        "filename": "invoice.pdf",
+        "content_type": "application/pdf",
+        "size_bytes": 11,
+    }
+
+
+@respx.mock
+async def test_upload_email_attachment_happy_path(client: HailClient) -> None:
+    aid = str(uuid4())
+    captured: dict = {}
+
+    def _handler(request: httpx.Request) -> httpx.Response:
+        captured["body"] = request.read()
+        captured["content_type"] = request.headers["content-type"]
+        return httpx.Response(201, json=_attachment_response(aid))
+
+    respx.post(f"{_BASE_URL}/email-attachments").mock(side_effect=_handler)
+
+    result = await tools.upload_email_attachment(
+        client=client,
+        content_base64=base64.b64encode(b"hello world").decode("ascii"),
+        filename="invoice.pdf",
+        content_type="application/pdf",
+    )
+    assert "error" not in result, result
+    assert result["id"] == aid
+    assert result["filename"] == "invoice.pdf"
+    assert b"hello world" in captured["body"]
+    assert captured["content_type"].startswith("multipart/form-data")
+
+
+@respx.mock
+async def test_upload_email_attachment_rejects_invalid_base64(
+    client: HailClient,
+) -> None:
+    result = await tools.upload_email_attachment(
+        client=client,
+        content_base64="not-valid-base64!!!",
+        filename="invoice.pdf",
+        content_type="application/pdf",
+    )
+    assert result == {"error": "content_base64: invalid base64 encoding"}
+    assert not respx.calls.called
+
+
+@respx.mock
+async def test_upload_email_attachment_maps_413_to_error_detail(
+    client: HailClient,
+) -> None:
+    respx.post(f"{_BASE_URL}/email-attachments").mock(
+        return_value=httpx.Response(
+            413, json={"detail": "attachment exceeds 10MB limit"}
+        )
+    )
+    result = await tools.upload_email_attachment(
+        client=client,
+        content_base64=base64.b64encode(b"hello world").decode("ascii"),
+        filename="invoice.pdf",
+        content_type="application/pdf",
+    )
+    assert "10MB" in result["error"]
 
 
 # --------------------------------------------------------------------------- #

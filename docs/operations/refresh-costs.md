@@ -32,7 +32,7 @@ These are non-negotiable per the project's tenets and the v0.2 design spec. Read
 4. **Two source verifies = the bar.** "Vendor pricing page is unreachable" or "model_id not in docs" means defer with a documented reason. Do not guess.
 5. **`last_verified` always bumps** on touched rows. **`last_changed_at` only bumps** if a structured price field actually moved.
 6. **Field order convention** (see "Field order" below). Match exactly.
-7. **No `git commit`.** Stage changes; produce a commit message; let the operator commit.
+7. **No destructive git in the shared tree.** This runbook's default model has every provider-agent editing the **same** working tree, so a subagent must never run a git command that reverts or discards it — `git checkout`, `git restore`, `git stash`, `git reset` — nor `git commit`/`git add`. A `checkout`/`restore` on a shared `costs/*.json` reverts the whole file and silently wipes every other provider's in-flight edits — it cost a full LLM sweep once. Fix broken formatting with the `Edit` tool or `pnpm exec prettier --write costs/<category>.json`, never git. Leave files modified-but-unstaged; produce a commit message; let the operator commit. (Giving each provider its **own** git worktree makes git safe per-agent — but then add a step to collate each worktree's single-file edit back, which is why the default is one shared tree + sequential dispatch.)
 
 ## Per-row data model (cheat sheet)
 
@@ -279,8 +279,9 @@ You are running a weekly cost-data refresh for {provider} in the Hail Costs Data
 
 ## Workflow constraints
 
-- NEVER run `git commit`.
+- You share ONE working tree with the other provider-agents. Never run a git command that reverts or discards it — `git checkout`, `git restore`, `git stash`, `git reset` — nor `git commit`/`git add`. A `checkout`/`restore` on `costs/{category}.json` reverts the whole shared file and destroys other providers' uncommitted edits. Fix broken formatting with the `Edit` tool or `pnpm exec prettier --write costs/{category}.json` — never with git.
 - You may edit `costs/{category}.json` and leave it modified-but-unstaged.
+- The controller runs providers **sequentially**, never in parallel — they all edit the same file.
 
 ## Project context
 
@@ -345,7 +346,7 @@ If the primary page is unreachable via WebFetch, fall back to the secondary. If 
 
 7. Run `pnpm site:build`. Must pass.
 
-8. Do NOT stage or commit.
+8. Do NOT run any git command — no stage, commit, checkout, restore, stash, or reset.
 
 ## Report
 

@@ -65,7 +65,14 @@ async def test_dispatch_agent_serializes_metadata_and_returns_id(
     )
     client._lkapi.agent_dispatch.create_dispatch.return_value = fake_dispatch
 
-    metadata = {"call_id": str(CALL_ID), "system_prompt": "be brief"}
+    # org_name is None on every lookup failure — pin that None survives the
+    # real json.dumps round-trip the dispatch channel performs (the api
+    # tests mock dispatch_agent, so this is the only place it runs).
+    metadata = {
+        "call_id": str(CALL_ID),
+        "system_prompt": "be brief",
+        "org_name": None,
+    }
     dispatch_id = await client.dispatch_agent(
         room_name=f"hail-{CALL_ID}",
         agent_name="hail-voicebot",
@@ -80,6 +87,7 @@ async def test_dispatch_agent_serializes_metadata_and_returns_id(
     assert req.agent_name == "hail-voicebot"
     # The proto field is a string — we must serialize the dict ourselves.
     assert req.metadata == json.dumps(metadata)
+    assert json.loads(req.metadata)["org_name"] is None
 
 
 async def test_create_sip_participant_maps_to_e164_and_from_e164(

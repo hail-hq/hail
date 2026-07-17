@@ -28,12 +28,14 @@
 ### Task 1: Split inbound/outbound number FKs (`to_number_id`)
 
 **Files:**
+
 - Modify: `core/hailhq/core/models.py` (class `Sms`, `from_number_id` ~line 465)
 - Create: `api/migrations/versions/0029_sms_to_number_id.py`
 - Modify: `core/hailhq/core/sms_ingest.py` (the `Sms(...)` construction, ~lines 100-119)
 - Test: `core/tests/test_sms_ingest.py`, `core/tests/test_models.py`
 
 **Interfaces:**
+
 - Produces: `Sms.to_number_id: Mapped[uuid.UUID | None]`; `Sms.from_number_id` becomes nullable. Inbound rows: `from_number_id IS NULL`, `to_number_id = <org receiving number id>`. Outbound rows unchanged: `from_number_id = <sender id>`, `to_number_id IS NULL`.
 
 - [ ] **Step 1: Write the failing test (inbound sets to_number_id, clears from_number_id)**
@@ -178,11 +180,13 @@ git commit -m "feat(sms): add to_number_id FK and make from_number_id nullable f
 ### Task 2: Config — compliance-reply flag + templates
 
 **Files:**
+
 - Modify: `core/hailhq/core/config.py` (after the abuse settings, ~line 220)
 - Modify: `.env.example` (after the abuse block, ~line 190)
 - Test: `core/tests/test_config.py` (create if absent, else append)
 
 **Interfaces:**
+
 - Produces: `settings.hail_sms_compliance_replies_enabled: bool` (default `False`); `settings.hail_sms_stop_reply`, `settings.hail_sms_help_reply`, `settings.hail_sms_start_reply` (str defaults). Consumed by Task 3.
 
 - [ ] **Step 1: Write the failing test**
@@ -258,11 +262,13 @@ git commit -m "feat(sms): add opt-in compliance-reply flag and templates"
 ### Task 3: HELP detection + compliance-reply dispatch
 
 **Files:**
+
 - Modify: `core/hailhq/core/sms_ingest.py` (keyword sets ~line 41, `_opt_out_action` ~line 47, `ingest_inbound_sms` signature + body)
 - Modify: `api/hailhq/api/routes/sms.py` (`receive_inbound_sms`, ~line 249)
 - Test: `core/tests/test_sms_ingest.py`, `api/tests/test_sms_inbound_api.py`
 
 **Interfaces:**
+
 - Consumes: `settings.hail_sms_*` (Task 2); `Sms.to_number_id`/nullable `from_number_id` (Task 1); `SmsProvider.send_sms(from_e164, to_e164, body) -> ProviderSmsResult`.
 - Produces: `ingest_inbound_sms(..., provider: SmsProvider | None = None)`; `_opt_out_action` returns `"STOP" | "START" | "HELP" | None`.
 
@@ -527,6 +533,7 @@ git commit -m "feat(sms): handle HELP and send opt-in STOP/START/HELP compliance
 ### Task 4: Docs — sms.received webhook + Twilio opt-out setup
 
 **Files:**
+
 - Modify: `docs/setup/webhooks.md` (Event types + Payload sections)
 - Modify: `docs/setup/twilio.md` (new inbound-SMS section)
 
@@ -609,6 +616,7 @@ git commit -m "docs(sms): document sms.received webhook and Twilio opt-out setup
 ### Task 5: Legal `sms.md` disclosures (hail-website repo)
 
 **Files:**
+
 - Create: `~/hail-website/content/legal/sms.md` (separate repo — its own branch/PR)
 
 **Interfaces:** none.

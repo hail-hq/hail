@@ -14,6 +14,8 @@ from pydantic import (
     model_validator,
 )
 
+from hailhq.core.sender_id import PLATFORM_DEFAULT_SENDER_ID
+
 E164 = re.compile(r"^\+[1-9]\d{1,14}$")
 
 
@@ -285,6 +287,57 @@ class SmsResponse(BaseModel):
 
 class SmsListResponse(BaseModel):
     items: list[SmsResponse]
+    next_cursor: str | None = None
+
+
+# ``\Z`` (not ``$``) so a trailing newline is rejected: in Python ``$`` also
+# matches just before a final ``\n``, which would let "ACME\n" through and be
+# stored as a malformed Sender ID.
+SENDER_ID_RE = re.compile(r"^[A-Za-z0-9]{2,11}\Z")
+
+
+class SenderIdPatch(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    custom_sender_id: str | None = None
+
+    @field_validator("custom_sender_id")
+    @classmethod
+    def _validate_sender_id(cls, v: str | None) -> str | None:
+        if v is not None and not SENDER_ID_RE.match(v):
+            raise ValueError(
+                "must be 2-11 alphanumeric characters, no spaces or symbols"
+            )
+        return v
+
+
+class SenderIdResponse(BaseModel):
+    custom_sender_id: str | None
+    effective_default: str = PLATFORM_DEFAULT_SENDER_ID
+
+
+class NumberAcquireRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    country_code: str = Field(min_length=2, max_length=2)
+    number_type: NumberType = "local"
+
+
+class PhoneNumberResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    e164: str
+    country_code: str
+    number_type: str
+    capabilities: list[str]
+    provisioning_state: str
+    is_dedicated: bool
+    messaging_service_sid: str | None = None
+
+
+class PhoneNumberListResponse(BaseModel):
+    items: list[PhoneNumberResponse]
     next_cursor: str | None = None
 
 
@@ -567,6 +620,7 @@ class EmailCreate(ConsentAttestationMixin):
     body_html: str | None = None
     conversation_id: UUID | None = None
     metadata: dict = Field(default_factory=dict)
+    attachment_ids: list[UUID] | None = None
 
     @field_validator("from_", "reply_to")
     @classmethod
@@ -726,6 +780,22 @@ class EmailAttachmentResponse(BaseModel):
     size_bytes: int
     content_id: str | None = None
     url: str
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class EmailAttachmentUploadResponse(BaseModel):
+    """Returned by POST /email-attachments.
+
+    ``id`` is reusable across many ``POST /emails`` calls via
+    ``EmailCreate.attachment_ids`` until Hail garbage-collects it (24h
+    if never referenced by a send).
+    """
+
+    id: UUID
+    filename: str
+    content_type: str
+    size_bytes: int
 
     model_config = ConfigDict(from_attributes=True)
 

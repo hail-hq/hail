@@ -1,9 +1,10 @@
-import { llmSchema, sttSchema, ttsSchema } from '@/lib/costs';
+import { llmSchema, sttSchema, ttsSchema, telephonySchema } from '@/lib/costs';
 
 const SCHEMAS = {
   'llm.json': llmSchema,
   'stt.json': sttSchema,
   'tts.json': ttsSchema,
+  'telephony.json': telephonySchema,
 } as const satisfies Record<string, object>;
 
 export const dynamic = 'force-static';

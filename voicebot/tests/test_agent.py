@@ -990,6 +990,25 @@ async def test_speak_greeting_first_message_cannot_precede_disclosure() -> None:
     assert session.say_calls[0] != session.say_calls[1]
 
 
+async def test_speak_greeting_names_the_org_when_dispatch_metadata_has_it() -> None:
+    """org_name (server-resolved, not caller-supplied) is spoken in the
+    disclosure — 47 CFR 64.1200(b)(1) wants the initiating business named."""
+    session = FakeAnnouncingSession()
+
+    await speak_greeting(session, {"org_name": "Acme Corp"})
+
+    assert session.say_calls == [
+        ("Hi, this is an AI assistant calling on behalf of Acme Corp.", True)
+    ]
+
+
+async def test_speak_greeting_blank_or_missing_org_name_falls_back_to_generic() -> None:
+    for meta in ({}, {"org_name": None}, {"org_name": ""}, {"org_name": "   "}):
+        session = FakeAnnouncingSession()
+        await speak_greeting(session, meta)
+        assert session.say_calls == [(AI_DISCLOSURE_LINE, True)]
+
+
 # --------------------------------------------------------------------------- #
 # Soft-cap behavior — voice call duration limit
 # --------------------------------------------------------------------------- #

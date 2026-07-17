@@ -3,7 +3,9 @@ package cmd
 import (
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
+	"net/http/httptest"
 	"path/filepath"
 	"strings"
 	"sync/atomic"
@@ -216,6 +218,37 @@ func TestEmailSend_APIError(t *testing.T) {
 	}
 }
 
+// TestEmailSend_OversizeAttachmentRejection guards against a real bug: the
+// server's attachment size-cap rejection returns a plain string `detail`
+// ({"detail": "..."}), not FastAPI's list-shaped validation-error detail
+// that the generated WithResponse parser expects for every 422. Using that
+// generated parser directly made the real "too large" message get replaced
+// by a raw Go json.Unmarshal error. This must surface the actual server
+// message instead.
+func TestEmailSend_OversizeAttachmentRejection(t *testing.T) {
+	srv := newFakeServer(t, http.StatusUnprocessableEntity, map[string]string{
+		"detail": "attachment(s) too large — host the file externally and include a link in the body instead",
+	})
+
+	_, _, err := runRoot(t,
+		map[string]string{"HAIL_API_KEY": "sk_test", "HAIL_API_URL": srv.URL},
+		"email", "send",
+		"--to", "x@example.com",
+		"--subject", "hi",
+		"--body", "hello",
+		"--recipient-consent",
+	)
+	if err == nil {
+		t.Fatal("expected error on 422")
+	}
+	if strings.Contains(err.Error(), "cannot unmarshal") {
+		t.Fatalf("leaked raw json unmarshal error instead of the server message: %v", err)
+	}
+	if !strings.Contains(err.Error(), "too large") {
+		t.Fatalf("expected the real oversize message, got: %v", err)
+	}
+}
+
 func TestEmailSendSubcommand_SendsConsentFlags(t *testing.T) {
 	srv := newFakeServer(t, http.StatusCreated, sampleEmailResponse())
 
@@ -293,5 +326,61 @@ func TestEmailSendSubcommand_RecipientConsent_FalseFailsBeforeNetwork(t *testing
 	}
 	if hits := atomic.LoadInt32(&srv.hits); hits != 0 {
 		t.Errorf("expected 0 HTTP calls, got %d", hits)
+	}
+}
+
+// TestEmailSend_AttachFlag exercises the --attach upload-then-send path
+// against a two-route fake server: --attach must upload the file to
+// POST /email-attachments first, then thread the returned id into
+// EmailCreate.attachment_ids on the POST /emails call.
+func TestEmailSend_AttachFlag(t *testing.T) {
+	dir := t.TempDir()
+	filePath := filepath.Join(dir, "invoice.pdf")
+	if err := os.WriteFile(filePath, []byte("pdf bytes"), 0o644); err != nil {
+		t.Fatalf("write attach file: %v", err)
+	}
+
+	mux := http.NewServeMux()
+	var sendBody []byte
+	mux.HandleFunc("/email-attachments", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"id":           "11111111-1111-1111-1111-111111111111",
+			"filename":     "invoice.pdf",
+			"content_type": "application/octet-stream",
+			"size_bytes":   9,
+		})
+	})
+	mux.HandleFunc("/emails", func(w http.ResponseWriter, r *http.Request) {
+		sendBody, _ = io.ReadAll(r.Body)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		email := sampleEmailResponse()
+		_ = json.NewEncoder(w).Encode(email)
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	_, _, err := runRoot(t,
+		map[string]string{"HAIL_API_KEY": "sk_test", "HAIL_API_URL": srv.URL},
+		"email", "send",
+		"--to", "x@example.com",
+		"--subject", "hi",
+		"--body", "hello",
+		"--recipient-consent",
+		"--attach", filePath,
+	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var body map[string]any
+	if err := json.Unmarshal(sendBody, &body); err != nil {
+		t.Fatalf("bad send body: %v", err)
+	}
+	ids, ok := body["attachment_ids"].([]any)
+	if !ok || len(ids) != 1 || ids[0] != "11111111-1111-1111-1111-111111111111" {
+		t.Fatalf("attachment_ids = %v", body["attachment_ids"])
 	}
 }

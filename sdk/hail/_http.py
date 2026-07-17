@@ -215,6 +215,36 @@ class _HailHTTP:
             await self._sleep(delay)
             attempt += 1
 
+    async def request_multipart(
+        self,
+        method: str,
+        path: str,
+        *,
+        files: dict[str, tuple[str, bytes, str]],
+        headers: dict[str, str] | None = None,
+    ) -> Any:
+        """Like :meth:`request`, but sends a multipart/form-data body.
+
+        ``files`` follows httpx's ``files=`` shape:
+        ``{field: (filename, content, content_type)}``. Never retried —
+        there's no idempotency-key convention for uploads yet, and
+        re-sending a large body on a flaky connection is worse than
+        failing fast.
+        """
+        client = self._ensure_client()
+        merged_headers: dict[str, str] = {
+            "Authorization": f"Bearer {self._api_key}",
+            "Accept": "application/json",
+            "User-Agent": "hail-sdk-python",
+        }
+        if headers:
+            merged_headers.update(headers)
+        resp = await client.request(method, path, files=files, headers=merged_headers)
+        _raise_for_status(resp)
+        if resp.status_code == 204 or not resp.content:
+            return None
+        return resp.json()
+
 
 def generate_idempotency_key() -> str:
     """Fresh UUIDv4 — used when the caller doesn't pass one explicitly."""

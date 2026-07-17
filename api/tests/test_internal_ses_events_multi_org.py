@@ -23,7 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from hailhq.api.main import app
 from hailhq.api.routes.internal.ses_events import (
     get_inbound_provider,
-    get_s3_inbound_client,
+    get_s3_mail_client,
 )
 from hailhq.core.models import Email, EmailDomain, UsageEvent
 from hailhq.core.providers.email.inbound.ses import SesInboundProvider
@@ -67,8 +67,8 @@ def inbound_enabled(monkeypatch: pytest.MonkeyPatch):
 
     monkeypatch.setattr(settings, "hail_inbound_enabled", True)
     monkeypatch.setattr(settings, "hail_inbound_hmac_secret", HMAC_SECRET)
-    # Bucket is derived as `${prefix}-raw`, so this yields "hail-inbound-test-raw".
-    monkeypatch.setattr(settings, "hail_inbound_email_name_prefix", "hail-inbound-test")
+    # Bucket is derived as `${prefix}-mail`, so this yields "hail-inbound-test-mail".
+    monkeypatch.setattr(settings, "hail_mail_name_prefix", "hail-inbound-test")
     monkeypatch.setattr(settings, "hail_mail_base_domain", "mail.hail.so")
 
 
@@ -85,12 +85,12 @@ def override_internal_deps(fake_s3):
     app.dependency_overrides[get_inbound_provider] = lambda: SesInboundProvider(
         hmac_secret=HMAC_SECRET
     )
-    app.dependency_overrides[get_s3_inbound_client] = lambda: fake_s3
+    app.dependency_overrides[get_s3_mail_client] = lambda: fake_s3
     try:
         yield
     finally:
         app.dependency_overrides.pop(get_inbound_provider, None)
-        app.dependency_overrides.pop(get_s3_inbound_client, None)
+        app.dependency_overrides.pop(get_s3_mail_client, None)
 
 
 @pytest.mark.asyncio

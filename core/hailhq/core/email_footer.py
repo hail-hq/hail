@@ -3,67 +3,80 @@
 Applied at the send boundary for direct sends (the stored Email row keeps
 the tenant-authored body; the wire message carries the footer) and at
 build time for forwards (the queued row already holds the final body).
+
+Direct sends get one blended line that is both branding and AI
+disclosure ("Sent via Hail.so, an AI communication platform.") — kept as
+a single sentence deliberately so it reads as attribution, not a legal
+disclaimer, while still disclosing AI involvement. Forwards keep the
+plain "Forwarded by Hail.so" label: forwarded mail is a relayed human
+message, not AI-generated content, so no AI disclosure applies.
 """
 
 from __future__ import annotations
 
 __all__ = [
-    "FOOTER_SENT",
-    "FOOTER_FORWARDED",
-    "AI_DISCLOSURE_LINE",
-    "append_footer",
-    "append_disclosure",
+    "SENT_FOOTER_TEXT",
+    "append_forwarded_footer",
+    "append_sent_footer",
 ]
 
 _LINK = "https://hail.so"
 
-FOOTER_SENT = "Sent by Hail.so"
-FOOTER_FORWARDED = "Forwarded by Hail.so"
+# The single blended branding + AI-disclosure line for direct sends.
+# Text form carries the literal URL; the HTML form hyperlinks "Hail.so".
+SENT_FOOTER_TEXT = f"Sent via Hail.so ({_LINK}), an AI communication platform."
 
-# Fixed AI-disclosure line appended at the wire-send boundary, same as the
-# branding footer — it always rides the wire message and is never part of
-# the tenant-authored stored body.
-AI_DISCLOSURE_LINE = (
-    "This message was sent using an AI-assisted communication platform "
-    "on behalf of the sender."
+_FORWARDED_FOOTER_TEXT = f"Forwarded by Hail.so ({_LINK})"
+_FORWARDED_FOOTER_HTML_INNER = f'Forwarded by <a href="{_LINK}">Hail.so</a>'
+_SENT_FOOTER_HTML_INNER = (
+    f'Sent via <a href="{_LINK}">Hail.so</a>, an AI communication platform.'
 )
 
 
-def _text_footer(label: str) -> str:
-    return f"\n\n--\n{label} ({_LINK})"
-
-
-def _html_footer(label: str) -> str:
+def _html_footer(inner: str) -> str:
+    """The one <p> wrapper both footers share — style changes land here once."""
     return (
-        '<p style="margin-top:16px;font-size:12px;color:#8a8a8a;">'
-        f'--<br>{label} (<a href="{_LINK}">hail.so</a>)</p>'
+        '<p style="margin-top:16px;font-size:12px;color:#8a8a8a;">' f"--<br>{inner}</p>"
     )
 
 
-def append_footer(
-    body_text: str | None, body_html: str | None, *, label: str
+def _append(
+    body_text: str | None,
+    body_html: str | None,
+    *,
+    text_line: str,
+    html_inner: str,
 ) -> tuple[str | None, str | None]:
-    """Append the branding footer to whichever body parts exist."""
     if body_text is not None:
-        body_text = body_text + _text_footer(label)
+        body_text = body_text + f"\n\n--\n{text_line}"
     if body_html is not None:
-        body_html = body_html + _html_footer(label)
+        body_html = body_html + _html_footer(html_inner)
     return body_text, body_html
 
 
-def append_disclosure(
+def append_forwarded_footer(
     body_text: str | None, body_html: str | None
 ) -> tuple[str | None, str | None]:
-    """Append the fixed AI-disclosure line to whichever body parts exist.
+    """Append the forwarded-mail branding footer to whichever parts exist."""
+    return _append(
+        body_text,
+        body_html,
+        text_line=_FORWARDED_FOOTER_TEXT,
+        html_inner=_FORWARDED_FOOTER_HTML_INNER,
+    )
 
-    Same pattern as :func:`append_footer` — applied at the send boundary so
-    the disclosure always rides the wire message, never the stored row.
+
+def append_sent_footer(
+    body_text: str | None, body_html: str | None
+) -> tuple[str | None, str | None]:
+    """Append the blended branding + AI-disclosure line for direct sends.
+
+    Applied at the send boundary so the line always rides the wire
+    message, never the stored row.
     """
-    if body_text is not None:
-        body_text = body_text + f"\n\n{AI_DISCLOSURE_LINE}"
-    if body_html is not None:
-        body_html = (
-            body_html
-            + f'<p style="margin-top:8px;font-size:12px;color:#8a8a8a;">{AI_DISCLOSURE_LINE}</p>'
-        )
-    return body_text, body_html
+    return _append(
+        body_text,
+        body_html,
+        text_line=SENT_FOOTER_TEXT,
+        html_inner=_SENT_FOOTER_HTML_INNER,
+    )

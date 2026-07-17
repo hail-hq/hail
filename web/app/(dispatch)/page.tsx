@@ -1,7 +1,8 @@
-import { llm, stt, tts } from '@/lib/costs';
+import { llm, stt, tts, telephony } from '@/lib/costs';
 import { LLMSection } from '@/components/categories/llm-section';
 import { STTSection } from '@/components/categories/stt-section';
 import { TTSSection } from '@/components/categories/tts-section';
+import { TelephonySection } from '@/components/categories/telephony-section';
 import { Toolbar } from '@/components/toolbar';
 import { mostRecent, priceRange } from '@/lib/format';
 
@@ -10,7 +11,7 @@ export const dynamic = 'force-static';
 export const metadata = {
   title: 'Model costs — Hail',
   description:
-    'Public, validated pricing and capability data for AI model providers — LLMs, speech-to-text, and text-to-speech. Schema-validated, CC-BY-4.0, refreshed weekly.',
+    'Public, validated pricing and capability data for AI model providers — LLMs, speech-to-text, text-to-speech, and telephony. Schema-validated, CC-BY-4.0, refreshed weekly.',
   alternates: {
     types: {
       'text/markdown': '/costs.md',
@@ -26,7 +27,7 @@ export default function CostsPage() {
   for (const m of [...llm.models, ...stt.models, ...tts.models]) {
     providers.add(m.provider);
   }
-  const verified = mostRecent(llm.models, stt.models, tts.models);
+  const verified = mostRecent(llm.models, stt.models, tts.models, telephony.numbers, telephony.a2p_10dlc);
 
   return (
     <>
@@ -36,7 +37,7 @@ export default function CostsPage() {
             <span className="dot">●</span> HAIL.SO / DISPATCH · {today} · MODEL COSTS
           </div>
           <div className="right">
-            FILE: <b>COSTS</b> · CC-BY-4.0 · v0.1.0
+            FILE: <b>COSTS</b> · CC-BY-4.0 · v0.2.0
           </div>
         </div>
       </div>
@@ -113,6 +114,13 @@ export default function CostsPage() {
                 {priceRange(tts.models.map((m) => m.price_per_1m_chars_usd), 0, 0, '1M chars')}
               </div>
             </div>
+            <div className="stat">
+              <div className="k">Numbers</div>
+              <div className="v">{telephony.numbers.length}</div>
+              <div className="n">
+                {priceRange(telephony.numbers.map((r) => r.usd_per_month), 2, 2, 'mo')} · at cost
+              </div>
+            </div>
           </div>
         </div>
       </section>
@@ -122,12 +130,14 @@ export default function CostsPage() {
           { id: 'llm', label: 'LLM' },
           { id: 'stt', label: 'STT' },
           { id: 'tts', label: 'TTS' },
+          { id: 'telephony', label: 'Numbers' },
         ]}
       />
 
       <LLMSection data={llm.models} />
       <STTSection data={stt.models} />
       <TTSSection data={tts.models} />
+      <TelephonySection data={telephony.numbers} />
 
       <section
         style={{
@@ -193,6 +203,10 @@ export default function CostsPage() {
               >
                 raw / costs/tts.json
               </a>
+            </li>
+            <li>
+              Telephony (number COGS + 10DLC fees):{' '}
+              <code>https://raw.githubusercontent.com/hail-hq/hail/main/costs/telephony.json</code>
             </li>
           </ul>
         </div>
