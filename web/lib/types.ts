@@ -1,6 +1,6 @@
 export type Modality = 'text' | 'image' | 'audio' | 'video';
 export type Confidence = 'high' | 'medium' | 'low';
-export type VerificationMethod = 'manual-confirmed' | 'community-pr';
+export type VerificationMethod = 'manual-confirmed' | 'community-pr' | 'carrier-sync';
 export type DeploymentOption =
   | 'native'
   | 'bedrock'
@@ -136,9 +136,13 @@ interface TelephonyProvenance {
 
 export interface TelephonyNumberRow extends TelephonyProvenance {
   country_code: string;
-  number_type: 'local' | 'mobile' | 'toll_free';
+  number_type: 'local' | 'mobile' | 'toll_free' | 'national';
   display_name: string;
+  dial_code: string;
   usd_per_month: string;
+  voice: boolean;
+  sms: boolean;
+  mms: boolean;
 }
 
 export interface TelephonyFeeRow extends TelephonyProvenance {

@@ -12,6 +12,10 @@
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",
       "source_url": "https://www.twilio.com/en-us/sms/pricing/us",
+      "voice": true,
+      "sms": true,
+      "mms": true,
+      "dial_code": "1",
       "notes": "At-cost pass-through of Twilio's US long-code monthly rental. No markup."
     },
     {
@@ -24,6 +28,10 @@
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",
       "source_url": "https://www.twilio.com/en-us/sms/pricing/us",
+      "voice": true,
+      "sms": true,
+      "mms": true,
+      "dial_code": "1",
       "notes": "At-cost pass-through of Twilio's US toll-free monthly rental."
     }
   ],
