@@ -22,11 +22,13 @@ from hailhq.api.deps import Principal, get_current_principal
 from hailhq.api.errors import unprocessable
 from hailhq.api.idempotency import (
     IdempotencyContext,
+    cache_failure,
     idempotency_dep,
     replay_cached,
 )
 from hailhq.api.pagination import fetch_cursor_page
 from hailhq.api.routes.sms import get_sms_provider
+from hailhq.core import telephony_catalog
 from hailhq.core.db import get_session
 from hailhq.core.models import PhoneNumber
 from hailhq.core.providers.sms import SmsProvider
@@ -92,17 +94,30 @@ async def acquire_number(
         cached_id, cached = replay_cached(idem, response, resource_prefix="/numbers")
         return PhoneNumberResponse.model_validate(cached)
 
-    from hailhq.core import telephony_catalog
-
-    if not telephony_catalog.is_acquirable(body.country_code, body.number_type):
-        raise unprocessable(
-            f"we don't offer a {body.number_type} number in {body.country_code} yet",
-            loc=["body", "number_type"],
+    caps = telephony_catalog.capabilities(body.country_code, body.number_type)
+    if caps is None:
+        raise await cache_failure(
+            idem,
+            unprocessable(
+                f"we don't offer a {body.number_type} number in "
+                f"{body.country_code} yet",
+                loc=["body", "number_type"],
+            ),
         )
 
-    caps = telephony_catalog.capabilities(body.country_code, body.number_type)
-    # caps is non-None: is_acquirable above guarantees the row exists.
     requested_caps = [c for c in ("voice", "sms") if caps[c]]
+    if not requested_caps:
+        # A catalog row with neither voice nor sms is schema-invalid, but the
+        # runtime load doesn't schema-validate; an empty filter would let the
+        # provider purchase an arbitrary number.
+        raise await cache_failure(
+            idem,
+            unprocessable(
+                f"the {body.number_type} number in {body.country_code} has no "
+                "usable capabilities",
+                loc=["body", "number_type"],
+            ),
+        )
 
     try:
         acquired = await provider.acquire_number(

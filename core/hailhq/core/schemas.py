@@ -322,6 +322,13 @@ class NumberAcquireRequest(BaseModel):
     country_code: str = Field(min_length=2, max_length=2)
     number_type: NumberType = "local"
 
+    @field_validator("country_code")
+    @classmethod
+    def _uppercase_country_code(cls, v: str) -> str:
+        # The telephony catalog, the provider, and the stored row all key on
+        # uppercase ISO alpha-2; normalize here so "us" and "US" behave alike.
+        return v.upper()
+
 
 class PhoneNumberResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
