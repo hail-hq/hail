@@ -43,6 +43,10 @@ COPY --from=builder --chown=hail:hail /app/.venv /app/.venv
 # actually reads, not the rest of api/.
 COPY --chown=hail:hail api/alembic.ini /app/api/alembic.ini
 COPY --chown=hail:hail api/migrations  /app/api/migrations
+
+# costs/telephony.json is read at runtime by hailhq.core.telephony_catalog
+# (the acquire allow-list / price / capability source of truth).
+COPY --chown=hail:hail costs /app/costs
 WORKDIR /app/api
 
 USER hail
