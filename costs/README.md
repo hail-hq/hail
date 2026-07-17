@@ -12,12 +12,14 @@ Programmatic consumers (agents, scripts, dashboards) should fetch directly:
 - STT: <https://raw.githubusercontent.com/hail-hq/hail/main/costs/stt.json>
 - TTS: <https://raw.githubusercontent.com/hail-hq/hail/main/costs/tts.json>
 - Telephony: <https://raw.githubusercontent.com/hail-hq/hail/main/costs/telephony.json>
+- SMS base rates: <https://raw.githubusercontent.com/hail-hq/hail/main/costs/sms.json>
 
 Schemas are served at their `$id` URLs:
 
 - <https://hail.so/costs/schema/llm.json>
 - <https://hail.so/costs/schema/stt.json>
 - <https://hail.so/costs/schema/tts.json>
+- <https://hail.so/costs/schema/sms.json>
 - <https://hail.so/costs/schema/telephony.json>
 
 **Note:** The interactive `web/` compare view and `costs.md` markdown export do not yet include telephony data (out of scope; a later PR).

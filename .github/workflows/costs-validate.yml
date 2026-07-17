@@ -27,6 +27,8 @@ jobs:
         run: check-jsonschema --schemafile costs/schema/stt.schema.json costs/stt.json
       - name: Validate TTS data
         run: check-jsonschema --schemafile costs/schema/tts.schema.json costs/tts.json
+      - name: Validate SMS data
+        run: check-jsonschema --schemafile costs/schema/sms.schema.json costs/sms.json
       - name: Validate Telephony data
         run: check-jsonschema --schemafile costs/schema/telephony.schema.json costs/telephony.json
       # Cross-field checks below are model-shaped (aliases, replaced_by_model_id)

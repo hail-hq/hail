@@ -16,6 +16,7 @@ const ROW_ARRAYS = {
   stt: ['models'],
   tts: ['models'],
   telephony: ['numbers', 'a2p_10dlc'],
+  sms: ['providers'],
 };
 
 export function rowsForFile(filename, data) {
