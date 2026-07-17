@@ -98,6 +98,38 @@ def make_suppression_response(
     }
 
 
+def make_phone_number_response(
+    *,
+    number_id: UUID | None = None,
+    e164: str = "+15550001111",
+    capabilities: list[str] | None = None,
+    messaging_service_sid: str | None = None,
+) -> dict:
+    """Server-shaped JSON for a PhoneNumberResponse."""
+    return {
+        "id": str(number_id or uuid4()),
+        "e164": e164,
+        "country_code": "US",
+        "number_type": "local",
+        "capabilities": capabilities or ["voice", "sms"],
+        "provisioning_state": "active",
+        "is_dedicated": True,
+        "messaging_service_sid": messaging_service_sid,
+    }
+
+
+def make_sender_id_response(
+    *,
+    custom_sender_id: str | None = None,
+    effective_default: str = "HAIL",
+) -> dict:
+    """Server-shaped JSON for a SenderIdResponse."""
+    return {
+        "custom_sender_id": custom_sender_id,
+        "effective_default": effective_default,
+    }
+
+
 def make_email_domain_response(
     *,
     domain_id: UUID | None = None,

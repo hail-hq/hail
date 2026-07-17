@@ -1,7 +1,8 @@
 openapi: 3.1.0
 info:
   title: Hail
-  description: "Universal communication platform for AI agents.\n\nThis file is the\
+  description:
+    "Universal communication platform for AI agents.\n\nThis file is the\
     \ source of truth for the Go CLI. Regenerate it after\nchanging API routes \u2014\
     \ see docs/contributing.md.\n"
   version: 0.1.0
@@ -9,704 +10,760 @@ paths:
   /calls:
     post:
       tags:
-      - calls
+        - calls
       summary: Create Call
       operationId: create_call_calls_post
       parameters:
-      - name: authorization
-        in: header
-        required: false
-        schema:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Authorization
-      - name: Idempotency-Key
-        in: header
-        required: false
-        schema:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Idempotency-Key
+        - name: authorization
+          in: header
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            title: Authorization
+        - name: Idempotency-Key
+          in: header
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            title: Idempotency-Key
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/CallCreate'
+              $ref: "#/components/schemas/CallCreate"
       responses:
-        '201':
+        "201":
           description: Successful Response
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/CallResponse'
-        '422':
+                $ref: "#/components/schemas/CallResponse"
+        "422":
           description: Validation Error
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/HTTPValidationError'
+                $ref: "#/components/schemas/HTTPValidationError"
+        "429":
+          description: >-
+            Rate limited. The agent-origin workspace exceeded a per-channel
+            velocity cap, or the platform kill switch is on. Retry after the
+            Retry-After header (seconds).
+          headers:
+            Retry-After:
+              description: Seconds to wait before retrying.
+              schema:
+                type: integer
     get:
       tags:
-      - calls
+        - calls
       summary: List Calls
       operationId: list_calls_calls_get
       parameters:
-      - name: cursor
-        in: query
-        required: false
-        schema:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Cursor
-      - name: limit
-        in: query
-        required: false
-        schema:
-          type: integer
-          maximum: 200
-          minimum: 1
-          default: 50
-          title: Limit
-      - name: status
-        in: query
-        required: false
-        schema:
-          anyOf:
-          - enum:
-            - queued
-            - dialing
-            - ringing
-            - in_progress
-            - completed
-            - failed
-            - busy
-            - no_answer
-            - canceled
-            type: string
-          - type: 'null'
-          title: Status
-      - name: to
-        in: query
-        required: false
-        schema:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: To
-      - name: authorization
-        in: header
-        required: false
-        schema:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Authorization
+        - name: cursor
+          in: query
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            title: Cursor
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            maximum: 200
+            minimum: 1
+            default: 50
+            title: Limit
+        - name: status
+          in: query
+          required: false
+          schema:
+            anyOf:
+              - enum:
+                  - queued
+                  - dialing
+                  - ringing
+                  - in_progress
+                  - completed
+                  - failed
+                  - busy
+                  - no_answer
+                  - canceled
+                type: string
+              - type: "null"
+            title: Status
+        - name: to
+          in: query
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            title: To
+        - name: authorization
+          in: header
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            title: Authorization
       responses:
-        '200':
+        "200":
           description: Successful Response
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/CallListResponse'
-        '422':
+                $ref: "#/components/schemas/CallListResponse"
+        "422":
           description: Validation Error
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/HTTPValidationError'
+                $ref: "#/components/schemas/HTTPValidationError"
   /calls/{call_id}:
     get:
       tags:
-      - calls
+        - calls
       summary: Get Call
       operationId: get_call_calls__call_id__get
       parameters:
-      - name: call_id
-        in: path
-        required: true
-        schema:
-          type: string
-          format: uuid
-          title: Call Id
-      - name: authorization
-        in: header
-        required: false
-        schema:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Authorization
+        - name: call_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+            title: Call Id
+        - name: authorization
+          in: header
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            title: Authorization
       responses:
-        '200':
+        "200":
           description: Successful Response
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/CallResponse'
-        '422':
+                $ref: "#/components/schemas/CallResponse"
+        "422":
           description: Validation Error
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/HTTPValidationError'
+                $ref: "#/components/schemas/HTTPValidationError"
+  /email-attachments:
+    post:
+      tags:
+        - email-attachments
+      summary: Create Email Attachment
+      operationId: upload_email_attachment
+      parameters:
+        - name: authorization
+          in: header
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            title: Authorization
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              $ref: "#/components/schemas/Body_upload_email_attachment"
+      responses:
+        "201":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EmailAttachmentUploadResponse"
+        "422":
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
   /emails:
     post:
       tags:
-      - emails
+        - emails
       summary: Create Email
       operationId: create_email_emails_post
       parameters:
-      - name: authorization
-        in: header
-        required: false
-        schema:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Authorization
-      - name: Idempotency-Key
-        in: header
-        required: false
-        schema:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Idempotency-Key
+        - name: authorization
+          in: header
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            title: Authorization
+        - name: Idempotency-Key
+          in: header
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            title: Idempotency-Key
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/EmailCreate'
+              $ref: "#/components/schemas/EmailCreate"
       responses:
-        '201':
+        "201":
           description: Successful Response
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/EmailResponse'
-        '422':
+                $ref: "#/components/schemas/EmailResponse"
+        "422":
           description: Validation Error
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/HTTPValidationError'
+                $ref: "#/components/schemas/HTTPValidationError"
+        "429":
+          description: >-
+            Rate limited. The agent-origin workspace exceeded a per-channel
+            velocity cap, or the platform kill switch is on. Retry after the
+            Retry-After header (seconds).
+          headers:
+            Retry-After:
+              description: Seconds to wait before retrying.
+              schema:
+                type: integer
     get:
       tags:
-      - emails
+        - emails
       summary: List Emails
       operationId: list_emails_emails_get
       parameters:
-      - name: cursor
-        in: query
-        required: false
-        schema:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Cursor
-      - name: limit
-        in: query
-        required: false
-        schema:
-          type: integer
-          maximum: 200
-          minimum: 1
-          default: 50
-          title: Limit
-      - name: status
-        in: query
-        required: false
-        schema:
-          anyOf:
-          - enum:
-            - queued
-            - sent
-            - delivered
-            - failed
-            - bounced
-            - complained
-            - received
-            type: string
-          - type: 'null'
-          title: Status
-      - name: direction
-        in: query
-        required: false
-        schema:
-          anyOf:
-          - enum:
-            - outbound
-            - inbound
-            type: string
-          - type: 'null'
-          title: Direction
-      - name: authorization
-        in: header
-        required: false
-        schema:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Authorization
+        - name: cursor
+          in: query
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            title: Cursor
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            maximum: 200
+            minimum: 1
+            default: 50
+            title: Limit
+        - name: status
+          in: query
+          required: false
+          schema:
+            anyOf:
+              - enum:
+                  - queued
+                  - sent
+                  - delivered
+                  - failed
+                  - bounced
+                  - complained
+                  - received
+                type: string
+              - type: "null"
+            title: Status
+        - name: direction
+          in: query
+          required: false
+          schema:
+            anyOf:
+              - enum:
+                  - outbound
+                  - inbound
+                type: string
+              - type: "null"
+            title: Direction
+        - name: authorization
+          in: header
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            title: Authorization
       responses:
-        '200':
+        "200":
           description: Successful Response
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/EmailListResponse'
-        '422':
+                $ref: "#/components/schemas/EmailListResponse"
+        "422":
           description: Validation Error
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/HTTPValidationError'
+                $ref: "#/components/schemas/HTTPValidationError"
   /emails/{email_id}/events:
     get:
       tags:
-      - emails
+        - emails
       summary: List Email Events
-      description: 'Chronological lifecycle events for one email (org-scoped).
+      description: "Chronological lifecycle events for one email (org-scoped).
 
 
         Cursor-paginated with the same forward-walk shape as ``GET /events``:
 
-        strictly-greater on ``(occurred_at, id)``, ascending.'
+        strictly-greater on ``(occurred_at, id)``, ascending."
       operationId: list_email_events_emails__email_id__events_get
       parameters:
-      - name: email_id
-        in: path
-        required: true
-        schema:
-          type: string
-          format: uuid
-          title: Email Id
-      - name: cursor
-        in: query
-        required: false
-        schema:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Cursor
-      - name: limit
-        in: query
-        required: false
-        schema:
-          type: integer
-          maximum: 1000
-          minimum: 1
-          default: 100
-          title: Limit
-      - name: authorization
-        in: header
-        required: false
-        schema:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Authorization
+        - name: email_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+            title: Email Id
+        - name: cursor
+          in: query
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            title: Cursor
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            maximum: 1000
+            minimum: 1
+            default: 100
+            title: Limit
+        - name: authorization
+          in: header
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            title: Authorization
       responses:
-        '200':
+        "200":
           description: Successful Response
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/EmailEventListResponse'
-        '422':
+                $ref: "#/components/schemas/EmailEventListResponse"
+        "422":
           description: Validation Error
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/HTTPValidationError'
+                $ref: "#/components/schemas/HTTPValidationError"
   /emails/stats:
     get:
       tags:
-      - emails
+        - emails
       summary: Get Email Stats
       operationId: get_email_stats_emails_stats_get
       parameters:
-      - name: from
-        in: query
-        required: false
-        schema:
-          anyOf:
-          - type: string
-            format: date-time
-          - type: 'null'
-          title: From
-      - name: to
-        in: query
-        required: false
-        schema:
-          anyOf:
-          - type: string
-            format: date-time
-          - type: 'null'
-          title: To
-      - name: bucket
-        in: query
-        required: false
-        schema:
-          enum:
-          - hour
-          - day
-          type: string
-          default: day
-          title: Bucket
-      - name: authorization
-        in: header
-        required: false
-        schema:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Authorization
+        - name: from
+          in: query
+          required: false
+          schema:
+            anyOf:
+              - type: string
+                format: date-time
+              - type: "null"
+            title: From
+        - name: to
+          in: query
+          required: false
+          schema:
+            anyOf:
+              - type: string
+                format: date-time
+              - type: "null"
+            title: To
+        - name: bucket
+          in: query
+          required: false
+          schema:
+            enum:
+              - hour
+              - day
+            type: string
+            default: day
+            title: Bucket
+        - name: authorization
+          in: header
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            title: Authorization
       responses:
-        '200':
+        "200":
           description: Successful Response
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/EmailStatsResponse'
-        '422':
+                $ref: "#/components/schemas/EmailStatsResponse"
+        "422":
           description: Validation Error
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/HTTPValidationError'
+                $ref: "#/components/schemas/HTTPValidationError"
   /emails/{email_id}:
     get:
       tags:
-      - emails
+        - emails
       summary: Get Email
       operationId: get_email_emails__email_id__get
       parameters:
-      - name: email_id
-        in: path
-        required: true
-        schema:
-          type: string
-          format: uuid
-          title: Email Id
-      - name: authorization
-        in: header
-        required: false
-        schema:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Authorization
+        - name: email_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+            title: Email Id
+        - name: authorization
+          in: header
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            title: Authorization
       responses:
-        '200':
+        "200":
           description: Successful Response
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/EmailResponse'
-        '422':
+                $ref: "#/components/schemas/EmailResponse"
+        "422":
           description: Validation Error
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/HTTPValidationError'
+                $ref: "#/components/schemas/HTTPValidationError"
   /emails/{email_id}/raw:
     get:
       tags:
-      - emails
+        - emails
       summary: Get Email Raw
-      description: "302 \u2192 presigned S3 URL for the raw inbound MIME (404 for\
+      description:
+        "302 \u2192 presigned S3 URL for the raw inbound MIME (404 for\
         \ outbound)."
       operationId: get_email_raw_emails__email_id__raw_get
       parameters:
-      - name: email_id
-        in: path
-        required: true
-        schema:
-          type: string
-          format: uuid
-          title: Email Id
-      - name: authorization
-        in: header
-        required: false
-        schema:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Authorization
+        - name: email_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+            title: Email Id
+        - name: authorization
+          in: header
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            title: Authorization
       responses:
-        '200':
+        "200":
           description: Successful Response
           content:
             application/json:
               schema: {}
-        '422':
+        "422":
           description: Validation Error
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/HTTPValidationError'
+                $ref: "#/components/schemas/HTTPValidationError"
   /emails/{email_id}/attachments/{attachment_id}:
     get:
       tags:
-      - emails
+        - emails
       summary: Get Email Attachment
       description: "302 \u2192 presigned S3 URL for one attachment."
       operationId: get_email_attachment_emails__email_id__attachments__attachment_id__get
       parameters:
-      - name: email_id
-        in: path
-        required: true
-        schema:
-          type: string
-          format: uuid
-          title: Email Id
-      - name: attachment_id
-        in: path
-        required: true
-        schema:
-          type: string
-          format: uuid
-          title: Attachment Id
-      - name: authorization
-        in: header
-        required: false
-        schema:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Authorization
+        - name: email_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+            title: Email Id
+        - name: attachment_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+            title: Attachment Id
+        - name: authorization
+          in: header
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            title: Authorization
       responses:
-        '200':
+        "200":
           description: Successful Response
           content:
             application/json:
               schema: {}
-        '422':
+        "422":
           description: Validation Error
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/HTTPValidationError'
+                $ref: "#/components/schemas/HTTPValidationError"
   /events:
     get:
       tags:
-      - events
+        - events
       summary: List Events
       operationId: list_events_events_get
       parameters:
-      - name: cursor
-        in: query
-        required: false
-        schema:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Cursor
-      - name: limit
-        in: query
-        required: false
-        schema:
-          type: integer
-          maximum: 1000
-          minimum: 1
-          default: 100
-          title: Limit
-      - name: id
-        in: query
-        required: false
-        schema:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Id
-      - name: kind
-        in: query
-        required: false
-        schema:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Kind
-      - name: authorization
-        in: header
-        required: false
-        schema:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Authorization
+        - name: cursor
+          in: query
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            title: Cursor
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            maximum: 1000
+            minimum: 1
+            default: 100
+            title: Limit
+        - name: id
+          in: query
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            title: Id
+        - name: kind
+          in: query
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            title: Kind
+        - name: authorization
+          in: header
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            title: Authorization
       responses:
-        '200':
+        "200":
           description: Successful Response
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/EventStreamResponse'
-        '422':
+                $ref: "#/components/schemas/EventStreamResponse"
+        "422":
           description: Validation Error
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/HTTPValidationError'
+                $ref: "#/components/schemas/HTTPValidationError"
   /email-domains:
     post:
       tags:
-      - email-domains
+        - email-domains
       summary: Create Email Domain
       operationId: create_email_domain_email_domains_post
       parameters:
-      - name: authorization
-        in: header
-        required: false
-        schema:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Authorization
+        - name: authorization
+          in: header
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            title: Authorization
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/EmailDomainCreate'
+              $ref: "#/components/schemas/EmailDomainCreate"
       responses:
-        '201':
+        "201":
           description: Successful Response
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/EmailDomainResponse'
-        '422':
+                $ref: "#/components/schemas/EmailDomainResponse"
+        "422":
           description: Validation Error
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/HTTPValidationError'
+                $ref: "#/components/schemas/HTTPValidationError"
     get:
       tags:
-      - email-domains
+        - email-domains
       summary: List Email Domains
       operationId: list_email_domains_email_domains_get
       parameters:
-      - name: cursor
-        in: query
-        required: false
-        schema:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Cursor
-      - name: limit
-        in: query
-        required: false
-        schema:
-          type: integer
-          maximum: 200
-          minimum: 1
-          default: 50
-          title: Limit
-      - name: authorization
-        in: header
-        required: false
-        schema:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Authorization
+        - name: cursor
+          in: query
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            title: Cursor
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            maximum: 200
+            minimum: 1
+            default: 50
+            title: Limit
+        - name: authorization
+          in: header
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            title: Authorization
       responses:
-        '200':
+        "200":
           description: Successful Response
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/EmailDomainListResponse'
-        '422':
+                $ref: "#/components/schemas/EmailDomainListResponse"
+        "422":
           description: Validation Error
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/HTTPValidationError'
+                $ref: "#/components/schemas/HTTPValidationError"
   /email-domains/check-domain:
     get:
       tags:
-      - email-domains
+        - email-domains
       summary: Check Domain
       description: Does this domain already receive mail? Drives apex-vs-prefix onboarding.
       operationId: check_domain_email_domains_check_domain_get
       parameters:
-      - name: domain
-        in: query
-        required: true
-        schema:
-          type: string
-          title: Domain
-      - name: authorization
-        in: header
-        required: false
-        schema:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Authorization
+        - name: domain
+          in: query
+          required: true
+          schema:
+            type: string
+            title: Domain
+        - name: authorization
+          in: header
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            title: Authorization
       responses:
-        '200':
+        "200":
           description: Successful Response
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/DomainCheckResponse'
-        '422':
+                $ref: "#/components/schemas/DomainCheckResponse"
+        "422":
           description: Validation Error
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/HTTPValidationError'
+                $ref: "#/components/schemas/HTTPValidationError"
   /email-domains/{domain_id}:
     get:
       tags:
-      - email-domains
+        - email-domains
       summary: Get Email Domain
       operationId: get_email_domain_email_domains__domain_id__get
       parameters:
-      - name: domain_id
-        in: path
-        required: true
-        schema:
-          type: string
-          format: uuid
-          title: Domain Id
-      - name: authorization
-        in: header
-        required: false
-        schema:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Authorization
+        - name: domain_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+            title: Domain Id
+        - name: authorization
+          in: header
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            title: Authorization
       responses:
-        '200':
+        "200":
           description: Successful Response
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/EmailDomainResponse'
-        '422':
+                $ref: "#/components/schemas/EmailDomainResponse"
+        "422":
           description: Validation Error
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/HTTPValidationError'
+                $ref: "#/components/schemas/HTTPValidationError"
     patch:
       tags:
-      - email-domains
+        - email-domains
       summary: Patch Email Domain
-      description: "Edit hail-mail prefixes and/or inbound action settings.\n\nTwo\
+      description:
+        "Edit hail-mail prefixes and/or inbound action settings.\n\nTwo\
         \ modes, mutually compatible:\n\n* **Prefix edit** (``local_prefix_user``\
         \ / ``local_prefix_org``):\n  hail_mail rows only. The managed-cloud console\
         \ writes here when\n  an org admin changes the visible hail-mail address.\n\
@@ -714,899 +771,900 @@ paths:
         \ any row kind."
       operationId: patch_email_domain_email_domains__domain_id__patch
       parameters:
-      - name: domain_id
-        in: path
-        required: true
-        schema:
-          type: string
-          format: uuid
-          title: Domain Id
-      - name: authorization
-        in: header
-        required: false
-        schema:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Authorization
+        - name: domain_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+            title: Domain Id
+        - name: authorization
+          in: header
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            title: Authorization
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/EmailDomainPatch'
+              $ref: "#/components/schemas/EmailDomainPatch"
       responses:
-        '200':
+        "200":
           description: Successful Response
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/EmailDomainResponse'
-        '422':
+                $ref: "#/components/schemas/EmailDomainResponse"
+        "422":
           description: Validation Error
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/HTTPValidationError'
+                $ref: "#/components/schemas/HTTPValidationError"
     delete:
       tags:
-      - email-domains
+        - email-domains
       summary: Delete Email Domain
       operationId: delete_email_domain_email_domains__domain_id__delete
       parameters:
-      - name: domain_id
-        in: path
-        required: true
-        schema:
-          type: string
-          format: uuid
-          title: Domain Id
-      - name: authorization
-        in: header
-        required: false
-        schema:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Authorization
+        - name: domain_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+            title: Domain Id
+        - name: authorization
+          in: header
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            title: Authorization
       responses:
-        '204':
+        "204":
           description: Successful Response
-        '422':
+        "422":
           description: Validation Error
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/HTTPValidationError'
+                $ref: "#/components/schemas/HTTPValidationError"
   /email-domains/{domain_id}/verify:
     post:
       tags:
-      - email-domains
+        - email-domains
       summary: Verify Email Domain
-      description: "Re-poll the email provider for the current verification status.\n\
+      description:
+        "Re-poll the email provider for the current verification status.\n\
         \nOn-demand only \u2014 there is no background poller in v1. Operators /\n\
         tenants hit this after publishing DNS to flip the row to ``verified``.\nHail-mail\
         \ rows are no-ops (they're already verified by construction)."
       operationId: verify_email_domain_email_domains__domain_id__verify_post
       parameters:
-      - name: domain_id
-        in: path
-        required: true
-        schema:
-          type: string
-          format: uuid
-          title: Domain Id
-      - name: authorization
-        in: header
-        required: false
-        schema:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Authorization
+        - name: domain_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+            title: Domain Id
+        - name: authorization
+          in: header
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            title: Authorization
       responses:
-        '200':
+        "200":
           description: Successful Response
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/EmailDomainResponse'
-        '422':
+                $ref: "#/components/schemas/EmailDomainResponse"
+        "422":
           description: Validation Error
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/HTTPValidationError'
+                $ref: "#/components/schemas/HTTPValidationError"
+  /numbers:
+    post:
+      tags:
+        - numbers
+      summary: Acquire Number
+      operationId: acquire_number_numbers_post
+      parameters:
+        - name: authorization
+          in: header
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            title: Authorization
+        - name: Idempotency-Key
+          in: header
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            title: Idempotency-Key
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/NumberAcquireRequest"
+      responses:
+        "201":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PhoneNumberResponse"
+        "422":
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
+    get:
+      tags:
+        - numbers
+      summary: List Numbers
+      operationId: list_numbers_numbers_get
+      parameters:
+        - name: cursor
+          in: query
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            title: Cursor
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            maximum: 200
+            minimum: 1
+            default: 50
+            title: Limit
+        - name: authorization
+          in: header
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            title: Authorization
+      responses:
+        "200":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PhoneNumberListResponse"
+        "422":
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
+  /numbers/{number_id}:
+    get:
+      tags:
+        - numbers
+      summary: Get Number
+      operationId: get_number_numbers__number_id__get
+      parameters:
+        - name: number_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+            title: Number Id
+        - name: authorization
+          in: header
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            title: Authorization
+      responses:
+        "200":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PhoneNumberResponse"
+        "422":
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
+  /numbers/{number_id}/enable-sms:
+    post:
+      tags:
+        - numbers
+      summary: Enable Sms
+      operationId: enable_sms_numbers__number_id__enable_sms_post
+      parameters:
+        - name: number_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+            title: Number Id
+        - name: authorization
+          in: header
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            title: Authorization
+      responses:
+        "200":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PhoneNumberResponse"
+        "422":
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
   /webhooks:
     post:
       tags:
-      - webhooks
+        - webhooks
       summary: Create Subscription
       operationId: create_subscription_webhooks_post
       parameters:
-      - name: authorization
-        in: header
-        required: false
-        schema:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Authorization
+        - name: authorization
+          in: header
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            title: Authorization
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/WebhookSubscriptionCreate'
+              $ref: "#/components/schemas/WebhookSubscriptionCreate"
       responses:
-        '201':
+        "201":
           description: Successful Response
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/WebhookSubscriptionResponse'
-        '422':
+                $ref: "#/components/schemas/WebhookSubscriptionResponse"
+        "422":
           description: Validation Error
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/HTTPValidationError'
+                $ref: "#/components/schemas/HTTPValidationError"
     get:
       tags:
-      - webhooks
+        - webhooks
       summary: List Subscriptions
       operationId: list_subscriptions_webhooks_get
       parameters:
-      - name: cursor
-        in: query
-        required: false
-        schema:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Cursor
-      - name: limit
-        in: query
-        required: false
-        schema:
-          type: integer
-          maximum: 200
-          minimum: 1
-          default: 50
-          title: Limit
-      - name: authorization
-        in: header
-        required: false
-        schema:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Authorization
+        - name: cursor
+          in: query
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            title: Cursor
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            maximum: 200
+            minimum: 1
+            default: 50
+            title: Limit
+        - name: authorization
+          in: header
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            title: Authorization
       responses:
-        '200':
+        "200":
           description: Successful Response
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/WebhookSubscriptionListResponse'
-        '422':
+                $ref: "#/components/schemas/WebhookSubscriptionListResponse"
+        "422":
           description: Validation Error
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/HTTPValidationError'
+                $ref: "#/components/schemas/HTTPValidationError"
   /webhooks/{sub_id}:
     get:
       tags:
-      - webhooks
+        - webhooks
       summary: Get Subscription
       operationId: get_subscription_webhooks__sub_id__get
       parameters:
-      - name: sub_id
-        in: path
-        required: true
-        schema:
-          type: string
-          format: uuid
-          title: Sub Id
-      - name: authorization
-        in: header
-        required: false
-        schema:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Authorization
+        - name: sub_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+            title: Sub Id
+        - name: authorization
+          in: header
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            title: Authorization
       responses:
-        '200':
+        "200":
           description: Successful Response
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/WebhookSubscriptionResponse'
-        '422':
+                $ref: "#/components/schemas/WebhookSubscriptionResponse"
+        "422":
           description: Validation Error
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/HTTPValidationError'
+                $ref: "#/components/schemas/HTTPValidationError"
     patch:
       tags:
-      - webhooks
+        - webhooks
       summary: Patch Subscription
       operationId: patch_subscription_webhooks__sub_id__patch
       parameters:
-      - name: sub_id
-        in: path
-        required: true
-        schema:
-          type: string
-          format: uuid
-          title: Sub Id
-      - name: authorization
-        in: header
-        required: false
-        schema:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Authorization
+        - name: sub_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+            title: Sub Id
+        - name: authorization
+          in: header
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            title: Authorization
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/WebhookSubscriptionPatch'
+              $ref: "#/components/schemas/WebhookSubscriptionPatch"
       responses:
-        '200':
+        "200":
           description: Successful Response
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/WebhookSubscriptionResponse'
-        '422':
+                $ref: "#/components/schemas/WebhookSubscriptionResponse"
+        "422":
           description: Validation Error
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/HTTPValidationError'
+                $ref: "#/components/schemas/HTTPValidationError"
     delete:
       tags:
-      - webhooks
+        - webhooks
       summary: Delete Subscription
       operationId: delete_subscription_webhooks__sub_id__delete
       parameters:
-      - name: sub_id
-        in: path
-        required: true
-        schema:
-          type: string
-          format: uuid
-          title: Sub Id
-      - name: authorization
-        in: header
-        required: false
-        schema:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Authorization
+        - name: sub_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+            title: Sub Id
+        - name: authorization
+          in: header
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            title: Authorization
       responses:
-        '204':
+        "204":
           description: Successful Response
-        '422':
+        "422":
           description: Validation Error
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/HTTPValidationError'
+                $ref: "#/components/schemas/HTTPValidationError"
   /webhooks/{sub_id}/rotate-secret:
     post:
       tags:
-      - webhooks
+        - webhooks
       summary: Rotate Secret
       operationId: rotate_secret_webhooks__sub_id__rotate_secret_post
       parameters:
-      - name: sub_id
-        in: path
-        required: true
-        schema:
-          type: string
-          format: uuid
-          title: Sub Id
-      - name: authorization
-        in: header
-        required: false
-        schema:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Authorization
+        - name: sub_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+            title: Sub Id
+        - name: authorization
+          in: header
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            title: Authorization
       responses:
-        '200':
+        "200":
           description: Successful Response
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/WebhookSubscriptionResponse'
-        '422':
+                $ref: "#/components/schemas/WebhookSubscriptionResponse"
+        "422":
           description: Validation Error
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/HTTPValidationError'
+                $ref: "#/components/schemas/HTTPValidationError"
   /webhooks/{sub_id}/deliveries:
     get:
       tags:
-      - webhooks
+        - webhooks
       summary: List Deliveries
       operationId: list_deliveries_webhooks__sub_id__deliveries_get
       parameters:
-      - name: sub_id
-        in: path
-        required: true
-        schema:
-          type: string
-          format: uuid
-          title: Sub Id
-      - name: cursor
-        in: query
-        required: false
-        schema:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Cursor
-      - name: limit
-        in: query
-        required: false
-        schema:
-          type: integer
-          maximum: 200
-          minimum: 1
-          default: 50
-          title: Limit
-      - name: authorization
-        in: header
-        required: false
-        schema:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Authorization
+        - name: sub_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+            title: Sub Id
+        - name: cursor
+          in: query
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            title: Cursor
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            maximum: 200
+            minimum: 1
+            default: 50
+            title: Limit
+        - name: authorization
+          in: header
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            title: Authorization
       responses:
-        '200':
+        "200":
           description: Successful Response
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/WebhookDeliveryListResponse'
-        '422':
+                $ref: "#/components/schemas/WebhookDeliveryListResponse"
+        "422":
           description: Validation Error
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/HTTPValidationError'
+                $ref: "#/components/schemas/HTTPValidationError"
   /webhooks/{sub_id}/deliveries/{delivery_id}/redeliver:
     post:
       tags:
-      - webhooks
+        - webhooks
       summary: Redeliver
       operationId: redeliver_webhooks__sub_id__deliveries__delivery_id__redeliver_post
       parameters:
-      - name: sub_id
-        in: path
-        required: true
-        schema:
-          type: string
-          format: uuid
-          title: Sub Id
-      - name: delivery_id
-        in: path
-        required: true
-        schema:
-          type: string
-          format: uuid
-          title: Delivery Id
-      - name: authorization
-        in: header
-        required: false
-        schema:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Authorization
+        - name: sub_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+            title: Sub Id
+        - name: delivery_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+            title: Delivery Id
+        - name: authorization
+          in: header
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            title: Authorization
       responses:
-        '200':
+        "200":
           description: Successful Response
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/WebhookDeliveryResponse'
-        '422':
+                $ref: "#/components/schemas/WebhookDeliveryResponse"
+        "422":
           description: Validation Error
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/HTTPValidationError'
+                $ref: "#/components/schemas/HTTPValidationError"
   /unsubscribe:
     get:
       tags:
-      - unsubscribe
+        - unsubscribe
       summary: Unsubscribe
       operationId: unsubscribe_unsubscribe_get
       parameters:
-      - name: token
-        in: query
-        required: true
-        schema:
-          type: string
-          title: Token
+        - name: token
+          in: query
+          required: true
+          schema:
+            type: string
+            title: Token
       responses:
-        '200':
+        "200":
           description: Successful Response
           content:
             text/html:
               schema:
                 type: string
-        '422':
+        "422":
           description: Validation Error
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/HTTPValidationError'
+                $ref: "#/components/schemas/HTTPValidationError"
   /sms:
     post:
       tags:
-      - sms
+        - sms
       summary: Create Sms
       operationId: create_sms_sms_post
       parameters:
-      - name: authorization
-        in: header
-        required: false
-        schema:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Authorization
-      - name: Idempotency-Key
-        in: header
-        required: false
-        schema:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Idempotency-Key
+        - name: authorization
+          in: header
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            title: Authorization
+        - name: Idempotency-Key
+          in: header
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            title: Idempotency-Key
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/SmsCreate'
+              $ref: "#/components/schemas/SmsCreate"
       responses:
-        '201':
+        "201":
           description: Successful Response
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/SmsResponse'
-        '422':
+                $ref: "#/components/schemas/SmsResponse"
+        "422":
           description: Validation Error
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/HTTPValidationError'
+                $ref: "#/components/schemas/HTTPValidationError"
+        "429":
+          description: >-
+            Rate limited. The agent-origin workspace exceeded a per-channel
+            velocity cap, or the platform kill switch is on. Retry after the
+            Retry-After header (seconds).
+          headers:
+            Retry-After:
+              description: Seconds to wait before retrying.
+              schema:
+                type: integer
     get:
       tags:
-      - sms
+        - sms
       summary: List Sms
       operationId: list_sms_sms_get
       parameters:
-      - name: cursor
-        in: query
-        required: false
-        schema:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Cursor
-      - name: limit
-        in: query
-        required: false
-        schema:
-          type: integer
-          maximum: 200
-          minimum: 1
-          default: 50
-          title: Limit
-      - name: status
-        in: query
-        required: false
-        schema:
-          anyOf:
-          - enum:
-            - queued
-            - sent
-            - delivered
-            - failed
-            - undelivered
-            - received
-            type: string
-          - type: 'null'
-          title: Status
-      - name: to
-        in: query
-        required: false
-        schema:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: To
-      - name: authorization
-        in: header
-        required: false
-        schema:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Authorization
+        - name: cursor
+          in: query
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            title: Cursor
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            maximum: 200
+            minimum: 1
+            default: 50
+            title: Limit
+        - name: status
+          in: query
+          required: false
+          schema:
+            anyOf:
+              - enum:
+                  - queued
+                  - sent
+                  - delivered
+                  - failed
+                  - undelivered
+                  - received
+                type: string
+              - type: "null"
+            title: Status
+        - name: to
+          in: query
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            title: To
+        - name: authorization
+          in: header
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            title: Authorization
       responses:
-        '200':
+        "200":
           description: Successful Response
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/SmsListResponse'
-        '422':
+                $ref: "#/components/schemas/SmsListResponse"
+        "422":
           description: Validation Error
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/HTTPValidationError'
+                $ref: "#/components/schemas/HTTPValidationError"
   /sms/suppressions:
     get:
       tags:
-      - sms
+        - sms
       summary: List Sms Suppressions
       operationId: list_sms_suppressions_sms_suppressions_get
       parameters:
-      - name: cursor
-        in: query
-        required: false
-        schema:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Cursor
-      - name: limit
-        in: query
-        required: false
-        schema:
-          type: integer
-          maximum: 200
-          minimum: 1
-          default: 50
-          title: Limit
-      - name: authorization
-        in: header
-        required: false
-        schema:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Authorization
+        - name: cursor
+          in: query
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            title: Cursor
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            maximum: 200
+            minimum: 1
+            default: 50
+            title: Limit
+        - name: authorization
+          in: header
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            title: Authorization
       responses:
-        '200':
+        "200":
           description: Successful Response
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/SuppressionListResponse'
-        '422':
+                $ref: "#/components/schemas/SuppressionListResponse"
+        "422":
           description: Validation Error
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/HTTPValidationError'
+                $ref: "#/components/schemas/HTTPValidationError"
   /sms/suppressions/{number}:
     delete:
       tags:
-      - sms
+        - sms
       summary: Delete Sms Suppression
       operationId: delete_sms_suppression_sms_suppressions__number__delete
       parameters:
-      - name: number
-        in: path
-        required: true
-        schema:
-          type: string
-          title: Number
-      - name: authorization
-        in: header
-        required: false
-        schema:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Authorization
+        - name: number
+          in: path
+          required: true
+          schema:
+            type: string
+            title: Number
+        - name: authorization
+          in: header
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            title: Authorization
       responses:
-        '204':
+        "204":
           description: Successful Response
-        '422':
+        "422":
           description: Validation Error
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/HTTPValidationError'
+                $ref: "#/components/schemas/HTTPValidationError"
+  /sms/sender-id:
+    get:
+      tags:
+        - sms
+      summary: Get Sender Id
+      operationId: get_sender_id_sms_sender_id_get
+      parameters:
+        - name: authorization
+          in: header
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            title: Authorization
+      responses:
+        "200":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SenderIdResponse"
+        "422":
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
+    patch:
+      tags:
+        - sms
+      summary: Patch Sender Id
+      operationId: patch_sender_id_sms_sender_id_patch
+      parameters:
+        - name: authorization
+          in: header
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            title: Authorization
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SenderIdPatch"
+      responses:
+        "200":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SenderIdResponse"
+        "422":
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
   /sms/{sms_id}:
     get:
       tags:
-      - sms
+        - sms
       summary: Get Sms
       operationId: get_sms_sms__sms_id__get
       parameters:
-      - name: sms_id
-        in: path
-        required: true
-        schema:
-          type: string
-          format: uuid
-          title: Sms Id
-      - name: authorization
-        in: header
-        required: false
-        schema:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Authorization
+        - name: sms_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+            title: Sms Id
+        - name: authorization
+          in: header
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            title: Authorization
       responses:
-        '200':
+        "200":
           description: Successful Response
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/SmsResponse'
-        '422':
+                $ref: "#/components/schemas/SmsResponse"
+        "422":
           description: Validation Error
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/HTTPValidationError'
-  /contacts:
-    get:
-      tags:
-      - contacts
-      summary: List Contacts
-      operationId: list_contacts_contacts_get
-      parameters:
-      - name: q
-        in: query
-        required: false
-        schema:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Q
-      - name: cursor
-        in: query
-        required: false
-        schema:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Cursor
-      - name: limit
-        in: query
-        required: false
-        schema:
-          type: integer
-          maximum: 500
-          minimum: 1
-          default: 100
-          title: Limit
-      - name: authorization
-        in: header
-        required: false
-        schema:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Authorization
-      responses:
-        '200':
-          description: Successful Response
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ContactListResponse'
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
-    post:
-      tags:
-      - contacts
-      summary: Create Contact
-      operationId: create_contact_contacts_post
-      parameters:
-      - name: authorization
-        in: header
-        required: false
-        schema:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Authorization
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/ContactCreate'
-      responses:
-        '201':
-          description: Successful Response
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ContactEntry'
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
-  /contacts/{contact_id}:
-    patch:
-      tags:
-      - contacts
-      summary: Patch Contact
-      operationId: patch_contact_contacts__contact_id__patch
-      parameters:
-      - name: contact_id
-        in: path
-        required: true
-        schema:
-          type: string
-          title: Contact Id
-      - name: authorization
-        in: header
-        required: false
-        schema:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Authorization
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/ContactPatch'
-      responses:
-        '200':
-          description: Successful Response
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ContactEntry'
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
-    delete:
-      tags:
-      - contacts
-      summary: Delete Contact
-      operationId: delete_contact_contacts__contact_id__delete
-      parameters:
-      - name: contact_id
-        in: path
-        required: true
-        schema:
-          type: string
-          title: Contact Id
-      - name: authorization
-        in: header
-        required: false
-        schema:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Authorization
-      responses:
-        '204':
-          description: Successful Response
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
-  /members/{user_id}/phone:
-    put:
-      tags:
-      - contacts
-      summary: Put Member Phone
-      operationId: put_member_phone_members__user_id__phone_put
-      parameters:
-      - name: user_id
-        in: path
-        required: true
-        schema:
-          type: string
-          title: User Id
-      - name: authorization
-        in: header
-        required: false
-        schema:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Authorization
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/MemberPhonePut'
-      responses:
-        '200':
-          description: Successful Response
-          content:
-            application/json:
-              schema:
-                type: object
-                additionalProperties:
-                  type: string
-                title: Response Put Member Phone Members  User Id  Phone Put
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
-    delete:
-      tags:
-      - contacts
-      summary: Delete Member Phone
-      operationId: delete_member_phone_members__user_id__phone_delete
-      parameters:
-      - name: user_id
-        in: path
-        required: true
-        schema:
-          type: string
-          title: User Id
-      - name: authorization
-        in: header
-        required: false
-        schema:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Authorization
-      responses:
-        '204':
-          description: Successful Response
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
+                $ref: "#/components/schemas/HTTPValidationError"
   /healthz:
     get:
       summary: Healthz
       operationId: healthz_healthz_get
       responses:
-        '200':
+        "200":
           description: Successful Response
           content:
             application/json:
@@ -1617,93 +1675,117 @@ paths:
                 title: Response Healthz Healthz Get
 components:
   schemas:
+    Body_upload_email_attachment:
+      properties:
+        file:
+          type: string
+          contentMediaType: application/octet-stream
+          title: File
+      type: object
+      required:
+        - file
+      title: Body_upload_email_attachment
     CallCreate:
       properties:
         recipient_consent:
           type: boolean
           title: Recipient Consent
-          description: "Attestation that you have obtained the lawful consent required\
+          description:
+            "Attestation that you have obtained the lawful consent required\
             \ to contact this recipient. Hail does not verify consent itself \u2014\
             \ you are responsible for a lawful basis under TCPA/ePrivacy/PECR/CAN-SPAM/GDPR\
             \ as applicable. Rejected (422) if not true."
         consent_source:
           anyOf:
-          - type: string
-          - type: 'null'
+            - type: string
+            - type: "null"
           title: Consent Source
-          description: Where/how consent was obtained (e.g. 'signup form', 'prior
+          description:
+            Where/how consent was obtained (e.g. 'signup form', 'prior
             customer relationship'). Required (non-empty) when message_type is 'marketing'.
         consent_obtained_at:
           anyOf:
-          - type: string
-            format: date-time
-          - type: 'null'
+            - type: string
+              format: date-time
+            - type: "null"
           title: Consent Obtained At
           description: When consent was obtained, if known.
         message_type:
           type: string
           enum:
-          - marketing
-          - informational
+            - marketing
+            - informational
           title: Message Type
-          description: '''marketing'' additionally requires a non-empty consent_source.
-            Use ''informational'' for transactional/service communications.'
+          description:
+            "'marketing' additionally requires a non-empty consent_source.
+            Use 'informational' for transactional/service communications."
           default: informational
         to:
           type: string
           title: To
         from:
           anyOf:
-          - type: string
-          - type: 'null'
+            - type: string
+            - type: "null"
           title: From
         system_prompt:
           anyOf:
-          - type: string
-          - type: 'null'
+            - type: string
+            - type: "null"
           title: System Prompt
         llm:
           anyOf:
-          - $ref: '#/components/schemas/LLMConfig'
-          - type: 'null'
+            - $ref: "#/components/schemas/LLMConfig"
+            - type: "null"
         first_message:
           anyOf:
-          - type: string
-          - type: 'null'
+            - type: string
+            - type: "null"
           title: First Message
         voice_config:
-          $ref: '#/components/schemas/VoiceConfig'
+          $ref: "#/components/schemas/VoiceConfig"
         conversation_id:
           anyOf:
-          - type: string
-            format: uuid
-          - type: 'null'
+            - type: string
+              format: uuid
+            - type: "null"
           title: Conversation Id
         metadata:
           additionalProperties: true
           type: object
           title: Metadata
+        tools:
+          anyOf:
+            - items:
+                type: string
+              type: array
+            - type: "null"
+          title: Tools
+          description:
+            "Agent tools to allow on this call. Omitted: every tool the
+            organization's configured channels support (new channels appear automatically).
+            Empty list: no tools. Tool names are validated against the server's registry."
       additionalProperties: false
       type: object
       required:
-      - recipient_consent
-      - to
+        - recipient_consent
+        - to
       title: CallCreate
     CallListResponse:
       properties:
         items:
           items:
-            $ref: '#/components/schemas/CallResponse'
+            $ref: "#/components/schemas/CallResponse"
           type: array
           title: Items
         next_cursor:
           anyOf:
-          - type: string
-          - type: 'null'
+            - type: string
+            - type: "null"
           title: Next Cursor
       type: object
       required:
-      - items
+        - items
       title: CallListResponse
     CallResponse:
       properties:
@@ -1717,9 +1799,9 @@ components:
           title: Organization Id
         conversation_id:
           anyOf:
-          - type: string
-            format: uuid
-          - type: 'null'
+            - type: string
+              format: uuid
+            - type: "null"
           title: Conversation Id
         from_e164:
           type: string
@@ -1730,46 +1812,46 @@ components:
         direction:
           type: string
           enum:
-          - outbound
-          - inbound
+            - outbound
+            - inbound
           title: Direction
         status:
           type: string
           enum:
-          - queued
-          - dialing
-          - ringing
-          - in_progress
-          - completed
-          - failed
-          - busy
-          - no_answer
-          - canceled
+            - queued
+            - dialing
+            - ringing
+            - in_progress
+            - completed
+            - failed
+            - busy
+            - no_answer
+            - canceled
           title: Status
         end_reason:
           anyOf:
-          - type: string
-          - type: 'null'
+            - type: string
+            - type: "null"
           title: End Reason
         provider_call_sid:
           anyOf:
-          - type: string
-          - type: 'null'
+            - type: string
+            - type: "null"
           title: Provider Call Sid
         livekit_room:
           anyOf:
-          - type: string
-          - type: 'null'
+            - type: string
+            - type: "null"
           title: Livekit Room
         initial_prompt:
           anyOf:
-          - type: string
-          - type: 'null'
+            - type: string
+            - type: "null"
           title: Initial Prompt
         recording_s3_key:
           anyOf:
-          - type: string
-          - type: 'null'
+            - type: string
+            - type: "null"
           title: Recording S3 Key
         requested_at:
           type: string
@@ -1777,139 +1859,41 @@ components:
           title: Requested At
         started_at:
           anyOf:
-          - type: string
-            format: date-time
-          - type: 'null'
+            - type: string
+              format: date-time
+            - type: "null"
           title: Started At
         answered_at:
           anyOf:
-          - type: string
-            format: date-time
-          - type: 'null'
+            - type: string
+              format: date-time
+            - type: "null"
           title: Answered At
         ended_at:
           anyOf:
-          - type: string
-            format: date-time
-          - type: 'null'
+            - type: string
+              format: date-time
+            - type: "null"
           title: Ended At
       type: object
       required:
-      - id
-      - organization_id
-      - conversation_id
-      - from_e164
-      - to_e164
-      - direction
-      - status
-      - end_reason
-      - provider_call_sid
-      - livekit_room
-      - initial_prompt
-      - recording_s3_key
-      - requested_at
-      - started_at
-      - answered_at
-      - ended_at
+        - id
+        - organization_id
+        - conversation_id
+        - from_e164
+        - to_e164
+        - direction
+        - status
+        - end_reason
+        - provider_call_sid
+        - livekit_room
+        - initial_prompt
+        - recording_s3_key
+        - requested_at
+        - started_at
+        - answered_at
+        - ended_at
       title: CallResponse
-    ContactCreate:
-      properties:
-        name:
-          type: string
-          maxLength: 200
-          minLength: 1
-          title: Name
-        phone_e164:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Phone E164
-        email:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Email
-      additionalProperties: false
-      type: object
-      required:
-      - name
-      title: ContactCreate
-    ContactEntry:
-      properties:
-        id:
-          type: string
-          title: Id
-        kind:
-          type: string
-          enum:
-          - member
-          - manual
-          title: Kind
-        name:
-          type: string
-          title: Name
-        phone_e164:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Phone E164
-        email:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Email
-        role:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Role
-      type: object
-      required:
-      - id
-      - kind
-      - name
-      title: ContactEntry
-      description: "One row in the computed contacts union \u2014 an org member or\
-        \ a manual\ncontact. ``id`` is ``member:<user_id>`` for members, the contact\
-        \ row's\nUUID (as str) for manual rows."
-    ContactListResponse:
-      properties:
-        items:
-          items:
-            $ref: '#/components/schemas/ContactEntry'
-          type: array
-          title: Items
-        next_cursor:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Next Cursor
-      type: object
-      required:
-      - items
-      title: ContactListResponse
-    ContactPatch:
-      properties:
-        name:
-          anyOf:
-          - type: string
-            maxLength: 200
-            minLength: 1
-          - type: 'null'
-          title: Name
-        phone_e164:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Phone E164
-        email:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Email
-      additionalProperties: false
-      type: object
-      title: ContactPatch
     DnsRecordSchema:
       properties:
         name:
@@ -1921,26 +1905,26 @@ components:
         type:
           type: string
           enum:
-          - CNAME
-          - MX
-          - TXT
+            - CNAME
+            - MX
+            - TXT
           title: Type
           default: CNAME
         priority:
           anyOf:
-          - type: integer
-          - type: 'null'
+            - type: integer
+            - type: "null"
           title: Priority
       additionalProperties: true
       type: object
       required:
-      - name
-      - value
+        - name
+        - value
       title: DnsRecordSchema
-      description: 'One DNS record the tenant must publish for a sending domain.
+      description: "One DNS record the tenant must publish for a sending domain.
 
 
-        Covers DKIM CNAMEs, MAIL FROM MX, and SPF TXT records.'
+        Covers DKIM CNAMEs, MAIL FROM MX, and SPF TXT records."
     DomainCheckResponse:
       properties:
         domain:
@@ -1959,10 +1943,10 @@ components:
           title: Suggested Domain
       type: object
       required:
-      - domain
-      - in_use
-      - existing_mx
-      - suggested_domain
+        - domain
+        - in_use
+        - existing_mx
+        - suggested_domain
       title: DomainCheckResponse
     EmailAttachmentResponse:
       properties:
@@ -1981,59 +1965,93 @@ components:
           title: Size Bytes
         content_id:
           anyOf:
-          - type: string
-          - type: 'null'
+            - type: string
+            - type: "null"
           title: Content Id
         url:
           type: string
           title: Url
       type: object
       required:
-      - id
-      - filename
-      - content_type
-      - size_bytes
-      - url
+        - id
+        - filename
+        - content_type
+        - size_bytes
+        - url
       title: EmailAttachmentResponse
-      description: "One inbound MIME attachment as exposed to API consumers.\n\n``url``\
+      description:
+        "One inbound MIME attachment as exposed to API consumers.\n\n``url``\
         \ is the stable Hail API endpoint that 302-redirects to a\npresigned S3 URL\
         \ on access \u2014 see GET /emails/{id}/attachments/{aid}."
+    EmailAttachmentUploadResponse:
+      properties:
+        id:
+          type: string
+          format: uuid
+          title: Id
+        filename:
+          type: string
+          title: Filename
+        content_type:
+          type: string
+          title: Content Type
+        size_bytes:
+          type: integer
+          title: Size Bytes
+      type: object
+      required:
+        - id
+        - filename
+        - content_type
+        - size_bytes
+      title: EmailAttachmentUploadResponse
+      description: "Returned by POST /email-attachments.
+
+
+        ``id`` is reusable across many ``POST /emails`` calls via
+
+        ``EmailCreate.attachment_ids`` until Hail garbage-collects it (24h
+
+        if never referenced by a send)."
     EmailCreate:
       properties:
         recipient_consent:
           type: boolean
           title: Recipient Consent
-          description: "Attestation that you have obtained the lawful consent required\
+          description:
+            "Attestation that you have obtained the lawful consent required\
             \ to contact this recipient. Hail does not verify consent itself \u2014\
             \ you are responsible for a lawful basis under TCPA/ePrivacy/PECR/CAN-SPAM/GDPR\
             \ as applicable. Rejected (422) if not true."
         consent_source:
           anyOf:
-          - type: string
-          - type: 'null'
+            - type: string
+            - type: "null"
           title: Consent Source
-          description: Where/how consent was obtained (e.g. 'signup form', 'prior
+          description:
+            Where/how consent was obtained (e.g. 'signup form', 'prior
             customer relationship'). Required (non-empty) when message_type is 'marketing'.
         consent_obtained_at:
           anyOf:
-          - type: string
-            format: date-time
-          - type: 'null'
+            - type: string
+              format: date-time
+            - type: "null"
           title: Consent Obtained At
           description: When consent was obtained, if known.
         message_type:
           type: string
           enum:
-          - marketing
-          - informational
+            - marketing
+            - informational
           title: Message Type
-          description: '''marketing'' additionally requires a non-empty consent_source.
-            Use ''informational'' for transactional/service communications.'
+          description:
+            "'marketing' additionally requires a non-empty consent_source.
+            Use 'informational' for transactional/service communications."
           default: informational
         from:
           anyOf:
-          - type: string
-          - type: 'null'
+            - type: string
+            - type: "null"
           title: From
         to:
           items:
@@ -2043,22 +2061,22 @@ components:
           title: To
         cc:
           anyOf:
-          - items:
-              type: string
-            type: array
-          - type: 'null'
+            - items:
+                type: string
+              type: array
+            - type: "null"
           title: Cc
         bcc:
           anyOf:
-          - items:
-              type: string
-            type: array
-          - type: 'null'
+            - items:
+                type: string
+              type: array
+            - type: "null"
           title: Bcc
         reply_to:
           anyOf:
-          - type: string
-          - type: 'null'
+            - type: string
+            - type: "null"
           title: Reply To
         subject:
           type: string
@@ -2067,63 +2085,71 @@ components:
           title: Subject
         body_text:
           anyOf:
-          - type: string
-          - type: 'null'
+            - type: string
+            - type: "null"
           title: Body Text
         body_html:
           anyOf:
-          - type: string
-          - type: 'null'
+            - type: string
+            - type: "null"
           title: Body Html
         conversation_id:
           anyOf:
-          - type: string
-            format: uuid
-          - type: 'null'
+            - type: string
+              format: uuid
+            - type: "null"
           title: Conversation Id
         metadata:
           additionalProperties: true
           type: object
           title: Metadata
+        attachment_ids:
+          anyOf:
+            - items:
+                type: string
+                format: uuid
+              type: array
+            - type: "null"
+          title: Attachment Ids
       additionalProperties: false
       type: object
       required:
-      - recipient_consent
-      - to
-      - subject
+        - recipient_consent
+        - to
+        - subject
       title: EmailCreate
     EmailDomainCreate:
       properties:
         kind:
           type: string
           enum:
-          - hail_mail
-          - custom
+            - hail_mail
+            - custom
           title: Kind
         domain:
           anyOf:
-          - type: string
-          - type: 'null'
+            - type: string
+            - type: "null"
           title: Domain
         local_prefix_user:
           anyOf:
-          - type: string
-          - type: 'null'
+            - type: string
+            - type: "null"
           title: Local Prefix User
         local_prefix_org:
           anyOf:
-          - type: string
-          - type: 'null'
+            - type: string
+            - type: "null"
           title: Local Prefix Org
       additionalProperties: false
       type: object
       required:
-      - kind
+        - kind
       title: EmailDomainCreate
-      description: 'Request body for POST /email-domains.
+      description: "Request body for POST /email-domains.
 
 
-        For ``kind=''hail_mail''`` ``domain`` is omitted; the server composes
+        For ``kind='hail_mail'`` ``domain`` is omitted; the server composes
 
         the full address as ``<local_prefix_user>+<local_prefix_org>@<base>``.
 
@@ -2131,58 +2157,59 @@ components:
 
         ``HAIL_MAIL_DEFAULT_*_PREFIX`` env vars; the server returns 503 if
 
-        neither is supplied. For ``kind=''custom''`` ``domain`` is required and
+        neither is supplied. For ``kind='custom'`` ``domain`` is required and
 
-        the prefix fields must be omitted.'
+        the prefix fields must be omitted."
     EmailDomainListResponse:
       properties:
         items:
           items:
-            $ref: '#/components/schemas/EmailDomainResponse'
+            $ref: "#/components/schemas/EmailDomainResponse"
           type: array
           title: Items
         next_cursor:
           anyOf:
-          - type: string
-          - type: 'null'
+            - type: string
+            - type: "null"
           title: Next Cursor
       type: object
       required:
-      - items
+        - items
       title: EmailDomainListResponse
     EmailDomainPatch:
       properties:
         local_prefix_user:
           anyOf:
-          - type: string
-          - type: 'null'
+            - type: string
+            - type: "null"
           title: Local Prefix User
         local_prefix_org:
           anyOf:
-          - type: string
-          - type: 'null'
+            - type: string
+            - type: "null"
           title: Local Prefix Org
         inbound_enabled:
           anyOf:
-          - type: boolean
-          - type: 'null'
+            - type: boolean
+            - type: "null"
           title: Inbound Enabled
         forward_to:
           anyOf:
-          - items:
-              type: string
-            type: array
-          - type: 'null'
+            - items:
+                type: string
+              type: array
+            - type: "null"
           title: Forward To
         forward_rate_per_hour:
           anyOf:
-          - type: integer
-          - type: 'null'
+            - type: integer
+            - type: "null"
           title: Forward Rate Per Hour
       additionalProperties: false
       type: object
       title: EmailDomainPatch
-      description: "Body for PATCH /email-domains/{id}.\n\nTwo clusters of mutable\
+      description:
+        "Body for PATCH /email-domains/{id}.\n\nTwo clusters of mutable\
         \ fields:\n\n* Hail-mail addressing \u2014 the user/org prefix pair (only\
         \ valid on\n  ``kind='hail_mail'`` rows; the handler returns 422 if a tenant\
         \ tries\n  to PATCH these on a custom row).\n* Inbound action \u2014 ``inbound_enabled``\
@@ -2207,52 +2234,52 @@ components:
         kind:
           type: string
           enum:
-          - hail_mail
-          - custom
+            - hail_mail
+            - custom
           title: Kind
         domain:
           type: string
           title: Domain
         local_prefix_user:
           anyOf:
-          - type: string
-          - type: 'null'
+            - type: string
+            - type: "null"
           title: Local Prefix User
         local_prefix_org:
           anyOf:
-          - type: string
-          - type: 'null'
+            - type: string
+            - type: "null"
           title: Local Prefix Org
         verification_status:
           type: string
           enum:
-          - pending
-          - verified
-          - failed
+            - pending
+            - verified
+            - failed
           title: Verification Status
         dns_records:
           items:
-            $ref: '#/components/schemas/DnsRecordSchema'
+            $ref: "#/components/schemas/DnsRecordSchema"
           type: array
           title: Dns Records
         mail_from_domain:
           anyOf:
-          - type: string
-          - type: 'null'
+            - type: string
+            - type: "null"
           title: Mail From Domain
         mail_from_status:
           anyOf:
-          - type: string
-          - type: 'null'
+            - type: string
+            - type: "null"
           title: Mail From Status
         provider:
           type: string
           title: Provider
         verified_at:
           anyOf:
-          - type: string
-            format: date-time
-          - type: 'null'
+            - type: string
+              format: date-time
+            - type: "null"
           title: Verified At
         inbound_enabled:
           type: boolean
@@ -2260,15 +2287,15 @@ components:
           default: false
         forward_to:
           anyOf:
-          - items:
-              type: string
-            type: array
-          - type: 'null'
+            - items:
+                type: string
+              type: array
+            - type: "null"
           title: Forward To
         forward_rate_per_hour:
           anyOf:
-          - type: integer
-          - type: 'null'
+            - type: integer
+            - type: "null"
           title: Forward Rate Per Hour
         created_at:
           type: string
@@ -2280,48 +2307,48 @@ components:
           title: Updated At
         receive_ready:
           anyOf:
-          - type: boolean
-          - type: 'null'
+            - type: boolean
+            - type: "null"
           title: Receive Ready
       type: object
       required:
-      - id
-      - organization_id
-      - kind
-      - domain
-      - local_prefix_user
-      - local_prefix_org
-      - verification_status
-      - dns_records
-      - mail_from_domain
-      - provider
-      - verified_at
-      - created_at
-      - updated_at
+        - id
+        - organization_id
+        - kind
+        - domain
+        - local_prefix_user
+        - local_prefix_org
+        - verification_status
+        - dns_records
+        - mail_from_domain
+        - provider
+        - verified_at
+        - created_at
+        - updated_at
       title: EmailDomainResponse
-      description: 'Read view for an email domain.
+      description: "Read view for an email domain.
 
 
         The inbound-action fields (``inbound_enabled``, ``forward_to``,
 
         ``forward_rate_per_hour``) surface what the row has configured for
 
-        incoming mail.'
+        incoming mail."
     EmailEventListResponse:
       properties:
         items:
           items:
-            $ref: '#/components/schemas/EmailEventResponse'
+            $ref: "#/components/schemas/EmailEventResponse"
           type: array
           title: Items
         next_cursor:
           anyOf:
-          - type: string
-          - type: 'null'
+            - type: string
+            - type: "null"
           title: Next Cursor
       type: object
       required:
-      - items
+        - items
       title: EmailEventListResponse
     EmailEventResponse:
       properties:
@@ -2336,14 +2363,14 @@ components:
         kind:
           type: string
           enum:
-          - sent
-          - delivered
-          - delivery_delayed
-          - bounced
-          - complained
-          - rejected
-          - opened
-          - clicked
+            - sent
+            - delivered
+            - delivery_delayed
+            - bounced
+            - complained
+            - rejected
+            - opened
+            - clicked
           title: Kind
         payload:
           additionalProperties: true
@@ -2355,27 +2382,27 @@ components:
           title: Occurred At
       type: object
       required:
-      - id
-      - email_id
-      - kind
-      - payload
-      - occurred_at
+        - id
+        - email_id
+        - kind
+        - payload
+        - occurred_at
       title: EmailEventResponse
     EmailListResponse:
       properties:
         items:
           items:
-            $ref: '#/components/schemas/EmailSummary'
+            $ref: "#/components/schemas/EmailSummary"
           type: array
           title: Items
         next_cursor:
           anyOf:
-          - type: string
-          - type: 'null'
+            - type: string
+            - type: "null"
           title: Next Cursor
       type: object
       required:
-      - items
+        - items
       title: EmailListResponse
     EmailResponse:
       properties:
@@ -2389,21 +2416,21 @@ components:
           title: Organization Id
         conversation_id:
           anyOf:
-          - type: string
-            format: uuid
-          - type: 'null'
+            - type: string
+              format: uuid
+            - type: "null"
           title: Conversation Id
         email_domain_id:
           anyOf:
-          - type: string
-            format: uuid
-          - type: 'null'
+            - type: string
+              format: uuid
+            - type: "null"
           title: Email Domain Id
         direction:
           type: string
           enum:
-          - outbound
-          - inbound
+            - outbound
+            - inbound
           title: Direction
           default: outbound
         from_address:
@@ -2416,22 +2443,22 @@ components:
           title: To Addresses
         cc_addresses:
           anyOf:
-          - items:
-              type: string
-            type: array
-          - type: 'null'
+            - items:
+                type: string
+              type: array
+            - type: "null"
           title: Cc Addresses
         bcc_addresses:
           anyOf:
-          - items:
-              type: string
-            type: array
-          - type: 'null'
+            - items:
+                type: string
+              type: array
+            - type: "null"
           title: Bcc Addresses
         reply_to:
           anyOf:
-          - type: string
-          - type: 'null'
+            - type: string
+            - type: "null"
           title: Reply To
         subject:
           type: string
@@ -2439,23 +2466,23 @@ components:
         status:
           type: string
           enum:
-          - queued
-          - sent
-          - delivered
-          - failed
-          - bounced
-          - complained
-          - received
+            - queued
+            - sent
+            - delivered
+            - failed
+            - bounced
+            - complained
+            - received
           title: Status
         end_reason:
           anyOf:
-          - type: string
-          - type: 'null'
+            - type: string
+            - type: "null"
           title: End Reason
         provider_message_id:
           anyOf:
-          - type: string
-          - type: 'null'
+            - type: string
+            - type: "null"
           title: Provider Message Id
         requested_at:
           type: string
@@ -2463,15 +2490,15 @@ components:
           title: Requested At
         sent_at:
           anyOf:
-          - type: string
-            format: date-time
-          - type: 'null'
+            - type: string
+              format: date-time
+            - type: "null"
           title: Sent At
         failed_at:
           anyOf:
-          - type: string
-            format: date-time
-          - type: 'null'
+            - type: string
+              format: date-time
+            - type: "null"
           title: Failed At
         metadata:
           additionalProperties: true
@@ -2479,99 +2506,99 @@ components:
           title: Metadata
         body_text:
           anyOf:
-          - type: string
-          - type: 'null'
+            - type: string
+            - type: "null"
           title: Body Text
         body_html:
           anyOf:
-          - type: string
-          - type: 'null'
+            - type: string
+            - type: "null"
           title: Body Html
         message_id:
           anyOf:
-          - type: string
-          - type: 'null'
+            - type: string
+            - type: "null"
           title: Message Id
         in_reply_to:
           anyOf:
-          - type: string
-          - type: 'null'
+            - type: string
+            - type: "null"
           title: In Reply To
         references_ids:
           anyOf:
-          - items:
-              type: string
-            type: array
-          - type: 'null'
+            - items:
+                type: string
+              type: array
+            - type: "null"
           title: References Ids
         spam_verdict:
           anyOf:
-          - type: string
-          - type: 'null'
+            - type: string
+            - type: "null"
           title: Spam Verdict
         virus_verdict:
           anyOf:
-          - type: string
-          - type: 'null'
+            - type: string
+            - type: "null"
           title: Virus Verdict
         dkim_verdict:
           anyOf:
-          - type: string
-          - type: 'null'
+            - type: string
+            - type: "null"
           title: Dkim Verdict
         spf_verdict:
           anyOf:
-          - type: string
-          - type: 'null'
+            - type: string
+            - type: "null"
           title: Spf Verdict
         dmarc_verdict:
           anyOf:
-          - type: string
-          - type: 'null'
+            - type: string
+            - type: "null"
           title: Dmarc Verdict
         provider_received_at:
           anyOf:
-          - type: string
-            format: date-time
-          - type: 'null'
+            - type: string
+              format: date-time
+            - type: "null"
           title: Provider Received At
         raw_url:
           anyOf:
-          - type: string
-          - type: 'null'
+            - type: string
+            - type: "null"
           title: Raw Url
         attachments:
           items:
-            $ref: '#/components/schemas/EmailAttachmentResponse'
+            $ref: "#/components/schemas/EmailAttachmentResponse"
           type: array
           title: Attachments
           default: []
         last_event_at:
           anyOf:
-          - type: string
-            format: date-time
-          - type: 'null'
+            - type: string
+              format: date-time
+            - type: "null"
           title: Last Event At
       type: object
       required:
-      - id
-      - organization_id
-      - conversation_id
-      - email_domain_id
-      - from_address
-      - to_addresses
-      - cc_addresses
-      - bcc_addresses
-      - reply_to
-      - subject
-      - status
-      - end_reason
-      - provider_message_id
-      - requested_at
-      - sent_at
-      - failed_at
-      - body_text
-      - body_html
+        - id
+        - organization_id
+        - conversation_id
+        - email_domain_id
+        - from_address
+        - to_addresses
+        - cc_addresses
+        - bcc_addresses
+        - reply_to
+        - subject
+        - status
+        - end_reason
+        - provider_message_id
+        - requested_at
+        - sent_at
+        - failed_at
+        - body_text
+        - body_html
       title: EmailResponse
     EmailStatsBucket:
       properties:
@@ -2625,7 +2652,7 @@ components:
           title: Bucket Start
       type: object
       required:
-      - bucket_start
+        - bucket_start
       title: EmailStatsBucket
     EmailStatsCounts:
       properties:
@@ -2679,28 +2706,28 @@ components:
       properties:
         delivery:
           anyOf:
-          - type: number
-          - type: 'null'
+            - type: number
+            - type: "null"
           title: Delivery
         bounce:
           anyOf:
-          - type: number
-          - type: 'null'
+            - type: number
+            - type: "null"
           title: Bounce
         complaint:
           anyOf:
-          - type: number
-          - type: 'null'
+            - type: number
+            - type: "null"
           title: Complaint
         open:
           anyOf:
-          - type: number
-          - type: 'null'
+            - type: number
+            - type: "null"
           title: Open
         click:
           anyOf:
-          - type: number
-          - type: 'null'
+            - type: number
+            - type: "null"
           title: Click
       type: object
       title: EmailStatsRates
@@ -2718,26 +2745,26 @@ components:
         bucket:
           type: string
           enum:
-          - hour
-          - day
+            - hour
+            - day
           title: Bucket
         totals:
-          $ref: '#/components/schemas/EmailStatsCounts'
+          $ref: "#/components/schemas/EmailStatsCounts"
         rates:
-          $ref: '#/components/schemas/EmailStatsRates'
+          $ref: "#/components/schemas/EmailStatsRates"
         series:
           items:
-            $ref: '#/components/schemas/EmailStatsBucket'
+            $ref: "#/components/schemas/EmailStatsBucket"
           type: array
           title: Series
       type: object
       required:
-      - from
-      - to
-      - bucket
-      - totals
-      - rates
-      - series
+        - from
+        - to
+        - bucket
+        - totals
+        - rates
+        - series
       title: EmailStatsResponse
     EmailSummary:
       properties:
@@ -2751,21 +2778,21 @@ components:
           title: Organization Id
         conversation_id:
           anyOf:
-          - type: string
-            format: uuid
-          - type: 'null'
+            - type: string
+              format: uuid
+            - type: "null"
           title: Conversation Id
         email_domain_id:
           anyOf:
-          - type: string
-            format: uuid
-          - type: 'null'
+            - type: string
+              format: uuid
+            - type: "null"
           title: Email Domain Id
         direction:
           type: string
           enum:
-          - outbound
-          - inbound
+            - outbound
+            - inbound
           title: Direction
           default: outbound
         from_address:
@@ -2778,22 +2805,22 @@ components:
           title: To Addresses
         cc_addresses:
           anyOf:
-          - items:
-              type: string
-            type: array
-          - type: 'null'
+            - items:
+                type: string
+              type: array
+            - type: "null"
           title: Cc Addresses
         bcc_addresses:
           anyOf:
-          - items:
-              type: string
-            type: array
-          - type: 'null'
+            - items:
+                type: string
+              type: array
+            - type: "null"
           title: Bcc Addresses
         reply_to:
           anyOf:
-          - type: string
-          - type: 'null'
+            - type: string
+            - type: "null"
           title: Reply To
         subject:
           type: string
@@ -2801,23 +2828,23 @@ components:
         status:
           type: string
           enum:
-          - queued
-          - sent
-          - delivered
-          - failed
-          - bounced
-          - complained
-          - received
+            - queued
+            - sent
+            - delivered
+            - failed
+            - bounced
+            - complained
+            - received
           title: Status
         end_reason:
           anyOf:
-          - type: string
-          - type: 'null'
+            - type: string
+            - type: "null"
           title: End Reason
         provider_message_id:
           anyOf:
-          - type: string
-          - type: 'null'
+            - type: string
+            - type: "null"
           title: Provider Message Id
         requested_at:
           type: string
@@ -2825,15 +2852,15 @@ components:
           title: Requested At
         sent_at:
           anyOf:
-          - type: string
-            format: date-time
-          - type: 'null'
+            - type: string
+              format: date-time
+            - type: "null"
           title: Sent At
         failed_at:
           anyOf:
-          - type: string
-            format: date-time
-          - type: 'null'
+            - type: string
+              format: date-time
+            - type: "null"
           title: Failed At
         metadata:
           additionalProperties: true
@@ -2841,24 +2868,25 @@ components:
           title: Metadata
       type: object
       required:
-      - id
-      - organization_id
-      - conversation_id
-      - email_domain_id
-      - from_address
-      - to_addresses
-      - cc_addresses
-      - bcc_addresses
-      - reply_to
-      - subject
-      - status
-      - end_reason
-      - provider_message_id
-      - requested_at
-      - sent_at
-      - failed_at
+        - id
+        - organization_id
+        - conversation_id
+        - email_domain_id
+        - from_address
+        - to_addresses
+        - cc_addresses
+        - bcc_addresses
+        - reply_to
+        - subject
+        - status
+        - end_reason
+        - provider_message_id
+        - requested_at
+        - sent_at
+        - failed_at
       title: EmailSummary
-      description: "Trimmed view for list endpoints \u2014 drops the message bodies.\n\
+      description:
+        "Trimmed view for list endpoints \u2014 drops the message bodies.\n\
         \nBodies can be large and contain PII; paging through a year of mail\nshouldn't\
         \ return every byte of every message just to render a list.\nUse ``EmailResponse``\
         \ (via ``GET /emails/{id}``) for the full row."
@@ -2871,27 +2899,27 @@ components:
         source:
           type: string
           enum:
-          - call
-          - email
-          - sms
+            - call
+            - email
+            - sms
           title: Source
         call_id:
           anyOf:
-          - type: string
-            format: uuid
-          - type: 'null'
+            - type: string
+              format: uuid
+            - type: "null"
           title: Call Id
         email_id:
           anyOf:
-          - type: string
-            format: uuid
-          - type: 'null'
+            - type: string
+              format: uuid
+            - type: "null"
           title: Email Id
         sms_id:
           anyOf:
-          - type: string
-            format: uuid
-          - type: 'null'
+            - type: string
+              format: uuid
+            - type: "null"
           title: Sms Id
         kind:
           type: string
@@ -2906,49 +2934,49 @@ components:
           title: Occurred At
       type: object
       required:
-      - id
-      - source
-      - kind
-      - payload
-      - occurred_at
+        - id
+        - source
+        - kind
+        - payload
+        - occurred_at
       title: EventResponse
       description: One event on the unified GET /events stream (call, email, or SMS).
     EventStreamResponse:
       properties:
         items:
           items:
-            $ref: '#/components/schemas/EventResponse'
+            $ref: "#/components/schemas/EventResponse"
           type: array
           title: Items
         next_cursor:
           anyOf:
-          - type: string
-          - type: 'null'
+            - type: string
+            - type: "null"
           title: Next Cursor
         call_status:
           anyOf:
-          - type: string
-            enum:
-            - queued
-            - dialing
-            - ringing
-            - in_progress
-            - completed
-            - failed
-            - busy
-            - no_answer
-            - canceled
-          - type: 'null'
+            - type: string
+              enum:
+                - queued
+                - dialing
+                - ringing
+                - in_progress
+                - completed
+                - failed
+                - busy
+                - no_answer
+                - canceled
+            - type: "null"
           title: Call Status
       type: object
       required:
-      - items
+        - items
       title: EventStreamResponse
     HTTPValidationError:
       properties:
         detail:
           items:
-            $ref: '#/components/schemas/ValidationError'
+            $ref: "#/components/schemas/ValidationError"
           type: array
           title: Detail
       type: object
@@ -2967,59 +2995,154 @@ components:
       additionalProperties: false
       type: object
       required:
-      - base_url
-      - api_key
-      - model
+        - base_url
+        - api_key
+        - model
       title: LLMConfig
-    MemberPhonePut:
+    NumberAcquireRequest:
       properties:
-        phone_e164:
+        country_code:
           type: string
-          title: Phone E164
+          maxLength: 2
+          minLength: 2
+          title: Country Code
+        number_type:
+          type: string
+          enum:
+            - local
+            - mobile
+            - toll_free
+          title: Number Type
+          default: local
       additionalProperties: false
       type: object
       required:
-      - phone_e164
-      title: MemberPhonePut
+        - country_code
+      title: NumberAcquireRequest
+    PhoneNumberListResponse:
+      properties:
+        items:
+          items:
+            $ref: "#/components/schemas/PhoneNumberResponse"
+          type: array
+          title: Items
+        next_cursor:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Next Cursor
+      type: object
+      required:
+        - items
+      title: PhoneNumberListResponse
+    PhoneNumberResponse:
+      properties:
+        id:
+          type: string
+          format: uuid
+          title: Id
+        e164:
+          type: string
+          title: E164
+        country_code:
+          type: string
+          title: Country Code
+        number_type:
+          type: string
+          title: Number Type
+        capabilities:
+          items:
+            type: string
+          type: array
+          title: Capabilities
+        provisioning_state:
+          type: string
+          title: Provisioning State
+        is_dedicated:
+          type: boolean
+          title: Is Dedicated
+        messaging_service_sid:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Messaging Service Sid
+      type: object
+      required:
+        - id
+        - e164
+        - country_code
+        - number_type
+        - capabilities
+        - provisioning_state
+        - is_dedicated
+      title: PhoneNumberResponse
+    SenderIdPatch:
+      properties:
+        custom_sender_id:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Custom Sender Id
+      additionalProperties: false
+      type: object
+      title: SenderIdPatch
+    SenderIdResponse:
+      properties:
+        custom_sender_id:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Custom Sender Id
+        effective_default:
+          type: string
+          title: Effective Default
+          default: HAIL
+      type: object
+      required:
+        - custom_sender_id
+      title: SenderIdResponse
     SmsCreate:
       properties:
         recipient_consent:
           type: boolean
           title: Recipient Consent
-          description: "Attestation that you have obtained the lawful consent required\
+          description:
+            "Attestation that you have obtained the lawful consent required\
             \ to contact this recipient. Hail does not verify consent itself \u2014\
             \ you are responsible for a lawful basis under TCPA/ePrivacy/PECR/CAN-SPAM/GDPR\
             \ as applicable. Rejected (422) if not true."
         consent_source:
           anyOf:
-          - type: string
-          - type: 'null'
+            - type: string
+            - type: "null"
           title: Consent Source
-          description: Where/how consent was obtained (e.g. 'signup form', 'prior
+          description:
+            Where/how consent was obtained (e.g. 'signup form', 'prior
             customer relationship'). Required (non-empty) when message_type is 'marketing'.
         consent_obtained_at:
           anyOf:
-          - type: string
-            format: date-time
-          - type: 'null'
+            - type: string
+              format: date-time
+            - type: "null"
           title: Consent Obtained At
           description: When consent was obtained, if known.
         message_type:
           type: string
           enum:
-          - marketing
-          - informational
+            - marketing
+            - informational
           title: Message Type
-          description: '''marketing'' additionally requires a non-empty consent_source.
-            Use ''informational'' for transactional/service communications.'
+          description:
+            "'marketing' additionally requires a non-empty consent_source.
+            Use 'informational' for transactional/service communications."
           default: informational
         to:
           type: string
           title: To
         from:
           anyOf:
-          - type: string
-          - type: 'null'
+            - type: string
+            - type: "null"
           title: From
         body:
           type: string
@@ -3033,25 +3156,25 @@ components:
       additionalProperties: false
       type: object
       required:
-      - recipient_consent
-      - to
-      - body
+        - recipient_consent
+        - to
+        - body
       title: SmsCreate
     SmsListResponse:
       properties:
         items:
           items:
-            $ref: '#/components/schemas/SmsResponse'
+            $ref: "#/components/schemas/SmsResponse"
           type: array
           title: Items
         next_cursor:
           anyOf:
-          - type: string
-          - type: 'null'
+            - type: string
+            - type: "null"
           title: Next Cursor
       type: object
       required:
-      - items
+        - items
       title: SmsListResponse
     SmsResponse:
       properties:
@@ -3072,34 +3195,34 @@ components:
         direction:
           type: string
           enum:
-          - outbound
-          - inbound
+            - outbound
+            - inbound
           title: Direction
         status:
           type: string
           enum:
-          - queued
-          - sent
-          - delivered
-          - failed
-          - undelivered
-          - received
+            - queued
+            - sent
+            - delivered
+            - failed
+            - undelivered
+            - received
           title: Status
         body:
           type: string
           title: Body
         provider_message_sid:
           anyOf:
-          - type: string
-          - type: 'null'
+            - type: string
+            - type: "null"
           title: Provider Message Sid
         segment_count:
           type: integer
           title: Segment Count
         error_code:
           anyOf:
-          - type: string
-          - type: 'null'
+            - type: string
+            - type: "null"
           title: Error Code
         requested_at:
           type: string
@@ -3107,40 +3230,40 @@ components:
           title: Requested At
         sent_at:
           anyOf:
-          - type: string
-            format: date-time
-          - type: 'null'
+            - type: string
+              format: date-time
+            - type: "null"
           title: Sent At
       type: object
       required:
-      - id
-      - organization_id
-      - from_e164
-      - to_e164
-      - direction
-      - status
-      - body
-      - provider_message_sid
-      - segment_count
-      - error_code
-      - requested_at
-      - sent_at
+        - id
+        - organization_id
+        - from_e164
+        - to_e164
+        - direction
+        - status
+        - body
+        - provider_message_sid
+        - segment_count
+        - error_code
+        - requested_at
+        - sent_at
       title: SmsResponse
     SuppressionListResponse:
       properties:
         items:
           items:
-            $ref: '#/components/schemas/SuppressionResponse'
+            $ref: "#/components/schemas/SuppressionResponse"
           type: array
           title: Items
         next_cursor:
           anyOf:
-          - type: string
-          - type: 'null'
+            - type: string
+            - type: "null"
           title: Next Cursor
       type: object
       required:
-      - items
+        - items
       title: SuppressionListResponse
     SuppressionResponse:
       properties:
@@ -3166,20 +3289,20 @@ components:
           title: Created At
       type: object
       required:
-      - id
-      - recipient
-      - channel
-      - reason
-      - source
-      - created_at
+        - id
+        - recipient
+        - channel
+        - reason
+        - source
+        - created_at
       title: SuppressionResponse
     ValidationError:
       properties:
         loc:
           items:
             anyOf:
-            - type: string
-            - type: integer
+              - type: string
+              - type: integer
           type: array
           title: Location
         msg:
@@ -3195,9 +3318,9 @@ components:
           title: Context
       type: object
       required:
-      - loc
-      - msg
-      - type
+        - loc
+        - msg
+        - type
       title: ValidationError
     VoiceConfig:
       properties:
@@ -3223,8 +3346,8 @@ components:
           default: livekit
         voice_id:
           anyOf:
-          - type: string
-          - type: 'null'
+            - type: string
+            - type: "null"
           title: Voice Id
       additionalProperties: false
       type: object
@@ -3233,17 +3356,17 @@ components:
       properties:
         items:
           items:
-            $ref: '#/components/schemas/WebhookDeliveryResponse'
+            $ref: "#/components/schemas/WebhookDeliveryResponse"
           type: array
           title: Items
         next_cursor:
           anyOf:
-          - type: string
-          - type: 'null'
+            - type: string
+            - type: "null"
           title: Next Cursor
       type: object
       required:
-      - items
+        - items
       title: WebhookDeliveryListResponse
     WebhookDeliveryResponse:
       properties:
@@ -3253,15 +3376,15 @@ components:
           title: Id
         subscription_id:
           anyOf:
-          - type: string
-            format: uuid
-          - type: 'null'
+            - type: string
+              format: uuid
+            - type: "null"
           title: Subscription Id
         email_domain_id:
           anyOf:
-          - type: string
-            format: uuid
-          - type: 'null'
+            - type: string
+              format: uuid
+            - type: "null"
           title: Email Domain Id
         event_type:
           type: string
@@ -3276,20 +3399,20 @@ components:
         status:
           type: string
           enum:
-          - pending
-          - succeeded
-          - failed
-          - dead
+            - pending
+            - succeeded
+            - failed
+            - dead
           title: Status
         response_status:
           anyOf:
-          - type: integer
-          - type: 'null'
+            - type: integer
+            - type: "null"
           title: Response Status
         response_body:
           anyOf:
-          - type: string
-          - type: 'null'
+            - type: string
+            - type: "null"
           title: Response Body
         next_attempt_at:
           type: string
@@ -3297,9 +3420,9 @@ components:
           title: Next Attempt At
         succeeded_at:
           anyOf:
-          - type: string
-            format: date-time
-          - type: 'null'
+            - type: string
+              format: date-time
+            - type: "null"
           title: Succeeded At
         created_at:
           type: string
@@ -3307,15 +3430,15 @@ components:
           title: Created At
       type: object
       required:
-      - id
-      - subscription_id
-      - email_domain_id
-      - event_type
-      - event_id
-      - attempt
-      - status
-      - next_attempt_at
-      - created_at
+        - id
+        - subscription_id
+        - email_domain_id
+        - event_type
+        - event_id
+        - attempt
+        - status
+        - next_attempt_at
+        - created_at
       title: WebhookDeliveryResponse
     WebhookSubscriptionCreate:
       properties:
@@ -3327,51 +3450,6 @@ components:
           items:
             type: string
             enum:
-            - email.received
-            - email.delivered
-            - email.delivery_delayed
-            - email.bounced
-            - email.complained
-            - email.opened
-            - email.clicked
-            - email.received.suppressed
-            - sms.received
-          type: array
-          minItems: 1
-          title: Event Types
-      type: object
-      required:
-      - target_url
-      - event_types
-      title: WebhookSubscriptionCreate
-    WebhookSubscriptionListResponse:
-      properties:
-        items:
-          items:
-            $ref: '#/components/schemas/WebhookSubscriptionResponse'
-          type: array
-          title: Items
-        next_cursor:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Next Cursor
-      type: object
-      required:
-      - items
-      title: WebhookSubscriptionListResponse
-    WebhookSubscriptionPatch:
-      properties:
-        target_url:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Target Url
-        event_types:
-          anyOf:
-          - items:
-              type: string
-              enum:
               - email.received
               - email.delivered
               - email.delivery_delayed
@@ -3381,16 +3459,61 @@ components:
               - email.clicked
               - email.received.suppressed
               - sms.received
-            type: array
-          - type: 'null'
+          type: array
+          minItems: 1
+          title: Event Types
+      type: object
+      required:
+        - target_url
+        - event_types
+      title: WebhookSubscriptionCreate
+    WebhookSubscriptionListResponse:
+      properties:
+        items:
+          items:
+            $ref: "#/components/schemas/WebhookSubscriptionResponse"
+          type: array
+          title: Items
+        next_cursor:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Next Cursor
+      type: object
+      required:
+        - items
+      title: WebhookSubscriptionListResponse
+    WebhookSubscriptionPatch:
+      properties:
+        target_url:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Target Url
+        event_types:
+          anyOf:
+            - items:
+                type: string
+                enum:
+                  - email.received
+                  - email.delivered
+                  - email.delivery_delayed
+                  - email.bounced
+                  - email.complained
+                  - email.opened
+                  - email.clicked
+                  - email.received.suppressed
+                  - sms.received
+              type: array
+            - type: "null"
           title: Event Types
         status:
           anyOf:
-          - type: string
-            enum:
-            - active
-            - disabled
-          - type: 'null'
+            - type: string
+              enum:
+                - active
+                - disabled
+            - type: "null"
           title: Status
       type: object
       title: WebhookSubscriptionPatch
@@ -3415,23 +3538,23 @@ components:
         status:
           type: string
           enum:
-          - active
-          - disabled
+            - active
+            - disabled
           title: Status
         consecutive_failures:
           type: integer
           title: Consecutive Failures
         last_success_at:
           anyOf:
-          - type: string
-            format: date-time
-          - type: 'null'
+            - type: string
+              format: date-time
+            - type: "null"
           title: Last Success At
         last_failure_at:
           anyOf:
-          - type: string
-            format: date-time
-          - type: 'null'
+            - type: string
+              format: date-time
+            - type: "null"
           title: Last Failure At
         created_at:
           type: string
@@ -3443,23 +3566,23 @@ components:
           title: Updated At
         secret:
           anyOf:
-          - type: string
-          - type: 'null'
+            - type: string
+            - type: "null"
           title: Secret
       type: object
       required:
-      - id
-      - organization_id
-      - target_url
-      - event_types
-      - status
-      - consecutive_failures
-      - created_at
-      - updated_at
+        - id
+        - organization_id
+        - target_url
+        - event_types
+        - status
+        - consecutive_failures
+        - created_at
+        - updated_at
       title: WebhookSubscriptionResponse
-      description: 'Subscription as returned by the API.
+      description: "Subscription as returned by the API.
 
 
         ``secret`` is populated **only** by create + rotate-secret responses;
 
-        later GETs return ``None`` so the plaintext never round-trips.'
+        later GETs return ``None`` so the plaintext never round-trips."

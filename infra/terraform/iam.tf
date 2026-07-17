@@ -12,6 +12,12 @@ data "aws_iam_policy_document" "main" {
   }
 
   statement {
+    sid       = "OutboundAttachmentsReadWriteDelete"
+    actions   = ["s3:GetObject", "s3:PutObject", "s3:DeleteObject"]
+    resources = ["${aws_s3_bucket.inbound.arn}/outbound-attachments/*"]
+  }
+
+  statement {
     sid = "OutboundSES"
     actions = [
       "ses:SendEmail",

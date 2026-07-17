@@ -37,6 +37,7 @@ from hail.models import (
     CallListResponse,
     CallResponse,
     CallStatus,
+    EmailAttachmentUploadResponse,
     EmailListResponse,
     EmailResponse,
     EmailStatus,
@@ -44,6 +45,10 @@ from hail.models import (
     LLMConfig,
     EmailDomainListResponse,
     EmailDomainResponse,
+    NumberType,
+    PhoneNumberListResponse,
+    PhoneNumberResponse,
+    SenderIdResponse,
     SmsListResponse,
     SmsResponse,
     SmsStatus,
@@ -142,11 +147,35 @@ class _CallsResource:
         return CallListResponse.model_validate(data)
 
 
+class _SenderIdResource:
+    """``client.sms.sender_id.*`` — read/set the org's custom SMS sender ID."""
+
+    def __init__(self, http: _HailHTTP) -> None:
+        self._http = http
+
+    async def get(self) -> SenderIdResponse:
+        """Fetch the current custom sender ID and effective default."""
+        data = await self._http.request("GET", "/sms/sender-id")
+        return SenderIdResponse.model_validate(data)
+
+    async def set(self, value: str | None) -> SenderIdResponse:
+        """Set the org's custom sender ID (2-11 alphanumeric chars).
+
+        Pass ``None`` (or an empty string) to clear it and revert to the
+        platform default. Validation is deferred to the server so SDK and
+        API stay in lockstep on the rule.
+        """
+        body = {"custom_sender_id": value or None}
+        data = await self._http.request("PATCH", "/sms/sender-id", json=body)
+        return SenderIdResponse.model_validate(data)
+
+
 class _SmsResource:
     """``client.sms.*`` — POST/GET/LIST against ``/sms``."""
 
     def __init__(self, http: _HailHTTP) -> None:
         self._http = http
+        self.sender_id = _SenderIdResource(http)
 
     async def create(
         self,
@@ -248,6 +277,7 @@ class _EmailsResource:
         consent_source: str | None = None,
         consent_obtained_at: datetime | None = None,
         message_type: Literal["marketing", "informational"] | None = None,
+        attachment_ids: list[str | UUID] | None = None,
         idempotency_key: str | None = None,
     ) -> EmailResponse:
         """Send an outbound email.
@@ -291,6 +321,8 @@ class _EmailsResource:
             body["consent_obtained_at"] = consent_obtained_at.isoformat()
         if message_type is not None:
             body["message_type"] = message_type
+        if attachment_ids:
+            body["attachment_ids"] = [str(a) for a in attachment_ids]
 
         key = idempotency_key or generate_idempotency_key()
         data = await self._http.request(
@@ -361,6 +393,24 @@ class _EmailsResource:
         if to is not None:
             params["to"] = to.isoformat() if isinstance(to, datetime) else to
         return await self._http.request("GET", "/emails/stats", params=params)
+
+
+class _EmailAttachmentsResource:
+    """``client.email_attachments.*`` — upload files to attach to outbound email."""
+
+    def __init__(self, http: _HailHTTP) -> None:
+        self._http = http
+
+    async def create(
+        self, *, filename: str, content: bytes, content_type: str
+    ) -> EmailAttachmentUploadResponse:
+        """Upload a file; returns a reusable id for ``emails.create(attachment_ids=...)``."""
+        data = await self._http.request_multipart(
+            "POST",
+            "/email-attachments",
+            files={"file": (filename, content, content_type)},
+        )
+        return EmailAttachmentUploadResponse.model_validate(data)
 
 
 class _EmailDomainsResource:
@@ -478,6 +528,66 @@ class _EmailDomainsResource:
         """Remove an email domain. SES identity is deleted for custom rows."""
         did = str(domain_id)
         await self._http.request("DELETE", f"/email-domains/{did}")
+
+
+class _NumbersResource:
+    """``client.numbers.*`` — acquire/list/get dedicated phone numbers.
+
+    A dedicated PhoneNumber is a cross-channel resource (voice + SMS), not
+    SMS-specific. Capabilities are fixed by the carrier at purchase time.
+    """
+
+    def __init__(self, http: _HailHTTP) -> None:
+        self._http = http
+
+    async def acquire(
+        self,
+        *,
+        country: str,
+        number_type: NumberType = "local",
+        idempotency_key: str | None = None,
+    ) -> PhoneNumberResponse:
+        """Provision a new dedicated number from the carrier.
+
+        ``country`` is an ISO 3166-1 alpha-2 code (e.g. ``"US"``).
+        ``idempotency_key`` defaults to a fresh UUIDv4.
+        """
+        body: dict[str, Any] = {"country_code": country, "number_type": number_type}
+        key = idempotency_key or generate_idempotency_key()
+        data = await self._http.request(
+            "POST",
+            "/numbers",
+            json=body,
+            headers={"Idempotency-Key": key},
+        )
+        return PhoneNumberResponse.model_validate(data)
+
+    async def get(self, number_id: str | UUID) -> PhoneNumberResponse:
+        """Fetch a single dedicated number by id."""
+        nid = str(number_id)
+        data = await self._http.request("GET", f"/numbers/{nid}")
+        return PhoneNumberResponse.model_validate(data)
+
+    async def list(
+        self,
+        *,
+        cursor: str | None = None,
+        limit: int = 50,
+    ) -> PhoneNumberListResponse:
+        """Cursor-paginated list, scoped to the caller's organization."""
+        params = {"limit": limit, "cursor": cursor}
+        data = await self._http.request("GET", "/numbers", params=params)
+        return PhoneNumberListResponse.model_validate(data)
+
+    async def enable_sms(self, number_id: str | UUID) -> PhoneNumberResponse:
+        """Attach a Messaging Service so the number can send SMS.
+
+        422s if the number lacks the ``sms`` capability (fixed at purchase
+        time) — acquire an SMS-capable number instead.
+        """
+        nid = str(number_id)
+        data = await self._http.request("POST", f"/numbers/{nid}/enable-sms")
+        return PhoneNumberResponse.model_validate(data)
 
 
 class _WebhooksResource:
@@ -667,7 +777,9 @@ class Client:
         )
         self.calls = _CallsResource(self._http)
         self.sms = _SmsResource(self._http)
+        self.numbers = _NumbersResource(self._http)
         self.emails = _EmailsResource(self._http)
+        self.email_attachments = _EmailAttachmentsResource(self._http)
         self.email_domains = _EmailDomainsResource(self._http)
         self.webhooks = _WebhooksResource(self._http)
         self.events = _EventsResource(self._http)

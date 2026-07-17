@@ -1,12 +1,13 @@
 """MCP tool surface for Hail's outbound-call API.
 
-Exposes seventeen tools to the calling agent:
+Exposes eighteen tools to the calling agent:
 
 * ``place_call`` — originate an outbound phone call
 * ``get_call`` — fetch the current state of one call
 * ``list_calls`` — page through recent calls
 * ``get_events`` — page through the event stream (call-narrow or org-wide)
 * ``send_email`` — send an outbound email
+* ``upload_email_attachment`` — upload a file to attach to an outbound email
 * ``get_email`` — fetch the full record of one email
 * ``list_emails`` — page through emails (``direction="inbound"`` for replies)
 * ``get_email_raw`` — presigned URL for an inbound email's raw MIME
@@ -33,7 +34,7 @@ mapped to an ``{"error": ...}`` dict. Only the ``<type>:<uuid>``
 resource-id shape for ``get_events`` is still checked locally via
 ``parse_resource_id``.
 
-The fourteen tool functions are kept module-importable so unit tests can
+The fifteen tool functions are kept module-importable so unit tests can
 call them directly with a constructed ``HailClient``; ``register_tools``
 is the FastMCP wiring step. Each registered tool closure accepts a
 FastMCP ``Context`` (auto-injected on dispatch) and uses the
@@ -44,6 +45,7 @@ FastMCP ``Context`` (auto-injected on dispatch) and uses the
 
 from __future__ import annotations
 
+import base64
 import contextlib
 import uuid
 from collections.abc import AsyncIterator
@@ -112,6 +114,7 @@ async def place_call(
     from_: str | None = None,
     first_message: str | None = None,
     metadata: dict[str, Any] | None = None,
+    tools: list[str] | None = None,
     idempotency_key: str | None = None,
     consent_source: str | None = None,
     consent_obtained_at: str | None = None,
@@ -128,6 +131,7 @@ async def place_call(
             from_=from_,
             first_message=first_message,
             metadata=metadata,
+            tools=tools,
             idempotency_key=idempotency_key,
             consent_source=consent_source,
             consent_obtained_at=consent_obtained_at,
@@ -162,6 +166,7 @@ async def send_email(
     consent_source: str | None = None,
     consent_obtained_at: str | None = None,
     message_type: str = "informational",
+    attachment_ids: list[str] | None = None,
 ) -> dict[str, Any]:
     if idempotency_key is None:
         idempotency_key = str(uuid.uuid4())
@@ -181,6 +186,7 @@ async def send_email(
             consent_source=consent_source,
             consent_obtained_at=consent_obtained_at,
             message_type=message_type,
+            attachment_ids=attachment_ids,
         )
     except ValidationError as exc:
         return {"error": _validation_error_message(exc)}
@@ -189,6 +195,21 @@ async def send_email(
     if isinstance(result, dict):
         result.setdefault("idempotency_key", idempotency_key)
     return result
+
+
+async def upload_email_attachment(
+    *, client: HailClient, content_base64: str, filename: str, content_type: str
+) -> dict[str, Any]:
+    try:
+        content = base64.b64decode(content_base64)
+    except Exception:
+        return {"error": "content_base64: invalid base64 encoding"}
+    try:
+        return await client.upload_email_attachment(
+            filename=filename, content=content, content_type=content_type
+        )
+    except HailAPIError as exc:
+        return _format_api_error(exc)
 
 
 async def get_call(*, client: HailClient, call_id: str) -> dict[str, Any]:
@@ -496,7 +517,7 @@ def register_tools(
     mode: AuthMode,
     singleton: HailClient | None,
 ) -> None:
-    """Register the seventeen Hail tools on a FastMCP app.
+    """Register the eighteen Hail tools on a FastMCP app.
 
     Tools accept a FastMCP ``Context`` parameter (auto-injected). The
     ``_client_for`` helper picks the right HailClient for the active mode
@@ -513,6 +534,7 @@ def register_tools(
         from_: str | None = None,
         first_message: str | None = None,
         metadata: dict[str, Any] | None = None,
+        tools: list[str] | None = None,
         idempotency_key: str | None = None,
         consent_source: str | None = None,
         consent_obtained_at: str | None = None,
@@ -530,6 +552,8 @@ def register_tools(
         optional and defaults to the first active number on your org.
         ``first_message`` is spoken on pickup before listening.
         ``metadata`` is free-form JSON attached to the call record.
+        ``tools`` are the agent tools to allow on this call. Omit for all
+        available; pass ``[]`` to disable.
 
         ``recipient_consent`` is required: attest that you (the caller
         triggering this request) have obtained the lawful consent needed
@@ -567,6 +591,7 @@ def register_tools(
                     from_=from_,
                     first_message=first_message,
                     metadata=metadata,
+                    tools=tools,
                     idempotency_key=idempotency_key,
                     consent_source=consent_source,
                     consent_obtained_at=consent_obtained_at,
@@ -592,6 +617,7 @@ def register_tools(
         consent_source: str | None = None,
         consent_obtained_at: str | None = None,
         message_type: str = "informational",
+        attachment_ids: list[str] | None = None,
     ) -> dict[str, Any]:
         """Send an outbound email through your configured SES sender.
 
@@ -628,6 +654,9 @@ def register_tools(
         value on a retry to replay rather than re-send. A new key
         is a new message.
 
+        ``attachment_ids`` are ids returned by ``upload_email_attachment``
+        — upload a file first, then pass its id(s) here to attach it.
+
         Example:
             send_email(to=["alice@example.com"],
                        subject="Welcome",
@@ -656,6 +685,36 @@ def register_tools(
                     consent_source=consent_source,
                     consent_obtained_at=consent_obtained_at,
                     message_type=message_type,
+                    attachment_ids=attachment_ids,
+                )
+        except RuntimeError as exc:
+            return {"error": str(exc)}
+
+    @mcp_app.tool(name="upload_email_attachment")
+    async def upload_email_attachment_tool(
+        ctx: Context,
+        content_base64: str,
+        filename: str,
+        content_type: str,
+    ) -> dict[str, Any]:
+        """Upload a file to attach to a future outbound email.
+
+        ``content_base64`` is the file's raw bytes, base64-encoded.
+        Returns ``{"id": ..., "filename": ..., "content_type": ...,
+        "size_bytes": ...}`` — pass ``id`` in ``send_email``'s
+        ``attachment_ids`` list. The id is reusable across many sends
+        and expires in 24h if never used. Files over 10MB (combined
+        with the message body and any other attachments, per send) are
+        rejected — host large files externally and link to them in the
+        body instead.
+        """
+        try:
+            async with _client_for(ctx, mode=mode, singleton=singleton) as client:
+                return await upload_email_attachment(
+                    client=client,
+                    content_base64=content_base64,
+                    filename=filename,
+                    content_type=content_type,
                 )
         except RuntimeError as exc:
             return {"error": str(exc)}

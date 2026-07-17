@@ -93,9 +93,11 @@ class Settings(BaseSettings):
 
     hail_inbound_enabled: bool = False
     # Single source of truth for both the Terraform module and the API.
-    # The raw-MIME bucket name is derived as ``{prefix}-raw``; SES Lambda
-    # writes there, the API reads back from it. Set in .env / .env.example.
-    hail_inbound_email_name_prefix: str = ""
+    # The mail bucket name is derived as ``{prefix}-mail``; SES Lambda
+    # writes inbound raw MIME there, outbound sends write uploaded
+    # attachments there, and the API reads both back. Set in .env /
+    # .env.example.
+    hail_mail_name_prefix: str = ""
     hail_inbound_hmac_secret: str = ""
     # Forwarding controls — see docs spec §6.2.
     hail_forward_max_hops: int = 3
@@ -225,6 +227,23 @@ class Settings(BaseSettings):
     # check — hourly by default, not a per-send check. Set 0 to disable.
     hail_abuse_monitor_poll_seconds: int = 3600
 
+    # Agent self-signup velocity caps (spec: 2026-07-14-agent-self-signup-design).
+    # Per agent-origin org:
+    agent_email_per_hour: int = 20
+    agent_email_per_day: int = 50
+    agent_sms_per_hour: int = 5
+    agent_sms_per_day: int = 15
+    agent_voice_per_hour: int = 3
+    agent_voice_per_day: int = 10
+    # Distinct recipients per org, per channel, per day:
+    agent_email_recipients_per_day: int = 10
+    agent_sms_recipients_per_day: int = 5
+    agent_voice_recipients_per_day: int = 5
+    # Global ceilings across ALL agent-origin orgs, per channel, per hour:
+    agent_global_email_per_hour: int = 200
+    agent_global_sms_per_hour: int = 30
+    agent_global_voice_per_hour: int = 15
+
     # SMS compliance auto-replies (HELP/STOP/START). OFF by default: Twilio's
     # own opt-out handling already auto-replies to these keywords, so enabling
     # Hail replies on top would double-text. Enable only when Twilio's default
@@ -246,11 +265,11 @@ class Settings(BaseSettings):
 
     @computed_field  # type: ignore[prop-decorator]
     @property
-    def hail_inbound_bucket(self) -> str:
-        """Raw-MIME bucket name. Derived to match Terraform's `${prefix}-raw`."""
-        if not self.hail_inbound_email_name_prefix:
+    def hail_mail_bucket(self) -> str:
+        """Shared mail bucket name. Derived to match Terraform's `${prefix}-mail`."""
+        if not self.hail_mail_name_prefix:
             return ""
-        return f"{self.hail_inbound_email_name_prefix}-raw"
+        return f"{self.hail_mail_name_prefix}-mail"
 
 
 settings = Settings()

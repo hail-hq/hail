@@ -37,7 +37,7 @@ from hailhq.core.email_delivery_events import apply_delivery_event
 from hailhq.core.email_ingest import ingest_inbound
 from hailhq.core.providers.email.inbound.ses import SesInboundProvider
 from hailhq.core.providers.email.inbound.ses_delivery import parse_delivery_event
-from hailhq.core.s3_inbound import S3InboundClient
+from hailhq.core.s3_mail import S3MailClient
 from hailhq.core.urls import canonical_url
 from hailhq.core.webhook_fanout import fanout_email_event
 
@@ -77,14 +77,14 @@ def get_inbound_provider() -> SesInboundProvider:
         ) from exc
 
 
-def get_s3_inbound_client() -> S3InboundClient:
+def get_s3_mail_client() -> S3MailClient:
     if not settings.hail_inbound_enabled:
         # Never used: the delivery_event branch skips S3 entirely and the
         # legacy inbound branch 503s via require_inbound_enabled() first.
         # Constructing the real client here would demand a bucket even for
         # delivery-only deployments running with inbound disabled.
-        return cast(S3InboundClient, None)
-    return S3InboundClient(bucket=settings.hail_inbound_bucket)
+        return cast(S3MailClient, None)
+    return S3MailClient(bucket=settings.hail_mail_bucket)
 
 
 @router.post("/ses-events")
@@ -92,7 +92,7 @@ async def receive_ses_event(
     request: Request,
     db: Annotated[AsyncSession, Depends(get_session)],
     provider: Annotated[SesInboundProvider, Depends(get_inbound_provider)],
-    s3: Annotated[S3InboundClient, Depends(get_s3_inbound_client)],
+    s3: Annotated[S3MailClient, Depends(get_s3_mail_client)],
     x_hail_signature: Annotated[str | None, Header()] = None,
 ) -> dict:
     body = await request.body()

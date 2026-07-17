@@ -1,0 +1,102 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hail.so/costs/schema/telephony.json",
+  "title": "Telephony Costs",
+  "description": "Provider COGS for telephony: dedicated phone-number monthly prices and A2P 10DLC carrier/registration fees. Number prices are at-cost pass-through; the rater bills these directly.",
+  "type": "object",
+  "required": ["version", "license", "numbers", "a2p_10dlc"],
+  "additionalProperties": false,
+  "properties": {
+    "version": { "const": 2 },
+    "license": { "const": "CC-BY-4.0" },
+    "numbers": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/number" }
+    },
+    "a2p_10dlc": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/fee" }
+    }
+  },
+  "$defs": {
+    "decimal": {
+      "type": "string",
+      "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]{1,8})?$"
+    },
+    "date": { "type": "string", "format": "date" },
+    "number": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "country_code",
+        "number_type",
+        "display_name",
+        "usd_per_month",
+        "last_verified",
+        "last_changed_at",
+        "verification_method",
+        "verified_by",
+        "source_url"
+      ],
+      "properties": {
+        "country_code": { "type": "string", "pattern": "^[A-Z]{2}$" },
+        "number_type": { "enum": ["local", "mobile", "toll_free"] },
+        "display_name": { "type": "string", "minLength": 1 },
+        "usd_per_month": { "$ref": "#/$defs/decimal" },
+        "last_verified": { "$ref": "#/$defs/date" },
+        "last_changed_at": { "$ref": "#/$defs/date" },
+        "verification_method": { "enum": ["manual-confirmed", "community-pr"] },
+        "verified_by": {
+          "type": "string",
+          "pattern": "^[a-zA-Z0-9](?:[a-zA-Z0-9]|-(?=[a-zA-Z0-9])){0,38}$"
+        },
+        "source_url": { "type": "string", "format": "uri" },
+        "notes": { "type": "string" }
+      }
+    },
+    "fee": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "carrier",
+        "fee_kind",
+        "direction",
+        "last_verified",
+        "last_changed_at",
+        "verification_method",
+        "verified_by",
+        "source_url"
+      ],
+      "anyOf": [
+        { "required": ["usd_per_message"] },
+        { "required": ["usd_per_month"] },
+        { "required": ["usd_one_time"] }
+      ],
+      "properties": {
+        "carrier": { "type": "string", "minLength": 1 },
+        "fee_kind": {
+          "enum": [
+            "carrier_passthrough",
+            "tcr_registration",
+            "tcr_campaign_monthly"
+          ]
+        },
+        "direction": { "enum": ["outbound", "inbound", "na"] },
+        "usd_per_message": { "$ref": "#/$defs/decimal" },
+        "usd_per_month": { "$ref": "#/$defs/decimal" },
+        "usd_one_time": { "$ref": "#/$defs/decimal" },
+        "last_verified": { "$ref": "#/$defs/date" },
+        "last_changed_at": { "$ref": "#/$defs/date" },
+        "verification_method": { "enum": ["manual-confirmed", "community-pr"] },
+        "verified_by": {
+          "type": "string",
+          "pattern": "^[a-zA-Z0-9](?:[a-zA-Z0-9]|-(?=[a-zA-Z0-9])){0,38}$"
+        },
+        "source_url": { "type": "string", "format": "uri" },
+        "notes": { "type": "string" }
+      }
+    }
+  }
+}

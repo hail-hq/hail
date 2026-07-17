@@ -7,6 +7,7 @@ surfaces as a test failure the same way real usage would.
 
 from __future__ import annotations
 
+import uuid
 from urllib.parse import parse_qs
 
 import pytest
@@ -181,3 +182,48 @@ def test_constructor_falls_back_to_settings(monkeypatch: pytest.MonkeyPatch) -> 
 
     provider = TwilioSmsProvider()
     assert provider.account_sid == ACCOUNT_SID
+
+
+@responses.activate
+async def test_ensure_messaging_service_creates_when_none_exists(
+    provider: TwilioSmsProvider,
+) -> None:
+    org_id = uuid.uuid4()
+    responses.add(
+        responses.POST,
+        "https://messaging.twilio.com/v1/Services",
+        json={"sid": "MG_test_service", "friendly_name": f"hail-org-{org_id}"},
+        status=201,
+    )
+    sid = await provider.ensure_messaging_service(
+        organization_id=org_id, existing_sid=None
+    )
+    assert sid == "MG_test_service"
+
+
+async def test_ensure_messaging_service_returns_existing_without_api_call(
+    provider: TwilioSmsProvider,
+) -> None:
+    org_id = uuid.uuid4()
+    sid = await provider.ensure_messaging_service(
+        organization_id=org_id, existing_sid="MG_already_have_one"
+    )
+    assert sid == "MG_already_have_one"
+
+
+@responses.activate
+async def test_attach_number_calls_phone_numbers_create(
+    provider: TwilioSmsProvider,
+) -> None:
+    responses.add(
+        responses.POST,
+        "https://messaging.twilio.com/v1/Services/MG_test_service/PhoneNumbers",
+        json={"sid": "PN_link", "phone_number_sid": "PN1234567890abcdef1234567890abcd"},
+        status=201,
+    )
+    await provider.attach_number(
+        messaging_service_sid="MG_test_service",
+        provider_resource_id="PN1234567890abcdef1234567890abcd",
+    )
+    sent_body = parse_qs(responses.calls[0].request.body)
+    assert sent_body == {"PhoneNumberSid": ["PN1234567890abcdef1234567890abcd"]}

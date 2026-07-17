@@ -18,7 +18,8 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from fastapi import status as http_status
-from sqlalchemy import select
+from sqlalchemy import delete, func, select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from hailhq.api.audit import write_audit_log
@@ -34,13 +35,21 @@ from hailhq.api.idempotency import (
 from hailhq.api.numbers import resolve_org_number
 from hailhq.api.pagination import fetch_cursor_page
 from hailhq.api.usage import write_usage_event
+from hailhq.api.agent_gate import (
+    RATE_LIMITED_RESPONSES,
+    require_agent_send_allowed,
+)
 from hailhq.api.funds import require_funds
 from hailhq.core.compliance_gate import check_sms_allowed, remove_suppression
 from hailhq.core.config import settings
 from hailhq.core.db import get_session
-from hailhq.core.models import Sms, SmsEvent, Suppression
+from hailhq.core.models import Sms, SmsEvent, SmsSenderIdentity, Suppression
+from hailhq.core.pricing_tier import classify_pricing_tier
 from hailhq.core.providers.sms import SmsProvider, TwilioSmsProvider
+from hailhq.core.sender_id import PLATFORM_DEFAULT_SENDER_ID, resolve_sender
 from hailhq.core.schemas import (
+    SenderIdPatch,
+    SenderIdResponse,
     SmsCreate,
     SmsListResponse,
     SmsResponse,
@@ -73,7 +82,82 @@ def get_sms_provider() -> SmsProvider:
     return _sms_provider_singleton
 
 
-@router.post("", response_model=SmsResponse, status_code=http_status.HTTP_201_CREATED)
+async def deliver_sms(db: AsyncSession, provider: SmsProvider, sms: Sms) -> str | None:
+    """Wire-send one queued Sms row and reconcile its status.
+
+    Shared by POST /sms and the internal agent-send route. Returns None
+    when the carrier accepted (status='sent', usage billed),
+    'provider_error' on transport failure, or the carrier error code on
+    rejection. Never raises — the caller owns HTTP semantics.
+    """
+    try:
+        result = await provider.send_sms(
+            from_e164=sms.from_e164, to_e164=sms.to_e164, body=sms.body
+        )
+    except Exception:
+        logger.warning("sms send failed for sms_id=%s", sms.id, exc_info=True)
+        sms.status = "failed"
+        db.add(
+            SmsEvent(
+                sms_id=sms.id,
+                organization_id=sms.organization_id,
+                kind="state_change",
+                payload={"from": "queued", "to": "failed", "reason": "provider_error"},
+            )
+        )
+        await db.commit()
+        return "provider_error"
+
+    # A carrier rejection surfaces via error_code AND/OR a failure status
+    # (base.ProviderSmsResult contract: "status reflecting the failure").
+    # Check both so a provider that reports failure by status alone isn't
+    # recorded as sent and billed.
+    carrier_rejected = result.error_code is not None or result.status.lower() in {
+        "failed",
+        "undelivered",
+    }
+    new_status = "failed" if carrier_rejected else "sent"
+    sms.status = new_status
+    sms.provider_message_sid = result.provider_message_sid
+    sms.segment_count = result.segment_count
+    sms.error_code = result.error_code
+    # ``sent_at`` means "the carrier accepted the message" — a rejected
+    # send keeps it NULL, matching emails (sent_at only with status='sent')
+    # and this route's own transport-failure branch above.
+    if not carrier_rejected:
+        sms.sent_at = datetime.now(timezone.utc)
+    event_payload: dict[str, Any] = {"from": "queued", "to": new_status}
+    if carrier_rejected:
+        event_payload["error_code"] = result.error_code
+    db.add(
+        SmsEvent(
+            sms_id=sms.id,
+            organization_id=sms.organization_id,
+            kind="state_change",
+            payload=event_payload,
+        )
+    )
+    await db.commit()
+
+    if carrier_rejected:
+        return result.error_code or "carrier_rejected"
+
+    tier = classify_pricing_tier(sms.to_e164)
+    await write_usage_event(
+        organization_id=sms.organization_id,
+        channel="sms",
+        units=sms.segment_count,
+        ref=f"sms:{sms.id}:{tier}",
+    )
+    return None
+
+
+@router.post(
+    "",
+    response_model=SmsResponse,
+    status_code=http_status.HTTP_201_CREATED,
+    responses=RATE_LIMITED_RESPONSES,
+)
 async def create_sms(
     body: SmsCreate,
     response: Response,
@@ -121,28 +205,59 @@ async def create_sms(
         )
 
     await require_funds(db, principal, idem)
+    await require_agent_send_allowed(db, principal, "sms", [body.to], idem)
 
-    # No pool fallback for SMS — a dedicated number is required (Decision 6).
-    from_number = await resolve_org_number(
-        db, principal.organization_id, body.from_, capability="sms"
-    )
-    if from_number is None:
-        if body.from_ is not None:
-            msg = (
-                f"phone number {body.from_} is not registered to this "
-                "organization, is not active, or lacks the sms capability"
+    # The dedicated-number requirement is conditional on the destination
+    # corridor (Task 5). For alphanumeric-eligible corridors with no explicit
+    # ``from``, the org's Sender ID is used and NO dedicated number is needed;
+    # otherwise a dedicated SMS-capable number is still required (Decision 6).
+    #
+    # An explicit ``from`` always resolves a dedicated number regardless of
+    # corridor, so the Sender ID lookup is skipped entirely in that case — no
+    # SmsSenderIdentity query on explicit-``from`` sends.
+    from_number = None
+    from_e164 = None
+    if body.from_ is None:
+        sender_id_row = (
+            await db.execute(
+                select(SmsSenderIdentity).where(
+                    SmsSenderIdentity.organization_id == principal.organization_id
+                )
             )
-        else:
-            msg = (
-                "no dedicated SMS-capable phone number on this organization; "
-                "SMS requires a dedicated number, not the shared voice pool"
-            )
-        raise await cache_failure(idem, unprocessable(msg, loc=["body", "from"]))
+        ).scalar_one_or_none()
+        resolution = resolve_sender(
+            body.to,
+            custom_sender_id=sender_id_row.custom_sender_id if sender_id_row else None,
+        )
+        if resolution.kind == "alphanumeric":
+            # Alphanumeric corridor with no explicit ``from`` → send from the
+            # resolved Sender ID; no dedicated number is provisioned.
+            from_e164 = resolution.sender_id
+
+    if from_e164 is None:
+        # Explicit ``from``, or a corridor that still requires a dedicated
+        # SMS-capable number.
+        from_number = await resolve_org_number(
+            db, principal.organization_id, body.from_, capability="sms"
+        )
+        if from_number is None:
+            if body.from_ is not None:
+                msg = (
+                    f"phone number {body.from_} is not registered to this "
+                    "organization, is not active, or lacks the sms capability"
+                )
+            else:
+                msg = (
+                    "no dedicated SMS-capable phone number on this organization; "
+                    "SMS requires a dedicated number, not the shared voice pool"
+                )
+            raise await cache_failure(idem, unprocessable(msg, loc=["body", "from"]))
+        from_e164 = from_number.e164
 
     sms = Sms(
         organization_id=principal.organization_id,
-        from_number_id=from_number.id,
-        from_e164=from_number.e164,
+        from_number_id=from_number.id if from_number is not None else None,
+        from_e164=from_e164,
         to_e164=body.to,
         direction="outbound",
         status="queued",
@@ -171,68 +286,18 @@ async def create_sms(
         },
     )
 
-    try:
-        result = await provider.send_sms(
-            from_e164=sms.from_e164, to_e164=sms.to_e164, body=sms.body
-        )
-    except Exception as exc:
-        logger.warning("sms send failed for sms_id=%s", sms.id, exc_info=True)
-        sms.status = "failed"
-        db.add(
-            SmsEvent(
-                sms_id=sms.id,
-                organization_id=sms.organization_id,
-                kind="state_change",
-                payload={"from": "queued", "to": "failed", "reason": "provider_error"},
-            )
-        )
-        await db.commit()
+    # Provider send — best-effort with status reconciliation.
+    err = await deliver_sms(db, provider, sms)
+    if err == "provider_error":
         raise await cache_failure(
             idem,
             HTTPException(
                 status_code=http_status.HTTP_502_BAD_GATEWAY,
                 detail=_SMS_SEND_FAILED_DETAIL,
             ),
-        ) from exc
-
-    # A carrier rejection surfaces via error_code AND/OR a failure status
-    # (base.ProviderSmsResult contract: "status reflecting the failure").
-    # Check both so a provider that reports failure by status alone isn't
-    # recorded as sent and billed.
-    carrier_rejected = result.error_code is not None or result.status.lower() in {
-        "failed",
-        "undelivered",
-    }
-    new_status = "failed" if carrier_rejected else "sent"
-    sms.status = new_status
-    sms.provider_message_sid = result.provider_message_sid
-    sms.segment_count = result.segment_count
-    sms.error_code = result.error_code
-    # ``sent_at`` means "the carrier accepted the message" — a rejected
-    # send keeps it NULL, matching emails (sent_at only with status='sent')
-    # and this route's own transport-failure branch above.
-    if not carrier_rejected:
-        sms.sent_at = datetime.now(timezone.utc)
-    event_payload: dict[str, Any] = {"from": "queued", "to": new_status}
-    if carrier_rejected:
-        event_payload["error_code"] = result.error_code
-    db.add(
-        SmsEvent(
-            sms_id=sms.id,
-            organization_id=sms.organization_id,
-            kind="state_change",
-            payload=event_payload,
         )
-    )
-    await db.commit()
-
-    if not carrier_rejected:
-        await write_usage_event(
-            organization_id=principal.organization_id,
-            channel="sms",
-            units=sms.segment_count,
-            ref=f"sms:{sms.id}",
-        )
+    # carrier rejection: row already reconciled to failed; fall through and
+    # return the SmsResponse exactly as before.
 
     response.headers["Location"] = f"/sms/{sms.id}"
     sms_response = SmsResponse.model_validate(sms)
@@ -317,6 +382,61 @@ async def delete_sms_suppression(
     await db.commit()
 
 
+@router.get("/sender-id", response_model=SenderIdResponse)
+async def get_sender_id(
+    principal: Annotated[Principal, Depends(get_current_principal)],
+    db: Annotated[AsyncSession, Depends(get_session)],
+) -> SenderIdResponse:
+    stmt = select(SmsSenderIdentity).where(
+        SmsSenderIdentity.organization_id == principal.organization_id
+    )
+    row = (await db.execute(stmt)).scalar_one_or_none()
+    return SenderIdResponse(
+        custom_sender_id=row.custom_sender_id if row else None,
+        effective_default=PLATFORM_DEFAULT_SENDER_ID,
+    )
+
+
+@router.patch("/sender-id", response_model=SenderIdResponse)
+async def patch_sender_id(
+    body: SenderIdPatch,
+    principal: Annotated[Principal, Depends(get_current_principal)],
+    db: Annotated[AsyncSession, Depends(get_session)],
+) -> SenderIdResponse:
+    if body.custom_sender_id is None:
+        # Clear: unconditional delete (a no-op when no row exists), so there is
+        # no read-then-delete window.
+        await db.execute(
+            delete(SmsSenderIdentity).where(
+                SmsSenderIdentity.organization_id == principal.organization_id
+            )
+        )
+        await db.commit()
+        return SenderIdResponse(
+            custom_sender_id=None, effective_default=PLATFORM_DEFAULT_SENDER_ID
+        )
+
+    # Set: atomic upsert keyed on the org PK, so two concurrent first-writes
+    # can't both INSERT and 500 on a duplicate-key IntegrityError (one round
+    # trip instead of SELECT-then-INSERT/UPDATE).
+    await db.execute(
+        pg_insert(SmsSenderIdentity)
+        .values(
+            organization_id=principal.organization_id,
+            custom_sender_id=body.custom_sender_id,
+        )
+        .on_conflict_do_update(
+            index_elements=["organization_id"],
+            set_={"custom_sender_id": body.custom_sender_id, "updated_at": func.now()},
+        )
+    )
+    await db.commit()
+    return SenderIdResponse(
+        custom_sender_id=body.custom_sender_id,
+        effective_default=PLATFORM_DEFAULT_SENDER_ID,
+    )
+
+
 @router.get("/{sms_id}", response_model=SmsResponse)
 async def get_sms(
     sms_id: UUID,
@@ -358,4 +478,4 @@ async def list_sms(
     )
 
 
-__all__ = ["router", "get_sms_provider"]
+__all__ = ["router", "get_sms_provider", "deliver_sms"]

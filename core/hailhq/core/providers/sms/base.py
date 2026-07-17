@@ -13,6 +13,7 @@ that's a later phase's concern, not this interface's.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from uuid import UUID
 
 from pydantic import BaseModel
 
@@ -45,3 +46,17 @@ class SmsProvider(ABC):
         as a ``ProviderSmsResult`` with ``error_code`` populated and
         ``status`` reflecting the failure.
         """
+
+    @abstractmethod
+    async def ensure_messaging_service(
+        self, organization_id: UUID, existing_sid: str | None
+    ) -> str:
+        """Return a Messaging Service SID for this org — the existing one
+        if provided, otherwise create a new one and return its SID."""
+
+    @abstractmethod
+    async def attach_number(
+        self, messaging_service_sid: str, provider_resource_id: str
+    ) -> None:
+        """Attach a purchased phone number (by its Twilio SID) to a
+        Messaging Service's sender pool."""

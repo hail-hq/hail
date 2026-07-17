@@ -103,6 +103,7 @@ class HailClient:
         from_: str | None = None,
         first_message: str | None = None,
         metadata: dict[str, Any] | None = None,
+        tools: list[str] | None = None,
         idempotency_key: str | None = None,
         consent_source: str | None = None,
         consent_obtained_at: str | None = None,
@@ -130,6 +131,8 @@ class HailClient:
             fields["first_message"] = first_message
         if metadata is not None:
             fields["metadata"] = metadata
+        if tools is not None:
+            fields["tools"] = tools
         if consent_source is not None:
             fields["consent_source"] = consent_source
         if consent_obtained_at is not None:
@@ -318,6 +321,7 @@ class HailClient:
         consent_source: str | None = None,
         consent_obtained_at: str | None = None,
         message_type: str = "informational",
+        attachment_ids: list[str] | None = None,
     ) -> dict[str, Any]:
         """POST /emails — send an outbound message.
 
@@ -349,6 +353,8 @@ class HailClient:
             fields["consent_source"] = consent_source
         if consent_obtained_at is not None:
             fields["consent_obtained_at"] = consent_obtained_at
+        if attachment_ids:
+            fields["attachment_ids"] = list(attachment_ids)
 
         body = EmailCreate.model_validate(fields).model_dump(
             mode="json", by_alias=True, exclude_unset=True
@@ -356,6 +362,25 @@ class HailClient:
         headers = {"Idempotency-Key": idempotency_key or str(uuid.uuid4())}
         resp = await self._client.post("/emails", json=body, headers=headers)
         return EmailResponse.model_validate(_decode(resp)).model_dump(mode="json")
+
+    # ------------------------------------------------------------------ #
+    # POST /email-attachments
+    # ------------------------------------------------------------------ #
+
+    async def upload_email_attachment(
+        self, *, filename: str, content: bytes, content_type: str
+    ) -> dict[str, Any]:
+        """POST /email-attachments — upload a file for outbound attachment.
+
+        Returns ``{"id": ..., "filename": ..., "content_type": ...,
+        "size_bytes": ...}``; the ``id`` is reusable via
+        ``send_email(attachment_ids=[...])``.
+        """
+        resp = await self._client.post(
+            "/email-attachments",
+            files={"file": (filename, content, content_type)},
+        )
+        return _decode(resp)
 
     # ------------------------------------------------------------------ #
     # GET /emails/{id}

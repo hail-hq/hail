@@ -10,7 +10,11 @@ import pytest
 import respx
 
 from hail import Client, HailNotFoundError
-from tests.conftest import make_sms_response, make_suppression_response
+from tests.conftest import (
+    make_sender_id_response,
+    make_sms_response,
+    make_suppression_response,
+)
 
 # --------------------------------------------------------------------------- #
 # sms.create
@@ -215,3 +219,70 @@ async def test_sms_delete_suppression_not_found_raises(
         with pytest.raises(HailNotFoundError) as exc:
             await c.sms.delete_suppression("+15555550123")
     assert "suppression not found" in str(exc.value)
+
+
+# --------------------------------------------------------------------------- #
+# sms.sender_id.get / set
+# --------------------------------------------------------------------------- #
+
+
+@respx.mock
+async def test_sms_sender_id_get(base_url: str, api_key: str) -> None:
+    payload = make_sender_id_response(custom_sender_id="ACME")
+    route = respx.get(f"{base_url}/sms/sender-id").mock(
+        return_value=httpx.Response(200, json=payload)
+    )
+    async with Client(api_key=api_key, base_url=base_url) as c:
+        result = await c.sms.sender_id.get()
+    assert result.custom_sender_id == "ACME"
+    assert result.effective_default == "HAIL"
+    assert route.calls.last.request.headers["Authorization"] == f"Bearer {api_key}"
+
+
+@respx.mock
+async def test_sms_sender_id_get_none_when_unset(base_url: str, api_key: str) -> None:
+    route = respx.get(f"{base_url}/sms/sender-id").mock(
+        return_value=httpx.Response(200, json=make_sender_id_response())
+    )
+    async with Client(api_key=api_key, base_url=base_url) as c:
+        result = await c.sms.sender_id.get()
+    assert result.custom_sender_id is None
+    assert route.called
+
+
+@respx.mock
+async def test_sms_sender_id_set_value(base_url: str, api_key: str) -> None:
+    payload = make_sender_id_response(custom_sender_id="ACME")
+    route = respx.patch(f"{base_url}/sms/sender-id").mock(
+        return_value=httpx.Response(200, json=payload)
+    )
+    async with Client(api_key=api_key, base_url=base_url) as c:
+        result = await c.sms.sender_id.set("ACME")
+    assert result.custom_sender_id == "ACME"
+    body = json.loads(route.calls.last.request.content)
+    assert body == {"custom_sender_id": "ACME"}
+
+
+@respx.mock
+async def test_sms_sender_id_set_none_clears(base_url: str, api_key: str) -> None:
+    route = respx.patch(f"{base_url}/sms/sender-id").mock(
+        return_value=httpx.Response(200, json=make_sender_id_response())
+    )
+    async with Client(api_key=api_key, base_url=base_url) as c:
+        result = await c.sms.sender_id.set(None)
+    assert result.custom_sender_id is None
+    body = json.loads(route.calls.last.request.content)
+    assert body == {"custom_sender_id": None}
+
+
+@respx.mock
+async def test_sms_sender_id_set_empty_string_clears(
+    base_url: str, api_key: str
+) -> None:
+    route = respx.patch(f"{base_url}/sms/sender-id").mock(
+        return_value=httpx.Response(200, json=make_sender_id_response())
+    )
+    async with Client(api_key=api_key, base_url=base_url) as c:
+        await c.sms.sender_id.set("")
+    body = json.loads(route.calls.last.request.content)
+    assert body == {"custom_sender_id": None}

@@ -32,10 +32,11 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from hailhq.core.agent_caps import agent_outbound_halted
 from hailhq.core.email_delivery_events import record_sent_event
 from hailhq.core.models import Email, EmailAttachment
 from hailhq.core.providers.email.base import EmailProvider, ProviderAttachment
-from hailhq.core.s3_inbound import S3InboundClient
+from hailhq.core.s3_mail import S3MailClient
 
 logger = logging.getLogger(__name__)
 
@@ -70,7 +71,7 @@ class OutboundForwardWorker:
         *,
         session_factory: SessionFactory,
         provider_factory: Callable[[], EmailProvider],
-        s3_factory: Callable[[], S3InboundClient],
+        s3_factory: Callable[[], S3MailClient],
         usage_callback: UsageCallback | None = None,
         poll_interval: float = 1.0,
     ) -> None:
@@ -79,7 +80,7 @@ class OutboundForwardWorker:
         self._s3_factory = s3_factory
         self._usage_callback = usage_callback
         self._provider: EmailProvider | None = None
-        self._s3: S3InboundClient | None = None
+        self._s3: S3MailClient | None = None
         self._poll_interval = poll_interval
         self._stop = asyncio.Event()
 
@@ -88,7 +89,7 @@ class OutboundForwardWorker:
             self._provider = self._provider_factory()
         return self._provider
 
-    def _get_s3(self) -> S3InboundClient:
+    def _get_s3(self) -> S3MailClient:
         if self._s3 is None:
             self._s3 = self._s3_factory()
         return self._s3
@@ -195,6 +196,19 @@ class OutboundForwardWorker:
             row.end_reason = type(exc).__name__
             row.failed_at = now
             return "failed"
+
+        # Emergency kill switch covers forwarded mail too: an agent-origin org
+        # whose outbound is disabled must not relay forwards on shared sender
+        # domains. Defer (leave queued) rather than fail — forwards resume when
+        # an operator clears the switch. (Per-workspace velocity caps do NOT
+        # apply here: a forward is inbound-triggered, not agent-initiated.)
+        if await agent_outbound_halted(session, row.organization_id):
+            logger.info(
+                "agent outbound kill switch on; deferring forward email_id=%s org=%s",
+                row.id,
+                row.organization_id,
+            )
+            return "deferred"
 
         try:
             attachments = await self._load_attachments(session, inbound_uuid)

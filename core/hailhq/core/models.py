@@ -55,14 +55,23 @@ class OrganizationMember(Base):
 
 
 class User(Base):
-    """Better-auth's users table (owned by hail-website). Mapped read-mostly;
-    the ONLY column this codebase writes is phone_number."""
+    """Read-only mirror of the website's ``users`` table (better-auth).
+
+    Same posture as :class:`OrganizationMember`: the website owns the
+    schema; hail only reads it. Columns verified 2026-07-11 against
+    hail-website's better-auth migrations (users: id / name / email /
+    email_verified / image / timestamps); only the columns hail reads
+    are mapped. ``phone_number`` is the one exception — it's the only
+    column this codebase writes (migration 0035), named for a
+    migration-free upgrade to better-auth's phone-number plugin.
+    """
 
     __tablename__ = "users"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
     name: Mapped[str] = mapped_column(Text, nullable=False)
     email: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(TS, nullable=False)
     phone_number: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
@@ -178,6 +187,13 @@ class UsageEvent(Base):
     to ``account_credits``, then stamps ``priced_at`` here. Self-host
     operators never run the rater — this table accumulates as a raw
     analytics primitive they can query directly.
+
+    ``ref`` formats (the rater's parsing contract):
+      * voice: bare call UUID
+      * sms:   ``sms:{uuid}:{tier}`` where tier is us/ca/row
+               (rows written before the tiered rates shipped are bare
+               ``sms:{uuid}``; the rater must treat those as ``us``)
+      * email: ``email:{uuid}``; forwards use ``email-forward:{id}``
     """
 
     __tablename__ = "usage_events"
@@ -366,6 +382,7 @@ class PhoneNumber(Base):
     provisioning_metadata: Mapped[dict] = mapped_column(
         JSONB, server_default=text("'{}'::jsonb"), nullable=False
     )
+    messaging_service_sid: Mapped[str | None] = mapped_column(Text, nullable=True)
     acquired_at: Mapped[datetime | None] = mapped_column(TS, nullable=True)
     released_at: Mapped[datetime | None] = mapped_column(TS, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
@@ -410,6 +427,16 @@ class PhoneNumber(Base):
             name="phone_numbers_pool_owner_xor",
         ),
     )
+
+    @property
+    def is_dedicated(self) -> bool:
+        """A dedicated number is org-owned — the inverse of a shared pool number.
+
+        Exposed under this friendlier name for API responses; reading it (rather
+        than an inverting alias on the schema) keeps ``PhoneNumberResponse``
+        round-trippable through ``model_dump``/``model_validate``.
+        """
+        return not self.is_pool
 
 
 class Conversation(Base):
@@ -614,6 +641,26 @@ class SmsEvent(Base):
             "occurred_at",
             "kind",
         ),
+    )
+
+
+class SmsSenderIdentity(Base):
+    """One row per org with a custom Sender ID set — absence of a row
+    means the org uses the platform default ("HAIL"). Keyed by
+    organization_id with no FK, matching OrgClosure's convention (hail's
+    DB doesn't own the Organization table)."""
+
+    __tablename__ = "sms_sender_identities"
+
+    organization_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True
+    )
+    custom_sender_id: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        TS, server_default=text("now()"), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        TS, server_default=text("now()"), nullable=False
     )
 
 
@@ -996,6 +1043,50 @@ class EmailAttachment(Base):
     )
 
 
+class EmailAttachmentUpload(Base):
+    """A caller-uploaded file, pre-send, awaiting reference from a `send`.
+
+    Distinct from ``EmailAttachment`` (which is always 1:1 with an
+    already-received inbound email, created once at ingest, never reused).
+    This row is org-owned, reusable across many outbound sends until
+    referenced or garbage-collected — see
+    ``hailhq.core.email_attachment_gc.EmailAttachmentGcWorker``, which
+    deletes rows where ``first_used_at`` is still null 24h after upload.
+    Rows that have been used at least once are kept indefinitely.
+    """
+
+    __tablename__ = "email_attachment_uploads"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        server_default=text("gen_random_uuid()"),
+    )
+    organization_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), nullable=False
+    )
+    filename: Mapped[str] = mapped_column(Text, nullable=False)
+    content_type: Mapped[str] = mapped_column(Text, nullable=False)
+    size_bytes: Mapped[int] = mapped_column(Integer, nullable=False)
+    s3_key: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        TS, server_default=text("now()"), nullable=False
+    )
+    first_used_at: Mapped[datetime | None] = mapped_column(TS, nullable=True)
+
+    __table_args__ = (
+        Index(
+            "email_attachment_uploads_gc_idx",
+            "created_at",
+            postgresql_where=text("first_used_at IS NULL"),
+        ),
+        Index(
+            "email_attachment_uploads_org_idx",
+            "organization_id",
+        ),
+    )
+
+
 class AuditLog(Base):
     __tablename__ = "audit_log"
 
@@ -1180,4 +1271,64 @@ class OrgProviderConfig(Base):
             postgresql_where=text("is_active"),
         ),
         Index("org_provider_config_org_idx", "organization_id"),
+    )
+
+
+class Organization(Base):
+    """Read-only mapping of the website-owned ``organizations`` table.
+
+    hail-website's better-auth migrations own the schema (same posture as
+    ``members``/``OrganizationMember``); hail/api only reads ``origin`` to
+    decide whether agent velocity caps apply. Never written from Python.
+    """
+
+    __tablename__ = "organizations"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    origin: Mapped[str] = mapped_column(Text, nullable=False, server_default="human")
+
+
+class AgentSendLog(Base):
+    """One row per allowed agent-origin send attempt — the counter behind
+    the velocity caps in agent_caps.py. Written by the gate itself at
+    check time (counts attempts, uniform across channels)."""
+
+    __tablename__ = "agent_send_log"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    organization_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), nullable=False
+    )
+    channel: Mapped[str] = mapped_column(
+        Text, nullable=False
+    )  # 'email' | 'sms' | 'voice'
+    recipient: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        TS, nullable=False, server_default=text("now()")
+    )
+
+    __table_args__ = (
+        Index(
+            "agent_send_log_org_channel_created_idx",
+            "organization_id",
+            "channel",
+            "created_at",
+        ),
+        Index("agent_send_log_channel_created_idx", "channel", "created_at"),
+    )
+
+
+class PlatformFlag(Base):
+    """Platform-wide runtime flags. v1 has exactly one consumer:
+    ``agent_outbound_disabled`` — the agent-traffic kill switch
+    (see agent_caps.py). Toggled via psql; see docs runbook."""
+
+    __tablename__ = "platform_flags"
+
+    key: Mapped[str] = mapped_column(Text, primary_key=True)
+    value: Mapped[str] = mapped_column(Text, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        TS, nullable=False, server_default=text("now()")
     )

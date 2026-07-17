@@ -8,6 +8,7 @@ Same sync-SDK-wrapped-in-``asyncio.to_thread`` approach as
 from __future__ import annotations
 
 import asyncio
+from uuid import UUID
 
 from twilio.base.exceptions import TwilioRestException
 from twilio.rest import Client as TwilioClient
@@ -73,4 +74,25 @@ class TwilioSmsProvider(SmsProvider):
             status=message.status,
             segment_count=segment_count,
             error_code=error_code,
+        )
+
+    async def ensure_messaging_service(
+        self, organization_id: UUID, existing_sid: str | None
+    ) -> str:
+        if existing_sid is not None:
+            return existing_sid
+        service = await asyncio.to_thread(
+            self._client.messaging.v1.services.create,
+            friendly_name=f"hail-org-{organization_id}",
+        )
+        return service.sid
+
+    async def attach_number(
+        self, messaging_service_sid: str, provider_resource_id: str
+    ) -> None:
+        await asyncio.to_thread(
+            self._client.messaging.v1.services(
+                messaging_service_sid
+            ).phone_numbers.create,
+            phone_number_sid=provider_resource_id,
         )

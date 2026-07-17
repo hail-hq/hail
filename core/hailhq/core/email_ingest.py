@@ -34,7 +34,7 @@ from hailhq.core.email_routing import classify_hail_mail_recipient
 from hailhq.core.forward_limiter import ForwardLimiter
 from hailhq.core.models import Email, EmailAttachment, EmailDomain
 from hailhq.core.providers.email.inbound.base import InboundMessage
-from hailhq.core.s3_inbound import S3InboundClient
+from hailhq.core.s3_mail import S3MailClient
 from hailhq.core.urls import join_url
 from hailhq.core.webhook_fanout import build_event_data
 
@@ -114,7 +114,7 @@ async def _persist_attachments(
     *,
     email_id: UUID,
     attachments: list[ParsedAttachment],
-    s3: S3InboundClient,
+    s3: S3MailClient,
 ) -> None:
     for parsed in attachments:
         att_id = uuid4()
@@ -179,7 +179,7 @@ async def _persist_one(
     message: InboundMessage,
     domain: EmailDomain,
     suppress: str | None,
-    s3: S3InboundClient,
+    s3: S3MailClient,
 ) -> tuple[UUID | None, bool]:
     """Persist one inbound Email row; returns ``(email_id, created)``.
 
@@ -378,7 +378,7 @@ async def ingest_inbound(
     db: AsyncSession,
     *,
     message: InboundMessage,
-    s3: S3InboundClient,
+    s3: S3MailClient,
     hail_mail_base_domain: str,
     forward_enqueue: ForwardEnqueue | None = None,
     forward_max_hops: int = 3,

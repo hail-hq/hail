@@ -22,10 +22,17 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from hailhq.api.audit import write_audit_log
 from hailhq.api.consent import enforce_consent, isoformat_or_none
 from hailhq.api.errors import unprocessable
+from hailhq.api.agent_gate import (
+    RATE_LIMITED_RESPONSES,
+    require_agent_send_allowed,
+)
 from hailhq.api.funds import require_funds
+from hailhq.core.agent_tools.registry import all_tools
+from hailhq.core.billing import CALL_META_BILLED
 from hailhq.core.call_end_reasons import CallEndReason
 from hailhq.core.compliance_gate import check_call_allowed
 from hailhq.core.db import get_session
+from hailhq.core.internal_webhook import fetch_organization_name
 from hailhq.api.deps import Principal, get_current_principal
 from hailhq.api.pagination import fetch_cursor_page
 from hailhq.api.idempotency import (
@@ -139,6 +146,7 @@ async def _cleanup_partial_livekit(
     "",
     response_model=CallResponse,
     status_code=http_status.HTTP_201_CREATED,
+    responses=RATE_LIMITED_RESPONSES,
 )
 async def create_call(
     body: CallCreate,
@@ -196,6 +204,20 @@ async def create_call(
     except HTTPException as exc:
         raise await cache_failure(idem, exc) from None
 
+    # Tool allowlist gate — reject unknown tool names before any Call row is
+    # created. `None` (omitted) means "all tools"; `[]` means "no tools" and
+    # is passed through as-is below.
+    if body.tools is not None:
+        known = {t.name for t in all_tools()}
+        unknown = sorted(set(body.tools) - known)
+        if unknown:
+            raise await cache_failure(
+                idem,
+                unprocessable(
+                    f"unknown tools: {', '.join(unknown)}", loc=["body", "tools"]
+                ),
+            )
+
     # Compliance gate — suppression/DNC, premium-rate prefix, velocity cap.
     # Also before any Call row is created, so a denial has no resource to
     # clean up; the audit entry below carries resource_id=None.
@@ -218,6 +240,7 @@ async def create_call(
         )
 
     await require_funds(db, principal, idem)
+    await require_agent_send_allowed(db, principal, "voice", [body.to], idem)
 
     # 1. Resolve the from-number: explicit `from` → org-owned active → shared
     #    pool. Pool numbers are never explicitly addressable; naming one would
@@ -258,6 +281,7 @@ async def create_call(
     call_metadata = dict(body.metadata)
     if pool_number is not None:
         call_metadata[CALL_META_FROM_POOL] = True
+    call_metadata[CALL_META_BILLED] = principal.api_key_id is not None
 
     call = Call(
         organization_id=principal.organization_id,
@@ -298,6 +322,17 @@ async def create_call(
         },
     )
 
+    # Resolve the org's display name for the spoken TCPA identity
+    # disclosure (47 CFR 64.1200(b)(1)). Fail-safe: any lookup failure →
+    # None → the voicebot speaks the generic fallback line instead. Run as
+    # a task so the up-to-1s lookup overlaps the LiveKit room creation
+    # below (only the dispatch metadata needs the result) instead of
+    # adding its latency serially; the task never raises, so an abandoned
+    # result on the failure path is inert.
+    org_name_task = asyncio.create_task(
+        fetch_organization_name(str(call.organization_id))
+    )
+
     # 4. External calls — best-effort with status reconciliation.
     room_name: str | None = None
     dispatch_id: str | None = None
@@ -332,6 +367,8 @@ async def create_call(
                 "system_prompt": body.system_prompt,
                 "llm": llm_meta,
                 "first_message": body.first_message,
+                "tools": body.tools,
+                "org_name": await org_name_task,
             },
         )
         setup_stage = "sip_participant"

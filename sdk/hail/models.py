@@ -207,6 +207,51 @@ class SuppressionListResponse(BaseModel):
     next_cursor: str | None = None
 
 
+# --------------------------------------------------------------------------- #
+# Number + sender-id models — mirror hailhq.core.schemas. A dedicated
+# PhoneNumber is cross-channel (voice + SMS); sender-id is the org's custom
+# alphanumeric "from" label for SMS.
+# --------------------------------------------------------------------------- #
+
+
+class PhoneNumberResponse(BaseModel):
+    """Shape returned by the ``/numbers`` endpoints.
+
+    ``is_dedicated`` is the server-side inversion of the internal ``is_pool``
+    flag: dedicated numbers belong to one org, pool numbers are shared.
+    ``capabilities`` are fixed by the carrier at purchase time.
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    e164: str
+    country_code: str
+    number_type: str
+    capabilities: list[str]
+    provisioning_state: str
+    is_dedicated: bool
+    messaging_service_sid: str | None = None
+
+
+class PhoneNumberListResponse(BaseModel):
+    items: list[PhoneNumberResponse]
+    next_cursor: str | None = None
+
+
+class SenderIdResponse(BaseModel):
+    """Shape returned by ``GET`` / ``PATCH /sms/sender-id``.
+
+    ``custom_sender_id`` is null when the org hasn't set one;
+    ``effective_default`` is the platform fallback used in that case.
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    custom_sender_id: str | None = None
+    effective_default: str = "HAIL"
+
+
 class CallEventResponse(BaseModel):
     """One event on the unified ``GET /events`` stream (mirrors the API's
     ``EventResponse``). The name predates the unified stream — it carries
@@ -285,6 +330,7 @@ class EmailCreate(BaseModel):
     body_html: str | None = None
     conversation_id: UUID | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
+    attachment_ids: list[UUID] | None = None
     recipient_consent: bool
     consent_source: str | None = None
     consent_obtained_at: datetime | None = None
@@ -365,6 +411,23 @@ class EmailAttachmentResponse(BaseModel):
     size_bytes: int
     content_id: str | None = None
     url: str
+
+
+class EmailAttachmentUploadResponse(BaseModel):
+    """Returned by ``client.email_attachments.create(...)``.
+
+    Mirrors ``core/hailhq/core/schemas.py:EmailAttachmentUploadResponse``.
+    The returned ``id`` is reusable across many
+    ``emails.create(attachment_ids=...)`` calls until Hail garbage-collects
+    it (24h if never referenced by a send).
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    filename: str
+    content_type: str
+    size_bytes: int
 
 
 class EmailResponse(EmailSummary):
@@ -583,8 +646,12 @@ __all__ = [
     "SmsListResponse",
     "SuppressionResponse",
     "SuppressionListResponse",
+    "PhoneNumberResponse",
+    "PhoneNumberListResponse",
+    "SenderIdResponse",
     "EmailCreate",
     "EmailAttachmentResponse",
+    "EmailAttachmentUploadResponse",
     "EmailResponse",
     "EmailSummary",
     "EmailListResponse",

@@ -116,8 +116,15 @@ jobs:
             # transaction pooling, which rejects libpq PGOPTIONS at startup).
             echo "=== current schema revision ==="
             $COMPOSE run --rm api alembic current
-            echo "=== migrations to apply (dry-print) ==="
-            $COMPOSE run --rm api alembic upgrade head --sql | head -200 || true
+            # Best-effort preview: --sql runs in Alembic's offline mode, which
+            # has no live DB connection. Any migration with a runtime
+            # data-dependent guard (a real SELECT via op.get_bind()) throws
+            # there and aborts the preview early — expected, not a deploy
+            # failure. Stderr is folded into the same pipe as stdout so that
+            # a traceback gets bounded by head -200 like normal output does,
+            # instead of dumping unbounded into the log.
+            echo "=== migrations to apply (dry-print, best-effort) ==="
+            $COMPOSE run --rm api alembic upgrade head --sql 2>&1 | head -200 || true
             echo "=== applying ==="
             $COMPOSE run --rm api alembic upgrade head
 

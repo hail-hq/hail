@@ -19,9 +19,10 @@ export interface CategorySectionProps<T> {
   data: T[];
   columns: ColumnDef<T>[];
   defaultSort?: { id: string; desc: boolean };
+  noun?: string;
 }
 
-export function CategorySection<T extends { provider: string }>({
+export function CategorySection<T>({
   id,
   num,
   title,
@@ -30,6 +31,7 @@ export function CategorySection<T extends { provider: string }>({
   data,
   columns,
   defaultSort,
+  noun = 'model',
 }: CategorySectionProps<T>) {
   const [sorting, setSorting] = useState<SortingState>(defaultSort ? [defaultSort] : []);
 
@@ -49,7 +51,7 @@ export function CategorySection<T extends { provider: string }>({
           <span className="num">{num}</span>
           <h2>{title}</h2>
           <span className="count">
-            {count} {count === 1 ? 'model' : 'models'} · {rangeLabel}
+            {count} {count === 1 ? noun : `${noun}s`} · {rangeLabel}
           </span>
         </div>
 
