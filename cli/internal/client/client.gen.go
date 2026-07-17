@@ -93,6 +93,24 @@ func (e CallResponseStatus) Valid() bool {
 	}
 }
 
+// Defines values for ContactEntryKind.
+const (
+	Manual ContactEntryKind = "manual"
+	Member ContactEntryKind = "member"
+)
+
+// Valid indicates whether the value is a known member of the ContactEntryKind enum.
+func (e ContactEntryKind) Valid() bool {
+	switch e {
+	case Manual:
+		return true
+	case Member:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for DnsRecordSchemaType.
 const (
 	CNAME DnsRecordSchemaType = "CNAME"
@@ -834,6 +852,41 @@ type CallResponseDirection string
 // CallResponseStatus defines model for CallResponse.Status.
 type CallResponseStatus string
 
+// ContactCreate defines model for ContactCreate.
+type ContactCreate struct {
+	Email     *string `json:"email,omitempty"`
+	Name      string  `json:"name"`
+	PhoneE164 *string `json:"phone_e164,omitempty"`
+}
+
+// ContactEntry One row in the computed contacts union — an org member or a manual
+// contact. “id“ is “member:<user_id>“ for members, the contact row's
+// UUID (as str) for manual rows.
+type ContactEntry struct {
+	Email     *string          `json:"email,omitempty"`
+	Id        string           `json:"id"`
+	Kind      ContactEntryKind `json:"kind"`
+	Name      string           `json:"name"`
+	PhoneE164 *string          `json:"phone_e164,omitempty"`
+	Role      *string          `json:"role,omitempty"`
+}
+
+// ContactEntryKind defines model for ContactEntry.Kind.
+type ContactEntryKind string
+
+// ContactListResponse defines model for ContactListResponse.
+type ContactListResponse struct {
+	Items      []ContactEntry `json:"items"`
+	NextCursor *string        `json:"next_cursor,omitempty"`
+}
+
+// ContactPatch defines model for ContactPatch.
+type ContactPatch struct {
+	Email     *string `json:"email,omitempty"`
+	Name      *string `json:"name,omitempty"`
+	PhoneE164 *string `json:"phone_e164,omitempty"`
+}
+
 // DnsRecordSchema One DNS record the tenant must publish for a sending domain.
 //
 // Covers DKIM CNAMEs, MAIL FROM MX, and SPF TXT records.
@@ -1183,6 +1236,11 @@ type LLMConfig struct {
 	Model   string `json:"model"`
 }
 
+// MemberPhonePut defines model for MemberPhonePut.
+type MemberPhonePut struct {
+	PhoneE164 string `json:"phone_e164"`
+}
+
 // NumberAcquireRequest defines model for NumberAcquireRequest.
 type NumberAcquireRequest struct {
 	CountryCode string                          `json:"country_code"`
@@ -1414,6 +1472,29 @@ type GetCallCallsCallIdGetParams struct {
 	Authorization *string `json:"authorization,omitempty"`
 }
 
+// ListContactsContactsGetParams defines parameters for ListContactsContactsGet.
+type ListContactsContactsGetParams struct {
+	Q             *string `form:"q,omitempty" json:"q,omitempty"`
+	Cursor        *string `form:"cursor,omitempty" json:"cursor,omitempty"`
+	Limit         *int    `form:"limit,omitempty" json:"limit,omitempty"`
+	Authorization *string `json:"authorization,omitempty"`
+}
+
+// CreateContactContactsPostParams defines parameters for CreateContactContactsPost.
+type CreateContactContactsPostParams struct {
+	Authorization *string `json:"authorization,omitempty"`
+}
+
+// DeleteContactContactsContactIdDeleteParams defines parameters for DeleteContactContactsContactIdDelete.
+type DeleteContactContactsContactIdDeleteParams struct {
+	Authorization *string `json:"authorization,omitempty"`
+}
+
+// PatchContactContactsContactIdPatchParams defines parameters for PatchContactContactsContactIdPatch.
+type PatchContactContactsContactIdPatchParams struct {
+	Authorization *string `json:"authorization,omitempty"`
+}
+
 // UploadEmailAttachmentParams defines parameters for UploadEmailAttachment.
 type UploadEmailAttachmentParams struct {
 	Authorization *string `json:"authorization,omitempty"`
@@ -1517,6 +1598,16 @@ type ListEventsEventsGetParams struct {
 	Limit         *int    `form:"limit,omitempty" json:"limit,omitempty"`
 	Id            *string `form:"id,omitempty" json:"id,omitempty"`
 	Kind          *string `form:"kind,omitempty" json:"kind,omitempty"`
+	Authorization *string `json:"authorization,omitempty"`
+}
+
+// DeleteMemberPhoneMembersUserIdPhoneDeleteParams defines parameters for DeleteMemberPhoneMembersUserIdPhoneDelete.
+type DeleteMemberPhoneMembersUserIdPhoneDeleteParams struct {
+	Authorization *string `json:"authorization,omitempty"`
+}
+
+// PutMemberPhoneMembersUserIdPhonePutParams defines parameters for PutMemberPhoneMembersUserIdPhonePut.
+type PutMemberPhoneMembersUserIdPhonePutParams struct {
 	Authorization *string `json:"authorization,omitempty"`
 }
 
@@ -1640,6 +1731,12 @@ type RotateSecretWebhooksSubIdRotateSecretPostParams struct {
 // CreateCallCallsPostJSONRequestBody defines body for CreateCallCallsPost for application/json ContentType.
 type CreateCallCallsPostJSONRequestBody = CallCreate
 
+// CreateContactContactsPostJSONRequestBody defines body for CreateContactContactsPost for application/json ContentType.
+type CreateContactContactsPostJSONRequestBody = ContactCreate
+
+// PatchContactContactsContactIdPatchJSONRequestBody defines body for PatchContactContactsContactIdPatch for application/json ContentType.
+type PatchContactContactsContactIdPatchJSONRequestBody = ContactPatch
+
 // UploadEmailAttachmentMultipartRequestBody defines body for UploadEmailAttachment for multipart/form-data ContentType.
 type UploadEmailAttachmentMultipartRequestBody = BodyUploadEmailAttachment
 
@@ -1651,6 +1748,9 @@ type PatchEmailDomainEmailDomainsDomainIdPatchJSONRequestBody = EmailDomainPatch
 
 // CreateEmailEmailsPostJSONRequestBody defines body for CreateEmailEmailsPost for application/json ContentType.
 type CreateEmailEmailsPostJSONRequestBody = EmailCreate
+
+// PutMemberPhoneMembersUserIdPhonePutJSONRequestBody defines body for PutMemberPhoneMembersUserIdPhonePut for application/json ContentType.
+type PutMemberPhoneMembersUserIdPhonePutJSONRequestBody = MemberPhonePut
 
 // AcquireNumberNumbersPostJSONRequestBody defines body for AcquireNumberNumbersPost for application/json ContentType.
 type AcquireNumberNumbersPostJSONRequestBody = NumberAcquireRequest
@@ -1922,6 +2022,22 @@ type ClientInterface interface {
 	// GetCallCallsCallIdGet request
 	GetCallCallsCallIdGet(ctx context.Context, callId openapi_types.UUID, params *GetCallCallsCallIdGetParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
+	// ListContactsContactsGet request
+	ListContactsContactsGet(ctx context.Context, params *ListContactsContactsGetParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// CreateContactContactsPostWithBody request with any body
+	CreateContactContactsPostWithBody(ctx context.Context, params *CreateContactContactsPostParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	CreateContactContactsPost(ctx context.Context, params *CreateContactContactsPostParams, body CreateContactContactsPostJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// DeleteContactContactsContactIdDelete request
+	DeleteContactContactsContactIdDelete(ctx context.Context, contactId string, params *DeleteContactContactsContactIdDeleteParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// PatchContactContactsContactIdPatchWithBody request with any body
+	PatchContactContactsContactIdPatchWithBody(ctx context.Context, contactId string, params *PatchContactContactsContactIdPatchParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	PatchContactContactsContactIdPatch(ctx context.Context, contactId string, params *PatchContactContactsContactIdPatchParams, body PatchContactContactsContactIdPatchJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
 	// UploadEmailAttachmentWithBody request with any body
 	UploadEmailAttachmentWithBody(ctx context.Context, params *UploadEmailAttachmentParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
 
@@ -1978,6 +2094,14 @@ type ClientInterface interface {
 
 	// HealthzHealthzGet request
 	HealthzHealthzGet(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// DeleteMemberPhoneMembersUserIdPhoneDelete request
+	DeleteMemberPhoneMembersUserIdPhoneDelete(ctx context.Context, userId string, params *DeleteMemberPhoneMembersUserIdPhoneDeleteParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// PutMemberPhoneMembersUserIdPhonePutWithBody request with any body
+	PutMemberPhoneMembersUserIdPhonePutWithBody(ctx context.Context, userId string, params *PutMemberPhoneMembersUserIdPhonePutParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	PutMemberPhoneMembersUserIdPhonePut(ctx context.Context, userId string, params *PutMemberPhoneMembersUserIdPhonePutParams, body PutMemberPhoneMembersUserIdPhonePutJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// ListNumbersNumbersGet request
 	ListNumbersNumbersGet(ctx context.Context, params *ListNumbersNumbersGetParams, reqEditors ...RequestEditorFn) (*http.Response, error)
@@ -2088,6 +2212,78 @@ func (c *Client) CreateCallCallsPost(ctx context.Context, params *CreateCallCall
 
 func (c *Client) GetCallCallsCallIdGet(ctx context.Context, callId openapi_types.UUID, params *GetCallCallsCallIdGetParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewGetCallCallsCallIdGetRequest(c.Server, callId, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) ListContactsContactsGet(ctx context.Context, params *ListContactsContactsGetParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewListContactsContactsGetRequest(c.Server, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) CreateContactContactsPostWithBody(ctx context.Context, params *CreateContactContactsPostParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewCreateContactContactsPostRequestWithBody(c.Server, params, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) CreateContactContactsPost(ctx context.Context, params *CreateContactContactsPostParams, body CreateContactContactsPostJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewCreateContactContactsPostRequest(c.Server, params, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) DeleteContactContactsContactIdDelete(ctx context.Context, contactId string, params *DeleteContactContactsContactIdDeleteParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewDeleteContactContactsContactIdDeleteRequest(c.Server, contactId, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) PatchContactContactsContactIdPatchWithBody(ctx context.Context, contactId string, params *PatchContactContactsContactIdPatchParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewPatchContactContactsContactIdPatchRequestWithBody(c.Server, contactId, params, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) PatchContactContactsContactIdPatch(ctx context.Context, contactId string, params *PatchContactContactsContactIdPatchParams, body PatchContactContactsContactIdPatchJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewPatchContactContactsContactIdPatchRequest(c.Server, contactId, params, body)
 	if err != nil {
 		return nil, err
 	}
@@ -2328,6 +2524,42 @@ func (c *Client) ListEventsEventsGet(ctx context.Context, params *ListEventsEven
 
 func (c *Client) HealthzHealthzGet(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewHealthzHealthzGetRequest(c.Server)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) DeleteMemberPhoneMembersUserIdPhoneDelete(ctx context.Context, userId string, params *DeleteMemberPhoneMembersUserIdPhoneDeleteParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewDeleteMemberPhoneMembersUserIdPhoneDeleteRequest(c.Server, userId, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) PutMemberPhoneMembersUserIdPhonePutWithBody(ctx context.Context, userId string, params *PutMemberPhoneMembersUserIdPhonePutParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewPutMemberPhoneMembersUserIdPhonePutRequestWithBody(c.Server, userId, params, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) PutMemberPhoneMembersUserIdPhonePut(ctx context.Context, userId string, params *PutMemberPhoneMembersUserIdPhonePutParams, body PutMemberPhoneMembersUserIdPhonePutJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewPutMemberPhoneMembersUserIdPhonePutRequest(c.Server, userId, params, body)
 	if err != nil {
 		return nil, err
 	}
@@ -2846,6 +3078,268 @@ func NewGetCallCallsCallIdGetRequest(server string, callId openapi_types.UUID, p
 	if err != nil {
 		return nil, err
 	}
+
+	if params != nil {
+
+		if params.Authorization != nil {
+			var headerParam0 string
+
+			headerParam0, err = runtime.StyleParamWithOptions("simple", false, "authorization", *params.Authorization, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationHeader, Type: "string", Format: ""})
+			if err != nil {
+				return nil, err
+			}
+
+			req.Header.Set("authorization", headerParam0)
+		}
+
+	}
+
+	return req, nil
+}
+
+// NewListContactsContactsGetRequest generates requests for ListContactsContactsGet
+func NewListContactsContactsGetRequest(server string, params *ListContactsContactsGetParams) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/contacts")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+		queryValues := queryURL.Query()
+
+		if params.Q != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "q", *params.Q, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+				return nil, err
+			} else {
+				for k, v := range parsed {
+					for _, v2 := range v {
+						queryValues.Add(k, v2)
+					}
+				}
+			}
+
+		}
+
+		if params.Cursor != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "cursor", *params.Cursor, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+				return nil, err
+			} else {
+				for k, v := range parsed {
+					for _, v2 := range v {
+						queryValues.Add(k, v2)
+					}
+				}
+			}
+
+		}
+
+		if params.Limit != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "limit", *params.Limit, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "integer", Format: ""}); err != nil {
+				return nil, err
+			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+				return nil, err
+			} else {
+				for k, v := range parsed {
+					for _, v2 := range v {
+						queryValues.Add(k, v2)
+					}
+				}
+			}
+
+		}
+
+		queryURL.RawQuery = queryValues.Encode()
+	}
+
+	req, err := http.NewRequest("GET", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+
+		if params.Authorization != nil {
+			var headerParam0 string
+
+			headerParam0, err = runtime.StyleParamWithOptions("simple", false, "authorization", *params.Authorization, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationHeader, Type: "string", Format: ""})
+			if err != nil {
+				return nil, err
+			}
+
+			req.Header.Set("authorization", headerParam0)
+		}
+
+	}
+
+	return req, nil
+}
+
+// NewCreateContactContactsPostRequest calls the generic CreateContactContactsPost builder with application/json body
+func NewCreateContactContactsPostRequest(server string, params *CreateContactContactsPostParams, body CreateContactContactsPostJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewCreateContactContactsPostRequestWithBody(server, params, "application/json", bodyReader)
+}
+
+// NewCreateContactContactsPostRequestWithBody generates requests for CreateContactContactsPost with any type of body
+func NewCreateContactContactsPostRequestWithBody(server string, params *CreateContactContactsPostParams, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/contacts")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("POST", queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	if params != nil {
+
+		if params.Authorization != nil {
+			var headerParam0 string
+
+			headerParam0, err = runtime.StyleParamWithOptions("simple", false, "authorization", *params.Authorization, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationHeader, Type: "string", Format: ""})
+			if err != nil {
+				return nil, err
+			}
+
+			req.Header.Set("authorization", headerParam0)
+		}
+
+	}
+
+	return req, nil
+}
+
+// NewDeleteContactContactsContactIdDeleteRequest generates requests for DeleteContactContactsContactIdDelete
+func NewDeleteContactContactsContactIdDeleteRequest(server string, contactId string, params *DeleteContactContactsContactIdDeleteParams) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "contact_id", contactId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/contacts/%s", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("DELETE", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+
+		if params.Authorization != nil {
+			var headerParam0 string
+
+			headerParam0, err = runtime.StyleParamWithOptions("simple", false, "authorization", *params.Authorization, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationHeader, Type: "string", Format: ""})
+			if err != nil {
+				return nil, err
+			}
+
+			req.Header.Set("authorization", headerParam0)
+		}
+
+	}
+
+	return req, nil
+}
+
+// NewPatchContactContactsContactIdPatchRequest calls the generic PatchContactContactsContactIdPatch builder with application/json body
+func NewPatchContactContactsContactIdPatchRequest(server string, contactId string, params *PatchContactContactsContactIdPatchParams, body PatchContactContactsContactIdPatchJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewPatchContactContactsContactIdPatchRequestWithBody(server, contactId, params, "application/json", bodyReader)
+}
+
+// NewPatchContactContactsContactIdPatchRequestWithBody generates requests for PatchContactContactsContactIdPatch with any type of body
+func NewPatchContactContactsContactIdPatchRequestWithBody(server string, contactId string, params *PatchContactContactsContactIdPatchParams, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "contact_id", contactId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/contacts/%s", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("PATCH", queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
 
 	if params != nil {
 
@@ -3962,6 +4456,117 @@ func NewHealthzHealthzGetRequest(server string) (*http.Request, error) {
 	req, err := http.NewRequest("GET", queryURL.String(), nil)
 	if err != nil {
 		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewDeleteMemberPhoneMembersUserIdPhoneDeleteRequest generates requests for DeleteMemberPhoneMembersUserIdPhoneDelete
+func NewDeleteMemberPhoneMembersUserIdPhoneDeleteRequest(server string, userId string, params *DeleteMemberPhoneMembersUserIdPhoneDeleteParams) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "user_id", userId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/members/%s/phone", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("DELETE", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+
+		if params.Authorization != nil {
+			var headerParam0 string
+
+			headerParam0, err = runtime.StyleParamWithOptions("simple", false, "authorization", *params.Authorization, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationHeader, Type: "string", Format: ""})
+			if err != nil {
+				return nil, err
+			}
+
+			req.Header.Set("authorization", headerParam0)
+		}
+
+	}
+
+	return req, nil
+}
+
+// NewPutMemberPhoneMembersUserIdPhonePutRequest calls the generic PutMemberPhoneMembersUserIdPhonePut builder with application/json body
+func NewPutMemberPhoneMembersUserIdPhonePutRequest(server string, userId string, params *PutMemberPhoneMembersUserIdPhonePutParams, body PutMemberPhoneMembersUserIdPhonePutJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewPutMemberPhoneMembersUserIdPhonePutRequestWithBody(server, userId, params, "application/json", bodyReader)
+}
+
+// NewPutMemberPhoneMembersUserIdPhonePutRequestWithBody generates requests for PutMemberPhoneMembersUserIdPhonePut with any type of body
+func NewPutMemberPhoneMembersUserIdPhonePutRequestWithBody(server string, userId string, params *PutMemberPhoneMembersUserIdPhonePutParams, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "user_id", userId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/members/%s/phone", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("PUT", queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	if params != nil {
+
+		if params.Authorization != nil {
+			var headerParam0 string
+
+			headerParam0, err = runtime.StyleParamWithOptions("simple", false, "authorization", *params.Authorization, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationHeader, Type: "string", Format: ""})
+			if err != nil {
+				return nil, err
+			}
+
+			req.Header.Set("authorization", headerParam0)
+		}
+
 	}
 
 	return req, nil
@@ -5250,6 +5855,22 @@ type ClientWithResponsesInterface interface {
 	// GetCallCallsCallIdGetWithResponse request
 	GetCallCallsCallIdGetWithResponse(ctx context.Context, callId openapi_types.UUID, params *GetCallCallsCallIdGetParams, reqEditors ...RequestEditorFn) (*GetCallCallsCallIdGetResponse, error)
 
+	// ListContactsContactsGetWithResponse request
+	ListContactsContactsGetWithResponse(ctx context.Context, params *ListContactsContactsGetParams, reqEditors ...RequestEditorFn) (*ListContactsContactsGetResponse, error)
+
+	// CreateContactContactsPostWithBodyWithResponse request with any body
+	CreateContactContactsPostWithBodyWithResponse(ctx context.Context, params *CreateContactContactsPostParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CreateContactContactsPostResponse, error)
+
+	CreateContactContactsPostWithResponse(ctx context.Context, params *CreateContactContactsPostParams, body CreateContactContactsPostJSONRequestBody, reqEditors ...RequestEditorFn) (*CreateContactContactsPostResponse, error)
+
+	// DeleteContactContactsContactIdDeleteWithResponse request
+	DeleteContactContactsContactIdDeleteWithResponse(ctx context.Context, contactId string, params *DeleteContactContactsContactIdDeleteParams, reqEditors ...RequestEditorFn) (*DeleteContactContactsContactIdDeleteResponse, error)
+
+	// PatchContactContactsContactIdPatchWithBodyWithResponse request with any body
+	PatchContactContactsContactIdPatchWithBodyWithResponse(ctx context.Context, contactId string, params *PatchContactContactsContactIdPatchParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*PatchContactContactsContactIdPatchResponse, error)
+
+	PatchContactContactsContactIdPatchWithResponse(ctx context.Context, contactId string, params *PatchContactContactsContactIdPatchParams, body PatchContactContactsContactIdPatchJSONRequestBody, reqEditors ...RequestEditorFn) (*PatchContactContactsContactIdPatchResponse, error)
+
 	// UploadEmailAttachmentWithBodyWithResponse request with any body
 	UploadEmailAttachmentWithBodyWithResponse(ctx context.Context, params *UploadEmailAttachmentParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*UploadEmailAttachmentResponse, error)
 
@@ -5306,6 +5927,14 @@ type ClientWithResponsesInterface interface {
 
 	// HealthzHealthzGetWithResponse request
 	HealthzHealthzGetWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*HealthzHealthzGetResponse, error)
+
+	// DeleteMemberPhoneMembersUserIdPhoneDeleteWithResponse request
+	DeleteMemberPhoneMembersUserIdPhoneDeleteWithResponse(ctx context.Context, userId string, params *DeleteMemberPhoneMembersUserIdPhoneDeleteParams, reqEditors ...RequestEditorFn) (*DeleteMemberPhoneMembersUserIdPhoneDeleteResponse, error)
+
+	// PutMemberPhoneMembersUserIdPhonePutWithBodyWithResponse request with any body
+	PutMemberPhoneMembersUserIdPhonePutWithBodyWithResponse(ctx context.Context, userId string, params *PutMemberPhoneMembersUserIdPhonePutParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*PutMemberPhoneMembersUserIdPhonePutResponse, error)
+
+	PutMemberPhoneMembersUserIdPhonePutWithResponse(ctx context.Context, userId string, params *PutMemberPhoneMembersUserIdPhonePutParams, body PutMemberPhoneMembersUserIdPhonePutJSONRequestBody, reqEditors ...RequestEditorFn) (*PutMemberPhoneMembersUserIdPhonePutResponse, error)
 
 	// ListNumbersNumbersGetWithResponse request
 	ListNumbersNumbersGetWithResponse(ctx context.Context, params *ListNumbersNumbersGetParams, reqEditors ...RequestEditorFn) (*ListNumbersNumbersGetResponse, error)
@@ -5441,6 +6070,97 @@ func (r GetCallCallsCallIdGetResponse) Status() string {
 
 // StatusCode returns HTTPResponse.StatusCode
 func (r GetCallCallsCallIdGetResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type ListContactsContactsGetResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *ContactListResponse
+	JSON422      *HTTPValidationError
+}
+
+// Status returns HTTPResponse.Status
+func (r ListContactsContactsGetResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ListContactsContactsGetResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type CreateContactContactsPostResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON201      *ContactEntry
+	JSON422      *HTTPValidationError
+}
+
+// Status returns HTTPResponse.Status
+func (r CreateContactContactsPostResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r CreateContactContactsPostResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type DeleteContactContactsContactIdDeleteResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON422      *HTTPValidationError
+}
+
+// Status returns HTTPResponse.Status
+func (r DeleteContactContactsContactIdDeleteResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r DeleteContactContactsContactIdDeleteResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type PatchContactContactsContactIdPatchResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *ContactEntry
+	JSON422      *HTTPValidationError
+}
+
+// Status returns HTTPResponse.Status
+func (r PatchContactContactsContactIdPatchResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r PatchContactContactsContactIdPatchResponse) StatusCode() int {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.StatusCode
 	}
@@ -5830,6 +6550,51 @@ func (r HealthzHealthzGetResponse) Status() string {
 
 // StatusCode returns HTTPResponse.StatusCode
 func (r HealthzHealthzGetResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type DeleteMemberPhoneMembersUserIdPhoneDeleteResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON422      *HTTPValidationError
+}
+
+// Status returns HTTPResponse.Status
+func (r DeleteMemberPhoneMembersUserIdPhoneDeleteResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r DeleteMemberPhoneMembersUserIdPhoneDeleteResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type PutMemberPhoneMembersUserIdPhonePutResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *map[string]string
+	JSON422      *HTTPValidationError
+}
+
+// Status returns HTTPResponse.Status
+func (r PutMemberPhoneMembersUserIdPhonePutResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r PutMemberPhoneMembersUserIdPhonePutResponse) StatusCode() int {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.StatusCode
 	}
@@ -6328,6 +7093,58 @@ func (c *ClientWithResponses) GetCallCallsCallIdGetWithResponse(ctx context.Cont
 	return ParseGetCallCallsCallIdGetResponse(rsp)
 }
 
+// ListContactsContactsGetWithResponse request returning *ListContactsContactsGetResponse
+func (c *ClientWithResponses) ListContactsContactsGetWithResponse(ctx context.Context, params *ListContactsContactsGetParams, reqEditors ...RequestEditorFn) (*ListContactsContactsGetResponse, error) {
+	rsp, err := c.ListContactsContactsGet(ctx, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseListContactsContactsGetResponse(rsp)
+}
+
+// CreateContactContactsPostWithBodyWithResponse request with arbitrary body returning *CreateContactContactsPostResponse
+func (c *ClientWithResponses) CreateContactContactsPostWithBodyWithResponse(ctx context.Context, params *CreateContactContactsPostParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CreateContactContactsPostResponse, error) {
+	rsp, err := c.CreateContactContactsPostWithBody(ctx, params, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseCreateContactContactsPostResponse(rsp)
+}
+
+func (c *ClientWithResponses) CreateContactContactsPostWithResponse(ctx context.Context, params *CreateContactContactsPostParams, body CreateContactContactsPostJSONRequestBody, reqEditors ...RequestEditorFn) (*CreateContactContactsPostResponse, error) {
+	rsp, err := c.CreateContactContactsPost(ctx, params, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseCreateContactContactsPostResponse(rsp)
+}
+
+// DeleteContactContactsContactIdDeleteWithResponse request returning *DeleteContactContactsContactIdDeleteResponse
+func (c *ClientWithResponses) DeleteContactContactsContactIdDeleteWithResponse(ctx context.Context, contactId string, params *DeleteContactContactsContactIdDeleteParams, reqEditors ...RequestEditorFn) (*DeleteContactContactsContactIdDeleteResponse, error) {
+	rsp, err := c.DeleteContactContactsContactIdDelete(ctx, contactId, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseDeleteContactContactsContactIdDeleteResponse(rsp)
+}
+
+// PatchContactContactsContactIdPatchWithBodyWithResponse request with arbitrary body returning *PatchContactContactsContactIdPatchResponse
+func (c *ClientWithResponses) PatchContactContactsContactIdPatchWithBodyWithResponse(ctx context.Context, contactId string, params *PatchContactContactsContactIdPatchParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*PatchContactContactsContactIdPatchResponse, error) {
+	rsp, err := c.PatchContactContactsContactIdPatchWithBody(ctx, contactId, params, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParsePatchContactContactsContactIdPatchResponse(rsp)
+}
+
+func (c *ClientWithResponses) PatchContactContactsContactIdPatchWithResponse(ctx context.Context, contactId string, params *PatchContactContactsContactIdPatchParams, body PatchContactContactsContactIdPatchJSONRequestBody, reqEditors ...RequestEditorFn) (*PatchContactContactsContactIdPatchResponse, error) {
+	rsp, err := c.PatchContactContactsContactIdPatch(ctx, contactId, params, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParsePatchContactContactsContactIdPatchResponse(rsp)
+}
+
 // UploadEmailAttachmentWithBodyWithResponse request with arbitrary body returning *UploadEmailAttachmentResponse
 func (c *ClientWithResponses) UploadEmailAttachmentWithBodyWithResponse(ctx context.Context, params *UploadEmailAttachmentParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*UploadEmailAttachmentResponse, error) {
 	rsp, err := c.UploadEmailAttachmentWithBody(ctx, params, contentType, body, reqEditors...)
@@ -6503,6 +7320,32 @@ func (c *ClientWithResponses) HealthzHealthzGetWithResponse(ctx context.Context,
 		return nil, err
 	}
 	return ParseHealthzHealthzGetResponse(rsp)
+}
+
+// DeleteMemberPhoneMembersUserIdPhoneDeleteWithResponse request returning *DeleteMemberPhoneMembersUserIdPhoneDeleteResponse
+func (c *ClientWithResponses) DeleteMemberPhoneMembersUserIdPhoneDeleteWithResponse(ctx context.Context, userId string, params *DeleteMemberPhoneMembersUserIdPhoneDeleteParams, reqEditors ...RequestEditorFn) (*DeleteMemberPhoneMembersUserIdPhoneDeleteResponse, error) {
+	rsp, err := c.DeleteMemberPhoneMembersUserIdPhoneDelete(ctx, userId, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseDeleteMemberPhoneMembersUserIdPhoneDeleteResponse(rsp)
+}
+
+// PutMemberPhoneMembersUserIdPhonePutWithBodyWithResponse request with arbitrary body returning *PutMemberPhoneMembersUserIdPhonePutResponse
+func (c *ClientWithResponses) PutMemberPhoneMembersUserIdPhonePutWithBodyWithResponse(ctx context.Context, userId string, params *PutMemberPhoneMembersUserIdPhonePutParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*PutMemberPhoneMembersUserIdPhonePutResponse, error) {
+	rsp, err := c.PutMemberPhoneMembersUserIdPhonePutWithBody(ctx, userId, params, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParsePutMemberPhoneMembersUserIdPhonePutResponse(rsp)
+}
+
+func (c *ClientWithResponses) PutMemberPhoneMembersUserIdPhonePutWithResponse(ctx context.Context, userId string, params *PutMemberPhoneMembersUserIdPhonePutParams, body PutMemberPhoneMembersUserIdPhonePutJSONRequestBody, reqEditors ...RequestEditorFn) (*PutMemberPhoneMembersUserIdPhonePutResponse, error) {
+	rsp, err := c.PutMemberPhoneMembersUserIdPhonePut(ctx, userId, params, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParsePutMemberPhoneMembersUserIdPhonePutResponse(rsp)
 }
 
 // ListNumbersNumbersGetWithResponse request returning *ListNumbersNumbersGetResponse
@@ -6807,6 +7650,131 @@ func ParseGetCallCallsCallIdGetResponse(rsp *http.Response) (*GetCallCallsCallId
 	switch {
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
 		var dest CallResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 422:
+		var dest HTTPValidationError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON422 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseListContactsContactsGetResponse parses an HTTP response from a ListContactsContactsGetWithResponse call
+func ParseListContactsContactsGetResponse(rsp *http.Response) (*ListContactsContactsGetResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ListContactsContactsGetResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest ContactListResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 422:
+		var dest HTTPValidationError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON422 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseCreateContactContactsPostResponse parses an HTTP response from a CreateContactContactsPostWithResponse call
+func ParseCreateContactContactsPostResponse(rsp *http.Response) (*CreateContactContactsPostResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &CreateContactContactsPostResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 201:
+		var dest ContactEntry
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON201 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 422:
+		var dest HTTPValidationError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON422 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseDeleteContactContactsContactIdDeleteResponse parses an HTTP response from a DeleteContactContactsContactIdDeleteWithResponse call
+func ParseDeleteContactContactsContactIdDeleteResponse(rsp *http.Response) (*DeleteContactContactsContactIdDeleteResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &DeleteContactContactsContactIdDeleteResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 422:
+		var dest HTTPValidationError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON422 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParsePatchContactContactsContactIdPatchResponse parses an HTTP response from a PatchContactContactsContactIdPatchWithResponse call
+func ParsePatchContactContactsContactIdPatchResponse(rsp *http.Response) (*PatchContactContactsContactIdPatchResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &PatchContactContactsContactIdPatchResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest ContactEntry
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err
 		}
@@ -7365,6 +8333,65 @@ func ParseHealthzHealthzGetResponse(rsp *http.Response) (*HealthzHealthzGetRespo
 			return nil, err
 		}
 		response.JSON200 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseDeleteMemberPhoneMembersUserIdPhoneDeleteResponse parses an HTTP response from a DeleteMemberPhoneMembersUserIdPhoneDeleteWithResponse call
+func ParseDeleteMemberPhoneMembersUserIdPhoneDeleteResponse(rsp *http.Response) (*DeleteMemberPhoneMembersUserIdPhoneDeleteResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &DeleteMemberPhoneMembersUserIdPhoneDeleteResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 422:
+		var dest HTTPValidationError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON422 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParsePutMemberPhoneMembersUserIdPhonePutResponse parses an HTTP response from a PutMemberPhoneMembersUserIdPhonePutWithResponse call
+func ParsePutMemberPhoneMembersUserIdPhonePutResponse(rsp *http.Response) (*PutMemberPhoneMembersUserIdPhonePutResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &PutMemberPhoneMembersUserIdPhonePutResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest map[string]string
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 422:
+		var dest HTTPValidationError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON422 = &dest
 
 	}
 
