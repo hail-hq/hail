@@ -18,13 +18,13 @@
       "provider": "Vonage",
       "country_code": "US",
       "direction": "outbound",
-      "usd_per_segment": "0.00809",
+      "usd_per_segment": "0.0086",
       "last_verified": "2026-07-17",
       "last_changed_at": "2026-07-17",
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",
       "source_url": "https://www.vonage.com/communications-apis/sms/pricing/",
-      "notes": "Base rate; carrier fees added per message."
+      "notes": "Base rate; carrier fees added per message. Public pricing page is bot-protected; rate read from Vonage's own USD pricing data endpoint (US.messaging.USD.json) that renders the page's 'Send a message' card. Billed per segment for multi-part messages."
     },
     {
       "provider": "Plivo",
@@ -36,19 +36,19 @@
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",
       "source_url": "https://www.plivo.com/sms/pricing/us/",
-      "notes": "Base rate; carrier surcharge $0.0035–$0.0050 added per SMS depending on carrier."
+      "notes": "Base rate; carrier surcharge $0.0035\u2013$0.0050 added per SMS depending on carrier."
     },
     {
       "provider": "AWS End User Messaging",
       "country_code": "US",
       "direction": "outbound",
-      "usd_per_segment": "0.00645",
+      "usd_per_segment": "0.00774",
       "last_verified": "2026-07-17",
       "last_changed_at": "2026-07-17",
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",
       "source_url": "https://aws.amazon.com/end-user-messaging/pricing/",
-      "notes": "Per message part; origination-number fees billed separately."
+      "notes": "Per message part; 10DLC carrier pass-through fee ($0.00421) and origination-number fees billed separately. Read from the official SMS price CSV and the pricing widget's data feed (both agree; price-list publication 2026-06-26)."
     },
     {
       "provider": "Telnyx",
@@ -60,7 +60,7 @@
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",
       "source_url": "https://telnyx.com/pricing/messaging",
-      "notes": "Base rate per message part; carrier fees $0.0035–$0.0045 added per part."
+      "notes": "Base rate per message part; carrier fees $0.0035\u2013$0.0045 added per part."
     }
   ]
 }
