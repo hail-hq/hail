@@ -154,10 +154,25 @@ def make_agent_hangup(
     successful agent-initiated hangup. Status is left untouched (``None``)
     so ``on_call_end`` falls back to its ``"completed"`` default — matching
     a normal, callee-initiated hangup.
+
+    Deletes the room, not just the job: ``ctx.shutdown()`` alone ends the
+    agent while the SIP participant keeps hearing silence until they hang
+    up themselves (docs.livekit.io/telephony/making-calls/outbound-calls,
+    "Hang up"). ``delete_room`` disconnects the phone leg; the resulting
+    ``ROOM_DELETED`` disconnect is in ``_SDK_AUTO_CLOSE_REASONS`` and is
+    not mapped to a status override, so the stamped ``normal_hangup`` /
+    default ``completed`` outcome is preserved. ``ctx.shutdown()`` still
+    runs afterwards as a belt-and-braces job release — and as the only
+    path to ``on_call_end`` if the delete fails (the room then dies via
+    LiveKit's empty-timeout instead).
     """
 
     async def _hangup() -> None:
         captured["end_reason"] = CallEndReason.NORMAL_HANGUP.value
+        try:
+            await ctx.delete_room()
+        except Exception:
+            logger.exception("delete_room failed during agent hangup")
         ctx.shutdown(reason="agent_end_call")
 
     return _hangup
