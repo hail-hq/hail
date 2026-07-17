@@ -87,6 +87,26 @@ func TestNumberAcquire_TollFreeType(t *testing.T) {
 	}
 }
 
+func TestNumberAcquire_NationalType(t *testing.T) {
+	resp := samplePhoneNumber("11111111-1111-1111-1111-111111111111", "+552135551234", []string{"voice", "sms"}, nil)
+	srv := newFakeServer(t, http.StatusCreated, resp)
+
+	_, _, err := runRoot(t,
+		map[string]string{"HAIL_API_KEY": "sk_test", "HAIL_API_URL": srv.URL},
+		"numbers", "acquire", "--country", "BR", "--type", "national",
+	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	var body client.NumberAcquireRequest
+	if err := json.Unmarshal(srv.lastBody, &body); err != nil {
+		t.Fatalf("body parse: %v; raw=%s", err, srv.lastBody)
+	}
+	if body.NumberType == nil || *body.NumberType != "national" {
+		t.Fatalf("NumberType = %v", body.NumberType)
+	}
+}
+
 func TestNumberAcquire_MissingCountryFailsBeforeNetwork(t *testing.T) {
 	srv := newFakeServer(t, http.StatusCreated, samplePhoneNumber("11111111-1111-1111-1111-111111111111", "+14155551234", []string{"voice"}, nil))
 

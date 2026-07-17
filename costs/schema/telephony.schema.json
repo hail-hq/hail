@@ -38,23 +38,37 @@
         "last_changed_at",
         "verification_method",
         "verified_by",
-        "source_url"
+        "source_url",
+        "voice",
+        "sms",
+        "mms",
+        "dial_code"
       ],
       "properties": {
         "country_code": { "type": "string", "pattern": "^[A-Z]{2}$" },
-        "number_type": { "enum": ["local", "mobile", "toll_free"] },
+        "number_type": { "enum": ["local", "mobile", "toll_free", "national"] },
         "display_name": { "type": "string", "minLength": 1 },
         "usd_per_month": { "$ref": "#/$defs/decimal" },
         "last_verified": { "$ref": "#/$defs/date" },
         "last_changed_at": { "$ref": "#/$defs/date" },
-        "verification_method": { "enum": ["manual-confirmed", "community-pr"] },
+        "verification_method": {
+          "enum": ["manual-confirmed", "community-pr", "carrier-sync"]
+        },
         "verified_by": {
           "type": "string",
           "pattern": "^[a-zA-Z0-9](?:[a-zA-Z0-9]|-(?=[a-zA-Z0-9])){0,38}$"
         },
         "source_url": { "type": "string", "format": "uri" },
+        "voice": { "type": "boolean" },
+        "sms": { "type": "boolean" },
+        "mms": { "type": "boolean" },
+        "dial_code": { "type": "string", "minLength": 1 },
         "notes": { "type": "string" }
-      }
+      },
+      "anyOf": [
+        { "required": ["voice"], "properties": { "voice": { "const": true } } },
+        { "required": ["sms"], "properties": { "sms": { "const": true } } }
+      ]
     },
     "fee": {
       "type": "object",
@@ -89,7 +103,9 @@
         "usd_one_time": { "$ref": "#/$defs/decimal" },
         "last_verified": { "$ref": "#/$defs/date" },
         "last_changed_at": { "$ref": "#/$defs/date" },
-        "verification_method": { "enum": ["manual-confirmed", "community-pr"] },
+        "verification_method": {
+          "enum": ["manual-confirmed", "community-pr", "carrier-sync"]
+        },
         "verified_by": {
           "type": "string",
           "pattern": "^[a-zA-Z0-9](?:[a-zA-Z0-9]|-(?=[a-zA-Z0-9])){0,38}$"

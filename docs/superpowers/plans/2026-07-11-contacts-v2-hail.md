@@ -26,12 +26,14 @@
 ### Task 1: Migrations + models (`users.phone_number`, `contacts`)
 
 **Files:**
+
 - Create: `api/migrations/versions/0029_users_phone_number.py`
 - Create: `api/migrations/versions/0030_contacts.py`
 - Modify: `core/hailhq/core/models.py` (add `User` and `Contact` models; `OrganizationMember` already exists at line ~38)
 - Test: `api/tests/test_contacts_core.py` (model round-trip only in this task; grows in Task 2)
 
 **Interfaces:**
+
 - Produces: `hailhq.core.models.User` (`__tablename__="users"`; columns `id: UUID pk`, `name: str`, `email: str`, `phone_number: str | None`) and `hailhq.core.models.Contact` (`id UUID pk default uuid4`, `organization_id UUID FK organizations.id ondelete CASCADE`, `name str`, `phone_e164 str | None`, `email str | None`, `created_by UUID | None FK users.id ondelete SET NULL`, `created_at/updated_at datetime`).
 
 - [ ] **Step 1: Read the conventions**
@@ -272,11 +274,13 @@ git commit -m "feat(contacts): users.phone_number + contacts table, mapped model
 ### Task 2: `hailhq.core.contacts` — the union + schemas
 
 **Files:**
+
 - Create: `core/hailhq/core/contacts.py`
 - Modify: `core/hailhq/core/schemas.py` (add `ContactEntry`, `ContactCreate`, `ContactPatch`, `ContactListResponse`, `MemberPhonePut`)
 - Test: `api/tests/test_contacts_core.py` (extend)
 
 **Interfaces:**
+
 - Consumes: `User`, `Contact`, `OrganizationMember` models (Task 1).
 - Produces:
   - `ContactEntry(BaseModel)`: `id: str`, `kind: Literal["member","manual"]`, `name: str`, `phone_e164: str | None`, `email: str | None`, `role: str | None`
@@ -504,10 +508,12 @@ git commit -m "feat(contacts): search_contacts union + contact schemas"
 ### Task 3: `Principal.user_id`
 
 **Files:**
+
 - Modify: `api/hailhq/api/deps.py` (Principal model + both auth paths)
 - Test: extend the existing auth tests (`api/tests/test_auth.py`, `api/tests/test_auth_jwt.py`) — find where Principal assertions live.
 
 **Interfaces:**
+
 - Produces: `Principal.user_id: uuid.UUID | None` — the caller's user id. API-key path: `api_keys.reference_id` cast to UUID (the existing members join already casts it — reuse that value). JWT path: the token's `sub`. Shared-key (`HAIL_API_KEY`) path: `None`.
 
 - [ ] **Step 1: Read the three auth paths**
@@ -563,11 +569,13 @@ git commit -m "feat(auth): surface caller user_id on Principal"
 ### Task 4: Routes — `/contacts` CRUD + `/members/{id}/phone`
 
 **Files:**
+
 - Create: `api/hailhq/api/routes/contacts.py`
 - Modify: `api/hailhq/api/main.py` (`include_router` beside the others, ~line 236)
 - Test: `api/tests/test_contacts_api.py`
 
 **Interfaces:**
+
 - Consumes: `search_contacts`, schemas (Task 2), `Principal.user_id` (Task 3), `get_current_principal`, `get_session`, `unprocessable` (`api/hailhq/api/errors.py:19`).
 - Produces (the wire contract plans 2 and Tasks 5–6 rely on):
   - `GET /contacts?q=&limit=` → `ContactListResponse` `{items: [...]}`
@@ -581,26 +589,26 @@ git commit -m "feat(auth): surface caller user_id on Principal"
 
 `api/tests/test_contacts_api.py` — mirror `test_emails_api.py` / `test_calls_api.py` client usage (the `client` fixture + `org_and_key` bearer). Cover, at minimum, each row of this table (one test per row, names as given):
 
-| test | arrange | act | assert |
-|---|---|---|---|
-| test_list_union | seed member w/ phone + manual contact | GET /contacts | 200; two items; member first; ids `member:<uuid>` / `<uuid>` |
-| test_list_q_filter | same | GET /contacts?q=maya | only the manual row |
-| test_create_manual_phone_only | — | POST {name, phone_e164} | 201; kind manual; email null |
-| test_create_email_only | — | POST {name, email} | 201 |
-| test_create_neither_422 | — | POST {name} | 422 |
-| test_create_duplicate_phone_409 | existing row same phone | POST | 409 |
-| test_create_duplicate_email_409 | existing row same email | POST | 409 |
-| test_patch_manual | manual row | PATCH name | 200; new name |
-| test_patch_member_422 | member | PATCH member:<uid> | 422, detail mentions membership |
-| test_patch_clear_both_422 | phone-only row | PATCH {phone_e164: null} | 422 |
-| test_delete_manual_204_and_gone | manual row | DELETE then GET | 204; list shrinks |
-| test_delete_member_422 | member | DELETE member:<uid> | 422 |
-| test_put_own_phone_via_me | JWT principal for a member | PUT /members/me/phone | 200; users.phone_number updated |
-| test_admin_sets_other_phone | caller role owner | PUT /members/<other>/phone | 200 |
-| test_member_cannot_set_other_403 | caller role member | PUT /members/<other>/phone | 403 |
-| test_phone_target_not_in_org_404 | other-org user | PUT | 404 |
-| test_delete_phone_clears | member w/ phone | DELETE /members/me/phone | 204; column null |
-| test_other_org_contact_404 | contact in org B | PATCH/DELETE with org A key | 404 |
+| test                             | arrange                               | act                         | assert                                                       |
+| -------------------------------- | ------------------------------------- | --------------------------- | ------------------------------------------------------------ |
+| test_list_union                  | seed member w/ phone + manual contact | GET /contacts               | 200; two items; member first; ids `member:<uuid>` / `<uuid>` |
+| test_list_q_filter               | same                                  | GET /contacts?q=maya        | only the manual row                                          |
+| test_create_manual_phone_only    | —                                     | POST {name, phone_e164}     | 201; kind manual; email null                                 |
+| test_create_email_only           | —                                     | POST {name, email}          | 201                                                          |
+| test_create_neither_422          | —                                     | POST {name}                 | 422                                                          |
+| test_create_duplicate_phone_409  | existing row same phone               | POST                        | 409                                                          |
+| test_create_duplicate_email_409  | existing row same email               | POST                        | 409                                                          |
+| test_patch_manual                | manual row                            | PATCH name                  | 200; new name                                                |
+| test_patch_member_422            | member                                | PATCH member:<uid>          | 422, detail mentions membership                              |
+| test_patch_clear_both_422        | phone-only row                        | PATCH {phone_e164: null}    | 422                                                          |
+| test_delete_manual_204_and_gone  | manual row                            | DELETE then GET             | 204; list shrinks                                            |
+| test_delete_member_422           | member                                | DELETE member:<uid>         | 422                                                          |
+| test_put_own_phone_via_me        | JWT principal for a member            | PUT /members/me/phone       | 200; users.phone_number updated                              |
+| test_admin_sets_other_phone      | caller role owner                     | PUT /members/<other>/phone  | 200                                                          |
+| test_member_cannot_set_other_403 | caller role member                    | PUT /members/<other>/phone  | 403                                                          |
+| test_phone_target_not_in_org_404 | other-org user                        | PUT                         | 404                                                          |
+| test_delete_phone_clears         | member w/ phone                       | DELETE /members/me/phone    | 204; column null                                             |
+| test_other_org_contact_404       | contact in org B                      | PATCH/DELETE with org A key | 404                                                          |
 
 Use the JWT fixtures from `test_auth_jwt.py` for the `me`/self cases (API-key principals carry user_id too — Task 3 — so either works; write `me` tests through whichever auth path the fixtures make easy, but at least one test must exercise `me`).
 
@@ -855,11 +863,13 @@ git commit -m "feat(api): /contacts union CRUD + member phone routes"
 ### Task 5: MCP tools
 
 **Files:**
+
 - Modify: `mcp/hailhq/mcp/hail_client.py` (two methods)
 - Modify: `mcp/hailhq/mcp/tools.py` (three tools in `register_tools`, ~line 448)
 - Test: `mcp/tests/test_tools.py` (extend, mirroring its existing stub-client pattern)
 
 **Interfaces:**
+
 - Consumes: Task 4's wire contract.
 - Produces MCP tools: `list_contacts()`, `lookup_contact(query: str)`, `create_contact(name: str, phone_e164: str | None = None, email: str | None = None)`.
 
@@ -949,10 +959,12 @@ git commit -m "feat(mcp): list_contacts / lookup_contact / create_contact tools"
 ### Task 6: Voicebot `lookup_contact` function tool
 
 **Files:**
+
 - Modify: `voicebot/hailhq/voicebot/agent.py` (Agent construction at ~707; org resolution in `entrypoint`)
 - Test: `voicebot/tests/test_agent.py` (extend, using its `_fakes.py`/conftest DB pattern)
 
 **Interfaces:**
+
 - Consumes: `hailhq.core.contacts.search_contacts`, the voicebot's existing `session_scope` (used by `write_call_event` at agent.py ~250), `Call` model (org lookup by `call_id`).
 - Produces: a LiveKit function tool `lookup_contact(query: str) -> str` returning up to 5 matches as lines `name · phone · email` (misses → `"no contacts matched"`), org-scoped to the call's organization.
 

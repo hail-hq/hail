@@ -68,7 +68,7 @@ Examples:
 		},
 	}
 	cmd.Flags().StringVar(&f.country, "country", "", "ISO 3166-1 alpha-2 country code (e.g. US)")
-	cmd.Flags().StringVar(&f.numberType, "type", "local", "Number type: local, mobile, or toll_free")
+	cmd.Flags().StringVar(&f.numberType, "type", "local", "Number type: local, mobile, toll_free, or national")
 	cmd.Flags().StringVar(&f.idemKey, "idempotency-key", "", "Defaults to a fresh UUID")
 	cmd.MarkFlagRequired("country")
 	return cmd
@@ -79,9 +79,9 @@ func runNumberAcquire(ctx context.Context, cmd *cobra.Command, opts *Options, f 
 		return requireInputs(cmd, "--country")
 	}
 	switch f.numberType {
-	case "local", "mobile", "toll_free":
+	case "local", "mobile", "toll_free", "national":
 	default:
-		return helpAndFail(cmd, "--type must be 'local', 'mobile', or 'toll_free'")
+		return helpAndFail(cmd, "--type must be 'local', 'mobile', 'toll_free', or 'national'")
 	}
 
 	nt := client.NumberAcquireRequestNumberType(f.numberType)

@@ -2,7 +2,48 @@
 
 from __future__ import annotations
 
+import json
 import uuid
+
+import pytest
+
+from hailhq.core import telephony_catalog
+
+
+@pytest.fixture(autouse=True)
+def pinned_catalog(tmp_path, monkeypatch):
+    """Pin the telephony catalog to a fixed fixture so these tests exercise
+    route logic, not whatever the committed costs/telephony.json currently
+    says — a routine carrier-sync data PR must not break API CI."""
+    data = {
+        "version": 2,
+        "license": "CC-BY-4.0",
+        "numbers": [
+            {
+                "country_code": "US",
+                "number_type": "local",
+                "usd_per_month": "1.15",
+                "voice": True,
+                "sms": True,
+                "mms": True,
+            },
+            {
+                "country_code": "SE",
+                "number_type": "mobile",
+                "usd_per_month": "3.00",
+                "voice": False,
+                "sms": True,
+                "mms": False,
+            },
+        ],
+        "a2p_10dlc": [],
+    }
+    path = tmp_path / "telephony.json"
+    path.write_text(json.dumps(data))
+    monkeypatch.setenv("HAIL_TELEPHONY_CATALOG_PATH", str(path))
+    telephony_catalog._load.cache_clear()
+    yield
+    telephony_catalog._load.cache_clear()
 
 
 async def test_acquire_number_requires_auth(client) -> None:
@@ -50,6 +91,84 @@ async def test_acquire_number_idempotent_replay(
 
     assert second.json()["id"] == first.json()["id"]
     voice_provider_mock.acquire_number.assert_awaited_once()
+
+
+async def test_acquire_rejects_unlisted_country_type(
+    client, org_and_key, voice_provider_mock
+):
+    _, _, plaintext = org_and_key
+    resp = await client.post(
+        "/numbers",
+        json={"country_code": "ZZ", "number_type": "local"},
+        headers={"Authorization": f"Bearer {plaintext}"},
+    )
+    assert resp.status_code == 422, resp.text
+    voice_provider_mock.acquire_number.assert_not_awaited()  # guarded before the provider
+
+
+async def test_acquire_allows_listed_country_type(
+    client, org_and_key, voice_provider_mock
+):
+    _, _, plaintext = org_and_key
+    # US/local is in the pinned catalog; the provider mock returns a fake number.
+    resp = await client.post(
+        "/numbers",
+        json={"country_code": "US", "number_type": "local"},
+        headers={"Authorization": f"Bearer {plaintext}"},
+    )
+    assert resp.status_code == 201, resp.text
+    voice_provider_mock.acquire_number.assert_awaited_once()
+
+
+async def test_acquire_lowercase_country_code_is_normalized(
+    client, org_and_key, voice_provider_mock
+):
+    """The catalog keys on uppercase ISO codes; a lowercase request must be
+    normalized, not 422ed as unlisted."""
+    _, _, plaintext = org_and_key
+    resp = await client.post(
+        "/numbers",
+        json={"country_code": "us", "number_type": "local"},
+        headers={"Authorization": f"Bearer {plaintext}"},
+    )
+    assert resp.status_code == 201, resp.text
+    _, kwargs = voice_provider_mock.acquire_number.call_args
+    assert kwargs["country_code"] == "US"
+
+
+async def test_acquire_sms_only_country_requests_sms_capability_only(
+    client, org_and_key, voice_provider_mock
+):
+    """SE/mobile is SMS-only in the pinned catalog (voice=False, sms=True).
+    The route must request only the capabilities the catalog row advertises,
+    not the hardcoded ["voice", "sms"] — otherwise the Twilio adapter's AND
+    filter matches nothing and acquisition 503s."""
+    _, _, plaintext = org_and_key
+    resp = await client.post(
+        "/numbers",
+        json={"country_code": "SE", "number_type": "mobile"},
+        headers={"Authorization": f"Bearer {plaintext}"},
+    )
+    assert resp.status_code == 201, resp.text
+    voice_provider_mock.acquire_number.assert_awaited_once()
+    _, kwargs = voice_provider_mock.acquire_number.call_args
+    assert kwargs["capabilities"] == ["sms"]
+
+
+async def test_acquire_voice_and_sms_country_requests_both_capabilities(
+    client, org_and_key, voice_provider_mock
+):
+    """US/local supports both voice and sms — both must still be requested."""
+    _, _, plaintext = org_and_key
+    resp = await client.post(
+        "/numbers",
+        json={"country_code": "US", "number_type": "local"},
+        headers={"Authorization": f"Bearer {plaintext}"},
+    )
+    assert resp.status_code == 201, resp.text
+    voice_provider_mock.acquire_number.assert_awaited_once()
+    _, kwargs = voice_provider_mock.acquire_number.call_args
+    assert kwargs["capabilities"] == ["voice", "sms"]
 
 
 async def test_get_number_not_found(client, org_and_key) -> None:
