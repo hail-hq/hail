@@ -113,7 +113,15 @@ async def seed_member(
     manual-contact rows created moments later in the same test.
     """
     uid = uuid.uuid4()
-    session.add(User(id=uid, name=name, email=email, phone_number=phone))
+    session.add(
+        User(
+            id=uid,
+            name=name,
+            email=email,
+            phone_number=phone,
+            created_at=datetime.now(timezone.utc),
+        )
+    )
     session.add(
         OrganizationMember(
             id=uuid.uuid4(),
