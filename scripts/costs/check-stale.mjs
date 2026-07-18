@@ -16,6 +16,7 @@ const ROW_ARRAYS = {
   stt: ['models'],
   tts: ['models'],
   telephony: ['numbers', 'a2p_10dlc'],
+  sms: ['providers'],
 };
 
 export function rowsForFile(filename, data) {
@@ -77,7 +78,12 @@ async function main() {
     const days = Math.floor(
       (Date.now() - new Date(row.last_verified + 'T00:00:00Z').getTime()) / MS_PER_DAY,
     );
-    const label = row.model_id || row.display_name || row.carrier || '(row)';
+    const label =
+      row.model_id ||
+      row.display_name ||
+      row.carrier ||
+      [row.country_code, row.direction].filter(Boolean).join(' ') ||
+      '(row)';
     const name = [row.provider, label].filter(Boolean).join(' / ');
     console.log(`- [${row.category}] ${name} — last verified ${row.last_verified} (${days} days ago)`);
   }

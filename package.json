@@ -6,7 +6,7 @@
   "packageManager": "pnpm@9.15.0",
   "scripts": {
     "prepare": "husky",
-    "costs:validate": "pipx run check-jsonschema --schemafile costs/schema/llm.schema.json costs/llm.json && pipx run check-jsonschema --schemafile costs/schema/stt.schema.json costs/stt.json && pipx run check-jsonschema --schemafile costs/schema/tts.schema.json costs/tts.json && pipx run check-jsonschema --schemafile costs/schema/telephony.schema.json costs/telephony.json",
+    "costs:validate": "pipx run check-jsonschema --schemafile costs/schema/llm.schema.json costs/llm.json && pipx run check-jsonschema --schemafile costs/schema/stt.schema.json costs/stt.json && pipx run check-jsonschema --schemafile costs/schema/tts.schema.json costs/tts.json && pipx run check-jsonschema --schemafile costs/schema/sms.schema.json costs/sms.json && pipx run check-jsonschema --schemafile costs/schema/telephony.schema.json costs/telephony.json",
     "costs:stale": "node scripts/costs/check-stale.mjs --max-age 30",
     "costs:sync-telephony": "node scripts/costs/sync-telephony.mjs",
     "site:dev": "pnpm --filter @hail-hq/web dev",

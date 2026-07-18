@@ -154,6 +154,19 @@ export interface TelephonyFeeRow extends TelephonyProvenance {
   usd_one_time?: string;
 }
 
+export interface SmsRateRow extends TelephonyProvenance {
+  provider: string;
+  country_code: string;
+  direction: 'outbound';
+  usd_per_segment: string;
+}
+
+export interface SmsFile {
+  version: 2;
+  license: 'CC-BY-4.0';
+  providers: SmsRateRow[];
+}
+
 export interface TelephonyFile {
   version: 2;
   license: 'CC-BY-4.0';
