@@ -4,6 +4,50 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 
 ## [Unreleased]
 
+## [0.15.0] — 2026-07-18
+
+Multi-country numbers milestone, contacts from the CLI, and a public SMS
+pricing dataset.
+
+Component versions cut alongside this release:
+**`sdk-v0.11.0`** (PyPI: `hail-sdk==0.11.0`), **`cli-v0.14.0`** (Homebrew + GitHub Releases).
+
+### Multi-country numbers
+
+- `costs/telephony.json` grows a broad multi-country catalog: per-country
+  number types, monthly prices, and per-row capabilities (voice/SMS), synced
+  from Twilio's price lists by a scheduled CI job that opens a PR on drift.
+- New `national` number type end to end: schema literal + migration, API,
+  SDK (`NumberType` gains `national`), and `hail numbers acquire --type
+national`.
+- `POST /numbers` validates against the catalog allow-list: unlisted
+  country/number-type combinations are rejected, and the acquired number's
+  capabilities derive from the catalog row instead of being assumed. The
+  catalog is bundled into the API image and read from the runtime path.
+- `/costs` shows number capabilities across all countries.
+
+### Contacts CLI
+
+- `hail contacts list|create|update|delete|set-phone|clear-phone` — manage
+  the org contact directory, including member phone numbers, from the CLI.
+  OpenAPI client regenerated for the contacts + member-phone endpoints.
+
+### SMS pricing dataset
+
+- `costs/sms.json` — provider base rates for US outbound SMS per segment
+  (Twilio, Vonage, Plivo, AWS End User Messaging, Telnyx) with per-row
+  provenance and a JSON Schema; validated in CI and staleness-checked like
+  the other costs files. Rates verified against official provider sources
+  on 2026-07-17.
+- `/costs` renders the dataset as a new SMS section and links the free
+  tools at hail.so/tools that consume it.
+
+### Fixed
+
+- Number acquire guard hardened and capability derivation corrected
+  (code review follow-ups to the multi-country work).
+- Costs page and contacts CLI code-review fixes.
+
 ## [0.14.0] — 2026-07-17
 
 Voicebot agent tools milestone. The voice agent can now act mid-call — text
