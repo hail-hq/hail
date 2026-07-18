@@ -22,7 +22,7 @@ Schemas are served at their `$id` URLs:
 - <https://hail.so/costs/schema/sms.json>
 - <https://hail.so/costs/schema/telephony.json>
 
-**Note:** The interactive `web/` compare view and `costs.md` markdown export do not yet include telephony data (out of scope; a later PR).
+**Note:** The interactive `web/` compare view and `costs.md` markdown export do not yet include telephony or SMS data (out of scope; a later PR).
 
 ## How AI agents should use this
 

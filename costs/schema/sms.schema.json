@@ -41,12 +41,15 @@
       "properties": {
         "provider": { "type": "string", "minLength": 1 },
         "country_code": { "type": "string", "pattern": "^[A-Z]{2}$" },
-        "direction": { "enum": ["outbound", "inbound"] },
+        "direction": { "const": "outbound" },
         "usd_per_segment": { "$ref": "#/$defs/decimal" },
         "last_verified": { "$ref": "#/$defs/date" },
         "last_changed_at": { "$ref": "#/$defs/date" },
         "verification_method": { "enum": ["manual-confirmed", "community-pr"] },
-        "verified_by": { "type": "string", "minLength": 1 },
+        "verified_by": {
+          "type": "string",
+          "pattern": "^[a-zA-Z0-9](?:[a-zA-Z0-9]|-(?=[a-zA-Z0-9])){0,38}$"
+        },
         "source_url": { "type": "string", "format": "uri" },
         "notes": { "type": "string" }
       }

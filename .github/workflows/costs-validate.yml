@@ -21,16 +21,20 @@ jobs:
           cache: pip
       - name: Install check-jsonschema
         run: pip install check-jsonschema==0.29.4
-      - name: Validate LLM data
-        run: check-jsonschema --schemafile costs/schema/llm.schema.json costs/llm.json
-      - name: Validate STT data
-        run: check-jsonschema --schemafile costs/schema/stt.schema.json costs/stt.json
-      - name: Validate TTS data
-        run: check-jsonschema --schemafile costs/schema/tts.schema.json costs/tts.json
-      - name: Validate SMS data
-        run: check-jsonschema --schemafile costs/schema/sms.schema.json costs/sms.json
-      - name: Validate Telephony data
-        run: check-jsonschema --schemafile costs/schema/telephony.schema.json costs/telephony.json
+      # Every costs/*.json must have a matching costs/schema/<name>.schema.json.
+      # Discovery mirrors check-stale.mjs: a new dataset without a schema fails
+      # here instead of silently shipping unvalidated.
+      - name: Validate costs data against schemas
+        run: |
+          for f in costs/*.json; do
+            name=$(basename "$f" .json)
+            schema="costs/schema/$name.schema.json"
+            if [ ! -f "$schema" ]; then
+              echo "::error file=$f::missing schema $schema"
+              exit 1
+            fi
+            check-jsonschema --schemafile "$schema" "$f"
+          done
       # Cross-field checks below are model-shaped (aliases, replaced_by_model_id)
       # and apply only to llm/stt/tts. telephony.json has no models[] and is
       # covered by its own schema validation step above.

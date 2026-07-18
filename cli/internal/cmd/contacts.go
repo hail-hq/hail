@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"strings"
 	"text/tabwriter"
 
 	"github.com/spf13/cobra"
@@ -59,6 +60,7 @@ type contactsListFlags struct {
 	q      string
 	limit  int
 	cursor string
+	all    bool
 }
 
 func newContactsListCmd(opts *Options) *cobra.Command {
@@ -75,6 +77,7 @@ func newContactsListCmd(opts *Options) *cobra.Command {
 	cmd.Flags().StringVar(&f.q, "q", "", "Filter by name/email/phone (server-side substring match)")
 	cmd.Flags().IntVar(&f.limit, "limit", 100, "Page size (1..500)")
 	cmd.Flags().StringVar(&f.cursor, "cursor", "", "Resume from a previous next_cursor")
+	cmd.Flags().BoolVar(&f.all, "all", false, "Walk every page (warns at >1000 contacts)")
 	return cmd
 }
 
@@ -84,19 +87,26 @@ func runContactsList(ctx context.Context, opts *Options, f *contactsListFlags) e
 		return err
 	}
 
-	params := &client.ListContactsContactsGetParams{
-		Q:      strPtr(f.q),
-		Cursor: strPtr(f.cursor),
-		Limit:  &f.limit,
-	}
-	resp, err := apiClient.ListContactsContactsGetWithResponse(ctx, params)
+	items, next, err := walkCursor(f.all, f.cursor, opts.Stderr, "contacts",
+		func(cursor string) (cursorPage[client.ContactEntry], error) {
+			params := &client.ListContactsContactsGetParams{
+				Q:      strPtr(f.q),
+				Cursor: strPtr(cursor),
+				Limit:  &f.limit,
+			}
+			resp, err := apiClient.ListContactsContactsGetWithResponse(ctx, params)
+			if err != nil {
+				return cursorPage[client.ContactEntry]{}, fmt.Errorf("contacts API: %w", err)
+			}
+			if resp.HTTPResponse.StatusCode != http.StatusOK || resp.JSON200 == nil {
+				return cursorPage[client.ContactEntry]{}, apiError(resp.HTTPResponse.StatusCode, resp.Body)
+			}
+			return cursorPage[client.ContactEntry]{items: resp.JSON200.Items, nextCursor: resp.JSON200.NextCursor}, nil
+		})
 	if err != nil {
-		return fmt.Errorf("contacts API: %w", err)
+		return err
 	}
-	if resp.HTTPResponse.StatusCode != http.StatusOK || resp.JSON200 == nil {
-		return apiError(resp.HTTPResponse.StatusCode, resp.Body)
-	}
-	return printContactList(opts, resp.JSON200)
+	return printContactList(opts, &client.ContactListResponse{Items: items, NextCursor: next})
 }
 
 // --------------------------------------------------------------------------- //
@@ -188,7 +198,7 @@ Example:
   hail contacts update 11111111-1111-1111-1111-111111111111 --phone +15559876543`,
 		Args: argsOrHelp(1, "<id>"),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runContactsUpdate(cmd.Context(), opts, f, args[0])
+			return runContactsUpdate(cmd.Context(), cmd, opts, f, args[0])
 		},
 	}
 	cmd.Flags().StringVar(&f.name, "name", "", "New name")
@@ -197,7 +207,14 @@ Example:
 	return cmd
 }
 
-func runContactsUpdate(ctx context.Context, opts *Options, f *contactsUpdateFlags, id string) error {
+func runContactsUpdate(ctx context.Context, cmd *cobra.Command, opts *Options, f *contactsUpdateFlags, id string) error {
+	// With no flags every ContactPatch field is nil/omitempty: the request
+	// would be `{}`, the API would 200 the unchanged row, and the CLI would
+	// print "✓ Contact updated" having changed nothing. Fail locally instead.
+	if f.name == "" && f.phone == "" && f.email == "" {
+		return requireInputs(cmd, "--name, --phone, or --email")
+	}
+
 	body := client.ContactPatch{
 		Name:      strPtr(f.name),
 		PhoneE164: strPtr(f.phone),
@@ -298,15 +315,12 @@ func runContactsSetPhone(ctx context.Context, opts *Options, f *contactsSetPhone
 	if err != nil {
 		return fmt.Errorf("members API: %w", err)
 	}
-	if resp.HTTPResponse.StatusCode != http.StatusOK {
+	if resp.HTTPResponse.StatusCode != http.StatusOK || resp.JSON200 == nil {
 		return apiError(resp.HTTPResponse.StatusCode, resp.Body)
 	}
 
 	if opts.JSON {
-		if resp.JSON200 != nil {
-			return printJSON(opts.Stdout, resp.JSON200)
-		}
-		return printJSON(opts.Stdout, map[string]string{"user_id": userID, "phone_e164": f.phone})
+		return printJSON(opts.Stdout, resp.JSON200)
 	}
 	fmt.Fprintf(opts.Stdout, "✓ Phone set for %s: %s\n", userID, f.phone)
 	return nil
@@ -391,7 +405,7 @@ func printContactList(opts *Options, body *client.ContactListResponse) error {
 		return fmt.Errorf("write table: %w", err)
 	}
 	if body.NextCursor != nil && *body.NextCursor != "" {
-		fmt.Fprintf(opts.Stdout, "\nmore: --cursor %s\n", *body.NextCursor)
+		fmt.Fprintf(opts.Stdout, "\nmore: --cursor %s\n", strings.TrimSpace(*body.NextCursor))
 	}
 	return nil
 }

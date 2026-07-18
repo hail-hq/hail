@@ -12,7 +12,7 @@ export const dynamic = 'force-static';
 export const metadata = {
   title: 'Model costs — Hail',
   description:
-    'Public, validated pricing and capability data for AI model providers — LLMs, speech-to-text, text-to-speech, and telephony. Schema-validated, CC-BY-4.0, refreshed weekly.',
+    'Public, validated pricing and capability data for AI model providers — LLMs, speech-to-text, text-to-speech, SMS, and telephony. Schema-validated, CC-BY-4.0, refreshed weekly.',
   alternates: {
     types: {
       'text/markdown': '/costs.md',
@@ -119,7 +119,7 @@ export default function CostsPage() {
               <div className="k">SMS</div>
               <div className="v">{sms.providers.length}</div>
               <div className="n">
-                {priceRange(sms.providers.map((r) => r.usd_per_segment), 5, 3, 'segment')} · base
+                {priceRange(sms.providers.map((r) => r.usd_per_segment), 5, 5, 'segment')} · base
               </div>
             </div>
             <div className="stat">

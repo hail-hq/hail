@@ -49,7 +49,7 @@ export function SmsSection({ data }: { data: SmsRateRow[] }) {
         </>
       }
       count={data.length}
-      rangeLabel={priceRange(data.map((r) => r.usd_per_segment), 5, 3, 'segment')}
+      rangeLabel={priceRange(data.map((r) => r.usd_per_segment), 5, 5, 'segment')}
       data={data}
       columns={columns}
       defaultSort={{ id: 'price', desc: false }}

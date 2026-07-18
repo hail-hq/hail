@@ -312,6 +312,27 @@ func TestContactsUpdate_MissingID_PrintsHelp(t *testing.T) {
 	}
 }
 
+// TestContactsUpdate_RequiresAField pins the local guard against a no-op
+// update: zero flags would send an empty PATCH, get the unchanged row back
+// with 200, and report success without changing anything.
+func TestContactsUpdate_RequiresAField(t *testing.T) {
+	srv := newFakeServer(t, http.StatusOK, sampleManualContact())
+
+	_, stderr, err := runRoot(t,
+		map[string]string{"HAIL_API_KEY": "sk_test", "HAIL_API_URL": srv.URL},
+		"contacts", "update", "11111111-1111-1111-1111-111111111111",
+	)
+	if !errors.Is(err, errInvalidInputs) {
+		t.Fatalf("want errInvalidInputs, got %v", err)
+	}
+	if !strings.Contains(stderr, "--name, --phone, or --email") {
+		t.Errorf("stderr missing reason: %q", stderr)
+	}
+	if got := atomic.LoadInt32(&srv.hits); got != 0 {
+		t.Fatalf("server should not have been called, got %d hits", got)
+	}
+}
+
 // --------------------------------------------------------------------------- //
 // delete
 // --------------------------------------------------------------------------- //

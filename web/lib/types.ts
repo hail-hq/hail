@@ -153,7 +153,7 @@ export interface TelephonyFeeRow extends TelephonyProvenance {
 export interface SmsRateRow extends TelephonyProvenance {
   provider: string;
   country_code: string;
-  direction: 'outbound' | 'inbound';
+  direction: 'outbound';
   usd_per_segment: string;
 }
 
