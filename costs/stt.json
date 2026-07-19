@@ -14,7 +14,7 @@
       "streaming": true,
       "realtime": true,
       "diarization": "extra-cost",
-      "last_verified": "2026-07-13",
+      "last_verified": "2026-07-19",
       "last_changed_at": "2026-07-02",
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",
@@ -33,7 +33,7 @@
       "streaming": true,
       "realtime": true,
       "diarization": "extra-cost",
-      "last_verified": "2026-07-13",
+      "last_verified": "2026-07-19",
       "last_changed_at": "2026-07-02",
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",
@@ -63,7 +63,7 @@
       "diarization": "extra-cost",
       "deployment_options": ["native"],
       "confidence": "medium",
-      "last_verified": "2026-07-13",
+      "last_verified": "2026-07-19",
       "last_changed_at": "2026-05-19",
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",
@@ -80,7 +80,7 @@
       "streaming": true,
       "realtime": true,
       "confidence": "medium",
-      "last_verified": "2026-07-13",
+      "last_verified": "2026-07-19",
       "last_changed_at": "2026-07-02",
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",
@@ -97,7 +97,7 @@
       "streaming": true,
       "realtime": true,
       "confidence": "medium",
-      "last_verified": "2026-07-13",
+      "last_verified": "2026-07-19",
       "last_changed_at": "2026-07-02",
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",
@@ -114,7 +114,7 @@
       "streaming": false,
       "realtime": false,
       "diarization": "extra-cost",
-      "last_verified": "2026-07-13",
+      "last_verified": "2026-07-19",
       "last_changed_at": "2026-05-05",
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",
@@ -134,7 +134,7 @@
       "deprecated_at": "2026-07-02",
       "replaced_by_model_id": "universal-streaming-english",
       "confidence": "medium",
-      "last_verified": "2026-07-13",
+      "last_verified": "2026-07-19",
       "last_changed_at": "2026-05-05",
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",
@@ -152,7 +152,7 @@
       "realtime": true,
       "diarization": "extra-cost",
       "deployment_options": ["native"],
-      "last_verified": "2026-07-13",
+      "last_verified": "2026-07-19",
       "last_changed_at": "2026-07-02",
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",
@@ -189,12 +189,12 @@
       "realtime": false,
       "diarization": "extra-cost",
       "deployment_options": ["native"],
-      "last_verified": "2026-07-13",
+      "last_verified": "2026-07-19",
       "last_changed_at": "2026-05-26",
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",
       "source_url": "https://www.assemblyai.com/pricing",
-      "notes": "AssemblyAI's highest-accuracy pre-recorded model with native code-switching, now documented at 18 languages (expanded from the 6 tracked at last verification) per assemblyai.com/docs/getting-started/models and assemblyai.com/llms/models.md; unsupported languages fall back to Universal-2. Published as $0.21/hr, unchanged. Vendor pricing page labels this row \"Universal-3.5 Pro\" (marketing rebrand); API model_id remains `universal-3-pro` per assemblyai.com/llms/models.md quick reference (a separate docs landing page's code sample showed `universal-3-5-pro`, but the quick-reference and pricing page agree on `universal-3-pro`, so the existing model_id is kept). For real-time use see universal-3-pro-streaming."
+      "notes": "AssemblyAI's highest-accuracy pre-recorded model with native code-switching, documented at 18 languages per assemblyai.com/docs/getting-started/models and assemblyai.com/llms/models.md; unsupported languages fall back to Universal-2. Published as $0.21/hr, unchanged. Vendor pricing page labels this row \"Universal-3.5 Pro\" (marketing rebrand) and as of 2026-07-19 explicitly lists `universal-3-pro` as the API identifier, matching the llms/models.md quick reference. Legacy request value `best` now routes here (`nano` routes to universal-2). For real-time use see u3-rt-pro."
     },
     {
       "provider": "AssemblyAI",
@@ -226,13 +226,53 @@
       "realtime": true,
       "diarization": "extra-cost",
       "deployment_options": ["native"],
+      "deprecated_at": "2026-07-19",
+      "replaced_by_model_id": "u3-rt-pro",
       "confidence": "medium",
-      "last_verified": "2026-07-13",
+      "last_verified": "2026-07-19",
       "last_changed_at": "2026-05-26",
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",
       "source_url": "https://www.assemblyai.com/pricing",
-      "notes": "Real-time streaming variant of Universal-3 Pro, positioned for voice agents. Now documented at 18 languages, matching the pre-recorded universal-3-pro coverage (same source pair as that row). Published as $0.45/hr, unchanged this refresh. Vendor has rebranded this tier \"Universal-3.5 Pro Realtime\"; both the pricing page and the assemblyai.com/llms/models.md quick reference this refresh consistently give `u3-rt-pro` (alias `u3-pro`) as the API identifier, but no vendor source uses the literal string `universal-3-pro-streaming` that this row's model_id carries. Keeping the existing model_id unchanged this cycle rather than renaming on a single refresh's evidence; confidence:medium pending a repeat confirmation before renaming/deprecating in favor of `u3-rt-pro`."
+      "notes": "Real-time streaming tier for voice agents, now branded \"Universal-3.5 Pro Realtime\". Deprecated in this dataset 2026-07-19: for a second consecutive refresh (2026-07-13 and 2026-07-19) the pricing page and the assemblyai.com/llms/models.md quick reference both give `u3-rt-pro` (alias `u3-pro`) as the API identifier, and no vendor source uses the literal string `universal-3-pro-streaming`. This was the repeat confirmation the 2026-07-13 refresh required before renaming; superseded by the `u3-rt-pro` row at the same $0.45/hr price (a rename, not a price change). confidence:medium because this id was never published by the vendor, so there is no explicit vendor deprecation notice for it."
+    },
+    {
+      "provider": "AssemblyAI",
+      "provider_url": "https://www.assemblyai.com",
+      "model_id": "u3-rt-pro",
+      "display_name": "Universal-3.5 Pro Realtime",
+      "aliases": ["u3-pro"],
+      "price_per_minute_usd": "0.0075",
+      "languages": [
+        "en",
+        "es",
+        "fr",
+        "de",
+        "it",
+        "pt",
+        "ar",
+        "da",
+        "nl",
+        "fi",
+        "he",
+        "hi",
+        "ja",
+        "zh",
+        "no",
+        "sv",
+        "tr",
+        "vi"
+      ],
+      "streaming": true,
+      "realtime": true,
+      "diarization": "extra-cost",
+      "deployment_options": ["native"],
+      "last_verified": "2026-07-19",
+      "last_changed_at": "2026-07-19",
+      "verification_method": "manual-confirmed",
+      "verified_by": "r13i",
+      "source_url": "https://www.assemblyai.com/pricing",
+      "notes": "Canonical id for the streaming tier this dataset previously tracked as `universal-3-pro-streaming` (GA 2026-03-03 per assemblyai.com/llms/models.md; `u3-pro` kept as a backward-compatible alias that routes here). Published as $0.45/hr ($0.0075/min), billed on session duration, not audio duration. Same 18-language coverage as pre-recorded universal-3-pro. Real-time inline diarization is a streaming add-on at +$0.12/hr per assemblyai.com/llms/pricing.md, hence diarization:extra-cost. Sources: pricing page + llms/models.md + llms/pricing.md, all fetched 2026-07-19."
     },
     {
       "provider": "AssemblyAI",
@@ -245,7 +285,7 @@
       "realtime": true,
       "diarization": "extra-cost",
       "deployment_options": ["native"],
-      "last_verified": "2026-07-13",
+      "last_verified": "2026-07-19",
       "last_changed_at": "2026-05-26",
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",
@@ -265,12 +305,12 @@
       "deployment_options": ["native"],
       "deprecated_at": "2026-07-02",
       "confidence": "medium",
-      "last_verified": "2026-07-13",
+      "last_verified": "2026-07-19",
       "last_changed_at": "2026-05-26",
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",
       "source_url": "https://www.assemblyai.com/pricing",
-      "notes": "OpenAI Whisper served via AssemblyAI's streaming infrastructure with 99+ language coverage. Published as $0.30/hr as of last verification, but no longer listed on the pricing page, docs/getting-started/models, the llms/models.md quick reference, or the changelog — still absent as of 2026-07-13, reconfirming silent discontinuation. No in-file replacement (no surviving streaming model offers 99+ language coverage); confidence:medium since no explicit vendor deprecation notice was found, only absence across all checked sources."
+      "notes": "OpenAI Whisper served via AssemblyAI's streaming infrastructure with 99+ language coverage. Published as $0.30/hr as of last verification, but no longer listed on the pricing page, docs/getting-started/models, the llms/models.md quick reference, or the changelog — still absent as of 2026-07-19, reconfirming silent discontinuation. No in-file replacement (no surviving streaming model offers 99+ language coverage); confidence:medium since no explicit vendor deprecation notice was found, only absence across all checked sources."
     },
     {
       "provider": "Cartesia",
@@ -284,12 +324,12 @@
       "realtime": true,
       "diarization": "unsupported",
       "confidence": "medium",
-      "last_verified": "2026-07-13",
+      "last_verified": "2026-07-19",
       "last_changed_at": "2026-07-02",
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",
       "source_url": "https://cartesia.ai/pricing",
-      "notes": "model_id corrected from the invented 'ink-1' to the actual API identifier 'ink-whisper' (docs.cartesia.ai STT AsyncAPI spec enumerates only ink-2 and ink-whisper; latest dated snapshot is ink-whisper-2025-06-04). cartesia.ai/pricing no longer publishes an explicit $/min table -- STT is now billed in credits (docs.cartesia.ai/pricing.md: ink-whisper = 1 credit/sec streaming, 1 credit per 2 sec via the batch endpoint) with credit value varying by plan tier. Converting at the Pro-tier rate ($5/mo for 100,000 credits = $0.00005/credit, the same rate implied by the prior $0.003/min figure) yields $0.003/min streaming (unchanged) and $0.0015/min batch (new price_per_minute_batch_usd field, derived not published, hence confidence: medium). Languages widened from '42+' to '99+' per docs.cartesia.ai/build-with-cartesia/stt/older-models. Still the same STT product as the Sonic TTS provider; supports both batch (/stt) and manual realtime websocket. 2026-07-13 re-verify: still active, no deprecation banner; docs.cartesia.ai/build-with-cartesia/stt/older-models confirms 99-language support and ink-whisper-2025-06-04 as latest snapshot unchanged; docs.cartesia.ai/pricing.md credit rates (1 credit/sec streaming, 1 credit/2sec batch) and cartesia.ai/pricing Pro-tier allotment ($5/mo, ~9h16m ink-2 hours implying $0.00005/credit) unchanged, so both prices confirmed unchanged."
+      "notes": "model_id corrected from the invented 'ink-1' to the actual API identifier 'ink-whisper' (docs.cartesia.ai STT AsyncAPI spec enumerates only ink-2 and ink-whisper; latest dated snapshot is ink-whisper-2025-06-04). cartesia.ai/pricing no longer publishes an explicit $/min table -- STT is now billed in credits (docs.cartesia.ai/pricing.md: ink-whisper = 1 credit/sec streaming, 1 credit per 2 sec via the batch endpoint) with credit value varying by plan tier. Converting at the Pro-tier rate ($5/mo for 100,000 credits = $0.00005/credit, the same rate implied by the prior $0.003/min figure) yields $0.003/min streaming (unchanged) and $0.0015/min batch (new price_per_minute_batch_usd field, derived not published, hence confidence: medium). Languages widened from '42+' to '99+' per docs.cartesia.ai/build-with-cartesia/stt/older-models. Still the same STT product as the Sonic TTS provider; supports both batch (/stt) and manual realtime websocket. 2026-07-13 re-verify: still active, no deprecation banner; docs.cartesia.ai/build-with-cartesia/stt/older-models confirms 99-language support and ink-whisper-2025-06-04 as latest snapshot unchanged; docs.cartesia.ai/pricing.md credit rates (1 credit/sec streaming, 1 credit/2sec batch) and cartesia.ai/pricing Pro-tier allotment ($5/mo, ~9h16m ink-2 hours implying $0.00005/credit) unchanged, so both prices confirmed unchanged. 2026-07-19 re-verify: docs.cartesia.ai/pricing.md still lists ink-whisper at 1 credit/sec streaming and 1 credit/2sec batch; cartesia.ai/pricing plan allotments unchanged ($5 Pro ~9h16m); no deprecation notice (only 'Older STT Models' placement); prices unchanged."
     },
     {
       "provider": "Cartesia",
@@ -301,12 +341,12 @@
       "streaming": true,
       "realtime": true,
       "confidence": "medium",
-      "last_verified": "2026-07-13",
+      "last_verified": "2026-07-19",
       "last_changed_at": "2026-07-02",
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",
       "source_url": "https://cartesia.ai/pricing",
-      "notes": "New model launched 2026-05-22 (docs.cartesia.ai/build-with-cartesia/stt/latest): Cartesia's fastest streaming STT with built-in turn detection, replacing the need for separate VAD. English only ('en') as of this refresh; batch (/stt) support listed as 'coming soon', so only the streaming/auto-websocket endpoint is priced here (no price_per_minute_batch_usd yet). Billed at 3 credits/sec (docs.cartesia.ai/pricing.md); converted at the Pro-tier rate of $0.00005/credit ($5/mo for 100,000 credits) = $0.009/min, consistent with the ~9h16m Ink-2 allotment shown for the $5 Pro plan on cartesia.ai/pricing (9.27h => ~$0.009/min). Diarization support unconfirmed in docs, field omitted pending verification. Not a replacement for ink-whisper -- both remain listed as stable/active models. 2026-07-13 re-verify: still active/stable, still English-only, batch endpoint still listed as not yet available, turn-detection lifecycle events (turn.start/update/eager_end/resume/end) confirmed live on docs.cartesia.ai/build-with-cartesia/stt/latest; credit rate (3 credits/sec) and Pro-tier allotment (~9h16m for $5) unchanged, so $0.009/min confirmed unchanged."
+      "notes": "New model launched 2026-05-22 (docs.cartesia.ai/build-with-cartesia/stt/latest): Cartesia's fastest streaming STT with built-in turn detection, replacing the need for separate VAD. English only ('en') as of this refresh; batch (/stt) support listed as 'coming soon', so only the streaming/auto-websocket endpoint is priced here (no price_per_minute_batch_usd yet). Billed at 3 credits/sec (docs.cartesia.ai/pricing.md); converted at the Pro-tier rate of $0.00005/credit ($5/mo for 100,000 credits) = $0.009/min, consistent with the ~9h16m Ink-2 allotment shown for the $5 Pro plan on cartesia.ai/pricing (9.27h => ~$0.009/min). Diarization support unconfirmed in docs, field omitted pending verification. Not a replacement for ink-whisper -- both remain listed as stable/active models. 2026-07-13 re-verify: still active/stable, still English-only, batch endpoint still listed as not yet available, turn-detection lifecycle events (turn.start/update/eager_end/resume/end) confirmed live on docs.cartesia.ai/build-with-cartesia/stt/latest; credit rate (3 credits/sec) and Pro-tier allotment (~9h16m for $5) unchanged, so $0.009/min confirmed unchanged. 2026-07-19 re-verify: still latest/stable on docs.cartesia.ai/build-with-cartesia/stt/latest, still English-only, batch (/stt) still not available per docs.cartesia.ai/pricing.md (3 credits/sec streaming unchanged); cartesia.ai/pricing Pro allotment ~9h16m/$5 unchanged; price unchanged; no new Cartesia STT models found on either source."
     },
     {
       "provider": "OpenAI",
@@ -318,12 +358,12 @@
       "streaming": false,
       "realtime": false,
       "diarization": "unsupported",
-      "last_verified": "2026-07-13",
+      "last_verified": "2026-07-19",
       "last_changed_at": "2026-05-05",
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",
       "source_url": "https://developers.openai.com/api/docs/pricing",
-      "notes": "Billed to the nearest second. Pre-recorded only. Price unchanged at $0.006/min. openai.com/api/pricing/ still 403s and platform.openai.com/docs/pricing now 301-redirects to developers.openai.com/api/docs/pricing; Whisper is a collapsed/hidden row on that pricing table but present at the same rate, cross-verified against developers.openai.com/api/docs/models (not deprecated; no entry on /api/docs/deprecations)."
+      "notes": "Billed to the nearest second. Pre-recorded only. Price unchanged at $0.006/min. openai.com/api/pricing/ still 403s and platform.openai.com/docs/pricing 301-redirects to developers.openai.com/api/docs/pricing; as of 2026-07-19 Whisper no longer surfaces on the main pricing table at all — rate re-verified on the model detail page developers.openai.com/api/docs/models/whisper-1 ($0.006/min, active), cross-checked against /api/docs/deprecations (no entry) and the speech-to-text guide, which still covers whisper-1 (labeled legacy/open-source-based but not deprecated)."
     },
     {
       "provider": "OpenAI",
@@ -336,12 +376,12 @@
       "realtime": false,
       "diarization": "unsupported",
       "confidence": "medium",
-      "last_verified": "2026-07-13",
+      "last_verified": "2026-07-19",
       "last_changed_at": "2026-07-13",
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",
       "source_url": "https://developers.openai.com/api/docs/pricing",
-      "notes": "New row this refresh. GPT-4o-powered transcription model served via the same /v1/audio/transcriptions endpoint as whisper-1; higher quality with prompting support for improved accuracy. Billed per-token ($2.50/1M input audio tokens, $10.00/1M output tokens); developers.openai.com/api/docs/pricing publishes this as an 'Estimated cost' of $0.006/minute (confidence: medium — the real bill tracks token usage, not a flat per-minute rate like whisper-1). 25 MB file-size limit. Supports `stream=true` for incremental text output on an already-uploaded file, which is not the same as live/realtime audio-in — OpenAI's Realtime API instead designates a separate `gpt-realtime-whisper` model for that; deferred, see notes on that decision in this refresh's report (categorization as STT vs. realtime/audio-modality product needs a call before adding). Same supported-language set as whisper-1 per developers.openai.com/api/docs/guides/speech-to-text 'Supported languages' section (page notes ISO 639-3 codes are additionally accepted for GPT-4o-based models). Not listed on /api/docs/deprecations. Cross-verified model existence via developers.openai.com/api/docs/models."
+      "notes": "GPT-4o-powered transcription model served via the same /v1/audio/transcriptions endpoint as whisper-1; higher quality with prompting support for improved accuracy. Billed per-token ($2.50/1M input audio tokens, $10.00/1M output tokens); developers.openai.com/api/docs/pricing publishes this as an 'Estimated cost' of $0.006/minute (confidence: medium — the real bill tracks token usage, not a flat per-minute rate like whisper-1). Rates re-verified unchanged 2026-07-19. 25 MB file-size limit. Supports `stream=true` for incremental text output on an already-uploaded file, which is not the same as live/realtime audio-in — for live audio OpenAI designates the separate `gpt-realtime-whisper` model (see its row). Same supported-language set as whisper-1 per developers.openai.com/api/docs/guides/speech-to-text 'Supported languages' section (page notes ISO 639-3 codes are additionally accepted for GPT-4o-based models). Not listed on /api/docs/deprecations. Cross-verified model existence via developers.openai.com/api/docs/models."
     },
     {
       "provider": "OpenAI",
@@ -354,12 +394,12 @@
       "realtime": false,
       "diarization": "unsupported",
       "confidence": "medium",
-      "last_verified": "2026-07-13",
+      "last_verified": "2026-07-19",
       "last_changed_at": "2026-07-13",
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",
       "source_url": "https://developers.openai.com/api/docs/pricing",
-      "notes": "New row this refresh. Cost-efficient sibling of gpt-4o-transcribe with the same prompting and (non-realtime) streaming-of-output capabilities; same /v1/audio/transcriptions endpoint and 25 MB file-size limit. Billed per-token ($1.25/1M input audio tokens, $5.00/1M output tokens); developers.openai.com/api/docs/pricing publishes this as an 'Estimated cost' of $0.003/minute (confidence: medium, same token-vs-flat-rate caveat as gpt-4o-transcribe). Same supported-language set as whisper-1 per the speech-to-text guide's 'Supported languages' section. Not listed on /api/docs/deprecations. Cross-verified model existence via developers.openai.com/api/docs/models."
+      "notes": "Cost-efficient sibling of gpt-4o-transcribe with the same prompting and (non-realtime) streaming-of-output capabilities; same /v1/audio/transcriptions endpoint and 25 MB file-size limit. Billed per-token ($1.25/1M input audio tokens, $5.00/1M output tokens); developers.openai.com/api/docs/pricing publishes this as an 'Estimated cost' of $0.003/minute (confidence: medium, same token-vs-flat-rate caveat as gpt-4o-transcribe). Same supported-language set as whisper-1 per the speech-to-text guide's 'Supported languages' section. Not listed on /api/docs/deprecations. Cross-verified model existence via developers.openai.com/api/docs/models."
     },
     {
       "provider": "OpenAI",
@@ -372,12 +412,30 @@
       "realtime": false,
       "diarization": "included",
       "confidence": "medium",
-      "last_verified": "2026-07-13",
+      "last_verified": "2026-07-19",
       "last_changed_at": "2026-07-13",
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",
       "source_url": "https://developers.openai.com/api/docs/pricing",
-      "notes": "New row this refresh. Speaker-aware transcription variant for meeting recordings / multi-speaker audio: emits `transcript.text.segment` events with speaker labels (up to 4 known-speaker reference clips accepted), no separate diarization fee — priced identically to gpt-4o-transcribe. developers.openai.com/api/docs/pricing lists it as a hidden-by-default row (same collapsed-row pattern as whisper-1) at the same $2.50/$10.00 per-1M-token rate, 'Estimated cost' $0.006/minute (confidence: medium, same token-vs-flat-rate caveat). Requires `chunking_strategy` (auto or VAD config) for audio longer than 30 seconds; does not support the `prompt` or `logprobs` parameters. 25 MB file-size limit. Cross-verified model existence via developers.openai.com/api/docs/models and developers.openai.com/api/docs/guides/speech-to-text."
+      "notes": "Speaker-aware transcription variant for meeting recordings / multi-speaker audio: emits `transcript.text.segment` events with speaker labels (up to 4 known-speaker reference clips accepted), no separate diarization fee — priced identically to gpt-4o-transcribe at $2.50/$10.00 per 1M audio tokens, 'Estimated cost' $0.006/minute (confidence: medium, same token-vs-flat-rate caveat). Hidden/collapsed on the main pricing table; rates re-verified unchanged 2026-07-19 on the model detail page developers.openai.com/api/docs/models/gpt-4o-transcribe-diarize (active, not on /api/docs/deprecations). Requires `chunking_strategy` (auto or VAD config) for audio longer than 30 seconds; does not support the `prompt` or `logprobs` parameters. 25 MB file-size limit. Cross-verified model existence via developers.openai.com/api/docs/models and developers.openai.com/api/docs/guides/speech-to-text."
+    },
+    {
+      "provider": "OpenAI",
+      "provider_url": "https://openai.com",
+      "model_id": "gpt-realtime-whisper",
+      "display_name": "GPT Realtime Whisper",
+      "price_per_minute_usd": "0.017",
+      "languages": "99+",
+      "streaming": true,
+      "realtime": true,
+      "diarization": "unsupported",
+      "confidence": "medium",
+      "last_verified": "2026-07-19",
+      "last_changed_at": "2026-07-19",
+      "verification_method": "manual-confirmed",
+      "verified_by": "r13i",
+      "source_url": "https://developers.openai.com/api/docs/pricing",
+      "notes": "New row this refresh (deferred 2026-07-13 pending STT-vs-realtime categorization; vendor now lists it plainly as 'Streaming speech-to-text model for realtime transcription', so it belongs here). Low-latency streaming transcription for live audio (microphone/call/media stream) via /v1/realtime and /v1/realtime/transcription_sessions. Flat $0.017 per minute of audio duration — not token-billed; price confirmed on both developers.openai.com/api/docs/pricing and the model detail page developers.openai.com/api/docs/models/gpt-realtime-whisper. confidence: medium because the supported-language list is not explicitly published for this model — '99+' is inherited from the Whisper family (speech-to-text guide's language section covers the file-based endpoints only). No function calling / structured outputs / fine-tuning. Not listed on /api/docs/deprecations."
     },
     {
       "provider": "Groq",
@@ -390,12 +448,12 @@
       "realtime": false,
       "diarization": "unsupported",
       "min_billed_seconds": 10,
-      "last_verified": "2026-07-13",
+      "last_verified": "2026-07-19",
       "last_changed_at": "2026-05-05",
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",
       "source_url": "https://groq.com/pricing/",
-      "notes": "Whisper V3 Large hosted on Groq. Published as $0.111/hr. Speed factor 217x realtime. Re-verified 2026-07-13: model_id, price ($0.111/hr = $0.00185/min), and 10s minimum billing unchanged. Cross-verified against console.groq.com/docs/models and console.groq.com/docs/speech-to-text (groq.com/groqcloud-models secondary URL now 404s)."
+      "notes": "Whisper V3 Large hosted on Groq. Published as $0.111/hr. Speed factor 217x realtime. Re-verified 2026-07-19: model_id active (production model, not on console.groq.com/docs/deprecations), price ($0.111/hr = $0.00185/min) and 10s minimum billing unchanged. Cross-verified against console.groq.com/docs/models."
     },
     {
       "provider": "Groq",
@@ -408,12 +466,12 @@
       "realtime": false,
       "diarization": "unsupported",
       "min_billed_seconds": 10,
-      "last_verified": "2026-07-13",
+      "last_verified": "2026-07-19",
       "last_changed_at": "2026-05-05",
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",
       "source_url": "https://groq.com/pricing/",
-      "notes": "Whisper Large v3 Turbo hosted on Groq — faster variant. Published as $0.04/hr. Speed factor 228x realtime. Re-verified 2026-07-13: model_id and price ($0.04/hr = $0.000667/min) unchanged. Cross-verified against console.groq.com/docs/models and console.groq.com/docs/speech-to-text (groq.com/groqcloud-models secondary URL now 404s)."
+      "notes": "Whisper Large v3 Turbo hosted on Groq — faster variant. Published as $0.04/hr. Speed factor 228x realtime. Re-verified 2026-07-19: model_id active (production model, not on console.groq.com/docs/deprecations), price ($0.04/hr = $0.000667/min) and 10s minimum billing unchanged. Cross-verified against console.groq.com/docs/models."
     },
     {
       "provider": "Microsoft Azure",
@@ -421,37 +479,55 @@
       "model_id": "azure-speech-realtime",
       "display_name": "Azure Speech (Real-time)",
       "price_per_minute_usd": "0.016667",
+      "diarization_per_minute_usd": "0.005",
       "languages": "100+",
       "streaming": true,
       "realtime": true,
-      "diarization": "included",
+      "diarization": "extra-cost",
       "deployment_options": ["azure"],
-      "confidence": "medium",
-      "last_verified": "2026-07-13",
-      "last_changed_at": "2026-05-19",
+      "last_verified": "2026-07-19",
+      "last_changed_at": "2026-07-19",
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",
       "source_url": "https://azure.microsoft.com/en-us/pricing/details/speech/",
-      "notes": "Azure Speech Standard (S0) real-time speech-to-text. Published as $1.00/hr pay-as-you-go (= $0.016667/min); custom real-time endpoint is $1.20/hr ($0.02/min). Commitment tiers reduce effective rate (2,000 hrs/mo $0.80/hr; 10,000 hrs/mo $0.65/hr; 50,000 hrs/mo $0.50/hr). Real-time diarization is included up to 240 min/session per Microsoft Learn quotas/limits doc. Languages: 100+ per Azure language support docs. Cross-verified via https://learn.microsoft.com/en-us/answers/questions/2155625/speech-to-text-costing-1-hr-is-crazy-no-bulk-avail. 2026-07-13 pass: primary azure.microsoft.com pricing page timed out on WebFetch (5 attempts across 2 URL variants); figures re-confirmed unchanged via the Q&A above plus techcommunity.microsoft.com/blog/azure-ai-foundry-blog/updates-to-azure-ai-speech-service-pricing/3928425 (same $1.20/hr custom real-time baseline in effect since Oct 2023, no newer revision found); confidence set to medium pending a successful direct fetch of the primary page next pass."
+      "notes": "Azure Speech Standard (S0) real-time speech-to-text. Published as $1.00/hr pay-as-you-go (= $0.016667/min), unchanged; custom real-time endpoint is $1.20/hr ($0.02/min). Commitment tiers reduce effective rate (2,000 hrs/mo $0.80/hr; 10,000 hrs/mo $0.65/hr; 50,000 hrs/mo $0.50/hr — all confirmed unchanged via Retail Prices API). Enhanced add-on features on real-time (diarization, continuous language identification, pronunciation assessment) cost $0.30/hr per feature (= $0.005/min) — previously recorded here as included; data correction, base rate did not move, and the vendor-side effective date of the add-on pricing is not published, so last_changed_at reflects the pass that captured it. Real-time diarization limited to 240 min/session. Languages: 100+ (137 locales). 2026-07-19 pass: azure.microsoft.com/en-us/pricing/details/speech/ fetched directly (page lists real-time enhanced add-ons as paid, batch add-ons as included; per-hour figures render client-side), exact rates from Azure Retail Prices API (prices.azure.com, eastus USD: 'S1 Speech To Text' $1.00/hr, 'S1 Speech to Text Enhanced Feature Audio' $0.30/hr), cross-verified via blocksentient.com/review/microsoft-azure-speech-service ($1/hr real-time; $0.30/hr/feature add-ons); confidence restored to high."
     },
     {
       "provider": "Microsoft Azure",
       "provider_url": "https://azure.microsoft.com",
       "model_id": "azure-speech-batch",
       "display_name": "Azure Speech (Batch)",
-      "price_per_minute_usd": "0.006",
+      "price_per_minute_usd": "0.003",
       "languages": "100+",
       "streaming": false,
       "realtime": false,
       "diarization": "included",
       "deployment_options": ["azure"],
-      "confidence": "medium",
-      "last_verified": "2026-07-13",
-      "last_changed_at": "2026-05-19",
+      "last_verified": "2026-07-19",
+      "last_changed_at": "2026-07-19",
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",
       "source_url": "https://azure.microsoft.com/en-us/pricing/details/speech/",
-      "notes": "Azure Speech Standard (S0) batch transcription. Published as $0.36/hr (= $0.006/min); custom batch endpoint is $0.45/hr ($0.0075/min). Fast transcription (REST API, sync) is a separate $0.66/hr ($0.011/min) tier, not modelled here. Batch diarization is included (up to 240 min/file). Cross-verified via https://learn.microsoft.com/en-us/answers/questions/2155625/speech-to-text-costing-1-hr-is-crazy-no-bulk-avail. 2026-07-13 pass: primary azure.microsoft.com pricing page timed out on WebFetch (5 attempts across 2 URL variants); figures re-confirmed unchanged via the Q&A above (explicitly states Standard Batch $0.36/hr, Custom Batch $0.45/hr) plus techcommunity.microsoft.com/blog/azure-ai-foundry-blog/updates-to-azure-ai-speech-service-pricing/3928425 (same baseline since Oct 2023, no newer revision found); confidence set to medium pending a successful direct fetch of the primary page next pass."
+      "notes": "Azure Speech Standard (S0) batch transcription. Published as $0.18/hr (= $0.003/min), down from the $0.36/hr recorded last pass; custom batch endpoint is now $0.225/hr ($0.00375/min), down from $0.45/hr. Batch enhanced add-ons (diarization, continuous language identification) are included at no extra charge; diarization up to 240 min/file. Fast transcription is modelled as its own row (azure-speech-fast). 2026-07-19 pass: azure.microsoft.com/en-us/pricing/details/speech/ fetched directly (figures render client-side), exact rates from Azure Retail Prices API (prices.azure.com, eastus USD: 'S1 Speech to Text Batch' $0.18/hr, 'S1 Custom Speech to Text Batch' $0.225/hr), cross-verified via blocksentient.com/review/microsoft-azure-speech-service ($0.18/hr batch, $0.225/hr custom batch). The prior $0.36 figure had been re-confirmed 2026-07-13 only from a 2023-era Microsoft Q&A thread while the primary page was unreachable, so the vendor's actual change date is unknown; last_changed_at is the verification date of the move. Confidence restored to high."
+    },
+    {
+      "provider": "Microsoft Azure",
+      "provider_url": "https://azure.microsoft.com",
+      "model_id": "azure-speech-fast",
+      "display_name": "Azure Speech (Fast)",
+      "price_per_minute_usd": "0.006",
+      "languages": "100+",
+      "streaming": false,
+      "realtime": false,
+      "diarization": "included",
+      "max_audio_minutes_per_file": 300,
+      "deployment_options": ["azure"],
+      "last_verified": "2026-07-19",
+      "last_changed_at": "2026-07-19",
+      "verification_method": "manual-confirmed",
+      "verified_by": "r13i",
+      "source_url": "https://azure.microsoft.com/en-us/pricing/details/speech/",
+      "notes": "Azure Speech fast transcription: synchronous REST API (/speechtotext/transcriptions:transcribe) returning faster-than-real-time file transcription; not streaming. Published as $0.36/hr (= $0.006/min); custom fast transcription is $0.45/hr ($0.0075/min). Diarization included at no extra charge. Limits (S0): <500 MB and <5 hrs (300 min) per file, 600 requests/min. Supported in 133 of 137 STT locales per Azure language-support docs. model_id is a Hail-coined tier slug — Azure exposes no stable model identifier. Added 2026-07-19: rates from Azure Retail Prices API (prices.azure.com, eastus USD: 'Fast Transcription Speech To Text' $0.36/hr, 'Custom - Fast Transcription' $0.45/hr), cross-verified via blocksentient.com/review/microsoft-azure-speech-service ($0.36/hr fast) and learn.microsoft.com fast-transcription-create + speech-services-quotas-and-limits docs."
     },
     {
       "provider": "Google",
@@ -464,12 +540,12 @@
       "realtime": true,
       "diarization": "included",
       "deployment_options": ["native"],
-      "last_verified": "2026-07-13",
+      "last_verified": "2026-07-19",
       "last_changed_at": "2026-05-19",
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",
       "source_url": "https://cloud.google.com/speech-to-text/pricing",
-      "notes": "Google Cloud Speech-to-Text v2 multilingual model. Standard tier $0.016/min for both real-time and batch (down from v1's $0.024/min, per https://cloud.google.com/blog/products/ai-machine-learning/google-cloud-speech-to-text-v2-api). Dynamic Batch tier (up to 24h SLA) is 75% lower at $0.004/min — not modelled as price_per_minute_batch_usd because standard batch is the same as real-time. Standard volume tiers can reduce effective rate to as low as $0.004/min. Supports StreamingRecognize (~20 languages), Recognize, and BatchRecognize (broadest language coverage) per https://docs.cloud.google.com/speech-to-text/docs/models/chirp-2. GA in us-central1, europe-west4, asia-southeast1. 2026-07-13 re-verify: pricing page (primary) still truncates on WebFetch — same known issue; cross-checked via https://docs.cloud.google.com/speech-to-text/v2/docs/transcription-model (secondary, model still listed GA, not deprecated) and two independent web-search snippets quoting the pricing page's own text, both confirming $0.016/min standard + $0.004/min (75% off) Dynamic Batch unchanged. No price change. Language-count sub-field left untouched this pass — repeated WebFetch summaries of the supported-languages table returned inconsistent counts (72/90+/150+) due to table truncation, so it does not meet the two-source bar for a non-price-field edit."
+      "notes": "Google Cloud Speech-to-Text v2 multilingual model. Standard tier $0.016/min for both real-time and batch (down from v1's $0.024/min, per https://cloud.google.com/blog/products/ai-machine-learning/google-cloud-speech-to-text-v2-api). Dynamic Batch tier (up to 24h SLA) listed at $0.003/min on the pricing page as of 2026-07-19 (sku 7700-6778-EF8E; previously noted $0.004/min '75% off'; page footnote enumerates the Standard dynamic-batch models as default/command_and_search/latest_short/latest_long/phone_call/video/chirp without naming chirp_2) — not modelled as price_per_minute_batch_usd because standard batch is the same as real-time. Standard volume tiers: $0.016/min (0-500k min/mo), $0.01 (500k-1M), $0.008 (1M-2M), $0.004 (2M+). Supports StreamingRecognize (~20 languages), Recognize, and BatchRecognize (broadest language coverage) per https://docs.cloud.google.com/speech-to-text/docs/models/chirp-2. GA in us-central1, europe-west4, asia-southeast1. 2026-07-19 re-verify: WebFetch of the pricing page still truncates (known issue), but a raw-HTML fetch of the primary succeeded this pass — V2 standard recognition confirmed $0.016/min (sku 3099-B70F-0949); cross-checked via https://docs.cloud.google.com/speech-to-text/v2/docs/transcription-model (secondary; chirp_2 still listed GA, streaming, not deprecated) and web-search snippets citing the Google V2 launch blog. No structured price change. Language-count sub-field left untouched — prior passes found inconsistent counts (72/90+/150+) from the truncating supported-languages table, so it does not meet the two-source bar for a non-price-field edit."
     },
     {
       "provider": "Google",
@@ -482,12 +558,12 @@
       "realtime": true,
       "diarization": "included",
       "deployment_options": ["native"],
-      "last_verified": "2026-07-13",
+      "last_verified": "2026-07-19",
       "last_changed_at": "2026-05-19",
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",
       "source_url": "https://cloud.google.com/speech-to-text/pricing",
-      "notes": "Google Cloud Speech-to-Text v2 latest-generation generative ASR model. Standard tier $0.016/min for both real-time and batch; Dynamic Batch tier (up to 24h SLA) at $0.004/min (75% off) — not modelled as price_per_minute_batch_usd because standard batch is the same as real-time. Adds automatic language detection and diarization vs Chirp 2 per https://docs.cloud.google.com/speech-to-text/docs/models/chirp-3. 98+ languages and locales (24 GA + 74 preview) per prior verification; supports StreamingRecognize and BatchRecognize. 2026-07-13 re-verify: pricing page (primary) still truncates on WebFetch — same known issue; cross-checked via https://docs.cloud.google.com/speech-to-text/v2/docs/transcription-model (secondary, model still listed GA, not deprecated) and two independent web-search snippets quoting the pricing page's own text, both confirming $0.016/min standard + $0.004/min (75% off) Dynamic Batch unchanged. No price change. Language-count sub-field left untouched this pass — repeated WebFetch summaries of the chirp-3 model page and supported-languages table returned inconsistent GA/preview splits (24+48 vs 24+74) and inconsistent totals (72/90+/100+) due to table truncation, so it does not meet the two-source bar for a non-price-field edit; existing 98+ figure retained pending a cleaner source."
+      "notes": "Google Cloud Speech-to-Text v2 latest-generation generative ASR model. Standard tier $0.016/min for both real-time and batch; Dynamic Batch tier (up to 24h SLA) listed at $0.003/min on the pricing page as of 2026-07-19 (sku 7700-6778-EF8E; previously noted $0.004/min '75% off'; page footnote enumerates the Standard dynamic-batch models without naming chirp_3) — not modelled as price_per_minute_batch_usd because standard batch is the same as real-time. Standard volume tiers: $0.016/min (0-500k min/mo), $0.01 (500k-1M), $0.008 (1M-2M), $0.004 (2M+). Adds automatic language detection and diarization vs Chirp 2 per https://docs.cloud.google.com/speech-to-text/docs/models/chirp-3. 98+ languages and locales (24 GA + 74 preview) per prior verification; supports StreamingRecognize and BatchRecognize. 2026-07-19 re-verify: WebFetch of the pricing page still truncates (known issue), but a raw-HTML fetch of the primary succeeded this pass — V2 standard recognition confirmed $0.016/min (sku 3099-B70F-0949); cross-checked via https://docs.cloud.google.com/speech-to-text/v2/docs/transcription-model (secondary; chirp_3 still listed GA as latest generation, streaming, not deprecated) and web-search snippets confirming $0.016/min standard for Chirp 3. No structured price change. Language-count sub-field left untouched — prior passes found inconsistent GA/preview splits and totals from truncating tables, and this pass's search snippets differ again (125+), so it does not meet the two-source bar for a non-price-field edit; existing 98+ figure retained pending a cleaner source."
     },
     {
       "provider": "Speechmatics",
@@ -501,12 +577,12 @@
       "diarization": "included",
       "deployment_options": ["native"],
       "confidence": "medium",
-      "last_verified": "2026-07-13",
+      "last_verified": "2026-07-19",
       "last_changed_at": "2026-07-02",
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",
       "source_url": "https://www.speechmatics.com/pricing",
-      "notes": "Speechmatics offers three operating points — `enhanced` (highest accuracy), `standard` (faster/cheaper), and the newer `melia-1` (multilingual, batch-only) — selected via the `operating_point` API parameter on both Batch and Real-time APIs (Melia 1 is batch-only). Pricing page lists Pro tier from $0.129/hr ($0.00215/min) on PAYG (price cut from $0.24/hr at last check) with an automatic 20% volume discount above 500 hrs/month; the same flat rate is used for both real-time and batch and is not broken out per operating point. Free plan now includes 3,000 minutes (50 hrs)/month, up from 480 min (not modelled as `free_tier` because schema expects per-day/per-token quotas). Confidence is medium because the pricing page exposes tier names rather than per-model SKU rates; verify against contract for production. Cross-verified product structure via https://docs.speechmatics.com/. 2026-07-13 re-verify: pricing page still shows Pro tier $0.129/hr ($0.00215/min) PAYG with the same 20% >500 hrs/month discount and 3,000 min (50 hrs)/month free tier; 56+ languages confirmed. Cross-checked https://docs.speechmatics.com/speech-to-text/models (secondary) — Enhanced still active, batch+real-time, EU/US/AU. Docs note the `operating_point` request parameter has been superseded by a `model` parameter (legacy `operating_point` values remain functional) — naming change only, no effect on this row's model_id or price. No price change."
+      "notes": "Speechmatics offers three operating points — `enhanced` (highest accuracy), `standard` (faster/cheaper), and the newer `melia-1` (multilingual, batch-only) — selected via the `operating_point` API parameter on both Batch and Real-time APIs (Melia 1 is batch-only). Pricing page lists Pro tier from $0.129/hr ($0.00215/min) on PAYG (price cut from $0.24/hr at last check) with an automatic 20% volume discount above 500 hrs/month; the same flat rate is used for both real-time and batch and is not broken out per operating point. Free plan now includes 3,000 minutes (50 hrs)/month, up from 480 min (not modelled as `free_tier` because schema expects per-day/per-token quotas). Confidence is medium because the pricing page exposes tier names rather than per-model SKU rates; verify against contract for production. Cross-verified product structure via https://docs.speechmatics.com/. 2026-07-19 re-verify: pricing page (primary) still shows Pro tier $0.129/hr ($0.00215/min) PAYG with the same 20% >500 hrs/month volume discount and 3,000 min (50 hrs)/month free tier; per-model rates still not broken out. Cross-checked https://docs.speechmatics.com/speech-to-text/models (secondary) — Enhanced still GA, batch+real-time, EU/US/AU; legacy `operating_point` parameter remains deprecated in favor of `model` (naming only, no effect on this row's model_id or price). Docs also mention a specialized Enhanced Medical variant with no separately published price. No price change."
     },
     {
       "provider": "Speechmatics",
@@ -520,12 +596,12 @@
       "diarization": "included",
       "deployment_options": ["native"],
       "confidence": "medium",
-      "last_verified": "2026-07-13",
+      "last_verified": "2026-07-19",
       "last_changed_at": "2026-07-02",
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",
       "source_url": "https://www.speechmatics.com/pricing",
-      "notes": "New `operating_point=melia-1` model added since last refresh: early-access, multilingual model that auto-detects and transcribes code-switched audio into one continuous transcript without language-pack selection, per https://docs.speechmatics.com/speech-to-text/models. Batch-only (no real-time API support) — Enhanced and Standard remain active and unaffected. Matches Standard's accuracy tier; lacks custom dictionaries, confidence scores, and speaker/intelligence features available on Enhanced/Standard, though diarization and word timings are supported. Available only in EU/US regions (not AU). `68+` languages is a derived count (the docs table lists 72 entries: ~68 individual languages plus 4 bilingual packs which Melia 1 does not use) — not an officially published per-model figure. Billed at the same flat Pro-tier rate as Enhanced/Standard per https://www.speechmatics.com/pricing — the pricing page does not publish a per-model rate, hence confidence: medium. 2026-07-13 re-verify: still listed as early-access, batch-only, EU/US-only per https://docs.speechmatics.com/speech-to-text/models (secondary); flat Pro-tier rate ($0.129/hr / $0.00215/min) unchanged on the pricing page (primary). No price change; not deprecated."
+      "notes": "New `operating_point=melia-1` model added since last refresh: early-access, multilingual model that auto-detects and transcribes code-switched audio into one continuous transcript without language-pack selection, per https://docs.speechmatics.com/speech-to-text/models. Batch-only (no real-time API support) — Enhanced and Standard remain active and unaffected. Matches Standard's accuracy tier; lacks custom dictionaries, confidence scores, and speaker/intelligence features available on Enhanced/Standard, though diarization and word timings are supported. Available only in EU/US regions (not AU). `68+` languages is a derived count (the docs table lists 72 entries: ~68 individual languages plus 4 bilingual packs which Melia 1 does not use) — not an officially published per-model figure. Billed at the same flat Pro-tier rate as Enhanced/Standard per https://www.speechmatics.com/pricing — the pricing page does not publish a per-model rate, hence confidence: medium. 2026-07-19 re-verify: still early-access, batch-only, EU/US-only (accuracy on par with Standard; invoked via `model: melia-1` + `language: multi`) per https://docs.speechmatics.com/speech-to-text/models (secondary); flat Pro-tier rate ($0.129/hr / $0.00215/min) unchanged on the pricing page (primary). No price change; not deprecated."
     },
     {
       "provider": "Rev.ai",
@@ -538,12 +614,12 @@
       "realtime": true,
       "diarization": "included",
       "deployment_options": ["native"],
-      "last_verified": "2026-07-13",
+      "last_verified": "2026-07-19",
       "last_changed_at": "2026-05-19",
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",
       "source_url": "https://www.rev.ai/pricing",
-      "notes": "Rev.ai's streaming transcription product, branded `Whisper Fusion` on the pricing page at $0.005/min; the parallel Whisper Large streaming tier is also $0.005/min. Free credits equivalent to 5 hours of Reverb ASR (cross-applicable across products). Reverb (batch) is modelled separately; see https://docs.rev.ai/ for the full API surface. English-primary; foreign language support is a distinct Reverb Foreign Language product line. 2026-07-13 re-verify: still listed at $0.005/min on the pricing page (primary); no price change. Note for context: the async job API's `transcriber` enum uses `fusion`/`machine`/`low_cost` rather than these marketing names (per docs.rev.ai, secondary) — model_id here follows this dataset's pricing-page-branding convention, unchanged from prior refresh."
+      "notes": "Rev.ai's streaming transcription product, branded `Whisper Fusion` on the pricing page at $0.005/min; the parallel Whisper Large streaming tier is also $0.005/min. Free credits equivalent to 5 hours of Reverb ASR (cross-applicable across products). Reverb (batch) is modelled separately; see https://docs.rev.ai/ for the full API surface. English-primary; foreign language support is a distinct Reverb Foreign Language product line. 2026-07-13 re-verify: still listed at $0.005/min on the pricing page (primary); no price change. Note for context: the async job API's `transcriber` enum uses `fusion`/`machine`/`low_cost` rather than these marketing names (per docs.rev.ai, secondary) — model_id here follows this dataset's pricing-page-branding convention, unchanged from prior refresh. 2026-07-19 re-verify: still listed at $0.005/min on the pricing page (primary); `fusion` still an active `transcriber` value in the async job API reference (docs.rev.ai, secondary); no price change, not deprecated."
     },
     {
       "provider": "Rev.ai",
@@ -556,12 +632,12 @@
       "realtime": false,
       "diarization": "included",
       "deployment_options": ["native"],
-      "last_verified": "2026-07-13",
+      "last_verified": "2026-07-19",
       "last_changed_at": "2026-05-19",
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",
       "source_url": "https://www.rev.ai/pricing",
-      "notes": "Rev.ai's async/batch ASR model branded `Reverb` at $0.20/hr ($0.0033/min). A `Reverb Turbo` tier exists at $0.10/hr ($0.0017/min) — not modelled as a separate row since it's a latency/quality dial on the same product; `Reverb Foreign Language` ($0.30/hr, $0.005/min, 57+ languages) is also priced separately and could be added if needed. Free credits equivalent to 5 hours of Reverb ASR. See https://docs.rev.ai/ for the async transcription API. 2026-07-13 re-verify: still listed at $0.20/hr on the pricing page (primary); no price change. Reverb Turbo and Reverb Foreign Language remain distinct pricing tiers, still not modelled as separate rows (unchanged decision)."
+      "notes": "Rev.ai's async/batch ASR model branded `Reverb` at $0.20/hr ($0.0033/min). A `Reverb Turbo` tier exists at $0.10/hr ($0.0017/min) — not modelled as a separate row since it's a latency/quality dial on the same product; `Reverb Foreign Language` ($0.30/hr, $0.005/min, 57+ languages) is also priced separately and could be added if needed. Free credits equivalent to 5 hours of Reverb ASR. See https://docs.rev.ai/ for the async transcription API. 2026-07-13 re-verify: still listed at $0.20/hr on the pricing page (primary); no price change. Reverb Turbo and Reverb Foreign Language remain distinct pricing tiers, still not modelled as separate rows (unchanged decision). 2026-07-19 re-verify: still listed at $0.20/hr on the pricing page (primary); `machine` (routing to Reverb) still the default `transcriber` value in the async job API reference (docs.rev.ai, secondary); no price change, not deprecated."
     },
     {
       "provider": "Gladia",
@@ -576,12 +652,12 @@
       "realtime_latency_ms": 300,
       "diarization": "included",
       "deployment_options": ["native"],
-      "last_verified": "2026-07-13",
+      "last_verified": "2026-07-19",
       "last_changed_at": "2026-05-19",
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",
       "source_url": "https://www.gladia.io/pricing",
-      "notes": "Gladia's first-generation universal STT model `solaria-1`, supporting 100+ languages with automatic language detection and code-switching. Default model when `model` param is omitted (confirmed via docs.gladia.io pre-recorded transcription reference). Starter (PAYG) pricing: real-time $0.75/hr ($0.0125/min), async $0.61/hr (~$0.01017/min). Growth (committed) plan lowers real-time to $0.25/hr ($0.0042/min) and async to $0.20/hr ($0.0033/min). Sub-300ms streaming latency claimed on the pricing page. Speaker diarization and word-level timestamps included on all tiers. Starter includes 10 free hours per month. Model name confirmed via https://docs.gladia.io/. 2026-07-13 re-verify: still listed at the same rates on the pricing page (primary) and docs.gladia.io (secondary); no price change."
+      "notes": "Gladia's first-generation universal STT model `solaria-1`, supporting 100+ languages with automatic language detection and code-switching. Default model when `model` param is omitted (confirmed via docs.gladia.io pre-recorded transcription reference). Starter (PAYG) pricing: real-time $0.75/hr ($0.0125/min), async $0.61/hr (~$0.01017/min). Growth (committed) plan lowers real-time to $0.25/hr ($0.0042/min) and async to $0.20/hr ($0.0033/min). Sub-300ms streaming latency claimed on the pricing page. Speaker diarization and word-level timestamps included on all tiers. Starter includes 10 free hours per month. Model name confirmed via https://docs.gladia.io/. 2026-07-19 re-verify: still listed at the same rates on the pricing page (primary) and the pre-recorded API reference on docs.gladia.io (secondary, still the default model); no price change."
     },
     {
       "provider": "Gladia",
@@ -595,12 +671,12 @@
       "diarization": "included",
       "deployment_options": ["native"],
       "confidence": "medium",
-      "last_verified": "2026-07-13",
+      "last_verified": "2026-07-19",
       "last_changed_at": "2026-07-02",
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",
       "source_url": "https://www.gladia.io/pricing",
-      "notes": "Gladia's higher-accuracy model for European real-world audio (English, French, German, Spanish, Italian); async/pre-recorded only, requires exactly one language in `language_config.languages` (no code-switching). Confirmed as a valid `model` param value via https://docs.gladia.io (pre-recorded transcription API reference). The pricing page does not break out per-model rates, so the Starter async rate ($0.61/hr ≈ $0.01017/min) is assumed to apply; `confidence: medium` reflects that this price is not explicitly stated per-model on the pricing page. No real-time/streaming support documented for this model. 2026-07-13 re-verify: still active, async-only, and priced the same on both primary and secondary sources; no price change."
+      "notes": "Gladia's higher-accuracy model for European real-world audio (English, French, German, Spanish, Italian); async/pre-recorded only, requires exactly one language in `language_config.languages` (no code-switching). Confirmed as a valid `model` param value via https://docs.gladia.io (pre-recorded transcription API reference). The pricing page does not break out per-model rates, so the Starter async rate ($0.61/hr ≈ $0.01017/min) is assumed to apply; `confidence: medium` reflects that this price is not explicitly stated per-model on the pricing page. No real-time/streaming support documented for this model. 2026-07-19 re-verify: still active and async-only per the pre-recorded API reference (secondary); pricing page (primary) still lists no per-model rate, so the Starter async assumption stands; no price change."
     },
     {
       "provider": "Soniox",
@@ -616,12 +692,12 @@
       "deprecated_at": "2026-06-30",
       "replaced_by_model_id": "stt-rt-v5",
       "confidence": "medium",
-      "last_verified": "2026-07-13",
+      "last_verified": "2026-07-19",
       "last_changed_at": "2026-05-19",
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",
       "source_url": "https://soniox.com/pricing",
-      "notes": "Soniox real-time STT model `stt-rt-v4`. Primary billing metric is input audio tokens at $2.00 per 1M tokens; vendor approximates ~$0.12/hour which we use as $0.002/min for comparability. Aliased from `stt-rt-v3` (deprecated 2026-02-05; removed 2026-02-28 per https://soniox.com/docs/stt/models). Removed 2026-06-30 per https://soniox.com/docs/stt/models: requests using `stt-rt-v4` now auto-route to `stt-rt-v5` with no service interruption. 60+ languages with automatic language detection. Confidence medium because per-minute is an approximation of token-based pricing; actual cost varies with audio content density. 2026-07-13 re-verify: still deprecated/auto-routing to stt-rt-v5 per soniox.com/docs/stt/models (secondary); pricing page (primary) still quotes $2.00/1M input audio tokens for real-time; no price change."
+      "notes": "Soniox real-time STT model `stt-rt-v4`. Primary billing metric is input audio tokens at $2.00 per 1M tokens; vendor approximates ~$0.12/hour which we use as $0.002/min for comparability. Aliased from `stt-rt-v3` (deprecated 2026-02-05; removed 2026-02-28 per https://soniox.com/docs/stt/models). Removed 2026-06-30 per https://soniox.com/docs/stt/models: requests using `stt-rt-v4` now auto-route to `stt-rt-v5` with no service interruption. 60+ languages with automatic language detection. Confidence medium because per-minute is an approximation of token-based pricing; actual cost varies with audio content density. 2026-07-19 re-verify: still deprecated/auto-routing to stt-rt-v5 per soniox.com/docs/stt/models (secondary); pricing page (primary) still quotes $2.00/1M input audio tokens for real-time; no price change."
     },
     {
       "provider": "Soniox",
@@ -635,12 +711,12 @@
       "diarization": "included",
       "deployment_options": ["native"],
       "confidence": "medium",
-      "last_verified": "2026-07-13",
+      "last_verified": "2026-07-19",
       "last_changed_at": "2026-07-02",
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",
       "source_url": "https://soniox.com/pricing",
-      "notes": "Soniox real-time STT model `stt-rt-v4` (deprecated 2026-06-30; auto-routes to `stt-rt-v5`) per https://soniox.com/docs/stt/models: `stt-rt-v5` released 2026-06-16 with reworked speaker separation and improved spoken-language identification. Soniox's pricing page bills real-time by input audio tokens at $2.00 per 1M tokens regardless of model version (~$0.12/hour, used here as $0.002/min for comparability); the docs page confirms pricing continuity across the v4→v5 auto-route (\"no service interruption\"). 60+ languages with automatic language detection. Confidence medium because (a) per-minute is an approximation of token-based pricing and (b) the pricing page does not itemize a v5-specific rate distinct from the general real-time rate. 2026-07-13 re-verify: still the current active real-time model per soniox.com/docs/stt/models (secondary), no newer version listed; pricing page (primary) still quotes $2.00/1M input audio tokens; no price change."
+      "notes": "Soniox real-time STT model `stt-rt-v4` (deprecated 2026-06-30; auto-routes to `stt-rt-v5`) per https://soniox.com/docs/stt/models: `stt-rt-v5` released 2026-06-16 with reworked speaker separation and improved spoken-language identification. Soniox's pricing page bills real-time by input audio tokens at $2.00 per 1M tokens regardless of model version (~$0.12/hour, used here as $0.002/min for comparability); the docs page confirms pricing continuity across the v4→v5 auto-route (\"no service interruption\"). 60+ languages with automatic language detection. Confidence medium because (a) per-minute is an approximation of token-based pricing and (b) the pricing page does not itemize a v5-specific rate distinct from the general real-time rate. 2026-07-19 re-verify: still the current active real-time model per soniox.com/docs/stt/models (secondary), no newer version listed (no v6); pricing page (primary) still quotes $2.00/1M input audio tokens; no price change."
     },
     {
       "provider": "Soniox",
@@ -657,12 +733,12 @@
       "deprecated_at": "2026-06-30",
       "replaced_by_model_id": "stt-async-v5",
       "confidence": "medium",
-      "last_verified": "2026-07-13",
+      "last_verified": "2026-07-19",
       "last_changed_at": "2026-05-19",
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",
       "source_url": "https://soniox.com/pricing",
-      "notes": "Soniox async (file) STT model `stt-async-v4`. Primary billing metric is input audio tokens at $1.50 per 1M tokens; vendor approximates ~$0.10/hour which we use as $0.00167/min for comparability. Aliased from `stt-async-v3` (deprecated 2026-02-05; removed 2026-02-28 per https://soniox.com/docs/stt/models). Removed 2026-06-30 per https://soniox.com/docs/stt/models: requests using `stt-async-v4` now auto-route to `stt-async-v5` with no service interruption. Supports up to 5 hours of audio per request. 60+ languages with automatic language detection. Confidence medium because per-minute is an approximation of token-based pricing. 2026-07-13 re-verify: still deprecated/auto-routing to stt-async-v5 per soniox.com/docs/stt/models (secondary); pricing page (primary) still quotes $1.50/1M input audio tokens for async; no price change."
+      "notes": "Soniox async (file) STT model `stt-async-v4`. Primary billing metric is input audio tokens at $1.50 per 1M tokens; vendor approximates ~$0.10/hour which we use as $0.00167/min for comparability. Aliased from `stt-async-v3` (deprecated 2026-02-05; removed 2026-02-28 per https://soniox.com/docs/stt/models). Removed 2026-06-30 per https://soniox.com/docs/stt/models: requests using `stt-async-v4` now auto-route to `stt-async-v5` with no service interruption. Supports up to 5 hours of audio per request. 60+ languages with automatic language detection. Confidence medium because per-minute is an approximation of token-based pricing. 2026-07-19 re-verify: still deprecated/auto-routing to stt-async-v5 per soniox.com/docs/stt/models (secondary); pricing page (primary) still quotes $1.50/1M input audio tokens for async; no price change."
     },
     {
       "provider": "Soniox",
@@ -677,12 +753,12 @@
       "max_audio_minutes_per_file": 300,
       "deployment_options": ["native"],
       "confidence": "medium",
-      "last_verified": "2026-07-13",
+      "last_verified": "2026-07-19",
       "last_changed_at": "2026-07-02",
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",
       "source_url": "https://soniox.com/pricing",
-      "notes": "Soniox async (file) STT model `stt-async-v4` (deprecated 2026-06-30; auto-routes to `stt-async-v5`) per https://soniox.com/docs/stt/models: `stt-async-v5` released 2026-06-11 with reengineered speaker separation and improved spoken-language identification. Soniox's pricing page bills async by input audio tokens at $1.50 per 1M tokens regardless of model version (~$0.10/hour, used here as $0.00167/min for comparability); the docs page confirms pricing continuity across the v4→v5 auto-route (\"no service interruption\"). Supports up to 5 hours of audio per request (carried over from v4; not independently re-stated for v5 in the docs excerpt). 60+ languages with automatic language detection. Confidence medium because (a) per-minute is an approximation of token-based pricing and (b) the max-audio-duration and pricing figures are inferred from vendor continuity statements rather than v5-specific line items. 2026-07-13 re-verify: still the current active async model per soniox.com/docs/stt/models (secondary), no newer version listed; pricing page (primary) still quotes $1.50/1M input audio tokens; no price change."
+      "notes": "Soniox async (file) STT model `stt-async-v4` (deprecated 2026-06-30; auto-routes to `stt-async-v5`) per https://soniox.com/docs/stt/models: `stt-async-v5` released 2026-06-11 with reengineered speaker separation and improved spoken-language identification. Soniox's pricing page bills async by input audio tokens at $1.50 per 1M tokens regardless of model version (~$0.10/hour, used here as $0.00167/min for comparability); the docs page confirms pricing continuity across the v4→v5 auto-route (\"no service interruption\"). Supports up to 5 hours of audio per request (carried over from v4; not independently re-stated for v5 in the docs excerpt). 60+ languages with automatic language detection. Confidence medium because (a) per-minute is an approximation of token-based pricing and (b) the max-audio-duration and pricing figures are inferred from vendor continuity statements rather than v5-specific line items. 2026-07-19 re-verify: still the current active async model per soniox.com/docs/stt/models (secondary), no newer version listed (no v6); pricing page (primary) still quotes $1.50/1M input audio tokens; no price change."
     }
   ]
 }

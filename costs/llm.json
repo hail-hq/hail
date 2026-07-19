@@ -30,7 +30,7 @@
       "supports_pdf": true,
       "reasoning_tokens_billed": true,
       "deployment_options": ["native", "bedrock", "vertex"],
-      "last_verified": "2026-07-13",
+      "last_verified": "2026-07-19",
       "last_changed_at": "2026-05-05",
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",
@@ -65,7 +65,7 @@
       "supports_pdf": true,
       "reasoning_tokens_billed": true,
       "deployment_options": ["native", "bedrock", "vertex"],
-      "last_verified": "2026-07-13",
+      "last_verified": "2026-07-19",
       "last_changed_at": "2026-05-05",
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",
@@ -100,7 +100,7 @@
       "supports_pdf": true,
       "reasoning_tokens_billed": true,
       "deployment_options": ["native", "bedrock", "vertex"],
-      "last_verified": "2026-07-13",
+      "last_verified": "2026-07-19",
       "last_changed_at": "2026-06-09",
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",
@@ -135,7 +135,7 @@
       "supports_pdf": true,
       "reasoning_tokens_billed": true,
       "deployment_options": ["native", "bedrock", "vertex"],
-      "last_verified": "2026-07-13",
+      "last_verified": "2026-07-19",
       "last_changed_at": "2026-05-28",
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",
@@ -170,7 +170,7 @@
       "supports_pdf": true,
       "reasoning_tokens_billed": true,
       "deployment_options": ["native", "bedrock", "vertex"],
-      "last_verified": "2026-07-13",
+      "last_verified": "2026-07-19",
       "last_changed_at": "2026-06-30",
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",
@@ -205,12 +205,12 @@
       "deployment_options": ["native", "azure"],
       "deprecated_at": "2026-06-11",
       "replaced_by_model_id": "gpt-5.5",
-      "last_verified": "2026-07-13",
+      "last_verified": "2026-07-19",
       "last_changed_at": "2026-05-05",
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",
       "source_url": "https://developers.openai.com/api/docs/models/gpt-5",
-      "notes": "Reasoning model with adjustable reasoning_effort; reasoning tokens are billed at the output rate. Context window 400k, max output 128k confirmed against developers.openai.com/api/docs/models/gpt-5. Cached input at 10% of base ($0.125/MTok). Batch API at flat 50% off input and output. PDF input via the Files API; image input native; audio is NOT supported on this model_id. Knowledge cutoff Sept 2024. Deprecation announced 2026-06-11: dated snapshot gpt-5-2025-08-07 scheduled for API removal 2026-12-11, recommended replacement gpt-5.5 (per developers.openai.com/api/docs/deprecations); bare 'gpt-5' still serving as of 2026-07-13, prices unchanged. 2026-07-13 re-verify: model card prose now points to the newer GPT-5.6 family ('We recommend using the latest GPT-5.6') as of GPT-5.6's release, but the structured deprecations table still redirects the dated gpt-5-2025-08-07 snapshot to gpt-5.5; kept replaced_by_model_id at gpt-5.5 pending an update to the formal deprecation entry."
+      "notes": "Reasoning model with adjustable reasoning_effort; reasoning tokens are billed at the output rate. Context window 400k, max output 128k confirmed against developers.openai.com/api/docs/models/gpt-5. Cached input at 10% of base ($0.125/MTok). Batch API at flat 50% off input and output. PDF input via the Files API; image input native; audio is NOT supported on this model_id. Knowledge cutoff Sept 2024. Deprecation announced 2026-06-11: dated snapshot gpt-5-2025-08-07 scheduled for API removal 2026-12-11, recommended replacement gpt-5.5 (per developers.openai.com/api/docs/deprecations); bare 'gpt-5' still serving as of 2026-07-19, prices unchanged. 2026-07-13 re-verify: model card prose now points to the newer GPT-5.6 family ('We recommend using the latest GPT-5.6') as of GPT-5.6's release, but the structured deprecations table still redirects the dated gpt-5-2025-08-07 snapshot to gpt-5.5; kept replaced_by_model_id at gpt-5.5 pending an update to the formal deprecation entry. 2026-07-19 re-verify: model card live with prices/specs unchanged and deprecations table unchanged; note this model no longer appears on the main pricing page (prices verified against the model card)."
     },
     {
       "provider": "Google",
@@ -248,12 +248,12 @@
       "reasoning_tokens_billed": true,
       "deployment_options": ["native", "vertex"],
       "confidence": "high",
-      "last_verified": "2026-07-13",
+      "last_verified": "2026-07-19",
       "last_changed_at": "2026-05-05",
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",
       "source_url": "https://ai.google.dev/pricing",
-      "notes": "Input pricing shown is for prompts <=200k tokens; prompts >200k tokens are billed per pricing_tiers; cached input also tiers at 200k (the >200k rate is captured in pricing_tiers[0].cache_read_per_mtok_usd). Context window and max_output_tokens confirmed via ai.google.dev/gemini-api/docs/models/gemini-2.5-pro. Thinking is always on and cannot be disabled; thinking tokens are billed at the output rate. Knowledge cutoff January 2025. Batch Mode discount is a flat 50% off input/output. Audio input is billed at the standard input rate of $1.25/MTok (no separate audio premium, unlike 2.5 Flash/Flash-Lite/2.0 Flash); audio_input_per_mtok_usd omitted. Explicit context caching storage is captured in cache_storage_per_mtok_per_hour_usd. Free tier (AI Studio) is published as per-minute RPM/TPM only, not per-day; free_tier omitted. PDF input via the Files API; image, audio, and video native. Re-verified 2026-07-02: prices, context window, and modalities unchanged; no new pricing tiers. Re-verified 2026-07-13: prices, tiers, and modalities unchanged against ai.google.dev/pricing; cross-checked ai.google.dev/gemini-api/docs/models."
+      "notes": "Input pricing shown is for prompts <=200k tokens; prompts >200k tokens are billed per pricing_tiers; cached input also tiers at 200k (the >200k rate is captured in pricing_tiers[0].cache_read_per_mtok_usd). Context window and max_output_tokens confirmed via ai.google.dev/gemini-api/docs/models/gemini-2.5-pro. Thinking is always on and cannot be disabled; thinking tokens are billed at the output rate. Knowledge cutoff January 2025. Batch Mode discount is a flat 50% off input/output. Audio input is billed at the standard input rate of $1.25/MTok (no separate audio premium, unlike 2.5 Flash/Flash-Lite/2.0 Flash); audio_input_per_mtok_usd omitted. Explicit context caching storage is captured in cache_storage_per_mtok_per_hour_usd. Free tier (AI Studio) is published as per-minute RPM/TPM only, not per-day; free_tier omitted. PDF input via the Files API; image, audio, and video native. Re-verified 2026-07-02: prices, context window, and modalities unchanged; no new pricing tiers. Re-verified 2026-07-13: prices, tiers, and modalities unchanged against ai.google.dev/pricing; cross-checked ai.google.dev/gemini-api/docs/models. Re-verified 2026-07-19: prices, tiers, and modalities unchanged against ai.google.dev/pricing; still listed stable on ai.google.dev/gemini-api/docs/models."
     },
     {
       "provider": "DeepSeek",
@@ -278,12 +278,12 @@
       "supports_pdf": false,
       "reasoning_tokens_billed": true,
       "deployment_options": ["native"],
-      "last_verified": "2026-07-13",
+      "last_verified": "2026-07-19",
       "last_changed_at": "2026-05-05",
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",
       "source_url": "https://api-docs.deepseek.com/quick_start/pricing",
-      "notes": "MoE architecture: 284B total parameters, 13B activated. Replaces deepseek-chat (V3-era alias). Cached input price ($0.0028/MTok) is 1/50th of base input, effective after DeepSeek reduced cache hit rates on 2026-04-26. Supports both non-thinking and thinking (default) modes; thinking output is billed at the same output rate, so reasoning_tokens_billed: true. deepseek-chat and deepseek-reasoner legacy aliases are scheduled for discontinuation on 2026-07-24; until then they route to V4 Flash non-thinking and thinking modes respectively. Re-verified 2026-07-02: prices, context window, and concurrency limit unchanged. Re-verified 2026-07-13: prices, context window, and concurrency limit unchanged against api-docs.deepseek.com/quick_start/pricing; cross-checked api-docs.deepseek.com/news/news, which shows no new deprecation activity."
+      "notes": "MoE architecture: 284B total parameters, 13B activated. Replaces deepseek-chat (V3-era alias). Cached input price ($0.0028/MTok) is 1/50th of base input, effective after DeepSeek reduced cache hit rates on 2026-04-26. Supports both non-thinking and thinking (default) modes; thinking output is billed at the same output rate, so reasoning_tokens_billed: true. deepseek-chat and deepseek-reasoner legacy aliases are scheduled for discontinuation on 2026-07-24; until then they route to V4 Flash non-thinking and thinking modes respectively. Re-verified 2026-07-02: prices, context window, and concurrency limit unchanged. Re-verified 2026-07-13: prices, context window, and concurrency limit unchanged against api-docs.deepseek.com/quick_start/pricing; cross-checked api-docs.deepseek.com/news/news, which shows no new deprecation activity. Re-verified 2026-07-19: prices (cache hit $0.0028 / cache miss $0.14 / output $0.28 per MTok), 1M context, 384K max output, and 2500 concurrency unchanged against api-docs.deepseek.com/quick_start/pricing; cross-checked api-docs.deepseek.com/news/news, no new models or price changes."
     },
     {
       "provider": "DeepSeek",
@@ -308,12 +308,12 @@
       "supports_pdf": false,
       "reasoning_tokens_billed": true,
       "deployment_options": ["native"],
-      "last_verified": "2026-07-13",
+      "last_verified": "2026-07-19",
       "last_changed_at": "2026-07-02",
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",
       "source_url": "https://api-docs.deepseek.com/quick_start/pricing",
-      "notes": "Pro-tier sibling to deepseek-v4-flash, positioned for higher-quality responses at lower concurrency (500 vs Flash's 2500). The original list rates ($1.74 / $3.48 per MTok; cache hit $0.0145) carried a 75% launch promotion through 2026-05-31 15:59 UTC; DeepSeek made the discounted rate permanent (announced 2026-05-22) rather than reverting, so the promo price is now the standing list price: $0.435 input / $0.87 output / $0.003625 cache hit — exactly 1/4 of the original rates, confirmed live on the pricing page 2026-07-02. Secondary confirmation: https://apidog.com/blog/deepseek-v4-pro-permanent-price-cut/ (reporting DeepSeek's permanent 75% cut, citing Reuters/Engadget coverage). Cache miss is billed at the base input rate. Supports both non-thinking and thinking modes with tool calls and JSON output; thinking output is billed at the output rate, so reasoning_tokens_billed: true. Re-verified 2026-07-13: prices, context window, and concurrency limit unchanged against api-docs.deepseek.com/quick_start/pricing."
+      "notes": "Pro-tier sibling to deepseek-v4-flash, positioned for higher-quality responses at lower concurrency (500 vs Flash's 2500). The original list rates ($1.74 / $3.48 per MTok; cache hit $0.0145) carried a 75% launch promotion through 2026-05-31 15:59 UTC; DeepSeek made the discounted rate permanent (announced 2026-05-22) rather than reverting, so the promo price is now the standing list price: $0.435 input / $0.87 output / $0.003625 cache hit — exactly 1/4 of the original rates, confirmed live on the pricing page 2026-07-02. Secondary confirmation: https://apidog.com/blog/deepseek-v4-pro-permanent-price-cut/ (reporting DeepSeek's permanent 75% cut, citing Reuters/Engadget coverage). Cache miss is billed at the base input rate. Supports both non-thinking and thinking modes with tool calls and JSON output; thinking output is billed at the output rate, so reasoning_tokens_billed: true. Re-verified 2026-07-13: prices, context window, and concurrency limit unchanged against api-docs.deepseek.com/quick_start/pricing. Re-verified 2026-07-19: prices (cache hit $0.003625 / cache miss $0.435 / output $0.87 per MTok), 1M context, 384K max output, and 500 concurrency unchanged against api-docs.deepseek.com/quick_start/pricing; cross-checked api-docs.deepseek.com/news/news, no changes."
     },
     {
       "provider": "DeepSeek",
@@ -340,12 +340,12 @@
       "deployment_options": ["native"],
       "deprecated_at": "2026-04-24",
       "replaced_by_model_id": "deepseek-v4-flash",
-      "last_verified": "2026-07-13",
+      "last_verified": "2026-07-19",
       "last_changed_at": "2026-04-24",
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",
       "source_url": "https://api-docs.deepseek.com/quick_start/pricing",
-      "notes": "Canonical API model_id for the DeepSeek V3 lineage (V3 launched 2024-12-26 as deepseek-chat; upgraded through V3-0324, V3.1, V3.1-Terminus, V3.2 by 2025-12-01). Deprecated 2026-04-24 when V4 launched; still callable until scheduled discontinuation 2026-07-24, currently routing to deepseek-v4-flash non-thinking mode (prices captured here reflect that routing). DeepSeek's pricing page no longer publishes V3-era historical rates; standalone deepseek-v3 model_id was never exposed by the API. Re-verified 2026-07-02: discontinuation date (2026-07-24 15:59 UTC) and routing/pricing unchanged. Re-verified 2026-07-13: discontinuation date (2026-07-24 15:59 UTC) and routing/pricing unchanged; now 11 days out, expect this row to flip from deprecated to fully retired at the next refresh."
+      "notes": "Canonical API model_id for the DeepSeek V3 lineage (V3 launched 2024-12-26 as deepseek-chat; upgraded through V3-0324, V3.1, V3.1-Terminus, V3.2 by 2025-12-01). Deprecated 2026-04-24 when V4 launched; still callable until scheduled discontinuation 2026-07-24, currently routing to deepseek-v4-flash non-thinking mode (prices captured here reflect that routing). DeepSeek's pricing page no longer publishes V3-era historical rates; standalone deepseek-v3 model_id was never exposed by the API. Re-verified 2026-07-02: discontinuation date (2026-07-24 15:59 UTC) and routing/pricing unchanged. Re-verified 2026-07-13: discontinuation date (2026-07-24 15:59 UTC) and routing/pricing unchanged; now 11 days out, expect this row to flip from deprecated to fully retired at the next refresh. Re-verified 2026-07-19: discontinuation date (2026-07-24 15:59 UTC) and routing/pricing unchanged against api-docs.deepseek.com/quick_start/pricing; now 5 days out."
     },
     {
       "provider": "DeepSeek",
@@ -372,12 +372,12 @@
       "deployment_options": ["native"],
       "deprecated_at": "2026-04-24",
       "replaced_by_model_id": "deepseek-v4-flash",
-      "last_verified": "2026-07-13",
+      "last_verified": "2026-07-19",
       "last_changed_at": "2026-04-24",
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",
       "source_url": "https://api-docs.deepseek.com/quick_start/pricing",
-      "notes": "Canonical API model_id for the DeepSeek R1 reasoning lineage (R1 launched 2025-01-20 as deepseek-reasoner; R1-0528 update 2025-05-28). Deprecated 2026-04-24 when V4 launched; still callable until scheduled discontinuation 2026-07-24, currently routing to deepseek-v4-flash thinking mode (prices captured here reflect that routing). Reasoning output is billed at the standard output rate (reasoning_tokens_billed: true). DeepSeek's pricing page no longer publishes R1-era historical rates; standalone deepseek-r1 model_id was never exposed by the API. Re-verified 2026-07-02: discontinuation date (2026-07-24 15:59 UTC) and routing/pricing unchanged. Re-verified 2026-07-13: discontinuation date (2026-07-24 15:59 UTC) and routing/pricing unchanged; now 11 days out, expect this row to flip from deprecated to fully retired at the next refresh."
+      "notes": "Canonical API model_id for the DeepSeek R1 reasoning lineage (R1 launched 2025-01-20 as deepseek-reasoner; R1-0528 update 2025-05-28). Deprecated 2026-04-24 when V4 launched; still callable until scheduled discontinuation 2026-07-24, currently routing to deepseek-v4-flash thinking mode (prices captured here reflect that routing). Reasoning output is billed at the standard output rate (reasoning_tokens_billed: true). DeepSeek's pricing page no longer publishes R1-era historical rates; standalone deepseek-r1 model_id was never exposed by the API. Re-verified 2026-07-02: discontinuation date (2026-07-24 15:59 UTC) and routing/pricing unchanged. Re-verified 2026-07-13: discontinuation date (2026-07-24 15:59 UTC) and routing/pricing unchanged; now 11 days out, expect this row to flip from deprecated to fully retired at the next refresh. Re-verified 2026-07-19: discontinuation date (2026-07-24 15:59 UTC) and routing/pricing unchanged against api-docs.deepseek.com/quick_start/pricing; now 5 days out."
     },
     {
       "provider": "Anthropic",
@@ -411,7 +411,7 @@
       "supports_pdf": true,
       "reasoning_tokens_billed": true,
       "deployment_options": ["native", "bedrock", "vertex"],
-      "last_verified": "2026-07-13",
+      "last_verified": "2026-07-19",
       "last_changed_at": "2025-10-01",
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",
@@ -450,7 +450,7 @@
       "supports_pdf": true,
       "reasoning_tokens_billed": true,
       "deployment_options": ["native", "bedrock", "vertex"],
-      "last_verified": "2026-07-13",
+      "last_verified": "2026-07-19",
       "last_changed_at": "2025-09-29",
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",
@@ -489,7 +489,7 @@
       "supports_pdf": true,
       "reasoning_tokens_billed": true,
       "deployment_options": ["native", "bedrock", "vertex"],
-      "last_verified": "2026-07-13",
+      "last_verified": "2026-07-19",
       "last_changed_at": "2025-11-01",
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",
@@ -531,7 +531,7 @@
       "deprecated_at": "2025-10-28",
       "replaced_by_model_id": "claude-sonnet-4-6",
       "confidence": "medium",
-      "last_verified": "2026-07-13",
+      "last_verified": "2026-07-19",
       "last_changed_at": "2025-10-28",
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",
@@ -573,7 +573,7 @@
       "deprecated_at": "2025-12-19",
       "replaced_by_model_id": "claude-haiku-4-5-20251001",
       "confidence": "medium",
-      "last_verified": "2026-07-13",
+      "last_verified": "2026-07-19",
       "last_changed_at": "2025-12-19",
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",
@@ -608,12 +608,12 @@
       "deployment_options": ["native", "azure"],
       "deprecated_at": "2026-06-11",
       "replaced_by_model_id": "gpt-5.4-mini",
-      "last_verified": "2026-07-13",
+      "last_verified": "2026-07-19",
       "last_changed_at": "2026-05-17",
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",
       "source_url": "https://developers.openai.com/api/docs/models/gpt-5-mini",
-      "notes": "Faster, more cost-efficient GPT-5 variant for low-latency, high-volume workloads. Cached input at 10% of base ($0.025/MTok). Batch API at flat 50% off input and output. Reasoning model with adjustable reasoning_effort; reasoning tokens are billed at the output rate. PDF input via the Files API; image input native. Knowledge cutoff May 2024. Deprecation announced 2026-06-11: dated snapshot gpt-5-mini-2025-08-07 scheduled for API removal 2026-12-11, recommended replacement gpt-5.4-mini (per developers.openai.com/api/docs/deprecations); bare 'gpt-5-mini' still serving as of 2026-07-13, prices unchanged. 2026-07-13 re-verify: model card now also points new low-latency workloads to GPT-5.6 Terra, but bare gpt-5-mini remains active."
+      "notes": "Faster, more cost-efficient GPT-5 variant for low-latency, high-volume workloads. Cached input at 10% of base ($0.025/MTok). Batch API at flat 50% off input and output. Reasoning model with adjustable reasoning_effort; reasoning tokens are billed at the output rate. PDF input via the Files API; image input native. Knowledge cutoff May 2024. Deprecation announced 2026-06-11: dated snapshot gpt-5-mini-2025-08-07 scheduled for API removal 2026-12-11, recommended replacement gpt-5.4-mini (per developers.openai.com/api/docs/deprecations); bare 'gpt-5-mini' still serving as of 2026-07-19, prices unchanged. 2026-07-13 re-verify: model card now also points new low-latency workloads to GPT-5.6 Terra, but bare gpt-5-mini remains active. 2026-07-19 re-verify: model card live with prices/specs unchanged; no longer listed on the main pricing page (prices verified against the model card)."
     },
     {
       "provider": "OpenAI",
@@ -644,12 +644,12 @@
       "deprecated_at": "2026-06-11",
       "replaced_by_model_id": "gpt-5.4-nano",
       "confidence": "medium",
-      "last_verified": "2026-07-13",
+      "last_verified": "2026-07-19",
       "last_changed_at": "2026-05-17",
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",
       "source_url": "https://developers.openai.com/api/docs/models/gpt-5-nano",
-      "notes": "Smallest GPT-5 variant; OpenAI model card lists 'Reasoning model: No' with 'Average' reasoning capability — reasoning_tokens_billed set to false on that basis (confidence: medium because other GPT-5 family members are reasoning models). Cached input at 10% of base ($0.005/MTok). Batch API at flat 50% off input and output. Knowledge cutoff May 2024. Deprecation announced 2026-06-11: dated snapshot gpt-5-nano-2025-08-07 scheduled for API removal 2026-12-11, recommended replacement gpt-5.4-nano (per developers.openai.com/api/docs/deprecations); bare 'gpt-5-nano' still serving as of 2026-07-13, prices unchanged. 2026-07-13 re-verify: model card now also points new speed/cost-sensitive workloads to GPT-5.6 Luna, but bare gpt-5-nano remains active."
+      "notes": "Smallest GPT-5 variant; OpenAI model card lists 'Reasoning model: No' with 'Average' reasoning capability — reasoning_tokens_billed set to false on that basis (confidence: medium because other GPT-5 family members are reasoning models). Cached input at 10% of base ($0.005/MTok). Batch API at flat 50% off input and output. Knowledge cutoff May 2024. Deprecation announced 2026-06-11: dated snapshot gpt-5-nano-2025-08-07 scheduled for API removal 2026-12-11, recommended replacement gpt-5.4-nano (per developers.openai.com/api/docs/deprecations); bare 'gpt-5-nano' still serving as of 2026-07-19, prices unchanged. 2026-07-13 re-verify: model card now also points new speed/cost-sensitive workloads to GPT-5.6 Luna, but bare gpt-5-nano remains active. 2026-07-19 re-verify: model card live with prices/specs unchanged; no longer listed on the main pricing page (prices verified against the model card)."
     },
     {
       "provider": "OpenAI",
@@ -677,12 +677,12 @@
       "supports_pdf": true,
       "reasoning_tokens_billed": false,
       "deployment_options": ["native", "azure"],
-      "last_verified": "2026-07-13",
+      "last_verified": "2026-07-19",
       "last_changed_at": "2026-05-17",
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",
       "source_url": "https://developers.openai.com/api/docs/models/gpt-4.1",
-      "notes": "Non-reasoning flagship with a ~1M-token context window (1,047,576). Cached input at 25% of base ($0.50/MTok). Batch API at flat 50% off input and output. PDF input via the Files API; image input native. Knowledge cutoff June 2024. Not on the June 2026 deprecation announcement; remains active alongside the new GPT-5.4/5.5 family. Re-verified 2026-07-13: prices unchanged, still not on the deprecations table; remains active alongside the new GPT-5.6 family."
+      "notes": "Non-reasoning flagship with a ~1M-token context window (1,047,576). Cached input at 25% of base ($0.50/MTok). Batch API at flat 50% off input and output. PDF input via the Files API; image input native. Knowledge cutoff June 2024. Not on the June 2026 deprecation announcement; remains active alongside the new GPT-5.4/5.5 family. Re-verified 2026-07-13: prices unchanged, still not on the deprecations table; remains active alongside the new GPT-5.6 family. Re-verified 2026-07-19: model card live with prices/specs unchanged, still not on the deprecations table; no longer listed on the main pricing page (prices verified against the model card)."
     },
     {
       "provider": "OpenAI",
@@ -712,12 +712,12 @@
       "deployment_options": ["native", "azure"],
       "deprecated_at": "2026-04-22",
       "replaced_by_model_id": "gpt-5.5",
-      "last_verified": "2026-07-13",
+      "last_verified": "2026-07-19",
       "last_changed_at": "2026-04-22",
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",
       "source_url": "https://developers.openai.com/api/docs/models/gpt-4o",
-      "notes": "Deprecated 2026-04-22 (dated alias gpt-4o-2024-05-13 scheduled for shutdown 2026-10-23 per OpenAI deprecations page); still serving on the API as of 2026-07-13. Audio input/output are NOT supported on this model_id — they live on a sibling gpt-4o-audio-preview model card with separate pricing (audio input $40/MTok, audio output $80/MTok); text-mode prices captured here. Cached input at 50% of base ($1.25/MTok). Batch API at flat 50% off input and output. Knowledge cutoff Oct 2023. 2026-07-13 re-verify: the deprecations table now redirects the dated gpt-4o-2024-05-13 snapshot to gpt-5.5 (previously gpt-4.1); replaced_by_model_id updated to match the current table verbatim ('gpt-4o-2024-05-13 | gpt-5.5')."
+      "notes": "Deprecated 2026-04-22 (dated alias gpt-4o-2024-05-13 scheduled for shutdown 2026-10-23 per OpenAI deprecations page); still serving on the API as of 2026-07-19. 2026-07-19 re-verify: model card live with prices/specs unchanged, deprecations table unchanged (gpt-4o-2024-05-13 -> gpt-5.5); no longer listed on the main pricing page (prices verified against the model card). Audio input/output are NOT supported on this model_id — they live on a sibling gpt-4o-audio-preview model card with separate pricing (audio input $40/MTok, audio output $80/MTok); text-mode prices captured here. Cached input at 50% of base ($1.25/MTok). Batch API at flat 50% off input and output. Knowledge cutoff Oct 2023. 2026-07-13 re-verify: the deprecations table now redirects the dated gpt-4o-2024-05-13 snapshot to gpt-5.5 (previously gpt-4.1); replaced_by_model_id updated to match the current table verbatim ('gpt-4o-2024-05-13 | gpt-5.5')."
     },
     {
       "provider": "OpenAI",
@@ -745,12 +745,12 @@
       "supports_pdf": true,
       "reasoning_tokens_billed": false,
       "deployment_options": ["native", "azure"],
-      "last_verified": "2026-07-13",
+      "last_verified": "2026-07-19",
       "last_changed_at": "2026-05-17",
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",
       "source_url": "https://developers.openai.com/api/docs/models/gpt-4o-mini",
-      "notes": "Not on the April 2026 deprecation list; remains active. Audio input/output are NOT supported on this model_id — they live on a sibling gpt-4o-mini-audio-preview model card; text-mode prices captured here. Cached input at 50% of base ($0.075/MTok). Batch API at flat 50% off input and output. Knowledge cutoff Oct 2023. Not on the June 2026 deprecation announcement either; remains active alongside the new GPT-5.4/5.5 family. Re-verified 2026-07-13: prices unchanged, listed as 'Default' tier, still not on the deprecations table."
+      "notes": "Not on the April 2026 deprecation list; remains active. Re-verified 2026-07-19: model card live with prices/specs unchanged, still not on the deprecations table; no longer listed on the main pricing page (prices verified against the model card). Audio input/output are NOT supported on this model_id — they live on a sibling gpt-4o-mini-audio-preview model card; text-mode prices captured here. Cached input at 50% of base ($0.075/MTok). Batch API at flat 50% off input and output. Knowledge cutoff Oct 2023. Not on the June 2026 deprecation announcement either; remains active alongside the new GPT-5.4/5.5 family. Re-verified 2026-07-13: prices unchanged, listed as 'Default' tier, still not on the deprecations table."
     },
     {
       "provider": "OpenAI",
@@ -780,12 +780,12 @@
       "deployment_options": ["native", "azure"],
       "deprecated_at": "2026-06-11",
       "replaced_by_model_id": "gpt-5.5",
-      "last_verified": "2026-07-13",
+      "last_verified": "2026-07-19",
       "last_changed_at": "2026-05-17",
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",
       "source_url": "https://developers.openai.com/api/docs/models/o3",
-      "notes": "Reasoning model for complex tasks; reasoning tokens are billed at the output rate. Cached input at 25% of base ($0.50/MTok). Batch API at flat 50% off input and output. Knowledge cutoff June 2024. Deprecation announced 2026-06-11: dated snapshot o3-2025-04-16 scheduled for API removal 2026-12-11, recommended replacement gpt-5.5 (per developers.openai.com/api/docs/deprecations); bare 'o3' still serving as of 2026-07-13, prices unchanged."
+      "notes": "Reasoning model for complex tasks; reasoning tokens are billed at the output rate. Cached input at 25% of base ($0.50/MTok). Batch API at flat 50% off input and output. Knowledge cutoff June 2024. Deprecation announced 2026-06-11: dated snapshot o3-2025-04-16 scheduled for API removal 2026-12-11, recommended replacement gpt-5.5 (per developers.openai.com/api/docs/deprecations); bare 'o3' still serving as of 2026-07-19, prices unchanged. 2026-07-19 re-verify: model card live with prices (incl. batch $1.00/$4.00) and specs unchanged, deprecations table unchanged; no longer listed on the main pricing page (prices verified against the model card)."
     },
     {
       "provider": "OpenAI",
@@ -815,12 +815,12 @@
       "deployment_options": ["native", "azure"],
       "deprecated_at": "2026-04-22",
       "replaced_by_model_id": "gpt-5.4-mini",
-      "last_verified": "2026-07-13",
+      "last_verified": "2026-07-19",
       "last_changed_at": "2026-04-22",
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",
       "source_url": "https://developers.openai.com/api/docs/models/o4-mini",
-      "notes": "Fast, cost-efficient reasoning model; reasoning tokens are billed at the output rate. Deprecated 2026-04-22 (dated alias o4-mini-2025-04-16 scheduled for shutdown 2026-10-23 per OpenAI deprecations page); still serving as of 2026-07-13. OpenAI's model card prose notes 'succeeded by GPT-5 mini'. Cached input at 25% of base ($0.275/MTok). Batch API at flat 50% off input and output. Knowledge cutoff June 2024. 2026-07-13 re-verify: the structured deprecations table lists the dated o4-mini-2025-04-16 snapshot's recommended replacement as gpt-5.4-mini (not gpt-5-mini); replaced_by_model_id updated to match that table verbatim."
+      "notes": "Fast, cost-efficient reasoning model; reasoning tokens are billed at the output rate. Deprecated 2026-04-22 (dated alias o4-mini-2025-04-16 scheduled for shutdown 2026-10-23 per OpenAI deprecations page); still serving as of 2026-07-19. 2026-07-19 re-verify: model card live with prices/specs unchanged, deprecations table unchanged (o4-mini-2025-04-16 -> gpt-5.4-mini); no longer listed on the main pricing page (prices verified against the model card). OpenAI's model card prose notes 'succeeded by GPT-5 mini'. Cached input at 25% of base ($0.275/MTok). Batch API at flat 50% off input and output. Knowledge cutoff June 2024. 2026-07-13 re-verify: the structured deprecations table lists the dated o4-mini-2025-04-16 snapshot's recommended replacement as gpt-5.4-mini (not gpt-5-mini); replaced_by_model_id updated to match that table verbatim."
     },
     {
       "provider": "OpenAI",
@@ -850,12 +850,12 @@
       "deployment_options": ["native", "azure"],
       "deprecated_at": "2026-04-22",
       "replaced_by_model_id": "gpt-5.5",
-      "last_verified": "2026-07-13",
+      "last_verified": "2026-07-19",
       "last_changed_at": "2026-04-22",
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",
       "source_url": "https://developers.openai.com/api/docs/models/o1",
-      "notes": "First-generation reasoning model; reasoning tokens are billed at the output rate. Deprecated 2026-04-22 (dated alias o1-2024-12-17 scheduled for shutdown 2026-10-23 per OpenAI deprecations page); still serving as of 2026-07-13. OpenAI's recommended replacement is gpt-5.5, which is now in-file; replaced_by_model_id updated from the interim 'o3' successor (o3 itself was deprecated 2026-06-11). Cached input at 50% of base ($7.50/MTok). Batch API at flat 50% off input and output. Knowledge cutoff Oct 2023. Re-verified 2026-07-13: deprecations table confirms shutdown date 2026-10-23 and replacement gpt-5.5 unchanged."
+      "notes": "First-generation reasoning model; reasoning tokens are billed at the output rate. Deprecated 2026-04-22 (dated alias o1-2024-12-17 scheduled for shutdown 2026-10-23 per OpenAI deprecations page); still serving as of 2026-07-19. 2026-07-19 re-verify: model card live with prices/specs unchanged, deprecations table unchanged (o1-2024-12-17 -> gpt-5.5); no longer listed on the main pricing page (prices verified against the model card). OpenAI's recommended replacement is gpt-5.5, which is now in-file; replaced_by_model_id updated from the interim 'o3' successor (o3 itself was deprecated 2026-06-11). Cached input at 50% of base ($7.50/MTok). Batch API at flat 50% off input and output. Knowledge cutoff Oct 2023. Re-verified 2026-07-13: deprecations table confirms shutdown date 2026-10-23 and replacement gpt-5.5 unchanged."
     },
     {
       "provider": "OpenAI",
@@ -883,12 +883,12 @@
       "supports_pdf": false,
       "reasoning_tokens_billed": true,
       "deployment_options": ["native", "azure"],
-      "last_verified": "2026-07-13",
+      "last_verified": "2026-07-19",
       "last_changed_at": "2026-07-02",
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",
       "source_url": "https://developers.openai.com/api/docs/models/gpt-5.5",
-      "notes": "New row this refresh — OpenAI's newest frontier reasoning model, released 2025-12-01; replaces gpt-5 and o3 as the recommended default per the 2026-06-11 deprecations announcement. Reasoning model with adjustable reasoning_effort (none/low/medium/high/xhigh); reasoning tokens billed at the output rate. Context window 1,050,000 (Azure Foundry lists 922k input / 128k output split within that total). Cached input at 10% of base ($0.50/MTok). Batch API at flat 50% off input and output. Prompts over 272k input tokens incur a 2x input / 1.5x output surcharge (not modeled as a separate pricing tier here). Azure availability confirmed via learn.microsoft.com/azure/ai-foundry model list (context/output match exactly). supports_pdf set to false: unlike gpt-5's page, the modality table on this model's docs page lists only Text/Image/Audio/Video rows with no PDF/file callout — treating conservatively pending explicit confirmation."
+      "notes": "Re-verified 2026-07-19 against the main pricing page: standard ($5.00/$0.50/$30.00) and batch ($2.50/$15.00) prices unchanged. OpenAI frontier reasoning model, released 2025-12-01; replaces gpt-5 and o3 as the recommended default per the 2026-06-11 deprecations announcement. Reasoning model with adjustable reasoning_effort (none/low/medium/high/xhigh); reasoning tokens billed at the output rate. Context window 1,050,000 (Azure Foundry lists 922k input / 128k output split within that total). Cached input at 10% of base ($0.50/MTok). Batch API at flat 50% off input and output. Prompts over 272k input tokens incur a 2x input / 1.5x output surcharge (not modeled as a separate pricing tier here). Azure availability confirmed via learn.microsoft.com/azure/ai-foundry model list (context/output match exactly). supports_pdf set to false: unlike gpt-5's page, the modality table on this model's docs page lists only Text/Image/Audio/Video rows with no PDF/file callout — treating conservatively pending explicit confirmation."
     },
     {
       "provider": "OpenAI",
@@ -916,12 +916,12 @@
       "supports_pdf": false,
       "reasoning_tokens_billed": true,
       "deployment_options": ["native", "azure"],
-      "last_verified": "2026-07-13",
+      "last_verified": "2026-07-19",
       "last_changed_at": "2026-07-02",
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",
       "source_url": "https://developers.openai.com/api/docs/models/gpt-5.4",
-      "notes": "New row this refresh — default GPT-5.4-class frontier model for professional work, snapshot gpt-5.4-2026-03-05. Reasoning model with adjustable reasoning_effort (none/low/medium/high/xhigh); reasoning tokens billed at the output rate. Cached input at 10% of base ($0.25/MTok). Batch API at flat 50% off input and output. Azure availability confirmed via learn.microsoft.com/azure/ai-foundry model list (context/output match exactly). supports_pdf set to false: this model's modality table explicitly lists Audio and Video as not supported with no PDF/file row — treating conservatively pending explicit confirmation."
+      "notes": "Re-verified 2026-07-19 against the main pricing page: standard ($2.50/$0.25/$15.00) and batch ($1.25/$7.50) prices unchanged. Default GPT-5.4-class frontier model for professional work, snapshot gpt-5.4-2026-03-05. Reasoning model with adjustable reasoning_effort (none/low/medium/high/xhigh); reasoning tokens billed at the output rate. Cached input at 10% of base ($0.25/MTok). Batch API at flat 50% off input and output. Azure availability confirmed via learn.microsoft.com/azure/ai-foundry model list (context/output match exactly). supports_pdf set to false: this model's modality table explicitly lists Audio and Video as not supported with no PDF/file row — treating conservatively pending explicit confirmation."
     },
     {
       "provider": "OpenAI",
@@ -949,12 +949,12 @@
       "supports_pdf": false,
       "reasoning_tokens_billed": true,
       "deployment_options": ["native", "azure"],
-      "last_verified": "2026-07-13",
+      "last_verified": "2026-07-19",
       "last_changed_at": "2026-07-02",
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",
       "source_url": "https://developers.openai.com/api/docs/models/gpt-5.4-mini",
-      "notes": "New row this refresh — default mini model for low-latency, high-volume workloads; replaces gpt-5-mini per the 2026-06-11 deprecations announcement. Reasoning model with adjustable reasoning_effort (none/low/medium/high/xhigh); reasoning tokens billed at the output rate. Cached input at 10% of base ($0.075/MTok). Batch API at flat 50% off input and output. Azure availability confirmed via learn.microsoft.com/azure/ai-foundry model list (context/output match exactly). supports_pdf set to false: modality table lists no PDF/file row — treating conservatively pending explicit confirmation."
+      "notes": "Re-verified 2026-07-19 against the main pricing page: standard ($0.75/$0.075/$4.50) and batch ($0.375/$2.25) prices unchanged. Default mini model for low-latency, high-volume workloads; replaces gpt-5-mini per the 2026-06-11 deprecations announcement. Reasoning model with adjustable reasoning_effort (none/low/medium/high/xhigh); reasoning tokens billed at the output rate. Cached input at 10% of base ($0.075/MTok). Batch API at flat 50% off input and output. Azure availability confirmed via learn.microsoft.com/azure/ai-foundry model list (context/output match exactly). supports_pdf set to false: modality table lists no PDF/file row — treating conservatively pending explicit confirmation."
     },
     {
       "provider": "OpenAI",
@@ -982,12 +982,12 @@
       "supports_pdf": false,
       "reasoning_tokens_billed": true,
       "deployment_options": ["native", "azure"],
-      "last_verified": "2026-07-13",
+      "last_verified": "2026-07-19",
       "last_changed_at": "2026-07-02",
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",
       "source_url": "https://developers.openai.com/api/docs/models/gpt-5.4-nano",
-      "notes": "New row this refresh — cheapest GPT-5.4-class model for simple, high-volume tasks (classification, extraction, ranking, sub-agents); replaces gpt-5-nano per the 2026-06-11 deprecations announcement. Reasoning model with adjustable reasoning_effort (none/low/medium/high/xhigh); reasoning tokens billed at the output rate. Cached input at 10% of base ($0.02/MTok). Batch API at flat 50% off input and output. Azure availability confirmed via learn.microsoft.com/azure/ai-foundry model list (context/output match exactly). supports_pdf set to false: modality table lists no PDF/file row — treating conservatively pending explicit confirmation."
+      "notes": "Re-verified 2026-07-19 against the main pricing page: standard ($0.20/$0.02/$1.25) and batch ($0.10/$0.625) prices unchanged. Cheapest GPT-5.4-class model for simple, high-volume tasks (classification, extraction, ranking, sub-agents); replaces gpt-5-nano per the 2026-06-11 deprecations announcement. Reasoning model with adjustable reasoning_effort (none/low/medium/high/xhigh); reasoning tokens billed at the output rate. Cached input at 10% of base ($0.02/MTok). Batch API at flat 50% off input and output. Azure availability confirmed via learn.microsoft.com/azure/ai-foundry model list (context/output match exactly). supports_pdf set to false: modality table lists no PDF/file row — treating conservatively pending explicit confirmation."
     },
     {
       "provider": "OpenAI",
@@ -996,11 +996,14 @@
       "display_name": "GPT-5.6 Sol",
       "model_family": "GPT-5.6",
       "knowledge_cutoff": "2026-02-16",
+      "aliases": ["gpt-5.6"],
       "context_window": 1050000,
       "max_output_tokens": 128000,
       "input_per_mtok_usd": "5.0",
       "output_per_mtok_usd": "30.0",
       "cache_read_per_mtok_usd": "0.5",
+      "batch_input_per_mtok_usd": "2.5",
+      "batch_output_per_mtok_usd": "15.0",
       "modalities": {
         "input": ["text", "image"],
         "output": ["text"]
@@ -1014,12 +1017,12 @@
       "reasoning_tokens_billed": true,
       "deployment_options": ["native"],
       "confidence": "medium",
-      "last_verified": "2026-07-13",
-      "last_changed_at": "2026-07-13",
+      "last_verified": "2026-07-19",
+      "last_changed_at": "2026-07-19",
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",
       "source_url": "https://developers.openai.com/api/docs/models/gpt-5.6-sol",
-      "notes": "New row this refresh — frontier-tier model of the newly released GPT-5.6 family; model_id and price cross-checked across the OpenAI pricing page, the API models overview page, and this model's own docs page. Reasoning model with adjustable reasoning_effort; reasoning_tokens_billed set to true by parity with sibling GPT-5.4/5.5 reasoning models (not independently re-confirmed on this specific page, hence confidence: medium). Context window 1,050,000, max output 128k, knowledge cutoff 2026-02-16. Cached input at 10% of base ($0.50/MTok). Batch pricing was not explicitly published on the page as of this verification — omitted rather than assumed/invented. supports_pdf set to false and deployment_options limited to native (no Azure availability confirmed) — both treated conservatively pending explicit confirmation, matching how the GPT-5.4/5.5 rows were first added. Alias 'gpt-5.6' mentioned on the models overview page but not added here pending independent confirmation."
+      "notes": "Frontier-tier model of the GPT-5.6 family; model_id and price cross-checked across the OpenAI pricing page, the API models overview page, and this model's own docs page. Reasoning model with adjustable reasoning_effort; model card now explicitly lists reasoning token support with billing (confirmed 2026-07-19). Context window 1,050,000, max output 128k, knowledge cutoff 2026-02-16. Cached input at 10% of base ($0.50/MTok). 2026-07-19 re-verify: base prices unchanged; batch pricing now published on the main pricing page (input $2.50 / output $15.00, flat 50% off) — added; batch rates appear on the pricing page only (model card confirms Batch endpoint support but quotes no rate), so confidence stays medium. Alias 'gpt-5.6' added — now confirmed by two sources (models overview page and this model card: 'gpt-5.6 routes to GPT-5.6 Sol'). supports_pdf false and deployment_options limited to native (no Azure availability confirmed) — still treated conservatively."
     },
     {
       "provider": "OpenAI",
@@ -1033,6 +1036,8 @@
       "input_per_mtok_usd": "2.5",
       "output_per_mtok_usd": "15.0",
       "cache_read_per_mtok_usd": "0.25",
+      "batch_input_per_mtok_usd": "1.25",
+      "batch_output_per_mtok_usd": "7.5",
       "modalities": {
         "input": ["text", "image"],
         "output": ["text"]
@@ -1046,12 +1051,12 @@
       "reasoning_tokens_billed": true,
       "deployment_options": ["native"],
       "confidence": "medium",
-      "last_verified": "2026-07-13",
-      "last_changed_at": "2026-07-13",
+      "last_verified": "2026-07-19",
+      "last_changed_at": "2026-07-19",
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",
       "source_url": "https://developers.openai.com/api/docs/models/gpt-5.6-terra",
-      "notes": "New row this refresh — mid-tier model of the newly released GPT-5.6 family, described as balancing intelligence and cost; model_id and price cross-checked across the OpenAI pricing page, the API models overview page, and this model's own docs page. Reasoning model with adjustable reasoning_effort; reasoning_tokens_billed set to true by parity with sibling GPT-5.4/5.5 reasoning models. Context window 1,050,000, max output 128k, knowledge cutoff 2026-02-16. Cached input at 10% of base ($0.25/MTok). Batch pricing not explicitly published as of this verification — omitted rather than assumed. supports_pdf set to false and deployment_options limited to native — treated conservatively pending explicit confirmation. confidence: medium for the same reason as gpt-5.6-sol."
+      "notes": "Mid-tier model of the GPT-5.6 family, described as balancing intelligence and cost; model_id and price cross-checked across the OpenAI pricing page, the API models overview page, and this model's own docs page. Reasoning model with adjustable reasoning_effort; model card lists reasoning token support (confirmed 2026-07-19). Context window 1,050,000, max output 128k, knowledge cutoff 2026-02-16. Cached input at 10% of base ($0.25/MTok). 2026-07-19 re-verify: base prices unchanged; batch pricing now published on the main pricing page (input $1.25 / output $7.50, flat 50% off) — added; batch rates appear on the pricing page only (model card quotes no batch rate), so confidence stays medium. supports_pdf false and deployment_options limited to native — still treated conservatively."
     },
     {
       "provider": "OpenAI",
@@ -1065,6 +1070,8 @@
       "input_per_mtok_usd": "1.0",
       "output_per_mtok_usd": "6.0",
       "cache_read_per_mtok_usd": "0.1",
+      "batch_input_per_mtok_usd": "0.5",
+      "batch_output_per_mtok_usd": "3.0",
       "modalities": {
         "input": ["text", "image"],
         "output": ["text"]
@@ -1078,12 +1085,12 @@
       "reasoning_tokens_billed": true,
       "deployment_options": ["native"],
       "confidence": "medium",
-      "last_verified": "2026-07-13",
-      "last_changed_at": "2026-07-13",
+      "last_verified": "2026-07-19",
+      "last_changed_at": "2026-07-19",
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",
       "source_url": "https://developers.openai.com/api/docs/models/gpt-5.6-luna",
-      "notes": "New row this refresh — cheapest tier of the newly released GPT-5.6 family, designed for cost-sensitive, high-volume workloads; model_id and price cross-checked across the OpenAI pricing page, the API models overview page, and this model's own docs page. Reasoning model with adjustable reasoning_effort; reasoning_tokens_billed set to true by parity with sibling GPT-5.4/5.5 reasoning models. Context window 1,050,000, max output 128k, knowledge cutoff 2026-02-16. Cached input at 10% of base ($0.10/MTok). Batch pricing not explicitly published as of this verification — omitted rather than assumed. supports_pdf set to false and deployment_options limited to native — treated conservatively pending explicit confirmation. confidence: medium for the same reason as gpt-5.6-sol."
+      "notes": "Cheapest tier of the GPT-5.6 family, designed for cost-sensitive, high-volume workloads; model_id and price cross-checked across the OpenAI pricing page, the API models overview page, and this model's own docs page. Reasoning model with adjustable reasoning_effort; model card lists reasoning token support (confirmed 2026-07-19). Context window 1,050,000, max output 128k, knowledge cutoff 2026-02-16. Cached input at 10% of base ($0.10/MTok). 2026-07-19 re-verify: base prices unchanged; batch pricing now published on the main pricing page (input $0.50 / output $3.00, flat 50% off) — added; batch rates appear on the pricing page only (model card quotes no batch rate), so confidence stays medium. supports_pdf false and deployment_options limited to native — still treated conservatively."
     },
     {
       "provider": "OpenAI",
@@ -1111,12 +1118,12 @@
       "reasoning_tokens_billed": true,
       "deployment_options": ["native"],
       "confidence": "medium",
-      "last_verified": "2026-07-13",
+      "last_verified": "2026-07-19",
       "last_changed_at": "2026-07-13",
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",
       "source_url": "https://developers.openai.com/api/docs/models/gpt-5.5-pro",
-      "notes": "New row this refresh — highest-effort reasoning tier of GPT-5.5, 'uses more compute to think harder'; model_id and price ($30/$180 per MTok) cross-checked across the OpenAI pricing page and this model's own docs page. No cache_read_per_mtok_usd field: the docs page states this model 'does not offer a cached input discount'. Batch API documented as the same rate as standard (no batch discount for this tier) — unusual versus sibling rows, recorded as given rather than assumed. Prompts over 272k input tokens incur a surcharge per the shared GPT-5.5 pricing note (not modeled as a separate pricing tier here, consistent with the gpt-5.5 row). supports_pdf false and deployment_options limited to native — treated conservatively pending explicit confirmation. confidence: medium because tool/structured-output flags were read from an AI-summarized fetch rather than raw page content."
+      "notes": "2026-07-19 re-verify: base prices unchanged; SOURCE CONFLICT on batch — the main pricing page now shows Batch input $15.00 / output $90.00 (50% off), but this model's docs page still states Batch runs at the standard $30/$180 rate; per the two-source rule the batch fields are left at $30/$180 (matching the model card and the prior verification) pending agreement between sources — re-check next refresh. Highest-effort reasoning tier of GPT-5.5, 'uses more compute to think harder'; model_id and price ($30/$180 per MTok) cross-checked across the OpenAI pricing page and this model's own docs page. No cache_read_per_mtok_usd field: the docs page states this model 'does not offer a cached input discount'. Batch API documented as the same rate as standard (no batch discount for this tier) — unusual versus sibling rows, recorded as given rather than assumed. Prompts over 272k input tokens incur a surcharge per the shared GPT-5.5 pricing note (not modeled as a separate pricing tier here, consistent with the gpt-5.5 row). supports_pdf false and deployment_options limited to native — treated conservatively pending explicit confirmation. confidence: medium because tool/structured-output flags were read from an AI-summarized fetch rather than raw page content."
     },
     {
       "provider": "OpenAI",
@@ -1144,12 +1151,43 @@
       "reasoning_tokens_billed": true,
       "deployment_options": ["native"],
       "confidence": "medium",
-      "last_verified": "2026-07-13",
+      "last_verified": "2026-07-19",
       "last_changed_at": "2026-07-13",
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",
       "source_url": "https://developers.openai.com/api/docs/models/gpt-5.4-pro",
-      "notes": "New row this refresh — highest-effort reasoning tier of GPT-5.4, 'uses more compute to think harder'; model_id and price ($30/$180 per MTok) cross-checked across the OpenAI pricing page and this model's own docs page. structured_output recorded as false: unlike every other row in this file, this model's docs page explicitly states structured outputs are NOT supported — flagged here rather than assumed true by parity with siblings; re-verify next refresh since this is a surprising outlier. No cache_read_per_mtok_usd field: no cache discount documented for this tier. Batch API documented as the same rate as standard (no batch discount). Prompts over 272k input tokens incur a surcharge per the shared GPT-5.4 pricing note (not modeled as a separate pricing tier here, consistent with the gpt-5.4 row). supports_pdf false and deployment_options limited to native — treated conservatively pending explicit confirmation. confidence: medium."
+      "notes": "2026-07-19 re-verify: base prices unchanged; SOURCE CONFLICT on batch — the main pricing page now shows Batch input $15.00 / output $90.00 (50% off), but this model's docs page still quotes Batch at the standard $30/$180 rate; per the two-source rule the batch fields are left at $30/$180 (matching the model card and the prior verification) pending agreement between sources — re-check next refresh. Highest-effort reasoning tier of GPT-5.4, 'uses more compute to think harder'; model_id and price ($30/$180 per MTok) cross-checked across the OpenAI pricing page and this model's own docs page. structured_output recorded as false: re-confirmed 2026-07-19 — the docs page still explicitly states structured outputs are 'Not supported'; genuine outlier, no longer treated as a fetch artifact. No cache_read_per_mtok_usd field: no cache discount documented for this tier. Batch API documented as the same rate as standard (no batch discount). Prompts over 272k input tokens incur a surcharge per the shared GPT-5.4 pricing note (not modeled as a separate pricing tier here, consistent with the gpt-5.4 row). supports_pdf false and deployment_options limited to native — treated conservatively pending explicit confirmation. confidence: medium."
+    },
+    {
+      "provider": "OpenAI",
+      "provider_url": "https://openai.com",
+      "model_id": "gpt-5.3-codex",
+      "display_name": "GPT-5.3-Codex",
+      "model_family": "Codex",
+      "knowledge_cutoff": "2025-08-31",
+      "context_window": 400000,
+      "max_output_tokens": 128000,
+      "input_per_mtok_usd": "1.75",
+      "output_per_mtok_usd": "14.0",
+      "cache_read_per_mtok_usd": "0.175",
+      "modalities": {
+        "input": ["text", "image"],
+        "output": ["text"]
+      },
+      "supports_tool_use": true,
+      "structured_output": true,
+      "supports_vision": true,
+      "supports_audio_in": false,
+      "supports_audio_out": false,
+      "supports_pdf": false,
+      "reasoning_tokens_billed": true,
+      "deployment_options": ["native"],
+      "last_verified": "2026-07-19",
+      "last_changed_at": "2026-07-19",
+      "verification_method": "manual-confirmed",
+      "verified_by": "r13i",
+      "source_url": "https://developers.openai.com/api/docs/models/gpt-5.3-codex",
+      "notes": "New row this refresh — agentic coding model ('the most capable agentic coding model to date'), optimized for Codex environments; model_id and price ($1.75 input / $0.175 cached / $14.00 output per MTok) cross-checked across the OpenAI main pricing page and this model's own docs page (two-source rule met). Reasoning model with low/medium/high/xhigh reasoning_effort; reasoning tokens billed at the output rate. Context window 400,000, max output 128k, knowledge cutoff 2025-08-31. Cached input at 10% of base. Batch endpoint supported per the model card but no batch rate published on either source — batch fields omitted rather than assumed. Fine-tuning and predicted outputs not supported. supports_pdf false and deployment_options limited to native — treated conservatively pending explicit confirmation, matching how sibling rows were first added."
     },
     {
       "provider": "Google",
@@ -1180,12 +1218,12 @@
       "reasoning_tokens_billed": true,
       "deployment_options": ["native", "vertex"],
       "confidence": "high",
-      "last_verified": "2026-07-13",
+      "last_verified": "2026-07-19",
       "last_changed_at": "2026-05-18",
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",
       "source_url": "https://ai.google.dev/gemini-api/docs/pricing",
-      "notes": "Hybrid reasoning model with dynamic thinking on by default; thinking can be disabled via thinkingBudget=0. When thinking is on, response pricing is the sum of output and thinking tokens (both billed at the output rate). Audio input is priced separately (captured in audio_input_per_mtok_usd); cached audio input is $0.10/MTok vs $0.03/MTok for text/image/video. Batch Mode at flat 50% off; audio batch input is $0.50/MTok. No long-context tier. Context window and max_output_tokens confirmed via ai.google.dev/gemini-api/docs/models/gemini-2.5-flash. Knowledge cutoff January 2025. Explicit context caching storage is captured in cache_storage_per_mtok_per_hour_usd. Free tier (AI Studio) is published as per-minute RPM/TPM only, not per-day; free_tier omitted. Cross-verified prompt/completion price against openrouter.ai/google/gemini-2.5-flash. Re-verified 2026-07-02: prices unchanged. Re-verified 2026-07-13: prices unchanged against ai.google.dev/pricing; cross-checked ai.google.dev/gemini-api/docs/models."
+      "notes": "Hybrid reasoning model with dynamic thinking on by default; thinking can be disabled via thinkingBudget=0. When thinking is on, response pricing is the sum of output and thinking tokens (both billed at the output rate). Audio input is priced separately (captured in audio_input_per_mtok_usd); cached audio input is $0.10/MTok vs $0.03/MTok for text/image/video. Batch Mode at flat 50% off; audio batch input is $0.50/MTok. No long-context tier. Context window and max_output_tokens confirmed via ai.google.dev/gemini-api/docs/models/gemini-2.5-flash. Knowledge cutoff January 2025. Explicit context caching storage is captured in cache_storage_per_mtok_per_hour_usd. Free tier (AI Studio) is published as per-minute RPM/TPM only, not per-day; free_tier omitted. Cross-verified prompt/completion price against openrouter.ai/google/gemini-2.5-flash. Re-verified 2026-07-02: prices unchanged. Re-verified 2026-07-13: prices unchanged against ai.google.dev/pricing; cross-checked ai.google.dev/gemini-api/docs/models. Re-verified 2026-07-19: prices unchanged against ai.google.dev/pricing; still listed stable on ai.google.dev/gemini-api/docs/models."
     },
     {
       "provider": "Google",
@@ -1216,12 +1254,12 @@
       "reasoning_tokens_billed": true,
       "deployment_options": ["native", "vertex"],
       "confidence": "high",
-      "last_verified": "2026-07-13",
+      "last_verified": "2026-07-19",
       "last_changed_at": "2026-05-18",
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",
       "source_url": "https://ai.google.dev/gemini-api/docs/pricing",
-      "notes": "Hybrid reasoning model; thinking is OFF by default (unlike 2.5 Flash/Pro) but can be enabled by setting thinkingBudget. When thinking is enabled, response pricing is the sum of output and thinking tokens at the output rate, so reasoning_tokens_billed is true. Audio input is priced separately (captured in audio_input_per_mtok_usd); cached audio input is $0.03/MTok vs $0.01/MTok for text/image/video. Batch Mode at flat 50% off; audio batch input is $0.15/MTok. No long-context tier. Context window and max_output_tokens confirmed via ai.google.dev/gemini-api/docs/models/gemini-2.5-flash-lite. Knowledge cutoff January 2025. Explicit context caching storage is captured in cache_storage_per_mtok_per_hour_usd. Free tier (AI Studio) is published as per-minute RPM/TPM only, not per-day; free_tier omitted. Cross-verified prompt/completion price against openrouter.ai/google/gemini-2.5-flash-lite. Re-verified 2026-07-02: prices unchanged. Re-verified 2026-07-13: prices unchanged against ai.google.dev/pricing; cross-checked ai.google.dev/gemini-api/docs/models."
+      "notes": "Hybrid reasoning model; thinking is OFF by default (unlike 2.5 Flash/Pro) but can be enabled by setting thinkingBudget. When thinking is enabled, response pricing is the sum of output and thinking tokens at the output rate, so reasoning_tokens_billed is true. Audio input is priced separately (captured in audio_input_per_mtok_usd); cached audio input is $0.03/MTok vs $0.01/MTok for text/image/video. Batch Mode at flat 50% off; audio batch input is $0.15/MTok. No long-context tier. Context window and max_output_tokens confirmed via ai.google.dev/gemini-api/docs/models/gemini-2.5-flash-lite. Knowledge cutoff January 2025. Explicit context caching storage is captured in cache_storage_per_mtok_per_hour_usd. Free tier (AI Studio) is published as per-minute RPM/TPM only, not per-day; free_tier omitted. Cross-verified prompt/completion price against openrouter.ai/google/gemini-2.5-flash-lite. Re-verified 2026-07-02: prices unchanged. Re-verified 2026-07-13: prices unchanged against ai.google.dev/pricing; cross-checked ai.google.dev/gemini-api/docs/models. Re-verified 2026-07-19: prices unchanged against ai.google.dev/pricing; still listed stable on ai.google.dev/gemini-api/docs/models."
     },
     {
       "provider": "Google",
@@ -1254,12 +1292,12 @@
       "deprecated_at": "2026-06-01",
       "replaced_by_model_id": "gemini-3.5-flash",
       "confidence": "medium",
-      "last_verified": "2026-07-13",
+      "last_verified": "2026-07-19",
       "last_changed_at": "2026-05-18",
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",
       "source_url": "https://ai.google.dev/gemini-api/docs/pricing",
-      "notes": "Deprecated; shut down 2026-06-01 per the model card's verbatim notice: \"Gemini 2.0 Flash is deprecated and has been shut down June 1, 2026. Migrate to Gemini 3.5 Flash to avoid service disruption.\" replaced_by_model_id updated 2026-07-02 to gemini-3.5-flash (Google's documented migration target), now that it is in-dataset; previously pointed at gemini-2.5-flash as a placeholder in-file successor. Standard production 2.0 Flash does not support thinking (thinking exists only on Gemini 2.5+ and 3 series per ai.google.dev/gemini-api/docs/thinking); reasoning_tokens_billed=false. Audio input is priced separately (captured in audio_input_per_mtok_usd); cached audio input is $0.175/MTok vs $0.025/MTok for text/image/video. Batch Mode at flat 50% off. No long-context tier. supports_pdf=false since the 2.0 Flash model card lists supported inputs as audio/images/video/text (PDF not enumerated). Confidence medium because Vertex AI's published pricing for the same model name differs ($0.15 input / $0.60 output) from AI Studio's $0.10/$0.40; AI Studio primary value retained per spec, and OpenRouter (openrouter.ai/google/gemini-2.0-flash-001) cross-confirms $0.10/$0.40. Explicit context caching storage is captured in cache_storage_per_mtok_per_hour_usd. Free tier (AI Studio) is published as per-minute RPM/TPM only, not per-day; free_tier omitted. Prices unchanged as of 2026-07-02 re-verification. Re-verified 2026-07-13: deprecation notice and shutdown date still confirmed on ai.google.dev/pricing; no new information."
+      "notes": "Deprecated; shut down 2026-06-01 per the model card's verbatim notice: \"Gemini 2.0 Flash is deprecated and has been shut down June 1, 2026. Migrate to Gemini 3.5 Flash to avoid service disruption.\" replaced_by_model_id updated 2026-07-02 to gemini-3.5-flash (Google's documented migration target), now that it is in-dataset; previously pointed at gemini-2.5-flash as a placeholder in-file successor. Standard production 2.0 Flash does not support thinking (thinking exists only on Gemini 2.5+ and 3 series per ai.google.dev/gemini-api/docs/thinking); reasoning_tokens_billed=false. Audio input is priced separately (captured in audio_input_per_mtok_usd); cached audio input is $0.175/MTok vs $0.025/MTok for text/image/video. Batch Mode at flat 50% off. No long-context tier. supports_pdf=false since the 2.0 Flash model card lists supported inputs as audio/images/video/text (PDF not enumerated). Confidence medium because Vertex AI's published pricing for the same model name differs ($0.15 input / $0.60 output) from AI Studio's $0.10/$0.40; AI Studio primary value retained per spec, and OpenRouter (openrouter.ai/google/gemini-2.0-flash-001) cross-confirms $0.10/$0.40. Explicit context caching storage is captured in cache_storage_per_mtok_per_hour_usd. Free tier (AI Studio) is published as per-minute RPM/TPM only, not per-day; free_tier omitted. Prices unchanged as of 2026-07-02 re-verification. Re-verified 2026-07-13: deprecation notice and shutdown date still confirmed on ai.google.dev/pricing; no new information. Re-verified 2026-07-19: deprecation notice (shut down June 1, 2026) still shown on ai.google.dev/pricing; model marked shut down on ai.google.dev/gemini-api/docs/models."
     },
     {
       "provider": "Google",
@@ -1289,12 +1327,12 @@
       "reasoning_tokens_billed": true,
       "deployment_options": ["native"],
       "confidence": "high",
-      "last_verified": "2026-07-13",
+      "last_verified": "2026-07-19",
       "last_changed_at": "2026-07-02",
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",
       "source_url": "https://ai.google.dev/pricing",
-      "notes": "New GA/stable row added 2026-07-02; this is Google's documented migration target for the retired Gemini 2.0 Flash (see that row's notes). Thinking is on by default (medium level) and configurable (minimal/low/medium/high); when on, response pricing is the sum of output and thinking tokens billed at the output rate, so reasoning_tokens_billed=true. No >200k-token pricing tier is published for this model (unlike Gemini 3.1 Pro Preview). Context window and max_output_tokens confirmed via ai.google.dev/gemini-api/docs/models/gemini-3.5-flash. Knowledge cutoff January 2025, unchanged from the Gemini 2.5 family. Explicit context caching storage is captured in cache_storage_per_mtok_per_hour_usd. Google Search grounding is billed separately (5,000 prompts/month free, shared across Gemini 3 models, then $14/1,000 queries); not captured as a structured field since sibling 2.5-series rows in this file omit the same grounding fee for consistency. Vertex AI availability not confirmed as of this pass; deployment_options limited to native pending verification. Free tier (AI Studio) is published as per-minute RPM/TPM only, not per-day; free_tier omitted. Re-verified 2026-07-13: prices unchanged against ai.google.dev/pricing; cross-checked ai.google.dev/gemini-api/docs/models."
+      "notes": "New GA/stable row added 2026-07-02; this is Google's documented migration target for the retired Gemini 2.0 Flash (see that row's notes). Thinking is on by default (medium level) and configurable (minimal/low/medium/high); when on, response pricing is the sum of output and thinking tokens billed at the output rate, so reasoning_tokens_billed=true. No >200k-token pricing tier is published for this model (unlike Gemini 3.1 Pro Preview). Context window and max_output_tokens confirmed via ai.google.dev/gemini-api/docs/models/gemini-3.5-flash. Knowledge cutoff January 2025, unchanged from the Gemini 2.5 family. Explicit context caching storage is captured in cache_storage_per_mtok_per_hour_usd. Google Search grounding is billed separately (5,000 prompts/month free, shared across Gemini 3 models, then $14/1,000 queries); not captured as a structured field since sibling 2.5-series rows in this file omit the same grounding fee for consistency. Vertex AI availability not confirmed as of this pass; deployment_options limited to native pending verification. Free tier (AI Studio) is published as per-minute RPM/TPM only, not per-day; free_tier omitted. Re-verified 2026-07-13: prices unchanged against ai.google.dev/pricing; cross-checked ai.google.dev/gemini-api/docs/models. Re-verified 2026-07-19: prices unchanged against ai.google.dev/pricing; still listed stable on ai.google.dev/gemini-api/docs/models. Pricing page now also lists Flex (same rates as Batch) and Priority ($2.70/$16.20) service tiers; no schema fields for those, standard/batch rates unchanged."
     },
     {
       "provider": "Google",
@@ -1332,12 +1370,12 @@
       "reasoning_tokens_billed": true,
       "deployment_options": ["native"],
       "confidence": "high",
-      "last_verified": "2026-07-13",
+      "last_verified": "2026-07-19",
       "last_changed_at": "2026-07-02",
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",
       "source_url": "https://ai.google.dev/pricing",
-      "notes": "New preview row added 2026-07-02; not GA. Optimized for software engineering and agentic workflows; a specialized gemini-3.1-pro-preview-customtools variant exists but is not tracked as a separate row. Input/output/cache-read pricing tiers at >200k tokens (>200k rate captured in pricing_tiers[0]); batch pricing also tiers ($2.00/$9.00 input/output above 200k) but batch has no tiered field in this schema, so only the <=200k batch rate is captured. Thinking is on by default at high level (configurable low/medium/high); thinking tokens billed at the output rate, so reasoning_tokens_billed=true. Context window and max_output_tokens confirmed via ai.google.dev/gemini-api/docs/models/gemini-3.1-pro-preview. Knowledge cutoff January 2025, unchanged from the Gemini 2.5 family. Google Search grounding billed separately (5,000 prompts/month free, shared across Gemini 3 models, then $14/1,000 queries); omitted as a structured field for consistency with sibling rows. Vertex AI availability not confirmed as of this pass; deployment_options limited to native pending verification. Free tier (AI Studio) is published as per-minute RPM/TPM only, not per-day; free_tier omitted. Re-verified 2026-07-13: prices, tiers, and status (still preview, not GA) unchanged against ai.google.dev/pricing; cross-checked ai.google.dev/gemini-api/docs/models."
+      "notes": "New preview row added 2026-07-02; not GA. Optimized for software engineering and agentic workflows; a specialized gemini-3.1-pro-preview-customtools variant exists but is not tracked as a separate row. Input/output/cache-read pricing tiers at >200k tokens (>200k rate captured in pricing_tiers[0]); batch pricing also tiers ($2.00/$9.00 input/output above 200k) but batch has no tiered field in this schema, so only the <=200k batch rate is captured. Thinking is on by default at high level (configurable low/medium/high); thinking tokens billed at the output rate, so reasoning_tokens_billed=true. Context window and max_output_tokens confirmed via ai.google.dev/gemini-api/docs/models/gemini-3.1-pro-preview. Knowledge cutoff January 2025, unchanged from the Gemini 2.5 family. Google Search grounding billed separately (5,000 prompts/month free, shared across Gemini 3 models, then $14/1,000 queries); omitted as a structured field for consistency with sibling rows. Vertex AI availability not confirmed as of this pass; deployment_options limited to native pending verification. Free tier (AI Studio) is published as per-minute RPM/TPM only, not per-day; free_tier omitted. Re-verified 2026-07-13: prices, tiers, and status (still preview, not GA) unchanged against ai.google.dev/pricing; cross-checked ai.google.dev/gemini-api/docs/models. Re-verified 2026-07-19: prices, tiers, and status (still preview) unchanged against ai.google.dev/pricing; cross-checked ai.google.dev/gemini-api/docs/models."
     },
     {
       "provider": "Google",
@@ -1368,12 +1406,12 @@
       "reasoning_tokens_billed": true,
       "deployment_options": ["native"],
       "confidence": "high",
-      "last_verified": "2026-07-13",
+      "last_verified": "2026-07-19",
       "last_changed_at": "2026-07-02",
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",
       "source_url": "https://ai.google.dev/pricing",
-      "notes": "New preview row added 2026-07-02; not GA. Audio input is priced separately (captured in audio_input_per_mtok_usd); cached audio input is $0.10/MTok vs $0.05/MTok for text/image/video. No >200k-token pricing tier published. Thinking is on by default at high level (configurable minimal/low/medium/high); thinking tokens billed at the output rate, so reasoning_tokens_billed=true. Context window and max_output_tokens confirmed via ai.google.dev/gemini-api/docs/models/gemini-3-flash-preview. Knowledge cutoff January 2025, unchanged from the Gemini 2.5 family. Google Search grounding billed separately (5,000 prompts/month free, shared across Gemini 3 models, then $14/1,000 queries); omitted as a structured field for consistency with sibling rows. Vertex AI availability not confirmed as of this pass; deployment_options limited to native pending verification. Free tier (AI Studio) is published as per-minute RPM/TPM only, not per-day; free_tier omitted. Re-verified 2026-07-13: prices and status (still preview, not GA) unchanged against ai.google.dev/pricing; cross-checked ai.google.dev/gemini-api/docs/models."
+      "notes": "New preview row added 2026-07-02; not GA. Audio input is priced separately (captured in audio_input_per_mtok_usd); cached audio input is $0.10/MTok vs $0.05/MTok for text/image/video. No >200k-token pricing tier published. Thinking is on by default at high level (configurable minimal/low/medium/high); thinking tokens billed at the output rate, so reasoning_tokens_billed=true. Context window and max_output_tokens confirmed via ai.google.dev/gemini-api/docs/models/gemini-3-flash-preview. Knowledge cutoff January 2025, unchanged from the Gemini 2.5 family. Google Search grounding billed separately (5,000 prompts/month free, shared across Gemini 3 models, then $14/1,000 queries); omitted as a structured field for consistency with sibling rows. Vertex AI availability not confirmed as of this pass; deployment_options limited to native pending verification. Free tier (AI Studio) is published as per-minute RPM/TPM only, not per-day; free_tier omitted. Re-verified 2026-07-13: prices and status (still preview, not GA) unchanged against ai.google.dev/pricing; cross-checked ai.google.dev/gemini-api/docs/models. Re-verified 2026-07-19: prices and status (still preview) unchanged against ai.google.dev/pricing; cross-checked ai.google.dev/gemini-api/docs/models."
     },
     {
       "provider": "Google",
@@ -1404,12 +1442,12 @@
       "reasoning_tokens_billed": true,
       "deployment_options": ["native"],
       "confidence": "high",
-      "last_verified": "2026-07-13",
+      "last_verified": "2026-07-19",
       "last_changed_at": "2026-07-02",
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",
       "source_url": "https://ai.google.dev/pricing",
-      "notes": "New GA/stable row added 2026-07-02. Audio input is priced separately (captured in audio_input_per_mtok_usd); cached audio input is $0.05/MTok vs $0.025/MTok for text/image/video. No >200k-token pricing tier published. Thinking is minimal by default (options: minimal or high); thinking tokens billed at the output rate, so reasoning_tokens_billed=true. Context window and max_output_tokens confirmed via ai.google.dev/gemini-api/docs/models/gemini-3.1-flash-lite. Knowledge cutoff January 2025, unchanged from the Gemini 2.5 family. Google Search grounding billed separately (5,000 prompts/month free, shared across Gemini 3 models, then $14/1,000 queries); omitted as a structured field for consistency with sibling rows. Vertex AI availability not confirmed as of this pass; deployment_options limited to native pending verification. Free tier (AI Studio) is published as per-minute RPM/TPM only, not per-day; free_tier omitted. Re-verified 2026-07-13: prices unchanged against ai.google.dev/pricing; cross-checked ai.google.dev/gemini-api/docs/models."
+      "notes": "New GA/stable row added 2026-07-02. Audio input is priced separately (captured in audio_input_per_mtok_usd); cached audio input is $0.05/MTok vs $0.025/MTok for text/image/video. No >200k-token pricing tier published. Thinking is minimal by default (options: minimal or high); thinking tokens billed at the output rate, so reasoning_tokens_billed=true. Context window and max_output_tokens confirmed via ai.google.dev/gemini-api/docs/models/gemini-3.1-flash-lite. Knowledge cutoff January 2025, unchanged from the Gemini 2.5 family. Google Search grounding billed separately (5,000 prompts/month free, shared across Gemini 3 models, then $14/1,000 queries); omitted as a structured field for consistency with sibling rows. Vertex AI availability not confirmed as of this pass; deployment_options limited to native pending verification. Free tier (AI Studio) is published as per-minute RPM/TPM only, not per-day; free_tier omitted. Re-verified 2026-07-13: prices unchanged against ai.google.dev/pricing; cross-checked ai.google.dev/gemini-api/docs/models. Re-verified 2026-07-19: prices unchanged against ai.google.dev/pricing; still listed stable on ai.google.dev/gemini-api/docs/models."
     },
     {
       "provider": "Meta",
@@ -1439,13 +1477,13 @@
       "reasoning_tokens_billed": false,
       "deployment_options": ["together"],
       "aggregators": ["openrouter"],
-      "confidence": "high",
-      "last_verified": "2026-07-13",
+      "confidence": "medium",
+      "last_verified": "2026-07-19",
       "last_changed_at": "2026-05-18",
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",
       "source_url": "https://huggingface.co/meta-llama/Llama-4-Maverick-17B-128E-Instruct",
-      "notes": "Multi-host pricing re-verified 2026-07-13: Together still $0.27/$0.85 per MTok (meta-llama/Llama-4-Maverick-17B-128E-Instruct-FP8), the row's structured price as the lowest direct-host rate; unchanged since 2026-05-18. OpenRouter aggregator now routes at $0.20/$0.80 (was $0.15/$0.60 on 2026-05-18; informational only, structured input/output stay at the lowest direct-host price per the PR4 convention) and is structured as aggregators[\"openrouter\"]. Groq still does not list Maverick on its public pricing page; Fireworks still does not offer Maverick on serverless (on-demand deployments only, no listed per-token price). Context window is Meta's published 1M (1048576 tokens); OpenRouter advertises 1.05M but the HuggingFace model card spec is 1M. max_output_tokens not published on the model card; defaulted to 8192. 17B activated / 400B total MoE with 128 experts. deployment_options[] omits hosts whose canonical slug or full pricing could not be confirmed in a single primary source on this date (Fireworks no-serverless, Groq absent)."
+      "notes": "Multi-host pricing re-verified 2026-07-19: Together still $0.27/$0.85 per MTok (meta-llama/Llama-4-Maverick-17B-128E-Instruct-FP8) per its model page (together.ai/models/llama-4-maverick), the row's structured price as the sole confirmed direct-host rate; unchanged since 2026-05-18. Confidence lowered to medium this pass: Together's model page is the only live source for the serverless rate — together.ai/pricing and the docs.together.ai serverless catalog no longer list Maverick (fine-tuning tables only), and OpenRouter's endpoint list routes no Together endpoint. Groq formally deprecated Maverick (announced 2026-02-20, shutdown 2026-03-09 per console.groq.com/docs/deprecations); Fireworks still does not offer Maverick on serverless (on-demand deployments only). Bedrock pricing tables did not render on this pass; omitted per the single-primary-source rule for deployment_options[]. OpenRouter aggregator still routes at $0.20/$0.80 (informational only; structured input/output stay at the lowest direct-host price per the PR4 convention). Context window is Meta's published 1M (1048576 tokens); OpenRouter advertises 1.05M but the HuggingFace model card spec is 1M. max_output_tokens not published on the model card; defaulted to 8192. 17B activated / 400B total MoE with 128 experts."
     },
     {
       "provider": "Meta",
@@ -1462,8 +1500,8 @@
       ],
       "context_window": 10485760,
       "max_output_tokens": 8192,
-      "input_per_mtok_usd": "0.11",
-      "output_per_mtok_usd": "0.34",
+      "input_per_mtok_usd": "0.18",
+      "output_per_mtok_usd": "0.59",
       "modalities": {
         "input": ["text", "image"],
         "output": ["text"]
@@ -1475,15 +1513,15 @@
       "supports_audio_out": false,
       "supports_pdf": false,
       "reasoning_tokens_billed": false,
-      "deployment_options": ["together", "fireworks", "groq"],
+      "deployment_options": ["together"],
       "aggregators": ["openrouter"],
-      "confidence": "high",
-      "last_verified": "2026-07-13",
-      "last_changed_at": "2026-05-18",
+      "confidence": "medium",
+      "last_verified": "2026-07-19",
+      "last_changed_at": "2026-07-19",
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",
       "source_url": "https://huggingface.co/meta-llama/Llama-4-Scout-17B-16E-Instruct",
-      "notes": "Multi-host pricing re-verified 2026-07-13: Together still $0.18/$0.59 per MTok (meta-llama/Llama-4-Scout-17B-16E-Instruct); Fireworks still $0.15/$0.60 (accounts/fireworks/models/llama4-scout-instruct-basic); Groq still $0.11/$0.34 (meta-llama/llama-4-scout-17b-16e-instruct) remains the lowest direct-host rate and the row's structured price; all unchanged since 2026-05-18. OpenRouter aggregator now routes at $0.10/$0.30 (was $0.08/$0.30 on 2026-05-18; informational only, structured input/output stay at the lowest direct-host price per the PR4 convention) and is structured as aggregators[\"openrouter\"]. Context window is Meta's published 10M (10485760 tokens); most hosts cap below Meta's spec (e.g. Groq, Fireworks typically expose ~128K-1M at the API). max_output_tokens not published on the model card; defaulted to 8192. 17B activated / 109B total MoE with 16 experts."
+      "notes": "Price changed 2026-07-19: Groq retired Llama 4 Scout (announced 2026-06-17, shutdown 2026-07-17 per console.groq.com/docs/deprecations; removed from groq.com/pricing and console.groq.com/docs/models), so its $0.11/$0.34 rate no longer exists. Fireworks' model page now states serverless is not supported for accounts/fireworks/models/llama4-scout-instruct-basic, so Fireworks is also removed from deployment_options. Together is now the sole confirmed direct host at $0.18/$0.59 per MTok (meta-llama/Llama-4-Scout-17B-16E-Instruct, per together.ai/models/llama-4-scout; same Together rate as verified 2026-05-18 and 2026-07-13), which becomes the row's structured price. Confidence lowered to medium: Together's model page is the only live source for that rate — together.ai/pricing and the docs.together.ai serverless catalog no longer list Scout, and OpenRouter routes no Together endpoint (its Groq endpoint still listed at $0.11/$0.34 is stale post-shutdown). Bedrock pricing tables did not render on this pass; omitted per the single-primary-source rule for deployment_options[]. OpenRouter aggregator still routes at $0.10/$0.30 (informational only; structured input/output stay at the lowest direct-host price per the PR4 convention). Retired-host aliases (Groq, Fireworks) retained for lookup. Context window is Meta's published 10M (10485760 tokens); hosts cap below Meta's spec. max_output_tokens not published on the model card; defaulted to 8192. 17B activated / 109B total MoE with 16 experts."
     },
     {
       "provider": "Meta",
@@ -1516,12 +1554,12 @@
       "deployment_options": ["together", "groq"],
       "aggregators": ["openrouter"],
       "confidence": "high",
-      "last_verified": "2026-07-13",
+      "last_verified": "2026-07-19",
       "last_changed_at": "2026-05-18",
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",
       "source_url": "https://huggingface.co/meta-llama/Llama-3.3-70B-Instruct",
-      "notes": "Multi-host pricing re-verified 2026-07-13: Together still $1.04/$1.04 per MTok for Llama 3.3 70B (unchanged since the 2026-07-02 jump from $0.88/$0.88); Groq still $0.59/$0.79 (llama-3.3-70b-versatile) remains the lowest direct-host rate and stays the row's structured price. Fireworks still publishes $0.90 input on accounts/fireworks/models/llama-v3p3-70b-instruct and its own model page states serverless is not supported for this model, so Fireworks remains omitted from deployment_options. OpenRouter aggregator still routes at $0.10/$0.32 (informational only; structured input/output stay at the lowest direct-host price per the PR4 convention) and is structured as aggregators[\"openrouter\"]. Context window 128K per Meta's spec (131072 tokens). Text-only; no vision. max_output_tokens not published on the model card; defaulted to 8192. Knowledge cutoff December 2023 per model card."
+      "notes": "Multi-host pricing re-verified 2026-07-19: Together still $1.04/$1.04 per MTok for Llama 3.3 70B (meta-llama/Llama-3.3-70B-Instruct-Turbo, confirmed on both together.ai/pricing and the docs.together.ai serverless catalog; unchanged since the 2026-07-02 jump from $0.88/$0.88); Groq still $0.59/$0.79 (llama-3.3-70b-versatile, confirmed on both groq.com/pricing and console.groq.com/docs/models) remains the lowest direct-host rate and stays the row's structured price. Fireworks still publishes $0.90 input on accounts/fireworks/models/llama-v3p3-70b-instruct and its own model page states serverless is not supported for this model, so Fireworks remains omitted from deployment_options. OpenRouter aggregator still routes at $0.10/$0.32 (informational only; structured input/output stay at the lowest direct-host price per the PR4 convention) and is structured as aggregators[\"openrouter\"]. Context window 128K per Meta's spec (131072 tokens). Text-only; no vision. max_output_tokens not published on the model card; defaulted to 8192. Knowledge cutoff December 2023 per model card."
     },
     {
       "provider": "Mistral",
@@ -1548,7 +1586,7 @@
       "deployment_options": ["native", "bedrock", "vertex", "azure"],
       "deprecated_at": "2026-02-27",
       "replaced_by_model_id": "mistral-medium-3-5",
-      "last_verified": "2026-07-13",
+      "last_verified": "2026-07-19",
       "last_changed_at": "2024-11-19",
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",
@@ -1579,7 +1617,7 @@
       "deployment_options": ["native"],
       "deprecated_at": "2026-05-22",
       "replaced_by_model_id": "mistral-medium-3-5",
-      "last_verified": "2026-07-13",
+      "last_verified": "2026-07-19",
       "last_changed_at": "2025-05-07",
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",
@@ -1611,7 +1649,7 @@
       "deployment_options": ["native"],
       "deprecated_at": "2025-11-06",
       "replaced_by_model_id": "mistral-small-2603",
-      "last_verified": "2026-07-13",
+      "last_verified": "2026-07-19",
       "last_changed_at": "2025-01-30",
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",
@@ -1641,7 +1679,7 @@
       "supports_pdf": false,
       "reasoning_tokens_billed": false,
       "deployment_options": ["native", "vertex"],
-      "last_verified": "2026-07-13",
+      "last_verified": "2026-07-19",
       "last_changed_at": "2025-07-31",
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",
@@ -1673,7 +1711,7 @@
       "deployment_options": ["native", "bedrock"],
       "deprecated_at": "2026-02-27",
       "replaced_by_model_id": "mistral-medium-3-5",
-      "last_verified": "2026-07-13",
+      "last_verified": "2026-07-19",
       "last_changed_at": "2024-11-18",
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",
@@ -1703,7 +1741,7 @@
       "supports_pdf": false,
       "reasoning_tokens_billed": false,
       "deployment_options": ["native"],
-      "last_verified": "2026-07-13",
+      "last_verified": "2026-07-19",
       "last_changed_at": "2025-12-02",
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",
@@ -1733,7 +1771,7 @@
       "supports_pdf": false,
       "reasoning_tokens_billed": false,
       "deployment_options": ["native"],
-      "last_verified": "2026-07-13",
+      "last_verified": "2026-07-19",
       "last_changed_at": "2026-04-28",
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",
@@ -1763,7 +1801,7 @@
       "supports_pdf": false,
       "reasoning_tokens_billed": false,
       "deployment_options": ["native"],
-      "last_verified": "2026-07-13",
+      "last_verified": "2026-07-19",
       "last_changed_at": "2026-03-16",
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",
@@ -1793,7 +1831,7 @@
       "supports_pdf": false,
       "reasoning_tokens_billed": false,
       "deployment_options": ["native"],
-      "last_verified": "2026-07-13",
+      "last_verified": "2026-07-19",
       "last_changed_at": "2025-12-02",
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",
@@ -1823,7 +1861,7 @@
       "supports_pdf": false,
       "reasoning_tokens_billed": false,
       "deployment_options": ["native"],
-      "last_verified": "2026-07-13",
+      "last_verified": "2026-07-19",
       "last_changed_at": "2025-12-02",
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",
@@ -1853,7 +1891,7 @@
       "supports_pdf": false,
       "reasoning_tokens_billed": false,
       "deployment_options": ["native"],
-      "last_verified": "2026-07-13",
+      "last_verified": "2026-07-19",
       "last_changed_at": "2025-12-02",
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",
@@ -1884,12 +1922,12 @@
       "reasoning_tokens_billed": false,
       "deployment_options": ["native", "azure"],
       "confidence": "medium",
-      "last_verified": "2026-07-13",
+      "last_verified": "2026-07-19",
       "last_changed_at": "2025-03-01",
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",
       "source_url": "https://docs.cohere.com/docs/command-a",
-      "notes": "Cohere's flagship 111B-parameter model: 256K context, text-only, optimized for tool use, RAG, agents, and 23-language multilingual workloads. Price ($2.50 / $10.00 per MTok) per artificialanalysis.ai citing Cohere's API; Command A is still not listed on cohere.com/pricing as of 2026-07-13 (page only publishes a \"Legacy Model Pricing\" FAQ table for Command/Command-light/Command R/Command R+ 04-2024/Command R+ 08-2024, plus Model Vault dedicated-instance rates; newer generative models including Command A route to \"Get in touch for custom enterprise pricing\"), so confidence remains medium. docs.cohere.com/docs/models confirms `command-a-03-2025` is still Live (256K context, 8K max output, text-only) and Cohere's deprecations page (docs.cohere.com/docs/deprecations, re-checked 2026-07-13) does not list it, so status and price are unchanged. Cohere's model catalog has grown since last pass (command-a-reasoning-08-2025, command-a-vision-07-2025, command-a-translate-08-2025, command-r-08-2024, and a command-a-plus-05-2026 sighted on docs.cohere.com/docs/models) but none of these publish per-token input/output pricing on cohere.com/pricing or a corroborating secondary source (artificialanalysis.ai only has a blended/zero rate for Command A / Command A+, not a clean input/output split), so they are deferred rather than added this pass. Cohere docs still don't surface AWS Bedrock availability for this model (so `bedrock` remains omitted from deployment_options); Azure AI Foundry availability is published but uses per-deployment IDs, so no Azure alias is encoded. Oracle OCI exposes it as `cohere.command-a-03-2025` (kept as alias). Cache and batch pricing not published by Cohere. Knowledge cutoff not published on the Cohere model card."
+      "notes": "Cohere's flagship 111B-parameter model: 256K context, text-only, optimized for tool use, RAG, agents, and 23-language multilingual workloads. Price ($2.50 / $10.00 per MTok) per artificialanalysis.ai citing Cohere's API (re-confirmed on its Command A model page 2026-07-19); Command A is still not listed on cohere.com/pricing as of 2026-07-19 (page only publishes a \"Legacy Model Pricing\" FAQ table for Command/Command-light/Command R/Command R+ 04-2024/Command R+ 08-2024, plus Model Vault dedicated-instance rates; newer generative models including Command A route to \"Get in touch for custom enterprise pricing\"), so confidence remains medium. docs.cohere.com/docs/models confirms `command-a-03-2025` is still Live (256K context, 8K max output, text-only) and Cohere's deprecations page (docs.cohere.com/docs/deprecations, re-checked 2026-07-19) does not list it, so status and price are unchanged. Cohere's model catalog still lists newer generative models (command-a-reasoning-08-2025, command-a-vision-07-2025, command-a-translate-08-2025, command-r-08-2024, and command-a-plus-05-2026 — now shown Live on docs.cohere.com/docs/models with 128K context / 64K max output) but none of these publish per-token input/output pricing on cohere.com/pricing or a corroborating secondary source (artificialanalysis.ai's provider view shows only blended/zero rates for Command A+ and no listing for the others, not a clean input/output split), so they remain deferred as of 2026-07-19. Cohere docs still don't surface AWS Bedrock availability for this model (so `bedrock` remains omitted from deployment_options); Azure AI Foundry availability is published but uses per-deployment IDs, so no Azure alias is encoded. Oracle OCI exposes it as `cohere.command-a-03-2025` (kept as alias). Cache and batch pricing not published by Cohere. Knowledge cutoff not published on the Cohere model card."
     },
     {
       "provider": "Cohere",
@@ -1915,12 +1953,12 @@
       "supports_pdf": false,
       "reasoning_tokens_billed": false,
       "deployment_options": ["native", "bedrock", "azure"],
-      "last_verified": "2026-07-13",
+      "last_verified": "2026-07-19",
       "last_changed_at": "2024-08-30",
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",
       "source_url": "https://cohere.com/pricing",
-      "notes": "Cohere Platform rates ($2.50 / $10.00 per MTok) are the row's structured price, listed on cohere.com/pricing as \"Command R+ 08-2024\" (page now files it under a \"Legacy Model Pricing\" FAQ table alongside Command/Command-light/Command R/Command R+ 04-2024, meaning it's held for existing customers rather than a headline SKU, but the price is unchanged and it remains orderable). 128K context, text-only, optimized for complex RAG and multi-step tool use. Cohere's deprecations page (docs.cohere.com/docs/deprecations, re-checked 2026-07-13) still sunsets only the predecessor `command-r-plus-04-2024` on 2025-09-15 and names this 08-2024 build as the recommended replacement, so it is active on Cohere Platform; docs.cohere.com/docs/models also lists `command-r-plus-08-2024` as Live. Bedrock SKU `cohere.command-r-plus-v1:0` launched Aug 2024 with a Mar 2024 knowledge cutoff (per Bedrock model card), matching this row; Bedrock marks the model \"Legacy\" with an EOL of 2026-08-19, which is a Bedrock-side lifecycle marker, not a Cohere deprecation. Azure AI Foundry availability published by Cohere; per-deployment IDs there, so no Azure alias is encoded. Cache and batch pricing not published by Cohere. Cohere's docs/models catalog also now lists a plain `command-r-08-2024` (non-plus) SKU, but it has no published per-token pricing on cohere.com/pricing or a corroborating secondary source, so it is deferred rather than added this pass."
+      "notes": "Cohere Platform rates ($2.50 / $10.00 per MTok) are the row's structured price, listed on cohere.com/pricing as \"Command R+ 08-2024\" (page now files it under a \"Legacy Model Pricing\" FAQ table alongside Command/Command-light/Command R/Command R+ 04-2024, meaning it's held for existing customers rather than a headline SKU, but the price is unchanged and it remains orderable). 128K context, text-only, optimized for complex RAG and multi-step tool use. Cohere's deprecations page (docs.cohere.com/docs/deprecations, re-checked 2026-07-19) still sunsets only the predecessor `command-r-plus-04-2024` on 2025-09-15 and names this 08-2024 build as the recommended replacement, so it is active on Cohere Platform; docs.cohere.com/docs/models also lists `command-r-plus-08-2024` as Live. Bedrock SKU `cohere.command-r-plus-v1:0` launched Aug 2024 with a Mar 2024 knowledge cutoff (per Bedrock model card), matching this row; Bedrock marks the model \"Legacy\" with an EOL of 2026-08-19, which is a Bedrock-side lifecycle marker, not a Cohere deprecation. Azure AI Foundry availability published by Cohere; per-deployment IDs there, so no Azure alias is encoded. Cache and batch pricing not published by Cohere. Cohere's docs/models catalog also now lists a plain `command-r-08-2024` (non-plus) SKU, but it has no published per-token pricing on cohere.com/pricing or a corroborating secondary source, so it is deferred rather than added this pass."
     },
     {
       "provider": "Cohere",
@@ -1945,12 +1983,12 @@
       "reasoning_tokens_billed": false,
       "deployment_options": ["native"],
       "confidence": "medium",
-      "last_verified": "2026-07-13",
+      "last_verified": "2026-07-19",
       "last_changed_at": "2024-10-24",
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",
       "source_url": "https://cohere.com/pricing",
-      "notes": "32B-parameter multilingual research/generative model (23 languages), 128K context, text-only. Cohere's \"Legacy Model Pricing\" FAQ table on cohere.com/pricing still lists the same single bundled rate for \"Aya Expanse (8B and 32B): $0.50 / $1.50 per MTok\" (not broken out per size) as of 2026-07-13, so confidence remains medium. docs.cohere.com/docs/aya-expanse confirms `c4ai-aya-expanse-32b`, 128K context, 4K max output, text-only, available via the Chat API and as open weights on Hugging Face (Hugging Face not encoded as a deployment_option since it isn't a hosted API SKU). docs.cohere.com/docs/models lists it as Live and unchanged. The 8B sibling `c4ai-aya-expanse-8b` reached its scheduled retirement/shutdown date of 2026-04-04 per docs.cohere.com/docs/deprecations (replacement: `command-r7b-12-2024`, `command-a-03-2025`, or `command-a-reasoning-08-2025`) and remains intentionally excluded as a row (never tracked, so no deprecated_at entry needed here). Tool use, structured output, and knowledge cutoff not published by Cohere for this model; booleans defaulted to false pending confirmation. Cache and batch pricing not published."
+      "notes": "32B-parameter multilingual research/generative model (23 languages), 128K context, text-only. Cohere's \"Legacy Model Pricing\" FAQ table on cohere.com/pricing still lists the same single bundled rate for \"Aya Expanse (8B and 32B): $0.50 / $1.50 per MTok\" (not broken out per size) as of 2026-07-19, so confidence remains medium. docs.cohere.com/docs/aya-expanse confirms `c4ai-aya-expanse-32b`, 128K context, 4K max output, text-only, available via the Chat API and as open weights on Hugging Face (Hugging Face not encoded as a deployment_option since it isn't a hosted API SKU). docs.cohere.com/docs/models lists it as Live and unchanged. The 8B sibling `c4ai-aya-expanse-8b` reached its scheduled retirement/shutdown date of 2026-04-04 per docs.cohere.com/docs/deprecations (replacement: `command-r7b-12-2024`, `command-a-03-2025`, or `command-a-reasoning-08-2025`) and remains intentionally excluded as a row (never tracked, so no deprecated_at entry needed here). Tool use, structured output, and knowledge cutoff not published by Cohere for this model; booleans defaulted to false pending confirmation. Cache and batch pricing not published."
     },
     {
       "provider": "xAI",
@@ -1986,12 +2024,12 @@
       "deployment_options": ["native"],
       "deprecated_at": "2026-05-15",
       "replaced_by_model_id": "grok-4.3",
-      "last_verified": "2026-07-13",
+      "last_verified": "2026-07-19",
       "last_changed_at": "2026-05-15",
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",
       "source_url": "https://docs.x.ai/developers/migration/may-15-retirement",
-      "notes": "xAI native rates ($3.00 / $15.00 per MTok, $0.75 cached input) are the row's structured price; prompts above 128K total tokens are billed at the higher pricing_tiers rate ($6.00 / $30.00) per xAI's documented long-context tiering. Grok 4 (snapshot `grok-4-0709`, released 2025-07-09) was xAI's flagship reasoning model: reasoning is always on (thinking tokens billed at the output rate, hence reasoning_tokens_billed: true), parallel tool calling and structured outputs supported, accepts text and image inputs. max_output_tokens of 256000 reflects xAI's documented \"up to 256K tokens of output\" within the shared 256K prompt+response context. Retired from the xAI API on 2026-05-15 12:00 PM PT alongside seven other legacy slugs; requests to `grok-4-0709` and `grok-4` continue to resolve but are now redirected to `grok-4.3` with `low` reasoning effort and billed at grok-4.3 rates. Successor is `grok-4.3`, captured in this dataset and referenced via `replaced_by_model_id`. xAI's API is native-only (not on Bedrock/Vertex/Azure). Batch API not published for this model. Re-verified 2026-07-02 and 2026-07-13: `grok-4-0709` absent from both docs.x.ai/docs/models and docs.x.ai/docs/pricing, and still listed on docs.x.ai/developers/migration/may-15-retirement with redirect target `grok-4.3`, confirming retirement status is unchanged."
+      "notes": "xAI native rates ($3.00 / $15.00 per MTok, $0.75 cached input) are the row's structured price; prompts above 128K total tokens are billed at the higher pricing_tiers rate ($6.00 / $30.00) per xAI's documented long-context tiering. Grok 4 (snapshot `grok-4-0709`, released 2025-07-09) was xAI's flagship reasoning model: reasoning is always on (thinking tokens billed at the output rate, hence reasoning_tokens_billed: true), parallel tool calling and structured outputs supported, accepts text and image inputs. max_output_tokens of 256000 reflects xAI's documented \"up to 256K tokens of output\" within the shared 256K prompt+response context. Retired from the xAI API on 2026-05-15 12:00 PM PT alongside seven other legacy slugs; requests to `grok-4-0709` and `grok-4` continue to resolve but are now redirected to `grok-4.3` with `low` reasoning effort and billed at grok-4.3 rates. Successor is `grok-4.3`, captured in this dataset and referenced via `replaced_by_model_id`. xAI's API is native-only (not on Bedrock/Vertex/Azure). Batch API not published for this model. Re-verified 2026-07-02, 2026-07-13, and 2026-07-19: `grok-4-0709` absent from both docs.x.ai/docs/models and docs.x.ai/docs/pricing, and still listed on docs.x.ai/developers/migration/may-15-retirement with redirect target `grok-4.3`, confirming retirement status is unchanged."
     },
     {
       "provider": "xAI",
@@ -2019,12 +2057,12 @@
       "deployment_options": ["native"],
       "deprecated_at": "2026-05-15",
       "replaced_by_model_id": "grok-4.3",
-      "last_verified": "2026-07-13",
+      "last_verified": "2026-07-19",
       "last_changed_at": "2026-05-15",
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",
       "source_url": "https://docs.x.ai/developers/migration/may-15-retirement",
-      "notes": "xAI native rates ($3.00 / $15.00 per MTok, $0.75 cached input) are the row's structured price (xAI's pricing page and mem0/pricepertoken aggregator both report $3/$15; artificialanalysis.ai reports a higher $4/$20 — choosing xAI-aligned figures). Grok 3 (released 2025-02-19) was xAI's flagship non-reasoning chat model; text-only inputs, function calling and structured outputs supported, 131,072-token combined prompt+response context window. Not a reasoning model (direct responses, no extended chain-of-thought; the reasoning sibling was `grok-3-mini`, not in this dataset). max_output_tokens defaulted to the documented context cap; xAI does not publish a separate max-output limit beyond the shared 131,072-token window. Retired from the xAI API on 2026-05-15 12:00 PM PT; requests to `grok-3` continue to resolve but are now redirected to `grok-4.3` with `none` reasoning effort and billed at grok-4.3 rates. Successor is `grok-4.3`, captured in this dataset and referenced via `replaced_by_model_id`. xAI's API is native-only. Batch API not published for this model. Re-verified 2026-07-02 and 2026-07-13: `grok-3` absent from both docs.x.ai/docs/models and docs.x.ai/docs/pricing, and still listed on docs.x.ai/developers/migration/may-15-retirement with redirect target `grok-4.3`, confirming retirement status is unchanged."
+      "notes": "xAI native rates ($3.00 / $15.00 per MTok, $0.75 cached input) are the row's structured price (xAI's pricing page and mem0/pricepertoken aggregator both report $3/$15; artificialanalysis.ai reports a higher $4/$20 — choosing xAI-aligned figures). Grok 3 (released 2025-02-19) was xAI's flagship non-reasoning chat model; text-only inputs, function calling and structured outputs supported, 131,072-token combined prompt+response context window. Not a reasoning model (direct responses, no extended chain-of-thought; the reasoning sibling was `grok-3-mini`, not in this dataset). max_output_tokens defaulted to the documented context cap; xAI does not publish a separate max-output limit beyond the shared 131,072-token window. Retired from the xAI API on 2026-05-15 12:00 PM PT; requests to `grok-3` continue to resolve but are now redirected to `grok-4.3` with `none` reasoning effort and billed at grok-4.3 rates. Successor is `grok-4.3`, captured in this dataset and referenced via `replaced_by_model_id`. xAI's API is native-only. Batch API not published for this model. Re-verified 2026-07-02, 2026-07-13, and 2026-07-19: `grok-3` absent from both docs.x.ai/docs/models and docs.x.ai/docs/pricing, and still listed on docs.x.ai/developers/migration/may-15-retirement with redirect target `grok-4.3`, confirming retirement status is unchanged."
     },
     {
       "provider": "xAI",
@@ -2051,12 +2089,12 @@
       "deployment_options": ["native"],
       "deprecated_at": "2026-05-15",
       "replaced_by_model_id": "grok-build-0.1",
-      "last_verified": "2026-07-13",
+      "last_verified": "2026-07-19",
       "last_changed_at": "2026-05-15",
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",
       "source_url": "https://docs.x.ai/developers/migration/may-15-retirement",
-      "notes": "xAI native rates ($0.20 / $1.50 per MTok, $0.02 cached input) are the row's structured price. Grok Code Fast 1 (released 2025-08-26) was xAI's speedy, economical coding-specialized reasoning model: 314B-parameter MoE architecture, 256K combined prompt+response context, agentic coding focus, visible reasoning traces (`reasoning_content` field in streaming responses), function calling and structured outputs supported, text-only. Reasoning is enabled by default so reasoning tokens are billed at the output rate. max_output_tokens defaulted to the documented 256K context cap; xAI does not publish a separate max-output limit beyond the shared window. Retired from the xAI API on 2026-05-15 12:00 PM PT; requests to `grok-code-fast-1` continue to resolve. CORRECTION on 2026-07-13 re-verification: docs.x.ai/developers/migration/may-15-retirement now states the redirect target is `grok-build-0.1` (\"After May 15, requests to `grok-code-fast-1` are routed to `grok-build-0.1`\"), not `grok-4.3` as previously recorded on 2026-07-02 — `replaced_by_model_id` updated accordingly; this is a referential correction, not a price change to this row, so `last_changed_at` is not bumped. `grok-build-0.1` is now captured in this dataset. xAI's API is native-only. Batch API not published for this model. Knowledge cutoff not published by xAI. `grok-code-fast-1` remains absent from both docs.x.ai/docs/models and docs.x.ai/docs/pricing, confirming retirement status is unchanged."
+      "notes": "xAI native rates ($0.20 / $1.50 per MTok, $0.02 cached input) are the row's structured price. Grok Code Fast 1 (released 2025-08-26) was xAI's speedy, economical coding-specialized reasoning model: 314B-parameter MoE architecture, 256K combined prompt+response context, agentic coding focus, visible reasoning traces (`reasoning_content` field in streaming responses), function calling and structured outputs supported, text-only. Reasoning is enabled by default so reasoning tokens are billed at the output rate. max_output_tokens defaulted to the documented 256K context cap; xAI does not publish a separate max-output limit beyond the shared window. Retired from the xAI API on 2026-05-15 12:00 PM PT; requests to `grok-code-fast-1` continue to resolve. CORRECTION on 2026-07-13 re-verification: docs.x.ai/developers/migration/may-15-retirement now states the redirect target is `grok-build-0.1` (\"After May 15, requests to `grok-code-fast-1` are routed to `grok-build-0.1`\"), not `grok-4.3` as previously recorded on 2026-07-02 — `replaced_by_model_id` updated accordingly; this is a referential correction, not a price change to this row, so `last_changed_at` is not bumped. `grok-build-0.1` is now captured in this dataset. xAI's API is native-only. Batch API not published for this model. Knowledge cutoff not published by xAI. `grok-code-fast-1` remains absent from both docs.x.ai/docs/models and docs.x.ai/docs/pricing, confirming retirement status is unchanged. Re-verified 2026-07-19: still absent from both vendor pages, and docs.x.ai/developers/migration/may-15-retirement still lists redirect target `grok-build-0.1`."
     },
     {
       "provider": "xAI",
@@ -2068,6 +2106,15 @@
       "max_output_tokens": 1000000,
       "input_per_mtok_usd": "1.25",
       "output_per_mtok_usd": "2.50",
+      "cache_read_per_mtok_usd": "0.20",
+      "pricing_tiers": [
+        {
+          "threshold_tokens": 200000,
+          "input_per_mtok_usd": "2.50",
+          "output_per_mtok_usd": "5.00",
+          "cache_read_per_mtok_usd": "0.40"
+        }
+      ],
       "modalities": {
         "input": ["text", "image"],
         "output": ["text"]
@@ -2077,15 +2124,15 @@
       "supports_vision": true,
       "supports_audio_in": false,
       "supports_audio_out": false,
-      "supports_pdf": false,
+      "supports_pdf": true,
       "reasoning_tokens_billed": true,
       "deployment_options": ["native"],
-      "last_verified": "2026-07-13",
-      "last_changed_at": "2026-05-15",
+      "last_verified": "2026-07-19",
+      "last_changed_at": "2026-07-19",
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",
       "source_url": "https://docs.x.ai/docs/models",
-      "notes": "xAI native rates ($1.25 / $2.50 per MTok) are the row's structured price, listed on docs.x.ai/docs/models and docs.x.ai/docs/pricing, unchanged as of 2026-07-13. 1M-token combined prompt+response context window (a 4x expansion over the 256K window on Grok 4 / Grok Code Fast 1). Successor to `grok-4-0709`, `grok-3`, and `grok-code-fast-1` (the latter's redirect target was corrected to `grok-build-0.1` on 2026-07-13; see that row), which xAI retired on 2026-05-15 12:00 PM PT. Thinking mode is exposed via the `reasoning_effort` parameter (`none` / `low` / `medium` / `high`); when reasoning is on, thinking tokens are billed at the output rate, hence reasoning_tokens_billed: true. Accepts text and image inputs, text output; parallel tool calling and structured outputs supported. max_output_tokens reflects the documented 1M-token shared window — xAI does not publish a separate max-output limit. Cached input price, knowledge cutoff, and release date are not published by xAI on the models or pricing pages as of last_verified; omitted rather than guessed. xAI's API is native-only (not on Bedrock / Vertex / Azure). Batch API not published for this model. STATUS UPDATE 2026-07-13: xAI launched `grok-4.5` on 2026-07-08 as its new top-line recommended model (\"Your choice depends on your use case... For everything else, including code, use Grok 4.5\" per docs.x.ai/docs/models) — captured as a new row in this dataset. `grok-4.3` remains listed on both docs.x.ai/docs/models and docs.x.ai/docs/pricing with no deprecation banner, so it is kept active here with unchanged price and 1M context window, but is no longer singled out in xAI's own guidance as the flagship pick. docs.x.ai/docs/pricing also lists `grok-4.20-0309-reasoning`, `grok-4.20-0309-non-reasoning`, and `grok-4.20-multi-agent-0309` (beta variants, $1.25/$2.50 per MTok, xAI-stated 1M context) — deferred again this pass: a third-party technical writeup (buildfastwithai.com, published 2026-03-14) reports conflicting specs for the same three model_ids ($2.00/$6.00 per MTok, 2M context matching Grok 4.1, multi-agent variant API still 'coming soon'), and the two-source rule requires corroboration, not contradiction. Re-verify next pass once sources converge."
+      "notes": "xAI native rates ($1.25 / $2.50 per MTok, $0.20 cached input) are the row's structured price, listed on docs.x.ai/docs/models and docs.x.ai/docs/pricing; base $1.25/$2.50 unchanged since 2026-05-15. PRICE STRUCTURE UPDATE 2026-07-19: xAI now publishes a cached-input rate ($0.20/MTok) and long-context tiering for this model — prompts ≥200K tokens bill at $2.50 input / $5.00 output / $0.40 cached input — captured in cache_read_per_mtok_usd and pricing_tiers; cross-checked against OpenRouter's public models API (openrouter.ai/api/v1/models, x-ai/grok-4.3: prompt $0.00000125/token = $1.25/MTok, completion $0.0000025/token = $2.50/MTok, input_cache_read $0.0000002/token = $0.20/MTok) — satisfies the two-source rule; last_changed_at bumped. 1M-token combined prompt+response context window (a 4x expansion over the 256K window on Grok 4 / Grok Code Fast 1). Successor to `grok-4-0709`, `grok-3`, and (via corrected redirect) predecessor line of `grok-build-0.1`, retired 2026-05-15 12:00 PM PT. Thinking mode is exposed via the `reasoning_effort` parameter (`none` / `low` / `medium` / `high`); when reasoning is on, thinking tokens are billed at the output rate, hence reasoning_tokens_billed: true. Accepts text and image inputs, text output; parallel tool calling and structured outputs supported. supports_pdf flipped to true on 2026-07-19: OpenRouter's architecture for x-ai/grok-4.3 now lists a `file` input modality — the same derivation already used for the grok-4.5 and grok-build-0.1 rows; capability fix, not a price change. max_output_tokens reflects the documented 1M-token shared window — xAI does not publish a separate max-output limit. Knowledge cutoff and release date still not published by xAI; omitted rather than guessed. xAI's API is native-only (not on Bedrock / Vertex / Azure). Batch API not published for this model. Remains listed on both vendor pages with no deprecation banner as of 2026-07-19; xAI's top-line recommendation remains `grok-4.5`. The `grok-4.20-0309-*` beta variants deferred on 2026-07-02/2026-07-13 were added as rows on 2026-07-19 after sources converged — see those rows."
     },
     {
       "provider": "xAI",
@@ -2098,7 +2145,15 @@
       "max_output_tokens": 500000,
       "input_per_mtok_usd": "2.00",
       "output_per_mtok_usd": "6.00",
-      "cache_read_per_mtok_usd": "0.50",
+      "cache_read_per_mtok_usd": "0.30",
+      "pricing_tiers": [
+        {
+          "threshold_tokens": 200000,
+          "input_per_mtok_usd": "4.00",
+          "output_per_mtok_usd": "12.00",
+          "cache_read_per_mtok_usd": "0.60"
+        }
+      ],
       "modalities": {
         "input": ["text", "image"],
         "output": ["text"]
@@ -2111,12 +2166,12 @@
       "supports_pdf": true,
       "reasoning_tokens_billed": true,
       "deployment_options": ["native"],
-      "last_verified": "2026-07-13",
-      "last_changed_at": "2026-07-13",
+      "last_verified": "2026-07-19",
+      "last_changed_at": "2026-07-19",
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",
       "source_url": "https://docs.x.ai/docs/models",
-      "notes": "New row, added on the 2026-07-13 refresh. Grok 4.5 launched 2026-07-08 as xAI's new top-line recommended model (\"the most intelligent and fastest model we've built\"; docs.x.ai/docs/models: \"For everything else, including code, use Grok 4.5\"), positioned for coding, agentic, and knowledge-work use. xAI native rates ($2.00 / $6.00 per MTok) confirmed on both docs.x.ai/docs/models and docs.x.ai/docs/pricing, cross-checked against OpenRouter's public models API (openrouter.ai/api/v1/models, x-ai/grok-4.5: prompt $0.000002/token = $2.00/MTok, completion $0.000006/token = $6.00/MTok, input_cache_read $0.0000005/token = $0.50/MTok cache read) — satisfies the two-source rule. Context window 500,000 tokens (smaller than grok-4.3's 1M) per docs.x.ai and OpenRouter agreement; knowledge cutoff \"February 1, 2026\" per docs.x.ai/docs/models verbatim. max_output_tokens defaulted to the 500K context cap; xAI does not publish a separate max-output limit (OpenRouter reports max_completion_tokens: null, consistent with no separate cap). Input modalities text + image (OpenRouter architecture also lists a `file` input modality, taken here as supports_pdf: true; images up to 20MiB, jpg/jpeg/png); output text-only. OpenRouter's supported_parameters list for this model includes `tools`/`tool_choice` (supports_tool_use: true), `response_format`/`structured_outputs` (structured_output: true), and `reasoning`/`reasoning_effort`/`include_reasoning` (reasoning_tokens_billed: true, consistent with the `reasoning_effort` parameter pattern on grok-4.3). Audio input/output not supported. Batch pricing and deployment options beyond native not published by xAI as of last_verified; xAI's API remains native-only (not on Bedrock/Vertex/Azure). Does not affect the existing `grok-4.3` row, which remains active at its own unchanged price — see that row's notes."
+      "notes": "Grok 4.5 launched 2026-07-08 as xAI's top-line recommended model (\"the most intelligent and fastest model we've built\"; docs.x.ai/docs/models: \"For everything else, including code, use Grok 4.5\"), positioned for coding, agentic, and knowledge-work use. xAI native rates ($2.00 / $6.00 per MTok, $0.30 cached input) are the row's structured price, confirmed on both docs.x.ai/docs/models and docs.x.ai/docs/pricing, cross-checked against OpenRouter's public models API (openrouter.ai/api/v1/models, x-ai/grok-4.5: prompt $0.000002/token = $2.00/MTok, completion $0.000006/token = $6.00/MTok, input_cache_read $0.0000003/token = $0.30/MTok cache read) — satisfies the two-source rule. PRICE CHANGE 2026-07-19: cached-input rate dropped from $0.50 to $0.30/MTok (both vendor pages and OpenRouter agree; $0.50 was the verified rate on 2026-07-13), and xAI now publishes long-context tiering — prompts ≥200K tokens bill at $4.00 input / $12.00 output / $0.60 cached input — captured in pricing_tiers (OpenRouter does not model per-tier rates; tier figures are per docs.x.ai/docs/models and docs.x.ai/docs/pricing, which agree); last_changed_at bumped. Context window 500,000 tokens (smaller than grok-4.3's 1M) per docs.x.ai and OpenRouter agreement; knowledge cutoff \"February 1, 2026\" per docs.x.ai/docs/models verbatim. max_output_tokens defaulted to the 500K context cap; xAI does not publish a separate max-output limit (OpenRouter reports max_completion_tokens: null, consistent with no separate cap). Input modalities text + image (OpenRouter architecture also lists a `file` input modality, taken here as supports_pdf: true; images up to 20MiB, jpg/jpeg/png); output text-only. OpenRouter's supported_parameters list for this model includes `tools`/`tool_choice` (supports_tool_use: true), `response_format`/`structured_outputs` (structured_output: true), and `reasoning`/`reasoning_effort`/`include_reasoning` (reasoning_tokens_billed: true, consistent with the `reasoning_effort` parameter pattern on grok-4.3). Audio input/output not supported. Batch pricing and deployment options beyond native not published by xAI as of last_verified; xAI's API remains native-only (not on Bedrock/Vertex/Azure). Does not affect the existing `grok-4.3` row — see that row's notes."
     },
     {
       "provider": "xAI",
@@ -2129,6 +2184,14 @@
       "input_per_mtok_usd": "1.00",
       "output_per_mtok_usd": "2.00",
       "cache_read_per_mtok_usd": "0.20",
+      "pricing_tiers": [
+        {
+          "threshold_tokens": 200000,
+          "input_per_mtok_usd": "2.00",
+          "output_per_mtok_usd": "4.00",
+          "cache_read_per_mtok_usd": "0.40"
+        }
+      ],
       "modalities": {
         "input": ["text", "image"],
         "output": ["text"]
@@ -2141,12 +2204,128 @@
       "supports_pdf": true,
       "reasoning_tokens_billed": true,
       "deployment_options": ["native"],
-      "last_verified": "2026-07-13",
-      "last_changed_at": "2026-07-13",
+      "last_verified": "2026-07-19",
+      "last_changed_at": "2026-07-19",
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",
       "source_url": "https://docs.x.ai/docs/models",
-      "notes": "New row, added on the 2026-07-13 refresh. Grok Build 0.1 (public beta, first opened via API 2026-05-20) is xAI's fast, economical agentic-coding model that powers the Grok Build CLI; it is the documented redirect target for the retired `grok-code-fast-1` slug (docs.x.ai/developers/migration/may-15-retirement: \"After May 15, requests to `grok-code-fast-1` are routed to `grok-build-0.1`\") — see that row's `replaced_by_model_id`. xAI native rates ($1.00 / $2.00 per MTok) confirmed on docs.x.ai/docs/models and docs.x.ai/docs/pricing, cross-checked against OpenRouter's public models API (openrouter.ai/api/v1/models, x-ai/grok-build-0.1: prompt $0.000001/token = $1.00/MTok, completion $0.000002/token = $2.00/MTok, input_cache_read $0.0000002/token = $0.20/MTok cache read) — satisfies the two-source rule. Context window 256,000 tokens per both sources; max_output_tokens defaulted to the 256K context cap (OpenRouter reports max_completion_tokens: null, no separate limit published). Input modalities text + image (OpenRouter architecture lists a `file` input modality too, taken here as supports_pdf: true); output text-only. OpenRouter's supported_parameters for this model include `tools`/`tool_choice` (supports_tool_use: true), `response_format`/`structured_outputs` (structured_output: true), and `reasoning`/`include_reasoning` (reasoning_tokens_billed: true — consistent with predecessor `grok-code-fast-1`'s visible reasoning traces). Audio input/output not supported. Knowledge cutoff and release date beyond the 2026-05-20 API-opening not published by xAI; omitted rather than guessed. Batch pricing not published. xAI's API is native-only (not on Bedrock/Vertex/Azure); limited regional availability noted by third-party docs (us-east-1, us-west-2) but not encoded as a separate deployment_option since it isn't a distinct hosted-API SKU distinction xAI itself publishes."
+      "notes": "Grok Build 0.1 (public beta, first opened via API 2026-05-20) is xAI's fast, economical agentic-coding model that powers the Grok Build CLI; it is the documented redirect target for the retired `grok-code-fast-1` slug (docs.x.ai/developers/migration/may-15-retirement: \"After May 15, requests to `grok-code-fast-1` are routed to `grok-build-0.1`\") — see that row's `replaced_by_model_id`. xAI native rates ($1.00 / $2.00 per MTok) confirmed on docs.x.ai/docs/models and docs.x.ai/docs/pricing, cross-checked against OpenRouter's public models API (openrouter.ai/api/v1/models, x-ai/grok-build-0.1: prompt $0.000001/token = $1.00/MTok, completion $0.000002/token = $2.00/MTok, input_cache_read $0.0000002/token = $0.20/MTok cache read) — satisfies the two-source rule; base and cached rates re-confirmed unchanged on 2026-07-19. PRICE STRUCTURE UPDATE 2026-07-19: xAI now publishes long-context tiering for this model — prompts ≥200K tokens bill at $2.00 input / $4.00 output / $0.40 cached input — captured in pricing_tiers (tier figures per docs.x.ai/docs/models and docs.x.ai/docs/pricing, which agree; OpenRouter does not model per-tier rates); last_changed_at bumped. Context window 256,000 tokens per both sources; max_output_tokens defaulted to the 256K context cap (OpenRouter reports max_completion_tokens: null, no separate limit published). Input modalities text + image (OpenRouter architecture lists a `file` input modality too, taken here as supports_pdf: true); output text-only. OpenRouter's supported_parameters for this model include `tools`/`tool_choice` (supports_tool_use: true), `response_format`/`structured_outputs` (structured_output: true), and `reasoning`/`include_reasoning` (reasoning_tokens_billed: true — consistent with predecessor `grok-code-fast-1`'s visible reasoning traces). Audio input/output not supported. Knowledge cutoff and release date beyond the 2026-05-20 API-opening not published by xAI; omitted rather than guessed. Batch pricing not published. xAI's API is native-only (not on Bedrock/Vertex/Azure); limited regional availability noted by third-party docs (us-east-1, us-west-2) but not encoded as a separate deployment_option since it isn't a distinct hosted-API SKU distinction xAI itself publishes."
+    },
+    {
+      "provider": "xAI",
+      "provider_url": "https://x.ai",
+      "model_id": "grok-4.20-0309-reasoning",
+      "display_name": "Grok 4.20 Reasoning",
+      "model_family": "Grok 4.20",
+      "context_window": 1000000,
+      "max_output_tokens": 1000000,
+      "input_per_mtok_usd": "1.25",
+      "output_per_mtok_usd": "2.50",
+      "cache_read_per_mtok_usd": "0.20",
+      "pricing_tiers": [
+        {
+          "threshold_tokens": 200000,
+          "input_per_mtok_usd": "2.50",
+          "output_per_mtok_usd": "5.00",
+          "cache_read_per_mtok_usd": "0.40"
+        }
+      ],
+      "modalities": {
+        "input": ["text", "image"],
+        "output": ["text"]
+      },
+      "supports_tool_use": true,
+      "structured_output": true,
+      "supports_vision": true,
+      "supports_audio_in": false,
+      "supports_audio_out": false,
+      "supports_pdf": true,
+      "reasoning_tokens_billed": true,
+      "deployment_options": ["native"],
+      "confidence": "medium",
+      "last_verified": "2026-07-19",
+      "last_changed_at": "2026-07-19",
+      "verification_method": "manual-confirmed",
+      "verified_by": "r13i",
+      "source_url": "https://docs.x.ai/docs/models",
+      "notes": "New row, added on the 2026-07-19 refresh; deferred on 2026-07-02 and 2026-07-13 because a third-party writeup (buildfastwithai.com, 2026-03-14) contradicted xAI's published specs ($2.00/$6.00 per MTok, 2M context). Sources have now converged on price: docs.x.ai/docs/models and docs.x.ai/docs/pricing both list `grok-4.20-0309-reasoning` at $1.25 / $2.50 per MTok with $0.20 cached input and long-context tiering (prompts ≥200K tokens: $2.50 / $5.00, $0.40 cached input), and OpenRouter's public models API corroborates the family pricing (openrouter.ai/api/v1/models, x-ai/grok-4.20: prompt $0.00000125/token = $1.25/MTok, completion $0.0000025/token = $2.50/MTok, input_cache_read $0.0000002/token = $0.20/MTok). confidence: medium because the secondary-source match is at family level, not exact slug — OpenRouter lists the family as `x-ai/grok-4.20` (no `-0309-` snapshot suffix) and reports a 2M-token context, while xAI's own models and pricing pages state 1M for this API model_id; the vendor figure (1,000,000) is used as authoritative for the native API. Grok 4.20 beta reasoning variant (snapshot suffix 0309, consistent with a 2026-03-09 snapshot; xAI does not publish a release date). Reasoning tokens billed at the output rate (reasoning_tokens_billed: true). Capabilities per OpenRouter x-ai/grok-4.20 supported_parameters: `tools`/`tool_choice` (supports_tool_use: true), `response_format`/`structured_outputs` (structured_output: true), `reasoning`/`include_reasoning`. Input modalities text + image (OpenRouter architecture also lists `file`, taken as supports_pdf: true, same derivation as sibling xAI rows); output text-only; audio not supported. max_output_tokens defaulted to the 1M context cap — no separate max-output limit published. Knowledge cutoff not published; omitted rather than guessed. Batch pricing not published. xAI's API is native-only (not on Bedrock/Vertex/Azure). Priced identically to `grok-4.3`. Sibling rows: `grok-4.20-0309-non-reasoning`, `grok-4.20-multi-agent-0309`."
+    },
+    {
+      "provider": "xAI",
+      "provider_url": "https://x.ai",
+      "model_id": "grok-4.20-0309-non-reasoning",
+      "display_name": "Grok 4.20 Non-Reasoning",
+      "model_family": "Grok 4.20",
+      "context_window": 1000000,
+      "max_output_tokens": 1000000,
+      "input_per_mtok_usd": "1.25",
+      "output_per_mtok_usd": "2.50",
+      "cache_read_per_mtok_usd": "0.20",
+      "pricing_tiers": [
+        {
+          "threshold_tokens": 200000,
+          "input_per_mtok_usd": "2.50",
+          "output_per_mtok_usd": "5.00",
+          "cache_read_per_mtok_usd": "0.40"
+        }
+      ],
+      "modalities": {
+        "input": ["text", "image"],
+        "output": ["text"]
+      },
+      "supports_tool_use": true,
+      "structured_output": true,
+      "supports_vision": true,
+      "supports_audio_in": false,
+      "supports_audio_out": false,
+      "supports_pdf": true,
+      "reasoning_tokens_billed": false,
+      "deployment_options": ["native"],
+      "confidence": "medium",
+      "last_verified": "2026-07-19",
+      "last_changed_at": "2026-07-19",
+      "verification_method": "manual-confirmed",
+      "verified_by": "r13i",
+      "source_url": "https://docs.x.ai/docs/models",
+      "notes": "New row, added on the 2026-07-19 refresh; deferred on 2026-07-02 and 2026-07-13 because a third-party writeup (buildfastwithai.com, 2026-03-14) contradicted xAI's published specs. Sources have now converged on price: docs.x.ai/docs/models and docs.x.ai/docs/pricing both list `grok-4.20-0309-non-reasoning` at $1.25 / $2.50 per MTok with $0.20 cached input and long-context tiering (prompts ≥200K tokens: $2.50 / $5.00, $0.40 cached input), and OpenRouter's public models API corroborates the family pricing under `x-ai/grok-4.20` (prompt $0.00000125/token, completion $0.0000025/token, input_cache_read $0.0000002/token). confidence: medium for the same reasons as the sibling `grok-4.20-0309-reasoning` row: family-level (not exact-slug) secondary corroboration, and a context-window discrepancy (OpenRouter reports 2M; xAI's models and pricing pages state 1M — vendor figure 1,000,000 used as authoritative for the native API). Grok 4.20 beta non-reasoning variant: direct responses without extended chain-of-thought, so reasoning_tokens_billed: false (analogous to the retired `grok-3` and to grok-4.3's `reasoning_effort: none` mode). Function calling and structured outputs supported per OpenRouter x-ai/grok-4.20 supported_parameters (`tools`/`tool_choice`, `response_format`/`structured_outputs`). Input modalities text + image (OpenRouter architecture also lists `file`, taken as supports_pdf: true, same derivation as sibling xAI rows); output text-only; audio not supported. max_output_tokens defaulted to the 1M context cap — no separate max-output limit published. Knowledge cutoff and release date not published; omitted rather than guessed. Batch pricing not published. xAI's API is native-only (not on Bedrock/Vertex/Azure). Priced identically to `grok-4.3`. Sibling rows: `grok-4.20-0309-reasoning`, `grok-4.20-multi-agent-0309`."
+    },
+    {
+      "provider": "xAI",
+      "provider_url": "https://x.ai",
+      "model_id": "grok-4.20-multi-agent-0309",
+      "display_name": "Grok 4.20 Multi-Agent",
+      "model_family": "Grok 4.20",
+      "context_window": 1000000,
+      "max_output_tokens": 1000000,
+      "input_per_mtok_usd": "1.25",
+      "output_per_mtok_usd": "2.50",
+      "cache_read_per_mtok_usd": "0.20",
+      "pricing_tiers": [
+        {
+          "threshold_tokens": 200000,
+          "input_per_mtok_usd": "2.50",
+          "output_per_mtok_usd": "5.00",
+          "cache_read_per_mtok_usd": "0.40"
+        }
+      ],
+      "modalities": {
+        "input": ["text", "image"],
+        "output": ["text"]
+      },
+      "structured_output": true,
+      "supports_vision": true,
+      "supports_audio_in": false,
+      "supports_audio_out": false,
+      "supports_pdf": true,
+      "reasoning_tokens_billed": true,
+      "deployment_options": ["native"],
+      "confidence": "medium",
+      "last_verified": "2026-07-19",
+      "last_changed_at": "2026-07-19",
+      "verification_method": "manual-confirmed",
+      "verified_by": "r13i",
+      "source_url": "https://docs.x.ai/docs/models",
+      "notes": "New row, added on the 2026-07-19 refresh; deferred on 2026-07-02 and 2026-07-13 (a third-party writeup then reported the multi-agent API as 'coming soon' with conflicting prices). Sources have now converged: docs.x.ai/docs/models and docs.x.ai/docs/pricing both list `grok-4.20-multi-agent-0309` at $1.25 / $2.50 per MTok with $0.20 cached input and long-context tiering (prompts ≥200K tokens: $2.50 / $5.00, $0.40 cached input), and OpenRouter carries a live listing `x-ai/grok-4.20-multi-agent` with matching pricing (prompt $0.00000125/token, completion $0.0000025/token, input_cache_read $0.0000002/token) — the API is live, no longer 'coming soon'. confidence: medium: OpenRouter's slug lacks the `-0309` snapshot suffix and reports a 2M-token context while xAI's own pages state 1M — vendor figure (1,000,000) used as authoritative for the native API. Grok 4.20 beta multi-agent variant: multiple agents run in parallel to conduct deep research, coordinate tool use internally, and synthesize a final answer (per OpenRouter's model description). supports_tool_use omitted rather than guessed: OpenRouter's supported_parameters for x-ai/grok-4.20-multi-agent do not include `tools`/`tool_choice` (client-side function calling), unlike the sibling variants — tool use appears to be internal to the agent swarm; xAI does not publish a definitive statement. `response_format`/`structured_outputs` supported (structured_output: true); `reasoning`/`reasoning_effort` supported, thinking tokens billed at the output rate (reasoning_tokens_billed: true). Input modalities text + image (OpenRouter architecture also lists `file`, taken as supports_pdf: true); output text-only; audio not supported. max_output_tokens defaulted to the 1M context cap — no separate max-output limit published. Knowledge cutoff and release date not published; omitted rather than guessed. Batch pricing not published. xAI's API is native-only (not on Bedrock/Vertex/Azure). Priced identically to `grok-4.3`. Sibling rows: `grok-4.20-0309-reasoning`, `grok-4.20-0309-non-reasoning`."
     },
     {
       "provider": "Alibaba",
@@ -2183,12 +2362,12 @@
       "supports_pdf": false,
       "reasoning_tokens_billed": true,
       "deployment_options": ["dashscope"],
-      "last_verified": "2026-07-13",
+      "last_verified": "2026-07-19",
       "last_changed_at": "2026-07-02",
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",
       "source_url": "https://www.alibabacloud.com/help/en/model-studio/model-pricing",
-      "notes": "Alibaba DashScope (International) tiered pricing by input-token bucket: 0-32K = $1.20 input / $6.00 output per MTok (base row rate); 32K-128K = $2.40 / $12.00; 128K-252K = $3.00 / $15.00 (captured in pricing_tiers) — unchanged at last_verified. Context window 262,144 tokens (DashScope publishes 252K as the top-tier pricing ceiling; Qwen team and OpenRouter publish the full 262,144 model context). Max output 32,768 tokens. `qwen3-max` is a rolling alias: as of 2026-07-02 it resolves to `qwen3-max-2026-01-23` (previously `qwen3-max-2025-09-23`, still separately listed); pricing identical across both dated snapshots, so this is a metadata-only pointer change. Knowledge cutoff 2025-06-30 (unverified against the new snapshot; vendor page does not publish per-snapshot cutoffs, carried over from prior verification). Hybrid thinking model: thinking mode disabled by default but available via `/think` (and disabled via `/no_think`); when enabled, thinking tokens are billed at the output rate, hence reasoning_tokens_billed: true. Text-only inputs and outputs (the Qwen3-VL family is a separate set of model_ids). Tool calling and structured outputs supported via the DashScope and OpenAI-compatible endpoints. Explicit context cache discounts cached input tokens to 10% of the standard rate, but DashScope does not publish a single cache_read figure across the tiered input rates, so cache_read_per_mtok_usd is omitted rather than guessed. Deployment via DashScope (Model Studio) only at last_verified; not on Bedrock, Vertex, Together, Fireworks, or Groq as a first-party offering. CHANGE 2026-07-02: batch_input_per_mtok_usd/batch_output_per_mtok_usd removed — the vendor pricing page's International/Singapore \"Qwen-Max\" table for qwen3-max no longer carries a batch-inference-discount badge (verified against raw page HTML: only the \"context caching discount\" annotation remains). The 50% batch discount badge is now only shown on the Chinese-mainland deployment row for this model family, which this dataset does not price (DashScope International is canonical). Prior batch figures ($0.60/$3.00) were the International 50%-off rate and are no longer offered there as of this verification. Re-verified 2026-07-13: prices, tiers, and batch/cache posture unchanged against alibabacloud.com/help/en/model-studio/billing; still no batch badge on the International row (China-mainland row still carries it), model_id still active (not deprecated), no newer dated snapshot beyond qwen3-max-2026-01-23."
+      "notes": "Alibaba DashScope (International) tiered pricing by input-token bucket: 0-32K = $1.20 input / $6.00 output per MTok (base row rate); 32K-128K = $2.40 / $12.00; 128K-252K = $3.00 / $15.00 (captured in pricing_tiers) — unchanged at last_verified. Context window 262,144 tokens (DashScope publishes 252K as the top-tier pricing ceiling; Qwen team and OpenRouter publish the full 262,144 model context). Max output 32,768 tokens. `qwen3-max` is a rolling alias: as of 2026-07-02 it resolves to `qwen3-max-2026-01-23` (previously `qwen3-max-2025-09-23`, still separately listed); pricing identical across both dated snapshots, so this is a metadata-only pointer change. Knowledge cutoff 2025-06-30 (unverified against the new snapshot; vendor page does not publish per-snapshot cutoffs, carried over from prior verification). Hybrid thinking model: thinking mode disabled by default but available via `/think` (and disabled via `/no_think`); when enabled, thinking tokens are billed at the output rate, hence reasoning_tokens_billed: true. Text-only inputs and outputs (the Qwen3-VL family is a separate set of model_ids). Tool calling and structured outputs supported via the DashScope and OpenAI-compatible endpoints. Explicit context cache discounts cached input tokens to 10% of the standard rate, but DashScope does not publish a single cache_read figure across the tiered input rates, so cache_read_per_mtok_usd is omitted rather than guessed. Deployment via DashScope (Model Studio) only at last_verified; not on Bedrock, Vertex, Together, Fireworks, or Groq as a first-party offering. CHANGE 2026-07-02: batch_input_per_mtok_usd/batch_output_per_mtok_usd removed — the vendor pricing page's International/Singapore \"Qwen-Max\" table for qwen3-max no longer carries a batch-inference-discount badge (verified against raw page HTML: only the \"context caching discount\" annotation remains). The 50% batch discount badge is now only shown on the Chinese-mainland deployment row for this model family, which this dataset does not price (DashScope International is canonical). Prior batch figures ($0.60/$3.00) were the International 50%-off rate and are no longer offered there as of this verification. Re-verified 2026-07-13: prices, tiers, and batch/cache posture unchanged against alibabacloud.com/help/en/model-studio/billing; still no batch badge on the International row (China-mainland row still carries it), model_id still active (not deprecated), no newer dated snapshot beyond qwen3-max-2026-01-23. Re-verified 2026-07-19: International (Singapore) list prices and tiers unchanged ($1.20/$6.00, $2.40/$12.00, $3.00/$15.00); alias still resolves to qwen3-max-2026-01-23; no deprecation notice. New since last pass: a 'Limited-time 50% off' promo label now appears on the International qwen3-max row — promo only, list prices (recorded here) unchanged, so last_changed_at not bumped."
     },
     {
       "provider": "Alibaba",
@@ -2229,12 +2408,12 @@
       "supports_pdf": false,
       "reasoning_tokens_billed": false,
       "deployment_options": ["dashscope"],
-      "last_verified": "2026-07-13",
+      "last_verified": "2026-07-19",
       "last_changed_at": "2026-07-02",
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",
       "source_url": "https://www.alibabacloud.com/help/en/model-studio/model-pricing",
-      "notes": "Alibaba DashScope (International) tiered pricing by input-token bucket: 0-32K = $1.00 / $5.00 per MTok (base row rate); 32K-128K = $1.80 / $9.00; 128K-256K = $3.00 / $15.00; 256K-1M = $6.00 / $60.00 (captured in pricing_tiers) — unchanged at last_verified. 1,000,000-token context window with 65,536 max output tokens. `qwen3-coder-plus` still resolves to `qwen3-coder-plus-2025-09-23` (no newer dated snapshot published; an older `qwen3-coder-plus-2025-07-22` snapshot remains listed separately at identical pricing). Built on the Qwen3-Coder 480B-A35B MoE base; positioned for agentic coding (robust tool calling and environment interaction). Not a thinking/reasoning SKU (no chain-of-thought billing semantics), so reasoning_tokens_billed is false. Text-only modalities. Explicit context cache discounts cached input to 10% of the standard rate; implicit cache to 20%; DashScope does not publish a single cache_read figure across tiered input rates, so cache_read_per_mtok_usd is omitted rather than guessed. Knowledge cutoff not published. Deployment via DashScope (Model Studio) only at last_verified. CHANGE 2026-07-02: batch_input_per_mtok_usd/batch_output_per_mtok_usd removed — the vendor's \"Qwen-Coder\" pricing section intro no longer mentions batch-call pricing at all (unlike the \"Qwen-Max\" section, which still documents a batch discount), and neither the International nor Chinese-mainland qwen3-coder-plus table rows carry a batch badge (verified against raw page HTML across all 4 occurrences of this model_id on the page). Batch inference discount is no longer offered for this model as of this verification; prior figures ($0.50/$2.50) are stale. Re-verified 2026-07-13: prices, tiers, and no-batch posture unchanged against alibabacloud.com/help/en/model-studio/billing; still resolves to qwen3-coder-plus-2025-09-23 with no newer dated snapshot; model_id still active."
+      "notes": "Alibaba DashScope (International) tiered pricing by input-token bucket: 0-32K = $1.00 / $5.00 per MTok (base row rate); 32K-128K = $1.80 / $9.00; 128K-256K = $3.00 / $15.00; 256K-1M = $6.00 / $60.00 (captured in pricing_tiers) — unchanged at last_verified. 1,000,000-token context window with 65,536 max output tokens. `qwen3-coder-plus` still resolves to `qwen3-coder-plus-2025-09-23` (no newer dated snapshot published; an older `qwen3-coder-plus-2025-07-22` snapshot remains listed separately at identical pricing). Built on the Qwen3-Coder 480B-A35B MoE base; positioned for agentic coding (robust tool calling and environment interaction). Not a thinking/reasoning SKU (no chain-of-thought billing semantics), so reasoning_tokens_billed is false. Text-only modalities. Explicit context cache discounts cached input to 10% of the standard rate; implicit cache to 20%; DashScope does not publish a single cache_read figure across tiered input rates, so cache_read_per_mtok_usd is omitted rather than guessed. Knowledge cutoff not published. Deployment via DashScope (Model Studio) only at last_verified. CHANGE 2026-07-02: batch_input_per_mtok_usd/batch_output_per_mtok_usd removed — the vendor's \"Qwen-Coder\" pricing section intro no longer mentions batch-call pricing at all (unlike the \"Qwen-Max\" section, which still documents a batch discount), and neither the International nor Chinese-mainland qwen3-coder-plus table rows carry a batch badge (verified against raw page HTML across all 4 occurrences of this model_id on the page). Batch inference discount is no longer offered for this model as of this verification; prior figures ($0.50/$2.50) are stale. Re-verified 2026-07-13: prices, tiers, and no-batch posture unchanged against alibabacloud.com/help/en/model-studio/billing; still resolves to qwen3-coder-plus-2025-09-23 with no newer dated snapshot; model_id still active. Re-verified 2026-07-19: International (Singapore) tiered prices unchanged ($1.00/$5.00, $1.80/$9.00, $3.00/$15.00, $6.00/$60.00); alias still qwen3-coder-plus-2025-09-23; context caching discount still present, no batch badge; no deprecation notice."
     },
     {
       "provider": "Alibaba",
@@ -2260,12 +2439,12 @@
       "deployment_options": ["dashscope"],
       "aggregators": ["openrouter"],
       "confidence": "medium",
-      "last_verified": "2026-07-13",
+      "last_verified": "2026-07-19",
       "last_changed_at": "2026-07-02",
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",
       "source_url": "https://www.alibabacloud.com/help/en/model-studio/model-pricing",
-      "notes": "New flagship generation added this pass. `qwen3.7-max` is a rolling alias, currently equivalent to `qwen3.7-max-2026-05-20` per the vendor pricing page (updated Jun 26, 2026); a newer `qwen3.7-max-2026-06-08` dated snapshot is also listed at identical pricing but is not yet the default alias. Flat (non-tiered) DashScope International rate of $2.50 input / $7.50 output per MTok across the full 0-1M token range (no pricing_tiers needed, unlike qwen3-max/qwen3-coder-plus). Cross-verified against OpenRouter (openrouter.ai/qwen/qwen3.7-max), which lists the same $2.50/$7.50 standard rate (its displayed $1.25/$3.75 is an explicitly-labeled 50%-off launch promotion, not the standard price). No batch-inference-discount badge on the International row (Chinese-mainland deployment shows one; not priced here, DashScope International is canonical). Context caching discount available but DashScope does not publish a flat cache_read rate, so cache_read_per_mtok_usd is omitted. 1M-token context window confirmed on the vendor pricing page; max_output_tokens (65,536) is not published on the vendor pricing/model pages directly and is sourced from third-party trackers (OpenRouter, llm-stats.com) that agree on the figure — confidence: medium reflects this one field, not the price. Text-only modalities (MarkTechPost coverage of the 2026-05-20 launch explicitly notes no image input); native tool/function calling supported (reported over 1,000 sequential tool calls in agentic testing). Hybrid thinking model (Non-Thinking and Thinking modes both billed at the same rate), hence reasoning_tokens_billed: true. Knowledge cutoff not published by the vendor; omitted rather than guessed. Deployment via DashScope (Model Studio) only; not yet confirmed on Bedrock, Vertex, Together, Fireworks, or Groq as a first-party offering. Re-verified 2026-07-13: flat $2.50/$7.50 rate, 1M context, and no-batch-on-International posture unchanged against alibabacloud.com/help/en/model-studio/billing; cross-checked openrouter.ai/api/v1/models (qwen/qwen3.7-max: context_length 1,000,000, top_provider.max_completion_tokens 65,536) — corroborates max_output_tokens beyond the prior third-party-tracker citation. Still no qwen4-generation flagship listed by the vendor as of this pass; qwen3.7-max remains current."
+      "notes": "New flagship generation added this pass. `qwen3.7-max` is a rolling alias, currently equivalent to `qwen3.7-max-2026-05-20` per the vendor pricing page (updated Jun 26, 2026); a newer `qwen3.7-max-2026-06-08` dated snapshot is also listed at identical pricing but is not yet the default alias. Flat (non-tiered) DashScope International rate of $2.50 input / $7.50 output per MTok across the full 0-1M token range (no pricing_tiers needed, unlike qwen3-max/qwen3-coder-plus). Cross-verified against OpenRouter (openrouter.ai/qwen/qwen3.7-max), which lists the same $2.50/$7.50 standard rate (its displayed $1.25/$3.75 is an explicitly-labeled 50%-off launch promotion, not the standard price). No batch-inference-discount badge on the International row (Chinese-mainland deployment shows one; not priced here, DashScope International is canonical). Context caching discount available but DashScope does not publish a flat cache_read rate, so cache_read_per_mtok_usd is omitted. 1M-token context window confirmed on the vendor pricing page; max_output_tokens (65,536) is not published on the vendor pricing/model pages directly and is sourced from third-party trackers (OpenRouter, llm-stats.com) that agree on the figure — confidence: medium reflects this one field, not the price. Text-only modalities (MarkTechPost coverage of the 2026-05-20 launch explicitly notes no image input); native tool/function calling supported (reported over 1,000 sequential tool calls in agentic testing). Hybrid thinking model (Non-Thinking and Thinking modes both billed at the same rate), hence reasoning_tokens_billed: true. Knowledge cutoff not published by the vendor; omitted rather than guessed. Deployment via DashScope (Model Studio) only; not yet confirmed on Bedrock, Vertex, Together, Fireworks, or Groq as a first-party offering. Re-verified 2026-07-13: flat $2.50/$7.50 rate, 1M context, and no-batch-on-International posture unchanged against alibabacloud.com/help/en/model-studio/billing; cross-checked openrouter.ai/api/v1/models (qwen/qwen3.7-max: context_length 1,000,000, top_provider.max_completion_tokens 65,536) — corroborates max_output_tokens beyond the prior third-party-tracker citation. Still no qwen4-generation flagship listed by the vendor as of this pass; qwen3.7-max remains current. Re-verified 2026-07-19: flat $2.50/$7.50 list rate over 0-1M unchanged on the International row; the 'Limited-time 50% off' promo label now appears on the vendor billing page itself (previously observed only on OpenRouter) — promo only, list price recorded here, so last_changed_at not bumped. Alias still resolves to qwen3.7-max-2026-05-20; the qwen3.7-max-2026-06-08 dated snapshot remains listed at identical pricing but is still not the default alias. No deprecation notice; still no qwen4/qwen3.8 flagship listed."
     },
     {
       "provider": "Alibaba",
@@ -2281,7 +2460,7 @@
         {
           "threshold_tokens": 262144,
           "input_per_mtok_usd": "1.20",
-          "output_per_mtok_usd": "1.60"
+          "output_per_mtok_usd": "4.80"
         }
       ],
       "modalities": {
@@ -2298,12 +2477,12 @@
       "deployment_options": ["dashscope"],
       "aggregators": ["openrouter"],
       "confidence": "medium",
-      "last_verified": "2026-07-13",
-      "last_changed_at": "2026-07-13",
+      "last_verified": "2026-07-19",
+      "last_changed_at": "2026-07-19",
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",
       "source_url": "https://www.alibabacloud.com/help/en/model-studio/billing",
-      "notes": "New row, added on the 2026-07-13 refresh. Qwen3.7-Plus is Alibaba's cost-effective multimodal agent model in the Qwen3.7 series (released 2026-05-31/06-02), a step down from qwen3.7-max. `qwen3.7-plus` is a rolling alias, currently equivalent to `qwen3.7-plus-2026-05-26`. DashScope International tiered pricing by input-token bucket: 0-256K = $0.40 input / $1.60 output per MTok (base row rate); 256K-1M = $1.20 input / $1.60 output (output rate does not change with tier, per vendor billing page — both Non-Thinking and Thinking modes billed at the same $1.60/MTok output rate). China-mainland row carries an additional 20%-off limited-time promotion, not priced here (DashScope International is canonical). Context window 1,048,576 tokens (1M) per vendor billing page. max_output_tokens (65,536) not published on the vendor billing page directly; sourced from OpenRouter's public models API (openrouter.ai/api/v1/models, qwen/qwen3.7-plus: top_provider.max_completion_tokens 65536, context_length 1,000,000) and cross-checked against llm-stats.com/api/models/qwen3.7-plus (\"up to 65,536 output tokens\", 1M context, multimodal: true) — satisfies the two-source rule; confidence: medium reflects this field, not the price. Input modalities text + image (\"multimodal interactive hybrid agent\": perceives scenes, reads screens/GUIs, writes code from visual references) per OpenRouter architecture (text+image->text) and llm-stats.com; output text-only. Vendor billing page itself does not call out modality explicitly (no separate image-token pricing tier), so supports_vision is sourced from the two secondary trackers, not the primary. Tool calling and structured outputs supported per OpenRouter's supported_parameters (tools/tool_choice, response_format/structured_outputs). Always-on/hybrid thinking (llm-stats.com tags thinking: true); thinking tokens billed at the standard output rate, hence reasoning_tokens_billed: true. Context caching discount available but DashScope does not publish a flat cache_read rate, so cache_read_per_mtok_usd is omitted rather than guessed. No batch-inference-discount badge found for the International row. Knowledge cutoff not published by the vendor; omitted rather than guessed. Deployment via DashScope (Model Studio) only; not yet confirmed on Bedrock, Vertex, Together, Fireworks, or Groq as a first-party offering."
+      "notes": "New row, added on the 2026-07-13 refresh. Qwen3.7-Plus is Alibaba's cost-effective multimodal agent model in the Qwen3.7 series (released 2026-05-31/06-02), a step down from qwen3.7-max. `qwen3.7-plus` is a rolling alias, currently equivalent to `qwen3.7-plus-2026-05-26`. DashScope International tiered pricing by input-token bucket: 0-256K = $0.40 input / $1.60 output per MTok (base row rate); 256K-1M = $1.20 input / $4.80 output (captured in pricing_tiers). CHANGE 2026-07-19: 256K-1M tier output rate corrected/moved from $1.60 to $4.80 per MTok — the vendor billing page now unambiguously lists $4.8 output for the 256K-1M International tier (confirmed in two separate fetches of the page), and OpenRouter's models API corroborates via its min_prompt_tokens=256000 pricing override (completion $3.84/MTok = exactly 20% off the $4.80 list, matching the vendor's limited-time 20%-off promo; base-tier override figures likewise match $0.40/$1.60/$1.20 list at 20% off). Structured prices here remain list prices, not promo prices. The 20%-off limited-time promotion now appears on the International row itself (both tiers), not only China-mainland. Context window 1,048,576 tokens (1M) per vendor billing page. max_output_tokens (65,536) not published on the vendor billing page directly; sourced from OpenRouter's public models API (openrouter.ai/api/v1/models, qwen/qwen3.7-plus: top_provider.max_completion_tokens 65536, context_length 1,000,000) and cross-checked against llm-stats.com/api/models/qwen3.7-plus (\"up to 65,536 output tokens\", 1M context, multimodal: true) — satisfies the two-source rule; confidence: medium reflects this field, not the price. Input modalities text + image (\"multimodal interactive hybrid agent\": perceives scenes, reads screens/GUIs, writes code from visual references) per OpenRouter architecture (text+image->text) and llm-stats.com; output text-only. Vendor billing page itself does not call out modality explicitly (no separate image-token pricing tier), so supports_vision is sourced from the two secondary trackers, not the primary. Tool calling and structured outputs supported per OpenRouter's supported_parameters (tools/tool_choice, response_format/structured_outputs). Always-on/hybrid thinking (llm-stats.com tags thinking: true); thinking tokens billed at the standard output rate, hence reasoning_tokens_billed: true. Context caching discount available but DashScope does not publish a flat cache_read rate, so cache_read_per_mtok_usd is omitted rather than guessed. No batch-inference-discount badge found for the International row. Knowledge cutoff not published by the vendor; omitted rather than guessed. Deployment via DashScope (Model Studio) only; not yet confirmed on Bedrock, Vertex, Together, Fireworks, or Groq as a first-party offering."
     },
     {
       "provider": "Alibaba",
@@ -2336,12 +2515,12 @@
       "deployment_options": ["dashscope"],
       "aggregators": ["openrouter"],
       "confidence": "medium",
-      "last_verified": "2026-07-13",
+      "last_verified": "2026-07-19",
       "last_changed_at": "2026-07-13",
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",
       "source_url": "https://www.alibabacloud.com/help/en/model-studio/billing",
-      "notes": "New row, added on the 2026-07-13 refresh. Qwen3.6-Flash is Alibaba's fast/efficient tier in the Qwen3.6 series (released 2026-04-16), positioned below the Qwen3.7 generation on price but supporting multimodal input. `qwen3.6-flash` is a rolling alias, currently equivalent to `qwen3.6-flash-2026-04-16`. DashScope International tiered pricing by input-token bucket: 0-256K = $0.25 input / $1.50 output per MTok (base row rate); 256K-1M = $1.00 / $4.00 (captured in pricing_tiers). Context window 1,048,576 tokens (1M) per vendor billing page. max_output_tokens (65,536) not published on the vendor billing page directly; sourced from OpenRouter's public models API (openrouter.ai/api/v1/models, qwen/qwen3.6-flash: top_provider.max_completion_tokens 65536, context_length 1,000,000, architecture text+image+video->text) — satisfies the two-source rule alongside the vendor's own pricing table; confidence: medium reflects this field and modality, not the price. Input modalities text + image + video per OpenRouter; output text-only. Unlike qwen3-max/qwen3.7-max, this SKU carries a 50% batch-inference-discount badge on the International/Singapore row itself (confirmed on the vendor billing page) rather than only the China-mainland row — batch_input_per_mtok_usd/batch_output_per_mtok_usd are nonetheless omitted here because the discount applies per input-token tier and the schema's batch fields are flat (non-tiered), so a single number would misrepresent the 256K/1M split; noted here instead of guessed. Context caching discount available but DashScope does not publish a flat cache_read rate, so cache_read_per_mtok_usd is omitted. Tool calling and structured outputs supported per OpenRouter's supported_parameters. Hybrid thinking (OpenRouter reasoning.mandatory: false); thinking tokens billed at the standard output rate, hence reasoning_tokens_billed: true. Knowledge cutoff not published by the vendor; omitted rather than guessed. Deployment via DashScope (Model Studio) only; not yet confirmed on Bedrock, Vertex, Together, Fireworks, or Groq as a first-party offering."
+      "notes": "New row, added on the 2026-07-13 refresh. Qwen3.6-Flash is Alibaba's fast/efficient tier in the Qwen3.6 series (released 2026-04-16), positioned below the Qwen3.7 generation on price but supporting multimodal input. `qwen3.6-flash` is a rolling alias, currently equivalent to `qwen3.6-flash-2026-04-16`. DashScope International tiered pricing by input-token bucket: 0-256K = $0.25 input / $1.50 output per MTok (base row rate); 256K-1M = $1.00 / $4.00 (captured in pricing_tiers). Context window 1,048,576 tokens (1M) per vendor billing page. max_output_tokens (65,536) not published on the vendor billing page directly; sourced from OpenRouter's public models API (openrouter.ai/api/v1/models, qwen/qwen3.6-flash: top_provider.max_completion_tokens 65536, context_length 1,000,000, architecture text+image+video->text) — satisfies the two-source rule alongside the vendor's own pricing table; confidence: medium reflects this field and modality, not the price. Input modalities text + image + video per OpenRouter; output text-only. Unlike qwen3-max/qwen3.7-max, this SKU carries a 50% batch-inference-discount badge on the International/Singapore row itself (confirmed on the vendor billing page) rather than only the China-mainland row — batch_input_per_mtok_usd/batch_output_per_mtok_usd are nonetheless omitted here because the discount applies per input-token tier and the schema's batch fields are flat (non-tiered), so a single number would misrepresent the 256K/1M split; noted here instead of guessed. Context caching discount available but DashScope does not publish a flat cache_read rate, so cache_read_per_mtok_usd is omitted. Tool calling and structured outputs supported per OpenRouter's supported_parameters. Hybrid thinking (OpenRouter reasoning.mandatory: false); thinking tokens billed at the standard output rate, hence reasoning_tokens_billed: true. Knowledge cutoff not published by the vendor; omitted rather than guessed. Deployment via DashScope (Model Studio) only; not yet confirmed on Bedrock, Vertex, Together, Fireworks, or Groq as a first-party offering. Re-verified 2026-07-19: International tiered prices unchanged ($0.25/$1.50 for 0-256K; $1.00/$4.00 for 256K-1M); 50% batch-discount badge still on the International row (batch fields still omitted for the tiered-vs-flat reason above); alias still resolves to qwen3.6-flash-2026-04-16; no deprecation notice."
     },
     {
       "provider": "Perplexity",
@@ -2366,12 +2545,12 @@
       "supports_pdf": false,
       "reasoning_tokens_billed": false,
       "deployment_options": ["native"],
-      "last_verified": "2026-07-13",
+      "last_verified": "2026-07-19",
       "last_changed_at": "2026-05-19",
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",
       "source_url": "https://docs.perplexity.ai/getting-started/pricing",
-      "notes": "Perplexity native rates: $1.00 input / $1.00 output per MTok. Web search is built into the API as a first-class capability rather than a user-defined tool, so total cost per query = token costs + a per-request fee. per_request_usd captures the low-context tier ($5 / 1,000 requests = $0.005); medium and high search-context tiers add $8 / $12 per 1,000 requests respectively (not captured structurally — single-value field). Perplexity does not publish a separate per-search fee for this SKU (per-search metering applies to `sonar-deep-research`), so per_search_usd is omitted. 128,000-token context window; max_output_tokens 8,000 per Perplexity's documented Sonar limits. Sonar (released January 2025) is built on a fine-tuned Llama 3.3 70B base optimized for web-grounded question answering with inline citations. Knowledge cutoff is intentionally omitted: Sonar fetches the live web at query time, so a static cutoff date does not meaningfully describe its answer space. Not a reasoning SKU (no chain-of-thought tokens), hence reasoning_tokens_billed is false. supports_tool_use is set conservatively to false because web search — the model's primary capability — is exposed as a built-in feature of the Sonar endpoint, not a user-defined tool; Perplexity recommends its separate Agent API for production tool-using agents. Structured outputs supported via response_format. Perplexity API is native-only (no Bedrock / Vertex / Azure / Together / Fireworks / Groq first-party deployment). Cache and batch APIs are not published."
+      "notes": "Perplexity native rates: $1.00 input / $1.00 output per MTok. Web search is built into the API as a first-class capability rather than a user-defined tool, so total cost per query = token costs + a per-request fee. per_request_usd captures the low-context tier ($5 / 1,000 requests = $0.005); medium and high search-context tiers add $8 / $12 per 1,000 requests respectively (not captured structurally — single-value field). Perplexity does not publish a separate per-search fee for this SKU (per-search metering applies to `sonar-deep-research`), so per_search_usd is omitted. 128,000-token context window; max_output_tokens 8,000 per Perplexity's documented Sonar limits. Sonar (released January 2025) is built on a fine-tuned Llama 3.3 70B base optimized for web-grounded question answering with inline citations. Knowledge cutoff is intentionally omitted: Sonar fetches the live web at query time, so a static cutoff date does not meaningfully describe its answer space. Not a reasoning SKU (no chain-of-thought tokens), hence reasoning_tokens_billed is false. supports_tool_use is set conservatively to false because web search — the model's primary capability — is exposed as a built-in feature of the Sonar endpoint, not a user-defined tool; Perplexity recommends its separate Agent API for production tool-using agents. Structured outputs supported via response_format. Perplexity API is native-only (no Bedrock / Vertex / Azure / Together / Fireworks / Groq first-party deployment). Cache and batch APIs are not published. Re-verified 2026-07-19: $1/$1 per MTok and $5/$8/$12 per-1K-request search-context tiers unchanged on the vendor pricing page; model still listed as active on the Sonar models page."
     },
     {
       "provider": "Perplexity",
@@ -2396,12 +2575,12 @@
       "supports_pdf": false,
       "reasoning_tokens_billed": false,
       "deployment_options": ["native"],
-      "last_verified": "2026-07-13",
+      "last_verified": "2026-07-19",
       "last_changed_at": "2026-05-19",
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",
       "source_url": "https://docs.perplexity.ai/getting-started/pricing",
-      "notes": "Perplexity native rates: $3.00 input / $15.00 output per MTok. Web search is built into the API, not exposed as a user-defined tool; total cost per query = token costs + a per-request fee. per_request_usd captures the low-context tier ($6 / 1,000 requests = $0.006); medium and high search-context tiers add $10 / $14 per 1,000 requests respectively (not captured structurally — single-value field). 200,000-token context window (largest of the Sonar family); max_output_tokens 8,000 per Perplexity's documented Sonar limits. Positioned as Perplexity's advanced search SKU for complex multi-source queries and follow-ups. Knowledge cutoff intentionally omitted: Sonar Pro fetches the live web at query time. Not a reasoning SKU, hence reasoning_tokens_billed is false. supports_tool_use set conservatively to false because Perplexity exposes web search as the built-in capability and recommends the separate Agent API for production tool-using agents. Structured outputs supported via response_format. Perplexity API is native-only (no Bedrock / Vertex / Azure / Together / Fireworks / Groq first-party deployment). Cache and batch APIs are not published."
+      "notes": "Perplexity native rates: $3.00 input / $15.00 output per MTok. Web search is built into the API, not exposed as a user-defined tool; total cost per query = token costs + a per-request fee. per_request_usd captures the low-context tier ($6 / 1,000 requests = $0.006); medium and high search-context tiers add $10 / $14 per 1,000 requests respectively (not captured structurally — single-value field). 200,000-token context window (largest of the Sonar family); max_output_tokens 8,000 per Perplexity's documented Sonar limits. Positioned as Perplexity's advanced search SKU for complex multi-source queries and follow-ups. Knowledge cutoff intentionally omitted: Sonar Pro fetches the live web at query time. Not a reasoning SKU, hence reasoning_tokens_billed is false. supports_tool_use set conservatively to false because Perplexity exposes web search as the built-in capability and recommends the separate Agent API for production tool-using agents. Structured outputs supported via response_format. Perplexity API is native-only (no Bedrock / Vertex / Azure / Together / Fireworks / Groq first-party deployment). Cache and batch APIs are not published. Re-verified 2026-07-19: $3/$15 per MTok and $6/$10/$14 per-1K-request search-context tiers unchanged on the vendor pricing page; model still listed as active on the Sonar models page."
     },
     {
       "provider": "Perplexity",
@@ -2426,12 +2605,88 @@
       "supports_pdf": false,
       "reasoning_tokens_billed": true,
       "deployment_options": ["native"],
-      "last_verified": "2026-07-13",
+      "last_verified": "2026-07-19",
       "last_changed_at": "2026-05-19",
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",
       "source_url": "https://docs.perplexity.ai/getting-started/pricing",
-      "notes": "Perplexity native rates: $2.00 input / $8.00 output per MTok. Web search is built into the API; total cost per query = token costs + a per-request fee. per_request_usd captures the low-context tier ($6 / 1,000 requests = $0.006); medium and high search-context tiers add $10 / $14 per 1,000 requests respectively (not captured structurally — single-value field). 128,000-token context window; max_output_tokens 8,000 per Perplexity's documented Sonar limits. Reasoning SKU built on DeepSeek R1 with Chain-of-Thought; responses include a leading `<think>` reasoning block followed by the answer, and those reasoning tokens are billed at the output rate, hence reasoning_tokens_billed: true. Knowledge cutoff intentionally omitted: Sonar Reasoning Pro fetches the live web at query time. supports_tool_use set conservatively to false because Perplexity exposes web search as the built-in capability and recommends the separate Agent API for production tool-using agents. Structured outputs supported via response_format. Perplexity API is native-only (no Bedrock / Vertex / Azure / Together / Fireworks / Groq first-party deployment). Cache and batch APIs are not published. Note: the older `sonar-reasoning` SKU is no longer listed in Perplexity's current model lineup at last_verified."
+      "notes": "Perplexity native rates: $2.00 input / $8.00 output per MTok. Web search is built into the API; total cost per query = token costs + a per-request fee. per_request_usd captures the low-context tier ($6 / 1,000 requests = $0.006); medium and high search-context tiers add $10 / $14 per 1,000 requests respectively (not captured structurally — single-value field). 128,000-token context window; max_output_tokens 8,000 per Perplexity's documented Sonar limits. Reasoning SKU built on DeepSeek R1 with Chain-of-Thought; responses include a leading `<think>` reasoning block followed by the answer, and those reasoning tokens are billed at the output rate, hence reasoning_tokens_billed: true. Knowledge cutoff intentionally omitted: Sonar Reasoning Pro fetches the live web at query time. supports_tool_use set conservatively to false because Perplexity exposes web search as the built-in capability and recommends the separate Agent API for production tool-using agents. Structured outputs supported via response_format. Perplexity API is native-only (no Bedrock / Vertex / Azure / Together / Fireworks / Groq first-party deployment). Cache and batch APIs are not published. Note: the older `sonar-reasoning` SKU is no longer listed in Perplexity's current model lineup at last_verified. Re-verified 2026-07-19: $2/$8 per MTok and $6/$10/$14 per-1K-request search-context tiers unchanged on the vendor pricing page; model still listed as active on the Sonar models page. `sonar-deep-research` remains the only other SKU in the current lineup; not added as a row because its schema-required max_output_tokens is not published by Perplexity (model card and OpenRouter listing both omit it) — deferred rather than guessed."
+    },
+    {
+      "provider": "Anthropic",
+      "provider_url": "https://www.anthropic.com",
+      "model_id": "claude-opus-4-6",
+      "display_name": "Claude Opus 4.6",
+      "model_family": "Claude 4",
+      "knowledge_cutoff": "2025-05-31",
+      "aliases": ["anthropic.claude-opus-4-6-v1"],
+      "context_window": 1000000,
+      "max_output_tokens": 128000,
+      "input_per_mtok_usd": "5.0",
+      "output_per_mtok_usd": "25.0",
+      "cache_read_per_mtok_usd": "0.5",
+      "cache_write_per_mtok_usd": "6.25",
+      "batch_input_per_mtok_usd": "2.5",
+      "batch_output_per_mtok_usd": "12.5",
+      "modalities": {
+        "input": ["text", "image"],
+        "output": ["text"]
+      },
+      "supports_tool_use": true,
+      "structured_output": true,
+      "supports_vision": true,
+      "supports_audio_in": false,
+      "supports_audio_out": false,
+      "supports_pdf": true,
+      "reasoning_tokens_billed": true,
+      "deployment_options": ["native", "bedrock", "vertex"],
+      "last_verified": "2026-07-19",
+      "last_changed_at": "2026-02-05",
+      "verification_method": "manual-confirmed",
+      "verified_by": "r13i",
+      "source_url": "https://platform.claude.com/docs/en/about-claude/pricing",
+      "notes": "New row this refresh: fully active legacy listing that was present on Anthropic's pricing page and models overview but previously missing from this dataset (sits between Opus 4.5 and 4.7). Pricing identical to Opus 4.5/4.7/4.8. Cache hit is 0.1x base input ($0.50/MTok); 5-minute cache write is 1.25x ($6.25/MTok); 1-hour cache write is 2x ($10/MTok). Batch API discounts both input and output by 50%. 1M context window at standard pricing, 128k max output; uses the pre-4.7 tokenizer (~750k words per 1M tokens). Supports both extended thinking and adaptive thinking; thinking output tokens billed at the output rate. Fast mode is no longer available on this model as of 2026-06-29 (speed:'fast' requests run and bill at standard rates). Reliable knowledge cutoff May 2025; training data cutoff Aug 2025. last_changed_at is the launch date 2026-02-05, INFERRED from Anthropic's tentative retirement date 'not sooner than February 5, 2027' (launch + 1 year pattern confirmed against Fable 5, Opus 4.8, and Sonnet 5); prices verified as current, not historical. Bedrock ID recorded as shown in the models overview ('anthropic.claude-opus-4-6-v1')."
+    },
+    {
+      "provider": "Anthropic",
+      "provider_url": "https://www.anthropic.com",
+      "model_id": "claude-opus-4-1-20250805",
+      "display_name": "Claude Opus 4.1",
+      "model_family": "Claude 4",
+      "knowledge_cutoff": "2025-01-31",
+      "aliases": [
+        "claude-opus-4-1",
+        "anthropic.claude-opus-4-1-20250805-v1:0",
+        "claude-opus-4-1@20250805"
+      ],
+      "context_window": 200000,
+      "max_output_tokens": 32000,
+      "input_per_mtok_usd": "15.0",
+      "output_per_mtok_usd": "75.0",
+      "cache_read_per_mtok_usd": "1.5",
+      "cache_write_per_mtok_usd": "18.75",
+      "batch_input_per_mtok_usd": "7.5",
+      "batch_output_per_mtok_usd": "37.5",
+      "modalities": {
+        "input": ["text", "image"],
+        "output": ["text"]
+      },
+      "supports_tool_use": true,
+      "structured_output": true,
+      "supports_vision": true,
+      "supports_audio_in": false,
+      "supports_audio_out": false,
+      "supports_pdf": true,
+      "reasoning_tokens_billed": true,
+      "deployment_options": ["native", "bedrock", "vertex"],
+      "deprecated_at": "2026-06-05",
+      "replaced_by_model_id": "claude-opus-4-8",
+      "last_verified": "2026-07-19",
+      "last_changed_at": "2026-06-05",
+      "verification_method": "manual-confirmed",
+      "verified_by": "r13i",
+      "source_url": "https://platform.claude.com/docs/en/about-claude/pricing",
+      "notes": "New row this refresh: deprecated 2026-06-05, retires on the Claude API 2026-08-05 (recommended replacement claude-opus-4-8); added because it is still purchasable and carries distinct premium pricing ($15/$75 vs $5/$25 for later Opus). Cache hit is 0.1x base input ($1.50/MTok); 5-minute cache write is 1.25x ($18.75/MTok); 1-hour cache write is 2x ($30/MTok). Batch API discounts both input and output by 50%. 200k context window, 32k max output. Supports extended thinking (not adaptive); thinking output tokens billed at the output rate. Reliable knowledge cutoff Jan 2025; training data cutoff Mar 2025. Cross-verified against the models overview and model-deprecations pages (both platform.claude.com) on 2026-07-19."
     }
   ]
 }
