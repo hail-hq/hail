@@ -802,3 +802,33 @@ async def test_sms_status_intermediate_status_is_ignored(
 
     deliveries = (await async_session.execute(select(WebhookDelivery))).scalars().all()
     assert deliveries == []
+
+
+async def test_sms_status_missing_sid_is_unmatched(
+    client, async_session, org_and_key, monkeypatch
+) -> None:
+    from sqlalchemy import select
+
+    from hailhq.core.config import settings
+    from hailhq.core.models import Sms, WebhookDelivery
+
+    monkeypatch.setattr(settings, "twilio_auth_token", STATUS_AUTH_TOKEN)
+    monkeypatch.setattr(settings, "hail_api_url", "http://t")
+
+    org_id, _, _ = org_and_key
+    # A "sent" SMS with a null provider_message_sid: if the missing-MessageSid
+    # guard were absent, `Sms.provider_message_sid == None` would match this
+    # row (and any other null-sid row), triggering MultipleResultsFound or a
+    # wrong-row status transition.
+    sms = await _seed_sent_sms(async_session, org_id, provider_message_sid=None)
+
+    form, headers = _signed_status_form({"MessageStatus": "delivered"})
+    resp = await client.post("/sms/status", data=form, headers=headers)
+    assert resp.status_code == 200
+    assert resp.json() == {"status": "unmatched"}
+
+    refreshed = await async_session.get(Sms, sms.id)
+    assert refreshed.status == "sent"
+
+    deliveries = (await async_session.execute(select(WebhookDelivery))).scalars().all()
+    assert deliveries == []

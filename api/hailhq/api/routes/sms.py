@@ -411,6 +411,8 @@ async def receive_sms_status(
         return {"status": "ignored"}
 
     sid = params.get("MessageSid")
+    if not sid:
+        return {"status": "unmatched"}
     sms = (
         await db.execute(
             select(Sms).where(Sms.provider_message_sid == sid).with_for_update()
