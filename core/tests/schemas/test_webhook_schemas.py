@@ -19,7 +19,7 @@ def test_create_rejects_unknown_event_type():
     with pytest.raises(ValidationError):
         WebhookSubscriptionCreate(
             target_url="https://example.com/h",
-            event_types=["call.completed"],  # type: ignore[arg-type]
+            event_types=["call.ringing"],  # type: ignore[arg-type]
         )
 
 
