@@ -72,6 +72,7 @@ from hailhq.core.s3_mail import S3MailClient
 from hailhq.core.providers.email import EmailProvider
 from hailhq.core.providers.email.base import ProviderAttachment
 from hailhq.core.unsubscribe import build_unsubscribe_url
+from hailhq.core.webhook_fanout import build_event_data, fanout_email_event
 from hailhq.core.schemas import (
     EmailAttachmentResponse,
     EmailCreate,
@@ -364,6 +365,29 @@ async def deliver_email(
                 end_reason=type(exc).__name__,
                 failed_at=now,
             )
+        )
+        await fanout_email_event(
+            db,
+            organization_id=email.organization_id,
+            email_domain_id=email.email_domain_id,
+            event_type="email.send_failed",
+            event_id=email.id,
+            data=build_event_data(
+                email_id=str(email.id),
+                direction="outbound",
+                from_address=email.from_address,
+                to_addresses=email.to_addresses,
+                subject=email.subject,
+                message_id=email.message_id,
+                in_reply_to=None,
+                spam_verdict=None,
+                virus_verdict=None,
+                spf_verdict=None,
+                dkim_verdict=None,
+                dmarc_verdict=None,
+                raw_url=None,
+                attachments=[],
+            ),
         )
         await db.commit()
         return type(exc).__name__
