@@ -43,6 +43,7 @@ from hailhq.core.pool import release_pool_reservation
 from hailhq.core.models import Call, CallEvent, UsageEvent
 from hailhq.core.schemas import TERMINAL_CALL_STATUSES
 from hailhq.core.url_guard import assert_public_https_url
+from hailhq.core.webhook_fanout import fanout_call_event
 from hailhq.voicebot.pipeline import (
     ProviderKeyError,
     build_session,
@@ -257,6 +258,17 @@ _DISCONNECT_REASON_MAP: dict[int, tuple[str, CallEndReason]] = {
 }
 
 
+# Only statuses that have a real data source are emittable. `ringing` and
+# `canceled` are deliberately absent — the voicebot never produces them.
+_STATUS_TO_CALL_EVENT: dict[str, str] = {
+    "in_progress": "call.answered",
+    "completed": "call.completed",
+    "failed": "call.failed",
+    "busy": "call.busy",
+    "no_answer": "call.no_answer",
+}
+
+
 # LiveKit SIP participant attribute carrying the live call state. For an
 # outbound call it walks `dialing` → `active` when the callee picks up; `active`
 # is our answer signal. Verified 2026-06-05 against
@@ -426,8 +438,10 @@ async def mark_call_answered(call_id: UUID) -> bool:
                 Call.answered_at.is_(None),
             )
             .values(status="in_progress", answered_at=now)
+            .returning(Call.organization_id)
         )
-        transitioned = (result.rowcount or 0) > 0
+        organization_id = result.scalar_one_or_none()
+        transitioned = organization_id is not None
         if transitioned:
             # `from` is always `dialing` in practice — we never write `ringing`
             # for outbound (LiveKit only exposes `ringing` inbound) — but the
@@ -438,6 +452,13 @@ async def mark_call_answered(call_id: UUID) -> bool:
                     kind="state_change",
                     payload={"from": "dialing", "to": "in_progress"},
                 )
+            )
+            await fanout_call_event(
+                session,
+                organization_id=organization_id,
+                event_type=_STATUS_TO_CALL_EVENT["in_progress"],
+                event_id=call_id,
+                data={"id": str(call_id), "status": "in_progress"},
             )
         await session.commit()
     return transitioned
@@ -559,6 +580,19 @@ async def on_call_end(
                     },
                 )
             )
+            event_type = _STATUS_TO_CALL_EVENT.get(final_status)
+            if event_type is not None:
+                await fanout_call_event(
+                    session,
+                    organization_id=organization_id,
+                    event_type=event_type,
+                    event_id=call_id,
+                    data={
+                        "id": str(call_id),
+                        "status": final_status,
+                        "end_reason": final_end_reason,
+                    },
+                )
         # Idempotent and order-independent — free the pool number regardless of
         # which writer recorded the terminal status, so it is never leaked. In
         # the same transaction as the status update: a rollback (e.g. failed
