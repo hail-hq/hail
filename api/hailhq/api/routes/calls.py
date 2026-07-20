@@ -51,6 +51,7 @@ from hailhq.core.pool import (
     release_pool_reservation,
 )
 from hailhq.core.provider_config import provider_cipher
+from hailhq.core.webhook_fanout import fanout_call_event
 from hailhq.core.schemas import (
     TERMINAL_CALL_STATUSES,
     CallCreate,
@@ -416,6 +417,13 @@ async def create_call(
                         "reason": failure_code,
                     },
                 )
+            )
+            await fanout_call_event(
+                db,
+                organization_id=call.organization_id,
+                event_type="call.failed",
+                event_id=call.id,
+                data={"id": str(call.id), "status": "failed"},
             )
         # No-op when this call didn't hold a pool reservation.
         await release_pool_reservation(db, call_id=call.id)

@@ -15,7 +15,13 @@ from datetime import datetime, timedelta, timezone
 import pytest
 from sqlalchemy import select, update
 
-from hailhq.core.models import Call, CallEvent, PhoneNumber
+from hailhq.core.models import (
+    Call,
+    CallEvent,
+    PhoneNumber,
+    WebhookDelivery,
+    WebhookSubscription,
+)
 from hailhq.core.reconcile import sweep_stale_calls
 
 
@@ -195,6 +201,47 @@ async def test_sweep_respects_max_duration_snapshot(async_session):
 async def test_sweep_noop_when_nothing_stuck(async_session):
     swept = await sweep_stale_calls(async_session, grace_seconds=120)
     assert swept == []
+
+
+@pytest.mark.asyncio
+async def test_sweep_emits_call_failed_webhook(async_session):
+    """Each force-closed call fans out a call.failed webhook delivery."""
+    now = datetime.now(timezone.utc)
+    call = await _make_call(
+        async_session,
+        status="dialing",
+        started_at=now - timedelta(seconds=600),
+        max_duration_seconds=300,
+    )
+    async_session.add(
+        WebhookSubscription(
+            organization_id=call.organization_id,
+            target_url="https://example.com/firehose",
+            secret_encrypted="hash",
+            event_types=["call.failed"],
+        )
+    )
+    await async_session.commit()
+
+    swept = await sweep_stale_calls(async_session, grace_seconds=120)
+    await async_session.commit()
+
+    assert call.id in swept
+
+    rows = (
+        (
+            await async_session.execute(
+                select(WebhookDelivery).where(
+                    WebhookDelivery.event_type == "call.failed"
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert len(rows) == 1
+    assert rows[0].payload["data"]["id"] == str(call.id)
+    assert rows[0].payload["data"]["end_reason"] == "sweeper_timeout"
 
 
 @pytest.mark.asyncio
