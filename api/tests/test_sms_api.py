@@ -161,6 +161,154 @@ async def test_create_sms_carrier_rejection_not_billed(
     assert rows == []
 
 
+async def test_create_sms_transport_failure_emits_sms_failed_webhook(
+    client, async_session, org_and_key, sms_mock
+) -> None:
+    """A provider-level exception (transport failure) fans out sms.failed."""
+    from sqlalchemy import select
+
+    from hailhq.core.models import Sms, WebhookDelivery, WebhookSubscription
+
+    org_id, _, plaintext = org_and_key
+    await _seed_dedicated_number(async_session, org_id)
+
+    async_session.add(
+        WebhookSubscription(
+            organization_id=org_id,
+            target_url="https://example.com/firehose",
+            secret_encrypted="hash",
+            event_types=["sms.failed"],
+        )
+    )
+    await async_session.commit()
+
+    sms_mock.send_sms.side_effect = RuntimeError("carrier link down")
+
+    resp = await client.post(
+        "/sms",
+        json={"to": "+14155551234", "body": "hello", "recipient_consent": True},
+        headers={"Authorization": f"Bearer {plaintext}"},
+    )
+    assert resp.status_code == 502
+
+    sms = (await async_session.execute(select(Sms))).scalar_one()
+    assert sms.status == "failed"
+
+    rows = (
+        (
+            await async_session.execute(
+                select(WebhookDelivery).where(
+                    WebhookDelivery.event_type == "sms.failed"
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert len(rows) == 1
+    assert rows[0].payload["data"]["id"] == str(sms.id)
+    assert rows[0].payload["data"]["status"] == "failed"
+    assert rows[0].payload["data"]["reason"] == "provider_error"
+
+
+async def test_create_sms_carrier_rejection_emits_sms_failed_webhook(
+    client, async_session, org_and_key, sms_mock
+) -> None:
+    """A carrier-level rejection (error_code / undelivered status) fans out
+    sms.failed too — not just a transport exception."""
+    from sqlalchemy import select
+
+    from hailhq.core.models import WebhookDelivery, WebhookSubscription
+    from hailhq.core.providers.sms import ProviderSmsResult
+
+    org_id, _, plaintext = org_and_key
+    await _seed_dedicated_number(async_session, org_id)
+
+    async_session.add(
+        WebhookSubscription(
+            organization_id=org_id,
+            target_url="https://example.com/firehose",
+            secret_encrypted="hash",
+            event_types=["sms.failed"],
+        )
+    )
+    await async_session.commit()
+
+    sms_mock.send_sms.side_effect = None
+    sms_mock.send_sms.return_value = ProviderSmsResult(
+        provider_message_sid="SM_rejected",
+        status="failed",
+        segment_count=1,
+        error_code="30006",
+    )
+
+    resp = await client.post(
+        "/sms",
+        json={"to": "+14155551234", "body": "hello", "recipient_consent": True},
+        headers={"Authorization": f"Bearer {plaintext}"},
+    )
+    assert resp.status_code == 201
+    sms_id = resp.json()["id"]
+
+    rows = (
+        (
+            await async_session.execute(
+                select(WebhookDelivery).where(
+                    WebhookDelivery.event_type == "sms.failed"
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert len(rows) == 1
+    assert rows[0].payload["data"]["id"] == sms_id
+    assert rows[0].payload["data"]["error_code"] == "30006"
+
+
+async def test_create_sms_happy_path_emits_no_sms_failed_webhook(
+    client, async_session, org_and_key, sms_mock
+) -> None:
+    """A successful send must not fan out sms.failed — over-emit guard."""
+    from sqlalchemy import select
+
+    from hailhq.core.models import WebhookDelivery, WebhookSubscription
+
+    org_id, _, plaintext = org_and_key
+    await _seed_dedicated_number(async_session, org_id)
+
+    async_session.add(
+        WebhookSubscription(
+            organization_id=org_id,
+            target_url="https://example.com/firehose",
+            secret_encrypted="hash",
+            event_types=["sms.failed"],
+        )
+    )
+    await async_session.commit()
+
+    resp = await client.post(
+        "/sms",
+        json={"to": "+14155551234", "body": "hello", "recipient_consent": True},
+        headers={"Authorization": f"Bearer {plaintext}"},
+    )
+    assert resp.status_code == 201
+    assert resp.json()["status"] == "sent"
+
+    rows = (
+        (
+            await async_session.execute(
+                select(WebhookDelivery).where(
+                    WebhookDelivery.event_type == "sms.failed"
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert rows == []
+
+
 async def test_create_sms_blocked_by_suppression(
     client, async_session, org_and_key
 ) -> None:

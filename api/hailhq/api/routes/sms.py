@@ -60,6 +60,7 @@ from hailhq.core.schemas import (
 from hailhq.core.sms_ingest import ingest_inbound_sms
 from hailhq.core.twilio_signature import verify_twilio_signature
 from hailhq.core.urls import join_url
+from hailhq.core.webhook_fanout import fanout_sms_event
 
 logger = logging.getLogger(__name__)
 
@@ -105,6 +106,19 @@ async def deliver_sms(db: AsyncSession, provider: SmsProvider, sms: Sms) -> str 
                 payload={"from": "queued", "to": "failed", "reason": "provider_error"},
             )
         )
+        await fanout_sms_event(
+            db,
+            organization_id=sms.organization_id,
+            event_type="sms.failed",
+            event_id=sms.id,
+            data={
+                "id": str(sms.id),
+                "to": sms.to_e164,
+                "from": sms.from_e164,
+                "status": "failed",
+                "reason": "provider_error",
+            },
+        )
         await db.commit()
         return "provider_error"
 
@@ -137,6 +151,20 @@ async def deliver_sms(db: AsyncSession, provider: SmsProvider, sms: Sms) -> str 
             payload=event_payload,
         )
     )
+    if carrier_rejected:
+        await fanout_sms_event(
+            db,
+            organization_id=sms.organization_id,
+            event_type="sms.failed",
+            event_id=sms.id,
+            data={
+                "id": str(sms.id),
+                "to": sms.to_e164,
+                "from": sms.from_e164,
+                "status": "failed",
+                "error_code": result.error_code,
+            },
+        )
     await db.commit()
 
     if carrier_rejected:
