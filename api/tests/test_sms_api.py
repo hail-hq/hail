@@ -662,3 +662,143 @@ async def test_sms_status_failed_fans_out(
         .all()
     )
     assert len(deliveries) == 1
+
+
+async def test_sms_status_out_of_order_terminal_callback_is_absorbed(
+    client, async_session, org_and_key, monkeypatch
+) -> None:
+    """A `failed` callback is terminal; a later, out-of-order `delivered`
+    redelivery for the same message must not flip status back or fan out
+    `sms.delivered` — Twilio's callback carries no ordering token, so the
+    only safe rule is: once terminal, absorb everything else."""
+    from sqlalchemy import select
+
+    from hailhq.core.config import settings
+    from hailhq.core.models import Sms, SmsEvent, WebhookDelivery, WebhookSubscription
+
+    monkeypatch.setattr(settings, "twilio_auth_token", STATUS_AUTH_TOKEN)
+    monkeypatch.setattr(settings, "hail_api_url", "http://t")
+
+    org_id, _, _ = org_and_key
+    sms = await _seed_sent_sms(async_session, org_id, provider_message_sid="SM789")
+    async_session.add(
+        WebhookSubscription(
+            organization_id=org_id,
+            target_url="https://example.com/firehose",
+            secret_encrypted="hash",
+            event_types=["sms.failed", "sms.delivered"],
+        )
+    )
+    await async_session.commit()
+
+    failed_form, failed_headers = _signed_status_form(
+        {"MessageSid": "SM789", "MessageStatus": "failed"}
+    )
+    failed_resp = await client.post(
+        "/sms/status", data=failed_form, headers=failed_headers
+    )
+    assert failed_resp.status_code == 200
+    assert failed_resp.json() == {"status": "applied"}
+
+    refreshed = await async_session.get(Sms, sms.id)
+    assert refreshed.status == "failed"
+
+    failed_deliveries = (
+        (
+            await async_session.execute(
+                select(WebhookDelivery).where(
+                    WebhookDelivery.event_type == "sms.failed"
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert len(failed_deliveries) == 1
+
+    delivered_form, delivered_headers = _signed_status_form(
+        {"MessageSid": "SM789", "MessageStatus": "delivered"}
+    )
+    delivered_resp = await client.post(
+        "/sms/status", data=delivered_form, headers=delivered_headers
+    )
+    assert delivered_resp.status_code == 200
+    assert delivered_resp.json() == {"status": "duplicate"}
+
+    await async_session.refresh(refreshed)
+    assert refreshed.status == "failed"
+
+    failed_deliveries_after = (
+        (
+            await async_session.execute(
+                select(WebhookDelivery).where(
+                    WebhookDelivery.event_type == "sms.failed"
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert len(failed_deliveries_after) == 1
+
+    delivered_deliveries = (
+        (
+            await async_session.execute(
+                select(WebhookDelivery).where(
+                    WebhookDelivery.event_type == "sms.delivered"
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert len(delivered_deliveries) == 0
+
+    events = (
+        (
+            await async_session.execute(
+                select(SmsEvent).where(
+                    SmsEvent.sms_id == sms.id, SmsEvent.kind == "state_change"
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert len(events) == 1
+    assert events[0].payload == {"from": "sent", "to": "failed"}
+
+
+async def test_sms_status_intermediate_status_is_ignored(
+    client, async_session, org_and_key, monkeypatch
+) -> None:
+    from sqlalchemy import select
+
+    from hailhq.core.config import settings
+    from hailhq.core.models import Sms, SmsEvent, WebhookDelivery
+
+    monkeypatch.setattr(settings, "twilio_auth_token", STATUS_AUTH_TOKEN)
+    monkeypatch.setattr(settings, "hail_api_url", "http://t")
+
+    org_id, _, _ = org_and_key
+    sms = await _seed_sent_sms(async_session, org_id, provider_message_sid="SM999")
+
+    form, headers = _signed_status_form(
+        {"MessageSid": "SM999", "MessageStatus": "queued"}
+    )
+    resp = await client.post("/sms/status", data=form, headers=headers)
+    assert resp.status_code == 200
+    assert resp.json() == {"status": "ignored"}
+
+    refreshed = await async_session.get(Sms, sms.id)
+    assert refreshed.status == "sent"
+
+    events = (
+        (await async_session.execute(select(SmsEvent).where(SmsEvent.sms_id == sms.id)))
+        .scalars()
+        .all()
+    )
+    assert events == []
+
+    deliveries = (await async_session.execute(select(WebhookDelivery))).scalars().all()
+    assert deliveries == []

@@ -373,6 +373,12 @@ async def receive_inbound_sms(
     return Response(status_code=http_status.HTTP_200_OK)
 
 
+# Once an Sms reaches any of these, it is done: no later callback — however
+# delayed or out-of-order Twilio's at-least-once redelivery makes it — may
+# change status or fan out again.
+_TERMINAL_SMS_STATUSES = frozenset({"delivered", "undelivered", "failed"})
+
+
 @router.post("/status", include_in_schema=False)
 async def receive_sms_status(
     request: Request,
@@ -387,6 +393,9 @@ async def receive_sms_status(
     callbacks for the same message so only the callback that actually
     changes ``status`` writes an event or fans out. ``sms.sent`` is not a
     subscribable event, so fan-out is gated to the three terminal statuses.
+    Those same terminal statuses are also absorbing: once set, no later
+    callback — including an out-of-order redelivery for an earlier status —
+    may change ``status`` or fan out again.
     """
     form = await request.form()
     params = {k: str(v) for k, v in form.items()}
@@ -410,9 +419,11 @@ async def receive_sms_status(
     if sms is None:
         return {"status": "unmatched"}
 
-    if new_status == sms.status:
+    if sms.status in _TERMINAL_SMS_STATUSES or new_status == sms.status:
         # Emit-once: the row lock serializes concurrent/duplicate callbacks
-        # for this message; no status change means no new event.
+        # for this message; a terminal status is absorbing (an out-of-order
+        # redelivery must not flip it back), and no status change means no
+        # new event either way.
         return {"status": "duplicate"}
 
     prior = sms.status
