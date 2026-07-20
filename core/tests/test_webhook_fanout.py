@@ -5,7 +5,11 @@ import pytest
 from sqlalchemy import select
 
 from hailhq.core.models import EmailDomain, WebhookDelivery, WebhookSubscription
-from hailhq.core.webhook_fanout import build_event_data, fanout_email_event
+from hailhq.core.webhook_fanout import (
+    build_event_data,
+    fanout_call_event,
+    fanout_email_event,
+)
 
 
 async def _seed_domain(session, org_id):
@@ -151,6 +155,57 @@ async def test_fanout_stamps_null_domain_when_source_unknown(async_session):
     row = (await async_session.execute(select(WebhookDelivery))).scalars().one()
     assert row.subscription_id is not None
     assert row.email_domain_id is None
+
+
+@pytest.mark.asyncio
+async def test_fanout_call_event_inserts_for_matching_sub(async_session):
+    org_id = uuid.uuid4()
+    async_session.add(
+        WebhookSubscription(
+            organization_id=org_id,
+            target_url="https://example.com/firehose",
+            secret_encrypted="hash",
+            event_types=["call.completed"],
+        )
+    )
+    await async_session.commit()
+
+    n = await fanout_call_event(
+        async_session,
+        organization_id=org_id,
+        event_type="call.completed",
+        event_id=uuid.uuid4(),
+        data={"id": "c1", "status": "completed"},
+    )
+    assert n == 1
+
+    rows = (await async_session.execute(select(WebhookDelivery))).scalars().all()
+    assert len(rows) == 1
+    assert rows[0].event_type == "call.completed"
+    assert rows[0].email_domain_id is None
+
+
+@pytest.mark.asyncio
+async def test_fanout_call_event_skips_non_matching(async_session):
+    org_id = uuid.uuid4()
+    async_session.add(
+        WebhookSubscription(
+            organization_id=org_id,
+            target_url="https://example.com/firehose",
+            secret_encrypted="hash",
+            event_types=["call.failed"],
+        )
+    )
+    await async_session.commit()
+
+    n = await fanout_call_event(
+        async_session,
+        organization_id=org_id,
+        event_type="call.completed",
+        event_id=uuid.uuid4(),
+        data={"id": "c1"},
+    )
+    assert n == 0
 
 
 def test_build_event_data_passes_through_attachments():
