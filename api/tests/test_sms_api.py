@@ -4,7 +4,37 @@ from __future__ import annotations
 
 import uuid
 
+from twilio.request_validator import RequestValidator
+
 from .conftest import insert_org_and_key  # noqa: F401
+
+STATUS_AUTH_TOKEN = "test-twilio-auth-token"
+STATUS_URL = "http://t/sms/status"
+
+
+def _signed_status_form(
+    params: dict[str, str],
+) -> tuple[dict[str, str], dict[str, str]]:
+    sig = RequestValidator(STATUS_AUTH_TOKEN).compute_signature(STATUS_URL, params)
+    return params, {"X-Twilio-Signature": sig}
+
+
+async def _seed_sent_sms(async_session, organization_id, *, provider_message_sid: str):
+    from hailhq.core.models import Sms
+
+    sms = Sms(
+        organization_id=organization_id,
+        from_e164="+14155559999",
+        to_e164="+14155551234",
+        direction="outbound",
+        status="sent",
+        body="hi",
+        provider_message_sid=provider_message_sid,
+    )
+    async_session.add(sms)
+    await async_session.commit()
+    await async_session.refresh(sms)
+    return sms
 
 
 async def _seed_dedicated_number(async_session, organization_id) -> None:
@@ -441,3 +471,194 @@ async def test_create_sms_to_india_still_requires_dedicated_number(
     assert isinstance(detail, list)
     assert detail[0]["loc"] == ["body", "from"]
     assert "dedicated" in detail[0]["msg"]
+
+
+async def test_sms_status_delivered_persists_and_fans_out(
+    client, async_session, org_and_key, monkeypatch
+) -> None:
+    from sqlalchemy import select
+
+    from hailhq.core.config import settings
+    from hailhq.core.models import Sms, WebhookDelivery, WebhookSubscription
+
+    monkeypatch.setattr(settings, "twilio_auth_token", STATUS_AUTH_TOKEN)
+    monkeypatch.setattr(settings, "hail_api_url", "http://t")
+
+    org_id, _, _ = org_and_key
+    sms = await _seed_sent_sms(async_session, org_id, provider_message_sid="SM123")
+    async_session.add(
+        WebhookSubscription(
+            organization_id=org_id,
+            target_url="https://example.com/firehose",
+            secret_encrypted="hash",
+            event_types=["sms.delivered"],
+        )
+    )
+    await async_session.commit()
+
+    form, headers = _signed_status_form(
+        {"MessageSid": "SM123", "MessageStatus": "delivered"}
+    )
+    resp = await client.post("/sms/status", data=form, headers=headers)
+    assert resp.status_code == 200
+    assert resp.json() == {"status": "applied"}
+
+    refreshed = await async_session.get(Sms, sms.id)
+    assert refreshed.status == "delivered"
+
+    deliveries = (
+        (
+            await async_session.execute(
+                select(WebhookDelivery).where(
+                    WebhookDelivery.event_type == "sms.delivered"
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert len(deliveries) == 1
+
+
+async def test_sms_status_bad_signature_rejected(
+    client, async_session, org_and_key, monkeypatch
+) -> None:
+    from hailhq.core.config import settings
+    from hailhq.core.models import Sms
+
+    monkeypatch.setattr(settings, "twilio_auth_token", STATUS_AUTH_TOKEN)
+    monkeypatch.setattr(settings, "hail_api_url", "http://t")
+
+    org_id, _, _ = org_and_key
+    sms = await _seed_sent_sms(async_session, org_id, provider_message_sid="SM123")
+
+    resp = await client.post(
+        "/sms/status",
+        data={"MessageSid": "SM123", "MessageStatus": "delivered"},
+        headers={"X-Twilio-Signature": "sha1=bogus"},
+    )
+    assert resp.status_code == 403
+
+    refreshed = await async_session.get(Sms, sms.id)
+    assert refreshed.status == "sent"
+
+
+async def test_sms_status_duplicate_callback_is_idempotent(
+    client, async_session, org_and_key, monkeypatch
+) -> None:
+    from sqlalchemy import select
+
+    from hailhq.core.config import settings
+    from hailhq.core.models import SmsEvent, WebhookDelivery, WebhookSubscription
+
+    monkeypatch.setattr(settings, "twilio_auth_token", STATUS_AUTH_TOKEN)
+    monkeypatch.setattr(settings, "hail_api_url", "http://t")
+
+    org_id, _, _ = org_and_key
+    await _seed_sent_sms(async_session, org_id, provider_message_sid="SM123")
+    async_session.add(
+        WebhookSubscription(
+            organization_id=org_id,
+            target_url="https://example.com/firehose",
+            secret_encrypted="hash",
+            event_types=["sms.delivered"],
+        )
+    )
+    await async_session.commit()
+
+    form, headers = _signed_status_form(
+        {"MessageSid": "SM123", "MessageStatus": "delivered"}
+    )
+    first = await client.post("/sms/status", data=form, headers=headers)
+    assert first.json() == {"status": "applied"}
+
+    second = await client.post("/sms/status", data=form, headers=headers)
+    assert second.status_code == 200
+    assert second.json() == {"status": "duplicate"}
+
+    events = (
+        (
+            await async_session.execute(
+                select(SmsEvent).where(SmsEvent.kind == "state_change")
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert len([e for e in events if e.payload.get("to") == "delivered"]) == 1
+
+    deliveries = (
+        (
+            await async_session.execute(
+                select(WebhookDelivery).where(
+                    WebhookDelivery.event_type == "sms.delivered"
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert len(deliveries) == 1
+
+
+async def test_sms_status_unknown_sid_is_noop(
+    client, async_session, monkeypatch
+) -> None:
+    from hailhq.core.config import settings
+
+    monkeypatch.setattr(settings, "twilio_auth_token", STATUS_AUTH_TOKEN)
+    monkeypatch.setattr(settings, "hail_api_url", "http://t")
+
+    form, headers = _signed_status_form(
+        {"MessageSid": "SM_nope", "MessageStatus": "delivered"}
+    )
+    resp = await client.post("/sms/status", data=form, headers=headers)
+    assert resp.status_code == 200
+    assert resp.json() == {"status": "unmatched"}
+
+
+async def test_sms_status_failed_fans_out(
+    client, async_session, org_and_key, monkeypatch
+) -> None:
+    from sqlalchemy import select
+
+    from hailhq.core.config import settings
+    from hailhq.core.models import Sms, WebhookDelivery, WebhookSubscription
+
+    monkeypatch.setattr(settings, "twilio_auth_token", STATUS_AUTH_TOKEN)
+    monkeypatch.setattr(settings, "hail_api_url", "http://t")
+
+    org_id, _, _ = org_and_key
+    sms = await _seed_sent_sms(async_session, org_id, provider_message_sid="SM456")
+    async_session.add(
+        WebhookSubscription(
+            organization_id=org_id,
+            target_url="https://example.com/firehose",
+            secret_encrypted="hash",
+            event_types=["sms.failed"],
+        )
+    )
+    await async_session.commit()
+
+    form, headers = _signed_status_form(
+        {"MessageSid": "SM456", "MessageStatus": "failed"}
+    )
+    resp = await client.post("/sms/status", data=form, headers=headers)
+    assert resp.status_code == 200
+    assert resp.json() == {"status": "applied"}
+
+    refreshed = await async_session.get(Sms, sms.id)
+    assert refreshed.status == "failed"
+
+    deliveries = (
+        (
+            await async_session.execute(
+                select(WebhookDelivery).where(
+                    WebhookDelivery.event_type == "sms.failed"
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert len(deliveries) == 1

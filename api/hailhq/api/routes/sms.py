@@ -46,6 +46,7 @@ from hailhq.core.db import get_session
 from hailhq.core.models import Sms, SmsEvent, SmsSenderIdentity, Suppression
 from hailhq.core.pricing_tier import classify_pricing_tier
 from hailhq.core.providers.sms import SmsProvider, TwilioSmsProvider
+from hailhq.core.providers.sms.status_map import map_twilio_message_status
 from hailhq.core.sender_id import PLATFORM_DEFAULT_SENDER_ID, resolve_sender
 from hailhq.core.schemas import (
     SenderIdPatch,
@@ -370,6 +371,75 @@ async def receive_inbound_sms(
     )
     await db.commit()
     return Response(status_code=http_status.HTTP_200_OK)
+
+
+@router.post("/status", include_in_schema=False)
+async def receive_sms_status(
+    request: Request,
+    db: Annotated[AsyncSession, Depends(get_session)],
+) -> dict[str, str]:
+    """Twilio delivery-status callback — transitions ``Sms.status`` and fans
+    out ``sms.delivered`` / ``sms.undelivered`` / ``sms.failed``.
+
+    Emit-once relies on a ``SELECT ... FOR UPDATE`` row lock plus a
+    status-unchanged short-circuit rather than a dedup constraint: Twilio
+    redelivers at-least-once, and locking the row serializes concurrent
+    callbacks for the same message so only the callback that actually
+    changes ``status`` writes an event or fans out. ``sms.sent`` is not a
+    subscribable event, so fan-out is gated to the three terminal statuses.
+    """
+    form = await request.form()
+    params = {k: str(v) for k, v in form.items()}
+    signature = request.headers.get("X-Twilio-Signature")
+    url = join_url(settings.hail_api_url, "sms/status")
+    if not verify_twilio_signature(url, params, signature, settings.twilio_auth_token):
+        raise HTTPException(
+            status_code=http_status.HTTP_403_FORBIDDEN, detail="invalid signature"
+        )
+
+    new_status = map_twilio_message_status(params.get("MessageStatus", ""))
+    if new_status is None:
+        return {"status": "ignored"}
+
+    sid = params.get("MessageSid")
+    sms = (
+        await db.execute(
+            select(Sms).where(Sms.provider_message_sid == sid).with_for_update()
+        )
+    ).scalar_one_or_none()
+    if sms is None:
+        return {"status": "unmatched"}
+
+    if new_status == sms.status:
+        # Emit-once: the row lock serializes concurrent/duplicate callbacks
+        # for this message; no status change means no new event.
+        return {"status": "duplicate"}
+
+    prior = sms.status
+    sms.status = new_status
+    db.add(
+        SmsEvent(
+            sms_id=sms.id,
+            organization_id=sms.organization_id,
+            kind="state_change",
+            payload={"from": prior, "to": new_status},
+        )
+    )
+    if new_status in {"delivered", "undelivered", "failed"}:
+        await fanout_sms_event(
+            db,
+            organization_id=sms.organization_id,
+            event_type=f"sms.{new_status}",
+            event_id=sms.id,
+            data={
+                "id": str(sms.id),
+                "to": sms.to_e164,
+                "from": sms.from_e164,
+                "status": new_status,
+            },
+        )
+    await db.commit()
+    return {"status": "applied"}
 
 
 @router.get("/suppressions", response_model=SuppressionListResponse)
