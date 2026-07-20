@@ -91,9 +91,13 @@ async def deliver_sms(db: AsyncSession, provider: SmsProvider, sms: Sms) -> str 
     'provider_error' on transport failure, or the carrier error code on
     rejection. Never raises — the caller owns HTTP semantics.
     """
+    callback_url = join_url(settings.hail_api_url, "sms/status")
     try:
         result = await provider.send_sms(
-            from_e164=sms.from_e164, to_e164=sms.to_e164, body=sms.body
+            from_e164=sms.from_e164,
+            to_e164=sms.to_e164,
+            body=sms.body,
+            status_callback_url=callback_url,
         )
     except Exception:
         logger.warning("sms send failed for sms_id=%s", sms.id, exc_info=True)
