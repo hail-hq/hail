@@ -971,7 +971,22 @@ async def entrypoint(ctx: JobContext) -> None:
     # anything. The event is written on every call, machine or not, so
     # classification quality is observable per call. A detection failure
     # returns None and the call proceeds exactly as it did before AMD.
-    amd_result = await run_amd(session, call_id)
+    #
+    # Skipped outright when the SIP leg is already gone. `captured["status"]`
+    # is only ever set by the participant-disconnect handler above, so a
+    # non-None value here means busy / no-answer / trunk failure — there is
+    # no audio track to classify, and AMD would sit on its 30s backstop
+    # before giving up (observed: a leg rejected at :20.475 still held the
+    # job until :50.700, then "entrypoint did not exit in time").
+    if captured["status"] is not None:
+        logger.info(
+            "call_id=%s sip leg already gone (%s) — skipping AMD",
+            call_id,
+            captured["status"],
+        )
+        amd_result = None
+    else:
+        amd_result = await run_amd(session, call_id)
     await write_call_event(
         call_id,
         "amd_result",
