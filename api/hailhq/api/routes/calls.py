@@ -51,7 +51,6 @@ from hailhq.core.pool import (
     release_pool_reservation,
 )
 from hailhq.core.provider_config import provider_cipher
-from hailhq.core.webhook_fanout import fanout_call_event
 from hailhq.core.schemas import (
     TERMINAL_CALL_STATUSES,
     CallCreate,
@@ -61,6 +60,7 @@ from hailhq.core.schemas import (
 )
 from hailhq.core.secret_cipher import SecretKeyMissing
 from hailhq.core.url_guard import UnsafeUrlError, assert_public_https_url
+from hailhq.core.webhook_fanout import fanout_call_event
 
 logger = logging.getLogger(__name__)
 

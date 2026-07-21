@@ -30,6 +30,27 @@ def test_create_accepts_email_received():
     assert sub.event_types == ["email.received"]
 
 
+@pytest.mark.parametrize(
+    "event",
+    [
+        "call.answered",
+        "call.completed",
+        "call.failed",
+        "call.busy",
+        "call.no_answer",
+        "sms.delivered",
+        "sms.undelivered",
+        "sms.failed",
+        "email.send_failed",
+    ],
+)
+def test_create_accepts_new_lifecycle_event(event):
+    sub = WebhookSubscriptionCreate(
+        target_url="https://example.com/h", event_types=[event]
+    )
+    assert sub.event_types == [event]
+
+
 def test_patch_allows_partial():
     p = WebhookSubscriptionPatch(status="disabled")
     assert p.status == "disabled"
