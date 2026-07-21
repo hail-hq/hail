@@ -14,6 +14,7 @@ from typing import Any
 from uuid import UUID
 
 import pytest
+from livekit import rtc
 from livekit.agents.voice.amd import AMDCategory, AMDPredictionEvent
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -170,17 +171,29 @@ def test_amd_end_reason_maps_to_call_end_reason_values() -> None:
 
 
 class _FakeAmdSession:
-    """AgentSession stand-in: event registration, start(), and say()."""
+    """AgentSession stand-in: event registration, start(), say(), reply."""
 
     def __init__(self) -> None:
         self.say_calls: list[str] = []
+        self.replies: list[str] = []
         self.started = False
+        self.handlers: dict[str, list] = {}
 
-    def on(self, _event: str):
+    def on(self, event: str):
         def _register(fn):
+            self.handlers.setdefault(event, []).append(fn)
             return fn
 
         return _register
+
+    def emit_user_turn(self, text: str = "Hello.") -> None:
+        item = SimpleNamespace(role="user", text_content=text)
+        for fn in self.handlers.get("conversation_item_added", []):
+            fn(SimpleNamespace(item=item))
+
+    def generate_reply(self, *, instructions: str) -> Any:
+        self.replies.append(instructions)
+        return SimpleNamespace()
 
     async def start(self, **_kwargs: object) -> None:
         self.started = True
@@ -203,22 +216,37 @@ class _FakeLocalParticipant:
 
 
 class _FakeAmdRoom:
-    def __init__(self, name: str) -> None:
+    def __init__(self, name: str, *, disconnect_on_register: bool = False) -> None:
         self.name = name
         self.remote_participants: dict[str, object] = {}
         self.local_participant = _FakeLocalParticipant()
+        self._disconnect_on_register = disconnect_on_register
 
-    def on(self, _event: str):
+    def on(self, event: str):
         def _register(fn):
+            # Mirrors production ordering on a rejected leg: the SIP
+            # participant is already gone by the time entrypoint wires its
+            # handlers, so the disconnect fires before AMD would start.
+            if event == "participant_disconnected" and self._disconnect_on_register:
+                fn(
+                    SimpleNamespace(
+                        kind=rtc.ParticipantKind.PARTICIPANT_KIND_SIP,
+                        disconnect_reason=rtc.DisconnectReason.USER_REJECTED,
+                    )
+                )
             return fn
 
         return _register
 
 
 class _FakeAmdCtx:
-    def __init__(self, metadata: str, room_name: str) -> None:
+    def __init__(
+        self, metadata: str, room_name: str, *, disconnect_on_register: bool = False
+    ) -> None:
         self.job = SimpleNamespace(metadata=metadata)
-        self.room = _FakeAmdRoom(room_name)
+        self.room = _FakeAmdRoom(
+            room_name, disconnect_on_register=disconnect_on_register
+        )
         self.proc = SimpleNamespace(userdata={"vad": object()})
         self.shutdown_calls: list[str] = []
         self.delete_room_calls = 0
@@ -242,6 +270,8 @@ async def _drive_entrypoint(
     monkeypatch: pytest.MonkeyPatch,
     *,
     amd_result: AMDPredictionEvent | None,
+    run_amd_override: Any = None,
+    disconnect_before_amd: bool = False,
 ) -> tuple[UUID, _FakeAmdCtx, _FakeAmdSession]:
     """Run ``entrypoint`` with AMD stubbed, then fire the shutdown callback."""
     from hailhq.voicebot import agent as agent_mod
@@ -258,7 +288,7 @@ async def _drive_entrypoint(
 
     monkeypatch.setattr(agent_mod, "resolve_org_configs", _no_org_cfgs)
     monkeypatch.setattr(agent_mod, "build_session", lambda *a, **k: session)
-    monkeypatch.setattr(agent_mod, "run_amd", _fake_run_amd)
+    monkeypatch.setattr(agent_mod, "run_amd", run_amd_override or _fake_run_amd)
     monkeypatch.setattr(
         agent_mod.settings, "hail_voice_max_duration_seconds", 0, raising=False
     )
@@ -273,6 +303,7 @@ async def _drive_entrypoint(
             }
         ),
         room_name=f"hail-{call_id}",
+        disconnect_on_register=disconnect_before_amd,
     )
 
     await entrypoint_under_test(ctx)
@@ -335,7 +366,7 @@ async def test_machine_categories_hang_up_without_speaking(
     assert refreshed.end_reason == end_reason
 
 
-@pytest.mark.parametrize("category", ["human", "uncertain", "machine-ivr"])
+@pytest.mark.parametrize("category", ["human", "uncertain"])
 async def test_non_hangup_categories_speak_the_disclosure(
     async_session: AsyncSession,
     monkeypatch: pytest.MonkeyPatch,
@@ -350,6 +381,102 @@ async def test_non_hangup_categories_speak_the_disclosure(
     assert session.say_calls == [AI_DISCLOSURE_LINE, "Is this a good time?"]
     assert ctx.delete_room_calls == 0
     assert ctx.shutdown_calls == []
+
+
+# --------------------------------------------------------------------------- #
+# machine-ivr: the production failure this branch fixes
+# --------------------------------------------------------------------------- #
+
+
+async def test_amd_is_skipped_when_the_sip_leg_already_disconnected(
+    async_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Regression: call 3c7e39b7 was rejected at :20.475, yet AMD still ran
+    to its 30s backstop and the job had to be force-cancelled."""
+    ran = {"amd": False}
+
+    async def _tracking_run_amd(_session: object, _call_id: UUID):
+        ran["amd"] = True
+        return None
+
+    call_id, _ctx, _session = await _drive_entrypoint(
+        async_session,
+        monkeypatch,
+        amd_result=None,
+        run_amd_override=_tracking_run_amd,
+        disconnect_before_amd=True,
+    )
+
+    assert ran["amd"] is False
+    events = await _amd_events(async_session, call_id)
+    assert len(events) == 1
+    assert events[0].payload == {"category": None, "transcript": None}
+
+
+async def test_ivr_does_not_speak_the_greeting_into_the_menu(
+    async_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Regression: call fe1d2d08 recited the disclosure at a "press one /
+    press two" menu and pressed nothing, because `session.say` is TTS-only
+    and never gives the LLM a turn."""
+    _call_id, ctx, session = await _drive_entrypoint(
+        async_session, monkeypatch, amd_result=_prediction("machine-ivr")
+    )
+
+    # Nothing spoken at the tree...
+    assert session.say_calls == []
+    # ...and the LLM got a real turn, which is the only thing that can
+    # reach the send_dtmf tool.
+    assert len(session.replies) == 1
+    assert ctx.shutdown_calls == []
+
+
+async def test_ivr_reply_carries_the_menu_and_orders_keypresses(
+    async_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _call_id, _ctx, session = await _drive_entrypoint(
+        async_session, monkeypatch, amd_result=_prediction("machine-ivr")
+    )
+
+    instructions = session.replies[0]
+    assert "hello you have reached" in instructions  # the captured menu
+    assert "send_dtmf" in instructions
+    assert "do not speak" in instructions.lower()
+
+
+async def test_ivr_greeting_is_deferred_to_the_first_person(
+    async_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The disclosure is delayed, never dropped."""
+    from hailhq.voicebot.agent import AI_DISCLOSURE_LINE
+
+    _call_id, _ctx, session = await _drive_entrypoint(
+        async_session, monkeypatch, amd_result=_prediction("machine-ivr")
+    )
+    assert session.say_calls == []
+
+    session.emit_user_turn("Hello, reception.")
+    await asyncio.sleep(0)
+    await asyncio.sleep(0)
+
+    assert session.say_calls == [AI_DISCLOSURE_LINE, "Is this a good time?"]
+
+
+async def test_ivr_greeting_fires_only_once(
+    async_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from hailhq.voicebot.agent import AI_DISCLOSURE_LINE
+
+    _call_id, _ctx, session = await _drive_entrypoint(
+        async_session, monkeypatch, amd_result=_prediction("machine-ivr")
+    )
+
+    for _ in range(3):
+        session.emit_user_turn("Hello?")
+        await asyncio.sleep(0)
+    await asyncio.sleep(0)
+
+    assert session.say_calls.count(AI_DISCLOSURE_LINE) == 1
 
 
 async def test_detection_failure_proceeds_like_a_human_answer(
