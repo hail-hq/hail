@@ -14,8 +14,10 @@ from urllib.parse import parse_qs, urlsplit
 
 import pytest
 import responses
+from twilio.base.exceptions import TwilioRestException
 
 from hailhq.core.providers.voice import (
+    NumberNotProvisionable,
     ProviderCallStatus,
     ProviderNumber,
     TwilioVoiceProvider,
@@ -164,6 +166,98 @@ async def test_acquire_raises_when_no_numbers_available(
             country_code="US",
             number_type="local",
             capabilities=["voice"],
+        )
+
+
+@responses.activate
+async def test_acquire_raises_not_provisionable_on_bundle_required(
+    provider: TwilioVoiceProvider,
+) -> None:
+    """A 400 at purchase (e.g. GB mobile 'Bundle required') is translated into
+    a typed NumberNotProvisionable — not a raw TwilioRestException that would
+    surface as a 500."""
+    responses.add(
+        responses.GET,
+        f"{API_BASE}/AvailablePhoneNumbers/GB/Mobile.json",
+        json={
+            "available_phone_numbers": [
+                {
+                    "phone_number": "+447700900123",
+                    "iso_country": "GB",
+                    "capabilities": {
+                        "voice": True,
+                        "SMS": True,
+                        "MMS": False,
+                        "fax": False,
+                    },
+                }
+            ],
+            "uri": "/x",
+        },
+        status=200,
+    )
+    responses.add(
+        responses.POST,
+        f"{API_BASE}/IncomingPhoneNumbers.json",
+        json={
+            "code": 21649,
+            "message": (
+                "Unable to create record: Bundle required and not provided "
+                "for country: [GB] and numberType: [MOBILE]"
+            ),
+            "status": 400,
+        },
+        status=400,
+    )
+
+    with pytest.raises(NumberNotProvisionable) as excinfo:
+        await provider.acquire_number(
+            country_code="GB",
+            number_type="mobile",
+            capabilities=["voice", "sms"],
+        )
+    assert "Bundle required" in excinfo.value.detail
+
+
+@responses.activate
+async def test_acquire_propagates_non_400_purchase_error(
+    provider: TwilioVoiceProvider,
+) -> None:
+    """A 5xx at purchase is a transport failure and propagates unchanged — it
+    must NOT be swallowed as NumberNotProvisionable (which would wrongly tell
+    the caller the number is unavailable)."""
+    responses.add(
+        responses.GET,
+        f"{API_BASE}/AvailablePhoneNumbers/US/Local.json",
+        json={
+            "available_phone_numbers": [
+                {
+                    "phone_number": "+14155551234",
+                    "iso_country": "US",
+                    "capabilities": {
+                        "voice": True,
+                        "SMS": True,
+                        "MMS": True,
+                        "fax": False,
+                    },
+                }
+            ],
+            "uri": "/x",
+        },
+        status=200,
+    )
+    responses.add(
+        responses.POST,
+        f"{API_BASE}/IncomingPhoneNumbers.json",
+        json={"code": 20500, "message": "Internal server error", "status": 500},
+        status=500,
+    )
+
+    with pytest.raises(TwilioRestException):
+        await provider.acquire_number(
+            country_code="US",
+            number_type="local",
+            capabilities=["voice", "sms"],
         )
 
 

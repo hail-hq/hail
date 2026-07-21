@@ -10,6 +10,7 @@ stays with the rest of the `/numbers` router rather than splitting onto
 
 from __future__ import annotations
 
+import logging
 from typing import Annotated
 from uuid import UUID
 
@@ -32,12 +33,14 @@ from hailhq.core import telephony_catalog
 from hailhq.core.db import get_session
 from hailhq.core.models import PhoneNumber
 from hailhq.core.providers.sms import SmsProvider
-from hailhq.core.providers.voice import VoiceProvider
+from hailhq.core.providers.voice import NumberNotProvisionable, VoiceProvider
 from hailhq.core.schemas import (
     NumberAcquireRequest,
     PhoneNumberListResponse,
     PhoneNumberResponse,
 )
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/numbers", tags=["numbers"])
 
@@ -136,6 +139,26 @@ async def acquire_number(
         raise HTTPException(
             status_code=http_status.HTTP_503_SERVICE_UNAVAILABLE,
             detail=str(exc),
+        ) from exc
+    except NumberNotProvisionable as exc:
+        # Deterministic: this country/number-type can't be provisioned without
+        # regulatory setup (a bundle/address) we don't have — a retry fails
+        # identically, so cache the 422 rather than releasing the key. The raw
+        # carrier reason is logged, not leaked to the caller.
+        logger.warning(
+            "number not provisionable (%s %s): %s",
+            body.country_code,
+            body.number_type,
+            exc.detail,
+        )
+        raise await cache_failure(
+            idem,
+            unprocessable(
+                f"we can't provision a {body.number_type} number in "
+                f"{body.country_code} yet — it needs regulatory verification "
+                "we don't support",
+                loc=["body", "number_type"],
+            ),
         ) from exc
 
     number = PhoneNumber(
