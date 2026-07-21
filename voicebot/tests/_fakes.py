@@ -143,18 +143,42 @@ class FakeAnnouncingSession:
         return handle
 
 
+class FakeLocalParticipant:
+    """Records ``publish_dtmf`` calls made by the DTMF handle.
+
+    Verified shape against livekit/rtc/participant.py:
+    ``publish_dtmf(*, code: int, digit: str)``.
+    """
+
+    def __init__(self) -> None:
+        self.dtmf: list[tuple[int, str]] = []
+
+    async def publish_dtmf(self, *, code: int, digit: str) -> None:
+        self.dtmf.append((code, digit))
+
+
+class FakeRoom:
+    """Minimal ``ctx.room``: the local participant plus a name."""
+
+    def __init__(self, name: str = "hail-test") -> None:
+        self.name = name
+        self.local_participant = FakeLocalParticipant()
+
+
 class FakeJobContext:
     """Stand-in for livekit.agents.JobContext.
 
     Verified shape against livekit/agents/job.py: we need
-    ``ctx.shutdown(reason=…)`` and ``ctx.delete_room()`` (returns an
-    awaitable resolving to the DeleteRoomResponse; a completed Future here).
+    ``ctx.shutdown(reason=…)``, ``ctx.delete_room()`` (returns an
+    awaitable resolving to the DeleteRoomResponse; a completed Future here),
+    and ``ctx.room.local_participant`` for the DTMF handle.
     """
 
     def __init__(self) -> None:
         self.shutdown_calls: list[str] = []
         self.delete_room_calls: int = 0
         self.delete_room_error: Exception | None = None
+        self.room = FakeRoom()
 
     def shutdown(self, reason: str = "") -> None:
         self.shutdown_calls.append(reason)
@@ -173,5 +197,7 @@ __all__ = [
     "FakeAnnouncingSession",
     "FakeJobContext",
     "FakeLLM",
+    "FakeLocalParticipant",
+    "FakeRoom",
     "FakeSpeechHandle",
 ]

@@ -34,6 +34,7 @@ from sqlalchemy import select, update
 from sqlalchemy.exc import SQLAlchemyError
 
 from hailhq.core.agent_tools.client import AgentApiClient
+from hailhq.core.agent_tools.send_dtmf import DTMF_CODES
 from hailhq.core.call_end_reasons import CallEndReason
 from hailhq.core.config import settings
 from hailhq.core.db import session_scope
@@ -43,6 +44,7 @@ from hailhq.core.pool import release_pool_reservation
 from hailhq.core.models import Call, CallEvent, UsageEvent
 from hailhq.core.schemas import TERMINAL_CALL_STATUSES
 from hailhq.core.url_guard import assert_public_https_url
+from hailhq.voicebot.amd import MACHINE_HANGUP_CATEGORIES, amd_end_reason, run_amd
 from hailhq.voicebot.pipeline import (
     ProviderKeyError,
     build_session,
@@ -178,10 +180,28 @@ def make_agent_hangup(
     return _hangup
 
 
+def make_agent_send_dtmf(ctx: JobContext) -> Callable[[str], Awaitable[None]]:
+    """Build the DTMF handle wired into the ``send_dtmf`` agent tool.
+
+    One already-validated digit per call — ``core``'s tool owns the vocabulary
+    (:data:`hailhq.core.agent_tools.send_dtmf.DTMF_CODES`) and the inter-digit
+    pacing; this side owns only the transport, which is what keeps ``core``
+    free of ``livekit`` imports.
+    """
+
+    async def _send_dtmf(digit: str) -> None:
+        await ctx.room.local_participant.publish_dtmf(
+            code=DTMF_CODES[digit], digit=digit
+        )
+
+    return _send_dtmf
+
+
 async def build_tools_safely(
     metadata: dict[str, Any],
     call_id: UUID,
     hangup: Callable[[], Awaitable[None]],
+    send_dtmf: Callable[[str], Awaitable[None]],
 ) -> tuple[list, AgentApiClient | None]:
     """Build this call's agent tools, degrading to none on any failure.
 
@@ -191,7 +211,9 @@ async def build_tools_safely(
     the session.
     """
     try:
-        return await build_agent_tools(metadata, call_id=call_id, hangup=hangup)
+        return await build_agent_tools(
+            metadata, call_id=call_id, hangup=hangup, send_dtmf=send_dtmf
+        )
     except Exception:
         logger.exception(
             "call_id=%s build_agent_tools failed; continuing without agent tools",
@@ -566,11 +588,22 @@ async def on_call_end(
         # backstop can retry. No-op for non-pool calls.
         await release_pool_reservation(session, call_id=call_id)
         usage_event_id: str | None = None
-        # Only bill for calls that *this call* actually completed a conversation
-        # on. A no-answer / busy / failed call has a non-zero ring delta but
-        # isn't billable; an already-terminal row (transitioned is False) was
-        # billed — or deliberately not — by whoever closed it first.
-        if transitioned and final_status == "completed" and duration_ms > 0:
+        # Bill when the call actually consumed minutes. Two sufficient
+        # conditions, deliberately OR'd:
+        #   - `answered_at` set: the SIP leg went active, so someone (or
+        #     something) picked up. This is what lets a voicemail box
+        #     (status=no_answer) or a call that died mid-conversation
+        #     (status=failed) still bill for the minutes it burned.
+        #   - status='completed': the historical test, kept so a completed
+        #     call whose answer signal never landed — a DB blip inside
+        #     `mark_call_answered`, a missed `sip.callStatus` event, a legacy
+        #     row predating `answered_at`, or the `recording_duration_ms`
+        #     fallback above — is still billed rather than silently free.
+        # A genuine no-answer satisfies neither and stays unbilled. An
+        # already-terminal row (transitioned is False) was billed — or
+        # deliberately not — by whoever closed it first.
+        billable = answered_at is not None or final_status == "completed"
+        if transitioned and billable and duration_ms > 0:
             usage = UsageEvent(
                 organization_id=organization_id,
                 channel="voice",
@@ -782,7 +815,10 @@ async def entrypoint(ctx: JobContext) -> None:
             captured["status"] = "failed"
 
     agent_tools, agent_api = await build_tools_safely(
-        metadata, call_id, make_agent_hangup(ctx, captured)
+        metadata,
+        call_id,
+        make_agent_hangup(ctx, captured),
+        make_agent_send_dtmf(ctx),
     )
     if agent_tools:
         logger.info(
@@ -797,16 +833,20 @@ async def entrypoint(ctx: JobContext) -> None:
     )
     await session.start(agent=agent, room=ctx.room)
 
-    await speak_greeting(session, metadata)
-
     room_name = ctx.room.name
 
     soft_cap_seconds = settings.hail_voice_max_duration_seconds
     soft_cap_task: asyncio.Task[None] | None = None
     if soft_cap_seconds > 0:
-        # When the cap actually fires (vs being cancelled by a natural hangup)
-        # stamp end_reason='soft_cap_reached' before ctx.shutdown so the
-        # shutdown callback writes it.
+        # Armed here, before AMD and before the greeting, so the cap bounds
+        # the whole call from pickup. Starting it after those would let a
+        # 20s detection window plus greeting playout (`session.say` awaits
+        # full playout) push the real ceiling ~30s past what the operator
+        # configured. Cancelled in `_shutdown` on every other exit path.
+        #
+        # When the cap actually fires (vs being cancelled by a natural
+        # hangup) stamp end_reason='soft_cap_reached' before ctx.shutdown so
+        # the shutdown callback writes it.
         def _on_soft_cap_fired() -> None:
             captured["end_reason"] = CallEndReason.SOFT_CAP_REACHED.value
             # Status stays None → on_call_end falls back to "completed".
@@ -840,6 +880,54 @@ async def entrypoint(ctx: JobContext) -> None:
 
     ctx.add_shutdown_callback(_shutdown)
 
+    # Answering machine detection: classify the greeting before we say
+    # anything. The event is written on every call, machine or not, so
+    # classification quality is observable per call. A detection failure
+    # returns None and the call proceeds exactly as it did before AMD.
+    amd_result = await run_amd(session, call_id)
+    await write_call_event(
+        call_id,
+        "amd_result",
+        {
+            "category": amd_result.category.value if amd_result else None,
+            # Truncated like the `error` payload above: an IVR menu or a
+            # rambling voicemail greeting can run to multiple KB, and this
+            # row is written on every single call.
+            "transcript": (amd_result.transcript or "")[:500] if amd_result else None,
+        },
+    )
+    if amd_result is not None and amd_result.category in MACHINE_HANGUP_CATEGORIES:
+        # Voicemail or a dead mailbox — hang up without speaking. We never
+        # leave a message: a partial line on someone's voicemail is worse
+        # than silence. Mirrors `make_agent_hangup`: delete_room disconnects
+        # the phone leg, ctx.shutdown releases the job and drives `_shutdown`.
+        end_reason = amd_end_reason(amd_result.category)
+        captured["status"] = "no_answer"
+        captured["end_reason"] = end_reason
+        logger.info(
+            "call_id=%s answered by a machine (%s) — hanging up",
+            call_id,
+            amd_result.category.value,
+        )
+        try:
+            await ctx.delete_room()
+        except Exception:
+            logger.exception("delete_room failed after machine detection")
+        ctx.shutdown(reason=end_reason)
+        return
+
+    # AMD holds the greeting for up to its detection window, and the callee
+    # can hang up inside it. `AgentSession.say` raises RuntimeError once the
+    # activity is torn down, so a greeting that arrives after the session
+    # died must not escape entrypoint — the shutdown callback registered
+    # above already finalizes the row.
+    try:
+        await speak_greeting(session, metadata)
+    except Exception:
+        logger.exception(
+            "call_id=%s greeting failed; session closed during detection", call_id
+        )
+
 
 __all__ = [
     "AI_DISCLOSURE_LINE",
@@ -856,6 +944,7 @@ __all__ = [
     "entrypoint",
     "is_sip_answer_signal",
     "make_agent_hangup",
+    "make_agent_send_dtmf",
     "mark_call_answered",
     "on_call_end",
     "parse_metadata",

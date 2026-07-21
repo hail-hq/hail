@@ -30,13 +30,19 @@ class ToolContext:
     """Capability handles the voicebot supplies per call.
 
     ``api`` is None when HAIL_INTERNAL_SECRET is unset (send tools are
-    unavailable then); ``hangup`` is None outside a live session.
+    unavailable then); ``hangup`` and ``send_dtmf`` are None outside a live
+    session.
+
+    ``send_dtmf`` takes the already-validated digit string and publishes it to
+    the SIP leg. Keeping it a handle (rather than importing ``livekit`` here)
+    is what keeps ``core`` free of transport dependencies.
     """
 
     call_id: uuid.UUID
     organization_id: uuid.UUID
     api: AgentApiClient | None
     hangup: Callable[[], Awaitable[None]] | None
+    send_dtmf: Callable[[str], Awaitable[None]] | None
 
 
 @dataclass(frozen=True)
