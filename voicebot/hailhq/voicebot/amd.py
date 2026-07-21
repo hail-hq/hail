@@ -50,6 +50,35 @@ NO_SPEECH_THRESHOLD_SECONDS = 6.0
 # that budget never started.
 DETECTION_TIMEOUT_SECONDS = 30.0
 
+# The verdict that means "we are talking to a phone tree, not a person".
+MACHINE_IVR_CATEGORY = "machine-ivr"
+
+# Handed to ``session.generate_reply`` the moment AMD reports a phone tree.
+# This exists because the alternative — our hardcoded ``session.say``
+# disclosure — is TTS-only and never invokes the LLM, so the model got no
+# turn in which it could press a key and the menu simply timed out. A
+# generated reply is a real LLM turn with the full tool set attached.
+#
+# The disclosure is deliberately folded in here rather than spoken up front:
+# 47 CFR 64.1200(b)(1) is about identifying yourself to a *person*, and a
+# menu prompt is not one. It is spoken for real, via `speak_greeting`, as
+# soon as a human is on the line.
+IVR_NAVIGATION_INSTRUCTIONS = """\
+You have reached an automated phone menu, not a person. This was the menu:
+
+{transcript}
+
+Use the send_dtmf tool to press the option that best advances the reason for \
+your call. Press keys — do not speak your choice, the menu cannot hear you. \
+If no option fits, press the one for a human operator or reception. Say \
+nothing until a person is on the line."""
+
+
+def ivr_navigation_instructions(transcript: str | None) -> str:
+    """The prompt handed to the LLM when AMD reports a phone tree."""
+    menu = (transcript or "").strip() or "(the menu text was not captured)"
+    return IVR_NAVIGATION_INSTRUCTIONS.format(transcript=menu)
+
 
 def amd_end_reason(category: str) -> str:
     """The ``call_end_reason`` for a machine category we hang up on."""
@@ -115,8 +144,11 @@ async def run_amd(session: AgentSession, call_id: UUID) -> AMDPredictionEvent | 
 
 __all__ = [
     "DETECTION_TIMEOUT_SECONDS",
+    "IVR_NAVIGATION_INSTRUCTIONS",
     "MACHINE_HANGUP_CATEGORIES",
+    "MACHINE_IVR_CATEGORY",
     "NO_SPEECH_THRESHOLD_SECONDS",
+    "ivr_navigation_instructions",
     "amd_end_reason",
     "run_amd",
 ]
