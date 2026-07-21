@@ -64,6 +64,65 @@ async def test_send_sms_success(provider: TwilioSmsProvider) -> None:
 
 
 @responses.activate
+async def test_send_sms_passes_status_callback_when_set(
+    provider: TwilioSmsProvider,
+) -> None:
+    responses.add(
+        responses.POST,
+        f"{API_BASE}/Messages.json",
+        json={
+            "sid": "SM_callback1234567890abcdef1234",
+            "account_sid": ACCOUNT_SID,
+            "to": "+14155551234",
+            "from": "+14155559999",
+            "body": "Hello from Hail",
+            "status": "queued",
+            "num_segments": "1",
+            "error_code": None,
+        },
+        status=201,
+    )
+
+    await provider.send_sms(
+        from_e164="+14155559999",
+        to_e164="+14155551234",
+        body="Hello from Hail",
+        status_callback_url="https://api.hail.test/sms/status",
+    )
+
+    sent_body = parse_qs(responses.calls[0].request.body)
+    assert sent_body["StatusCallback"] == ["https://api.hail.test/sms/status"]
+
+
+@responses.activate
+async def test_send_sms_omits_status_callback_when_not_set(
+    provider: TwilioSmsProvider,
+) -> None:
+    responses.add(
+        responses.POST,
+        f"{API_BASE}/Messages.json",
+        json={
+            "sid": "SM_nocallback1234567890abcdef123",
+            "account_sid": ACCOUNT_SID,
+            "to": "+14155551234",
+            "from": "+14155559999",
+            "body": "Hello from Hail",
+            "status": "queued",
+            "num_segments": "1",
+            "error_code": None,
+        },
+        status=201,
+    )
+
+    await provider.send_sms(
+        from_e164="+14155559999", to_e164="+14155551234", body="Hello from Hail"
+    )
+
+    sent_body = parse_qs(responses.calls[0].request.body)
+    assert "StatusCallback" not in sent_body
+
+
+@responses.activate
 async def test_send_sms_multi_segment(provider: TwilioSmsProvider) -> None:
     long_body = "x" * 200  # over the 160-char single-segment threshold
     responses.add(

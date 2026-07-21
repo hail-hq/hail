@@ -85,9 +85,22 @@ The full set is the `WebhookEventType` enum in
 - **`email.complained`** — the recipient marked the message as spam.
 - **`email.opened`** — the recipient opened the message (image tracked, approximate).
 - **`email.clicked`** — the recipient clicked a tracked link.
+- **`email.send_failed`** — an outbound email failed to send.
 - **`sms.received`** — an inbound SMS arrived and was accepted. Delivered through
   the same signed, retried webhook worker as the email events (`X-Hail-Signature`,
   `X-Hail-Event`, `X-Hail-Delivery`); the `X-Hail-Email-Domain` header is omitted.
+- **`sms.delivered`** — the carrier confirmed delivery (requires Twilio delivery receipts).
+- **`sms.undelivered`** — the carrier reported the message was not delivered.
+- **`sms.failed`** — the send failed (transport error or carrier rejection).
+
+**Call lifecycle** — covers `answered`, `completed`, `failed`, `busy`, `no_answer`
+only (no `ringing` or `canceled` events; no data source):
+
+- **`call.answered`** — the callee picked up (call entered in-progress).
+- **`call.completed`** — the call ended normally.
+- **`call.failed`** — the call failed (setup error, trunk/media failure, or force-closed).
+- **`call.busy`** — the callee was busy or rejected.
+- **`call.no_answer`** — the callee did not answer.
 
 ## Payload
 

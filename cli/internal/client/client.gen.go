@@ -539,6 +539,11 @@ func (e WebhookDeliveryResponseStatus) Valid() bool {
 
 // Defines values for WebhookSubscriptionCreateEventTypes.
 const (
+	WebhookSubscriptionCreateEventTypesCallAnswered            WebhookSubscriptionCreateEventTypes = "call.answered"
+	WebhookSubscriptionCreateEventTypesCallBusy                WebhookSubscriptionCreateEventTypes = "call.busy"
+	WebhookSubscriptionCreateEventTypesCallCompleted           WebhookSubscriptionCreateEventTypes = "call.completed"
+	WebhookSubscriptionCreateEventTypesCallFailed              WebhookSubscriptionCreateEventTypes = "call.failed"
+	WebhookSubscriptionCreateEventTypesCallNoAnswer            WebhookSubscriptionCreateEventTypes = "call.no_answer"
 	WebhookSubscriptionCreateEventTypesEmailBounced            WebhookSubscriptionCreateEventTypes = "email.bounced"
 	WebhookSubscriptionCreateEventTypesEmailClicked            WebhookSubscriptionCreateEventTypes = "email.clicked"
 	WebhookSubscriptionCreateEventTypesEmailComplained         WebhookSubscriptionCreateEventTypes = "email.complained"
@@ -547,12 +552,26 @@ const (
 	WebhookSubscriptionCreateEventTypesEmailOpened             WebhookSubscriptionCreateEventTypes = "email.opened"
 	WebhookSubscriptionCreateEventTypesEmailReceived           WebhookSubscriptionCreateEventTypes = "email.received"
 	WebhookSubscriptionCreateEventTypesEmailReceivedSuppressed WebhookSubscriptionCreateEventTypes = "email.received.suppressed"
+	WebhookSubscriptionCreateEventTypesEmailSendFailed         WebhookSubscriptionCreateEventTypes = "email.send_failed"
+	WebhookSubscriptionCreateEventTypesSmsDelivered            WebhookSubscriptionCreateEventTypes = "sms.delivered"
+	WebhookSubscriptionCreateEventTypesSmsFailed               WebhookSubscriptionCreateEventTypes = "sms.failed"
 	WebhookSubscriptionCreateEventTypesSmsReceived             WebhookSubscriptionCreateEventTypes = "sms.received"
+	WebhookSubscriptionCreateEventTypesSmsUndelivered          WebhookSubscriptionCreateEventTypes = "sms.undelivered"
 )
 
 // Valid indicates whether the value is a known member of the WebhookSubscriptionCreateEventTypes enum.
 func (e WebhookSubscriptionCreateEventTypes) Valid() bool {
 	switch e {
+	case WebhookSubscriptionCreateEventTypesCallAnswered:
+		return true
+	case WebhookSubscriptionCreateEventTypesCallBusy:
+		return true
+	case WebhookSubscriptionCreateEventTypesCallCompleted:
+		return true
+	case WebhookSubscriptionCreateEventTypesCallFailed:
+		return true
+	case WebhookSubscriptionCreateEventTypesCallNoAnswer:
+		return true
 	case WebhookSubscriptionCreateEventTypesEmailBounced:
 		return true
 	case WebhookSubscriptionCreateEventTypesEmailClicked:
@@ -569,7 +588,15 @@ func (e WebhookSubscriptionCreateEventTypes) Valid() bool {
 		return true
 	case WebhookSubscriptionCreateEventTypesEmailReceivedSuppressed:
 		return true
+	case WebhookSubscriptionCreateEventTypesEmailSendFailed:
+		return true
+	case WebhookSubscriptionCreateEventTypesSmsDelivered:
+		return true
+	case WebhookSubscriptionCreateEventTypesSmsFailed:
+		return true
 	case WebhookSubscriptionCreateEventTypesSmsReceived:
+		return true
+	case WebhookSubscriptionCreateEventTypesSmsUndelivered:
 		return true
 	default:
 		return false
@@ -578,6 +605,11 @@ func (e WebhookSubscriptionCreateEventTypes) Valid() bool {
 
 // Defines values for WebhookSubscriptionPatchEventTypes.
 const (
+	WebhookSubscriptionPatchEventTypesCallAnswered            WebhookSubscriptionPatchEventTypes = "call.answered"
+	WebhookSubscriptionPatchEventTypesCallBusy                WebhookSubscriptionPatchEventTypes = "call.busy"
+	WebhookSubscriptionPatchEventTypesCallCompleted           WebhookSubscriptionPatchEventTypes = "call.completed"
+	WebhookSubscriptionPatchEventTypesCallFailed              WebhookSubscriptionPatchEventTypes = "call.failed"
+	WebhookSubscriptionPatchEventTypesCallNoAnswer            WebhookSubscriptionPatchEventTypes = "call.no_answer"
 	WebhookSubscriptionPatchEventTypesEmailBounced            WebhookSubscriptionPatchEventTypes = "email.bounced"
 	WebhookSubscriptionPatchEventTypesEmailClicked            WebhookSubscriptionPatchEventTypes = "email.clicked"
 	WebhookSubscriptionPatchEventTypesEmailComplained         WebhookSubscriptionPatchEventTypes = "email.complained"
@@ -586,12 +618,26 @@ const (
 	WebhookSubscriptionPatchEventTypesEmailOpened             WebhookSubscriptionPatchEventTypes = "email.opened"
 	WebhookSubscriptionPatchEventTypesEmailReceived           WebhookSubscriptionPatchEventTypes = "email.received"
 	WebhookSubscriptionPatchEventTypesEmailReceivedSuppressed WebhookSubscriptionPatchEventTypes = "email.received.suppressed"
+	WebhookSubscriptionPatchEventTypesEmailSendFailed         WebhookSubscriptionPatchEventTypes = "email.send_failed"
+	WebhookSubscriptionPatchEventTypesSmsDelivered            WebhookSubscriptionPatchEventTypes = "sms.delivered"
+	WebhookSubscriptionPatchEventTypesSmsFailed               WebhookSubscriptionPatchEventTypes = "sms.failed"
 	WebhookSubscriptionPatchEventTypesSmsReceived             WebhookSubscriptionPatchEventTypes = "sms.received"
+	WebhookSubscriptionPatchEventTypesSmsUndelivered          WebhookSubscriptionPatchEventTypes = "sms.undelivered"
 )
 
 // Valid indicates whether the value is a known member of the WebhookSubscriptionPatchEventTypes enum.
 func (e WebhookSubscriptionPatchEventTypes) Valid() bool {
 	switch e {
+	case WebhookSubscriptionPatchEventTypesCallAnswered:
+		return true
+	case WebhookSubscriptionPatchEventTypesCallBusy:
+		return true
+	case WebhookSubscriptionPatchEventTypesCallCompleted:
+		return true
+	case WebhookSubscriptionPatchEventTypesCallFailed:
+		return true
+	case WebhookSubscriptionPatchEventTypesCallNoAnswer:
+		return true
 	case WebhookSubscriptionPatchEventTypesEmailBounced:
 		return true
 	case WebhookSubscriptionPatchEventTypesEmailClicked:
@@ -608,7 +654,15 @@ func (e WebhookSubscriptionPatchEventTypes) Valid() bool {
 		return true
 	case WebhookSubscriptionPatchEventTypesEmailReceivedSuppressed:
 		return true
+	case WebhookSubscriptionPatchEventTypesEmailSendFailed:
+		return true
+	case WebhookSubscriptionPatchEventTypesSmsDelivered:
+		return true
+	case WebhookSubscriptionPatchEventTypesSmsFailed:
+		return true
 	case WebhookSubscriptionPatchEventTypesSmsReceived:
+		return true
+	case WebhookSubscriptionPatchEventTypesSmsUndelivered:
 		return true
 	default:
 		return false

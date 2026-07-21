@@ -19,7 +19,7 @@ def test_create_rejects_unknown_event_type():
     with pytest.raises(ValidationError):
         WebhookSubscriptionCreate(
             target_url="https://example.com/h",
-            event_types=["call.completed"],  # type: ignore[arg-type]
+            event_types=["call.ringing"],  # type: ignore[arg-type]
         )
 
 
@@ -28,6 +28,27 @@ def test_create_accepts_email_received():
         target_url="https://example.com/h", event_types=["email.received"]
     )
     assert sub.event_types == ["email.received"]
+
+
+@pytest.mark.parametrize(
+    "event",
+    [
+        "call.answered",
+        "call.completed",
+        "call.failed",
+        "call.busy",
+        "call.no_answer",
+        "sms.delivered",
+        "sms.undelivered",
+        "sms.failed",
+        "email.send_failed",
+    ],
+)
+def test_create_accepts_new_lifecycle_event(event):
+    sub = WebhookSubscriptionCreate(
+        target_url="https://example.com/h", event_types=[event]
+    )
+    assert sub.event_types == [event]
 
 
 def test_patch_allows_partial():

@@ -21,6 +21,8 @@ from hailhq.core.models import (
     AuditLog,
     Call,
     CallEvent,
+    WebhookDelivery,
+    WebhookSubscription,
 )
 from hailhq.core.pool import CALL_META_FROM_POOL
 from .conftest import insert_org_and_key
@@ -314,6 +316,59 @@ async def test_post_calls_livekit_failure_marks_call_failed(
         "AD_test_dispatch", "hail-test-room"
     )
     livekit_mock.delete_room.assert_awaited_once_with("hail-test-room")
+
+
+async def test_post_calls_livekit_failure_emits_call_failed_webhook(
+    client: httpx.AsyncClient,
+    async_session: AsyncSession,
+    org_and_key: tuple[str, ApiKey, str],
+    livekit_mock: AsyncMock,
+    add_phone_number,
+) -> None:
+    """A setup failure that transitions the call to failed fans out call.failed."""
+    org_id, _, plain = org_and_key
+    await add_phone_number(async_session, org_id)
+
+    async_session.add(
+        WebhookSubscription(
+            organization_id=org_id,
+            target_url="https://example.com/firehose",
+            secret_encrypted="hash",
+            event_types=["call.failed"],
+        )
+    )
+    await async_session.commit()
+
+    livekit_mock.create_sip_participant.side_effect = RuntimeError("trunk down")
+
+    resp = await client.post(
+        "/calls",
+        json={
+            "to": "+14155559999",
+            "system_prompt": "hi",
+            "recipient_consent": True,
+        },
+        headers={"Authorization": f"Bearer {plain}"},
+    )
+    assert resp.status_code == 502
+
+    call = (await async_session.execute(select(Call))).scalar_one()
+    assert call.status == "failed"
+
+    rows = (
+        (
+            await async_session.execute(
+                select(WebhookDelivery).where(
+                    WebhookDelivery.event_type == "call.failed"
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert len(rows) == 1
+    assert rows[0].payload["data"]["id"] == str(call.id)
+    assert rows[0].payload["data"]["status"] == "failed"
 
 
 # --------------------------------------------------------------------------- #
