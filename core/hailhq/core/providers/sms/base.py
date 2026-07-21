@@ -37,7 +37,11 @@ class SmsProvider(ABC):
 
     @abstractmethod
     async def send_sms(
-        self, from_e164: str, to_e164: str, body: str
+        self,
+        from_e164: str,
+        to_e164: str,
+        body: str,
+        status_callback_url: str | None = None,
     ) -> ProviderSmsResult:
         """Send a single SMS.
 
@@ -45,6 +49,10 @@ class SmsProvider(ABC):
         rejection (e.g. an invalid number) is not raised — it is returned
         as a ``ProviderSmsResult`` with ``error_code`` populated and
         ``status`` reflecting the failure.
+
+        ``status_callback_url``, when set, asks the carrier to POST
+        delivery-status updates (e.g. delivered/undelivered) to that URL
+        as the message transitions after the initial accept.
         """
 
     @abstractmethod

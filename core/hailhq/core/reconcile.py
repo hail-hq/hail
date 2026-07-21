@@ -30,6 +30,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from hailhq.core.call_end_reasons import CallEndReason
 from hailhq.core.models import Call, CallEvent
 from hailhq.core.schemas import TERMINAL_CALL_STATUSES
+from hailhq.core.webhook_fanout import fanout_call_event
 
 
 async def sweep_stale_calls(
@@ -51,7 +52,7 @@ async def sweep_stale_calls(
     sweep idempotent.
     """
     select_stmt = text("""
-        SELECT c.id, c.status
+        SELECT c.id, c.status, c.organization_id
           FROM calls c
          WHERE c.status NOT IN :terminal_statuses
            AND c.max_duration_seconds IS NOT NULL
@@ -83,7 +84,7 @@ async def sweep_stale_calls(
             ended_at=func.now(),
         )
     )
-    for call_id, prior_status in rows:
+    for call_id, prior_status, organization_id in rows:
         session.add(
             CallEvent(
                 call_id=call_id,
@@ -94,6 +95,17 @@ async def sweep_stale_calls(
                     "reason": CallEndReason.SWEEPER_TIMEOUT.value,
                 },
             )
+        )
+        await fanout_call_event(
+            session,
+            organization_id=organization_id,
+            event_type="call.failed",
+            event_id=call_id,
+            data={
+                "id": str(call_id),
+                "status": "failed",
+                "end_reason": CallEndReason.SWEEPER_TIMEOUT.value,
+            },
         )
     return ids
 

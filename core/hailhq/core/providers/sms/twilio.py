@@ -40,14 +40,23 @@ class TwilioSmsProvider(SmsProvider):
         self._client = client
 
     async def send_sms(
-        self, from_e164: str, to_e164: str, body: str
+        self,
+        from_e164: str,
+        to_e164: str,
+        body: str,
+        status_callback_url: str | None = None,
     ) -> ProviderSmsResult:
+        create_kwargs: dict[str, str] = {
+            "to": to_e164,
+            "from_": from_e164,
+            "body": body,
+        }
+        if status_callback_url is not None:
+            create_kwargs["status_callback"] = status_callback_url
         try:
             message = await asyncio.to_thread(
                 self._client.messages.create,
-                to=to_e164,
-                from_=from_e164,
-                body=body,
+                **create_kwargs,
             )
         except TwilioRestException as exc:
             # A carrier/recipient-level rejection (invalid number, unsubscribed,

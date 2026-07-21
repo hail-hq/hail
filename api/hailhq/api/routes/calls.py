@@ -60,6 +60,7 @@ from hailhq.core.schemas import (
 )
 from hailhq.core.secret_cipher import SecretKeyMissing
 from hailhq.core.url_guard import UnsafeUrlError, assert_public_https_url
+from hailhq.core.webhook_fanout import fanout_call_event
 
 logger = logging.getLogger(__name__)
 
@@ -416,6 +417,13 @@ async def create_call(
                         "reason": failure_code,
                     },
                 )
+            )
+            await fanout_call_event(
+                db,
+                organization_id=call.organization_id,
+                event_type="call.failed",
+                event_id=call.id,
+                data={"id": str(call.id), "status": "failed"},
             )
         # No-op when this call didn't hold a pool reservation.
         await release_pool_reservation(db, call_id=call.id)

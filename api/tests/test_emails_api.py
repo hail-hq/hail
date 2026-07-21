@@ -16,7 +16,15 @@ from hailhq.api.routes import emails as emails_routes
 from hailhq.core.config import settings
 from hailhq.core.email_footer import SENT_FOOTER_TEXT
 from hailhq.core.hail_mail import org_prefix_from_id
-from hailhq.core.models import ApiKey, AuditLog, Email, EmailDomain, UsageEvent
+from hailhq.core.models import (
+    ApiKey,
+    AuditLog,
+    Email,
+    EmailDomain,
+    UsageEvent,
+    WebhookDelivery,
+    WebhookSubscription,
+)
 
 from .conftest import insert_org_and_key  # noqa: F401
 
@@ -823,6 +831,60 @@ async def test_post_emails_marks_failed_when_provider_raises(
         .all()
     )
     assert actions == ["email.create", "email.send_failed"]
+
+
+async def test_post_emails_provider_failure_emits_send_failed_webhook(
+    client: httpx.AsyncClient,
+    org_and_key: tuple,
+    email_mock: AsyncMock,
+    async_session: AsyncSession,
+) -> None:
+    """A send failure fans out email.send_failed to subscribers."""
+    org_id, _, plain = org_and_key
+    headers = {"Authorization": f"Bearer {plain}"}
+    await _register_custom_verified(client, headers, domain="acme.com")
+
+    async_session.add(
+        WebhookSubscription(
+            organization_id=org_id,
+            target_url="https://example.com/firehose",
+            secret_encrypted="hash",
+            event_types=["email.send_failed"],
+        )
+    )
+    await async_session.commit()
+
+    email_mock.send_email.side_effect = RuntimeError("MessageRejected")
+
+    resp = await client.post(
+        "/emails",
+        json={
+            "to": ["x@example.com"],
+            "subject": "hi",
+            "body_text": "body",
+            "recipient_consent": True,
+        },
+        headers=headers,
+    )
+    assert resp.status_code == 502
+
+    email = (await async_session.execute(select(Email))).scalar_one()
+    assert email.status == "failed"
+
+    rows = (
+        (
+            await async_session.execute(
+                select(WebhookDelivery).where(
+                    WebhookDelivery.event_type == "email.send_failed"
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert len(rows) == 1
+    assert rows[0].payload["data"]["id"] == str(email.id)
+    assert rows[0].payload["data"]["direction"] == "outbound"
 
 
 # --------------------------------------------------------------------------- #
