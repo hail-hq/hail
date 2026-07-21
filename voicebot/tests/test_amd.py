@@ -170,17 +170,29 @@ def test_amd_end_reason_maps_to_call_end_reason_values() -> None:
 
 
 class _FakeAmdSession:
-    """AgentSession stand-in: event registration, start(), and say()."""
+    """AgentSession stand-in: event registration, start(), say(), reply."""
 
     def __init__(self) -> None:
         self.say_calls: list[str] = []
+        self.replies: list[str] = []
         self.started = False
+        self.handlers: dict[str, list] = {}
 
-    def on(self, _event: str):
+    def on(self, event: str):
         def _register(fn):
+            self.handlers.setdefault(event, []).append(fn)
             return fn
 
         return _register
+
+    def emit_user_turn(self, text: str = "Hello.") -> None:
+        item = SimpleNamespace(role="user", text_content=text)
+        for fn in self.handlers.get("conversation_item_added", []):
+            fn(SimpleNamespace(item=item))
+
+    def generate_reply(self, *, instructions: str) -> Any:
+        self.replies.append(instructions)
+        return SimpleNamespace()
 
     async def start(self, **_kwargs: object) -> None:
         self.started = True
@@ -335,7 +347,7 @@ async def test_machine_categories_hang_up_without_speaking(
     assert refreshed.end_reason == end_reason
 
 
-@pytest.mark.parametrize("category", ["human", "uncertain", "machine-ivr"])
+@pytest.mark.parametrize("category", ["human", "uncertain"])
 async def test_non_hangup_categories_speak_the_disclosure(
     async_session: AsyncSession,
     monkeypatch: pytest.MonkeyPatch,
@@ -350,6 +362,77 @@ async def test_non_hangup_categories_speak_the_disclosure(
     assert session.say_calls == [AI_DISCLOSURE_LINE, "Is this a good time?"]
     assert ctx.delete_room_calls == 0
     assert ctx.shutdown_calls == []
+
+
+# --------------------------------------------------------------------------- #
+# machine-ivr: the production failure this branch fixes
+# --------------------------------------------------------------------------- #
+
+
+async def test_ivr_does_not_speak_the_greeting_into_the_menu(
+    async_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Regression: call fe1d2d08 recited the disclosure at a "press one /
+    press two" menu and pressed nothing, because `session.say` is TTS-only
+    and never gives the LLM a turn."""
+    _call_id, ctx, session = await _drive_entrypoint(
+        async_session, monkeypatch, amd_result=_prediction("machine-ivr")
+    )
+
+    # Nothing spoken at the tree...
+    assert session.say_calls == []
+    # ...and the LLM got a real turn, which is the only thing that can
+    # reach the send_dtmf tool.
+    assert len(session.replies) == 1
+    assert ctx.shutdown_calls == []
+
+
+async def test_ivr_reply_carries_the_menu_and_orders_keypresses(
+    async_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _call_id, _ctx, session = await _drive_entrypoint(
+        async_session, monkeypatch, amd_result=_prediction("machine-ivr")
+    )
+
+    instructions = session.replies[0]
+    assert "hello you have reached" in instructions  # the captured menu
+    assert "send_dtmf" in instructions
+    assert "do not speak" in instructions.lower()
+
+
+async def test_ivr_greeting_is_deferred_to_the_first_person(
+    async_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The disclosure is delayed, never dropped."""
+    from hailhq.voicebot.agent import AI_DISCLOSURE_LINE
+
+    _call_id, _ctx, session = await _drive_entrypoint(
+        async_session, monkeypatch, amd_result=_prediction("machine-ivr")
+    )
+    assert session.say_calls == []
+
+    session.emit_user_turn("Hello, reception.")
+    await asyncio.sleep(0)
+    await asyncio.sleep(0)
+
+    assert session.say_calls == [AI_DISCLOSURE_LINE, "Is this a good time?"]
+
+
+async def test_ivr_greeting_fires_only_once(
+    async_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from hailhq.voicebot.agent import AI_DISCLOSURE_LINE
+
+    _call_id, _ctx, session = await _drive_entrypoint(
+        async_session, monkeypatch, amd_result=_prediction("machine-ivr")
+    )
+
+    for _ in range(3):
+        session.emit_user_turn("Hello?")
+        await asyncio.sleep(0)
+    await asyncio.sleep(0)
+
+    assert session.say_calls.count(AI_DISCLOSURE_LINE) == 1
 
 
 async def test_detection_failure_proceeds_like_a_human_answer(

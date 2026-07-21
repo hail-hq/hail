@@ -45,7 +45,13 @@ from hailhq.core.models import Call, CallEvent, UsageEvent
 from hailhq.core.schemas import TERMINAL_CALL_STATUSES
 from hailhq.core.url_guard import assert_public_https_url
 from hailhq.core.webhook_fanout import fanout_call_event
-from hailhq.voicebot.amd import MACHINE_HANGUP_CATEGORIES, amd_end_reason, run_amd
+from hailhq.voicebot.amd import (
+    MACHINE_HANGUP_CATEGORIES,
+    MACHINE_IVR_CATEGORY,
+    amd_end_reason,
+    ivr_navigation_instructions,
+    run_amd,
+)
 from hailhq.voicebot.pipeline import (
     ProviderKeyError,
     build_session,
@@ -91,6 +97,9 @@ intonation of your speech.
 
 - Help the other party reach the call's goal efficiently. Take the simplest \
 safe step first.
+- If you reach an automated menu, press the keys it asks for instead of \
+speaking — a menu cannot hear you. Choose the option that advances the call, \
+or the one for a human operator when none fits.
 - Give information in small steps and confirm before moving on.
 - Briefly summarize the outcome when you finish a topic or end the call.
 
@@ -237,6 +246,50 @@ async def speak_greeting(session: AgentSession, metadata: dict[str, Any]) -> Non
     )
     if metadata.get("first_message"):
         await session.say(metadata["first_message"], allow_interruptions=True)
+
+
+def arm_deferred_greeting(
+    session: AgentSession,
+    metadata: dict[str, Any],
+    call_id: UUID,
+    tasks: set[asyncio.Task[None]],
+) -> None:
+    """Hold the greeting until someone speaks, then say it exactly once.
+
+    Only used on the ``machine-ivr`` branch. The greeting is still a real,
+    enforced ``session.say`` — it is only *when* it fires that changes, from
+    "immediately, into a menu that cannot hear it" to "on the next turn",
+    which on a single-level tree is the person the menu handed us to.
+
+    Known limitation: on a multi-level tree the next turn is another menu
+    prompt, so the disclosure is spoken into that submenu. That is no worse
+    than the unconditional behavior it replaces, and the person who
+    eventually answers still hears it because the greeting fires before the
+    agent says anything else.
+
+    Registering a second ``conversation_item_added`` listener is fine —
+    ``AgentSession`` inherits ``rtc.EventEmitter``, which fans out to every
+    registered handler, so this does not disturb ``attach_event_handlers``.
+    """
+    spoken = {"done": False}
+
+    @session.on("conversation_item_added")
+    def _on_first_user_turn(ev: Any) -> None:
+        if spoken["done"] or getattr(ev.item, "role", None) != "user":
+            return
+        spoken["done"] = True
+
+        async def _run() -> None:
+            try:
+                await speak_greeting(session, metadata)
+            except Exception:
+                logger.exception(
+                    "call_id=%s deferred greeting failed after IVR", call_id
+                )
+
+        task = asyncio.ensure_future(_run())
+        tasks.add(task)
+        task.add_done_callback(tasks.discard)
 
 
 # Soft-cap announcement spoken when a call hits HAIL_VOICE_MAX_DURATION_SECONDS.
@@ -950,17 +1003,32 @@ async def entrypoint(ctx: JobContext) -> None:
         ctx.shutdown(reason=end_reason)
         return
 
-    # AMD holds the greeting for up to its detection window, and the callee
-    # can hang up inside it. `AgentSession.say` raises RuntimeError once the
-    # activity is torn down, so a greeting that arrives after the session
-    # died must not escape entrypoint — the shutdown callback registered
-    # above already finalizes the row.
-    try:
-        await speak_greeting(session, metadata)
-    except Exception:
-        logger.exception(
-            "call_id=%s greeting failed; session closed during detection", call_id
+    if amd_result is not None and amd_result.category == MACHINE_IVR_CATEGORY:
+        # A phone tree answered. Do NOT speak the greeting here: `session.say`
+        # is TTS-only and never invokes the LLM, so the model would get no
+        # turn in which to press a key — observed in production as the agent
+        # reciting its disclosure into a "press one / press two" menu while
+        # the tree timed out. `generate_reply` is a real LLM turn with
+        # `send_dtmf` attached, which is what actually navigates the menu.
+        # The disclosure is deferred, not dropped: `_speak_deferred_greeting`
+        # fires it the moment a person is on the line.
+        logger.info("call_id=%s phone tree detected — navigating", call_id)
+        arm_deferred_greeting(session, metadata, call_id, event_tasks)
+        session.generate_reply(
+            instructions=ivr_navigation_instructions(amd_result.transcript)
         )
+    else:
+        # AMD holds the greeting for up to its detection window, and the
+        # callee can hang up inside it. `AgentSession.say` raises
+        # RuntimeError once the activity is torn down, so a greeting that
+        # arrives after the session died must not escape entrypoint — the
+        # shutdown callback registered above already finalizes the row.
+        try:
+            await speak_greeting(session, metadata)
+        except Exception:
+            logger.exception(
+                "call_id=%s greeting failed; session closed during detection", call_id
+            )
 
 
 __all__ = [
@@ -971,6 +1039,7 @@ __all__ = [
     "SOFT_CAP_ANNOUNCEMENT",
     "SOFT_CAP_END_REASON",
     "VOICE_PREAMBLE",
+    "arm_deferred_greeting",
     "attach_event_handlers",
     "build_instructions",
     "build_tools_safely",
