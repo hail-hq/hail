@@ -23,11 +23,26 @@ from pydantic import BaseModel
 from hailhq.core.schemas import NumberType
 
 __all__ = [
+    "NumberNotProvisionable",
     "NumberType",
     "ProviderCallStatus",
     "ProviderNumber",
     "VoiceProvider",
 ]
+
+
+class NumberNotProvisionable(Exception):
+    """The carrier refused to provision the requested number for a reason a
+    retry won't fix — most often a country/number-type that needs regulatory
+    verification (a bundle or address) the platform hasn't set up (e.g. GB
+    mobile). Distinct from a transient inventory miss (``LookupError``, a 503)
+    and from transport/auth failures (which propagate). Carries a
+    human-readable ``detail`` for the caller-facing 422.
+    """
+
+    def __init__(self, detail: str) -> None:
+        super().__init__(detail)
+        self.detail = detail
 
 
 class ProviderNumber(BaseModel):

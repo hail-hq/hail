@@ -12,10 +12,12 @@ from __future__ import annotations
 
 import asyncio
 
+from twilio.base.exceptions import TwilioRestException
 from twilio.rest import Client as TwilioClient
 
 from hailhq.core.config import settings
 from hailhq.core.providers.voice.base import (
+    NumberNotProvisionable,
     NumberType,
     ProviderCallStatus,
     ProviderNumber,
@@ -87,10 +89,22 @@ class TwilioVoiceProvider(VoiceProvider):
             )
         chosen = available[0]
 
-        purchased = await asyncio.to_thread(
-            self._client.incoming_phone_numbers.create,
-            phone_number=chosen.phone_number,
-        )
+        try:
+            purchased = await asyncio.to_thread(
+                self._client.incoming_phone_numbers.create,
+                phone_number=chosen.phone_number,
+            )
+        except TwilioRestException as exc:
+            # A 400 at purchase means the number can't be provisioned as
+            # requested — most often a country/number-type that needs a
+            # regulatory bundle or address we haven't set up (e.g. GB mobile:
+            # "Bundle required and not provided"). Surface it as a typed,
+            # non-retryable error the route maps to a 422, not an opaque 500.
+            # Auth (401/403), rate-limit (429), and 5xx transport failures
+            # propagate unchanged.
+            if exc.status == 400:
+                raise NumberNotProvisionable(exc.msg) from exc
+            raise
 
         return ProviderNumber(
             provider_resource_id=purchased.sid,

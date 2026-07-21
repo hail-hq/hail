@@ -93,6 +93,28 @@ async def test_acquire_number_idempotent_replay(
     voice_provider_mock.acquire_number.assert_awaited_once()
 
 
+async def test_acquire_not_provisionable_returns_422_not_500(
+    client, org_and_key, voice_provider_mock
+):
+    """A carrier 'bundle required' rejection (NumberNotProvisionable) surfaces
+    as a clean 422 — not an opaque 500 — and the provider IS reached (unlike
+    the pre-provider allow-list 422). The raw carrier reason is not leaked."""
+    from hailhq.core.providers.voice import NumberNotProvisionable
+
+    voice_provider_mock.acquire_number.side_effect = NumberNotProvisionable(
+        "Bundle required and not provided for country: [GB] and numberType: [MOBILE]"
+    )
+    _, _, plaintext = org_and_key
+    resp = await client.post(
+        "/numbers",
+        json={"country_code": "US", "number_type": "local"},
+        headers={"Authorization": f"Bearer {plaintext}"},
+    )
+    assert resp.status_code == 422, resp.text
+    voice_provider_mock.acquire_number.assert_awaited_once()
+    assert "Bundle" not in resp.text  # raw carrier reason stays server-side
+
+
 async def test_acquire_rejects_unlisted_country_type(
     client, org_and_key, voice_provider_mock
 ):
