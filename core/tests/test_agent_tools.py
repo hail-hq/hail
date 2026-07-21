@@ -18,6 +18,7 @@ def _ctx(**overrides):
         organization_id=uuid.uuid4(),
         api=None,
         hangup=None,
+        send_dtmf=None,
     )
     defaults.update(overrides)
     return ToolContext(**defaults)
@@ -25,8 +26,15 @@ def _ctx(**overrides):
 
 def test_registry_names_and_tiers():
     tools = {t.name: t for t in all_tools()}
-    assert set(tools) == {"end_call", "list_contacts", "send_sms", "send_email"}
+    assert set(tools) == {
+        "end_call",
+        "send_dtmf",
+        "list_contacts",
+        "send_sms",
+        "send_email",
+    }
     assert tools["end_call"].risk_tier == "session_control"
+    assert tools["send_dtmf"].risk_tier == "session_control"
     assert tools["list_contacts"].risk_tier == "read_only"
     assert tools["send_sms"].risk_tier == "outbound_send"
     assert tools["send_email"].risk_tier == "outbound_send"

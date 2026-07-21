@@ -28,6 +28,10 @@ class CallEndReason(StrEnum):
     USER_UNAVAILABLE = "user_unavailable"  # → status=no_answer
     USER_REJECTED = "user_rejected"  # → status=busy
 
+    # answering machine detection (callee picked up, but not a person)
+    VOICEMAIL_REACHED = "voicemail_reached"  # → status=no_answer
+    MACHINE_UNAVAILABLE = "machine_unavailable"  # → status=no_answer
+
     # SIP failures (transport / media / trunk)
     SIP_TRUNK_FAILURE = "sip_trunk_failure"
     CONNECTION_TIMEOUT = "connection_timeout"

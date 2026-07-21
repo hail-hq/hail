@@ -41,6 +41,7 @@ from hailhq.voicebot.agent import (
     entrypoint,
     is_sip_answer_signal,
     make_agent_hangup,
+    make_agent_send_dtmf,
     mark_call_answered,
     on_call_end,
     parse_metadata,
@@ -345,11 +346,13 @@ async def test_on_call_end_inserts_usage_event(async_session: AsyncSession) -> N
     The website's private rater turns that into a dollar debit later.
     """
     call_id = await _make_call_row(async_session)
-    # Backdate started_at so the (now - started_at) delta is roughly 60s.
+    # Backdate the pickup so the (now - answered_at) delta is roughly 60s.
+    # `answered_at` is what gates billing: it means the SIP leg went active.
+    answered = datetime.now(timezone.utc) - timedelta(seconds=60)
     await async_session.execute(
         update(Call)
         .where(Call.id == call_id)
-        .values(started_at=datetime.now(timezone.utc) - timedelta(seconds=60))
+        .values(started_at=answered, answered_at=answered)
     )
     await async_session.commit()
 
@@ -1097,6 +1100,158 @@ async def test_agent_hangup_still_shuts_down_when_delete_room_fails() -> None:
     assert ctx.shutdown_calls == ["agent_end_call"]
 
 
+async def test_agent_send_dtmf_publishes_rfc4733_code() -> None:
+    """The DTMF handle owns only transport; core owns the digit vocabulary."""
+    ctx = FakeJobContext()
+    send_dtmf = make_agent_send_dtmf(ctx)  # type: ignore[arg-type]
+
+    await send_dtmf("#")
+    await send_dtmf("7")
+
+    assert ctx.room.local_participant.dtmf == [(11, "#"), (7, "7")]
+
+
+async def test_on_call_end_bills_a_machine_answered_call(
+    async_session: AsyncSession,
+) -> None:
+    """A voicemail box that picked up burned real minutes — bill them.
+
+    Billing keys off `answered_at` (the SIP leg went active), not the final
+    status, so an AMD hangup recorded as `no_answer` is still billed.
+    """
+    call_id = await _make_call_row(async_session)
+    answered = datetime.now(timezone.utc) - timedelta(seconds=12)
+    await async_session.execute(
+        update(Call)
+        .where(Call.id == call_id)
+        .values(started_at=answered, answered_at=answered)
+    )
+    await async_session.commit()
+
+    await on_call_end(
+        call_id,
+        room_name=f"hail-{call_id}",
+        status_override="no_answer",
+        end_reason_override=CallEndReason.VOICEMAIL_REACHED.value,
+    )
+
+    refreshed = (
+        await async_session.execute(select(Call).where(Call.id == call_id))
+    ).scalar_one()
+    await async_session.refresh(refreshed)
+    assert refreshed.status == "no_answer"
+    assert refreshed.end_reason == CallEndReason.VOICEMAIL_REACHED.value
+
+    rows = (
+        (
+            await async_session.execute(
+                select(UsageEvent).where(UsageEvent.ref == str(call_id))
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert len(rows) == 1
+    assert 10_000 <= rows[0].units <= 20_000
+
+
+async def test_on_call_end_bills_a_completed_call_with_no_answered_at(
+    async_session: AsyncSession,
+) -> None:
+    """A completed call whose answer signal never landed must still bill.
+
+    `mark_call_answered` can miss (DB blip, dropped `sip.callStatus` event),
+    and legacy rows predate `answered_at` entirely. Billing falls back to
+    `started_at` for those, so `status='completed'` remains a sufficient
+    condition alongside `answered_at`.
+    """
+    call_id = await _make_call_row(async_session)
+    await async_session.execute(
+        update(Call)
+        .where(Call.id == call_id)
+        .values(started_at=datetime.now(timezone.utc) - timedelta(seconds=45))
+    )
+    await async_session.commit()
+
+    await on_call_end(call_id, room_name=f"hail-{call_id}")
+
+    rows = (
+        (
+            await async_session.execute(
+                select(UsageEvent).where(UsageEvent.ref == str(call_id))
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert len(rows) == 1
+    assert 40_000 <= rows[0].units <= 55_000
+
+
+async def test_on_call_end_does_not_bill_a_call_that_never_answered(
+    async_session: AsyncSession,
+) -> None:
+    """A genuine no-answer rang but never picked up — nothing to bill."""
+    call_id = await _make_call_row(async_session)
+    # started_at (dial time) is set, answered_at is not: pure ring time.
+    await async_session.execute(
+        update(Call)
+        .where(Call.id == call_id)
+        .values(started_at=datetime.now(timezone.utc) - timedelta(seconds=30))
+    )
+    await async_session.commit()
+
+    await on_call_end(
+        call_id,
+        room_name=f"hail-{call_id}",
+        status_override="no_answer",
+        end_reason_override=CallEndReason.USER_UNAVAILABLE.value,
+    )
+
+    rows = (
+        (
+            await async_session.execute(
+                select(UsageEvent).where(UsageEvent.ref == str(call_id))
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert rows == []
+
+
+async def test_on_call_end_bills_a_call_that_failed_mid_conversation(
+    async_session: AsyncSession,
+) -> None:
+    """Deliberate widening: answered-then-failed minutes were consumed too."""
+    call_id = await _make_call_row(async_session)
+    answered = datetime.now(timezone.utc) - timedelta(seconds=20)
+    await async_session.execute(
+        update(Call)
+        .where(Call.id == call_id)
+        .values(status="in_progress", started_at=answered, answered_at=answered)
+    )
+    await async_session.commit()
+
+    await on_call_end(
+        call_id,
+        room_name=f"hail-{call_id}",
+        status_override="failed",
+        end_reason_override=CallEndReason.AGENT_ERROR.value,
+    )
+
+    rows = (
+        (
+            await async_session.execute(
+                select(UsageEvent).where(UsageEvent.ref == str(call_id))
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert len(rows) == 1
+
+
 async def test_build_tools_safely_degrades_on_failure(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1108,7 +1263,9 @@ async def test_build_tools_safely_degrades_on_failure(
     """
     from hailhq.voicebot import agent as agent_mod
 
-    async def _boom(_metadata: dict, *, call_id: UUID, hangup: object) -> tuple:
+    async def _boom(
+        _metadata: dict, *, call_id: UUID, hangup: object, send_dtmf: object
+    ) -> tuple:
         raise RuntimeError("dead connection during availability checks")
 
     monkeypatch.setattr(agent_mod, "build_agent_tools", _boom)
@@ -1116,9 +1273,12 @@ async def test_build_tools_safely_degrades_on_failure(
     async def _hangup() -> None:
         return None
 
+    async def _send_dtmf(_digit: str) -> None:
+        return None
+
     call_id = UUID("11111111-2222-3333-4444-555555555557")
     # Must not raise.
-    tools, api = await build_tools_safely({}, call_id, _hangup)
+    tools, api = await build_tools_safely({}, call_id, _hangup, _send_dtmf)
 
     assert tools == []
     assert api is None
@@ -1133,7 +1293,9 @@ async def test_build_tools_safely_passes_through_on_success(
     sentinel_tools = [object()]
     sentinel_api = object()
 
-    async def _ok(_metadata: dict, *, call_id: UUID, hangup: object) -> tuple:
+    async def _ok(
+        _metadata: dict, *, call_id: UUID, hangup: object, send_dtmf: object
+    ) -> tuple:
         return sentinel_tools, sentinel_api
 
     monkeypatch.setattr(agent_mod, "build_agent_tools", _ok)
@@ -1141,8 +1303,11 @@ async def test_build_tools_safely_passes_through_on_success(
     async def _hangup() -> None:
         return None
 
+    async def _send_dtmf(_digit: str) -> None:
+        return None
+
     call_id = UUID("11111111-2222-3333-4444-555555555558")
-    tools, api = await build_tools_safely({}, call_id, _hangup)
+    tools, api = await build_tools_safely({}, call_id, _hangup, _send_dtmf)
 
     assert tools is sentinel_tools
     assert api is sentinel_api

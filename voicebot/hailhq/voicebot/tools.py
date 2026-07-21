@@ -58,7 +58,7 @@ def _wrap(spec: ToolSpec, tctx: ToolContext):
 
 
 async def build_agent_tools(
-    metadata: dict[str, Any], *, call_id: UUID, hangup
+    metadata: dict[str, Any], *, call_id: UUID, hangup, send_dtmf
 ) -> tuple[list, AgentApiClient | None]:
     """Build this call's LiveKit tools. Returns (tools, api_client).
 
@@ -98,7 +98,11 @@ async def build_agent_tools(
         api = AgentApiClient(settings.hail_api_url, settings.hail_internal_secret)
 
     tctx = ToolContext(
-        call_id=call_id, organization_id=organization_id, api=api, hangup=hangup
+        call_id=call_id,
+        organization_id=organization_id,
+        api=api,
+        hangup=hangup,
+        send_dtmf=send_dtmf,
     )
 
     available: list[ToolSpec] = []

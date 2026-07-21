@@ -31,8 +31,16 @@ LiveKit Cloud is external. The `hail` Go CLI is a human-facing scriptable tool, 
 1. Caller (agent via MCP, or CLI, or direct HTTP) → `POST /calls` with `{to, from, first_message?, …llm}`.
 2. Hail API creates a LiveKit room and dispatches the voicebot into it.
 3. Voicebot joins; LiveKit places a SIP outbound via the Twilio trunk to `to`.
-4. On pickup, voicebot speaks `first_message` (if set), then runs the STT → LLM → TTS loop.
+4. On pickup, voicebot classifies who answered before saying anything (see below), then speaks the AI disclosure and `first_message` (if set) and runs the STT → LLM → TTS loop.
 5. On hangup, voicebot writes the call record to Postgres and uploads the recording to S3.
+
+### Answering machine detection and DTMF
+
+Every outbound call runs LiveKit's AMD ([`voicebot/hailhq/voicebot/amd.py`](../voicebot/hailhq/voicebot/amd.py)) against the greeting, classifying on the session's own LLM and STT rather than LiveKit Inference. `machine-vm` and `machine-unavailable` hang up without speaking — no message is ever left — and record `status=no_answer` with `end_reason=voicemail_reached` / `machine_unavailable`. `human`, `uncertain`, and `machine-ivr` proceed normally; `machine-ivr` also starts LiveKit's IVR navigation. The verdict lands in `call_events` as an `amd_result` row on every call. A detection failure is non-fatal: the call proceeds as if a human answered.
+
+Billing no longer requires a `completed` status: a call is billed when `answered_at` is set (the SIP leg went active) **or** the call completed normally. The first clause bills a machine-answered call and one that failed mid-conversation; the second keeps billing a completed call whose answer signal never landed.
+
+The agent can press keypad digits at any point via the `send_dtmf` tool ([`core/hailhq/core/agent_tools/send_dtmf.py`](../core/hailhq/core/agent_tools/send_dtmf.py)) — not just after an IVR verdict — so phone trees reached mid-call are navigable.
 
 ## LLM modes
 

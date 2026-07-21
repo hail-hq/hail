@@ -47,6 +47,7 @@ def _tctx():
         organization_id=uuid.uuid4(),
         api=None,
         hangup=None,
+        send_dtmf=None,
     )
 
 
@@ -55,20 +56,26 @@ async def test_empty_opt_out_disables_all_tools():
         {"organization_id": str(uuid.uuid4()), "tools": []},
         call_id=uuid.uuid4(),
         hangup=None,
+        send_dtmf=None,
     )
     assert tools == []
     assert api is None
 
 
 async def test_missing_organization_id_disables_tools():
-    tools, api = await build_agent_tools({}, call_id=uuid.uuid4(), hangup=None)
+    tools, api = await build_agent_tools(
+        {}, call_id=uuid.uuid4(), hangup=None, send_dtmf=None
+    )
     assert tools == []
     assert api is None
 
 
 async def test_malformed_organization_id_disables_tools():
     tools, api = await build_agent_tools(
-        {"organization_id": "not-a-uuid"}, call_id=uuid.uuid4(), hangup=None
+        {"organization_id": "not-a-uuid"},
+        call_id=uuid.uuid4(),
+        hangup=None,
+        send_dtmf=None,
     )
     assert tools == []
     assert api is None
@@ -79,6 +86,7 @@ async def test_malformed_tools_field_disables_tools():
         {"organization_id": str(uuid.uuid4()), "tools": "send_sms"},
         call_id=uuid.uuid4(),
         hangup=None,
+        send_dtmf=None,
     )
     assert tools == []
     assert api is None
@@ -144,6 +152,7 @@ async def test_availability_failure_does_not_poison_session(db, monkeypatch):
         {"organization_id": str(uuid.uuid4())},
         call_id=uuid.uuid4(),
         hangup=None,
+        send_dtmf=None,
     )
     try:
         assert [get_raw_function_info(t).name for t in tools] == ["healthy_tool"]
