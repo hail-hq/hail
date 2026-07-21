@@ -200,9 +200,16 @@ def make_agent_send_dtmf(ctx: JobContext) -> Callable[[str], Awaitable[None]]:
     """
 
     async def _send_dtmf(digit: str) -> None:
-        await ctx.room.local_participant.publish_dtmf(
-            code=DTMF_CODES[digit], digit=digit
-        )
+        code = DTMF_CODES[digit]
+        try:
+            await ctx.room.local_participant.publish_dtmf(code=code, digit=digit)
+        except Exception:
+            # The other side of the same diagnosis problem: without this, a
+            # publish that throws is swallowed by the tool wrapper and the
+            # call just goes quiet with no way to tell why.
+            logger.exception("publish_dtmf failed for digit=%r code=%d", digit, code)
+            raise
+        logger.info("published dtmf digit=%r code=%d", digit, code)
 
     return _send_dtmf
 

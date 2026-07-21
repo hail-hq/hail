@@ -15,6 +15,7 @@ inherits the registry's allowlist, availability gate, failure wrapper, and
 from __future__ import annotations
 
 import asyncio
+import logging
 import uuid
 from typing import Any
 
@@ -39,6 +40,8 @@ DIGIT_DELAY_SECONDS = 0.3
 
 MAX_DIGITS = 32
 
+logger = logging.getLogger("hailhq.core.agent_tools")
+
 
 def normalize_digits(raw: Any) -> str | None:
     """Uppercase + validate ``raw``; ``None`` when it is not a sendable string."""
@@ -59,16 +62,29 @@ async def _always(_org: uuid.UUID, _session: AsyncSession) -> bool:
 async def _execute(ctx: ToolContext, args: dict[str, Any]) -> str:
     if ctx.send_dtmf is None:
         return "I can't press any keys on this call right now."
-    digits = normalize_digits(args.get("digits"))
+    raw = args.get("digits")
+    digits = normalize_digits(raw)
     if digits is None:
+        # Load-bearing for diagnosis: a rejected argument and a published
+        # tone that never reaches the trunk look identical from the outside
+        # (silent call, one tool_call event). The type and value are what
+        # tell them apart — an LLM sending 2 instead of "2" lands here.
+        logger.warning(
+            "call_id=%s send_dtmf rejected argument type=%s value=%r",
+            ctx.call_id,
+            type(raw).__name__,
+            str(raw)[:64],
+        )
         return (
             "I can only press the digits zero through nine, star, pound, or "
             f"the letters A through D, up to {MAX_DIGITS} at a time."
         )
+    logger.info("call_id=%s send_dtmf publishing %r", ctx.call_id, digits)
     for index, digit in enumerate(digits):
         if index:
             await asyncio.sleep(DIGIT_DELAY_SECONDS)
         await ctx.send_dtmf(digit)
+    logger.info("call_id=%s send_dtmf published %d digit(s)", ctx.call_id, len(digits))
     return "Done, I pressed those keys."
 
 
