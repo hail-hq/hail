@@ -255,36 +255,46 @@ async def speak_greeting(session: AgentSession, metadata: dict[str, Any]) -> Non
         await session.say(metadata["first_message"], allow_interruptions=True)
 
 
+DTMF_TOOL_NAME = "send_dtmf"
+
+
 def arm_deferred_greeting(
     session: AgentSession,
     metadata: dict[str, Any],
     call_id: UUID,
     tasks: set[asyncio.Task[None]],
 ) -> None:
-    """Hold the greeting until someone speaks, then say it exactly once.
+    """Hold the greeting until the tree hands us to someone, then say it once.
 
-    Only used on the ``machine-ivr`` branch. The greeting is still a real,
-    enforced ``session.say`` — it is only *when* it fires that changes, from
-    "immediately, into a menu that cannot hear it" to "on the next turn",
-    which on a single-level tree is the person the menu handed us to.
+    Only used on the ``machine-ivr`` branch, in two stages:
 
-    Known limitation: on a multi-level tree the next turn is another menu
-    prompt, so the disclosure is spoken into that submenu. That is no worse
-    than the unconditional behavior it replaces, and the person who
-    eventually answers still hears it because the greeting fires before the
-    agent says anything else.
+    1. **Arm** once ``send_dtmf`` has actually executed. Arming any earlier
+       would catch the tail of the menu prompt we are still listening to.
+    2. **Fire** on ``user_state_changed -> "speaking"``, i.e. on VAD.
 
-    Registering a second ``conversation_item_added`` listener is fine —
-    ``AgentSession`` inherits ``rtc.EventEmitter``, which fans out to every
-    registered handler, so this does not disturb ``attach_event_handlers``.
+    VAD is the load-bearing choice. It is driven by audio energy, not by
+    transcripts, so it is **language-independent**: on call 9647b6c4 the
+    clerk answered in Catalan against an ``en-US`` Deepgram, produced no
+    final transcript at all, and the previous trigger — the first
+    ``conversation_item_added`` with ``role="user"`` — never fired. The
+    agent sat mute while a person said "bona tarda" twice and hung up.
+    Waiting on a transcript makes the greeting hostage to STT language
+    coverage; waiting on VAD does not.
+
+    ``conversation_item_added`` is kept as a second trigger for the case
+    where a transcript lands without a VAD state transition. Whichever
+    arrives first wins; the latch makes the greeting exactly-once.
+
+    Registering extra listeners is fine — ``AgentSession`` inherits
+    ``rtc.EventEmitter``, which fans out to every registered handler, so
+    this does not disturb ``attach_event_handlers``.
     """
-    spoken = {"done": False}
+    state = {"armed": False, "spoken": False}
 
-    @session.on("conversation_item_added")
-    def _on_first_user_turn(ev: Any) -> None:
-        if spoken["done"] or getattr(ev.item, "role", None) != "user":
+    def _speak_once() -> None:
+        if state["spoken"] or not state["armed"]:
             return
-        spoken["done"] = True
+        state["spoken"] = True
 
         async def _run() -> None:
             try:
@@ -297,6 +307,26 @@ def arm_deferred_greeting(
         task = asyncio.ensure_future(_run())
         tasks.add(task)
         task.add_done_callback(tasks.discard)
+
+    @session.on("function_tools_executed")
+    def _on_keypress(ev: Any) -> None:
+        if state["armed"]:
+            return
+        if any(c.name == DTMF_TOOL_NAME for c in getattr(ev, "function_calls", [])):
+            logger.info(
+                "call_id=%s keys pressed — waiting for a voice to greet", call_id
+            )
+            state["armed"] = True
+
+    @session.on("user_state_changed")
+    def _on_user_speaking(ev: Any) -> None:
+        if getattr(ev, "new_state", None) == "speaking":
+            _speak_once()
+
+    @session.on("conversation_item_added")
+    def _on_user_turn(ev: Any) -> None:
+        if getattr(ev.item, "role", None) == "user":
+            _speak_once()
 
 
 # Soft-cap announcement spoken when a call hits HAIL_VOICE_MAX_DURATION_SECONDS.
@@ -1061,6 +1091,7 @@ __all__ = [
     "SOFT_CAP_ANNOUNCEMENT",
     "SOFT_CAP_END_REASON",
     "VOICE_PREAMBLE",
+    "DTMF_TOOL_NAME",
     "arm_deferred_greeting",
     "attach_event_handlers",
     "build_instructions",
