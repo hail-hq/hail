@@ -18,6 +18,25 @@
       "type": "array",
       "minItems": 1,
       "items": { "$ref": "#/$defs/fee" }
+    },
+    "regulatory": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["phone_setup_required", "sms_registration_required"],
+      "properties": {
+        "note": { "type": "string" },
+        "phone_setup_required": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[A-Z]{2}:(local|mobile|toll_free|national)$"
+          }
+        },
+        "sms_registration_required": {
+          "type": "array",
+          "items": { "type": "string", "pattern": "^[A-Z]{2}$" }
+        }
+      }
     }
   },
   "$defs": {
