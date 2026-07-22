@@ -191,6 +191,17 @@ class _FakeAmdSession:
         for fn in self.handlers.get("conversation_item_added", []):
             fn(SimpleNamespace(item=item))
 
+    def emit_keypress(self, name: str = "send_dtmf") -> None:
+        ev = SimpleNamespace(function_calls=[SimpleNamespace(name=name)])
+        for fn in self.handlers.get("function_tools_executed", []):
+            fn(ev)
+
+    def emit_vad_speaking(self) -> None:
+        """VAD heard a voice — no transcript, as with unsupported languages."""
+        ev = SimpleNamespace(new_state="speaking", old_state="listening")
+        for fn in self.handlers.get("user_state_changed", []):
+            fn(ev)
+
     def generate_reply(self, *, instructions: str) -> Any:
         self.replies.append(instructions)
         return SimpleNamespace()
@@ -444,6 +455,62 @@ async def test_ivr_reply_carries_the_menu_and_orders_keypresses(
     assert "do not speak" in instructions.lower()
 
 
+async def test_greeting_fires_on_vad_with_no_transcript(
+    async_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Regression: call 9647b6c4. DTMF routed us to a clerk who answered in
+    Catalan against an en-US Deepgram, so no transcript ever landed and the
+    agent sat mute while a person said "bona tarda" twice. VAD does not care
+    what language it is."""
+    from hailhq.voicebot.agent import AI_DISCLOSURE_LINE
+
+    _call_id, _ctx, session = await _drive_entrypoint(
+        async_session, monkeypatch, amd_result=_prediction("machine-ivr")
+    )
+
+    session.emit_keypress()
+    session.emit_vad_speaking()  # a voice, zero transcripts
+    await asyncio.sleep(0)
+    await asyncio.sleep(0)
+
+    assert session.say_calls == [AI_DISCLOSURE_LINE, "Is this a good time?"]
+
+
+async def test_greeting_stays_held_until_keys_are_pressed(
+    async_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Voice activity from the tail of the menu prompt must not trigger it."""
+    _call_id, _ctx, session = await _drive_entrypoint(
+        async_session, monkeypatch, amd_result=_prediction("machine-ivr")
+    )
+
+    session.emit_vad_speaking()  # menu still talking, no keypress yet
+    session.emit_user_turn("For any other request, press two.")
+    await asyncio.sleep(0)
+    await asyncio.sleep(0)
+
+    assert session.say_calls == []
+
+
+async def test_greeting_fires_once_across_both_triggers(
+    async_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from hailhq.voicebot.agent import AI_DISCLOSURE_LINE
+
+    _call_id, _ctx, session = await _drive_entrypoint(
+        async_session, monkeypatch, amd_result=_prediction("machine-ivr")
+    )
+
+    session.emit_keypress()
+    for _ in range(3):
+        session.emit_vad_speaking()
+        session.emit_user_turn("Hola?")
+        await asyncio.sleep(0)
+    await asyncio.sleep(0)
+
+    assert session.say_calls.count(AI_DISCLOSURE_LINE) == 1
+
+
 async def test_ivr_greeting_is_deferred_to_the_first_person(
     async_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -455,28 +522,12 @@ async def test_ivr_greeting_is_deferred_to_the_first_person(
     )
     assert session.say_calls == []
 
+    session.emit_keypress()
     session.emit_user_turn("Hello, reception.")
     await asyncio.sleep(0)
     await asyncio.sleep(0)
 
     assert session.say_calls == [AI_DISCLOSURE_LINE, "Is this a good time?"]
-
-
-async def test_ivr_greeting_fires_only_once(
-    async_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    from hailhq.voicebot.agent import AI_DISCLOSURE_LINE
-
-    _call_id, _ctx, session = await _drive_entrypoint(
-        async_session, monkeypatch, amd_result=_prediction("machine-ivr")
-    )
-
-    for _ in range(3):
-        session.emit_user_turn("Hello?")
-        await asyncio.sleep(0)
-    await asyncio.sleep(0)
-
-    assert session.say_calls.count(AI_DISCLOSURE_LINE) == 1
 
 
 async def test_detection_failure_proceeds_like_a_human_answer(
