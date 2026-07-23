@@ -4,6 +4,15 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 
 ## [Unreleased]
 
+- `hail tail` call-transcript display overhaul: turns render as `[hail]` /
+  `[human]` (was `[agent]` / `[user]`); pickup speech that AMD attributes
+  to a machine renders as `[machine]` with a plain-language `[amd]`
+  verdict line ("answered by a machine (phone menu)") instead of payload
+  JSON; silent seconds render as dim `.`
+  lines (gaps beyond 10s compress to three dots plus a duration); and
+  `--id` now accepts a bare call UUID or a 4+ char hex prefix (`hail tail
+df10f471`), resolved like git short hashes.
+
 ## [0.17.0] — 2026-07-23
 
 Optional AI disclosure and a voice agent that opens the call itself.

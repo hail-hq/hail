@@ -2,7 +2,6 @@ package cmd
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/spf13/cobra"
 )
@@ -26,14 +25,8 @@ for stream flags (--from-start, --no-follow, --interval, --kind).`,
 }
 
 func runEmailTail(ctx context.Context, opts *Options, f *tailFlags, input string) error {
-	apiClient, err := opts.newClient()
-	if err != nil {
-		return err
-	}
-	id, err := resolveEmailID(ctx, apiClient, input)
-	if err != nil {
-		return err
-	}
-	f.id = fmt.Sprintf("email:%s", id.String())
+	// runTail owns prefix resolution (resolveTailID); this alias only pins
+	// the resource type.
+	f.id = "email:" + input
 	return runTail(ctx, opts, f)
 }

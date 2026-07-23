@@ -172,8 +172,10 @@ func TestTail_RejectsMalformedId(t *testing.T) {
 		id        string
 		mustMatch string
 	}{
-		{"missing colon", "badvalue", "missing ':'"},
-		{"bad uuid", "call:notuuid", "invalid uuid"},
+		// A bare value defaults to a call id; non-hex garbage fails the
+		// local shape check before any HTTP.
+		{"bare non-id", "badvalue", "invalid call id"},
+		{"bad uuid", "call:notuuid", "invalid call id"},
 		{"bare colon", ":", "missing resource type"},
 		{"empty id", "call:", "missing resource id"},
 	}
@@ -324,8 +326,8 @@ func TestTail_DefensiveOnUnknownKind(t *testing.T) {
 	if !strings.Contains(stdout, "\"a\":1") && !strings.Contains(stdout, "\"a\": 1") {
 		t.Errorf("missing payload JSON for unknown kind:\n%s", stdout)
 	}
-	if !strings.Contains(stdout, "[agent]") {
-		t.Errorf("missing [agent] label for fallback:\n%s", stdout)
+	if !strings.Contains(stdout, "[hail]") {
+		t.Errorf("missing [hail] label for fallback:\n%s", stdout)
 	}
 }
 
@@ -580,5 +582,173 @@ func TestTail_UnsupportedType(t *testing.T) {
 	)
 	if err == nil || !strings.Contains(err.Error(), "unsupported resource type") {
 		t.Fatalf("want unsupported-type rejection, got %v", err)
+	}
+}
+
+// TestTail_MachineTranscriptsRelabeled: pickup transcripts that precede a
+// machine AMD verdict render as [machine], never [human]; the amd_result
+// row renders as a compact [amd] verdict, not payload JSON.
+func TestTail_MachineTranscriptsRelabeled(t *testing.T) {
+	tFuture := time.Now().Add(time.Hour)
+	srv := newSequenceServer(t, []sequenceResponse{
+		{http.StatusOK, client.EventStreamResponse{
+			Items: []client.EventResponse{
+				sampleEventInCall("11111111-1111-1111-1111-111111111111", callA, "user_turn",
+					map[string]interface{}{"text": "press one."}, tFuture),
+				sampleEventInCall("22222222-2222-2222-2222-222222222221", callA, "amd_result",
+					map[string]interface{}{"category": "machine-ivr", "transcript": "press one."}, tFuture.Add(time.Second)),
+				sampleEventInCall("33333333-3333-3333-3333-333333333331", callA, "agent_turn",
+					map[string]interface{}{"text": "Hi, this is an AI assistant."}, tFuture.Add(2*time.Second)),
+			},
+			CallStatus: completedStatus(),
+		}},
+	})
+
+	stdout, _, err := runRoot(t,
+		map[string]string{"HAIL_API_KEY": "sk_test", "HAIL_API_URL": srv.URL, "NO_COLOR": "1"},
+		"tail", "--id", "call:"+uuid.UUID(callA).String(),
+	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(stdout, "[machine]") || !strings.Contains(stdout, "press one.") {
+		t.Errorf("machine transcript not relabeled:\n%s", stdout)
+	}
+	if strings.Contains(stdout, "[human]") || strings.Contains(stdout, "[user]") {
+		t.Errorf("machine speech leaked a human/user label:\n%s", stdout)
+	}
+	if !strings.Contains(stdout, "[amd]") || !strings.Contains(stdout, "answered by a machine (phone menu)") {
+		t.Errorf("missing [amd] verdict sentence:\n%s", stdout)
+	}
+	if strings.Contains(stdout, "transcript") {
+		t.Errorf("amd_result should not dump payload JSON:\n%s", stdout)
+	}
+	if !strings.Contains(stdout, "[hail]") {
+		t.Errorf("agent line should render as [hail]:\n%s", stdout)
+	}
+}
+
+// TestTail_HumanPickupFlushesAsHuman: transcripts buffered during AMD
+// flush as [human] when the verdict is human, preserving order before the
+// verdict line.
+func TestTail_HumanPickupFlushesAsHuman(t *testing.T) {
+	tFuture := time.Now().Add(time.Hour)
+	srv := newSequenceServer(t, []sequenceResponse{
+		{http.StatusOK, client.EventStreamResponse{
+			Items: []client.EventResponse{
+				sampleEventInCall("11111111-1111-1111-1111-111111111111", callA, "user_turn",
+					map[string]interface{}{"text": "Hello?"}, tFuture),
+				sampleEventInCall("22222222-2222-2222-2222-222222222221", callA, "amd_result",
+					map[string]interface{}{"category": "human"}, tFuture.Add(time.Second)),
+			},
+			CallStatus: completedStatus(),
+		}},
+	})
+
+	stdout, _, err := runRoot(t,
+		map[string]string{"HAIL_API_KEY": "sk_test", "HAIL_API_URL": srv.URL, "NO_COLOR": "1"},
+		"tail", "--id", "call:"+uuid.UUID(callA).String(),
+	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(stdout, "[human]") || !strings.Contains(stdout, "Hello?") {
+		t.Errorf("human pickup transcript missing:\n%s", stdout)
+	}
+	if strings.Index(stdout, "Hello?") > strings.Index(stdout, "[amd]") {
+		t.Errorf("buffered transcript must print before the verdict line:\n%s", stdout)
+	}
+}
+
+// TestTail_SilenceDotsBetweenEvents: a short gap prints one dim "." line
+// per second; a long gap compresses to three dots plus a duration.
+func TestTail_SilenceDotsBetweenEvents(t *testing.T) {
+	tFuture := time.Now().Add(time.Hour)
+	srv := newSequenceServer(t, []sequenceResponse{
+		{http.StatusOK, client.EventStreamResponse{
+			Items: []client.EventResponse{
+				sampleEventInCall("11111111-1111-1111-1111-111111111111", callA, "agent_turn",
+					map[string]interface{}{"text": "One moment."}, tFuture),
+				sampleEventInCall("22222222-2222-2222-2222-222222222221", callA, "agent_turn",
+					map[string]interface{}{"text": "Still here."}, tFuture.Add(5*time.Second)),
+				sampleEventInCall("33333333-3333-3333-3333-333333333331", callA, "agent_turn",
+					map[string]interface{}{"text": "Back again."}, tFuture.Add(3605*time.Second)),
+			},
+			CallStatus: completedStatus(),
+		}},
+	})
+
+	stdout, _, err := runRoot(t,
+		map[string]string{"HAIL_API_KEY": "sk_test", "HAIL_API_URL": srv.URL, "NO_COLOR": "1"},
+		"tail", "--id", "call:"+uuid.UUID(callA).String(),
+	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	dotLines := 0
+	for _, line := range strings.Split(stdout, "\n") {
+		if line == "." {
+			dotLines++
+		}
+	}
+	// 5 for the 5s gap + 3 for the compressed hour-long gap.
+	if dotLines != 8 {
+		t.Errorf("dot lines = %d, want 8:\n%s", dotLines, stdout)
+	}
+	if !strings.Contains(stdout, "1h0m0s silent") {
+		t.Errorf("missing compressed silence duration:\n%s", stdout)
+	}
+}
+
+// TestTail_BareUUIDDefaultsToCall: --id with a bare UUID (no "call:"
+// prefix) narrows to that call.
+func TestTail_BareUUIDDefaultsToCall(t *testing.T) {
+	srv := newSequenceServer(t, []sequenceResponse{
+		{http.StatusOK, client.EventStreamResponse{CallStatus: completedStatus()}},
+	})
+
+	_, _, err := runRoot(t,
+		map[string]string{"HAIL_API_KEY": "sk_test", "HAIL_API_URL": srv.URL, "NO_COLOR": "1"},
+		"tail", "--id", uuid.UUID(callA).String(),
+	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	got := srv.lastReq.URL.Query().Get("id")
+	want := "call:" + uuid.UUID(callA).String()
+	if got != want {
+		t.Errorf("wire id = %q, want %q", got, want)
+	}
+}
+
+// TestTail_ShortPrefixResolvesViaCallsList: --id call:<prefix> resolves the
+// full UUID through GET /calls before polling events.
+func TestTail_ShortPrefixResolvesViaCallsList(t *testing.T) {
+	var eventsQuery atomic.Value
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		switch {
+		case strings.HasPrefix(r.URL.Path, "/calls"):
+			_ = json.NewEncoder(w).Encode(client.CallListResponse{
+				Items: []client.CallResponse{sampleCall(uuid.UUID(callA).String(), "+15551234567", client.CallResponseStatusCompleted)},
+			})
+		default:
+			eventsQuery.Store(r.URL.Query().Get("id"))
+			_ = json.NewEncoder(w).Encode(client.EventStreamResponse{CallStatus: completedStatus()})
+		}
+	}))
+	defer srv.Close()
+
+	_, _, err := runRoot(t,
+		map[string]string{"HAIL_API_KEY": "sk_test", "HAIL_API_URL": srv.URL, "NO_COLOR": "1"},
+		"tail", "--id", "call:c2a8f1d3",
+	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	want := "call:" + uuid.UUID(callA).String()
+	if got, _ := eventsQuery.Load().(string); got != want {
+		t.Errorf("events wire id = %q, want %q", got, want)
 	}
 }
