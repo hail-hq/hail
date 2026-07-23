@@ -476,14 +476,14 @@ func (r *tailRenderer) renderSilence(ts time.Time) {
 		return
 	}
 	if secs > 10 {
-		for i := 0; i < 3; i++ {
-			r.dotLine(".")
+		for i := 1; i <= 3; i++ {
+			r.dotLine(r.lastShownAt.Add(time.Duration(i)*time.Second), ".")
 		}
-		r.dotLine(fmt.Sprintf("(%s silent)", (time.Duration(secs) * time.Second).String()))
+		r.dotLine(ts, fmt.Sprintf("(%s silent)", (time.Duration(secs)*time.Second).String()))
 		return
 	}
-	for i := 0; i < secs; i++ {
-		r.dotLine(".")
+	for i := 1; i <= secs; i++ {
+		r.dotLine(r.lastShownAt.Add(time.Duration(i)*time.Second), ".")
 	}
 }
 
@@ -499,27 +499,30 @@ func (r *tailRenderer) markQuiet() {
 		// Wall-clock jump — machine suspend, a blocked terminal — not a
 		// live second-by-second wait. Compress like renderSilence instead
 		// of flooding one dot line per elapsed second.
-		for i := 0; i < 3; i++ {
-			r.dotLine(".")
+		for i := 1; i <= 3; i++ {
+			r.dotLine(r.lastShownAt.Add(time.Duration(i)*time.Second), ".")
 		}
-		r.dotLine(fmt.Sprintf("(%s silent)", (time.Duration(secs) * time.Second).String()))
 		advance := time.Duration(secs) * time.Second
+		r.dotLine(r.lastShownAt.Add(advance), fmt.Sprintf("(%s silent)", advance.String()))
 		r.quietAnchor = r.quietAnchor.Add(advance)
 		r.lastShownAt = r.lastShownAt.Add(advance)
 		return
 	}
 	for now.Sub(r.quietAnchor) >= time.Second {
-		r.dotLine(".")
+		r.dotLine(r.lastShownAt.Add(time.Second), ".")
 		r.quietAnchor = r.quietAnchor.Add(time.Second)
 		r.lastShownAt = r.lastShownAt.Add(time.Second)
 	}
 }
 
-func (r *tailRenderer) dotLine(s string) {
+// dotLine writes one waiting line — "[13:50:57] [wait]    ." — timestamped
+// like every other line so silence reads in sequence with the transcript.
+func (r *tailRenderer) dotLine(ts time.Time, s string) {
+	line := fmt.Sprintf("[%s] %-9s %s", ts.UTC().Format("15:04:05"), "[wait]", s)
 	if r.colorize {
-		s = colorDim + s + colorReset
+		line = colorDim + line + colorReset
 	}
-	fmt.Fprintln(r.opts.Stdout, s)
+	fmt.Fprintln(r.opts.Stdout, line)
 }
 
 // eventResourceID picks the id (call, email, or sms) that owns this event,

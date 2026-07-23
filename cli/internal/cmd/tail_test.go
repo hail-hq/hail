@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"regexp"
 	"strings"
 	"sync/atomic"
 	"syscall"
@@ -687,7 +688,7 @@ func TestTail_SilenceDotsBetweenEvents(t *testing.T) {
 	}
 	dotLines := 0
 	for _, line := range strings.Split(stdout, "\n") {
-		if line == "." {
+		if strings.Contains(line, "[wait]") && strings.HasSuffix(line, " .") {
 			dotLines++
 		}
 	}
@@ -695,7 +696,11 @@ func TestTail_SilenceDotsBetweenEvents(t *testing.T) {
 	if dotLines != 8 {
 		t.Errorf("dot lines = %d, want 8:\n%s", dotLines, stdout)
 	}
-	if !strings.Contains(stdout, "1h0m0s silent") {
+	// Dot lines carry the standard timestamp prefix: "[HH:MM:SS] [wait]    ."
+	if !regexp.MustCompile(`(?m)^\[\d{2}:\d{2}:\d{2}\] \[wait\]\s+\.$`).MatchString(stdout) {
+		t.Errorf("dot lines missing timestamped [wait] prefix:\n%s", stdout)
+	}
+	if !strings.Contains(stdout, "[wait]") || !strings.Contains(stdout, "1h0m0s silent") {
 		t.Errorf("missing compressed silence duration:\n%s", stdout)
 	}
 }
