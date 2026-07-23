@@ -55,6 +55,9 @@ class VoiceConfig(BaseModel):
     tts: Literal["cartesia"] = "cartesia"
     vad: Literal["silero"] = "silero"
     turn_detection: Literal["livekit"] = "livekit"
+    # Spoken language for the call (lowercase ISO 639-1, e.g. "fr").
+    # Applied to both STT and TTS; None -> provider defaults (English).
+    language: str | None = Field(default=None, pattern=r"^[a-z]{2}$")
 
 
 CallStatus = Literal[

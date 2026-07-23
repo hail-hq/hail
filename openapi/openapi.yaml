@@ -3686,6 +3686,17 @@ components:
             - type: string
             - type: "null"
           title: Voice Id
+        language:
+          anyOf:
+            - type: string
+              pattern: ^[a-z]{2}$
+            - type: "null"
+          title: Language
+          description:
+            "Spoken language for the call as a lowercase ISO 639-1 code
+            (e.g. 'fr'). Applied to both STT and TTS, so it must be a language the
+            configured STT and TTS models support. Omitted: the providers' defaults
+            (English)."
       additionalProperties: false
       type: object
       title: VoiceConfig

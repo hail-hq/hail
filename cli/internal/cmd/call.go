@@ -22,6 +22,7 @@ type callFlags struct {
 	llmModel       string
 	from           string
 	firstMessage   string
+	language       string
 	tools          []string
 	idempotencyKey string
 }
@@ -72,6 +73,7 @@ Example (minimal):
 	cmd.Flags().StringVar(&f.llmModel, "llm-model", "", "Model name — one of --prompt/--llm-* required (mode B)")
 	cmd.Flags().StringVar(&f.from, "from", "", "Override the from-number (default: first active number on the org)")
 	cmd.Flags().StringVar(&f.firstMessage, "first-message", "", "Spoken on pickup before listening")
+	cmd.Flags().StringVar(&f.language, "language", "", "Spoken language for the call, lowercase ISO 639-1 (e.g. fr); default English")
 	cmd.Flags().StringSliceVar(&f.tools, "tools", nil, "Agent tools to allow (comma-separated or repeated); omit for all available, 'none' to disable all")
 	cmd.Flags().StringVar(&f.idempotencyKey, "idempotency-key", "", "Defaults to a fresh UUID")
 	f.registerConsentFlags(cmd, "call")
@@ -99,6 +101,9 @@ func runCall(cmd *cobra.Command, opts *Options, f *callFlags, toNumber string) e
 		SystemPrompt: strPtr(f.prompt),
 		From:         strPtr(f.from),
 		FirstMessage: strPtr(f.firstMessage),
+	}
+	if f.language != "" {
+		body.VoiceConfig = &client.VoiceConfig{Language: strPtr(f.language)}
 	}
 	if cmd.Flags().Changed("tools") {
 		// [] disables all agent tools; the sentinel word "none" maps to []

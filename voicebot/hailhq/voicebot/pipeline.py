@@ -251,26 +251,32 @@ def build_llm(
     return _house_llm()
 
 
-def _house_tts(voice_id_override: str | None) -> list[agents_tts.TTS]:
+def _house_tts(
+    voice_id_override: str | None, language: str | None
+) -> list[agents_tts.TTS]:
     instances: list[agents_tts.TTS] = []
     if settings.cartesia_api_key:
-        instances.append(
-            cartesia_plugin.TTS(
-                model=settings.cartesia_model,
-                voice=voice_id_override or settings.cartesia_voice_id,
-            )
-        )
+        kwargs: dict[str, Any] = {
+            "model": settings.cartesia_model,
+            "voice": voice_id_override or settings.cartesia_voice_id,
+        }
+        if language:
+            kwargs["language"] = language
+        instances.append(cartesia_plugin.TTS(**kwargs))
     if settings.eleven_api_key:
-        instances.append(
-            elevenlabs_plugin.TTS(
-                voice_id=voice_id_override or settings.elevenlabs_voice_id,
-                model=settings.elevenlabs_model,
-            )
-        )
+        kwargs = {
+            "voice_id": voice_id_override or settings.elevenlabs_voice_id,
+            "model": settings.elevenlabs_model,
+        }
+        if language:
+            kwargs["language"] = language
+        instances.append(elevenlabs_plugin.TTS(**kwargs))
     return instances
 
 
-def _org_tts(org: ResolvedLayer, voice_id_override: str | None) -> agents_tts.TTS:
+def _org_tts(
+    org: ResolvedLayer, voice_id_override: str | None, language: str | None
+) -> agents_tts.TTS:
     voice = voice_id_override or org.params.get("voice_id")
     if org.provider == "cartesia":
         kwargs: dict[str, Any] = {
@@ -282,6 +288,8 @@ def _org_tts(org: ResolvedLayer, voice_id_override: str | None) -> agents_tts.TT
             raise ProviderKeyError("no org or house cartesia key available")
         if voice:
             kwargs["voice"] = voice
+        if language:
+            kwargs["language"] = language
         return cartesia_plugin.TTS(**kwargs)
     if org.provider == "elevenlabs":
         kwargs = {"model": org.params.get("model") or settings.elevenlabs_model}
@@ -291,12 +299,16 @@ def _org_tts(org: ResolvedLayer, voice_id_override: str | None) -> agents_tts.TT
             raise ProviderKeyError("no org or house elevenlabs key available")
         if voice:
             kwargs["voice_id"] = voice
+        if language:
+            kwargs["language"] = language
         return elevenlabs_plugin.TTS(**kwargs)
     raise ProviderKeyError(f"unknown org tts provider '{org.provider}'")
 
 
 def build_tts(
-    org: ResolvedLayer | None = None, voice_id_override: str | None = None
+    org: ResolvedLayer | None = None,
+    voice_id_override: str | None = None,
+    language: str | None = None,
 ) -> agents_tts.TTS:
     """Construct the TTS for one call.
 
@@ -307,15 +319,20 @@ def build_tts(
     single-key self-host still works (tenet 4). With both keys set the two
     are wrapped in a ``FallbackAdapter`` with Cartesia first. With one key
     set that provider is used directly with no adapter.
+
+    ``language`` is the per-call ``voice_config.language`` (ISO 639-1); it is
+    applied to every instance built here — BYO and house fallbacks alike —
+    so a provider failover never silently switches the call's language back
+    to English. ``None`` keeps each plugin's default (English).
     """
     if org is not None:
-        byo = _org_tts(org, voice_id_override)
+        byo = _org_tts(org, voice_id_override, language)
         if org.fallback_enabled:
-            house = _house_tts(voice_id_override)
+            house = _house_tts(voice_id_override, language)
             if house:
                 return agents_tts.FallbackAdapter([byo, *house])
         return byo
-    instances = _house_tts(voice_id_override)
+    instances = _house_tts(voice_id_override, language)
     if not instances:
         raise RuntimeError(
             "No TTS provider configured: set CARTESIA_API_KEY or ELEVEN_API_KEY."
@@ -325,7 +342,9 @@ def build_tts(
     return agents_tts.FallbackAdapter(instances)
 
 
-def build_stt(org: ResolvedLayer | None = None) -> agents_stt.STT:
+def build_stt(
+    org: ResolvedLayer | None = None, language: str | None = None
+) -> agents_stt.STT:
     """Construct the STT for one call.
 
     ``org`` present (mode C, deepgram only today): the org's key, with
@@ -334,13 +353,21 @@ def build_stt(org: ResolvedLayer | None = None) -> agents_stt.STT:
     any other provider fails fast with ``ProviderKeyError`` (matching
     ``_org_llm``/``_org_tts``) rather than silently billing Hail's key for
     a BYO org. ``org`` absent (mode A): Hail's house Deepgram key.
+
+    ``language`` mirrors :func:`build_tts`: applied to every instance,
+    ``None`` keeps the plugin default (``en-US``).
     """
+    house_kwargs: dict[str, Any] = {"model": settings.deepgram_model}
+    if language:
+        house_kwargs["language"] = language
     if org is not None:
         if org.provider != "deepgram":
             raise ProviderKeyError(f"unknown org stt provider '{org.provider}'")
         kwargs: dict[str, Any] = {
             "model": org.params.get("model") or settings.deepgram_model
         }
+        if language:
+            kwargs["language"] = language
         if org.api_key is not None:
             kwargs["api_key"] = org.api_key
         elif not settings.deepgram_api_key:
@@ -348,10 +375,10 @@ def build_stt(org: ResolvedLayer | None = None) -> agents_stt.STT:
         byo = deepgram_plugin.STT(**kwargs)
         if org.fallback_enabled and settings.deepgram_api_key:
             return agents_stt.FallbackAdapter(
-                [byo, deepgram_plugin.STT(model=settings.deepgram_model)]
+                [byo, deepgram_plugin.STT(**house_kwargs)]
             )
         return byo
-    return deepgram_plugin.STT(model=settings.deepgram_model)
+    return deepgram_plugin.STT(**house_kwargs)
 
 
 def build_session(
@@ -359,19 +386,21 @@ def build_session(
     vad: agents_vad.VAD,
     org_cfgs: dict[str, ResolvedLayer] | None = None,
     voice_id_override: str | None = None,
+    language: str | None = None,
 ) -> AgentSession:
     """Build the :class:`AgentSession` for one job.
 
     ``vad`` is the per-process Silero instance loaded once in
     :func:`hailhq.voicebot.agent.prewarm`. ``org_cfgs`` is the org's resolved
-    BYO layers (from :func:`resolve_org_configs`); ``voice_id_override`` is
-    the per-call ``voice_config.voice_id`` from dispatch metadata, which
-    beats any org-level default voice.
+    BYO layers (from :func:`resolve_org_configs`); ``voice_id_override`` and
+    ``language`` are the per-call ``voice_config.voice_id`` /
+    ``voice_config.language`` from dispatch metadata — the voice beats any
+    org-level default, the language pins both STT and TTS.
     """
     org_cfgs = org_cfgs or {}
     return AgentSession(
         vad=vad,
-        stt=build_stt(org_cfgs.get("stt")),
-        tts=build_tts(org_cfgs.get("tts"), voice_id_override),
+        stt=build_stt(org_cfgs.get("stt"), language),
+        tts=build_tts(org_cfgs.get("tts"), voice_id_override, language),
         llm=build_llm(llm_cfg, org_cfgs.get("llm")),
     )

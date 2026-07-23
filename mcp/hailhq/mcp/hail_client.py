@@ -102,6 +102,7 @@ class HailClient:
         llm: dict[str, Any] | None = None,
         from_: str | None = None,
         first_message: str | None = None,
+        language: str | None = None,
         metadata: dict[str, Any] | None = None,
         tools: list[str] | None = None,
         idempotency_key: str | None = None,
@@ -129,6 +130,8 @@ class HailClient:
             fields["llm"] = llm
         if first_message is not None:
             fields["first_message"] = first_message
+        if language is not None:
+            fields["voice_config"] = {"language": language}
         if metadata is not None:
             fields["metadata"] = metadata
         if tools is not None:

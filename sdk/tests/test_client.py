@@ -102,6 +102,31 @@ async def test_calls_create_tools_passthrough(base_url: str, api_key: str) -> No
 
 
 @respx.mock
+async def test_calls_create_language_lands_in_voice_config(
+    base_url: str, api_key: str
+) -> None:
+    """language= lands in voice_config; omitted -> no voice_config key."""
+    route = respx.post(f"{base_url}/calls").mock(
+        return_value=httpx.Response(201, json=make_call_response())
+    )
+    async with Client(api_key=api_key, base_url=base_url) as c:
+        await c.calls.create(
+            to="+15555550123",
+            system_prompt="be polite",
+            recipient_consent=True,
+            language="fr",
+        )
+        await c.calls.create(
+            to="+15555550123",
+            system_prompt="be polite",
+            recipient_consent=True,
+        )
+    bodies = [json.loads(call.request.content) for call in route.calls]
+    assert bodies[0]["voice_config"] == {"language": "fr"}
+    assert "voice_config" not in bodies[1]
+
+
+@respx.mock
 async def test_calls_create_sends_consent_fields(base_url: str, api_key: str) -> None:
     route = respx.post(f"{base_url}/calls").mock(
         return_value=httpx.Response(201, json=make_call_response())
