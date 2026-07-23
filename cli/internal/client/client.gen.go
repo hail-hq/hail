@@ -850,6 +850,9 @@ type BodyUploadEmailAttachment struct {
 
 // CallCreate defines model for CallCreate.
 type CallCreate struct {
+	// AiDisclosure Speak the AI self-disclosure line ('Hi, this is an AI assistant calling on behalf of ...') as the first thing on the call. Enabled by default. Disable only if you have verified the disclosure is not required for this call — 47 CFR 64.1200(b)(1) requires identifying the initiating business at the start of artificial-voice calls in the US, and several jurisdictions have AI bot-disclosure laws. Hail does not verify this for you. The agent still identifies itself as an AI if asked.
+	AiDisclosure *bool `json:"ai_disclosure,omitempty"`
+
 	// ConsentObtainedAt When consent was obtained, if known.
 	ConsentObtainedAt *time.Time `json:"consent_obtained_at,omitempty"`
 

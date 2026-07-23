@@ -4,6 +4,18 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 
 ## [Unreleased]
 
+- `first_message` is now truly optional: without one the agent opens the
+  conversation itself with a generated first turn — reacting to how the
+  call was answered (the AMD pickup transcript) or introducing itself
+  after silence — instead of waiting mute for the callee to speak.
+- `POST /calls` gains `ai_disclosure` (default `true`): set `false` to skip
+  the spoken "this is an AI assistant" line at the start of the call. The
+  line stays non-customizable, the agent still identifies as an AI when
+  asked, and the opt-out is recorded in the audit log — disabling is the
+  caller's responsibility (47 CFR 64.1200(b)(1) and state AI bot-disclosure
+  laws may require it). Exposed via SDK `calls.create(ai_disclosure=...)`,
+  CLI `hail call --ai-disclosure=false`, MCP `place_call(ai_disclosure=...)`.
+
 ## [0.16.0] — 2026-07-23
 
 Multi-language calls and a more natural-sounding voice agent.

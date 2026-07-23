@@ -114,6 +114,7 @@ async def place_call(
     from_: str | None = None,
     first_message: str | None = None,
     language: str | None = None,
+    ai_disclosure: bool = True,
     metadata: dict[str, Any] | None = None,
     tools: list[str] | None = None,
     idempotency_key: str | None = None,
@@ -132,6 +133,7 @@ async def place_call(
             from_=from_,
             first_message=first_message,
             language=language,
+            ai_disclosure=ai_disclosure,
             metadata=metadata,
             tools=tools,
             idempotency_key=idempotency_key,
@@ -536,6 +538,7 @@ def register_tools(
         from_: str | None = None,
         first_message: str | None = None,
         language: str | None = None,
+        ai_disclosure: bool = True,
         metadata: dict[str, Any] | None = None,
         tools: list[str] | None = None,
         idempotency_key: str | None = None,
@@ -553,10 +556,18 @@ def register_tools(
 
         ``to`` must be E.164 (e.g. ``+14155551234``). ``from_`` is
         optional and defaults to the first active number on your org.
-        ``first_message`` is spoken on pickup before listening.
+        ``first_message`` is spoken verbatim on pickup; omit it to let
+        the agent open the conversation itself — it reacts to how the
+        call was answered, or introduces itself after silence.
         ``language`` sets the call's spoken language for both
         speech-to-text and text-to-speech, as a lowercase ISO 639-1 code
         (e.g. ``"fr"``); omit for English.
+        ``ai_disclosure=False`` skips the spoken "this is an AI
+        assistant" line at the start of the call. Leave enabled unless
+        the user has verified it is not required for this call — US
+        artificial-voice calls (47 CFR 64.1200(b)(1)) and several AI
+        bot-disclosure laws require it, and Hail does not verify this.
+        The agent still identifies itself as an AI if asked.
         ``metadata`` is free-form JSON attached to the call record.
         ``tools`` are the agent tools to allow on this call. Omit for all
         available; pass ``[]`` to disable.
@@ -597,6 +608,7 @@ def register_tools(
                     from_=from_,
                     first_message=first_message,
                     language=language,
+                    ai_disclosure=ai_disclosure,
                     metadata=metadata,
                     tools=tools,
                     idempotency_key=idempotency_key,

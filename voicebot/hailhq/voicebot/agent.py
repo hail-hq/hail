@@ -166,8 +166,8 @@ def build_instructions(system_prompt: str | None) -> str:
     return f"{VOICE_PREAMBLE}\n\n# Caller instructions\n\n{caller}"
 
 
-# Proactive AI disclosure — spoken unconditionally as the first thing on
-# every call, immediately after session.start(). Unlike VOICE_PREAMBLE (LLM
+# Proactive AI disclosure — spoken by default as the first thing on every
+# call, immediately after session.start(). Unlike VOICE_PREAMBLE (LLM
 # instructions the model could ignore), this is a literal session.say() so
 # it is a real, enforced disclosure, not a prompt hope. When the API
 # resolved the requesting organization's display name, the line names it —
@@ -176,7 +176,11 @@ def build_instructions(system_prompt: str | None) -> str:
 # wording. Only the name is interpolated; the template is hardcoded and
 # not reachable/overridable via the public API: org_name arrives in the
 # server-built dispatch metadata (resolved from the org record), never
-# from body.system_prompt, body.first_message, or body.metadata.
+# from body.system_prompt, body.first_message, or body.metadata. Callers
+# can opt out per call via ``ai_disclosure: false`` (the API records the
+# opt-out in the audit log; the responsibility for it is theirs) — but the
+# line itself stays non-customizable, and the preamble still makes the
+# agent identify as an AI when asked.
 _DISCLOSURE_PREFIX = "Hi, this is an AI assistant calling on behalf of "
 
 AI_DISCLOSURE_LINE = _DISCLOSURE_PREFIX + "whoever requested this call."
@@ -273,20 +277,70 @@ async def build_tools_safely(
         return [], None
 
 
-async def speak_greeting(session: AgentSession, metadata: dict[str, Any]) -> None:
-    """Speak the mandatory AI disclosure, then the caller's ``first_message`` if set.
+# Spoken opening when the caller supplied no ``first_message``. A real LLM
+# turn, mirroring the IVR branch's reasoning: ``session.say`` is TTS-only,
+# so without this a call with no ``first_message`` opened in dead air —
+# nothing spoken beyond the disclosure and no LLM turn until the callee
+# spoke first. The AMD pickup transcript, when there is one, lets the model
+# react to how the call was answered ("Joe's Pizza, good evening") instead
+# of talking past it; after 6s of pickup silence (AMD's no-speech
+# threshold) the transcript is empty and the model introduces itself cold.
+_OPENING_BASE = (
+    "The call was just answered. Open the conversation: briefly greet the "
+    "person and say why you are calling, following your instructions, then "
+    "give them room to respond."
+)
 
-    The disclosure is unconditional and always first. Its template is not
-    reachable via caller-controlled fields (``body.system_prompt`` /
+
+def opening_instructions(pickup_transcript: str | None) -> str:
+    """The prompt for the generated opening turn (no caller ``first_message``)."""
+    heard = (pickup_transcript or "").strip()
+    if heard:
+        return (
+            f'{_OPENING_BASE} They answered the phone saying: "{heard}" — '
+            "respond to that naturally."
+        )
+    return f"{_OPENING_BASE} They have not said anything yet."
+
+
+async def speak_greeting(
+    session: AgentSession,
+    metadata: dict[str, Any],
+    pickup_transcript: str | None = None,
+    *,
+    generate_opening: bool = True,
+) -> None:
+    """Open the call: disclosure (unless opted out), then the first message.
+
+    The disclosure leads by default and can only be skipped, never
+    customized or reordered: its template is not reachable via
+    caller-controlled fields (``body.system_prompt`` /
     ``body.first_message``); only ``org_name`` — resolved server-side by
-    the API from the organization record — is interpolated into it. Call
-    this right after ``session.start()``.
+    the API from the organization record — is interpolated into it, and a
+    caller-supplied ``first_message`` can never precede it. The
+    ``ai_disclosure`` default is ``True`` so a dispatch that predates the
+    field (rolling deploy) keeps the disclosure.
+
+    A caller ``first_message`` is spoken verbatim. Without one, the LLM
+    generates the opening (see :func:`opening_instructions`) so the call
+    never opens in dead air — including with ``ai_disclosure: false``.
+    Call this right after ``session.start()``.
+
+    ``generate_opening=False`` skips that generated turn. It exists for
+    the deferred IVR path (:func:`arm_deferred_greeting`), where the
+    greeting fires *because* a person just spoke: there the session's
+    normal turn loop already answers that utterance, so an injected
+    opening would race it and its "they have not said anything yet"
+    premise would be false.
     """
-    await session.say(
-        disclosure_line(metadata.get("org_name")), allow_interruptions=True
-    )
+    if metadata.get("ai_disclosure", True):
+        await session.say(
+            disclosure_line(metadata.get("org_name")), allow_interruptions=True
+        )
     if metadata.get("first_message"):
         await session.say(metadata["first_message"], allow_interruptions=True)
+    elif generate_opening:
+        session.generate_reply(instructions=opening_instructions(pickup_transcript))
 
 
 DTMF_TOOL_NAME = "send_dtmf"
@@ -332,7 +386,10 @@ def arm_deferred_greeting(
 
         async def _run() -> None:
             try:
-                await speak_greeting(session, metadata)
+                # No generated opening here: this fires because a person
+                # just spoke, and the normal turn loop answers them. The
+                # injected opening turn is for cold-open pickups only.
+                await speak_greeting(session, metadata, generate_opening=False)
             except Exception:
                 logger.exception(
                     "call_id=%s deferred greeting failed after IVR", call_id
@@ -478,8 +535,9 @@ def parse_metadata(raw: str | None) -> dict[str, Any]:
 
     Required: ``call_id`` (returned as a parsed :class:`UUID`). Optional:
     ``voice_config``, ``system_prompt``, ``llm`` (None → mode A fallback
-    chain), ``first_message``, ``org_name`` (server-resolved display name
-    spoken in the AI disclosure; absent/None → generic wording).
+    chain), ``first_message``, ``ai_disclosure`` (absent → ``True``),
+    ``org_name`` (server-resolved display name spoken in the AI
+    disclosure; absent/None → generic wording).
     """
     payload = json.loads(raw) if raw else {}
     if "call_id" not in payload:
@@ -1116,7 +1174,11 @@ async def entrypoint(ctx: JobContext) -> None:
         # arrives after the session died must not escape entrypoint — the
         # shutdown callback registered above already finalizes the row.
         try:
-            await speak_greeting(session, metadata)
+            await speak_greeting(
+                session,
+                metadata,
+                pickup_transcript=amd_result.transcript if amd_result else None,
+            )
         except Exception:
             logger.exception(
                 "call_id=%s greeting failed; session closed during detection", call_id
@@ -1143,6 +1205,7 @@ __all__ = [
     "make_agent_send_dtmf",
     "mark_call_answered",
     "on_call_end",
+    "opening_instructions",
     "parse_metadata",
     "prewarm",
     "soft_cap_announce_and_hangup",
