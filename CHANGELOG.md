@@ -4,10 +4,22 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 
 ## [Unreleased]
 
+## [0.17.0] — 2026-07-23
+
+Optional AI disclosure and a voice agent that opens the call itself.
+
+Component versions cut alongside this release:
+**`sdk-v0.13.0`** (PyPI: `hail-sdk==0.13.0`), **`cli-v0.16.0`** (Homebrew + GitHub Releases).
+
+### Self-opening voice agent
+
 - `first_message` is now truly optional: without one the agent opens the
   conversation itself with a generated first turn — reacting to how the
   call was answered (the AMD pickup transcript) or introducing itself
   after silence — instead of waiting mute for the callee to speak.
+
+### Optional AI disclosure
+
 - `POST /calls` gains `ai_disclosure` (default `true`): set `false` to skip
   the spoken "this is an AI assistant" line at the start of the call. The
   line stays non-customizable, the agent still identifies as an AI when
