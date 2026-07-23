@@ -95,6 +95,10 @@ class CallCreate(BaseModel):
     system_prompt: str | None = None
     llm: LLMConfig | None = None
     first_message: str | None = None
+    # Speak the AI self-disclosure line first on the call (default True).
+    # Disabling is the caller's responsibility — see the API schema notes
+    # on 47 CFR 64.1200(b)(1) and state AI bot-disclosure laws.
+    ai_disclosure: bool = True
     voice_config: VoiceConfig = Field(default_factory=VoiceConfig)
     conversation_id: UUID | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)

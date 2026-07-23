@@ -249,6 +249,44 @@ func TestCallSubcommand_LanguageFlag(t *testing.T) {
 	}
 }
 
+func TestCallSubcommand_AiDisclosureFlag(t *testing.T) {
+	t.Run("explicit false sent", func(t *testing.T) {
+		srv := newFakeServer(t, http.StatusCreated, sampleResponse())
+		_, _, err := runRoot(t,
+			map[string]string{"HAIL_API_KEY": "sk_test", "HAIL_API_URL": srv.URL},
+			"call", "+15551234567", "--prompt", "hi", "--recipient-consent",
+			"--ai-disclosure=false",
+		)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		var body client.CallCreate
+		if err := json.Unmarshal(srv.lastBody, &body); err != nil {
+			t.Fatalf("body parse: %v", err)
+		}
+		if body.AiDisclosure == nil || *body.AiDisclosure != false {
+			t.Errorf("AiDisclosure = %v, want false", body.AiDisclosure)
+		}
+	})
+	t.Run("omitted stays server-default", func(t *testing.T) {
+		srv := newFakeServer(t, http.StatusCreated, sampleResponse())
+		_, _, err := runRoot(t,
+			map[string]string{"HAIL_API_KEY": "sk_test", "HAIL_API_URL": srv.URL},
+			"call", "+15551234567", "--prompt", "hi", "--recipient-consent",
+		)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		var body client.CallCreate
+		if err := json.Unmarshal(srv.lastBody, &body); err != nil {
+			t.Fatalf("body parse: %v", err)
+		}
+		if body.AiDisclosure != nil {
+			t.Errorf("AiDisclosure = %v, want omitted", *body.AiDisclosure)
+		}
+	})
+}
+
 func TestCallSubcommand_ToolsFlag(t *testing.T) {
 	t.Run("explicit list", func(t *testing.T) {
 		srv := newFakeServer(t, http.StatusCreated, sampleResponse())

@@ -44,6 +44,7 @@ from hailhq.voicebot.agent import (
     make_agent_send_dtmf,
     mark_call_answered,
     on_call_end,
+    opening_instructions,
     parse_metadata,
     soft_cap_announce_and_hangup,
     speak_greeting,
@@ -969,13 +970,64 @@ async def test_speak_greeting_speaks_disclosure_before_first_message() -> None:
     assert second_text == "Hi, calling about your order."
 
 
+async def test_speak_greeting_skips_disclosure_when_opted_out() -> None:
+    """``ai_disclosure: False`` skips the disclosure; ``first_message`` still
+    plays. With neither, the LLM opening still fires — never dead air."""
+    session = FakeAnnouncingSession()
+    await speak_greeting(
+        session, {"ai_disclosure": False, "first_message": "Hi, about your order."}
+    )
+    assert session.say_calls == [("Hi, about your order.", True)]
+    assert session.generate_reply_calls == []
+
+    session = FakeAnnouncingSession()
+    await speak_greeting(session, {"ai_disclosure": False})
+    assert session.say_calls == []
+    assert session.generate_reply_calls == [opening_instructions(None)]
+
+
 async def test_speak_greeting_speaks_disclosure_when_no_first_message() -> None:
-    """No ``first_message`` in metadata → the disclosure is still spoken."""
+    """No ``first_message`` → disclosure still spoken, then a generated
+    opening turn instead of silence."""
     session = FakeAnnouncingSession()
 
     await speak_greeting(session, {})
 
     assert session.say_calls == [(AI_DISCLOSURE_LINE, True)]
+    assert session.generate_reply_calls == [opening_instructions(None)]
+
+
+async def test_speak_greeting_first_message_suppresses_generated_opening() -> None:
+    """A caller ``first_message`` is the opening — no LLM turn on top of it."""
+    session = FakeAnnouncingSession()
+
+    await speak_greeting(session, {"first_message": "Hi, about your order."})
+
+    assert session.generate_reply_calls == []
+
+
+async def test_generated_opening_reacts_to_pickup_transcript() -> None:
+    """The AMD pickup transcript flows into the opening instructions; silence
+    (None/blank) gets the not-said-anything variant."""
+    session = FakeAnnouncingSession()
+    await speak_greeting(session, {}, pickup_transcript="Joe's Pizza, good evening?")
+    assert len(session.generate_reply_calls) == 1
+    assert "Joe's Pizza, good evening?" in session.generate_reply_calls[0]
+
+    assert "not said anything" in opening_instructions("   ")
+    assert "not said anything" in opening_instructions(None)
+
+
+async def test_speak_greeting_deferred_path_skips_generated_opening() -> None:
+    """``generate_opening=False`` (the deferred IVR path) fires no opening
+    turn: the greeting runs because a person just spoke, and the session's
+    normal turn loop answers them. Disclosure still plays."""
+    session = FakeAnnouncingSession()
+
+    await speak_greeting(session, {}, generate_opening=False)
+
+    assert session.say_calls == [(AI_DISCLOSURE_LINE, True)]
+    assert session.generate_reply_calls == []
 
 
 async def test_speak_greeting_first_message_cannot_precede_disclosure() -> None:

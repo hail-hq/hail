@@ -134,6 +134,7 @@ class FakeAnnouncingSession:
 
     def __init__(self) -> None:
         self.say_calls: list[tuple[str, bool]] = []
+        self.generate_reply_calls: list[str | None] = []
         self.last_handle: FakeSpeechHandle | None = None
 
     def say(self, text: str, *, allow_interruptions: bool) -> FakeSpeechHandle:
@@ -141,6 +142,10 @@ class FakeAnnouncingSession:
         handle = FakeSpeechHandle()
         self.last_handle = handle
         return handle
+
+    def generate_reply(self, *, instructions: str | None = None) -> FakeSpeechHandle:
+        self.generate_reply_calls.append(instructions)
+        return FakeSpeechHandle()
 
 
 class FakeLocalParticipant:

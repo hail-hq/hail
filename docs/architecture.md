@@ -31,7 +31,7 @@ LiveKit Cloud is external. The `hail` Go CLI is a human-facing scriptable tool, 
 1. Caller (agent via MCP, or CLI, or direct HTTP) → `POST /calls` with `{to, from, first_message?, …llm}`.
 2. Hail API creates a LiveKit room and dispatches the voicebot into it.
 3. Voicebot joins; LiveKit places a SIP outbound via the Twilio trunk to `to`.
-4. On pickup, voicebot classifies who answered before saying anything (see below), then speaks the AI disclosure and `first_message` (if set) and runs the STT → LLM → TTS loop.
+4. On pickup, voicebot classifies who answered before saying anything (see below), then speaks the AI disclosure (unless the call set `ai_disclosure: false` — the opt-out is audit-logged and the caller's responsibility) and `first_message` (if set) and runs the STT → LLM → TTS loop.
 5. On hangup, voicebot writes the call record to Postgres and uploads the recording to S3.
 
 ### Answering machine detection and DTMF

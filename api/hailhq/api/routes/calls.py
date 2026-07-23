@@ -319,6 +319,9 @@ async def create_call(
             "consent_source": body.consent_source,
             "consent_obtained_at": isoformat_or_none(body.consent_obtained_at),
             "message_type": body.message_type,
+            # Compliance-relevant: record when a caller opted out of the
+            # spoken AI disclosure, so the decision is attributable later.
+            "ai_disclosure": body.ai_disclosure,
             "compliance": gate.checks,
         },
     )
@@ -368,6 +371,7 @@ async def create_call(
                 "system_prompt": body.system_prompt,
                 "llm": llm_meta,
                 "first_message": body.first_message,
+                "ai_disclosure": body.ai_disclosure,
                 "tools": body.tools,
                 "org_name": await org_name_task,
             },

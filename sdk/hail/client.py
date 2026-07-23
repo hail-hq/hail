@@ -87,6 +87,7 @@ class _CallsResource:
         from_: str | None = None,
         first_message: str | None = None,
         language: str | None = None,
+        ai_disclosure: bool = True,
         metadata: dict[str, Any] | None = None,
         consent_source: str | None = None,
         consent_obtained_at: datetime | None = None,
@@ -102,6 +103,9 @@ class _CallsResource:
         rule. ``recipient_consent`` is required — the server 422s without
         it. ``language`` is the call's spoken language for both STT and TTS
         as a lowercase ISO 639-1 code (e.g. ``"fr"``); omit for English.
+        ``ai_disclosure=False`` skips the spoken AI self-disclosure line —
+        disabling is your responsibility (US artificial-voice calls and
+        several AI bot-disclosure laws require it).
         ``idempotency_key`` defaults to a fresh UUIDv4.
         """
         body: dict[str, Any] = {"to": to, "recipient_consent": recipient_consent}
@@ -111,6 +115,8 @@ class _CallsResource:
             body["system_prompt"] = system_prompt
         if first_message is not None:
             body["first_message"] = first_message
+        if not ai_disclosure:
+            body["ai_disclosure"] = False
         if language is not None:
             body["voice_config"] = {"language": language}
         if metadata is not None:
