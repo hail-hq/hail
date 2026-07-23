@@ -86,6 +86,7 @@ class _CallsResource:
         llm: LLMConfig | dict[str, Any] | None = None,
         from_: str | None = None,
         first_message: str | None = None,
+        language: str | None = None,
         metadata: dict[str, Any] | None = None,
         consent_source: str | None = None,
         consent_obtained_at: datetime | None = None,
@@ -99,7 +100,9 @@ class _CallsResource:
         ``llm`` block (mode B) must be provided — server enforces this with
         a 422; we don't pre-validate so SDK and API stay in lockstep on the
         rule. ``recipient_consent`` is required — the server 422s without
-        it. ``idempotency_key`` defaults to a fresh UUIDv4.
+        it. ``language`` is the call's spoken language for both STT and TTS
+        as a lowercase ISO 639-1 code (e.g. ``"fr"``); omit for English.
+        ``idempotency_key`` defaults to a fresh UUIDv4.
         """
         body: dict[str, Any] = {"to": to, "recipient_consent": recipient_consent}
         if from_ is not None:
@@ -108,6 +111,8 @@ class _CallsResource:
             body["system_prompt"] = system_prompt
         if first_message is not None:
             body["first_message"] = first_message
+        if language is not None:
+            body["voice_config"] = {"language": language}
         if metadata is not None:
             body["metadata"] = metadata
         if llm is not None:

@@ -904,7 +904,9 @@ async def entrypoint(ctx: JobContext) -> None:
         _maybe_mark_answered(_participant)
 
     vad = ctx.proc.userdata["vad"]
-    voice_id_override = (metadata.get("voice_config") or {}).get("voice_id")
+    voice_cfg = metadata.get("voice_config") or {}
+    voice_id_override = voice_cfg.get("voice_id")
+    language = voice_cfg.get("language")
     try:
         # Loading + decrypting the org's BYO config, and decrypting the
         # per-call llm key, must sit inside this guard: a malformed org id
@@ -933,7 +935,11 @@ async def entrypoint(ctx: JobContext) -> None:
         except (SecretKeyMissing, InvalidToken, ValueError, SQLAlchemyError) as exc:
             raise ProviderKeyError(f"could not load provider config: {exc}") from exc
         session = build_session(
-            llm_cfg, vad, org_cfgs=org_cfgs, voice_id_override=voice_id_override
+            llm_cfg,
+            vad,
+            org_cfgs=org_cfgs,
+            voice_id_override=voice_id_override,
+            language=language,
         )
     except ProviderKeyError as exc:
         logger.warning("provider key error for call_id=%s: %s", call_id, exc)

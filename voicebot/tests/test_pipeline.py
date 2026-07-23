@@ -145,3 +145,37 @@ def test_build_tts_no_keys_raises(monkeypatch: pytest.MonkeyPatch) -> None:
 
     with pytest.raises(RuntimeError, match="No TTS provider configured"):
         build_tts()
+
+
+def test_build_tts_language_applies_to_every_instance() -> None:
+    """Per-call language reaches both house instances, so a Cartesia ->
+    ElevenLabs failover keeps speaking the call's language.
+
+    ``_opts.language`` attribute verified against the installed cartesia and
+    elevenlabs plugins on 2026-07-23; revisit if it changes.
+    """
+    from hailhq.voicebot.pipeline import build_tts
+
+    adapter = build_tts(language="fr")
+    for inst in adapter._tts_instances:
+        assert inst._opts.language == "fr"
+
+
+def test_build_tts_no_language_keeps_plugin_default() -> None:
+    """language=None -> the Cartesia plugin default ('en'), not None."""
+    from livekit.plugins import cartesia as cartesia_plugin
+
+    from hailhq.voicebot.pipeline import build_tts
+
+    adapter = build_tts()
+    cartesia_inst = adapter._tts_instances[0]
+    assert isinstance(cartesia_inst, cartesia_plugin.TTS)
+    assert cartesia_inst._opts.language == "en"
+
+
+def test_build_stt_language_pins_deepgram() -> None:
+    """Per-call language reaches the Deepgram instance; None keeps en-US."""
+    from hailhq.voicebot.pipeline import build_stt
+
+    assert build_stt(language="fr")._opts.language == "fr"
+    assert build_stt()._opts.language == "en-US"

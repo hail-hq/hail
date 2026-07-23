@@ -113,6 +113,7 @@ async def place_call(
     llm: dict[str, Any] | None = None,
     from_: str | None = None,
     first_message: str | None = None,
+    language: str | None = None,
     metadata: dict[str, Any] | None = None,
     tools: list[str] | None = None,
     idempotency_key: str | None = None,
@@ -130,6 +131,7 @@ async def place_call(
             llm=llm,
             from_=from_,
             first_message=first_message,
+            language=language,
             metadata=metadata,
             tools=tools,
             idempotency_key=idempotency_key,
@@ -533,6 +535,7 @@ def register_tools(
         llm: dict[str, Any] | None = None,
         from_: str | None = None,
         first_message: str | None = None,
+        language: str | None = None,
         metadata: dict[str, Any] | None = None,
         tools: list[str] | None = None,
         idempotency_key: str | None = None,
@@ -551,6 +554,9 @@ def register_tools(
         ``to`` must be E.164 (e.g. ``+14155551234``). ``from_`` is
         optional and defaults to the first active number on your org.
         ``first_message`` is spoken on pickup before listening.
+        ``language`` sets the call's spoken language for both
+        speech-to-text and text-to-speech, as a lowercase ISO 639-1 code
+        (e.g. ``"fr"``); omit for English.
         ``metadata`` is free-form JSON attached to the call record.
         ``tools`` are the agent tools to allow on this call. Omit for all
         available; pass ``[]`` to disable.
@@ -590,6 +596,7 @@ def register_tools(
                     llm=llm,
                     from_=from_,
                     first_message=first_message,
+                    language=language,
                     metadata=metadata,
                     tools=tools,
                     idempotency_key=idempotency_key,

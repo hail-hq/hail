@@ -1425,6 +1425,8 @@ type ValidationError_Loc_Item struct {
 
 // VoiceConfig defines model for VoiceConfig.
 type VoiceConfig struct {
+	// Language Spoken language for the call as a lowercase ISO 639-1 code (e.g. 'fr'). Applied to both STT and TTS, so it must be a language the configured STT and TTS models support. Omitted: the providers' defaults (English).
+	Language      *string `json:"language,omitempty"`
 	Stt           *string `json:"stt,omitempty"`
 	Tts           *string `json:"tts,omitempty"`
 	TurnDetection *string `json:"turn_detection,omitempty"`

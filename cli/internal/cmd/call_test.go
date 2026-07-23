@@ -226,6 +226,29 @@ func TestCallSubcommand_FromAndFirstMessageFlow(t *testing.T) {
 	}
 }
 
+func TestCallSubcommand_LanguageFlag(t *testing.T) {
+	srv := newFakeServer(t, http.StatusCreated, sampleResponse())
+
+	_, _, err := runRoot(t,
+		map[string]string{"HAIL_API_KEY": "sk_test", "HAIL_API_URL": srv.URL},
+		"call", "+15551234567",
+		"--prompt", "hi",
+		"--language", "fr",
+		"--recipient-consent",
+	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var body client.CallCreate
+	if err := json.Unmarshal(srv.lastBody, &body); err != nil {
+		t.Fatalf("body parse: %v", err)
+	}
+	if body.VoiceConfig == nil || body.VoiceConfig.Language == nil || *body.VoiceConfig.Language != "fr" {
+		t.Errorf("VoiceConfig.Language = %v, want fr", body.VoiceConfig)
+	}
+}
+
 func TestCallSubcommand_ToolsFlag(t *testing.T) {
 	t.Run("explicit list", func(t *testing.T) {
 		srv := newFakeServer(t, http.StatusCreated, sampleResponse())

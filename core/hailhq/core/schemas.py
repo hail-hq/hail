@@ -134,6 +134,16 @@ class VoiceConfig(BaseModel):
     # Per-call TTS voice override. Applies to whichever TTS provider serves
     # the call (org BYO config or Hail default). None → org/env default.
     voice_id: str | None = None
+    language: str | None = Field(
+        default=None,
+        pattern=r"^[a-z]{2}$",
+        description=(
+            "Spoken language for the call as a lowercase ISO 639-1 code "
+            "(e.g. 'fr'). Applied to both STT and TTS, so it must be a "
+            "language the configured STT and TTS models support. "
+            "Omitted: the providers' defaults (English)."
+        ),
+    )
 
 
 class ConsentAttestationMixin(BaseModel):
