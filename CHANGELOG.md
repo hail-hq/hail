@@ -4,6 +4,35 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 
 ## [Unreleased]
 
+## [0.16.0] — 2026-07-23
+
+Multi-language calls and a more natural-sounding voice agent.
+
+Component versions cut alongside this release:
+**`sdk-v0.12.0`** (PyPI: `hail-sdk==0.12.0`), **`cli-v0.15.0`** (Homebrew + GitHub Releases).
+
+### Multi-language calls
+
+- `POST /calls` accepts `voice_config.language` (lowercase ISO 639-1, e.g.
+  `"fr"`). The voicebot pins both STT (Deepgram) and TTS (Cartesia /
+  ElevenLabs) to the requested language on every instance it builds — BYO
+  and house fallbacks alike — so a provider failover never flips the call
+  back to English. Omitted: English defaults, as before.
+- Exposed end to end: SDK `calls.create(language=...)`, CLI
+  `hail call --language fr`, MCP `place_call(language=...)`. OpenAPI spec
+  and the generated Go client regenerated.
+
+### Voice agent realism
+
+- The voicebot's non-overridable preamble is restructured per LiveKit's
+  prompting guide (Identity / Output rules / Sounding natural /
+  Conversational flow / Tools / Guardrails): natural fillers and
+  punctuation-driven pauses, occasional mid-sentence self-corrections,
+  varied turn openers, a calm emotion baseline, automated-menu (IVR)
+  keypad guidance, and first-class tool rules — confirm before sending
+  SMS/email, state failures once, summarize tool results instead of
+  reciting raw data.
+
 ## [0.15.0] — 2026-07-18
 
 Multi-country numbers milestone, contacts from the CLI, and a public SMS
