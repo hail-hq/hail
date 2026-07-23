@@ -4,14 +4,19 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 
 ## [Unreleased]
 
+## [0.18.0] — 2026-07-23
+
+Readable call tails in the CLI. `cli-v0.17.0` cut alongside; the SDK is
+unchanged and stays at `hail-sdk==0.13.0`.
+
 - `hail tail` call-transcript display overhaul: turns render as `[hail]` /
   `[human]` (was `[agent]` / `[user]`); pickup speech that AMD attributes
   to a machine renders as `[machine]` with a plain-language `[amd]`
   verdict line ("answered by a machine (phone menu)") instead of payload
-  JSON; silent seconds render as dim `.`
-  lines (gaps beyond 10s compress to three dots plus a duration); and
-  `--id` now accepts a bare call UUID or a 4+ char hex prefix (`hail tail
-df10f471`), resolved like git short hashes.
+  JSON; silent seconds render as timestamped dim `[wait] .` lines (gaps
+  beyond 10s compress to three dots plus a duration); and `--id` now
+  accepts a bare call UUID or a 4+ char hex prefix (`hail tail df10f471`),
+  resolved like git short hashes.
 
 ## [0.17.0] — 2026-07-23
 
