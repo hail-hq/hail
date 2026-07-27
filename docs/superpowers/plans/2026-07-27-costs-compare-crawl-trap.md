@@ -640,11 +640,82 @@ git commit -m "feat(web): derive featured comparison pairs from costs data"
 
 - Create: `web/app/(dispatch)/compare/[pair]/page.tsx`
 - Create: `web/components/deprecation-notice.tsx`
+- Modify: `web/components/compare-table.tsx` (add a `removable` prop — see Step 0)
 
 **Interfaces:**
 
-- Consumes: `featuredPairs`, `pairBySlug`, `FeaturedPair` from Task 3; the existing `LLMCompareTable`, `STTCompareTable`, `TTSCompareTable` from `web/components/compare-table.tsx`, each of which takes `{ models, currentIds }`.
-- Produces: 96 static routes at `/costs/compare/<slug>`.
+- Consumes: `featuredPairs`, `pairBySlug`, `FeaturedPair` from Task 3; the existing `LLMCompareTable`, `STTCompareTable`, `TTSCompareTable` from `web/components/compare-table.tsx`.
+- Produces: 96 static routes at `/costs/compare/<slug>`, and a `removable?: boolean` prop on all three compare-table components (defaults to `true`, preserving current behavior for Task 5's picker).
+
+- [ ] **Step 0: Suppress the remove-links on static pages**
+
+`CompareGrid` renders a remove-link per model at `web/components/compare-table.tsx:35-42`:
+
+```tsx
+<a href={compareHrefRemove(currentIds, m.model_id)} className="compare-remove" rel="nofollow" ...>
+```
+
+On a static pair page that link is both meaningless (the pair is fixed) and harmful: 96 pages × 2 models would emit ~192 crawlable `?m=` hrefs pointing straight back into the query space this whole branch exists to delist.
+
+Add an optional `removable` prop, defaulting to `true` so Task 5's picker is unaffected.
+
+In `CompareGrid`, extend the signature:
+
+```tsx
+function CompareGrid({
+  models,
+  currentIds,
+  rows,
+  removable = true,
+}: {
+  models: { provider: string; display_name: string; model_id: string }[];
+  currentIds: string[];
+  rows: CompareRow[];
+  removable?: boolean;
+}) {
+```
+
+Wrap the remove-link so it renders only when `removable` is true:
+
+```tsx
+{
+  removable && (
+    <a
+      href={compareHrefRemove(currentIds, m.model_id)}
+      className="compare-remove"
+      rel="nofollow"
+      title={`Remove ${m.display_name}`}
+      aria-label={`Remove ${m.display_name} from comparison`}
+    >
+      ×
+    </a>
+  );
+}
+```
+
+Then thread the prop through all three exported wrappers. Each currently reads:
+
+```tsx
+export function LLMCompareTable({ models, currentIds }: { models: LLMRow[]; currentIds: string[] }) {
+```
+
+Change each to accept and forward it — `LLMCompareTable` with `LLMRow[]`, `STTCompareTable` with `STTRow[]`, `TTSCompareTable` with `TTSRow[]`:
+
+```tsx
+export function LLMCompareTable({
+  models,
+  currentIds,
+  removable = true,
+}: {
+  models: LLMRow[];
+  currentIds: string[];
+  removable?: boolean;
+}) {
+```
+
+and pass `removable` down in each wrapper's `<CompareGrid ... />` call.
+
+The `[pair]` page in Step 2 passes `removable={false}`.
 
 - [ ] **Step 1: Write the deprecation notice component**
 
@@ -743,12 +814,15 @@ export async function generateMetadata({
 
 function successorSlugFor(entry: FeaturedPair): string | null {
   const [a, b] = entry.models;
-  const replacement = a.deprecated_at
-    ? a.replaced_by_model_id
-    : b.replaced_by_model_id;
-  const survivor = a.deprecated_at ? b : a;
-  if (!replacement) return null;
-  const candidate = pairSlug(replacement, survivor.model_id);
+  if (!a.deprecated_at && !b.deprecated_at) return null;
+
+  // A deprecated model contributes its successor; a live one contributes itself.
+  const currentA = a.deprecated_at ? a.replaced_by_model_id : a.model_id;
+  const currentB = b.deprecated_at ? b.replaced_by_model_id : b.model_id;
+  if (!currentA || !currentB) return null;
+  if (currentA === a.model_id && currentB === b.model_id) return null;
+
+  const candidate = pairSlug(currentA, currentB);
   return pairBySlug.has(candidate) ? candidate : null;
 }
 
@@ -813,18 +887,21 @@ export default async function PairPage({
             <LLMCompareTable
               models={entry.models as LLMRow[]}
               currentIds={currentIds}
+              removable={false}
             />
           )}
           {entry.category === "stt" && (
             <STTCompareTable
               models={entry.models as STTRow[]}
               currentIds={currentIds}
+              removable={false}
             />
           )}
           {entry.category === "tts" && (
             <TTSCompareTable
               models={entry.models as TTSRow[]}
               currentIds={currentIds}
+              removable={false}
             />
           )}
         </div>
@@ -846,15 +923,32 @@ Expected: the route table lists `● /compare/[pair]` with `96 paths` (shown as 
 - [ ] **Step 4: Verify a rendered page has real content**
 
 ```bash
-grep -l "claude-opus-5" web/.next/server/app/compare/*.html | head -3
+cd "$(git rev-parse --show-toplevel)"
+PAIR_DIR=$(dirname "$(find web/.next/server/app -name 'claude-opus-5-vs-*.html' | head -1)")
+echo "pair dir: $PAIR_DIR"
+ls "$PAIR_DIR"/*.html | wc -l
+grep -l "claude-opus-5" "$PAIR_DIR"/*.html | head -3
 ```
 
-Expected: at least one matching prerendered HTML file. If `.next/server/app/compare/` does not exist, check the actual output path with `find web/.next/server/app -name '*.html' | head`.
+Expected: a directory containing **96** prerendered HTML files, and at least one matching the grep.
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 5: Assert the pair pages emit no `?m=` links**
+
+This is the check that proves Step 0 worked. Without `removable={false}`, each page emits one `?m=` remove-link per model — ~192 crawlable links back into the query space this branch exists to delist.
 
 ```bash
-git add "web/app/(dispatch)/compare/[pair]/page.tsx" web/components/deprecation-notice.tsx
+cd "$(git rev-parse --show-toplevel)"
+PAIR_DIR=$(dirname "$(find web/.next/server/app -name 'claude-opus-5-vs-*.html' | head -1)")
+echo -n "pages containing a ?m= href (expect 0): "
+grep -l '?m=' "$PAIR_DIR"/*.html | wc -l
+```
+
+Expected: `0`. Any non-zero count means `removable={false}` is not reaching `CompareGrid` — fix it before committing.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add "web/app/(dispatch)/compare/[pair]/page.tsx" web/components/deprecation-notice.tsx web/components/compare-table.tsx
 git commit -m "feat(web): prerender featured model comparison pages"
 ```
 
@@ -1249,7 +1343,7 @@ const nextConfig: NextConfig = {
   async redirects() {
     return [
       {
-        source: "/:path*",
+        source: "/costs/:path*",
         has: [{ type: "host", value: VERCEL_HOST }],
         destination: "https://hail.so/costs/:path*",
         permanent: true,
@@ -1262,7 +1356,13 @@ const nextConfig: NextConfig = {
 export default nextConfig;
 ```
 
-`basePath: false` is load-bearing. Without it Next prefixes `source` with `/costs`, so the rule would only match `/costs/costs/...` and silently never fire.
+`basePath: false` and the `/costs/` prefix on `source` are both load-bearing, and they work together:
+
+- **With** `basePath: false`, Next does **not** prefix `source`, so `source` must match the **raw incoming path** — which for this app already begins with `/costs`. Hence `source: "/costs/:path*"`.
+- Writing `source: "/:path*"` instead captures `:path*` as `costs/compare`, producing the doubled destination `https://hail.so/costs/costs/compare`.
+- Dropping `basePath: false` makes Next prefix `source` itself, so the rule only matches `/costs/costs/...` and silently never fires.
+
+All three failure modes build cleanly and produce no warning, so **Step 4's `curl` check is the only thing that catches them.** Confirm the redirect target has exactly one `/costs` and that the query string survives.
 
 - [ ] **Step 3: Build and verify the sitemap contains 98 URLs**
 

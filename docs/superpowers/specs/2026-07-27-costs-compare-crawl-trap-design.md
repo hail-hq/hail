@@ -65,7 +65,7 @@ It is not monetizable demand, and a paywall (Stripe machine payments, x402, or o
 New route `web/app/(dispatch)/compare/[pair]/page.tsx`:
 
 ```ts
-export const dynamic = 'force-static';
+export const dynamic = "force-static";
 export const dynamicParams = false; // unknown slug -> static 404, no function
 export async function generateStaticParams() {
   /* from lib/featured.ts */
@@ -84,17 +84,17 @@ Pairs are within-category only. Comparing an LLM against a TTS model has no shar
 
 The page set is derived from the dataset, not from a parallel list.
 
-- **Schema v2.3**: add `"featured": { "type": "boolean" }` to `costs/schema/{llm,stt,tts}.schema.json`. None of the three currently set `additionalProperties: false`, so the flag validates today but silently — declaring it makes it real and reviewable.
+- **Schema v2.3**: add `"featured": { "type": "boolean" }` to `costs/schema/{llm,stt,tts}.schema.json`. This is mandatory, not cosmetic: `models.items` is a `$ref` to `$defs.model`, which sets `additionalProperties: false`, so an undeclared `featured` would fail validation on every flagged row.
 - **Field order**: `featured` sits immediately after `display_name` in all three categories. [`docs/operations/refresh-costs.md`](../../operations/refresh-costs.md) rule 6 makes field order non-negotiable, so the runbook's three field-order blocks must be updated in the same change.
 - **Effect**: a refresh run that adds `"featured": true` to a new row creates that model's comparison pages on the next deploy. Nothing else to touch.
 
 Initial set — 12 LLM, 6 STT, 6 TTS → **66 + 15 + 15 = 96 pages**:
 
-| Category | Featured `model_id`s |
-| --- | --- |
-| LLM | `claude-opus-5`, `claude-sonnet-5`, `claude-haiku-4-5-20251001`, `gpt-5.5`, `gpt-5.4-mini`, `gemini-2.5-pro`, `gemini-3.6-flash`, `deepseek-v4-pro`, `grok-4.5`, `llama-4-maverick`, `mistral-large-2512`, `qwen3.7-max` |
-| STT | `nova-3-monolingual`, `universal-3-pro`, `whisper-large-v3-turbo`, `gpt-4o-transcribe`, `ink-2`, `solaria-3` |
-| TTS | `eleven_flash_v2_5`, `eleven_v3`, `sonic-3.5`, `gpt-4o-mini-tts`, `aura-2`, `inworld-tts-2` |
+| Category | Featured `model_id`s                                                                                                                                                                                                     |
+| -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| LLM      | `claude-opus-5`, `claude-sonnet-5`, `claude-haiku-4-5-20251001`, `gpt-5.5`, `gpt-5.4-mini`, `gemini-2.5-pro`, `gemini-3.6-flash`, `deepseek-v4-pro`, `grok-4.5`, `llama-4-maverick`, `mistral-large-2512`, `qwen3.7-max` |
+| STT      | `nova-3-monolingual`, `universal-3-pro`, `whisper-large-v3-turbo`, `gpt-4o-transcribe`, `ink-2`, `solaria-3`                                                                                                             |
+| TTS      | `eleven_flash_v2_5`, `eleven_v3`, `sonic-3.5`, `gpt-4o-mini-tts`, `aura-2`, `inworld-tts-2`                                                                                                                              |
 
 Selection notes: `claude-opus-5` takes the Opus slot over `claude-opus-4-8` — same $5/$25 pricing, and it is the current flagship as of its 2026-06-09 launch. `gemini-3.6-flash` is likewise the current flagship Flash as of the 2026-07-27 refresh. `sonic-3.5` is the only Sonic variant without a sunset notice — `sonic-3`, `sonic-2`, and `sonic-turbo` all retire 2026-10-20.
 
@@ -160,14 +160,14 @@ costs/{llm,stt,tts}.json  --(featured: true)-->  web/lib/featured.ts
 
 ## Error handling
 
-| Case | Behavior |
-| --- | --- |
-| Unknown pair slug | Static 404 via `dynamicParams = false`. No function invocation. |
-| `?m=` with unknown model ids | Client-side picker ignores them, renders the empty state. |
+| Case                                   | Behavior                                                                  |
+| -------------------------------------- | ------------------------------------------------------------------------- |
+| Unknown pair slug                      | Static 404 via `dynamicParams = false`. No function invocation.           |
+| `?m=` with unknown model ids           | Client-side picker ignores them, renders the empty state.                 |
 | `?m=` with more than `MAX_COMPARE` ids | Picker truncates to the first 6, consistent with today's server behavior. |
-| Featured model deprecated | Page persists with a deprecation banner and successor link. |
-| Fewer than 2 featured in a category | CI fails before deploy. |
-| A published slug disappears | CI fails against `featured.lock.json`. |
+| Featured model deprecated              | Page persists with a deprecation banner and successor link.               |
+| Fewer than 2 featured in a category    | CI fails before deploy.                                                   |
+| A published slug disappears            | CI fails against `featured.lock.json`.                                    |
 
 ## Testing
 
