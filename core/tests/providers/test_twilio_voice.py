@@ -14,14 +14,13 @@ from urllib.parse import parse_qs, urlsplit
 
 import pytest
 import responses
-from twilio.base.exceptions import TwilioRestException
-
 from hailhq.core.providers.voice import (
     NumberNotProvisionable,
     ProviderCallStatus,
     ProviderNumber,
     TwilioVoiceProvider,
 )
+from twilio.base.exceptions import TwilioRestException
 
 ACCOUNT_SID = "ACtest1234567890abcdef1234567890ab"
 AUTH_TOKEN = "test-auth-token"

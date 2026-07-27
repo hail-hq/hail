@@ -6,12 +6,11 @@ from datetime import datetime, timezone
 from unittest.mock import AsyncMock
 from uuid import uuid4
 
-from sqlalchemy import select, update
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
-
 from hailhq.core.email_delivery_events import apply_delivery_event
 from hailhq.core.models import Email, EmailEvent
 from hailhq.core.providers.email.inbound.ses_delivery import DeliveryEvent
+from sqlalchemy import select, update
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 T0 = datetime(2026, 7, 1, 12, 0, tzinfo=timezone.utc)
 

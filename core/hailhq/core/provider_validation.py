@@ -33,7 +33,6 @@ import dataclasses
 from typing import Literal
 
 import httpx
-
 from hailhq.core.url_guard import UnsafeUrlError, assert_public_https_url
 from hailhq.core.urls import join_url
 

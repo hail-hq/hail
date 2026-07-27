@@ -29,11 +29,10 @@ import logging
 import uuid
 from dataclasses import dataclass
 
+from hailhq.core.models import Contact, OrganizationMember, User
 from sqlalchemy import func, select
 from sqlalchemy.exc import ProgrammingError
 from sqlalchemy.ext.asyncio import AsyncSession
-
-from hailhq.core.models import Contact, OrganizationMember, User
 
 logger = logging.getLogger("hailhq.core.directory")
 

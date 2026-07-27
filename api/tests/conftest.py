@@ -5,10 +5,10 @@ from __future__ import annotations
 import json as _jwt_json
 import secrets
 import uuid
-from collections.abc import Callable, Iterable
+from collections.abc import AsyncIterator, Callable, Iterable
 from datetime import datetime, timezone
 from types import SimpleNamespace
-from typing import Any, AsyncIterator
+from typing import Any
 from unittest.mock import AsyncMock
 
 import httpx
@@ -17,9 +17,6 @@ import jwt as _jwt_lib
 import pytest
 from cryptography.hazmat.primitives import serialization as _serialization
 from cryptography.hazmat.primitives.asymmetric import ed25519 as _ed25519
-from jwt.algorithms import OKPAlgorithm as _OKPAlgorithm
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from hailhq.api import auth as _auth_module
 from hailhq.api.auth import hash_key
 from hailhq.api.main import app
@@ -48,6 +45,8 @@ from hailhq.core.testing.fixtures import (  # noqa: F401
     db,
     session_factory,
 )
+from jwt.algorithms import OKPAlgorithm as _OKPAlgorithm
+from sqlalchemy.ext.asyncio import AsyncSession
 
 
 def mint_test_key() -> tuple[str, str]:
@@ -59,8 +58,8 @@ def mint_test_key() -> tuple[str, str]:
 async def insert_org_and_key(
     session: AsyncSession,
     *,
-    org_name: str = "Acme",  # noqa: ARG001 — kept for backwards-compatible call sites
-    org_slug: str = "acme",  # noqa: ARG001
+    org_name: str = "Acme",
+    org_slug: str = "acme",
     auth_user_id: str | None = None,
     initial_credit_cents: int = 100_000,
 ) -> tuple[uuid.UUID, ApiKey, str]:

@@ -15,10 +15,9 @@ from __future__ import annotations
 import logging
 import uuid
 
+from hailhq.core.models import AccountCredit
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
-
-from hailhq.core.models import AccountCredit
 
 logger = logging.getLogger(__name__)
 
@@ -30,7 +29,7 @@ logger = logging.getLogger(__name__)
 # pool.CALL_META_FROM_POOL.
 CALL_META_BILLED = "billed"
 
-__all__ = ["get_balance_cents", "has_funds", "CALL_META_BILLED"]
+__all__ = ["CALL_META_BILLED", "get_balance_cents", "has_funds"]
 
 
 async def get_balance_cents(db: AsyncSession, organization_id: uuid.UUID) -> int:

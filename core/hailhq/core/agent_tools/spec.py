@@ -12,9 +12,8 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any, Literal
 
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from hailhq.core.agent_tools.client import AgentApiClient
+from sqlalchemy.ext.asyncio import AsyncSession
 
 RiskTier = Literal["read_only", "session_control", "outbound_send"]
 
@@ -55,4 +54,4 @@ class ToolSpec:
     execute: Callable[[ToolContext, dict[str, Any]], Awaitable[str]]
 
 
-__all__ = ["RiskTier", "SPOKEN_FALLBACK", "ToolContext", "ToolSpec"]
+__all__ = ["SPOKEN_FALLBACK", "RiskTier", "ToolContext", "ToolSpec"]

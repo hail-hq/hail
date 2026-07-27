@@ -4,9 +4,8 @@ import uuid
 from datetime import datetime
 
 import pytest
-from sqlalchemy.exc import IntegrityError
-
 from hailhq.core.models import Call, PhoneNumber, Sms
+from sqlalchemy.exc import IntegrityError
 
 
 def test_call_round_trip(session):
@@ -95,9 +94,8 @@ async def test_sms_status_check_constraint(async_session) -> None:
 async def test_channel_suspension_unique_per_org_and_channel(async_session) -> None:
     import uuid
 
-    from sqlalchemy.exc import IntegrityError
-
     from hailhq.core.models import ChannelSuspension
+    from sqlalchemy.exc import IntegrityError
 
     org_id = uuid.uuid4()
     async_session.add(

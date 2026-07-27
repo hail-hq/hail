@@ -5,10 +5,9 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import text
-
 from hailhq.core.directory import list_directory, resolve_member_emails
 from hailhq.core.models import Contact, OrganizationMember, User
+from sqlalchemy import text
 
 
 async def _add_member(session, org_id, name, email, phone_number=None):

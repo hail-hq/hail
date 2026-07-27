@@ -73,7 +73,7 @@ async def test_create_sms_requires_consent(client, async_session, org_and_key) -
 
 
 async def test_create_sms_without_dedicated_number_422s(client, org_and_key) -> None:
-    org_id, _, plaintext = org_and_key
+    _org_id, _, plaintext = org_and_key
 
     resp = await client.post(
         "/sms",
@@ -125,9 +125,8 @@ async def test_create_sms_explicit_from_requires_active_number(
 async def test_create_sms_happy_path(
     client, async_session, org_and_key, sms_mock
 ) -> None:
-    from sqlalchemy import select
-
     from hailhq.core.models import UsageEvent
+    from sqlalchemy import select
 
     org_id, _, plaintext = org_and_key
     await _seed_dedicated_number(async_session, org_id)
@@ -156,10 +155,9 @@ async def test_create_sms_happy_path(
 async def test_create_sms_carrier_rejection_not_billed(
     client, async_session, org_and_key, sms_mock
 ) -> None:
-    from sqlalchemy import select
-
     from hailhq.core.models import UsageEvent
     from hailhq.core.providers.sms import ProviderSmsResult
+    from sqlalchemy import select
 
     org_id, _, plaintext = org_and_key
     await _seed_dedicated_number(async_session, org_id)
@@ -195,9 +193,8 @@ async def test_create_sms_transport_failure_emits_sms_failed_webhook(
     client, async_session, org_and_key, sms_mock
 ) -> None:
     """A provider-level exception (transport failure) fans out sms.failed."""
-    from sqlalchemy import select
-
     from hailhq.core.models import Sms, WebhookDelivery, WebhookSubscription
+    from sqlalchemy import select
 
     org_id, _, plaintext = org_and_key
     await _seed_dedicated_number(async_session, org_id)
@@ -246,10 +243,9 @@ async def test_create_sms_carrier_rejection_emits_sms_failed_webhook(
 ) -> None:
     """A carrier-level rejection (error_code / undelivered status) fans out
     sms.failed too — not just a transport exception."""
-    from sqlalchemy import select
-
     from hailhq.core.models import WebhookDelivery, WebhookSubscription
     from hailhq.core.providers.sms import ProviderSmsResult
+    from sqlalchemy import select
 
     org_id, _, plaintext = org_and_key
     await _seed_dedicated_number(async_session, org_id)
@@ -300,9 +296,8 @@ async def test_create_sms_happy_path_emits_no_sms_failed_webhook(
     client, async_session, org_and_key, sms_mock
 ) -> None:
     """A successful send must not fan out sms.failed — over-emit guard."""
-    from sqlalchemy import select
-
     from hailhq.core.models import WebhookDelivery, WebhookSubscription
+    from sqlalchemy import select
 
     org_id, _, plaintext = org_and_key
     await _seed_dedicated_number(async_session, org_id)
@@ -476,10 +471,9 @@ async def test_create_sms_to_india_still_requires_dedicated_number(
 async def test_sms_status_delivered_persists_and_fans_out(
     client, async_session, org_and_key, monkeypatch
 ) -> None:
-    from sqlalchemy import select
-
     from hailhq.core.config import settings
     from hailhq.core.models import Sms, WebhookDelivery, WebhookSubscription
+    from sqlalchemy import select
 
     monkeypatch.setattr(settings, "twilio_auth_token", STATUS_AUTH_TOKEN)
     monkeypatch.setattr(settings, "hail_api_url", "http://t")
@@ -546,10 +540,9 @@ async def test_sms_status_bad_signature_rejected(
 async def test_sms_status_duplicate_callback_is_idempotent(
     client, async_session, org_and_key, monkeypatch
 ) -> None:
-    from sqlalchemy import select
-
     from hailhq.core.config import settings
     from hailhq.core.models import SmsEvent, WebhookDelivery, WebhookSubscription
+    from sqlalchemy import select
 
     monkeypatch.setattr(settings, "twilio_auth_token", STATUS_AUTH_TOKEN)
     monkeypatch.setattr(settings, "hail_api_url", "http://t")
@@ -620,10 +613,9 @@ async def test_sms_status_unknown_sid_is_noop(
 async def test_sms_status_failed_fans_out(
     client, async_session, org_and_key, monkeypatch
 ) -> None:
-    from sqlalchemy import select
-
     from hailhq.core.config import settings
     from hailhq.core.models import Sms, WebhookDelivery, WebhookSubscription
+    from sqlalchemy import select
 
     monkeypatch.setattr(settings, "twilio_auth_token", STATUS_AUTH_TOKEN)
     monkeypatch.setattr(settings, "hail_api_url", "http://t")
@@ -671,10 +663,9 @@ async def test_sms_status_out_of_order_terminal_callback_is_absorbed(
     redelivery for the same message must not flip status back or fan out
     `sms.delivered` — Twilio's callback carries no ordering token, so the
     only safe rule is: once terminal, absorb everything else."""
-    from sqlalchemy import select
-
     from hailhq.core.config import settings
     from hailhq.core.models import Sms, SmsEvent, WebhookDelivery, WebhookSubscription
+    from sqlalchemy import select
 
     monkeypatch.setattr(settings, "twilio_auth_token", STATUS_AUTH_TOKEN)
     monkeypatch.setattr(settings, "hail_api_url", "http://t")
@@ -772,10 +763,9 @@ async def test_sms_status_out_of_order_terminal_callback_is_absorbed(
 async def test_sms_status_intermediate_status_is_ignored(
     client, async_session, org_and_key, monkeypatch
 ) -> None:
-    from sqlalchemy import select
-
     from hailhq.core.config import settings
     from hailhq.core.models import Sms, SmsEvent, WebhookDelivery
+    from sqlalchemy import select
 
     monkeypatch.setattr(settings, "twilio_auth_token", STATUS_AUTH_TOKEN)
     monkeypatch.setattr(settings, "hail_api_url", "http://t")
@@ -807,10 +797,9 @@ async def test_sms_status_intermediate_status_is_ignored(
 async def test_sms_status_missing_sid_is_unmatched(
     client, async_session, org_and_key, monkeypatch
 ) -> None:
-    from sqlalchemy import select
-
     from hailhq.core.config import settings
     from hailhq.core.models import Sms, WebhookDelivery
+    from sqlalchemy import select
 
     monkeypatch.setattr(settings, "twilio_auth_token", STATUS_AUTH_TOKEN)
     monkeypatch.setattr(settings, "hail_api_url", "http://t")

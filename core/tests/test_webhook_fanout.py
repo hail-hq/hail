@@ -2,14 +2,13 @@ import uuid
 from datetime import datetime, timezone
 
 import pytest
-from sqlalchemy import select
-
 from hailhq.core.models import EmailDomain, WebhookDelivery, WebhookSubscription
 from hailhq.core.webhook_fanout import (
     build_event_data,
     fanout_call_event,
     fanout_email_event,
 )
+from sqlalchemy import select
 
 
 async def _seed_domain(session, org_id):

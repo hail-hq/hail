@@ -11,9 +11,8 @@ from datetime import datetime, timezone
 
 import httpx
 import pytest
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from hailhq.core.models import EmailDomain
+from sqlalchemy.ext.asyncio import AsyncSession
 
 
 @pytest.fixture()

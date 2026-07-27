@@ -6,7 +6,6 @@ import time
 import uuid
 
 import pytest
-
 from hailhq.core.config import settings
 from hailhq.core.unsubscribe import (
     InvalidUnsubscribeToken,

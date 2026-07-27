@@ -8,11 +8,10 @@ from unittest.mock import AsyncMock
 from uuid import uuid4
 
 import pytest
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from hailhq.core.email_attachment_gc import EmailAttachmentGcWorker
 from hailhq.core.models import EmailAttachmentUpload
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 
 async def _make_row(

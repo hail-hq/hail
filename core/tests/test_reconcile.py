@@ -13,8 +13,6 @@ import uuid
 from datetime import datetime, timedelta, timezone
 
 import pytest
-from sqlalchemy import select, update
-
 from hailhq.core.models import (
     Call,
     CallEvent,
@@ -23,6 +21,7 @@ from hailhq.core.models import (
     WebhookSubscription,
 )
 from hailhq.core.reconcile import sweep_stale_calls
+from sqlalchemy import select, update
 
 
 async def _make_call(

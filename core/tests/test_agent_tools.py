@@ -13,13 +13,13 @@ from hailhq.core.models import EmailDomain, PhoneNumber
 
 
 def _ctx(**overrides):
-    defaults = dict(
-        call_id=uuid.uuid4(),
-        organization_id=uuid.uuid4(),
-        api=None,
-        hangup=None,
-        send_dtmf=None,
-    )
+    defaults = {
+        "call_id": uuid.uuid4(),
+        "organization_id": uuid.uuid4(),
+        "api": None,
+        "hangup": None,
+        "send_dtmf": None,
+    }
     defaults.update(overrides)
     return ToolContext(**defaults)
 
@@ -87,9 +87,8 @@ async def test_list_contacts_degrades_when_directory_tables_are_missing(
     """Self-host: `users`/`members` are website-owned tables a pure
     self-host deployment never creates. list_contacts must degrade to an
     empty-directory answer instead of surfacing the DB error."""
-    from sqlalchemy.exc import ProgrammingError
-
     import hailhq.core.agent_tools.list_contacts as list_contacts_module
+    from sqlalchemy.exc import ProgrammingError
 
     async def _raise(_session, _org_id):
         raise ProgrammingError("stmt", {}, Exception("UndefinedTable"))
@@ -272,5 +271,7 @@ def test_agent_tools_package_is_livekit_free():
         "m.startswith('livekit.')]; "
         "sys.exit(1 if mods else 0)"
     )
-    result = subprocess.run([sys.executable, "-c", code], capture_output=True)
+    result = subprocess.run(
+        [sys.executable, "-c", code], capture_output=True, check=False
+    )
     assert result.returncode == 0, result.stderr.decode()

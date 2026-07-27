@@ -10,10 +10,9 @@ from __future__ import annotations
 
 from uuid import UUID
 
+from hailhq.core.models import PhoneNumber
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-
-from hailhq.core.models import PhoneNumber
 
 __all__ = ["resolve_org_number"]
 

@@ -8,8 +8,8 @@ from uuid import UUID
 import httpx
 import pytest
 import respx
-
 from hail import Client, HailNotFoundError
+
 from tests.conftest import (
     make_sender_id_response,
     make_sms_response,

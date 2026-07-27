@@ -1,13 +1,12 @@
 from uuid import uuid4
 
 import pytest
-from pydantic import ValidationError
-
 from hailhq.core.schemas import (
     WebhookSubscriptionCreate,
     WebhookSubscriptionPatch,
     WebhookSubscriptionResponse,
 )
+from pydantic import ValidationError
 
 
 def test_create_requires_at_least_one_event():

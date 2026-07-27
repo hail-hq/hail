@@ -2,6 +2,8 @@ import uuid
 from datetime import datetime
 from decimal import Decimal
 
+from hailhq.core.call_end_reasons import CallEndReasonDB
+from hailhq.core.schemas import TERMINAL_CALL_STATUSES
 from sqlalchemy import (
     ARRAY,
     Boolean,
@@ -18,9 +20,6 @@ from sqlalchemy import (
 )
 from sqlalchemy.dialects.postgresql import INET, JSONB, UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
-
-from hailhq.core.call_end_reasons import CallEndReasonDB
-from hailhq.core.schemas import TERMINAL_CALL_STATUSES
 
 
 class Base(DeclarativeBase):

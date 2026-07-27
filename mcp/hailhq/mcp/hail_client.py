@@ -25,7 +25,6 @@ import uuid
 from typing import Any
 
 import httpx
-
 from hailhq.core.config import settings
 from hailhq.core.schemas import (
     CallCreate,
@@ -44,6 +43,7 @@ from hailhq.core.schemas import (
     SmsListResponse,
     SmsResponse,
 )
+from typing_extensions import Self
 
 
 class HailAPIError(Exception):
@@ -80,10 +80,10 @@ class HailClient:
             headers={"Authorization": f"Bearer {self._api_key}"},
         )
 
-    async def __aenter__(self) -> "HailClient":
+    async def __aenter__(self) -> Self:
         return self
 
-    async def __aexit__(self, *_exc: Any) -> None:
+    async def __aexit__(self, *_exc: object) -> None:
         await self.aclose()
 
     async def aclose(self) -> None:

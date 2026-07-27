@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import uuid
 
-
 from hailhq.voicebot.tools import (
     SPOKEN_TOOL_FAILURE,
     _make_handler,
@@ -129,10 +128,9 @@ async def test_availability_failure_does_not_poison_session(db, monkeypatch):
     after the first failure, so the second check's execute() raises
     PendingRollbackError and a genuinely-available tool is silently lost.
     """
+    import hailhq.voicebot.tools as tools_mod
     from livekit.agents.llm.tool_context import get_raw_function_info
     from sqlalchemy import text
-
-    import hailhq.voicebot.tools as tools_mod
 
     async def broken_avail(_org, session):
         await session.execute(text("SELECT * FROM nonexistent_table_xyz"))

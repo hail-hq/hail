@@ -21,11 +21,10 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
-from sqlalchemy import func, select
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from hailhq.core.config import settings
 from hailhq.core.models import AgentSendLog, Organization, PlatformFlag
+from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 __all__ = [
     "AGENT_OUTBOUND_DISABLED_FLAG",

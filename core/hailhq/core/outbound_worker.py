@@ -29,14 +29,13 @@ from datetime import datetime, timezone
 from typing import Any, Protocol
 from uuid import UUID
 
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from hailhq.core.agent_caps import agent_outbound_halted
 from hailhq.core.email_delivery_events import record_sent_event
 from hailhq.core.models import Email, EmailAttachment
 from hailhq.core.providers.email.base import EmailProvider, ProviderAttachment
 from hailhq.core.s3_mail import S3MailClient
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
 

@@ -9,10 +9,9 @@ import uuid
 
 import httpx
 import pytest
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from hailhq.core.config import settings
 from hailhq.core.models import Call, Contact, PhoneNumber, Suppression
+from sqlalchemy.ext.asyncio import AsyncSession
 
 HMAC_SECRET = "test-internal-secret"
 PHONE = "+14155551234"
@@ -87,7 +86,7 @@ async def test_rejects_non_ascii_signature_with_401_not_500(
         "/internal/dsar/lookup",
         content=b'{"identifier": "+14155551234"}',
         headers={
-            "X-Hail-Signature": "sha256=héllo".encode("utf-8"),
+            "X-Hail-Signature": "sha256=héllo".encode(),
             "Content-Type": "application/json",
         },
     )

@@ -10,8 +10,6 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import select
-
 from hailhq.core.models import (
     AuditLog,
     Call,
@@ -22,6 +20,7 @@ from hailhq.core.models import (
     Sms,
 )
 from hailhq.core.retention import purge_expired_data
+from sqlalchemy import select
 
 
 async def _make_sms(session, organization_id: uuid.UUID) -> Sms:

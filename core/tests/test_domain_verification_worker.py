@@ -5,11 +5,10 @@ from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock
 
 import pytest
-from sqlalchemy import select
-
 from hailhq.core.domain_verification_worker import DomainVerificationWorker
 from hailhq.core.models import EmailDomain
 from hailhq.core.providers.email.base import ProviderIdentity
+from sqlalchemy import select
 
 
 async def _insert_pending(session_factory, *, age_hours: float = 0.0) -> uuid.UUID:

@@ -1,7 +1,6 @@
 from uuid import uuid4
 
 import pytest
-
 from hailhq.core.email_forwarding import (
     LoopDetected,
     build_forwarded,

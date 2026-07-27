@@ -9,16 +9,13 @@ from datetime import datetime, timezone
 
 import httpx
 import pytest
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from hailhq.api.main import app
 from hailhq.core import hmac_signing
-from hailhq.core.compliance_gate import add_suppression
-from hailhq.core.db import get_session
 from hailhq.core.agent_caps import AGENT_OUTBOUND_DISABLED_FLAG
 from hailhq.core.billing import CALL_META_BILLED
+from hailhq.core.compliance_gate import add_suppression
 from hailhq.core.config import settings
+from hailhq.core.db import get_session
 from hailhq.core.models import (
     AuditLog,
     Call,
@@ -30,6 +27,8 @@ from hailhq.core.models import (
     Sms,
     User,
 )
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 HMAC_SECRET = "test-internal-secret"
 

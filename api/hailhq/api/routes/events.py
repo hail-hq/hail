@@ -21,14 +21,10 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi import status as http_status
-from sqlalchemy import literal, select, union_all
-from sqlalchemy.dialects.postgresql import UUID as PG_UUID
-from sqlalchemy.ext.asyncio import AsyncSession
-
-from hailhq.core.db import get_session
 from hailhq.api.deps import Principal, get_current_principal
 from hailhq.api.errors import unprocessable
 from hailhq.api.pagination import fetch_cursor_page
+from hailhq.core.db import get_session
 from hailhq.core.models import Call, CallEvent, Email, EmailEvent, Sms, SmsEvent
 from hailhq.core.schemas import (
     CallStatus,
@@ -36,6 +32,9 @@ from hailhq.core.schemas import (
     EventStreamResponse,
     parse_resource_id,
 )
+from sqlalchemy import literal, select, union_all
+from sqlalchemy.dialects.postgresql import UUID as PG_UUID
+from sqlalchemy.ext.asyncio import AsyncSession
 
 router = APIRouter(prefix="/events", tags=["events"])
 

@@ -10,9 +10,8 @@ from __future__ import annotations
 import uuid
 from typing import Any
 
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from hailhq.core.agent_tools.spec import ToolContext, ToolSpec
+from sqlalchemy.ext.asyncio import AsyncSession
 
 
 async def _always(_org: uuid.UUID, _session: AsyncSession) -> bool:

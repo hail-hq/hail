@@ -13,16 +13,15 @@ from __future__ import annotations
 from typing import Any
 from uuid import UUID
 
+from hailhq.core.models import WebhookDelivery, WebhookSubscription
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from hailhq.core.models import WebhookDelivery, WebhookSubscription
-
 __all__ = [
     "build_event_data",
+    "fanout_call_event",
     "fanout_email_event",
     "fanout_sms_event",
-    "fanout_call_event",
 ]
 
 

@@ -27,17 +27,17 @@ from __future__ import annotations
 import contextlib
 from collections.abc import AsyncIterator
 
-from mcp.server.auth.settings import AuthSettings
-from mcp.server.fastmcp import FastMCP
+from hailhq.core.config import settings
+from hailhq.mcp.auth import AuthMode, PassThroughVerifier, select_auth_mode
+from hailhq.mcp.hail_client import HailClient
+from hailhq.mcp.tools import register_tools
 from starlette.applications import Starlette
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 from starlette.routing import Route
 
-from hailhq.core.config import settings
-from hailhq.mcp.auth import AuthMode, PassThroughVerifier, select_auth_mode
-from hailhq.mcp.hail_client import HailClient
-from hailhq.mcp.tools import register_tools
+from mcp.server.auth.settings import AuthSettings
+from mcp.server.fastmcp import FastMCP
 
 
 def _build_app() -> tuple[FastMCP, HailClient | None, Starlette]:
@@ -108,4 +108,4 @@ def _build_app() -> tuple[FastMCP, HailClient | None, Starlette]:
 
 mcp_app, hail_client, app = _build_app()
 
-__all__ = ["app", "mcp_app", "hail_client"]
+__all__ = ["app", "hail_client", "mcp_app"]

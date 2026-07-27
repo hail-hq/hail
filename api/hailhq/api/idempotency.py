@@ -31,12 +31,11 @@ from uuid import UUID
 
 from fastapi import Depends, Header, HTTPException, Request, Response
 from fastapi import status as http_status
+from hailhq.api.deps import Principal, get_current_principal
+from hailhq.core.db import session_scope
+from hailhq.core.models import IdempotencyKey
 from sqlalchemy import delete, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
-
-from hailhq.core.db import session_scope
-from hailhq.api.deps import Principal, get_current_principal
-from hailhq.core.models import IdempotencyKey
 
 # Sentinel `response_status` for an in-flight handler. Real HTTP responses
 # are always >= 100, so 0 unambiguously means "another worker is running".

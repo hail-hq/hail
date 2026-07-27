@@ -12,10 +12,9 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
+from hailhq.core.models import Email
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
-
-from hailhq.core.models import Email
 
 __all__ = ["ForwardLimiter"]
 

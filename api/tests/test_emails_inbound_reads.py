@@ -13,11 +13,10 @@ from unittest.mock import AsyncMock
 
 import httpx
 import pytest
-from sqlalchemy.ext.asyncio import AsyncSession
-
-from hailhq.api.main import app
 from hailhq.api.deps import get_s3_mail
+from hailhq.api.main import app
 from hailhq.core.models import Email, EmailAttachment, EmailDomain
+from sqlalchemy.ext.asyncio import AsyncSession
 
 
 @pytest.fixture()
@@ -211,7 +210,7 @@ async def test_attachment_cross_org_isolation(
     async_session: AsyncSession,
     s3_mock,
 ):
-    org_id, headers = auth_headers
+    org_id, _headers = auth_headers
     inbound, att = await _make_inbound_pair(async_session, org_id)
     from .conftest import insert_org_and_key
 

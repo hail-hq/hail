@@ -1,2 +1,23 @@
 [tool.uv.workspace]
 members = ["core", "api", "voicebot", "mcp", "sdk"]
+
+[tool.ruff]
+# Keep lint out of nested git worktrees (full repo copies under
+# .claude/worktrees) — a repo-root `ruff check --fix .` otherwise rewrites
+# other branches' working files.
+extend-exclude = [".claude"]
+
+[tool.ruff.lint]
+ignore = [
+  # FastAPI's Depends()/Query() in argument defaults is the framework idiom.
+  "B008",
+  # Broad `except Exception` is the repo's deliberate resilience posture:
+  # a tool/handler failure must never kill a live call or a worker loop.
+  "BLE001",
+  # try/except/pass sites pair with the BLE001 posture (best-effort cleanup).
+  "S110",
+]
+
+[tool.ruff.lint.per-file-ignores]
+# pytest.raises(Exception) deliberately asserts a broad never-raises contract.
+"**/tests/*" = ["B017"]

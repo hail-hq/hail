@@ -7,14 +7,13 @@ from unittest.mock import AsyncMock
 
 import httpx
 import pytest
-
 from hailhq.core.config import settings
 from hailhq.core.hail_mail import org_prefix_from_id
 from hailhq.core.models import ApiKey, EmailDomain
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from .conftest import insert_org_and_key  # noqa: F401
+from .conftest import insert_org_and_key
 
 # --------------------------------------------------------------------------- #
 # POST /email-domains

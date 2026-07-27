@@ -5,7 +5,6 @@ from __future__ import annotations
 import uuid
 
 import pytest
-
 from hailhq.core.agent_tools.send_dtmf import (
     DTMF_CODES,
     MAX_DIGITS,

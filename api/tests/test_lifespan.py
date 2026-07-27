@@ -4,10 +4,9 @@ from __future__ import annotations
 
 import httpx
 import pytest
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from hailhq.api.main import app, lifespan
 from hailhq.core.config import settings
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from .conftest import insert_org_and_key
 

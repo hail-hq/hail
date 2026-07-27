@@ -328,7 +328,6 @@ func runTail(ctx context.Context, opts *Options, f *tailFlags) error {
 			return nil
 		}
 
-		renderer.markQuiet()
 		select {
 		case <-tailCtx.Done():
 			return errInterrupted
@@ -338,8 +337,7 @@ func runTail(ctx context.Context, opts *Options, f *tailFlags) error {
 }
 
 // tailRenderer owns cross-event display state: AMD-aware labeling of
-// pickup transcripts, and silence dots between displayed lines. One
-// instance lives for the whole tail loop.
+// pickup transcripts. One instance lives for the whole tail loop.
 //
 // `singleResource` is true when --id <type>:<uuid> narrowed the stream; the
 // short-id prefix is omitted in that mode (every event belongs to the same
@@ -349,9 +347,8 @@ type tailRenderer struct {
 	singleResource bool
 	colorize       bool
 	// kindFiltered is true when --kind narrows the stream server-side. A
-	// partial stream disables both AMD buffering (the amd_result row may be
-	// filtered out, so buffered turns would starve until call end) and
-	// silence dots (gaps between filtered lines are not dead air).
+	// partial stream disables AMD buffering (the amd_result row may be
+	// filtered out, so buffered turns would starve until call end).
 	kindFiltered bool
 	// pending buffers user_turn events per call until that call's AMD
 	// verdict arrives, so a phone tree's menu prompt renders as [machine]
@@ -363,12 +360,6 @@ type tailRenderer struct {
 	// person has been detected yet — user_turn events in that window are
 	// the phone tree talking, not a human.
 	machineActive map[openapi_types.UUID]bool
-	// lastShownAt is the event-timestamp of the last printed line; silence
-	// dots derive from gaps between them. quietAnchor is its wall-clock
-	// twin for live-mode waiting dots.
-	lastShownAt time.Time
-	quietAnchor time.Time
-	hasShown    bool
 }
 
 func newTailRenderer(opts *Options, singleResource, colorize, kindFiltered bool) *tailRenderer {
@@ -462,10 +453,8 @@ func (r *tailRenderer) flushAll() {
 	}
 }
 
-// printLine writes one formatted line, preceded by silence dots when the
-// event-timestamp gap since the previous line warrants them.
+// printLine writes one formatted line.
 func (r *tailRenderer) printLine(ev client.EventResponse, label, color, body string) {
-	r.renderSilence(ev.OccurredAt)
 	ts := ev.OccurredAt.UTC().Format("15:04:05")
 	if r.colorize && color != "" {
 		label = color + label + colorReset
@@ -480,72 +469,6 @@ func (r *tailRenderer) printLine(ev client.EventResponse, label, color, body str
 		}
 		fmt.Fprintf(r.opts.Stdout, "[%s] %s %-9s %s\n", ts, prefix, label, body)
 	}
-	r.lastShownAt = ev.OccurredAt
-	r.quietAnchor = time.Now()
-	r.hasShown = true
-}
-
-// renderSilence prints one dim "." line per second of gap between displayed
-// lines, so dead air is visible instead of implied. Gaps beyond 10s
-// compress to three dots plus a duration — a four-hour hold must not
-// scroll fourteen thousand lines. Single-resource mode only: org-wide
-// streams interleave calls, so gaps between lines mean nothing there.
-func (r *tailRenderer) renderSilence(ts time.Time) {
-	if !r.singleResource || r.kindFiltered || !r.hasShown {
-		return
-	}
-	secs := int(ts.Sub(r.lastShownAt).Seconds())
-	if secs < 2 {
-		return
-	}
-	if secs > 10 {
-		for i := 1; i <= 3; i++ {
-			r.dotLine(r.lastShownAt.Add(time.Duration(i)*time.Second), ".")
-		}
-		r.dotLine(ts, fmt.Sprintf("(%s silent)", (time.Duration(secs)*time.Second).String()))
-		return
-	}
-	for i := 1; i <= secs; i++ {
-		r.dotLine(r.lastShownAt.Add(time.Duration(i)*time.Second), ".")
-	}
-}
-
-// markQuiet prints live-mode waiting dots: one per full wall-clock second
-// since the last printed line. It advances both anchors so the next
-// event's timestamp gap doesn't re-print the same silence.
-func (r *tailRenderer) markQuiet() {
-	if !r.singleResource || r.kindFiltered || r.opts.JSON || !r.hasShown {
-		return
-	}
-	now := time.Now()
-	if secs := int(now.Sub(r.quietAnchor).Seconds()); secs > 10 {
-		// Wall-clock jump — machine suspend, a blocked terminal — not a
-		// live second-by-second wait. Compress like renderSilence instead
-		// of flooding one dot line per elapsed second.
-		for i := 1; i <= 3; i++ {
-			r.dotLine(r.lastShownAt.Add(time.Duration(i)*time.Second), ".")
-		}
-		advance := time.Duration(secs) * time.Second
-		r.dotLine(r.lastShownAt.Add(advance), fmt.Sprintf("(%s silent)", advance.String()))
-		r.quietAnchor = r.quietAnchor.Add(advance)
-		r.lastShownAt = r.lastShownAt.Add(advance)
-		return
-	}
-	for now.Sub(r.quietAnchor) >= time.Second {
-		r.dotLine(r.lastShownAt.Add(time.Second), ".")
-		r.quietAnchor = r.quietAnchor.Add(time.Second)
-		r.lastShownAt = r.lastShownAt.Add(time.Second)
-	}
-}
-
-// dotLine writes one waiting line — "[13:50:57] [wait]    ." — timestamped
-// like every other line so silence reads in sequence with the transcript.
-func (r *tailRenderer) dotLine(ts time.Time, s string) {
-	line := fmt.Sprintf("[%s] %-9s %s", ts.UTC().Format("15:04:05"), "[wait]", s)
-	if r.colorize {
-		line = colorDim + line + colorReset
-	}
-	fmt.Fprintln(r.opts.Stdout, line)
 }
 
 // eventResourceID picks the id (call, email, or sms) that owns this event,

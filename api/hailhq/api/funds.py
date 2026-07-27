@@ -8,11 +8,10 @@ from __future__ import annotations
 
 from fastapi import HTTPException
 from fastapi import status as http_status
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from hailhq.api.deps import Principal
 from hailhq.api.idempotency import IdempotencyContext, cache_failure
 from hailhq.core.billing import has_funds
+from sqlalchemy.ext.asyncio import AsyncSession
 
 __all__ = ["require_funds"]
 

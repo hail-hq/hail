@@ -8,10 +8,9 @@ from uuid import UUID
 import httpx
 import pytest
 import respx
-
+from hail import Client, EmailDomainCreate, EmailDomainPatch
 from pydantic import ValidationError
 
-from hail import Client, EmailDomainCreate, EmailDomainPatch
 from tests.conftest import make_email_domain_response
 
 # --------------------------------------------------------------------------- #
@@ -251,9 +250,10 @@ def test_email_domain_patch_still_requires_at_least_one_field() -> None:
 
 def test_email_domain_response_inbound_fields_default_to_safe_values() -> None:
     """Outbound/existing responses that omit inbound fields must still parse."""
-    from hail.models import EmailDomainResponse
-    from uuid import uuid4
     from datetime import datetime, timezone
+    from uuid import uuid4
+
+    from hail.models import EmailDomainResponse
 
     now = datetime.now(timezone.utc)
     dom = EmailDomainResponse.model_validate(

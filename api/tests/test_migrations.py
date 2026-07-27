@@ -21,12 +21,11 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
+from collections.abc import Iterator
 from pathlib import Path
-from typing import Iterator
 
 import psycopg
 import pytest
-
 from hailhq.core.db import to_sync_url
 from hailhq.core.testing.fixtures import database_url  # noqa: F401
 
@@ -78,6 +77,7 @@ def _run_alembic(url: str, args: list[str]) -> None:
     env["DATABASE_URL"] = url
     result = subprocess.run(
         [sys.executable, "-m", "alembic", *args],
+        check=False,
         cwd=str(API_DIR),
         env=env,
         capture_output=True,

@@ -6,11 +6,10 @@ import uuid
 from unittest.mock import AsyncMock, patch
 
 import pytest
-from sqlalchemy import select
-
 from hailhq.api.main import _meter_forward_send
 from hailhq.api.usage import write_usage_event
 from hailhq.core.models import UsageEvent
+from sqlalchemy import select
 
 
 @pytest.mark.asyncio

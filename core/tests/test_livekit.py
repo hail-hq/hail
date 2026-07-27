@@ -15,10 +15,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import UUID
 
 import pytest
-from livekit import api
-
 from hailhq.core import config
 from hailhq.core.livekit import LiveKitClient
+from livekit import api
 
 CALL_ID = UUID("11111111-2222-3333-4444-555555555555")
 

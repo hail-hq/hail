@@ -41,13 +41,11 @@ Revises: 0009
 
 from __future__ import annotations
 
-from typing import Union
-
 import sqlalchemy as sa
 from alembic import op
 
 revision: str = "0010"
-down_revision: Union[str, None] = "0009"
+down_revision: str | None = "0009"
 branch_labels = None
 depends_on = None
 

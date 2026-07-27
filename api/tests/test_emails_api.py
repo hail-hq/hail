@@ -7,9 +7,6 @@ from uuid import UUID
 
 import httpx
 import pytest
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from hailhq.api.deps import get_s3_mail
 from hailhq.api.main import app
 from hailhq.api.routes import emails as emails_routes
@@ -25,8 +22,10 @@ from hailhq.core.models import (
     WebhookDelivery,
     WebhookSubscription,
 )
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from .conftest import insert_org_and_key  # noqa: F401
+from .conftest import insert_org_and_key
 
 # --------------------------------------------------------------------------- #
 # Helpers — keep tests focused on the surface, not boilerplate.

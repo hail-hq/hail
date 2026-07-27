@@ -15,9 +15,8 @@ from __future__ import annotations
 
 from uuid import UUID
 
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from hailhq.core.models import Email
+from sqlalchemy.ext.asyncio import AsyncSession
 
 
 async def enqueue_outbound_forward(

@@ -1,5 +1,4 @@
 import pytest
-
 from hailhq.core.providers.email.inbound import (
     InboundMessage,
     InboundProvider,

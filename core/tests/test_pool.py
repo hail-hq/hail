@@ -6,14 +6,13 @@ import uuid
 from datetime import datetime, timedelta, timezone
 
 import pytest
-from sqlalchemy import update
-
 from hailhq.core.models import Call, PhoneNumber
 from hailhq.core.pool import (
     claim_pool_number,
     release_pool_reservation,
     sweep_pool_reservations,
 )
+from sqlalchemy import update
 
 
 async def _make_number(
@@ -158,9 +157,8 @@ async def test_release_noop_on_non_pool_call(async_session):
 @pytest.mark.asyncio
 async def test_concurrent_claims_pick_different_rows(async_session, database_url):
     """SELECT FOR UPDATE SKIP LOCKED guarantees concurrent claimers don't collide."""
-    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
-
     from hailhq.core.db import to_async_url
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
     # Seed two pool rows.
     pn_a = await _make_pool_number(async_session, e164="+14155550400")

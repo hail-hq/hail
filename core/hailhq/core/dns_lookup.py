@@ -8,7 +8,6 @@ domain's receive MX points at SES inbound after the user publishes DNS.
 from __future__ import annotations
 
 import httpx
-
 from hailhq.core.config import settings
 from hailhq.core.providers.email import DkimRecord
 

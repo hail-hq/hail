@@ -5,14 +5,13 @@ from __future__ import annotations
 import uuid
 
 import pytest
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from hailhq.core.agent_caps import (
     AGENT_OUTBOUND_DISABLED_FLAG,
     check_agent_send_allowed,
 )
 from hailhq.core.config import settings
 from hailhq.core.models import AgentSendLog, Organization, PlatformFlag
+from sqlalchemy.ext.asyncio import AsyncSession
 
 
 async def _mk_org(db: AsyncSession, origin: str) -> uuid.UUID:

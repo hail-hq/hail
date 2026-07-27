@@ -27,14 +27,14 @@ The audit_log conversion drops the "shared" string sentinel (``api_key_id``
 is NULL for HAIL_API_KEY callers now, a proper UUID otherwise).
 """
 
-from typing import Sequence, Union
+from collections.abc import Sequence
 
 from alembic import op
 
 revision: str = "0004"
-down_revision: Union[str, None] = "0003"
-branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
+down_revision: str | None = "0003"
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
 
 
 UPGRADE = """

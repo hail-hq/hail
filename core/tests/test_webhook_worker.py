@@ -11,8 +11,6 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 
 import pytest
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from hailhq.core.models import EmailDomain, WebhookDelivery, WebhookSubscription
 from hailhq.core.webhook_worker import (
     MAX_CONSECUTIVE_FAILURES,
@@ -20,6 +18,7 @@ from hailhq.core.webhook_worker import (
     _next_delivery_state,
 )
 from hailhq.core.webhooks import RETRY_SCHEDULE_SECONDS
+from sqlalchemy.ext.asyncio import AsyncSession
 
 
 def _make_delivery(**kw) -> WebhookDelivery:

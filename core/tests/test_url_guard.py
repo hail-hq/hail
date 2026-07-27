@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import pytest
-
 from hailhq.core.url_guard import UnsafeUrlError, assert_public_https_url
 
 

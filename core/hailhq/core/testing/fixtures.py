@@ -9,20 +9,19 @@ from __future__ import annotations
 
 import os
 import uuid
+from collections.abc import AsyncGenerator, AsyncIterator, Iterator
 from datetime import datetime, timezone
-from typing import AsyncGenerator, AsyncIterator, Iterator
 
 import pytest
+from hailhq.core import db as core_db
+from hailhq.core.db import to_async_url
+from hailhq.core.models import OrganizationMember, User
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
     async_sessionmaker,
     create_async_engine,
 )
-
-from hailhq.core import db as core_db
-from hailhq.core.db import to_async_url
-from hailhq.core.models import OrganizationMember, User
 
 
 @pytest.fixture(scope="session")
@@ -46,7 +45,7 @@ def database_url() -> Iterator[str]:
 
 @pytest.fixture()
 async def db(
-    database_url: str,  # noqa: F811 (re-used as a fixture parameter name)
+    database_url: str,
     monkeypatch: pytest.MonkeyPatch,
 ) -> AsyncGenerator[AsyncEngine, None]:
     """Fresh async engine with recreated schema; patches the global sessionmaker.

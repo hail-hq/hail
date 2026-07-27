@@ -51,13 +51,12 @@ import uuid
 from collections.abc import AsyncIterator
 from typing import Any
 
-from mcp.server.fastmcp import Context, FastMCP
-from pydantic import ValidationError
-
 from hailhq.core.schemas import parse_resource_id
-
 from hailhq.mcp.auth import AuthMode
 from hailhq.mcp.hail_client import HailAPIError, HailClient
+from pydantic import ValidationError
+
+from mcp.server.fastmcp import Context, FastMCP
 
 # --------------------------------------------------------------------------- #
 # Error mapping — turns HailAPIError into a stable agent-facing message.
@@ -1137,22 +1136,22 @@ def register_tools(
 
 
 __all__ = [
-    "register_tools",
-    "place_call",
-    "send_email",
+    "create_contact",
     "get_call",
-    "list_calls",
-    "send_sms",
-    "get_sms",
-    "list_sms",
     "get_email",
-    "list_emails",
-    "get_email_raw",
     "get_email_attachment",
     "get_email_events",
+    "get_email_raw",
     "get_email_stats",
     "get_events",
+    "get_sms",
+    "list_calls",
     "list_contacts",
+    "list_emails",
+    "list_sms",
     "lookup_contact",
-    "create_contact",
+    "place_call",
+    "register_tools",
+    "send_email",
+    "send_sms",
 ]

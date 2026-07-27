@@ -5,8 +5,6 @@ from __future__ import annotations
 import uuid
 
 import pytest
-from pydantic import ValidationError
-
 from hailhq.core.config import settings
 from hailhq.core.models import OrgProviderConfig
 from hailhq.core.provider_config import (
@@ -18,6 +16,7 @@ from hailhq.core.provider_config import (
     provider_cipher,
 )
 from hailhq.core.secret_cipher import SecretKeyMissing, generate_key
+from pydantic import ValidationError
 
 
 def test_llm_params_openai_compatible_requires_base_url() -> None:

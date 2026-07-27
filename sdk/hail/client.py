@@ -22,29 +22,32 @@ from __future__ import annotations
 import asyncio
 import base64
 import os
+from collections.abc import AsyncIterator
 from datetime import datetime
-from typing import Any, AsyncIterator, Literal
+from typing import Any, Literal
 from urllib.parse import quote
 from uuid import UUID
 
 import httpx
+from typing_extensions import Self
 
 from hail._errors import HailConfigError
 from hail._http import _HailHTTP, generate_idempotency_key
 from hail._resource_id import parse_resource_id
 from hail.models import (
+    TERMINAL_CALL_STATUSES,
     CallEventResponse,
     CallListResponse,
     CallResponse,
     CallStatus,
     EmailAttachmentUploadResponse,
+    EmailDomainListResponse,
+    EmailDomainResponse,
     EmailListResponse,
     EmailResponse,
     EmailStatus,
     EventStreamResponse,
     LLMConfig,
-    EmailDomainListResponse,
-    EmailDomainResponse,
     NumberType,
     PhoneNumberListResponse,
     PhoneNumberResponse,
@@ -53,7 +56,6 @@ from hail.models import (
     SmsResponse,
     SmsStatus,
     SuppressionListResponse,
-    TERMINAL_CALL_STATUSES,
 )
 
 _DEFAULT_BASE_URL = "https://api.hail.so"
@@ -67,7 +69,7 @@ def _encode_event_cursor(occurred_at: datetime, event_id: UUID) -> str:
     can't import core, so the logic is duplicated. Used to synthesize the
     next polling cursor when the server didn't hand one back.
     """
-    raw = f"{occurred_at.isoformat()}|{event_id}".encode("utf-8")
+    raw = f"{occurred_at.isoformat()}|{event_id}".encode()
     return base64.urlsafe_b64encode(raw).rstrip(b"=").decode("ascii")
 
 
@@ -804,10 +806,10 @@ class Client:
     async def aclose(self) -> None:
         await self._http.aclose()
 
-    async def __aenter__(self) -> "Client":
+    async def __aenter__(self) -> Self:
         return self
 
-    async def __aexit__(self, exc_type: Any, exc: Any, tb: Any) -> None:
+    async def __aexit__(self, exc_type: object, exc: object, tb: object) -> None:
         await self.aclose()
 
     def __repr__(self) -> str:
