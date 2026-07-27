@@ -4,7 +4,7 @@
 
 **Goal:** Replace the unbounded `?m=` comparison URL space with 96 prerendered pair pages derived from a `featured` flag in `costs/*.json`, and make `/costs/compare` fully static.
 
-**Architecture:** A new optional `featured` boolean in the costs schema seeds a finite set of within-category model pairs. `web/lib/featured.ts` derives slugs from that flag and is consumed by a static `[pair]` route and by `app/sitemap.ts`. `/costs/compare` becomes `force-static` with selection moved to a client component, and its crawlable `<a href>` pills become `<button>`s. `costs/featured.lock.json` is the contract between the Next app and a Node CI guard, since `allowJs: false` prevents sharing a module across that boundary.
+**Architecture:** A new optional `featured` boolean in the costs schema seeds a finite set of within-category model pairs. `web/lib/featured.ts` derives slugs from that flag and is consumed by a static `[pair]` route and by `app/sitemap.ts`. `/costs/compare` becomes `force-static` with selection moved to a client component, and its crawlable `<a href>` pills become `<button>`s. `web/lib/featured.lock.json` is the contract between the Next app and a Node CI guard, since `allowJs: false` prevents sharing a module across that boundary.
 
 **Tech Stack:** Next.js 16 (App Router, `basePath: '/costs'`), React 19, TypeScript 5.5 (strict), Node's built-in `node:test`, `check-jsonschema`, prettier 3.8.
 
@@ -28,7 +28,7 @@
 | -------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
 | `costs/schema/{llm,stt,tts}.schema.json`     | Declare the optional `featured` boolean (v2.3)                                                           |
 | `costs/{llm,stt,tts}.json`                   | Carry `featured: true` on the 24 seed rows                                                               |
-| `costs/featured.lock.json`                   | Committed snapshot of generated slugs; the contract between the Next app and CI                          |
+| `web/lib/featured.lock.json`                 | Committed snapshot of generated slugs; the contract between the Next app and CI                          |
 | `scripts/costs/check-featured.mjs`           | CI guard + lockfile generator (`--write`)                                                                |
 | `scripts/costs/check-featured.test.mjs`      | Unit tests for the guard's pure functions                                                                |
 | `web/lib/types.ts`                           | Add `featured?: boolean` to `CommonFields`                                                               |
@@ -143,14 +143,14 @@ git commit -m "feat(costs): add featured flag for comparison pages (schema v2.3)
 
 - Create: `scripts/costs/check-featured.mjs`
 - Create: `scripts/costs/check-featured.test.mjs`
-- Create: `costs/featured.lock.json` (generated)
+- Create: `web/lib/featured.lock.json` (generated)
 - Modify: `package.json`
 - Modify: `.github/workflows/costs-validate.yml`
 
 **Interfaces:**
 
 - Consumes: `featured` from Task 1.
-- Produces: `pairSlug(a, b) -> string`, `featuredIds(data) -> string[]`, `pairSlugs(ids) -> string[]`, `checkInvariants({ llm, stt, tts, lock }) -> string[]` (array of error messages; empty means pass). Also produces `costs/featured.lock.json` with shape `{ "slugs": string[] }`, which Task 3 imports.
+- Produces: `pairSlug(a, b) -> string`, `featuredIds(data) -> string[]`, `pairSlugs(ids) -> string[]`, `checkInvariants({ llm, stt, tts, lock }) -> string[]` (array of error messages; empty means pass). Also produces `web/lib/featured.lock.json` with shape `{ "slugs": string[] }`, which Task 3 imports.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -369,14 +369,14 @@ export function checkInvariants({ llm, stt, tts, lock }) {
   const removed = locked.filter((s) => !computed.includes(s));
   if (removed.length > 0) {
     errors.push(
-      `these slugs are in costs/featured.lock.json but are no longer generated, so previously indexed pages would 404: ${removed.join(", ")}`,
+      `these slugs are in web/lib/featured.lock.json but are no longer generated, so previously indexed pages would 404: ${removed.join(", ")}`,
     );
   }
 
   const added = computed.filter((s) => !locked.includes(s));
   if (added.length > 0) {
     errors.push(
-      `${added.length} new slug(s) are not in the lockfile; run \`pnpm costs:featured --write\` and commit costs/featured.lock.json: ${added.join(", ")}`,
+      `${added.length} new slug(s) are not in the lockfile; run \`pnpm costs:featured --write\` and commit web/lib/featured.lock.json: ${added.join(", ")}`,
     );
   }
 
@@ -398,7 +398,7 @@ async function main() {
       JSON.stringify({ slugs }, null, 2) + "\n",
       "utf-8",
     );
-    console.log(`Wrote ${slugs.length} slug(s) to costs/featured.lock.json`);
+    console.log(`Wrote ${slugs.length} slug(s) to web/lib/featured.lock.json`);
     process.exit(0);
   }
 
@@ -407,7 +407,7 @@ async function main() {
     lock = JSON.parse(await readFile(LOCK_PATH, "utf-8"));
   } catch {
     console.error(
-      "costs/featured.lock.json is missing. Run `pnpm costs:featured --write`.",
+      "web/lib/featured.lock.json is missing. Run `pnpm costs:featured --write`.",
     );
     process.exit(1);
   }
@@ -442,10 +442,10 @@ Expected: `# pass 10`, `# fail 0`.
 
 ```bash
 node scripts/costs/check-featured.mjs --write
-jq -r '.slugs | length' costs/featured.lock.json
+jq -r '.slugs | length' web/lib/featured.lock.json
 ```
 
-Expected: `Wrote 96 slug(s) to costs/featured.lock.json`, then `96`.
+Expected: `Wrote 96 slug(s) to web/lib/featured.lock.json`, then `96`.
 
 - [ ] **Step 6: Verify the guard passes against real data**
 
@@ -498,7 +498,7 @@ Expected: all tests pass across `check-stale.test.mjs`, `sync-telephony.test.mjs
 
 ```bash
 git add scripts/costs/check-featured.mjs scripts/costs/check-featured.test.mjs
-git add costs/featured.lock.json package.json .github/workflows/costs-validate.yml
+git add web/lib/featured.lock.json package.json .github/workflows/costs-validate.yml
 git commit -m "feat(costs): guard the featured comparison set in CI"
 ```
 
@@ -512,7 +512,7 @@ git commit -m "feat(costs): guard the featured comparison set in CI"
 
 **Interfaces:**
 
-- Consumes: `featured` from Task 1, `costs/featured.lock.json` from Task 2, and the existing `llm`, `stt`, `tts` exports from `web/lib/costs.ts`.
+- Consumes: `featured` from Task 1, `web/lib/featured.lock.json` from Task 2, and the existing `llm`, `stt`, `tts` exports from `web/lib/costs.ts`.
 - Produces:
   - `type FeaturedCategory = 'llm' | 'stt' | 'tts'`
   - `type FeaturedPair = { slug: string; category: FeaturedCategory; models: [FeaturedRow, FeaturedRow] }`
@@ -528,7 +528,7 @@ Create `web/lib/featured.ts`:
 
 ```ts
 import { llm, stt, tts } from "./costs";
-import lockJson from "../../costs/featured.lock.json";
+import lockJson from "../../web/lib/featured.lock.json";
 import type { LLMRow, STTRow, TTSRow } from "./types";
 
 export type FeaturedCategory = "llm" | "stt" | "tts";
@@ -595,7 +595,7 @@ export const pairBySlug: Map<string, FeaturedPair> = new Map(
   const stale = locked.filter((s) => !computed.includes(s));
   if (missing.length > 0 || stale.length > 0) {
     throw new Error(
-      "costs/featured.lock.json is out of date. Run `pnpm costs:featured --write`.\n" +
+      "web/lib/featured.lock.json is out of date. Run `pnpm costs:featured --write`.\n" +
         `  missing from lock: ${missing.join(", ") || "(none)"}\n` +
         `  stale in lock:     ${stale.join(", ") || "(none)"}`,
     );
@@ -617,10 +617,10 @@ Temporarily corrupt the lockfile and confirm the guard catches it:
 
 ```bash
 cd "$(git rev-parse --show-toplevel)"
-cp costs/featured.lock.json /tmp/featured.lock.bak
-jq '.slugs |= (. + ["fake-vs-slug"])' costs/featured.lock.json > /tmp/lock.tmp && mv /tmp/lock.tmp costs/featured.lock.json
+cp web/lib/featured.lock.json /tmp/featured.lock.bak
+jq '.slugs |= (. + ["fake-vs-slug"])' web/lib/featured.lock.json > /tmp/lock.tmp && mv /tmp/lock.tmp web/lib/featured.lock.json
 pnpm site:build 2>&1 | grep -c "featured.lock.json is out of date"
-cp /tmp/featured.lock.bak costs/featured.lock.json
+cp /tmp/featured.lock.bak web/lib/featured.lock.json
 ```
 
 Expected: a non-zero count from `grep -c`, then the file is restored. Confirm with `node scripts/costs/check-featured.mjs` printing `Featured set OK (96 comparison pages).` before moving on.
@@ -1449,7 +1449,7 @@ Rules for a refresh pass:
 - Adding or removing a flag changes the generated slug set, so regenerate and commit the lockfile:
 
 ```bash
-pnpm costs:featured --write   # regenerates costs/featured.lock.json
+pnpm costs:featured --write   # regenerates web/lib/featured.lock.json
 pnpm costs:featured           # verifies invariants; must print "Featured set OK"
 ```
 
@@ -1461,7 +1461,7 @@ Keep the set small. Every model added creates a page against each existing featu
 In the "## Closing checklist" section, add after the `pnpm site:build` line:
 
 ```markdown
-- [ ] `pnpm costs:featured` passes (`Featured set OK`); if any `featured` flag changed, `costs/featured.lock.json` was regenerated with `--write` and staged
+- [ ] `pnpm costs:featured` passes (`Featured set OK`); if any `featured` flag changed, `web/lib/featured.lock.json` was regenerated with `--write` and staged
 - [ ] `node --test "scripts/costs/*.test.mjs"` passes
 ```
 

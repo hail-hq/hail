@@ -138,7 +138,7 @@ Fails on:
 
 1. A category with fewer than 2 featured models — pages would silently vanish.
 2. A featured row whose `replaced_by_model_id` does not resolve in-file.
-3. **A previously-published slug disappearing**, checked against a committed `costs/featured.lock.json` of generated slugs. This is the guard that matters: it makes a refresh run unable to delete indexed pages without the deletion showing up in review.
+3. **A previously-published slug disappearing**, checked against a committed `web/lib/featured.lock.json` of generated slugs. This is the guard that matters: it makes a refresh run unable to delete indexed pages without the deletion showing up in review.
 
 `refresh-costs.md` gains a **Featured models** subsection and one closing-checklist line: a new marquee model is a candidate for `"featured": true`; a deprecated featured model keeps its flag and must have a resolving `replaced_by_model_id`.
 
@@ -153,7 +153,7 @@ costs/{llm,stt,tts}.json  --(featured: true)-->  web/lib/featured.ts
                         |                                                   |
           /costs/compare/<a>-vs-<b>  (96 static pages)          /costs/sitemap.xml
                         |
-              scripts/costs/check-featured.mjs  <--> costs/featured.lock.json
+              scripts/costs/check-featured.mjs  <--> web/lib/featured.lock.json
 ```
 
 `web/lib/featured.ts` is the single boundary. It reads the dataset via the existing `web/lib/costs.ts` loader and exports the featured models, the slug map, and the ordered slug list. The route, the sitemap, and the CI check all consume that one module, so there is no second place where "which comparisons exist" is decided.

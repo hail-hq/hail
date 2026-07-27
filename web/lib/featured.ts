@@ -1,5 +1,5 @@
 import { llm, stt, tts } from "./costs";
-import lockJson from "../../costs/featured.lock.json";
+import lockJson from "./featured.lock.json";
 import type { LLMRow, STTRow, TTSRow } from "./types";
 
 export type FeaturedCategory = "llm" | "stt" | "tts";
@@ -66,7 +66,7 @@ export const pairBySlug: Map<string, FeaturedPair> = new Map(
   const stale = locked.filter((s) => !computed.includes(s));
   if (missing.length > 0 || stale.length > 0) {
     throw new Error(
-      "costs/featured.lock.json is out of date. Run `pnpm costs:featured --write`.\n" +
+      "web/lib/featured.lock.json is out of date. Run `pnpm costs:featured --write`.\n" +
         `  missing from lock: ${missing.join(", ") || "(none)"}\n` +
         `  stale in lock:     ${stale.join(", ") || "(none)"}`,
     );

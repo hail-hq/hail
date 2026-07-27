@@ -178,11 +178,11 @@ Rules for a refresh pass:
 - **Adding** a flag changes the generated slug set, so regenerate and commit the lockfile:
 
 ```bash
-pnpm costs:featured --write   # regenerates costs/featured.lock.json
+pnpm costs:featured --write   # regenerates web/lib/featured.lock.json
 pnpm costs:featured           # verifies invariants; must print "Featured set OK"
 ```
 
-- Removing a flag is a deliberate de-indexing decision. Do **not** run `--write` to silence the resulting failure — restore the flag, or hand-edit `costs/featured.lock.json` in the same commit so the deletion is visible in review.
+- Removing a flag is a deliberate de-indexing decision. Do **not** run `--write` to silence the resulting failure — restore the flag, or hand-edit `web/lib/featured.lock.json` in the same commit so the deletion is visible in review.
 
 Keep the set small. Every model added creates a page against each existing featured model in its category, so N models produce N×(N−1)/2 pages.
 
@@ -405,7 +405,7 @@ Before signing off the refresh:
 - [ ] `pnpm costs:validate` passes (all three categories `ok -- validation done`)
 - [ ] jq referential checks pass (every line ends `[] ; replaced_by: []`)
 - [ ] `pnpm site:build` passes (Next.js compiles, all static pages generated)
-- [ ] `pnpm costs:featured` passes (`Featured set OK`); if any `featured` flag changed, `costs/featured.lock.json` was regenerated with `--write` and staged
+- [ ] `pnpm costs:featured` passes (`Featured set OK`); if any `featured` flag changed, `web/lib/featured.lock.json` was regenerated with `--write` and staged
 - [ ] `node --test "scripts/costs/*.test.mjs"` passes
 - [ ] All touched rows have `last_verified` bumped to today
 - [ ] No row has both per-unit price fields set with conflicting math (STT: `price_per_minute = price_per_second × 60`; TTS: analogous if both populated)

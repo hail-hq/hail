@@ -5,7 +5,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = join(__dirname, '..', '..');
 const DATA_DIR = join(REPO_ROOT, 'costs');
-const LOCK_PATH = join(DATA_DIR, 'featured.lock.json');
+const LOCK_PATH = join(REPO_ROOT, 'web', 'lib', 'featured.lock.json');
 
 const CATEGORIES = ['llm', 'stt', 'tts'];
 const MIN_FEATURED_PER_CATEGORY = 2;
@@ -67,14 +67,14 @@ export function checkInvariants({ llm, stt, tts, lock }) {
   const removed = locked.filter((s) => !computed.includes(s));
   if (removed.length > 0) {
     errors.push(
-      `these slugs are in costs/featured.lock.json but are no longer generated, so previously indexed pages would 404: ${removed.join(', ')} — do not run \`pnpm costs:featured --write\` to silence this; restore \`featured: true\`, or hand-edit costs/featured.lock.json so the removal is reviewable.`,
+      `these slugs are in web/lib/featured.lock.json but are no longer generated, so previously indexed pages would 404: ${removed.join(', ')} — do not run \`pnpm costs:featured --write\` to silence this; restore \`featured: true\`, or hand-edit web/lib/featured.lock.json so the removal is reviewable.`,
     );
   }
 
   const added = computed.filter((s) => !locked.includes(s));
   if (added.length > 0) {
     errors.push(
-      `${added.length} new slug(s) are not in the lockfile; run \`pnpm costs:featured --write\` and commit costs/featured.lock.json: ${added.join(', ')}`,
+      `${added.length} new slug(s) are not in the lockfile; run \`pnpm costs:featured --write\` and commit web/lib/featured.lock.json: ${added.join(', ')}`,
     );
   }
 
@@ -92,7 +92,7 @@ async function main() {
   if (write) {
     const slugs = computeSlugs({ llm, stt, tts });
     await writeFile(LOCK_PATH, JSON.stringify({ slugs }, null, 2) + '\n', 'utf-8');
-    console.log(`Wrote ${slugs.length} slug(s) to costs/featured.lock.json`);
+    console.log(`Wrote ${slugs.length} slug(s) to web/lib/featured.lock.json`);
     process.exit(0);
   }
 
@@ -100,7 +100,7 @@ async function main() {
   try {
     lock = JSON.parse(await readFile(LOCK_PATH, 'utf-8'));
   } catch {
-    console.error('costs/featured.lock.json is missing. Run `pnpm costs:featured --write`.');
+    console.error('web/lib/featured.lock.json is missing. Run `pnpm costs:featured --write`.');
     process.exit(1);
   }
 

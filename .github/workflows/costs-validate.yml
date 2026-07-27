@@ -5,6 +5,7 @@ on:
     paths:
       - "costs/**"
       - "scripts/costs/**"
+      - "web/lib/featured.lock.json"
       - ".github/workflows/costs-validate.yml"
 
 concurrency:
