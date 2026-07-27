@@ -5,7 +5,6 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
-	"regexp"
 	"strings"
 	"sync/atomic"
 	"syscall"
@@ -658,50 +657,6 @@ func TestTail_HumanPickupFlushesAsHuman(t *testing.T) {
 	}
 	if strings.Index(stdout, "Hello?") > strings.Index(stdout, "[amd]") {
 		t.Errorf("buffered transcript must print before the verdict line:\n%s", stdout)
-	}
-}
-
-// TestTail_SilenceDotsBetweenEvents: a short gap prints one dim "." line
-// per second; a long gap compresses to three dots plus a duration.
-func TestTail_SilenceDotsBetweenEvents(t *testing.T) {
-	tFuture := time.Now().Add(time.Hour)
-	srv := newSequenceServer(t, []sequenceResponse{
-		{http.StatusOK, client.EventStreamResponse{
-			Items: []client.EventResponse{
-				sampleEventInCall("11111111-1111-1111-1111-111111111111", callA, "agent_turn",
-					map[string]interface{}{"text": "One moment."}, tFuture),
-				sampleEventInCall("22222222-2222-2222-2222-222222222221", callA, "agent_turn",
-					map[string]interface{}{"text": "Still here."}, tFuture.Add(5*time.Second)),
-				sampleEventInCall("33333333-3333-3333-3333-333333333331", callA, "agent_turn",
-					map[string]interface{}{"text": "Back again."}, tFuture.Add(3605*time.Second)),
-			},
-			CallStatus: completedStatus(),
-		}},
-	})
-
-	stdout, _, err := runRoot(t,
-		map[string]string{"HAIL_API_KEY": "sk_test", "HAIL_API_URL": srv.URL, "NO_COLOR": "1"},
-		"tail", "--id", "call:"+uuid.UUID(callA).String(),
-	)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	dotLines := 0
-	for _, line := range strings.Split(stdout, "\n") {
-		if strings.Contains(line, "[wait]") && strings.HasSuffix(line, " .") {
-			dotLines++
-		}
-	}
-	// 5 for the 5s gap + 3 for the compressed hour-long gap.
-	if dotLines != 8 {
-		t.Errorf("dot lines = %d, want 8:\n%s", dotLines, stdout)
-	}
-	// Dot lines carry the standard timestamp prefix: "[HH:MM:SS] [wait]    ."
-	if !regexp.MustCompile(`(?m)^\[\d{2}:\d{2}:\d{2}\] \[wait\]\s+\.$`).MatchString(stdout) {
-		t.Errorf("dot lines missing timestamped [wait] prefix:\n%s", stdout)
-	}
-	if !strings.Contains(stdout, "[wait]") || !strings.Contains(stdout, "1h0m0s silent") {
-		t.Errorf("missing compressed silence duration:\n%s", stdout)
 	}
 }
 

@@ -4,6 +4,9 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 
 ## [Unreleased]
 
+- `hail tail` no longer prints per-second `[wait] .` filler lines (shipped
+  in 0.18.0, removed after real-world use: they drowned the transcript).
+
 - Voicebot speech sanitizer: LLM turns that are tool-call syntax (code
   fences, bare JSON — seen when fast-tier models leak arguments as text
   during IVR navigation) are no longer spoken or recorded as agent turns;
