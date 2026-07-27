@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"sort"
 	"strings"
 	"syscall"
 	"time"
@@ -358,6 +359,10 @@ type tailRenderer struct {
 	// the amd_result row, so the right label is unknowable on arrival.
 	pending     map[openapi_types.UUID][]client.EventResponse
 	amdResolved map[openapi_types.UUID]bool
+	// machineActive marks calls whose AMD verdict was a machine and no
+	// person has been detected yet — user_turn events in that window are
+	// the phone tree talking, not a human.
+	machineActive map[openapi_types.UUID]bool
 	// lastShownAt is the event-timestamp of the last printed line; silence
 	// dots derive from gaps between them. quietAnchor is its wall-clock
 	// twin for live-mode waiting dots.
@@ -374,6 +379,7 @@ func newTailRenderer(opts *Options, singleResource, colorize, kindFiltered bool)
 		kindFiltered:   kindFiltered,
 		pending:        map[openapi_types.UUID][]client.EventResponse{},
 		amdResolved:    map[openapi_types.UUID]bool{},
+		machineActive:  map[openapi_types.UUID]bool{},
 	}
 }
 
@@ -398,7 +404,18 @@ func (r *tailRenderer) renderEvent(ev client.EventResponse) error {
 	if ev.Kind == "amd_result" {
 		r.amdResolved[res] = true
 		category, _ := ev.Payload["category"].(string)
-		r.flushPending(res, strings.HasPrefix(category, "machine"))
+		machine := strings.HasPrefix(category, "machine")
+		r.flushPending(res, machine)
+		// The voicebot may keep transcribing the phone tree after the
+		// verdict row (menu speech events land after amd_result) — keep
+		// labeling that speech [machine] until a person is detected.
+		r.machineActive[res] = machine
+	} else if ev.Kind == "person_detected" {
+		// The handoff marker means everything user-side before it was the
+		// phone tree — a mid-join buffer (amd_result outside the window)
+		// flushes as [machine], not [human].
+		r.amdResolved[res] = true
+		r.flushPending(res, true)
 	} else if ev.Kind != "state_change" || len(r.pending[res]) > 0 {
 		// The voicebot writes amd_result before any agent_turn, so any
 		// post-pickup event kind means the verdict is not coming (AMD
@@ -408,6 +425,16 @@ func (r *tailRenderer) renderEvent(ev client.EventResponse) error {
 		// precede pickup in --from-start replays.
 		r.amdResolved[res] = true
 		r.flushPending(res, false)
+	}
+	// A machine phase ends when the voicebot reports the handoff
+	// (person_detected) or, for events written before that kind existed,
+	// when the agent first speaks to the person.
+	if ev.Kind == "person_detected" || ev.Kind == "agent_turn" {
+		r.machineActive[res] = false
+	}
+	if ev.Kind == "user_turn" && r.machineActive[res] {
+		r.printLine(ev, "[machine]", colorDim, turnText(ev))
+		return nil
 	}
 	label, body := renderEventBody(ev)
 	r.printLine(ev, label, colorFor(ev.Kind), body)
@@ -422,11 +449,7 @@ func (r *tailRenderer) flushPending(res openapi_types.UUID, machine bool) {
 		if machine {
 			label, color = "[machine]", colorDim
 		}
-		text, _ := ev.Payload["text"].(string)
-		if text == "" {
-			text = payloadJSON(ev.Payload)
-		}
-		r.printLine(ev, label, color, text)
+		r.printLine(ev, label, color, turnText(ev))
 	}
 	delete(r.pending, res)
 }
@@ -575,17 +598,9 @@ func renderEventBody(ev client.EventResponse) (label, body string) {
 		}
 		return "[system]", fmt.Sprintf("%s → %s", from, to)
 	case "agent_turn":
-		text, _ := ev.Payload["text"].(string)
-		if text == "" {
-			return "[hail]", payloadJSON(ev.Payload)
-		}
-		return "[hail]", text
+		return "[hail]", turnText(ev)
 	case "user_turn":
-		text, _ := ev.Payload["text"].(string)
-		if text == "" {
-			return "[human]", payloadJSON(ev.Payload)
-		}
-		return "[human]", text
+		return "[human]", turnText(ev)
 	case "amd_result":
 		// The pickup transcript lines above already show what was heard —
 		// render only the verdict, as a sentence, not the payload JSON.
@@ -596,9 +611,21 @@ func renderEventBody(ev client.EventResponse) (label, body string) {
 			return "[amd]", category
 		}
 		return "[amd]", payloadJSON(ev.Payload)
+	case "person_detected":
+		// Written by the voicebot when a person comes on the line after a
+		// machine answered (post-IVR handoff).
+		return "[system]", "a person is on the line"
 	case "tool_call":
-		// Verified shape (voicebot/.../agent.py): {"tools": [<name>, ...]}.
-		// Spec mentions {"name", "args"} too — handle both defensively.
+		// Current shape (voicebot/.../agent.py): {"tools": [names],
+		// "calls": [{"name", "args"}]} — `calls` carries arguments so the
+		// line shows what the tool did, e.g. send_dtmf(digits=2). Older
+		// rows have only `tools`; spec mentions {"name", "args"} too —
+		// handle all three defensively.
+		if calls, ok := ev.Payload["calls"].([]interface{}); ok && len(calls) > 0 {
+			if rendered := renderToolCalls(calls); rendered != "" {
+				return "[tool]", rendered
+			}
+		}
 		if name, ok := ev.Payload["name"].(string); ok && name != "" {
 			args, _ := json.Marshal(ev.Payload["args"])
 			return "[tool]", fmt.Sprintf("%s(%s)", name, string(args))
@@ -630,6 +657,41 @@ func renderEventBody(ev client.EventResponse) (label, body string) {
 	}
 }
 
+// renderToolCalls formats the tool_call `calls` payload as
+// "name(k=v, ...)" entries joined by "; ". Returns "" on a malformed
+// list so the caller can fall through to the older shapes.
+func renderToolCalls(calls []interface{}) string {
+	parts := make([]string, 0, len(calls))
+	for _, c := range calls {
+		m, ok := c.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		name, _ := m["name"].(string)
+		if name == "" {
+			continue
+		}
+		args, _ := m["args"].(map[string]interface{})
+		kvs := make([]string, 0, len(args))
+		for k, v := range args {
+			kvs = append(kvs, fmt.Sprintf("%s=%v", k, v))
+		}
+		sort.Strings(kvs)
+		parts = append(parts, fmt.Sprintf("%s(%s)", name, strings.Join(kvs, ", ")))
+	}
+	return strings.Join(parts, "; ")
+}
+
+// turnText is the spoken text of a turn event, falling back to the raw
+// payload JSON when the text field is absent or empty.
+func turnText(ev client.EventResponse) string {
+	text, _ := ev.Payload["text"].(string)
+	if text == "" {
+		return payloadJSON(ev.Payload)
+	}
+	return text
+}
+
 func payloadJSON(p map[string]interface{}) string {
 	b, err := json.Marshal(p)
 	if err != nil {
@@ -658,7 +720,7 @@ func colorFor(kind string) string {
 		return colorCyan
 	case "user_turn":
 		return colorYellow
-	case "state_change", "amd_result":
+	case "state_change", "amd_result", "person_detected":
 		return colorDim
 	case "error":
 		return colorRed

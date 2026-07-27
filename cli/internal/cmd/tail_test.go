@@ -757,3 +757,117 @@ func TestTail_ShortPrefixResolvesViaCallsList(t *testing.T) {
 		t.Errorf("events wire id = %q, want %q", got, want)
 	}
 }
+
+// TestTail_PostVerdictMachineSpeech: the voicebot writes amd_result before
+// the menu transcript, so machine speech arriving AFTER the verdict must
+// still render [machine] — until person_detected hands off to a human.
+func TestTail_PostVerdictMachineSpeech(t *testing.T) {
+	tFuture := time.Now().Add(time.Hour)
+	srv := newSequenceServer(t, []sequenceResponse{
+		{http.StatusOK, client.EventStreamResponse{
+			Items: []client.EventResponse{
+				sampleEventInCall("11111111-1111-1111-1111-111111111111", callA, "amd_result",
+					map[string]interface{}{"category": "machine-ivr"}, tFuture),
+				sampleEventInCall("22222222-2222-2222-2222-222222222221", callA, "user_turn",
+					map[string]interface{}{"text": "For reservations, press one."}, tFuture.Add(time.Second)),
+				sampleEventInCall("33333333-3333-3333-3333-333333333331", callA, "person_detected",
+					map[string]interface{}{}, tFuture.Add(2*time.Second)),
+				sampleEventInCall("44444444-4444-4444-4444-444444444441", callA, "user_turn",
+					map[string]interface{}{"text": "Front desk, hello?"}, tFuture.Add(3*time.Second)),
+			},
+			CallStatus: completedStatus(),
+		}},
+	})
+
+	stdout, _, err := runRoot(t,
+		map[string]string{"HAIL_API_KEY": "sk_test", "HAIL_API_URL": srv.URL, "NO_COLOR": "1"},
+		"tail", "--id", "call:"+uuid.UUID(callA).String(),
+	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	for _, line := range strings.Split(stdout, "\n") {
+		if strings.Contains(line, "press one") && !strings.Contains(line, "[machine]") {
+			t.Errorf("post-verdict menu speech not labeled [machine]: %q", line)
+		}
+		if strings.Contains(line, "Front desk") && !strings.Contains(line, "[human]") {
+			t.Errorf("post-handoff speech not labeled [human]: %q", line)
+		}
+	}
+	if !strings.Contains(stdout, "a person is on the line") {
+		t.Errorf("missing person_detected system line:\n%s", stdout)
+	}
+}
+
+// TestTail_MidJoinPersonDetectedFlushesMachine: joining mid-call during IVR
+// (amd_result outside the window), buffered speech that precedes
+// person_detected is the phone tree and must flush as [machine].
+func TestTail_MidJoinPersonDetectedFlushesMachine(t *testing.T) {
+	tFuture := time.Now().Add(time.Hour)
+	srv := newSequenceServer(t, []sequenceResponse{
+		{http.StatusOK, client.EventStreamResponse{
+			Items: []client.EventResponse{
+				sampleEventInCall("11111111-1111-1111-1111-111111111111", callA, "user_turn",
+					map[string]interface{}{"text": "For reservations, press one."}, tFuture),
+				sampleEventInCall("22222222-2222-2222-2222-222222222221", callA, "person_detected",
+					map[string]interface{}{}, tFuture.Add(time.Second)),
+				sampleEventInCall("33333333-3333-3333-3333-333333333331", callA, "user_turn",
+					map[string]interface{}{"text": "Front desk, hello?"}, tFuture.Add(2*time.Second)),
+			},
+			CallStatus: completedStatus(),
+		}},
+	})
+
+	stdout, _, err := runRoot(t,
+		map[string]string{"HAIL_API_KEY": "sk_test", "HAIL_API_URL": srv.URL, "NO_COLOR": "1"},
+		"tail", "--id", "call:"+uuid.UUID(callA).String(),
+	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	for _, line := range strings.Split(stdout, "\n") {
+		if strings.Contains(line, "press one") && !strings.Contains(line, "[machine]") {
+			t.Errorf("pre-handoff buffered speech not labeled [machine]: %q", line)
+		}
+		if strings.Contains(line, "Front desk") && !strings.Contains(line, "[human]") {
+			t.Errorf("post-handoff speech not labeled [human]: %q", line)
+		}
+	}
+}
+
+// TestTail_ToolCallArgsRendered: the tool_call `calls` payload renders as
+// name(k=v) so the digit pressed (or message sent) is visible.
+func TestTail_ToolCallArgsRendered(t *testing.T) {
+	tFuture := time.Now().Add(time.Hour)
+	srv := newSequenceServer(t, []sequenceResponse{
+		{http.StatusOK, client.EventStreamResponse{
+			Items: []client.EventResponse{
+				sampleEventInCall("11111111-1111-1111-1111-111111111111", callA, "tool_call",
+					map[string]interface{}{
+						"tools": []interface{}{"send_dtmf"},
+						"calls": []interface{}{
+							map[string]interface{}{"name": "send_dtmf", "args": map[string]interface{}{"digits": "2"}},
+						},
+					}, tFuture),
+				sampleEventInCall("22222222-2222-2222-2222-222222222221", callA, "tool_call",
+					map[string]interface{}{"tools": []interface{}{"end_call"}}, tFuture.Add(time.Second)),
+			},
+			CallStatus: completedStatus(),
+		}},
+	})
+
+	stdout, _, err := runRoot(t,
+		map[string]string{"HAIL_API_KEY": "sk_test", "HAIL_API_URL": srv.URL, "NO_COLOR": "1"},
+		"tail", "--id", "call:"+uuid.UUID(callA).String(),
+	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(stdout, "send_dtmf(digits=2)") {
+		t.Errorf("missing rendered tool args:\n%s", stdout)
+	}
+	// Legacy names-only payloads keep the old rendering.
+	if !strings.Contains(stdout, "end_call") {
+		t.Errorf("legacy tools list not rendered:\n%s", stdout)
+	}
+}
