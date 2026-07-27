@@ -60,6 +60,6 @@ jobs:
         with:
           node-version: "22"
       - name: Costs script unit tests
-        run: node --test scripts/costs/
+        run: node --test "scripts/costs/*.test.mjs"
       - name: Featured set guard
         run: node scripts/costs/check-featured.mjs

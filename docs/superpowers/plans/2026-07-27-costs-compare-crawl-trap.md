@@ -24,33 +24,35 @@
 
 ## File Structure
 
-| Path | Responsibility |
-| --- | --- |
-| `costs/schema/{llm,stt,tts}.schema.json` | Declare the optional `featured` boolean (v2.3) |
-| `costs/{llm,stt,tts}.json` | Carry `featured: true` on the 24 seed rows |
-| `costs/featured.lock.json` | Committed snapshot of generated slugs; the contract between the Next app and CI |
-| `scripts/costs/check-featured.mjs` | CI guard + lockfile generator (`--write`) |
-| `scripts/costs/check-featured.test.mjs` | Unit tests for the guard's pure functions |
-| `web/lib/types.ts` | Add `featured?: boolean` to `CommonFields` |
-| `web/lib/featured.ts` | Single source for featured models, pair slugs, slug→pair map; asserts against the lockfile at build time |
-| `web/app/(dispatch)/compare/[pair]/page.tsx` | The 96 static comparison pages |
-| `web/components/deprecation-notice.tsx` | Banner + successor link for deprecated featured models |
-| `web/components/compare-picker.tsx` | Client-side selection for `/costs/compare` |
-| `web/app/(dispatch)/compare/page.tsx` | Becomes a static shell that renders the picker |
-| `web/app/sitemap.ts` | Serves `/costs/sitemap.xml` |
-| `web/next.config.ts` | Canonical-host 308 redirect |
-| `docs/operations/refresh-costs.md` | Featured-models maintenance procedure |
+| Path                                         | Responsibility                                                                                           |
+| -------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| `costs/schema/{llm,stt,tts}.schema.json`     | Declare the optional `featured` boolean (v2.3)                                                           |
+| `costs/{llm,stt,tts}.json`                   | Carry `featured: true` on the 24 seed rows                                                               |
+| `costs/featured.lock.json`                   | Committed snapshot of generated slugs; the contract between the Next app and CI                          |
+| `scripts/costs/check-featured.mjs`           | CI guard + lockfile generator (`--write`)                                                                |
+| `scripts/costs/check-featured.test.mjs`      | Unit tests for the guard's pure functions                                                                |
+| `web/lib/types.ts`                           | Add `featured?: boolean` to `CommonFields`                                                               |
+| `web/lib/featured.ts`                        | Single source for featured models, pair slugs, slug→pair map; asserts against the lockfile at build time |
+| `web/app/(dispatch)/compare/[pair]/page.tsx` | The 96 static comparison pages                                                                           |
+| `web/components/deprecation-notice.tsx`      | Banner + successor link for deprecated featured models                                                   |
+| `web/components/compare-picker.tsx`          | Client-side selection for `/costs/compare`                                                               |
+| `web/app/(dispatch)/compare/page.tsx`        | Becomes a static shell that renders the picker                                                           |
+| `web/app/sitemap.ts`                         | Serves `/costs/sitemap.xml`                                                                              |
+| `web/next.config.ts`                         | Canonical-host 308 redirect                                                                              |
+| `docs/operations/refresh-costs.md`           | Featured-models maintenance procedure                                                                    |
 
 ---
 
 ## Task 1: `featured` flag — schema, types, seed data
 
 **Files:**
+
 - Modify: `costs/schema/llm.schema.json`, `costs/schema/stt.schema.json`, `costs/schema/tts.schema.json`
 - Modify: `costs/llm.json`, `costs/stt.json`, `costs/tts.json`
 - Modify: `web/lib/types.ts`
 
 **Interfaces:**
+
 - Consumes: nothing.
 - Produces: an optional `featured?: boolean` on every model row, set to `true` on exactly 24 rows. Task 2 and Task 3 both read it.
 
@@ -138,6 +140,7 @@ git commit -m "feat(costs): add featured flag for comparison pages (schema v2.3)
 ## Task 2: CI guard and lockfile
 
 **Files:**
+
 - Create: `scripts/costs/check-featured.mjs`
 - Create: `scripts/costs/check-featured.test.mjs`
 - Create: `costs/featured.lock.json` (generated)
@@ -145,6 +148,7 @@ git commit -m "feat(costs): add featured flag for comparison pages (schema v2.3)
 - Modify: `.github/workflows/costs-validate.yml`
 
 **Interfaces:**
+
 - Consumes: `featured` from Task 1.
 - Produces: `pairSlug(a, b) -> string`, `featuredIds(data) -> string[]`, `pairSlugs(ids) -> string[]`, `checkInvariants({ llm, stt, tts, lock }) -> string[]` (array of error messages; empty means pass). Also produces `costs/featured.lock.json` with shape `{ "slugs": string[] }`, which Task 3 imports.
 
@@ -153,99 +157,130 @@ git commit -m "feat(costs): add featured flag for comparison pages (schema v2.3)
 Create `scripts/costs/check-featured.test.mjs`:
 
 ```js
-import { test } from 'node:test';
-import assert from 'node:assert/strict';
-import { pairSlug, featuredIds, pairSlugs, checkInvariants } from './check-featured.mjs';
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import {
+  pairSlug,
+  featuredIds,
+  pairSlugs,
+  checkInvariants,
+} from "./check-featured.mjs";
 
-test('pairSlug sorts ids deterministically', () => {
-  assert.equal(pairSlug('gpt-5.5', 'claude-opus-5'), 'claude-opus-5-vs-gpt-5.5');
-  assert.equal(pairSlug('claude-opus-5', 'gpt-5.5'), 'claude-opus-5-vs-gpt-5.5');
+test("pairSlug sorts ids deterministically", () => {
+  assert.equal(
+    pairSlug("gpt-5.5", "claude-opus-5"),
+    "claude-opus-5-vs-gpt-5.5",
+  );
+  assert.equal(
+    pairSlug("claude-opus-5", "gpt-5.5"),
+    "claude-opus-5-vs-gpt-5.5",
+  );
 });
 
-test('featuredIds selects only flagged rows', () => {
+test("featuredIds selects only flagged rows", () => {
   const data = {
     models: [
-      { model_id: 'a', featured: true },
-      { model_id: 'b' },
-      { model_id: 'c', featured: false },
-      { model_id: 'd', featured: true },
+      { model_id: "a", featured: true },
+      { model_id: "b" },
+      { model_id: "c", featured: false },
+      { model_id: "d", featured: true },
     ],
   };
-  assert.deepEqual(featuredIds(data), ['a', 'd']);
+  assert.deepEqual(featuredIds(data), ["a", "d"]);
 });
 
-test('featuredIds keeps deprecated rows', () => {
-  const data = { models: [{ model_id: 'old', featured: true, deprecated_at: '2026-01-01' }] };
-  assert.deepEqual(featuredIds(data), ['old']);
+test("featuredIds keeps deprecated rows", () => {
+  const data = {
+    models: [{ model_id: "old", featured: true, deprecated_at: "2026-01-01" }],
+  };
+  assert.deepEqual(featuredIds(data), ["old"]);
 });
 
-test('pairSlugs produces every unordered pair, sorted', () => {
-  assert.deepEqual(pairSlugs(['b', 'a', 'c']), ['a-vs-b', 'a-vs-c', 'b-vs-c']);
+test("pairSlugs produces every unordered pair, sorted", () => {
+  assert.deepEqual(pairSlugs(["b", "a", "c"]), ["a-vs-b", "a-vs-c", "b-vs-c"]);
 });
 
-test('pairSlugs of two ids is one pair', () => {
-  assert.deepEqual(pairSlugs(['x', 'y']), ['x-vs-y']);
+test("pairSlugs of two ids is one pair", () => {
+  assert.deepEqual(pairSlugs(["x", "y"]), ["x-vs-y"]);
 });
 
-test('passes when lock matches and invariants hold', () => {
-  const cat = (ids) => ({ models: ids.map((id) => ({ model_id: id, featured: true })) });
+test("passes when lock matches and invariants hold", () => {
+  const cat = (ids) => ({
+    models: ids.map((id) => ({ model_id: id, featured: true })),
+  });
   const errors = checkInvariants({
-    llm: cat(['a', 'b']),
-    stt: cat(['c', 'd']),
-    tts: cat(['e', 'f']),
-    lock: { slugs: ['a-vs-b', 'c-vs-d', 'e-vs-f'] },
+    llm: cat(["a", "b"]),
+    stt: cat(["c", "d"]),
+    tts: cat(["e", "f"]),
+    lock: { slugs: ["a-vs-b", "c-vs-d", "e-vs-f"] },
   });
   assert.deepEqual(errors, []);
 });
 
-test('fails when a category has fewer than two featured models', () => {
-  const cat = (ids) => ({ models: ids.map((id) => ({ model_id: id, featured: true })) });
+test("fails when a category has fewer than two featured models", () => {
+  const cat = (ids) => ({
+    models: ids.map((id) => ({ model_id: id, featured: true })),
+  });
   const errors = checkInvariants({
-    llm: cat(['a']),
-    stt: cat(['c', 'd']),
-    tts: cat(['e', 'f']),
-    lock: { slugs: ['c-vs-d', 'e-vs-f'] },
+    llm: cat(["a"]),
+    stt: cat(["c", "d"]),
+    tts: cat(["e", "f"]),
+    lock: { slugs: ["c-vs-d", "e-vs-f"] },
   });
   assert.equal(errors.length, 1);
   assert.match(errors[0], /llm has 1 featured model/);
 });
 
-test('fails when a locked slug disappears', () => {
-  const cat = (ids) => ({ models: ids.map((id) => ({ model_id: id, featured: true })) });
+test("fails when a locked slug disappears", () => {
+  const cat = (ids) => ({
+    models: ids.map((id) => ({ model_id: id, featured: true })),
+  });
   const errors = checkInvariants({
-    llm: cat(['a', 'b']),
-    stt: cat(['c', 'd']),
-    tts: cat(['e', 'f']),
-    lock: { slugs: ['a-vs-b', 'a-vs-z', 'c-vs-d', 'e-vs-f'] },
+    llm: cat(["a", "b"]),
+    stt: cat(["c", "d"]),
+    tts: cat(["e", "f"]),
+    lock: { slugs: ["a-vs-b", "a-vs-z", "c-vs-d", "e-vs-f"] },
   });
   assert.equal(errors.length, 1);
   assert.match(errors[0], /a-vs-z/);
   assert.match(errors[0], /no longer generated/);
 });
 
-test('fails when a featured replaced_by_model_id does not resolve', () => {
+test("fails when a featured replaced_by_model_id does not resolve", () => {
   const errors = checkInvariants({
     llm: {
       models: [
-        { model_id: 'a', featured: true, replaced_by_model_id: 'ghost' },
-        { model_id: 'b', featured: true },
+        { model_id: "a", featured: true, replaced_by_model_id: "ghost" },
+        { model_id: "b", featured: true },
       ],
     },
-    stt: { models: [{ model_id: 'c', featured: true }, { model_id: 'd', featured: true }] },
-    tts: { models: [{ model_id: 'e', featured: true }, { model_id: 'f', featured: true }] },
-    lock: { slugs: ['a-vs-b', 'c-vs-d', 'e-vs-f'] },
+    stt: {
+      models: [
+        { model_id: "c", featured: true },
+        { model_id: "d", featured: true },
+      ],
+    },
+    tts: {
+      models: [
+        { model_id: "e", featured: true },
+        { model_id: "f", featured: true },
+      ],
+    },
+    lock: { slugs: ["a-vs-b", "c-vs-d", "e-vs-f"] },
   });
   assert.equal(errors.length, 1);
   assert.match(errors[0], /ghost/);
 });
 
-test('reports new slugs missing from the lock', () => {
-  const cat = (ids) => ({ models: ids.map((id) => ({ model_id: id, featured: true })) });
+test("reports new slugs missing from the lock", () => {
+  const cat = (ids) => ({
+    models: ids.map((id) => ({ model_id: id, featured: true })),
+  });
   const errors = checkInvariants({
-    llm: cat(['a', 'b', 'c']),
-    stt: cat(['d', 'e']),
-    tts: cat(['f', 'g']),
-    lock: { slugs: ['a-vs-b', 'd-vs-e', 'f-vs-g'] },
+    llm: cat(["a", "b", "c"]),
+    stt: cat(["d", "e"]),
+    tts: cat(["f", "g"]),
+    lock: { slugs: ["a-vs-b", "d-vs-e", "f-vs-g"] },
   });
   assert.equal(errors.length, 1);
   assert.match(errors[0], /--write/);
@@ -265,22 +300,22 @@ Expected: FAIL — `Cannot find module '.../scripts/costs/check-featured.mjs'`.
 Create `scripts/costs/check-featured.mjs`:
 
 ```js
-import { readFile, writeFile } from 'node:fs/promises';
-import { join, dirname } from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { readFile, writeFile } from "node:fs/promises";
+import { join, dirname } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const REPO_ROOT = join(__dirname, '..', '..');
-const DATA_DIR = join(REPO_ROOT, 'costs');
-const LOCK_PATH = join(DATA_DIR, 'featured.lock.json');
+const REPO_ROOT = join(__dirname, "..", "..");
+const DATA_DIR = join(REPO_ROOT, "costs");
+const LOCK_PATH = join(DATA_DIR, "featured.lock.json");
 
-const CATEGORIES = ['llm', 'stt', 'tts'];
+const CATEGORIES = ["llm", "stt", "tts"];
 const MIN_FEATURED_PER_CATEGORY = 2;
 
 // Sorted with bare .sort() (code-unit order) rather than localeCompare, which is
 // locale-dependent and would yield different route sets on different machines.
 export function pairSlug(a, b) {
-  return [a, b].sort().join('-vs-');
+  return [a, b].sort().join("-vs-");
 }
 
 export function featuredIds(data) {
@@ -334,14 +369,14 @@ export function checkInvariants({ llm, stt, tts, lock }) {
   const removed = locked.filter((s) => !computed.includes(s));
   if (removed.length > 0) {
     errors.push(
-      `these slugs are in costs/featured.lock.json but are no longer generated, so previously indexed pages would 404: ${removed.join(', ')}`,
+      `these slugs are in costs/featured.lock.json but are no longer generated, so previously indexed pages would 404: ${removed.join(", ")}`,
     );
   }
 
   const added = computed.filter((s) => !locked.includes(s));
   if (added.length > 0) {
     errors.push(
-      `${added.length} new slug(s) are not in the lockfile; run \`pnpm costs:featured --write\` and commit costs/featured.lock.json: ${added.join(', ')}`,
+      `${added.length} new slug(s) are not in the lockfile; run \`pnpm costs:featured --write\` and commit costs/featured.lock.json: ${added.join(", ")}`,
     );
   }
 
@@ -349,25 +384,31 @@ export function checkInvariants({ llm, stt, tts, lock }) {
 }
 
 async function readCategory(name) {
-  return JSON.parse(await readFile(join(DATA_DIR, `${name}.json`), 'utf-8'));
+  return JSON.parse(await readFile(join(DATA_DIR, `${name}.json`), "utf-8"));
 }
 
 async function main() {
-  const write = process.argv.includes('--write');
+  const write = process.argv.includes("--write");
   const [llm, stt, tts] = await Promise.all(CATEGORIES.map(readCategory));
 
   if (write) {
     const slugs = computeSlugs({ llm, stt, tts });
-    await writeFile(LOCK_PATH, JSON.stringify({ slugs }, null, 2) + '\n', 'utf-8');
+    await writeFile(
+      LOCK_PATH,
+      JSON.stringify({ slugs }, null, 2) + "\n",
+      "utf-8",
+    );
     console.log(`Wrote ${slugs.length} slug(s) to costs/featured.lock.json`);
     process.exit(0);
   }
 
   let lock;
   try {
-    lock = JSON.parse(await readFile(LOCK_PATH, 'utf-8'));
+    lock = JSON.parse(await readFile(LOCK_PATH, "utf-8"));
   } catch {
-    console.error('costs/featured.lock.json is missing. Run `pnpm costs:featured --write`.');
+    console.error(
+      "costs/featured.lock.json is missing. Run `pnpm costs:featured --write`.",
+    );
     process.exit(1);
   }
 
@@ -427,28 +468,28 @@ In the root `package.json`, add after the `"costs:stale"` line:
 `scripts/costs/*.test.mjs` currently run nowhere. Append to `.github/workflows/costs-validate.yml`, after the existing "Cross-field validity checks" step:
 
 ```yaml
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "22"
-      - name: Costs script unit tests
-        run: node --test scripts/costs/
-      - name: Featured set guard
-        run: node scripts/costs/check-featured.mjs
+- uses: actions/setup-node@v4
+  with:
+    node-version: "22"
+- name: Costs script unit tests
+  run: node --test "scripts/costs/*.test.mjs"
+- name: Featured set guard
+  run: node scripts/costs/check-featured.mjs
 ```
 
 Then extend the workflow's `on.pull_request.paths` list to include `scripts/costs/**` so the guard runs when the script itself changes:
 
 ```yaml
-    paths:
-      - "costs/**"
-      - "scripts/costs/**"
-      - ".github/workflows/costs-validate.yml"
+paths:
+  - "costs/**"
+  - "scripts/costs/**"
+  - ".github/workflows/costs-validate.yml"
 ```
 
-- [ ] **Step 9: Run the full script test directory as CI will**
+- [ ] **Step 9: Run the full script test files as CI will**
 
 ```bash
-node --test scripts/costs/
+node --test "scripts/costs/*.test.mjs"
 ```
 
 Expected: all tests pass across `check-stale.test.mjs`, `sync-telephony.test.mjs`, and `check-featured.test.mjs`. If a pre-existing test fails, stop and report it — do not fix unrelated tests in this task.
@@ -466,9 +507,11 @@ git commit -m "feat(costs): guard the featured comparison set in CI"
 ## Task 3: `web/lib/featured.ts`
 
 **Files:**
+
 - Create: `web/lib/featured.ts`
 
 **Interfaces:**
+
 - Consumes: `featured` from Task 1, `costs/featured.lock.json` from Task 2, and the existing `llm`, `stt`, `tts` exports from `web/lib/costs.ts`.
 - Produces:
   - `type FeaturedCategory = 'llm' | 'stt' | 'tts'`
@@ -484,11 +527,11 @@ git commit -m "feat(costs): guard the featured comparison set in CI"
 Create `web/lib/featured.ts`:
 
 ```ts
-import { llm, stt, tts } from './costs';
-import lockJson from '../../costs/featured.lock.json';
-import type { LLMRow, STTRow, TTSRow } from './types';
+import { llm, stt, tts } from "./costs";
+import lockJson from "../../costs/featured.lock.json";
+import type { LLMRow, STTRow, TTSRow } from "./types";
 
-export type FeaturedCategory = 'llm' | 'stt' | 'tts';
+export type FeaturedCategory = "llm" | "stt" | "tts";
 export type FeaturedRow = LLMRow | STTRow | TTSRow;
 
 export type FeaturedPair = {
@@ -503,16 +546,21 @@ export type FeaturedPair = {
  * This must stay byte-identical to pairSlug() in scripts/costs/check-featured.mjs.
  */
 export function pairSlug(a: string, b: string): string {
-  return [a, b].sort().join('-vs-');
+  return [a, b].sort().join("-vs-");
 }
 
 function featuredOf<T extends FeaturedRow>(rows: T[]): T[] {
   return rows
     .filter((m) => m.featured === true)
-    .sort((a, b) => (a.model_id < b.model_id ? -1 : a.model_id > b.model_id ? 1 : 0));
+    .sort((a, b) =>
+      a.model_id < b.model_id ? -1 : a.model_id > b.model_id ? 1 : 0,
+    );
 }
 
-function pairsFor(category: FeaturedCategory, rows: FeaturedRow[]): FeaturedPair[] {
+function pairsFor(
+  category: FeaturedCategory,
+  rows: FeaturedRow[],
+): FeaturedPair[] {
   const out: FeaturedPair[] = [];
   for (let i = 0; i < rows.length; i++) {
     for (let j = i + 1; j < rows.length; j++) {
@@ -527,9 +575,9 @@ function pairsFor(category: FeaturedCategory, rows: FeaturedRow[]): FeaturedPair
 }
 
 export const featuredPairs: FeaturedPair[] = [
-  ...pairsFor('llm', featuredOf(llm.models)),
-  ...pairsFor('stt', featuredOf(stt.models)),
-  ...pairsFor('tts', featuredOf(tts.models)),
+  ...pairsFor("llm", featuredOf(llm.models)),
+  ...pairsFor("stt", featuredOf(stt.models)),
+  ...pairsFor("tts", featuredOf(tts.models)),
 ];
 
 export const pairBySlug: Map<string, FeaturedPair> = new Map(
@@ -547,9 +595,9 @@ export const pairBySlug: Map<string, FeaturedPair> = new Map(
   const stale = locked.filter((s) => !computed.includes(s));
   if (missing.length > 0 || stale.length > 0) {
     throw new Error(
-      'costs/featured.lock.json is out of date. Run `pnpm costs:featured --write`.\n' +
-        `  missing from lock: ${missing.join(', ') || '(none)'}\n` +
-        `  stale in lock:     ${stale.join(', ') || '(none)'}`,
+      "costs/featured.lock.json is out of date. Run `pnpm costs:featured --write`.\n" +
+        `  missing from lock: ${missing.join(", ") || "(none)"}\n` +
+        `  stale in lock:     ${stale.join(", ") || "(none)"}`,
     );
   }
 }
@@ -589,10 +637,12 @@ git commit -m "feat(web): derive featured comparison pairs from costs data"
 ## Task 4: Static `[pair]` comparison pages
 
 **Files:**
+
 - Create: `web/app/(dispatch)/compare/[pair]/page.tsx`
 - Create: `web/components/deprecation-notice.tsx`
 
 **Interfaces:**
+
 - Consumes: `featuredPairs`, `pairBySlug`, `FeaturedPair` from Task 3; the existing `LLMCompareTable`, `STTCompareTable`, `TTSCompareTable` from `web/components/compare-table.tsx`, each of which takes `{ models, currentIds }`.
 - Produces: 96 static routes at `/costs/compare/<slug>`.
 
@@ -601,7 +651,7 @@ git commit -m "feat(web): derive featured comparison pairs from costs data"
 Create `web/components/deprecation-notice.tsx`:
 
 ```tsx
-import type { FeaturedRow } from '@/lib/featured';
+import type { FeaturedRow } from "@/lib/featured";
 
 export function DeprecationNotice({
   models,
@@ -616,11 +666,11 @@ export function DeprecationNotice({
   return (
     <div
       style={{
-        border: '2px solid var(--color-ink)',
-        background: 'var(--color-paper)',
-        padding: '14px 18px',
+        border: "2px solid var(--color-ink)",
+        background: "var(--color-paper)",
+        padding: "14px 18px",
         marginBottom: 24,
-        fontFamily: 'var(--font-mono)',
+        fontFamily: "var(--font-mono)",
         fontSize: 12,
       }}
       role="note"
@@ -628,12 +678,19 @@ export function DeprecationNotice({
       {deprecated.map((m) => (
         <div key={m.model_id}>
           <b>{m.display_name}</b> was deprecated on {m.deprecated_at}.
-          {m.replaced_by_model_id ? <> Replaced by <code>{m.replaced_by_model_id}</code>.</> : null}
+          {m.replaced_by_model_id ? (
+            <>
+              {" "}
+              Replaced by <code>{m.replaced_by_model_id}</code>.
+            </>
+          ) : null}
         </div>
       ))}
       {successorSlug ? (
         <div style={{ marginTop: 8 }}>
-          <a href={`/costs/compare/${successorSlug}`}>See the current comparison →</a>
+          <a href={`/costs/compare/${successorSlug}`}>
+            See the current comparison →
+          </a>
         </div>
       ) : null}
     </div>
@@ -646,20 +703,20 @@ export function DeprecationNotice({
 Create `web/app/(dispatch)/compare/[pair]/page.tsx`:
 
 ```tsx
-import type { Metadata } from 'next';
-import { notFound } from 'next/navigation';
-import { featuredPairs, pairBySlug, pairSlug } from '@/lib/featured';
-import type { FeaturedPair } from '@/lib/featured';
+import type { Metadata } from "next";
+import { notFound } from "next/navigation";
+import { featuredPairs, pairBySlug, pairSlug } from "@/lib/featured";
+import type { FeaturedPair } from "@/lib/featured";
 import {
   LLMCompareTable,
   STTCompareTable,
   TTSCompareTable,
-} from '@/components/compare-table';
-import { DeprecationNotice } from '@/components/deprecation-notice';
-import { SITE_ORIGIN } from '@/lib/url';
-import type { LLMRow, STTRow, TTSRow } from '@/lib/types';
+} from "@/components/compare-table";
+import { DeprecationNotice } from "@/components/deprecation-notice";
+import { SITE_ORIGIN } from "@/lib/url";
+import type { LLMRow, STTRow, TTSRow } from "@/lib/types";
 
-export const dynamic = 'force-static';
+export const dynamic = "force-static";
 export const dynamicParams = false;
 
 export function generateStaticParams() {
@@ -686,14 +743,20 @@ export async function generateMetadata({
 
 function successorSlugFor(entry: FeaturedPair): string | null {
   const [a, b] = entry.models;
-  const replacement = a.deprecated_at ? a.replaced_by_model_id : b.replaced_by_model_id;
+  const replacement = a.deprecated_at
+    ? a.replaced_by_model_id
+    : b.replaced_by_model_id;
   const survivor = a.deprecated_at ? b : a;
   if (!replacement) return null;
   const candidate = pairSlug(replacement, survivor.model_id);
   return pairBySlug.has(candidate) ? candidate : null;
 }
 
-export default async function PairPage({ params }: { params: Promise<{ pair: string }> }) {
+export default async function PairPage({
+  params,
+}: {
+  params: Promise<{ pair: string }>;
+}) {
   const { pair } = await params;
   const entry = pairBySlug.get(pair);
   if (!entry) notFound();
@@ -707,7 +770,8 @@ export default async function PairPage({ params }: { params: Promise<{ pair: str
       <div className="dispatch-tape">
         <div className="wrap row">
           <div className="left">
-            <span className="dot">●</span> HAIL.SO / DISPATCH · {today} · COMPARE
+            <span className="dot">●</span> HAIL.SO / DISPATCH · {today} ·
+            COMPARE
           </div>
           <div className="right">
             FILE: <b>{entry.category.toUpperCase()}</b> · 2 models
@@ -715,7 +779,12 @@ export default async function PairPage({ params }: { params: Promise<{ pair: str
         </div>
       </div>
 
-      <header style={{ padding: '40px 0 28px', borderBottom: '2px solid var(--color-ink)' }}>
+      <header
+        style={{
+          padding: "40px 0 28px",
+          borderBottom: "2px solid var(--color-ink)",
+        }}
+      >
         <div className="wrap">
           <h1 className="dispatch-h1">
             {a.display_name} <em className="it">vs</em> {b.display_name}
@@ -736,15 +805,27 @@ export default async function PairPage({ params }: { params: Promise<{ pair: str
 
       <section className="cat">
         <div className="wrap">
-          <DeprecationNotice models={entry.models} successorSlug={successorSlugFor(entry)} />
-          {entry.category === 'llm' && (
-            <LLMCompareTable models={entry.models as LLMRow[]} currentIds={currentIds} />
+          <DeprecationNotice
+            models={entry.models}
+            successorSlug={successorSlugFor(entry)}
+          />
+          {entry.category === "llm" && (
+            <LLMCompareTable
+              models={entry.models as LLMRow[]}
+              currentIds={currentIds}
+            />
           )}
-          {entry.category === 'stt' && (
-            <STTCompareTable models={entry.models as STTRow[]} currentIds={currentIds} />
+          {entry.category === "stt" && (
+            <STTCompareTable
+              models={entry.models as STTRow[]}
+              currentIds={currentIds}
+            />
           )}
-          {entry.category === 'tts' && (
-            <TTSCompareTable models={entry.models as TTSRow[]} currentIds={currentIds} />
+          {entry.category === "tts" && (
+            <TTSCompareTable
+              models={entry.models as TTSRow[]}
+              currentIds={currentIds}
+            />
           )}
         </div>
       </section>
@@ -782,11 +863,13 @@ git commit -m "feat(web): prerender featured model comparison pages"
 ## Task 5: Make `/costs/compare` static
 
 **Files:**
+
 - Create: `web/components/compare-picker.tsx`
 - Modify: `web/app/(dispatch)/compare/page.tsx` (full rewrite)
 - Modify: `web/components/compare-link.tsx:5` (remove `rel="nofollow"`, keep the href)
 
 **Interfaces:**
+
 - Consumes: `llm`, `stt`, `tts` from `web/lib/costs.ts`; `MAX_COMPARE`, `compareHref` from `web/lib/url.ts`.
 - Produces: a `<CompareModels llm={...} stt={...} tts={...} />` client component. No later task depends on it.
 
@@ -795,19 +878,23 @@ git commit -m "feat(web): prerender featured model comparison pages"
 Create `web/components/compare-picker.tsx`. Note `useSearchParams()` requires a `<Suspense>` boundary, supplied by the parent in Step 2.
 
 ```tsx
-'use client';
+"use client";
 
-import { useCallback, useEffect, useState } from 'react';
-import { useSearchParams } from 'next/navigation';
-import { LLMCompareTable, STTCompareTable, TTSCompareTable } from './compare-table';
-import { MAX_COMPARE, compareHref } from '@/lib/url';
-import type { LLMRow, STTRow, TTSRow } from '@/lib/types';
+import { useCallback, useEffect, useState } from "react";
+import { useSearchParams } from "next/navigation";
+import {
+  LLMCompareTable,
+  STTCompareTable,
+  TTSCompareTable,
+} from "./compare-table";
+import { MAX_COMPARE, compareHref } from "@/lib/url";
+import type { LLMRow, STTRow, TTSRow } from "@/lib/types";
 
 type Props = { llm: LLMRow[]; stt: STTRow[]; tts: TTSRow[] };
 
 function parseIds(raw: string | null): string[] {
-  return (raw ?? '')
-    .split(',')
+  return (raw ?? "")
+    .split(",")
     .map((s) => s.trim())
     .filter(Boolean)
     .slice(0, MAX_COMPARE);
@@ -815,27 +902,39 @@ function parseIds(raw: string | null): string[] {
 
 export function CompareModels({ llm, stt, tts }: Props) {
   const searchParams = useSearchParams();
-  const [ids, setIds] = useState<string[]>(() => parseIds(searchParams.get('m')));
+  const [ids, setIds] = useState<string[]>(() =>
+    parseIds(searchParams.get("m")),
+  );
 
   // Keep the URL shareable without triggering a navigation or a server render.
   useEffect(() => {
     const href = compareHref(ids);
     if (window.location.pathname + window.location.search !== href) {
-      window.history.replaceState(null, '', href);
+      window.history.replaceState(null, "", href);
     }
   }, [ids]);
 
   const add = useCallback((id: string) => {
-    setIds((prev) => (prev.includes(id) || prev.length >= MAX_COMPARE ? prev : [...prev, id]));
+    setIds((prev) =>
+      prev.includes(id) || prev.length >= MAX_COMPARE ? prev : [...prev, id],
+    );
   }, []);
 
   const clear = useCallback(() => setIds([]), []);
 
-  const selectedLLM = ids.map((id) => llm.find((m) => m.model_id === id)).filter(Boolean) as LLMRow[];
-  const selectedSTT = ids.map((id) => stt.find((m) => m.model_id === id)).filter(Boolean) as STTRow[];
-  const selectedTTS = ids.map((id) => tts.find((m) => m.model_id === id)).filter(Boolean) as TTSRow[];
+  const selectedLLM = ids
+    .map((id) => llm.find((m) => m.model_id === id))
+    .filter(Boolean) as LLMRow[];
+  const selectedSTT = ids
+    .map((id) => stt.find((m) => m.model_id === id))
+    .filter(Boolean) as STTRow[];
+  const selectedTTS = ids
+    .map((id) => tts.find((m) => m.model_id === id))
+    .filter(Boolean) as TTSRow[];
   const total = selectedLLM.length + selectedSTT.length + selectedTTS.length;
-  const currentIds = [...selectedLLM, ...selectedSTT, ...selectedTTS].map((m) => m.model_id);
+  const currentIds = [...selectedLLM, ...selectedSTT, ...selectedTTS].map(
+    (m) => m.model_id,
+  );
 
   return (
     <>
@@ -849,7 +948,13 @@ export function CompareModels({ llm, stt, tts }: Props) {
               clear
             </button>
           )}
-          <div style={{ marginLeft: 'auto', fontFamily: 'var(--font-mono)', fontSize: 11 }}>
+          <div
+            style={{
+              marginLeft: "auto",
+              fontFamily: "var(--font-mono)",
+              fontSize: 11,
+            }}
+          >
             {total} of {MAX_COMPARE} slots
           </div>
         </div>
@@ -857,26 +962,47 @@ export function CompareModels({ llm, stt, tts }: Props) {
 
       <section className="cat">
         <div className="wrap">
-          {selectedLLM.length > 0 && <LLMCompareTable models={selectedLLM} currentIds={currentIds} />}
-          {selectedSTT.length > 0 && <STTCompareTable models={selectedSTT} currentIds={currentIds} />}
-          {selectedTTS.length > 0 && <TTSCompareTable models={selectedTTS} currentIds={currentIds} />}
+          {selectedLLM.length > 0 && (
+            <LLMCompareTable models={selectedLLM} currentIds={currentIds} />
+          )}
+          {selectedSTT.length > 0 && (
+            <STTCompareTable models={selectedSTT} currentIds={currentIds} />
+          )}
+          {selectedTTS.length > 0 && (
+            <TTSCompareTable models={selectedTTS} currentIds={currentIds} />
+          )}
 
           <h3
             style={{
-              fontFamily: 'var(--font-mono)',
+              fontFamily: "var(--font-mono)",
               fontSize: 11,
               fontWeight: 700,
-              letterSpacing: '0.14em',
-              textTransform: 'uppercase',
-              color: 'var(--color-mute)',
-              margin: '24px 0 16px',
+              letterSpacing: "0.14em",
+              textTransform: "uppercase",
+              color: "var(--color-mute)",
+              margin: "24px 0 16px",
             }}
           >
-            {total === 0 ? 'Available models' : 'Add another model'}
+            {total === 0 ? "Available models" : "Add another model"}
           </h3>
-          <ModelGroup label="LLMs" models={llm} currentIds={currentIds} onAdd={add} />
-          <ModelGroup label="Speech-to-Text" models={stt} currentIds={currentIds} onAdd={add} />
-          <ModelGroup label="Text-to-Speech" models={tts} currentIds={currentIds} onAdd={add} />
+          <ModelGroup
+            label="LLMs"
+            models={llm}
+            currentIds={currentIds}
+            onAdd={add}
+          />
+          <ModelGroup
+            label="Speech-to-Text"
+            models={stt}
+            currentIds={currentIds}
+            onAdd={add}
+          />
+          <ModelGroup
+            label="Text-to-Speech"
+            models={tts}
+            currentIds={currentIds}
+            onAdd={add}
+          />
         </div>
       </section>
     </>
@@ -900,18 +1026,18 @@ function ModelGroup({
     <div style={{ marginBottom: 18 }}>
       <div
         style={{
-          fontFamily: 'var(--font-mono)',
+          fontFamily: "var(--font-mono)",
           fontSize: 10,
           fontWeight: 700,
-          letterSpacing: '0.12em',
-          textTransform: 'uppercase',
-          color: 'var(--color-mute)',
+          letterSpacing: "0.12em",
+          textTransform: "uppercase",
+          color: "var(--color-mute)",
           marginBottom: 8,
         }}
       >
         {label}
       </div>
-      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
         {available.map((m) => (
           <button
             key={m.model_id}
@@ -921,7 +1047,8 @@ function ModelGroup({
           >
             <span className="add-pill-plus">+</span>
             <span>
-              <span className="add-pill-prov">{m.provider}</span> {m.display_name}
+              <span className="add-pill-prov">{m.provider}</span>{" "}
+              {m.display_name}
             </span>
           </button>
         ))}
@@ -936,16 +1063,17 @@ function ModelGroup({
 Replace the entire contents of `web/app/(dispatch)/compare/page.tsx` with:
 
 ```tsx
-import { Suspense } from 'react';
-import { llm, stt, tts } from '@/lib/costs';
-import { CompareModels } from '@/components/compare-picker';
-import { featuredPairs } from '@/lib/featured';
+import { Suspense } from "react";
+import { llm, stt, tts } from "@/lib/costs";
+import { CompareModels } from "@/components/compare-picker";
+import { featuredPairs } from "@/lib/featured";
 
-export const dynamic = 'force-static';
+export const dynamic = "force-static";
 
 export const metadata = {
-  title: 'Compare model costs — Hail',
-  description: 'Compare AI model providers side-by-side. Schema-validated, refreshed weekly.',
+  title: "Compare model costs — Hail",
+  description:
+    "Compare AI model providers side-by-side. Schema-validated, refreshed weekly.",
 };
 
 export default function ComparePage() {
@@ -956,12 +1084,18 @@ export default function ComparePage() {
       <div className="dispatch-tape">
         <div className="wrap row">
           <div className="left">
-            <span className="dot">●</span> HAIL.SO / DISPATCH · {today} · COMPARE
+            <span className="dot">●</span> HAIL.SO / DISPATCH · {today} ·
+            COMPARE
           </div>
         </div>
       </div>
 
-      <header style={{ padding: '40px 0 28px', borderBottom: '2px solid var(--color-ink)' }}>
+      <header
+        style={{
+          padding: "40px 0 28px",
+          borderBottom: "2px solid var(--color-ink)",
+        }}
+      >
         <div className="wrap">
           <h1 className="dispatch-h1">
             <em className="it">side</em> by side.
@@ -973,24 +1107,30 @@ export default function ComparePage() {
         <CompareModels llm={llm.models} stt={stt.models} tts={tts.models} />
       </Suspense>
 
-      <section style={{ padding: '32px 0', borderTop: '2px solid var(--color-ink)' }}>
+      <section
+        style={{ padding: "32px 0", borderTop: "2px solid var(--color-ink)" }}
+      >
         <div className="wrap">
           <h2
             style={{
-              fontFamily: 'var(--font-mono)',
+              fontFamily: "var(--font-mono)",
               fontSize: 11,
               fontWeight: 700,
-              letterSpacing: '0.14em',
-              textTransform: 'uppercase',
-              color: 'var(--color-mute)',
-              margin: '0 0 16px',
+              letterSpacing: "0.14em",
+              textTransform: "uppercase",
+              color: "var(--color-mute)",
+              margin: "0 0 16px",
             }}
           >
             Popular comparisons
           </h2>
-          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
             {featuredPairs.map((p) => (
-              <a key={p.slug} className="add-pill" href={`/costs/compare/${p.slug}`}>
+              <a
+                key={p.slug}
+                className="add-pill"
+                href={`/costs/compare/${p.slug}`}
+              >
                 {p.models[0].display_name} vs {p.models[1].display_name}
               </a>
             ))}
@@ -1056,10 +1196,12 @@ git commit -m "feat(web): make /costs/compare static with client-side selection"
 ## Task 6: Sitemap and canonical-host redirect
 
 **Files:**
+
 - Create: `web/app/sitemap.ts`
 - Modify: `web/next.config.ts`
 
 **Interfaces:**
+
 - Consumes: `featuredPairs` from Task 3, `SITE_ORIGIN` from `web/lib/url.ts`.
 - Produces: `/costs/sitemap.xml`, and a 308 from the raw Vercel host.
 
@@ -1068,21 +1210,21 @@ git commit -m "feat(web): make /costs/compare static with client-side selection"
 Create `web/app/sitemap.ts`:
 
 ```ts
-import type { MetadataRoute } from 'next';
-import { featuredPairs } from '@/lib/featured';
-import { SITE_ORIGIN } from '@/lib/url';
+import type { MetadataRoute } from "next";
+import { featuredPairs } from "@/lib/featured";
+import { SITE_ORIGIN } from "@/lib/url";
 
-export const dynamic = 'force-static';
+export const dynamic = "force-static";
 
 const abs = (path: string) => new URL(path, SITE_ORIGIN).toString();
 
 export default function sitemap(): MetadataRoute.Sitemap {
   return [
-    { url: abs('/costs'), changeFrequency: 'weekly', priority: 1 },
-    { url: abs('/costs/compare'), changeFrequency: 'weekly', priority: 0.8 },
+    { url: abs("/costs"), changeFrequency: "weekly", priority: 1 },
+    { url: abs("/costs/compare"), changeFrequency: "weekly", priority: 0.8 },
     ...featuredPairs.map((p) => ({
       url: abs(`/costs/compare/${p.slug}`),
-      changeFrequency: 'weekly' as const,
+      changeFrequency: "weekly" as const,
       priority: 0.6,
     })),
   ];
@@ -1094,22 +1236,22 @@ export default function sitemap(): MetadataRoute.Sitemap {
 Replace `web/next.config.ts` with:
 
 ```ts
-import type { NextConfig } from 'next';
+import type { NextConfig } from "next";
 
 // The raw deployment host was serving the crawl trap directly, bypassing the
 // hail.so rewrite. Redirecting it also removes the duplicate-content problem.
-const VERCEL_HOST = 'hail-costs.vercel.app';
+const VERCEL_HOST = "hail-costs.vercel.app";
 
 const nextConfig: NextConfig = {
   reactStrictMode: true,
   typedRoutes: true,
-  basePath: '/costs',
+  basePath: "/costs",
   async redirects() {
     return [
       {
-        source: '/:path*',
-        has: [{ type: 'host', value: VERCEL_HOST }],
-        destination: 'https://hail.so/costs/:path*',
+        source: "/:path*",
+        has: [{ type: "host", value: VERCEL_HOST }],
+        destination: "https://hail.so/costs/:path*",
         permanent: true,
         basePath: false,
       },
@@ -1126,7 +1268,7 @@ export default nextConfig;
 
 ```bash
 cd "$(git rev-parse --show-toplevel)"
-pnpm site:build 2>&1 | grep -E "sitemap|Error" 
+pnpm site:build 2>&1 | grep -E "sitemap|Error"
 pnpm site:start &
 sleep 4
 curl -s http://localhost:3000/costs/sitemap.xml | grep -c "<loc>"
@@ -1161,9 +1303,11 @@ git commit -m "feat(web): add costs sitemap and canonical-host redirect"
 ## Task 7: Runbook maintenance procedure
 
 **Files:**
+
 - Modify: `docs/operations/refresh-costs.md`
 
 **Interfaces:**
+
 - Consumes: everything above.
 - Produces: documentation only.
 
@@ -1218,7 +1362,7 @@ In the "## Closing checklist" section, add after the `pnpm site:build` line:
 
 ```markdown
 - [ ] `pnpm costs:featured` passes (`Featured set OK`); if any `featured` flag changed, `costs/featured.lock.json` was regenerated with `--write` and staged
-- [ ] `node --test scripts/costs/` passes
+- [ ] `node --test "scripts/costs/*.test.mjs"` passes
 ```
 
 - [ ] **Step 5: Add `featured` to the "When this runbook needs updates" trigger list**
@@ -1255,7 +1399,7 @@ cd "$(git rev-parse --show-toplevel)"
 for f in llm stt tts; do
   /Users/r/.local/bin/check-jsonschema --schemafile costs/schema/$f.schema.json costs/$f.json
 done
-node --test scripts/costs/
+node --test "scripts/costs/*.test.mjs"
 node scripts/costs/check-featured.mjs
 pnpm exec prettier --check costs/*.json
 pnpm site:build
