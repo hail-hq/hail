@@ -16,11 +16,10 @@ import asyncio
 import logging
 from uuid import UUID
 
+from hailhq.core.call_end_reasons import CallEndReason
 from livekit.agents.llm import LLM
 from livekit.agents.voice import AgentSession
 from livekit.agents.voice.amd import AMD, AMDPredictionEvent
-
-from hailhq.core.call_end_reasons import CallEndReason
 
 logger = logging.getLogger("hailhq.voicebot")
 
@@ -70,8 +69,11 @@ You have reached an automated phone menu, not a person. This was the menu:
 
 Use the send_dtmf tool to press the option that best advances the reason for \
 your call. Press keys — do not speak your choice, the menu cannot hear you. \
-If no option fits, press the one for a human operator or reception. Say \
-nothing until a person is on the line."""
+If no option fits, press the one for a human operator or reception. Key \
+presses happen only through the send_dtmf tool — never write JSON, code, or \
+tool-call syntax in your reply. When you have nothing to say, reply with \
+exactly "..." and no other text. Do not speak sentences until a person is on \
+the line."""
 
 
 def ivr_navigation_instructions(transcript: str | None) -> str:
@@ -148,7 +150,7 @@ __all__ = [
     "MACHINE_HANGUP_CATEGORIES",
     "MACHINE_IVR_CATEGORY",
     "NO_SPEECH_THRESHOLD_SECONDS",
-    "ivr_navigation_instructions",
     "amd_end_reason",
+    "ivr_navigation_instructions",
     "run_amd",
 ]

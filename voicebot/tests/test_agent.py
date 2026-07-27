@@ -19,11 +19,6 @@ from uuid import UUID
 
 import pytest
 from cryptography.fernet import InvalidToken
-from livekit import rtc
-from livekit.agents import Agent, AgentSession
-from sqlalchemy import select, update
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from hailhq.core.call_end_reasons import CallEndReason
 from hailhq.core.models import Call, CallEvent, PhoneNumber, UsageEvent
 from hailhq.core.pool import CALL_META_FROM_POOL
@@ -34,6 +29,7 @@ from hailhq.voicebot.agent import (
     SOFT_CAP_ANNOUNCEMENT,
     SOFT_CAP_END_REASON,
     VOICE_PREAMBLE,
+    _sanitize_tts_stream,
     attach_event_handlers,
     build_instructions,
     build_tools_safely,
@@ -48,7 +44,12 @@ from hailhq.voicebot.agent import (
     parse_metadata,
     soft_cap_announce_and_hangup,
     speak_greeting,
+    speech_text,
 )
+from livekit import rtc
+from livekit.agents import Agent, AgentSession
+from sqlalchemy import select, update
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from ._fakes import FakeAnnouncingSession, FakeJobContext, FakeLLM
 
@@ -1016,6 +1017,113 @@ async def test_generated_opening_reacts_to_pickup_transcript() -> None:
 
     assert "not said anything" in opening_instructions("   ")
     assert "not said anything" in opening_instructions(None)
+
+
+def test_speech_text_strips_tool_syntax() -> None:
+    """Regression for call d8f4743f: fast-tier models leaked tool-call
+    syntax as spoken turns during IVR navigation."""
+    assert speech_text("```json\n{}\n") == ""
+    assert speech_text('{"digits":"2"}') == ""
+    assert speech_text("...") == ""
+    assert speech_text("") == ""
+    assert speech_text("No action needed.\n```json\n{}") == "No action needed."
+    # The session's markdown filter strips fences before TTS, leaving bare
+    # JSON on its own line — truncate from a newline-opening object/array.
+    assert speech_text('Pressing two.\n{"digits":"2"}') == "Pressing two."
+    assert speech_text("One moment, please.") == "One moment, please."
+
+
+async def test_sanitize_tts_stream_filters_like_speech_text() -> None:
+    """The streaming TTS filter matches speech_text: normal speech passes
+    byte-identical, JSON-opening turns drop, fences truncate — even when
+    the fence splits across chunk boundaries."""
+
+    async def gen(*chunks: str):
+        for c in chunks:
+            yield c
+
+    async def collect(*chunks: str) -> str:
+        return "".join([c async for c in _sanitize_tts_stream(gen(*chunks))])
+
+    assert await collect("One moment, ", "please.") == "One moment, please."
+    assert await collect("```json", "\n{}") == ""
+    assert await collect('{"digits"', ':"2"}') == ""
+    assert await collect("Sure. `", "``json\n{}") == "Sure. "
+    # Fence already stripped upstream by filter_markdown: truncate from the
+    # newline-opening JSON remnant, split across chunks.
+    assert await collect("Pressing two.", '\n{"digits":"2"}') == "Pressing two."
+    # The sanctioned "..." nothing-to-say reply is dropped, not synthesized.
+    assert await collect("...") == ""
+    assert await collect("..", ". OK") == "... OK"
+
+
+async def test_agent_turn_tool_syntax_not_recorded(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Garbage assistant turns are neither spoken nor written to
+    call_events; partially-speakable turns store only the spoken part."""
+    recorded: list[tuple[str, dict]] = []
+
+    async def _fake_write(call_id: UUID, kind: str, payload: dict) -> None:
+        recorded.append((kind, payload))
+
+    monkeypatch.setattr("hailhq.voicebot.agent.write_call_event", _fake_write)
+    session = _FakeSession()
+    tasks = attach_event_handlers(session, UUID("11111111-1111-1111-1111-111111111111"))
+    on_item = session.handlers["conversation_item_added"]
+
+    on_item(
+        SimpleNamespace(
+            item=SimpleNamespace(role="assistant", text_content="```json\n{}")
+        )
+    )
+    assert not tasks, "pure tool-syntax turn must not spawn a write"
+
+    on_item(
+        SimpleNamespace(
+            item=SimpleNamespace(
+                role="assistant", text_content="No action needed.\n```json\n{}"
+            )
+        )
+    )
+    await asyncio.gather(*list(tasks))
+    assert recorded == [
+        ("agent_turn", {"role": "assistant", "text": "No action needed."})
+    ]
+
+
+async def test_tool_call_event_records_arguments(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """tool_call events carry per-call args so consumers can show what a
+    tool did (e.g. which DTMF digit was pressed)."""
+    recorded: list[tuple[str, dict]] = []
+
+    async def _fake_write(call_id: UUID, kind: str, payload: dict) -> None:
+        recorded.append((kind, payload))
+
+    monkeypatch.setattr("hailhq.voicebot.agent.write_call_event", _fake_write)
+    session = _FakeSession()
+    tasks = attach_event_handlers(session, UUID("11111111-1111-1111-1111-111111111111"))
+    on_tools = session.handlers["function_tools_executed"]
+
+    on_tools(
+        SimpleNamespace(
+            function_calls=[
+                SimpleNamespace(name="send_dtmf", arguments='{"digits": "2"}')
+            ]
+        )
+    )
+    await asyncio.gather(*list(tasks))
+    assert recorded == [
+        (
+            "tool_call",
+            {
+                "tools": ["send_dtmf"],
+                "calls": [{"name": "send_dtmf", "args": {"digits": "2"}}],
+            },
+        )
+    ]
 
 
 async def test_speak_greeting_deferred_path_skips_generated_opening() -> None:

@@ -4,6 +4,17 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 
 ## [Unreleased]
 
+- Voicebot speech sanitizer: LLM turns that are tool-call syntax (code
+  fences, bare JSON — seen when fast-tier models leak arguments as text
+  during IVR navigation) are no longer spoken or recorded as agent turns;
+  the IVR prompt now names an explicit nothing-to-say reply instead of the
+  impossible "say nothing".
+- `tool_call` events now carry per-call arguments (string values capped at
+  200 chars); `hail tail` renders them as `send_dtmf(digits=2)`.
+- New `person_detected` call event marks the machine→person handoff after
+  IVR navigation; `hail tail` uses it (with the AMD verdict) to label phone-
+  tree speech `[machine]` even when transcripts arrive after the verdict.
+
 ## [0.18.0] — 2026-07-23
 
 Readable call tails in the CLI. `cli-v0.17.0` cut alongside; the SDK is
