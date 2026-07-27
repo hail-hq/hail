@@ -38,12 +38,15 @@ export async function generateMetadata({
 
 function successorSlugFor(entry: FeaturedPair): string | null {
   const [a, b] = entry.models;
-  const replacement = a.deprecated_at
-    ? a.replaced_by_model_id
-    : b.replaced_by_model_id;
-  const survivor = a.deprecated_at ? b : a;
-  if (!replacement) return null;
-  const candidate = pairSlug(replacement, survivor.model_id);
+  if (!a.deprecated_at && !b.deprecated_at) return null;
+
+  // A deprecated model contributes its successor; a live one contributes itself.
+  const currentA = a.deprecated_at ? a.replaced_by_model_id : a.model_id;
+  const currentB = b.deprecated_at ? b.replaced_by_model_id : b.model_id;
+  if (!currentA || !currentB) return null;
+  if (currentA === a.model_id && currentB === b.model_id) return null;
+
+  const candidate = pairSlug(currentA, currentB);
   return pairBySlug.has(candidate) ? candidate : null;
 }
 
