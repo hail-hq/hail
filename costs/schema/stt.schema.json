@@ -44,6 +44,10 @@
         "provider_url": { "type": "string", "format": "uri" },
         "model_id": { "type": "string", "minLength": 1 },
         "display_name": { "type": "string", "minLength": 1 },
+        "featured": {
+          "type": "boolean",
+          "description": "Include this model in the prerendered /costs/compare/<a>-vs-<b> page set. Not cleared on deprecation — see docs/superpowers/specs/2026-07-27-costs-compare-crawl-trap-design.md."
+        },
         "price_per_minute_usd": { "$ref": "#/$defs/decimal" },
         "price_per_second_usd": { "$ref": "#/$defs/decimal" },
         "price_per_minute_batch_usd": { "$ref": "#/$defs/decimal" },

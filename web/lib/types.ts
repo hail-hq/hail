@@ -20,6 +20,7 @@ export type CommonFields = {
   provider_url?: string;
   model_id: string;
   display_name: string;
+  featured?: boolean;
   last_verified: string;
   last_changed_at: string;
   verification_method: VerificationMethod;
