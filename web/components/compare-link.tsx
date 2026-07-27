@@ -5,7 +5,6 @@ export function CompareLink({ modelId }: { modelId: string }) {
     <a
       href={compareHref([modelId])}
       className="compare-link"
-      rel="nofollow"
       aria-label={`Add ${modelId} to comparison`}
       title="Add to compare"
     >
