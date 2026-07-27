@@ -4,6 +4,7 @@ on:
   pull_request:
     paths:
       - "costs/**"
+      - "scripts/costs/**"
       - ".github/workflows/costs-validate.yml"
 
 concurrency:
@@ -55,3 +56,10 @@ jobs:
               exit 1
             fi
           done
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Costs script unit tests
+        run: node --test scripts/costs/
+      - name: Featured set guard
+        run: node scripts/costs/check-featured.mjs
