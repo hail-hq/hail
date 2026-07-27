@@ -1,24 +1,14 @@
 import type { NextConfig } from "next";
 
-// The raw deployment host was serving the crawl trap directly, bypassing the
-// hail.so rewrite. Redirecting it also removes the duplicate-content problem.
-const VERCEL_HOST = "hail-costs.vercel.app";
+// No canonical-host redirect here. hail-website rewrites /costs/* to this
+// deployment, so a proxied request presents the same Host as a direct hit on
+// the raw *.vercel.app domain — a host-based redirect cannot tell them apart
+// and loops against the rewrite. See PR #54 / the 2026-07-27 incident.
 
 const nextConfig: NextConfig = {
   reactStrictMode: true,
   typedRoutes: true,
   basePath: "/costs",
-  async redirects() {
-    return [
-      {
-        source: "/costs/:path*",
-        has: [{ type: "host", value: VERCEL_HOST }],
-        destination: "https://hail.so/costs/:path*",
-        permanent: true,
-        basePath: false,
-      },
-    ];
-  },
 };
 
 export default nextConfig;
