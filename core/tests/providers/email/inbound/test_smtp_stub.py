@@ -1,7 +1,6 @@
 import asyncio
 
 import pytest
-
 from hailhq.core.providers.email.inbound.smtp import SmtpInboundProvider
 
 

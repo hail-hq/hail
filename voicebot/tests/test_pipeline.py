@@ -12,11 +12,10 @@ made because we never invoke ``.chat()``.
 from __future__ import annotations
 
 import pytest
+from hailhq.voicebot.pipeline import build_llm, build_session
 from livekit.agents import AgentSession
 from livekit.agents.llm import FallbackAdapter
 from livekit.plugins import openai as openai_plugin
-
-from hailhq.voicebot.pipeline import build_llm, build_session
 
 
 @pytest.fixture(autouse=True)
@@ -91,10 +90,9 @@ def test_build_tts_both_keys_returns_fallback_adapter() -> None:
     livekit/agents/tts/fallback_adapter.py (self._tts_instances) on
     2026-06-17; revisit if it changes.
     """
+    from hailhq.voicebot.pipeline import build_tts
     from livekit.agents.tts import FallbackAdapter
     from livekit.plugins import cartesia as cartesia_plugin
-
-    from hailhq.voicebot.pipeline import build_tts
 
     adapter = build_tts()
     assert isinstance(adapter, FallbackAdapter)
@@ -107,11 +105,10 @@ def test_build_tts_cartesia_only_returns_single_instance(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Only Cartesia configured -> the Cartesia TTS directly, no adapter."""
-    from livekit.agents.tts import FallbackAdapter
-    from livekit.plugins import cartesia as cartesia_plugin
-
     from hailhq.core.config import settings
     from hailhq.voicebot.pipeline import build_tts
+    from livekit.agents.tts import FallbackAdapter
+    from livekit.plugins import cartesia as cartesia_plugin
 
     monkeypatch.setattr(settings, "eleven_api_key", "")
 
@@ -124,10 +121,9 @@ def test_build_tts_elevenlabs_only_returns_single_instance(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Only ElevenLabs configured -> the ElevenLabs TTS directly, no adapter."""
-    from livekit.plugins import elevenlabs as elevenlabs_plugin
-
     from hailhq.core.config import settings
     from hailhq.voicebot.pipeline import build_tts
+    from livekit.plugins import elevenlabs as elevenlabs_plugin
 
     monkeypatch.setattr(settings, "cartesia_api_key", "")
 
@@ -163,9 +159,8 @@ def test_build_tts_language_applies_to_every_instance() -> None:
 
 def test_build_tts_no_language_keeps_plugin_default() -> None:
     """language=None -> the Cartesia plugin default ('en'), not None."""
-    from livekit.plugins import cartesia as cartesia_plugin
-
     from hailhq.voicebot.pipeline import build_tts
+    from livekit.plugins import cartesia as cartesia_plugin
 
     adapter = build_tts()
     cartesia_inst = adapter._tts_instances[0]

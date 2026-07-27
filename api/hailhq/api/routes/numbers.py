@@ -16,9 +16,6 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from fastapi import status as http_status
-from sqlalchemy import select, text
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from hailhq.api.deps import Principal, get_current_principal
 from hailhq.api.errors import unprocessable
 from hailhq.api.idempotency import (
@@ -39,6 +36,8 @@ from hailhq.core.schemas import (
     PhoneNumberListResponse,
     PhoneNumberResponse,
 )
+from sqlalchemy import select, text
+from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
 
@@ -94,7 +93,7 @@ async def acquire_number(
     idem: Annotated[IdempotencyContext | None, Depends(idempotency_dep)] = None,
 ) -> PhoneNumberResponse:
     if idem is not None and idem.is_replay:
-        cached_id, cached = replay_cached(idem, response, resource_prefix="/numbers")
+        _cached_id, cached = replay_cached(idem, response, resource_prefix="/numbers")
         return PhoneNumberResponse.model_validate(cached)
 
     caps = telephony_catalog.capabilities(body.country_code, body.number_type)
@@ -294,4 +293,4 @@ async def enable_sms(
     return PhoneNumberResponse.model_validate(number)
 
 
-__all__ = ["router", "get_voice_provider"]
+__all__ = ["get_voice_provider", "router"]

@@ -10,8 +10,6 @@ from __future__ import annotations
 import json
 import uuid
 
-from sqlalchemy import select
-
 from hailhq.core.dsar import (
     delete_recipient_data,
     export_recipient_data,
@@ -26,6 +24,7 @@ from hailhq.core.models import (
     Sms,
     Suppression,
 )
+from sqlalchemy import select
 
 PHONE = "+14155551234"
 EMAIL_ADDR = "alice@example.com"

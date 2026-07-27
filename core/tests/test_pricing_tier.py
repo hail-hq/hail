@@ -9,7 +9,6 @@ different, unrelated output axes.
 from __future__ import annotations
 
 import pytest
-
 from hailhq.core.pricing_tier import classify_pricing_tier
 
 

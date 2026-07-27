@@ -12,9 +12,8 @@ service's ``LiveKitClient.dispatch_agent`` matches on this name.
 
 from __future__ import annotations
 
-from livekit.agents import WorkerOptions, cli
-
 from hailhq.voicebot.agent import entrypoint, prewarm
+from livekit.agents import WorkerOptions, cli
 
 
 def main() -> None:

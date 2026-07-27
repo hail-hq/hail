@@ -24,9 +24,9 @@ from hailhq.core.urls import join_url
 
 __all__ = [
     "InvalidUnsubscribeToken",
+    "build_unsubscribe_url",
     "mint_unsubscribe_token",
     "verify_unsubscribe_token",
-    "build_unsubscribe_url",
 ]
 
 # 30 days — long enough that a message read weeks later still unsubscribes.
@@ -52,7 +52,7 @@ def mint_unsubscribe_token(
     expiry = int(time.time()) + ttl_seconds
     payload = f"{email}|{organization_id}|{expiry}"
     sig = _sign(payload)
-    raw = f"{payload}|{sig}".encode("utf-8")
+    raw = f"{payload}|{sig}".encode()
     return base64.urlsafe_b64encode(raw).rstrip(b"=").decode("ascii")
 
 

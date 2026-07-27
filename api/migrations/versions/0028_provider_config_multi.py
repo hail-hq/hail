@@ -2,13 +2,11 @@
 
 from __future__ import annotations
 
-from typing import Union
-
 import sqlalchemy as sa
 from alembic import op
 
 revision: str = "0028"
-down_revision: Union[str, None] = "0027"
+down_revision: str | None = "0027"
 branch_labels = None
 depends_on = None
 

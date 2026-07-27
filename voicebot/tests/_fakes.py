@@ -117,7 +117,7 @@ class FakeSpeechHandle:
         # Mirrors the real SpeechHandle being awaitable directly (the
         # entrypoint does ``await session.say(...)`` without capturing a
         # handle). Resolving immediately is enough for ordering assertions.
-        async def _resolve() -> "FakeSpeechHandle":
+        async def _resolve() -> FakeSpeechHandle:
             return self
 
         return _resolve().__await__()
@@ -188,7 +188,7 @@ class FakeJobContext:
     def shutdown(self, reason: str = "") -> None:
         self.shutdown_calls.append(reason)
 
-    def delete_room(self) -> "asyncio.Future[None]":
+    def delete_room(self) -> asyncio.Future[None]:
         self.delete_room_calls += 1
         fut: asyncio.Future[None] = asyncio.get_event_loop().create_future()
         if self.delete_room_error is not None:

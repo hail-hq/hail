@@ -5,14 +5,12 @@ organizations lives in the website DB — no FK (see migration 0001, 0023).
 
 from __future__ import annotations
 
-from typing import Union
-
 import sqlalchemy as sa
 from alembic import op
 from sqlalchemy.dialects.postgresql import UUID
 
 revision: str = "0036"
-down_revision: Union[str, None] = "0035"
+down_revision: str | None = "0035"
 branch_labels = None
 depends_on = None
 

@@ -12,7 +12,6 @@ import asyncio
 from typing import Any
 
 import boto3
-
 from hailhq.core.config import settings
 
 __all__ = ["S3MailClient", "build_default_client"]

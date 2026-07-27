@@ -15,11 +15,10 @@ from collections.abc import Callable
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import delete, select
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from hailhq.core.models import EmailAttachmentUpload
 from hailhq.core.s3_mail import S3MailClient
+from sqlalchemy import delete, select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
 
@@ -117,4 +116,4 @@ class EmailAttachmentGcWorker:
         return deleted
 
 
-__all__ = ["EmailAttachmentGcWorker", "UNUSED_TTL"]
+__all__ = ["UNUSED_TTL", "EmailAttachmentGcWorker"]

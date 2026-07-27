@@ -6,7 +6,6 @@ import uuid
 from dataclasses import dataclass
 
 import pytest
-
 from hailhq.core.config import settings
 from hailhq.core.models import OrgProviderConfig
 from hailhq.core.secret_cipher import generate_key

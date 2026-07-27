@@ -9,7 +9,6 @@ from uuid import UUID, uuid4
 import httpx
 import pytest
 import respx
-
 from hail import (
     Client,
     HailAuthError,
@@ -21,6 +20,7 @@ from hail import (
     HailValidationError,
 )
 from hail._http import _HailHTTP
+
 from tests.conftest import make_call_response, make_event
 
 # --------------------------------------------------------------------------- #

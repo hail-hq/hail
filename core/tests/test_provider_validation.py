@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import httpx
 import pytest
-
 from hailhq.core.provider_validation import validate_provider_key
 
 # (provider, layer, params, method, url-substr, header-key, header-val-substr, mode)
@@ -97,7 +96,7 @@ async def test_401_is_invalid(provider, layer, params, mode) -> None:
     client = httpx.AsyncClient(
         transport=httpx.MockTransport(lambda r: httpx.Response(401, json={}))
     )
-    status, msg = await validate_provider_key(
+    status, _msg = await validate_provider_key(
         layer, provider, "bad", params, client=client
     )
     assert status == "invalid"
@@ -108,7 +107,7 @@ async def test_5xx_and_429_are_indeterminate_capability(code) -> None:
     client = httpx.AsyncClient(
         transport=httpx.MockTransport(lambda r: httpx.Response(code, json={}))
     )
-    status, msg = await validate_provider_key(
+    status, _msg = await validate_provider_key(
         "tts", "elevenlabs", "k", {}, client=client
     )
     assert status == "indeterminate"
@@ -163,7 +162,7 @@ async def test_unknown_provider_invalid() -> None:
 
 
 async def test_openai_bad_base_url_invalid() -> None:
-    status, msg = await validate_provider_key(
+    status, _msg = await validate_provider_key(
         "llm", "openai-compatible", "k", {"base_url": "http://169.254.169.254/v1"}
     )
     assert status == "invalid"

@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
+from hailhq.core.models import EmailEvent
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from hailhq.core.models import EmailEvent
 from .conftest import insert_org_and_key
 from .test_emails_api import _register_custom_verified, _send_email
 

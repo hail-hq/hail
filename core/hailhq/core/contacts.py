@@ -9,11 +9,10 @@ from __future__ import annotations
 import re
 from uuid import UUID
 
-from sqlalchemy import Text, cast, literal, or_, select, union_all
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from hailhq.core.models import Contact, OrganizationMember, User
 from hailhq.core.schemas import ContactEntry
+from sqlalchemy import Text, cast, literal, or_, select, union_all
+from sqlalchemy.ext.asyncio import AsyncSession
 
 MEMBER_ID_PREFIX = "member:"
 

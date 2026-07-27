@@ -2,7 +2,6 @@ import uuid
 from datetime import datetime, timezone
 
 import pytest
-
 from hailhq.core.forward_limiter import ForwardLimiter
 from hailhq.core.models import Email, EmailDomain
 

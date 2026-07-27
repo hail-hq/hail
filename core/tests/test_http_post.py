@@ -1,7 +1,6 @@
 import socket
 
 import pytest
-
 from hailhq.core.http_post import (
     PrivateNetworkBlockedError,
     httpx_post,

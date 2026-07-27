@@ -76,9 +76,10 @@ def validate_webhook_target(url: str, *, allow_private_networks: bool) -> None:
     restricted to private-network addresses only.
     """
     parsed = urlparse(url)
-    if parsed.scheme != "https":
-        if not (allow_private_networks and parsed.scheme == "http"):
-            raise ValueError("target_url must use https")
+    if parsed.scheme != "https" and not (
+        allow_private_networks and parsed.scheme == "http"
+    ):
+        raise ValueError("target_url must use https")
     if not parsed.hostname:
         raise ValueError("target_url must include a host")
     if not allow_private_networks and is_private_url(url):

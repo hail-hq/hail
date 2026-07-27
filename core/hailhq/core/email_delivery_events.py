@@ -7,19 +7,19 @@ row, the status change, and the webhook delivery rows land atomically.
 
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any, Awaitable, Callable, get_args
+from typing import Any, get_args
 from uuid import UUID, uuid4
-
-from sqlalchemy import select, update
-from sqlalchemy.dialects.postgresql import insert as pg_insert
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import defer
 
 from hailhq.core.models import Email, EmailEvent
 from hailhq.core.providers.email.inbound.ses_delivery import DeliveryEvent
 from hailhq.core.schemas import EmailEventKind
+from sqlalchemy import select, update
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import defer
 
 __all__ = [
     "ApplyResult",

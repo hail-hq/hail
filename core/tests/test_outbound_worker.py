@@ -9,8 +9,6 @@ from unittest.mock import AsyncMock
 
 import pytest
 from botocore.exceptions import ClientError
-from sqlalchemy import select
-
 from hailhq.core.agent_caps import AGENT_OUTBOUND_DISABLED_FLAG
 from hailhq.core.models import (
     Email,
@@ -21,6 +19,7 @@ from hailhq.core.models import (
 )
 from hailhq.core.outbound_worker import OutboundForwardWorker
 from hailhq.core.providers.email.base import ProviderSendResult
+from sqlalchemy import select
 
 
 def _domain(org_id):

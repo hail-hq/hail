@@ -25,8 +25,6 @@ from typing import Annotated, cast
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from fastapi import status as http_status
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from hailhq.api.errors import unprocessable
 from hailhq.api.outbound_queue import enqueue_outbound_forward
 from hailhq.api.usage import write_usage_event
@@ -40,6 +38,7 @@ from hailhq.core.providers.email.inbound.ses_delivery import parse_delivery_even
 from hailhq.core.s3_mail import S3MailClient
 from hailhq.core.urls import canonical_url
 from hailhq.core.webhook_fanout import fanout_email_event
+from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
 

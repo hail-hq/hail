@@ -24,11 +24,10 @@ from __future__ import annotations
 
 import uuid
 
-from sqlalchemy import bindparam, func, select, text, update
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from hailhq.core.models import PhoneNumber
 from hailhq.core.schemas import TERMINAL_CALL_STATUSES
+from sqlalchemy import bindparam, func, select, text, update
+from sqlalchemy.ext.asyncio import AsyncSession
 
 # Metadata key stamped on Call.metadata_ when the call drew from the shared
 # pool. Read by tests, the voicebot, and any external consumer that needs

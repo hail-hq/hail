@@ -5,6 +5,7 @@ from typing import Any, Literal
 from urllib.parse import urlsplit
 from uuid import UUID
 
+from hailhq.core.sender_id import PLATFORM_DEFAULT_SENDER_ID
 from pydantic import (
     AliasChoices,
     BaseModel,
@@ -13,8 +14,6 @@ from pydantic import (
     field_validator,
     model_validator,
 )
-
-from hailhq.core.sender_id import PLATFORM_DEFAULT_SENDER_ID
 
 E164 = re.compile(r"^\+[1-9]\d{1,14}$")
 
@@ -39,7 +38,7 @@ def _e164_or_error(v: str | None) -> str | None:
 
 
 def encode_cursor(ts: datetime, id_: UUID) -> str:
-    raw = f"{ts.isoformat()}|{id_}".encode("utf-8")
+    raw = f"{ts.isoformat()}|{id_}".encode()
     return base64.urlsafe_b64encode(raw).rstrip(b"=").decode("ascii")
 
 

@@ -15,28 +15,29 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID
 
+from hailhq.core.compliance_gate import normalize_recipient
+from hailhq.core.models import AuditLog, Call, Contact, Email, Sms, Suppression
 from sqlalchemy import (
     case,
     cast,
     delete,
     exists,
     func,
-    inspect as sa_inspect,
     or_,
     select,
+)
+from sqlalchemy import (
+    inspect as sa_inspect,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from hailhq.core.compliance_gate import normalize_recipient
-from hailhq.core.models import AuditLog, Call, Contact, Email, Sms, Suppression
-
 __all__ = [
     "DSARRecord",
     "DeletionSummary",
-    "lookup_recipient",
-    "export_recipient_data",
     "delete_recipient_data",
+    "export_recipient_data",
+    "lookup_recipient",
 ]
 
 

@@ -5,11 +5,10 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import select
-
 from hailhq.core.contacts import search_contacts
 from hailhq.core.models import Contact, User
 from hailhq.core.testing.fixtures import seed_member as _seed_member
+from sqlalchemy import select
 
 
 async def test_contact_model_round_trip(async_session, org_and_key):

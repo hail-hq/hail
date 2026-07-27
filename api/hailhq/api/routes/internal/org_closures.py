@@ -22,13 +22,12 @@ from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends
-from pydantic import BaseModel
-from sqlalchemy.dialects.postgresql import insert as pg_insert
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from hailhq.api.routes.internal.auth import verify_internal_request
 from hailhq.core.db import get_session
 from hailhq.core.models import OrgClosure
+from pydantic import BaseModel
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.ext.asyncio import AsyncSession
 
 router = APIRouter(
     prefix="/internal",

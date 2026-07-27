@@ -19,9 +19,8 @@ import logging
 import uuid
 from typing import Any
 
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from hailhq.core.agent_tools.spec import ToolContext, ToolSpec
+from sqlalchemy.ext.asyncio import AsyncSession
 
 # RFC 4733 named telephone events: digits 0-9 map to their own value, then
 # `*`, `#`, and the rarely-used A-D tones.

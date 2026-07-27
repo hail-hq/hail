@@ -6,13 +6,11 @@ named for a migration-free upgrade to better-auth's phone-number plugin.
 
 from __future__ import annotations
 
-from typing import Union
-
 import sqlalchemy as sa
 from alembic import op
 
 revision: str = "0035"
-down_revision: Union[str, None] = "0034"
+down_revision: str | None = "0034"
 branch_labels = None
 depends_on = None
 

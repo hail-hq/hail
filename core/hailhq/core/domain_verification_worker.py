@@ -12,14 +12,13 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
-from typing import Callable
-
-from sqlalchemy import select, update
 
 from hailhq.core.dns_lookup import custom_dns_records
 from hailhq.core.models import EmailDomain
 from hailhq.core.providers.email.base import EmailProvider
+from sqlalchemy import select, update
 
 logger = logging.getLogger(__name__)
 
@@ -102,9 +101,9 @@ class DomainVerificationWorker:
                     "mail_from_status": identity.mail_from_status,
                     "inbound_enabled": True,
                 }
-            elif identity.verification_status == "failed":
-                values = {"verification_status": "failed"}
-            elif self._is_past_ttl(row.created_at, now):
+            elif identity.verification_status == "failed" or self._is_past_ttl(
+                row.created_at, now
+            ):
                 values = {"verification_status": "failed"}
             else:
                 values = {"mail_from_status": identity.mail_from_status}

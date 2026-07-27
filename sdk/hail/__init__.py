@@ -56,14 +56,17 @@ from hail.models import (
 __version__ = "0.8.0"
 
 __all__ = [
-    "Client",
-    "__version__",
+    # helpers
+    "SUPPORTED_RESOURCE_TYPES",
+    "TERMINAL_CALL_STATUSES",
+    "TERMINAL_EMAIL_STATUSES",
     # models
     "CallCreate",
     "CallEventResponse",
     "CallListResponse",
     "CallResponse",
     "CallStatus",
+    "Client",
     "DkimRecord",
     "EmailAttachmentResponse",
     "EmailCreate",
@@ -78,6 +81,17 @@ __all__ = [
     "EmailStatus",
     "EmailSummary",
     "EventStreamResponse",
+    "HailAPIError",
+    "HailAuthError",
+    "HailClientError",
+    "HailConfigError",
+    # errors
+    "HailError",
+    "HailIdempotencyConflict",
+    "HailMalformedResourceId",
+    "HailNotFoundError",
+    "HailServerError",
+    "HailValidationError",
     "LLMConfig",
     "NumberType",
     "PhoneNumberListResponse",
@@ -87,21 +101,7 @@ __all__ = [
     "SmsListResponse",
     "SmsResponse",
     "SmsStatus",
-    "TERMINAL_CALL_STATUSES",
-    "TERMINAL_EMAIL_STATUSES",
     "VoiceConfig",
-    # helpers
-    "SUPPORTED_RESOURCE_TYPES",
+    "__version__",
     "parse_resource_id",
-    # errors
-    "HailError",
-    "HailAPIError",
-    "HailAuthError",
-    "HailClientError",
-    "HailConfigError",
-    "HailIdempotencyConflict",
-    "HailMalformedResourceId",
-    "HailNotFoundError",
-    "HailServerError",
-    "HailValidationError",
 ]

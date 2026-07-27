@@ -17,11 +17,10 @@ from __future__ import annotations
 from uuid import UUID
 
 import pytest
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from hailhq.core.models import Call
 from hailhq.voicebot.agent import on_call_end
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from .test_agent import _make_call_row
 

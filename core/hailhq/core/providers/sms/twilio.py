@@ -10,11 +10,10 @@ from __future__ import annotations
 import asyncio
 from uuid import UUID
 
-from twilio.base.exceptions import TwilioRestException
-from twilio.rest import Client as TwilioClient
-
 from hailhq.core.config import settings
 from hailhq.core.providers.sms.base import ProviderSmsResult, SmsProvider
+from twilio.base.exceptions import TwilioRestException
+from twilio.rest import Client as TwilioClient
 
 
 class TwilioSmsProvider(SmsProvider):

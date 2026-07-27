@@ -10,15 +10,14 @@ from __future__ import annotations
 
 from uuid import UUID
 
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
-
-from hailhq.core.models import PhoneNumber, Call, WebhookDelivery, WebhookSubscription
+from hailhq.core.models import Call, PhoneNumber, WebhookDelivery, WebhookSubscription
 from hailhq.voicebot.agent import (
     _STATUS_TO_CALL_EVENT,
     mark_call_answered,
     on_call_end,
 )
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 
 def test_status_to_call_event_covers_reachable_terminals() -> None:

@@ -6,8 +6,6 @@ from __future__ import annotations
 
 import uuid
 
-from sqlalchemy import select
-
 from hailhq.core.models import (
     PhoneNumber,
     Sms,
@@ -16,6 +14,7 @@ from hailhq.core.models import (
     WebhookSubscription,
 )
 from hailhq.core.sms_ingest import ingest_inbound_sms
+from sqlalchemy import select
 
 
 async def _seed_number(session, organization_id) -> PhoneNumber:

@@ -17,9 +17,6 @@ from unittest.mock import AsyncMock
 
 import httpx
 import pytest
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from hailhq.api.main import app
 from hailhq.api.routes.internal.ses_events import (
     get_inbound_provider,
@@ -27,6 +24,8 @@ from hailhq.api.routes.internal.ses_events import (
 )
 from hailhq.core.models import Email, EmailDomain, UsageEvent
 from hailhq.core.providers.email.inbound.ses import SesInboundProvider
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 FIX = Path(__file__).parent.parent.parent / "core" / "tests" / "fixtures" / "inbound"
 

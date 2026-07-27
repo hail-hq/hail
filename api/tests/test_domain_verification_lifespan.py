@@ -9,6 +9,7 @@ def test_domain_verify_poll_setting_defaults_to_120() -> None:
 
 def test_main_lifespan_references_domain_verification_worker() -> None:
     import inspect
+
     from hailhq.api import main
 
     src = inspect.getsource(main.lifespan)

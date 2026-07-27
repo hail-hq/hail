@@ -252,9 +252,9 @@ def generate_idempotency_key() -> str:
 
 
 __all__ = [
-    "_HailHTTP",
-    "MAX_RETRIES",
-    "BASE_BACKOFF",
     "BACKOFF_MULTIPLIER",
+    "BASE_BACKOFF",
+    "MAX_RETRIES",
+    "_HailHTTP",
     "generate_idempotency_key",
 ]

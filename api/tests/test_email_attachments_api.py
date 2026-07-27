@@ -6,7 +6,6 @@ from unittest.mock import AsyncMock
 
 import httpx
 import pytest
-
 from hailhq.api.deps import get_s3_mail
 from hailhq.api.main import app
 

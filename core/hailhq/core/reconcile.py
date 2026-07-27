@@ -24,13 +24,12 @@ from __future__ import annotations
 
 import uuid
 
-from sqlalchemy import bindparam, func, text, update
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from hailhq.core.call_end_reasons import CallEndReason
 from hailhq.core.models import Call, CallEvent
 from hailhq.core.schemas import TERMINAL_CALL_STATUSES
 from hailhq.core.webhook_fanout import fanout_call_event
+from sqlalchemy import bindparam, func, text, update
+from sqlalchemy.ext.asyncio import AsyncSession
 
 
 async def sweep_stale_calls(

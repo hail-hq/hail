@@ -1,8 +1,7 @@
-from decimal import Decimal
 import json
+from decimal import Decimal
 
 import pytest
-
 from hailhq.core import telephony_catalog
 
 

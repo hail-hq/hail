@@ -11,14 +11,12 @@ Revises: 0024
 
 from __future__ import annotations
 
-from typing import Union
-
 import sqlalchemy as sa
 from alembic import op
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 
 revision: str = "0025"
-down_revision: Union[str, None] = "0024"
+down_revision: str | None = "0024"
 branch_labels = None
 depends_on = None
 

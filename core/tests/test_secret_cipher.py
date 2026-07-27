@@ -1,6 +1,5 @@
 import pytest
 from cryptography.fernet import InvalidToken
-
 from hailhq.core.secret_cipher import (
     SecretCipher,
     SecretKeyMissing,

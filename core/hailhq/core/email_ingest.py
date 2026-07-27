@@ -23,11 +23,6 @@ from email import message_from_bytes
 from typing import Any
 from uuid import UUID, uuid4
 
-from sqlalchemy import cast, func, select, update
-from sqlalchemy.dialects.postgresql import JSONB
-from sqlalchemy.exc import IntegrityError
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from hailhq.core.email_forwarding import LoopDetected, build_forwarded, detect_loop
 from hailhq.core.email_mime import ParsedAttachment, ParsedMime, parse_mime
 from hailhq.core.email_routing import classify_hail_mail_recipient
@@ -37,6 +32,10 @@ from hailhq.core.providers.email.inbound.base import InboundMessage
 from hailhq.core.s3_mail import S3MailClient
 from hailhq.core.urls import join_url
 from hailhq.core.webhook_fanout import build_event_data
+from sqlalchemy import cast, func, select, update
+from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import AsyncSession
 
 __all__ = ["FanoutFn", "ForwardEnqueue", "FundsCheck", "IngestResult", "ingest_inbound"]
 

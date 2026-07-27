@@ -1,6 +1,6 @@
-import pytest
 from unittest.mock import AsyncMock, patch
 
+import pytest
 from hailhq.core.dns_lookup import resolve_mx, ses_inbound_host
 
 

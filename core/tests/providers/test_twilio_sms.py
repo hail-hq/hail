@@ -12,7 +12,6 @@ from urllib.parse import parse_qs
 
 import pytest
 import responses
-
 from hailhq.core.providers.sms import ProviderSmsResult, TwilioSmsProvider
 
 ACCOUNT_SID = "ACtest1234567890abcdef1234567890ab"

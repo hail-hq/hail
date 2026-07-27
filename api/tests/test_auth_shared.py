@@ -10,13 +10,11 @@ Covers:
 
 from __future__ import annotations
 
-from typing import AsyncIterator
+from collections.abc import AsyncIterator
 
 import httpx
 import pytest
 from fastapi import Depends, FastAPI
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from hailhq.api import deps as deps_module
 from hailhq.api.deps import (
     SELF_HOSTED_ORG_ID,
@@ -25,6 +23,7 @@ from hailhq.api.deps import (
 )
 from hailhq.core.config import settings
 from hailhq.core.db import get_session
+from sqlalchemy.ext.asyncio import AsyncSession
 
 SHARED_KEY = "hail-test-shared-secret-do-not-use-in-prod"
 

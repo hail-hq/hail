@@ -14,10 +14,9 @@ from typing import Any
 
 from fastapi import HTTPException
 from fastapi import status as http_status
+from hailhq.core.schemas import decode_cursor, encode_cursor
 from sqlalchemy import Select, tuple_
 from sqlalchemy.ext.asyncio import AsyncSession
-
-from hailhq.core.schemas import decode_cursor, encode_cursor
 
 __all__ = ["fetch_cursor_page"]
 

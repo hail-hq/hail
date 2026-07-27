@@ -18,9 +18,8 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from datetime import datetime
 
-from pydantic import BaseModel
-
 from hailhq.core.schemas import NumberType
+from pydantic import BaseModel
 
 __all__ = [
     "NumberNotProvisionable",

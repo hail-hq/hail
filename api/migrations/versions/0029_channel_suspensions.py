@@ -15,14 +15,12 @@ parallel-branch 0028 (org_provider_config) that took the 0028 slot on main.
 
 from __future__ import annotations
 
-from typing import Union
-
 import sqlalchemy as sa
 from alembic import op
 from sqlalchemy.dialects.postgresql import UUID
 
 revision: str = "0029"
-down_revision: Union[str, None] = "0028"
+down_revision: str | None = "0028"
 branch_labels = None
 depends_on = None
 

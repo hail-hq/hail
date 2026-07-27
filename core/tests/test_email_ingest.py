@@ -4,8 +4,6 @@ from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 import pytest
-from sqlalchemy import func, select
-
 from hailhq.core.email_ingest import (
     IngestResult,
     _persist_one,
@@ -13,6 +11,7 @@ from hailhq.core.email_ingest import (
 )
 from hailhq.core.models import Email, EmailAttachment, EmailDomain
 from hailhq.core.providers.email.inbound.base import InboundMessage
+from sqlalchemy import func, select
 
 FIX = Path(__file__).parent / "fixtures" / "inbound"
 
@@ -1014,9 +1013,8 @@ async def test_unrelated_integrity_error_is_not_swallowed(async_session):
     Under the old blanket `except IntegrityError` this was silently
     absorbed as a dedupe race; it must raise instead.
     """
-    from sqlalchemy.exc import IntegrityError as SAIntegrityError
-
     from hailhq.core.email_mime import ParsedMime
+    from sqlalchemy.exc import IntegrityError as SAIntegrityError
 
     # Never added to the session/DB — its ids point nowhere.
     ghost_domain = _make_inbound_domain(uuid.uuid4())

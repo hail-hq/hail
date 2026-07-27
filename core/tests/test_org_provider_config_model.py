@@ -5,10 +5,9 @@ from __future__ import annotations
 import uuid
 
 import pytest
+from hailhq.core.models import OrgProviderConfig
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
-
-from hailhq.core.models import OrgProviderConfig
 
 
 async def test_round_trip_defaults(async_session) -> None:

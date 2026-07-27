@@ -15,14 +15,13 @@ import logging
 from typing import Any
 from uuid import UUID
 
-from livekit.agents.llm import function_tool
-from livekit.agents.voice import RunContext
-
 from hailhq.core.agent_tools.client import AgentApiClient
 from hailhq.core.agent_tools.registry import all_tools
 from hailhq.core.agent_tools.spec import SPOKEN_FALLBACK, ToolContext, ToolSpec
 from hailhq.core.config import settings
 from hailhq.core.db import session_scope
+from livekit.agents.llm import function_tool
+from livekit.agents.voice import RunContext
 
 logger = logging.getLogger("hailhq.voicebot")
 

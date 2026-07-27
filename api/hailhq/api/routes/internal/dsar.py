@@ -13,12 +13,11 @@ from __future__ import annotations
 from typing import Annotated
 
 from fastapi import APIRouter, Depends
+from hailhq.api.routes.internal.auth import verify_internal_request
+from hailhq.core.db import get_session
+from hailhq.core.dsar import delete_recipient_data, export_recipient_data
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
-
-from hailhq.api.routes.internal.auth import verify_internal_request
-from hailhq.core.dsar import delete_recipient_data, export_recipient_data
-from hailhq.core.db import get_session
 
 router = APIRouter(
     prefix="/internal/dsar",

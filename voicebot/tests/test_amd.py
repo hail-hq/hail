@@ -10,15 +10,10 @@ from __future__ import annotations
 import asyncio
 import json
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, ClassVar
 from uuid import UUID
 
 import pytest
-from livekit import rtc
-from livekit.agents.voice.amd import AMDCategory, AMDPredictionEvent
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from hailhq.core.call_end_reasons import CallEndReason
 from hailhq.core.models import Call, CallEvent
 from hailhq.voicebot import amd as amd_mod
@@ -28,6 +23,11 @@ from hailhq.voicebot.amd import (
     amd_end_reason,
     run_amd,
 )
+from livekit import rtc
+from livekit.agents.voice.amd import AMDCategory, AMDPredictionEvent
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+from typing_extensions import Self
 
 from ._fakes import FakeLLM
 from .test_agent import _make_call_row
@@ -40,13 +40,13 @@ from .test_agent import _make_call_row
 class _RecordingAMD:
     """Stand-in for livekit.agents.voice.amd.AMD recording its kwargs."""
 
-    last_kwargs: dict[str, Any] = {}
+    last_kwargs: ClassVar[dict[str, Any]] = {}
     result: AMDPredictionEvent | None = None
 
     def __init__(self, session: Any, **kwargs: Any) -> None:
         type(self).last_kwargs = {"session": session, **kwargs}
 
-    async def __aenter__(self) -> "_RecordingAMD":
+    async def __aenter__(self) -> Self:
         return self
 
     async def __aexit__(self, *_exc: object) -> None:
@@ -408,7 +408,6 @@ async def test_amd_is_skipped_when_the_sip_leg_already_disconnected(
 
     async def _tracking_run_amd(_session: object, _call_id: UUID):
         ran["amd"] = True
-        return None
 
     call_id, _ctx, _session = await _drive_entrypoint(
         async_session,

@@ -5,7 +5,6 @@ from __future__ import annotations
 from uuid import UUID
 
 import pytest
-
 from hail import HailMalformedResourceId, parse_resource_id
 
 

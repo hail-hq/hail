@@ -45,14 +45,13 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
+from hailhq.core.models import Call, Contact, Email, OrgClosure, Sms
 from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from hailhq.core.models import Call, Contact, Email, OrgClosure, Sms
-
 logger = logging.getLogger(__name__)
 
-__all__ = ["PurgeSummary", "RETENTION_PERIOD_AFTER_CLOSURE", "purge_expired_data"]
+__all__ = ["RETENTION_PERIOD_AFTER_CLOSURE", "PurgeSummary", "purge_expired_data"]
 
 # "12 months" approximated as a fixed day-count. This is a compliance
 # boundary, not a billing-precision figure, so a plain timedelta avoids

@@ -13,13 +13,13 @@ from decimal import Decimal
 
 import httpx
 import pytest
+from hailhq.api import deps as deps_module
+from hailhq.api.deps import SELF_HOSTED_ORG_ID
+from hailhq.core.models import AccountCredit
 from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from hailhq.api import deps as deps_module
-from hailhq.api.deps import SELF_HOSTED_ORG_ID
-from hailhq.core.models import AccountCredit
 from .conftest import insert_org_and_key
 
 _DEFAULT_BODY = {

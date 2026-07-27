@@ -7,14 +7,12 @@ layer (llm/tts/stt). organizations lives in the website DB — no FK.
 
 from __future__ import annotations
 
-from typing import Union
-
 import sqlalchemy as sa
 from alembic import op
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 
 revision: str = "0023"
-down_revision: Union[str, None] = "0022"
+down_revision: str | None = "0022"
 branch_labels = None
 depends_on = None
 

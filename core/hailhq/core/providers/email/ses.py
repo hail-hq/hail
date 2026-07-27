@@ -18,7 +18,6 @@ from typing import Any
 
 import boto3
 from botocore.exceptions import ClientError
-
 from hailhq.core.config import settings
 from hailhq.core.providers.email.base import (
     DkimRecord,

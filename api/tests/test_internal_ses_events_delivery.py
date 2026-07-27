@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 
 import pytest
-
 from hailhq.core.config import settings
 
 from .conftest import insert_org_and_key

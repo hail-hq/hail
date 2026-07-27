@@ -7,8 +7,8 @@ from uuid import UUID, uuid4
 
 import httpx
 import respx
-
 from hail import Client
+
 from tests.conftest import make_phone_number_response
 
 # --------------------------------------------------------------------------- #

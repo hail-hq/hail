@@ -16,9 +16,6 @@ from unittest.mock import AsyncMock
 
 import httpx
 import pytest
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from hailhq.api.main import app
 from hailhq.api.routes.internal.ses_events import (
     get_inbound_provider,
@@ -27,6 +24,8 @@ from hailhq.api.routes.internal.ses_events import (
 from hailhq.core.config import settings
 from hailhq.core.models import Email, EmailDomain
 from hailhq.core.providers.email.inbound.ses import SesInboundProvider
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 FIX = Path(__file__).parent.parent.parent / "core" / "tests" / "fixtures" / "inbound"
 
@@ -275,9 +274,8 @@ async def test_inbound_meters_one_usage_event_per_created_row(
 ):
     from unittest.mock import patch
 
-    from sqlalchemy import func
-
     from hailhq.core.models import UsageEvent
+    from sqlalchemy import func
 
     # Insert an org + hail_mail domain routing "smoke+acme@mail.hail.so".
     org_id = await _insert_inbound_domain(async_session, user="smoke", org="acme")

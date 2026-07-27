@@ -12,12 +12,11 @@ from __future__ import annotations
 import uuid
 from typing import Any
 
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from hailhq.core.agent_tools.spec import SPOKEN_FALLBACK, ToolContext, ToolSpec
 from hailhq.core.config import settings
 from hailhq.core.models import PhoneNumber
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 MAX_BODY_CHARS = 480  # ~3 SMS segments; the internal route imports this as its cap
 

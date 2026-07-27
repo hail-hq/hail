@@ -9,13 +9,10 @@ database without any FastAPI dep override.
 from __future__ import annotations
 
 import uuid
+from unittest.mock import AsyncMock
 from uuid import uuid4
 
 import httpx
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
-from unittest.mock import AsyncMock
-
 from hailhq.core.models import (
     ApiKey,
     AuditLog,
@@ -25,6 +22,9 @@ from hailhq.core.models import (
     WebhookSubscription,
 )
 from hailhq.core.pool import CALL_META_FROM_POOL
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from .conftest import insert_org_and_key
 
 # --------------------------------------------------------------------------- #

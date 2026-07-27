@@ -27,10 +27,9 @@ from typing import Any
 
 import httpx
 import jwt
-from jwt import PyJWK
-
 from hailhq.core.config import settings
 from hailhq.core.urls import join_url
+from jwt import PyJWK
 
 # --------------------------------------------------------------------------- #
 # API-key hashing (unchanged).

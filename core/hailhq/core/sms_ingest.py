@@ -15,15 +15,14 @@ import logging
 from dataclasses import dataclass
 from uuid import UUID
 
-from sqlalchemy import select
-from sqlalchemy.exc import IntegrityError
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from hailhq.core.compliance_gate import add_suppression, remove_suppression
 from hailhq.core.config import settings
 from hailhq.core.models import PhoneNumber, Sms, SmsEvent
 from hailhq.core.providers.sms import ProviderSmsResult, SmsProvider
 from hailhq.core.webhook_fanout import fanout_sms_event
+from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
 

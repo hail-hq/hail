@@ -32,10 +32,6 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from fastapi import status as http_status
-from sqlalchemy import select, update
-from sqlalchemy.exc import IntegrityError
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from hailhq.api.audit import write_audit_log
 from hailhq.api.deps import Principal, get_current_principal
 from hailhq.api.errors import unprocessable
@@ -54,6 +50,9 @@ from hailhq.core.schemas import (
     EmailDomainPatch,
     EmailDomainResponse,
 )
+from sqlalchemy import select, update
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
 
@@ -545,13 +544,13 @@ async def verify_email_domain(
         else sd.verified_at
     )
     new_status = identity.verification_status
-    values = dict(
-        verification_status=new_status,
-        dns_records=custom_dns_records(sd.domain, identity.dkim_records),
-        mail_from_domain=identity.mail_from_domain,
-        mail_from_status=identity.mail_from_status,
-        verified_at=verified_at,
-    )
+    values = {
+        "verification_status": new_status,
+        "dns_records": custom_dns_records(sd.domain, identity.dkim_records),
+        "mail_from_domain": identity.mail_from_domain,
+        "mail_from_status": identity.mail_from_status,
+        "verified_at": verified_at,
+    }
     # Receiving turns on automatically once a custom domain verifies — no
     # separate toggle. Idempotent: re-verifying a row already True keeps it True.
     if sd.kind == "custom" and new_status == "verified":
@@ -670,4 +669,4 @@ async def delete_email_domain(
     return Response(status_code=http_status.HTTP_204_NO_CONTENT)
 
 
-__all__ = ["router", "get_email_provider"]
+__all__ = ["get_email_provider", "router"]

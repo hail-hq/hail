@@ -1,13 +1,12 @@
 import pytest
-from sqlalchemy import create_engine
-from sqlalchemy.orm import Session
-
 from hailhq.core.testing.fixtures import (  # noqa: F401
     async_session,
     database_url,
     db,
     session_factory,
 )
+from sqlalchemy import create_engine
+from sqlalchemy.orm import Session
 
 
 @pytest.fixture()

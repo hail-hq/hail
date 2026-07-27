@@ -3,9 +3,8 @@
 from __future__ import annotations
 
 import pytest
-from pydantic import ValidationError
-
 from hail.models import CallCreate, LLMConfig
+from pydantic import ValidationError
 
 
 def test_call_create_mode_a_valid() -> None:

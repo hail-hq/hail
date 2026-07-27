@@ -16,7 +16,6 @@ from uuid import uuid4
 import httpx
 import pytest
 import respx
-
 from hailhq.mcp import tools
 from hailhq.mcp.hail_client import HailClient
 
