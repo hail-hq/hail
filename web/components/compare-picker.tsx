@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import {
   LLMCompareTable,
@@ -12,18 +12,27 @@ import type { LLMRow, STTRow, TTSRow } from "@/lib/types";
 
 type Props = { llm: LLMRow[]; stt: STTRow[]; tts: TTSRow[] };
 
-function parseIds(raw: string | null): string[] {
+function parseIds(raw: string | null, knownIds: Set<string>): string[] {
   return (raw ?? "")
     .split(",")
     .map((s) => s.trim())
     .filter(Boolean)
+    .filter((id) => knownIds.has(id))
     .slice(0, MAX_COMPARE);
 }
 
 export function CompareModels({ llm, stt, tts }: Props) {
   const searchParams = useSearchParams();
+  // Deep-linked ?m= ids are validated against the real catalog before they
+  // ever reach state, so a garbage id can never occupy one of the
+  // MAX_COMPARE slots and silently block later adds.
+  const knownIds = useMemo(
+    () =>
+      new Set([...llm, ...stt, ...tts].map((m) => m.model_id)),
+    [llm, stt, tts],
+  );
   const [ids, setIds] = useState<string[]>(() =>
-    parseIds(searchParams.get("m")),
+    parseIds(searchParams.get("m"), knownIds),
   );
 
   // Keep the URL shareable without triggering a navigation or a server render.
@@ -58,6 +67,23 @@ export function CompareModels({ llm, stt, tts }: Props) {
 
   return (
     <>
+      <div className="wrap" style={{ padding: "20px 0" }}>
+        <aside className="filed-panel">
+          <b>COMPARE</b>
+          <span>Up to {MAX_COMPARE} models, side-by-side.</span>
+          <dl>
+            <dt>SELECTED</dt>
+            <dd>{total}</dd>
+            <dt>LLM</dt>
+            <dd>{selectedLLM.length}</dd>
+            <dt>STT</dt>
+            <dd>{selectedSTT.length}</dd>
+            <dt>TTS</dt>
+            <dd>{selectedTTS.length}</dd>
+          </dl>
+        </aside>
+      </div>
+
       <div className="toolbar">
         <div className="wrap row">
           <a href="/costs" className="btn btn-outline">
@@ -71,11 +97,24 @@ export function CompareModels({ llm, stt, tts }: Props) {
           <div
             style={{
               marginLeft: "auto",
-              fontFamily: "var(--font-mono)",
-              fontSize: 11,
+              display: "flex",
+              alignItems: "center",
+              gap: 12,
             }}
           >
-            {total} of {MAX_COMPARE} slots
+            <div className="anchors">
+              {selectedLLM.length > 0 && <a href="#cmp-llm">LLM</a>}
+              {selectedSTT.length > 0 && <a href="#cmp-stt">STT</a>}
+              {selectedTTS.length > 0 && <a href="#cmp-tts">TTS</a>}
+            </div>
+            <div
+              style={{
+                fontFamily: "var(--font-mono)",
+                fontSize: 11,
+              }}
+            >
+              {total} of {MAX_COMPARE} slots
+            </div>
           </div>
         </div>
       </div>
@@ -83,13 +122,19 @@ export function CompareModels({ llm, stt, tts }: Props) {
       <section className="cat">
         <div className="wrap">
           {selectedLLM.length > 0 && (
-            <LLMCompareTable models={selectedLLM} currentIds={currentIds} />
+            <div id="cmp-llm">
+              <LLMCompareTable models={selectedLLM} currentIds={currentIds} />
+            </div>
           )}
           {selectedSTT.length > 0 && (
-            <STTCompareTable models={selectedSTT} currentIds={currentIds} />
+            <div id="cmp-stt">
+              <STTCompareTable models={selectedSTT} currentIds={currentIds} />
+            </div>
           )}
           {selectedTTS.length > 0 && (
-            <TTSCompareTable models={selectedTTS} currentIds={currentIds} />
+            <div id="cmp-tts">
+              <TTSCompareTable models={selectedTTS} currentIds={currentIds} />
+            </div>
           )}
 
           <h3
