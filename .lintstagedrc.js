@@ -1,6 +1,9 @@
 module.exports = {
-  // Python — lint with Ruff (auto-fix), format with Black.
-  "**/*.py": ["uvx ruff check --fix", "uvx black"],
+  // Python — lint with Ruff (auto-fix), format with Black. Versions
+  // pinned in lockstep with .github/workflows/ci.yml: unpinned uvx pulls
+  // the latest release, and a linter upgrade mid-PR rewrites staged files
+  // to a style CI then rejects.
+  "**/*.py": ["uvx ruff@0.15.12 check --fix", "uvx black@26.5.1"],
 
   // Go — format.
   "cli/**/*.go": ["gofmt -w"],

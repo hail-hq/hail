@@ -13,8 +13,12 @@ jobs:
       - uses: astral-sh/setup-uv@v3
         with:
           python-version: "3.12"
-      - run: uvx ruff check .
-      - run: uvx black --check .
+      # Pinned: unpinned uvx resolves the latest release, and a linter
+      # upgrade (ruff 0.16.0, 2026-07) changed defaults and broke lint on
+      # untouched code. Keep in lockstep with .lintstagedrc.js and the
+      # workspace dev dependency.
+      - run: uvx ruff@0.15.12 check .
+      - run: uvx black@26.5.1 --check .
 
   test:
     runs-on: ubuntu-latest
