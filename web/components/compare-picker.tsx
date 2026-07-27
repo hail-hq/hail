@@ -13,12 +13,12 @@ import type { LLMRow, STTRow, TTSRow } from "@/lib/types";
 type Props = { llm: LLMRow[]; stt: STTRow[]; tts: TTSRow[] };
 
 function parseIds(raw: string | null, knownIds: Set<string>): string[] {
-  return (raw ?? "")
+  const filtered = (raw ?? "")
     .split(",")
     .map((s) => s.trim())
     .filter(Boolean)
-    .filter((id) => knownIds.has(id))
-    .slice(0, MAX_COMPARE);
+    .filter((id) => knownIds.has(id));
+  return [...new Set(filtered)].slice(0, MAX_COMPARE);
 }
 
 export function CompareModels({ llm, stt, tts }: Props) {
@@ -208,6 +208,12 @@ function ModelGroup({
             key={m.model_id}
             type="button"
             className="add-pill"
+            disabled={currentIds.length >= MAX_COMPARE}
+            style={{
+              opacity: currentIds.length >= MAX_COMPARE ? 0.4 : undefined,
+              cursor:
+                currentIds.length >= MAX_COMPARE ? "not-allowed" : undefined,
+            }}
             onClick={() => onAdd(m.model_id)}
           >
             <span className="add-pill-plus">+</span>

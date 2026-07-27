@@ -2,6 +2,7 @@ import { Suspense } from "react";
 import { llm, stt, tts } from "@/lib/costs";
 import { CompareModels } from "@/components/compare-picker";
 import { featuredPairs } from "@/lib/featured";
+import { SITE_ORIGIN } from "@/lib/url";
 
 export const dynamic = "force-static";
 
@@ -9,6 +10,9 @@ export const metadata = {
   title: "Compare model costs — Hail",
   description:
     "Compare AI model providers side-by-side. Schema-validated, refreshed weekly.",
+  alternates: {
+    canonical: new URL("/costs/compare", SITE_ORIGIN).toString(),
+  },
 };
 
 export default function ComparePage() {

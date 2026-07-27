@@ -67,7 +67,7 @@ export function checkInvariants({ llm, stt, tts, lock }) {
   const removed = locked.filter((s) => !computed.includes(s));
   if (removed.length > 0) {
     errors.push(
-      `these slugs are in costs/featured.lock.json but are no longer generated, so previously indexed pages would 404: ${removed.join(', ')}`,
+      `these slugs are in costs/featured.lock.json but are no longer generated, so previously indexed pages would 404: ${removed.join(', ')} — do not run \`pnpm costs:featured --write\` to silence this; restore \`featured: true\`, or hand-edit costs/featured.lock.json so the removal is reviewable.`,
     );
   }
 

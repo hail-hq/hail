@@ -175,12 +175,14 @@ Rules for a refresh pass:
 - **New marquee model launched?** It is a candidate for `featured: true`. Adding the flag creates its comparison pages on the next deploy — nothing else to edit.
 - **Featured model deprecated?** **Keep the flag.** The page persists with a deprecation banner so an indexed URL never 404s. Make sure `replaced_by_model_id` resolves to a model in the same file.
 - **Never drop a featured flag** to tidy up. Removing one deletes indexed pages; `scripts/costs/check-featured.mjs` will fail the build if you do.
-- Adding or removing a flag changes the generated slug set, so regenerate and commit the lockfile:
+- **Adding** a flag changes the generated slug set, so regenerate and commit the lockfile:
 
 ```bash
 pnpm costs:featured --write   # regenerates costs/featured.lock.json
 pnpm costs:featured           # verifies invariants; must print "Featured set OK"
 ```
+
+- Removing a flag is a deliberate de-indexing decision. Do **not** run `--write` to silence the resulting failure — restore the flag, or hand-edit `costs/featured.lock.json` in the same commit so the deletion is visible in review.
 
 Keep the set small. Every model added creates a page against each existing featured model in its category, so N models produce N×(N−1)/2 pages.
 

@@ -44,9 +44,9 @@ function successorSlugFor(entry: FeaturedPair): string | null {
   const currentA = a.deprecated_at ? a.replaced_by_model_id : a.model_id;
   const currentB = b.deprecated_at ? b.replaced_by_model_id : b.model_id;
   if (!currentA || !currentB) return null;
-  if (currentA === a.model_id && currentB === b.model_id) return null;
 
   const candidate = pairSlug(currentA, currentB);
+  if (candidate === entry.slug) return null;
   return pairBySlug.has(candidate) ? candidate : null;
 }
 
