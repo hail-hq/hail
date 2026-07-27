@@ -51,6 +51,8 @@ export function CompareModels({ llm, stt, tts }: Props) {
 
   const clear = useCallback(() => setIds([]), []);
 
+  const today = new Date().toISOString().slice(0, 10);
+
   const selectedLLM = ids
     .map((id) => llm.find((m) => m.model_id === id))
     .filter(Boolean) as LLMRow[];
@@ -67,6 +69,18 @@ export function CompareModels({ llm, stt, tts }: Props) {
 
   return (
     <>
+      <div className="dispatch-tape">
+        <div className="wrap row">
+          <div className="left">
+            <span className="dot">●</span> HAIL.SO / DISPATCH · {today} ·
+            COMPARE
+          </div>
+          <div className="right">
+            FILE: <b>COMPARE</b> · {total} of {MAX_COMPARE} slots
+          </div>
+        </div>
+      </div>
+
       <div className="wrap" style={{ padding: "20px 0" }}>
         <aside className="filed-panel">
           <b>COMPARE</b>
@@ -94,46 +108,112 @@ export function CompareModels({ llm, stt, tts }: Props) {
               clear
             </button>
           )}
-          <div
-            style={{
-              marginLeft: "auto",
-              display: "flex",
-              alignItems: "center",
-              gap: 12,
-            }}
-          >
-            <div className="anchors">
-              {selectedLLM.length > 0 && <a href="#cmp-llm">LLM</a>}
-              {selectedSTT.length > 0 && <a href="#cmp-stt">STT</a>}
-              {selectedTTS.length > 0 && <a href="#cmp-tts">TTS</a>}
-            </div>
-            <div
-              style={{
-                fontFamily: "var(--font-mono)",
-                fontSize: 11,
-              }}
-            >
-              {total} of {MAX_COMPARE} slots
-            </div>
+          <div style={{ marginLeft: "auto" }} className="anchors">
+            {selectedLLM.length > 0 && <a href="#cmp-llm">LLM</a>}
+            {selectedSTT.length > 0 && <a href="#cmp-stt">STT</a>}
+            {selectedTTS.length > 0 && <a href="#cmp-tts">TTS</a>}
           </div>
         </div>
       </div>
 
-      <section className="cat">
+      {selectedLLM.length > 0 && (
+        <section className="cat" id="cmp-llm">
+          <div className="wrap">
+            <div className="cat-bar">
+              <span className="num">01</span>
+              <h2>
+                Large language <em className="it">models</em>
+              </h2>
+              <span className="count">
+                {selectedLLM.length}{" "}
+                {selectedLLM.length === 1 ? "model" : "models"}
+              </span>
+            </div>
+            <LLMCompareTable models={selectedLLM} currentIds={currentIds} />
+          </div>
+        </section>
+      )}
+
+      {selectedSTT.length > 0 && (
+        <section className="cat" id="cmp-stt">
+          <div className="wrap">
+            <div className="cat-bar">
+              <span className="num">02</span>
+              <h2>
+                <em className="it">Speech</em> to text
+              </h2>
+              <span className="count">
+                {selectedSTT.length}{" "}
+                {selectedSTT.length === 1 ? "model" : "models"}
+              </span>
+            </div>
+            <STTCompareTable models={selectedSTT} currentIds={currentIds} />
+          </div>
+        </section>
+      )}
+
+      {selectedTTS.length > 0 && (
+        <section className="cat" id="cmp-tts">
+          <div className="wrap">
+            <div className="cat-bar">
+              <span className="num">03</span>
+              <h2>
+                Text to <em className="it">speech</em>
+              </h2>
+              <span className="count">
+                {selectedTTS.length}{" "}
+                {selectedTTS.length === 1 ? "model" : "models"}
+              </span>
+            </div>
+            <TTSCompareTable models={selectedTTS} currentIds={currentIds} />
+          </div>
+        </section>
+      )}
+
+      <section
+        style={{
+          padding: "36px 0",
+          borderBottom: "2px solid var(--color-ink)",
+          background: "var(--color-paper)",
+        }}
+        id="cmp-add"
+      >
         <div className="wrap">
-          {selectedLLM.length > 0 && (
-            <div id="cmp-llm">
-              <LLMCompareTable models={selectedLLM} currentIds={currentIds} />
-            </div>
-          )}
-          {selectedSTT.length > 0 && (
-            <div id="cmp-stt">
-              <STTCompareTable models={selectedSTT} currentIds={currentIds} />
-            </div>
-          )}
-          {selectedTTS.length > 0 && (
-            <div id="cmp-tts">
-              <TTSCompareTable models={selectedTTS} currentIds={currentIds} />
+          {total === 0 && (
+            <div
+              style={{
+                border: "2px dashed var(--color-ink)",
+                padding: "32px 28px",
+                background: "var(--color-paper)",
+                textAlign: "center",
+                marginBottom: 36,
+              }}
+            >
+              <div
+                style={{
+                  fontFamily: "var(--font-mono)",
+                  fontSize: 11,
+                  fontWeight: 700,
+                  letterSpacing: "0.14em",
+                  textTransform: "uppercase",
+                  color: "var(--color-mute)",
+                  marginBottom: 8,
+                }}
+              >
+                No models selected
+              </div>
+              <p
+                style={{
+                  fontFamily: "var(--font-serif)",
+                  fontStyle: "italic",
+                  fontSize: 22,
+                  margin: 0,
+                  maxWidth: "50ch",
+                  marginInline: "auto",
+                }}
+              >
+                Pick at least two models below to see them side-by-side.
+              </p>
             </div>
           )}
 
@@ -145,7 +225,7 @@ export function CompareModels({ llm, stt, tts }: Props) {
               letterSpacing: "0.14em",
               textTransform: "uppercase",
               color: "var(--color-mute)",
-              margin: "24px 0 16px",
+              margin: "0 0 16px",
             }}
           >
             {total === 0 ? "Available models" : "Add another model"}

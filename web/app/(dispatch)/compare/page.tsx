@@ -16,19 +16,8 @@ export const metadata = {
 };
 
 export default function ComparePage() {
-  const today = new Date().toISOString().slice(0, 10);
-
   return (
     <>
-      <div className="dispatch-tape">
-        <div className="wrap row">
-          <div className="left">
-            <span className="dot">●</span> HAIL.SO / DISPATCH · {today} ·
-            COMPARE
-          </div>
-        </div>
-      </div>
-
       <header
         style={{
           padding: "40px 0 28px",
