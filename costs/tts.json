@@ -21,7 +21,7 @@
         "alaw_8000"
       ],
       "time_to_first_byte_ms": 75,
-      "last_verified": "2026-07-19",
+      "last_verified": "2026-07-27",
       "last_changed_at": "2026-05-05",
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",
@@ -38,7 +38,7 @@
       "languages": "29+",
       "ssml_supported": false,
       "voice_cloning": true,
-      "last_verified": "2026-07-19",
+      "last_verified": "2026-07-27",
       "last_changed_at": "2026-05-19",
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",
@@ -56,7 +56,7 @@
       "ssml_supported": false,
       "emotion_control_supported": true,
       "voice_cloning": true,
-      "last_verified": "2026-07-19",
+      "last_verified": "2026-07-27",
       "last_changed_at": "2026-05-19",
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",
@@ -75,7 +75,7 @@
       "voice_cloning": true,
       "deprecated_at": "2026-05-19",
       "replaced_by_model_id": "eleven_flash_v2_5",
-      "last_verified": "2026-07-19",
+      "last_verified": "2026-07-27",
       "last_changed_at": "2026-05-19",
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",
@@ -93,7 +93,7 @@
       "ssml_supported": false,
       "voice_cloning": true,
       "time_to_first_byte_ms": 75,
-      "last_verified": "2026-07-19",
+      "last_verified": "2026-07-27",
       "last_changed_at": "2026-07-02",
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",
@@ -170,12 +170,12 @@
         "mp3"
       ],
       "time_to_first_byte_ms": 90,
-      "last_verified": "2026-07-19",
+      "last_verified": "2026-07-27",
       "last_changed_at": "2026-05-05",
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",
       "source_url": "https://cartesia.ai/pricing",
-      "notes": "Cartesia now documents TTS billing as ~1 credit per character on every TTS endpoint (https://docs.cartesia.ai/pricing); Pro Voice Clone output is ~1.5 credits/char. USD anchor: Pro plan $5/mo for 100K credits => $50/1M chars; higher tiers are cheaper per credit (Startup ~$39.2, Scale ~$37.4 per 1M chars). Effective rate matches the prior $1-per-25-min + ~150 WPM anchoring, so no structured price change; per-char billing removes the speech-rate assumption. Plan-page minutes math (750 credits/min) is consistent with 1 credit/char at ~150 WPM. IVC voice cloning included (no clone fee). 90ms TTFB (sub-90ms per docs). 42 languages; latest snapshot sonic-3.5-2026-05-04. SSML speed/volume tags confirmed available on sonic-3.5 per https://docs.cartesia.ai/build-with-cartesia/sonic-3/ssml-tags (re-checked 2026-07-02). Emotion tags remain beta. Re-verified 2026-07-19: still Cartesia's current-recommended model."
+      "notes": "Cartesia now documents TTS billing as ~1 credit per character on every TTS endpoint (https://docs.cartesia.ai/pricing); Pro Voice Clone output is ~1.5 credits/char. USD anchor: Pro plan $5/mo for 100K credits => $50/1M chars; higher tiers are cheaper per credit (Startup ~$39.2, Scale ~$37.4 per 1M chars). Effective rate matches the prior $1-per-25-min + ~150 WPM anchoring, so no structured price change; per-char billing removes the speech-rate assumption. Plan-page minutes math (750 credits/min) is consistent with 1 credit/char at ~150 WPM. IVC voice cloning included (no clone fee). 90ms TTFB (sub-90ms per docs). 42 languages; latest snapshot sonic-3.5-2026-05-04. SSML speed/volume tags confirmed available on sonic-3.5 per https://docs.cartesia.ai/build-with-cartesia/sonic-3/ssml-tags (re-checked 2026-07-02). Emotion tags remain beta. Re-verified 2026-07-19: still Cartesia's current-recommended model. 2026-07-27 refresh: pricing and model status unchanged via primary (cartesia.ai/pricing) and secondary (docs.cartesia.ai/build-with-cartesia/tts-models/older-models) sources."
     },
     {
       "provider": "Cartesia",
@@ -184,17 +184,17 @@
       "display_name": "Sonic 3",
       "price_per_1m_chars_usd": "50.0",
       "voice_quality": "neural",
-      "languages": "42+",
+      "languages": "44+",
       "ssml_supported": true,
       "voice_cloning": true,
       "replaced_by_model_id": "sonic-3.5",
       "confidence": "medium",
-      "last_verified": "2026-07-19",
+      "last_verified": "2026-07-27",
       "last_changed_at": "2026-07-02",
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",
       "source_url": "https://docs.cartesia.ai/build-with-cartesia/tts-models/older-models",
-      "notes": "Predecessor to sonic-3.5, still stable and a valid model_id on the TTS API. Latest snapshot sonic-3-2026-01-12; older-models page lists 42 languages for this snapshot as of 2026-07-19 (was 43), languages field updated accordingly (non-price change). Cartesia recommends sonic-3.5 for best results, most languages, and naturalness. SSML speed/volume tags confirmed available per https://docs.cartesia.ai/build-with-cartesia/sonic-3/ssml-tags. TTFB not published for this specific snapshot. Pricing equality with sonic-3.5 now documented: https://docs.cartesia.ai/pricing applies ~1 credit/char to every TTS endpoint; USD anchor Pro plan $5 per 100K credits => $50/1M chars. Confidence medium because the USD-per-credit rate varies by plan tier (Scale ~$37.4/1M chars). Re-verified 2026-07-19: still stable, no structured price change."
+      "notes": "Predecessor to sonic-3.5, still stable and a valid model_id on the TTS API. Latest snapshot sonic-3-2026-01-12; older-models page lists 44 languages for this snapshot, updated from prior 42+ count (non-price change). Cartesia recommends sonic-3.5 for best results, most languages, and naturalness. SSML speed/volume tags confirmed available per https://docs.cartesia.ai/build-with-cartesia/sonic-3/ssml-tags. TTFB not published for this specific snapshot. Pricing equality with sonic-3.5 now documented: https://docs.cartesia.ai/pricing applies ~1 credit/char to every TTS endpoint; USD anchor Pro plan $5 per 100K credits => $50/1M chars. Confidence medium because the USD-per-credit rate varies by plan tier (Scale ~$37.4/1M chars). Model sunsets October 20, 2026 per https://docs.cartesia.ai/build-with-cartesia/tts-models/older-models. 2026-07-27 refresh: language count corrected to 44 (non-price), pricing and sunset date confirmed via secondary source."
     },
     {
       "provider": "Cartesia",
@@ -209,12 +209,12 @@
       "time_to_first_byte_ms": 90,
       "replaced_by_model_id": "sonic-3.5",
       "confidence": "medium",
-      "last_verified": "2026-07-19",
+      "last_verified": "2026-07-27",
       "last_changed_at": "2026-05-19",
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",
       "source_url": "https://docs.cartesia.ai/build-with-cartesia/tts-models/older-models",
-      "notes": "Predecessor to sonic-3.5; still stable and callable, but Cartesia recommends sonic-3.5 for new builds. Latest snapshot sonic-2-2025-06-11, supporting 8 core languages (en, fr, de, es, pt, zh, ja, ko). The 7 additional languages previously carrying a 2026-06-01 EOL are no longer listed as supported on this snapshot as of 2026-07-02; languages field reduced from 15+ accordingly. 90ms model latency. Higher-fidelity voice cloning capability. Pricing equality with sonic-3.5 now documented (~1 credit/char on every TTS endpoint per https://docs.cartesia.ai/pricing); USD anchor Pro plan $5 per 100K credits => $50/1M chars. Confidence medium because the USD-per-credit rate varies by plan tier. Re-verified 2026-07-19: snapshot and 8-language count unchanged, no structured price change."
+      "notes": "Predecessor to sonic-3.5; still stable and callable, but Cartesia recommends sonic-3.5 for new builds. Latest snapshot sonic-2-2025-06-11, supporting 8 core languages (en, fr, de, es, pt, zh, ja, ko). The 7 additional languages previously carrying a 2026-06-01 EOL are no longer listed as supported on this snapshot as of 2026-07-02; languages field reduced from 15+ accordingly. 90ms model latency. Higher-fidelity voice cloning capability. Pricing equality with sonic-3.5 now documented (~1 credit/char on every TTS endpoint per https://docs.cartesia.ai/pricing); USD anchor Pro plan $5 per 100K credits => $50/1M chars. Confidence medium because the USD-per-credit rate varies by plan tier. Model sunsets October 20, 2026 per https://docs.cartesia.ai/build-with-cartesia/tts-models/older-models. 2026-07-27 refresh: pricing, snapshot, and language count confirmed unchanged; sunset date noted."
     },
     {
       "provider": "Cartesia",
@@ -229,12 +229,12 @@
       "time_to_first_byte_ms": 40,
       "replaced_by_model_id": "sonic-3.5",
       "confidence": "medium",
-      "last_verified": "2026-07-19",
+      "last_verified": "2026-07-27",
       "last_changed_at": "2026-05-19",
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",
       "source_url": "https://docs.cartesia.ai/build-with-cartesia/tts-models/older-models",
-      "notes": "Lowest-latency Sonic variant (~40ms TTFB). Still stable and callable, but Cartesia recommends sonic-3.5 for new builds. Latest snapshot sonic-turbo-2025-06-04, supporting 9 languages (en, fr, de, es, pt, zh, ja, hi, ko). The 6 additional languages previously carrying a 2026-06-01 EOL are no longer listed as supported on this snapshot as of 2026-07-02; languages field reduced from 15+ accordingly. Pricing equality with sonic-3.5 now documented (~1 credit/char on every TTS endpoint per https://docs.cartesia.ai/pricing); USD anchor Pro plan $5 per 100K credits => $50/1M chars. Confidence medium because the USD-per-credit rate varies by plan tier. Re-verified 2026-07-19: snapshot and 9-language count unchanged, no structured price change."
+      "notes": "Lowest-latency Sonic variant (~40ms TTFB). Still stable and callable, but Cartesia recommends sonic-3.5 for new builds. Latest snapshot sonic-turbo-2025-06-04, supporting 9 languages (en, fr, de, es, pt, zh, ja, hi, ko). The 6 additional languages previously carrying a 2026-06-01 EOL are no longer listed as supported on this snapshot as of 2026-07-02; languages field reduced from 15+ accordingly. Pricing equality with sonic-3.5 now documented (~1 credit/char on every TTS endpoint per https://docs.cartesia.ai/pricing); USD anchor Pro plan $5 per 100K credits => $50/1M chars. Confidence medium because the USD-per-credit rate varies by plan tier. Model sunsets October 20, 2026 per https://docs.cartesia.ai/build-with-cartesia/tts-models/older-models. 2026-07-27 refresh: pricing, snapshot, and language count confirmed unchanged; sunset date noted."
     },
     {
       "provider": "Groq",
