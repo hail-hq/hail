@@ -15,10 +15,12 @@ function CompareGrid({
   models,
   currentIds,
   rows,
+  removable = true,
 }: {
   models: { provider: string; display_name: string; model_id: string }[];
   currentIds: string[];
   rows: CompareRow[];
+  removable?: boolean;
 }) {
   return (
     <div className="table-wrap">
@@ -32,15 +34,17 @@ function CompareGrid({
                   <div className="compare-model-prov">{m.provider}</div>
                   <div className="compare-model-name">{m.display_name}</div>
                   <CopyableCode value={m.model_id} />
-                  <a
-                    href={compareHrefRemove(currentIds, m.model_id)}
-                    className="compare-remove"
-                    rel="nofollow"
-                    title={`Remove ${m.display_name}`}
-                    aria-label={`Remove ${m.display_name} from comparison`}
-                  >
-                    ×
-                  </a>
+                  {removable && (
+                    <a
+                      href={compareHrefRemove(currentIds, m.model_id)}
+                      className="compare-remove"
+                      rel="nofollow"
+                      title={`Remove ${m.display_name}`}
+                      aria-label={`Remove ${m.display_name} from comparison`}
+                    >
+                      ×
+                    </a>
+                  )}
                 </div>
               </th>
             ))}
@@ -61,7 +65,15 @@ function CompareGrid({
   );
 }
 
-export function LLMCompareTable({ models, currentIds }: { models: LLMRow[]; currentIds: string[] }) {
+export function LLMCompareTable({
+  models,
+  currentIds,
+  removable = true,
+}: {
+  models: LLMRow[];
+  currentIds: string[];
+  removable?: boolean;
+}) {
   const rows: CompareRow[] = [
     { label: 'Output $/MTok', cells: models.map((m) => usd(m.output_per_mtok_usd, 2)), emphasis: true },
     { label: 'Input $/MTok', cells: models.map((m) => usd(m.input_per_mtok_usd, 2)) },
@@ -97,10 +109,18 @@ export function LLMCompareTable({ models, currentIds }: { models: LLMRow[]; curr
       )),
     },
   ];
-  return <CompareGrid models={models} currentIds={currentIds} rows={rows} />;
+  return <CompareGrid models={models} currentIds={currentIds} rows={rows} removable={removable} />;
 }
 
-export function STTCompareTable({ models, currentIds }: { models: STTRow[]; currentIds: string[] }) {
+export function STTCompareTable({
+  models,
+  currentIds,
+  removable = true,
+}: {
+  models: STTRow[];
+  currentIds: string[];
+  removable?: boolean;
+}) {
   const rows: CompareRow[] = [
     { label: '$/min', cells: models.map((m) => usd(m.price_per_minute_usd, 6)), emphasis: true },
     {
@@ -133,10 +153,18 @@ export function STTCompareTable({ models, currentIds }: { models: STTRow[]; curr
       )),
     },
   ];
-  return <CompareGrid models={models} currentIds={currentIds} rows={rows} />;
+  return <CompareGrid models={models} currentIds={currentIds} rows={rows} removable={removable} />;
 }
 
-export function TTSCompareTable({ models, currentIds }: { models: TTSRow[]; currentIds: string[] }) {
+export function TTSCompareTable({
+  models,
+  currentIds,
+  removable = true,
+}: {
+  models: TTSRow[];
+  currentIds: string[];
+  removable?: boolean;
+}) {
   const rows: CompareRow[] = [
     { label: '$/1M chars', cells: models.map((m) => usd(m.price_per_1m_chars_usd, 2)), emphasis: true },
     { label: 'Voice quality', cells: models.map((m) => m.voice_quality) },
@@ -176,5 +204,5 @@ export function TTSCompareTable({ models, currentIds }: { models: TTSRow[]; curr
       )),
     },
   ];
-  return <CompareGrid models={models} currentIds={currentIds} rows={rows} />;
+  return <CompareGrid models={models} currentIds={currentIds} rows={rows} removable={removable} />;
 }

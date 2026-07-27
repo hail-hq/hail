@@ -54,6 +54,8 @@ Optional (v2.1): cache_storage_per_mtok_per_hour_usd, per_request_usd,
 per_search_usd.
 
 Optional (v2.2): audio_input_per_mtok_usd, aggregators[].
+
+Optional (v2.3): featured.
 ```
 
 STT rows (`costs/stt.json`):
@@ -70,6 +72,8 @@ enum, punctuation_included, formatting_included, min_billed_seconds,
 max_audio_minutes_per_file, concurrent_streams_included, wer_benchmark,
 time_to_first_word_ms, aliases[], deployment_options[], aggregators[],
 free_tier, deprecated_at, replaced_by_model_id, confidence, notes.
+
+Optional (v2.3): featured.
 ```
 
 TTS rows (`costs/tts.json`):
@@ -85,6 +89,8 @@ emotion_control_supported, streaming_supported, voice_cloning,
 output_formats[], sample_rates_hz[], time_to_first_byte_ms, min_billed_chars,
 aliases[], deployment_options[], aggregators[], free_tier, deprecated_at,
 replaced_by_model_id, confidence, notes.
+
+Optional (v2.3): featured.
 ```
 
 Authoritative source: [`costs/schema/llm.schema.json`](../../costs/schema/llm.schema.json), [`costs/schema/stt.schema.json`](../../costs/schema/stt.schema.json), [`costs/schema/tts.schema.json`](../../costs/schema/tts.schema.json).
@@ -96,8 +102,8 @@ Keep this consistent across all rows. The order makes diffs reviewable and match
 **LLM:**
 
 ```
-provider, provider_url, model_id, display_name, model_family,
-knowledge_cutoff, aliases (when present),
+provider, provider_url, model_id, display_name, featured (when true),
+model_family, knowledge_cutoff, aliases (when present),
 context_window, max_output_tokens,
 input_per_mtok_usd, output_per_mtok_usd,
 audio_input_per_mtok_usd (when set),
@@ -122,6 +128,7 @@ source_url, notes
 
 ```
 provider, provider_url, model_id, display_name,
+featured (when true),
 aliases (when present),
 price_per_minute_usd, price_per_second_usd (whichever applies),
 price_per_minute_batch_usd, diarization_per_minute_usd, pii_redaction_per_minute_usd (when set),
@@ -141,6 +148,7 @@ source_url, notes
 
 ```
 provider, provider_url, model_id, display_name,
+featured (when true),
 aliases (when present),
 price_per_1m_chars_usd, price_per_second_usd (whichever applies),
 min_billed_chars (when set),
@@ -157,6 +165,26 @@ confidence (when non-default),
 last_verified, last_changed_at, verification_method, verified_by,
 source_url, notes
 ```
+
+## Featured models
+
+`featured: true` puts a model into the prerendered `/costs/compare/<a>-vs-<b>` page set. Every within-category pair of featured models becomes a static page. Design rationale: [`docs/superpowers/specs/2026-07-27-costs-compare-crawl-trap-design.md`](../superpowers/specs/2026-07-27-costs-compare-crawl-trap-design.md).
+
+Rules for a refresh pass:
+
+- **New marquee model launched?** It is a candidate for `featured: true`. Adding the flag creates its comparison pages on the next deploy — nothing else to edit.
+- **Featured model deprecated?** **Keep the flag.** The page persists with a deprecation banner so an indexed URL never 404s. Make sure `replaced_by_model_id` resolves to a model in the same file.
+- **Never drop a featured flag** to tidy up. Removing one deletes indexed pages; `scripts/costs/check-featured.mjs` will fail the build if you do.
+- **Adding** a flag changes the generated slug set, so regenerate and commit the lockfile:
+
+```bash
+pnpm costs:featured --write   # regenerates web/lib/featured.lock.json
+pnpm costs:featured           # verifies invariants; must print "Featured set OK"
+```
+
+- Removing a flag is a deliberate de-indexing decision. Do **not** run `--write` to silence the resulting failure — restore the flag, or hand-edit `web/lib/featured.lock.json` in the same commit so the deletion is visible in review.
+
+Keep the set small. Every model added creates a page against each existing featured model in its category, so N models produce N×(N−1)/2 pages.
 
 ## Provider catalog
 
@@ -377,6 +405,8 @@ Before signing off the refresh:
 - [ ] `pnpm costs:validate` passes (all three categories `ok -- validation done`)
 - [ ] jq referential checks pass (every line ends `[] ; replaced_by: []`)
 - [ ] `pnpm site:build` passes (Next.js compiles, all static pages generated)
+- [ ] `pnpm costs:featured` passes (`Featured set OK`); if any `featured` flag changed, `web/lib/featured.lock.json` was regenerated with `--write` and staged
+- [ ] `node --test "scripts/costs/*.test.mjs"` passes
 - [ ] All touched rows have `last_verified` bumped to today
 - [ ] No row has both per-unit price fields set with conflicting math (STT: `price_per_minute = price_per_second × 60`; TTS: analogous if both populated)
 - [ ] No new aggregator added without at least one direct host in `deployment_options[]`
@@ -410,5 +440,6 @@ Edit this file when:
 - A vendor URL changes (most common edit; vendors rename pricing pages frequently)
 - A new schema field lands (the v2.x evolution path) — update the "Per-row data model" section
 - The two-source rule, decimal-string rule, or field-order convention changes (would require a schema-version bump too)
+- The featured-model policy changes (see "Featured models") — update that section and the closing checklist together
 
 Schema-shaped changes get their own design spec under `docs/superpowers/specs/`. Catalog edits do not — they're maintenance of this runbook.
