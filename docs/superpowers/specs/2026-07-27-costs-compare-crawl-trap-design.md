@@ -122,8 +122,9 @@ A static page still costs egress if a bot keeps fetching it, so caching alone is
 
 **In this repo:**
 
-- **Canonical-host redirect** in [`web/next.config.ts`](../../../web/next.config.ts): a 308 from `hail-costs.vercel.app/costs/:path*` to `https://hail.so/costs/:path*`, scoped to that exact host so preview deployments are unaffected. Observed traffic targets the raw Vercel host, so this is the most direct lever, and it removes the duplicate-content problem at the same time.
 - **`web/app/sitemap.ts`** → served at `/costs/sitemap.xml` given `basePath: '/costs'`, listing `/costs`, `/costs/compare`, and all 96 pair pages.
+
+> **Rejected during implementation — a canonical-host redirect.** This design originally called for a 308 from `hail-costs.vercel.app/costs/:path*` to `https://hail.so/costs/:path*`, on the reasoning that observed traffic targeted the raw Vercel host. **That reasoning was wrong and the rule took production down.** hail-website _rewrites_ `/costs/*` to this deployment, and a rewrite is a proxy: the legitimate proxied request arrives carrying the identical `Host` as a direct hit on the raw domain. No header distinguishes them, so the rule fired on every real visitor and looped against the rewrite — `ERR_TOO_MANY_REDIRECTS` for everyone. Removed in `febb1ea`. **A host-based redirect cannot work behind a rewrite.** The observation that started it was also misread: traffic appearing to come from the `*.vercel.app` host is simply what the normal rewrite path looks like from inside the app.
 
 **In hail-website (separate repo — cannot be changed from here):**
 
@@ -174,14 +175,18 @@ costs/{llm,stt,tts}.json  --(featured: true)-->  web/lib/featured.ts
 - `node --test scripts/costs/check-featured.test.mjs` — the three CI invariants, following the `check-stale.test.mjs` precedent.
 - `pnpm site:build` — proves all 96 pages prerender and that `/compare` is no longer marked `ƒ (Dynamic)` in the route table.
 - `check-jsonschema --schemafile costs/schema/<cat>.schema.json costs/<cat>.json` for the v2.3 flag. Note `pnpm costs:validate` is currently broken on macOS hosts by a pipx/Python 3.14 ABI issue; `/Users/r/.local/bin/check-jsonschema` works.
-- Post-deploy: `curl -sI https://hail.so/costs/compare/<pair>` must show `x-vercel-cache: HIT`, and `curl -sI https://hail-costs.vercel.app/costs` must return 308.
+- Post-deploy: `curl -sI https://hail.so/costs/compare/<pair>` must show `x-vercel-cache: HIT`, and `curl -sI https://hail.so/costs` must return 200 with no redirect. (The earlier version of this line expected a 308 from the raw Vercel host — see the rejected redirect above.)
 
 ## Consequences
 
-- Function invocations on `/costs/compare`: 642K/12h → 0.
+Measured 24h after deploy (Vercel Observability, `hail-costs` production):
+
+- **Active CPU: ~3m per bucket → 0ms, flat.** Function invocations on `/costs/compare` are gone, as intended.
+- **Edge requests: ~12-15K per bucket → ~2-3K.**
 - 96 indexable, CDN-cached comparison pages replace an unbounded uncacheable space.
 - One additive optional schema field (v2.3) and three runbook sections to update.
-- Two edits required in hail-website that this repo cannot make; until they land, `robots.txt` still permits the query space, though the removal of crawlable `href`s already denies discovery of it.
+
+**Egress went up, not down — this design got that wrong.** Goal 1 said "eliminate the function invocations and the egress." The first happened; the second inverted: outgoing transfer rose from roughly 200MB to ~1GB per bucket (57GB/24h). The likely cause is success at goal 2 — 96 genuinely crawlable pages, advertised by a new sitemap, are now being fetched, and they are served from cache rather than skipped. Cheap per byte and no compute, but it is real bandwidth, and it means the `Disallow: /costs/compare?` in hail-website's `robots.txt` matters more than this design treated it. Re-measure after that lands before drawing conclusions.
 
 ## Alternatives rejected
 
