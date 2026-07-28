@@ -2,10 +2,10 @@
 
 The `SmtpInboundProvider` interface exists in
 [`core/hailhq/core/providers/email/inbound/smtp.py`](../../core/hailhq/core/providers/email/inbound/smtp.py)
-but is not implemented. It is the cloud-agnostic / OSS-only path,
-deferred to a follow-up milestone.
+but is not implemented. It is the cloud-agnostic / OSS-only path.
+We defer it to a follow-up milestone.
 
-When it lands, this page will describe:
+When it is released, this page will describe:
 
 - the `mailbot/` container (`aiosmtpd`-backed), parallel to `voicebot/`
 - listen ports + TLS configuration
@@ -13,9 +13,9 @@ When it lands, this page will describe:
   DMARC verification and flood resistance
 - self-host quickstart
 
-In the meantime, use the SES-backed inbound path documented in
+Until then, use the SES-backed inbound path documented in
 [`docs/setup/aws-ses.md`](aws-ses.md). If you must avoid AWS, file an
-issue tracking your need so the SMTP listener gets prioritized.
+issue that tracks your need. Then we can give the SMTP listener priority.
 
 ## References
 

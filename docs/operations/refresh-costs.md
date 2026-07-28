@@ -1,38 +1,38 @@
 # Weekly cost-data refresh runbook
 
-> **For Claude Code sessions:** This document is self-contained. Read it end-to-end and follow the procedure. You do not need any session context beyond what's here plus the canonical sources it links to.
+> **For Claude Code sessions:** This document is self-contained. Read all of it and follow the procedure. You do not need other session context. This document and the canonical sources that it links to are sufficient.
 
 ## What this is
 
-The `costs/` dataset (`costs/llm.json`, `costs/stt.json`, `costs/tts.json`) needs periodic re-verification against vendor pricing pages. Prices drift, models get deprecated, new variants launch. This runbook is the procedure for a weekly pass.
+You must verify the `costs/` dataset (`costs/llm.json`, `costs/stt.json`, `costs/tts.json`) against the vendor pricing pages at regular intervals. Prices change, vendors deprecate models, and new variants launch. This runbook gives the procedure for a weekly pass.
 
-The pass is fundamentally a sequence of WebFetch dispatches, one per provider family, comparing the live pricing page against the existing rows and producing updates. Run by a Claude Code session (or any agent with web-fetch + git-edit access).
+The pass is a sequence of WebFetch dispatches, one for each provider family. Each dispatch compares the live pricing page with the existing rows and produces updates. A Claude Code session (or an agent with web-fetch and git-edit access) runs the pass.
 
 ## When to run
 
-- Triggered weekly by the `costs-stale.yml` GitHub Action — opens an issue every Monday listing rows whose `last_verified` is more than 30 days old.
-- Or manually any time, e.g. after a high-profile model launch.
-- Or as part of a release-tag cut (`costs-v0.2.<N>` or higher).
+- The `costs-stale.yml` GitHub Action triggers the pass each week. The action opens an issue each Monday that lists the rows with a `last_verified` more than 30 days old.
+- You can also run the pass manually at any time, for example after a high-profile model launch.
+- You can also run the pass as part of a release-tag cut (`costs-v0.2.<N>` or higher).
 
 ## Pre-flight
 
-Before starting, confirm:
+Before you start, confirm these items:
 
-1. **Working tree is clean** for `costs/` (no in-flight data PRs). Stash or commit pending work first.
-2. **Schema is at v2 with v2.1+v2.2 extensions.** Check `costs/schema/llm.schema.json`'s `version` const is `2` and that `audio_input_per_mtok_usd`, `price_per_second_usd`, `aggregators[]` are declared.
-3. **You can run `pnpm costs:validate`.** If `pipx run check-jsonschema` is broken on the host (Python ABI issues are common), fall back to `check-jsonschema --schemafile <schema> <data>` directly with whatever `check-jsonschema` binary is on PATH.
+1. **The working tree is clean** for `costs/` (no data PRs in flight). Stash or commit pending work first.
+2. **The schema is at v2 with the v2.1+v2.2 extensions.** Make sure that the `version` const in `costs/schema/llm.schema.json` is `2`. Make sure that `audio_input_per_mtok_usd`, `price_per_second_usd`, and `aggregators[]` are declared.
+3. **You can run `pnpm costs:validate`.** If `pipx run check-jsonschema` is broken on the host (Python ABI problems are common), use `check-jsonschema --schemafile <schema> <data>` directly with the `check-jsonschema` binary that is on PATH.
 
 ## Conventions you must follow
 
-These are non-negotiable per the project's tenets and the v0.2 design spec. Read [`costs/README.md`](../../costs/README.md) and [`docs/superpowers/specs/2026-05-17-costs-v0.2-design.md`](../superpowers/specs/2026-05-17-costs-v0.2-design.md) for context.
+These rules are mandatory per the project tenets and the v0.2 design spec. For context, refer to [`costs/README.md`](../../costs/README.md) and [`docs/superpowers/specs/2026-05-17-costs-v0.2-design.md`](../superpowers/specs/2026-05-17-costs-v0.2-design.md).
 
-1. **Two-source rule.** Every price-affecting change cites the vendor pricing page plus one secondary source (vendor announcement, third-party aggregator, vendor API docs). If only one source is available, set the row's `confidence: medium` and explain in `notes`.
-2. **Decimal-string prices.** All `*_per_*_usd` fields are JSON strings, not numbers, matching the pattern `^(0|[1-9][0-9]*)(\.[0-9]{1,8})?$`. The validator rejects floats.
-3. **Canonical model_ids.** Use the vendor's actual API model_id string. Never invent. If a marketing name doesn't correspond to a stable API identifier, defer the row.
-4. **Two source verifies = the bar.** "Vendor pricing page is unreachable" or "model_id not in docs" means defer with a documented reason. Do not guess.
-5. **`last_verified` always bumps** on touched rows. **`last_changed_at` only bumps** if a structured price field actually moved.
-6. **Field order convention** (see "Field order" below). Match exactly.
-7. **No destructive git in the shared tree.** This runbook's default model has every provider-agent editing the **same** working tree, so a subagent must never run a git command that reverts or discards it — `git checkout`, `git restore`, `git stash`, `git reset` — nor `git commit`/`git add`. A `checkout`/`restore` on a shared `costs/*.json` reverts the whole file and silently wipes every other provider's in-flight edits — it cost a full LLM sweep once. Fix broken formatting with the `Edit` tool or `pnpm exec prettier --write costs/<category>.json`, never git. Leave files modified-but-unstaged; produce a commit message; let the operator commit. (Giving each provider its **own** git worktree makes git safe per-agent — but then add a step to collate each worktree's single-file edit back, which is why the default is one shared tree + sequential dispatch.)
+1. **Two-source rule.** For every price-affecting change, cite the vendor pricing page plus one secondary source. A secondary source is a vendor announcement, a third-party aggregator, or the vendor API docs. If only one source is available, set `confidence: medium` on the row and give the reason in `notes`.
+2. **Decimal-string prices.** All `*_per_*_usd` fields are JSON strings, not numbers. They must match the pattern `^(0|[1-9][0-9]*)(\.[0-9]{1,8})?$`. The validator rejects floats.
+3. **Canonical model_ids.** Use the vendor's real API model_id string. Do not invent one. If a marketing name does not have a stable API identifier, defer the row.
+4. **Two source verifications are the bar.** If the vendor pricing page is unreachable, or the model_id is not in the docs, defer the row with a documented reason. Do not guess.
+5. **Always bump `last_verified`** on each row that you touch. **Bump `last_changed_at` only** if a structured price field changed.
+6. **Field order convention** (refer to "Field order" below). Match it exactly.
+7. **No destructive git in the shared tree.** In the default model of this runbook, every provider-agent edits the **same** working tree. Thus a subagent must never run a git command that reverts or discards the tree — `git checkout`, `git restore`, `git stash`, `git reset` — and must never run `git commit`/`git add`. A `checkout`/`restore` on a shared `costs/*.json` reverts the full file and silently erases the in-flight edits of every other provider — one such error caused the loss of a full LLM sweep. Repair broken formatting with the `Edit` tool or `pnpm exec prettier --write costs/<category>.json`, never with git. Leave the files modified but unstaged. Produce a commit message. Let the operator commit. (A separate git worktree for each provider makes git safe for each agent. But then you must add a step to collate the single-file edit of each worktree back. Thus the default is one shared tree plus sequential dispatch.)
 
 ## Per-row data model (cheat sheet)
 
@@ -97,7 +97,7 @@ Authoritative source: [`costs/schema/llm.schema.json`](../../costs/schema/llm.sc
 
 ## Field order (all categories)
 
-Keep this consistent across all rows. The order makes diffs reviewable and matches existing committed data.
+Keep this order the same across all rows. The order makes diffs easy to review and agrees with the existing committed data.
 
 **LLM:**
 
@@ -168,27 +168,27 @@ source_url, notes
 
 ## Featured models
 
-`featured: true` puts a model into the prerendered `/costs/compare/<a>-vs-<b>` page set. Every within-category pair of featured models becomes a static page. Design rationale: [`docs/superpowers/specs/2026-07-27-costs-compare-crawl-trap-design.md`](../superpowers/specs/2026-07-27-costs-compare-crawl-trap-design.md).
+`featured: true` puts a model into the prerendered `/costs/compare/<a>-vs-<b>` page set. Every within-category pair of featured models becomes a static page. For the design rationale, refer to [`docs/superpowers/specs/2026-07-27-costs-compare-crawl-trap-design.md`](../superpowers/specs/2026-07-27-costs-compare-crawl-trap-design.md).
 
 Rules for a refresh pass:
 
-- **New marquee model launched?** It is a candidate for `featured: true`. Adding the flag creates its comparison pages on the next deploy — nothing else to edit.
-- **Featured model deprecated?** **Keep the flag.** The page persists with a deprecation banner so an indexed URL never 404s. Make sure `replaced_by_model_id` resolves to a model in the same file.
-- **Never drop a featured flag** to tidy up. Removing one deletes indexed pages; `scripts/costs/check-featured.mjs` will fail the build if you do.
-- **Adding** a flag changes the generated slug set, so regenerate and commit the lockfile:
+- **If a new marquee model launched**, the model is a candidate for `featured: true`. When you add the flag, the next deploy creates the comparison pages for the model. You do not edit anything else.
+- **If a featured model is deprecated**, **keep the flag.** The page stays live with a deprecation banner, so an indexed URL never returns a 404. Make sure that `replaced_by_model_id` resolves to a model in the same file.
+- **Never remove a featured flag** to clean up. If you remove one, you delete indexed pages, and `scripts/costs/check-featured.mjs` fails the build.
+- When you **add** a flag, you change the generated slug set. Regenerate and commit the lockfile:
 
 ```bash
 pnpm costs:featured --write   # regenerates web/lib/featured.lock.json
 pnpm costs:featured           # verifies invariants; must print "Featured set OK"
 ```
 
-- Removing a flag is a deliberate de-indexing decision. Do **not** run `--write` to silence the resulting failure — restore the flag, or hand-edit `web/lib/featured.lock.json` in the same commit so the deletion is visible in review.
+- The removal of a flag is a deliberate de-indexing decision. Do **not** run `--write` to silence the failure that results. Restore the flag, or hand-edit `web/lib/featured.lock.json` in the same commit, so the deletion is visible in review.
 
-Keep the set small. Every model added creates a page against each existing featured model in its category, so N models produce N×(N−1)/2 pages.
+Keep the set small. Each model that you add creates a page against each existing featured model in its category. Thus N models produce N×(N−1)/2 pages.
 
 ## Provider catalog
 
-The agent re-verifies each provider against these primary + secondary sources. New providers are appended as the dataset grows.
+The agent verifies each provider again against these primary and secondary sources. Append new providers as the dataset grows.
 
 | Category | Provider         | Primary pricing URL                                                                   | Secondary URL                                                                     | Notes                                                                            |
 | -------- | ---------------- | ------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
@@ -231,7 +231,7 @@ The agent re-verifies each provider against these primary + secondary sources. N
 
 ## Procedure
 
-Run the steps below in order. Each provider takes one focused dispatch.
+Do the steps below in sequence. Each provider gets one focused dispatch.
 
 ### Step 0 — Pre-flight
 
@@ -241,20 +241,20 @@ git status --short costs/      # must be empty
 pnpm costs:validate            # baseline must pass (fall back to direct check-jsonschema if needed)
 ```
 
-If `git status` shows anything under `costs/`, stop and reconcile. Don't proceed on a dirty tree.
+If `git status` shows changes under `costs/`, stop and reconcile them. Do not continue on a dirty tree.
 
 ### Step 1 — Dispatch one subagent per provider
 
-For each provider in the catalog above, dispatch a Claude Code subagent with the **per-provider prompt template** (next section). Run providers in sequence (not parallel — they all edit the same files).
+For each provider in the catalog above, dispatch a Claude Code subagent with the **per-provider prompt template** (next section). Run the providers in sequence, not in parallel, because they all edit the same files.
 
 Strategy hints:
 
-- Start with high-leverage providers (Anthropic, OpenAI, Google) — they're the most consumed and most volatile.
-- If a vendor's pricing page is unreachable on the first WebFetch, retry once with a fallback URL from the catalog. If still unreachable, defer the whole provider for this pass.
-- Watch for deprecations. They surfaced in 4 of 15 PRs during Phase 1; always check.
-- Watch for new models. New launches happen most weeks for the marquee providers.
+- Start with the high-leverage providers (Anthropic, OpenAI, Google). They are the most consumed and the most volatile.
+- If a vendor pricing page is unreachable on the first WebFetch, retry one time with a fallback URL from the catalog. If the page is still unreachable, defer the full provider for this pass.
+- Monitor for deprecations. They occurred in 4 of 15 PRs during Phase 1. Always check.
+- Monitor for new models. The marquee providers launch new models most weeks.
 
-### Step 2 — After each dispatch, the subagent should have:
+### Step 2 — After each dispatch, the subagent must have:
 
 - Edited `costs/{llm,stt,tts}.json` for that provider's rows
 - Bumped `last_verified` on touched rows; `last_changed_at` only where a price changed
@@ -267,27 +267,27 @@ Strategy hints:
 
 ### Step 3 — Stage and close out
 
-Once all providers have been processed (or deferred):
+When all providers are processed (or deferred):
 
 ```bash
 git add costs/llm.json costs/stt.json costs/tts.json
 git diff --cached --stat
 ```
 
-Produce a single rolled-up commit message summarizing:
+Produce one rolled-up commit message that summarizes:
 
 - How many rows touched
 - New rows added (provider + model_id)
 - New deprecations marked
 - Defers (with reasons)
 
-Commit (operator's call, manual):
+Commit (the operator does this step manually):
 
 ```
 git commit -m "feat(costs): weekly refresh YYYY-MM-DD"
 ```
 
-Optionally bump the patch tag:
+If applicable, bump the patch tag:
 
 ```
 git tag -a costs-v0.2.<next> -m "Weekly refresh YYYY-MM-DD"
@@ -296,7 +296,7 @@ git push origin main costs-v0.2.<next>
 
 ## Per-provider dispatch prompt template
 
-Copy-paste this into a `Task` tool call (or equivalent). Replace placeholders.
+Copy and paste this into a `Task` tool call (or equivalent). Replace the placeholders.
 
 ````
 You are running a weekly cost-data refresh for {provider} in the Hail Costs Dataset.
@@ -396,11 +396,11 @@ for f in costs/llm.json costs/stt.json costs/tts.json; do
 done
 ```
 
-Each line must end `[] ; replaced_by: []`. The CI workflow at `.github/workflows/costs-validate.yml` enforces the same.
+Each line must end with `[] ; replaced_by: []`. The CI workflow at `.github/workflows/costs-validate.yml` enforces the same checks.
 
 ## Closing checklist
 
-Before signing off the refresh:
+Before you sign off the refresh:
 
 - [ ] `pnpm costs:validate` passes (all three categories `ok -- validation done`)
 - [ ] jq referential checks pass (every line ends `[] ; replaced_by: []`)
@@ -411,12 +411,12 @@ Before signing off the refresh:
 - [ ] No row has both per-unit price fields set with conflicting math (STT: `price_per_minute = price_per_second × 60`; TTS: analogous if both populated)
 - [ ] No new aggregator added without at least one direct host in `deployment_options[]`
 - [ ] `git diff --cached` shows ONLY rows in `costs/{llm,stt,tts}.json` — no schema, no README, no unrelated files
-- [ ] Single rolled-up commit message documents row count, new additions, deprecations, defers
+- [ ] One rolled-up commit message documents the row count, new additions, deprecations, and defers
 - [ ] Stop. Let the operator run `git commit`.
 
 ## How to point a fresh Claude Code session at this document
 
-The fastest workflow:
+This is the fastest workflow:
 
 ```
 1. Open a new Claude Code session in the Hail repo.
@@ -430,16 +430,16 @@ The fastest workflow:
 4. You review the diff, commit when satisfied, optionally tag.
 ```
 
-The agent does not need any prior session context. This document plus the canonical sources it links to are complete inputs.
+The agent does not need prior session context. This document plus the canonical sources that it links to are the complete inputs.
 
 ## When this runbook needs updates
 
 Edit this file when:
 
-- A new provider is added to the catalog (append to the table in "Provider catalog")
-- A vendor URL changes (most common edit; vendors rename pricing pages frequently)
-- A new schema field lands (the v2.x evolution path) — update the "Per-row data model" section
-- The two-source rule, decimal-string rule, or field-order convention changes (would require a schema-version bump too)
-- The featured-model policy changes (see "Featured models") — update that section and the closing checklist together
+- You add a new provider to the catalog (append it to the table in "Provider catalog")
+- A vendor URL changes (the most common edit; vendors frequently rename pricing pages)
+- A new schema field is released (the v2.x evolution path) — update the "Per-row data model" section
+- The two-source rule, decimal-string rule, or field-order convention changes (this also requires a schema-version bump)
+- The featured-model policy changes (refer to "Featured models") — update that section and the closing checklist together
 
-Schema-shaped changes get their own design spec under `docs/superpowers/specs/`. Catalog edits do not — they're maintenance of this runbook.
+Schema-shaped changes get their own design spec under `docs/superpowers/specs/`. Catalog edits do not — they are maintenance of this runbook.

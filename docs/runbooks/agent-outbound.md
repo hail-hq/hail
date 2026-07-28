@@ -1,9 +1,9 @@
 # Agent outbound — runbook
 
-Agent-origin orgs (organizations.origin = 'agent') self-signup via
-POST hail.so/api/agent/signup and send on free credit, gated by velocity
-caps (core/hailhq/core/agent_caps.py — the enforcement gate; defaults live
-in core/hailhq/core/config.py). Spec: hail-website
+Agent-origin orgs (organizations.origin = 'agent') do self-signup via
+POST hail.so/api/agent/signup and send on free credit. Velocity caps gate
+them (core/hailhq/core/agent_caps.py is the enforcement gate; the defaults
+are in core/hailhq/core/config.py). Refer to the spec: hail-website
 docs/superpowers/specs/2026-07-14-agent-self-signup-design.md.
 
 ## Kill switch (all agent outbound, instantly; humans unaffected)
@@ -15,21 +15,22 @@ OFF:
 UPDATE platform_flags SET value = 'false', updated_at = now()
 WHERE key = 'agent_outbound_disabled';
 
-Covers direct sends (POST /emails, /sms, /calls) AND inbound-forward relay for
-agent-origin orgs — both check the flag before hitting a provider. While the
-switch is ON, an agent-origin org's queued forwards defer (stay queued, resume
-when you flip it OFF); a queued agent forward at the head of the shared forward
-queue can briefly delay other orgs' forwards until the switch clears — expected
-during a short emergency stop.
+The switch covers direct sends (POST /emails, /sms, /calls) AND the
+inbound-forward relay for agent-origin orgs. Both check the flag before they
+call a provider. While the switch is ON, an agent-origin org's queued forwards
+defer: they stay queued and resume when you flip the switch OFF. A queued agent
+forward at the head of the shared forward queue can delay other orgs' forwards
+for a short time until the switch clears. This is expected during a short
+emergency stop.
 
 ## One abusive org (targeted, not the kill switch)
 
 Use the existing per-org channel suspension. `reason` is NOT NULL — always
-record why (ticket/link):
+record the reason (ticket/link):
 INSERT INTO channel_suspensions (organization_id, channel, reason)
 VALUES ('<org>', '<email|sms|voice>', '<why — ticket/link>');
 
-To lift the suspension once resolved:
+To lift the suspension after you resolve the issue:
 DELETE FROM channel_suspensions
 WHERE organization_id = '<org>' AND channel = '<email|sms|voice>';
 
@@ -41,7 +42,7 @@ AGENT_EMAIL_PER_DAY, AGENT_SMS_PER_DAY, AGENT_VOICE_PER_DAY,
 AGENT_EMAIL_RECIPIENTS_PER_DAY, AGENT_SMS_RECIPIENTS_PER_DAY,
 AGENT_VOICE_RECIPIENTS_PER_DAY, AGENT_GLOBAL_EMAIL_PER_HOUR,
 AGENT_GLOBAL_SMS_PER_HOUR, AGENT_GLOBAL_VOICE_PER_HOUR — pydantic-settings naming,
-no prefix). Restart the API to pick up changes.
+no prefix). Restart the API to apply the changes.
 
 ## Monitoring queries
 
@@ -72,33 +73,33 @@ GROUP BY ac.organization_id ORDER BY 2 DESC;
 
 ## Retention (agent_send_log grows unbounded)
 
-The gate only ever queries the last hour/day, so rows older than ~24h have no
-runtime value; the monitoring queries above cap at 7 days. Prune periodically to
-bound table + autovacuum cost (e.g. a daily job):
+The gate queries only the last hour/day. Thus rows older than approximately
+24h have no runtime value. The monitoring queries above cap at 7 days. Prune
+periodically to bound the table + autovacuum cost (for example, a daily job):
 DELETE FROM agent_send_log WHERE created_at < now() - interval '30 days';
 
 ## Accepted risk (from the spec)
 
-Agent traffic shares sender domains with paying customers — velocity caps +
-this kill switch are the mitigation. If deliverability dips
-(bounce/complaint rates on shared domains), flip the kill switch first,
-investigate second. Reputation isolation (dedicated subdomain/IP pool) is
+Agent traffic shares sender domains with paying customers. Velocity caps +
+this kill switch are the mitigation. If deliverability decreases
+(bounce/complaint rates on shared domains), flip the kill switch first.
+Investigate second. Reputation isolation (dedicated subdomain/IP pool) is
 the designated fast-follow.
 
 ---
 
 ## Launch checklist (operator — after deploy)
 
-**SEQUENCING WARNING:** Deploy order is critical. Each step must complete before the next:
+**SEQUENCING WARNING:** The deploy order is critical. Complete each step before you start the next:
 
-1. hail-website DB migration applies first (Global Constraint)
-2. hail-website deploy
-3. hail API deploy (alembic 0034 auto-applies per the repo's deploy flow — verify in GHA log)
-4. Only THEN publish SKILL.md to ClawHub and Moltbook — the doc promises 429 caps and Retry-After headers that don't exist until the API deploys
+1. Apply the hail-website DB migration first (Global Constraint)
+2. Deploy hail-website
+3. Deploy the hail API (alembic 0034 auto-applies per the repo's deploy flow — verify in the GHA log)
+4. Only THEN publish SKILL.md to ClawHub and Moltbook. The doc promises 429 caps and Retry-After headers that do not exist until the API deploys
 
 - [ ] **Step 1: Verify API deployment**
-  - Check GHA logs for successful hail-api deploy
-  - Confirm alembic 0034 migration ran (search logs for "agent_send_log" or "agent_signups")
+  - Check the GHA logs for a successful hail-api deploy
+  - Confirm that the alembic 0034 migration ran (search the logs for "agent_send_log" or "agent_signups")
 
 - [ ] **Step 2: Publish to ClawHub**
 
@@ -108,12 +109,12 @@ the designated fast-follow.
   clawhub skill publish /tmp/hail-skill
   ```
 
-  Expected: listing visible on clawhub. If `clawhub` CLI needs auth/setup, follow its login flow first (operator account).
+  Expected result: the listing is visible on clawhub. If the `clawhub` CLI needs auth/setup, follow its login flow first (operator account).
 
 - [ ] **Step 3: Moltbook presence**
-  1. Register a Hail-owned agent on moltbook.com per their flow (agent signs up, provides claim link, owner verifies via X).
-  2. First post: the skill doc — link `https://hail.so/skill.md?ref=moltbook`, framed as "you can sign up yourself, here's how."
-  3. Ongoing cadence via the `~/playground/hail-content` pipeline (manual posting first, per current content-engine practice): product notes and replies to comms-related threads, each carrying the `?ref=moltbook` link.
+  1. Register a Hail-owned agent on moltbook.com per their flow (the agent signs up and provides a claim link, then the owner verifies via X).
+  2. Make the first post the skill doc — link `https://hail.so/skill.md?ref=moltbook`, framed as "you can sign up yourself, here's how."
+  3. Keep an ongoing cadence via the `~/playground/hail-content` pipeline (manual posting first, per current content-engine practice). Post product notes and replies to comms-related threads. Each post carries the `?ref=moltbook` link.
 
 - [ ] **Step 4: Verify the funnel end-to-end in prod**
-      After all above steps complete: run the Task 4 Step 3 curl against `https://hail.so` with a real owner email you control; confirm 201 + key; send one email via the key; confirm the send succeeds, `agent_send_log` has the row, and the attribution query in this runbook shows the `ref`. Then delete/close the test workspace.
+      After all the steps above are complete, run the Task 4 Step 3 curl against `https://hail.so` with a real owner email that you control. Confirm 201 + key. Send one email via the key. Confirm that the send succeeds, that `agent_send_log` has the row, and that the attribution query in this runbook shows the `ref`. Then delete/close the test workspace.
