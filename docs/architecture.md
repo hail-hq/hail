@@ -1,6 +1,6 @@
 # Architecture
 
-Hail v1 is three Python services + a Go CLI, wrapped around LiveKit Cloud.
+Hail v1 is three Python services plus a Go CLI, built around LiveKit Cloud.
 
 ```
  AI agent                                     Hail                                LiveKit Cloud         PSTN
@@ -18,54 +18,64 @@ Hail v1 is three Python services + a Go CLI, wrapped around LiveKit Cloud.
 
 ## Services
 
-- **api** (`:8080`, FastAPI) — REST surface; accepts `POST /calls` etc. Source of truth for OpenAPI.
-- **mcp** (`:8081`, Streamable HTTP; legacy SSE during transition) — MCP server wrapping the API; what agent clients (Claude.ai, ChatGPT, Claude Code, Cursor) connect to. See [MCP setup](./setup/mcp.md).
-- **voicebot** (LiveKit Agents worker) — registers with LiveKit Cloud; dispatched into a room per call.
+- **api** (`:8080`, FastAPI) — the REST surface; it accepts `POST /calls` and the other routes. It is the source of truth for OpenAPI.
+- **mcp** (`:8081`, Streamable HTTP; legacy SSE during the transition) — the MCP server that wraps the API. Agent clients (Claude.ai, ChatGPT, Claude Code, Cursor) connect to it. Refer to [MCP setup](./setup/mcp.md).
+- **voicebot** (LiveKit Agents worker) — registers with LiveKit Cloud. Hail dispatches it into a room for each call.
 - **postgres** — call records, phone numbers, API keys.
-- **minio** (dev only) — S3-compatible local object storage. Swap for real S3 in prod.
+- **minio** (dev only) — S3-compatible local object storage. Use real S3 in production.
 
-LiveKit Cloud is external. The `hail` Go CLI is a human-facing scriptable tool, not a service.
+LiveKit Cloud is external. The `hail` Go CLI is a scriptable tool for humans, not a service.
 
 ## Outbound call flow
 
-1. Caller (agent via MCP, or CLI, or direct HTTP) → `POST /calls` with `{to, from, first_message?, …llm}`.
-2. Hail API creates a LiveKit room and dispatches the voicebot into it.
-3. Voicebot joins; LiveKit places a SIP outbound via the Twilio trunk to `to`.
-4. On pickup, voicebot classifies who answered before saying anything (see below), then speaks the AI disclosure (unless the call set `ai_disclosure: false` — the opt-out is audit-logged and the caller's responsibility) and `first_message` (if set) and runs the STT → LLM → TTS loop.
-5. On hangup, voicebot writes the call record to Postgres and uploads the recording to S3.
+1. The caller (an agent via MCP, the CLI, or direct HTTP) sends `POST /calls` with `{to, from, first_message?, …llm}`.
+2. The Hail API creates a LiveKit room and dispatches the voicebot into it.
+3. The voicebot joins the room. LiveKit places an outbound SIP call through the Twilio trunk to `to`.
+4. On pickup, the voicebot classifies who answered before it speaks (refer to the section below). Then it speaks the AI disclosure and the `first_message` (if set), and runs the STT → LLM → TTS loop. If the call set `ai_disclosure: false`, the voicebot skips the disclosure; Hail audit-logs the opt-out, and the opt-out is the caller's responsibility.
+5. On hangup, the voicebot writes the call record to Postgres and uploads the recording to S3.
 
 ### Answering machine detection and DTMF
 
-Every outbound call runs LiveKit's AMD ([`voicebot/hailhq/voicebot/amd.py`](../voicebot/hailhq/voicebot/amd.py)) against the greeting, classifying on the session's own LLM and STT rather than LiveKit Inference. `machine-vm` and `machine-unavailable` hang up without speaking — no message is ever left — and record `status=no_answer` with `end_reason=voicemail_reached` / `machine_unavailable`. `human` and `uncertain` proceed normally. `machine-ivr` does **not** speak the greeting — a menu cannot hear it, and `session.say` is TTS-only so it would give the LLM no turn in which to press a key. Instead the agent takes a real LLM turn (`generate_reply`) carrying the captured menu text and the `send_dtmf` tool, and the disclosure is deferred until the first person speaks. The verdict lands in `call_events` as an `amd_result` row on every call. A detection failure is non-fatal: the call proceeds as if a human answered.
+Every outbound call runs LiveKit's AMD ([`voicebot/hailhq/voicebot/amd.py`](../voicebot/hailhq/voicebot/amd.py)) against the greeting. Classification runs on the session's own LLM and STT, not on LiveKit Inference. On `machine-vm` and `machine-unavailable`, the voicebot hangs up without a word — it never leaves a message. It records `status=no_answer` with `end_reason=voicemail_reached` / `machine_unavailable`. On `human` and `uncertain`, the call proceeds normally.
 
-Billing no longer requires a `completed` status: a call is billed when `answered_at` is set (the SIP leg went active) **or** the call completed normally. The first clause bills a machine-answered call and one that failed mid-conversation; the second keeps billing a completed call whose answer signal never landed.
+On `machine-ivr`, the voicebot does **not** speak the greeting. A menu cannot hear it, and `session.say` is TTS-only, so the LLM would get no turn in which to press a key. Instead, the agent takes a real LLM turn (`generate_reply`) with the captured menu text and the `send_dtmf` tool. Hail defers the disclosure until the first person speaks. Hail writes the verdict to `call_events` as an `amd_result` row on every call. A detection failure is non-fatal: the call proceeds as if a human answered.
 
-The agent can press keypad digits at any point via the `send_dtmf` tool ([`core/hailhq/core/agent_tools/send_dtmf.py`](../core/hailhq/core/agent_tools/send_dtmf.py)) — not just after an IVR verdict — so phone trees reached mid-call are navigable.
+Billing no longer requires a `completed` status. Hail bills a call when `answered_at` is set (the SIP leg went active) **or** when the call completed normally. The first clause bills a machine-answered call and a call that failed mid-conversation. The second clause keeps billing for a completed call whose answer signal never arrived.
+
+The agent can press keypad digits at any point with the `send_dtmf` tool ([`core/hailhq/core/agent_tools/send_dtmf.py`](../core/hailhq/core/agent_tools/send_dtmf.py)) — not only after an IVR verdict. Thus the agent can navigate phone trees that it reaches mid-call.
 
 ## LLM modes
 
-**A — system prompt (default).** Caller supplies `system_prompt`. Voicebot uses LiveKit's `FallbackAdapter` chaining `openai.LLM` → `google.LLM` → `anthropic.LLM` (fast models each). Falls through on error.
+**A — system prompt (default).** The caller supplies `system_prompt`. The voicebot uses LiveKit's `FallbackAdapter`, which chains `openai.LLM` → `google.LLM` → `anthropic.LLM` (a fast model for each). It falls through on error.
 
-**B — BYO endpoint.** Caller supplies `llm: { base_url, api_key, model }`. Voicebot points `openai.LLM` at that endpoint. No fallback.
+**B — BYO endpoint.** The caller supplies `llm: { base_url, api_key, model }`. The voicebot points `openai.LLM` at that endpoint. There is no fallback.
 
-One mode per call.
+Each call uses one mode.
 
 ## Data
 
-- **Postgres** — call records, phone numbers, API keys.
+- **Postgres** — call, SMS, and email records; phone numbers; email domains; contacts; webhook subscriptions; API keys.
 - **S3** — call recordings.
 - **LiveKit Cloud** — transient media (ephemeral).
 
+## SMS
+
+The `SmsProvider` adapter in [`core/hailhq/core/providers/sms/`](../core/hailhq/core/providers/sms/) sends SMS through Twilio.
+
+**Outbound.** `POST /sms` sends from the org's dedicated SMS-capable number. There is no pool fallback — refer to `hail numbers` for number acquisition. Twilio posts delivery-status callbacks. These callbacks move `Sms.status` and fan out the `sms.delivered` / `sms.undelivered` / `sms.failed` webhook events.
+
+**Inbound.** Twilio posts each incoming message to `POST /sms/inbound`. Hail verifies the `X-Twilio-Signature` header. It matches the destination number to an org, stores the message, and fires the `sms.received` webhook event. Messages to unknown or pool numbers are dropped. An opt-out reply (`STOP`) adds the sender to the org's suppression list; `START` removes it.
+
 ## Outbound email
 
-Outbound mail goes through AWS SES via the `EmailProvider` adapter in `core/hailhq/core/providers/email/`. Two flavors of sender identity, stored in `email_domains`:
+The `EmailProvider` adapter in `core/hailhq/core/providers/email/` sends outbound mail through AWS SES. Hail stores two kinds of sender identity in `email_domains`:
 
-- **`kind='custom'`** — tenant-controlled DNS (e.g. `acme.com`). `POST /email-domains` registers the identity with SES and auto-configures a custom MAIL FROM on `send.<domain>`; the response surfaces three DKIM CNAMEs **plus** the MAIL FROM MX/SPF records (each carrying an optional `priority`). The tenant publishes them, then `POST /email-domains/{id}/verify` re-polls SES for both DKIM and MAIL FROM status. Verified custom domains can also **receive** — inbound matches by identity, one row + webhook per matched domain.
-- **`kind='hail_mail'`** — per-org address under an operator-managed parent domain. The full sender is `<user>+<org>@<HAIL_MAIL_BASE_DOMAIN>` (e.g. `alice+acme@mail.hail.so`); the parent domain is pre-verified once by the operator out of band, so per-org rows land already-verified without ever calling SES.
+- **`kind='custom'`** — tenant-controlled DNS (for example `acme.com`). `POST /email-domains` registers the identity with SES and auto-configures a custom MAIL FROM on `send.<domain>`. The response surfaces three DKIM CNAMEs **plus** the MAIL FROM MX/SPF records (each with an optional `priority`). The tenant publishes them, then calls `POST /email-domains/{id}/verify` to re-poll SES for the DKIM and MAIL FROM status. Verified custom domains can also **receive** — inbound matches by identity, with one row and one webhook per matched domain.
+- **`kind='hail_mail'`** — a per-org address under an operator-managed parent domain. The full sender is `<user>+<org>@<HAIL_MAIL_BASE_DOMAIN>` (for example `alice+acme@mail.hail.so`). The operator pre-verifies the parent domain once, out of band. Thus Hail creates per-org rows as already verified, without a call to SES.
 
 ### Self-hosted vs managed
 
-The two surfaces differ in where the prefixes come from and where they're edited:
+The two surfaces differ in the source of the prefixes and in the place where you edit them:
 
 |                       | Self-hosted Hail                                                                                                         | Managed Hail (hail.so)                                                                              |
 | --------------------- | ------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------- |
@@ -77,30 +87,30 @@ The two surfaces differ in where the prefixes come from and where they're edited
 | SES production access | Operator's AWS account                                                                                                   | Operator's AWS account                                                                              |
 | Billing               | Off — `usage_events` accumulates as raw analytics                                                                        | Cloud rater applies cents/unit, debits `account_credits`                                            |
 
-Both prefixes are validated against `^[a-z0-9]([a-z0-9-]{0,18}[a-z0-9])?$` (1–20 chars, lowercase alphanumeric + hyphen, no leading/trailing hyphen), so the full local part fits well under the RFC-5321 64-char budget.
+Hail validates both prefixes against `^[a-z0-9]([a-z0-9-]{0,18}[a-z0-9])?$` (1–20 chars, lowercase alphanumeric + hyphen, no leading or trailing hyphen). Thus the full local part stays well under the RFC-5321 64-char budget.
 
 ### Send-time resolution
 
 `POST /emails` picks a sender in this order:
 
-1. Explicit `from` — must match a `verified` row owned by the caller's org.
-2. First verified org-owned domain (ordered by `created_at`, so a tenant's "default sender" stays stable).
-3. Auto-mint a hail-mail row using the configured prefixes, if `HAIL_MAIL_BASE_DOMAIN` is set.
+1. An explicit `from` — it must match a `verified` row that the caller's org owns.
+2. The first verified org-owned domain (ordered by `created_at`, so a tenant's "default sender" stays stable).
+3. An auto-minted hail-mail row with the configured prefixes, if `HAIL_MAIL_BASE_DOMAIN` is set.
 
-If none of those resolve, the request returns `503` pointing at how to register a domain.
+If none of those resolve, the request returns `503` with instructions on how to register a domain.
 
-See [`docs/setup/aws-ses.md`](./setup/aws-ses.md) for the operator-side setup, and [`docs/superpowers/plans/2026-05-17-hail-mail-addressing.md`](./superpowers/plans/2026-05-17-hail-mail-addressing.md) for the addressing/configurability plan.
+Refer to [`docs/setup/aws-ses.md`](./setup/aws-ses.md) for the operator-side setup. Refer to [`docs/superpowers/plans/2026-05-17-hail-mail-addressing.md`](./superpowers/plans/2026-05-17-hail-mail-addressing.md) for the addressing/configurability plan.
 
 ## Inbound email
 
-Operators on AWS enable inbound by applying `infra/terraform/`, which
-provisions an S3 bucket, an SES Receipt Rule + Rule Set, and a small
-Lambda that signs and forwards SES events into Hail's
-`POST /internal/ses-events` endpoint. The API parses raw MIME from S3,
-routes the message to the owning org by parsing the hail-mail
-local-part (`<user>+<org>@mail.hail.so`), persists an `Email` row with
-`direction='inbound'`, and fans out events to per-domain webhooks and
-org-wide subscriptions via the background delivery worker.
+Operators on AWS enable inbound email when they apply `infra/terraform/`.
+The Terraform provisions an S3 bucket, an SES Receipt Rule + Rule Set,
+and a small Lambda. The Lambda signs SES events and forwards them to
+Hail's `POST /internal/ses-events` endpoint. The API parses the raw MIME
+from S3 and routes the message to the owning org by the hail-mail
+local-part (`<user>+<org>@mail.hail.so`). It persists an `Email` row
+with `direction='inbound'`. The background delivery worker fans out
+events to per-domain webhooks and org-wide subscriptions.
 
 ```
 inbound SMTP ──► SES Receipt Rule
@@ -118,21 +128,21 @@ inbound SMTP ──► SES Receipt Rule
                                       • enqueue forwarding sends (header rewrite)
 ```
 
-The cloud-agnostic SMTP path is stubbed
-([`SmtpInboundProvider`](../core/hailhq/core/providers/email/inbound/smtp.py))
-and tracked in [`docs/setup/smtp-inbound.md`](setup/smtp-inbound.md).
+The cloud-agnostic SMTP path is a stub
+([`SmtpInboundProvider`](../core/hailhq/core/providers/email/inbound/smtp.py)).
+[`docs/setup/smtp-inbound.md`](setup/smtp-inbound.md) tracks it.
 
 ### Per-domain routing — forward and/or webhook
 
 Each `email_domains` row carries `inbound_enabled`, `forward_to`, and `webhook_url`. When `inbound_enabled` is true:
 
-- `forward_to` (list of addresses) triggers one outbound `Email` row per target through the existing send loop, with header rewrite (envelope `From:` = `forwarder+<org>@mail.hail.so`, `Reply-To:` = original sender, `References:` preserved for threading, `X-Hail-Forward-Hops` and `Auto-Submitted: auto-forwarded` for loop suppression).
+- `forward_to` (a list of addresses) triggers one outbound `Email` row per target through the existing send loop. The forward rewrites headers: envelope `From:` = `forwarder+<org>@mail.hail.so`, `Reply-To:` = the original sender, `References:` preserved for threading, and `X-Hail-Forward-Hops` plus `Auto-Submitted: auto-forwarded` for loop suppression.
 - `webhook_url` triggers a signed POST through the webhook delivery worker.
 
-A separate `inbound_routes` table for per-mailbox routing within custom domains is deferred to a future milestone (when tenants point their own MX at SES).
+A separate `inbound_routes` table, for per-mailbox routing in custom domains, is deferred to a future milestone (when tenants point their own MX at SES).
 
 ### Org-wide subscriptions
 
-The `/webhooks` CRUD surface is the firehose pattern — one subscription covers multiple event types (`email.received`, `email.bounced`, `email.complained`). Stripe-style signing: `X-Hail-Signature: t=<unix>,v1=<hex>`. Retries on a fixed `0/30s/2m/10m/1h/6h/24h` ladder; after the last retry the delivery is marked `dead` and after 50 consecutive dead deliveries the subscription auto-disables.
+The `/webhooks` CRUD surface is the firehose pattern — one subscription covers multiple event types (`email.received`, `email.bounced`, `email.complained`). Signatures are Stripe-style: `X-Hail-Signature: t=<unix>,v1=<hex>`. Hail retries deliveries on a fixed `0/30s/2m/10m/1h/6h/24h` ladder. After the last retry, Hail marks the delivery `dead`. After 50 consecutive dead deliveries, the subscription auto-disables.
 
-See [`docs/setup/aws-ses.md`](./setup/aws-ses.md) §10 for the operator runbook and [`docs/superpowers/specs/2026-06-06-inbound-email-design.md`](./superpowers/specs/2026-06-06-inbound-email-design.md) for the full spec.
+Refer to [`docs/setup/aws-ses.md`](./setup/aws-ses.md) §10 for the operator runbook. Refer to [`docs/superpowers/specs/2026-06-06-inbound-email-design.md`](./superpowers/specs/2026-06-06-inbound-email-design.md) for the full spec.

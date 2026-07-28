@@ -1,10 +1,10 @@
-# AWS SES (outbound email)
+# AWS SES (email)
 
-Outbound email goes through [Amazon SES](https://aws.amazon.com/ses/) ([SESv2 API](https://docs.aws.amazon.com/ses/latest/APIReference-V2/API_Operations.html)). You need an AWS account, the SES service enabled in one region, and either IAM-role credentials (recommended for EC2/ECS/EKS deployments) or a long-lived access key.
+Outbound and inbound email go through [Amazon SES](https://aws.amazon.com/ses/) ([SESv2 API](https://docs.aws.amazon.com/ses/latest/APIReference-V2/API_Operations.html)). You need an AWS account and the SES service enabled in one region. You also need IAM-role credentials (recommended for EC2/ECS/EKS deployments) or a long-lived access key.
 
 ## 1. Credentials
 
-The Python SDK uses the standard [boto3 credential chain](https://boto3.amazonaws.com/v1/documentation/api/latest/guide/credentials.html), so leave keys empty in `.env` if you run on AWS infra with an attached IAM role. Otherwise:
+The Python SDK uses the standard [boto3 credential chain](https://boto3.amazonaws.com/v1/documentation/api/latest/guide/credentials.html). If you run on AWS infrastructure with an attached IAM role, leave the keys empty in `.env`. Otherwise, set:
 
 ```bash
 AWS_REGION=us-east-1
@@ -12,7 +12,7 @@ AWS_ACCESS_KEY_ID=AKIA…
 AWS_SECRET_ACCESS_KEY=…
 ```
 
-Minimal IAM policy (one statement is enough for the v1 surface):
+Minimal IAM policy (one statement is sufficient for the v1 surface):
 
 ```json
 {
@@ -34,35 +34,35 @@ Minimal IAM policy (one statement is enough for the v1 surface):
 
 ## 2. Sandbox vs production
 
-Brand-new SES accounts are in the [sandbox](https://docs.aws.amazon.com/ses/latest/dg/request-production-access.html): 200 messages/day, 1 message/second, and you can only send **to verified addresses**. Request production access from **SES → Account dashboard → Request production access** once you're ready to send to arbitrary recipients.
+New SES accounts start in the [sandbox](https://docs.aws.amazon.com/ses/latest/dg/request-production-access.html): 200 messages/day, 1 message/second, and you can send only **to verified addresses**. When you are ready to send to arbitrary recipients, request production access from **SES → Account dashboard → Request production access**.
 
 ## 3. Why `mail.hail.so` (a subdomain), not `hail.so`
 
-Always send transactional mail from a **dedicated subdomain**, not your apex domain. The two reasons:
+Always send transactional mail from a **dedicated subdomain**, not from your apex domain. There are two reasons:
 
-- **Reputation isolation.** If a bounce spike or spam-report cluster damages the sender's reputation, only the subdomain takes the hit. Your apex domain (website, marketing email if any) stays clean.
-- **Standard practice.** Postmark uses `mtasv.net`, SendGrid `sendgrid.net`, Resend has tenants verify their own subdomains. Mixing transactional volume with brand traffic on the apex is a known footgun.
+- **Reputation isolation.** If a bounce spike or a spam-report cluster damages the sender reputation, only the subdomain takes the damage. Your apex domain (website, marketing email if any) stays clean.
+- **Standard practice.** Postmark uses `mtasv.net`, and SendGrid uses `sendgrid.net`. Resend has tenants verify their own subdomains. Do not mix transactional volume with brand traffic on the apex domain — it is a known risk.
 
-Recommended for the Hail public cloud: `mail.hail.so`. Self-hosters: pick a subdomain you own, e.g. `mail.<your-domain>`.
+The recommended subdomain for the Hail public cloud is `mail.hail.so`. Self-hosters: select a subdomain that you own, for example `mail.<your-domain>`.
 
 ## 4. Set up the SES identity
 
-Operator setup, once per deployment. Hail does not configure SES on your behalf for the parent `HAIL_MAIL_BASE_DOMAIN` — that identity has to exist (and be verified) before the first `POST /emails`, and the MAIL FROM subdomain is also operator-configured. Custom tenant domains follow a separate, fully-automated flow (Hail calls `CreateEmailIdentity` **and** configures their MAIL FROM; see §7).
+This is operator setup, done once per deployment. Hail does not configure SES for the parent `HAIL_MAIL_BASE_DOMAIN`. That identity must exist, and be verified, before the first `POST /emails`. The operator also configures the MAIL FROM subdomain. Custom tenant domains follow a separate, fully automated flow: Hail calls `CreateEmailIdentity` **and** configures their MAIL FROM (refer to §7).
 
-1. **AWS Console → SES → Verified identities → Create identity → Domain**. Enter the bare subdomain (`mail.hail.so`). Enable **DKIM** (default; leave the bit-length at 2048).
-2. SES returns three CNAMEs of the form `<token>._domainkey.mail.hail.so → <token>.dkim.amazonses.com`. **Publish all three** at your DNS provider. Wait for SES to flip status to **Verified** (usually < 1 hour).
-3. **Configure a custom MAIL FROM domain** — **not optional** for production deliverability (see §5 below). On the identity detail page → **Edit MAIL FROM** → set to `bounces.mail.hail.so`. SES returns one MX and one TXT record. Publish both at DNS:
+1. Open **AWS Console → SES → Verified identities → Create identity → Domain**. Enter the bare subdomain (`mail.hail.so`). Enable **DKIM** (the default; keep the bit-length at 2048).
+2. SES returns three CNAMEs of the form `<token>._domainkey.mail.hail.so → <token>.dkim.amazonses.com`. **Publish all three** at your DNS provider. Wait until SES sets the status to **Verified** (usually less than 1 hour).
+3. **Configure a custom MAIL FROM domain** — this step is **mandatory** for production deliverability (refer to §5 below). On the identity detail page, select **Edit MAIL FROM** and set the value to `bounces.mail.hail.so`. SES returns one MX record and one TXT record. Publish both at DNS:
    ```
    bounces.mail.hail.so  MX   10  feedback-smtp.us-east-1.amazonses.com
    bounces.mail.hail.so  TXT  "v=spf1 include:amazonses.com ~all"
    ```
-4. Wait for the MAIL FROM domain to flip to **Success**.
+4. Wait until the MAIL FROM domain status is **Success**.
 
-> This MAIL FROM subdomain — `bounces.mail.hail.so` on the **operator parent** — is operator-managed: you configure it once, by hand, in the steps above. **Custom tenant domains are different**: Hail auto-configures their MAIL FROM. `POST /email-domains` (kind=`custom`) calls `PutEmailIdentityMailFromAttributes` for `send.<domain>` and returns the MX + SPF records to publish alongside the DKIM CNAMEs; `POST /email-domains/{id}/verify` then re-polls both DKIM and MAIL FROM status. See §7.
+> This MAIL FROM subdomain — `bounces.mail.hail.so` on the **operator parent** — is operator-managed: you configure it once, manually, in the steps above. **Custom tenant domains are different**: Hail configures their MAIL FROM automatically. `POST /email-domains` (kind=`custom`) calls `PutEmailIdentityMailFromAttributes` for `send.<domain>` and returns the MX + SPF records to publish together with the DKIM CNAMEs. `POST /email-domains/{id}/verify` then re-polls both the DKIM status and the MAIL FROM status. Refer to §7.
 
 ## 5. DMARC alignment (required for inbox delivery)
 
-Without an aligned MAIL FROM, SES uses `<random>@amazonses.com` as the Return-Path. SPF then authenticates against `amazonses.com`, not your domain — and that breaks DMARC alignment, so recipients' DMARC policies push your mail to spam.
+Without an aligned MAIL FROM, SES uses `<random>@amazonses.com` as the Return-Path. SPF then authenticates against `amazonses.com`, not against your domain. This breaks DMARC alignment, and the DMARC policies of recipients push your mail to spam.
 
 With `bounces.mail.hail.so` as MAIL FROM:
 
@@ -70,15 +70,15 @@ With `bounces.mail.hail.so` as MAIL FROM:
 - **DKIM** signs with `mail.hail.so` → aligns.
 - Both aligned → DMARC `pass` → inbox.
 
-Publish a DMARC record. Start at `p=none` (monitor-only), then ratchet up after a couple of weeks of clean reports:
+Publish a DMARC record. Start at `p=none` (monitor-only). Increase the policy after some weeks of clean reports:
 
 ```
 _dmarc.mail.hail.so  TXT  "v=DMARC1; p=none; rua=mailto:dmarc-reports@hail.so; adkim=s; aspf=s"
 ```
 
-Field cheat-sheet: `p=none` reports but doesn't block (start here); `quarantine` shunts unaligned mail to spam; `reject` drops it. `adkim=s` and `aspf=s` require strict alignment between the DKIM/SPF authentication domain and the From domain.
+Field summary: `p=none` reports but does not block (start here). `quarantine` moves unaligned mail to spam. `reject` drops it. `adkim=s` and `aspf=s` require strict alignment between the DKIM/SPF authentication domain and the From domain.
 
-> **TODO(dmarc-ratchet):** Hail's public `mail.hail.so` currently sits at `p=none`. After 30+ days of clean DMARC aggregate reports (no unauthenticated mail in `rua=` feeds), step the policy to `p=quarantine`, monitor another 30 days, then move to `p=reject`. Self-hosters should follow the same staged rollout on their own subdomain.
+> **TODO(dmarc-ratchet):** Hail's public `mail.hail.so` is currently at `p=none`. After 30 or more days of clean DMARC aggregate reports (no unauthenticated mail in `rua=` feeds), step the policy to `p=quarantine`. Monitor for 30 more days, then move to `p=reject`. Self-hosters must follow the same staged rollout on their own subdomain.
 
 ## 6. Configure Hail
 
@@ -95,18 +95,18 @@ HAIL_MAIL_FROM=admin+selfhost@mail.hail.so
 AWS_REGION=us-east-1
 ```
 
-Hail-mail addresses always have the shape `<user>+<org>@<HAIL_MAIL_BASE_DOMAIN>` — e.g. `alice+acme@mail.hail.so`. Both `<user>` and `<org>` are validated against `^[a-z0-9]([a-z0-9-]{0,18}[a-z0-9])?$` (1–20 chars, lowercase alphanumeric + hyphens, no leading/trailing hyphen).
+Hail-mail addresses always have the shape `<user>+<org>@<HAIL_MAIL_BASE_DOMAIN>` — for example `alice+acme@mail.hail.so`. Hail validates both `<user>` and `<org>` against `^[a-z0-9]([a-z0-9-]{0,18}[a-z0-9])?$` (1–20 characters, lowercase alphanumeric plus hyphens, no leading or trailing hyphen).
 
 Precedence at send time (highest wins):
 
 - **User prefix:** explicit `local_prefix_user` → `HAIL_MAIL_FROM` (user part) → `HAIL_MAIL_DEFAULT_USER_PREFIX`.
-- **Org prefix:** explicit `local_prefix_org` → `HAIL_MAIL_FROM` (org part, single-tenant) → derived per-org from the organization id. Never a deploy-wide constant — that would make every org collide on one address.
+- **Org prefix:** explicit `local_prefix_org` → `HAIL_MAIL_FROM` (org part, single-tenant) → derived per-org from the organization id. The org prefix is never a deploy-wide constant — that constant would make every org collide on one address.
 
 ### Self-host vs managed
 
-**Self-hosters**: there's no console, so the env vars _are_ the configuration. Set them in `.env` once, restart, and `POST /emails` works without any prior `POST /email-domains` — the server auto-mints a hail-mail row from the env defaults on first send.
+**Self-hosters**: there is no console, so the env vars _are_ the configuration. Set them in `.env` once, then restart. `POST /emails` then works without a prior `POST /email-domains` — the server auto-mints a hail-mail row from the env defaults on the first send.
 
-**Managed cloud**: the website provisions each org's hail-mail row at signup (calling `POST /email-domains` with prefixes derived from the org slug + user identity). Org admins then change the visible address through the console, which writes via `PATCH /email-domains/{id}`. The env vars provide deploy-time defaults but rarely surface to tenants directly.
+**Managed cloud**: the website provisions the hail-mail row of each org at signup. It calls `POST /email-domains` with prefixes derived from the org slug and the user identity. Org admins then change the visible address through the console, which writes via `PATCH /email-domains/{id}`. The env vars provide deploy-time defaults but rarely surface to tenants directly.
 
 ## 7. Custom (tenant) domains
 
@@ -128,7 +128,7 @@ The response returns the full DNS record set to publish:
   send.acme.com  TXT      "v=spf1 include:amazonses.com ~all"
   ```
 
-After publishing all of them, the tenant calls `POST /email-domains/{id}/verify` to re-poll SES for **both** DKIM and MAIL FROM status.
+After the tenant publishes all records, the tenant calls `POST /email-domains/{id}/verify` to re-poll SES for **both** the DKIM status and the MAIL FROM status.
 
 ```bash
 hail email domain register --kind custom --domain acme.com
@@ -137,7 +137,7 @@ hail email domain verify <id>
 # → re-polls SES; flips the row to verified once the records are live
 ```
 
-> Inbound on a custom domain: once the row is `verified`, enabling inbound (`forward_to` and/or a webhook) lets it receive — matched by identity, so each receiving domain yields its own inbound row + webhook. Receiving still relies on the operator's region-wide SES receipt rule (§10).
+> Inbound on a custom domain: after the row is `verified`, enable inbound (`forward_to` and/or a webhook) to receive mail. Matching is by identity, so each receiving domain yields its own inbound row + webhook. Receiving still relies on the operator's region-wide SES receipt rule (§10).
 
 ## 8. Send
 
@@ -161,14 +161,14 @@ curl -X POST $HAIL_API_URL/emails \
 The `from` field is optional. Resolution order:
 
 1. Explicit `from` — must match a `verified` email_domain row owned by the caller's org.
-2. First verified org-owned domain (ordered by `created_at`, so the default sender stays stable as more get added).
-3. Auto-minted hail-mail row, if `HAIL_MAIL_BASE_DOMAIN` and prefixes are configured.
+2. The first verified org-owned domain (ordered by `created_at`, so the default sender stays stable when you add more domains).
+3. The auto-minted hail-mail row, if `HAIL_MAIL_BASE_DOMAIN` and the prefixes are configured.
 
-If none of those resolve, the call returns `503` pointing at how to register a domain.
+If none of these resolve, the call returns `503` with instructions to register a domain.
 
 ## 8a. Attachments
 
-Upload files once and attach them to as many sends as you like. File size limit is 10MB per upload; total message size (including all attachments) is capped at SES's 10MB raw-message limit.
+Upload a file once and attach it to as many sends as you want. The file size limit is 10MB per upload. SES caps the total message size (including all attachments) at its 10MB raw-message limit.
 
 ### Upload a file
 
@@ -198,7 +198,7 @@ curl -X POST $HAIL_API_URL/emails \
   }'
 ```
 
-You can attach the same uploaded file to multiple sends without re-uploading. CLI shortcut — upload and attach in one step:
+You can attach the same uploaded file to multiple sends without a new upload. CLI shortcut — upload and attach in one step:
 
 ```bash
 hail email send --to alice@example.com --subject "Invoice" --body "See attached." --attach invoice.pdf
@@ -206,27 +206,27 @@ hail email send --to alice@example.com --subject "Invoice" --body "See attached.
 
 ### Lifecycle
 
-Unused uploads (not attached to any send) are garbage-collected 24 hours after upload. Once attached to a send, the file is retained indefinitely and reusable across as many messages as you want.
+Hail garbage-collects unused uploads (not attached to any send) 24 hours after upload. After you attach the file to a send, Hail retains it indefinitely. You can reuse it across as many messages as you want.
 
-## 9. What v1 doesn't do
+## 9. What v1 does not do
 
-Skip these until later milestones — they're called out so you don't reach for SES features that aren't wired yet:
+Skip these until later milestones. This list names them so that you do not use SES features that are not wired yet:
 
-- **Templates** — the API takes raw `body_text` / `body_html`. SES templates are a v2 ask.
+- **Templates** — the API takes raw `body_text` / `body_html`. SES templates are a v2 request.
 - **Cloud-agnostic inbound** — the SMTP listener is stubbed at [`docs/setup/smtp-inbound.md`](smtp-inbound.md); inbound currently runs on AWS only.
 
 ## 10. Inbound email
 
-Receiving mail at `<user>+<org>@<HAIL_MAIL_BASE_DOMAIN>` requires four things:
+To receive mail at `<user>+<org>@<HAIL_MAIL_BASE_DOMAIN>`, you need four things:
 
-1. An MX record on `mail.hail.so` pointing at SES inbound.
-2. An S3 bucket SES can write raw MIME into.
+1. An MX record on `mail.hail.so` that points at SES inbound.
+2. An S3 bucket that SES can write raw MIME into.
 3. A SES Receipt Rule that writes the object and invokes a Lambda.
 4. A small Lambda that signs the SES event and POSTs it to Hail.
 
-Provisioning is automated by a Terragrunt wrapper at `infra/terragrunt.hcl`
+A Terragrunt wrapper at `infra/terragrunt.hcl` automates provisioning
 around the bare Terraform module in `infra/terraform/`. The wrapper
-configures an S3-backed remote state with a DynamoDB lock table and
+configures an S3-backed remote state with a DynamoDB lock table. It
 pulls every input from the repo's `.env` — no parallel `tfvars` file.
 
 ### 10.1 Terragrunt apply
@@ -243,36 +243,36 @@ terragrunt plan                # `run_cmd`; no manual export step.
 terragrunt apply
 ```
 
-One-time bootstrap per AWS account before the first `terragrunt init`:
-the state bucket + lock table don't auto-create. See the comment block
+Do a one-time bootstrap per AWS account before the first `terragrunt init`:
+the state bucket + lock table do not auto-create. Refer to the comment block
 at the top of [`infra/terragrunt.hcl`](../../infra/terragrunt.hcl) for
-the AWS CLI one-liners, and [`docs/operations.md`](../operations.md) →
+the AWS CLI one-liners. Refer to [`docs/operations.md`](../operations.md) →
 "Inbound email rollout → Stage 4" for the full sequence.
 
 Outputs:
 
 - `inbound_mx_record` — publish at DNS for `HAIL_MAIL_BASE_DOMAIN`.
-- `inbound_bucket` — this is `${HAIL_MAIL_NAME_PREFIX}-mail`; set `HAIL_MAIL_NAME_PREFIX` in the API `.env` to match the Terraform `name_prefix` var (not settable directly — there is no `HAIL_MAIL_BUCKET` var).
+- `inbound_bucket` — this is `${HAIL_MAIL_NAME_PREFIX}-mail`. Set `HAIL_MAIL_NAME_PREFIX` in the API `.env` to match the Terraform `name_prefix` var. The bucket name is not settable directly — there is no `HAIL_MAIL_BUCKET` var.
 - `activate_command` — the `aws sesv2 set-active-receipt-rule-set ...` to run once.
 
-The bare Terraform module at `infra/terraform/` is provider-vanilla and
-still works with `terraform apply -var=...` if you'd prefer to skip
-Terragrunt.
+The bare Terraform module at `infra/terraform/` is provider-vanilla. If
+you prefer to skip Terragrunt, it still works with
+`terraform apply -var=...`.
 
 ### 10.2 Activate the receipt rule set (manual)
 
 SES has **one active receipt rule set per region per AWS account.** The module
-creates the rule set but does **not** activate it (activation is destructive when
-an account already has another rule set active).
+creates the rule set but does **not** activate it. If an account already has
+another rule set active, activation is destructive.
 
 - **Greenfield AWS account**: run the `activate_command` output verbatim.
 - **Account with existing rules**: import the existing rule set into Terraform
-  state and merge Hail's rule into it, or skip the module's rule resource and
-  add Hail's rule manually via the AWS console.
+  state and merge Hail's rule into it. As an alternative, skip the module's rule
+  resource and add Hail's rule manually via the AWS console.
 
 ### 10.3 Publish the MX record
 
-At your DNS provider, publish what the Terraform output prints, e.g.:
+At your DNS provider, publish what the Terraform output prints, for example:
 
 ```
 mail.hail.so  MX  10  inbound-smtp.us-east-1.amazonaws.com
@@ -295,15 +295,15 @@ curl "$HAIL_API_URL/emails?direction=inbound" \
   -H "Authorization: Bearer $HAIL_API_KEY"
 ```
 
-Or, using the Python SDK:
+Or, with the Python SDK:
 
 ```python
 emails = await client.emails.list(direction="inbound")
 ```
 
 If the API is down beyond the Lambda's async retries, failed deliveries land in
-the `<name_prefix>-ingest-dlq` SQS queue (`ingest_dlq_url` terraform output) —
-replay by re-driving each message's body at `POST /internal/ses-events`; the raw
+the `<name_prefix>-ingest-dlq` SQS queue (`ingest_dlq_url` terraform output). To
+replay, re-drive each message's body at `POST /internal/ses-events`. The raw
 MIME is still in S3.
 
 ## Delivery & engagement events
@@ -311,7 +311,7 @@ MIME is still in S3.
 Outbound sends carry the SES configuration set named by
 `HAIL_SES_CONFIGURATION_SET` (Terraform default: `hail-events`). SES
 publishes Delivery / Bounce / Complaint / Reject / DeliveryDelay / Open /
-Click events to SNS; the ingest Lambda relays them to
+Click events to SNS. The ingest Lambda relays them to
 `POST /internal/ses-events`, which records them in `email_events`,
 advances `emails.status`, and fans out webhooks.
 
@@ -330,13 +330,13 @@ hail email stats --from 2026-06-01T00:00:00Z --bucket day
 Notes:
 
 - Open/Click tracking rewrites links through the default SES tracking
-  domain. A custom tracking domain is not yet supported.
-- Open counts are approximate (image-proxying mail clients inflate them).
-- Events for mail sent outside Hail from the same SES account are
-  acknowledged and dropped (`status: unmatched` in the API log).
-- Forwarded inbound mail (see below) is re-sent as normal outbound — it
-  carries the config set and writes a synthetic `sent` event, so it counts
-  in `/emails/stats` like any other send.
+  domain. Hail does not yet support a custom tracking domain.
+- Open counts are approximate (mail clients that proxy images inflate them).
+- Hail acknowledges and drops events for mail sent outside Hail from the
+  same SES account (`status: unmatched` in the API log).
+- Hail re-sends forwarded inbound mail (refer to §10.5) as normal outbound.
+  It carries the config set and writes a synthetic `sent` event, so it
+  counts in `/emails/stats` like any other send.
 
 ### 10.5 Forwarding and webhooks
 
@@ -358,19 +358,20 @@ curl -X PATCH $HAIL_API_URL/email-domains/$DOMAIN_ID \
 For org-wide multi-event delivery (firehose pattern):
 
 ```bash
-hail webhooks create \
-  --url https://hooks.acme.com/all \
-  --events email.received,email.bounced,email.complained
+curl -X POST $HAIL_API_URL/webhooks \
+  -H "Authorization: Bearer $HAIL_API_KEY" \
+  -d '{"target_url":"https://hooks.acme.com/all","event_types":["email.received","email.bounced","email.complained"]}'
 ```
 
 ### 10.6 Webhook secrets at rest
 
-Webhook signing secrets are **encrypted at rest** with a deployment-scoped
+Hail encrypts webhook signing secrets **at rest** with a deployment-scoped
 [Fernet](https://cryptography.io/en/latest/fernet/) key
 ([`core/hailhq/core/secret_cipher.py`](../../core/hailhq/core/secret_cipher.py)).
 The worker decrypts on each delivery, so deliveries survive API restarts and
 work across multi-process deployments. If `HAIL_WEBHOOK_SECRET_KEY` is unset,
-webhook creation returns `500` — generate and set it before enabling webhooks:
+webhook creation returns `500`. Generate and set the key before you enable
+webhooks:
 
 ```bash
 # Generate a key (run once; store in .env, never commit). Run inside the
