@@ -1,14 +1,16 @@
-'use client';
+"use client";
 
-import { useState } from 'react';
+import { useCallback, useState } from "react";
 import {
   type ColumnDef,
   type SortingState,
+  type Updater,
   flexRender,
   getCoreRowModel,
   getSortedRowModel,
   useReactTable,
-} from '@tanstack/react-table';
+} from "@tanstack/react-table";
+import posthog from "posthog-js";
 
 export interface CategorySectionProps<T> {
   id: string;
@@ -31,15 +33,34 @@ export function CategorySection<T>({
   data,
   columns,
   defaultSort,
-  noun = 'model',
+  noun = "model",
 }: CategorySectionProps<T>) {
-  const [sorting, setSorting] = useState<SortingState>(defaultSort ? [defaultSort] : []);
+  const [sorting, setSorting] = useState<SortingState>(
+    defaultSort ? [defaultSort] : [],
+  );
+
+  const handleSortingChange = useCallback(
+    (updater: Updater<SortingState>) => {
+      setSorting((prev) => {
+        const next = typeof updater === "function" ? updater(prev) : updater;
+        if (next.length > 0) {
+          posthog.capture("table_sorted", {
+            category: id,
+            column: next[0].id,
+            direction: next[0].desc ? "desc" : "asc",
+          });
+        }
+        return next;
+      });
+    },
+    [id],
+  );
 
   const table = useReactTable({
     data,
     columns,
     state: { sorting },
-    onSortingChange: setSorting,
+    onSortingChange: handleSortingChange,
     getCoreRowModel: getCoreRowModel(),
     getSortedRowModel: getSortedRowModel(),
   });
@@ -65,11 +86,18 @@ export function CategorySection<T>({
                     const meta = h.column.columnDef.meta as
                       | { num?: boolean; killer?: boolean }
                       | undefined;
-                    const cls = [meta?.num ? 'num' : '', meta?.killer ? 'killer' : '']
+                    const cls = [
+                      meta?.num ? "num" : "",
+                      meta?.killer ? "killer" : "",
+                    ]
                       .filter(Boolean)
-                      .join(' ');
-                    const ariaSort: 'ascending' | 'descending' | undefined =
-                      sorted === 'asc' ? 'ascending' : sorted === 'desc' ? 'descending' : undefined;
+                      .join(" ");
+                    const ariaSort: "ascending" | "descending" | undefined =
+                      sorted === "asc"
+                        ? "ascending"
+                        : sorted === "desc"
+                          ? "descending"
+                          : undefined;
                     return (
                       <th
                         key={h.id}
@@ -77,7 +105,7 @@ export function CategorySection<T>({
                         aria-sort={ariaSort}
                         onClick={h.column.getToggleSortingHandler()}
                         onKeyDown={(e) => {
-                          if (e.key === 'Enter' || e.key === ' ') {
+                          if (e.key === "Enter" || e.key === " ") {
                             e.preventDefault();
                             h.column.toggleSorting();
                           }
@@ -99,12 +127,18 @@ export function CategorySection<T>({
                     const meta = cell.column.columnDef.meta as
                       | { num?: boolean; killer?: boolean }
                       | undefined;
-                    const cls = [meta?.num ? 'num' : '', meta?.killer ? 'killer' : '']
+                    const cls = [
+                      meta?.num ? "num" : "",
+                      meta?.killer ? "killer" : "",
+                    ]
                       .filter(Boolean)
-                      .join(' ');
+                      .join(" ");
                     return (
                       <td key={cell.id} className={cls || undefined}>
-                        {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                        {flexRender(
+                          cell.column.columnDef.cell,
+                          cell.getContext(),
+                        )}
                       </td>
                     );
                   })}

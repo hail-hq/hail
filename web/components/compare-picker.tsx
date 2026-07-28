@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
+import posthog from "posthog-js";
 import {
   LLMCompareTable,
   STTCompareTable,
@@ -43,13 +44,29 @@ export function CompareModels({ llm, stt, tts }: Props) {
     }
   }, [ids]);
 
+  // One event per page view that arrives with a selection, not per add/remove.
+  useEffect(() => {
+    if (ids.length === 0) return;
+    posthog.capture("compare_viewed", {
+      model_count: ids.length,
+      llm_count: ids.filter((id) => llm.some((m) => m.model_id === id)).length,
+      stt_count: ids.filter((id) => stt.some((m) => m.model_id === id)).length,
+      tts_count: ids.filter((id) => tts.some((m) => m.model_id === id)).length,
+      model_ids: ids,
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const add = useCallback((id: string) => {
     setIds((prev) =>
       prev.includes(id) || prev.length >= MAX_COMPARE ? prev : [...prev, id],
     );
   }, []);
 
-  const clear = useCallback(() => setIds([]), []);
+  const clear = useCallback(() => {
+    posthog.capture("compare_cleared");
+    setIds([]);
+  }, []);
 
   const today = new Date().toISOString().slice(0, 10);
 
@@ -294,7 +311,14 @@ function ModelGroup({
               cursor:
                 currentIds.length >= MAX_COMPARE ? "not-allowed" : undefined,
             }}
-            onClick={() => onAdd(m.model_id)}
+            onClick={() => {
+                posthog.capture("model_added_to_compare", {
+                  model_id: m.model_id,
+                  provider: m.provider,
+                  category: label,
+                });
+                onAdd(m.model_id);
+              }}
           >
             <span className="add-pill-plus">+</span>
             <span>
