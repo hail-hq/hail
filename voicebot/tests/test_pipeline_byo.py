@@ -166,6 +166,9 @@ def test_build_stt_unknown_org_provider_fails_fast(captured_plugins) -> None:
 
 
 def test_stt_org_speechmatics_key_used(captured_plugins) -> None:
+    """``_api_key`` verified against the installed
+    livekit-plugins-speechmatics==1.6.6 (``speechmatics.STT.__init__`` stores
+    the resolved key on ``self._api_key``); revisit if it changes."""
     from hailhq.voicebot.pipeline import ResolvedLayer, build_stt
 
     org = ResolvedLayer(
@@ -175,7 +178,7 @@ def test_stt_org_speechmatics_key_used(captured_plugins) -> None:
         fallback_enabled=False,
     )
     stt = build_stt(org=org, language="sv", provider="speechmatics")
-    assert stt is not None  # constructed with the org key, no exception
+    assert stt._api_key == "sm-org-key"
 
 
 def test_stt_org_row_ignored_when_pinned_to_other_provider(

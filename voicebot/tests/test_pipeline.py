@@ -179,11 +179,17 @@ def test_build_stt_language_pins_deepgram() -> None:
 
 
 def test_build_stt_speechmatics_house() -> None:
+    """``_stt_options`` attrs verified against the installed
+    livekit-plugins-speechmatics==1.6.6 (``speechmatics.STT.__init__`` stores
+    the resolved options dataclass on ``self._stt_options``); revisit if it
+    changes."""
     from hailhq.voicebot.pipeline import build_stt
     from livekit.plugins import speechmatics as speechmatics_plugin
 
     stt = build_stt(language="da", provider="speechmatics")
     assert isinstance(stt, speechmatics_plugin.STT)
+    assert stt._stt_options.language == "da"
+    assert stt._stt_options.operating_point == "enhanced"
 
 
 def test_build_stt_deepgram_still_default_shape() -> None:
@@ -192,6 +198,7 @@ def test_build_stt_deepgram_still_default_shape() -> None:
 
     stt = build_stt(language="en", provider="deepgram")
     assert isinstance(stt, deepgram_plugin.STT)
+    assert stt._opts.language == "en"
 
 
 def test_build_stt_speechmatics_without_any_key_fails_fast(
