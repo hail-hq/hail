@@ -59,6 +59,16 @@ PROBES = [
         "Token ",
         "capability",
     ),
+    (
+        "speechmatics",
+        "stt",
+        {},
+        "GET",
+        "https://asr.api.speechmatics.com/v2/jobs",
+        "authorization",
+        "Bearer ",
+        "auth",
+    ),
 ]
 
 

@@ -121,6 +121,16 @@ def _probe_for(provider: str, api_key: str, params: dict) -> _Probe | None:
             {},
             "capability",
         )
+    if provider == "speechmatics":
+        # Auth probe: the batch jobs listing is a cheap authenticated GET;
+        # 200 proves the key, 401/403 disproves it.
+        return _Probe(
+            "GET",
+            "https://asr.api.speechmatics.com/v2/jobs",
+            {"Authorization": f"Bearer {api_key}"},
+            None,
+            "auth",
+        )
     return None
 
 
