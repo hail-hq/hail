@@ -40,6 +40,7 @@ from hailhq.core.compliance_gate import check_call_allowed
 from hailhq.core.config import settings
 from hailhq.core.db import get_session
 from hailhq.core.internal_webhook import fetch_organization_name
+from hailhq.core.languages import SUPPORTED_LANGUAGES, resolve_stt_provider
 from hailhq.core.livekit import LiveKitClient
 from hailhq.core.models import Call, CallEvent, PhoneNumber
 from hailhq.core.pool import (
@@ -47,7 +48,7 @@ from hailhq.core.pool import (
     claim_pool_number,
     release_pool_reservation,
 )
-from hailhq.core.provider_config import provider_cipher
+from hailhq.core.provider_config import load_org_provider_configs, provider_cipher
 from hailhq.core.schemas import (
     TERMINAL_CALL_STATUSES,
     CallCreate,
@@ -215,6 +216,40 @@ async def create_call(
                 idem,
                 unprocessable(
                     f"unknown tools: {', '.join(unknown)}", loc=["body", "tools"]
+                ),
+            )
+
+    # Language/provider compatibility gate — reject before any Call row is
+    # created. Deterministic on request + org config, so failures are
+    # cached for idempotent replay like the other 422 gates.
+    lang = body.voice_config.language
+    if lang is not None:
+        caps = SUPPORTED_LANGUAGES[lang]
+        org_rows = await load_org_provider_configs(db, principal.organization_id)
+        stt_row = org_rows.get("stt")
+        provider = resolve_stt_provider(
+            body.voice_config.stt,
+            stt_row.provider if stt_row is not None else None,
+            lang,
+        )
+        if body.voice_config.stt != "auto" and provider not in caps.stt:
+            raise await cache_failure(
+                idem,
+                unprocessable(
+                    f"stt provider '{provider}' does not support language "
+                    f"'{lang}'; supported providers: {sorted(caps.stt)}",
+                    loc=["body", "voice_config", "stt"],
+                ),
+            )
+        tts_row = org_rows.get("tts")
+        if tts_row is not None and tts_row.provider not in caps.tts:
+            raise await cache_failure(
+                idem,
+                unprocessable(
+                    f"your BYO tts provider '{tts_row.provider}' does not "
+                    f"support language '{lang}'; supported providers: "
+                    f"{sorted(caps.tts)}",
+                    loc=["body", "voice_config", "language"],
                 ),
             )
 
