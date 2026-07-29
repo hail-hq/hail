@@ -247,6 +247,53 @@ func TestCallSubcommand_LanguageFlag(t *testing.T) {
 	if body.VoiceConfig == nil || body.VoiceConfig.Language == nil || *body.VoiceConfig.Language != "fr" {
 		t.Errorf("VoiceConfig.Language = %v, want fr", body.VoiceConfig)
 	}
+
+	var raw map[string]any
+	if err := json.Unmarshal(srv.lastBody, &raw); err != nil {
+		t.Fatalf("raw body parse: %v", err)
+	}
+	vc, ok := raw["voice_config"].(map[string]any)
+	if !ok {
+		t.Fatalf("voice_config missing or not an object: %v", raw["voice_config"])
+	}
+	if _, present := vc["stt"]; present {
+		t.Errorf("voice_config.stt should be absent, got %v", vc["stt"])
+	}
+}
+
+func TestCallSubcommand_SttFlagAlone(t *testing.T) {
+	srv := newFakeServer(t, http.StatusCreated, sampleResponse())
+
+	_, _, err := runRoot(t,
+		map[string]string{"HAIL_API_KEY": "sk_test", "HAIL_API_URL": srv.URL},
+		"call", "+15551234567",
+		"--prompt", "hi",
+		"--stt", "speechmatics",
+		"--recipient-consent",
+	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var body client.CallCreate
+	if err := json.Unmarshal(srv.lastBody, &body); err != nil {
+		t.Fatalf("body parse: %v", err)
+	}
+	if body.VoiceConfig == nil || body.VoiceConfig.Stt == nil || *body.VoiceConfig.Stt != "speechmatics" {
+		t.Errorf("VoiceConfig.Stt = %v, want speechmatics", body.VoiceConfig)
+	}
+
+	var raw map[string]any
+	if err := json.Unmarshal(srv.lastBody, &raw); err != nil {
+		t.Fatalf("raw body parse: %v", err)
+	}
+	vc, ok := raw["voice_config"].(map[string]any)
+	if !ok {
+		t.Fatalf("voice_config missing or not an object: %v", raw["voice_config"])
+	}
+	if _, present := vc["language"]; present {
+		t.Errorf("voice_config.language should be absent, got %v", vc["language"])
+	}
 }
 
 func TestCallSttFlagRidesInVoiceConfig(t *testing.T) {
