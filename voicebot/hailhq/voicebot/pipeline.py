@@ -492,6 +492,14 @@ def build_session(
     if language is not None and provider not in SUPPORTED_LANGUAGES[language].stt:
         # Direct dispatch can bypass the API's 422 gate; deepgram covers
         # every supported language, so degrade rather than fail the call.
+        logger.warning(
+            "language %r resolved to stt provider %r, which does not "
+            "support it; dropping %r and falling back to deepgram (turn "
+            "detection degrades accordingly)",
+            language,
+            provider,
+            provider,
+        )
         provider = "deepgram"
     if (
         provider == "speechmatics"
@@ -499,6 +507,13 @@ def build_session(
         and not settings.speechmatics_api_key
         and not (org_stt and org_stt.provider == "speechmatics" and org_stt.api_key)
     ):
+        logger.warning(
+            "auto-routing picked speechmatics for language %r but no "
+            "SPEECHMATICS_API_KEY is configured (house or org BYO); "
+            "skipping speechmatics routing and running deepgram + VAD "
+            "turn detection instead",
+            language,
+        )
         provider = "deepgram"
     mode = turn_mode_for(language, provider)
     turn_detection: Any = MultilingualModel() if mode == "semantic" else mode

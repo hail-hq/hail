@@ -259,15 +259,43 @@ def test_session_vad_turns_when_pinned_away_from_speechmatics() -> None:
 
 def test_session_auto_falls_back_to_deepgram_without_speechmatics_key(
     monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
     """Tenet 4: a deepgram-only self-host still serves 'da' (VAD turns)."""
+    import logging
+
     from hailhq.core.config import settings
     from livekit.plugins import deepgram as deepgram_plugin
 
     monkeypatch.setattr(settings, "speechmatics_api_key", "")
-    session = _make_session("da")
+    with caplog.at_level(logging.WARNING, logger="hailhq.voicebot"):
+        session = _make_session("da")
     assert isinstance(session.stt, deepgram_plugin.STT)
     assert session.turn_detection == "vad"
+    assert any(
+        "da" in record.message and "speechmatics" in record.message
+        for record in caplog.records
+    )
+
+
+def test_session_provider_pin_unsupported_by_language_degrades_to_deepgram(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """'gu' (Gujarati) has no Speechmatics coverage (``_NO_SPEECHMATICS``).
+    Dispatch metadata can still pin ``stt_choice="speechmatics"`` for it
+    (bypassing the API's 422 gate), so ``build_session`` must degrade to
+    deepgram rather than construct an incompatible provider — and warn."""
+    import logging
+
+    from livekit.plugins import deepgram as deepgram_plugin
+
+    with caplog.at_level(logging.WARNING, logger="hailhq.voicebot"):
+        session = _make_session("gu", stt_choice="speechmatics")
+    assert isinstance(session.stt, deepgram_plugin.STT)
+    assert any(
+        "gu" in record.message and "speechmatics" in record.message
+        for record in caplog.records
+    )
 
 
 def test_session_unknown_language_degrades_to_defaults(

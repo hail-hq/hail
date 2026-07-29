@@ -241,6 +241,12 @@ async def create_call(
                     loc=["body", "voice_config", "stt"],
                 ),
             )
+        # Asymmetric with the STT gate above: STT only 422s an *explicit*
+        # pin (stt != "auto"), because auto-routing degrades safely inside
+        # the voicebot — deepgram covers every supported language, so an
+        # unpinned request never fails the call. TTS has no per-call pin at
+        # all; the org's BYO TTS row is the sole source of truth, so it's
+        # always checked here regardless of voice_config contents.
         tts_row = org_rows.get("tts")
         if tts_row is not None and tts_row.provider not in caps.tts:
             raise await cache_failure(
