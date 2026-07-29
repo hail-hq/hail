@@ -29,6 +29,7 @@ class Settings(BaseSettings):
     deepgram_api_key: str = ""
     cartesia_api_key: str = ""
     eleven_api_key: str = ""
+    speechmatics_api_key: str = ""
 
     # STT/TTS — model names set via .env / .env.local.
     deepgram_model: str = ""
