@@ -23,6 +23,7 @@ type callFlags struct {
 	from           string
 	firstMessage   string
 	language       string
+	stt            string
 	aiDisclosure   bool
 	tools          []string
 	idempotencyKey string
@@ -74,7 +75,8 @@ Example (minimal):
 	cmd.Flags().StringVar(&f.llmModel, "llm-model", "", "Model name — one of --prompt/--llm-* required (mode B)")
 	cmd.Flags().StringVar(&f.from, "from", "", "Override the from-number (default: first active number on the org)")
 	cmd.Flags().StringVar(&f.firstMessage, "first-message", "", "Spoken on pickup before listening")
-	cmd.Flags().StringVar(&f.language, "language", "", "Spoken language for the call, lowercase ISO 639-1 (e.g. fr); default English")
+	cmd.Flags().StringVar(&f.language, "language", "", "Spoken language for the call, lowercase ISO 639-1 (e.g. da); one of the 39 supported codes, see docs/languages.md; default English")
+	cmd.Flags().StringVar(&f.stt, "stt", "", "STT provider: deepgram or speechmatics; default auto-routes by language")
 	cmd.Flags().BoolVar(&f.aiDisclosure, "ai-disclosure", true, "Speak the AI self-disclosure line first on the call; --ai-disclosure=false skips it (your responsibility — disclosure laws may require it)")
 	cmd.Flags().StringSliceVar(&f.tools, "tools", nil, "Agent tools to allow (comma-separated or repeated); omit for all available, 'none' to disable all")
 	cmd.Flags().StringVar(&f.idempotencyKey, "idempotency-key", "", "Defaults to a fresh UUID")
@@ -104,8 +106,17 @@ func runCall(cmd *cobra.Command, opts *Options, f *callFlags, toNumber string) e
 		From:         strPtr(f.from),
 		FirstMessage: strPtr(f.firstMessage),
 	}
-	if f.language != "" {
-		body.VoiceConfig = &client.VoiceConfig{Language: strPtr(f.language)}
+	if f.language != "" || f.stt != "" {
+		vc := &client.VoiceConfig{}
+		if f.language != "" {
+			lang := client.VoiceConfigLanguage(f.language)
+			vc.Language = &lang
+		}
+		if f.stt != "" {
+			stt := client.VoiceConfigStt(f.stt)
+			vc.Stt = &stt
+		}
+		body.VoiceConfig = vc
 	}
 	if cmd.Flags().Changed("ai-disclosure") {
 		body.AiDisclosure = &f.aiDisclosure
