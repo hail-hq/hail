@@ -67,6 +67,7 @@ from hailhq.core.db import session_scope
 from hailhq.core.languages import (
     SUPPORTED_LANGUAGES,
     resolve_stt_provider,
+    tts_providers_for,
     turn_mode_for,
 )
 from hailhq.core.provider_config import load_org_provider_configs, provider_cipher
@@ -277,8 +278,9 @@ def build_llm(
 def _house_tts(
     voice_id_override: str | None, language: str | None
 ) -> list[agents_tts.TTS]:
+    allowed = tts_providers_for(language)
     instances: list[agents_tts.TTS] = []
-    if settings.cartesia_api_key:
+    if settings.cartesia_api_key and "cartesia" in allowed:
         kwargs: dict[str, Any] = {
             "model": settings.cartesia_model,
             "voice": voice_id_override or settings.cartesia_voice_id,
@@ -286,7 +288,7 @@ def _house_tts(
         if language:
             kwargs["language"] = language
         instances.append(cartesia_plugin.TTS(**kwargs))
-    if settings.eleven_api_key:
+    if settings.eleven_api_key and "elevenlabs" in allowed:
         kwargs = {
             "voice_id": voice_id_override or settings.elevenlabs_voice_id,
             "model": settings.elevenlabs_model,

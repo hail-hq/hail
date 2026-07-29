@@ -296,3 +296,19 @@ def test_build_session_raises_typeerror_for_unhashable_language() -> None:
     test_agent.py for the end-to-end conversion."""
     with pytest.raises(TypeError):
         _make_session({"unexpected": "shape"})
+
+
+def test_house_tts_trims_elevenlabs_for_cartesia_only_language() -> None:
+    from hailhq.voicebot.pipeline import build_tts
+    from livekit.plugins import cartesia as cartesia_plugin
+
+    tts = build_tts(language="th")  # th: no elevenlabs support
+    assert isinstance(tts, cartesia_plugin.TTS)  # single instance, no adapter
+
+
+def test_house_tts_keeps_fallback_for_dual_provider_language() -> None:
+    from hailhq.voicebot.pipeline import build_tts
+    from livekit.agents import tts as agents_tts
+
+    tts = build_tts(language="da")
+    assert isinstance(tts, agents_tts.FallbackAdapter)
