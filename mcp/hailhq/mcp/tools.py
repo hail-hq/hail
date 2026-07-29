@@ -49,7 +49,7 @@ import base64
 import contextlib
 import uuid
 from collections.abc import AsyncIterator
-from typing import Any
+from typing import Any, Literal
 
 from hailhq.core.schemas import parse_resource_id
 from hailhq.mcp.auth import AuthMode
@@ -113,7 +113,7 @@ async def place_call(
     from_: str | None = None,
     first_message: str | None = None,
     language: str | None = None,
-    stt: str | None = None,
+    stt: Literal["auto", "deepgram", "speechmatics"] | None = None,
     ai_disclosure: bool = True,
     metadata: dict[str, Any] | None = None,
     tools: list[str] | None = None,
@@ -539,7 +539,7 @@ def register_tools(
         from_: str | None = None,
         first_message: str | None = None,
         language: str | None = None,
-        stt: str | None = None,
+        stt: Literal["auto", "deepgram", "speechmatics"] | None = None,
         ai_disclosure: bool = True,
         metadata: dict[str, Any] | None = None,
         tools: list[str] | None = None,

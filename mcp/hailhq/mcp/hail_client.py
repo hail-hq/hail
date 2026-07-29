@@ -22,7 +22,7 @@ kwargs override for tests.
 from __future__ import annotations
 
 import uuid
-from typing import Any
+from typing import Any, Literal
 
 import httpx
 from hailhq.core.config import settings
@@ -103,7 +103,7 @@ class HailClient:
         from_: str | None = None,
         first_message: str | None = None,
         language: str | None = None,
-        stt: str | None = None,
+        stt: Literal["auto", "deepgram", "speechmatics"] | None = None,
         ai_disclosure: bool = True,
         metadata: dict[str, Any] | None = None,
         tools: list[str] | None = None,
