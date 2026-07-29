@@ -119,6 +119,30 @@ async def test_place_call_language_lands_in_voice_config(client: HailClient) -> 
 
 
 @respx.mock
+async def test_place_call_stt_lands_in_voice_config(client: HailClient) -> None:
+    captured: dict = {}
+
+    def _handler(request: httpx.Request) -> httpx.Response:
+        captured["body"] = request.read().decode("utf-8")
+        return httpx.Response(201, json=_call_response())
+
+    respx.post(f"{_BASE_URL}/calls").mock(side_effect=_handler)
+
+    result = await tools.place_call(
+        client=client,
+        recipient_consent=True,
+        to="+14155559999",
+        system_prompt="be polite",
+        language="da",
+        stt="speechmatics",
+    )
+    assert "error" not in result, result
+
+    body = httpx.Response(200, content=captured["body"]).json()
+    assert body["voice_config"] == {"language": "da", "stt": "speechmatics"}
+
+
+@respx.mock
 async def test_place_call_ai_disclosure_opt_out(client: HailClient) -> None:
     captured: dict = {}
 

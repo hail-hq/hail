@@ -103,6 +103,7 @@ class HailClient:
         from_: str | None = None,
         first_message: str | None = None,
         language: str | None = None,
+        stt: str | None = None,
         ai_disclosure: bool = True,
         metadata: dict[str, Any] | None = None,
         tools: list[str] | None = None,
@@ -131,8 +132,13 @@ class HailClient:
             fields["llm"] = llm
         if first_message is not None:
             fields["first_message"] = first_message
-        if language is not None:
-            fields["voice_config"] = {"language": language}
+        if language is not None or stt is not None:
+            voice_config: dict[str, Any] = {}
+            if language is not None:
+                voice_config["language"] = language
+            if stt is not None:
+                voice_config["stt"] = stt
+            fields["voice_config"] = voice_config
         if not ai_disclosure:
             fields["ai_disclosure"] = False
         if metadata is not None:
