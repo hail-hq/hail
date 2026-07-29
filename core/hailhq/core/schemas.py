@@ -5,6 +5,7 @@ from typing import Any, Literal
 from urllib.parse import urlsplit
 from uuid import UUID
 
+from hailhq.core.languages import Language
 from hailhq.core.sender_id import PLATFORM_DEFAULT_SENDER_ID
 from pydantic import (
     AliasChoices,
@@ -126,20 +127,28 @@ class LLMConfig(BaseModel):
 class VoiceConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    stt: Literal["deepgram"] = "deepgram"
+    stt: Literal["auto", "deepgram", "speechmatics"] = Field(
+        default="auto",
+        description=(
+            "STT provider for the call. 'auto' (default) routes by "
+            "language: Deepgram where LiveKit's semantic turn detector "
+            "covers the language, Speechmatics elsewhere. An explicit "
+            "value pins the provider (rejected with 422 if it does not "
+            "support the requested language)."
+        ),
+    )
     tts: Literal["cartesia"] = "cartesia"
     vad: Literal["silero"] = "silero"
     turn_detection: Literal["livekit"] = "livekit"
     # Per-call TTS voice override. Applies to whichever TTS provider serves
     # the call (org BYO config or Hail default). None → org/env default.
     voice_id: str | None = None
-    language: str | None = Field(
+    language: Language | None = Field(
         default=None,
-        pattern=r"^[a-z]{2}$",
         description=(
             "Spoken language for the call as a lowercase ISO 639-1 code "
-            "(e.g. 'fr'). Applied to both STT and TTS, so it must be a "
-            "language the configured STT and TTS models support. "
+            "(e.g. 'da'). One of the 39 supported codes — see "
+            "docs/languages.md. Applied to STT, TTS, and turn detection. "
             "Omitted: the providers' defaults (English)."
         ),
     )

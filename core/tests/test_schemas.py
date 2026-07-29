@@ -66,7 +66,7 @@ def test_call_create_message_type_defaults_to_informational():
 
 def test_voice_config_defaults():
     cfg = VoiceConfig()
-    assert cfg.stt == "deepgram"
+    assert cfg.stt == "auto"
     assert cfg.tts == "cartesia"
     assert cfg.vad == "silero"
 
