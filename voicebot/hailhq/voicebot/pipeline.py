@@ -88,6 +88,9 @@ from livekit.plugins import (
 from livekit.plugins import (
     openai as openai_plugin,
 )
+from livekit.plugins import (
+    speechmatics as speechmatics_plugin,
+)
 
 __all__ = [
     "ProviderKeyError",
@@ -354,29 +357,58 @@ def build_tts(
 
 
 def build_stt(
-    org: ResolvedLayer | None = None, language: str | None = None
+    org: ResolvedLayer | None = None,
+    language: str | None = None,
+    provider: str = "deepgram",
+    stt_drives_turns: bool = False,
 ) -> agents_stt.STT:
     """Construct the STT for one call.
 
-    ``org`` present (mode C, deepgram only today): the org's key, with
-    Hail's house Deepgram key appended as a fallback only if
-    ``org.fallback_enabled`` and a house key is configured. An org row on
-    any other provider fails fast with ``ProviderKeyError`` (matching
-    ``_org_llm``/``_org_tts``) rather than silently billing Hail's key for
-    a BYO org. ``org`` absent (mode A): Hail's house Deepgram key.
+    ``provider`` arrives already resolved (per-call pin > org BYO row >
+    language auto-route — ``resolve_stt_provider``). The org row is used
+    only when its provider matches ``provider``; a row pinned away by the
+    per-call choice is ignored rather than billed. ``stt_drives_turns``
+    is set when the session's turn detection is ``"stt"`` — Speechmatics
+    then runs its ADAPTIVE end-of-utterance mode instead of EXTERNAL.
 
-    ``language`` mirrors :func:`build_tts`: applied to every instance,
-    ``None`` keeps the plugin default (``en-US``).
+    An org row on a provider outside ``("deepgram", "speechmatics")`` fails
+    fast with ``ProviderKeyError`` (matching ``_org_llm``/``_org_tts``)
+    rather than silently billing Hail's key for a BYO org.
+
+    Deepgram fallback semantics are unchanged: BYO + fallback_enabled
+    appends the house instance. Speechmatics mirrors them.
     """
+    if org is not None and org.provider not in ("deepgram", "speechmatics"):
+        raise ProviderKeyError(f"unknown org stt provider '{org.provider}'")
+
+    org_matches = org is not None and org.provider == provider
+    if provider == "speechmatics":
+        kwargs: dict[str, Any] = {
+            "language": language or "en",
+            "operating_point": "enhanced",
+        }
+        if stt_drives_turns:
+            kwargs["turn_detection_mode"] = (
+                speechmatics_plugin.TurnDetectionMode.ADAPTIVE
+            )
+        if org_matches and org.api_key is not None:
+            kwargs["api_key"] = org.api_key
+        elif not settings.speechmatics_api_key:
+            raise ProviderKeyError("no org or house speechmatics key available")
+        byo = speechmatics_plugin.STT(**kwargs)
+        if org_matches and org.fallback_enabled and settings.speechmatics_api_key:
+            house_kwargs = dict(kwargs)
+            house_kwargs.pop("api_key", None)
+            return agents_stt.FallbackAdapter(
+                [byo, speechmatics_plugin.STT(**house_kwargs)]
+            )
+        return byo
+
     house_kwargs: dict[str, Any] = {"model": settings.deepgram_model}
     if language:
         house_kwargs["language"] = language
-    if org is not None:
-        if org.provider != "deepgram":
-            raise ProviderKeyError(f"unknown org stt provider '{org.provider}'")
-        kwargs: dict[str, Any] = {
-            "model": org.params.get("model") or settings.deepgram_model
-        }
+    if org_matches:
+        kwargs = {"model": org.params.get("model") or settings.deepgram_model}
         if language:
             kwargs["language"] = language
         if org.api_key is not None:

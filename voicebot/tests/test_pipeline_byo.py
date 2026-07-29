@@ -165,6 +165,36 @@ def test_build_stt_unknown_org_provider_fails_fast(captured_plugins) -> None:
     assert "deepgram" not in captured_plugins
 
 
+def test_stt_org_speechmatics_key_used(captured_plugins) -> None:
+    from hailhq.voicebot.pipeline import ResolvedLayer, build_stt
+
+    org = ResolvedLayer(
+        provider="speechmatics",
+        api_key="sm-org-key",
+        params={},
+        fallback_enabled=False,
+    )
+    stt = build_stt(org=org, language="sv", provider="speechmatics")
+    assert stt is not None  # constructed with the org key, no exception
+
+
+def test_stt_org_row_ignored_when_pinned_to_other_provider(
+    captured_plugins,
+) -> None:
+    from hailhq.voicebot.pipeline import ResolvedLayer, build_stt
+    from livekit.plugins import deepgram as deepgram_plugin
+
+    org = ResolvedLayer(
+        provider="speechmatics",
+        api_key="sm-org-key",
+        params={},
+        fallback_enabled=False,
+    )
+    # Caller pinned deepgram; the speechmatics org row must not be used.
+    stt = build_stt(org=org, language="sv", provider="deepgram")
+    assert isinstance(stt, deepgram_plugin.STT)
+
+
 def test_fallback_enabled_wraps_house_after_byo(captured_plugins) -> None:
     org = ResolvedLayer(
         provider="cartesia", api_key="org-key", params={}, fallback_enabled=True

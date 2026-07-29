@@ -40,6 +40,8 @@ def _stub_provider_keys(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(settings, "eleven_api_key", "el-test-placeholder")
     monkeypatch.setattr(settings, "elevenlabs_voice_id", "test-voice-id")
     monkeypatch.setattr(settings, "elevenlabs_model", "eleven_turbo_v2_5")
+    monkeypatch.setenv("SPEECHMATICS_API_KEY", "sm-test-placeholder")
+    monkeypatch.setattr(settings, "speechmatics_api_key", "sm-test-placeholder")
 
 
 def test_build_llm_mode_a_returns_fallback_adapter() -> None:
@@ -174,3 +176,30 @@ def test_build_stt_language_pins_deepgram() -> None:
 
     assert build_stt(language="fr")._opts.language == "fr"
     assert build_stt()._opts.language == "en-US"
+
+
+def test_build_stt_speechmatics_house() -> None:
+    from hailhq.voicebot.pipeline import build_stt
+    from livekit.plugins import speechmatics as speechmatics_plugin
+
+    stt = build_stt(language="da", provider="speechmatics")
+    assert isinstance(stt, speechmatics_plugin.STT)
+
+
+def test_build_stt_deepgram_still_default_shape() -> None:
+    from hailhq.voicebot.pipeline import build_stt
+    from livekit.plugins import deepgram as deepgram_plugin
+
+    stt = build_stt(language="en", provider="deepgram")
+    assert isinstance(stt, deepgram_plugin.STT)
+
+
+def test_build_stt_speechmatics_without_any_key_fails_fast(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from hailhq.core.config import settings
+    from hailhq.voicebot.pipeline import ProviderKeyError, build_stt
+
+    monkeypatch.setattr(settings, "speechmatics_api_key", "")
+    with pytest.raises(ProviderKeyError):
+        build_stt(language="da", provider="speechmatics")
