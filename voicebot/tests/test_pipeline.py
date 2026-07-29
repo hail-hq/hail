@@ -148,14 +148,14 @@ def test_build_tts_elevenlabs_only_returns_single_instance(
 
 
 def test_build_tts_no_keys_raises(monkeypatch: pytest.MonkeyPatch) -> None:
-    """No TTS provider configured -> a clear RuntimeError, never a None TTS."""
+    """No TTS provider configured -> a clear ProviderKeyError, never a None TTS."""
     from hailhq.core.config import settings
-    from hailhq.voicebot.pipeline import build_tts
+    from hailhq.voicebot.pipeline import ProviderKeyError, build_tts
 
     monkeypatch.setattr(settings, "cartesia_api_key", "")
     monkeypatch.setattr(settings, "eleven_api_key", "")
 
-    with pytest.raises(RuntimeError, match="No TTS provider configured"):
+    with pytest.raises(ProviderKeyError, match="No TTS provider configured"):
         build_tts()
 
 
@@ -312,3 +312,38 @@ def test_house_tts_keeps_fallback_for_dual_provider_language() -> None:
 
     tts = build_tts(language="da")
     assert isinstance(tts, agents_tts.FallbackAdapter)
+
+
+def test_build_tts_byo_cartesia_with_fallback_and_cartesia_only_language() -> None:
+    """BYO Cartesia + fallback_enabled + Cartesia-only language (th) should
+    return FallbackAdapter(byo_cartesia, house_cartesia) with NO ElevenLabs."""
+    from hailhq.voicebot.pipeline import ResolvedLayer, build_tts
+    from livekit.agents import tts as agents_tts
+    from livekit.plugins import cartesia as cartesia_plugin
+
+    org = ResolvedLayer(
+        provider="cartesia",
+        api_key="org-cartesia-key",
+        params={"voice_id": "org-voice", "model": "sonic-3.5"},
+        fallback_enabled=True,
+    )
+    tts = build_tts(org=org, language="th")
+    assert isinstance(tts, agents_tts.FallbackAdapter)
+    inner = tts._tts_instances
+    assert len(inner) == 2, "BYO + house fallback should have 2 instances"
+    assert all(isinstance(inst, cartesia_plugin.TTS) for inst in inner)
+
+
+def test_build_tts_only_elevenlabs_key_with_cartesia_only_language_raises(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Only ELEVEN_API_KEY set, Cartesia-only language (th) → ProviderKeyError
+    (not RuntimeError that escapes entrypoint)."""
+    from hailhq.core.config import settings
+    from hailhq.voicebot.pipeline import ProviderKeyError, build_tts
+
+    monkeypatch.setattr(settings, "cartesia_api_key", "")
+    monkeypatch.setattr(settings, "eleven_api_key", "el-test-placeholder")
+
+    with pytest.raises(ProviderKeyError, match="cannot speak language"):
+        build_tts(language="th")

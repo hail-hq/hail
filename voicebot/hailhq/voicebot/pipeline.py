@@ -359,7 +359,19 @@ def build_tts(
         return byo
     instances = _house_tts(voice_id_override, language)
     if not instances:
-        raise RuntimeError(
+        # Distinguish between no keys configured vs. language filtering all keys out.
+        if settings.cartesia_api_key or settings.eleven_api_key:
+            # Keys exist but language doesn't support any of them.
+            providers = tts_providers_for(language)
+            if not providers:
+                raise ProviderKeyError(
+                    f"Language '{language}' has no TTS provider support."
+                )
+            raise ProviderKeyError(
+                f"Configured TTS providers cannot speak language '{language}'; "
+                f"language requires: {', '.join(sorted(providers))}."
+            )
+        raise ProviderKeyError(
             "No TTS provider configured: set CARTESIA_API_KEY or ELEVEN_API_KEY."
         )
     if len(instances) == 1:
