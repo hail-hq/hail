@@ -13,6 +13,7 @@ from unittest.mock import AsyncMock
 from uuid import uuid4
 
 import httpx
+import pytest
 from hailhq.core.models import (
     ApiKey,
     AuditLog,
@@ -1164,6 +1165,64 @@ async def test_pinned_stt_incompatible_with_language_422(
     assert resp.status_code == 422, resp.text
     assert "speechmatics" in resp.text
     livekit_mock.dispatch_agent.assert_not_awaited()
+
+
+async def test_pinned_stt_without_speechmatics_key_422(
+    client: httpx.AsyncClient,
+    async_session: AsyncSession,
+    org_and_key: tuple[str, ApiKey, str],
+    livekit_mock: AsyncMock,
+    add_phone_number,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An explicit speechmatics pin with no house key and no BYO row must
+    422 at the gate instead of dying post-dispatch with provider_key_error."""
+    from hailhq.core.config import settings
+
+    monkeypatch.setattr(settings, "speechmatics_api_key", "")
+    org_id, _, plain = org_and_key
+    await add_phone_number(async_session, org_id)
+
+    resp = await client.post(
+        "/calls",
+        json={
+            "to": "+14155559999",
+            "system_prompt": "hi",
+            "recipient_consent": True,
+            "voice_config": {"stt": "speechmatics", "language": "da"},
+        },
+        headers={"Authorization": f"Bearer {plain}"},
+    )
+    assert resp.status_code == 422, resp.text
+    assert "SPEECHMATICS_API_KEY" in resp.text
+    livekit_mock.dispatch_agent.assert_not_awaited()
+
+
+async def test_pinned_stt_with_house_key_accepted(
+    client: httpx.AsyncClient,
+    async_session: AsyncSession,
+    org_and_key: tuple[str, ApiKey, str],
+    livekit_mock: AsyncMock,
+    add_phone_number,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from hailhq.core.config import settings
+
+    monkeypatch.setattr(settings, "speechmatics_api_key", "sm-test-key")
+    org_id, _, plain = org_and_key
+    await add_phone_number(async_session, org_id)
+
+    resp = await client.post(
+        "/calls",
+        json={
+            "to": "+14155559999",
+            "system_prompt": "hi",
+            "recipient_consent": True,
+            "voice_config": {"stt": "speechmatics", "language": "da"},
+        },
+        headers={"Authorization": f"Bearer {plain}"},
+    )
+    assert resp.status_code == 201, resp.text
 
 
 async def test_unsupported_language_code_422(

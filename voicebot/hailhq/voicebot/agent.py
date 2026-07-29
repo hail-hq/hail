@@ -1117,12 +1117,17 @@ async def entrypoint(ctx: JobContext) -> None:
         # dispatch-metadata shape build_session indexes into (TypeError — e.g.
         # an unhashable `voice_config.language`), and a provider ctor that
         # rejects an absent key with its own ValueError (e.g. the speechmatics
-        # plugin) are none of them ProviderKeyError, but they all mean "can't
-        # honor this call's provider config". Convert them so they fail fast
-        # through the same clean finalize path below instead of escaping
-        # entrypoint() raw and leaking the pool number. UnsafeUrlError
-        # (raised by assert_public_https_url) is itself a ValueError
-        # subclass, so it's covered by the tuple below.
+        # plugin), and the turn-detector model cache miss (MultilingualModel
+        # raises a bare RuntimeError when the HF files were never downloaded
+        # — e.g. a self-host that skipped `download-files`) are none of them
+        # ProviderKeyError, but they all mean "can't honor this call's
+        # provider config". Convert them so they fail fast through the same
+        # clean finalize path below instead of escaping entrypoint() raw and
+        # leaking the pool number. UnsafeUrlError (raised by
+        # assert_public_https_url) is itself a ValueError subclass, so it's
+        # covered by the tuple below. ProviderKeyError subclasses
+        # RuntimeError, so it must be re-raised untouched before the tuple
+        # or it would be double-wrapped.
         try:
             org_id_raw = metadata.get("organization_id")
             org_id = UUID(org_id_raw) if org_id_raw else None
@@ -1145,11 +1150,14 @@ async def entrypoint(ctx: JobContext) -> None:
                 language=language,
                 stt_choice=stt_choice,
             )
+        except ProviderKeyError:
+            raise
         except (
             SecretKeyMissing,
             InvalidToken,
             ValueError,
             TypeError,
+            RuntimeError,
             SQLAlchemyError,
         ) as exc:
             raise ProviderKeyError(f"could not load provider config: {exc}") from exc

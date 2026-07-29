@@ -30,6 +30,15 @@ def test_every_language_has_deepgram_and_cartesia() -> None:
         assert "cartesia" in caps.tts
 
 
+def test_zh_excluded_from_speechmatics() -> None:
+    """Speechmatics' Mandarin code is "cmn", which the LiveKit plugin's
+    LanguageCode normalization rewrites back to "zh" — unreachable, so the
+    matrix must not offer speechmatics for zh (a pinned zh call would fail
+    at websocket start with invalid_language)."""
+    assert "speechmatics" not in SUPPORTED_LANGUAGES["zh"].stt
+    assert default_stt_for("zh") == "deepgram"
+
+
 def test_default_stt_routing() -> None:
     assert default_stt_for(None) == "deepgram"  # English default
     assert default_stt_for("en") == "deepgram"  # semantic-turn language

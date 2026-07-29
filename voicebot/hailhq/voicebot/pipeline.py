@@ -361,12 +361,10 @@ def build_tts(
     if not instances:
         # Distinguish between no keys configured vs. language filtering all keys out.
         if settings.cartesia_api_key or settings.eleven_api_key:
-            # Keys exist but language doesn't support any of them.
+            # Keys exist but the language filtered them all out. (Every
+            # supported language has at least Cartesia, so `providers` is
+            # never empty here.)
             providers = tts_providers_for(language)
-            if not providers:
-                raise ProviderKeyError(
-                    f"Language '{language}' has no TTS provider support."
-                )
             raise ProviderKeyError(
                 f"Configured TTS providers cannot speak language '{language}'; "
                 f"language requires: {', '.join(sorted(providers))}."
@@ -408,7 +406,10 @@ def build_stt(
     if provider == "speechmatics":
         kwargs: dict[str, Any] = {
             "language": language or "en",
-            "operating_point": "enhanced",
+            # Must be the enum, not the string "enhanced": the plugin stores
+            # it unconverted and its .model property does `op.value`, which
+            # raises AttributeError on a plain str at session start.
+            "operating_point": speechmatics_plugin.OperatingPoint.ENHANCED,
         }
         if stt_drives_turns:
             kwargs["turn_detection_mode"] = (

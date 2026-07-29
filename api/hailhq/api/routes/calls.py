@@ -40,7 +40,7 @@ from hailhq.core.compliance_gate import check_call_allowed
 from hailhq.core.config import settings
 from hailhq.core.db import get_session
 from hailhq.core.internal_webhook import fetch_organization_name
-from hailhq.core.languages import SUPPORTED_LANGUAGES, resolve_stt_provider
+from hailhq.core.languages import SUPPORTED_LANGUAGES
 from hailhq.core.livekit import LiveKitClient
 from hailhq.core.models import Call, CallEvent, PhoneNumber
 from hailhq.core.pool import (
@@ -223,20 +223,23 @@ async def create_call(
     # created. Deterministic on request + org config, so failures are
     # cached for idempotent replay like the other 422 gates.
     lang = body.voice_config.language
+    stt_pin = body.voice_config.stt
+    org_rows = (
+        await load_org_provider_configs(db, principal.organization_id)
+        if lang is not None or stt_pin == "speechmatics"
+        else {}
+    )
     if lang is not None:
         caps = SUPPORTED_LANGUAGES[lang]
-        org_rows = await load_org_provider_configs(db, principal.organization_id)
-        stt_row = org_rows.get("stt")
-        provider = resolve_stt_provider(
-            body.voice_config.stt,
-            stt_row.provider if stt_row is not None else None,
-            lang,
-        )
-        if body.voice_config.stt != "auto" and provider not in caps.stt:
+        # An explicit pin is checked verbatim — with stt != "auto",
+        # resolve_stt_provider would return the pin unchanged, and the org
+        # BYO STT row deliberately never participates in this gate (auto
+        # routing degrades safely inside the voicebot).
+        if stt_pin != "auto" and stt_pin not in caps.stt:
             raise await cache_failure(
                 idem,
                 unprocessable(
-                    f"stt provider '{provider}' does not support language "
+                    f"stt provider '{stt_pin}' does not support language "
                     f"'{lang}'; supported providers: {sorted(caps.stt)}",
                     loc=["body", "voice_config", "stt"],
                 ),
@@ -256,6 +259,28 @@ async def create_call(
                     f"support language '{lang}'; supported providers: "
                     f"{sorted(caps.tts)}",
                     loc=["body", "voice_config", "language"],
+                ),
+            )
+    # An explicit speechmatics pin with no usable key would otherwise be
+    # accepted here and then die post-dispatch in the voicebot with
+    # provider_key_error (the voicebot's deepgram degrade applies to
+    # stt="auto" only — a pin is honored or fails). Reject up front; the
+    # check is deterministic on request + org config + deployment env, so
+    # the failure is cached for idempotent replay like the gates above.
+    if stt_pin == "speechmatics" and not settings.speechmatics_api_key:
+        stt_row = org_rows.get("stt")
+        if not (
+            stt_row is not None
+            and stt_row.provider == "speechmatics"
+            and stt_row.encrypted_api_key is not None
+        ):
+            raise await cache_failure(
+                idem,
+                unprocessable(
+                    "stt provider 'speechmatics' is pinned but no Speechmatics "
+                    "API key is available (set SPEECHMATICS_API_KEY or add a "
+                    "BYO speechmatics STT config)",
+                    loc=["body", "voice_config", "stt"],
                 ),
             )
 

@@ -128,7 +128,12 @@ _SEMANTIC_TURN = frozenset(
     {"en", "es", "fr", "de", "it", "pt", "nl", "zh", "ja", "ko", "id", "tr", "ru", "hi"}
 )
 # Languages Speechmatics real-time STT does NOT cover (nova-3 only).
-_NO_SPEECHMATICS = frozenset({"gu", "kn", "te"})
+# "zh" is here not because Speechmatics lacks Mandarin but because its code
+# for it is "cmn", and the LiveKit plugin's LanguageCode normalization maps
+# "cmn" back to "zh" (livekit.agents language.py), so the code Speechmatics
+# accepts can never reach the wire — a speechmatics-routed zh call fails at
+# websocket start with invalid_language.
+_NO_SPEECHMATICS = frozenset({"gu", "kn", "te", "zh"})
 # Languages ElevenLabs eleven_turbo_v2_5 does NOT cover (Cartesia only).
 _NO_ELEVENLABS = frozenset({"bn", "gu", "he", "kn", "te", "th", "mr"})
 
