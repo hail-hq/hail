@@ -40,6 +40,18 @@ present on ``cartesia.TTS``, ``elevenlabs.TTS``, ``deepgram.STT``,
 private ``_llm_instances`` attribute (no public accessor), so the BYO+fallback
 branch below constructs the three house LLMs inline rather than reaching into
 a private attribute of ``_house_llm()``.
+
+Speechmatics plugin surface (2026-07-29, multi-language task): verified
+``speechmatics.STT`` kwargs (``language``, ``operating_point``,
+``api_key``, ``turn_detection_mode``, ``end_of_utterance_silence_trigger``)
+and ``TurnDetectionMode`` members against the installed
+livekit-plugins-speechmatics (1.6.6). All names match as expected; no
+deviations. ``TurnDetectionMode.ADAPTIVE`` constructs without error —
+``livekit-plugins-speechmatics`` pulls in ``speechmatics-voice[smart]`` as a
+hard (non-optional) dependency, so the smart-turn extra (onnxruntime,
+transformers) is already installed by a plain
+``uv sync --all-packages --all-extras``. No fallback to
+``TurnDetectionMode.FIXED`` is needed.
 """
 
 from __future__ import annotations
