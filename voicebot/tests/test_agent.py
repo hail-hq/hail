@@ -252,6 +252,42 @@ async def test_entrypoint_org_config_load_failure_finalizes_cleanly(
     assert refreshed.end_reason == "provider_key_error"
 
 
+async def test_entrypoint_build_session_type_error_finalizes_cleanly(
+    async_session: AsyncSession,
+) -> None:
+    """A malformed ``voice_config.language`` (a dict instead of a string
+    code — e.g. a direct LiveKit dispatch with hand-crafted metadata) makes
+    ``build_session``'s ``SUPPORTED_LANGUAGES`` membership check raise
+    ``TypeError`` (unhashable type). That must fail fast as
+    provider_key_error too, not escape ``entrypoint()`` raw and leak the pool
+    number — same leak class as the InvalidToken case above, just raised
+    from inside build_session (called within the same guarded block) instead
+    of from resolve_org_configs."""
+    call_id = await _make_call_row(async_session)
+
+    ctx = _FakeEntrypointCtx(
+        metadata=json.dumps(
+            {
+                "call_id": str(call_id),
+                "voice_config": {"language": {"unexpected": "shape"}},
+            }
+        ),
+        room_name=f"hail-{call_id}",
+    )
+
+    # Returns cleanly (the TypeError is converted, not propagated).
+    await entrypoint(ctx)  # type: ignore[arg-type]
+
+    assert ctx.shutdown_calls == ["provider_key_error"]
+
+    refreshed = (
+        await async_session.execute(select(Call).where(Call.id == call_id))
+    ).scalar_one()
+    await async_session.refresh(refreshed)
+    assert refreshed.status == "failed"
+    assert refreshed.end_reason == "provider_key_error"
+
+
 async def test_agent_session_run_emits_assistant_message() -> None:
     """Behavioral: one user turn yields at least one assistant message.
 

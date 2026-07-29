@@ -284,3 +284,15 @@ def test_session_unknown_language_degrades_to_defaults(
         session = _make_session("xx-not-a-real-code")
     assert isinstance(session.turn_detection, MultilingualModel)
     assert any("xx-not-a-real-code" in record.message for record in caplog.records)
+
+
+def test_build_session_raises_typeerror_for_unhashable_language() -> None:
+    """A malformed ``voice_config.language`` (e.g. a dict from mis-shapen
+    dispatch metadata, rather than a string code) makes the
+    ``SUPPORTED_LANGUAGES`` membership check raise ``TypeError`` (unhashable
+    type), not silently misbehave. ``entrypoint``'s guard in agent.py
+    converts this to ``ProviderKeyError`` so it never escapes raw — see
+    ``test_entrypoint_build_session_type_error_finalizes_cleanly`` in
+    test_agent.py for the end-to-end conversion."""
+    with pytest.raises(TypeError):
+        _make_session({"unexpected": "shape"})
