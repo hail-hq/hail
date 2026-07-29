@@ -89,6 +89,7 @@ class _CallsResource:
         from_: str | None = None,
         first_message: str | None = None,
         language: str | None = None,
+        stt: Literal["auto", "deepgram", "speechmatics"] | None = None,
         ai_disclosure: bool = True,
         metadata: dict[str, Any] | None = None,
         consent_source: str | None = None,
@@ -105,6 +106,8 @@ class _CallsResource:
         rule. ``recipient_consent`` is required — the server 422s without
         it. ``language`` is the call's spoken language for both STT and TTS
         as a lowercase ISO 639-1 code (e.g. ``"fr"``); omit for English.
+        ``stt`` pins the speech-to-text provider ("deepgram" or
+        "speechmatics"); omit for automatic per-language routing.
         ``ai_disclosure=False`` skips the spoken AI self-disclosure line —
         disabling is your responsibility (US artificial-voice calls and
         several AI bot-disclosure laws require it).
@@ -119,8 +122,13 @@ class _CallsResource:
             body["first_message"] = first_message
         if not ai_disclosure:
             body["ai_disclosure"] = False
+        voice_config: dict[str, Any] = {}
         if language is not None:
-            body["voice_config"] = {"language": language}
+            voice_config["language"] = language
+        if stt is not None:
+            voice_config["stt"] = stt
+        if voice_config:
+            body["voice_config"] = voice_config
         if metadata is not None:
             body["metadata"] = metadata
         if llm is not None:
