@@ -1107,6 +1107,7 @@ async def entrypoint(ctx: JobContext) -> None:
     voice_cfg = metadata.get("voice_config") or {}
     voice_id_override = voice_cfg.get("voice_id")
     language = voice_cfg.get("language")
+    stt_choice = voice_cfg.get("stt") or "auto"
     try:
         # Loading + decrypting the org's BYO config, and decrypting the
         # per-call llm key, must sit inside this guard: a malformed org id
@@ -1140,6 +1141,7 @@ async def entrypoint(ctx: JobContext) -> None:
             org_cfgs=org_cfgs,
             voice_id_override=voice_id_override,
             language=language,
+            stt_choice=stt_choice,
         )
     except ProviderKeyError as exc:
         logger.warning("provider key error for call_id=%s: %s", call_id, exc)

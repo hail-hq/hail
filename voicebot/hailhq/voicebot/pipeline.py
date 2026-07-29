@@ -58,11 +58,17 @@ from __future__ import annotations
 
 import asyncio
 import dataclasses
+import logging
 from typing import Any
 from uuid import UUID
 
 from hailhq.core.config import settings
 from hailhq.core.db import session_scope
+from hailhq.core.languages import (
+    SUPPORTED_LANGUAGES,
+    resolve_stt_provider,
+    turn_mode_for,
+)
 from hailhq.core.provider_config import load_org_provider_configs, provider_cipher
 from hailhq.core.url_guard import UnsafeUrlError, assert_public_https_url
 from livekit.agents import AgentSession
@@ -91,6 +97,9 @@ from livekit.plugins import (
 from livekit.plugins import (
     speechmatics as speechmatics_plugin,
 )
+from livekit.plugins.turn_detector.multilingual import MultilingualModel
+
+logger = logging.getLogger("hailhq.voicebot")
 
 __all__ = [
     "ProviderKeyError",
@@ -430,6 +439,7 @@ def build_session(
     org_cfgs: dict[str, ResolvedLayer] | None = None,
     voice_id_override: str | None = None,
     language: str | None = None,
+    stt_choice: str = "auto",
 ) -> AgentSession:
     """Build the :class:`AgentSession` for one job.
 
@@ -439,11 +449,49 @@ def build_session(
     ``language`` are the per-call ``voice_config.voice_id`` /
     ``voice_config.language`` from dispatch metadata — the voice beats any
     org-level default, the language pins both STT and TTS.
+
+    ``stt_choice`` is the per-call ``voice_config.stt`` ("auto" routes by
+    language). Provider resolution: per-call pin > org BYO row > auto.
+    Auto only picks speechmatics when a key exists for it (org or house)
+    — a deepgram-only self-host keeps working (tenet 4). Turn detection:
+    semantic MultilingualModel for its 14 languages, "stt" when
+    speechmatics serves the call, "vad" as the floor.
+
+    ``language`` arrives raw from dispatch metadata (a direct LiveKit
+    dispatch can carry any string, bypassing the API's request-validation
+    gate) — a code outside :data:`SUPPORTED_LANGUAGES` is degraded to
+    ``None`` (provider defaults / English) rather than raising, so a
+    malformed dispatch never crashes the call.
     """
+    if language is not None and language not in SUPPORTED_LANGUAGES:
+        logger.warning(
+            "unsupported language %r from dispatch metadata; falling back to "
+            "provider defaults",
+            language,
+        )
+        language = None
     org_cfgs = org_cfgs or {}
+    org_stt = org_cfgs.get("stt")
+    provider = resolve_stt_provider(
+        stt_choice, org_stt.provider if org_stt else None, language
+    )
+    if language is not None and provider not in SUPPORTED_LANGUAGES[language].stt:
+        # Direct dispatch can bypass the API's 422 gate; deepgram covers
+        # every supported language, so degrade rather than fail the call.
+        provider = "deepgram"
+    if (
+        provider == "speechmatics"
+        and stt_choice == "auto"
+        and not settings.speechmatics_api_key
+        and not (org_stt and org_stt.provider == "speechmatics" and org_stt.api_key)
+    ):
+        provider = "deepgram"
+    mode = turn_mode_for(language, provider)
+    turn_detection: Any = MultilingualModel() if mode == "semantic" else mode
     return AgentSession(
         vad=vad,
-        stt=build_stt(org_cfgs.get("stt"), language),
+        stt=build_stt(org_stt, language, provider, stt_drives_turns=(mode == "stt")),
         tts=build_tts(org_cfgs.get("tts"), voice_id_override, language),
         llm=build_llm(llm_cfg, org_cfgs.get("llm")),
+        turn_detection=turn_detection,
     )

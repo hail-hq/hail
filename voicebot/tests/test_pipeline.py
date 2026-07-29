@@ -44,6 +44,20 @@ def _stub_provider_keys(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(settings, "speechmatics_api_key", "sm-test-placeholder")
 
 
+@pytest.fixture(autouse=True)
+def _fake_job_context():
+    """``build_session``'s semantic turn-detection path constructs a
+    ``MultilingualModel``, which reads ``get_job_context().inference_executor``
+    at ``__init__`` time — it needs a job context even outside an active
+    call. ``livekit.agents.testing.fake_job_context`` is the SDK's own
+    in-process stand-in (installs a real ``JobContext`` with a no-op
+    inference executor) for exactly this situation."""
+    from livekit.agents.testing import fake_job_context
+
+    with fake_job_context():
+        yield
+
+
 def test_build_llm_mode_a_returns_fallback_adapter() -> None:
     """No ``llm`` config -> Hail's three-provider fallback chain.
 
@@ -210,3 +224,63 @@ def test_build_stt_speechmatics_without_any_key_fails_fast(
     monkeypatch.setattr(settings, "speechmatics_api_key", "")
     with pytest.raises(ProviderKeyError):
         build_stt(language="da", provider="speechmatics")
+
+
+def _make_session(language, stt_choice="auto"):
+    from unittest.mock import MagicMock
+
+    from hailhq.voicebot.pipeline import build_session
+
+    return build_session(None, MagicMock(), language=language, stt_choice=stt_choice)
+
+
+def test_session_semantic_turns_for_covered_language() -> None:
+    from livekit.plugins.turn_detector.multilingual import MultilingualModel
+
+    session = _make_session("fr")
+    assert isinstance(session.turn_detection, MultilingualModel)
+
+
+def test_session_stt_turns_for_speechmatics_language() -> None:
+    from livekit.plugins import speechmatics as speechmatics_plugin
+
+    session = _make_session("da")
+    assert session.turn_detection == "stt"
+    assert isinstance(session.stt, speechmatics_plugin.STT)
+
+
+def test_session_vad_turns_when_pinned_away_from_speechmatics() -> None:
+    from livekit.plugins import deepgram as deepgram_plugin
+
+    session = _make_session("da", stt_choice="deepgram")
+    assert session.turn_detection == "vad"
+    assert isinstance(session.stt, deepgram_plugin.STT)
+
+
+def test_session_auto_falls_back_to_deepgram_without_speechmatics_key(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Tenet 4: a deepgram-only self-host still serves 'da' (VAD turns)."""
+    from hailhq.core.config import settings
+    from livekit.plugins import deepgram as deepgram_plugin
+
+    monkeypatch.setattr(settings, "speechmatics_api_key", "")
+    session = _make_session("da")
+    assert isinstance(session.stt, deepgram_plugin.STT)
+    assert session.turn_detection == "vad"
+
+
+def test_session_unknown_language_degrades_to_defaults(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A raw dispatch-metadata language outside SUPPORTED_LANGUAGES must not
+    crash the call — degrade to provider defaults (English-ish) with a
+    warning, per the Task 1 review's known watch item."""
+    import logging
+
+    from livekit.plugins.turn_detector.multilingual import MultilingualModel
+
+    with caplog.at_level(logging.WARNING, logger="hailhq.voicebot"):
+        session = _make_session("xx-not-a-real-code")
+    assert isinstance(session.turn_detection, MultilingualModel)
+    assert any("xx-not-a-real-code" in record.message for record in caplog.records)
