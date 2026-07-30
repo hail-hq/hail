@@ -513,6 +513,135 @@ func (e SmsResponseStatus) Valid() bool {
 	}
 }
 
+// Defines values for VoiceConfigLanguage.
+const (
+	Ar VoiceConfigLanguage = "ar"
+	Bg VoiceConfigLanguage = "bg"
+	Bn VoiceConfigLanguage = "bn"
+	Cs VoiceConfigLanguage = "cs"
+	Da VoiceConfigLanguage = "da"
+	De VoiceConfigLanguage = "de"
+	El VoiceConfigLanguage = "el"
+	En VoiceConfigLanguage = "en"
+	Es VoiceConfigLanguage = "es"
+	Fi VoiceConfigLanguage = "fi"
+	Fr VoiceConfigLanguage = "fr"
+	Gu VoiceConfigLanguage = "gu"
+	He VoiceConfigLanguage = "he"
+	Hi VoiceConfigLanguage = "hi"
+	Hr VoiceConfigLanguage = "hr"
+	Hu VoiceConfigLanguage = "hu"
+	Id VoiceConfigLanguage = "id"
+	It VoiceConfigLanguage = "it"
+	Ja VoiceConfigLanguage = "ja"
+	Kn VoiceConfigLanguage = "kn"
+	Ko VoiceConfigLanguage = "ko"
+	Mr VoiceConfigLanguage = "mr"
+	Ms VoiceConfigLanguage = "ms"
+	Nl VoiceConfigLanguage = "nl"
+	No VoiceConfigLanguage = "no"
+	Pl VoiceConfigLanguage = "pl"
+	Pt VoiceConfigLanguage = "pt"
+	Ro VoiceConfigLanguage = "ro"
+	Ru VoiceConfigLanguage = "ru"
+	Sk VoiceConfigLanguage = "sk"
+	Sv VoiceConfigLanguage = "sv"
+	Ta VoiceConfigLanguage = "ta"
+	Te VoiceConfigLanguage = "te"
+	Th VoiceConfigLanguage = "th"
+	Tl VoiceConfigLanguage = "tl"
+	Tr VoiceConfigLanguage = "tr"
+	Uk VoiceConfigLanguage = "uk"
+	Vi VoiceConfigLanguage = "vi"
+	Zh VoiceConfigLanguage = "zh"
+)
+
+// Valid indicates whether the value is a known member of the VoiceConfigLanguage enum.
+func (e VoiceConfigLanguage) Valid() bool {
+	switch e {
+	case Ar:
+		return true
+	case Bg:
+		return true
+	case Bn:
+		return true
+	case Cs:
+		return true
+	case Da:
+		return true
+	case De:
+		return true
+	case El:
+		return true
+	case En:
+		return true
+	case Es:
+		return true
+	case Fi:
+		return true
+	case Fr:
+		return true
+	case Gu:
+		return true
+	case He:
+		return true
+	case Hi:
+		return true
+	case Hr:
+		return true
+	case Hu:
+		return true
+	case Id:
+		return true
+	case It:
+		return true
+	case Ja:
+		return true
+	case Kn:
+		return true
+	case Ko:
+		return true
+	case Mr:
+		return true
+	case Ms:
+		return true
+	case Nl:
+		return true
+	case No:
+		return true
+	case Pl:
+		return true
+	case Pt:
+		return true
+	case Ro:
+		return true
+	case Ru:
+		return true
+	case Sk:
+		return true
+	case Sv:
+		return true
+	case Ta:
+		return true
+	case Te:
+		return true
+	case Th:
+		return true
+	case Tl:
+		return true
+	case Tr:
+		return true
+	case Uk:
+		return true
+	case Vi:
+		return true
+	case Zh:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for WebhookDeliveryResponseStatus.
 const (
 	WebhookDeliveryResponseStatusDead      WebhookDeliveryResponseStatus = "dead"
@@ -1428,14 +1557,16 @@ type ValidationError_Loc_Item struct {
 
 // VoiceConfig defines model for VoiceConfig.
 type VoiceConfig struct {
-	// Language Spoken language for the call as a lowercase ISO 639-1 code (e.g. 'fr'). Applied to both STT and TTS, so it must be a language the configured STT and TTS models support. Omitted: the providers' defaults (English).
-	Language      *string `json:"language,omitempty"`
-	Stt           *string `json:"stt,omitempty"`
-	Tts           *string `json:"tts,omitempty"`
-	TurnDetection *string `json:"turn_detection,omitempty"`
-	Vad           *string `json:"vad,omitempty"`
-	VoiceId       *string `json:"voice_id,omitempty"`
+	// Language Spoken language for the call as a lowercase ISO 639-1 code (e.g. 'da'). One of the 39 supported codes — see docs/languages.md. Applied to STT, TTS, and turn detection. Omitted: the providers' defaults (English).
+	Language      *VoiceConfigLanguage `json:"language,omitempty"`
+	Tts           *string              `json:"tts,omitempty"`
+	TurnDetection *string              `json:"turn_detection,omitempty"`
+	Vad           *string              `json:"vad,omitempty"`
+	VoiceId       *string              `json:"voice_id,omitempty"`
 }
+
+// VoiceConfigLanguage Spoken language for the call as a lowercase ISO 639-1 code (e.g. 'da'). One of the 39 supported codes — see docs/languages.md. Applied to STT, TTS, and turn detection. Omitted: the providers' defaults (English).
+type VoiceConfigLanguage string
 
 // WebhookDeliveryListResponse defines model for WebhookDeliveryListResponse.
 type WebhookDeliveryListResponse struct {

@@ -84,7 +84,7 @@ class TTSParams(BaseModel):
 class STTParams(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    provider: Literal["deepgram"]
+    provider: Literal["deepgram", "speechmatics"]
     model: str | None = None
 
 

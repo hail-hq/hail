@@ -40,6 +40,22 @@ def _stub_provider_keys(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(settings, "eleven_api_key", "el-test-placeholder")
     monkeypatch.setattr(settings, "elevenlabs_voice_id", "test-voice-id")
     monkeypatch.setattr(settings, "elevenlabs_model", "eleven_turbo_v2_5")
+    monkeypatch.setenv("SPEECHMATICS_API_KEY", "sm-test-placeholder")
+    monkeypatch.setattr(settings, "speechmatics_api_key", "sm-test-placeholder")
+
+
+@pytest.fixture(autouse=True)
+def _fake_job_context():
+    """``build_session``'s semantic turn-detection path constructs a
+    ``MultilingualModel``, which reads ``get_job_context().inference_executor``
+    at ``__init__`` time — it needs a job context even outside an active
+    call. ``livekit.agents.testing.fake_job_context`` is the SDK's own
+    in-process stand-in (installs a real ``JobContext`` with a no-op
+    inference executor) for exactly this situation."""
+    from livekit.agents.testing import fake_job_context
+
+    with fake_job_context():
+        yield
 
 
 def test_build_llm_mode_a_returns_fallback_adapter() -> None:
@@ -132,14 +148,14 @@ def test_build_tts_elevenlabs_only_returns_single_instance(
 
 
 def test_build_tts_no_keys_raises(monkeypatch: pytest.MonkeyPatch) -> None:
-    """No TTS provider configured -> a clear RuntimeError, never a None TTS."""
+    """No TTS provider configured -> a clear ProviderKeyError, never a None TTS."""
     from hailhq.core.config import settings
-    from hailhq.voicebot.pipeline import build_tts
+    from hailhq.voicebot.pipeline import ProviderKeyError, build_tts
 
     monkeypatch.setattr(settings, "cartesia_api_key", "")
     monkeypatch.setattr(settings, "eleven_api_key", "")
 
-    with pytest.raises(RuntimeError, match="No TTS provider configured"):
+    with pytest.raises(ProviderKeyError, match="No TTS provider configured"):
         build_tts()
 
 
@@ -174,3 +190,209 @@ def test_build_stt_language_pins_deepgram() -> None:
 
     assert build_stt(language="fr")._opts.language == "fr"
     assert build_stt()._opts.language == "en-US"
+
+
+def test_build_stt_speechmatics_house() -> None:
+    """``_stt_options`` attrs verified against the installed
+    livekit-plugins-speechmatics==1.6.6 (``speechmatics.STT.__init__`` stores
+    the resolved options dataclass on ``self._stt_options``); revisit if it
+    changes."""
+    from hailhq.voicebot.pipeline import build_stt
+    from livekit.plugins import speechmatics as speechmatics_plugin
+
+    stt = build_stt(language="da", provider="speechmatics")
+    assert isinstance(stt, speechmatics_plugin.STT)
+    assert stt._stt_options.language == "da"
+    assert stt._stt_options.operating_point == "enhanced"
+
+
+def test_build_stt_deepgram_still_default_shape() -> None:
+    from hailhq.voicebot.pipeline import build_stt
+    from livekit.plugins import deepgram as deepgram_plugin
+
+    stt = build_stt(language="en", provider="deepgram")
+    assert isinstance(stt, deepgram_plugin.STT)
+    assert stt._opts.language == "en"
+
+
+def test_build_stt_speechmatics_without_any_key_fails_fast(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from hailhq.core.config import settings
+    from hailhq.voicebot.pipeline import ProviderKeyError, build_stt
+
+    monkeypatch.setattr(settings, "speechmatics_api_key", "")
+    with pytest.raises(ProviderKeyError):
+        build_stt(language="da", provider="speechmatics")
+
+
+def _make_session(language, org_cfgs=None):
+    from unittest.mock import MagicMock
+
+    from hailhq.voicebot.pipeline import build_session
+
+    return build_session(None, MagicMock(), org_cfgs=org_cfgs, language=language)
+
+
+def test_session_semantic_turns_for_covered_language() -> None:
+    from livekit.plugins.turn_detector.multilingual import MultilingualModel
+
+    session = _make_session("fr")
+    assert isinstance(session.turn_detection, MultilingualModel)
+
+
+def test_session_stt_turns_for_speechmatics_language() -> None:
+    from livekit.plugins import speechmatics as speechmatics_plugin
+
+    session = _make_session("da")
+    assert session.turn_detection == "stt"
+    assert isinstance(session.stt, speechmatics_plugin.STT)
+
+
+def test_session_org_deepgram_row_overrides_auto_speechmatics_routing() -> None:
+    """No per-call STT knob exists anymore: an org BYO deepgram row wins
+    over the language auto-route (which would otherwise pick speechmatics
+    for 'da'), matching resolve_stt_provider's org-row > auto precedence."""
+    from hailhq.voicebot.pipeline import ResolvedLayer
+    from livekit.plugins import deepgram as deepgram_plugin
+
+    org_cfgs = {
+        "stt": ResolvedLayer(
+            provider="deepgram",
+            api_key="org-deepgram-key",
+            params={},
+            fallback_enabled=False,
+        )
+    }
+    session = _make_session("da", org_cfgs=org_cfgs)
+    assert session.turn_detection == "vad"
+    assert isinstance(session.stt, deepgram_plugin.STT)
+
+
+def test_session_auto_falls_back_to_deepgram_without_speechmatics_key(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Tenet 4: a deepgram-only self-host still serves 'da' (VAD turns)."""
+    import logging
+
+    from hailhq.core.config import settings
+    from livekit.plugins import deepgram as deepgram_plugin
+
+    monkeypatch.setattr(settings, "speechmatics_api_key", "")
+    with caplog.at_level(logging.WARNING, logger="hailhq.voicebot"):
+        session = _make_session("da")
+    assert isinstance(session.stt, deepgram_plugin.STT)
+    assert session.turn_detection == "vad"
+    assert any(
+        "da" in record.message and "speechmatics" in record.message
+        for record in caplog.records
+    )
+
+
+def test_session_org_row_unsupported_by_language_degrades_to_deepgram(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """'gu' (Gujarati) has no Speechmatics coverage (``_NO_SPEECHMATICS``).
+    An org's console BYO STT row can still name speechmatics generally
+    (it's not language-scoped), so ``build_session`` must degrade to
+    deepgram rather than construct an incompatible provider — and warn."""
+    import logging
+
+    from hailhq.voicebot.pipeline import ResolvedLayer
+    from livekit.plugins import deepgram as deepgram_plugin
+
+    org_cfgs = {
+        "stt": ResolvedLayer(
+            provider="speechmatics",
+            api_key="org-sm-key",
+            params={},
+            fallback_enabled=False,
+        )
+    }
+    with caplog.at_level(logging.WARNING, logger="hailhq.voicebot"):
+        session = _make_session("gu", org_cfgs=org_cfgs)
+    assert isinstance(session.stt, deepgram_plugin.STT)
+    assert any(
+        "gu" in record.message and "speechmatics" in record.message
+        for record in caplog.records
+    )
+
+
+def test_session_unknown_language_degrades_to_defaults(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A raw dispatch-metadata language outside SUPPORTED_LANGUAGES must not
+    crash the call — degrade to provider defaults (English-ish) with a
+    warning, per the Task 1 review's known watch item."""
+    import logging
+
+    from livekit.plugins.turn_detector.multilingual import MultilingualModel
+
+    with caplog.at_level(logging.WARNING, logger="hailhq.voicebot"):
+        session = _make_session("xx-not-a-real-code")
+    assert isinstance(session.turn_detection, MultilingualModel)
+    assert any("xx-not-a-real-code" in record.message for record in caplog.records)
+
+
+def test_build_session_raises_typeerror_for_unhashable_language() -> None:
+    """A malformed ``voice_config.language`` (e.g. a dict from mis-shapen
+    dispatch metadata, rather than a string code) makes the
+    ``SUPPORTED_LANGUAGES`` membership check raise ``TypeError`` (unhashable
+    type), not silently misbehave. ``entrypoint``'s guard in agent.py
+    converts this to ``ProviderKeyError`` so it never escapes raw — see
+    ``test_entrypoint_build_session_type_error_finalizes_cleanly`` in
+    test_agent.py for the end-to-end conversion."""
+    with pytest.raises(TypeError):
+        _make_session({"unexpected": "shape"})
+
+
+def test_house_tts_trims_elevenlabs_for_cartesia_only_language() -> None:
+    from hailhq.voicebot.pipeline import build_tts
+    from livekit.plugins import cartesia as cartesia_plugin
+
+    tts = build_tts(language="th")  # th: no elevenlabs support
+    assert isinstance(tts, cartesia_plugin.TTS)  # single instance, no adapter
+
+
+def test_house_tts_keeps_fallback_for_dual_provider_language() -> None:
+    from hailhq.voicebot.pipeline import build_tts
+    from livekit.agents import tts as agents_tts
+
+    tts = build_tts(language="da")
+    assert isinstance(tts, agents_tts.FallbackAdapter)
+
+
+def test_build_tts_byo_cartesia_with_fallback_and_cartesia_only_language() -> None:
+    """BYO Cartesia + fallback_enabled + Cartesia-only language (th) should
+    return FallbackAdapter(byo_cartesia, house_cartesia) with NO ElevenLabs."""
+    from hailhq.voicebot.pipeline import ResolvedLayer, build_tts
+    from livekit.agents import tts as agents_tts
+    from livekit.plugins import cartesia as cartesia_plugin
+
+    org = ResolvedLayer(
+        provider="cartesia",
+        api_key="org-cartesia-key",
+        params={"voice_id": "org-voice", "model": "sonic-3.5"},
+        fallback_enabled=True,
+    )
+    tts = build_tts(org=org, language="th")
+    assert isinstance(tts, agents_tts.FallbackAdapter)
+    inner = tts._tts_instances
+    assert len(inner) == 2, "BYO + house fallback should have 2 instances"
+    assert all(isinstance(inst, cartesia_plugin.TTS) for inst in inner)
+
+
+def test_build_tts_only_elevenlabs_key_with_cartesia_only_language_raises(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Only ELEVEN_API_KEY set, Cartesia-only language (th) → ProviderKeyError
+    (not RuntimeError that escapes entrypoint)."""
+    from hailhq.core.config import settings
+    from hailhq.voicebot.pipeline import ProviderKeyError, build_tts
+
+    monkeypatch.setattr(settings, "cartesia_api_key", "")
+    monkeypatch.setattr(settings, "eleven_api_key", "el-test-placeholder")
+
+    with pytest.raises(ProviderKeyError, match="cannot speak language"):
+        build_tts(language="th")

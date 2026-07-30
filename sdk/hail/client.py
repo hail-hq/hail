@@ -105,6 +105,8 @@ class _CallsResource:
         rule. ``recipient_consent`` is required — the server 422s without
         it. ``language`` is the call's spoken language for both STT and TTS
         as a lowercase ISO 639-1 code (e.g. ``"fr"``); omit for English.
+        STT provider selection is console-BYO-only (no per-call override) —
+        configure it on the organization to pin a provider.
         ``ai_disclosure=False`` skips the spoken AI self-disclosure line —
         disabling is your responsibility (US artificial-voice calls and
         several AI bot-disclosure laws require it).

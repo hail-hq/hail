@@ -3673,11 +3673,6 @@ components:
       title: ValidationError
     VoiceConfig:
       properties:
-        stt:
-          type: string
-          const: deepgram
-          title: Stt
-          default: deepgram
         tts:
           type: string
           const: cartesia
@@ -3701,14 +3696,53 @@ components:
         language:
           anyOf:
             - type: string
-              pattern: ^[a-z]{2}$
+              enum:
+                - ar
+                - bg
+                - bn
+                - cs
+                - da
+                - de
+                - el
+                - en
+                - es
+                - fi
+                - fr
+                - gu
+                - he
+                - hi
+                - hr
+                - hu
+                - id
+                - it
+                - ja
+                - kn
+                - ko
+                - mr
+                - ms
+                - nl
+                - "no"
+                - pl
+                - pt
+                - ro
+                - ru
+                - sk
+                - sv
+                - ta
+                - te
+                - th
+                - tl
+                - tr
+                - uk
+                - vi
+                - zh
             - type: "null"
           title: Language
           description:
-            "Spoken language for the call as a lowercase ISO 639-1 code
-            (e.g. 'fr'). Applied to both STT and TTS, so it must be a language the
-            configured STT and TTS models support. Omitted: the providers' defaults
-            (English)."
+            "Spoken language for the call as a lowercase ISO 639-1 code\
+            \ (e.g. 'da'). One of the 39 supported codes \u2014 see docs/languages.md.\
+            \ Applied to STT, TTS, and turn detection. Omitted: the providers' defaults\
+            \ (English)."
       additionalProperties: false
       type: object
       title: VoiceConfig

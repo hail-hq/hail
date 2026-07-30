@@ -1108,16 +1108,25 @@ async def entrypoint(ctx: JobContext) -> None:
     voice_id_override = voice_cfg.get("voice_id")
     language = voice_cfg.get("language")
     try:
-        # Loading + decrypting the org's BYO config, and decrypting the
-        # per-call llm key, must sit inside this guard: a malformed org id
-        # (ValueError), a decrypt failure after a HAIL_PROVIDER_SECRET_KEY
-        # rotation (InvalidToken) or an unset key (SecretKeyMissing), and a
-        # DB error (SQLAlchemyError) are none of them ProviderKeyError, but
-        # they all mean "can't honor this call's provider config". Convert
-        # them so they fail fast through the same clean finalize path below
-        # instead of escaping entrypoint() raw and leaking the pool number.
-        # UnsafeUrlError (raised by assert_public_https_url) is itself a
-        # ValueError subclass, so it's covered by the tuple below.
+        # Loading + decrypting the org's BYO config, decrypting the per-call
+        # llm key, and building the session must all sit inside this guard: a
+        # malformed org id (ValueError), a decrypt failure after a
+        # HAIL_PROVIDER_SECRET_KEY rotation (InvalidToken) or an unset key
+        # (SecretKeyMissing), a DB error (SQLAlchemyError), a malformed
+        # dispatch-metadata shape build_session indexes into (TypeError — e.g.
+        # an unhashable `voice_config.language`), and a provider ctor that
+        # rejects an absent key with its own ValueError (e.g. the speechmatics
+        # plugin), and the turn-detector model cache miss (MultilingualModel
+        # raises a bare RuntimeError when the HF files were never downloaded
+        # — e.g. a self-host that skipped `download-files`) are none of them
+        # ProviderKeyError, but they all mean "can't honor this call's
+        # provider config". Convert them so they fail fast through the same
+        # clean finalize path below instead of escaping entrypoint() raw and
+        # leaking the pool number. UnsafeUrlError (raised by
+        # assert_public_https_url) is itself a ValueError subclass, so it's
+        # covered by the tuple below. ProviderKeyError subclasses
+        # RuntimeError, so it must be re-raised untouched before the tuple
+        # or it would be double-wrapped.
         try:
             org_id_raw = metadata.get("organization_id")
             org_id = UUID(org_id_raw) if org_id_raw else None
@@ -1132,15 +1141,24 @@ async def entrypoint(ctx: JobContext) -> None:
                     assert_public_https_url, llm_cfg["base_url"]
                 )
             org_cfgs = await resolve_org_configs(org_id, skip_llm=llm_cfg is not None)
-        except (SecretKeyMissing, InvalidToken, ValueError, SQLAlchemyError) as exc:
+            session = build_session(
+                llm_cfg,
+                vad,
+                org_cfgs=org_cfgs,
+                voice_id_override=voice_id_override,
+                language=language,
+            )
+        except ProviderKeyError:
+            raise
+        except (
+            SecretKeyMissing,
+            InvalidToken,
+            ValueError,
+            TypeError,
+            RuntimeError,
+            SQLAlchemyError,
+        ) as exc:
             raise ProviderKeyError(f"could not load provider config: {exc}") from exc
-        session = build_session(
-            llm_cfg,
-            vad,
-            org_cfgs=org_cfgs,
-            voice_id_override=voice_id_override,
-            language=language,
-        )
     except ProviderKeyError as exc:
         logger.warning("provider key error for call_id=%s: %s", call_id, exc)
         captured["end_reason"] = CallEndReason.PROVIDER_KEY_ERROR.value

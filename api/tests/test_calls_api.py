@@ -13,11 +13,13 @@ from unittest.mock import AsyncMock
 from uuid import uuid4
 
 import httpx
+import pytest
 from hailhq.core.models import (
     ApiKey,
     AuditLog,
     Call,
     CallEvent,
+    OrgProviderConfig,
     WebhookDelivery,
     WebhookSubscription,
 )
@@ -1138,3 +1140,143 @@ async def test_post_calls_dispatch_metadata_org_name_none_on_lookup_failure(
     assert resp.status_code == 201
     dispatch_kwargs = livekit_mock.dispatch_agent.await_args.kwargs
     assert dispatch_kwargs["metadata"]["org_name"] is None
+
+
+async def test_voice_config_stt_rejected_422(
+    client: httpx.AsyncClient,
+    async_session: AsyncSession,
+    org_and_key: tuple[str, ApiKey, str],
+    livekit_mock: AsyncMock,
+    add_phone_number,
+) -> None:
+    """Per-call STT selection is gone: sending ``voice_config.stt`` at all
+    is rejected with a clean 422 (``VoiceConfig`` has ``extra="forbid"``
+    and no longer declares the field) — STT provider selection is
+    console-BYO-only now."""
+    org_id, _, plain = org_and_key
+    await add_phone_number(async_session, org_id)
+
+    resp = await client.post(
+        "/calls",
+        json={
+            "to": "+14155559999",
+            "system_prompt": "hi",
+            "recipient_consent": True,
+            "voice_config": {"stt": "speechmatics", "language": "da"},
+        },
+        headers={"Authorization": f"Bearer {plain}"},
+    )
+    assert resp.status_code == 422, resp.text
+    livekit_mock.dispatch_agent.assert_not_awaited()
+
+
+async def test_language_with_no_speechmatics_key_still_201s(
+    client: httpx.AsyncClient,
+    async_session: AsyncSession,
+    org_and_key: tuple[str, ApiKey, str],
+    livekit_mock: AsyncMock,
+    add_phone_number,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """No per-call STT knob means the API never gates on Speechmatics key
+    availability — routing degrades safely inside the voicebot (deepgram +
+    VAD turn detection) instead of 422ing here."""
+    from hailhq.core.config import settings
+
+    monkeypatch.setattr(settings, "speechmatics_api_key", "")
+    org_id, _, plain = org_and_key
+    await add_phone_number(async_session, org_id)
+
+    resp = await client.post(
+        "/calls",
+        json={
+            "to": "+14155559999",
+            "system_prompt": "hi",
+            "recipient_consent": True,
+            "voice_config": {"language": "da"},
+        },
+        headers={"Authorization": f"Bearer {plain}"},
+    )
+    assert resp.status_code == 201, resp.text
+
+
+async def test_unsupported_language_code_422(
+    client: httpx.AsyncClient,
+    async_session: AsyncSession,
+    org_and_key: tuple[str, ApiKey, str],
+    add_phone_number,
+) -> None:
+    org_id, _, plain = org_and_key
+    await add_phone_number(async_session, org_id)
+
+    resp = await client.post(
+        "/calls",
+        json={
+            "to": "+14155559999",
+            "system_prompt": "hi",
+            "recipient_consent": True,
+            "voice_config": {"language": "ka"},  # excluded from the matrix
+        },
+        headers={"Authorization": f"Bearer {plain}"},
+    )
+    assert resp.status_code == 422, resp.text  # pydantic enum rejection
+
+
+async def test_supported_language_with_auto_stt_accepted(
+    client: httpx.AsyncClient,
+    async_session: AsyncSession,
+    org_and_key: tuple[str, ApiKey, str],
+    livekit_mock: AsyncMock,
+    add_phone_number,
+) -> None:
+    org_id, _, plain = org_and_key
+    await add_phone_number(async_session, org_id)
+
+    resp = await client.post(
+        "/calls",
+        json={
+            "to": "+14155559999",
+            "system_prompt": "hi",
+            "recipient_consent": True,
+            "voice_config": {"language": "da"},
+        },
+        headers={"Authorization": f"Bearer {plain}"},
+    )
+    assert resp.status_code == 201, resp.text
+    metadata = livekit_mock.dispatch_agent.await_args.kwargs["metadata"]
+    assert metadata["voice_config"]["language"] == "da"
+
+
+async def test_byo_elevenlabs_tts_with_cartesia_only_language_422(
+    client: httpx.AsyncClient,
+    async_session: AsyncSession,
+    org_and_key: tuple[str, ApiKey, str],
+    livekit_mock: AsyncMock,
+    add_phone_number,
+) -> None:
+    org_id, _, plain = org_and_key
+    await add_phone_number(async_session, org_id)
+    async_session.add(
+        OrgProviderConfig(
+            organization_id=org_id,
+            layer="tts",
+            provider="elevenlabs",
+            params={},
+            is_active=True,
+        )
+    )
+    await async_session.commit()
+
+    resp = await client.post(
+        "/calls",
+        json={
+            "to": "+14155559999",
+            "system_prompt": "hi",
+            "recipient_consent": True,
+            "voice_config": {"language": "th"},  # cartesia-only language
+        },
+        headers={"Authorization": f"Bearer {plain}"},
+    )
+    assert resp.status_code == 422, resp.text
+    assert "elevenlabs" in resp.text
+    livekit_mock.dispatch_agent.assert_not_awaited()

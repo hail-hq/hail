@@ -141,6 +141,8 @@ A checked box shows a feature that we released. The changelog for each artifact 
 
 ### Voice pipeline
 
+- Languages
+  - [x] 39 call languages with automatic STT routing and per-language turn detection — see [docs/languages.md](docs/languages.md)
 - STT
   - [x] Deepgram
   - [ ] Whisper

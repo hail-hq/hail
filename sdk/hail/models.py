@@ -51,12 +51,14 @@ class LLMConfig(BaseModel):
 class VoiceConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    stt: Literal["deepgram"] = "deepgram"
     tts: Literal["cartesia"] = "cartesia"
     vad: Literal["silero"] = "silero"
     turn_detection: Literal["livekit"] = "livekit"
-    # Spoken language for the call (lowercase ISO 639-1, e.g. "fr").
-    # Applied to both STT and TTS; None -> provider defaults (English).
+    # Spoken language for the call (lowercase ISO 639-1, e.g. "da").
+    # The *server* enforces the supported set (39 codes — see
+    # docs/languages.md and the OpenAPI enum); the SDK deliberately stays
+    # permissive (shape-only) so existing SDK releases keep working when
+    # languages are added server-side. None -> provider defaults (English).
     language: str | None = Field(default=None, pattern=r"^[a-z]{2}$")
 
 

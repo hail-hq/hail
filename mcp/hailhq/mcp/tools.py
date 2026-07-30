@@ -558,9 +558,12 @@ def register_tools(
         ``first_message`` is spoken verbatim on pickup; omit it to let
         the agent open the conversation itself — it reacts to how the
         call was answered, or introduces itself after silence.
-        ``language`` sets the call's spoken language for both
-        speech-to-text and text-to-speech, as a lowercase ISO 639-1 code
-        (e.g. ``"fr"``); omit for English.
+        ``language`` sets the call's spoken language for speech-to-text,
+        text-to-speech, and turn detection, as a lowercase ISO 639-1 code
+        (e.g. ``"da"``); 39 languages are supported (server rejects others
+        with 422); omit for English. STT provider selection is
+        console-BYO-only (no per-call override); configure it on the
+        organization to pin a provider.
         ``ai_disclosure=False`` skips the spoken "this is an AI
         assistant" line at the start of the call. Leave enabled unless
         the user has verified it is not required for this call — US
