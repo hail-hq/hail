@@ -1142,13 +1142,17 @@ async def test_post_calls_dispatch_metadata_org_name_none_on_lookup_failure(
     assert dispatch_kwargs["metadata"]["org_name"] is None
 
 
-async def test_pinned_stt_incompatible_with_language_422(
+async def test_voice_config_stt_rejected_422(
     client: httpx.AsyncClient,
     async_session: AsyncSession,
     org_and_key: tuple[str, ApiKey, str],
     livekit_mock: AsyncMock,
     add_phone_number,
 ) -> None:
+    """Per-call STT selection is gone: sending ``voice_config.stt`` at all
+    is rejected with a clean 422 (``VoiceConfig`` has ``extra="forbid"``
+    and no longer declares the field) — STT provider selection is
+    console-BYO-only now."""
     org_id, _, plain = org_and_key
     await add_phone_number(async_session, org_id)
 
@@ -1158,16 +1162,15 @@ async def test_pinned_stt_incompatible_with_language_422(
             "to": "+14155559999",
             "system_prompt": "hi",
             "recipient_consent": True,
-            "voice_config": {"stt": "speechmatics", "language": "gu"},
+            "voice_config": {"stt": "speechmatics", "language": "da"},
         },
         headers={"Authorization": f"Bearer {plain}"},
     )
     assert resp.status_code == 422, resp.text
-    assert "speechmatics" in resp.text
     livekit_mock.dispatch_agent.assert_not_awaited()
 
 
-async def test_pinned_stt_without_speechmatics_key_422(
+async def test_language_with_no_speechmatics_key_still_201s(
     client: httpx.AsyncClient,
     async_session: AsyncSession,
     org_and_key: tuple[str, ApiKey, str],
@@ -1175,8 +1178,9 @@ async def test_pinned_stt_without_speechmatics_key_422(
     add_phone_number,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """An explicit speechmatics pin with no house key and no BYO row must
-    422 at the gate instead of dying post-dispatch with provider_key_error."""
+    """No per-call STT knob means the API never gates on Speechmatics key
+    availability — routing degrades safely inside the voicebot (deepgram +
+    VAD turn detection) instead of 422ing here."""
     from hailhq.core.config import settings
 
     monkeypatch.setattr(settings, "speechmatics_api_key", "")
@@ -1189,36 +1193,7 @@ async def test_pinned_stt_without_speechmatics_key_422(
             "to": "+14155559999",
             "system_prompt": "hi",
             "recipient_consent": True,
-            "voice_config": {"stt": "speechmatics", "language": "da"},
-        },
-        headers={"Authorization": f"Bearer {plain}"},
-    )
-    assert resp.status_code == 422, resp.text
-    assert "SPEECHMATICS_API_KEY" in resp.text
-    livekit_mock.dispatch_agent.assert_not_awaited()
-
-
-async def test_pinned_stt_with_house_key_accepted(
-    client: httpx.AsyncClient,
-    async_session: AsyncSession,
-    org_and_key: tuple[str, ApiKey, str],
-    livekit_mock: AsyncMock,
-    add_phone_number,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from hailhq.core.config import settings
-
-    monkeypatch.setattr(settings, "speechmatics_api_key", "sm-test-key")
-    org_id, _, plain = org_and_key
-    await add_phone_number(async_session, org_id)
-
-    resp = await client.post(
-        "/calls",
-        json={
-            "to": "+14155559999",
-            "system_prompt": "hi",
-            "recipient_consent": True,
-            "voice_config": {"stt": "speechmatics", "language": "da"},
+            "voice_config": {"language": "da"},
         },
         headers={"Authorization": f"Bearer {plain}"},
     )

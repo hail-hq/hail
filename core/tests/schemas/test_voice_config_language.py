@@ -19,11 +19,13 @@ def test_unsupported_language_rejected() -> None:
         VoiceConfig(language="xx")
 
 
-def test_stt_defaults_to_auto_and_accepts_speechmatics() -> None:
-    assert VoiceConfig().stt == "auto"
-    assert VoiceConfig(stt="speechmatics").stt == "speechmatics"
+def test_stt_field_removed() -> None:
+    """Per-call STT selection is gone — a client sending it gets a clean
+    422 via ``extra="forbid"`` (console BYO is the only STT selector)."""
     with pytest.raises(ValidationError):
-        VoiceConfig(stt="whisper")
+        VoiceConfig(stt="speechmatics")
+    with pytest.raises(ValidationError):
+        VoiceConfig(stt="auto")
 
 
 def test_openapi_schema_exposes_language_enum() -> None:

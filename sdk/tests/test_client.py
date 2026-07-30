@@ -150,33 +150,6 @@ async def test_calls_create_ai_disclosure_opt_out(base_url: str, api_key: str) -
 
 
 @respx.mock
-async def test_calls_create_stt_lands_in_voice_config(
-    base_url: str, api_key: str
-) -> None:
-    """stt= composes with language= under voice_config; omitted -> absent."""
-    route = respx.post(f"{base_url}/calls").mock(
-        return_value=httpx.Response(201, json=make_call_response())
-    )
-    async with Client(api_key=api_key, base_url=base_url) as c:
-        await c.calls.create(
-            to="+15555550123",
-            system_prompt="be polite",
-            recipient_consent=True,
-            language="da",
-            stt="speechmatics",
-        )
-        await c.calls.create(
-            to="+15555550123",
-            system_prompt="be polite",
-            recipient_consent=True,
-            stt="deepgram",
-        )
-    bodies = [json.loads(call.request.content) for call in route.calls]
-    assert bodies[0]["voice_config"] == {"language": "da", "stt": "speechmatics"}
-    assert bodies[1]["voice_config"] == {"stt": "deepgram"}
-
-
-@respx.mock
 async def test_calls_create_sends_consent_fields(base_url: str, api_key: str) -> None:
     route = respx.post(f"{base_url}/calls").mock(
         return_value=httpx.Response(201, json=make_call_response())

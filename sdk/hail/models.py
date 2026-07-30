@@ -51,7 +51,6 @@ class LLMConfig(BaseModel):
 class VoiceConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    stt: Literal["auto", "deepgram", "speechmatics"] = "auto"
     tts: Literal["cartesia"] = "cartesia"
     vad: Literal["silero"] = "silero"
     turn_detection: Literal["livekit"] = "livekit"

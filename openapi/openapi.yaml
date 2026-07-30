@@ -3673,19 +3673,6 @@ components:
       title: ValidationError
     VoiceConfig:
       properties:
-        stt:
-          type: string
-          enum:
-            - auto
-            - deepgram
-            - speechmatics
-          title: Stt
-          description:
-            "STT provider for the call. 'auto' (default) routes by language:
-            Deepgram where LiveKit's semantic turn detector covers the language,
-            Speechmatics elsewhere. An explicit value pins the provider (rejected
-            with 422 if it does not support the requested language)."
-          default: auto
         tts:
           type: string
           const: cartesia

@@ -127,16 +127,6 @@ class LLMConfig(BaseModel):
 class VoiceConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    stt: Literal["auto", "deepgram", "speechmatics"] = Field(
-        default="auto",
-        description=(
-            "STT provider for the call. 'auto' (default) routes by "
-            "language: Deepgram where LiveKit's semantic turn detector "
-            "covers the language, Speechmatics elsewhere. An explicit "
-            "value pins the provider (rejected with 422 if it does not "
-            "support the requested language)."
-        ),
-    )
     tts: Literal["cartesia"] = "cartesia"
     vad: Literal["silero"] = "silero"
     turn_detection: Literal["livekit"] = "livekit"

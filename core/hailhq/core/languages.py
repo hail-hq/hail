@@ -179,13 +179,13 @@ def default_stt_for(language: str | None) -> str:
     return "deepgram"
 
 
-def resolve_stt_provider(
-    requested: str, org_provider: str | None, language: str | None
-) -> str:
-    """Precedence mirrors the pipeline's layers: per-call pin > org BYO
-    standing choice > language auto-routing."""
-    if requested != "auto":
-        return requested
+def resolve_stt_provider(org_provider: str | None, language: str | None) -> str:
+    """Precedence: org BYO standing choice > language auto-routing.
+
+    STT provider selection is console-BYO-only — there is no per-call
+    override. An org row (set via the console) always wins; absent one,
+    the call auto-routes by language (see :func:`default_stt_for`).
+    """
     if org_provider is not None:
         return org_provider
     return default_stt_for(language)

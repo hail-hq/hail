@@ -21,8 +21,7 @@ hail call tail <id>       # follow the event stream for one call
 
 Language support:
 
-- `--language` — one of 39 lowercase ISO 639-1 codes (e.g. `en`, `da`, `hi`). Hail auto-routes STT and turn detection per language (see [docs/languages.md](languages.md) for the full table).
-- `--stt` — `deepgram` or `speechmatics` to pin the STT provider; default `auto` routes by language. See [docs/languages.md](languages.md) for language-provider compatibility.
+- `--language` — one of 39 lowercase ISO 639-1 codes (e.g. `en`, `da`, `hi`). Hail auto-routes STT and turn detection per language (see [docs/languages.md](languages.md) for the full table). STT provider selection is console-BYO-only — there is no per-call flag to pin one.
 
 ## SMS
 

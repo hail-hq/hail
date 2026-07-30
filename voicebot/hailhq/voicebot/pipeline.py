@@ -19,12 +19,14 @@ clean up). Three LLM modes are supported:
   (``fallback_enabled``). Absent a per-call override, this is the org's
   standing choice.
 
-Precedence per layer: per-call (mode B, TTS/STT have no per-call override
-today) > org BYO (mode C) > house default (mode A). A BYO layer that cannot
-be built (no key, unknown provider, unsafe URL) and has fallback disabled
-raises :class:`ProviderKeyError` — deliberately fail-fast, since silently
-substituting Hail's keys would defeat the point of BYO unless the org opted
-into the fallback.
+Precedence per layer: per-call (mode B; LLM only — TTS/STT have no per-call
+override) > org BYO (mode C) > house default (mode A). STT provider
+selection is console-BYO-only: the org's BYO row (mode C) wins, else the
+call auto-routes by language (see ``hailhq.core.languages``). A BYO layer
+that cannot be built (no key, unknown provider, unsafe URL) and has
+fallback disabled raises :class:`ProviderKeyError` — deliberately
+fail-fast, since silently substituting Hail's keys would defeat the point
+of BYO unless the org opted into the fallback.
 
 API surface verified 2026-04-28 against:
 
@@ -385,12 +387,13 @@ def build_stt(
 ) -> agents_stt.STT:
     """Construct the STT for one call.
 
-    ``provider`` arrives already resolved (per-call pin > org BYO row >
-    language auto-route — ``resolve_stt_provider``). The org row is used
-    only when its provider matches ``provider``; a row pinned away by the
-    per-call choice is ignored rather than billed. ``stt_drives_turns``
-    is set when the session's turn detection is ``"stt"`` — Speechmatics
-    then runs its ADAPTIVE end-of-utterance mode instead of EXTERNAL.
+    ``provider`` arrives already resolved (org BYO row > language
+    auto-route — ``resolve_stt_provider``). The org row is used only when
+    its provider matches ``provider``; a row the auto-route degraded away
+    from (e.g. an unsupported-language fallback) is ignored rather than
+    billed. ``stt_drives_turns`` is set when the session's turn detection
+    is ``"stt"`` — Speechmatics then runs its ADAPTIVE end-of-utterance
+    mode instead of EXTERNAL.
 
     An org row on a provider outside ``("deepgram", "speechmatics")`` fails
     fast with ``ProviderKeyError`` (matching ``_org_llm``/``_org_tts``)
@@ -454,7 +457,6 @@ def build_session(
     org_cfgs: dict[str, ResolvedLayer] | None = None,
     voice_id_override: str | None = None,
     language: str | None = None,
-    stt_choice: str = "auto",
 ) -> AgentSession:
     """Build the :class:`AgentSession` for one job.
 
@@ -465,12 +467,13 @@ def build_session(
     ``voice_config.language`` from dispatch metadata — the voice beats any
     org-level default, the language pins both STT and TTS.
 
-    ``stt_choice`` is the per-call ``voice_config.stt`` ("auto" routes by
-    language). Provider resolution: per-call pin > org BYO row > auto.
-    Auto only picks speechmatics when a key exists for it (org or house)
-    — a deepgram-only self-host keeps working (tenet 4). Turn detection:
-    semantic MultilingualModel for its 14 languages, "stt" when
-    speechmatics serves the call, "vad" as the floor.
+    STT provider selection is console-BYO-only (no per-call knob): the
+    org's BYO STT row wins (:func:`resolve_stt_provider`), else the call
+    auto-routes by language. Auto-routing only picks speechmatics when a
+    key exists for it (org or house) — a deepgram-only self-host keeps
+    working (tenet 4). Turn detection: semantic MultilingualModel for its
+    14 languages, "stt" when speechmatics serves the call, "vad" as the
+    floor.
 
     ``language`` arrives raw from dispatch metadata (a direct LiveKit
     dispatch can carry any string, bypassing the API's request-validation
@@ -487,12 +490,11 @@ def build_session(
         language = None
     org_cfgs = org_cfgs or {}
     org_stt = org_cfgs.get("stt")
-    provider = resolve_stt_provider(
-        stt_choice, org_stt.provider if org_stt else None, language
-    )
+    provider = resolve_stt_provider(org_stt.provider if org_stt else None, language)
     if language is not None and provider not in SUPPORTED_LANGUAGES[language].stt:
-        # Direct dispatch can bypass the API's 422 gate; deepgram covers
-        # every supported language, so degrade rather than fail the call.
+        # An org BYO STT row can name a provider that doesn't cover this
+        # language; deepgram covers every supported language, so degrade
+        # rather than fail the call.
         logger.warning(
             "language %r resolved to stt provider %r, which does not "
             "support it; dropping %r and falling back to deepgram (turn "
@@ -504,7 +506,6 @@ def build_session(
         provider = "deepgram"
     if (
         provider == "speechmatics"
-        and stt_choice == "auto"
         and not settings.speechmatics_api_key
         and not (org_stt and org_stt.provider == "speechmatics" and org_stt.api_key)
     ):

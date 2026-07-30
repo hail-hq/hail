@@ -1107,7 +1107,6 @@ async def entrypoint(ctx: JobContext) -> None:
     voice_cfg = metadata.get("voice_config") or {}
     voice_id_override = voice_cfg.get("voice_id")
     language = voice_cfg.get("language")
-    stt_choice = voice_cfg.get("stt") or "auto"
     try:
         # Loading + decrypting the org's BYO config, decrypting the per-call
         # llm key, and building the session must all sit inside this guard: a
@@ -1148,7 +1147,6 @@ async def entrypoint(ctx: JobContext) -> None:
                 org_cfgs=org_cfgs,
                 voice_id_override=voice_id_override,
                 language=language,
-                stt_choice=stt_choice,
             )
         except ProviderKeyError:
             raise

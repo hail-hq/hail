@@ -226,12 +226,12 @@ def test_build_stt_speechmatics_without_any_key_fails_fast(
         build_stt(language="da", provider="speechmatics")
 
 
-def _make_session(language, stt_choice="auto"):
+def _make_session(language, org_cfgs=None):
     from unittest.mock import MagicMock
 
     from hailhq.voicebot.pipeline import build_session
 
-    return build_session(None, MagicMock(), language=language, stt_choice=stt_choice)
+    return build_session(None, MagicMock(), org_cfgs=org_cfgs, language=language)
 
 
 def test_session_semantic_turns_for_covered_language() -> None:
@@ -249,10 +249,22 @@ def test_session_stt_turns_for_speechmatics_language() -> None:
     assert isinstance(session.stt, speechmatics_plugin.STT)
 
 
-def test_session_vad_turns_when_pinned_away_from_speechmatics() -> None:
+def test_session_org_deepgram_row_overrides_auto_speechmatics_routing() -> None:
+    """No per-call STT knob exists anymore: an org BYO deepgram row wins
+    over the language auto-route (which would otherwise pick speechmatics
+    for 'da'), matching resolve_stt_provider's org-row > auto precedence."""
+    from hailhq.voicebot.pipeline import ResolvedLayer
     from livekit.plugins import deepgram as deepgram_plugin
 
-    session = _make_session("da", stt_choice="deepgram")
+    org_cfgs = {
+        "stt": ResolvedLayer(
+            provider="deepgram",
+            api_key="org-deepgram-key",
+            params={},
+            fallback_enabled=False,
+        )
+    }
+    session = _make_session("da", org_cfgs=org_cfgs)
     assert session.turn_detection == "vad"
     assert isinstance(session.stt, deepgram_plugin.STT)
 
@@ -278,19 +290,28 @@ def test_session_auto_falls_back_to_deepgram_without_speechmatics_key(
     )
 
 
-def test_session_provider_pin_unsupported_by_language_degrades_to_deepgram(
+def test_session_org_row_unsupported_by_language_degrades_to_deepgram(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     """'gu' (Gujarati) has no Speechmatics coverage (``_NO_SPEECHMATICS``).
-    Dispatch metadata can still pin ``stt_choice="speechmatics"`` for it
-    (bypassing the API's 422 gate), so ``build_session`` must degrade to
+    An org's console BYO STT row can still name speechmatics generally
+    (it's not language-scoped), so ``build_session`` must degrade to
     deepgram rather than construct an incompatible provider — and warn."""
     import logging
 
+    from hailhq.voicebot.pipeline import ResolvedLayer
     from livekit.plugins import deepgram as deepgram_plugin
 
+    org_cfgs = {
+        "stt": ResolvedLayer(
+            provider="speechmatics",
+            api_key="org-sm-key",
+            params={},
+            fallback_enabled=False,
+        )
+    }
     with caplog.at_level(logging.WARNING, logger="hailhq.voicebot"):
-        session = _make_session("gu", stt_choice="speechmatics")
+        session = _make_session("gu", org_cfgs=org_cfgs)
     assert isinstance(session.stt, deepgram_plugin.STT)
     assert any(
         "gu" in record.message and "speechmatics" in record.message

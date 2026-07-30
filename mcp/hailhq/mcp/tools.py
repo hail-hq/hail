@@ -49,7 +49,7 @@ import base64
 import contextlib
 import uuid
 from collections.abc import AsyncIterator
-from typing import Any, Literal
+from typing import Any
 
 from hailhq.core.schemas import parse_resource_id
 from hailhq.mcp.auth import AuthMode
@@ -113,7 +113,6 @@ async def place_call(
     from_: str | None = None,
     first_message: str | None = None,
     language: str | None = None,
-    stt: Literal["auto", "deepgram", "speechmatics"] | None = None,
     ai_disclosure: bool = True,
     metadata: dict[str, Any] | None = None,
     tools: list[str] | None = None,
@@ -133,7 +132,6 @@ async def place_call(
             from_=from_,
             first_message=first_message,
             language=language,
-            stt=stt,
             ai_disclosure=ai_disclosure,
             metadata=metadata,
             tools=tools,
@@ -539,7 +537,6 @@ def register_tools(
         from_: str | None = None,
         first_message: str | None = None,
         language: str | None = None,
-        stt: Literal["auto", "deepgram", "speechmatics"] | None = None,
         ai_disclosure: bool = True,
         metadata: dict[str, Any] | None = None,
         tools: list[str] | None = None,
@@ -564,9 +561,9 @@ def register_tools(
         ``language`` sets the call's spoken language for speech-to-text,
         text-to-speech, and turn detection, as a lowercase ISO 639-1 code
         (e.g. ``"da"``); 39 languages are supported (server rejects others
-        with 422); omit for English. ``stt`` pins the speech-to-text
-        provider (``"deepgram"`` or ``"speechmatics"``); omit for
-        automatic per-language routing.
+        with 422); omit for English. STT provider selection is
+        console-BYO-only (no per-call override); configure it on the
+        organization to pin a provider.
         ``ai_disclosure=False`` skips the spoken "this is an AI
         assistant" line at the start of the call. Leave enabled unless
         the user has verified it is not required for this call — US
@@ -613,7 +610,6 @@ def register_tools(
                     from_=from_,
                     first_message=first_message,
                     language=language,
-                    stt=stt,
                     ai_disclosure=ai_disclosure,
                     metadata=metadata,
                     tools=tools,

@@ -17,13 +17,13 @@ capabilities mismatch.
 A 10-agent research workflow (2026-07-29, adversarially verified, zero
 corrections) produced a language-support matrix from official provider docs:
 
-| Capability | Model | Streaming languages |
-|---|---|---|
-| STT | Deepgram nova-3 | ~50, incl. da/sv/no/fi (expanded through 2025) |
-| STT | Speechmatics enhanced/standard | ~50, incl. all Nordics; built-in end-of-utterance for all languages |
-| TTS | Cartesia sonic-3.5 (house primary) | 42 |
-| TTS | ElevenLabs eleven_turbo_v2_5 (house fallback) | 32 |
-| Turn detection | LiveKit MultilingualModel | 14: en es fr de it pt nl zh ja ko id tr ru hi |
+| Capability     | Model                                         | Streaming languages                                                 |
+| -------------- | --------------------------------------------- | ------------------------------------------------------------------- |
+| STT            | Deepgram nova-3                               | ~50, incl. da/sv/no/fi (expanded through 2025)                      |
+| STT            | Speechmatics enhanced/standard                | ~50, incl. all Nordics; built-in end-of-utterance for all languages |
+| TTS            | Cartesia sonic-3.5 (house primary)            | 42                                                                  |
+| TTS            | ElevenLabs eleven_turbo_v2_5 (house fallback) | 32                                                                  |
+| Turn detection | LiveKit MultilingualModel                     | 14: en es fr de it pt nl zh ja ko id tr ru hi                       |
 
 Key sources: docs.cartesia.ai/build-with-cartesia/tts-models/latest,
 docs.speechmatics.com/speech-to-text/realtime/end-of-turn,
@@ -67,47 +67,47 @@ Supported = (nova-3 ∪ Speechmatics STT) ∩ Cartesia sonic-3.5.
 Excluded for capability mismatch: `ka`, `ml`, `pa` (STT only on
 Whisper-based models hail doesn't run).
 
-| Code | Language | Auto STT route | Turn detection | ElevenLabs TTS fallback |
-|---|---|---|---|---|
-| ar | Arabic | speechmatics | STT-adaptive | yes |
-| bg | Bulgarian | speechmatics | STT-adaptive | yes |
-| bn | Bengali | speechmatics | STT-adaptive | no |
-| cs | Czech | speechmatics | STT-adaptive | yes |
-| da | Danish | speechmatics | STT-adaptive | yes |
-| de | German | deepgram | semantic (LiveKit) | yes |
-| el | Greek | speechmatics | STT-adaptive | yes |
-| en | English | deepgram | semantic (LiveKit) | yes |
-| es | Spanish | deepgram | semantic (LiveKit) | yes |
-| fi | Finnish | speechmatics | STT-adaptive | yes |
-| fr | French | deepgram | semantic (LiveKit) | yes |
-| gu | Gujarati | deepgram | VAD only | no |
-| he | Hebrew | speechmatics | STT-adaptive | no |
-| hi | Hindi | deepgram | semantic (LiveKit) | yes |
-| hr | Croatian | speechmatics | STT-adaptive | yes |
-| hu | Hungarian | speechmatics | STT-adaptive | yes |
-| id | Indonesian | deepgram | semantic (LiveKit) | yes |
-| it | Italian | deepgram | semantic (LiveKit) | yes |
-| ja | Japanese | deepgram | semantic (LiveKit) | yes |
-| kn | Kannada | deepgram | VAD only | no |
-| ko | Korean | deepgram | semantic (LiveKit) | yes |
-| mr | Marathi | speechmatics | STT-adaptive | no |
-| ms | Malay | speechmatics | STT-adaptive | yes |
-| nl | Dutch | deepgram | semantic (LiveKit) | yes |
-| no | Norwegian | speechmatics | STT-adaptive | yes |
-| pl | Polish | speechmatics | STT-adaptive | yes |
-| pt | Portuguese | deepgram | semantic (LiveKit) | yes |
-| ro | Romanian | speechmatics | STT-adaptive | yes |
-| ru | Russian | deepgram | semantic (LiveKit) | yes |
-| sk | Slovak | speechmatics | STT-adaptive | yes |
-| sv | Swedish | speechmatics | STT-adaptive | yes |
-| ta | Tamil | speechmatics | STT-adaptive | yes |
-| te | Telugu | deepgram | VAD only | no |
-| th | Thai | speechmatics | STT-adaptive | no |
-| tl | Tagalog | speechmatics | STT-adaptive | yes |
-| tr | Turkish | deepgram | semantic (LiveKit) | yes |
-| uk | Ukrainian | speechmatics | STT-adaptive | yes |
-| vi | Vietnamese | speechmatics | STT-adaptive | yes |
-| zh | Chinese | deepgram | semantic (LiveKit) | yes |
+| Code | Language   | Auto STT route | Turn detection     | ElevenLabs TTS fallback |
+| ---- | ---------- | -------------- | ------------------ | ----------------------- |
+| ar   | Arabic     | speechmatics   | STT-adaptive       | yes                     |
+| bg   | Bulgarian  | speechmatics   | STT-adaptive       | yes                     |
+| bn   | Bengali    | speechmatics   | STT-adaptive       | no                      |
+| cs   | Czech      | speechmatics   | STT-adaptive       | yes                     |
+| da   | Danish     | speechmatics   | STT-adaptive       | yes                     |
+| de   | German     | deepgram       | semantic (LiveKit) | yes                     |
+| el   | Greek      | speechmatics   | STT-adaptive       | yes                     |
+| en   | English    | deepgram       | semantic (LiveKit) | yes                     |
+| es   | Spanish    | deepgram       | semantic (LiveKit) | yes                     |
+| fi   | Finnish    | speechmatics   | STT-adaptive       | yes                     |
+| fr   | French     | deepgram       | semantic (LiveKit) | yes                     |
+| gu   | Gujarati   | deepgram       | VAD only           | no                      |
+| he   | Hebrew     | speechmatics   | STT-adaptive       | no                      |
+| hi   | Hindi      | deepgram       | semantic (LiveKit) | yes                     |
+| hr   | Croatian   | speechmatics   | STT-adaptive       | yes                     |
+| hu   | Hungarian  | speechmatics   | STT-adaptive       | yes                     |
+| id   | Indonesian | deepgram       | semantic (LiveKit) | yes                     |
+| it   | Italian    | deepgram       | semantic (LiveKit) | yes                     |
+| ja   | Japanese   | deepgram       | semantic (LiveKit) | yes                     |
+| kn   | Kannada    | deepgram       | VAD only           | no                      |
+| ko   | Korean     | deepgram       | semantic (LiveKit) | yes                     |
+| mr   | Marathi    | speechmatics   | STT-adaptive       | no                      |
+| ms   | Malay      | speechmatics   | STT-adaptive       | yes                     |
+| nl   | Dutch      | deepgram       | semantic (LiveKit) | yes                     |
+| no   | Norwegian  | speechmatics   | STT-adaptive       | yes                     |
+| pl   | Polish     | speechmatics   | STT-adaptive       | yes                     |
+| pt   | Portuguese | deepgram       | semantic (LiveKit) | yes                     |
+| ro   | Romanian   | speechmatics   | STT-adaptive       | yes                     |
+| ru   | Russian    | deepgram       | semantic (LiveKit) | yes                     |
+| sk   | Slovak     | speechmatics   | STT-adaptive       | yes                     |
+| sv   | Swedish    | speechmatics   | STT-adaptive       | yes                     |
+| ta   | Tamil      | speechmatics   | STT-adaptive       | yes                     |
+| te   | Telugu     | deepgram       | VAD only           | no                      |
+| th   | Thai       | speechmatics   | STT-adaptive       | no                      |
+| tl   | Tagalog    | speechmatics   | STT-adaptive       | yes                     |
+| tr   | Turkish    | deepgram       | semantic (LiveKit) | yes                     |
+| uk   | Ukrainian  | speechmatics   | STT-adaptive       | yes                     |
+| vi   | Vietnamese | speechmatics   | STT-adaptive       | yes                     |
+| zh   | Chinese    | deepgram       | semantic (LiveKit) | yes                     |
 
 Provider capability sets (for BYO validation):
 
@@ -245,3 +245,25 @@ validated via the new probe through the existing validation endpoint.
 - Cartesia STT (ink-2/ink-whisper) as a provider.
 - Regional variants (en-US vs en-GB) — base ISO 639-1 codes only.
 - Auto language detection (caller must specify the language).
+
+## Amendment 2026-07-30
+
+Owner decision: per-call STT provider pinning is removed. STT provider
+selection happens **only** via the org's console BYO row. Routing
+becomes: org BYO STT row > language auto-route (the per-call pin layer
+above it is gone; the `stt_choice`/pin parameter is deleted from
+`resolve_stt_provider` and `build_session`).
+
+This supersedes:
+
+- Section 2's `voice_config.stt` field (the `VoiceConfig.stt` Literal
+  described above) — deleted from the public schema. A client that still
+  sends `voice_config.stt` gets a clean 422 via `extra="forbid"`.
+- The CLI's `--stt` flag, the SDK's `Client.calls.create(stt=...)`
+  parameter, and the MCP `place_call` tool's `stt` parameter — all
+  removed from their respective public surfaces.
+
+Unchanged by this amendment: the `tts`/`vad`/`turn_detection` descriptor
+fields on `VoiceConfig`; the auto-degrade behavior for org-speechmatics +
+unsupported language (warn + house deepgram — still an open product
+question); the `language` enum; all turn-detection logic.

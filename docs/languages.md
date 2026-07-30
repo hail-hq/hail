@@ -10,9 +10,11 @@ hail call +4512345678 --language da \
 ```
 
 Hail picks the speech-to-text provider and turn-detection strategy per
-language automatically. Pin the STT provider with `--stt deepgram|speechmatics`
-(API: `voice_config.stt`; default `auto`). Unsupported codes and
-incompatible language/provider combos are rejected with `422`.
+language automatically. STT provider selection is console-BYO-only —
+there is no per-call knob; configure a BYO STT provider on your
+organization in the website console to pin one. Unsupported codes and
+incompatible language/provider combos (e.g. a BYO TTS provider that
+doesn't support the language) are rejected with `422`.
 
 | Code | Language   | Auto STT     | Turn detection | TTS fallback |
 | ---- | ---------- | ------------ | -------------- | ------------ |
@@ -58,7 +60,8 @@ incompatible language/provider combos are rejected with `422`.
 
 Column meanings:
 
-- **Auto STT** — provider chosen when `stt` is `auto`. "speechmatics"
+- **Auto STT** — provider chosen by language auto-routing (used unless
+  the org has a BYO STT row configured, which always wins). "speechmatics"
   requires `SPEECHMATICS_API_KEY` (or a BYO Speechmatics key); without
   one, the call falls back to Deepgram with VAD turn detection.
 - **Turn detection** — `semantic` = LiveKit's transcript-based turn

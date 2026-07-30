@@ -49,13 +49,11 @@ def test_default_stt_routing() -> None:
 
 
 def test_resolve_stt_provider_precedence() -> None:
-    # per-call pin wins over org row and auto
-    assert resolve_stt_provider("deepgram", "speechmatics", "da") == "deepgram"
     # org BYO row wins over auto
-    assert resolve_stt_provider("auto", "speechmatics", "en") == "speechmatics"
-    # auto with no org row -> routed
-    assert resolve_stt_provider("auto", None, "da") == "speechmatics"
-    assert resolve_stt_provider("auto", None, None) == "deepgram"
+    assert resolve_stt_provider("speechmatics", "en") == "speechmatics"
+    # no org row -> routed
+    assert resolve_stt_provider(None, "da") == "speechmatics"
+    assert resolve_stt_provider(None, None) == "deepgram"
 
 
 def test_tts_providers_trim() -> None:

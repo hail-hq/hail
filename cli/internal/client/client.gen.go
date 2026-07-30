@@ -642,27 +642,6 @@ func (e VoiceConfigLanguage) Valid() bool {
 	}
 }
 
-// Defines values for VoiceConfigStt.
-const (
-	Auto         VoiceConfigStt = "auto"
-	Deepgram     VoiceConfigStt = "deepgram"
-	Speechmatics VoiceConfigStt = "speechmatics"
-)
-
-// Valid indicates whether the value is a known member of the VoiceConfigStt enum.
-func (e VoiceConfigStt) Valid() bool {
-	switch e {
-	case Auto:
-		return true
-	case Deepgram:
-		return true
-	case Speechmatics:
-		return true
-	default:
-		return false
-	}
-}
-
 // Defines values for WebhookDeliveryResponseStatus.
 const (
 	WebhookDeliveryResponseStatusDead      WebhookDeliveryResponseStatus = "dead"
@@ -1579,21 +1558,15 @@ type ValidationError_Loc_Item struct {
 // VoiceConfig defines model for VoiceConfig.
 type VoiceConfig struct {
 	// Language Spoken language for the call as a lowercase ISO 639-1 code (e.g. 'da'). One of the 39 supported codes — see docs/languages.md. Applied to STT, TTS, and turn detection. Omitted: the providers' defaults (English).
-	Language *VoiceConfigLanguage `json:"language,omitempty"`
-
-	// Stt STT provider for the call. 'auto' (default) routes by language: Deepgram where LiveKit's semantic turn detector covers the language, Speechmatics elsewhere. An explicit value pins the provider (rejected with 422 if it does not support the requested language).
-	Stt           *VoiceConfigStt `json:"stt,omitempty"`
-	Tts           *string         `json:"tts,omitempty"`
-	TurnDetection *string         `json:"turn_detection,omitempty"`
-	Vad           *string         `json:"vad,omitempty"`
-	VoiceId       *string         `json:"voice_id,omitempty"`
+	Language      *VoiceConfigLanguage `json:"language,omitempty"`
+	Tts           *string              `json:"tts,omitempty"`
+	TurnDetection *string              `json:"turn_detection,omitempty"`
+	Vad           *string              `json:"vad,omitempty"`
+	VoiceId       *string              `json:"voice_id,omitempty"`
 }
 
 // VoiceConfigLanguage Spoken language for the call as a lowercase ISO 639-1 code (e.g. 'da'). One of the 39 supported codes — see docs/languages.md. Applied to STT, TTS, and turn detection. Omitted: the providers' defaults (English).
 type VoiceConfigLanguage string
-
-// VoiceConfigStt STT provider for the call. 'auto' (default) routes by language: Deepgram where LiveKit's semantic turn detector covers the language, Speechmatics elsewhere. An explicit value pins the provider (rejected with 422 if it does not support the requested language).
-type VoiceConfigStt string
 
 // WebhookDeliveryListResponse defines model for WebhookDeliveryListResponse.
 type WebhookDeliveryListResponse struct {

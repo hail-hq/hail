@@ -223,33 +223,19 @@ async def create_call(
     # created. Deterministic on request + org config, so failures are
     # cached for idempotent replay like the other 422 gates.
     lang = body.voice_config.language
-    stt_pin = body.voice_config.stt
     org_rows = (
         await load_org_provider_configs(db, principal.organization_id)
-        if lang is not None or stt_pin == "speechmatics"
+        if lang is not None
         else {}
     )
     if lang is not None:
         caps = SUPPORTED_LANGUAGES[lang]
-        # An explicit pin is checked verbatim — with stt != "auto",
-        # resolve_stt_provider would return the pin unchanged, and the org
-        # BYO STT row deliberately never participates in this gate (auto
-        # routing degrades safely inside the voicebot).
-        if stt_pin != "auto" and stt_pin not in caps.stt:
-            raise await cache_failure(
-                idem,
-                unprocessable(
-                    f"stt provider '{stt_pin}' does not support language "
-                    f"'{lang}'; supported providers: {sorted(caps.stt)}",
-                    loc=["body", "voice_config", "stt"],
-                ),
-            )
-        # Asymmetric with the STT gate above: STT only 422s an *explicit*
-        # pin (stt != "auto"), because auto-routing degrades safely inside
-        # the voicebot — deepgram covers every supported language, so an
-        # unpinned request never fails the call. TTS has no per-call pin at
-        # all; the org's BYO TTS row is the sole source of truth, so it's
-        # always checked here regardless of voice_config contents.
+        # Asymmetric by design: the STT side never 422s here — STT provider
+        # selection is console-BYO-only (no per-call knob), and routing
+        # (org BYO row > language auto-route) degrades safely inside the
+        # voicebot (deepgram covers every supported language). TTS has no
+        # per-call pin either; the org's BYO TTS row is the sole source of
+        # truth, so it's checked here regardless of voice_config contents.
         tts_row = org_rows.get("tts")
         if tts_row is not None and tts_row.provider not in caps.tts:
             raise await cache_failure(
@@ -259,28 +245,6 @@ async def create_call(
                     f"support language '{lang}'; supported providers: "
                     f"{sorted(caps.tts)}",
                     loc=["body", "voice_config", "language"],
-                ),
-            )
-    # An explicit speechmatics pin with no usable key would otherwise be
-    # accepted here and then die post-dispatch in the voicebot with
-    # provider_key_error (the voicebot's deepgram degrade applies to
-    # stt="auto" only — a pin is honored or fails). Reject up front; the
-    # check is deterministic on request + org config + deployment env, so
-    # the failure is cached for idempotent replay like the gates above.
-    if stt_pin == "speechmatics" and not settings.speechmatics_api_key:
-        stt_row = org_rows.get("stt")
-        if not (
-            stt_row is not None
-            and stt_row.provider == "speechmatics"
-            and stt_row.encrypted_api_key is not None
-        ):
-            raise await cache_failure(
-                idem,
-                unprocessable(
-                    "stt provider 'speechmatics' is pinned but no Speechmatics "
-                    "API key is available (set SPEECHMATICS_API_KEY or add a "
-                    "BYO speechmatics STT config)",
-                    loc=["body", "voice_config", "stt"],
                 ),
             )
 
