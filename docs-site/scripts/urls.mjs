@@ -13,6 +13,7 @@
 import { readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { slugSegments } from "../lib/doc-slug.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const CONTENT = resolve(here, "../../docs/public");
@@ -26,16 +27,13 @@ function walk(dir) {
   });
 }
 
+// Same slug rule as lib/source.ts, via the shared helper — a bare "/docs" for
+// the root index, "/docs/<segments>" otherwise.
 const urls = walk(CONTENT)
-  .map((file) =>
-    "/docs/" +
-    relative(CONTENT, file)
-      .replace(/\.md$/, "")
-      .split("/")
-      .filter((s) => s !== "README")
-      .join("/"),
-  )
-  .map((u) => u.replace(/\/$/, "") || "/docs")
+  .map((file) => {
+    const segments = slugSegments(relative(CONTENT, file).split("\\").join("/"));
+    return segments.length ? "/docs/" + segments.join("/") : "/docs";
+  })
   .sort();
 
 if (process.argv.includes("--check")) {
