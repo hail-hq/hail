@@ -311,7 +311,11 @@ async def create_call(
     call_metadata = dict(body.metadata)
     if pool_number is not None:
         call_metadata[CALL_META_FROM_POOL] = True
-    call_metadata[CALL_META_BILLED] = principal.api_key_id is not None
+    # Billed unless this is the unbilled self-hosted shared key. Both real API
+    # keys and console/website JWTs are billed, so the mid-call agent funds
+    # re-check (internal/agent._shared_denial) applies to them — keying on
+    # ``api_key_id is not None`` would wrongly exempt every JWT-placed call.
+    call_metadata[CALL_META_BILLED] = principal.auth_kind != "shared"
 
     call = Call(
         organization_id=principal.organization_id,

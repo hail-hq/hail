@@ -19,7 +19,7 @@ import json
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from typing import Annotated
+from typing import Annotated, Literal
 
 import jwt as _pyjwt
 from fastapi import Depends, Header, HTTPException, status
@@ -69,6 +69,13 @@ def reset_caches() -> None:
 class Principal(BaseModel):
     """The authenticated caller, exposed to route handlers.
 
+    ``auth_kind`` is the authentication path that produced this principal.
+    Prefer it over ``api_key_id is None`` for "is this a billed caller?"
+    questions: ``api_key_id`` is ``None`` on **both** the shared-key and JWT
+    paths, so it cannot tell a real (billable) console/website session apart
+    from the unbilled self-hosted master key. Only ``"shared"`` is exempt from
+    billing; ``"apikey"`` and ``"jwt"`` are both billed principals.
+
     ``api_key_id`` is ``None`` on shared-key (``HAIL_API_KEY``) and JWT
     requests — neither corresponds to a row in ``api_keys``.
 
@@ -77,6 +84,7 @@ class Principal(BaseModel):
     shared-key (``HAIL_API_KEY``) path, which carries no caller identity.
     """
 
+    auth_kind: Literal["apikey", "jwt", "shared"]
     api_key_id: uuid.UUID | None
     user_id: uuid.UUID | None
     organization_id: uuid.UUID
@@ -218,6 +226,7 @@ async def _principal_from_apikey_table(token: str, db: AsyncSession) -> Principa
         user_id = None
 
     return Principal(
+        auth_kind="apikey",
         api_key_id=api_key.id,
         user_id=user_id,
         organization_id=organization_id,
@@ -324,6 +333,7 @@ async def _principal_from_jwt(token: str, db: AsyncSession) -> Principal:
         )
 
     return Principal(
+        auth_kind="jwt",
         api_key_id=None,
         user_id=user_uuid,
         organization_id=organization_id,
@@ -339,6 +349,7 @@ async def get_current_principal(
 
     if _check_shared_key(token):
         return Principal(
+            auth_kind="shared",
             api_key_id=None,
             user_id=None,
             organization_id=SELF_HOSTED_ORG_ID,

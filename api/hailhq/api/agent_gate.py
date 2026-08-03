@@ -49,8 +49,12 @@ async def require_agent_send_allowed(
     to+cc+bcc (deduped/normalized); sms and calls pass a one-element list
     for their single destination. Every recipient counts toward the caps.
 
-    No-op for human-origin orgs and for the self-hosted shared-key path
-    (``api_key_id is None`` — same posture as require_funds)."""
+    No-op for human-origin callers: both the console/website JWT path and the
+    self-hosted shared key skip these agent velocity caps (``api_key_id`` is
+    None on both). Only API-key traffic is agent-origin and rate limited here.
+    NOTE: this is deliberately NOT the same predicate as require_funds — the
+    funds gate bills JWT sessions (``auth_kind``), the velocity gate exempts
+    them, because a JWT session is a human at the console, not an agent."""
     if principal.api_key_id is None:
         return
     denial = await check_agent_send_allowed(

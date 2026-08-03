@@ -2,6 +2,8 @@
 
 Covers:
   * the uniform 402 gate on POST /v1/calls (per-user apikey path)
+  * the same 402 gate on the JWT (console/website) path — a per-user key and a
+    session JWT are both billed principals; only the shared key is exempt
   * the shared-key (`HAIL_API_KEY`) bypass path via the ``self-hosted`` sentinel org
   * `AccountCredit` CHECK constraints
   * OSS fallback when the auth backend's apikey table is absent
@@ -9,6 +11,7 @@ Covers:
 
 from __future__ import annotations
 
+import uuid
 from decimal import Decimal
 
 import httpx
@@ -74,6 +77,93 @@ async def test_post_calls_succeeds_per_user_key_positive_balance(
             "recipient_consent": True,
         },
         headers={"Authorization": f"Bearer {plain}"},
+    )
+    assert resp.status_code == 201
+
+
+# --------------------------------------------------------------------------- #
+# JWT (console / website) path — a session JWT is a billed principal too
+# --------------------------------------------------------------------------- #
+
+
+def _configure_jwt(monkeypatch: pytest.MonkeyPatch, claims: dict) -> None:
+    """Make a JWT-shaped bearer authenticate as ``claims`` without real crypto.
+
+    ``_jwt_configured()`` must see an auth url + audiences, and the two JWT
+    helpers are stubbed so ``Bearer a.b.c`` resolves to the crafted claim set.
+    Mirrors ``_patch_jwt`` in test_jwt_active_org.py.
+    """
+    monkeypatch.setattr(
+        "hailhq.core.config.settings.hail_auth_url", "https://issuer.example.com"
+    )
+    monkeypatch.setattr(
+        "hailhq.core.config.settings.hail_auth_audiences", "https://api.example.com"
+    )
+    monkeypatch.setattr(deps_module, "get_jwks_cache", lambda: object())
+
+    async def _fake_verify(*_a, **_k) -> dict:
+        return claims
+
+    monkeypatch.setattr(deps_module, "verify_jwt", _fake_verify)
+
+
+async def test_post_calls_402_jwt_zero_balance(
+    client: httpx.AsyncClient,
+    async_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """JWT (console/welcome) principal + zero balance returns 402.
+
+    Regression guard: the funds gate keyed on ``api_key_id is None``, which is
+    also None on the JWT path, so every browser-session call skipped the
+    balance check. A new $0 org placing a call from the website must 402.
+    """
+    user_id = str(uuid.uuid4())
+    org_id, _, _ = await insert_org_and_key(
+        async_session,
+        org_slug="jwt-broke",
+        auth_user_id=user_id,
+        initial_credit_cents=0,
+    )
+    _configure_jwt(monkeypatch, {"sub": user_id, "activeOrganizationId": str(org_id)})
+
+    resp = await client.post(
+        "/calls",
+        json=_DEFAULT_BODY,
+        headers={"Authorization": "Bearer a.b.c"},
+    )
+    assert resp.status_code == 402
+    assert "credits" in resp.json()["detail"].lower()
+
+
+async def test_post_calls_succeeds_jwt_positive_balance(
+    client: httpx.AsyncClient,
+    async_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+    add_phone_number,
+) -> None:
+    """JWT principal + positive balance + active number → call queued.
+
+    Proves the gate fix does not break paying console/website users.
+    """
+    user_id = str(uuid.uuid4())
+    org_id, _, _ = await insert_org_and_key(
+        async_session,
+        org_slug="jwt-flush",
+        auth_user_id=user_id,
+        initial_credit_cents=10_000,
+    )
+    await add_phone_number(async_session, org_id, e164="+14155551234")
+    _configure_jwt(monkeypatch, {"sub": user_id, "activeOrganizationId": str(org_id)})
+
+    resp = await client.post(
+        "/calls",
+        json={
+            "to": "+14155559999",
+            "system_prompt": "hi",
+            "recipient_consent": True,
+        },
+        headers={"Authorization": "Bearer a.b.c"},
     )
     assert resp.status_code == 201
 
