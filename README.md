@@ -18,7 +18,7 @@ docker compose up
 Authenticate:
 
 - **Hail Cloud** (managed at hail.so): `hail login` runs the device-flow and saves an API key to `~/.hail/credentials.json`.
-- **Self-host**: seed an API key directly into your local stack — see [docs/operations.md](docs/operations.md) "First-run DB seed". Then export `HAIL_API_KEY` (or pass `--api-key`).
+- **Self-host**: seed an API key directly into your local stack — see [docs/public/operations.md](docs/public/operations.md) "First-run DB seed". Then export `HAIL_API_KEY` (or pass `--api-key`).
 
 Use it — CLI (for humans scripting Hail):
 
@@ -71,7 +71,7 @@ curl -X POST http://localhost:8080/emails \
 
 ![Animated terminal demo of hail tail streaming live call events](docs/assets/gifs/hail-tail-live-stream.gif)
 
-Full setup: [docs/setup/twilio.md](docs/setup/twilio.md), [docs/setup/livekit-cloud.md](docs/setup/livekit-cloud.md), [docs/setup/aws-ses.md](docs/setup/aws-ses.md), [docs/setup/mcp.md](docs/setup/mcp.md).
+Full setup: [docs/public/setup/twilio.md](docs/public/setup/twilio.md), [docs/public/setup/livekit-cloud.md](docs/public/setup/livekit-cloud.md), [docs/public/setup/aws-ses.md](docs/public/setup/aws-ses.md), [docs/public/setup/mcp.md](docs/public/setup/mcp.md).
 
 ## Tenets
 
@@ -140,7 +140,7 @@ Checked = shipped. Per-artifact changelogs (GitHub Releases for the CLI, PyPI re
   - [x] `hail` binary via GitHub Releases
 - MCP server
   - [x] Remote Streamable HTTP endpoint bundled with every Hail deploy
-  - ~~PyPI stdio package~~ — intentionally not shipped; see [docs/setup/mcp.md](docs/setup/mcp.md)
+  - ~~PyPI stdio package~~ — intentionally not shipped; see [docs/public/setup/mcp.md](docs/public/setup/mcp.md)
 - Python SDK
   - [x] `hail-sdk` on PyPI, imports as `hail`
 
@@ -156,11 +156,11 @@ Checked = shipped. Per-artifact changelogs (GitHub Releases for the CLI, PyPI re
 AI agent ──► Hail API ──dispatch──► Voicebot ──► LiveKit Cloud ──SIP──► Twilio ──► 📞
 ```
 
-Full diagram: [docs/architecture.md](docs/architecture.md).
+Full diagram: [docs/public/architecture.md](docs/public/architecture.md).
 
 ## Contributing
 
-See [docs/contributing.md](docs/contributing.md). TL;DR: fork, branch, conventional-commit, PR. Provider adapters go in `core/hailhq/core/providers/`. Update `.env.example` for any new env var.
+See [docs/public/contributing.md](docs/public/contributing.md). TL;DR: fork, branch, conventional-commit, PR. Provider adapters go in `core/hailhq/core/providers/`. Update `.env.example` for any new env var.
 
 ## License
 

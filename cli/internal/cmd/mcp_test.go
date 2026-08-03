@@ -14,7 +14,7 @@ func TestMcpEndpoint_TextForm_DerivesFromAPIURL(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	// docs/setup/mcp.md is explicit: the Streamable HTTP transport serves at
+	// docs/public/setup/mcp.md is explicit: the Streamable HTTP transport serves at
 	// the root path, no `/mcp` suffix. Assert both presence of the canonical
 	// host and absence of any path append.
 	if !strings.Contains(stdout, "https://mcp.hail.so") || strings.Contains(stdout, "mcp.hail.so/") {
@@ -38,7 +38,7 @@ func TestMcpEndpoint_JSON(t *testing.T) {
 		t.Fatalf("expected JSON, got %q (err: %v)", stdout, err)
 	}
 	if v.URL != "https://mcp.hail.so" {
-		t.Fatalf("url mismatch: %q (canonical per docs/setup/mcp.md is root path, no /mcp)", v.URL)
+		t.Fatalf("url mismatch: %q (canonical per docs/public/setup/mcp.md is root path, no /mcp)", v.URL)
 	}
 	if v.Transport != "streamable-http" {
 		t.Fatalf("transport mismatch: %q", v.Transport)

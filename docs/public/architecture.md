@@ -36,11 +36,11 @@ LiveKit Cloud is external. The `hail` Go CLI is a human-facing scriptable tool, 
 
 ### Answering machine detection and DTMF
 
-Every outbound call runs LiveKit's AMD ([`voicebot/hailhq/voicebot/amd.py`](../voicebot/hailhq/voicebot/amd.py)) against the greeting, classifying on the session's own LLM and STT rather than LiveKit Inference. `machine-vm` and `machine-unavailable` hang up without speaking — no message is ever left — and record `status=no_answer` with `end_reason=voicemail_reached` / `machine_unavailable`. `human` and `uncertain` proceed normally. `machine-ivr` does **not** speak the greeting — a menu cannot hear it, and `session.say` is TTS-only so it would give the LLM no turn in which to press a key. Instead the agent takes a real LLM turn (`generate_reply`) carrying the captured menu text and the `send_dtmf` tool, and the disclosure is deferred until the first person speaks. The verdict lands in `call_events` as an `amd_result` row on every call. A detection failure is non-fatal: the call proceeds as if a human answered.
+Every outbound call runs LiveKit's AMD ([`voicebot/hailhq/voicebot/amd.py`](https://github.com/hail-hq/hail/blob/main/voicebot/hailhq/voicebot/amd.py)) against the greeting, classifying on the session's own LLM and STT rather than LiveKit Inference. `machine-vm` and `machine-unavailable` hang up without speaking — no message is ever left — and record `status=no_answer` with `end_reason=voicemail_reached` / `machine_unavailable`. `human` and `uncertain` proceed normally. `machine-ivr` does **not** speak the greeting — a menu cannot hear it, and `session.say` is TTS-only so it would give the LLM no turn in which to press a key. Instead the agent takes a real LLM turn (`generate_reply`) carrying the captured menu text and the `send_dtmf` tool, and the disclosure is deferred until the first person speaks. The verdict lands in `call_events` as an `amd_result` row on every call. A detection failure is non-fatal: the call proceeds as if a human answered.
 
 Billing no longer requires a `completed` status: a call is billed when `answered_at` is set (the SIP leg went active) **or** the call completed normally. The first clause bills a machine-answered call and one that failed mid-conversation; the second keeps billing a completed call whose answer signal never landed.
 
-The agent can press keypad digits at any point via the `send_dtmf` tool ([`core/hailhq/core/agent_tools/send_dtmf.py`](../core/hailhq/core/agent_tools/send_dtmf.py)) — not just after an IVR verdict — so phone trees reached mid-call are navigable.
+The agent can press keypad digits at any point via the `send_dtmf` tool ([`core/hailhq/core/agent_tools/send_dtmf.py`](https://github.com/hail-hq/hail/blob/main/core/hailhq/core/agent_tools/send_dtmf.py)) — not just after an IVR verdict — so phone trees reached mid-call are navigable.
 
 ## LLM modes
 
@@ -89,7 +89,7 @@ Both prefixes are validated against `^[a-z0-9]([a-z0-9-]{0,18}[a-z0-9])?$` (1–
 
 If none of those resolve, the request returns `503` pointing at how to register a domain.
 
-See [`docs/setup/aws-ses.md`](./setup/aws-ses.md) for the operator-side setup, and [`docs/superpowers/plans/2026-05-17-hail-mail-addressing.md`](./superpowers/plans/2026-05-17-hail-mail-addressing.md) for the addressing/configurability plan.
+See [`docs/setup/aws-ses.md`](./setup/aws-ses.md) for the operator-side setup, and [`docs/superpowers/plans/2026-05-17-hail-mail-addressing.md`](https://github.com/hail-hq/hail/blob/main/docs/superpowers/plans/2026-05-17-hail-mail-addressing.md) for the addressing/configurability plan.
 
 ## Inbound email
 
@@ -119,8 +119,8 @@ inbound SMTP ──► SES Receipt Rule
 ```
 
 The cloud-agnostic SMTP path is stubbed
-([`SmtpInboundProvider`](../core/hailhq/core/providers/email/inbound/smtp.py))
-and tracked in [`docs/setup/smtp-inbound.md`](setup/smtp-inbound.md).
+([`SmtpInboundProvider`](https://github.com/hail-hq/hail/blob/main/core/hailhq/core/providers/email/inbound/smtp.py))
+and tracked in [`docs/public/self-host/smtp-inbound.md`](./self-host/smtp-inbound.md).
 
 ### Per-domain routing — forward and/or webhook
 
@@ -135,4 +135,4 @@ A separate `inbound_routes` table for per-mailbox routing within custom domains 
 
 The `/webhooks` CRUD surface is the firehose pattern — one subscription covers multiple event types (`email.received`, `email.bounced`, `email.complained`). Stripe-style signing: `X-Hail-Signature: t=<unix>,v1=<hex>`. Retries on a fixed `0/30s/2m/10m/1h/6h/24h` ladder; after the last retry the delivery is marked `dead` and after 50 consecutive dead deliveries the subscription auto-disables.
 
-See [`docs/setup/aws-ses.md`](./setup/aws-ses.md) §10 for the operator runbook and [`docs/superpowers/specs/2026-06-06-inbound-email-design.md`](./superpowers/specs/2026-06-06-inbound-email-design.md) for the full spec.
+See [`docs/setup/aws-ses.md`](./setup/aws-ses.md) §10 for the operator runbook and [`docs/superpowers/specs/2026-06-06-inbound-email-design.md`](https://github.com/hail-hq/hail/blob/main/docs/superpowers/specs/2026-06-06-inbound-email-design.md) for the full spec.

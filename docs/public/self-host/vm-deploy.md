@@ -112,7 +112,7 @@ docker compose -f docker-compose.yml -f docker-compose.prod.yml ps
 
 If you'd rather skip the manual GHCR login, trigger the GitHub Actions workflow (step 6) first — its `docker login` step writes credentials the VM can reuse.
 
-Seed your first phone number using the snippet in `docs/operations.md` → _Self-host: first-run setup_, swapping `docker compose exec postgres …` for `psql "$DATABASE_URL" -c …`.
+Seed your first phone number using the snippet in `docs/public/operations.md` → _Self-host: first-run setup_, swapping `docker compose exec postgres …` for `psql "$DATABASE_URL" -c …`.
 
 Hit `https://api.<domain>/healthz` from your laptop — you should see `{"status":"ok"}`. Caddy mints a Let's Encrypt cert on first request; the first call after boot can take 10–20 seconds.
 

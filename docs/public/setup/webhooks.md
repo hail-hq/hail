@@ -10,7 +10,7 @@ on a fixed ladder.
 The signature is HMAC-SHA256 over `f"{t}.{body}"` — the timestamp from the
 header, a literal `.`, then the **raw request bytes**. This is a runnable
 example; the `assert` passes (the fixture was produced by the real signer in
-[`core/hailhq/core/webhooks.py`](../../core/hailhq/core/webhooks.py)):
+[`core/hailhq/core/webhooks.py`](https://github.com/hail-hq/hail/blob/main/core/hailhq/core/webhooks.py)):
 
 ```python
 import hashlib, hmac
@@ -59,7 +59,7 @@ those bytes, not `await req.json()`.
 ## Headers
 
 Every delivery carries these (see
-[`core/hailhq/core/webhook_worker.py`](../../core/hailhq/core/webhook_worker.py)):
+[`core/hailhq/core/webhook_worker.py`](https://github.com/hail-hq/hail/blob/main/core/hailhq/core/webhook_worker.py)):
 
 | Header                | Meaning                                                                                                                     |
 | --------------------- | --------------------------------------------------------------------------------------------------------------------------- |
@@ -72,7 +72,7 @@ Every delivery carries these (see
 ## Event types
 
 The full set is the `WebhookEventType` enum in
-[`core/hailhq/core/schemas.py`](../../core/hailhq/core/schemas.py):
+[`core/hailhq/core/schemas.py`](https://github.com/hail-hq/hail/blob/main/core/hailhq/core/schemas.py):
 
 - **`email.received`** — a message arrived and was accepted.
 - **`email.received.suppressed`** — a message arrived but fan-out/forwarding was
@@ -105,8 +105,8 @@ only (no `ringing` or `canceled` events; no data source):
 ## Payload
 
 Hail wraps every event in this envelope (assembled by `build_event_payload` in
-[`webhooks.py`](../../core/hailhq/core/webhooks.py)); the `data` shape comes from
-the event type. Inbound events use [`build_event_data`](../../core/hailhq/core/webhook_fanout.py) for `email.received*`; delivery events use [`build_delivery_event_data`](../../core/hailhq/core/email_delivery_events.py) for the lifecycle events.
+[`webhooks.py`](https://github.com/hail-hq/hail/blob/main/core/hailhq/core/webhooks.py)); the `data` shape comes from
+the event type. Inbound events use [`build_event_data`](https://github.com/hail-hq/hail/blob/main/core/hailhq/core/webhook_fanout.py) for `email.received*`; delivery events use [`build_delivery_event_data`](https://github.com/hail-hq/hail/blob/main/core/hailhq/core/email_delivery_events.py) for the lifecycle events.
 
 **Inbound example** (`email.received`):
 
@@ -199,7 +199,7 @@ The `detail` field varies by event type: `bounced` and `complained` carry SES me
 ## Retries
 
 A delivery that doesn't get a `2xx` is retried on this fixed ladder
-(`RETRY_SCHEDULE_SECONDS` in [`webhooks.py`](../../core/hailhq/core/webhooks.py)):
+(`RETRY_SCHEDULE_SECONDS` in [`webhooks.py`](https://github.com/hail-hq/hail/blob/main/core/hailhq/core/webhooks.py)):
 
 ```
 0s → 30s → 2m → 10m → 1h → 6h → 24h
@@ -226,6 +226,6 @@ POST /webhooks   {"target_url": "https://example.com/hooks/hail",
 CLI equivalent: `hail webhooks create`.
 
 The `event_types` enum and request/response schemas are in
-[`openapi/openapi.yaml`](../../openapi/openapi.yaml) (`WebhookSubscriptionCreate`).
+[`openapi/openapi.yaml`](https://github.com/hail-hq/hail/blob/main/openapi/openapi.yaml) (`WebhookSubscriptionCreate`).
 CLI equivalents: `hail webhooks create`, `list`, `deliveries`, `redeliver` — see
 [the CLI reference](../cli.md).

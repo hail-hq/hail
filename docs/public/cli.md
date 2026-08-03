@@ -1,6 +1,6 @@
 # CLI reference: email & webhooks
 
-`hail` is the Go CLI. It codegens its client from [`openapi/openapi.yaml`](../openapi/openapi.yaml) — that spec is the canonical contract; this page covers only the email and webhooks surface. Run `hail <cmd> --help` for the full, authoritative flag list.
+`hail` is the Go CLI. It codegens its client from [`openapi/openapi.yaml`](https://github.com/hail-hq/hail/blob/main/openapi/openapi.yaml) — that spec is the canonical contract; this page covers only the email and webhooks surface. Run `hail <cmd> --help` for the full, authoritative flag list.
 
 Global flags (any command): `--api-url`, `--api-key`, `--json`. Auth resolves `--api-key > $HAIL_API_KEY > ~/.hail/credentials.json` (run `hail login`).
 

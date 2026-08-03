@@ -1,0 +1,11 @@
+{
+  "pages": [
+    "README",
+    "architecture",
+    "setup",
+    "cli",
+    "operations",
+    "self-host",
+    "contributing"
+  ]
+}
