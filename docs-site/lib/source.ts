@@ -1,5 +1,5 @@
 import { loader } from "fumadocs-core/source";
-import { docs } from "@/.source/server";
+import { apiDocs, docs } from "@/.source/server";
 import { slugSegments } from "@/lib/doc-slug.mjs";
 
 /**
@@ -13,4 +13,13 @@ export const source = loader({
   baseUrl: "/",
   source: docs.toFumadocsSource(),
   slugs: (file) => slugSegments(file.path),
+});
+
+/**
+ * The generated API reference lives at /docs/api/*. baseUrl "/api" → with the
+ * app's /docs basePath the pages resolve to /docs/api/<operation>.
+ */
+export const apiSource = loader({
+  baseUrl: "/api",
+  source: apiDocs.toFumadocsSource(),
 });

@@ -4,13 +4,15 @@
   "type": "module",
   "scripts": {
     "dev": "next dev --port 3002",
-    "build": "next build",
+    "build": "node --experimental-strip-types scripts/generate-openapi.mjs && next build",
     "start": "next start --port 3002",
-    "postinstall": "node -e \"import('fumadocs-mdx/next').then(m=>m.postInstall())\""
+    "postinstall": "node -e \"import('fumadocs-mdx/next').then(m=>m.postInstall())\"",
+    "generate:api": "node --experimental-strip-types scripts/generate-openapi.mjs"
   },
   "dependencies": {
     "fumadocs-core": "^16.12.0",
     "fumadocs-mdx": "^15.2.0",
+    "fumadocs-openapi": "^11.2.2",
     "fumadocs-ui": "^16.12.0",
     "next": "^16.2.11",
     "react": "^19.2.0",
