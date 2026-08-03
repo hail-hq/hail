@@ -8,7 +8,6 @@ and tools.py never branch on env directly.
 from __future__ import annotations
 
 import pytest
-
 from hailhq.mcp.auth import AuthMode, PassThroughVerifier, select_auth_mode
 
 

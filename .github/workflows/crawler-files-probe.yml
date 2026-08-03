@@ -26,6 +26,19 @@ jobs:
           # would close the pipe under `set -o pipefail`, failing the step.
           grep -q "<urlset" <<< "$body" || { echo "::error::sitemap.xml missing <urlset>"; exit 1; }
           grep -q "</urlset>" <<< "$body" || { echo "::error::sitemap.xml missing </urlset>"; exit 1; }
+      - name: Probe costs sitemap.xml
+        run: |
+          set -euo pipefail
+          body=$(curl --fail --silent --show-error https://hail.so/costs/sitemap.xml)
+          size=${#body}
+          echo "costs/sitemap.xml: $size bytes"
+          head -5 <<< "$body"
+          [ "$size" -gt 100 ] || { echo "::error::costs/sitemap.xml body too small ($size bytes)"; exit 1; }
+          # Here-strings avoid SIGPIPE: grep -q exits at first match and
+          # would close the pipe under `set -o pipefail`, failing the step.
+          grep -q "<urlset" <<< "$body" || { echo "::error::costs/sitemap.xml missing <urlset>"; exit 1; }
+          grep -q "</urlset>" <<< "$body" || { echo "::error::costs/sitemap.xml missing </urlset>"; exit 1; }
+          grep -q "/costs/compare/" <<< "$body" || { echo "::error::costs/sitemap.xml missing /costs/compare/ entries"; exit 1; }
       - name: Probe llms.txt
         run: |
           set -euo pipefail

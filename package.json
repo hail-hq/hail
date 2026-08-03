@@ -8,6 +8,7 @@
     "prepare": "husky",
     "costs:validate": "pipx run check-jsonschema --schemafile costs/schema/llm.schema.json costs/llm.json && pipx run check-jsonschema --schemafile costs/schema/stt.schema.json costs/stt.json && pipx run check-jsonschema --schemafile costs/schema/tts.schema.json costs/tts.json && pipx run check-jsonschema --schemafile costs/schema/sms.schema.json costs/sms.json && pipx run check-jsonschema --schemafile costs/schema/telephony.schema.json costs/telephony.json",
     "costs:stale": "node scripts/costs/check-stale.mjs --max-age 30",
+    "costs:featured": "node scripts/costs/check-featured.mjs",
     "costs:sync-telephony": "node scripts/costs/sync-telephony.mjs",
     "site:dev": "pnpm --filter @hail-hq/web dev",
     "site:build": "pnpm --filter @hail-hq/web build",

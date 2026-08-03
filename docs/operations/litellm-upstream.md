@@ -2,21 +2,21 @@
 
 ## Why
 
-[LiteLLM](https://github.com/BerriAI/litellm) is a Python SDK / proxy that unifies many model providers behind one interface. It ships an internal pricing database used for cost estimation (`litellm.model_cost`, sourced from `model_prices_and_context_window.json` in the repo root). That file is widely consumed — embedded in many agent stacks. Getting Hail Costs rows referenced there is a visibility win for the dataset.
+[LiteLLM](https://github.com/BerriAI/litellm) is a Python SDK / proxy that unifies many model providers behind one interface. It includes an internal pricing database for cost estimation (`litellm.model_cost`, sourced from `model_prices_and_context_window.json` in the repo root). Many agent stacks embed and consume that file. Hail Costs rows referenced there are a visibility win for the dataset.
 
 ## What to PR
 
-Two paths, in increasing scope:
+There are two paths, in increasing scope:
 
 ### Path A — Sync individual missing rows (recommended first PR)
 
-LiteLLM's pricing JSON is keyed by model identifier (e.g. `"claude-opus-4-7"`, `"gpt-5-mini"`, etc.) with a flat schema per entry. Map Hail Costs rows into LiteLLM's shape and submit a PR adding only models LiteLLM is missing.
+LiteLLM's pricing JSON is keyed by model identifier (for example, `"claude-opus-4-7"`, `"gpt-5-mini"`) with a flat schema per entry. Map Hail Costs rows into LiteLLM's shape. Submit a PR that adds only the models that LiteLLM does not have.
 
 Concrete steps:
 
 1. **Clone LiteLLM:** `gh repo fork BerriAI/litellm --clone`
-2. **Diff against Hail Costs.** Read `litellm/model_prices_and_context_window.json` and Hail Costs' `costs/llm.json`. List models present in Hail Costs but absent from LiteLLM.
-3. **Translate the shape.** LiteLLM's per-model entry looks like:
+2. **Diff against Hail Costs.** Read `litellm/model_prices_and_context_window.json` and Hail Costs' `costs/llm.json`. List the models that are present in Hail Costs but absent from LiteLLM.
+3. **Translate the shape.** LiteLLM's per-model entry has this form:
 
    ```json
    "claude-opus-4-7": {
@@ -35,7 +35,7 @@ Concrete steps:
    }
    ```
 
-   Hail Costs uses per-1M-token prices; LiteLLM uses per-token. Convert: `price_per_mtok / 1_000_000`. Decimal strings → number is fine here since LiteLLM's schema accepts numbers.
+   Hail Costs uses per-1M-token prices. LiteLLM uses per-token prices. Convert: `price_per_mtok / 1_000_000`. A decimal string → number conversion is acceptable here because LiteLLM's schema accepts numbers.
 
    Mapping table:
 
@@ -54,7 +54,7 @@ Concrete steps:
    | provider                          | `litellm_provider` (lowercased)           |
    | n/a                               | `mode: "chat"` (constant for LLM rows)    |
 
-   Drop fields that don't have a clean LiteLLM equivalent (`aggregators[]`, `aliases[]`, `cache_storage_per_mtok_per_hour_usd`, etc.). Note in PR description.
+   Drop the fields that do not have a clean LiteLLM equivalent (`aggregators[]`, `aliases[]`, `cache_storage_per_mtok_per_hour_usd`, and others). Note them in the PR description.
 
 4. **Open the PR.** Title: `feat: add N models from Hail Costs dataset`. Body template:
 
@@ -77,7 +77,7 @@ Concrete steps:
 
 ### Path B — Propose Hail Costs as an upstream data source (later, bigger ask)
 
-Once Path A has shipped and shown value, propose a richer integration: LiteLLM optionally consumes the Hail Costs raw JSON URLs (`https://raw.githubusercontent.com/hail-hq/hail/main/costs/llm.json`) as a source. Requires a config flag and adapter code in LiteLLM itself. Not in scope for the initial PR.
+After Path A is released and shows value, propose a richer integration: LiteLLM optionally consumes the Hail Costs raw JSON URLs (`https://raw.githubusercontent.com/hail-hq/hail/main/costs/llm.json`) as a source. This requires a config flag and adapter code in LiteLLM itself. It is not in scope for the initial PR.
 
 ## Practical setup commands
 
@@ -102,14 +102,14 @@ gh pr create --repo BerriAI/litellm --title "feat: add N models from Hail Costs 
 
 ## Status
 
-**Not yet executed.** This document is the recipe. The PR itself needs:
+**Not yet executed.** This document is the recipe. The PR itself needs three steps:
 
-1. The diff to be generated (Hail Costs models not in LiteLLM)
-2. The translated entries to be written
-3. The PR to be opened against `BerriAI/litellm`
+1. Generate the diff (Hail Costs models not in LiteLLM)
+2. Write the translated entries
+3. Open the PR against `BerriAI/litellm`
 
-All three can be done by a Claude Code session pointed at this document; the human just needs to confirm and click "Open PR" on GitHub.
+A Claude Code session pointed at this document can do all three steps. The human only needs to confirm and click "Open PR" on GitHub.
 
 ## Why not automate this?
 
-The LiteLLM project moves fast; their schema occasionally changes (new fields, renames). A hand-rolled adapter would break under their evolution. Periodic manual PRs (quarterly) following this recipe are more robust than a CI integration.
+The LiteLLM project moves fast. Their schema occasionally changes (new fields, renames). A hand-rolled adapter would break under their evolution. Periodic manual PRs (quarterly) that follow this recipe are more robust than a CI integration.

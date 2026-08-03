@@ -6,7 +6,6 @@ import json
 import uuid
 
 import pytest
-
 from hailhq.core import telephony_catalog
 
 

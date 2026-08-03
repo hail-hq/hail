@@ -23,11 +23,6 @@ from typing import Annotated
 
 import jwt as _pyjwt
 from fastapi import Depends, Header, HTTPException, status
-from pydantic import BaseModel
-from sqlalchemy import cast, func, select, text, update
-from sqlalchemy.dialects.postgresql import UUID as PG_UUID
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from hailhq.api.auth import (
     JWKSFetchError,
     get_jwks_cache,
@@ -35,10 +30,14 @@ from hailhq.api.auth import (
     verify_jwt,
 )
 from hailhq.core.config import settings
-from hailhq.core.urls import url_variants
 from hailhq.core.db import get_session, session_scope
 from hailhq.core.models import ApiKey, OrganizationMember
 from hailhq.core.s3_mail import S3MailClient
+from hailhq.core.urls import url_variants
+from pydantic import BaseModel
+from sqlalchemy import cast, func, select, text, update
+from sqlalchemy.dialects.postgresql import UUID as PG_UUID
+from sqlalchemy.ext.asyncio import AsyncSession
 
 # Throttle ``lastRequest`` writes so chatty agent traffic doesn't generate one
 # no-op UPDATE per request.

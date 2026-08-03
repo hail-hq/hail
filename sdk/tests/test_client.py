@@ -9,7 +9,6 @@ from uuid import UUID, uuid4
 import httpx
 import pytest
 import respx
-
 from hail import (
     Client,
     HailAuthError,
@@ -21,6 +20,7 @@ from hail import (
     HailValidationError,
 )
 from hail._http import _HailHTTP
+
 from tests.conftest import make_call_response, make_event
 
 # --------------------------------------------------------------------------- #
@@ -99,6 +99,54 @@ async def test_calls_create_tools_passthrough(base_url: str, api_key: str) -> No
     assert bodies[0]["tools"] == []
     assert bodies[1]["tools"] == ["end_call", "send_sms"]
     assert "tools" not in bodies[2]
+
+
+@respx.mock
+async def test_calls_create_language_lands_in_voice_config(
+    base_url: str, api_key: str
+) -> None:
+    """language= lands in voice_config; omitted -> no voice_config key."""
+    route = respx.post(f"{base_url}/calls").mock(
+        return_value=httpx.Response(201, json=make_call_response())
+    )
+    async with Client(api_key=api_key, base_url=base_url) as c:
+        await c.calls.create(
+            to="+15555550123",
+            system_prompt="be polite",
+            recipient_consent=True,
+            language="fr",
+        )
+        await c.calls.create(
+            to="+15555550123",
+            system_prompt="be polite",
+            recipient_consent=True,
+        )
+    bodies = [json.loads(call.request.content) for call in route.calls]
+    assert bodies[0]["voice_config"] == {"language": "fr"}
+    assert "voice_config" not in bodies[1]
+
+
+@respx.mock
+async def test_calls_create_ai_disclosure_opt_out(base_url: str, api_key: str) -> None:
+    """ai_disclosure=False lands in the body; default -> key omitted."""
+    route = respx.post(f"{base_url}/calls").mock(
+        return_value=httpx.Response(201, json=make_call_response())
+    )
+    async with Client(api_key=api_key, base_url=base_url) as c:
+        await c.calls.create(
+            to="+15555550123",
+            system_prompt="be polite",
+            recipient_consent=True,
+            ai_disclosure=False,
+        )
+        await c.calls.create(
+            to="+15555550123",
+            system_prompt="be polite",
+            recipient_consent=True,
+        )
+    bodies = [json.loads(call.request.content) for call in route.calls]
+    assert bodies[0]["ai_disclosure"] is False
+    assert "ai_disclosure" not in bodies[1]
 
 
 @respx.mock

@@ -15,11 +15,10 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query
 from fastapi.responses import HTMLResponse
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from hailhq.core.compliance_gate import add_suppression
 from hailhq.core.db import get_session
 from hailhq.core.unsubscribe import InvalidUnsubscribeToken, verify_unsubscribe_token
+from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
 

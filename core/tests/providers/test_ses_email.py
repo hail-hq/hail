@@ -11,7 +11,6 @@ from __future__ import annotations
 import boto3
 import pytest
 from botocore.stub import ANY, Stubber
-
 from hailhq.core.providers.email import SesEmailProvider
 from hailhq.core.providers.email.base import (
     DkimRecord,

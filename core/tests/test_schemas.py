@@ -3,8 +3,6 @@ from types import SimpleNamespace
 from uuid import UUID, uuid4
 
 import pytest
-from pydantic import ValidationError
-
 from hailhq.core.schemas import (
     CallCreate,
     EmailResponse,
@@ -13,6 +11,7 @@ from hailhq.core.schemas import (
     VoiceConfig,
     parse_resource_id,
 )
+from pydantic import ValidationError
 
 
 def test_call_create_minimal_valid():
@@ -67,7 +66,6 @@ def test_call_create_message_type_defaults_to_informational():
 
 def test_voice_config_defaults():
     cfg = VoiceConfig()
-    assert cfg.stt == "deepgram"
     assert cfg.tts == "cartesia"
     assert cfg.vad == "silero"
 
@@ -181,9 +179,8 @@ def test_email_summary_omits_bodies_keeps_metadata_alias():
 
 def test_sms_create_requires_consent() -> None:
     import pytest
-    from pydantic import ValidationError
-
     from hailhq.core.schemas import SmsCreate
+    from pydantic import ValidationError
 
     with pytest.raises(ValidationError):
         SmsCreate(to="+14155551234", body="hi")  # missing recipient_consent
@@ -191,9 +188,8 @@ def test_sms_create_requires_consent() -> None:
 
 def test_sms_create_validates_e164() -> None:
     import pytest
-    from pydantic import ValidationError
-
     from hailhq.core.schemas import SmsCreate
+    from pydantic import ValidationError
 
     with pytest.raises(ValidationError):
         SmsCreate(to="not-a-number", body="hi", recipient_consent=True)
@@ -211,9 +207,8 @@ def test_call_create_still_requires_consent_after_mixin_refactor() -> None:
     """Regression: CallCreate moving onto ConsentAttestationMixin must not
     change its externally-visible required-field behavior."""
     import pytest
-    from pydantic import ValidationError
-
     from hailhq.core.schemas import CallCreate
+    from pydantic import ValidationError
 
     with pytest.raises(ValidationError):
         CallCreate(to="+14155551234", system_prompt="hi")  # missing recipient_consent
@@ -221,9 +216,8 @@ def test_call_create_still_requires_consent_after_mixin_refactor() -> None:
 
 def test_email_create_still_requires_consent_after_mixin_refactor() -> None:
     import pytest
-    from pydantic import ValidationError
-
     from hailhq.core.schemas import EmailCreate
+    from pydantic import ValidationError
 
     with pytest.raises(ValidationError):
         EmailCreate(

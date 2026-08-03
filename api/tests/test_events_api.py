@@ -13,12 +13,12 @@ from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
 import httpx
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from hailhq.core.models import (
     ApiKey,
     CallEvent,
 )
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from .conftest import insert_org_and_key
 from .test_emails_api import _register_custom_verified, _send_email
 
@@ -365,7 +365,7 @@ async def test_stream_merges_email_events(
 async def test_stream_email_id_filter(
     client: httpx.AsyncClient, async_session: AsyncSession
 ) -> None:
-    org_id, _, plain = await insert_org_and_key(async_session)
+    _org_id, _, plain = await insert_org_and_key(async_session)
     headers = {"Authorization": f"Bearer {plain}"}
     await _register_custom_verified(client, headers, domain="acme.com")
     email_id = (await _send_email(client, plain))["id"]
@@ -395,12 +395,12 @@ async def test_get_events_email_org_isolation(
     client: httpx.AsyncClient, async_session: AsyncSession
 ) -> None:
     """Org-wide GET /events must never leak another org's email events."""
-    org_a_id, _, plain_a = await insert_org_and_key(async_session)
+    _org_a_id, _, plain_a = await insert_org_and_key(async_session)
     headers_a = {"Authorization": f"Bearer {plain_a}"}
     await _register_custom_verified(client, headers_a, domain="acme.com")
     email_id = (await _send_email(client, plain_a))["id"]
 
-    org_b_id, _, plain_b = await _make_second_org(async_session)
+    _org_b_id, _, plain_b = await _make_second_org(async_session)
     headers_b = {"Authorization": f"Bearer {plain_b}"}
 
     resp = await client.get("/events", headers=headers_b)
@@ -458,11 +458,10 @@ async def test_stream_cursor_walk_crosses_sources(
     email_id = (await _send_email(client, plain))["id"]
 
     # Interleave sources on the timeline: call@t1, email@t2, call@t3, email@t4.
+    from hailhq.core.models import EmailEvent
     from sqlalchemy import update
 
-    from hailhq.core.models import EmailEvent
-
-    t = lambda m: datetime(2026, 7, 1, 12, m, tzinfo=timezone.utc)  # noqa: E731
+    t = lambda m: datetime(2026, 7, 1, 12, m, tzinfo=timezone.utc)
     await _add_event(async_session, call_id, "call.queued", {}, occurred_at=t(1))
     await async_session.execute(
         update(EmailEvent)

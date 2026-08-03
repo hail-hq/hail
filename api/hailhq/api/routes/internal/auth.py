@@ -15,7 +15,6 @@ from __future__ import annotations
 
 from fastapi import HTTPException, Request
 from fastapi import status as http_status
-
 from hailhq.core.config import settings
 from hailhq.core.hmac_signing import verify
 

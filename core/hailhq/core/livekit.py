@@ -20,9 +20,8 @@ from __future__ import annotations
 import json
 from uuid import UUID
 
-from livekit import api
-
 from hailhq.core.config import settings
+from livekit import api
 
 
 class LiveKitClient:

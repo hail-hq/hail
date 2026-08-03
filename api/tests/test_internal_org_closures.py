@@ -14,17 +14,18 @@ from datetime import datetime, timedelta, timezone
 
 import httpx
 import pytest
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
-
 from hailhq.api.routes.internal.auth import verify_internal_request
 from hailhq.api.routes.internal.org_closures import (
     OrgClosureIn,
     record_org_closure,
+)
+from hailhq.api.routes.internal.org_closures import (
     router as org_closures_router,
 )
 from hailhq.core.config import settings
 from hailhq.core.models import OrgClosure
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from .test_internal_dsar import _signed, internal_secret_set  # noqa: F401
 

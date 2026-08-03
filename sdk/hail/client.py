@@ -22,29 +22,32 @@ from __future__ import annotations
 import asyncio
 import base64
 import os
+from collections.abc import AsyncIterator
 from datetime import datetime
-from typing import Any, AsyncIterator, Literal
+from typing import Any, Literal
 from urllib.parse import quote
 from uuid import UUID
 
 import httpx
+from typing_extensions import Self
 
 from hail._errors import HailConfigError
 from hail._http import _HailHTTP, generate_idempotency_key
 from hail._resource_id import parse_resource_id
 from hail.models import (
+    TERMINAL_CALL_STATUSES,
     CallEventResponse,
     CallListResponse,
     CallResponse,
     CallStatus,
     EmailAttachmentUploadResponse,
+    EmailDomainListResponse,
+    EmailDomainResponse,
     EmailListResponse,
     EmailResponse,
     EmailStatus,
     EventStreamResponse,
     LLMConfig,
-    EmailDomainListResponse,
-    EmailDomainResponse,
     NumberType,
     PhoneNumberListResponse,
     PhoneNumberResponse,
@@ -53,7 +56,6 @@ from hail.models import (
     SmsResponse,
     SmsStatus,
     SuppressionListResponse,
-    TERMINAL_CALL_STATUSES,
 )
 
 _DEFAULT_BASE_URL = "https://api.hail.so"
@@ -67,7 +69,7 @@ def _encode_event_cursor(occurred_at: datetime, event_id: UUID) -> str:
     can't import core, so the logic is duplicated. Used to synthesize the
     next polling cursor when the server didn't hand one back.
     """
-    raw = f"{occurred_at.isoformat()}|{event_id}".encode("utf-8")
+    raw = f"{occurred_at.isoformat()}|{event_id}".encode()
     return base64.urlsafe_b64encode(raw).rstrip(b"=").decode("ascii")
 
 
@@ -86,6 +88,8 @@ class _CallsResource:
         llm: LLMConfig | dict[str, Any] | None = None,
         from_: str | None = None,
         first_message: str | None = None,
+        language: str | None = None,
+        ai_disclosure: bool = True,
         metadata: dict[str, Any] | None = None,
         consent_source: str | None = None,
         consent_obtained_at: datetime | None = None,
@@ -99,7 +103,14 @@ class _CallsResource:
         ``llm`` block (mode B) must be provided — server enforces this with
         a 422; we don't pre-validate so SDK and API stay in lockstep on the
         rule. ``recipient_consent`` is required — the server 422s without
-        it. ``idempotency_key`` defaults to a fresh UUIDv4.
+        it. ``language`` is the call's spoken language for both STT and TTS
+        as a lowercase ISO 639-1 code (e.g. ``"fr"``); omit for English.
+        STT provider selection is console-BYO-only (no per-call override) —
+        configure it on the organization to pin a provider.
+        ``ai_disclosure=False`` skips the spoken AI self-disclosure line —
+        disabling is your responsibility (US artificial-voice calls and
+        several AI bot-disclosure laws require it).
+        ``idempotency_key`` defaults to a fresh UUIDv4.
         """
         body: dict[str, Any] = {"to": to, "recipient_consent": recipient_consent}
         if from_ is not None:
@@ -108,6 +119,10 @@ class _CallsResource:
             body["system_prompt"] = system_prompt
         if first_message is not None:
             body["first_message"] = first_message
+        if not ai_disclosure:
+            body["ai_disclosure"] = False
+        if language is not None:
+            body["voice_config"] = {"language": language}
         if metadata is not None:
             body["metadata"] = metadata
         if llm is not None:
@@ -793,10 +808,10 @@ class Client:
     async def aclose(self) -> None:
         await self._http.aclose()
 
-    async def __aenter__(self) -> "Client":
+    async def __aenter__(self) -> Self:
         return self
 
-    async def __aexit__(self, exc_type: Any, exc: Any, tb: Any) -> None:
+    async def __aexit__(self, exc_type: object, exc: object, tb: object) -> None:
         await self.aclose()
 
     def __repr__(self) -> str:

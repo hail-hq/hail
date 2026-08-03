@@ -1,6 +1,5 @@
-from sqlalchemy import ForeignKey
-
 from hailhq.core.models import WebhookDelivery, WebhookSubscription
+from sqlalchemy import ForeignKey
 
 
 def test_subscription_columns():

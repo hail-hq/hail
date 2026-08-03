@@ -20,9 +20,9 @@ from __future__ import annotations
 
 import enum
 
-from mcp.server.auth.provider import AccessToken, TokenVerifier
-
 from hailhq.core.config import settings
+
+from mcp.server.auth.provider import AccessToken, TokenVerifier
 
 
 class AuthMode(enum.Enum):

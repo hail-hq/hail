@@ -2,24 +2,38 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from typing import AsyncIterator
+from functools import partial
 
 from fastapi import FastAPI, Request
 from fastapi.encoders import jsonable_encoder
 from fastapi.exception_handlers import request_validation_exception_handler
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, Response
-
-from functools import partial
-
+from hailhq.api.routes import calls as calls_routes
+from hailhq.api.routes import contacts as contacts_routes
+from hailhq.api.routes import email_attachments as email_attachments_routes
+from hailhq.api.routes import email_domains as email_domains_routes
+from hailhq.api.routes import emails as emails_routes
+from hailhq.api.routes import events as events_routes
+from hailhq.api.routes import numbers as numbers_routes
+from hailhq.api.routes import sms as sms_routes
+from hailhq.api.routes import unsubscribe as unsubscribe_routes
+from hailhq.api.routes import webhooks as webhooks_routes
+from hailhq.api.routes.internal import agent as internal_agent
+from hailhq.api.routes.internal import dsar as internal_dsar
+from hailhq.api.routes.internal import org_closures as internal_org_closures
+from hailhq.api.routes.internal import provider_config as internal_provider_config
+from hailhq.api.routes.internal import ses_events as internal_ses_events
+from hailhq.api.usage import write_usage_event
+from hailhq.core import internal_webhook
 from hailhq.core.abuse_monitor import AbuseMonitorWorker
 from hailhq.core.config import settings
 from hailhq.core.db import dispose_engine, session_scope
-from hailhq.core.http_post import httpx_post
-from hailhq.core import internal_webhook
 from hailhq.core.domain_verification_worker import DomainVerificationWorker
 from hailhq.core.email_attachment_gc import EmailAttachmentGcWorker
+from hailhq.core.http_post import httpx_post
 from hailhq.core.outbound_worker import OutboundForwardWorker
 from hailhq.core.pool import sweep_pool_reservations
 from hailhq.core.providers.email.ses import SesEmailProvider
@@ -27,22 +41,6 @@ from hailhq.core.reconcile import sweep_stale_calls
 from hailhq.core.s3_mail import S3MailClient
 from hailhq.core.secret_cipher import SecretCipher, SecretKeyMissing
 from hailhq.core.webhook_worker import WebhookWorker
-from hailhq.api.routes import calls as calls_routes
-from hailhq.api.routes import contacts as contacts_routes
-from hailhq.api.routes import email_attachments as email_attachments_routes
-from hailhq.api.routes import emails as emails_routes
-from hailhq.api.routes import events as events_routes
-from hailhq.api.routes import email_domains as email_domains_routes
-from hailhq.api.routes import numbers as numbers_routes
-from hailhq.api.routes import webhooks as webhooks_routes
-from hailhq.api.routes import sms as sms_routes
-from hailhq.api.routes import unsubscribe as unsubscribe_routes
-from hailhq.api.routes.internal import agent as internal_agent
-from hailhq.api.routes.internal import dsar as internal_dsar
-from hailhq.api.routes.internal import org_closures as internal_org_closures
-from hailhq.api.routes.internal import provider_config as internal_provider_config
-from hailhq.api.routes.internal import ses_events as internal_ses_events
-from hailhq.api.usage import write_usage_event
 
 logger = logging.getLogger(__name__)
 

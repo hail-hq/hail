@@ -12,7 +12,6 @@ from datetime import datetime, timezone
 
 import pytest
 from fastapi import HTTPException
-
 from hailhq.api import deps
 from hailhq.core.models import OrganizationMember
 

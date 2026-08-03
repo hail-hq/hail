@@ -6,7 +6,6 @@ import asyncio
 
 import aiohttp
 import pytest
-
 from hailhq.core import internal_webhook
 from hailhq.core.config import settings
 from hailhq.core.internal_webhook import fetch_organization_name

@@ -83,9 +83,8 @@ async def test_inbound_accepts_valid_signature_and_creates_row(
     # The route commits on the same session the test holds (get_session is
     # overridden to async_session), so assert the message was actually
     # persisted — a 200 alone can't distinguish "stored" from "dropped".
-    from sqlalchemy import select
-
     from hailhq.core.models import Sms
+    from sqlalchemy import select
 
     row = (
         await async_session.execute(

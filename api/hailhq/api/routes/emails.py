@@ -25,34 +25,28 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from fastapi import status as http_status
 from fastapi.responses import RedirectResponse
-from sqlalchemy import and_, func, or_, select, text as text_sql, update
-from sqlalchemy.exc import IntegrityError
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import defer
-
+from hailhq.api.agent_gate import (
+    RATE_LIMITED_RESPONSES,
+    require_agent_send_allowed,
+)
 from hailhq.api.audit import write_audit_log
 from hailhq.api.consent import enforce_consent, isoformat_or_none
-from hailhq.core.urls import join_url
 from hailhq.api.deps import Principal, get_current_principal, get_s3_mail
 from hailhq.api.errors import unprocessable
-from hailhq.api.pagination import fetch_cursor_page
+from hailhq.api.funds import require_funds
 from hailhq.api.idempotency import (
     IdempotencyContext,
     cache_failure,
     idempotency_dep,
     replay_cached,
 )
-from hailhq.api.usage import write_usage_event
+from hailhq.api.pagination import fetch_cursor_page
 from hailhq.api.routes.email_domains import (
     compose_hail_mail_address,
     get_email_provider,
     resolve_hail_mail_prefixes,
 )
-from hailhq.api.agent_gate import (
-    RATE_LIMITED_RESPONSES,
-    require_agent_send_allowed,
-)
-from hailhq.api.funds import require_funds
+from hailhq.api.usage import write_usage_event
 from hailhq.core.compliance_gate import check_email_allowed, normalize_recipient
 from hailhq.core.db import get_session
 from hailhq.core.email_attachment_limits import (
@@ -68,11 +62,9 @@ from hailhq.core.models import (
     EmailDomain,
     EmailEvent,
 )
-from hailhq.core.s3_mail import S3MailClient
 from hailhq.core.providers.email import EmailProvider
 from hailhq.core.providers.email.base import ProviderAttachment
-from hailhq.core.unsubscribe import build_unsubscribe_url
-from hailhq.core.webhook_fanout import build_event_data, fanout_email_event
+from hailhq.core.s3_mail import S3MailClient
 from hailhq.core.schemas import (
     EmailAttachmentResponse,
     EmailCreate,
@@ -87,6 +79,14 @@ from hailhq.core.schemas import (
     EmailStatus,
     EmailSummary,
 )
+from hailhq.core.unsubscribe import build_unsubscribe_url
+from hailhq.core.urls import join_url
+from hailhq.core.webhook_fanout import build_event_data, fanout_email_event
+from sqlalchemy import and_, func, or_, select, update
+from sqlalchemy import text as text_sql
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import defer
 
 logger = logging.getLogger(__name__)
 
@@ -931,4 +931,4 @@ async def list_emails(
     )
 
 
-__all__ = ["router", "resolve_sender", "from_address_for", "deliver_email"]
+__all__ = ["deliver_email", "from_address_for", "resolve_sender", "router"]

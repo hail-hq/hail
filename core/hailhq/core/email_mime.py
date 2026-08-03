@@ -13,7 +13,7 @@ from email import message_from_bytes, policy
 from email.message import Message
 from email.utils import getaddresses
 
-__all__ = ["ParsedMime", "ParsedAttachment", "parse_mime"]
+__all__ = ["ParsedAttachment", "ParsedMime", "parse_mime"]
 
 
 @dataclass

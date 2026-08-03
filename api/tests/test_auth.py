@@ -17,18 +17,17 @@ from __future__ import annotations
 import base64
 import hashlib
 import uuid
+from collections.abc import AsyncIterator
 from datetime import datetime, timedelta, timezone
-from typing import AsyncIterator
 
 import httpx
 import pytest
 from fastapi import Depends, FastAPI
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from hailhq.api.auth import hash_key
 from hailhq.api.deps import Principal, get_current_principal
 from hailhq.core.db import get_session
 from hailhq.core.models import ApiKey
+from sqlalchemy.ext.asyncio import AsyncSession
 
 
 def test_hash_key_format() -> None:

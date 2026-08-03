@@ -10,9 +10,6 @@ from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock
 
 import httpx
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from hailhq.api.idempotency import (
     _IN_FLIGHT_STATUS,
     _storage_key,
@@ -23,6 +20,9 @@ from hailhq.core.models import (
     AuditLog,
     IdempotencyKey,
 )
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from .conftest import insert_org_and_key
 
 # --------------------------------------------------------------------------- #
@@ -67,7 +67,7 @@ async def test_post_calls_no_idempotency_header_normal_flow(
         headers={"Authorization": f"Bearer {plain}"},
     )
     assert resp.status_code == 201
-    assert "idempotency-replay" not in {h.lower() for h in resp.headers.keys()}
+    assert "idempotency-replay" not in {h.lower() for h in resp.headers}
 
     rows = (await async_session.execute(select(IdempotencyKey))).scalars().all()
     assert rows == []
@@ -97,7 +97,7 @@ async def test_post_calls_idempotency_first_request_inserts_and_runs(
         },
     )
     assert resp.status_code == 201
-    assert "idempotency-replay" not in {h.lower() for h in resp.headers.keys()}
+    assert "idempotency-replay" not in {h.lower() for h in resp.headers}
 
     livekit_mock.dispatch_agent.assert_awaited_once()
 
@@ -133,7 +133,7 @@ async def test_post_calls_idempotency_replay_returns_cached(
 
     first = await client.post("/calls", json=body, headers=headers)
     assert first.status_code == 201
-    assert "idempotency-replay" not in {h.lower() for h in first.headers.keys()}
+    assert "idempotency-replay" not in {h.lower() for h in first.headers}
 
     second = await client.post("/calls", json=body, headers=headers)
     assert second.status_code == 201

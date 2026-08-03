@@ -5,13 +5,13 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 import httpx
+from hailhq.core.models import EmailEvent
 from sqlalchemy import update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from hailhq.core.models import EmailEvent
-
 from .conftest import insert_org_and_key
-from .test_emails_api import _register_custom_verified, _send_email as _send
+from .test_emails_api import _register_custom_verified
+from .test_emails_api import _send_email as _send
 
 DAY1 = datetime(2026, 6, 28, 10, 0, tzinfo=timezone.utc)
 DAY2 = datetime(2026, 6, 29, 11, 0, tzinfo=timezone.utc)
@@ -95,7 +95,7 @@ async def test_stats_non_utc_offset_bucket_alignment(
     UTC buckets Postgres' date_trunc produces, or every row falls outside
     every `buckets.get(bucket_start)` lookup and totals silently zero out.
     """
-    org_id, _, plain = await insert_org_and_key(async_session)
+    _org_id, _, plain = await insert_org_and_key(async_session)
     await _register_custom_verified(
         client, {"Authorization": f"Bearer {plain}"}, domain="acme.com"
     )

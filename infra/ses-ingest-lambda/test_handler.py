@@ -2,9 +2,8 @@ import hashlib
 import hmac
 import json
 
-import pytest
-
 import handler
+import pytest
 
 SES_EVENT = {
     "Records": [

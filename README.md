@@ -1,26 +1,41 @@
 # Hail
 
-> Universal communication platform for AI agents.
-> Phone calls, SMS, email — outbound first, inbound next. Self-hostable. Open source (AGPLv3).
+> Hail is a communication platform for AI agents.
+> Agents can make telephone calls. Agents can send and receive SMS messages and email. Inbound telephone calls will follow. You can host Hail on your own servers. The source code is open (AGPLv3).
 
-Your agent wants to place a call: _"Call +1… and ask if they want to reschedule."_ Hail does the carrier glue, runs the voice pipeline, and lets the agent plug in its own brain (or fall back to OpenAI → Gemini → Claude).
+An example: your agent must call a person to change an appointment. Hail connects to the telephone carrier and operates the voice pipeline. The agent can supply its own LLM. If the agent does not supply an LLM, Hail uses a fallback sequence: OpenAI, then Gemini, then Claude.
 
-## Quickstart
+## Quick start
 
-```bash
-git clone https://github.com/hail-hq/hail
-cd hail
-cp .env.example .env
-# fill in Twilio, LiveKit Cloud, Deepgram, Cartesia, and one of OpenAI / Gemini / Anthropic
-docker compose up
-```
+Do these steps:
 
-Authenticate:
+1. Get the source code and go into the directory:
 
-- **Hail Cloud** (managed at hail.so): `hail login` runs the device-flow and saves an API key to `~/.hail/credentials.json`.
-- **Self-host**: seed an API key directly into your local stack — see [docs/public/operations.md](docs/public/operations.md) "First-run DB seed". Then export `HAIL_API_KEY` (or pass `--api-key`).
+   ```bash
+   git clone https://github.com/hail-hq/hail
+   cd hail
+   ```
 
-Use it — CLI (for humans scripting Hail):
+2. Copy the example configuration file:
+
+   ```bash
+   cp .env.example .env
+   ```
+
+3. Add your credentials to `.env` for Twilio, LiveKit Cloud, Deepgram, and Cartesia. Add credentials for one of OpenAI, Gemini, or Anthropic.
+
+4. Start the stack:
+
+   ```bash
+   docker compose up
+   ```
+
+Then get an API key. There are two procedures:
+
+- **Hail Cloud** (managed at hail.so): Run `hail login`. The command starts the device flow. It writes an API key to `~/.hail/credentials.json`.
+- **Self-host**: Put an API key into your local database. Refer to [docs/public/operations.md](docs/public/operations.md), section "First-run DB seed". Then set the environment variable `HAIL_API_KEY`, or give the `--api-key` option.
+
+Use the CLI (for persons who write scripts for Hail):
 
 ```bash
 hail login                        # authenticate (device flow)
@@ -30,6 +45,16 @@ hail auth token                   # print bare API key for scripting
 hail call +14155550100 --prompt "be brief"
 hail call list
 hail call tail <id>               # follow events for one call
+
+hail sms +15551234567 --body "Hello!" --recipient-consent
+hail sms list
+hail sms status <id>
+hail sms suppressions list        # opt-out list
+hail sms sender-id get            # custom sender ID
+
+hail numbers acquire              # dedicated phone number (voice + SMS)
+hail numbers list
+hail contacts list                # org contact directory
 
 hail email send --to a@b.com --subject hi --body "hello"
 hail email list
@@ -49,13 +74,17 @@ hail completion zsh               # source <(hail completion zsh)
 hail version
 ```
 
-Or over HTTP / MCP:
+Or use HTTP or MCP:
 
 ```bash
 # HTTP
 curl -X POST http://localhost:8080/calls \
   -H "Authorization: Bearer $HAIL_API_KEY" \
   -d '{"to":"+15551234567","system_prompt":"..."}'
+
+curl -X POST http://localhost:8080/sms \
+  -H "Authorization: Bearer $HAIL_API_KEY" \
+  -d '{"to":"+15551234567","body":"hello","recipient_consent":true}'
 
 curl -X POST http://localhost:8080/emails \
   -H "Authorization: Bearer $HAIL_API_KEY" \
@@ -67,24 +96,24 @@ curl -X POST http://localhost:8080/emails \
 #   https://mcp.hail.so        (Hail Cloud, later)
 ```
 
-`hail tail` in action:
+This is `hail tail` in operation:
 
 ![Animated terminal demo of hail tail streaming live call events](docs/assets/gifs/hail-tail-live-stream.gif)
 
-Full setup: [docs/public/setup/twilio.md](docs/public/setup/twilio.md), [docs/public/setup/livekit-cloud.md](docs/public/setup/livekit-cloud.md), [docs/public/setup/aws-ses.md](docs/public/setup/aws-ses.md), [docs/public/setup/mcp.md](docs/public/setup/mcp.md).
+For the full setup, refer to [docs/public/setup/twilio.md](docs/public/setup/twilio.md), [docs/public/setup/livekit-cloud.md](docs/public/setup/livekit-cloud.md), [docs/public/setup/aws-ses.md](docs/public/setup/aws-ses.md), and [docs/public/setup/mcp.md](docs/public/setup/mcp.md).
 
 ## Tenets
 
-1. **Clear comms.** Explicit OpenAPI contracts. No magic.
-2. **Simple code.** Boring is best. No abstractions without two uses.
-3. **Brief docs.** One screen per page. Setup ≤ 10 minutes from a fresh clone.
-4. **Self-hostable.** `docker compose up` runs everything except LiveKit Cloud.
-5. **Pluggable brain.** BYO endpoint compatible with OpenAI's completions API, or use Hail's bundled fallback (OpenAI → Gemini → Anthropic). Voice pipeline + transport are always Hail's.
-6. **Agent-first docs.** AI agents are first-class readers. Lead with concrete, runnable examples; link to canonical sources (OpenAPI spec, MCP tool schemas, code paths) rather than paraphrase them. Every page should let a reader — human or agent — take the next action.
+1. **Clear communication.** The API has explicit OpenAPI contracts. There is no hidden behavior.
+2. **Simple code.** Simple solutions are best. We do not add an abstraction before it has two uses.
+3. **Short documents.** Each page is one screen. Setup from a new clone takes 10 minutes or less.
+4. **Self-hostable.** The command `docker compose up` starts all the services. Only LiveKit Cloud is external.
+5. **Pluggable brain.** Connect your own LLM endpoint that is compatible with the OpenAI completions API. As an alternative, use the fallback sequence from Hail: OpenAI, then Gemini, then Anthropic. Hail always supplies the voice pipeline and the transport.
+6. **Agent-first documents.** AI agents are primary readers. Each page starts with an example that you can run. Pages give links to canonical sources (OpenAPI spec, MCP tool schemas, code paths). They do not give the same data again in different words. Each page lets a reader — a person or an agent — do the subsequent action.
 
 ## Milestones
 
-Checked = shipped. Per-artifact changelogs (GitHub Releases for the CLI, PyPI release notes for the SDK) own the "shipped in which version" question.
+A checked box shows a feature that we released. The changelog for each artifact (GitHub Releases for the CLI, PyPI release notes for the SDK) shows the version that contains each feature.
 
 ### Phone calls
 
@@ -105,13 +134,15 @@ Checked = shipped. Per-artifact changelogs (GitHub Releases for the CLI, PyPI re
 
 - Outbound
   - [x] AWS SES
-  - [x] Custom sender domains (own DNS, auto DKIM + MAIL FROM)
+  - [x] Custom sender domains (own DNS, automatic DKIM + MAIL FROM)
 - Inbound
   - [x] AWS SES
   - [x] Custom domains (receive on verified domains)
 
 ### Voice pipeline
 
+- Languages
+  - [x] 39 call languages with automatic STT routing and per-language turn detection — see [docs/languages.md](docs/languages.md)
 - STT
   - [x] Deepgram
   - [ ] Whisper
@@ -139,8 +170,8 @@ Checked = shipped. Per-artifact changelogs (GitHub Releases for the CLI, PyPI re
 - CLI
   - [x] `hail` binary via GitHub Releases
 - MCP server
-  - [x] Remote Streamable HTTP endpoint bundled with every Hail deploy
-  - ~~PyPI stdio package~~ — intentionally not shipped; see [docs/public/setup/mcp.md](docs/public/setup/mcp.md)
+  - [x] Remote Streamable HTTP endpoint included with each Hail deployment
+  - ~~PyPI stdio package~~ — we do not supply this package; refer to [docs/public/setup/mcp.md](docs/public/setup/mcp.md)
 - Python SDK
   - [x] `hail-sdk` on PyPI, imports as `hail`
 
@@ -152,17 +183,19 @@ Checked = shipped. Per-artifact changelogs (GitHub Releases for the CLI, PyPI re
 
 ## Architecture
 
+This diagram shows the path of an outbound call:
+
 ```
 AI agent ──► Hail API ──dispatch──► Voicebot ──► LiveKit Cloud ──SIP──► Twilio ──► 📞
 ```
 
-Full diagram: [docs/public/architecture.md](docs/public/architecture.md).
+For the full diagram, refer to [docs/public/architecture.md](docs/public/architecture.md).
 
 ## Contributing
 
-See [docs/public/contributing.md](docs/public/contributing.md). TL;DR: fork, branch, conventional-commit, PR. Provider adapters go in `core/hailhq/core/providers/`. Update `.env.example` for any new env var.
+Refer to [docs/public/contributing.md](docs/public/contributing.md). The procedure is short: make a fork, make a branch, write conventional commits, and open a pull request. Put provider adapters in `core/hailhq/core/providers/`. If you add a new environment variable, update `.env.example` in the same commit.
 
 ## License
 
-Source code: [AGPL-3.0-or-later](./LICENSE) — if you run a modified Hail as a service, you must release your source.
-Pricing dataset (`costs/`): [CC-BY-4.0](./costs/LICENSE) — reuse the pricing JSON freely with attribution.
+The source code has the [AGPL-3.0-or-later](./LICENSE) license. If you operate a modified Hail as a service, you must release your source code.
+The pricing dataset (`costs/`) has the [CC-BY-4.0](./costs/LICENSE) license. You can use the pricing JSON if you give attribution.

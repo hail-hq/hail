@@ -8,9 +8,8 @@ own module rather than extending that one.
 
 from __future__ import annotations
 
-from twilio.request_validator import RequestValidator
-
 from hailhq.core.twilio_signature import verify_twilio_signature
+from twilio.request_validator import RequestValidator
 
 AUTH_TOKEN = "test-auth-token"
 URL = "https://api.hail.so/sms/inbound"

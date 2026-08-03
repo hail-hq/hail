@@ -4,9 +4,8 @@ from __future__ import annotations
 
 from uuid import uuid4
 
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from hailhq.core.models import EmailAttachmentUpload
+from sqlalchemy.ext.asyncio import AsyncSession
 
 
 async def test_create_and_fetch_upload_row(async_session: AsyncSession) -> None:

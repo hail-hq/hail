@@ -11,7 +11,6 @@ import uuid
 from datetime import datetime, timedelta, timezone
 
 import pytest
-
 from hailhq.core.compliance_gate import (
     add_suppression,
     check_call_allowed,
@@ -418,14 +417,13 @@ async def test_remove_suppression_deletes_all_org_rows_but_spares_platform_row(
     org on the platform."""
     import uuid
 
-    from sqlalchemy import select as sa_select
-
     from hailhq.core.compliance_gate import (
         add_suppression,
         normalize_recipient,
         remove_suppression,
     )
     from hailhq.core.models import Suppression
+    from sqlalchemy import select as sa_select
 
     org_id = uuid.uuid4()
     recipient = "+14155551234"

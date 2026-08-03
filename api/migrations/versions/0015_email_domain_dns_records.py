@@ -10,13 +10,11 @@ Revises: 0014
 
 from __future__ import annotations
 
-from typing import Union
-
-from alembic import op
 import sqlalchemy as sa
+from alembic import op
 
 revision: str = "0015"
-down_revision: Union[str, None] = "0014"
+down_revision: str | None = "0014"
 branch_labels = None
 depends_on = None
 

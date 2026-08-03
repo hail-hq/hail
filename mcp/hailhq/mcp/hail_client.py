@@ -25,7 +25,6 @@ import uuid
 from typing import Any
 
 import httpx
-
 from hailhq.core.config import settings
 from hailhq.core.schemas import (
     CallCreate,
@@ -44,6 +43,7 @@ from hailhq.core.schemas import (
     SmsListResponse,
     SmsResponse,
 )
+from typing_extensions import Self
 
 
 class HailAPIError(Exception):
@@ -80,10 +80,10 @@ class HailClient:
             headers={"Authorization": f"Bearer {self._api_key}"},
         )
 
-    async def __aenter__(self) -> "HailClient":
+    async def __aenter__(self) -> Self:
         return self
 
-    async def __aexit__(self, *_exc: Any) -> None:
+    async def __aexit__(self, *_exc: object) -> None:
         await self.aclose()
 
     async def aclose(self) -> None:
@@ -102,6 +102,8 @@ class HailClient:
         llm: dict[str, Any] | None = None,
         from_: str | None = None,
         first_message: str | None = None,
+        language: str | None = None,
+        ai_disclosure: bool = True,
         metadata: dict[str, Any] | None = None,
         tools: list[str] | None = None,
         idempotency_key: str | None = None,
@@ -129,6 +131,10 @@ class HailClient:
             fields["llm"] = llm
         if first_message is not None:
             fields["first_message"] = first_message
+        if language is not None:
+            fields["voice_config"] = {"language": language}
+        if not ai_disclosure:
+            fields["ai_disclosure"] = False
         if metadata is not None:
             fields["metadata"] = metadata
         if tools is not None:

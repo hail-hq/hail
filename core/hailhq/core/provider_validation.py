@@ -33,7 +33,6 @@ import dataclasses
 from typing import Literal
 
 import httpx
-
 from hailhq.core.url_guard import UnsafeUrlError, assert_public_https_url
 from hailhq.core.urls import join_url
 
@@ -121,6 +120,16 @@ def _probe_for(provider: str, api_key: str, params: dict) -> _Probe | None:
             {"Authorization": f"Token {api_key}"},
             {},
             "capability",
+        )
+    if provider == "speechmatics":
+        # Auth probe: the batch jobs listing is a cheap authenticated GET;
+        # 200 proves the key, 401/403 disproves it.
+        return _Probe(
+            "GET",
+            "https://asr.api.speechmatics.com/v2/jobs",
+            {"Authorization": f"Bearer {api_key}"},
+            None,
+            "auth",
         )
     return None
 

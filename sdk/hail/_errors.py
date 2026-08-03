@@ -81,14 +81,14 @@ class HailConfigError(HailError):
 
 
 __all__ = [
-    "HailError",
     "HailAPIError",
     "HailAuthError",
-    "HailNotFoundError",
-    "HailValidationError",
-    "HailIdempotencyConflict",
-    "HailServerError",
     "HailClientError",
-    "HailMalformedResourceId",
     "HailConfigError",
+    "HailError",
+    "HailIdempotencyConflict",
+    "HailMalformedResourceId",
+    "HailNotFoundError",
+    "HailServerError",
+    "HailValidationError",
 ]

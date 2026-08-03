@@ -2,7 +2,6 @@ import asyncio
 from unittest.mock import MagicMock
 
 import pytest
-
 from hailhq.core.s3_mail import S3MailClient
 
 

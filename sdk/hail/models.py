@@ -51,10 +51,15 @@ class LLMConfig(BaseModel):
 class VoiceConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    stt: Literal["deepgram"] = "deepgram"
     tts: Literal["cartesia"] = "cartesia"
     vad: Literal["silero"] = "silero"
     turn_detection: Literal["livekit"] = "livekit"
+    # Spoken language for the call (lowercase ISO 639-1, e.g. "da").
+    # The *server* enforces the supported set (39 codes — see
+    # docs/languages.md and the OpenAPI enum); the SDK deliberately stays
+    # permissive (shape-only) so existing SDK releases keep working when
+    # languages are added server-side. None -> provider defaults (English).
+    language: str | None = Field(default=None, pattern=r"^[a-z]{2}$")
 
 
 CallStatus = Literal[
@@ -92,6 +97,10 @@ class CallCreate(BaseModel):
     system_prompt: str | None = None
     llm: LLMConfig | None = None
     first_message: str | None = None
+    # Speak the AI self-disclosure line first on the call (default True).
+    # Disabling is the caller's responsibility — see the API schema notes
+    # on 47 CFR 64.1200(b)(1) and state AI bot-disclosure laws.
+    ai_disclosure: bool = True
     voice_config: VoiceConfig = Field(default_factory=VoiceConfig)
     conversation_id: UUID | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
@@ -107,7 +116,7 @@ class CallCreate(BaseModel):
     _validate_e164 = field_validator("to", "from_")(_e164_or_error)
 
     @model_validator(mode="after")
-    def _exactly_one_mode(self) -> "CallCreate":
+    def _exactly_one_mode(self) -> CallCreate:
         has_prompt = self.system_prompt is not None and self.system_prompt != ""
         has_llm = self.llm is not None
         if has_prompt and has_llm:
@@ -628,43 +637,43 @@ class EmailDomainListResponse(BaseModel):
 
 
 __all__ = [
+    "DOMAIN_NAME",
     "E164",
     "EMAIL_ADDR",
     "LOCAL_PREFIX",
-    "DOMAIN_NAME",
-    "CallStatus",
     "TERMINAL_CALL_STATUSES",
-    "EmailStatus",
     "TERMINAL_EMAIL_STATUSES",
-    "NumberType",
-    "LLMConfig",
-    "VoiceConfig",
     "CallCreate",
-    "CallResponse",
-    "CallListResponse",
     "CallEventResponse",
-    "EventStreamResponse",
-    "SmsStatus",
-    "SmsCreate",
-    "SmsResponse",
-    "SmsListResponse",
-    "SuppressionResponse",
-    "SuppressionListResponse",
-    "PhoneNumberResponse",
-    "PhoneNumberListResponse",
-    "SenderIdResponse",
-    "EmailCreate",
-    "EmailAttachmentResponse",
-    "EmailAttachmentUploadResponse",
-    "EmailResponse",
-    "EmailSummary",
-    "EmailListResponse",
+    "CallListResponse",
+    "CallResponse",
+    "CallStatus",
     "DkimRecord",
     "DnsRecord",
-    "EmailDomainKind",
-    "EmailDomainVerificationStatus",
+    "EmailAttachmentResponse",
+    "EmailAttachmentUploadResponse",
+    "EmailCreate",
     "EmailDomainCreate",
+    "EmailDomainKind",
+    "EmailDomainListResponse",
     "EmailDomainPatch",
     "EmailDomainResponse",
-    "EmailDomainListResponse",
+    "EmailDomainVerificationStatus",
+    "EmailListResponse",
+    "EmailResponse",
+    "EmailStatus",
+    "EmailSummary",
+    "EventStreamResponse",
+    "LLMConfig",
+    "NumberType",
+    "PhoneNumberListResponse",
+    "PhoneNumberResponse",
+    "SenderIdResponse",
+    "SmsCreate",
+    "SmsListResponse",
+    "SmsResponse",
+    "SmsStatus",
+    "SuppressionListResponse",
+    "SuppressionResponse",
+    "VoiceConfig",
 ]

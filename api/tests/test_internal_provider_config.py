@@ -5,12 +5,11 @@ from __future__ import annotations
 import uuid
 
 import pytest
-from sqlalchemy import select
-from sqlalchemy.exc import IntegrityError
-
 from hailhq.core.config import settings
 from hailhq.core.models import OrgProviderConfig
 from hailhq.core.secret_cipher import generate_key
+from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 
 from .test_internal_dsar import _signed, internal_secret_set  # noqa: F401
 
@@ -225,8 +224,10 @@ async def test_deactivation_preserves_inactive_siblings_updated_at(
     bodies = [
         b'{"provider":"anthropic","api_key":"sk-AAAA","params":{"model":"m"}}',
         b'{"provider":"google","api_key":"sk-BBBB","params":{"model":"m"}}',
-        b'{"provider":"openai-compatible","api_key":"sk-CCCC",'
-        b'"params":{"model":"m","base_url":"https://api.example.com"}}',
+        (
+            b'{"provider":"openai-compatible","api_key":"sk-CCCC",'
+            b'"params":{"model":"m","base_url":"https://api.example.com"}}'
+        ),
     ]
     for b in bodies:
         resp = await client.put(f"{BASE}/llm", content=b, headers=_signed(b))

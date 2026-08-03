@@ -1,3 +1,7 @@
+"use client";
+
+import posthog from "posthog-js";
+
 export function Toolbar({ categories }: { categories: { id: string; label: string }[] }) {
   return (
     <div className="toolbar">
@@ -10,10 +14,19 @@ export function Toolbar({ categories }: { categories: { id: string; label: strin
           ))}
         </div>
         <div style={{ display: 'flex', gap: 8, marginLeft: 'auto' }}>
-          <a className="btn btn-accent" href="/costs/compare" rel="nofollow">
+          <a
+            className="btn btn-accent"
+            href="/costs/compare"
+            rel="nofollow"
+            onClick={() => posthog.capture("compare_cta_clicked")}
+          >
             Compare
           </a>
-          <a className="btn btn-filled" href="/costs/costs.md">
+          <a
+            className="btn btn-filled"
+            href="/costs/costs.md"
+            onClick={() => posthog.capture("markdown_downloaded")}
+          >
             ↓ .md
           </a>
         </div>

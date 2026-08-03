@@ -8,13 +8,12 @@ import uuid
 
 import httpx
 import pytest
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from hailhq.core.compliance_gate import add_suppression
 from hailhq.core.config import settings
 from hailhq.core.models import ApiKey, AuditLog, Call, Email, Suppression, UsageEvent
 from hailhq.core.unsubscribe import build_unsubscribe_url
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from .conftest import insert_org_and_key  # noqa: F401
 
@@ -140,7 +139,7 @@ async def test_post_emails_succeeds_carries_unsubscribe_headers(
 ) -> None:
     """Happy-path send passes List-Unsubscribe headers to the provider and
     logs the compliance scrub result even though nothing was blocked."""
-    org_id, _, plain = org_and_key
+    _org_id, _, plain = org_and_key
     headers = {"Authorization": f"Bearer {plain}"}
     await _register_custom_verified(client, headers)
 

@@ -7,7 +7,6 @@ from uuid import uuid4
 import httpx
 import pytest
 import respx
-
 from hailhq.mcp.hail_client import HailClient
 
 _BASE_URL = "http://hail-test"

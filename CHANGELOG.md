@@ -4,6 +4,102 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 
 ## [Unreleased]
 
+## [0.19.0] — 2026-07-27
+
+The voice agent never speaks tool-call syntax again, and call events say
+what tools actually did. `cli-v0.18.0` cut alongside; the SDK is unchanged
+and stays at `hail-sdk==0.13.0`.
+
+### Voicebot speech sanitizer
+
+- LLM turns that are tool-call syntax (code fences, bare JSON — seen when
+  fast-tier models leak arguments as text during IVR navigation) are no
+  longer spoken or recorded as agent turns; the IVR prompt now names an
+  explicit nothing-to-say reply instead of the impossible "say nothing".
+- `tool_call` events now carry per-call arguments (string values capped at
+  200 chars); `hail tail` renders them as `send_dtmf(digits=2)`.
+- New `person_detected` call event marks the machine→person handoff after
+  IVR navigation; `hail tail` uses it (with the AMD verdict) to label phone-
+  tree speech `[machine]` even when transcripts arrive after the verdict.
+
+### CLI
+
+- `hail tail` no longer prints per-second `[wait] .` filler lines (shipped
+  in 0.18.0, removed after real-world use: they drowned the transcript).
+
+### Internal
+
+- Repo conformed to ruff 0.16 defaults (mechanical fixes plus documented
+  rule ignores for FastAPI and resilience idioms); `.claude` excluded from
+  lint walks.
+
+## [0.18.0] — 2026-07-23
+
+Readable call tails in the CLI. `cli-v0.17.0` cut alongside; the SDK is
+unchanged and stays at `hail-sdk==0.13.0`.
+
+- `hail tail` call-transcript display overhaul: turns render as `[hail]` /
+  `[human]` (was `[agent]` / `[user]`); pickup speech that AMD attributes
+  to a machine renders as `[machine]` with a plain-language `[amd]`
+  verdict line ("answered by a machine (phone menu)") instead of payload
+  JSON; silent seconds render as timestamped dim `[wait] .` lines (gaps
+  beyond 10s compress to three dots plus a duration); and `--id` now
+  accepts a bare call UUID or a 4+ char hex prefix (`hail tail df10f471`),
+  resolved like git short hashes.
+
+## [0.17.0] — 2026-07-23
+
+Optional AI disclosure and a voice agent that opens the call itself.
+
+Component versions cut alongside this release:
+**`sdk-v0.13.0`** (PyPI: `hail-sdk==0.13.0`), **`cli-v0.16.0`** (Homebrew + GitHub Releases).
+
+### Self-opening voice agent
+
+- `first_message` is now truly optional: without one the agent opens the
+  conversation itself with a generated first turn — reacting to how the
+  call was answered (the AMD pickup transcript) or introducing itself
+  after silence — instead of waiting mute for the callee to speak.
+
+### Optional AI disclosure
+
+- `POST /calls` gains `ai_disclosure` (default `true`): set `false` to skip
+  the spoken "this is an AI assistant" line at the start of the call. The
+  line stays non-customizable, the agent still identifies as an AI when
+  asked, and the opt-out is recorded in the audit log — disabling is the
+  caller's responsibility (47 CFR 64.1200(b)(1) and state AI bot-disclosure
+  laws may require it). Exposed via SDK `calls.create(ai_disclosure=...)`,
+  CLI `hail call --ai-disclosure=false`, MCP `place_call(ai_disclosure=...)`.
+
+## [0.16.0] — 2026-07-23
+
+Multi-language calls and a more natural-sounding voice agent.
+
+Component versions cut alongside this release:
+**`sdk-v0.12.0`** (PyPI: `hail-sdk==0.12.0`), **`cli-v0.15.0`** (Homebrew + GitHub Releases).
+
+### Multi-language calls
+
+- `POST /calls` accepts `voice_config.language` (lowercase ISO 639-1, e.g.
+  `"fr"`). The voicebot pins both STT (Deepgram) and TTS (Cartesia /
+  ElevenLabs) to the requested language on every instance it builds — BYO
+  and house fallbacks alike — so a provider failover never flips the call
+  back to English. Omitted: English defaults, as before.
+- Exposed end to end: SDK `calls.create(language=...)`, CLI
+  `hail call --language fr`, MCP `place_call(language=...)`. OpenAPI spec
+  and the generated Go client regenerated.
+
+### Voice agent realism
+
+- The voicebot's non-overridable preamble is restructured per LiveKit's
+  prompting guide (Identity / Output rules / Sounding natural /
+  Conversational flow / Tools / Guardrails): natural fillers and
+  punctuation-driven pauses, occasional mid-sentence self-corrections,
+  varied turn openers, a calm emotion baseline, automated-menu (IVR)
+  keypad guidance, and first-class tool rules — confirm before sending
+  SMS/email, state failures once, summarize tool results instead of
+  reciting raw data.
+
 ## [0.15.0] — 2026-07-18
 
 Multi-country numbers milestone, contacts from the CLI, and a public SMS

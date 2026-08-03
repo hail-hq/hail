@@ -51,13 +51,12 @@ import uuid
 from collections.abc import AsyncIterator
 from typing import Any
 
-from mcp.server.fastmcp import Context, FastMCP
-from pydantic import ValidationError
-
 from hailhq.core.schemas import parse_resource_id
-
 from hailhq.mcp.auth import AuthMode
 from hailhq.mcp.hail_client import HailAPIError, HailClient
+from pydantic import ValidationError
+
+from mcp.server.fastmcp import Context, FastMCP
 
 # --------------------------------------------------------------------------- #
 # Error mapping — turns HailAPIError into a stable agent-facing message.
@@ -113,6 +112,8 @@ async def place_call(
     llm: dict[str, Any] | None = None,
     from_: str | None = None,
     first_message: str | None = None,
+    language: str | None = None,
+    ai_disclosure: bool = True,
     metadata: dict[str, Any] | None = None,
     tools: list[str] | None = None,
     idempotency_key: str | None = None,
@@ -130,6 +131,8 @@ async def place_call(
             llm=llm,
             from_=from_,
             first_message=first_message,
+            language=language,
+            ai_disclosure=ai_disclosure,
             metadata=metadata,
             tools=tools,
             idempotency_key=idempotency_key,
@@ -533,6 +536,8 @@ def register_tools(
         llm: dict[str, Any] | None = None,
         from_: str | None = None,
         first_message: str | None = None,
+        language: str | None = None,
+        ai_disclosure: bool = True,
         metadata: dict[str, Any] | None = None,
         tools: list[str] | None = None,
         idempotency_key: str | None = None,
@@ -550,7 +555,21 @@ def register_tools(
 
         ``to`` must be E.164 (e.g. ``+14155551234``). ``from_`` is
         optional and defaults to the first active number on your org.
-        ``first_message`` is spoken on pickup before listening.
+        ``first_message`` is spoken verbatim on pickup; omit it to let
+        the agent open the conversation itself — it reacts to how the
+        call was answered, or introduces itself after silence.
+        ``language`` sets the call's spoken language for speech-to-text,
+        text-to-speech, and turn detection, as a lowercase ISO 639-1 code
+        (e.g. ``"da"``); 39 languages are supported (server rejects others
+        with 422); omit for English. STT provider selection is
+        console-BYO-only (no per-call override); configure it on the
+        organization to pin a provider.
+        ``ai_disclosure=False`` skips the spoken "this is an AI
+        assistant" line at the start of the call. Leave enabled unless
+        the user has verified it is not required for this call — US
+        artificial-voice calls (47 CFR 64.1200(b)(1)) and several AI
+        bot-disclosure laws require it, and Hail does not verify this.
+        The agent still identifies itself as an AI if asked.
         ``metadata`` is free-form JSON attached to the call record.
         ``tools`` are the agent tools to allow on this call. Omit for all
         available; pass ``[]`` to disable.
@@ -590,6 +609,8 @@ def register_tools(
                     llm=llm,
                     from_=from_,
                     first_message=first_message,
+                    language=language,
+                    ai_disclosure=ai_disclosure,
                     metadata=metadata,
                     tools=tools,
                     idempotency_key=idempotency_key,
@@ -1118,22 +1139,22 @@ def register_tools(
 
 
 __all__ = [
-    "register_tools",
-    "place_call",
-    "send_email",
+    "create_contact",
     "get_call",
-    "list_calls",
-    "send_sms",
-    "get_sms",
-    "list_sms",
     "get_email",
-    "list_emails",
-    "get_email_raw",
     "get_email_attachment",
     "get_email_events",
+    "get_email_raw",
     "get_email_stats",
     "get_events",
+    "get_sms",
+    "list_calls",
     "list_contacts",
+    "list_emails",
+    "list_sms",
     "lookup_contact",
-    "create_contact",
+    "place_call",
+    "register_tools",
+    "send_email",
+    "send_sms",
 ]

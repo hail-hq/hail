@@ -9,11 +9,6 @@ export function compareHref(ids: string[]): string {
   return ids.length > 0 ? `/costs/compare?m=${ids.join(',')}` : '/costs/compare';
 }
 
-export function compareHrefAdd(ids: string[], idToAdd: string): string {
-  if (ids.includes(idToAdd) || ids.length >= MAX_COMPARE) return compareHref(ids);
-  return compareHref([...ids, idToAdd]);
-}
-
 export function compareHrefRemove(ids: string[], idToRemove: string): string {
   return compareHref(ids.filter((id) => id !== idToRemove));
 }

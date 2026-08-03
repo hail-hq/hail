@@ -6,7 +6,6 @@ import uuid
 from dataclasses import dataclass
 
 import pytest
-
 from hailhq.core.config import settings
 from hailhq.core.models import OrgProviderConfig
 from hailhq.core.secret_cipher import generate_key
@@ -164,6 +163,39 @@ def test_build_stt_unknown_org_provider_fails_fast(captured_plugins) -> None:
     with pytest.raises(ProviderKeyError):
         build_stt(org)
     assert "deepgram" not in captured_plugins
+
+
+def test_stt_org_speechmatics_key_used(captured_plugins) -> None:
+    """``_api_key`` verified against the installed
+    livekit-plugins-speechmatics==1.6.6 (``speechmatics.STT.__init__`` stores
+    the resolved key on ``self._api_key``); revisit if it changes."""
+    from hailhq.voicebot.pipeline import ResolvedLayer, build_stt
+
+    org = ResolvedLayer(
+        provider="speechmatics",
+        api_key="sm-org-key",
+        params={},
+        fallback_enabled=False,
+    )
+    stt = build_stt(org=org, language="sv", provider="speechmatics")
+    assert stt._api_key == "sm-org-key"
+
+
+def test_stt_org_row_ignored_when_pinned_to_other_provider(
+    captured_plugins,
+) -> None:
+    from hailhq.voicebot.pipeline import ResolvedLayer, build_stt
+    from livekit.plugins import deepgram as deepgram_plugin
+
+    org = ResolvedLayer(
+        provider="speechmatics",
+        api_key="sm-org-key",
+        params={},
+        fallback_enabled=False,
+    )
+    # Caller pinned deepgram; the speechmatics org row must not be used.
+    stt = build_stt(org=org, language="sv", provider="deepgram")
+    assert isinstance(stt, deepgram_plugin.STT)
 
 
 def test_fallback_enabled_wraps_house_after_byo(captured_plugins) -> None:

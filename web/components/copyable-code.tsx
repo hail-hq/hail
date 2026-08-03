@@ -1,6 +1,7 @@
-'use client';
+"use client";
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from "react";
+import posthog from "posthog-js";
 
 export function CopyableCode({ value }: { value: string }) {
   const [copied, setCopied] = useState(false);
@@ -22,6 +23,7 @@ export function CopyableCode({ value }: { value: string }) {
       } catch {
         return;
       }
+      posthog.capture("model_id_copied", { model_id: value });
       setCopied(true);
       if (timerRef.current !== null) clearTimeout(timerRef.current);
       timerRef.current = setTimeout(() => setCopied(false), 1400);
@@ -33,18 +35,36 @@ export function CopyableCode({ value }: { value: string }) {
     <button
       type="button"
       onClick={onClick}
-      className={`copy-chip${copied ? ' copy-chip--copied' : ''}`}
-      title={copied ? 'Copied!' : 'Click to copy'}
+      className={`copy-chip${copied ? " copy-chip--copied" : ""}`}
+      title={copied ? "Copied!" : "Click to copy"}
       aria-label={copied ? `Copied ${value}` : `Copy model id ${value}`}
     >
       <span className="copy-chip-text">{value}</span>
       <span className="copy-chip-icon" aria-hidden="true">
         {copied ? (
-          <svg viewBox="0 0 16 16" width="11" height="11" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <svg
+            viewBox="0 0 16 16"
+            width="11"
+            height="11"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
             <polyline points="3 8.5 6.5 12 13 4.5" />
           </svg>
         ) : (
-          <svg viewBox="0 0 16 16" width="11" height="11" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round">
+          <svg
+            viewBox="0 0 16 16"
+            width="11"
+            height="11"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.4"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
             <rect x="5.5" y="5.5" width="8" height="8" rx="1" />
             <path d="M3 10.5V3.5A1 1 0 0 1 4 2.5h7" />
           </svg>

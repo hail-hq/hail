@@ -6,12 +6,11 @@ import uuid
 
 import httpx
 import pytest
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from hailhq.api import deps
 from hailhq.core.models import Contact, User
 from hailhq.core.testing.fixtures import seed_member as _seed_member
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from .conftest import insert_org_and_key  # noqa: F401
 

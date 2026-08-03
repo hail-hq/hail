@@ -22,23 +22,21 @@ from typing import Annotated, Any
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, ConfigDict, Field
-from sqlalchemy import func, select
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from hailhq.api.audit import write_audit_log
 from hailhq.api.numbers import resolve_org_number
 from hailhq.api.routes.email_domains import get_email_provider
 from hailhq.api.routes.emails import deliver_email, from_address_for, resolve_sender
 from hailhq.api.routes.internal.auth import verify_internal_request
 from hailhq.api.routes.sms import deliver_sms, get_sms_provider
+from hailhq.core.agent_caps import check_agent_send_allowed
 from hailhq.core.agent_tools.send_email import (
     MAX_BODY_CHARS as EMAIL_MAX_BODY_CHARS,
+)
+from hailhq.core.agent_tools.send_email import (
     MAX_RECIPIENT_NAME_CHARS,
     MAX_SUBJECT_CHARS,
 )
 from hailhq.core.agent_tools.send_sms import MAX_BODY_CHARS as SMS_MAX_BODY_CHARS
-from hailhq.core.agent_caps import check_agent_send_allowed
 from hailhq.core.billing import CALL_META_BILLED, has_funds
 from hailhq.core.compliance_gate import (
     check_email_allowed,
@@ -50,6 +48,9 @@ from hailhq.core.directory import resolve_member_emails
 from hailhq.core.models import Call, Email, Sms
 from hailhq.core.providers.email import EmailProvider
 from hailhq.core.providers.sms import SmsProvider
+from pydantic import BaseModel, ConfigDict, Field
+from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 router = APIRouter(
     prefix="/internal/agent",
@@ -149,7 +150,7 @@ async def _sends_this_call(db: AsyncSession, org_id: UUID, call_id: UUID) -> int
 
 async def _prior_send(
     db: AsyncSession,
-    model: type[Sms] | type[Email],
+    model: type[Sms | Email],
     org_id: UUID,
     tool_invocation_id: UUID,
 ) -> Sms | Email | None:
@@ -463,4 +464,4 @@ async def agent_send_email(
     return AgentSendResponse(ok=True, spoken=_SPOKEN_EMAIL_SENT)
 
 
-__all__ = ["router", "AGENT_SEND_CAP"]
+__all__ = ["AGENT_SEND_CAP", "router"]

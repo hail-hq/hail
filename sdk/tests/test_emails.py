@@ -8,8 +8,8 @@ from uuid import UUID
 import httpx
 import pytest
 import respx
-
 from hail import Client, EmailCreate
+
 from tests.conftest import make_email_response
 
 # --------------------------------------------------------------------------- #
@@ -288,9 +288,10 @@ def test_email_response_inbound_fields_parse() -> None:
     Also validates that status='received' is accepted (inbound mails use
     this status and the SDK Literal must include it).
     """
-    from hail.models import EmailResponse, EmailAttachmentResponse
-    from uuid import uuid4
     from datetime import datetime, timezone
+    from uuid import uuid4
+
+    from hail.models import EmailAttachmentResponse, EmailResponse
 
     now = datetime.now(timezone.utc)
     att_id = str(uuid4())
@@ -389,9 +390,10 @@ async def test_emails_create_with_attachment_ids(base_url: str, api_key: str) ->
 
 def test_email_response_outbound_keeps_defaults() -> None:
     """Outbound EmailResponse (no inbound fields in payload) still parses cleanly."""
-    from hail.models import EmailResponse
-    from uuid import uuid4
     from datetime import datetime, timezone
+    from uuid import uuid4
+
+    from hail.models import EmailResponse
 
     now = datetime.now(timezone.utc)
     email = EmailResponse.model_validate(

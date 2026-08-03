@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"sort"
 	"strings"
 	"syscall"
 	"time"
@@ -60,40 +61,54 @@ var terminalCallStatuses = map[client.EventStreamResponseCallStatus]bool{
 	client.EventStreamResponseCallStatusCanceled:  true,
 }
 
-// parseResourceID mirrors core.schemas.parse_resource_id: validate and split
-// a "<type>:<uuid>" value before any HTTP. Errors carry the same shape as
-// the API helper but without brackets (matches the CLI error contract).
-func parseResourceID(value string) (resType string, resID uuid.UUID, err error) {
+// splitResourceArg splits a CLI-supplied --id value into (type, idPart).
+// A bare value with no "<type>:" prefix is treated as a call — `hail tail
+// --id df10f471` mirrors `hail call tail df10f471`. Validation of the id
+// part (full UUID vs 4+ char hex prefix) happens in resolveTailID.
+func splitResourceArg(value string) (resType, idPart string, err error) {
 	idx := strings.Index(value, ":")
 	if idx < 0 {
-		return "", uuid.Nil, fmt.Errorf("must be '<type>:<uuid>' (e.g. 'call:abc-...'); missing ':'")
+		return "call", value, nil
 	}
 	resType = value[:idx]
-	idStr := value[idx+1:]
+	idPart = value[idx+1:]
 	if resType == "" {
-		return "", uuid.Nil, fmt.Errorf("missing resource type before ':'")
+		return "", "", fmt.Errorf("missing resource type before ':'")
 	}
-	if idStr == "" {
-		return "", uuid.Nil, fmt.Errorf("missing resource id after ':'")
+	if idPart == "" {
+		return "", "", fmt.Errorf("missing resource id after ':'")
 	}
-	supported := false
 	for _, t := range supportedResourceTypes {
 		if t == resType {
-			supported = true
-			break
+			return resType, idPart, nil
 		}
 	}
-	if !supported {
-		return "", uuid.Nil, fmt.Errorf(
-			"unsupported resource type %q; supported: %s",
-			resType, strings.Join(supportedResourceTypes, ", "),
+	return "", "", fmt.Errorf(
+		"unsupported resource type %q; supported: %s",
+		resType, strings.Join(supportedResourceTypes, ", "),
+	)
+}
+
+// resolveTailID turns the id part into a full UUID. A full UUID passes
+// through with no HTTP; anything else is treated as a hex prefix and
+// resolved against the recent list for the resource type (calls and
+// emails have list endpoints; sms rows don't yet).
+func resolveTailID(ctx context.Context, apiClient *client.ClientWithResponses, resType, idPart string) (uuid.UUID, error) {
+	if parsed, err := uuid.Parse(idPart); err == nil {
+		return parsed, nil
+	}
+	switch resType {
+	case "call":
+		id, _, err := resolveCallID(ctx, apiClient, idPart)
+		return id, err
+	case "email":
+		return resolveEmailID(ctx, apiClient, idPart)
+	default:
+		return uuid.Nil, fmt.Errorf(
+			"invalid %s id %q: prefixes are not resolvable for %s, pass the full UUID",
+			resType, idPart, resType,
 		)
 	}
-	parsed, perr := uuid.Parse(idStr)
-	if perr != nil {
-		return "", uuid.Nil, fmt.Errorf("invalid uuid %q: %w", idStr, perr)
-	}
-	return resType, parsed, nil
 }
 
 // ANSI color codes used when stdout is a TTY and NO_COLOR is unset.
@@ -107,6 +122,17 @@ const (
 	colorRed     = "\x1b[31m"
 	colorDim     = "\x1b[2m"
 )
+
+// amdSentences maps AMD verdict categories (voicebot/hailhq/voicebot/amd.py)
+// to human-readable [amd] lines. Unknown categories render verbatim so a
+// new verdict doesn't need a CLI release to show up legibly.
+var amdSentences = map[string]string{
+	"human":               "answered by a human",
+	"machine-ivr":         "answered by a machine (phone menu)",
+	"machine-vm":          "answered by a machine (voicemail)",
+	"machine-unavailable": "answered by a machine (mailbox unavailable)",
+	"uncertain":           "unclear who answered — treating as human",
+}
 
 // perCallPalette is the small set of stable colors assigned to short call
 // ids in org-wide tail mode. Hashed lookup lives in shortIDColor.
@@ -134,8 +160,12 @@ Narrow to one resource either way:
 
   hail tail --id call:<uuid>
   hail tail call:<uuid>
+  hail tail df10f471            # bare id — treated as a call
+  hail tail --id call:df10f471  # 4+ char prefix, resolved like git short hashes
 
-Both forms accept '<type>:<uuid>' where <type> is one of: ` + strings.Join(supportedResourceTypes, ", ") + `.
+Both forms accept '<type>:<id>' where <type> is one of: ` + strings.Join(supportedResourceTypes, ", ") + `,
+and <id> is a full UUID or a 4+ char hex prefix (calls and emails). A bare
+<id> with no type defaults to call.
 
 When narrowed to a call, tail auto-exits when the call reaches a terminal
 status (completed/failed/busy/no_answer/canceled). Email tails currently
@@ -151,7 +181,7 @@ run until SIGINT.`,
 			return runTail(cmd.Context(), opts, f)
 		},
 	}
-	cmd.Flags().StringVar(&f.id, "id", "", "Narrow to one resource as '<type>:<uuid>' (e.g. 'call:abc-...'); supported: "+strings.Join(supportedResourceTypes, ", "))
+	cmd.Flags().StringVar(&f.id, "id", "", "Narrow to one resource: '<type>:<uuid>', '<type>:<prefix>', or a bare call id/prefix; supported types: "+strings.Join(supportedResourceTypes, ", "))
 	registerTailFlags(cmd, f)
 	return cmd
 }
@@ -172,21 +202,6 @@ func runTail(ctx context.Context, opts *Options, f *tailFlags) error {
 		return fmt.Errorf("--interval must be in [100, 10000] ms, got %d", f.intervalMS)
 	}
 
-	// Parse --id early so malformed / unsupported values fail before any
-	// network IO. The CLI knows the supported set in v1; it does not have to
-	// round-trip the API to validate.
-	var (
-		idWire       string // exact "<type>:<uuid>" string put on the wire
-		resourceType string
-	)
-	if f.id != "" {
-		rtype, rid, err := parseResourceID(f.id)
-		if err != nil {
-			return err
-		}
-		resourceType = rtype
-		idWire = fmt.Sprintf("%s:%s", rtype, rid.String())
-	}
 	// SIGINT cancels the poll loop. Exit 130 happens at Execute() — we just
 	// return errInterrupted from here.
 	tailCtx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
@@ -195,6 +210,26 @@ func runTail(ctx context.Context, opts *Options, f *tailFlags) error {
 	apiClient, err := opts.newClient()
 	if err != nil {
 		return err
+	}
+
+	// Resolve --id: split fails fast on malformed / unsupported values with
+	// no network IO, and a short prefix costs one list roundtrip (a full
+	// UUID none) before polling starts.
+	var (
+		idWire       string // exact "<type>:<uuid>" string put on the wire
+		resourceType string
+	)
+	if f.id != "" {
+		rtype, idPart, err := splitResourceArg(f.id)
+		if err != nil {
+			return err
+		}
+		rid, err := resolveTailID(tailCtx, apiClient, rtype, idPart)
+		if err != nil {
+			return err
+		}
+		resourceType = rtype
+		idWire = fmt.Sprintf("%s:%s", rtype, rid.String())
 	}
 
 	colorize := shouldColorize(opts.Stdout)
@@ -236,6 +271,12 @@ func runTail(ctx context.Context, opts *Options, f *tailFlags) error {
 		return resp.JSON200, nil
 	}
 
+	renderer := newTailRenderer(opts, resourceType != "", colorize, f.kind != "")
+	// Buffered pickup transcripts must survive every exit path — fetch
+	// errors, --no-follow, SIGINT. flushAll is idempotent, so the explicit
+	// call before the terminal-status line below is safe to keep.
+	defer renderer.flushAll()
+
 	for {
 		page, err := fetch(cursor)
 		if err != nil {
@@ -250,7 +291,7 @@ func runTail(ctx context.Context, opts *Options, f *tailFlags) error {
 		var lastEvent *client.EventResponse
 		for {
 			for i := range page.Items {
-				if err := renderEvent(opts, page.Items[i], resourceType != "", colorize); err != nil {
+				if err := renderer.renderEvent(page.Items[i]); err != nil {
 					return err
 				}
 				lastEvent = &page.Items[i]
@@ -281,6 +322,7 @@ func runTail(ctx context.Context, opts *Options, f *tailFlags) error {
 		// EmailStatus field on the generated client. Email tails run until SIGINT.
 		if resourceType == "call" &&
 			firstPage.CallStatus != nil && terminalCallStatuses[*firstPage.CallStatus] {
+			renderer.flushAll()
 			finalLine := fmt.Sprintf("call %s", string(*firstPage.CallStatus))
 			renderSystemLine(opts, time.Now().UTC(), finalLine, colorize)
 			return nil
@@ -294,38 +336,139 @@ func runTail(ctx context.Context, opts *Options, f *tailFlags) error {
 	}
 }
 
-// renderEvent dispatches on event.Kind and writes one line to opts.Stdout.
-// In --json mode each event is emitted as a single JSON object per line.
+// tailRenderer owns cross-event display state: AMD-aware labeling of
+// pickup transcripts. One instance lives for the whole tail loop.
 //
 // `singleResource` is true when --id <type>:<uuid> narrowed the stream; the
 // short-id prefix is omitted in that mode (every event belongs to the same
 // resource, the prefix would be redundant noise).
-func renderEvent(opts *Options, ev client.EventResponse, singleResource, colorize bool) error {
-	if opts.JSON {
+type tailRenderer struct {
+	opts           *Options
+	singleResource bool
+	colorize       bool
+	// kindFiltered is true when --kind narrows the stream server-side. A
+	// partial stream disables AMD buffering (the amd_result row may be
+	// filtered out, so buffered turns would starve until call end).
+	kindFiltered bool
+	// pending buffers user_turn events per call until that call's AMD
+	// verdict arrives, so a phone tree's menu prompt renders as [machine]
+	// instead of [human]. The transcript events land in the stream before
+	// the amd_result row, so the right label is unknowable on arrival.
+	pending     map[openapi_types.UUID][]client.EventResponse
+	amdResolved map[openapi_types.UUID]bool
+	// machineActive marks calls whose AMD verdict was a machine and no
+	// person has been detected yet — user_turn events in that window are
+	// the phone tree talking, not a human.
+	machineActive map[openapi_types.UUID]bool
+}
+
+func newTailRenderer(opts *Options, singleResource, colorize, kindFiltered bool) *tailRenderer {
+	return &tailRenderer{
+		opts:           opts,
+		singleResource: singleResource,
+		colorize:       colorize,
+		kindFiltered:   kindFiltered,
+		pending:        map[openapi_types.UUID][]client.EventResponse{},
+		amdResolved:    map[openapi_types.UUID]bool{},
+		machineActive:  map[openapi_types.UUID]bool{},
+	}
+}
+
+// renderEvent dispatches on event.Kind and writes one line to opts.Stdout.
+// In --json mode each event is emitted as a single JSON object per line,
+// verbatim and unbuffered — the NDJSON stream must not be reordered.
+func (r *tailRenderer) renderEvent(ev client.EventResponse) error {
+	if r.opts.JSON {
 		out, err := json.Marshal(ev)
 		if err != nil {
 			return fmt.Errorf("encode event JSON: %w", err)
 		}
-		fmt.Fprintln(opts.Stdout, string(out))
+		fmt.Fprintln(r.opts.Stdout, string(out))
 		return nil
 	}
 
-	ts := ev.OccurredAt.UTC().Format("15:04:05")
-	label, body := renderEventBody(ev)
-	if colorize {
-		label = colorFor(ev.Kind) + label + colorReset
-	}
-	if singleResource {
-		fmt.Fprintf(opts.Stdout, "[%s] %-9s %s\n", ts, label, body)
+	res := eventResourceID(ev)
+	if ev.Kind == "user_turn" && !r.kindFiltered && !r.amdResolved[res] {
+		r.pending[res] = append(r.pending[res], ev)
 		return nil
 	}
-	short := shortCallID(eventResourceID(ev))
-	prefix := fmt.Sprintf("[%s]", short)
-	if colorize {
-		prefix = shortIDColor(short) + prefix + colorReset
+	if ev.Kind == "amd_result" {
+		r.amdResolved[res] = true
+		category, _ := ev.Payload["category"].(string)
+		machine := strings.HasPrefix(category, "machine")
+		r.flushPending(res, machine)
+		// The voicebot may keep transcribing the phone tree after the
+		// verdict row (menu speech events land after amd_result) — keep
+		// labeling that speech [machine] until a person is detected.
+		r.machineActive[res] = machine
+	} else if ev.Kind == "person_detected" {
+		// The handoff marker means everything user-side before it was the
+		// phone tree — a mid-join buffer (amd_result outside the window)
+		// flushes as [machine], not [human].
+		r.amdResolved[res] = true
+		r.flushPending(res, true)
+	} else if ev.Kind != "state_change" || len(r.pending[res]) > 0 {
+		// The voicebot writes amd_result before any agent_turn, so any
+		// post-pickup event kind means the verdict is not coming (AMD
+		// skipped or failed, or the tail joined mid-call) — whoever speaks
+		// from here is presumed a person, with no buffering delay.
+		// state_change alone doesn't resolve: queued/ringing transitions
+		// precede pickup in --from-start replays.
+		r.amdResolved[res] = true
+		r.flushPending(res, false)
 	}
-	fmt.Fprintf(opts.Stdout, "[%s] %s %-9s %s\n", ts, prefix, label, body)
+	// A machine phase ends when the voicebot reports the handoff
+	// (person_detected) or, for events written before that kind existed,
+	// when the agent first speaks to the person.
+	if ev.Kind == "person_detected" || ev.Kind == "agent_turn" {
+		r.machineActive[res] = false
+	}
+	if ev.Kind == "user_turn" && r.machineActive[res] {
+		r.printLine(ev, "[machine]", colorDim, turnText(ev))
+		return nil
+	}
+	label, body := renderEventBody(ev)
+	r.printLine(ev, label, colorFor(ev.Kind), body)
 	return nil
+}
+
+// flushPending prints a call's buffered pickup transcripts, labeled per
+// the AMD verdict, preserving their original timestamps and order.
+func (r *tailRenderer) flushPending(res openapi_types.UUID, machine bool) {
+	for _, ev := range r.pending[res] {
+		label, color := "[human]", colorYellow
+		if machine {
+			label, color = "[machine]", colorDim
+		}
+		r.printLine(ev, label, color, turnText(ev))
+	}
+	delete(r.pending, res)
+}
+
+// flushAll drains every buffer as [human] — the stream is ending, so no
+// verdict is coming.
+func (r *tailRenderer) flushAll() {
+	for res := range r.pending {
+		r.flushPending(res, false)
+	}
+}
+
+// printLine writes one formatted line.
+func (r *tailRenderer) printLine(ev client.EventResponse, label, color, body string) {
+	ts := ev.OccurredAt.UTC().Format("15:04:05")
+	if r.colorize && color != "" {
+		label = color + label + colorReset
+	}
+	if r.singleResource {
+		fmt.Fprintf(r.opts.Stdout, "[%s] %-9s %s\n", ts, label, body)
+	} else {
+		short := shortCallID(eventResourceID(ev))
+		prefix := fmt.Sprintf("[%s]", short)
+		if r.colorize {
+			prefix = shortIDColor(short) + prefix + colorReset
+		}
+		fmt.Fprintf(r.opts.Stdout, "[%s] %s %-9s %s\n", ts, prefix, label, body)
+	}
 }
 
 // eventResourceID picks the id (call, email, or sms) that owns this event,
@@ -378,20 +521,34 @@ func renderEventBody(ev client.EventResponse) (label, body string) {
 		}
 		return "[system]", fmt.Sprintf("%s → %s", from, to)
 	case "agent_turn":
-		text, _ := ev.Payload["text"].(string)
-		if text == "" {
-			return "[agent]", payloadJSON(ev.Payload)
-		}
-		return "[agent]", text
+		return "[hail]", turnText(ev)
 	case "user_turn":
-		text, _ := ev.Payload["text"].(string)
-		if text == "" {
-			return "[user]", payloadJSON(ev.Payload)
+		return "[human]", turnText(ev)
+	case "amd_result":
+		// The pickup transcript lines above already show what was heard —
+		// render only the verdict, as a sentence, not the payload JSON.
+		if category, ok := ev.Payload["category"].(string); ok && category != "" {
+			if sentence, ok := amdSentences[category]; ok {
+				return "[amd]", sentence
+			}
+			return "[amd]", category
 		}
-		return "[user]", text
+		return "[amd]", payloadJSON(ev.Payload)
+	case "person_detected":
+		// Written by the voicebot when a person comes on the line after a
+		// machine answered (post-IVR handoff).
+		return "[system]", "a person is on the line"
 	case "tool_call":
-		// Verified shape (voicebot/.../agent.py): {"tools": [<name>, ...]}.
-		// Spec mentions {"name", "args"} too — handle both defensively.
+		// Current shape (voicebot/.../agent.py): {"tools": [names],
+		// "calls": [{"name", "args"}]} — `calls` carries arguments so the
+		// line shows what the tool did, e.g. send_dtmf(digits=2). Older
+		// rows have only `tools`; spec mentions {"name", "args"} too —
+		// handle all three defensively.
+		if calls, ok := ev.Payload["calls"].([]interface{}); ok && len(calls) > 0 {
+			if rendered := renderToolCalls(calls); rendered != "" {
+				return "[tool]", rendered
+			}
+		}
 		if name, ok := ev.Payload["name"].(string); ok && name != "" {
 			args, _ := json.Marshal(ev.Payload["args"])
 			return "[tool]", fmt.Sprintf("%s(%s)", name, string(args))
@@ -423,6 +580,41 @@ func renderEventBody(ev client.EventResponse) (label, body string) {
 	}
 }
 
+// renderToolCalls formats the tool_call `calls` payload as
+// "name(k=v, ...)" entries joined by "; ". Returns "" on a malformed
+// list so the caller can fall through to the older shapes.
+func renderToolCalls(calls []interface{}) string {
+	parts := make([]string, 0, len(calls))
+	for _, c := range calls {
+		m, ok := c.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		name, _ := m["name"].(string)
+		if name == "" {
+			continue
+		}
+		args, _ := m["args"].(map[string]interface{})
+		kvs := make([]string, 0, len(args))
+		for k, v := range args {
+			kvs = append(kvs, fmt.Sprintf("%s=%v", k, v))
+		}
+		sort.Strings(kvs)
+		parts = append(parts, fmt.Sprintf("%s(%s)", name, strings.Join(kvs, ", ")))
+	}
+	return strings.Join(parts, "; ")
+}
+
+// turnText is the spoken text of a turn event, falling back to the raw
+// payload JSON when the text field is absent or empty.
+func turnText(ev client.EventResponse) string {
+	text, _ := ev.Payload["text"].(string)
+	if text == "" {
+		return payloadJSON(ev.Payload)
+	}
+	return text
+}
+
 func payloadJSON(p map[string]interface{}) string {
 	b, err := json.Marshal(p)
 	if err != nil {
@@ -451,7 +643,7 @@ func colorFor(kind string) string {
 		return colorCyan
 	case "user_turn":
 		return colorYellow
-	case "state_change":
+	case "state_change", "amd_result", "person_detected":
 		return colorDim
 	case "error":
 		return colorRed

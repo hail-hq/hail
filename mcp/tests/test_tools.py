@@ -16,7 +16,6 @@ from uuid import uuid4
 import httpx
 import pytest
 import respx
-
 from hailhq.mcp import tools
 from hailhq.mcp.hail_client import HailClient
 
@@ -94,6 +93,65 @@ async def test_place_call_mode_a_happy_path(client: HailClient) -> None:
         "recipient_consent": True,
         "message_type": "informational",
     }
+
+
+@respx.mock
+async def test_place_call_language_lands_in_voice_config(client: HailClient) -> None:
+    captured: dict = {}
+
+    def _handler(request: httpx.Request) -> httpx.Response:
+        captured["body"] = request.read().decode("utf-8")
+        return httpx.Response(201, json=_call_response())
+
+    respx.post(f"{_BASE_URL}/calls").mock(side_effect=_handler)
+
+    result = await tools.place_call(
+        client=client,
+        recipient_consent=True,
+        to="+14155559999",
+        system_prompt="be polite",
+        language="fr",
+    )
+    assert "error" not in result, result
+
+    body = httpx.Response(200, content=captured["body"]).json()
+    assert body["voice_config"] == {"language": "fr"}
+
+
+@respx.mock
+async def test_place_call_ai_disclosure_opt_out(client: HailClient) -> None:
+    captured: dict = {}
+
+    def _handler(request: httpx.Request) -> httpx.Response:
+        captured["body"] = request.read().decode("utf-8")
+        return httpx.Response(201, json=_call_response())
+
+    respx.post(f"{_BASE_URL}/calls").mock(side_effect=_handler)
+
+    result = await tools.place_call(
+        client=client,
+        recipient_consent=True,
+        to="+14155559999",
+        system_prompt="be polite",
+        ai_disclosure=False,
+    )
+    assert "error" not in result, result
+
+    body = httpx.Response(200, content=captured["body"]).json()
+    assert body["ai_disclosure"] is False
+
+
+async def test_place_call_rejects_bad_language(client: HailClient) -> None:
+    """A non-ISO-639-1 code fails CallCreate validation before any HTTP."""
+    result = await tools.place_call(
+        client=client,
+        recipient_consent=True,
+        to="+14155559999",
+        system_prompt="be polite",
+        language="French",
+    )
+    assert "error" in result
+    assert "language" in result["error"]
 
 
 @respx.mock

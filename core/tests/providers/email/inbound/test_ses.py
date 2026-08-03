@@ -4,7 +4,6 @@ import hmac
 import json
 
 import pytest
-
 from hailhq.core.providers.email.inbound.ses import SesInboundProvider
 
 SAMPLE = {

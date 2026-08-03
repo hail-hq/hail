@@ -14,23 +14,22 @@ from typing import Literal
 from urllib.parse import urlsplit
 from uuid import UUID
 
+from hailhq.core.config import settings
+from hailhq.core.models import OrgProviderConfig
+from hailhq.core.secret_cipher import SecretCipher
 from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from hailhq.core.config import settings
-from hailhq.core.models import OrgProviderConfig
-from hailhq.core.secret_cipher import SecretCipher
-
 __all__ = [
     "LAYERS",
-    "LLMParams",
-    "TTSParams",
-    "STTParams",
     "PARAMS_BY_LAYER",
-    "provider_cipher",
+    "LLMParams",
+    "STTParams",
+    "TTSParams",
     "last4",
     "load_org_provider_configs",
+    "provider_cipher",
 ]
 
 LAYERS: tuple[str, ...] = ("llm", "tts", "stt")
@@ -66,7 +65,7 @@ class LLMParams(BaseModel):
         return v
 
     @model_validator(mode="after")
-    def _base_url_matches_provider(self) -> "LLMParams":
+    def _base_url_matches_provider(self) -> LLMParams:
         if self.provider == "openai-compatible" and not self.base_url:
             raise ValueError("base_url is required for openai-compatible")
         if self.provider != "openai-compatible" and self.base_url:
@@ -85,7 +84,7 @@ class TTSParams(BaseModel):
 class STTParams(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    provider: Literal["deepgram"]
+    provider: Literal["deepgram", "speechmatics"]
     model: str | None = None
 
 

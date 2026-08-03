@@ -12,9 +12,6 @@ from __future__ import annotations
 
 import asyncio
 
-from twilio.base.exceptions import TwilioRestException
-from twilio.rest import Client as TwilioClient
-
 from hailhq.core.config import settings
 from hailhq.core.providers.voice.base import (
     NumberNotProvisionable,
@@ -23,6 +20,8 @@ from hailhq.core.providers.voice.base import (
     ProviderNumber,
     VoiceProvider,
 )
+from twilio.base.exceptions import TwilioRestException
+from twilio.rest import Client as TwilioClient
 
 # Maps the Hail-canonical capability strings to Twilio's available-number
 # search kwargs (which take booleans). Anything in `capabilities` that

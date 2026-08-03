@@ -16,25 +16,15 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from fastapi import status as http_status
-from sqlalchemy import select, update
-from sqlalchemy.ext.asyncio import AsyncSession
-
-from hailhq.api.audit import write_audit_log
-from hailhq.api.consent import enforce_consent, isoformat_or_none
-from hailhq.api.errors import unprocessable
 from hailhq.api.agent_gate import (
     RATE_LIMITED_RESPONSES,
     require_agent_send_allowed,
 )
-from hailhq.api.funds import require_funds
-from hailhq.core.agent_tools.registry import all_tools
-from hailhq.core.billing import CALL_META_BILLED
-from hailhq.core.call_end_reasons import CallEndReason
-from hailhq.core.compliance_gate import check_call_allowed
-from hailhq.core.db import get_session
-from hailhq.core.internal_webhook import fetch_organization_name
+from hailhq.api.audit import write_audit_log
+from hailhq.api.consent import enforce_consent, isoformat_or_none
 from hailhq.api.deps import Principal, get_current_principal
-from hailhq.api.pagination import fetch_cursor_page
+from hailhq.api.errors import unprocessable
+from hailhq.api.funds import require_funds
 from hailhq.api.idempotency import (
     IdempotencyContext,
     cache_failure,
@@ -42,7 +32,15 @@ from hailhq.api.idempotency import (
     replay_cached,
 )
 from hailhq.api.numbers import resolve_org_number
+from hailhq.api.pagination import fetch_cursor_page
+from hailhq.core.agent_tools.registry import all_tools
+from hailhq.core.billing import CALL_META_BILLED
+from hailhq.core.call_end_reasons import CallEndReason
+from hailhq.core.compliance_gate import check_call_allowed
 from hailhq.core.config import settings
+from hailhq.core.db import get_session
+from hailhq.core.internal_webhook import fetch_organization_name
+from hailhq.core.languages import SUPPORTED_LANGUAGES
 from hailhq.core.livekit import LiveKitClient
 from hailhq.core.models import Call, CallEvent, PhoneNumber
 from hailhq.core.pool import (
@@ -50,7 +48,7 @@ from hailhq.core.pool import (
     claim_pool_number,
     release_pool_reservation,
 )
-from hailhq.core.provider_config import provider_cipher
+from hailhq.core.provider_config import load_org_provider_configs, provider_cipher
 from hailhq.core.schemas import (
     TERMINAL_CALL_STATUSES,
     CallCreate,
@@ -61,6 +59,8 @@ from hailhq.core.schemas import (
 from hailhq.core.secret_cipher import SecretKeyMissing
 from hailhq.core.url_guard import UnsafeUrlError, assert_public_https_url
 from hailhq.core.webhook_fanout import fanout_call_event
+from sqlalchemy import select, update
+from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
 
@@ -219,6 +219,35 @@ async def create_call(
                 ),
             )
 
+    # Language/provider compatibility gate — reject before any Call row is
+    # created. Deterministic on request + org config, so failures are
+    # cached for idempotent replay like the other 422 gates.
+    lang = body.voice_config.language
+    org_rows = (
+        await load_org_provider_configs(db, principal.organization_id)
+        if lang is not None
+        else {}
+    )
+    if lang is not None:
+        caps = SUPPORTED_LANGUAGES[lang]
+        # Asymmetric by design: the STT side never 422s here — STT provider
+        # selection is console-BYO-only (no per-call knob), and routing
+        # (org BYO row > language auto-route) degrades safely inside the
+        # voicebot (deepgram covers every supported language). TTS has no
+        # per-call pin either; the org's BYO TTS row is the sole source of
+        # truth, so it's checked here regardless of voice_config contents.
+        tts_row = org_rows.get("tts")
+        if tts_row is not None and tts_row.provider not in caps.tts:
+            raise await cache_failure(
+                idem,
+                unprocessable(
+                    f"your BYO tts provider '{tts_row.provider}' does not "
+                    f"support language '{lang}'; supported providers: "
+                    f"{sorted(caps.tts)}",
+                    loc=["body", "voice_config", "language"],
+                ),
+            )
+
     # Compliance gate — suppression/DNC, premium-rate prefix, velocity cap.
     # Also before any Call row is created, so a denial has no resource to
     # clean up; the audit entry below carries resource_id=None.
@@ -319,6 +348,9 @@ async def create_call(
             "consent_source": body.consent_source,
             "consent_obtained_at": isoformat_or_none(body.consent_obtained_at),
             "message_type": body.message_type,
+            # Compliance-relevant: record when a caller opted out of the
+            # spoken AI disclosure, so the decision is attributable later.
+            "ai_disclosure": body.ai_disclosure,
             "compliance": gate.checks,
         },
     )
@@ -368,6 +400,7 @@ async def create_call(
                 "system_prompt": body.system_prompt,
                 "llm": llm_meta,
                 "first_message": body.first_message,
+                "ai_disclosure": body.ai_disclosure,
                 "tools": body.tools,
                 "org_name": await org_name_task,
             },
@@ -542,4 +575,4 @@ async def list_calls(
     )
 
 
-__all__ = ["router", "get_livekit"]
+__all__ = ["get_livekit", "router"]

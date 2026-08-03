@@ -5,6 +5,8 @@ from typing import Any, Literal
 from urllib.parse import urlsplit
 from uuid import UUID
 
+from hailhq.core.languages import Language
+from hailhq.core.sender_id import PLATFORM_DEFAULT_SENDER_ID
 from pydantic import (
     AliasChoices,
     BaseModel,
@@ -13,8 +15,6 @@ from pydantic import (
     field_validator,
     model_validator,
 )
-
-from hailhq.core.sender_id import PLATFORM_DEFAULT_SENDER_ID
 
 E164 = re.compile(r"^\+[1-9]\d{1,14}$")
 
@@ -39,7 +39,7 @@ def _e164_or_error(v: str | None) -> str | None:
 
 
 def encode_cursor(ts: datetime, id_: UUID) -> str:
-    raw = f"{ts.isoformat()}|{id_}".encode("utf-8")
+    raw = f"{ts.isoformat()}|{id_}".encode()
     return base64.urlsafe_b64encode(raw).rstrip(b"=").decode("ascii")
 
 
@@ -127,13 +127,21 @@ class LLMConfig(BaseModel):
 class VoiceConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    stt: Literal["deepgram"] = "deepgram"
     tts: Literal["cartesia"] = "cartesia"
     vad: Literal["silero"] = "silero"
     turn_detection: Literal["livekit"] = "livekit"
     # Per-call TTS voice override. Applies to whichever TTS provider serves
     # the call (org BYO config or Hail default). None → org/env default.
     voice_id: str | None = None
+    language: Language | None = Field(
+        default=None,
+        description=(
+            "Spoken language for the call as a lowercase ISO 639-1 code "
+            "(e.g. 'da'). One of the 39 supported codes — see "
+            "docs/languages.md. Applied to STT, TTS, and turn detection. "
+            "Omitted: the providers' defaults (English)."
+        ),
+    )
 
 
 class ConsentAttestationMixin(BaseModel):
@@ -180,6 +188,20 @@ class CallCreate(ConsentAttestationMixin):
     system_prompt: str | None = None
     llm: LLMConfig | None = None
     first_message: str | None = None
+    ai_disclosure: bool = Field(
+        default=True,
+        description=(
+            "Speak the AI self-disclosure line ('Hi, this is an AI "
+            "assistant calling on behalf of ...') as the first thing on "
+            "the call. Enabled by default. Disable only if you have "
+            "verified the disclosure is not required for this call — 47 "
+            "CFR 64.1200(b)(1) requires identifying the initiating "
+            "business at the start of artificial-voice calls in the US, "
+            "and several jurisdictions have AI bot-disclosure laws. Hail "
+            "does not verify this for you. The agent still identifies "
+            "itself as an AI if asked."
+        ),
+    )
     voice_config: VoiceConfig = Field(default_factory=VoiceConfig)
     conversation_id: UUID | None = None
     metadata: dict = Field(default_factory=dict)

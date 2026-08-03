@@ -117,7 +117,7 @@ class FakeSpeechHandle:
         # Mirrors the real SpeechHandle being awaitable directly (the
         # entrypoint does ``await session.say(...)`` without capturing a
         # handle). Resolving immediately is enough for ordering assertions.
-        async def _resolve() -> "FakeSpeechHandle":
+        async def _resolve() -> FakeSpeechHandle:
             return self
 
         return _resolve().__await__()
@@ -134,6 +134,7 @@ class FakeAnnouncingSession:
 
     def __init__(self) -> None:
         self.say_calls: list[tuple[str, bool]] = []
+        self.generate_reply_calls: list[str | None] = []
         self.last_handle: FakeSpeechHandle | None = None
 
     def say(self, text: str, *, allow_interruptions: bool) -> FakeSpeechHandle:
@@ -141,6 +142,10 @@ class FakeAnnouncingSession:
         handle = FakeSpeechHandle()
         self.last_handle = handle
         return handle
+
+    def generate_reply(self, *, instructions: str | None = None) -> FakeSpeechHandle:
+        self.generate_reply_calls.append(instructions)
+        return FakeSpeechHandle()
 
 
 class FakeLocalParticipant:
@@ -183,7 +188,7 @@ class FakeJobContext:
     def shutdown(self, reason: str = "") -> None:
         self.shutdown_calls.append(reason)
 
-    def delete_room(self) -> "asyncio.Future[None]":
+    def delete_room(self) -> asyncio.Future[None]:
         self.delete_room_calls += 1
         fut: asyncio.Future[None] = asyncio.get_event_loop().create_future()
         if self.delete_room_error is not None:

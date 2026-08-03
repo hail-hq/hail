@@ -11,7 +11,6 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import pytest
-
 from hailhq.mcp.auth import AuthMode
 from hailhq.mcp.hail_client import HailClient
 from hailhq.mcp.tools import _client_for

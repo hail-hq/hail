@@ -11,11 +11,10 @@ import uuid
 
 import httpx
 import pytest
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from hailhq.core.agent_caps import AGENT_OUTBOUND_DISABLED_FLAG
 from hailhq.core.config import settings
 from hailhq.core.models import ApiKey, Organization, PhoneNumber, PlatformFlag
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from .conftest import insert_org_and_key  # noqa: F401
 
@@ -95,7 +94,7 @@ async def test_human_org_unaffected_by_agent_email_cap(
     org_and_key: tuple[uuid.UUID, ApiKey, str],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    org_id, _, plain = org_and_key  # no agent flag — origin defaults to 'human'
+    _org_id, _, plain = org_and_key  # no agent flag — origin defaults to 'human'
     headers = {"Authorization": f"Bearer {plain}"}
     await _register_custom_verified(client, headers)
     monkeypatch.setattr(settings, "agent_email_per_hour", 1)

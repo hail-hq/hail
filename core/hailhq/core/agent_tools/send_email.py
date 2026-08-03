@@ -11,12 +11,11 @@ from __future__ import annotations
 import uuid
 from typing import Any
 
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from hailhq.core.agent_tools.spec import SPOKEN_FALLBACK, ToolContext, ToolSpec
 from hailhq.core.config import settings
 from hailhq.core.models import EmailDomain
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 # The internal route (AgentSendEmailRequest) imports these as its Field caps.
 MAX_RECIPIENT_NAME_CHARS = 200

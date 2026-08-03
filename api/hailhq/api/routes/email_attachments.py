@@ -16,8 +16,6 @@ from uuid import uuid4
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from fastapi import status as http_status
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from hailhq.api.deps import Principal, get_current_principal, get_s3_mail
 from hailhq.core.db import get_session
 from hailhq.core.email_attachment_limits import (
@@ -27,6 +25,7 @@ from hailhq.core.email_attachment_limits import (
 from hailhq.core.models import EmailAttachmentUpload
 from hailhq.core.s3_mail import S3MailClient
 from hailhq.core.schemas import EmailAttachmentUploadResponse
+from sqlalchemy.ext.asyncio import AsyncSession
 
 router = APIRouter(prefix="/email-attachments", tags=["email-attachments"])
 

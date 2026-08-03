@@ -19,12 +19,14 @@ clean up). Three LLM modes are supported:
   (``fallback_enabled``). Absent a per-call override, this is the org's
   standing choice.
 
-Precedence per layer: per-call (mode B, TTS/STT have no per-call override
-today) > org BYO (mode C) > house default (mode A). A BYO layer that cannot
-be built (no key, unknown provider, unsafe URL) and has fallback disabled
-raises :class:`ProviderKeyError` — deliberately fail-fast, since silently
-substituting Hail's keys would defeat the point of BYO unless the org opted
-into the fallback.
+Precedence per layer: per-call (mode B; LLM only — TTS/STT have no per-call
+override) > org BYO (mode C) > house default (mode A). STT provider
+selection is console-BYO-only: the org's BYO row (mode C) wins, else the
+call auto-routes by language (see ``hailhq.core.languages``). A BYO layer
+that cannot be built (no key, unknown provider, unsafe URL) and has
+fallback disabled raises :class:`ProviderKeyError` — deliberately
+fail-fast, since silently substituting Hail's keys would defeat the point
+of BYO unless the org opted into the fallback.
 
 API surface verified 2026-04-28 against:
 
@@ -40,15 +42,38 @@ present on ``cartesia.TTS``, ``elevenlabs.TTS``, ``deepgram.STT``,
 private ``_llm_instances`` attribute (no public accessor), so the BYO+fallback
 branch below constructs the three house LLMs inline rather than reaching into
 a private attribute of ``_house_llm()``.
+
+Speechmatics plugin surface (2026-07-29, multi-language task): verified
+``speechmatics.STT`` kwargs (``language``, ``operating_point``,
+``api_key``, ``turn_detection_mode``, ``end_of_utterance_silence_trigger``)
+and ``TurnDetectionMode`` members against the installed
+livekit-plugins-speechmatics (1.6.6). All names match as expected; no
+deviations. ``TurnDetectionMode.ADAPTIVE`` constructs without error —
+``livekit-plugins-speechmatics`` pulls in ``speechmatics-voice[smart]`` as a
+hard (non-optional) dependency, so the smart-turn extra (onnxruntime,
+transformers) is already installed by a plain
+``uv sync --all-packages --all-extras``. No fallback to
+``TurnDetectionMode.FIXED`` is needed.
 """
 
 from __future__ import annotations
 
 import asyncio
 import dataclasses
+import logging
 from typing import Any
 from uuid import UUID
 
+from hailhq.core.config import settings
+from hailhq.core.db import session_scope
+from hailhq.core.languages import (
+    SUPPORTED_LANGUAGES,
+    resolve_stt_provider,
+    tts_providers_for,
+    turn_mode_for,
+)
+from hailhq.core.provider_config import load_org_provider_configs, provider_cipher
+from hailhq.core.url_guard import UnsafeUrlError, assert_public_https_url
 from livekit.agents import AgentSession
 from livekit.agents import llm as agents_llm
 from livekit.agents import stt as agents_stt
@@ -72,21 +97,22 @@ from livekit.plugins import (
 from livekit.plugins import (
     openai as openai_plugin,
 )
+from livekit.plugins import (
+    speechmatics as speechmatics_plugin,
+)
+from livekit.plugins.turn_detector.multilingual import MultilingualModel
 
-from hailhq.core.config import settings
-from hailhq.core.db import session_scope
-from hailhq.core.provider_config import load_org_provider_configs, provider_cipher
-from hailhq.core.url_guard import UnsafeUrlError, assert_public_https_url
+logger = logging.getLogger("hailhq.voicebot")
 
 __all__ = [
     "ProviderKeyError",
     "ResolvedLayer",
-    "resolve_org_configs",
-    "decrypt_llm_metadata",
     "build_llm",
-    "build_tts",
-    "build_stt",
     "build_session",
+    "build_stt",
+    "build_tts",
+    "decrypt_llm_metadata",
+    "resolve_org_configs",
 ]
 
 
@@ -251,26 +277,33 @@ def build_llm(
     return _house_llm()
 
 
-def _house_tts(voice_id_override: str | None) -> list[agents_tts.TTS]:
+def _house_tts(
+    voice_id_override: str | None, language: str | None
+) -> list[agents_tts.TTS]:
+    allowed = tts_providers_for(language)
     instances: list[agents_tts.TTS] = []
-    if settings.cartesia_api_key:
-        instances.append(
-            cartesia_plugin.TTS(
-                model=settings.cartesia_model,
-                voice=voice_id_override or settings.cartesia_voice_id,
-            )
-        )
-    if settings.eleven_api_key:
-        instances.append(
-            elevenlabs_plugin.TTS(
-                voice_id=voice_id_override or settings.elevenlabs_voice_id,
-                model=settings.elevenlabs_model,
-            )
-        )
+    if settings.cartesia_api_key and "cartesia" in allowed:
+        kwargs: dict[str, Any] = {
+            "model": settings.cartesia_model,
+            "voice": voice_id_override or settings.cartesia_voice_id,
+        }
+        if language:
+            kwargs["language"] = language
+        instances.append(cartesia_plugin.TTS(**kwargs))
+    if settings.eleven_api_key and "elevenlabs" in allowed:
+        kwargs = {
+            "voice_id": voice_id_override or settings.elevenlabs_voice_id,
+            "model": settings.elevenlabs_model,
+        }
+        if language:
+            kwargs["language"] = language
+        instances.append(elevenlabs_plugin.TTS(**kwargs))
     return instances
 
 
-def _org_tts(org: ResolvedLayer, voice_id_override: str | None) -> agents_tts.TTS:
+def _org_tts(
+    org: ResolvedLayer, voice_id_override: str | None, language: str | None
+) -> agents_tts.TTS:
     voice = voice_id_override or org.params.get("voice_id")
     if org.provider == "cartesia":
         kwargs: dict[str, Any] = {
@@ -282,6 +315,8 @@ def _org_tts(org: ResolvedLayer, voice_id_override: str | None) -> agents_tts.TT
             raise ProviderKeyError("no org or house cartesia key available")
         if voice:
             kwargs["voice"] = voice
+        if language:
+            kwargs["language"] = language
         return cartesia_plugin.TTS(**kwargs)
     if org.provider == "elevenlabs":
         kwargs = {"model": org.params.get("model") or settings.elevenlabs_model}
@@ -291,12 +326,16 @@ def _org_tts(org: ResolvedLayer, voice_id_override: str | None) -> agents_tts.TT
             raise ProviderKeyError("no org or house elevenlabs key available")
         if voice:
             kwargs["voice_id"] = voice
+        if language:
+            kwargs["language"] = language
         return elevenlabs_plugin.TTS(**kwargs)
     raise ProviderKeyError(f"unknown org tts provider '{org.provider}'")
 
 
 def build_tts(
-    org: ResolvedLayer | None = None, voice_id_override: str | None = None
+    org: ResolvedLayer | None = None,
+    voice_id_override: str | None = None,
+    language: str | None = None,
 ) -> agents_tts.TTS:
     """Construct the TTS for one call.
 
@@ -307,17 +346,32 @@ def build_tts(
     single-key self-host still works (tenet 4). With both keys set the two
     are wrapped in a ``FallbackAdapter`` with Cartesia first. With one key
     set that provider is used directly with no adapter.
+
+    ``language`` is the per-call ``voice_config.language`` (ISO 639-1); it is
+    applied to every instance built here — BYO and house fallbacks alike —
+    so a provider failover never silently switches the call's language back
+    to English. ``None`` keeps each plugin's default (English).
     """
     if org is not None:
-        byo = _org_tts(org, voice_id_override)
+        byo = _org_tts(org, voice_id_override, language)
         if org.fallback_enabled:
-            house = _house_tts(voice_id_override)
+            house = _house_tts(voice_id_override, language)
             if house:
                 return agents_tts.FallbackAdapter([byo, *house])
         return byo
-    instances = _house_tts(voice_id_override)
+    instances = _house_tts(voice_id_override, language)
     if not instances:
-        raise RuntimeError(
+        # Distinguish between no keys configured vs. language filtering all keys out.
+        if settings.cartesia_api_key or settings.eleven_api_key:
+            # Keys exist but the language filtered them all out. (Every
+            # supported language has at least Cartesia, so `providers` is
+            # never empty here.)
+            providers = tts_providers_for(language)
+            raise ProviderKeyError(
+                f"Configured TTS providers cannot speak language '{language}'; "
+                f"language requires: {', '.join(sorted(providers))}."
+            )
+        raise ProviderKeyError(
             "No TTS provider configured: set CARTESIA_API_KEY or ELEVEN_API_KEY."
         )
     if len(instances) == 1:
@@ -325,22 +379,65 @@ def build_tts(
     return agents_tts.FallbackAdapter(instances)
 
 
-def build_stt(org: ResolvedLayer | None = None) -> agents_stt.STT:
+def build_stt(
+    org: ResolvedLayer | None = None,
+    language: str | None = None,
+    provider: str = "deepgram",
+    stt_drives_turns: bool = False,
+) -> agents_stt.STT:
     """Construct the STT for one call.
 
-    ``org`` present (mode C, deepgram only today): the org's key, with
-    Hail's house Deepgram key appended as a fallback only if
-    ``org.fallback_enabled`` and a house key is configured. An org row on
-    any other provider fails fast with ``ProviderKeyError`` (matching
-    ``_org_llm``/``_org_tts``) rather than silently billing Hail's key for
-    a BYO org. ``org`` absent (mode A): Hail's house Deepgram key.
+    ``provider`` arrives already resolved (org BYO row > language
+    auto-route — ``resolve_stt_provider``). The org row is used only when
+    its provider matches ``provider``; a row the auto-route degraded away
+    from (e.g. an unsupported-language fallback) is ignored rather than
+    billed. ``stt_drives_turns`` is set when the session's turn detection
+    is ``"stt"`` — Speechmatics then runs its ADAPTIVE end-of-utterance
+    mode instead of EXTERNAL.
+
+    An org row on a provider outside ``("deepgram", "speechmatics")`` fails
+    fast with ``ProviderKeyError`` (matching ``_org_llm``/``_org_tts``)
+    rather than silently billing Hail's key for a BYO org.
+
+    Deepgram fallback semantics are unchanged: BYO + fallback_enabled
+    appends the house instance. Speechmatics mirrors them.
     """
-    if org is not None:
-        if org.provider != "deepgram":
-            raise ProviderKeyError(f"unknown org stt provider '{org.provider}'")
+    if org is not None and org.provider not in ("deepgram", "speechmatics"):
+        raise ProviderKeyError(f"unknown org stt provider '{org.provider}'")
+
+    org_matches = org is not None and org.provider == provider
+    if provider == "speechmatics":
         kwargs: dict[str, Any] = {
-            "model": org.params.get("model") or settings.deepgram_model
+            "language": language or "en",
+            # Must be the enum, not the string "enhanced": the plugin stores
+            # it unconverted and its .model property does `op.value`, which
+            # raises AttributeError on a plain str at session start.
+            "operating_point": speechmatics_plugin.OperatingPoint.ENHANCED,
         }
+        if stt_drives_turns:
+            kwargs["turn_detection_mode"] = (
+                speechmatics_plugin.TurnDetectionMode.ADAPTIVE
+            )
+        if org_matches and org.api_key is not None:
+            kwargs["api_key"] = org.api_key
+        elif not settings.speechmatics_api_key:
+            raise ProviderKeyError("no org or house speechmatics key available")
+        byo = speechmatics_plugin.STT(**kwargs)
+        if org_matches and org.fallback_enabled and settings.speechmatics_api_key:
+            house_kwargs = dict(kwargs)
+            house_kwargs.pop("api_key", None)
+            return agents_stt.FallbackAdapter(
+                [byo, speechmatics_plugin.STT(**house_kwargs)]
+            )
+        return byo
+
+    house_kwargs: dict[str, Any] = {"model": settings.deepgram_model}
+    if language:
+        house_kwargs["language"] = language
+    if org_matches:
+        kwargs = {"model": org.params.get("model") or settings.deepgram_model}
+        if language:
+            kwargs["language"] = language
         if org.api_key is not None:
             kwargs["api_key"] = org.api_key
         elif not settings.deepgram_api_key:
@@ -348,10 +445,10 @@ def build_stt(org: ResolvedLayer | None = None) -> agents_stt.STT:
         byo = deepgram_plugin.STT(**kwargs)
         if org.fallback_enabled and settings.deepgram_api_key:
             return agents_stt.FallbackAdapter(
-                [byo, deepgram_plugin.STT(model=settings.deepgram_model)]
+                [byo, deepgram_plugin.STT(**house_kwargs)]
             )
         return byo
-    return deepgram_plugin.STT(model=settings.deepgram_model)
+    return deepgram_plugin.STT(**house_kwargs)
 
 
 def build_session(
@@ -359,19 +456,73 @@ def build_session(
     vad: agents_vad.VAD,
     org_cfgs: dict[str, ResolvedLayer] | None = None,
     voice_id_override: str | None = None,
+    language: str | None = None,
 ) -> AgentSession:
     """Build the :class:`AgentSession` for one job.
 
     ``vad`` is the per-process Silero instance loaded once in
     :func:`hailhq.voicebot.agent.prewarm`. ``org_cfgs`` is the org's resolved
-    BYO layers (from :func:`resolve_org_configs`); ``voice_id_override`` is
-    the per-call ``voice_config.voice_id`` from dispatch metadata, which
-    beats any org-level default voice.
+    BYO layers (from :func:`resolve_org_configs`); ``voice_id_override`` and
+    ``language`` are the per-call ``voice_config.voice_id`` /
+    ``voice_config.language`` from dispatch metadata — the voice beats any
+    org-level default, the language pins both STT and TTS.
+
+    STT provider selection is console-BYO-only (no per-call knob): the
+    org's BYO STT row wins (:func:`resolve_stt_provider`), else the call
+    auto-routes by language. Auto-routing only picks speechmatics when a
+    key exists for it (org or house) — a deepgram-only self-host keeps
+    working (tenet 4). Turn detection: semantic MultilingualModel for its
+    14 languages, "stt" when speechmatics serves the call, "vad" as the
+    floor.
+
+    ``language`` arrives raw from dispatch metadata (a direct LiveKit
+    dispatch can carry any string, bypassing the API's request-validation
+    gate) — a code outside :data:`SUPPORTED_LANGUAGES` is degraded to
+    ``None`` (provider defaults / English) rather than raising, so a
+    malformed dispatch never crashes the call.
     """
+    if language is not None and language not in SUPPORTED_LANGUAGES:
+        logger.warning(
+            "unsupported language %r from dispatch metadata; falling back to "
+            "provider defaults",
+            language,
+        )
+        language = None
     org_cfgs = org_cfgs or {}
+    org_stt = org_cfgs.get("stt")
+    provider = resolve_stt_provider(org_stt.provider if org_stt else None, language)
+    if language is not None and provider not in SUPPORTED_LANGUAGES[language].stt:
+        # An org BYO STT row can name a provider that doesn't cover this
+        # language; deepgram covers every supported language, so degrade
+        # rather than fail the call.
+        logger.warning(
+            "language %r resolved to stt provider %r, which does not "
+            "support it; dropping %r and falling back to deepgram (turn "
+            "detection degrades accordingly)",
+            language,
+            provider,
+            provider,
+        )
+        provider = "deepgram"
+    if (
+        provider == "speechmatics"
+        and not settings.speechmatics_api_key
+        and not (org_stt and org_stt.provider == "speechmatics" and org_stt.api_key)
+    ):
+        logger.warning(
+            "auto-routing picked speechmatics for language %r but no "
+            "SPEECHMATICS_API_KEY is configured (house or org BYO); "
+            "skipping speechmatics routing and running deepgram + VAD "
+            "turn detection instead",
+            language,
+        )
+        provider = "deepgram"
+    mode = turn_mode_for(language, provider)
+    turn_detection: Any = MultilingualModel() if mode == "semantic" else mode
     return AgentSession(
         vad=vad,
-        stt=build_stt(org_cfgs.get("stt")),
-        tts=build_tts(org_cfgs.get("tts"), voice_id_override),
+        stt=build_stt(org_stt, language, provider, stt_drives_turns=(mode == "stt")),
+        tts=build_tts(org_cfgs.get("tts"), voice_id_override, language),
         llm=build_llm(llm_cfg, org_cfgs.get("llm")),
+        turn_detection=turn_detection,
     )

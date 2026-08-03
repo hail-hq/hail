@@ -226,6 +226,79 @@ func TestCallSubcommand_FromAndFirstMessageFlow(t *testing.T) {
 	}
 }
 
+func TestCallSubcommand_LanguageFlag(t *testing.T) {
+	srv := newFakeServer(t, http.StatusCreated, sampleResponse())
+
+	_, _, err := runRoot(t,
+		map[string]string{"HAIL_API_KEY": "sk_test", "HAIL_API_URL": srv.URL},
+		"call", "+15551234567",
+		"--prompt", "hi",
+		"--language", "fr",
+		"--recipient-consent",
+	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var body client.CallCreate
+	if err := json.Unmarshal(srv.lastBody, &body); err != nil {
+		t.Fatalf("body parse: %v", err)
+	}
+	if body.VoiceConfig == nil || body.VoiceConfig.Language == nil || *body.VoiceConfig.Language != "fr" {
+		t.Errorf("VoiceConfig.Language = %v, want fr", body.VoiceConfig)
+	}
+
+	var raw map[string]any
+	if err := json.Unmarshal(srv.lastBody, &raw); err != nil {
+		t.Fatalf("raw body parse: %v", err)
+	}
+	vc, ok := raw["voice_config"].(map[string]any)
+	if !ok {
+		t.Fatalf("voice_config missing or not an object: %v", raw["voice_config"])
+	}
+	if _, present := vc["stt"]; present {
+		t.Errorf("voice_config.stt should be absent, got %v", vc["stt"])
+	}
+}
+
+func TestCallSubcommand_AiDisclosureFlag(t *testing.T) {
+	t.Run("explicit false sent", func(t *testing.T) {
+		srv := newFakeServer(t, http.StatusCreated, sampleResponse())
+		_, _, err := runRoot(t,
+			map[string]string{"HAIL_API_KEY": "sk_test", "HAIL_API_URL": srv.URL},
+			"call", "+15551234567", "--prompt", "hi", "--recipient-consent",
+			"--ai-disclosure=false",
+		)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		var body client.CallCreate
+		if err := json.Unmarshal(srv.lastBody, &body); err != nil {
+			t.Fatalf("body parse: %v", err)
+		}
+		if body.AiDisclosure == nil || *body.AiDisclosure != false {
+			t.Errorf("AiDisclosure = %v, want false", body.AiDisclosure)
+		}
+	})
+	t.Run("omitted stays server-default", func(t *testing.T) {
+		srv := newFakeServer(t, http.StatusCreated, sampleResponse())
+		_, _, err := runRoot(t,
+			map[string]string{"HAIL_API_KEY": "sk_test", "HAIL_API_URL": srv.URL},
+			"call", "+15551234567", "--prompt", "hi", "--recipient-consent",
+		)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		var body client.CallCreate
+		if err := json.Unmarshal(srv.lastBody, &body); err != nil {
+			t.Fatalf("body parse: %v", err)
+		}
+		if body.AiDisclosure != nil {
+			t.Errorf("AiDisclosure = %v, want omitted", *body.AiDisclosure)
+		}
+	})
+}
+
 func TestCallSubcommand_ToolsFlag(t *testing.T) {
 	t.Run("explicit list", func(t *testing.T) {
 		srv := newFakeServer(t, http.StatusCreated, sampleResponse())

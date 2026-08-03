@@ -7,20 +7,18 @@ These cover the verifier in isolation; the integration with
 from __future__ import annotations
 
 import uuid
+from collections.abc import AsyncIterator
 from datetime import datetime, timedelta, timezone
-from typing import AsyncIterator
 
 import httpx
 import jwt as _jwt_lib
 import pytest
 from fastapi import Depends, FastAPI
-from sqlalchemy.ext.asyncio import AsyncSession
-
-from hailhq.api import auth
-from hailhq.api import deps
+from hailhq.api import auth, deps
 from hailhq.api.deps import Principal, get_current_principal
 from hailhq.core.db import get_session
 from hailhq.core.models import OrganizationMember
+from sqlalchemy.ext.asyncio import AsyncSession
 
 _AUTH_URL = "https://issuer.example.com"
 _JWKS_URL = (

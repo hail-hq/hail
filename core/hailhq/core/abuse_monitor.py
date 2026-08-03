@@ -19,15 +19,14 @@ import asyncio
 import logging
 from datetime import datetime, timedelta, timezone
 
+from hailhq.core.config import settings
+from hailhq.core.models import ChannelSuspension, Suppression, UsageEvent
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from hailhq.core.config import settings
-from hailhq.core.models import ChannelSuspension, Suppression, UsageEvent
-
 logger = logging.getLogger(__name__)
 
-__all__ = ["check_and_suspend_abusive_orgs", "AbuseMonitorWorker"]
+__all__ = ["AbuseMonitorWorker", "check_and_suspend_abusive_orgs"]
 
 
 async def check_and_suspend_abusive_orgs(db: AsyncSession) -> int:

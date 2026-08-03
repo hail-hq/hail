@@ -24,7 +24,6 @@ import logging
 from typing import Any
 
 import aiohttp
-
 from hailhq.core.config import settings
 from hailhq.core.hmac_signing import sign
 from hailhq.core.urls import join_url

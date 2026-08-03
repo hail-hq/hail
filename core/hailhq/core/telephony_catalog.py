@@ -16,7 +16,7 @@ from decimal import Decimal
 from functools import lru_cache
 from pathlib import Path
 
-__all__ = ["is_acquirable", "price_usd_per_month", "capabilities"]
+__all__ = ["capabilities", "is_acquirable", "price_usd_per_month"]
 
 # In the API image costs/ is copied to /app/costs (see api/Dockerfile); in dev
 # the module sits at core/hailhq/core/ so parents[3] is the repo root. An env

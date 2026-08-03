@@ -1969,6 +1969,18 @@ components:
             - type: string
             - type: "null"
           title: First Message
+        ai_disclosure:
+          type: boolean
+          title: Ai Disclosure
+          description:
+            "Speak the AI self-disclosure line ('Hi, this is an AI assistant\
+            \ calling on behalf of ...') as the first thing on the call. Enabled by\
+            \ default. Disable only if you have verified the disclosure is not required\
+            \ for this call \u2014 47 CFR 64.1200(b)(1) requires identifying the initiating\
+            \ business at the start of artificial-voice calls in the US, and several\
+            \ jurisdictions have AI bot-disclosure laws. Hail does not verify this\
+            \ for you. The agent still identifies itself as an AI if asked."
+          default: true
         voice_config:
           $ref: "#/components/schemas/VoiceConfig"
         conversation_id:
@@ -3661,11 +3673,6 @@ components:
       title: ValidationError
     VoiceConfig:
       properties:
-        stt:
-          type: string
-          const: deepgram
-          title: Stt
-          default: deepgram
         tts:
           type: string
           const: cartesia
@@ -3686,6 +3693,56 @@ components:
             - type: string
             - type: "null"
           title: Voice Id
+        language:
+          anyOf:
+            - type: string
+              enum:
+                - ar
+                - bg
+                - bn
+                - cs
+                - da
+                - de
+                - el
+                - en
+                - es
+                - fi
+                - fr
+                - gu
+                - he
+                - hi
+                - hr
+                - hu
+                - id
+                - it
+                - ja
+                - kn
+                - ko
+                - mr
+                - ms
+                - nl
+                - "no"
+                - pl
+                - pt
+                - ro
+                - ru
+                - sk
+                - sv
+                - ta
+                - te
+                - th
+                - tl
+                - tr
+                - uk
+                - vi
+                - zh
+            - type: "null"
+          title: Language
+          description:
+            "Spoken language for the call as a lowercase ISO 639-1 code\
+            \ (e.g. 'da'). One of the 39 supported codes \u2014 see docs/languages.md.\
+            \ Applied to STT, TTS, and turn detection. Omitted: the providers' defaults\
+            \ (English)."
       additionalProperties: false
       type: object
       title: VoiceConfig
