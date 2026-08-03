@@ -94,6 +94,8 @@ docs-site/.next/
 docs-site/.source/
 docs-site/next-env.d.ts
 docs-site/tsconfig.tsbuildinfo
+# Generated API reference (rebuilt from openapi.yaml before every build)
+docs-site/content/api/
 
 # Local Claude Code tooling
 .claude/workflows/

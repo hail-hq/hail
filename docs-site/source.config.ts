@@ -31,4 +31,13 @@ export const docs = defineDocs({
   meta: { schema: metaSchema },
 });
 
+/**
+ * API reference pages, generated from openapi/openapi.yaml into content/api by
+ * scripts/generate-openapi.mjs (run before every build). Generated files carry
+ * their own frontmatter, so no derivation is needed here.
+ */
+export const apiDocs = defineDocs({
+  dir: "content/api",
+});
+
 export default defineConfig();

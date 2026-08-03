@@ -10,6 +10,7 @@ export default function Layout({ children }: { children: ReactNode }) {
       // on the apex, which is a different Next zone.
       nav={{ title: "Hail docs", url: "https://hail.so" }}
       links={[
+        { text: "API Reference", url: "/api" },
         { text: "Pricing", url: "https://hail.so/pricing" },
         { text: "GitHub", url: "https://github.com/hail-hq/hail" },
       ]}
