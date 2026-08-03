@@ -1,0 +1,15 @@
+[
+  "/docs",
+  "/docs/architecture",
+  "/docs/cli",
+  "/docs/contributing",
+  "/docs/operations",
+  "/docs/self-host/smtp-inbound",
+  "/docs/self-host/vm-deploy",
+  "/docs/setup",
+  "/docs/setup/aws-ses",
+  "/docs/setup/livekit-cloud",
+  "/docs/setup/mcp",
+  "/docs/setup/twilio",
+  "/docs/setup/webhooks"
+]

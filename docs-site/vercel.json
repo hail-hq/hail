@@ -1,0 +1,4 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "ignoreCommand": "S=$VERCEL_GIT_PREVIOUS_SHA; [ -z \"$S\" ] && exit 1; git cat-file -e \"$S\" 2>/dev/null || exit 1; git diff --quiet \"$S\" HEAD -- ':(top)docs-site' ':(top)docs/public' ':(top)pnpm-workspace.yaml' ':(top)package.json' ':(top)pnpm-lock.yaml'"
+}

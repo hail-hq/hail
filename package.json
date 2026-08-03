@@ -11,7 +11,11 @@
     "costs:sync-telephony": "node scripts/costs/sync-telephony.mjs",
     "site:dev": "pnpm --filter @hail-hq/web dev",
     "site:build": "pnpm --filter @hail-hq/web build",
-    "site:start": "pnpm --filter @hail-hq/web start"
+    "site:start": "pnpm --filter @hail-hq/web start",
+    "docs:dev": "pnpm --filter @hail-hq/docs-site dev",
+    "docs:build": "pnpm --filter @hail-hq/docs-site build",
+    "docs:urls": "node docs-site/scripts/urls.mjs",
+    "docs:check-urls": "node docs-site/scripts/urls.mjs --check"
   },
   "devDependencies": {
     "husky": "^9.1.7",

@@ -89,3 +89,8 @@ infra/terraform/backend.tf
 
 # SDD scratch ledgers (dot-prefixed; not the tracked docs/superpowers/ docs)
 .superpowers/
+# docs-site build output
+docs-site/.next/
+docs-site/.source/
+docs-site/next-env.d.ts
+docs-site/tsconfig.tsbuildinfo
