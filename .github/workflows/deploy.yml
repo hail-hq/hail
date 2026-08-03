@@ -129,6 +129,31 @@ jobs:
             $COMPOSE run --rm api alembic upgrade head
 
             $COMPOSE up -d --remove-orphans
+
+            # Stale-image gate. `pull` + `up -d` can silently keep an old
+            # build running (cached layer, registry hiccup, a service that
+            # fails to recreate) while the deploy still reports success. For
+            # each service, pull the exact sha-<commit> tag and assert the
+            # running container's image ID matches it. Both :latest and
+            # sha-<sha> point at the same image within a build, and
+            # concurrency:deploy-prod serializes deploys so they cannot
+            # diverge. A mismatch exits non-zero and fails the deploy red.
+            assert_fresh() {
+              svc="$1"
+              docker pull -q "ghcr.io/hail-hq/hail-$svc:sha-$DEPLOY_GITHUB_SHA"
+              cid="$($COMPOSE ps -q "$svc")"
+              [ -n "$cid" ] || { echo "::error::$svc has no running container"; exit 1; }
+              running="$(docker inspect --format '{{.Image}}' "$cid")"
+              expected="$(docker image inspect --format '{{.Id}}' \
+                "ghcr.io/hail-hq/hail-$svc:sha-$DEPLOY_GITHUB_SHA")"
+              if [ "$running" != "$expected" ]; then
+                echo "::error::$svc is stale — running $running, expected $expected (sha-$DEPLOY_GITHUB_SHA)"
+                exit 1
+              fi
+              echo "$svc: fresh ($expected)"
+            }
+            for svc in api voicebot mcp; do assert_fresh "$svc"; done
+
             $COMPOSE ps
 
             # Restore main so operators SSHing the VM see a normal branch
