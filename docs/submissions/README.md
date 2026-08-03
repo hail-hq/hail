@@ -1,0 +1,54 @@
+# Submission tracker
+
+Ranked by relevance/impact score, highest first. Update the **Status** column as work progresses: `drafted` -> `submitted` -> `submitted (live)` or `rejected` / `n/a`.
+
+| Rank | Target                                             | Category      | Score | Status                                                                                                                        | File                                                                                                         |
+| ---- | -------------------------------------------------- | ------------- | ----- | ----------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| 1    | awesome-mcp-servers (punkpeye/awesome-mcp-servers) | github-list   | 9.5   | submitted ([PR #9561](https://github.com/punkpeye/awesome-mcp-servers/pull/9561), Glama badge added — awaiting review)        | [awesome-mcp-servers-punkpeye-awesome-mcp-servers.md](./awesome-mcp-servers-punkpeye-awesome-mcp-servers.md) |
+| 2    | Official MCP Registry (modelcontextprotocol.io)    | mcp-registry  | 9.3   | submitted (live — [io.github.hail-hq/hail-mcp v0.1.0](https://registry.modelcontextprotocol.io/v0.1/servers?search=hail-mcp)) | [official-mcp-registry-modelcontextprotocol-io.md](./official-mcp-registry-modelcontextprotocol-io.md)       |
+| 3    | PulseMCP                                           | mcp-registry  | 9     | waiting (auto-ingests from Official Registry, published 2026-07-07 — check back ~2026-07-14)                                  | [pulsemcp.md](./pulsemcp.md)                                                                                 |
+| 4    | Smithery                                           | mcp-registry  | 8     | drafted                                                                                                                       | [smithery.md](./smithery.md)                                                                                 |
+| 5    | r/mcp                                              | subreddit     | 7.8   | drafted                                                                                                                       | [r-mcp.md](./r-mcp.md)                                                                                       |
+| 6    | r/ClaudeAI                                         | subreddit     | 7.6   | drafted                                                                                                                       | [r-claudeai.md](./r-claudeai.md)                                                                             |
+| 7    | r/SideProject                                      | subreddit     | 7.4   | drafted                                                                                                                       | [r-sideproject.md](./r-sideproject.md)                                                                       |
+| 8    | Product Hunt                                       | dev-directory | 7.2   | drafted (HOLD)                                                                                                                | [product-hunt.md](./product-hunt.md)                                                                         |
+| 9    | Hacker News – Show HN                              | dev-directory | 7     | drafted                                                                                                                       | [hacker-news-show-hn.md](./hacker-news-show-hn.md)                                                           |
+| 10   | Glama MCP Registry                                 | mcp-registry  | 6.8   | n/a — abandoned (stdio/mcp-proxy architecture mismatch)                                                                       | [glama-mcp-registry.md](./glama-mcp-registry.md)                                                             |
+| 11   | mcp.so                                             | mcp-registry  | 6.5   | drafted                                                                                                                       | [mcp-so.md](./mcp-so.md)                                                                                     |
+| 12   | r/AI_Agents                                        | subreddit     | 6.3   | drafted                                                                                                                       | [r-ai-agents.md](./r-ai-agents.md)                                                                           |
+| 13   | Nango (NangoHQ/nango providers.yaml)               | github-list   | 6.2   | drafted                                                                                                                       | [nango.md](./nango.md)                                                                                       |
+| 14   | r/opensource                                       | subreddit     | 6     | drafted                                                                                                                       | [r-opensource.md](./r-opensource.md)                                                                         |
+| 15   | r/selfhosted                                       | subreddit     | 5.9   | drafted                                                                                                                       | [r-selfhosted.md](./r-selfhosted.md)                                                                         |
+| 16   | Future Tools (futuretools.io)                      | ai-directory  | 5.8   | drafted                                                                                                                       | [future-tools-futuretools-io.md](./future-tools-futuretools-io.md)                                           |
+| 17   | awesome-selfhosted (awesome-selfhosted-data)       | github-list   | 5.5   | drafted                                                                                                                       | [awesome-selfhosted-awesome-selfhosted-data.md](./awesome-selfhosted-awesome-selfhosted-data.md)             |
+| 18   | AlternativeTo                                      | dev-directory | 5     | drafted                                                                                                                       | [alternativeto.md](./alternativeto.md)                                                                       |
+| 19   | Claude.ai Connectors Directory                     | mcp-registry  | 5     | drafted                                                                                                                       | [claude-ai-connectors-directory.md](./claude-ai-connectors-directory.md)                                     |
+| 20   | There's An AI For That (TAAFT)                     | ai-directory  | 4.8   | drafted                                                                                                                       | [there-s-an-ai-for-that-taaft.md](./there-s-an-ai-for-that-taaft.md)                                         |
+| 21   | Toolify.ai                                         | ai-directory  | 4.3   | drafted                                                                                                                       | [toolify-ai.md](./toolify-ai.md)                                                                             |
+| 22   | Cursor directory (community)                       | mcp-registry  | 4     | drafted                                                                                                                       | [cursor-directory-community.md](./cursor-directory-community.md)                                             |
+| 23   | OpenTools                                          | mcp-registry  | 3.8   | drafted                                                                                                                       | [opentools.md](./opentools.md)                                                                               |
+| 24   | Futurepedia                                        | ai-directory  | 3.5   | drafted                                                                                                                       | [futurepedia.md](./futurepedia.md)                                                                           |
+| 25   | r/LocalLLaMA                                       | subreddit     | 2     | drafted                                                                                                                       | [r-localllama.md](./r-localllama.md)                                                                         |
+
+## TODO
+
+- [ ] **Reconcile the duplicate tracker in `hail-website/submissions/`.** A
+      second, divergent copy exists at `/Users/r/playground/hail-website/submissions/`
+      (9 files, dated 2026-07-14 — newer than these). Both trees are untracked in
+      git, so neither has a committed history to arbitrate. **This directory is
+      authoritative** (decided 2026-07-15): it holds the tracker, `_TEMPLATE.md`,
+      and `validate_submission.py`, and matches `2026-07-06-registry-submissions-design.md`,
+      which specifies `docs/submissions/<slug>.md` in the `hail` repo. - Three files exist in both and **their contents differ**: `mcp-so.md`,
+      `toolify-ai.md`, `r-claudeai.md`. The newer copies may contain real work. - Six exist only in `hail-website/submissions/`, under shorter slugs — same
+      targets, different filenames: `awesome-mcp-servers-punkpeye.md` (here:
+      `awesome-mcp-servers-punkpeye-awesome-mcp-servers.md`),
+      `awesome-mcp-servers-appcypher.md`, `awesome-mcp-servers-wong2.md`,
+      `awesome-voice-agents-yzfly.md`, `awesome-ai-agents-e2b.md`,
+      `mcp-registry.md` (here: `official-mcp-registry-modelcontextprotocol-io.md`). - Merge anything of value into this tree, add the missing targets to the
+      table above, then delete `hail-website/submissions/`.
+- [ ] **Re-check `awesome-selfhosted-awesome-selfhosted-data.md`'s copy before
+      submitting.** It was drafted 2026-07-07 and deliberately omits SMS, which was
+      unshipped then. `core/hailhq/core/providers/sms/twilio.py` has since landed
+      and SMS is checked (outbound + inbound) in `README.md` Milestones, so that
+      draft now understates Hail. Other drafts of the same vintage may be stale for
+      the same reason.
