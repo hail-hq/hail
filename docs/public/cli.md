@@ -122,7 +122,7 @@ hail tail --id call:1a2b       # narrow to one resource
 
 ## Webhooks
 
-Org-wide outbound subscriptions. Each subscription fires an HMAC-signed POST for each matching event. Hail retries failed deliveries on a fixed ladder. Refer to [setup/webhooks.md](setup/webhooks.md) for the payload shape, the event-type list, and signature verification.
+Org-wide outbound subscriptions. Each subscription fires an HMAC-signed POST for each matching event. Hail retries failed deliveries on a fixed ladder. Refer to [setup/webhooks.md](./setup/webhooks.md) for the payload shape, the event-type list, and signature verification.
 
 The CLI has no `webhooks` command group. Manage subscriptions through the HTTP API:
 

@@ -160,7 +160,7 @@ Add a Twilio number to the pool with `organization_id` NULL and `is_pool=TRUE` (
 psql "$DATABASE_URL" -c "INSERT INTO phone_numbers (organization_id, e164, country_code, number_type, capabilities, provider, provider_resource_id, provisioning_state, is_pool, acquired_at) VALUES (NULL, '+1XXXXXXXXXX', 'US', 'local', ARRAY['voice','sms'], 'twilio', 'PNxxxxxxxxxxxxxxxx', 'active', TRUE, now());"
 ```
 
-Attach the number to the same Twilio SIP trunk that you wired in [Twilio setup](setup/twilio.md). There is no per-number trunk routing. To grow the pool, repeat the INSERT with a different `e164` / `PN_SID`. To quarantine a bad pool number without deletion, run `UPDATE phone_numbers SET provisioning_state='failed' WHERE e164=...`. The claim query skips non-`active` rows.
+Attach the number to the same Twilio SIP trunk that you wired in [Twilio setup](./setup/twilio.md). There is no per-number trunk routing. To grow the pool, repeat the INSERT with a different `e164` / `PN_SID`. To quarantine a bad pool number without deletion, run `UPDATE phone_numbers SET provisioning_state='failed' WHERE e164=...`. The claim query skips non-`active` rows.
 
 Callers cannot address a pool number explicitly with the `from` field of `POST /calls`. The number is shared, so a caller that names one would cross tenants. The fallback fires only when an org has zero active numbers of its own.
 

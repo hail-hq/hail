@@ -19,7 +19,7 @@ Hail v1 is three Python services plus a Go CLI, built around LiveKit Cloud.
 ## Services
 
 - **api** (`:8080`, FastAPI) — the REST surface; it accepts `POST /calls` and the other routes. It is the source of truth for OpenAPI.
-- **mcp** (`:8081`, Streamable HTTP; legacy SSE during the transition) — the MCP server that wraps the API. Agent clients (Claude.ai, ChatGPT, Claude Code, Cursor) connect to it. Refer to [MCP setup](setup/mcp.md).
+- **mcp** (`:8081`, Streamable HTTP; legacy SSE during the transition) — the MCP server that wraps the API. Agent clients (Claude.ai, ChatGPT, Claude Code, Cursor) connect to it. Refer to [MCP setup](./setup/mcp.md).
 - **voicebot** (LiveKit Agents worker) — registers with LiveKit Cloud. Hail dispatches it into a room for each call.
 - **postgres** — call records, phone numbers, API keys.
 - **minio** (dev only) — S3-compatible local object storage. Use real S3 in production.
@@ -99,7 +99,7 @@ Hail validates both prefixes against `^[a-z0-9]([a-z0-9-]{0,18}[a-z0-9])?$` (1�
 
 If none of those resolve, the request returns `503` with instructions on how to register a domain.
 
-Refer to [`docs/setup/aws-ses.md`](setup/aws-ses.md) for the operator-side setup. Refer to [`docs/superpowers/plans/2026-05-17-hail-mail-addressing.md`](https://github.com/hail-hq/hail/blob/main/docs/superpowers/plans/2026-05-17-hail-mail-addressing.md) for the addressing/configurability plan.
+Refer to [`docs/setup/aws-ses.md`](./setup/aws-ses.md) for the operator-side setup. Refer to [`docs/superpowers/plans/2026-05-17-hail-mail-addressing.md`](https://github.com/hail-hq/hail/blob/main/docs/superpowers/plans/2026-05-17-hail-mail-addressing.md) for the addressing/configurability plan.
 
 ## Inbound email
 
@@ -130,7 +130,7 @@ inbound SMTP ──► SES Receipt Rule
 
 The cloud-agnostic SMTP path is a stub
 ([`SmtpInboundProvider`](https://github.com/hail-hq/hail/blob/main/core/hailhq/core/providers/email/inbound/smtp.py)).
-[`docs/setup/smtp-inbound.md`](self-host/smtp-inbound.md) tracks it.
+[`docs/setup/smtp-inbound.md`](./self-host/smtp-inbound.md) tracks it.
 
 ### Per-domain routing — forward and/or webhook
 
@@ -145,4 +145,4 @@ A separate `inbound_routes` table, for per-mailbox routing in custom domains, is
 
 The `/webhooks` CRUD surface is the firehose pattern — one subscription covers multiple event types (`email.received`, `email.bounced`, `email.complained`). Signatures are Stripe-style: `X-Hail-Signature: t=<unix>,v1=<hex>`. Hail retries deliveries on a fixed `0/30s/2m/10m/1h/6h/24h` ladder. After the last retry, Hail marks the delivery `dead`. After 50 consecutive dead deliveries, the subscription auto-disables.
 
-Refer to [`docs/setup/aws-ses.md`](setup/aws-ses.md) §10 for the operator runbook. Refer to [`docs/superpowers/specs/2026-06-06-inbound-email-design.md`](https://github.com/hail-hq/hail/blob/main/docs/superpowers/specs/2026-06-06-inbound-email-design.md) for the full spec.
+Refer to [`docs/setup/aws-ses.md`](./setup/aws-ses.md) §10 for the operator runbook. Refer to [`docs/superpowers/specs/2026-06-06-inbound-email-design.md`](https://github.com/hail-hq/hail/blob/main/docs/superpowers/specs/2026-06-06-inbound-email-design.md) for the full spec.
