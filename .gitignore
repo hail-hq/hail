@@ -94,3 +94,8 @@ docs-site/.next/
 docs-site/.source/
 docs-site/next-env.d.ts
 docs-site/tsconfig.tsbuildinfo
+
+# Local Claude Code tooling
+.claude/workflows/
+.claude/worktrees/
+web/.claude/
