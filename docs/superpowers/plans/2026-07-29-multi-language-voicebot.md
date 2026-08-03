@@ -35,10 +35,12 @@
 ### Task 1: Language capability matrix in core
 
 **Files:**
+
 - Create: `core/hailhq/core/languages.py`
 - Test: `core/tests/test_languages.py`
 
 **Interfaces:**
+
 - Produces: `Language` (Literal of 39 codes), `LanguageCaps` (frozen dataclass: `name: str`, `stt: frozenset[str]`, `tts: frozenset[str]`, `semantic_turn: bool`), `SUPPORTED_LANGUAGES: dict[str, LanguageCaps]`, `default_stt_for(language: str | None) -> str`, `resolve_stt_provider(requested: str, org_provider: str | None, language: str | None) -> str`, `tts_providers_for(language: str | None) -> frozenset[str]`, `turn_mode_for(language: str | None, stt_provider: str) -> str` (returns `"semantic" | "stt" | "vad"`).
 
 - [ ] **Step 1: Write the failing tests**
@@ -285,11 +287,13 @@ git commit -m "feat(core): language capability matrix and stt routing helpers"
 ### Task 2: Widen the schemas — language enum, `stt: "auto"`, BYO speechmatics
 
 **Files:**
+
 - Modify: `core/hailhq/core/schemas.py:126-145` (class `VoiceConfig`)
 - Modify: `core/hailhq/core/provider_config.py:86-89` (class `STTParams`)
 - Test: `core/tests/schemas/test_voice_config_language.py` (create)
 
 **Interfaces:**
+
 - Consumes: `Language` from Task 1.
 - Produces: `VoiceConfig.language: Language | None`, `VoiceConfig.stt: Literal["auto", "deepgram", "speechmatics"]` default `"auto"`, `STTParams.provider: Literal["deepgram", "speechmatics"]`.
 
@@ -407,10 +411,12 @@ git commit -m "feat(core): language enum on VoiceConfig, stt auto selector, spee
 ### Task 3: Speechmatics settings + env example
 
 **Files:**
+
 - Modify: `core/hailhq/core/config.py:29-31` (voice-pipeline settings block)
 - Modify: `.env.example` (voice-provider section, near `DEEPGRAM_API_KEY`)
 
 **Interfaces:**
+
 - Produces: `settings.speechmatics_api_key: str` (empty default).
 
 - [ ] **Step 1: Add the setting**
@@ -449,10 +455,12 @@ git commit -m "feat(core): SPEECHMATICS_API_KEY setting"
 ### Task 4: Voicebot — Speechmatics plugin dep + verified API surface
 
 **Files:**
+
 - Modify: `voicebot/pyproject.toml:12-21` (dependencies list)
 - Modify: `voicebot/hailhq/voicebot/pipeline.py:29-43` (the "API surface verified" docstring block)
 
 **Interfaces:**
+
 - Produces: importable `livekit.plugins.speechmatics` with verified constructor kwargs, recorded in the pipeline docstring for later tasks.
 
 - [ ] **Step 1: Add the dependency**
@@ -501,10 +509,12 @@ git commit -m "feat(voicebot): add livekit-plugins-speechmatics dependency"
 ### Task 5: Voicebot — `build_stt` speechmatics branch + provider resolution
 
 **Files:**
+
 - Modify: `voicebot/hailhq/voicebot/pipeline.py:344-380` (`build_stt`)
 - Test: `voicebot/tests/test_pipeline.py` (extend), `voicebot/tests/test_pipeline_byo.py` (extend)
 
 **Interfaces:**
+
 - Consumes: `resolve_stt_provider`, `SUPPORTED_LANGUAGES` (Task 1); `settings.speechmatics_api_key` (Task 3); verified plugin kwargs (Task 4).
 - Produces: `build_stt(org: ResolvedLayer | None = None, language: str | None = None, provider: str = "deepgram", stt_drives_turns: bool = False) -> agents_stt.STT`. Callers (Task 6) resolve `provider` first via `resolve_stt_provider`.
 
@@ -665,7 +675,7 @@ def build_stt(
     return deepgram_plugin.STT(**house_kwargs)
 ```
 
-Note the behavior change from today: an org STT row whose provider differs from the resolved provider is now *ignored* (house key for the resolved provider) instead of raising — the old `raise ProviderKeyError(f"unknown org stt provider ...")` disappears because `STTParams` now guarantees the row is deepgram or speechmatics. Update `voicebot/tests/test_pipeline_byo.py::test_build_stt_unknown_org_provider_fails_fast` accordingly: construct `ResolvedLayer(provider="whisper", ...)` and assert it is ignored (house deepgram built) rather than raising — or, if the team prefers fail-fast for genuinely unknown strings, keep a final `if org is not None and org.provider not in ("deepgram", "speechmatics"): raise ProviderKeyError(...)` guard at the top. **Choose the guard variant** — it preserves the documented fail-fast tenet:
+Note the behavior change from today: an org STT row whose provider differs from the resolved provider is now _ignored_ (house key for the resolved provider) instead of raising — the old `raise ProviderKeyError(f"unknown org stt provider ...")` disappears because `STTParams` now guarantees the row is deepgram or speechmatics. Update `voicebot/tests/test_pipeline_byo.py::test_build_stt_unknown_org_provider_fails_fast` accordingly: construct `ResolvedLayer(provider="whisper", ...)` and assert it is ignored (house deepgram built) rather than raising — or, if the team prefers fail-fast for genuinely unknown strings, keep a final `if org is not None and org.provider not in ("deepgram", "speechmatics"): raise ProviderKeyError(...)` guard at the top. **Choose the guard variant** — it preserves the documented fail-fast tenet:
 
 ```python
     if org is not None and org.provider not in ("deepgram", "speechmatics"):
@@ -693,11 +703,13 @@ git commit -m "feat(voicebot): speechmatics stt branch with resolved-provider pr
 ### Task 6: Voicebot — turn-detection wiring in `build_session` + agent pass-through
 
 **Files:**
+
 - Modify: `voicebot/hailhq/voicebot/pipeline.py:383-405` (`build_session`)
 - Modify: `voicebot/hailhq/voicebot/agent.py:1106-1143` (voice_cfg parsing + `build_session` call)
 - Test: `voicebot/tests/test_pipeline.py` (extend)
 
 **Interfaces:**
+
 - Consumes: `resolve_stt_provider`, `turn_mode_for`, `SUPPORTED_LANGUAGES` (Task 1); `build_stt(org, language, provider, stt_drives_turns)` (Task 5).
 - Produces: `build_session(llm_cfg, vad, org_cfgs=None, voice_id_override=None, language=None, stt_choice="auto") -> AgentSession` — sessions now always carry a `turn_detection` argument.
 
@@ -866,10 +878,12 @@ git commit -m "feat(voicebot): per-language turn detection (semantic/stt/vad) an
 ### Task 7: Voicebot — trim ElevenLabs from house TTS for Cartesia-only languages
 
 **Files:**
+
 - Modify: `voicebot/hailhq/voicebot/pipeline.py:253-273` (`_house_tts`)
 - Test: `voicebot/tests/test_pipeline.py` (extend)
 
 **Interfaces:**
+
 - Consumes: `tts_providers_for` (Task 1).
 - Produces: unchanged signature `_house_tts(voice_id_override, language) -> list[agents_tts.TTS]`; the list simply omits providers that can't speak the language.
 
@@ -949,10 +963,12 @@ git commit -m "feat(voicebot): drop elevenlabs tts fallback for languages it can
 ### Task 8: API — request-time 422 for incompatible language/provider combos
 
 **Files:**
+
 - Modify: `api/hailhq/api/routes/calls.py` (insert the gate after the tool-allowlist gate, ~line 220, before the compliance gate)
 - Test: `api/tests/test_calls_api.py` (extend)
 
 **Interfaces:**
+
 - Consumes: `SUPPORTED_LANGUAGES`, `resolve_stt_provider` (Task 1); `load_org_provider_configs` (existing, `hailhq.core.provider_config`); `unprocessable` (existing, `api/hailhq/api/errors.py`); `cache_failure` idiom (existing in this route).
 - Produces: POST /calls rejects with 422 + field `loc` when (a) a pinned `stt` provider doesn't support the language, or (b) the org's BYO TTS provider doesn't support it.
 
@@ -1145,10 +1161,12 @@ git commit -m "feat(api): 422 language/provider compatibility gate on call creat
 ### Task 9: Speechmatics key probe in provider validation
 
 **Files:**
+
 - Modify: `core/hailhq/core/provider_validation.py:116-124` (add branch next to the deepgram probe)
 - Test: `core/tests/test_provider_validation.py` (extend the `PROBES` table)
 
 **Interfaces:**
+
 - Consumes: `_Probe`, `_classify` (existing module internals).
 - Produces: `validate_provider_key("stt", "speechmatics", key, {})` returns `("valid", "ok")` for a working key.
 
@@ -1214,11 +1232,13 @@ git commit -m "feat(core): speechmatics key probe for BYO validation"
 ### Task 10: OpenAPI regen + CLI client regen + `--stt` flag
 
 **Files:**
+
 - Regenerate: `openapi/openapi.yaml`, `cli/internal/client/client.gen.go`
 - Modify: `cli/internal/cmd/call.go:25,77,107-108`
 - Test: `cli/internal/cmd/call_test.go` (extend, following its existing flag tests)
 
 **Interfaces:**
+
 - Consumes: the Task 2 schema (language enum + stt selector) via the regenerated spec.
 - Produces: `hail call --language da --stt speechmatics` sends `voice_config: {"language": "da", "stt": "speechmatics"}`.
 
@@ -1302,11 +1322,13 @@ git commit -m "feat(cli): regen client for language enum, add --stt flag"
 ### Task 11: SDK — language enum + stt parameter
 
 **Files:**
+
 - Modify: `sdk/hail/models.py:51-60` (`VoiceConfig`)
 - Modify: `sdk/hail/client.py:82-123` (`create` signature + body build)
 - Test: `sdk/tests/test_client.py` (extend, mirroring its existing language test)
 
 **Interfaces:**
+
 - Consumes: nothing from other tasks (the SDK is standalone; it mirrors the API contract by hand).
 - Produces: `hail.CallsResource.create(..., language="da", stt="speechmatics")` sends `voice_config: {"language": "da", "stt": "speechmatics"}`.
 
@@ -1411,11 +1433,13 @@ git commit -m "feat(sdk): stt provider parameter on calls.create"
 ### Task 12: MCP — `stt` on place_call + language description update
 
 **Files:**
+
 - Modify: `mcp/hailhq/mcp/tools.py:530-615` (`place_call_tool`)
 - Modify: `mcp/hailhq/mcp/hail_client.py:100-140` (`place_call`)
 - Test: `mcp/tests/test_tools.py` (extend, mirroring its existing language test)
 
 **Interfaces:**
+
 - Consumes: the API contract from Task 8 (server enforces validity; MCP passes through).
 - Produces: `place_call(..., language="da", stt="speechmatics")` MCP tool call sends `voice_config: {"language": "da", "stt": "speechmatics"}`.
 
@@ -1489,6 +1513,7 @@ git commit -m "feat(mcp): stt provider parameter on place_call"
 ### Task 13: Docs — languages page, README, setup
 
 **Files:**
+
 - Create: `docs/languages.md`
 - Modify: `README.md` (add a Languages section near the existing feature list)
 - Modify: `docs/cli.md` (the `--language` example) and whichever `docs/setup/*` file documents provider API keys (grep `DEEPGRAM_API_KEY` under `docs/`).
@@ -1497,64 +1522,64 @@ git commit -m "feat(mcp): stt provider parameter on place_call"
 
 - [ ] **Step 1: Write `docs/languages.md`**
 
-```markdown
+````markdown
 # Languages
 
 Place a call in any of 39 languages by setting `voice_config.language`
 (lowercase ISO 639-1):
 
-​```bash
+​`bash
 hail call +4512345678 --language da \
   --system-prompt "Book a table for two tomorrow at 19:00." \
   --recipient-consent
-​```
+​`
 
 Hail picks the speech-to-text provider and turn-detection strategy per
 language automatically. Pin the STT provider with `--stt deepgram|speechmatics`
 (API: `voice_config.stt`; default `auto`). Unsupported codes and
 incompatible language/provider combos are rejected with `422`.
 
-| Code | Language | Auto STT | Turn detection | TTS fallback |
-|---|---|---|---|---|
-| ar | Arabic | speechmatics | STT-adaptive | yes |
-| bg | Bulgarian | speechmatics | STT-adaptive | yes |
-| bn | Bengali | speechmatics | STT-adaptive | no |
-| cs | Czech | speechmatics | STT-adaptive | yes |
-| da | Danish | speechmatics | STT-adaptive | yes |
-| de | German | deepgram | semantic | yes |
-| el | Greek | speechmatics | STT-adaptive | yes |
-| en | English | deepgram | semantic | yes |
-| es | Spanish | deepgram | semantic | yes |
-| fi | Finnish | speechmatics | STT-adaptive | yes |
-| fr | French | deepgram | semantic | yes |
-| gu | Gujarati | deepgram | VAD | no |
-| he | Hebrew | speechmatics | STT-adaptive | no |
-| hi | Hindi | deepgram | semantic | yes |
-| hr | Croatian | speechmatics | STT-adaptive | yes |
-| hu | Hungarian | speechmatics | STT-adaptive | yes |
-| id | Indonesian | deepgram | semantic | yes |
-| it | Italian | deepgram | semantic | yes |
-| ja | Japanese | deepgram | semantic | yes |
-| kn | Kannada | deepgram | VAD | no |
-| ko | Korean | deepgram | semantic | yes |
-| mr | Marathi | speechmatics | STT-adaptive | no |
-| ms | Malay | speechmatics | STT-adaptive | yes |
-| nl | Dutch | deepgram | semantic | yes |
-| no | Norwegian | speechmatics | STT-adaptive | yes |
-| pl | Polish | speechmatics | STT-adaptive | yes |
-| pt | Portuguese | deepgram | semantic | yes |
-| ro | Romanian | speechmatics | STT-adaptive | yes |
-| ru | Russian | deepgram | semantic | yes |
-| sk | Slovak | speechmatics | STT-adaptive | yes |
-| sv | Swedish | speechmatics | STT-adaptive | yes |
-| ta | Tamil | speechmatics | STT-adaptive | yes |
-| te | Telugu | deepgram | VAD | no |
-| th | Thai | speechmatics | STT-adaptive | no |
-| tl | Tagalog | speechmatics | STT-adaptive | yes |
-| tr | Turkish | deepgram | semantic | yes |
-| uk | Ukrainian | speechmatics | STT-adaptive | yes |
-| vi | Vietnamese | speechmatics | STT-adaptive | yes |
-| zh | Chinese | deepgram | semantic | yes |
+| Code | Language   | Auto STT     | Turn detection | TTS fallback |
+| ---- | ---------- | ------------ | -------------- | ------------ |
+| ar   | Arabic     | speechmatics | STT-adaptive   | yes          |
+| bg   | Bulgarian  | speechmatics | STT-adaptive   | yes          |
+| bn   | Bengali    | speechmatics | STT-adaptive   | no           |
+| cs   | Czech      | speechmatics | STT-adaptive   | yes          |
+| da   | Danish     | speechmatics | STT-adaptive   | yes          |
+| de   | German     | deepgram     | semantic       | yes          |
+| el   | Greek      | speechmatics | STT-adaptive   | yes          |
+| en   | English    | deepgram     | semantic       | yes          |
+| es   | Spanish    | deepgram     | semantic       | yes          |
+| fi   | Finnish    | speechmatics | STT-adaptive   | yes          |
+| fr   | French     | deepgram     | semantic       | yes          |
+| gu   | Gujarati   | deepgram     | VAD            | no           |
+| he   | Hebrew     | speechmatics | STT-adaptive   | no           |
+| hi   | Hindi      | deepgram     | semantic       | yes          |
+| hr   | Croatian   | speechmatics | STT-adaptive   | yes          |
+| hu   | Hungarian  | speechmatics | STT-adaptive   | yes          |
+| id   | Indonesian | deepgram     | semantic       | yes          |
+| it   | Italian    | deepgram     | semantic       | yes          |
+| ja   | Japanese   | deepgram     | semantic       | yes          |
+| kn   | Kannada    | deepgram     | VAD            | no           |
+| ko   | Korean     | deepgram     | semantic       | yes          |
+| mr   | Marathi    | speechmatics | STT-adaptive   | no           |
+| ms   | Malay      | speechmatics | STT-adaptive   | yes          |
+| nl   | Dutch      | deepgram     | semantic       | yes          |
+| no   | Norwegian  | speechmatics | STT-adaptive   | yes          |
+| pl   | Polish     | speechmatics | STT-adaptive   | yes          |
+| pt   | Portuguese | deepgram     | semantic       | yes          |
+| ro   | Romanian   | speechmatics | STT-adaptive   | yes          |
+| ru   | Russian    | deepgram     | semantic       | yes          |
+| sk   | Slovak     | speechmatics | STT-adaptive   | yes          |
+| sv   | Swedish    | speechmatics | STT-adaptive   | yes          |
+| ta   | Tamil      | speechmatics | STT-adaptive   | yes          |
+| te   | Telugu     | deepgram     | VAD            | no           |
+| th   | Thai       | speechmatics | STT-adaptive   | no           |
+| tl   | Tagalog    | speechmatics | STT-adaptive   | yes          |
+| tr   | Turkish    | deepgram     | semantic       | yes          |
+| uk   | Ukrainian  | speechmatics | STT-adaptive   | yes          |
+| vi   | Vietnamese | speechmatics | STT-adaptive   | yes          |
+| zh   | Chinese    | deepgram     | semantic       | yes          |
 
 Column meanings:
 
@@ -1571,7 +1596,7 @@ Column meanings:
 Canonical data: [`core/hailhq/core/languages.py`](../core/hailhq/core/languages.py)
 (provider doc sources in its docstring). Voice routing:
 [`voicebot/hailhq/voicebot/pipeline.py`](../voicebot/hailhq/voicebot/pipeline.py).
-```
+````
 
 (Remove the zero-width characters around the inner code fence when writing the real file — shown here only to nest the fences.)
 

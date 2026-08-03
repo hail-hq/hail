@@ -213,7 +213,7 @@ Hail garbage-collects unused uploads (not attached to any send) 24 hours after u
 Skip these until later milestones. This list names them so that you do not use SES features that are not wired yet:
 
 - **Templates** — the API takes raw `body_text` / `body_html`. SES templates are a v2 request.
-- **Cloud-agnostic inbound** — the SMTP listener is stubbed at [`docs/setup/smtp-inbound.md`](smtp-inbound.md); inbound currently runs on AWS only.
+- **Cloud-agnostic inbound** — the SMTP listener is stubbed at [`docs/setup/smtp-inbound.md`](../self-host/smtp-inbound.md); inbound currently runs on AWS only.
 
 ## 10. Inbound email
 
@@ -245,7 +245,7 @@ terragrunt apply
 
 Do a one-time bootstrap per AWS account before the first `terragrunt init`:
 the state bucket + lock table do not auto-create. Refer to the comment block
-at the top of [`infra/terragrunt.hcl`](../../infra/terragrunt.hcl) for
+at the top of [`infra/terragrunt.hcl`](https://github.com/hail-hq/hail/blob/main/infra/terragrunt.hcl) for
 the AWS CLI one-liners. Refer to [`docs/operations.md`](../operations.md) →
 "Inbound email rollout → Stage 4" for the full sequence.
 
@@ -367,7 +367,7 @@ curl -X POST $HAIL_API_URL/webhooks \
 
 Hail encrypts webhook signing secrets **at rest** with a deployment-scoped
 [Fernet](https://cryptography.io/en/latest/fernet/) key
-([`core/hailhq/core/secret_cipher.py`](../../core/hailhq/core/secret_cipher.py)).
+([`core/hailhq/core/secret_cipher.py`](https://github.com/hail-hq/hail/blob/main/core/hailhq/core/secret_cipher.py)).
 The worker decrypts on each delivery, so deliveries survive API restarts and
 work across multi-process deployments. If `HAIL_WEBHOOK_SECRET_KEY` is unset,
 webhook creation returns `500`. Generate and set the key before you enable
@@ -389,7 +389,7 @@ HAIL_WEBHOOK_SECRET_KEY=<output above>
 - [DKIM in SES](https://docs.aws.amazon.com/ses/latest/dg/send-email-authentication-dkim.html)
 - [Custom MAIL FROM](https://docs.aws.amazon.com/ses/latest/dg/mail-from.html)
 - [DMARC overview](https://dmarc.org/overview/)
-- OpenAPI: [`openapi/openapi.yaml`](../../openapi/openapi.yaml) → `/emails`, `/email-domains`, `/webhooks` tags
-- Code paths: [`api/hailhq/api/routes/emails.py`](../../api/hailhq/api/routes/emails.py), [`api/hailhq/api/routes/email_domains.py`](../../api/hailhq/api/routes/email_domains.py), [`api/hailhq/api/routes/webhooks.py`](../../api/hailhq/api/routes/webhooks.py), [`core/hailhq/core/providers/email/ses.py`](../../core/hailhq/core/providers/email/ses.py)
-- Inbound infra: [`infra/terraform/`](../../infra/terraform/), [`infra/ses-ingest-lambda/`](../../infra/ses-ingest-lambda/)
-- Design spec: [`docs/superpowers/specs/2026-06-06-inbound-email-design.md`](../superpowers/specs/2026-06-06-inbound-email-design.md)
+- OpenAPI: [`openapi/openapi.yaml`](https://github.com/hail-hq/hail/blob/main/openapi/openapi.yaml) → `/emails`, `/email-domains`, `/webhooks` tags
+- Code paths: [`api/hailhq/api/routes/emails.py`](https://github.com/hail-hq/hail/blob/main/api/hailhq/api/routes/emails.py), [`api/hailhq/api/routes/email_domains.py`](https://github.com/hail-hq/hail/blob/main/api/hailhq/api/routes/email_domains.py), [`api/hailhq/api/routes/webhooks.py`](https://github.com/hail-hq/hail/blob/main/api/hailhq/api/routes/webhooks.py), [`core/hailhq/core/providers/email/ses.py`](https://github.com/hail-hq/hail/blob/main/core/hailhq/core/providers/email/ses.py)
+- Inbound infra: [`infra/terraform/`](https://github.com/hail-hq/hail/blob/main/infra/terraform), [`infra/ses-ingest-lambda/`](https://github.com/hail-hq/hail/blob/main/infra/ses-ingest-lambda)
+- Design spec: [`docs/superpowers/specs/2026-06-06-inbound-email-design.md`](https://github.com/hail-hq/hail/blob/main/docs/superpowers/specs/2026-06-06-inbound-email-design.md)

@@ -15,7 +15,7 @@ The Streamable HTTP transport serves the MCP root path. There is no `/mcp` suffi
 
 ## Tools
 
-The server exposes 18 tools. Schemas (args, validation, return shapes) are the source of truth — refer to [`mcp/hailhq/mcp/tools.py`](../../mcp/hailhq/mcp/tools.py).
+The server exposes 18 tools. Schemas (args, validation, return shapes) are the source of truth — refer to [`mcp/hailhq/mcp/tools.py`](https://github.com/hail-hq/hail/blob/main/mcp/hailhq/mcp/tools.py).
 
 | Tool                      | Does                                                    |
 | ------------------------- | ------------------------------------------------------- |

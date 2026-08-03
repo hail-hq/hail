@@ -228,7 +228,7 @@ app = FastAPI(
     description=(
         "Universal communication platform for AI agents.\n\n"
         "This file is the source of truth for the Go CLI. Regenerate it after\n"
-        "changing API routes — see docs/contributing.md.\n"
+        "changing API routes — see docs/public/contributing.md.\n"
     ),
     lifespan=lifespan,
 )

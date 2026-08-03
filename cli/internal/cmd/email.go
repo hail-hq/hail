@@ -84,7 +84,7 @@ uploaded via ` + "`hail email attachment-upload`" + ` (repeatable).
 
 If --from is omitted, the API picks the first verified sender domain
 on your organization, or auto-mints a hail-mail address if one is
-configured. See docs/setup/aws-ses.md.
+configured. See docs/public/setup/aws-ses.md.
 
 Example (minimal):
   hail email send --to alice@example.com --subject "Hi" --body "Hello" --recipient-consent`,

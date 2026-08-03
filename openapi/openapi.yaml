@@ -4,7 +4,7 @@ info:
   description:
     "Universal communication platform for AI agents.\n\nThis file is the\
     \ source of truth for the Go CLI. Regenerate it after\nchanging API routes \u2014\
-    \ see docs/contributing.md.\n"
+    \ see docs/public/contributing.md.\n"
   version: 0.1.0
 paths:
   /calls:

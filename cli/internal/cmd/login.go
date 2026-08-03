@@ -26,7 +26,7 @@ import (
 // `hail login` is a Hail Cloud feature: it calls device-flow endpoints on the
 // Hail website, exchanges the resulting session for a long-lived API key, and
 // targets the matching managed API. Self-hosters issue API keys directly via
-// the bootstrap flow in docs/operations.md and never need this command.
+// the bootstrap flow in docs/public/operations.md and never need this command.
 const DefaultAuthURL = "https://hail.so"
 
 // deviceClientID identifies this CLI to the device-authorization endpoint.
@@ -95,7 +95,7 @@ device-authorization pages are browser-rendered there; afterwards, all CLI
 traffic goes to the API server.
 
 This command targets Hail Cloud. Self-hosters issue API keys via the bootstrap
-flow in docs/operations.md and do not need to log in.`,
+flow in docs/public/operations.md and do not need to log in.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
 

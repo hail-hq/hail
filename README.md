@@ -33,7 +33,7 @@ Do these steps:
 Then get an API key. There are two procedures:
 
 - **Hail Cloud** (managed at hail.so): Run `hail login`. The command starts the device flow. It writes an API key to `~/.hail/credentials.json`.
-- **Self-host**: Put an API key into your local database. Refer to [docs/operations.md](docs/operations.md), section "First-run DB seed". Then set the environment variable `HAIL_API_KEY`, or give the `--api-key` option.
+- **Self-host**: Put an API key into your local database. Refer to [docs/public/operations.md](docs/public/operations.md), section "First-run DB seed". Then set the environment variable `HAIL_API_KEY`, or give the `--api-key` option.
 
 Use the CLI (for persons who write scripts for Hail):
 
@@ -100,7 +100,7 @@ This is `hail tail` in operation:
 
 ![Animated terminal demo of hail tail streaming live call events](docs/assets/gifs/hail-tail-live-stream.gif)
 
-For the full setup, refer to [docs/setup/twilio.md](docs/setup/twilio.md), [docs/setup/livekit-cloud.md](docs/setup/livekit-cloud.md), [docs/setup/aws-ses.md](docs/setup/aws-ses.md), and [docs/setup/mcp.md](docs/setup/mcp.md).
+For the full setup, refer to [docs/public/setup/twilio.md](docs/public/setup/twilio.md), [docs/public/setup/livekit-cloud.md](docs/public/setup/livekit-cloud.md), [docs/public/setup/aws-ses.md](docs/public/setup/aws-ses.md), and [docs/public/setup/mcp.md](docs/public/setup/mcp.md).
 
 ## Tenets
 
@@ -171,7 +171,7 @@ A checked box shows a feature that we released. The changelog for each artifact 
   - [x] `hail` binary via GitHub Releases
 - MCP server
   - [x] Remote Streamable HTTP endpoint included with each Hail deployment
-  - ~~PyPI stdio package~~ — we do not supply this package; refer to [docs/setup/mcp.md](docs/setup/mcp.md)
+  - ~~PyPI stdio package~~ — we do not supply this package; refer to [docs/public/setup/mcp.md](docs/public/setup/mcp.md)
 - Python SDK
   - [x] `hail-sdk` on PyPI, imports as `hail`
 
@@ -189,11 +189,11 @@ This diagram shows the path of an outbound call:
 AI agent ──► Hail API ──dispatch──► Voicebot ──► LiveKit Cloud ──SIP──► Twilio ──► 📞
 ```
 
-For the full diagram, refer to [docs/architecture.md](docs/architecture.md).
+For the full diagram, refer to [docs/public/architecture.md](docs/public/architecture.md).
 
 ## Contributing
 
-Refer to [docs/contributing.md](docs/contributing.md). The procedure is short: make a fork, make a branch, write conventional commits, and open a pull request. Put provider adapters in `core/hailhq/core/providers/`. If you add a new environment variable, update `.env.example` in the same commit.
+Refer to [docs/public/contributing.md](docs/public/contributing.md). The procedure is short: make a fork, make a branch, write conventional commits, and open a pull request. Put provider adapters in `core/hailhq/core/providers/`. If you add a new environment variable, update `.env.example` in the same commit.
 
 ## License
 

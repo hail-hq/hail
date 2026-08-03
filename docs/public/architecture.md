@@ -19,7 +19,7 @@ Hail v1 is three Python services plus a Go CLI, built around LiveKit Cloud.
 ## Services
 
 - **api** (`:8080`, FastAPI) — the REST surface; it accepts `POST /calls` and the other routes. It is the source of truth for OpenAPI.
-- **mcp** (`:8081`, Streamable HTTP; legacy SSE during the transition) — the MCP server that wraps the API. Agent clients (Claude.ai, ChatGPT, Claude Code, Cursor) connect to it. Refer to [MCP setup](./setup/mcp.md).
+- **mcp** (`:8081`, Streamable HTTP; legacy SSE during the transition) — the MCP server that wraps the API. Agent clients (Claude.ai, ChatGPT, Claude Code, Cursor) connect to it. Refer to [MCP setup](setup/mcp.md).
 - **voicebot** (LiveKit Agents worker) — registers with LiveKit Cloud. Hail dispatches it into a room for each call.
 - **postgres** — call records, phone numbers, API keys.
 - **minio** (dev only) — S3-compatible local object storage. Use real S3 in production.
@@ -36,13 +36,13 @@ LiveKit Cloud is external. The `hail` Go CLI is a scriptable tool for humans, no
 
 ### Answering machine detection and DTMF
 
-Every outbound call runs LiveKit's AMD ([`voicebot/hailhq/voicebot/amd.py`](../voicebot/hailhq/voicebot/amd.py)) against the greeting. Classification runs on the session's own LLM and STT, not on LiveKit Inference. On `machine-vm` and `machine-unavailable`, the voicebot hangs up without a word — it never leaves a message. It records `status=no_answer` with `end_reason=voicemail_reached` / `machine_unavailable`. On `human` and `uncertain`, the call proceeds normally.
+Every outbound call runs LiveKit's AMD ([`voicebot/hailhq/voicebot/amd.py`](https://github.com/hail-hq/hail/blob/main/voicebot/hailhq/voicebot/amd.py)) against the greeting. Classification runs on the session's own LLM and STT, not on LiveKit Inference. On `machine-vm` and `machine-unavailable`, the voicebot hangs up without a word — it never leaves a message. It records `status=no_answer` with `end_reason=voicemail_reached` / `machine_unavailable`. On `human` and `uncertain`, the call proceeds normally.
 
 On `machine-ivr`, the voicebot does **not** speak the greeting. A menu cannot hear it, and `session.say` is TTS-only, so the LLM would get no turn in which to press a key. Instead, the agent takes a real LLM turn (`generate_reply`) with the captured menu text and the `send_dtmf` tool. Hail defers the disclosure until the first person speaks. Hail writes the verdict to `call_events` as an `amd_result` row on every call. A detection failure is non-fatal: the call proceeds as if a human answered.
 
 Billing no longer requires a `completed` status. Hail bills a call when `answered_at` is set (the SIP leg went active) **or** when the call completed normally. The first clause bills a machine-answered call and a call that failed mid-conversation. The second clause keeps billing for a completed call whose answer signal never arrived.
 
-The agent can press keypad digits at any point with the `send_dtmf` tool ([`core/hailhq/core/agent_tools/send_dtmf.py`](../core/hailhq/core/agent_tools/send_dtmf.py)) — not only after an IVR verdict. Thus the agent can navigate phone trees that it reaches mid-call.
+The agent can press keypad digits at any point with the `send_dtmf` tool ([`core/hailhq/core/agent_tools/send_dtmf.py`](https://github.com/hail-hq/hail/blob/main/core/hailhq/core/agent_tools/send_dtmf.py)) — not only after an IVR verdict. Thus the agent can navigate phone trees that it reaches mid-call.
 
 ## LLM modes
 
@@ -60,7 +60,7 @@ Each call uses one mode.
 
 ## SMS
 
-The `SmsProvider` adapter in [`core/hailhq/core/providers/sms/`](../core/hailhq/core/providers/sms/) sends SMS through Twilio.
+The `SmsProvider` adapter in [`core/hailhq/core/providers/sms/`](https://github.com/hail-hq/hail/blob/main/core/hailhq/core/providers/sms) sends SMS through Twilio.
 
 **Outbound.** `POST /sms` sends from the org's dedicated SMS-capable number. There is no pool fallback — refer to `hail numbers` for number acquisition. Twilio posts delivery-status callbacks. These callbacks move `Sms.status` and fan out the `sms.delivered` / `sms.undelivered` / `sms.failed` webhook events.
 
@@ -99,7 +99,7 @@ Hail validates both prefixes against `^[a-z0-9]([a-z0-9-]{0,18}[a-z0-9])?$` (1�
 
 If none of those resolve, the request returns `503` with instructions on how to register a domain.
 
-Refer to [`docs/setup/aws-ses.md`](./setup/aws-ses.md) for the operator-side setup. Refer to [`docs/superpowers/plans/2026-05-17-hail-mail-addressing.md`](./superpowers/plans/2026-05-17-hail-mail-addressing.md) for the addressing/configurability plan.
+Refer to [`docs/setup/aws-ses.md`](setup/aws-ses.md) for the operator-side setup. Refer to [`docs/superpowers/plans/2026-05-17-hail-mail-addressing.md`](https://github.com/hail-hq/hail/blob/main/docs/superpowers/plans/2026-05-17-hail-mail-addressing.md) for the addressing/configurability plan.
 
 ## Inbound email
 
@@ -129,8 +129,8 @@ inbound SMTP ──► SES Receipt Rule
 ```
 
 The cloud-agnostic SMTP path is a stub
-([`SmtpInboundProvider`](../core/hailhq/core/providers/email/inbound/smtp.py)).
-[`docs/setup/smtp-inbound.md`](setup/smtp-inbound.md) tracks it.
+([`SmtpInboundProvider`](https://github.com/hail-hq/hail/blob/main/core/hailhq/core/providers/email/inbound/smtp.py)).
+[`docs/setup/smtp-inbound.md`](self-host/smtp-inbound.md) tracks it.
 
 ### Per-domain routing — forward and/or webhook
 
@@ -145,4 +145,4 @@ A separate `inbound_routes` table, for per-mailbox routing in custom domains, is
 
 The `/webhooks` CRUD surface is the firehose pattern — one subscription covers multiple event types (`email.received`, `email.bounced`, `email.complained`). Signatures are Stripe-style: `X-Hail-Signature: t=<unix>,v1=<hex>`. Hail retries deliveries on a fixed `0/30s/2m/10m/1h/6h/24h` ladder. After the last retry, Hail marks the delivery `dead`. After 50 consecutive dead deliveries, the subscription auto-disables.
 
-Refer to [`docs/setup/aws-ses.md`](./setup/aws-ses.md) §10 for the operator runbook. Refer to [`docs/superpowers/specs/2026-06-06-inbound-email-design.md`](./superpowers/specs/2026-06-06-inbound-email-design.md) for the full spec.
+Refer to [`docs/setup/aws-ses.md`](setup/aws-ses.md) §10 for the operator runbook. Refer to [`docs/superpowers/specs/2026-06-06-inbound-email-design.md`](https://github.com/hail-hq/hail/blob/main/docs/superpowers/specs/2026-06-06-inbound-email-design.md) for the full spec.

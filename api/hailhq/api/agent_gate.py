@@ -18,7 +18,7 @@ __all__ = ["RATE_LIMITED_RESPONSES", "require_agent_send_allowed"]
 # from ``raise HTTPException``, so the create routes must declare this on their
 # decorator (``responses=RATE_LIMITED_RESPONSES``) for the generated spec — and
 # the CLI codegen from it — to reflect the rate limit. Regenerate
-# openapi/openapi.yaml after touching this (see docs/contributing.md).
+# openapi/openapi.yaml after touching this (see docs/public/contributing.md).
 RATE_LIMITED_RESPONSES: dict[int | str, dict[str, Any]] = {
     429: {
         "description": (
