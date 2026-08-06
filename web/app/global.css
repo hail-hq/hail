@@ -100,10 +100,6 @@
     text-transform: uppercase;
     margin: 0;
   }
-  .dispatch-h1 .stroked {
-    -webkit-text-stroke: 2px var(--color-ink);
-    color: transparent;
-  }
 
   /* ── FILED PANEL ─────────────────────────── */
   .filed-panel {
