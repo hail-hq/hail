@@ -50,7 +50,9 @@ The agent can press keypad digits at any point with the `send_dtmf` tool ([`core
 
 **B — BYO endpoint.** The caller supplies `llm: { base_url, api_key, model }`. The voicebot points `openai.LLM` at that endpoint. There is no fallback.
 
-Each call uses one mode.
+**C — standing BYO endpoint.** The organization saves an endpoint once on the console Providers page. Every call uses it, with opt-in fallback to Hail's models. A per-call mode B block overrides it.
+
+Precedence is B, then C, then A. See [Bring your own LLM](byo-llm.md) for the wire contract and a runnable endpoint.
 
 ## Data
 

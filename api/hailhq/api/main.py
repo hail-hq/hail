@@ -18,6 +18,7 @@ from hailhq.api.routes import email_domains as email_domains_routes
 from hailhq.api.routes import emails as emails_routes
 from hailhq.api.routes import events as events_routes
 from hailhq.api.routes import numbers as numbers_routes
+from hailhq.api.routes import providers as providers_routes
 from hailhq.api.routes import sms as sms_routes
 from hailhq.api.routes import unsubscribe as unsubscribe_routes
 from hailhq.api.routes import webhooks as webhooks_routes
@@ -275,6 +276,7 @@ app.include_router(webhooks_routes.router)
 app.include_router(unsubscribe_routes.router)
 app.include_router(sms_routes.router)
 app.include_router(contacts_routes.router)
+app.include_router(providers_routes.router)
 app.include_router(internal_ses_events.router)
 app.include_router(internal_org_closures.router)
 app.include_router(internal_provider_config.router)

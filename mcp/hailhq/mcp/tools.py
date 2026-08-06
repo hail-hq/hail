@@ -22,8 +22,8 @@ Exposes eighteen tools to the calling agent:
 * ``create_contact`` — save a manual contact (phone and/or email)
 
 The tool docstrings are the agent's only documentation, so each one
-spells out the contract (required vs optional fields, mutually exclusive
-modes, example invocation, terminal-status loop hint).
+spells out the contract (required vs optional fields, how modes combine,
+example invocation, terminal-status loop hint).
 
 Errors are returned as ``{"error": "<message>"}`` dicts rather than
 raised — agents read tool responses, not exception traces. Field and
@@ -547,11 +547,13 @@ def register_tools(
     ) -> dict[str, Any]:
         """Originate an outbound phone call.
 
-        Provide either ``system_prompt`` (mode A — Hail's bundled
-        fallback LLM uses this prompt) or ``llm`` (mode B — bring your
-        own OpenAI-compatible endpoint as
-        ``{"base_url": ..., "api_key": ..., "model": ...}``).
-        Mode A and mode B are mutually exclusive; supply exactly one.
+        Provide ``system_prompt`` (mode A — Hail's bundled fallback LLM
+        uses this prompt) or ``llm`` (mode B — bring your own
+        OpenAI-compatible endpoint as
+        ``{"base_url": ..., "api_key": ..., "model": ...}``), or both.
+        At least one is required. Passing both runs your prompt on your
+        own endpoint: it receives Hail's voice preamble plus your prompt
+        as the leading system message.
 
         ``to`` must be E.164 (e.g. ``+14155551234``). ``from_`` is
         optional and defaults to the first active number on your org.

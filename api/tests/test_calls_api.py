@@ -61,18 +61,32 @@ async def test_post_calls_invalid_body_returns_422(
     assert resp.status_code == 422
 
 
-async def test_post_calls_rejects_prompt_and_llm_together(
+async def test_post_calls_accepts_prompt_and_llm_together(
     client: httpx.AsyncClient,
+    async_session: AsyncSession,
     org_and_key: tuple[str, ApiKey, str],
+    livekit_mock: AsyncMock,
+    add_phone_number,
+    monkeypatch,
 ) -> None:
-    _, _, plain = org_and_key
+    """Prompt + BYO endpoint: accepted, and both ride the dispatch metadata
+    so the voicebot composes the preamble + prompt for the BYO LLM."""
+    from hailhq.core.config import settings
+
+    monkeypatch.setattr(settings, "hail_provider_secret_key", "")
+
+    org_id, _, plain = org_and_key
+    await add_phone_number(async_session, org_id)
+
     resp = await client.post(
         "/calls",
         json={
             "to": "+14155559999",
             "system_prompt": "hi",
+            # A resolvable public https host — the route's SSRF guard does
+            # real DNS, so a .example.com placeholder would 422 here.
             "llm": {
-                "base_url": "https://byo.example.com/v1",
+                "base_url": "https://api.openai.com/v1",
                 "api_key": "k",
                 "model": "m",
             },
@@ -80,8 +94,27 @@ async def test_post_calls_rejects_prompt_and_llm_together(
         },
         headers={"Authorization": f"Bearer {plain}"},
     )
+    assert resp.status_code == 201, resp.text
+
+    metadata = livekit_mock.dispatch_agent.await_args.kwargs["metadata"]
+    assert metadata["system_prompt"] == "hi"
+    assert metadata["llm"]["base_url"] == "https://api.openai.com/v1"
+    assert metadata["llm"]["model"] == "m"
+
+
+async def test_post_calls_rejects_neither_prompt_nor_llm(
+    client: httpx.AsyncClient,
+    org_and_key: tuple[str, ApiKey, str],
+) -> None:
+    """Neither field is still a 422 — the one surviving half of the rule."""
+    _, _, plain = org_and_key
+    resp = await client.post(
+        "/calls",
+        json={"to": "+14155559999", "recipient_consent": True},
+        headers={"Authorization": f"Bearer {plain}"},
+    )
     assert resp.status_code == 422
-    assert "mutually exclusive" in resp.text
+    assert "either system_prompt or llm" in resp.text
 
 
 # --------------------------------------------------------------------------- #

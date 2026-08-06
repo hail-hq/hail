@@ -51,6 +51,10 @@ from hail.models import (
     NumberType,
     PhoneNumberListResponse,
     PhoneNumberResponse,
+    ProviderConfigEntry,
+    ProviderConfigListResponse,
+    ProviderLayer,
+    ProviderValidateResult,
     SenderIdResponse,
     SmsListResponse,
     SmsResponse,
@@ -99,10 +103,13 @@ class _CallsResource:
     ) -> CallResponse:
         """Originate an outbound call.
 
-        Exactly one of ``system_prompt`` (mode A) or a fully-populated
+        At least one of ``system_prompt`` (mode A) or a fully-populated
         ``llm`` block (mode B) must be provided — server enforces this with
         a 422; we don't pre-validate so SDK and API stay in lockstep on the
-        rule. ``recipient_consent`` is required — the server 422s without
+        rule. The two combine: pass both to run your own prompt on your own
+        endpoint — the endpoint receives Hail's voice preamble plus your
+        prompt as the leading system message. ``recipient_consent`` is
+        required — the server 422s without
         it. ``language`` is the call's spoken language for both STT and TTS
         as a lowercase ISO 639-1 code (e.g. ``"fr"``); omit for English.
         STT provider selection is console-BYO-only (no per-call override) —
@@ -664,6 +671,96 @@ class _WebhooksResource:
         )
 
 
+class _ProvidersResource:
+    """``client.providers.*`` — standing BYO provider config for the org.
+
+    The organization is the one behind your API key; it never appears in a
+    path or body. Keys are write-only — reads return ``key_last4`` and
+    ``key_set_at`` only.
+
+    ``layer`` is ``"llm"``, ``"tts"`` or ``"stt"``. ``params`` is
+    layer-shaped and validated server-side (422 on a mismatch):
+    ``{"base_url": ..., "model": ...}`` for ``llm``,
+    ``{"voice_id": ..., "model": ...}`` for ``tts``, ``{"model": ...}``
+    for ``stt``.
+    """
+
+    def __init__(self, http: _HailHTTP) -> None:
+        self._http = http
+
+    async def list(self) -> ProviderConfigListResponse:
+        """Every saved provider row, all layers."""
+        data = await self._http.request("GET", "/providers")
+        return ProviderConfigListResponse.model_validate(data)
+
+    async def set(
+        self,
+        layer: ProviderLayer,
+        *,
+        provider: str,
+        api_key: str | None = None,
+        params: dict[str, Any] | None = None,
+        fallback_enabled: bool = False,
+    ) -> ProviderConfigEntry:
+        """Save a provider for ``layer`` and make it the active one.
+
+        Omit ``api_key`` to edit params without resending the key — the
+        stored key survives. ``fallback_enabled`` lets a failure of your
+        provider fall through to Hail's own keys; off by default.
+        """
+        body: dict[str, Any] = {
+            "provider": provider,
+            "params": params or {},
+            "fallback_enabled": fallback_enabled,
+        }
+        if api_key is not None:
+            body["api_key"] = api_key
+        data = await self._http.request("PUT", f"/providers/{layer}", json=body)
+        return ProviderConfigEntry.model_validate(data)
+
+    async def delete(self, layer: ProviderLayer, provider: str) -> None:
+        """Delete one provider row. Deleting the active row promotes the
+        most-recently-updated sibling. Idempotent."""
+        await self._http.request("DELETE", f"/providers/{layer}/{provider}")
+
+    async def activate(
+        self, layer: ProviderLayer, *, provider: str
+    ) -> ProviderConfigEntry:
+        """Switch which saved provider is active for ``layer``. 404s when
+        that provider has no saved config."""
+        data = await self._http.request(
+            "POST", f"/providers/{layer}/activate", json={"provider": provider}
+        )
+        return ProviderConfigEntry.model_validate(data)
+
+    async def test(
+        self,
+        layer: ProviderLayer,
+        *,
+        provider: str | None = None,
+        api_key: str | None = None,
+        params: dict[str, Any] | None = None,
+    ) -> ProviderValidateResult:
+        """Probe a key against the real provider.
+
+        With no arguments beyond ``layer``, tests the layer's active
+        provider with its stored key. Pass ``provider`` to test a specific
+        saved row, or ``api_key`` (with ``provider``/``params``) to test a
+        key before saving it.
+        """
+        body: dict[str, Any] = {}
+        if provider is not None:
+            body["provider"] = provider
+        if api_key is not None:
+            body["api_key"] = api_key
+        if params is not None:
+            body["params"] = params
+        data = await self._http.request(
+            "POST", f"/providers/{layer}/validate", json=body
+        )
+        return ProviderValidateResult.model_validate(data)
+
+
 class _EventsResource:
     """``client.events.*`` — list and tail against ``/events``."""
 
@@ -802,6 +899,7 @@ class Client:
         self.email_attachments = _EmailAttachmentsResource(self._http)
         self.email_domains = _EmailDomainsResource(self._http)
         self.webhooks = _WebhooksResource(self._http)
+        self.providers = _ProvidersResource(self._http)
         self.events = _EventsResource(self._http)
         self.base_url = resolved_base.rstrip("/")
 

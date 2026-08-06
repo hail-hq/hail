@@ -1886,6 +1886,216 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HTTPValidationError"
+  /providers:
+    get:
+      tags:
+        - providers
+      summary: List Providers
+      description: Every saved provider row for the caller's organization, all layers.
+      operationId: list_providers
+      parameters:
+        - name: authorization
+          in: header
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            title: Authorization
+      responses:
+        "200":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProviderConfigListResponse"
+        "422":
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
+  /providers/{layer}:
+    put:
+      tags:
+        - providers
+      summary: Upsert Provider
+      description: "Save a provider for ``layer`` and make it the active one.
+
+
+        Omitting ``api_key`` keeps the stored key; ``params`` is validated
+
+        against the layer's schema (422 on a mismatch). 404 on an unknown layer."
+      operationId: upsert_provider
+      parameters:
+        - name: layer
+          in: path
+          required: true
+          schema:
+            type: string
+            title: Layer
+        - name: authorization
+          in: header
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            title: Authorization
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProviderConfigUpsert"
+      responses:
+        "200":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProviderConfigEntry"
+        "422":
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
+  /providers/{layer}/{provider}:
+    delete:
+      tags:
+        - providers
+      summary: Delete Provider
+      description:
+        "Delete one provider row. Deleting the active row promotes the
+
+        most-recently-updated sibling. Idempotent: deleting a row that isn't
+
+        there is a 204 too. 404 on an unknown layer."
+      operationId: delete_provider
+      parameters:
+        - name: layer
+          in: path
+          required: true
+          schema:
+            type: string
+            title: Layer
+        - name: provider
+          in: path
+          required: true
+          schema:
+            type: string
+            title: Provider
+        - name: authorization
+          in: header
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            title: Authorization
+      responses:
+        "204":
+          description: Successful Response
+        "422":
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
+  /providers/{layer}/activate:
+    post:
+      tags:
+        - providers
+      summary: Activate Provider
+      description:
+        "Switch which saved provider is active for ``layer``. 404 when
+        that
+
+        provider has no saved config."
+      operationId: activate_provider
+      parameters:
+        - name: layer
+          in: path
+          required: true
+          schema:
+            type: string
+            title: Layer
+        - name: authorization
+          in: header
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            title: Authorization
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProviderActivateRequest"
+      responses:
+        "200":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProviderConfigEntry"
+        "422":
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
+  /providers/{layer}/validate:
+    post:
+      tags:
+        - providers
+      summary: Validate Provider
+      description: "Probe a provider key against the real provider.
+
+
+        Empty body tests the layer's active provider with its stored key; send
+
+        ``provider`` to test a specific saved row, or ``api_key`` (plus
+
+        ``provider``/``params``) to test a key before saving it."
+      operationId: validate_provider
+      parameters:
+        - name: layer
+          in: path
+          required: true
+          schema:
+            type: string
+            title: Layer
+        - name: authorization
+          in: header
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            title: Authorization
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProviderValidateRequest"
+      responses:
+        "200":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProviderValidateResult"
+        "422":
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
   /healthz:
     get:
       summary: Healthz
@@ -3425,6 +3635,148 @@ components:
         - provisioning_state
         - is_dedicated
       title: PhoneNumberResponse
+    ProviderActivateRequest:
+      properties:
+        provider:
+          type: string
+          title: Provider
+      additionalProperties: false
+      type: object
+      required:
+        - provider
+      title: ProviderActivateRequest
+      description: Body of ``POST /providers/{layer}/activate``.
+    ProviderConfigEntry:
+      properties:
+        layer:
+          type: string
+          enum:
+            - llm
+            - tts
+            - stt
+          title: Layer
+        provider:
+          type: string
+          title: Provider
+        key_last4:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Key Last4
+        key_set_at:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Key Set At
+        params:
+          additionalProperties: true
+          type: object
+          title: Params
+        fallback_enabled:
+          type: boolean
+          title: Fallback Enabled
+        is_active:
+          type: boolean
+          title: Is Active
+      type: object
+      required:
+        - layer
+        - provider
+        - key_last4
+        - key_set_at
+        - params
+        - fallback_enabled
+        - is_active
+      title: ProviderConfigEntry
+      description: "One saved provider row. Write-only key: ``key_last4`` and
+
+        ``key_set_at`` are the only key-derived fields that leave the API.
+
+
+        Every field is required (``key_last4``/``key_set_at`` nullable): the
+
+        serializer always emits all of them, and required response fields
+
+        generate plain values instead of pointers in the Go CLI's client."
+    ProviderConfigListResponse:
+      properties:
+        providers:
+          items:
+            $ref: "#/components/schemas/ProviderConfigEntry"
+          type: array
+          title: Providers
+      type: object
+      required:
+        - providers
+      title: ProviderConfigListResponse
+    ProviderConfigUpsert:
+      properties:
+        provider:
+          type: string
+          title: Provider
+        api_key:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Api Key
+        params:
+          additionalProperties: true
+          type: object
+          title: Params
+        fallback_enabled:
+          type: boolean
+          title: Fallback Enabled
+          default: false
+      additionalProperties: false
+      type: object
+      required:
+        - provider
+      title: ProviderConfigUpsert
+      description:
+        "Body of ``PUT /providers/{layer}`` \u2014 save and activate one\
+        \ provider.\n\nOmit ``api_key`` to edit params without resending the key;\
+        \ the stored\nkey survives. Keys are write-only: no response ever echoes one\
+        \ back."
+    ProviderValidateRequest:
+      properties:
+        api_key:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Api Key
+        provider:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Provider
+        params:
+          additionalProperties: true
+          type: object
+          title: Params
+      additionalProperties: false
+      type: object
+      title: ProviderValidateRequest
+      description:
+        "Body of ``POST /providers/{layer}/validate`` \u2014 a live key\
+        \ probe.\n\nAll fields optional: with an empty body the layer's active provider\
+        \ and\nits stored key are tested. ``provider`` tests that provider's stored\
+        \ key\ninstead. ``api_key`` tests a key that has not been saved yet."
+    ProviderValidateResult:
+      properties:
+        status:
+          type: string
+          title: Status
+        message:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Message
+      type: object
+      required:
+        - status
+        - message
+      title: ProviderValidateResult
+      description: Outcome of a live provider-key probe.
     SenderIdPatch:
       properties:
         custom_sender_id:

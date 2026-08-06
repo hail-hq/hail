@@ -350,6 +350,7 @@ or pass --api-key.`,
 	root.AddCommand(newNumberCmd(opts))
 	root.AddCommand(newEmailCmd(opts))
 	root.AddCommand(newContactsCmd(opts))
+	root.AddCommand(newProvidersCmd(opts))
 	root.AddCommand(newTailCmd(opts))
 	root.AddCommand(newLoginCmd(opts))
 	root.AddCommand(newAuthCmd(opts))
