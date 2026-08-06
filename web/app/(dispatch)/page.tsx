@@ -59,7 +59,7 @@ export default function CostsPage() {
             }}
           >
             <h1 className="dispatch-h1">
-              <span className="stroked">MODEL</span> COSTS
+              MODEL COSTS
             </h1>
             <aside className="filed-panel">
               <b>FILED {today}</b>
