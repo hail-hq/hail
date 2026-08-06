@@ -1,18 +1,37 @@
 @import "tailwindcss";
 
+/* Palette mirrors hail.so's marketing surface (`.hsite` in hail-website's
+   app/(marketing)/marketing.css) so /costs reads as a page of the site rather
+   than a neighbouring property. Fonts already match (Space Grotesk /
+   JetBrains Mono / Instrument Serif). Keep these in sync by hand — the two
+   repos share no build. */
 @theme {
-  --color-ink: #000;
-  --color-bg: #ededed;
-  --color-paper: #f6f4ee;
-  --color-tape: #f2ecd8;
-  --color-mute: #555;
-  --color-dim: #888;
-  --color-accent: #ff4a1c;
+  --color-ink: #0d0d0d;
+  --color-bg: #e9e7e3;
+  --color-paper: #f2f0ec;
+  --color-tape: #dedbd5;
+  --color-mute: #6e6b66;
+  --color-dim: #8b877f;
+  --color-accent: #c4362c;
+  --color-line: #cbc8c2;
 }
 
 @layer base {
-  *, *::before, *::after { box-sizing: border-box; }
-  html, body { margin: 0; padding: 0; }
+  *,
+  *::before,
+  *::after {
+    box-sizing: border-box;
+  }
+  html,
+  body {
+    margin: 0;
+    padding: 0;
+  }
+  :root {
+    /* Height of the sticky site header — the toolbar sticks directly below. */
+    --head-h: 60px;
+    --accent-wash: rgba(196, 54, 44, 0.07);
+  }
   body {
     background: var(--color-bg);
     color: var(--color-ink);
@@ -21,8 +40,16 @@
     line-height: 1.5;
     -webkit-font-smoothing: antialiased;
   }
-  a { color: inherit; text-decoration: none; }
-  em.it, .it {
+  a {
+    color: inherit;
+    text-decoration: none;
+  }
+  ::selection {
+    background: var(--color-ink);
+    color: var(--color-bg);
+  }
+  em.it,
+  .it {
     font-family: var(--font-serif);
     font-style: italic;
     font-weight: 400;
@@ -31,12 +58,9 @@
 
 @layer components {
   .wrap {
-    max-width: 1400px;
+    max-width: 1360px;
     margin: 0 auto;
-    padding: 0 32px;
-  }
-  @media (max-width: 640px) {
-    .wrap { padding: 0 20px; }
+    padding-inline: clamp(18px, 4vw, 36px);
   }
 
   /* ── DATELINE / TOP TAPE ──────────────────── */
@@ -54,26 +78,17 @@
     gap: 24px;
     flex-wrap: wrap;
   }
-  .dispatch-tape .left { font-weight: 700; }
-  .dispatch-tape .left .dot { color: var(--color-accent); }
-  .dispatch-tape .right { color: var(--color-mute); }
-  .dispatch-tape .right b { color: var(--color-ink); }
-
-  /* ── BRAND ───────────────────────────────── */
-  .brand-mark {
-    font-family: var(--font-sans);
-    font-size: 22px;
-    font-weight: 800;
-    letter-spacing: -0.03em;
-    text-transform: lowercase;
-    line-height: 1;
+  .dispatch-tape .left {
+    font-weight: 700;
   }
-  .brand-mark i {
-    font-style: normal;
-    background: var(--color-ink);
-    color: var(--color-bg);
-    padding: 0 0.18em 0 0.12em;
-    border-radius: 2px;
+  .dispatch-tape .left .dot {
+    color: var(--color-accent);
+  }
+  .dispatch-tape .right {
+    color: var(--color-mute);
+  }
+  .dispatch-tape .right b {
+    color: var(--color-ink);
   }
 
   /* ── DISPATCH HEADING ────────────────────── */
@@ -111,8 +126,12 @@
     grid-template-columns: auto 1fr;
     gap: 4px 12px;
   }
-  .filed-panel dt { color: var(--color-mute); }
-  .filed-panel dd { margin: 0; }
+  .filed-panel dt {
+    color: var(--color-mute);
+  }
+  .filed-panel dd {
+    margin: 0;
+  }
 
   /* ── SUMMARY STRIP ───────────────────────── */
   .summary-strip {
@@ -135,13 +154,17 @@
     padding: 0 24px;
     border-right: 1.5px solid var(--color-ink);
   }
-  .summary-strip .stat:first-child { padding-left: 0; }
+  .summary-strip .stat:first-child {
+    padding-left: 0;
+  }
   .summary-strip .stat:last-child {
     border-right: 0;
     padding-right: 0;
   }
   @media (max-width: 720px) {
-    .summary-strip .stat:nth-child(2n) { border-right: 0; }
+    .summary-strip .stat:nth-child(2n) {
+      border-right: 0;
+    }
   }
   .summary-strip .stat .k {
     font-family: var(--font-mono);
@@ -171,7 +194,7 @@
     border-bottom: 2px solid var(--color-ink);
     background: var(--color-bg);
     position: sticky;
-    top: 0;
+    top: var(--head-h);
     z-index: 20;
   }
   .toolbar .row {
@@ -216,7 +239,10 @@
     text-decoration: none;
     cursor: pointer;
     white-space: nowrap;
-    transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
+    transition:
+      background 120ms ease,
+      color 120ms ease,
+      border-color 120ms ease;
   }
   .toolbar .anchors a:hover,
   .btn.btn-outline:hover {
@@ -229,7 +255,9 @@
     color: var(--color-bg);
     border-color: var(--color-ink);
   }
-  .toolbar .agent-cta::before { content: "→ "; }
+  .toolbar .agent-cta::before {
+    content: "→ ";
+  }
   .toolbar .agent-cta:hover,
   .btn.btn-filled:hover {
     background: var(--color-accent);
@@ -327,7 +355,9 @@
     background: var(--color-bg);
     color: var(--color-ink);
   }
-  .chip:hover { background: var(--color-paper); }
+  .chip:hover {
+    background: var(--color-paper);
+  }
   .chip[aria-pressed="true"] {
     background: var(--color-ink);
     color: var(--color-bg);
@@ -360,18 +390,32 @@
     cursor: pointer;
     user-select: none;
   }
-  .wire-table thead th.num { text-align: right; }
-  .wire-table thead th.killer { color: var(--color-accent); }
-  .wire-table thead th:hover { background: var(--color-tape); }
-  .wire-table thead th[aria-sort] { color: var(--color-ink); }
-  .wire-table thead th[aria-sort="descending"]::after { content: " ↓"; }
-  .wire-table thead th[aria-sort="ascending"]::after { content: " ↑"; }
+  .wire-table thead th.num {
+    text-align: right;
+  }
+  .wire-table thead th.killer {
+    color: var(--color-accent);
+  }
+  .wire-table thead th:hover {
+    background: var(--color-tape);
+  }
+  .wire-table thead th[aria-sort] {
+    color: var(--color-ink);
+  }
+  .wire-table thead th[aria-sort="descending"]::after {
+    content: " ↓";
+  }
+  .wire-table thead th[aria-sort="ascending"]::after {
+    content: " ↑";
+  }
   .wire-table tbody td {
     padding: 12px;
-    border-bottom: 1px solid rgba(0, 0, 0, 0.12);
+    border-bottom: 1px solid var(--color-line);
     vertical-align: top;
   }
-  .wire-table tbody tr:hover td { background: var(--color-paper); }
+  .wire-table tbody tr:hover td {
+    background: var(--color-paper);
+  }
   .wire-table tbody td.num {
     text-align: right;
     font-family: var(--font-mono);
@@ -400,7 +444,7 @@
     gap: 6px;
     margin: 4px 0 0;
     padding: 2px 7px 2px 8px;
-    border: 1px dashed rgba(0, 0, 0, 0.3);
+    border: 1px dashed var(--color-line);
     background: transparent;
     cursor: copy;
     font-family: var(--font-mono);
@@ -408,7 +452,10 @@
     font-weight: 500;
     color: var(--color-mute);
     line-height: 1.5;
-    transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
+    transition:
+      background 120ms ease,
+      color 120ms ease,
+      border-color 120ms ease;
     user-select: text;
   }
   .copy-chip:hover {
@@ -417,7 +464,9 @@
     background: var(--color-paper);
     color: var(--color-ink);
   }
-  .copy-chip:hover .copy-chip-icon { opacity: 1; }
+  .copy-chip:hover .copy-chip-icon {
+    opacity: 1;
+  }
   .copy-chip:active {
     transform: translateY(0.5px);
   }
@@ -434,7 +483,9 @@
     opacity: 0.55;
     transition: opacity 120ms ease;
   }
-  .copy-chip--copied .copy-chip-icon { opacity: 1; }
+  .copy-chip--copied .copy-chip-icon {
+    opacity: 1;
+  }
   .copy-chip-text {
     pointer-events: none;
   }
@@ -452,7 +503,7 @@
     margin-top: 4px;
     margin-left: 4px;
     padding: 2px 7px 2px 6px;
-    border: 1px dashed rgba(0, 0, 0, 0.25);
+    border: 1px dashed var(--color-line);
     background: transparent;
     font-family: var(--font-mono);
     font-size: 10.5px;
@@ -462,7 +513,10 @@
     color: var(--color-mute);
     text-decoration: none;
     line-height: 1.4;
-    transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
+    transition:
+      background 120ms ease,
+      color 120ms ease,
+      border-color 120ms ease;
   }
   .compare-link:hover {
     background: var(--color-accent);
@@ -501,35 +555,82 @@
     text-transform: uppercase;
   }
 
-  /* ── DISPATCH FOOTER ─────────────────────── */
-  .dispatch-foot {
-    background: var(--color-ink);
-    color: var(--color-bg);
-    padding: 36px 0;
+  /* ── SITE FOOTER ─────────────────────────── */
+  /* Mirrors hail.so's slim footer (SiteFooter variant="slim"): a paper row of
+     mono links over an ink-ruled end bar. */
+  .site-foot {
+    background: var(--color-bg);
+    border-top: 2px solid var(--color-ink);
   }
-  .dispatch-foot .row {
+  .site-foot .foot-top {
     display: flex;
     justify-content: space-between;
-    gap: 24px;
-    flex-wrap: wrap;
     align-items: center;
+    gap: 16px;
+    flex-wrap: wrap;
+    padding: clamp(36px, 4vw, 56px) 0 24px;
   }
-  .dispatch-foot .left {
+  .site-foot .foot-nav {
+    display: flex;
+    gap: 22px;
+    flex-wrap: wrap;
     font-family: var(--font-mono);
-    font-size: 11px;
-    letter-spacing: 0.12em;
+    font-size: 12px;
+    letter-spacing: 0.06em;
     text-transform: uppercase;
   }
-  .dispatch-foot .left b { color: var(--color-accent); }
-  .dispatch-foot .right {
+  .site-foot .foot-nav a:hover {
+    color: var(--color-accent);
+  }
+  .site-foot .foot-soc {
+    border: 1.5px solid var(--color-ink);
+    width: 34px;
+    height: 34px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--color-ink);
+    flex-shrink: 0;
+  }
+  .site-foot .foot-soc svg {
+    width: 14px;
+    height: 14px;
+    fill: currentColor;
+  }
+  .site-foot .foot-soc:hover {
+    background: var(--color-ink);
+    color: var(--color-bg);
+  }
+  .site-foot .foot-end {
+    border-top: 2px solid var(--color-ink);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 16px;
+    flex-wrap: wrap;
+    padding: 16px 0;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--color-mute);
+  }
+  .site-foot .foot-end .dot {
+    color: var(--color-accent);
+  }
+  .site-foot .foot-end a {
+    color: var(--color-ink);
+    text-decoration: underline;
+    text-underline-offset: 3px;
+    text-decoration-color: var(--color-accent);
+  }
+  .site-foot .foot-end .tagline {
     font-family: var(--font-serif);
     font-style: italic;
-    font-size: 22px;
-  }
-  .dispatch-foot a {
-    text-decoration: underline;
-    text-decoration-color: var(--color-accent);
-    text-underline-offset: 3px;
+    font-size: 14px;
+    letter-spacing: 0;
+    text-transform: none;
+    color: var(--color-mute);
   }
 
   /* ── COMPARE TABLE ───────────────────────── */
@@ -596,7 +697,9 @@
     font-weight: 700;
     line-height: 1;
     text-decoration: none;
-    transition: background 120ms ease, color 120ms ease;
+    transition:
+      background 120ms ease,
+      color 120ms ease;
   }
   .compare-remove:hover {
     background: var(--color-accent);
@@ -615,13 +718,13 @@
     text-align: left;
     vertical-align: top;
     border-right: 2px solid var(--color-ink);
-    border-bottom: 1px solid rgba(0, 0, 0, 0.12);
+    border-bottom: 1px solid var(--color-line);
     white-space: nowrap;
   }
   .compare-table tbody td {
     padding: 12px 14px;
     border-right: 1.5px solid var(--color-ink);
-    border-bottom: 1px solid rgba(0, 0, 0, 0.12);
+    border-bottom: 1px solid var(--color-line);
     vertical-align: top;
     font-family: var(--font-mono);
     font-size: 13px;
@@ -631,7 +734,7 @@
   }
   .compare-table tbody tr.compare-row-emphasis th.compare-attr-label,
   .compare-table tbody tr.compare-row-emphasis td {
-    background: rgba(255, 74, 28, 0.06);
+    background: var(--accent-wash);
     color: var(--color-accent);
     font-weight: 700;
     font-size: 14.5px;
@@ -666,7 +769,9 @@
     font-family: var(--font-sans);
     font-size: 13px;
     text-decoration: none;
-    transition: background 120ms ease, color 120ms ease;
+    transition:
+      background 120ms ease,
+      color 120ms ease;
   }
   .add-pill:hover {
     background: var(--color-ink);
@@ -701,30 +806,129 @@
     opacity: 0.7;
   }
 
-  /* ── HEADER NAV ──────────────────────────── */
+  /* ── SITE HEADER ─────────────────────────── */
+  /* Mirrors hail.so's `.hhead` chrome so /costs carries the same nav as every
+     other page behind the hail.so rewrite. Height is pinned to --head-h; the
+     toolbar sticks directly beneath it. */
   .site-header {
-    border-bottom: 2px solid var(--color-ink);
+    position: sticky;
+    top: 0;
+    z-index: 50;
     background: var(--color-bg);
+    border-bottom: 2px solid var(--color-ink);
   }
   .site-header .row {
+    max-width: 1360px;
+    margin: 0 auto;
+    /* min-height rather than symmetric padding: it pins the header to exactly
+       --head-h (plus its border) so the sticky toolbar lands flush beneath. */
+    min-height: calc(var(--head-h) - 2px);
+    padding: 8px clamp(18px, 4vw, 36px);
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 16px 0;
-    gap: 24px;
+    gap: 10px 24px;
   }
-  .site-header .left {
+  .site-mark {
     display: flex;
-    align-items: baseline;
-    gap: 14px;
+    align-items: center;
+    font-weight: 800;
+    font-size: 21px;
+    letter-spacing: -0.01em;
+    color: var(--color-ink);
   }
-  .site-header .doc-tag {
+  .site-mark span {
+    background: var(--color-ink);
+    color: var(--color-bg);
+    padding: 2px 6px;
+    margin-left: 5px;
+    font-size: 13px;
+    letter-spacing: 0.02em;
+  }
+  .site-nav {
+    display: flex;
+    align-items: center;
+    gap: 24px;
     font-family: var(--font-mono);
-    font-size: 10px;
-    border: 1.5px solid var(--color-ink);
-    padding: 3px 8px;
-    letter-spacing: 0.16em;
-    font-weight: 700;
+    font-size: 11.5px;
+    letter-spacing: 0.09em;
     text-transform: uppercase;
+  }
+  .site-nav a {
+    transition: color 120ms ease;
+  }
+  .site-nav a.nav-link:hover {
+    color: var(--color-accent);
+  }
+  .site-nav .is-active {
+    color: var(--color-accent);
+  }
+  .site-nav .nav-chip {
+    border: 1.5px solid var(--color-ink);
+    padding: 5px 10px;
+    transition:
+      background 120ms ease,
+      color 120ms ease;
+  }
+  /* This page *is* the pricing database, so the chip reads as a state, not a
+     link — inverted the way hail.so inverts it on hover. */
+  .site-nav .nav-chip.is-active {
+    background: var(--color-ink);
+    color: var(--color-bg);
+    border-color: var(--color-ink);
+  }
+  .site-nav .nav-gh {
+    border: 1.5px solid var(--color-ink);
+    width: 30px;
+    height: 30px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .site-nav .nav-gh svg {
+    width: 14px;
+    height: 14px;
+    fill: currentColor;
+  }
+  .site-nav .nav-gh:hover {
+    background: var(--color-ink);
+    color: var(--color-bg);
+  }
+  .site-nav a.nav-cta {
+    color: var(--color-bg);
+    background: var(--color-ink);
+    padding: 9px 16px;
+    line-height: 1;
+    letter-spacing: 0.1em;
+    white-space: nowrap;
+    transition: background 120ms ease;
+  }
+  .site-nav a.nav-cta:hover {
+    background: var(--color-accent);
+  }
+  @media (max-width: 900px) {
+    .site-nav .nav-hide-lg {
+      display: none;
+    }
+  }
+  @media (max-width: 600px) {
+    .site-nav {
+      gap: 14px;
+      font-size: 10.5px;
+    }
+    .site-nav .nav-hide {
+      display: none;
+    }
+  }
+  /* Below the wrap breakpoint the nav can wrap to a second row, so the header
+     height stops being a constant — drop it out of the sticky stack and let
+     the toolbar own the top edge. */
+  @media (max-width: 480px) {
+    .site-header {
+      position: static;
+    }
+    .toolbar {
+      top: 0;
+    }
   }
 }
