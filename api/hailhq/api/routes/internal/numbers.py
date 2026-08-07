@@ -12,6 +12,7 @@ Shared-secret HMAC auth, same as the rest of ``routes/internal/`` — see
 
 from __future__ import annotations
 
+import logging
 from typing import Annotated
 from uuid import UUID
 
@@ -25,6 +26,8 @@ from hailhq.core.providers.voice import VoiceProvider
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(
     prefix="/internal",
@@ -60,6 +63,15 @@ async def release_number_internal(
         raise HTTPException(
             status_code=http_status.HTTP_404_NOT_FOUND, detail="number not found"
         )
+    # `source` is provenance-only; log it so a dunning release and a future
+    # operator release are distinguishable after the fact (`released_at` says
+    # when, this says why).
+    logger.info(
+        "internal release of number %s (org %s, source=%s)",
+        body.number_id,
+        body.organization_id,
+        body.source,
+    )
     number = await release_org_number(db, provider, number)
     return {
         "number_id": str(number.id),

@@ -393,7 +393,11 @@ class PhoneNumber(Base):
     organization_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), nullable=True
     )
-    e164: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
+    # Uniqueness is partial (see __table_args__): released rows are tombstones
+    # and must not block re-acquiring a number Twilio later recycles — with a
+    # full UNIQUE, that re-acquire would buy the number at the carrier and
+    # then 500 on the INSERT, orphaning a paid number (migration 0041).
+    e164: Mapped[str] = mapped_column(Text, nullable=False)
     country_code: Mapped[str] = mapped_column(Text, nullable=False)
     number_type: Mapped[str] = mapped_column(Text, nullable=False)
     capabilities: Mapped[list[str]] = mapped_column(
@@ -450,6 +454,12 @@ class PhoneNumber(Base):
             "(is_pool = TRUE AND organization_id IS NULL)"
             " OR (is_pool = FALSE AND organization_id IS NOT NULL)",
             name="phone_numbers_pool_owner_xor",
+        ),
+        Index(
+            "phone_numbers_e164_live_uniq",
+            "e164",
+            unique=True,
+            postgresql_where=text("provisioning_state <> 'released'"),
         ),
     )
 

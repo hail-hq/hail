@@ -208,7 +208,18 @@ async def release_org_number(
     await provider.release_number(number.provider_resource_id)
     number.provisioning_state = "released"
     number.released_at = datetime.now(timezone.utc)
-    await db.commit()
+    try:
+        await db.commit()
+    except Exception:
+        # The carrier release already happened; until a retry converges the
+        # row, the monthly-fee rater keeps billing a number that is gone at
+        # Twilio. Loud on purpose.
+        logger.error(
+            "number %s released at carrier but the DB commit failed; "
+            "retry the release to stop billing",
+            number.id,
+        )
+        raise
     return number
 
 
@@ -271,6 +282,14 @@ async def enable_sms(
 ) -> PhoneNumberResponse:
     number = await _get_org_number_or_404(db, number_id, principal.organization_id)
 
+    # A released row is a tombstone: its PN is deleted at Twilio, so
+    # attach_number would 404 into an opaque 500.
+    if number.provisioning_state == "released":
+        raise unprocessable(
+            "this number has been released; acquire a new number instead",
+            loc=["path", "number_id"],
+        )
+
     if "sms" not in number.capabilities:
         raise unprocessable(
             "this number does not support sms (fixed at purchase time by the "
@@ -295,8 +314,14 @@ async def enable_sms(
         {"key": str(principal.organization_id)},
     )
     # Re-read under the lock: a concurrent enable of THIS number may have just
-    # attached it (its SID was NULL when the row was first loaded).
-    await db.refresh(number, ["messaging_service_sid"])
+    # attached it (its SID was NULL when the row was first loaded), and a
+    # concurrent release may have tombstoned it (its PN is gone at Twilio).
+    await db.refresh(number, ["messaging_service_sid", "provisioning_state"])
+    if number.provisioning_state == "released":
+        raise unprocessable(
+            "this number has been released; acquire a new number instead",
+            loc=["path", "number_id"],
+        )
     if number.messaging_service_sid is not None:
         return PhoneNumberResponse.model_validate(number)
 
