@@ -35,13 +35,34 @@ Full setup guides: [Twilio](docs/public/setup/twilio.md) · [LiveKit Cloud](docs
 **CLI** ([GitHub Releases](https://github.com/hail-hq/hail/releases)):
 
 ```bash
+hail login                        # authenticate (device flow)
+hail auth logout                  # remove local credentials
+hail auth token                   # print bare API key for scripting
+
 hail call +14155550100 --prompt "be brief"
+hail call list
 hail call status <id>             # one call's state
-hail call tail <id>               # follow events live
+hail call tail <id>               # follow events for one call
 
 hail sms +15551234567 --body "Hello!" --recipient-consent
+hail sms list
+hail sms status <id>
+hail sms suppressions list        # opt-out list
+hail sms sender-id get            # custom sender ID
+
+hail numbers acquire              # dedicated phone number (voice + SMS)
+hail numbers list
+hail contacts list                # org contact directory
+
 hail email send --to a@b.com --subject hi --body "hello"
-hail email domain register --kind custom --domain acme.com   # send + receive on your own domain
+hail email list
+hail email get <id>
+hail email tail <id>              # follow events for one email
+hail email raw <id>               # RFC 5322 source
+hail email attachment <id> <att-id> --output file.pdf
+hail email domain register --kind hail_mail
+hail email domain register --kind custom --domain acme.com  # send + receive on your own domain
+hail email domain list
 
 printf '%s' "$YOUR_API_KEY" | hail providers set llm \
   --provider openai-compatible \
@@ -49,9 +70,12 @@ printf '%s' "$YOUR_API_KEY" | hail providers set llm \
   --key -                         # standing BYO brain (also: tts, stt)
 
 hail tail                         # cross-channel event stream
-```
+hail tail call:<id>               # narrow by resource type
 
-Run `hail --help` for the full surface: numbers, contacts, suppressions, email stats/events/attachments, provider test/activate, shell completion.
+hail mcp endpoint                 # Streamable HTTP URL for the MCP server
+hail completion zsh               # source <(hail completion zsh)
+hail version
+```
 
 **Python** (`pip install hail-sdk`):
 
