@@ -52,6 +52,26 @@ async def test_acquire_number_requires_auth(client) -> None:
     assert resp.status_code == 401
 
 
+async def test_acquire_number_402_zero_balance(
+    client, async_session, voice_provider_mock
+) -> None:
+    """A zero-balance org must not purchase a number: 402 before the carrier
+    is ever reached — same gate as POST /calls, /sms, /emails."""
+    from .conftest import insert_org_and_key
+
+    _, _, plaintext = await insert_org_and_key(
+        async_session, org_slug="broke-numbers", initial_credit_cents=0
+    )
+    resp = await client.post(
+        "/numbers",
+        json={"country_code": "US", "number_type": "local"},
+        headers={"Authorization": f"Bearer {plaintext}"},
+    )
+    assert resp.status_code == 402, resp.text
+    assert "credits" in resp.json()["detail"].lower()
+    voice_provider_mock.acquire_number.assert_not_awaited()
+
+
 async def test_acquire_number_happy_path(
     client, org_and_key, voice_provider_mock
 ) -> None:

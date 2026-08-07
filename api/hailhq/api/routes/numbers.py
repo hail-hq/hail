@@ -18,6 +18,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from fastapi import status as http_status
 from hailhq.api.deps import Principal, get_current_principal
 from hailhq.api.errors import unprocessable
+from hailhq.api.funds import require_funds
 from hailhq.api.idempotency import (
     IdempotencyContext,
     cache_failure,
@@ -95,6 +96,11 @@ async def acquire_number(
     if idem is not None and idem.is_replay:
         _cached_id, cached = replay_cached(idem, response, resource_prefix="/numbers")
         return PhoneNumberResponse.model_validate(cached)
+
+    # Acquiring buys a real number at the carrier and starts a monthly fee —
+    # same balance gate as the other paid create routes (/calls, /sms,
+    # /emails). Must run before the carrier purchase below.
+    await require_funds(db, principal, idem)
 
     caps = telephony_catalog.capabilities(body.country_code, body.number_type)
     if caps is None:
