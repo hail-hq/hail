@@ -86,6 +86,16 @@ class STTParams(BaseModel):
 
     provider: Literal["deepgram", "speechmatics"]
     model: str | None = None
+    # Speechmatics transcription tier. None -> enhanced. Ignored on deepgram
+    # rows (accepted-but-unused would violate "no hidden behavior", so the
+    # validator below rejects it there).
+    operating_point: Literal["enhanced", "standard"] | None = None
+
+    @model_validator(mode="after")
+    def _operating_point_is_speechmatics_only(self) -> STTParams:
+        if self.provider != "speechmatics" and self.operating_point is not None:
+            raise ValueError("operating_point only applies to speechmatics")
+        return self
 
 
 PARAMS_BY_LAYER: dict[str, type[BaseModel]] = {

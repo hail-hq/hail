@@ -38,3 +38,13 @@ def test_openapi_schema_exposes_language_enum() -> None:
 
 def test_stt_params_accept_speechmatics() -> None:
     assert STTParams(provider="speechmatics").provider == "speechmatics"
+
+
+def test_stt_params_operating_point() -> None:
+    assert STTParams(provider="speechmatics").operating_point is None
+    assert (
+        STTParams(provider="speechmatics", operating_point="standard").operating_point
+        == "standard"
+    )
+    with pytest.raises(ValidationError):
+        STTParams(provider="speechmatics", operating_point="turbo")

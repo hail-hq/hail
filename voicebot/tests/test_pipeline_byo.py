@@ -181,6 +181,37 @@ def test_stt_org_speechmatics_key_used(captured_plugins) -> None:
     assert stt._api_key == "sm-org-key"
 
 
+def test_stt_org_speechmatics_operating_point_standard(captured_plugins) -> None:
+    from hailhq.voicebot.pipeline import ResolvedLayer, build_stt
+    from livekit.plugins import speechmatics as speechmatics_plugin
+
+    org = ResolvedLayer(
+        provider="speechmatics",
+        api_key="sm-org-key",
+        params={"operating_point": "standard"},
+        fallback_enabled=False,
+    )
+    stt = build_stt(org=org, language="sv", provider="speechmatics")
+    assert (
+        stt._stt_options.operating_point == speechmatics_plugin.OperatingPoint.STANDARD
+    )
+
+
+def test_stt_org_speechmatics_operating_point_defaults_enhanced(
+    captured_plugins,
+) -> None:
+    from hailhq.voicebot.pipeline import ResolvedLayer, build_stt
+    from livekit.plugins import speechmatics as speechmatics_plugin
+
+    org = ResolvedLayer(
+        provider="speechmatics", api_key="sm-org-key", params={}, fallback_enabled=False
+    )
+    stt = build_stt(org=org, language="sv", provider="speechmatics")
+    assert (
+        stt._stt_options.operating_point == speechmatics_plugin.OperatingPoint.ENHANCED
+    )
+
+
 def test_stt_org_row_ignored_when_pinned_to_other_provider(
     captured_plugins,
 ) -> None:

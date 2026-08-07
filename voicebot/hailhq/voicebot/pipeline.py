@@ -407,12 +407,15 @@ def build_stt(
 
     org_matches = org is not None and org.provider == provider
     if provider == "speechmatics":
+        # Must be the enum, not the string "enhanced"/"standard": the plugin
+        # stores it unconverted and its .model property does `op.value`,
+        # which raises AttributeError on a plain str at session start.
+        operating_point = speechmatics_plugin.OperatingPoint.ENHANCED
+        if org_matches and org.params.get("operating_point") == "standard":
+            operating_point = speechmatics_plugin.OperatingPoint.STANDARD
         kwargs: dict[str, Any] = {
             "language": language or "en",
-            # Must be the enum, not the string "enhanced": the plugin stores
-            # it unconverted and its .model property does `op.value`, which
-            # raises AttributeError on a plain str at session start.
-            "operating_point": speechmatics_plugin.OperatingPoint.ENHANCED,
+            "operating_point": operating_point,
         }
         if stt_drives_turns:
             kwargs["turn_detection_mode"] = (
