@@ -181,6 +181,37 @@ def test_stt_org_speechmatics_key_used(captured_plugins) -> None:
     assert stt._api_key == "sm-org-key"
 
 
+def test_stt_org_speechmatics_operating_point_standard(captured_plugins) -> None:
+    from hailhq.voicebot.pipeline import ResolvedLayer, build_stt
+    from livekit.plugins import speechmatics as speechmatics_plugin
+
+    org = ResolvedLayer(
+        provider="speechmatics",
+        api_key="sm-org-key",
+        params={"operating_point": "standard"},
+        fallback_enabled=False,
+    )
+    stt = build_stt(org=org, language="sv", provider="speechmatics")
+    assert (
+        stt._stt_options.operating_point == speechmatics_plugin.OperatingPoint.STANDARD
+    )
+
+
+def test_stt_org_speechmatics_operating_point_defaults_enhanced(
+    captured_plugins,
+) -> None:
+    from hailhq.voicebot.pipeline import ResolvedLayer, build_stt
+    from livekit.plugins import speechmatics as speechmatics_plugin
+
+    org = ResolvedLayer(
+        provider="speechmatics", api_key="sm-org-key", params={}, fallback_enabled=False
+    )
+    stt = build_stt(org=org, language="sv", provider="speechmatics")
+    assert (
+        stt._stt_options.operating_point == speechmatics_plugin.OperatingPoint.ENHANCED
+    )
+
+
 def test_stt_org_row_ignored_when_pinned_to_other_provider(
     captured_plugins,
 ) -> None:
@@ -196,6 +227,34 @@ def test_stt_org_row_ignored_when_pinned_to_other_provider(
     # Caller pinned deepgram; the speechmatics org row must not be used.
     stt = build_stt(org=org, language="sv", provider="deepgram")
     assert isinstance(stt, deepgram_plugin.STT)
+
+
+def test_build_tts_org_incapable_with_fallback_uses_house_only(
+    captured_plugins,
+) -> None:
+    """Org elevenlabs row can't speak 'th' (Cartesia-only); fallback_enabled
+    is consent to reroute — the BYO instance is skipped entirely and the
+    house chain (Cartesia only, for 'th') is returned."""
+    org = ResolvedLayer(
+        provider="elevenlabs", api_key="org-key", params={}, fallback_enabled=True
+    )
+    tts = build_tts(org, language="th")
+    assert "elevenlabs" not in captured_plugins
+    assert len(captured_plugins["cartesia"]) == 1
+    assert "api_key" not in captured_plugins["cartesia"][0].kwargs
+    assert tts is not None
+
+
+def test_build_tts_org_incapable_without_fallback_raises(captured_plugins) -> None:
+    """Same incapable org row, but fallback_enabled=False: no consent to
+    reroute, so this is a hard error naming the provider and language."""
+    org = ResolvedLayer(
+        provider="elevenlabs", api_key="org-key", params={}, fallback_enabled=False
+    )
+    with pytest.raises(ProviderKeyError, match="elevenlabs") as exc_info:
+        build_tts(org, language="th")
+    assert "th" in str(exc_info.value)
+    assert "elevenlabs" not in captured_plugins
 
 
 def test_fallback_enabled_wraps_house_after_byo(captured_plugins) -> None:

@@ -290,13 +290,69 @@ def test_session_auto_falls_back_to_deepgram_without_speechmatics_key(
     )
 
 
-def test_session_org_row_unsupported_by_language_degrades_to_deepgram(
+def test_session_org_speechmatics_row_no_key_without_fallback_raises(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An org speechmatics row with no stored key and no house key is a
+    key-absence failure, not a capability mismatch — but it must still
+    respect the consent flag: fallback_enabled=False means the org has NOT
+    consented to a silent deepgram reroute, so this must raise
+    ProviderKeyError (from build_stt's own fail-fast) rather than degrade."""
+    from hailhq.core.config import settings
+    from hailhq.voicebot.pipeline import ProviderKeyError, ResolvedLayer
+
+    monkeypatch.setattr(settings, "speechmatics_api_key", "")
+    org_cfgs = {
+        "stt": ResolvedLayer(
+            provider="speechmatics",
+            api_key=None,
+            params={},
+            fallback_enabled=False,
+        )
+    }
+    with pytest.raises(ProviderKeyError, match="speechmatics"):
+        _make_session("da", org_cfgs=org_cfgs)
+
+
+def test_session_org_speechmatics_row_no_key_with_fallback_degrades(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Same no-key org row, but fallback_enabled=True: consent to reroute,
+    so this degrades to deepgram + VAD turns with the existing warning."""
+    import logging
+
+    from hailhq.core.config import settings
+    from hailhq.voicebot.pipeline import ResolvedLayer
+    from livekit.plugins import deepgram as deepgram_plugin
+
+    monkeypatch.setattr(settings, "speechmatics_api_key", "")
+    org_cfgs = {
+        "stt": ResolvedLayer(
+            provider="speechmatics",
+            api_key=None,
+            params={},
+            fallback_enabled=True,
+        )
+    }
+    with caplog.at_level(logging.WARNING, logger="hailhq.voicebot"):
+        session = _make_session("da", org_cfgs=org_cfgs)
+    assert isinstance(session.stt, deepgram_plugin.STT)
+    assert session.turn_detection == "vad"
+    assert any(
+        "da" in record.message and "speechmatics" in record.message
+        for record in caplog.records
+    )
+
+
+def test_session_org_stt_incapable_with_fallback_degrades(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     """'gu' (Gujarati) has no Speechmatics coverage (``_NO_SPEECHMATICS``).
     An org's console BYO STT row can still name speechmatics generally
-    (it's not language-scoped), so ``build_session`` must degrade to
-    deepgram rather than construct an incompatible provider — and warn."""
+    (it's not language-scoped); with ``fallback_enabled=True`` (consent to
+    house-provider rerouting) ``build_session`` degrades to deepgram rather
+    than construct an incompatible provider — and warns."""
     import logging
 
     from hailhq.voicebot.pipeline import ResolvedLayer
@@ -307,7 +363,7 @@ def test_session_org_row_unsupported_by_language_degrades_to_deepgram(
             provider="speechmatics",
             api_key="org-sm-key",
             params={},
-            fallback_enabled=False,
+            fallback_enabled=True,
         )
     }
     with caplog.at_level(logging.WARNING, logger="hailhq.voicebot"):
@@ -317,6 +373,25 @@ def test_session_org_row_unsupported_by_language_degrades_to_deepgram(
         "gu" in record.message and "speechmatics" in record.message
         for record in caplog.records
     )
+
+
+def test_session_org_stt_incapable_without_fallback_raises() -> None:
+    """Same incapable org row as above, but ``fallback_enabled=False``: no
+    consent to reroute to deepgram, so this is a hard ``ProviderKeyError``
+    naming the provider and language, never a silent degrade."""
+    from hailhq.voicebot.pipeline import ProviderKeyError, ResolvedLayer
+
+    org_cfgs = {
+        "stt": ResolvedLayer(
+            provider="speechmatics",
+            api_key="org-sm-key",
+            params={},
+            fallback_enabled=False,
+        )
+    }
+    with pytest.raises(ProviderKeyError, match="speechmatics") as exc_info:
+        _make_session("gu", org_cfgs=org_cfgs)
+    assert "gu" in str(exc_info.value)
 
 
 def test_session_unknown_language_degrades_to_defaults(
@@ -396,3 +471,139 @@ def test_build_tts_only_elevenlabs_key_with_cartesia_only_language_raises(
 
     with pytest.raises(ProviderKeyError, match="cannot speak language"):
         build_tts(language="th")
+
+
+def test_startup_capability_warnings_both_keys_returns_empty_list(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Both TTS keys configured → no warnings."""
+    from hailhq.core.config import settings
+    from hailhq.voicebot.pipeline import startup_capability_warnings
+
+    monkeypatch.setattr(settings, "cartesia_api_key", "ct-key")
+    monkeypatch.setattr(settings, "eleven_api_key", "el-key")
+    monkeypatch.setattr(settings, "speechmatics_api_key", "sm-key")
+
+    warnings = startup_capability_warnings()
+    assert warnings == []
+
+
+def test_startup_capability_warnings_cartesia_empty_eleven_set_lists_cartesia_only_languages(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Cartesia empty + ElevenLabs set → message listing exactly the 7
+    Cartesia-only languages (those in _NO_ELEVENLABS)."""
+    import re
+
+    from hailhq.core.config import settings
+    from hailhq.voicebot.pipeline import startup_capability_warnings
+
+    monkeypatch.setattr(settings, "cartesia_api_key", "")
+    monkeypatch.setattr(settings, "eleven_api_key", "el-key")
+    monkeypatch.setattr(settings, "speechmatics_api_key", "sm-key")
+
+    warnings = startup_capability_warnings()
+    assert len(warnings) == 1
+    msg = warnings[0]
+
+    # Extract language codes from the comma-separated list
+    # Format: "...: bn, gu, he, ..." (codes after colon, comma-space separated)
+    match = re.search(r":\s*(.+)$", msg)
+    assert match, f"Could not extract language list from message: {msg}"
+    langs_str = match.group(1)
+    extracted_langs = {code.strip() for code in langs_str.split(", ")}
+
+    # Should list exactly the 7 Cartesia-only languages
+    expected_langs = {"bn", "gu", "he", "kn", "te", "th", "mr"}
+    assert (
+        extracted_langs == expected_langs
+    ), f"Expected {expected_langs}, got {extracted_langs}"
+    assert len(extracted_langs) == 7
+
+
+def test_startup_capability_warnings_cartesia_empty_eleven_empty_lists_all_tts_languages(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Cartesia empty + ElevenLabs empty → message listing all TTS-requiring
+    languages (all 39 supported languages)."""
+    import re
+
+    from hailhq.core.config import settings
+    from hailhq.core.languages import SUPPORTED_LANGUAGES
+    from hailhq.voicebot.pipeline import startup_capability_warnings
+
+    monkeypatch.setattr(settings, "cartesia_api_key", "")
+    monkeypatch.setattr(settings, "eleven_api_key", "")
+    monkeypatch.setattr(settings, "speechmatics_api_key", "sm-key")
+
+    warnings = startup_capability_warnings()
+    assert len(warnings) == 1
+    msg = warnings[0]
+
+    # Extract language codes from the comma-separated list
+    match = re.search(r":\s*(.+)$", msg)
+    assert match, f"Could not extract language list from message: {msg}"
+    langs_str = match.group(1)
+    extracted_langs = {code.strip() for code in langs_str.split(", ")}
+
+    # Should list all 39 supported languages
+    expected_langs = set(SUPPORTED_LANGUAGES.keys())
+    assert (
+        extracted_langs == expected_langs
+    ), f"Expected {expected_langs}, got {extracted_langs}"
+    assert len(extracted_langs) == 39
+
+
+def test_startup_capability_warnings_speechmatics_empty_lists_22_languages(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Speechmatics empty → message about 22 speechmatics-routed languages
+    falling back to Deepgram + VAD turn detection."""
+    import re
+
+    from hailhq.core.config import settings
+    from hailhq.core.languages import SUPPORTED_LANGUAGES, default_stt_for
+    from hailhq.voicebot.pipeline import startup_capability_warnings
+
+    monkeypatch.setattr(settings, "cartesia_api_key", "ct-key")
+    monkeypatch.setattr(settings, "eleven_api_key", "el-key")
+    monkeypatch.setattr(settings, "speechmatics_api_key", "")
+
+    warnings = startup_capability_warnings()
+    assert len(warnings) == 1
+    msg = warnings[0]
+
+    # Should mention Deepgram and VAD
+    assert "Deepgram" in msg
+    assert "VAD" in msg or "silence" in msg.lower()
+
+    # Extract language codes from the comma-separated list
+    match = re.search(r":\s*(.+)$", msg)
+    assert match, f"Could not extract language list from message: {msg}"
+    langs_str = match.group(1)
+    extracted_langs = {code.strip() for code in langs_str.split(", ")}
+
+    # Compute expected speechmatics-routed languages
+    expected_langs = {
+        code for code in SUPPORTED_LANGUAGES if default_stt_for(code) == "speechmatics"
+    }
+
+    assert (
+        extracted_langs == expected_langs
+    ), f"Expected {expected_langs}, got {extracted_langs}"
+    assert len(extracted_langs) == 22
+
+
+def test_startup_capability_warnings_both_keys_empty_returns_both_messages(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Both TTS and Speechmatics keys empty → two warnings."""
+    from hailhq.core.config import settings
+    from hailhq.voicebot.pipeline import startup_capability_warnings
+
+    monkeypatch.setattr(settings, "cartesia_api_key", "")
+    monkeypatch.setattr(settings, "eleven_api_key", "")
+    monkeypatch.setattr(settings, "speechmatics_api_key", "")
+
+    warnings = startup_capability_warnings()
+    assert len(warnings) == 2

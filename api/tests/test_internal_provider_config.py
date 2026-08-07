@@ -360,3 +360,69 @@ async def test_validate_inflight_bad_params_422(
         f"{BASE}/llm/validate", content=body, headers=_signed(body)
     )
     assert resp.status_code == 422
+
+
+async def test_put_speechmatics_operating_point_accepted(
+    client, internal_secret_set, provider_key_set  # noqa: F811
+) -> None:
+    body = (
+        b'{"provider":"speechmatics","api_key":"sk-sm-WXYZ",'
+        b'"params":{"operating_point":"standard"},"fallback_enabled":false}'
+    )
+    resp = await client.put(f"{BASE}/stt", content=body, headers=_signed(body))
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["params"] == {"operating_point": "standard"}
+
+    resp = await client.get(BASE, headers=_signed(b""))
+    providers = resp.json()["providers"]
+    assert providers == [
+        {
+            "layer": "stt",
+            "provider": "speechmatics",
+            "key_last4": "WXYZ",
+            "key_set_at": providers[0]["key_set_at"],
+            "params": {"operating_point": "standard"},
+            "fallback_enabled": False,
+            "is_active": True,
+        }
+    ]
+
+
+async def test_put_deepgram_operating_point_rejected_422(
+    client, internal_secret_set, provider_key_set  # noqa: F811
+) -> None:
+    body = (
+        b'{"provider":"deepgram","api_key":"sk-dg-AAAA",'
+        b'"params":{"operating_point":"standard"},"fallback_enabled":false}'
+    )
+    resp = await client.put(f"{BASE}/stt", content=body, headers=_signed(body))
+    assert resp.status_code == 422
+
+
+async def test_validate_inflight_speechmatics_operating_point(
+    client, internal_secret_set, provider_key_set, monkeypatch  # noqa: F811
+) -> None:
+    seen = {}
+
+    async def fake_validate(layer, provider, api_key, params, client=None):
+        seen.update(layer=layer, provider=provider, api_key=api_key, params=params)
+        return "valid", "checked"
+
+    monkeypatch.setattr(
+        "hailhq.api.routes.internal.provider_config.validate_provider_key",
+        fake_validate,
+    )
+    body = (
+        b'{"api_key":"sk-sm-inflight","provider":"speechmatics",'
+        b'"params":{"operating_point":"enhanced"}}'
+    )
+    resp = await client.post(
+        f"{BASE}/stt/validate", content=body, headers=_signed(body)
+    )
+    assert resp.json() == {"status": "valid", "message": "checked"}
+    assert seen == {
+        "layer": "stt",
+        "provider": "speechmatics",
+        "api_key": "sk-sm-inflight",
+        "params": {"operating_point": "enhanced"},
+    }

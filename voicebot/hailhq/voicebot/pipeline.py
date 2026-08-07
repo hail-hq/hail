@@ -68,6 +68,7 @@ from hailhq.core.config import settings
 from hailhq.core.db import session_scope
 from hailhq.core.languages import (
     SUPPORTED_LANGUAGES,
+    default_stt_for,
     resolve_stt_provider,
     tts_providers_for,
     turn_mode_for,
@@ -113,6 +114,7 @@ __all__ = [
     "build_tts",
     "decrypt_llm_metadata",
     "resolve_org_configs",
+    "startup_capability_warnings",
 ]
 
 
@@ -351,8 +353,32 @@ def build_tts(
     applied to every instance built here — BYO and house fallbacks alike —
     so a provider failover never silently switches the call's language back
     to English. ``None`` keeps each plugin's default (English).
+
+    ``fallback_enabled`` on the org row is consent to house-provider
+    rerouting: if the org's BYO provider can't speak ``language`` at all,
+    consent means skip the incapable BYO instance and build the house
+    chain only (this recurses into the ``org is None`` branch below, so it
+    shares that branch's single-instance/adapter shape and its
+    empty-chain ``ProviderKeyError``). Without consent it's a hard error —
+    the API gate (``routes/calls.py``) is meant to catch this before the
+    voicebot ever sees it; this is defense-in-depth for direct LiveKit
+    dispatches that bypass the API.
     """
     if org is not None:
+        if language is not None and org.provider not in tts_providers_for(language):
+            if not org.fallback_enabled:
+                raise ProviderKeyError(
+                    f"org tts provider '{org.provider}' does not support "
+                    f"language '{language}' and fallback is disabled"
+                )
+            logger.warning(
+                "org tts provider %r does not support language %r; "
+                "skipping the BYO instance and using the house chain only "
+                "(fallback consented)",
+                org.provider,
+                language,
+            )
+            return build_tts(None, voice_id_override, language)
         byo = _org_tts(org, voice_id_override, language)
         if org.fallback_enabled:
             house = _house_tts(voice_id_override, language)
@@ -407,12 +433,15 @@ def build_stt(
 
     org_matches = org is not None and org.provider == provider
     if provider == "speechmatics":
+        # Must be the enum, not the string "enhanced"/"standard": the plugin
+        # stores it unconverted and its .model property does `op.value`,
+        # which raises AttributeError on a plain str at session start.
+        operating_point = speechmatics_plugin.OperatingPoint.ENHANCED
+        if org_matches and org.params.get("operating_point") == "standard":
+            operating_point = speechmatics_plugin.OperatingPoint.STANDARD
         kwargs: dict[str, Any] = {
             "language": language or "en",
-            # Must be the enum, not the string "enhanced": the plugin stores
-            # it unconverted and its .model property does `op.value`, which
-            # raises AttributeError on a plain str at session start.
-            "operating_point": speechmatics_plugin.OperatingPoint.ENHANCED,
+            "operating_point": operating_point,
         }
         if stt_drives_turns:
             kwargs["turn_detection_mode"] = (
@@ -449,6 +478,55 @@ def build_stt(
             )
         return byo
     return deepgram_plugin.STT(**house_kwargs)
+
+
+def startup_capability_warnings() -> list[str]:
+    """Voicebot startup capability warnings based on configured provider keys.
+
+    Checks for missing TTS and STT provider keys and returns warning messages
+    for languages that will have degraded capability as a result.
+
+    Returns:
+        List of warning messages. Empty when all keys are configured.
+    """
+    warnings: list[str] = []
+
+    # Check for unservable TTS languages when cartesia is not configured
+    if not settings.cartesia_api_key:
+        # Determine which TTS providers are available
+        available_tts_providers = set()
+        if settings.eleven_api_key:
+            available_tts_providers.add("elevenlabs")
+
+        # Find languages that have no available TTS provider
+        unservable_langs = []
+        for code in sorted(SUPPORTED_LANGUAGES.keys()):
+            lang_tts_providers = SUPPORTED_LANGUAGES[code].tts
+            if not (lang_tts_providers & available_tts_providers):
+                unservable_langs.append(code)
+
+        if unservable_langs:
+            warnings.append(
+                f"No Cartesia key configured; the following languages have no "
+                f"usable TTS provider: {', '.join(unservable_langs)}"
+            )
+
+    # Check for speechmatics-routed languages when speechmatics is not configured
+    if not settings.speechmatics_api_key:
+        # Identify languages that route to speechmatics by default
+        speechmatics_routed = []
+        for code in sorted(SUPPORTED_LANGUAGES.keys()):
+            if default_stt_for(code) == "speechmatics":
+                speechmatics_routed.append(code)
+
+        if speechmatics_routed:
+            warnings.append(
+                f"No Speechmatics key configured; the following languages will "
+                f"fall back to Deepgram with VAD turn detection: "
+                f"{', '.join(speechmatics_routed)}"
+            )
+
+    return warnings
 
 
 def build_session(
@@ -493,8 +571,18 @@ def build_session(
     provider = resolve_stt_provider(org_stt.provider if org_stt else None, language)
     if language is not None and provider not in SUPPORTED_LANGUAGES[language].stt:
         # An org BYO STT row can name a provider that doesn't cover this
-        # language; deepgram covers every supported language, so degrade
-        # rather than fail the call.
+        # language. ``fallback_enabled`` on that row is consent to
+        # house-provider rerouting: with consent, degrade to deepgram
+        # (which covers every supported language); without it, this is a
+        # hard error naming the provider and language — the API gate
+        # (routes/calls.py) is meant to catch this before the voicebot ever
+        # sees it, so this is defense-in-depth for direct LiveKit dispatches
+        # that bypass the API.
+        if org_stt is not None and not org_stt.fallback_enabled:
+            raise ProviderKeyError(
+                f"org stt provider '{provider}' does not support language "
+                f"'{language}' and fallback is disabled"
+            )
         logger.warning(
             "language %r resolved to stt provider %r, which does not "
             "support it; dropping %r and falling back to deepgram (turn "
@@ -508,7 +596,16 @@ def build_session(
         provider == "speechmatics"
         and not settings.speechmatics_api_key
         and not (org_stt and org_stt.provider == "speechmatics" and org_stt.api_key)
+        and (org_stt is None or org_stt.fallback_enabled)
     ):
+        # No speechmatics key anywhere (house or org BYO). With no org row,
+        # or an org row that consented via fallback_enabled, degrade to
+        # deepgram + VAD turn detection (tenet 4: a deepgram-only self-host
+        # keeps working). An org row with fallback_enabled=False has NOT
+        # consented to this reroute — leave provider="speechmatics" so this
+        # falls through to build_stt(), which raises ProviderKeyError
+        # ("no org or house speechmatics key available") instead of
+        # silently substituting deepgram.
         logger.warning(
             "auto-routing picked speechmatics for language %r but no "
             "SPEECHMATICS_API_KEY is configured (house or org BYO); "
