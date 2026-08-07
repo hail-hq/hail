@@ -351,8 +351,32 @@ def build_tts(
     applied to every instance built here — BYO and house fallbacks alike —
     so a provider failover never silently switches the call's language back
     to English. ``None`` keeps each plugin's default (English).
+
+    ``fallback_enabled`` on the org row is consent to house-provider
+    rerouting: if the org's BYO provider can't speak ``language`` at all,
+    consent means skip the incapable BYO instance and build the house
+    chain only (this recurses into the ``org is None`` branch below, so it
+    shares that branch's single-instance/adapter shape and its
+    empty-chain ``ProviderKeyError``). Without consent it's a hard error —
+    the API gate (``routes/calls.py``) is meant to catch this before the
+    voicebot ever sees it; this is defense-in-depth for direct LiveKit
+    dispatches that bypass the API.
     """
     if org is not None:
+        if language is not None and org.provider not in tts_providers_for(language):
+            if not org.fallback_enabled:
+                raise ProviderKeyError(
+                    f"org tts provider '{org.provider}' does not support "
+                    f"language '{language}' and fallback is disabled"
+                )
+            logger.warning(
+                "org tts provider %r does not support language %r; "
+                "skipping the BYO instance and using the house chain only "
+                "(fallback consented)",
+                org.provider,
+                language,
+            )
+            return build_tts(None, voice_id_override, language)
         byo = _org_tts(org, voice_id_override, language)
         if org.fallback_enabled:
             house = _house_tts(voice_id_override, language)
@@ -496,8 +520,18 @@ def build_session(
     provider = resolve_stt_provider(org_stt.provider if org_stt else None, language)
     if language is not None and provider not in SUPPORTED_LANGUAGES[language].stt:
         # An org BYO STT row can name a provider that doesn't cover this
-        # language; deepgram covers every supported language, so degrade
-        # rather than fail the call.
+        # language. ``fallback_enabled`` on that row is consent to
+        # house-provider rerouting: with consent, degrade to deepgram
+        # (which covers every supported language); without it, this is a
+        # hard error naming the provider and language — the API gate
+        # (routes/calls.py) is meant to catch this before the voicebot ever
+        # sees it, so this is defense-in-depth for direct LiveKit dispatches
+        # that bypass the API.
+        if org_stt is not None and not org_stt.fallback_enabled:
+            raise ProviderKeyError(
+                f"org stt provider '{provider}' does not support language "
+                f"'{language}' and fallback is disabled"
+            )
         logger.warning(
             "language %r resolved to stt provider %r, which does not "
             "support it; dropping %r and falling back to deepgram (turn "

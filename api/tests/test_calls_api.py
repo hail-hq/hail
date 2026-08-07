@@ -1295,6 +1295,7 @@ async def test_byo_elevenlabs_tts_with_cartesia_only_language_422(
             layer="tts",
             provider="elevenlabs",
             params={},
+            fallback_enabled=False,
             is_active=True,
         )
     )
@@ -1313,3 +1314,108 @@ async def test_byo_elevenlabs_tts_with_cartesia_only_language_422(
     assert resp.status_code == 422, resp.text
     assert "elevenlabs" in resp.text
     livekit_mock.dispatch_agent.assert_not_awaited()
+
+
+async def test_byo_stt_incapable_language_without_fallback_422(
+    client: httpx.AsyncClient,
+    async_session: AsyncSession,
+    org_and_key: tuple[str, ApiKey, str],
+    livekit_mock: AsyncMock,
+    add_phone_number,
+) -> None:
+    org_id, _, plain = org_and_key
+    await add_phone_number(async_session, org_id)
+    async_session.add(
+        OrgProviderConfig(
+            organization_id=org_id,
+            layer="stt",
+            provider="speechmatics",
+            params={},
+            fallback_enabled=False,
+            is_active=True,
+        )
+    )
+    await async_session.commit()
+
+    resp = await client.post(
+        "/calls",
+        json={
+            "to": "+14155559999",
+            "system_prompt": "hi",
+            "recipient_consent": True,
+            "voice_config": {"language": "gu"},  # no speechmatics coverage
+        },
+        headers={"Authorization": f"Bearer {plain}"},
+    )
+    assert resp.status_code == 422, resp.text
+    assert "speechmatics" in resp.text
+    assert "gu" in resp.text
+    livekit_mock.dispatch_agent.assert_not_awaited()
+
+
+async def test_byo_stt_incapable_language_with_fallback_201(
+    client: httpx.AsyncClient,
+    async_session: AsyncSession,
+    org_and_key: tuple[str, ApiKey, str],
+    livekit_mock: AsyncMock,
+    add_phone_number,
+) -> None:
+    org_id, _, plain = org_and_key
+    await add_phone_number(async_session, org_id)
+    async_session.add(
+        OrgProviderConfig(
+            organization_id=org_id,
+            layer="stt",
+            provider="speechmatics",
+            params={},
+            fallback_enabled=True,
+            is_active=True,
+        )
+    )
+    await async_session.commit()
+
+    resp = await client.post(
+        "/calls",
+        json={
+            "to": "+14155559999",
+            "system_prompt": "hi",
+            "recipient_consent": True,
+            "voice_config": {"language": "gu"},  # no speechmatics coverage
+        },
+        headers={"Authorization": f"Bearer {plain}"},
+    )
+    assert resp.status_code == 201, resp.text
+
+
+async def test_byo_tts_incapable_language_with_fallback_201(
+    client: httpx.AsyncClient,
+    async_session: AsyncSession,
+    org_and_key: tuple[str, ApiKey, str],
+    livekit_mock: AsyncMock,
+    add_phone_number,
+) -> None:
+    org_id, _, plain = org_and_key
+    await add_phone_number(async_session, org_id)
+    async_session.add(
+        OrgProviderConfig(
+            organization_id=org_id,
+            layer="tts",
+            provider="elevenlabs",
+            params={},
+            fallback_enabled=True,
+            is_active=True,
+        )
+    )
+    await async_session.commit()
+
+    resp = await client.post(
+        "/calls",
+        json={
+            "to": "+14155559999",
+            "system_prompt": "hi",
+            "recipient_consent": True,
+            "voice_config": {"language": "th"},  # cartesia-only language
+        },
+        headers={"Authorization": f"Bearer {plain}"},
+    )
+    assert resp.status_code == 201, resp.text

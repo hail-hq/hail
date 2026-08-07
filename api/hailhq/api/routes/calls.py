@@ -230,14 +230,36 @@ async def create_call(
     )
     if lang is not None:
         caps = SUPPORTED_LANGUAGES[lang]
-        # Asymmetric by design: the STT side never 422s here — STT provider
-        # selection is console-BYO-only (no per-call knob), and routing
-        # (org BYO row > language auto-route) degrades safely inside the
-        # voicebot (deepgram covers every supported language). TTS has no
-        # per-call pin either; the org's BYO TTS row is the sole source of
-        # truth, so it's checked here regardless of voice_config contents.
+        # Both layers share one consent rule: an org BYO row (STT or TTS)
+        # that can't serve the requested language 422s here UNLESS the org
+        # set fallback_enabled — that flag is consent to house-provider
+        # rerouting, so a consenting org sails through and the mismatch is
+        # handled downstream in the voicebot (STT degrades to house
+        # deepgram; TTS skips the incapable BYO instance for the house
+        # chain). Neither layer has a per-call provider override — the
+        # org's BYO row (or its absence) is the sole source of truth, so
+        # this is checked here regardless of voice_config contents.
+        stt_row = org_rows.get("stt")
+        if (
+            stt_row is not None
+            and stt_row.provider not in caps.stt
+            and not stt_row.fallback_enabled
+        ):
+            raise await cache_failure(
+                idem,
+                unprocessable(
+                    f"your BYO stt provider '{stt_row.provider}' does not "
+                    f"support language '{lang}'; supported providers: "
+                    f"{sorted(caps.stt)}",
+                    loc=["body", "voice_config", "language"],
+                ),
+            )
         tts_row = org_rows.get("tts")
-        if tts_row is not None and tts_row.provider not in caps.tts:
+        if (
+            tts_row is not None
+            and tts_row.provider not in caps.tts
+            and not tts_row.fallback_enabled
+        ):
             raise await cache_failure(
                 idem,
                 unprocessable(

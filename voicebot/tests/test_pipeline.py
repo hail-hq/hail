@@ -290,13 +290,14 @@ def test_session_auto_falls_back_to_deepgram_without_speechmatics_key(
     )
 
 
-def test_session_org_row_unsupported_by_language_degrades_to_deepgram(
+def test_session_org_stt_incapable_with_fallback_degrades(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     """'gu' (Gujarati) has no Speechmatics coverage (``_NO_SPEECHMATICS``).
     An org's console BYO STT row can still name speechmatics generally
-    (it's not language-scoped), so ``build_session`` must degrade to
-    deepgram rather than construct an incompatible provider — and warn."""
+    (it's not language-scoped); with ``fallback_enabled=True`` (consent to
+    house-provider rerouting) ``build_session`` degrades to deepgram rather
+    than construct an incompatible provider — and warns."""
     import logging
 
     from hailhq.voicebot.pipeline import ResolvedLayer
@@ -307,7 +308,7 @@ def test_session_org_row_unsupported_by_language_degrades_to_deepgram(
             provider="speechmatics",
             api_key="org-sm-key",
             params={},
-            fallback_enabled=False,
+            fallback_enabled=True,
         )
     }
     with caplog.at_level(logging.WARNING, logger="hailhq.voicebot"):
@@ -317,6 +318,25 @@ def test_session_org_row_unsupported_by_language_degrades_to_deepgram(
         "gu" in record.message and "speechmatics" in record.message
         for record in caplog.records
     )
+
+
+def test_session_org_stt_incapable_without_fallback_raises() -> None:
+    """Same incapable org row as above, but ``fallback_enabled=False``: no
+    consent to reroute to deepgram, so this is a hard ``ProviderKeyError``
+    naming the provider and language, never a silent degrade."""
+    from hailhq.voicebot.pipeline import ProviderKeyError, ResolvedLayer
+
+    org_cfgs = {
+        "stt": ResolvedLayer(
+            provider="speechmatics",
+            api_key="org-sm-key",
+            params={},
+            fallback_enabled=False,
+        )
+    }
+    with pytest.raises(ProviderKeyError, match="speechmatics") as exc_info:
+        _make_session("gu", org_cfgs=org_cfgs)
+    assert "gu" in str(exc_info.value)
 
 
 def test_session_unknown_language_degrades_to_defaults(

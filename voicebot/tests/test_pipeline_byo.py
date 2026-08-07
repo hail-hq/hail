@@ -229,6 +229,34 @@ def test_stt_org_row_ignored_when_pinned_to_other_provider(
     assert isinstance(stt, deepgram_plugin.STT)
 
 
+def test_build_tts_org_incapable_with_fallback_uses_house_only(
+    captured_plugins,
+) -> None:
+    """Org elevenlabs row can't speak 'th' (Cartesia-only); fallback_enabled
+    is consent to reroute — the BYO instance is skipped entirely and the
+    house chain (Cartesia only, for 'th') is returned."""
+    org = ResolvedLayer(
+        provider="elevenlabs", api_key="org-key", params={}, fallback_enabled=True
+    )
+    tts = build_tts(org, language="th")
+    assert "elevenlabs" not in captured_plugins
+    assert len(captured_plugins["cartesia"]) == 1
+    assert "api_key" not in captured_plugins["cartesia"][0].kwargs
+    assert tts is not None
+
+
+def test_build_tts_org_incapable_without_fallback_raises(captured_plugins) -> None:
+    """Same incapable org row, but fallback_enabled=False: no consent to
+    reroute, so this is a hard error naming the provider and language."""
+    org = ResolvedLayer(
+        provider="elevenlabs", api_key="org-key", params={}, fallback_enabled=False
+    )
+    with pytest.raises(ProviderKeyError, match="elevenlabs") as exc_info:
+        build_tts(org, language="th")
+    assert "th" in str(exc_info.value)
+    assert "elevenlabs" not in captured_plugins
+
+
 def test_fallback_enabled_wraps_house_after_byo(captured_plugins) -> None:
     org = ResolvedLayer(
         provider="cartesia", api_key="org-key", params={}, fallback_enabled=True
