@@ -114,9 +114,16 @@ class TwilioVoiceProvider(VoiceProvider):
         )
 
     async def release_number(self, provider_resource_id: str) -> None:
-        await asyncio.to_thread(
-            self._client.incoming_phone_numbers(provider_resource_id).delete
-        )
+        try:
+            await asyncio.to_thread(
+                self._client.incoming_phone_numbers(provider_resource_id).delete
+            )
+        except TwilioRestException as exc:
+            # Already gone at the carrier (released out of band, or a retry of
+            # a half-completed release): the desired end state holds.
+            if exc.status == 404:
+                return
+            raise
 
     async def get_call_status(self, provider_call_sid: str) -> ProviderCallStatus:
         call = await asyncio.to_thread(self._client.calls(provider_call_sid).fetch)

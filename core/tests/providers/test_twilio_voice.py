@@ -276,6 +276,39 @@ async def test_release_number(provider: TwilioVoiceProvider) -> None:
 
 
 @responses.activate
+async def test_release_number_tolerates_carrier_404(
+    provider: TwilioVoiceProvider,
+) -> None:
+    """A number already gone at Twilio (out-of-band release, or a retry of a
+    half-completed release) is treated as released — no raise."""
+    responses.add(
+        responses.DELETE,
+        f"{API_BASE}/IncomingPhoneNumbers/PN9999999999999999999999999999.json",
+        json={"code": 20404, "message": "not found", "status": 404},
+        status=404,
+    )
+
+    await provider.release_number("PN9999999999999999999999999999")
+
+    assert len(responses.calls) == 1
+
+
+@responses.activate
+async def test_release_number_raises_on_other_errors(
+    provider: TwilioVoiceProvider,
+) -> None:
+    responses.add(
+        responses.DELETE,
+        f"{API_BASE}/IncomingPhoneNumbers/PN9999999999999999999999999999.json",
+        json={"code": 20003, "message": "auth error", "status": 401},
+        status=401,
+    )
+
+    with pytest.raises(TwilioRestException):
+        await provider.release_number("PN9999999999999999999999999999")
+
+
+@responses.activate
 async def test_get_call_status(provider: TwilioVoiceProvider) -> None:
     responses.add(
         responses.GET,

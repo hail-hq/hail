@@ -11,6 +11,7 @@ stays with the rest of the `/numbers` router rather than splitting onto
 from __future__ import annotations
 
 import logging
+from datetime import datetime, timezone
 from typing import Annotated
 from uuid import UUID
 
@@ -192,6 +193,39 @@ async def acquire_number(
     return number_response
 
 
+async def release_org_number(
+    db: AsyncSession, provider: VoiceProvider, number: PhoneNumber
+) -> PhoneNumber:
+    """Release a dedicated number at the carrier and mark the row released.
+
+    Idempotent: an already-released row is returned unchanged, and the
+    provider tolerates a number that is already gone at the carrier.
+    Shared by DELETE /numbers/{id} and the internal dunning release
+    (routes/internal/numbers.py) so both paths stay identical.
+    """
+    if number.provisioning_state == "released":
+        return number
+    await provider.release_number(number.provider_resource_id)
+    number.provisioning_state = "released"
+    number.released_at = datetime.now(timezone.utc)
+    await db.commit()
+    return number
+
+
+@router.delete("/{number_id}", status_code=http_status.HTTP_204_NO_CONTENT)
+async def release_number(
+    number_id: UUID,
+    principal: Annotated[Principal, Depends(get_current_principal)],
+    db: Annotated[AsyncSession, Depends(get_session)],
+    provider: Annotated[VoiceProvider, Depends(get_voice_provider)],
+) -> None:
+    """Release a dedicated number. The monthly fee stops accruing after the
+    release month; months already accrued stay owed (the rater bills late,
+    never forgives)."""
+    number = await _get_org_number_or_404(db, number_id, principal.organization_id)
+    await release_org_number(db, provider, number)
+
+
 @router.get("/{number_id}", response_model=PhoneNumberResponse)
 async def get_number(
     number_id: UUID,
@@ -299,4 +333,4 @@ async def enable_sms(
     return PhoneNumberResponse.model_validate(number)
 
 
-__all__ = ["get_voice_provider", "router"]
+__all__ = ["get_voice_provider", "release_org_number", "router"]

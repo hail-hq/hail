@@ -328,6 +328,32 @@ class OrgClosure(Base):
     )
 
 
+class NumberDunning(Base):
+    """Per-org dunning state for the unfunded-numbers sweep.
+
+    A row exists while an org holds active dedicated numbers on a zero or
+    negative balance and has been warned by email that they will be
+    released. ``release_after`` is fixed at warn time (warned_at + grace)
+    so a later change to the grace setting never retroactively shortens an
+    already-announced deadline. The website's dunning job
+    (app/api/internal/billing/dunning in hail-website) owns the lifecycle:
+    it inserts on first detection, releases the org's numbers via
+    ``POST /internal/numbers/release`` once ``release_after`` passes, and
+    deletes the row when the org tops up or the numbers are gone.
+    """
+
+    __tablename__ = "number_dunning"
+
+    organization_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True
+    )
+    warned_at: Mapped[datetime] = mapped_column(TS, nullable=False)
+    release_after: Mapped[datetime] = mapped_column(TS, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        TS, server_default=text("now()"), nullable=False
+    )
+
+
 class ApiKey(Base):
     """Read-only mirror of the auth backend's ``api_keys`` table.
 
