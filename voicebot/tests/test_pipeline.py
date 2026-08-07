@@ -290,6 +290,61 @@ def test_session_auto_falls_back_to_deepgram_without_speechmatics_key(
     )
 
 
+def test_session_org_speechmatics_row_no_key_without_fallback_raises(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An org speechmatics row with no stored key and no house key is a
+    key-absence failure, not a capability mismatch — but it must still
+    respect the consent flag: fallback_enabled=False means the org has NOT
+    consented to a silent deepgram reroute, so this must raise
+    ProviderKeyError (from build_stt's own fail-fast) rather than degrade."""
+    from hailhq.core.config import settings
+    from hailhq.voicebot.pipeline import ProviderKeyError, ResolvedLayer
+
+    monkeypatch.setattr(settings, "speechmatics_api_key", "")
+    org_cfgs = {
+        "stt": ResolvedLayer(
+            provider="speechmatics",
+            api_key=None,
+            params={},
+            fallback_enabled=False,
+        )
+    }
+    with pytest.raises(ProviderKeyError, match="speechmatics"):
+        _make_session("da", org_cfgs=org_cfgs)
+
+
+def test_session_org_speechmatics_row_no_key_with_fallback_degrades(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Same no-key org row, but fallback_enabled=True: consent to reroute,
+    so this degrades to deepgram + VAD turns with the existing warning."""
+    import logging
+
+    from hailhq.core.config import settings
+    from hailhq.voicebot.pipeline import ResolvedLayer
+    from livekit.plugins import deepgram as deepgram_plugin
+
+    monkeypatch.setattr(settings, "speechmatics_api_key", "")
+    org_cfgs = {
+        "stt": ResolvedLayer(
+            provider="speechmatics",
+            api_key=None,
+            params={},
+            fallback_enabled=True,
+        )
+    }
+    with caplog.at_level(logging.WARNING, logger="hailhq.voicebot"):
+        session = _make_session("da", org_cfgs=org_cfgs)
+    assert isinstance(session.stt, deepgram_plugin.STT)
+    assert session.turn_detection == "vad"
+    assert any(
+        "da" in record.message and "speechmatics" in record.message
+        for record in caplog.records
+    )
+
+
 def test_session_org_stt_incapable_with_fallback_degrades(
     caplog: pytest.LogCaptureFixture,
 ) -> None:

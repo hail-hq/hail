@@ -545,7 +545,16 @@ def build_session(
         provider == "speechmatics"
         and not settings.speechmatics_api_key
         and not (org_stt and org_stt.provider == "speechmatics" and org_stt.api_key)
+        and (org_stt is None or org_stt.fallback_enabled)
     ):
+        # No speechmatics key anywhere (house or org BYO). With no org row,
+        # or an org row that consented via fallback_enabled, degrade to
+        # deepgram + VAD turn detection (tenet 4: a deepgram-only self-host
+        # keeps working). An org row with fallback_enabled=False has NOT
+        # consented to this reroute — leave provider="speechmatics" so this
+        # falls through to build_stt(), which raises ProviderKeyError
+        # ("no org or house speechmatics key available") instead of
+        # silently substituting deepgram.
         logger.warning(
             "auto-routing picked speechmatics for language %r but no "
             "SPEECHMATICS_API_KEY is configured (house or org BYO); "
