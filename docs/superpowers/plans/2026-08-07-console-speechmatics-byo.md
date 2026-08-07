@@ -234,3 +234,71 @@ git add app/console/calls/providers/ && git commit -m "feat(console): speechmati
 ### Final: whole-branch reviews
 
 One review per repo diff (hail: `main..feat/stt-operating-point`; website worktree: `master..feat/console-speechmatics-stt`), then hand both branches to the user for push/PR (never push or create PRs).
+
+---
+
+## Part C — owner rulings on the four product calls (2026-08-07)
+
+Rulings: (1) = option c, (2) = option b, (3) = accept/no work, (4) = leave + startup warning.
+Unifying rule for C1: **`fallback_enabled` on a BYO row is consent to house-provider rerouting; without it, a capability mismatch is an error, never a silent reroute.**
+
+### Task C1: consent-gated STT/TTS rerouting
+
+**Files:**
+
+- Modify: `api/hailhq/api/routes/calls.py` (the language/provider gate)
+- Modify: `voicebot/hailhq/voicebot/pipeline.py` (`build_session` STT degrade branch; `build_tts` org branch)
+- Test: `api/tests/test_calls_api.py`, `voicebot/tests/test_pipeline.py`, `voicebot/tests/test_pipeline_byo.py`
+
+**Interfaces:**
+
+- Consumes: `SUPPORTED_LANGUAGES`, `tts_providers_for` (existing); `OrgProviderConfig.fallback_enabled` column (existing); `ResolvedLayer.fallback_enabled` (existing).
+- Produces: API — 422 when an org BYO row (STT or TTS) cannot serve the requested language AND `fallback_enabled` is false; allowed when true. Voicebot — with consent, STT degrades to house Deepgram (as today) and TTS skips the incapable BYO instance (house chain only); without consent, `ProviderKeyError` (defense-in-depth behind the API gate).
+
+- [ ] **Step 1: Write the failing API tests** (mirror the existing gate tests' fixtures exactly; seed `OrgProviderConfig` the way `test_byo_elevenlabs_tts_with_cartesia_only_language_422` does):
+
+```python
+async def test_byo_stt_incapable_language_without_fallback_422(...):
+    # org row: layer="stt", provider="speechmatics", fallback_enabled=False
+    # POST language="gu" -> 422, message names speechmatics and gu
+async def test_byo_stt_incapable_language_with_fallback_201(...):
+    # same row but fallback_enabled=True -> 201
+async def test_byo_tts_incapable_language_with_fallback_201(...):
+    # org row: layer="tts", provider="elevenlabs", fallback_enabled=True
+    # POST language="th" -> 201 (was 422 before this task)
+```
+
+Keep the existing `fallback_enabled=False` TTS 422 test passing (seed must set the flag explicitly if the column default differs).
+
+- [ ] **Step 2: Write the failing voicebot tests**:
+
+```python
+def test_build_tts_org_incapable_with_fallback_uses_house_only(...):
+    # org elevenlabs row fallback_enabled=True, language="th" ->
+    # result contains ONLY cartesia instance(s), no elevenlabs
+def test_build_tts_org_incapable_without_fallback_raises(...):
+    # same but fallback_enabled=False -> ProviderKeyError
+def test_session_org_stt_incapable_without_fallback_raises(...):
+    # org speechmatics row fallback_enabled=False, language="gu" -> ProviderKeyError
+def test_session_org_stt_incapable_with_fallback_degrades(...):
+    # fallback_enabled=True -> deepgram STT, warning logged (existing behavior)
+```
+
+- [ ] **Step 3: Run all four files' new tests, verify failures**
+- [ ] **Step 4: Implement** — API gate: both checks become `row is not None and row.provider not in caps.<layer> and not row.fallback_enabled`. Voicebot `build_session`: in the degrade branch, when the incapable provider came from the org row and `not org_stt.fallback_enabled`, raise `ProviderKeyError` naming provider+language. Voicebot `build_tts`: before building the BYO instance, if `language is not None and org.provider not in tts_providers_for(language)`: with consent → log + return the house chain (reuse the existing house-instances path incl. its empty-chain ProviderKeyError); without → raise `ProviderKeyError`. Update the gate's asymmetry comment (both layers now share the consent rule).
+- [ ] **Step 5: Full api + voicebot suites green; lint; commit** (`feat: consent-gated rerouting for BYO stt/tts capability mismatches`).
+
+### Task C2: voicebot startup capability warning
+
+**Files:**
+
+- Modify: `voicebot/hailhq/voicebot/main.py` (log before `cli.run_app`), helper in `voicebot/hailhq/voicebot/pipeline.py`
+- Test: `voicebot/tests/test_pipeline.py`
+
+**Interfaces:**
+
+- Produces: `startup_capability_warnings() -> list[str]` in pipeline.py — pure function of `settings`: (a) when `cartesia_api_key` empty: one message listing the supported languages with no usable house TTS given configured keys; (b) when `speechmatics_api_key` empty: one message that the 22 speechmatics-routed languages fall back to Deepgram + VAD turn detection. `main()` logs each at WARNING.
+
+- [ ] **Step 1: failing tests** — monkeypatch settings combos (both keys set → `[]`; cartesia empty + eleven set → message lists exactly the 7 Cartesia-only codes; speechmatics empty → the 22-language message).
+- [ ] **Step 2: implement helper + wire into `main()`** (import cost: pipeline already imported transitively by agent; keep `main.py` lean — import the helper only).
+- [ ] **Step 3: voicebot suite green; lint; commit** (`feat(voicebot): startup warning for unservable languages`).
