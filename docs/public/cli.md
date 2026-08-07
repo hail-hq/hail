@@ -130,7 +130,9 @@ hail providers activate llm --provider anthropic
 hail providers delete llm anthropic
 ```
 
-`set` requires `--provider` and `--model`; `--base-url` is required by the `openai-compatible` LLM provider and rejected by the others; `--fallback` lets a failure of your provider fall through to Hail's own keys. Omit `--key` to edit the model or base URL without resending the key. `test` takes `--provider` to probe a saved-but-inactive provider instead of the active one. Aliases: `list`→`ls`, `delete`→`rm`.
+`set` requires only `--provider`. Params are per layer: `--model` (required by the `llm` layer, optional for `tts`/`stt`), `--base-url` (required by the `openai-compatible` LLM provider, rejected by the others), `--voice-id` (`tts` only). `--fallback` lets a failure of your provider fall through to Hail's own keys; `--fallback=false` turns it back off.
+
+`set` is a partial write — it changes only the flags you pass and preserves everything else on the row, so `hail providers set tts --provider cartesia --model sonic-3` keeps the saved `voice_id` and the saved fallback setting. Omitting `--key` likewise keeps the stored key. Config is per provider, so a different `--provider` for the same layer starts a fresh row instead of inheriting the previous one's params. `test` takes `--provider` to probe a saved-but-inactive provider instead of the active one. Aliases: `list`→`ls`, `delete`→`rm`.
 
 Keys are write-only: no command can print one back, only the last four characters and when it was set. The org comes from your API key — it is never an argument.
 

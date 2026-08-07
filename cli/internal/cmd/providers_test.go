@@ -3,6 +3,7 @@ package cmd
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"strings"
@@ -138,7 +139,12 @@ func TestProvidersSet_RequestBody(t *testing.T) {
 	}
 }
 
-func TestProvidersSet_OmitsKeyAndBaseURLWhenUnset(t *testing.T) {
+// The server merges the body over the saved row, so every field the user did
+// not type must be absent — a zero value in the body is an instruction to
+// store that zero. --fallback is the one that bites: cobra defaults it to
+// false, so sending it unconditionally would turn a caller's fallback off on
+// every unrelated `set`.
+func TestProvidersSet_OmitsUntypedFlags(t *testing.T) {
 	srv := newFakeServer(t, http.StatusOK, sampleProviderEntry())
 
 	_, _, err := runRoot(t,
@@ -150,20 +156,64 @@ func TestProvidersSet_OmitsKeyAndBaseURLWhenUnset(t *testing.T) {
 	}
 
 	body := decodeBody(t, srv.lastBody)
-	// No api_key at all means "keep the stored key" — sending null would be
-	// a different request.
-	if _, present := body["api_key"]; present {
-		t.Errorf("api_key must be omitted when --key is unset: %v", body)
-	}
-	if body["fallback_enabled"] != false {
-		t.Errorf("fallback_enabled = %v", body["fallback_enabled"])
+	for _, key := range []string{"api_key", "fallback_enabled"} {
+		if _, present := body[key]; present {
+			t.Errorf("%s must be omitted when its flag is unset: %v", key, body)
+		}
 	}
 	params := body["params"].(map[string]interface{})
-	if _, present := params["base_url"]; present {
-		t.Errorf("base_url must be omitted when unset: %v", params)
+	for _, key := range []string{"base_url", "voice_id"} {
+		if _, present := params[key]; present {
+			t.Errorf("%s must be omitted when its flag is unset: %v", key, params)
+		}
 	}
 	if params["model"] != "sonic-2" {
 		t.Errorf("params = %v", params)
+	}
+}
+
+func TestProvidersSet_VoiceIDFlag(t *testing.T) {
+	srv := newFakeServer(t, http.StatusOK, sampleProviderEntry())
+
+	_, _, err := runRoot(t,
+		map[string]string{"HAIL_API_KEY": "sk_test", "HAIL_API_URL": srv.URL},
+		"providers", "set", "tts",
+		"--provider", "cartesia", "--voice-id", "v-abc123",
+	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	params := decodeBody(t, srv.lastBody)["params"].(map[string]interface{})
+	if params["voice_id"] != "v-abc123" {
+		t.Errorf("voice_id = %v", params["voice_id"])
+	}
+	// --model is optional for tts/stt, so it must not be invented here.
+	if _, present := params["model"]; present {
+		t.Errorf("model must be omitted when unset: %v", params)
+	}
+}
+
+// --fallback=false is a real instruction (turn it off) and has to reach the
+// wire, unlike the omitted default asserted above.
+func TestProvidersSet_ExplicitFallbackFalseIsSent(t *testing.T) {
+	srv := newFakeServer(t, http.StatusOK, sampleProviderEntry())
+
+	_, _, err := runRoot(t,
+		map[string]string{"HAIL_API_KEY": "sk_test", "HAIL_API_URL": srv.URL},
+		"providers", "set", "stt", "--provider", "deepgram", "--fallback=false",
+	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	body := decodeBody(t, srv.lastBody)
+	if got, present := body["fallback_enabled"]; !present || got != false {
+		t.Errorf("fallback_enabled = %v (present=%t), want false", got, present)
+	}
+	// Nothing else was typed, so params must not be sent at all.
+	if _, present := body["params"]; present {
+		t.Errorf("params must be omitted when no param flag is set: %v", body)
 	}
 }
 
@@ -204,19 +254,40 @@ func TestProvidersSet_KeyFromEmptyStdinFails(t *testing.T) {
 	}
 }
 
-func TestProvidersSet_RequiresProviderAndModel(t *testing.T) {
+// --provider and <layer> are the only hard requirements. --model is NOT one:
+// TTSParams/STTParams make it optional, and requiring it would force a caller
+// updating only a voice_id to retype the model. Asserting errInvalidInputs
+// specifically matters — the unreachable API URL would make any assertion of
+// "some error" pass for the wrong reason.
+func TestProvidersSet_RequiresProviderAndLayer(t *testing.T) {
 	for _, args := range [][]string{
 		{"providers", "set", "llm", "--model", "m"},
-		{"providers", "set", "llm", "--provider", "anthropic"},
 		{"providers", "set", "--provider", "anthropic", "--model", "m"},
 	} {
 		_, _, err := runRoot(t,
 			map[string]string{"HAIL_API_KEY": "sk_test", "HAIL_API_URL": "http://127.0.0.1:1"},
 			args...,
 		)
-		if err == nil {
-			t.Errorf("%v: expected an error", args)
+		if !errors.Is(err, errInvalidInputs) {
+			t.Errorf("%v: err = %v, want errInvalidInputs", args, err)
 		}
+	}
+}
+
+// The counterpart: a set with no --model must reach the API, not be rejected
+// by the CLI. It is the whole point of dropping MarkFlagRequired("model").
+func TestProvidersSet_ModelIsOptional(t *testing.T) {
+	srv := newFakeServer(t, http.StatusOK, sampleProviderEntry())
+
+	_, _, err := runRoot(t,
+		map[string]string{"HAIL_API_KEY": "sk_test", "HAIL_API_URL": srv.URL},
+		"providers", "set", "tts", "--provider", "cartesia", "--voice-id", "v-1",
+	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got := atomic.LoadInt32(&srv.hits); got != 1 {
+		t.Errorf("request count = %d, want 1", got)
 	}
 }
 

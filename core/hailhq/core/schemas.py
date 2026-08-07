@@ -1070,8 +1070,19 @@ class MemberPhonePut(BaseModel):
 class ProviderConfigUpsert(BaseModel):
     """Body of ``PUT /providers/{layer}`` — save and activate one provider.
 
-    Omit ``api_key`` to edit params without resending the key; the stored
-    key survives. Keys are write-only: no response ever echoes one back.
+    A partial write. Fields you omit keep the value already saved for this
+    ``(layer, provider)`` pair: omit ``api_key`` to edit params without
+    resending the key, send only the ``params`` keys you want to change,
+    and omit ``fallback_enabled`` to leave the flag as it is. The merged
+    result is what gets validated against the layer's schema (422 on a
+    mismatch), so a partial write can never leave an invalid config behind.
+
+    Rows are keyed by ``(organization, layer, provider)``, so writing a
+    *different* provider for the same layer starts from scratch rather than
+    inheriting the previous provider's params. On a brand-new row
+    ``fallback_enabled`` defaults to ``false``.
+
+    Keys are write-only: no response ever echoes one back.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -1079,7 +1090,7 @@ class ProviderConfigUpsert(BaseModel):
     provider: str
     api_key: str | None = None
     params: dict[str, Any] = Field(default_factory=dict)
-    fallback_enabled: bool = False
+    fallback_enabled: bool | None = None
 
 
 class ProviderActivateRequest(BaseModel):

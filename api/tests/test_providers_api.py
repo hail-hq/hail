@@ -342,6 +342,155 @@ async def test_validate_accepts_an_unsaved_key(
 
 
 # --------------------------------------------------------------------------- #
+# Merge-on-update — the public router reads the row for the SAME provider and
+# merges the request over it, so a partial write never silently clears a field
+# the caller didn't mention. (The internal/console router keeps full-replace
+# semantics; see test_internal_provider_config.py.)
+# --------------------------------------------------------------------------- #
+
+
+async def test_put_model_only_keeps_the_stored_voice_id(
+    client, auth, provider_key_set
+) -> None:
+    await _save(
+        client,
+        auth,
+        "tts",
+        "cartesia",
+        api_key="sk-1-AAAA",
+        params={"voice_id": "v-1", "model": "sonic-2"},
+    )
+    updated = await _save(client, auth, "tts", "cartesia", params={"model": "sonic-3"})
+    assert updated["params"] == {"voice_id": "v-1", "model": "sonic-3"}
+
+
+async def test_put_model_only_keeps_fallback_enabled(
+    client, auth, provider_key_set
+) -> None:
+    await _save(
+        client,
+        auth,
+        "tts",
+        "cartesia",
+        api_key="sk-1-AAAA",
+        params={"model": "sonic-2"},
+        fallback_enabled=True,
+    )
+    updated = await _save(client, auth, "tts", "cartesia", params={"model": "sonic-3"})
+    assert updated["fallback_enabled"] is True
+
+
+async def test_put_explicit_false_turns_fallback_off(
+    client, auth, provider_key_set
+) -> None:
+    await _save(
+        client,
+        auth,
+        "stt",
+        "deepgram",
+        api_key="sk-1-AAAA",
+        fallback_enabled=True,
+    )
+    updated = await _save(client, auth, "stt", "deepgram", fallback_enabled=False)
+    assert updated["fallback_enabled"] is False
+
+
+async def test_put_new_row_defaults_fallback_off(
+    client, auth, provider_key_set
+) -> None:
+    saved = await _save(client, auth, "stt", "deepgram", api_key="sk-1-AAAA")
+    assert saved["fallback_enabled"] is False
+
+
+async def test_partial_params_are_validated_after_the_merge(
+    client, auth, provider_key_set
+) -> None:
+    """``{"model": ...}`` alone would fail LLMParams (openai-compatible needs
+    a base_url) — it validates because the merged result carries the stored
+    base_url. This is what proves validation runs on the merge, not the input.
+    """
+    await _save(
+        client,
+        auth,
+        "llm",
+        "openai-compatible",
+        api_key="sk-llm-AAAA",
+        params={"base_url": "https://llm.example.com/v1", "model": "m-1"},
+    )
+    updated = await _save(
+        client, auth, "llm", "openai-compatible", params={"model": "m-2"}
+    )
+    assert updated["params"] == {
+        "base_url": "https://llm.example.com/v1",
+        "model": "m-2",
+    }
+
+
+async def test_a_merge_that_would_be_invalid_is_422(
+    client, auth, provider_key_set
+) -> None:
+    """The merged config is what gets validated, so a partial write cannot
+    smuggle an invalid row past the layer schema — and the stored row is
+    left exactly as it was."""
+    await _save(
+        client,
+        auth,
+        "llm",
+        "openai-compatible",
+        api_key="sk-llm-AAAA",
+        params={"base_url": "https://llm.example.com/v1", "model": "m-1"},
+    )
+    resp = await client.put(
+        "/providers/llm",
+        json={
+            "provider": "openai-compatible",
+            "params": {"base_url": "http://insecure.example.com/v1"},
+        },
+        headers=auth,
+    )
+    assert resp.status_code == 422, resp.text
+
+    resp = await client.get("/providers", headers=auth)
+    assert resp.json()["providers"][0]["params"] == {
+        "base_url": "https://llm.example.com/v1",
+        "model": "m-1",
+    }
+
+
+async def test_a_different_provider_does_not_inherit_the_previous_params(
+    client, auth, provider_key_set
+) -> None:
+    """Rows are keyed by (org, layer, provider): switching provider is a
+    fresh config, so cartesia's voice_id must not leak into elevenlabs."""
+    await _save(
+        client,
+        auth,
+        "tts",
+        "cartesia",
+        api_key="sk-1-AAAA",
+        params={"voice_id": "v-cartesia", "model": "sonic-2"},
+        fallback_enabled=True,
+    )
+    saved = await _save(
+        client,
+        auth,
+        "tts",
+        "elevenlabs",
+        api_key="sk-2-BBBB",
+        params={"model": "eleven-v3"},
+    )
+    assert saved["params"] == {"model": "eleven-v3"}
+    assert saved["fallback_enabled"] is False
+
+    resp = await client.get("/providers", headers=auth)
+    by_provider = {p["provider"]: p for p in resp.json()["providers"]}
+    assert by_provider["cartesia"]["params"] == {
+        "voice_id": "v-cartesia",
+        "model": "sonic-2",
+    }
+
+
+# --------------------------------------------------------------------------- #
 # 404 / 422.
 # --------------------------------------------------------------------------- #
 

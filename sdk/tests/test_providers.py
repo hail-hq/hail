@@ -82,11 +82,13 @@ async def test_providers_set_sends_full_body(base_url: str, api_key: str) -> Non
 
 
 @respx.mock
-async def test_providers_set_omits_api_key_when_not_given(
+async def test_providers_set_omits_api_key_and_fallback_when_not_given(
     base_url: str, api_key: str
 ) -> None:
-    """No ``api_key`` in the body means "keep the stored key" server-side —
-    sending ``null`` would be a different request. Assert it's absent."""
+    """Omitting a field means "keep what's stored" server-side — sending a
+    zero value would be a different request. ``fallback_enabled=False`` in
+    particular would silently turn a caller's fallback off, so the field
+    must be absent, not ``false``."""
     route = respx.put(f"{base_url}/providers/tts").mock(
         return_value=httpx.Response(200, json=make_provider_entry(layer="tts"))
     )
@@ -94,12 +96,43 @@ async def test_providers_set_omits_api_key_when_not_given(
         await c.providers.set("tts", provider="cartesia", params={"voice_id": "v-1"})
 
     body = json.loads(route.calls.last.request.content)
-    assert body == {
-        "provider": "cartesia",
-        "params": {"voice_id": "v-1"},
-        "fallback_enabled": False,
-    }
+    assert body == {"provider": "cartesia", "params": {"voice_id": "v-1"}}
     assert "api_key" not in body
+    assert "fallback_enabled" not in body
+
+
+@respx.mock
+async def test_providers_set_omits_params_when_not_given(
+    base_url: str, api_key: str
+) -> None:
+    """A key-only rotation must not send ``params: {}`` — the server treats
+    the params it receives as the keys to change, and an explicit empty dict
+    is indistinguishable from "I passed no params" only because we omit it."""
+    route = respx.put(f"{base_url}/providers/tts").mock(
+        return_value=httpx.Response(200, json=make_provider_entry(layer="tts"))
+    )
+    async with Client(api_key=api_key, base_url=base_url) as c:
+        await c.providers.set("tts", provider="cartesia", api_key="sk-rotated-WXYZ")
+
+    body = json.loads(route.calls.last.request.content)
+    assert body == {"provider": "cartesia", "api_key": "sk-rotated-WXYZ"}
+    assert "params" not in body
+
+
+@respx.mock
+async def test_providers_set_sends_fallback_when_explicitly_false(
+    base_url: str, api_key: str
+) -> None:
+    """Explicit ``False`` is a real instruction — turn fallback off — and
+    must reach the wire, unlike the omitted default."""
+    route = respx.put(f"{base_url}/providers/stt").mock(
+        return_value=httpx.Response(200, json=make_provider_entry(layer="stt"))
+    )
+    async with Client(api_key=api_key, base_url=base_url) as c:
+        await c.providers.set("stt", provider="deepgram", fallback_enabled=False)
+
+    body = json.loads(route.calls.last.request.content)
+    assert body == {"provider": "deepgram", "fallback_enabled": False}
 
 
 # --------------------------------------------------------------------------- #

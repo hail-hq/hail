@@ -1920,12 +1920,13 @@ paths:
       tags:
         - providers
       summary: Upsert Provider
-      description: "Save a provider for ``layer`` and make it the active one.
-
-
-        Omitting ``api_key`` keeps the stored key; ``params`` is validated
-
-        against the layer's schema (422 on a mismatch). 404 on an unknown layer."
+      description:
+        "Save a provider for ``layer`` and make it the active one.\n\n\
+        A partial write: anything you omit keeps its saved value. Omitting\n``api_key``\
+        \ keeps the stored key, ``params`` keys you don't send are\npreserved, and\
+        \ omitting ``fallback_enabled`` leaves the flag alone\n(``false`` on a new\
+        \ row). The merged result \u2014 not the partial input \u2014\nis validated\
+        \ against the layer's schema (422 on a mismatch). 404 on an\nunknown layer."
       operationId: upsert_provider
       parameters:
         - name: layer
@@ -3724,9 +3725,10 @@ components:
           type: object
           title: Params
         fallback_enabled:
-          type: boolean
+          anyOf:
+            - type: boolean
+            - type: "null"
           title: Fallback Enabled
-          default: false
       additionalProperties: false
       type: object
       required:
@@ -3734,8 +3736,16 @@ components:
       title: ProviderConfigUpsert
       description:
         "Body of ``PUT /providers/{layer}`` \u2014 save and activate one\
-        \ provider.\n\nOmit ``api_key`` to edit params without resending the key;\
-        \ the stored\nkey survives. Keys are write-only: no response ever echoes one\
+        \ provider.\n\nA partial write. Fields you omit keep the value already saved\
+        \ for this\n``(layer, provider)`` pair: omit ``api_key`` to edit params without\n\
+        resending the key, send only the ``params`` keys you want to change,\nand\
+        \ omit ``fallback_enabled`` to leave the flag as it is. The merged\nresult\
+        \ is what gets validated against the layer's schema (422 on a\nmismatch),\
+        \ so a partial write can never leave an invalid config behind.\n\nRows are\
+        \ keyed by ``(organization, layer, provider)``, so writing a\n*different*\
+        \ provider for the same layer starts from scratch rather than\ninheriting\
+        \ the previous provider's params. On a brand-new row\n``fallback_enabled``\
+        \ defaults to ``false``.\n\nKeys are write-only: no response ever echoes one\
         \ back."
     ProviderValidateRequest:
       properties:

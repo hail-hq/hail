@@ -230,12 +230,14 @@ time the call runs ends the call with `end_reason=provider_key_error`.
 not silently substitute its own models when your endpoint fails. A standing
 console endpoint can opt into fallback; a per-call endpoint cannot.
 
-**Three consecutive failures end the call.** After three non-recoverable
-errors in a row with no successful turn between them, Hail speaks a short
-goodbye and hangs up with `end_reason=llm_endpoint_failed`, rather than
-letting a dead endpoint burn the caller's minutes. A turn that succeeds
-resets the count. An interruption is not a failure — barge-in cancels the
-in-flight request and never counts against you.
+**Three consecutive failures end a per-call endpoint's call.** After three
+non-recoverable errors in a row with no successful turn between them, Hail
+speaks a short goodbye and hangs up with `end_reason=llm_endpoint_failed`,
+rather than letting a dead endpoint burn the caller's minutes. A turn that
+succeeds resets the count. An interruption is not a failure — barge-in
+cancels the in-flight request and never counts against you. This give-up
+is armed for per-call `llm` blocks only: a standing endpoint with fallback
+off that keeps failing ends the call as `end_reason=agent_error` instead.
 
 **A non-200 costs about four seconds.** Hail retries the turn three times
 before giving up on it. The caller hears silence for that whole window, so
@@ -353,6 +355,30 @@ Keys are write-only on every one of these paths: `GET /providers` returns
 `key_last4` and `key_set_at` and nothing else key-shaped. To rotate a key,
 `set` the layer again with the new one; to edit the model or base URL
 without resending the key, omit `--key` (SDK: omit `api_key`).
+
+`set` is a partial write: it changes only the fields you send and leaves
+every other saved field alone. So this swaps the model and nothing else —
+
+```bash
+hail providers set tts --provider cartesia --model sonic-3
+```
+
+— the row's `voice_id` and its fallback setting survive untouched. Send
+`--voice-id` (SDK: `params={"voice_id": ...}`) when you do want to change
+it, and `--fallback` / `--fallback=false` (SDK: `fallback_enabled=True` /
+`False`) when you want to move the fallback flag; omit them to leave both
+as they are. What the server validates is the merged result, so a partial
+write can never leave an invalid config behind — it 422s instead.
+
+Config is per provider: rows are keyed by `(organization, layer, provider)`,
+so pointing a layer at a different `--provider` starts a fresh row rather
+than inheriting the old provider's params. `fallback_enabled` is `false` on
+a new row.
+
+> The console writes the same rows through `/internal`, which keeps
+> full-replace semantics — that is what lets a console user clear a field by
+> emptying it. Merging is specific to the public `/providers` routes the CLI
+> and SDK use.
 
 ## Which brain runs a call
 

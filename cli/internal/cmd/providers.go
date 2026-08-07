@@ -98,6 +98,7 @@ type providersSetFlags struct {
 	provider string
 	model    string
 	baseURL  string
+	voiceID  string
 	key      string
 	fallback bool
 }
@@ -111,16 +112,29 @@ func newProvidersSetCmd(opts *Options) *cobra.Command {
 
 <layer> is llm, tts, or stt.
 
-Omit --key to edit the model/base-url without resending the key: the stored
-key survives. Pass '--key -' to read the key from stdin so it never lands in
-shell history:
+A set is a partial write: it changes only what you pass. Flags you leave
+off keep their saved value, so updating one field never clears the others.
+
+  hail providers set tts --provider cartesia --model sonic-3
+
+leaves the row's voice_id and its fallback setting exactly as they were.
+Omit --key the same way to edit params without resending the key, or pass
+'--key -' to read the key from stdin so it never lands in shell history:
 
   printf '%s' "$MY_KEY" | hail providers set llm --provider anthropic \
     --model claude-sonnet-4-5 --key -
 
+Which params each layer takes:
+  llm   --model (required by the layer), --base-url (openai-compatible only)
+  tts   --model, --voice-id
+  stt   --model
+
+Config is per provider, so pointing a layer at a different --provider starts
+a fresh row rather than inheriting the previous provider's params.
+
 --fallback lets a failure of your provider fall through to Hail's own keys
-(off by default — silently billing Hail's models would defeat the point of
-bringing your own).`,
+(off on a new row — silently billing Hail's models would defeat the point of
+bringing your own). Pass --fallback=false to turn it back off.`,
 		Args:    argsOrHelp(1, "<layer>"),
 		PreRunE: requireMarkedFlags,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -130,10 +144,10 @@ bringing your own).`,
 	cmd.Flags().StringVar(&f.provider, "provider", "", "Provider name for the layer (e.g. openai-compatible, cartesia, deepgram)")
 	cmd.Flags().StringVar(&f.model, "model", "", "Model identifier to run on that provider")
 	cmd.Flags().StringVar(&f.baseURL, "base-url", "", "HTTPS endpoint — required by the openai-compatible LLM provider")
+	cmd.Flags().StringVar(&f.voiceID, "voice-id", "", "Voice identifier — tts layer only")
 	cmd.Flags().StringVar(&f.key, "key", "", "Provider API key; '-' reads it from stdin. Omit to keep the stored key")
 	cmd.Flags().BoolVar(&f.fallback, "fallback", false, "Fall back to Hail's own keys when this provider fails")
 	cmd.MarkFlagRequired("provider")
-	cmd.MarkFlagRequired("model")
 	return cmd
 }
 
@@ -143,15 +157,32 @@ func runProvidersSet(ctx context.Context, cmd *cobra.Command, opts *Options, f *
 		return err
 	}
 
-	params := map[string]interface{}{"model": f.model}
-	if f.baseURL != "" {
+	body := client.ProviderConfigUpsert{
+		Provider: f.provider,
+		ApiKey:   strPtr(apiKey),
+	}
+
+	// Send a field only when the user actually typed its flag. The API
+	// merges what it receives over the saved row, so an unset flag left out
+	// of the body is preserved — but a zero value put *in* the body is an
+	// instruction to store that zero. --fallback is the sharp one: cobra's
+	// default is false, so sending it unconditionally would silently switch
+	// a caller's fallback off on every unrelated `set`.
+	params := map[string]interface{}{}
+	if cmd.Flags().Changed("model") {
+		params["model"] = f.model
+	}
+	if cmd.Flags().Changed("base-url") {
 		params["base_url"] = f.baseURL
 	}
-	body := client.ProviderConfigUpsert{
-		Provider:        f.provider,
-		Params:          &params,
-		FallbackEnabled: &f.fallback,
-		ApiKey:          strPtr(apiKey),
+	if cmd.Flags().Changed("voice-id") {
+		params["voice_id"] = f.voiceID
+	}
+	if len(params) > 0 {
+		body.Params = &params
+	}
+	if cmd.Flags().Changed("fallback") {
+		body.FallbackEnabled = &f.fallback
 	}
 
 	apiClient, err := opts.newClient()

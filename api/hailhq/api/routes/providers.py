@@ -37,6 +37,7 @@ from hailhq.api.routes.internal.provider_config import (
     ActivateIn,
     ProviderConfigIn,
     ValidateIn,
+    _get_row,
 )
 from hailhq.api.routes.internal.provider_config import (
     activate_provider_config as _activate_provider_config,
@@ -89,11 +90,43 @@ async def upsert_provider(
 ) -> dict:
     """Save a provider for ``layer`` and make it the active one.
 
-    Omitting ``api_key`` keeps the stored key; ``params`` is validated
-    against the layer's schema (422 on a mismatch). 404 on an unknown layer.
+    A partial write: anything you omit keeps its saved value. Omitting
+    ``api_key`` keeps the stored key, ``params`` keys you don't send are
+    preserved, and omitting ``fallback_enabled`` leaves the flag alone
+    (``false`` on a new row). The merged result — not the partial input —
+    is validated against the layer's schema (422 on a mismatch). 404 on an
+    unknown layer.
     """
+    # Merge here, in the public router only. The internal (console) router
+    # keeps full-replace semantics on purpose: the console strips empty
+    # fields before it PUTs, so merging there would resurrect a value the
+    # user just cleared. This route's callers are the CLI and the SDK, which
+    # send a handful of flags and would otherwise wipe everything else.
+    #
+    # _get_row keys by (organization, layer, provider) — so `row` is the row
+    # for the provider being written, and switching provider finds nothing
+    # to merge. That is the behavior we want: a different provider is a
+    # different config, and inheriting the old one's params would be wrong
+    # (cartesia's voice_id is meaningless to elevenlabs).
+    row = await _get_row(db, principal.organization_id, layer, body.provider)
+    merged_params = {**row.params, **body.params} if row is not None else body.params
+    if body.fallback_enabled is not None:
+        fallback_enabled = body.fallback_enabled
+    elif row is not None:
+        fallback_enabled = row.fallback_enabled
+    else:
+        fallback_enabled = False
+
     return await _upsert_provider_config(
-        principal.organization_id, layer, ProviderConfigIn(**body.model_dump()), db
+        principal.organization_id,
+        layer,
+        ProviderConfigIn(
+            provider=body.provider,
+            api_key=body.api_key,
+            params=merged_params,
+            fallback_enabled=fallback_enabled,
+        ),
+        db,
     )
 
 

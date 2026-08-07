@@ -700,19 +700,27 @@ class _ProvidersResource:
         provider: str,
         api_key: str | None = None,
         params: dict[str, Any] | None = None,
-        fallback_enabled: bool = False,
+        fallback_enabled: bool | None = None,
     ) -> ProviderConfigEntry:
         """Save a provider for ``layer`` and make it the active one.
 
-        Omit ``api_key`` to edit params without resending the key — the
-        stored key survives. ``fallback_enabled`` lets a failure of your
-        provider fall through to Hail's own keys; off by default.
+        A partial write: anything you leave out keeps its saved value. Omit
+        ``api_key`` to edit params without resending the key, pass only the
+        ``params`` keys you want to change (the rest are preserved), and
+        omit ``fallback_enabled`` to leave the flag as it is. The merged
+        result is what the server validates, so a partial write can't leave
+        an invalid config behind.
+
+        ``fallback_enabled`` lets a failure of your provider fall through to
+        Hail's own keys; it is ``False`` on a new row. Rows are keyed by
+        provider, so setting a *different* provider for the same layer
+        starts fresh rather than inheriting the previous one's params.
         """
-        body: dict[str, Any] = {
-            "provider": provider,
-            "params": params or {},
-            "fallback_enabled": fallback_enabled,
-        }
+        body: dict[str, Any] = {"provider": provider}
+        if params is not None:
+            body["params"] = params
+        if fallback_enabled is not None:
+            body["fallback_enabled"] = fallback_enabled
         if api_key is not None:
             body["api_key"] = api_key
         data = await self._http.request("PUT", f"/providers/{layer}", json=body)
