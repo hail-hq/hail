@@ -158,10 +158,12 @@ func TestCallSubcommand_ModeB_BringYourOwnLLM(t *testing.T) {
 	}
 }
 
-func TestCallSubcommand_RejectsBothModes(t *testing.T) {
+// --prompt and --llm-* combine: the request body carries both, so the
+// caller's own endpoint runs the caller's prompt.
+func TestCallSubcommand_AcceptsBothModes(t *testing.T) {
 	srv := newFakeServer(t, http.StatusCreated, sampleResponse())
 
-	_, stderr, err := runRoot(t,
+	_, _, err := runRoot(t,
 		map[string]string{"HAIL_API_KEY": "sk_test", "HAIL_API_URL": srv.URL},
 		"call", "+15551234567",
 		"--prompt", "hi",
@@ -170,14 +172,22 @@ func TestCallSubcommand_RejectsBothModes(t *testing.T) {
 		"--llm-model", "m",
 		"--recipient-consent",
 	)
-	if !errors.Is(err, errInvalidInputs) {
-		t.Fatalf("want errInvalidInputs, got %v", err)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
 	}
-	if !strings.Contains(stderr, "--prompt and --llm-* are mutually exclusive") {
-		t.Errorf("stderr = %q", stderr)
+
+	var body client.CallCreate
+	if err := json.Unmarshal(srv.lastBody, &body); err != nil {
+		t.Fatalf("body parse: %v", err)
 	}
-	if hits := atomic.LoadInt32(&srv.hits); hits != 0 {
-		t.Errorf("expected 0 HTTP calls, got %d", hits)
+	if body.SystemPrompt == nil || *body.SystemPrompt != "hi" {
+		t.Errorf("SystemPrompt = %v, want %q", body.SystemPrompt, "hi")
+	}
+	if body.Llm == nil {
+		t.Fatal("Llm should be set")
+	}
+	if body.Llm.BaseUrl != "https://api.openai.com/v1" || body.Llm.ApiKey != "k" || body.Llm.Model != "m" {
+		t.Errorf("Llm = %+v", body.Llm)
 	}
 }
 

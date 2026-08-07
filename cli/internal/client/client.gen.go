@@ -447,6 +447,27 @@ func (e NumberAcquireRequestNumberType) Valid() bool {
 	}
 }
 
+// Defines values for ProviderConfigEntryLayer.
+const (
+	Llm ProviderConfigEntryLayer = "llm"
+	Stt ProviderConfigEntryLayer = "stt"
+	Tts ProviderConfigEntryLayer = "tts"
+)
+
+// Valid indicates whether the value is a known member of the ProviderConfigEntryLayer enum.
+func (e ProviderConfigEntryLayer) Valid() bool {
+	switch e {
+	case Llm:
+		return true
+	case Stt:
+		return true
+	case Tts:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for SmsCreateMessageType.
 const (
 	Informational SmsCreateMessageType = "informational"
@@ -1457,6 +1478,74 @@ type PhoneNumberResponse struct {
 	ProvisioningState   string             `json:"provisioning_state"`
 }
 
+// ProviderActivateRequest Body of “POST /providers/{layer}/activate“.
+type ProviderActivateRequest struct {
+	Provider string `json:"provider"`
+}
+
+// ProviderConfigEntry One saved provider row. Write-only key: “key_last4“ and
+// “key_set_at“ are the only key-derived fields that leave the API.
+//
+// Every field is required (“key_last4“/“key_set_at“ nullable): the
+// serializer always emits all of them, and required response fields
+// generate plain values instead of pointers in the Go CLI's client.
+type ProviderConfigEntry struct {
+	FallbackEnabled bool                     `json:"fallback_enabled"`
+	IsActive        bool                     `json:"is_active"`
+	KeyLast4        *string                  `json:"key_last4"`
+	KeySetAt        *string                  `json:"key_set_at"`
+	Layer           ProviderConfigEntryLayer `json:"layer"`
+	Params          map[string]interface{}   `json:"params"`
+	Provider        string                   `json:"provider"`
+}
+
+// ProviderConfigEntryLayer defines model for ProviderConfigEntry.Layer.
+type ProviderConfigEntryLayer string
+
+// ProviderConfigListResponse defines model for ProviderConfigListResponse.
+type ProviderConfigListResponse struct {
+	Providers []ProviderConfigEntry `json:"providers"`
+}
+
+// ProviderConfigUpsert Body of “PUT /providers/{layer}“ — save and activate one provider.
+//
+// A partial write. Fields you omit keep the value already saved for this
+// “(layer, provider)“ pair: omit “api_key“ to edit params without
+// resending the key, send only the “params“ keys you want to change,
+// and omit “fallback_enabled“ to leave the flag as it is. The merged
+// result is what gets validated against the layer's schema (422 on a
+// mismatch), so a partial write can never leave an invalid config behind.
+//
+// Rows are keyed by “(organization, layer, provider)“, so writing a
+// *different* provider for the same layer starts from scratch rather than
+// inheriting the previous provider's params. On a brand-new row
+// “fallback_enabled“ defaults to “false“.
+//
+// Keys are write-only: no response ever echoes one back.
+type ProviderConfigUpsert struct {
+	ApiKey          *string                 `json:"api_key,omitempty"`
+	FallbackEnabled *bool                   `json:"fallback_enabled,omitempty"`
+	Params          *map[string]interface{} `json:"params,omitempty"`
+	Provider        string                  `json:"provider"`
+}
+
+// ProviderValidateRequest Body of “POST /providers/{layer}/validate“ — a live key probe.
+//
+// All fields optional: with an empty body the layer's active provider and
+// its stored key are tested. “provider“ tests that provider's stored key
+// instead. “api_key“ tests a key that has not been saved yet.
+type ProviderValidateRequest struct {
+	ApiKey   *string                 `json:"api_key,omitempty"`
+	Params   *map[string]interface{} `json:"params,omitempty"`
+	Provider *string                 `json:"provider,omitempty"`
+}
+
+// ProviderValidateResult Outcome of a live provider-key probe.
+type ProviderValidateResult struct {
+	Message *string `json:"message"`
+	Status  string  `json:"status"`
+}
+
 // SenderIdPatch defines model for SenderIdPatch.
 type SenderIdPatch struct {
 	CustomSenderId *string `json:"custom_sender_id,omitempty"`
@@ -1827,6 +1916,31 @@ type EnableSmsNumbersNumberIdEnableSmsPostParams struct {
 	Authorization *string `json:"authorization,omitempty"`
 }
 
+// ListProvidersParams defines parameters for ListProviders.
+type ListProvidersParams struct {
+	Authorization *string `json:"authorization,omitempty"`
+}
+
+// UpsertProviderParams defines parameters for UpsertProvider.
+type UpsertProviderParams struct {
+	Authorization *string `json:"authorization,omitempty"`
+}
+
+// ActivateProviderParams defines parameters for ActivateProvider.
+type ActivateProviderParams struct {
+	Authorization *string `json:"authorization,omitempty"`
+}
+
+// ValidateProviderParams defines parameters for ValidateProvider.
+type ValidateProviderParams struct {
+	Authorization *string `json:"authorization,omitempty"`
+}
+
+// DeleteProviderParams defines parameters for DeleteProvider.
+type DeleteProviderParams struct {
+	Authorization *string `json:"authorization,omitempty"`
+}
+
 // ListSmsSmsGetParams defines parameters for ListSmsSmsGet.
 type ListSmsSmsGetParams struct {
 	Cursor        *string                    `form:"cursor,omitempty" json:"cursor,omitempty"`
@@ -1947,6 +2061,15 @@ type PutMemberPhoneMembersUserIdPhonePutJSONRequestBody = MemberPhonePut
 
 // AcquireNumberNumbersPostJSONRequestBody defines body for AcquireNumberNumbersPost for application/json ContentType.
 type AcquireNumberNumbersPostJSONRequestBody = NumberAcquireRequest
+
+// UpsertProviderJSONRequestBody defines body for UpsertProvider for application/json ContentType.
+type UpsertProviderJSONRequestBody = ProviderConfigUpsert
+
+// ActivateProviderJSONRequestBody defines body for ActivateProvider for application/json ContentType.
+type ActivateProviderJSONRequestBody = ProviderActivateRequest
+
+// ValidateProviderJSONRequestBody defines body for ValidateProvider for application/json ContentType.
+type ValidateProviderJSONRequestBody = ProviderValidateRequest
 
 // CreateSmsSmsPostJSONRequestBody defines body for CreateSmsSmsPost for application/json ContentType.
 type CreateSmsSmsPostJSONRequestBody = SmsCreate
@@ -2309,6 +2432,27 @@ type ClientInterface interface {
 
 	// EnableSmsNumbersNumberIdEnableSmsPost request
 	EnableSmsNumbersNumberIdEnableSmsPost(ctx context.Context, numberId openapi_types.UUID, params *EnableSmsNumbersNumberIdEnableSmsPostParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// ListProviders request
+	ListProviders(ctx context.Context, params *ListProvidersParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// UpsertProviderWithBody request with any body
+	UpsertProviderWithBody(ctx context.Context, layer string, params *UpsertProviderParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	UpsertProvider(ctx context.Context, layer string, params *UpsertProviderParams, body UpsertProviderJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// ActivateProviderWithBody request with any body
+	ActivateProviderWithBody(ctx context.Context, layer string, params *ActivateProviderParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	ActivateProvider(ctx context.Context, layer string, params *ActivateProviderParams, body ActivateProviderJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// ValidateProviderWithBody request with any body
+	ValidateProviderWithBody(ctx context.Context, layer string, params *ValidateProviderParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	ValidateProvider(ctx context.Context, layer string, params *ValidateProviderParams, body ValidateProviderJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// DeleteProvider request
+	DeleteProvider(ctx context.Context, layer string, provider string, params *DeleteProviderParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// ListSmsSmsGet request
 	ListSmsSmsGet(ctx context.Context, params *ListSmsSmsGetParams, reqEditors ...RequestEditorFn) (*http.Response, error)
@@ -2813,6 +2957,102 @@ func (c *Client) GetNumberNumbersNumberIdGet(ctx context.Context, numberId opena
 
 func (c *Client) EnableSmsNumbersNumberIdEnableSmsPost(ctx context.Context, numberId openapi_types.UUID, params *EnableSmsNumbersNumberIdEnableSmsPostParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewEnableSmsNumbersNumberIdEnableSmsPostRequest(c.Server, numberId, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) ListProviders(ctx context.Context, params *ListProvidersParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewListProvidersRequest(c.Server, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) UpsertProviderWithBody(ctx context.Context, layer string, params *UpsertProviderParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewUpsertProviderRequestWithBody(c.Server, layer, params, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) UpsertProvider(ctx context.Context, layer string, params *UpsertProviderParams, body UpsertProviderJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewUpsertProviderRequest(c.Server, layer, params, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) ActivateProviderWithBody(ctx context.Context, layer string, params *ActivateProviderParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewActivateProviderRequestWithBody(c.Server, layer, params, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) ActivateProvider(ctx context.Context, layer string, params *ActivateProviderParams, body ActivateProviderJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewActivateProviderRequest(c.Server, layer, params, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) ValidateProviderWithBody(ctx context.Context, layer string, params *ValidateProviderParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewValidateProviderRequestWithBody(c.Server, layer, params, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) ValidateProvider(ctx context.Context, layer string, params *ValidateProviderParams, body ValidateProviderJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewValidateProviderRequest(c.Server, layer, params, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) DeleteProvider(ctx context.Context, layer string, provider string, params *DeleteProviderParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewDeleteProviderRequest(c.Server, layer, provider, params)
 	if err != nil {
 		return nil, err
 	}
@@ -5009,6 +5249,290 @@ func NewEnableSmsNumbersNumberIdEnableSmsPostRequest(server string, numberId ope
 	return req, nil
 }
 
+// NewListProvidersRequest generates requests for ListProviders
+func NewListProvidersRequest(server string, params *ListProvidersParams) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/providers")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("GET", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+
+		if params.Authorization != nil {
+			var headerParam0 string
+
+			headerParam0, err = runtime.StyleParamWithOptions("simple", false, "authorization", *params.Authorization, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationHeader, Type: "string", Format: ""})
+			if err != nil {
+				return nil, err
+			}
+
+			req.Header.Set("authorization", headerParam0)
+		}
+
+	}
+
+	return req, nil
+}
+
+// NewUpsertProviderRequest calls the generic UpsertProvider builder with application/json body
+func NewUpsertProviderRequest(server string, layer string, params *UpsertProviderParams, body UpsertProviderJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewUpsertProviderRequestWithBody(server, layer, params, "application/json", bodyReader)
+}
+
+// NewUpsertProviderRequestWithBody generates requests for UpsertProvider with any type of body
+func NewUpsertProviderRequestWithBody(server string, layer string, params *UpsertProviderParams, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "layer", layer, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/providers/%s", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("PUT", queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	if params != nil {
+
+		if params.Authorization != nil {
+			var headerParam0 string
+
+			headerParam0, err = runtime.StyleParamWithOptions("simple", false, "authorization", *params.Authorization, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationHeader, Type: "string", Format: ""})
+			if err != nil {
+				return nil, err
+			}
+
+			req.Header.Set("authorization", headerParam0)
+		}
+
+	}
+
+	return req, nil
+}
+
+// NewActivateProviderRequest calls the generic ActivateProvider builder with application/json body
+func NewActivateProviderRequest(server string, layer string, params *ActivateProviderParams, body ActivateProviderJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewActivateProviderRequestWithBody(server, layer, params, "application/json", bodyReader)
+}
+
+// NewActivateProviderRequestWithBody generates requests for ActivateProvider with any type of body
+func NewActivateProviderRequestWithBody(server string, layer string, params *ActivateProviderParams, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "layer", layer, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/providers/%s/activate", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("POST", queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	if params != nil {
+
+		if params.Authorization != nil {
+			var headerParam0 string
+
+			headerParam0, err = runtime.StyleParamWithOptions("simple", false, "authorization", *params.Authorization, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationHeader, Type: "string", Format: ""})
+			if err != nil {
+				return nil, err
+			}
+
+			req.Header.Set("authorization", headerParam0)
+		}
+
+	}
+
+	return req, nil
+}
+
+// NewValidateProviderRequest calls the generic ValidateProvider builder with application/json body
+func NewValidateProviderRequest(server string, layer string, params *ValidateProviderParams, body ValidateProviderJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewValidateProviderRequestWithBody(server, layer, params, "application/json", bodyReader)
+}
+
+// NewValidateProviderRequestWithBody generates requests for ValidateProvider with any type of body
+func NewValidateProviderRequestWithBody(server string, layer string, params *ValidateProviderParams, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "layer", layer, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/providers/%s/validate", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("POST", queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	if params != nil {
+
+		if params.Authorization != nil {
+			var headerParam0 string
+
+			headerParam0, err = runtime.StyleParamWithOptions("simple", false, "authorization", *params.Authorization, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationHeader, Type: "string", Format: ""})
+			if err != nil {
+				return nil, err
+			}
+
+			req.Header.Set("authorization", headerParam0)
+		}
+
+	}
+
+	return req, nil
+}
+
+// NewDeleteProviderRequest generates requests for DeleteProvider
+func NewDeleteProviderRequest(server string, layer string, provider string, params *DeleteProviderParams) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "layer", layer, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithOptions("simple", false, "provider", provider, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/providers/%s/%s", pathParam0, pathParam1)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("DELETE", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+
+		if params.Authorization != nil {
+			var headerParam0 string
+
+			headerParam0, err = runtime.StyleParamWithOptions("simple", false, "authorization", *params.Authorization, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationHeader, Type: "string", Format: ""})
+			if err != nil {
+				return nil, err
+			}
+
+			req.Header.Set("authorization", headerParam0)
+		}
+
+	}
+
+	return req, nil
+}
+
 // NewListSmsSmsGetRequest generates requests for ListSmsSmsGet
 func NewListSmsSmsGetRequest(server string, params *ListSmsSmsGetParams) (*http.Request, error) {
 	var err error
@@ -6143,6 +6667,27 @@ type ClientWithResponsesInterface interface {
 	// EnableSmsNumbersNumberIdEnableSmsPostWithResponse request
 	EnableSmsNumbersNumberIdEnableSmsPostWithResponse(ctx context.Context, numberId openapi_types.UUID, params *EnableSmsNumbersNumberIdEnableSmsPostParams, reqEditors ...RequestEditorFn) (*EnableSmsNumbersNumberIdEnableSmsPostResponse, error)
 
+	// ListProvidersWithResponse request
+	ListProvidersWithResponse(ctx context.Context, params *ListProvidersParams, reqEditors ...RequestEditorFn) (*ListProvidersResponse, error)
+
+	// UpsertProviderWithBodyWithResponse request with any body
+	UpsertProviderWithBodyWithResponse(ctx context.Context, layer string, params *UpsertProviderParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*UpsertProviderResponse, error)
+
+	UpsertProviderWithResponse(ctx context.Context, layer string, params *UpsertProviderParams, body UpsertProviderJSONRequestBody, reqEditors ...RequestEditorFn) (*UpsertProviderResponse, error)
+
+	// ActivateProviderWithBodyWithResponse request with any body
+	ActivateProviderWithBodyWithResponse(ctx context.Context, layer string, params *ActivateProviderParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*ActivateProviderResponse, error)
+
+	ActivateProviderWithResponse(ctx context.Context, layer string, params *ActivateProviderParams, body ActivateProviderJSONRequestBody, reqEditors ...RequestEditorFn) (*ActivateProviderResponse, error)
+
+	// ValidateProviderWithBodyWithResponse request with any body
+	ValidateProviderWithBodyWithResponse(ctx context.Context, layer string, params *ValidateProviderParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*ValidateProviderResponse, error)
+
+	ValidateProviderWithResponse(ctx context.Context, layer string, params *ValidateProviderParams, body ValidateProviderJSONRequestBody, reqEditors ...RequestEditorFn) (*ValidateProviderResponse, error)
+
+	// DeleteProviderWithResponse request
+	DeleteProviderWithResponse(ctx context.Context, layer string, provider string, params *DeleteProviderParams, reqEditors ...RequestEditorFn) (*DeleteProviderResponse, error)
+
 	// ListSmsSmsGetWithResponse request
 	ListSmsSmsGetWithResponse(ctx context.Context, params *ListSmsSmsGetParams, reqEditors ...RequestEditorFn) (*ListSmsSmsGetResponse, error)
 
@@ -6886,6 +7431,120 @@ func (r EnableSmsNumbersNumberIdEnableSmsPostResponse) StatusCode() int {
 	return 0
 }
 
+type ListProvidersResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *ProviderConfigListResponse
+	JSON422      *HTTPValidationError
+}
+
+// Status returns HTTPResponse.Status
+func (r ListProvidersResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ListProvidersResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type UpsertProviderResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *ProviderConfigEntry
+	JSON422      *HTTPValidationError
+}
+
+// Status returns HTTPResponse.Status
+func (r UpsertProviderResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r UpsertProviderResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type ActivateProviderResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *ProviderConfigEntry
+	JSON422      *HTTPValidationError
+}
+
+// Status returns HTTPResponse.Status
+func (r ActivateProviderResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ActivateProviderResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type ValidateProviderResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *ProviderValidateResult
+	JSON422      *HTTPValidationError
+}
+
+// Status returns HTTPResponse.Status
+func (r ValidateProviderResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ValidateProviderResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type DeleteProviderResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON422      *HTTPValidationError
+}
+
+// Status returns HTTPResponse.Status
+func (r DeleteProviderResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r DeleteProviderResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
 type ListSmsSmsGetResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
@@ -7583,6 +8242,75 @@ func (c *ClientWithResponses) EnableSmsNumbersNumberIdEnableSmsPostWithResponse(
 		return nil, err
 	}
 	return ParseEnableSmsNumbersNumberIdEnableSmsPostResponse(rsp)
+}
+
+// ListProvidersWithResponse request returning *ListProvidersResponse
+func (c *ClientWithResponses) ListProvidersWithResponse(ctx context.Context, params *ListProvidersParams, reqEditors ...RequestEditorFn) (*ListProvidersResponse, error) {
+	rsp, err := c.ListProviders(ctx, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseListProvidersResponse(rsp)
+}
+
+// UpsertProviderWithBodyWithResponse request with arbitrary body returning *UpsertProviderResponse
+func (c *ClientWithResponses) UpsertProviderWithBodyWithResponse(ctx context.Context, layer string, params *UpsertProviderParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*UpsertProviderResponse, error) {
+	rsp, err := c.UpsertProviderWithBody(ctx, layer, params, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseUpsertProviderResponse(rsp)
+}
+
+func (c *ClientWithResponses) UpsertProviderWithResponse(ctx context.Context, layer string, params *UpsertProviderParams, body UpsertProviderJSONRequestBody, reqEditors ...RequestEditorFn) (*UpsertProviderResponse, error) {
+	rsp, err := c.UpsertProvider(ctx, layer, params, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseUpsertProviderResponse(rsp)
+}
+
+// ActivateProviderWithBodyWithResponse request with arbitrary body returning *ActivateProviderResponse
+func (c *ClientWithResponses) ActivateProviderWithBodyWithResponse(ctx context.Context, layer string, params *ActivateProviderParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*ActivateProviderResponse, error) {
+	rsp, err := c.ActivateProviderWithBody(ctx, layer, params, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseActivateProviderResponse(rsp)
+}
+
+func (c *ClientWithResponses) ActivateProviderWithResponse(ctx context.Context, layer string, params *ActivateProviderParams, body ActivateProviderJSONRequestBody, reqEditors ...RequestEditorFn) (*ActivateProviderResponse, error) {
+	rsp, err := c.ActivateProvider(ctx, layer, params, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseActivateProviderResponse(rsp)
+}
+
+// ValidateProviderWithBodyWithResponse request with arbitrary body returning *ValidateProviderResponse
+func (c *ClientWithResponses) ValidateProviderWithBodyWithResponse(ctx context.Context, layer string, params *ValidateProviderParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*ValidateProviderResponse, error) {
+	rsp, err := c.ValidateProviderWithBody(ctx, layer, params, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseValidateProviderResponse(rsp)
+}
+
+func (c *ClientWithResponses) ValidateProviderWithResponse(ctx context.Context, layer string, params *ValidateProviderParams, body ValidateProviderJSONRequestBody, reqEditors ...RequestEditorFn) (*ValidateProviderResponse, error) {
+	rsp, err := c.ValidateProvider(ctx, layer, params, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseValidateProviderResponse(rsp)
+}
+
+// DeleteProviderWithResponse request returning *DeleteProviderResponse
+func (c *ClientWithResponses) DeleteProviderWithResponse(ctx context.Context, layer string, provider string, params *DeleteProviderParams, reqEditors ...RequestEditorFn) (*DeleteProviderResponse, error) {
+	rsp, err := c.DeleteProvider(ctx, layer, provider, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseDeleteProviderResponse(rsp)
 }
 
 // ListSmsSmsGetWithResponse request returning *ListSmsSmsGetResponse
@@ -8711,6 +9439,164 @@ func ParseEnableSmsNumbersNumberIdEnableSmsPostResponse(rsp *http.Response) (*En
 		}
 		response.JSON200 = &dest
 
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 422:
+		var dest HTTPValidationError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON422 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseListProvidersResponse parses an HTTP response from a ListProvidersWithResponse call
+func ParseListProvidersResponse(rsp *http.Response) (*ListProvidersResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ListProvidersResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest ProviderConfigListResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 422:
+		var dest HTTPValidationError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON422 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseUpsertProviderResponse parses an HTTP response from a UpsertProviderWithResponse call
+func ParseUpsertProviderResponse(rsp *http.Response) (*UpsertProviderResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &UpsertProviderResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest ProviderConfigEntry
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 422:
+		var dest HTTPValidationError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON422 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseActivateProviderResponse parses an HTTP response from a ActivateProviderWithResponse call
+func ParseActivateProviderResponse(rsp *http.Response) (*ActivateProviderResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ActivateProviderResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest ProviderConfigEntry
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 422:
+		var dest HTTPValidationError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON422 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseValidateProviderResponse parses an HTTP response from a ValidateProviderWithResponse call
+func ParseValidateProviderResponse(rsp *http.Response) (*ValidateProviderResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ValidateProviderResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest ProviderValidateResult
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 422:
+		var dest HTTPValidationError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON422 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseDeleteProviderResponse parses an HTTP response from a DeleteProviderWithResponse call
+func ParseDeleteProviderResponse(rsp *http.Response) (*DeleteProviderResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &DeleteProviderResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 422:
 		var dest HTTPValidationError
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {

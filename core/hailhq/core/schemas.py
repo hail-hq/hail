@@ -219,12 +219,17 @@ class CallCreate(ConsentAttestationMixin):
 
     @model_validator(mode="after")
     def _prompt_or_llm(self):
+        """At least one of ``system_prompt`` / ``llm`` — but not exclusive.
+
+        Both together is a legitimate combination: the call runs on the
+        caller's BYO endpoint (mode B) *and* carries their task prompt.
+        ``build_instructions()`` in the voicebot is mode-agnostic and
+        composes ``VOICE_PREAMBLE`` + the caller prompt whichever LLM
+        serves the call, so the endpoint receives the prompt as its
+        leading system message.
+        """
         has_prompt = self.system_prompt is not None and self.system_prompt != ""
         has_llm = self.llm is not None
-        if has_prompt and has_llm:
-            raise ValueError(
-                "system_prompt and llm are mutually exclusive (use one mode)"
-            )
         if not has_prompt and not has_llm:
             raise ValueError("either system_prompt or llm must be provided")
         return self
@@ -1042,3 +1047,99 @@ class MemberPhonePut(BaseModel):
     phone_e164: str
 
     _validate_phone = field_validator("phone_e164")(_e164_or_error)
+
+
+# --------------------------------------------------------------------------- #
+# Standing (per-organization) BYO provider config — the public /providers
+# surface. The organization is always the one resolved from the API key, so
+# it never appears in a request body or path here.
+#
+# These are the public contract: their names become the OpenAPI component
+# names, and from there the Go CLI's and SDK's type names. The internal
+# console router (``routes/internal/provider_config.py``) keeps its own
+# request models; it is not refactored, and its handlers return bare dicts —
+# the response models below are what give the public routes a schema.
+#
+# ``params`` stays a free-form object on the wire: its shape depends on the
+# layer, and the canonical per-layer schemas are ``LLMParams`` / ``TTSParams``
+# / ``STTParams`` in ``hailhq.core.provider_config``, which the route
+# validates against (422 on a mismatch).
+# --------------------------------------------------------------------------- #
+
+
+class ProviderConfigUpsert(BaseModel):
+    """Body of ``PUT /providers/{layer}`` — save and activate one provider.
+
+    A partial write. Fields you omit keep the value already saved for this
+    ``(layer, provider)`` pair: omit ``api_key`` to edit params without
+    resending the key, send only the ``params`` keys you want to change,
+    and omit ``fallback_enabled`` to leave the flag as it is. The merged
+    result is what gets validated against the layer's schema (422 on a
+    mismatch), so a partial write can never leave an invalid config behind.
+
+    Rows are keyed by ``(organization, layer, provider)``, so writing a
+    *different* provider for the same layer starts from scratch rather than
+    inheriting the previous provider's params. On a brand-new row
+    ``fallback_enabled`` defaults to ``false``.
+
+    Keys are write-only: no response ever echoes one back.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    provider: str
+    api_key: str | None = None
+    params: dict[str, Any] = Field(default_factory=dict)
+    fallback_enabled: bool | None = None
+
+
+class ProviderActivateRequest(BaseModel):
+    """Body of ``POST /providers/{layer}/activate``."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    provider: str
+
+
+class ProviderValidateRequest(BaseModel):
+    """Body of ``POST /providers/{layer}/validate`` — a live key probe.
+
+    All fields optional: with an empty body the layer's active provider and
+    its stored key are tested. ``provider`` tests that provider's stored key
+    instead. ``api_key`` tests a key that has not been saved yet.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    api_key: str | None = None
+    provider: str | None = None
+    params: dict[str, Any] = Field(default_factory=dict)
+
+
+class ProviderConfigEntry(BaseModel):
+    """One saved provider row. Write-only key: ``key_last4`` and
+    ``key_set_at`` are the only key-derived fields that leave the API.
+
+    Every field is required (``key_last4``/``key_set_at`` nullable): the
+    serializer always emits all of them, and required response fields
+    generate plain values instead of pointers in the Go CLI's client.
+    """
+
+    layer: Literal["llm", "tts", "stt"]
+    provider: str
+    key_last4: str | None
+    key_set_at: str | None
+    params: dict[str, Any]
+    fallback_enabled: bool
+    is_active: bool
+
+
+class ProviderConfigListResponse(BaseModel):
+    providers: list[ProviderConfigEntry]
+
+
+class ProviderValidateResult(BaseModel):
+    """Outcome of a live provider-key probe."""
+
+    status: str
+    message: str | None

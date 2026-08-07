@@ -7,14 +7,9 @@ when fields change. A future task will codegen these from
 ``openapi/openapi.yaml``; until then the duplication is intentional and
 audited by hand.
 
-Two intentional deviations from core:
+One intentional deviation from core:
 
-1. ``CallCreate`` enforces the CLI's mode-A/B rules (mirroring
-   ``cli/internal/cmd/call.go::validateMode``): exactly one of
-   ``system_prompt`` / a fully-populated ``llm`` block must be
-   provided. Core's validator is looser (it allows both); the SDK
-   matches the CLI so the public surfaces agree.
-2. ``CallCreate`` is configured with ``populate_by_name=True`` so
+1. ``CallCreate`` is configured with ``populate_by_name=True`` so
    ``CallCreate(from_="+1...")`` works at the Python boundary while
    ``model_dump(by_alias=True)`` still emits ``"from"`` on the wire.
 """
@@ -86,8 +81,10 @@ NumberType = Literal["local", "mobile", "toll_free", "national"]
 class CallCreate(BaseModel):
     """Body shape for ``POST /calls``.
 
-    Mode A: pass ``system_prompt``. Mode B: pass a full ``llm`` block. Exactly
-    one is required (mirrors the CLI's ``--prompt`` vs. ``--llm-*`` rule).
+    Mode A: pass ``system_prompt``. Mode B: pass a full ``llm`` block. At
+    least one is required; both together is allowed and means "run this
+    prompt on my own endpoint" (mirrors the CLI's ``--prompt`` /
+    ``--llm-*`` rule).
     """
 
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
@@ -116,13 +113,11 @@ class CallCreate(BaseModel):
     _validate_e164 = field_validator("to", "from_")(_e164_or_error)
 
     @model_validator(mode="after")
-    def _exactly_one_mode(self) -> CallCreate:
+    def _prompt_or_llm(self) -> CallCreate:
+        """Mirrors ``hailhq.core.schemas.CallCreate._prompt_or_llm``: at
+        least one of the two, both together permitted."""
         has_prompt = self.system_prompt is not None and self.system_prompt != ""
         has_llm = self.llm is not None
-        if has_prompt and has_llm:
-            raise ValueError(
-                "system_prompt and llm are mutually exclusive (use one mode)"
-            )
         if not has_prompt and not has_llm:
             raise ValueError("must provide either system_prompt or a full llm block")
         return self
@@ -636,6 +631,44 @@ class EmailDomainListResponse(BaseModel):
     next_cursor: str | None = None
 
 
+# --------------------------------------------------------------------------- #
+# Standing (per-organization) BYO provider config — ``/providers``.
+# --------------------------------------------------------------------------- #
+
+ProviderLayer = Literal["llm", "tts", "stt"]
+
+
+class ProviderConfigEntry(BaseModel):
+    """One saved provider row for the caller's organization.
+
+    Keys are write-only: the API returns ``key_last4`` and ``key_set_at``
+    and never the key itself. ``params`` is layer-shaped — ``base_url`` and
+    ``model`` for ``llm``, ``voice_id``/``model`` for ``tts``, ``model``
+    for ``stt``.
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    layer: ProviderLayer
+    provider: str
+    key_last4: str | None
+    key_set_at: str | None
+    params: dict[str, Any]
+    fallback_enabled: bool
+    is_active: bool
+
+
+class ProviderConfigListResponse(BaseModel):
+    providers: list[ProviderConfigEntry]
+
+
+class ProviderValidateResult(BaseModel):
+    """Outcome of a live provider-key probe."""
+
+    status: str
+    message: str | None
+
+
 __all__ = [
     "DOMAIN_NAME",
     "E164",
@@ -668,6 +701,10 @@ __all__ = [
     "NumberType",
     "PhoneNumberListResponse",
     "PhoneNumberResponse",
+    "ProviderConfigEntry",
+    "ProviderConfigListResponse",
+    "ProviderLayer",
+    "ProviderValidateResult",
     "SenderIdResponse",
     "SmsCreate",
     "SmsListResponse",

@@ -54,7 +54,8 @@ Provide either:
 or all three of:
   --llm-url, --llm-key, --llm-model   (mode B — bring your own OpenAI-compatible endpoint)
 
-Mode A and mode B are mutually exclusive; supply exactly one.
+At least one is required. Supply both to run your prompt on your own
+endpoint — it receives Hail's voice preamble plus your prompt.
 
 To stream events across the whole org, see ` + "`hail tail`" + ` (top-level);
 for one call, ` + "`hail call tail <id>`" + ` is sugar over the same loop.
@@ -156,15 +157,14 @@ func runCall(cmd *cobra.Command, opts *Options, f *callFlags, toNumber string) e
 	return printCall(opts, resp.JSON201)
 }
 
-// validateMode enforces that exactly one of mode A or mode B is in play.
+// validateMode enforces that at least one of mode A or mode B is in play.
+// The two combine: --prompt alongside --llm-* runs the caller's prompt on
+// the caller's endpoint. The --llm-* flags stay all-or-none.
 func validateMode(cmd *cobra.Command, f *callFlags) error {
 	hasPrompt := f.prompt != ""
 	hasAnyLLM := f.llmURL != "" || f.llmKey != "" || f.llmModel != ""
 	hasFullLLM := f.llmURL != "" && f.llmKey != "" && f.llmModel != ""
 
-	if hasPrompt && hasAnyLLM {
-		return helpAndFail(cmd, "--prompt and --llm-* are mutually exclusive (use one mode)")
-	}
 	if !hasPrompt && !hasAnyLLM {
 		return helpAndFail(cmd, "must provide either --prompt or all of --llm-url --llm-key --llm-model")
 	}

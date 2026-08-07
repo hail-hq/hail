@@ -112,6 +112,35 @@ def test_build_instructions_adds_caller_boundary_header() -> None:
     assert out.index("# Caller instructions") < out.index(caller)
 
 
+def test_build_instructions_composes_for_a_mode_b_call_with_a_prompt() -> None:
+    """A mode B dispatch (BYO ``llm``) that also carries a ``system_prompt``
+    gets the same composition as mode A: preamble first, caller prompt after.
+
+    This is the combination `POST /calls` now accepts — nothing here is
+    mode-aware, which is why no voicebot change was needed for it.
+    """
+    caller = "You are calling Dr. Lee's office to book a teeth cleaning."
+    raw = json.dumps(
+        {
+            "call_id": "11111111-1111-1111-1111-111111111111",
+            "system_prompt": caller,
+            "llm": {
+                "base_url": "https://byo.example.com/v1",
+                "api_key": "k",
+                "model": "m",
+            },
+        }
+    )
+    metadata = parse_metadata(raw)
+    assert metadata["llm"]["model"] == "m"  # this really is a mode B call
+
+    out = build_instructions(metadata.get("system_prompt"))
+
+    assert out.startswith(VOICE_PREAMBLE)
+    assert caller in out
+    assert out.index(VOICE_PREAMBLE) < out.index(caller)
+
+
 def test_voice_preamble_frames_the_channel() -> None:
     """The preamble explicitly addresses the observed failure modes."""
     low = VOICE_PREAMBLE.lower()

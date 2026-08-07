@@ -17,7 +17,9 @@ hail call list
 hail call tail <id>       # follow the event stream for one call
 ```
 
-`hail call` flags: `--prompt` (mode A) or `--llm-url`/`--llm-key`/`--llm-model` (mode B), `--from`, `--first-message`, `--ai-disclosure`, `--tools`, `--idempotency-key`, plus the consent flags.
+`hail call` flags: `--prompt` (mode A) and/or `--llm-url`/`--llm-key`/`--llm-model` (mode B) — at least one is required, and passing both runs your prompt on your own endpoint — `--from`, `--first-message`, `--ai-disclosure`, `--tools`, `--idempotency-key`, plus the consent flags.
+
+To point a call at your own OpenAI-compatible endpoint, see [Bring your own LLM](byo-llm.md) — it has the wire contract and an endpoint you can run in five minutes.
 
 Language support:
 
@@ -110,6 +112,29 @@ hail contacts clear-phone me
 ```
 
 `create` requires one of `--phone` / `--email`. `list` takes `--q`, `--limit`, `--cursor`, `--all`.
+
+## Providers
+
+Standing BYO provider config for the org's `llm`, `tts`, and `stt` layers — the same rows the console's Providers page writes. Applies to every call unless that call carries its own `--llm-*` block. See [byo-llm.md](./byo-llm.md).
+
+```bash
+# Save a provider and make it active ('--key -' reads the key from stdin,
+# keeping it out of shell history)
+printf '%s' "$MY_KEY" | hail providers set llm \
+  --provider openai-compatible --base-url https://you.example.com/v1 \
+  --model demo --key -
+
+hail providers list                          # all layers; keys show as …ABCD
+hail providers test llm                      # probe the stored key, live
+hail providers activate llm --provider anthropic
+hail providers delete llm anthropic
+```
+
+`set` requires only `--provider`. Params are per layer: `--model` (required by the `llm` layer, optional for `tts`/`stt`), `--base-url` (required by the `openai-compatible` LLM provider, rejected by the others), `--voice-id` (`tts` only). `--fallback` lets a failure of your provider fall through to Hail's own keys; `--fallback=false` turns it back off.
+
+`set` is a partial write — it changes only the flags you pass and preserves everything else on the row, so `hail providers set tts --provider cartesia --model sonic-3` keeps the saved `voice_id` and the saved fallback setting. Omitting `--key` likewise keeps the stored key. Config is per provider, so a different `--provider` for the same layer starts a fresh row instead of inheriting the previous one's params. `test` takes `--provider` to probe a saved-but-inactive provider instead of the active one. Aliases: `list`→`ls`, `delete`→`rm`.
+
+Keys are write-only: no command can print one back, only the last four characters and when it was set. The org comes from your API key — it is never an argument.
 
 ## Events
 

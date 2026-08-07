@@ -32,19 +32,21 @@ def test_call_create_mode_b_valid() -> None:
     assert "system_prompt" not in dumped
 
 
-def test_call_create_rejects_both_modes() -> None:
-    with pytest.raises(ValidationError) as exc:
-        CallCreate(
-            to="+14155551234",
-            system_prompt="be polite",
-            recipient_consent=True,
-            llm=LLMConfig(
-                base_url="https://api.openai.com/v1",
-                api_key="sk-x",
-                model="gpt-4o-mini",
-            ),
-        )
-    assert "mutually exclusive" in str(exc.value)
+def test_call_create_accepts_both_modes() -> None:
+    """Prompt + BYO endpoint together: both survive onto the wire body."""
+    body = CallCreate(
+        to="+14155551234",
+        system_prompt="be polite",
+        recipient_consent=True,
+        llm=LLMConfig(
+            base_url="https://api.openai.com/v1",
+            api_key="sk-x",
+            model="gpt-4o-mini",
+        ),
+    )
+    dumped = body.model_dump(by_alias=True, exclude_none=True)
+    assert dumped["system_prompt"] == "be polite"
+    assert dumped["llm"]["model"] == "gpt-4o-mini"
 
 
 def test_call_create_rejects_neither_mode() -> None:

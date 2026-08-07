@@ -186,10 +186,16 @@ async def test_place_call_mode_b_byo_endpoint(client: HailClient) -> None:
 
 
 @respx.mock
-async def test_place_call_rejects_both_modes(client: HailClient) -> None:
-    route = respx.post(f"{_BASE_URL}/calls").mock(
-        return_value=httpx.Response(201, json=_call_response())
-    )
+async def test_place_call_accepts_both_modes(client: HailClient) -> None:
+    """Prompt + BYO endpoint together reach the API with both fields."""
+    captured: dict[str, str] = {}
+
+    def _handler(request: httpx.Request) -> httpx.Response:
+        captured["body"] = request.read().decode("utf-8")
+        return httpx.Response(201, json=_call_response())
+
+    respx.post(f"{_BASE_URL}/calls").mock(side_effect=_handler)
+
     result = await tools.place_call(
         client=client,
         recipient_consent=True,
@@ -197,9 +203,15 @@ async def test_place_call_rejects_both_modes(client: HailClient) -> None:
         system_prompt="be polite",
         llm={"base_url": "https://api.example.com/v1", "api_key": "k", "model": "m"},
     )
-    assert "error" in result
-    assert "mutually exclusive" in result["error"]
-    assert not route.called  # short-circuited before HTTP
+    assert "error" not in result, result
+
+    body = httpx.Response(200, content=captured["body"]).json()
+    assert body["system_prompt"] == "be polite"
+    assert body["llm"] == {
+        "base_url": "https://api.example.com/v1",
+        "api_key": "k",
+        "model": "m",
+    }
 
 
 @respx.mock

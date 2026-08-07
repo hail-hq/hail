@@ -13,6 +13,11 @@ Verified 2026-04-28 against:
   and ``on()`` (inherits ``rtc.EventEmitter``).
 * ``livekit-agents/livekit/agents/voice/events.py`` — event type strings
   (``conversation_item_added``, ``function_tools_executed``, ``error``).
+
+Verified 2026-08-06 against livekit-agents 1.6.6 for the mode B give-up
+(:func:`arm_byo_llm_giveup`): ``llm/llm.py`` (``LLMError.recoverable``),
+``voice/events.py`` (``ErrorEvent.error`` union / ``ConversationItemAddedEvent``),
+``voice/agent_activity.py`` and ``voice/agent_session.py`` (``_on_error``).
 """
 
 from __future__ import annotations
@@ -55,6 +60,7 @@ from hailhq.voicebot.recording import upload_recording
 from hailhq.voicebot.tools import build_agent_tools
 from livekit import rtc
 from livekit.agents import Agent, JobContext, JobProcess
+from livekit.agents.llm import LLMError
 from livekit.agents.voice import AgentSession
 from livekit.plugins import silero
 from sqlalchemy import select, update
@@ -540,6 +546,25 @@ SOFT_CAP_ANNOUNCEMENT = (
 # matches the call_end_reason ENUM so it can land directly in the calls row.
 SOFT_CAP_END_REASON: str = CallEndReason.SOFT_CAP_REACHED.value
 
+
+# Consecutive non-recoverable LLM errors tolerated on a mode B (per-call BYO)
+# call before Hail gives up on the endpoint. Hardcoded on purpose: one
+# transient failure has to be tolerated and a persistently dead endpoint has
+# to end the call promptly — there is no operator decision between those, so
+# there is no env var.
+MAX_CONSECUTIVE_LLM_ERRORS = 3
+
+# Spoken once, right before the give-up hangup. Fixed text: the endpoint that
+# would normally compose a line is exactly what is broken.
+BYO_LLM_FAILURE_ANNOUNCEMENT = (
+    "Sorry, I'm having trouble reaching the service that powers this call, "
+    "so I have to end it here. Goodbye."
+)
+
+# Shutdown reason passed to ctx.shutdown() when the BYO endpoint is given up
+# on. Value matches the call_end_reason ENUM, like SOFT_CAP_END_REASON.
+BYO_LLM_FAILURE_END_REASON: str = CallEndReason.LLM_ENDPOINT_FAILED.value
+
 # Reasons the LiveKit Agents SDK closes the session on automatically. Mirror
 # of livekit-agents 1.5.x `room_io.types.DEFAULT_CLOSE_ON_DISCONNECT_REASONS`.
 # Encoded locally because that module is not part of the public surface.
@@ -721,6 +746,119 @@ async def soft_cap_announce_and_hangup(
     if on_fire is not None:
         on_fire()
     ctx.shutdown(reason=SOFT_CAP_END_REASON)
+
+
+def arm_byo_llm_giveup(
+    ctx: JobContext,
+    session: AgentSession,
+    call_id: UUID,
+    tasks: set[asyncio.Task[None]],
+    on_fire: Callable[[], None] | None = None,
+) -> None:
+    """End the call after 3 consecutive non-recoverable LLM errors.
+
+    Mode B only (a per-call ``llm`` block in dispatch metadata). Mode B has
+    no failover by design and, before this, no give-up either: an endpoint
+    that 500s every turn burned the caller's minutes until the wall-clock
+    soft cap. Mode A fails over across the house chain and mode C either
+    falls back (``fallback_enabled``) or already fails fast at session build
+    as ``provider_key_error``, so neither arms this.
+
+    **Counting on the session ``error`` event is the safety property here**,
+    not an implementation detail. A caller interrupting the agent mid-sentence
+    (barge-in) cancels the in-flight LLM stream with
+    :class:`asyncio.CancelledError`, which is a ``BaseException`` and so never
+    reaches the plugin's ``except Exception`` — it is never classified as an
+    :class:`~livekit.agents.llm.LLMError` at all. A wrapper counting failures
+    around ``LLM.chat()`` would see that cancellation as a failure and could
+    hang up on a healthy, talkative caller. This path cannot make that
+    mistake: LiveKit classifies the failure before Hail sees it.
+
+    Only ``LLMError`` with ``recoverable=False`` counts. ``ErrorEvent.error``
+    is a union (``LLMError | STTError | TTSError | RealtimeModelError | ...``)
+    and the STT/TTS members carry a ``recoverable`` flag of their own, so the
+    ``isinstance`` check is what keeps a dying TTS from being blamed on the
+    caller's endpoint. Recoverable errors are the plugin's own retry ladder
+    and are not evidence of anything yet.
+
+    The counter resets on ``conversation_item_added`` with an assistant item —
+    proof that a turn actually completed. NB ``session.say()`` defaults to
+    ``add_to_chat_ctx=True``, so Hail's own spoken lines (disclosure,
+    ``first_message``, the deferred IVR greeting, the soft cap, the goodbye
+    below) also emit assistant items and also reset the counter. Harmless in
+    practice: they all happen at the start of the call (counter already 0),
+    at its very end, or — for the deferred greeting — once, right after a
+    keypress.
+
+    On the threshold, the fired latch is set **synchronously inside the event
+    handler** so a fourth error arriving while the goodbye is still playing is
+    a no-op, then the goodbye + hangup runs as a task (LiveKit dispatches
+    sync callbacks). Ordering mirrors :func:`soft_cap_announce_and_hangup`:
+    speak, wait for playout, stamp ``end_reason`` via ``on_fire``, *then*
+    ``ctx.shutdown()`` — the stamp has to precede shutdown or
+    ``_on_session_close`` maps the bare ``job_shutdown`` to
+    ``worker_shutdown``.
+
+    Verified 2026-08-06 against installed livekit-agents 1.6.6:
+    ``llm/llm.py`` (``LLMError`` fields ``timestamp``/``label``/``error``/
+    ``recoverable``; ``_emit_error(..., recoverable=False)`` only from
+    ``except APIError`` / ``except Exception``), ``voice/events.py``
+    (``ErrorEvent.error`` union, ``ConversationItemAddedEvent.item``),
+    ``voice/agent_activity.py::_on_error`` (LLM errors re-emitted on the
+    session as ``"error"``), and ``voice/agent_session.py::_on_error``
+    (the SDK's own breaker closes the session only *after*
+    ``max_unrecoverable_errors=3`` is exceeded, i.e. on the 4th — so this
+    fires first and the call ends with a spoken goodbye and a precise
+    ``llm_endpoint_failed`` instead of a silent ``agent_error``).
+    """
+    consecutive = {"errors": 0}
+    fired = {"value": False}
+
+    async def _announce_and_hangup() -> None:
+        logger.warning(
+            "call_id=%s BYO llm endpoint failed %d consecutive turns — ending call",
+            call_id,
+            MAX_CONSECUTIVE_LLM_ERRORS,
+        )
+        try:
+            handle = session.say(
+                BYO_LLM_FAILURE_ANNOUNCEMENT, allow_interruptions=False
+            )
+            await handle.wait_for_playout()
+        except Exception:
+            logger.exception(
+                "call_id=%s BYO llm goodbye failed; proceeding to hangup", call_id
+            )
+        if on_fire is not None:
+            on_fire()
+        ctx.shutdown(reason=BYO_LLM_FAILURE_END_REASON)
+
+    @session.on("error")
+    def _on_llm_error(ev: Any) -> None:
+        if fired["value"]:
+            return
+        error = getattr(ev, "error", None)
+        if not isinstance(error, LLMError) or error.recoverable:
+            return
+        consecutive["errors"] += 1
+        logger.warning(
+            "call_id=%s non-recoverable llm error %d/%d: %s",
+            call_id,
+            consecutive["errors"],
+            MAX_CONSECUTIVE_LLM_ERRORS,
+            str(error.error)[:200],
+        )
+        if consecutive["errors"] < MAX_CONSECUTIVE_LLM_ERRORS:
+            return
+        fired["value"] = True
+        task = asyncio.ensure_future(_announce_and_hangup())
+        tasks.add(task)
+        task.add_done_callback(tasks.discard)
+
+    @session.on("conversation_item_added")
+    def _on_assistant_turn(ev: Any) -> None:
+        if getattr(ev.item, "role", None) == "assistant":
+            consecutive["errors"] = 0
 
 
 async def mark_call_answered(call_id: UUID) -> bool:
@@ -1243,6 +1381,23 @@ async def entrypoint(ctx: JobContext) -> None:
             )
         )
 
+    if llm_cfg is not None:
+        # Mode B (per-call BYO endpoint) only — see arm_byo_llm_giveup. Mode A
+        # fails over across the house chain; mode C either falls back or
+        # already failed fast above as provider_key_error.
+        #
+        # status='failed' alongside the reason, matching every other member of
+        # the agent-failure group (agent_error, worker_shutdown,
+        # provider_key_error): the call ended because the brain never worked.
+        # Billing is unaffected — on_call_end bills on `answered_at`.
+        def _on_byo_llm_giveup() -> None:
+            captured["end_reason"] = CallEndReason.LLM_ENDPOINT_FAILED.value
+            captured["status"] = "failed"
+
+        arm_byo_llm_giveup(
+            ctx, session, call_id, event_tasks, on_fire=_on_byo_llm_giveup
+        )
+
     async def _shutdown() -> None:
         if soft_cap_task is not None and not soft_cap_task.done():
             soft_cap_task.cancel()
@@ -1347,13 +1502,17 @@ async def entrypoint(ctx: JobContext) -> None:
 
 __all__ = [
     "AI_DISCLOSURE_LINE",
+    "BYO_LLM_FAILURE_ANNOUNCEMENT",
+    "BYO_LLM_FAILURE_END_REASON",
     "DTMF_TOOL_NAME",
+    "MAX_CONSECUTIVE_LLM_ERRORS",
     "SIP_CALL_STATUS_ACTIVE",
     "SIP_CALL_STATUS_ATTRIBUTE",
     "SOFT_CAP_ANNOUNCEMENT",
     "SOFT_CAP_END_REASON",
     "VOICE_PREAMBLE",
     "SpeechSanitizingAgent",
+    "arm_byo_llm_giveup",
     "arm_deferred_greeting",
     "attach_event_handlers",
     "build_instructions",

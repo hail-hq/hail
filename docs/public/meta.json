@@ -2,6 +2,7 @@
   "pages": [
     "README",
     "architecture",
+    "byo-llm",
     "setup",
     "cli",
     "operations",

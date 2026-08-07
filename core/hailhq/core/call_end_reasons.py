@@ -45,10 +45,16 @@ class CallEndReason(StrEnum):
     # voicebot-side anomalies
     AGENT_ERROR = "agent_error"
     WORKER_SHUTDOWN = "worker_shutdown"
-    # A BYO provider key was rejected at session build (v1 only classifies
-    # session-build failures; a mid-call provider failure maps to
-    # agent_error) and the org had fallback disabled - fails fast by design.
+    # A BYO provider key was rejected at session build and the org had
+    # fallback disabled - fails fast by design. Mid-call provider failures
+    # map to agent_error, except a per-call (mode B) BYO llm endpoint that
+    # fails repeatedly, which maps to llm_endpoint_failed below.
     PROVIDER_KEY_ERROR = "provider_key_error"
+    # A per-call BYO llm endpoint (mode B) returned non-recoverable errors on
+    # 3 consecutive turns. Mode B has no failover by design, so the voicebot
+    # says a short goodbye and ends the call instead of burning the caller's
+    # minutes until the wall-clock soft cap.
+    LLM_ENDPOINT_FAILED = "llm_endpoint_failed"
 
     # backstop (sweeper force-released the call after max_duration + grace)
     SWEEPER_TIMEOUT = "sweeper_timeout"

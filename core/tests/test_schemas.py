@@ -41,16 +41,18 @@ def test_call_create_requires_prompt_or_llm():
         CallCreate(to="+14155551234", recipient_consent=True)
 
 
-def test_call_create_rejects_prompt_and_llm_together():
-    with pytest.raises(ValidationError, match="mutually exclusive"):
-        CallCreate(
-            to="+14155551234",
-            system_prompt="Hi",
-            llm=LLMConfig(
-                base_url="https://byo.example.com/v1", api_key="k", model="m"
-            ),
-            recipient_consent=True,
-        )
+def test_call_create_accepts_prompt_and_llm_together():
+    """Mode B plus a task prompt is a legitimate combination — the voicebot's
+    ``build_instructions`` composes the preamble + prompt for either LLM."""
+    req = CallCreate(
+        to="+14155551234",
+        system_prompt="Hi",
+        llm=LLMConfig(base_url="https://byo.example.com/v1", api_key="k", model="m"),
+        recipient_consent=True,
+    )
+    assert req.system_prompt == "Hi"
+    assert req.llm is not None
+    assert req.llm.model == "m"
 
 
 def test_call_create_requires_recipient_consent_field():
