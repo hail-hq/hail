@@ -33,7 +33,7 @@ Do these steps:
 Then get an API key. There are two procedures:
 
 - **Hail Cloud** (managed at hail.so): Run `hail login`. The command starts the device flow. It writes an API key to `~/.hail/credentials.json`.
-- **Self-host**: Put an API key into your local database. Refer to [docs/public/operations.md](docs/public/operations.md), section "First-run DB seed". Then set the environment variable `HAIL_API_KEY`, or give the `--api-key` option.
+- **Self-host**: Put an API key into your local database. Refer to [docs/public/self-host/operations.md](docs/public/self-host/operations.md), section "First-run DB seed". Then set the environment variable `HAIL_API_KEY`, or give the `--api-key` option.
 
 Use the CLI (for persons who write scripts for Hail):
 
@@ -100,7 +100,7 @@ This is `hail tail` in operation:
 
 ![Animated terminal demo of hail tail streaming live call events](docs/assets/gifs/hail-tail-live-stream.gif)
 
-For the full setup, refer to [docs/public/setup/twilio.md](docs/public/setup/twilio.md), [docs/public/setup/livekit-cloud.md](docs/public/setup/livekit-cloud.md), [docs/public/setup/aws-ses.md](docs/public/setup/aws-ses.md), and [docs/public/setup/mcp.md](docs/public/setup/mcp.md).
+For the full setup, refer to [docs/public/self-host/twilio.md](docs/public/self-host/twilio.md), [docs/public/self-host/livekit-cloud.md](docs/public/self-host/livekit-cloud.md), [docs/public/self-host/aws-ses.md](docs/public/self-host/aws-ses.md), and [docs/public/mcp.md](docs/public/mcp.md).
 
 ## Tenets
 
@@ -171,7 +171,7 @@ A checked box shows a feature that we released. The changelog for each artifact 
   - [x] `hail` binary via GitHub Releases
 - MCP server
   - [x] Remote Streamable HTTP endpoint included with each Hail deployment
-  - ~~PyPI stdio package~~ — we do not supply this package; refer to [docs/public/setup/mcp.md](docs/public/setup/mcp.md)
+  - ~~PyPI stdio package~~ — we do not supply this package; refer to [docs/public/mcp.md](docs/public/mcp.md)
 - Python SDK
   - [x] `hail-sdk` on PyPI, imports as `hail`
 

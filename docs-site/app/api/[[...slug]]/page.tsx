@@ -20,9 +20,15 @@ function ApiIndex() {
       <DocsBody>
         <h1>API Reference</h1>
         <p>
-          Hail exposes a REST API. Every endpoint below is generated from{" "}
+          Hail exposes a REST API at <code>https://api.hail.so</code>. Every endpoint
+          below is generated from{" "}
           <code>openapi/openapi.yaml</code>, the canonical contract that CI verifies
           against the live service, so this reference never drifts from the code.
+        </p>
+        <p>
+          Machine-readable spec:{" "}
+          <a href="/docs/api/openapi.yaml">openapi.yaml</a> ·{" "}
+          <a href="/docs/api/openapi.json">openapi.json</a>
         </p>
         <ul>
           {pages.map((page) => (

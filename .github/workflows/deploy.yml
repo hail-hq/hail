@@ -109,7 +109,7 @@ jobs:
             COMPOSE="docker compose -f docker-compose.yml -f docker-compose.prod.yml"
             $COMPOSE pull
 
-            # Migration safety. See docs/public/operations.md → "Migration discipline".
+            # Migration safety. See docs/public/self-host/operations.md → "Migration discipline".
             # alembic current + --sql print the diff in the deploy log before
             # anything mutates. Statement and lock timeouts are set inside
             # env.py via SET LOCAL (so they survive Neon/PgBouncer-style

@@ -230,4 +230,4 @@ POST /webhooks   {"target_url": "https://example.com/hooks/hail",
 The `event_types` enum and request/response schemas are in
 [`openapi/openapi.yaml`](https://github.com/hail-hq/hail/blob/main/openapi/openapi.yaml) (`WebhookSubscriptionCreate`).
 The CLI has no `webhooks` command group — for the full endpoint list, refer to
-[the CLI reference](../cli.md#webhooks).
+[the CLI reference](./cli.md#webhooks).

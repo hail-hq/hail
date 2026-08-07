@@ -6,6 +6,9 @@ info:
     \ source of truth for the Go CLI. Regenerate it after\nchanging API routes \u2014\
     \ see docs/public/contributing.md.\n"
   version: 0.1.0
+servers:
+  - url: https://api.hail.so
+    description: Hail Cloud
 paths:
   /calls:
     post:

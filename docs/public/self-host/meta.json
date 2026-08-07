@@ -1,4 +1,12 @@
 {
   "title": "Self-hosting",
-  "pages": ["vm-deploy", "smtp-inbound"]
+  "pages": [
+    "README",
+    "vm-deploy",
+    "livekit-cloud",
+    "twilio",
+    "aws-ses",
+    "smtp-inbound",
+    "operations"
+  ]
 }

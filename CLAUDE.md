@@ -21,7 +21,7 @@ web/        — Next.js workspace for the interactive costs surface (/costs, /co
 
 **PyPI posture for v1**: one external artifact — the Python SDK, published as `hail-sdk` (imports as `import hail`). The internal services `hailhq-api`, `hailhq-voicebot`, `hailhq-mcp` all carry `Private :: Do Not Upload`. `hailhq-core` is not marked private but is not released in v1 either — it's an internal workspace dep.
 
-**MCP distribution**: remote Streamable HTTP only. We deliberately do **not** ship a stdio PyPI package. Reasoning lives in [docs/public/setup/mcp.md](docs/public/setup/mcp.md) — read it before proposing a stdio server; the default answer is "no, use the remote HTTP endpoint".
+**MCP distribution**: remote Streamable HTTP only. We deliberately do **not** ship a stdio PyPI package. Reasoning lives in [docs/public/mcp.md](docs/public/mcp.md) — read it before proposing a stdio server; the default answer is "no, use the remote HTTP endpoint".
 
 Internal packages share the `hailhq.*` namespace (PEP 420 implicit — **no** `hailhq/__init__.py` at the namespace root). The import name `hail` is **reserved** for the external SDK (`hail-sdk` on PyPI); do not introduce top-level `hail` modules inside the monorepo.
 
@@ -60,7 +60,7 @@ Go CLI module path is `github.com/hail-hq/hail/cli`. npm packages are published 
 The base `docker-compose.yml` assumes `DATABASE_URL` reaches a Postgres you bring; `docker-compose.local.yml` is a thin overlay that adds the local `postgres` container and wires `depends_on` for `api` and `voicebot`.
 
 For the comprehensive operations runbook (releases, deployment, DB switching,
-known footguns), see [docs/public/operations.md](docs/public/operations.md). **AI agents
+known footguns), see [docs/public/self-host/operations.md](docs/public/self-host/operations.md). **AI agents
 picking up this codebase: read it before making any infra-shaped change.**
 
 ## Style

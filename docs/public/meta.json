@@ -1,11 +1,11 @@
 {
   "pages": [
     "README",
-    "architecture",
+    "mcp",
+    "webhooks",
     "byo-llm",
-    "setup",
     "cli",
-    "operations",
+    "architecture",
     "self-host",
     "contributing"
   ]

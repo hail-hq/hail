@@ -52,7 +52,7 @@ number, regardless of this setting.
 **Rate limits.** Per-organization send velocity is capped by
 `HAIL_VELOCITY_SMS_PER_HOUR` (default 100) and `HAIL_VELOCITY_SMS_PER_DAY`
 (default 1000). An abuse monitor suspends an organization's SMS channel when its
-opt-out rate is too high — see [operations](../operations.md) for the
+opt-out rate is too high — see [operations](./operations.md) for the
 `HAIL_SMS_ABUSE_*` variables and how to lift a suspension.
 
 ## 5. Inbound SMS & opt-out

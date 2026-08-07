@@ -14,7 +14,7 @@ When it is released, this page will describe:
 - self-host quickstart
 
 Until then, use the SES-backed inbound path documented in
-[`docs/setup/aws-ses.md`](../setup/aws-ses.md). If you must avoid AWS, file an
+[`docs/setup/aws-ses.md`](./aws-ses.md). If you must avoid AWS, file an
 issue that tracks your need. Then we can give the SMTP listener priority.
 
 ## References

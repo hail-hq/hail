@@ -1,6 +1,6 @@
 # Contributing
 
-For the full operational runbook (releases, deployment, DB switching, all the known problems), refer to [Operations](./operations.md). This page covers the contribution flow only.
+For the full operational runbook (releases, deployment, DB switching, all the known problems), refer to [Operations](./self-host/operations.md). This page covers the contribution flow only.
 
 ## Setup
 

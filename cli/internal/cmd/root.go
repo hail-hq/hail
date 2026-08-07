@@ -247,7 +247,7 @@ func NewRootCmd(stdout, stderr io.Writer, getenv func(string) string) *cobra.Com
 
 Works with Hail Cloud (the managed offering at https://hail.so) and self-hosted
 deployments. Cloud users authenticate via ` + "`hail login`" + `; self-hosters seed an
-API key into their local stack (see docs/public/operations.md) and set HAIL_API_KEY
+API key into their local stack (see docs/public/self-host/operations.md) and set HAIL_API_KEY
 or pass --api-key.`,
 		SilenceUsage:  true,
 		SilenceErrors: true,

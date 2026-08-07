@@ -392,7 +392,7 @@ Component versions cut alongside this umbrella release:
 ### Deferred to next milestone
 
 - Inbound SMS: webhook receipt, STOP/HELP/START opt-out keyword processing.
-- Self-serve dedicated-number provisioning — today, assigning a number to an organization is a manual database operation; see `docs/public/operations.md`.
+- Self-serve dedicated-number provisioning — today, assigning a number to an organization is a manual database operation; see `docs/public/self-host/operations.md`.
 - Custom per-org Sender ID (international, outbound-only corridors).
 - Console UI for SMS activity, numbers, and suppression management.
 
@@ -579,7 +579,7 @@ Component versions cut alongside this umbrella release:
 
 - Terraform module under `infra/terraform/` provisions S3 (raw + attachments + lifecycle), SES Receipt Rule + Rule Set, Lambda + IAM + log group, and emits the MX record + the `set-active-receipt-rule-set` activation command.
 - Stdlib-only `infra/ses-ingest-lambda/handler.py` bridges SES events into the HMAC-signed POST.
-- Three migrations: `0006` (rename + auxiliary objects), `0007` (Email inbound columns + `email_attachments` + `email_domains` action columns + idempotency partial unique index), `0008` (`webhook_subscriptions` + `webhook_deliveries`). See `docs/public/operations.md` → "Inbound email rollout" for the staged deploy sequence.
+- Three migrations: `0006` (rename + auxiliary objects), `0007` (Email inbound columns + `email_attachments` + `email_domains` action columns + idempotency partial unique index), `0008` (`webhook_subscriptions` + `webhook_deliveries`). See `docs/public/self-host/operations.md` → "Inbound email rollout" for the staged deploy sequence.
 - `InboundProvider` interface in `core/hailhq/core/providers/email/inbound/` with `SesInboundProvider` shipping and `SmtpInboundProvider` stubbed for a future cloud-agnostic milestone.
 - Operator-facing env vars (`HAIL_INBOUND_EMAIL_NAME_PREFIX`, `HAIL_IAM_USER_NAME`) are required in `.env` — terragrunt fails fast on missing values instead of silently using a hardcoded default. The inbound bucket name is now a single source of truth (`Settings.hail_inbound_bucket` is a computed `${prefix}-raw`), so Terraform and the API can't drift.
 
