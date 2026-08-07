@@ -133,7 +133,7 @@ A checked box is a released feature. Per-artifact changelogs (GitHub Releases fo
   - [x] 39 call languages with automatic STT routing and per-language turn detection — see [docs/languages.md](docs/languages.md)
 - STT
   - [x] Deepgram
-  - [x] Speechmatics (BYO, standing config)
+  - [x] Speechmatics
   - [ ] Whisper
   - [ ] AssemblyAI
 - TTS
