@@ -12,11 +12,20 @@ service's ``LiveKitClient.dispatch_agent`` matches on this name.
 
 from __future__ import annotations
 
+import logging
+
 from hailhq.voicebot.agent import entrypoint, prewarm
+from hailhq.voicebot.pipeline import startup_capability_warnings
 from livekit.agents import WorkerOptions, cli
+
+logger = logging.getLogger("hailhq.voicebot")
 
 
 def main() -> None:
+    # Log startup capability warnings before running the app
+    for warning in startup_capability_warnings():
+        logger.warning(warning)
+
     cli.run_app(
         WorkerOptions(
             entrypoint_fnc=entrypoint,

@@ -68,6 +68,7 @@ from hailhq.core.config import settings
 from hailhq.core.db import session_scope
 from hailhq.core.languages import (
     SUPPORTED_LANGUAGES,
+    default_stt_for,
     resolve_stt_provider,
     tts_providers_for,
     turn_mode_for,
@@ -113,6 +114,7 @@ __all__ = [
     "build_tts",
     "decrypt_llm_metadata",
     "resolve_org_configs",
+    "startup_capability_warnings",
 ]
 
 
@@ -476,6 +478,55 @@ def build_stt(
             )
         return byo
     return deepgram_plugin.STT(**house_kwargs)
+
+
+def startup_capability_warnings() -> list[str]:
+    """Voicebot startup capability warnings based on configured provider keys.
+
+    Checks for missing TTS and STT provider keys and returns warning messages
+    for languages that will have degraded capability as a result.
+
+    Returns:
+        List of warning messages. Empty when all keys are configured.
+    """
+    warnings: list[str] = []
+
+    # Check for unservable TTS languages when cartesia is not configured
+    if not settings.cartesia_api_key:
+        # Determine which TTS providers are available
+        available_tts_providers = set()
+        if settings.eleven_api_key:
+            available_tts_providers.add("elevenlabs")
+
+        # Find languages that have no available TTS provider
+        unservable_langs = []
+        for code in sorted(SUPPORTED_LANGUAGES.keys()):
+            lang_tts_providers = SUPPORTED_LANGUAGES[code].tts
+            if not (lang_tts_providers & available_tts_providers):
+                unservable_langs.append(code)
+
+        if unservable_langs:
+            warnings.append(
+                f"No Cartesia key configured; the following languages have no "
+                f"usable TTS provider: {', '.join(unservable_langs)}"
+            )
+
+    # Check for speechmatics-routed languages when speechmatics is not configured
+    if not settings.speechmatics_api_key:
+        # Identify languages that route to speechmatics by default
+        speechmatics_routed = []
+        for code in sorted(SUPPORTED_LANGUAGES.keys()):
+            if default_stt_for(code) == "speechmatics":
+                speechmatics_routed.append(code)
+
+        if speechmatics_routed:
+            warnings.append(
+                f"No Speechmatics key configured; the following languages will "
+                f"fall back to Deepgram with VAD turn detection: "
+                f"{', '.join(speechmatics_routed)}"
+            )
+
+    return warnings
 
 
 def build_session(

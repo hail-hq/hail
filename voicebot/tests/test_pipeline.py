@@ -471,3 +471,149 @@ def test_build_tts_only_elevenlabs_key_with_cartesia_only_language_raises(
 
     with pytest.raises(ProviderKeyError, match="cannot speak language"):
         build_tts(language="th")
+
+
+def test_startup_capability_warnings_both_keys_returns_empty_list(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Both TTS keys configured → no warnings."""
+    from hailhq.core.config import settings
+    from hailhq.voicebot.pipeline import startup_capability_warnings
+
+    monkeypatch.setattr(settings, "cartesia_api_key", "ct-key")
+    monkeypatch.setattr(settings, "eleven_api_key", "el-key")
+    monkeypatch.setattr(settings, "speechmatics_api_key", "sm-key")
+
+    warnings = startup_capability_warnings()
+    assert warnings == []
+
+
+def test_startup_capability_warnings_cartesia_empty_eleven_set_lists_cartesia_only_languages(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Cartesia empty + ElevenLabs set → message listing exactly the 7
+    Cartesia-only languages (those in _NO_ELEVENLABS)."""
+    from hailhq.core.config import settings
+    from hailhq.voicebot.pipeline import startup_capability_warnings
+
+    monkeypatch.setattr(settings, "cartesia_api_key", "")
+    monkeypatch.setattr(settings, "eleven_api_key", "el-key")
+    monkeypatch.setattr(settings, "speechmatics_api_key", "sm-key")
+
+    warnings = startup_capability_warnings()
+    assert len(warnings) == 1
+    msg = warnings[0]
+
+    # Should list the 7 Cartesia-only languages
+    expected_langs = {"bn", "gu", "he", "kn", "te", "th", "mr"}
+    for lang in expected_langs:
+        assert lang in msg, f"Language {lang} should be in warning message"
+
+
+def test_startup_capability_warnings_cartesia_empty_eleven_empty_lists_all_tts_languages(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Cartesia empty + ElevenLabs empty → message listing all TTS-requiring
+    languages (all 40 supported languages)."""
+    from hailhq.core.config import settings
+    from hailhq.core.languages import SUPPORTED_LANGUAGES
+    from hailhq.voicebot.pipeline import startup_capability_warnings
+
+    monkeypatch.setattr(settings, "cartesia_api_key", "")
+    monkeypatch.setattr(settings, "eleven_api_key", "")
+    monkeypatch.setattr(settings, "speechmatics_api_key", "sm-key")
+
+    warnings = startup_capability_warnings()
+    assert len(warnings) == 1
+    msg = warnings[0]
+
+    # Should list all supported languages
+    for lang_code in SUPPORTED_LANGUAGES:
+        assert lang_code in msg, f"Language {lang_code} should be in warning message"
+
+
+def test_startup_capability_warnings_speechmatics_empty_lists_22_languages(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Speechmatics empty → message about 22 speechmatics-routed languages
+    falling back to Deepgram + VAD turn detection."""
+    from hailhq.core.config import settings
+    from hailhq.core.languages import default_stt_for
+    from hailhq.voicebot.pipeline import startup_capability_warnings
+
+    monkeypatch.setattr(settings, "cartesia_api_key", "ct-key")
+    monkeypatch.setattr(settings, "eleven_api_key", "el-key")
+    monkeypatch.setattr(settings, "speechmatics_api_key", "")
+
+    warnings = startup_capability_warnings()
+    assert len(warnings) == 1
+    msg = warnings[0]
+
+    # Should mention Deepgram and VAD
+    assert "Deepgram" in msg
+    assert "VAD" in msg or "silence" in msg.lower()
+
+    # Should list exactly the 22 speechmatics-routed languages
+    speechmatics_routed = {
+        code
+        for code in [
+            "ar",
+            "bg",
+            "bn",
+            "cs",
+            "da",
+            "de",
+            "el",
+            "en",
+            "es",
+            "fi",
+            "fr",
+            "gu",
+            "he",
+            "hi",
+            "hr",
+            "hu",
+            "id",
+            "it",
+            "ja",
+            "kn",
+            "ko",
+            "mr",
+            "ms",
+            "nl",
+            "no",
+            "pl",
+            "pt",
+            "ro",
+            "ru",
+            "sk",
+            "sv",
+            "ta",
+            "te",
+            "th",
+            "tl",
+            "tr",
+            "uk",
+            "vi",
+            "zh",
+        ]
+        if default_stt_for(code) == "speechmatics"
+    }
+
+    for lang in speechmatics_routed:
+        assert lang in msg, f"Speechmatics language {lang} should be in message"
+
+
+def test_startup_capability_warnings_both_keys_empty_returns_both_messages(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Both TTS and Speechmatics keys empty → two warnings."""
+    from hailhq.core.config import settings
+    from hailhq.voicebot.pipeline import startup_capability_warnings
+
+    monkeypatch.setattr(settings, "cartesia_api_key", "")
+    monkeypatch.setattr(settings, "eleven_api_key", "")
+    monkeypatch.setattr(settings, "speechmatics_api_key", "")
+
+    warnings = startup_capability_warnings()
+    assert len(warnings) == 2
