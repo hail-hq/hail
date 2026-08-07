@@ -73,7 +73,7 @@ jobs:
       # remote; they only need to satisfy GoReleaser's local git lookup.
       #
       # `-f` is required because umbrella `v<semver>` tags can already exist
-      # (see docs/public/operations.md "Cutting an umbrella release") and would
+      # (see docs/public/self-host/operations.md "Cutting an umbrella release") and would
       # collide with our mirror names. Force-replacing is safe because the
       # workflow never pushes tags back to origin.
       - name: Mirror prefix-stripped tags for GoReleaser

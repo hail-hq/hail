@@ -231,6 +231,10 @@ app = FastAPI(
         "This file is the source of truth for the Go CLI. Regenerate it after\n"
         "changing API routes — see docs/public/contributing.md.\n"
     ),
+    # Baked into openapi.yaml as `servers`, which the docs-site API reference
+    # uses as the base URL in generated code samples (otherwise they show
+    # example.com). Self-hosters substitute their own host.
+    servers=[{"url": "https://api.hail.so", "description": "Hail Cloud"}],
     lifespan=lifespan,
 )
 

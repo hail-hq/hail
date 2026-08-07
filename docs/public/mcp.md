@@ -72,7 +72,7 @@ Self-hosted deployments do not use OAuth. Set `HAIL_API_KEY` and send it as a be
 curl -H "Authorization: Bearer ${HAIL_API_KEY}" http://localhost:8081/
 ```
 
-The MCP service selects its auth mode from env at boot. For the full env-var contract, refer to the [MCP modes table in the operations runbook](../operations.md#mcp-modes) (`HAIL_AUTH_URL` for cloud, `HAIL_API_KEY` for self-host, mutually exclusive).
+The MCP service selects its auth mode from env at boot. For the full env-var contract, refer to the [MCP modes table in the operations runbook](./self-host/operations.md#mcp-modes) (`HAIL_AUTH_URL` for cloud, `HAIL_API_KEY` for self-host, mutually exclusive).
 
 ## Why remote-only (no stdio / no PyPI install)
 

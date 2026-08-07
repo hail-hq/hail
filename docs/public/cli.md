@@ -19,7 +19,7 @@ hail call tail <id>       # follow the event stream for one call
 
 `hail call` flags: `--prompt` (mode A) and/or `--llm-url`/`--llm-key`/`--llm-model` (mode B) — at least one is required, and passing both runs your prompt on your own endpoint — `--from`, `--first-message`, `--ai-disclosure`, `--tools`, `--idempotency-key`, plus the consent flags.
 
-To point a call at your own OpenAI-compatible endpoint, see [Bring your own LLM](byo-llm.md) — it has the wire contract and an endpoint you can run in five minutes.
+To point a call at your own OpenAI-compatible endpoint, see [Bring your own LLM](./byo-llm.md) — it has the wire contract and an endpoint you can run in five minutes.
 
 Language support:
 
@@ -147,7 +147,7 @@ hail tail --id call:1a2b       # narrow to one resource
 
 ## Webhooks
 
-Org-wide outbound subscriptions. Each subscription fires an HMAC-signed POST for each matching event. Hail retries failed deliveries on a fixed ladder. Refer to [setup/webhooks.md](./setup/webhooks.md) for the payload shape, the event-type list, and signature verification.
+Org-wide outbound subscriptions. Each subscription fires an HMAC-signed POST for each matching event. Hail retries failed deliveries on a fixed ladder. Refer to [setup/webhooks.md](./webhooks.md) for the payload shape, the event-type list, and signature verification.
 
 The CLI has no `webhooks` command group. Manage subscriptions through the HTTP API:
 

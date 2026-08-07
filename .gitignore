@@ -101,3 +101,4 @@ docs-site/content/api/
 .claude/workflows/
 .claude/worktrees/
 web/.claude/
+docs-site/public/api/

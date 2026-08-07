@@ -11,7 +11,7 @@ name: hail
 #                                and rebinds host ports to 127.0.0.1.
 #
 # Pick one or the other (or neither, if you bring your own managed Postgres
-# and don't need ingress). See docs/public/operations.md → "Switching the database"
+# and don't need ingress). See docs/public/self-host/operations.md → "Switching the database"
 # and docs/public/self-host/vm-deploy.md.
 
 services:

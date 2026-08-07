@@ -4,13 +4,13 @@
   "/docs/byo-llm",
   "/docs/cli",
   "/docs/contributing",
-  "/docs/operations",
+  "/docs/mcp",
+  "/docs/self-host",
+  "/docs/self-host/aws-ses",
+  "/docs/self-host/livekit-cloud",
+  "/docs/self-host/operations",
   "/docs/self-host/smtp-inbound",
+  "/docs/self-host/twilio",
   "/docs/self-host/vm-deploy",
-  "/docs/setup",
-  "/docs/setup/aws-ses",
-  "/docs/setup/livekit-cloud",
-  "/docs/setup/mcp",
-  "/docs/setup/twilio",
-  "/docs/setup/webhooks"
+  "/docs/webhooks"
 ]
