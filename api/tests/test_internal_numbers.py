@@ -58,9 +58,7 @@ async def test_internal_release_releases_number(
     payload = resp.json()
     assert payload["provisioning_state"] == "released"
     assert payload["released_at"] is not None
-    voice_provider_mock.release_number.assert_awaited_once_with(
-        pn.provider_resource_id
-    )
+    voice_provider_mock.release_number.assert_awaited_once_with(pn.provider_resource_id)
 
 
 async def test_internal_release_idempotent_when_already_released(
