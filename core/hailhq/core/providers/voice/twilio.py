@@ -11,6 +11,7 @@ test failures rather than silent breakage.
 from __future__ import annotations
 
 import asyncio
+import logging
 
 from hailhq.core.config import settings
 from hailhq.core.providers.voice.base import (
@@ -22,6 +23,8 @@ from hailhq.core.providers.voice.base import (
 )
 from twilio.base.exceptions import TwilioRestException
 from twilio.rest import Client as TwilioClient
+
+logger = logging.getLogger(__name__)
 
 # Maps the Hail-canonical capability strings to Twilio's available-number
 # search kwargs (which take booleans). Anything in `capabilities` that
@@ -120,8 +123,18 @@ class TwilioVoiceProvider(VoiceProvider):
             )
         except TwilioRestException as exc:
             # Already gone at the carrier (released out of band, or a retry of
-            # a half-completed release): the desired end state holds.
+            # a half-completed release): the desired end state holds. Loud,
+            # not silent — a 404 is also what wrong credentials (a different
+            # (sub)account) or a stale/mangled SID produce, and in that case
+            # the number is still live and billed at Twilio while we mark the
+            # row released.
             if exc.status == 404:
+                logger.warning(
+                    "twilio release of %s returned 404; treating as already "
+                    "released — if this number was expected to be live, check "
+                    "the account credentials and the stored SID",
+                    provider_resource_id,
+                )
                 return
             raise
 
