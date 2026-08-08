@@ -26,7 +26,7 @@ docker compose up
 Then get an API key:
 
 - **Hail Cloud** (managed, at [hail.so](https://hail.so)): run `hail login`. The device flow writes a key to `~/.hail/credentials.json`.
-- **Self-host**: seed a key into your database — see [operations.md, "First-run DB seed"](docs/public/operations.md) — then set `HAIL_API_KEY` or pass `--api-key`.
+- **Self-host**: seed a key into your database — see [operations.md, "Self-host: first-run setup"](docs/public/operations.md#self-host-first-run-setup) — then set `HAIL_API_KEY` or pass `--api-key`.
 
 Full setup guides: [Twilio](docs/public/setup/twilio.md) · [LiveKit Cloud](docs/public/setup/livekit-cloud.md) · [AWS SES](docs/public/setup/aws-ses.md) · [Webhooks](docs/public/setup/webhooks.md) · [MCP](docs/public/setup/mcp.md)
 
@@ -39,7 +39,7 @@ hail login                        # authenticate (device flow)
 hail auth logout                  # remove local credentials
 hail auth token                   # print bare API key for scripting
 
-hail call +14155550100 --prompt "be brief"
+hail call +14155550100 --prompt "be brief" --recipient-consent
 hail call list
 hail call status <id>             # one call's state
 hail call tail <id>               # follow events for one call
@@ -54,7 +54,7 @@ hail numbers acquire              # dedicated phone number (voice + SMS)
 hail numbers list
 hail contacts list                # org contact directory
 
-hail email send --to a@b.com --subject hi --body "hello"
+hail email send --to a@b.com --subject hi --body "hello" --recipient-consent
 hail email list
 hail email get <id>
 hail email tail <id>              # follow events for one email
@@ -67,6 +67,7 @@ hail email domain list
 printf '%s' "$YOUR_API_KEY" | hail providers set llm \
   --provider openai-compatible \
   --base-url https://api.your-agent.dev/v1 \
+  --model your-model \
   --key -                         # standing BYO brain (also: tts, stt)
 
 hail tail                         # cross-channel event stream
@@ -87,6 +88,7 @@ async def main():
     async with Client() as client:  # reads $HAIL_API_KEY
         call = await client.calls.create(
             to="+15551234567",
+            recipient_consent=True,
             system_prompt="You are calling to confirm a reschedule.",
         )
         async for event in client.events.tail(id=f"call:{call.id}"):
@@ -100,7 +102,7 @@ asyncio.run(main())
 ```bash
 curl -X POST http://localhost:8080/calls \
   -H "Authorization: Bearer $HAIL_API_KEY" \
-  -d '{"to":"+15551234567","system_prompt":"..."}'
+  -d '{"to":"+15551234567","recipient_consent":true,"system_prompt":"..."}'
 ```
 
 **MCP** (Claude.ai, Claude Code, ChatGPT, Cursor, …): add a remote MCP connector pointing at `http://<your-host>:8081` (self-hosted). See [setup/mcp.md](docs/public/setup/mcp.md).
