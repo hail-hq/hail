@@ -57,7 +57,7 @@ from hail.models import (
     VoiceConfig,
 )
 
-__version__ = "0.8.0"
+__version__ = "0.14.0"
 
 __all__ = [
     # helpers

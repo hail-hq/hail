@@ -4,6 +4,13 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 
 ## [Unreleased]
 
+## [0.20.0] — 2026-08-10
+
+Sender display names on outbound email, and a 25MB attachment cap.
+
+Component versions cut alongside this release:
+**`sdk-v0.14.0`** (PyPI: `hail-sdk==0.14.0`), **`cli-v0.19.0`** (Homebrew + GitHub Releases).
+
 ### Email
 
 - `POST /emails` accepts an optional `from_name` — a display name rendered
