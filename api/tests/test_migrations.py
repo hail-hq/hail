@@ -671,3 +671,21 @@ def test_0017_custom_domain_global_unique(empty_db: str) -> None:
         ), "email_domains_custom_domain_global_uq missing after round-trip upgrade"
         assert "UNIQUE" in indexdef
         assert "custom" in indexdef
+
+
+def test_0041_e164_unique_is_partial(empty_db: str) -> None:
+    """After 0041 the full UNIQUE on phone_numbers.e164 is replaced by a
+    partial unique index excluding released tombstones — so a number Twilio
+    recycles can be re-acquired while the released row stays for billing
+    history."""
+    _run_alembic(empty_db, ["upgrade", "head"])
+    with psycopg.connect(_to_libpq_url(to_sync_url(empty_db))) as conn:
+        assert not _constraint_exists(
+            conn, "phone_numbers_e164_key"
+        ), "full unique on phone_numbers.e164 still present after 0041"
+        indexdef = _index_def(conn, "phone_numbers_e164_live_uniq")
+        assert (
+            indexdef is not None
+        ), "partial unique index phone_numbers_e164_live_uniq missing"
+        assert "UNIQUE" in indexdef
+        assert "released" in indexdef, "index WHERE clause missing released filter"

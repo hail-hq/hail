@@ -328,6 +328,32 @@ class OrgClosure(Base):
     )
 
 
+class NumberDunning(Base):
+    """Per-org dunning state for the unfunded-numbers sweep.
+
+    A row exists while an org holds active dedicated numbers on a zero or
+    negative balance and has been warned by email that they will be
+    released. ``release_after`` is fixed at warn time (warned_at + grace)
+    so a later change to the grace setting never retroactively shortens an
+    already-announced deadline. The website's dunning job
+    (app/api/internal/billing/dunning in hail-website) owns the lifecycle:
+    it inserts on first detection, releases the org's numbers via
+    ``POST /internal/numbers/release`` once ``release_after`` passes, and
+    deletes the row when the org tops up or the numbers are gone.
+    """
+
+    __tablename__ = "number_dunning"
+
+    organization_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True
+    )
+    warned_at: Mapped[datetime] = mapped_column(TS, nullable=False)
+    release_after: Mapped[datetime] = mapped_column(TS, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        TS, server_default=text("now()"), nullable=False
+    )
+
+
 class ApiKey(Base):
     """Read-only mirror of the auth backend's ``api_keys`` table.
 
@@ -367,7 +393,11 @@ class PhoneNumber(Base):
     organization_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), nullable=True
     )
-    e164: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
+    # Uniqueness is partial (see __table_args__): released rows are tombstones
+    # and must not block re-acquiring a number Twilio later recycles — with a
+    # full UNIQUE, that re-acquire would buy the number at the carrier and
+    # then 500 on the INSERT, orphaning a paid number (migration 0041).
+    e164: Mapped[str] = mapped_column(Text, nullable=False)
     country_code: Mapped[str] = mapped_column(Text, nullable=False)
     number_type: Mapped[str] = mapped_column(Text, nullable=False)
     capabilities: Mapped[list[str]] = mapped_column(
@@ -424,6 +454,12 @@ class PhoneNumber(Base):
             "(is_pool = TRUE AND organization_id IS NULL)"
             " OR (is_pool = FALSE AND organization_id IS NOT NULL)",
             name="phone_numbers_pool_owner_xor",
+        ),
+        Index(
+            "phone_numbers_e164_live_uniq",
+            "e164",
+            unique=True,
+            postgresql_where=text("provisioning_state <> 'released'"),
         ),
     )
 

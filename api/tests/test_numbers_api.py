@@ -112,6 +112,102 @@ async def test_acquire_number_idempotent_replay(
     voice_provider_mock.acquire_number.assert_awaited_once()
 
 
+async def test_release_number_204_marks_released(
+    client, org_and_key, voice_provider_mock
+) -> None:
+    _, _, plaintext = org_and_key
+    headers = {"Authorization": f"Bearer {plaintext}"}
+    acquired = await client.post(
+        "/numbers",
+        json={"country_code": "US", "number_type": "local"},
+        headers=headers,
+    )
+    assert acquired.status_code == 201, acquired.text
+    number_id = acquired.json()["id"]
+
+    resp = await client.delete(f"/numbers/{number_id}", headers=headers)
+    assert resp.status_code == 204, resp.text
+    voice_provider_mock.release_number.assert_awaited_once_with("PN_test_acquired")
+
+    got = await client.get(f"/numbers/{number_id}", headers=headers)
+    assert got.status_code == 200
+    assert got.json()["provisioning_state"] == "released"
+
+    # Idempotent: a second DELETE is a no-op 204, no second carrier call.
+    again = await client.delete(f"/numbers/{number_id}", headers=headers)
+    assert again.status_code == 204
+    voice_provider_mock.release_number.assert_awaited_once()
+
+
+async def test_reacquire_same_e164_after_release(
+    client, org_and_key, voice_provider_mock
+) -> None:
+    """Twilio recycles released numbers: a released row is a tombstone and
+    must not block re-acquiring the same e164 (partial unique index,
+    migration 0041). Before, the INSERT hit the full UNIQUE after the
+    carrier purchase — a 500 and an orphaned paid number."""
+    _, _, plaintext = org_and_key
+    headers = {"Authorization": f"Bearer {plaintext}"}
+    body = {"country_code": "US", "number_type": "local"}
+
+    first = await client.post("/numbers", json=body, headers=headers)
+    assert first.status_code == 201, first.text
+    resp = await client.delete(f"/numbers/{first.json()['id']}", headers=headers)
+    assert resp.status_code == 204
+
+    # The mock returns the same e164 (+14155550001) again.
+    second = await client.post("/numbers", json=body, headers=headers)
+    assert second.status_code == 201, second.text
+    assert second.json()["e164"] == first.json()["e164"]
+    assert second.json()["id"] != first.json()["id"]
+
+
+async def test_enable_sms_on_released_number_422(
+    client, org_and_key, voice_provider_mock
+) -> None:
+    """A released number's PN is deleted at Twilio — enable-sms must be a
+    clean 422, not a TwilioRestException 500 from attach_number."""
+    _, _, plaintext = org_and_key
+    headers = {"Authorization": f"Bearer {plaintext}"}
+    acquired = await client.post(
+        "/numbers",
+        json={"country_code": "US", "number_type": "local"},
+        headers=headers,
+    )
+    assert acquired.status_code == 201, acquired.text
+    number_id = acquired.json()["id"]
+    resp = await client.delete(f"/numbers/{number_id}", headers=headers)
+    assert resp.status_code == 204
+
+    enable = await client.post(f"/numbers/{number_id}/enable-sms", headers=headers)
+    assert enable.status_code == 422, enable.text
+    assert "released" in enable.json()["detail"][0]["msg"].lower()
+
+
+async def test_release_number_404_other_org(
+    client, async_session, org_and_key, voice_provider_mock
+) -> None:
+    from .conftest import insert_org_and_key
+
+    _, _, owner_key = org_and_key
+    acquired = await client.post(
+        "/numbers",
+        json={"country_code": "US", "number_type": "local"},
+        headers={"Authorization": f"Bearer {owner_key}"},
+    )
+    assert acquired.status_code == 201, acquired.text
+    number_id = acquired.json()["id"]
+
+    _, _, intruder_key = await insert_org_and_key(
+        async_session, org_slug="other-org-release"
+    )
+    resp = await client.delete(
+        f"/numbers/{number_id}", headers={"Authorization": f"Bearer {intruder_key}"}
+    )
+    assert resp.status_code == 404
+    voice_provider_mock.release_number.assert_not_awaited()
+
+
 async def test_acquire_not_provisionable_returns_422_not_500(
     client, org_and_key, voice_provider_mock
 ):
