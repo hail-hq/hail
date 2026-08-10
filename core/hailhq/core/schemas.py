@@ -645,6 +645,11 @@ class EmailCreate(ConsentAttestationMixin):
 
     # ``from`` is reserved; ``from_`` mirrors how CallCreate handles it.
     from_: str | None = Field(default=None, alias="from")
+    # Friendly display name for the From: header ("Acme Billing
+    # <billing@acme.com>"). Rendered by the email provider at send time
+    # (see providers/email/ses.py); ``from_`` stays a bare address
+    # everywhere else (sender resolution, compliance, events).
+    from_name: str | None = Field(default=None, max_length=256)
     to: list[str] = Field(min_length=1)
     cc: list[str] | None = None
     bcc: list[str] | None = None
@@ -655,6 +660,30 @@ class EmailCreate(ConsentAttestationMixin):
     conversation_id: UUID | None = None
     metadata: dict = Field(default_factory=dict)
     attachment_ids: list[UUID] | None = None
+
+    @field_validator("from_name", mode="before")
+    @classmethod
+    def _strip_from_name(cls, v: object) -> object:
+        # Strip BEFORE max_length runs so a padded-but-valid name
+        # ("Acme" + spaces) isn't rejected as too long.
+        if isinstance(v, str):
+            v = v.strip()
+            if not v:
+                return None
+        return v
+
+    @field_validator("from_name")
+    @classmethod
+    def _validate_from_name(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        # The display name lands in the From: header. isprintable() rejects
+        # every C0/C1 control (CR/LF header injection, NEL U+0085, U+2028)
+        # plus zero-width/format characters — strictly wider than a bare
+        # ord(ch) < 32 check.
+        if not v.isprintable():
+            raise ValueError("must contain only printable characters")
+        return v
 
     @field_validator("from_", "reply_to")
     @classmethod
@@ -783,6 +812,9 @@ class EmailSummary(BaseModel):
     email_domain_id: UUID | None
     direction: Literal["outbound", "inbound"] = "outbound"
     from_address: str
+    # Display name used on the From: header, when the sender supplied one.
+    # Always None on inbound rows and pre-existing outbound rows.
+    from_name: str | None = None
     to_addresses: list[str]
     cc_addresses: list[str] | None
     bcc_addresses: list[str] | None

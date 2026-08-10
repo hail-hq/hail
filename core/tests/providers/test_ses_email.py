@@ -190,6 +190,116 @@ async def test_send_email_with_attachments_uses_raw_mime() -> None:
     assert b"base64" in raw  # attachment payload is base64-encoded
 
 
+async def test_send_email_simple_path_with_from_name(ses_client, stub: Stubber) -> None:
+    stub.add_response(
+        "send_email",
+        {"MessageId": "m-name"},
+        {
+            "FromEmailAddress": "Acme Billing <alerts@acme.com>",
+            "Destination": {"ToAddresses": ["alice@example.com"]},
+            "Content": {
+                "Simple": {
+                    "Subject": {"Data": "hi", "Charset": "UTF-8"},
+                    "Body": {"Text": {"Data": "body", "Charset": "UTF-8"}},
+                }
+            },
+        },
+    )
+
+    provider = SesEmailProvider(client=ses_client)
+    result = await provider.send_email(
+        from_address="alerts@acme.com",
+        from_name="Acme Billing",
+        to_addresses=["alice@example.com"],
+        subject="hi",
+        body_text="body",
+        body_html=None,
+    )
+    assert result.provider_message_id == "m-name"
+    stub.assert_no_pending_responses()
+
+
+async def test_send_email_simple_path_splits_long_non_ascii_from_name() -> None:
+    """RFC 2047 caps encoded words at 75 chars — a long non-ASCII name must
+    ride as multiple encoded words, not one oversized token, and the
+    parameter must stay a single line."""
+    fake = FakeClient("m-name-long")
+    provider = SesEmailProvider(client=fake)
+    await provider.send_email(
+        from_address="a@b.co",
+        from_name=(
+            "Café Réservations München Support Team — "
+            "Département Facturation Européenne"
+        ),
+        to_addresses=["ops@example.com"],
+        subject="hi",
+        body_text="body",
+        body_html=None,
+    )
+
+    assert fake.kwargs is not None
+    friendly = fake.kwargs["FromEmailAddress"]
+    assert "\r" not in friendly and "\n" not in friendly
+    assert friendly.endswith("<a@b.co>")
+    encoded_words = [tok for tok in friendly.split() if tok.startswith("=?")]
+    assert encoded_words, friendly
+    assert all(len(tok) <= 75 for tok in encoded_words), friendly
+
+
+async def test_send_email_raw_path_with_from_name() -> None:
+    fake = FakeClient("m-name-raw")
+    provider = SesEmailProvider(client=fake)
+    await provider.send_email(
+        from_address="alerts@acme.com",
+        from_name="Acme Billing",
+        to_addresses=["ops@example.com"],
+        subject="invoice",
+        body_text="see attached",
+        body_html=None,
+        attachments=[
+            ProviderAttachment(
+                filename="invoice.pdf",
+                content_type="application/pdf",
+                payload=b"%PDF-1.4",
+            )
+        ],
+    )
+
+    assert fake.kwargs is not None
+    raw = fake.kwargs["Content"]["Raw"]["Data"]
+    assert b"From: Acme Billing <alerts@acme.com>" in raw
+    # The envelope identity stays the bare address — SES matches the
+    # sending identity against it.
+    assert fake.kwargs["FromEmailAddress"] == "alerts@acme.com"
+
+
+async def test_send_email_raw_path_encodes_non_ascii_from_name() -> None:
+    fake = FakeClient("m-name-utf8")
+    provider = SesEmailProvider(client=fake)
+    await provider.send_email(
+        from_address="alerts@acme.com",
+        from_name="Café Réservations",
+        to_addresses=["ops@example.com"],
+        subject="invoice",
+        body_text="see attached",
+        body_html=None,
+        attachments=[
+            ProviderAttachment(
+                filename="invoice.pdf",
+                content_type="application/pdf",
+                payload=b"%PDF-1.4",
+            )
+        ],
+    )
+
+    assert fake.kwargs is not None
+    raw = fake.kwargs["Content"]["Raw"]["Data"]
+    # Non-ASCII display names must ride as RFC 2047 encoded words, never
+    # raw UTF-8 bytes in the header.
+    assert b"=?utf-8?" in raw
+    assert "Café".encode() not in raw
+
+
 async def test_send_email_requires_recipients(ses_client) -> None:
     provider = SesEmailProvider(client=ses_client)
     with pytest.raises(ValueError, match="at least one recipient"):

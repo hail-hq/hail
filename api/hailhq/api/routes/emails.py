@@ -17,6 +17,7 @@ from a tenant who hasn't registered a domain still goes out.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import datetime, timedelta, timezone
 from typing import Annotated, Literal
@@ -327,16 +328,22 @@ async def deliver_email(
             # explicit Idempotency-Key, that key stuck at the in-flight
             # sentinel for its full TTL.
             s3 = get_s3_mail()
+            # Independent objects — fetch concurrently so caller latency
+            # is max(fetch) instead of sum(fetch) across attachments.
+            payloads = await asyncio.gather(
+                *(s3.fetch_raw(row.s3_key) for row in attachment_rows)
+            )
             provider_attachments = [
                 ProviderAttachment(
                     filename=row.filename,
                     content_type=row.content_type,
-                    payload=await s3.fetch_raw(row.s3_key),
+                    payload=payload,
                 )
-                for row in attachment_rows
+                for row, payload in zip(attachment_rows, payloads)
             ]
         result = await email_provider.send_email(
             from_address=email.from_address,
+            from_name=email.from_name,
             to_addresses=email.to_addresses,
             subject=email.subject,
             body_text=wire_text,
@@ -522,17 +529,20 @@ async def create_email(
                     detail=f"attachment(s) not found: {', '.join(missing)}",
                 ),
             )
-        total_bytes = sum(row.size_bytes for row in attachment_rows)
-        total_bytes += len((body.body_text or "").encode("utf-8"))
-        total_bytes += len((body.body_html or "").encode("utf-8"))
-        if total_bytes > MAX_EMAIL_ATTACHMENT_BYTES:
-            raise await cache_failure(
-                idem,
-                HTTPException(
-                    status_code=http_status.HTTP_422_UNPROCESSABLE_ENTITY,
-                    detail=ATTACHMENT_TOO_LARGE_DETAIL,
-                ),
-            )
+    # Aggregate per-send cap — body counts even with no attachments
+    # (empty attachment_rows sums to 0), matching the documented
+    # "body + all attachments combined, per send" behavior.
+    total_bytes = sum(row.size_bytes for row in attachment_rows)
+    total_bytes += len((body.body_text or "").encode("utf-8"))
+    total_bytes += len((body.body_html or "").encode("utf-8"))
+    if total_bytes > MAX_EMAIL_ATTACHMENT_BYTES:
+        raise await cache_failure(
+            idem,
+            HTTPException(
+                status_code=http_status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=ATTACHMENT_TOO_LARGE_DETAIL,
+            ),
+        )
 
     try:
         sd = await resolve_sender(db, principal.organization_id, body.from_)
@@ -545,6 +555,7 @@ async def create_email(
         conversation_id=body.conversation_id,
         email_domain_id=sd.id,
         from_address=from_address,
+        from_name=body.from_name,
         to_addresses=list(body.to),
         cc_addresses=list(body.cc) if body.cc else None,
         bcc_addresses=list(body.bcc) if body.bcc else None,
@@ -568,6 +579,9 @@ async def create_email(
         resource_id=email.id,
         payload={
             "from": email.from_address,
+            # What the recipient sees in the From header — audit must be
+            # able to reconstruct it (display-name impersonation reviews).
+            "from_name": email.from_name,
             "to": email.to_addresses,
             "cc": email.cc_addresses,
             "bcc": email.bcc_addresses,

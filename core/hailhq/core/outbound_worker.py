@@ -230,6 +230,10 @@ class OutboundForwardWorker:
         try:
             result = await self._get_provider().send_email(
                 from_address=row.from_address,
+                # NULL on every forward row today, but forward what the row
+                # carries so a stored display name never silently drops off
+                # the wire message.
+                from_name=row.from_name,
                 to_addresses=row.to_addresses,
                 subject=row.subject,
                 body_text=row.body_text,

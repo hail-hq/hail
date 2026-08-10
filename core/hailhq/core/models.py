@@ -918,6 +918,9 @@ class Email(Base):
         nullable=True,
     )
     from_address: Mapped[str] = mapped_column(Text, nullable=False)
+    # Display name for the From: header ("Acme Billing <billing@acme.com>").
+    # NULL on inbound rows and on sends that didn't supply one.
+    from_name: Mapped[str | None] = mapped_column(Text, nullable=True)
     to_addresses: Mapped[list[str]] = mapped_column(ARRAY(Text), nullable=False)
     cc_addresses: Mapped[list[str] | None] = mapped_column(ARRAY(Text), nullable=True)
     bcc_addresses: Mapped[list[str] | None] = mapped_column(ARRAY(Text), nullable=True)

@@ -4,6 +4,25 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 
 ## [Unreleased]
 
+## [0.20.0] — 2026-08-10
+
+Sender display names on outbound email, and a 25MB attachment cap.
+
+Component versions cut alongside this release:
+**`sdk-v0.14.0`** (PyPI: `hail-sdk==0.14.0`), **`cli-v0.19.0`** (Homebrew + GitHub Releases).
+
+### Email
+
+- `POST /emails` accepts an optional `from_name` — a display name rendered
+  on the `From:` header (`"Acme Billing" <billing@acme.com>`, RFC-2047-encoded
+  for non-ASCII). Exposed on the SDK (`from_name=`), MCP `send_email`
+  (`from_name`), and CLI (`--from-name`); persisted and returned on email
+  reads. Control characters are rejected (422).
+- The per-send attachment cap (body + all attachments, pre-encoding) rose
+  from 10MB to 25MB — SESv2 allows 40MB post-base64, and 25MB raw ≈ 34MB
+  encoded leaves headroom. Same cap applies to `POST /email-attachments`
+  single-file uploads.
+
 ## [0.19.0] — 2026-07-27
 
 The voice agent never speaks tool-call syntax again, and call events say

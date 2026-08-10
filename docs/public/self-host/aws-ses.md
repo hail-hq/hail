@@ -166,9 +166,11 @@ The `from` field is optional. Resolution order:
 
 If none of these resolve, the call returns `503` with instructions to register a domain.
 
+The optional `from_name` field sets a display name on the `From:` header (`"Acme Billing" <billing@acme.com>`). Non-ASCII names are RFC-2047-encoded automatically; control characters are rejected with `422`.
+
 ## 8a. Attachments
 
-Upload a file once and attach it to as many sends as you want. The file size limit is 10MB per upload. SES caps the total message size (including all attachments) at its 10MB raw-message limit.
+Upload a file once and attach it to as many sends as you want. The limit is 25MB per upload and per send (body + all attachments combined, measured before base64 encoding). SES caps the encoded wire message at 40MB and bandwidth-throttles messages over 10MB.
 
 ### Upload a file
 

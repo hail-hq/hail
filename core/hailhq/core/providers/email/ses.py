@@ -13,6 +13,7 @@ The SESv2 surface is much cleaner than v1 for identity management:
 from __future__ import annotations
 
 import asyncio
+from email.headerregistry import Address
 from email.message import EmailMessage
 from typing import Any
 
@@ -97,9 +98,29 @@ def _mail_from_records(domain: str) -> list[DkimRecord]:
     ]
 
 
+def _friendly_from(from_name: str | None, from_address: str) -> str:
+    """Render ``"Name <addr>"`` as a single header-safe line.
+
+    ``Address`` handles display-name quoting; folding the header through
+    the default policy RFC-2047-encodes non-ASCII names AND splits them
+    into <=75-char encoded words (RFC 2047 §2 — ``formataddr`` would emit
+    one arbitrarily long word). Unfolding keeps it a single line for the
+    SESv2 ``FromEmailAddress`` parameter. The raw-MIME path gets the same
+    rendering by assigning ``Address`` directly (string round-trips are
+    lossy for adjacent encoded words, so it can't share this output).
+    """
+    if not from_name:
+        return from_address
+    msg = EmailMessage()
+    msg["From"] = Address(display_name=from_name, addr_spec=from_address)
+    folded = msg["From"].fold(policy=msg.policy)  # "From: ...\n ..." folded
+    return "".join(folded.splitlines()).removeprefix("From: ").strip()
+
+
 def _build_raw_mime(
     *,
     from_address: str,
+    from_name: str | None,
     to_addresses: list[str],
     subject: str,
     body_text: str | None,
@@ -115,7 +136,13 @@ def _build_raw_mime(
     goes through this path instead.
     """
     msg = EmailMessage()
-    msg["From"] = from_address
+    # Same rendering as _friendly_from (Address + policy folding); assigned
+    # as an Address object because re-parsing an encoded string is lossy.
+    msg["From"] = (
+        Address(display_name=from_name, addr_spec=from_address)
+        if from_name
+        else from_address
+    )
     msg["To"] = ", ".join(to_addresses)
     if cc:
         msg["Cc"] = ", ".join(cc)
@@ -152,6 +179,7 @@ class SesEmailProvider(EmailProvider):
         self,
         *,
         from_address: str,
+        from_name: str | None = None,
         to_addresses: list[str],
         subject: str,
         body_text: str | None,
@@ -185,8 +213,12 @@ class SesEmailProvider(EmailProvider):
         }
 
         if attachments:
-            raw = _build_raw_mime(
+            # Serialization base64-encodes every attachment (pure-Python
+            # CPU work, up to tens of MB) — keep it off the event loop.
+            raw = await asyncio.to_thread(
+                _build_raw_mime,
                 from_address=from_address,
+                from_name=from_name,
                 to_addresses=to_addresses,
                 subject=subject,
                 body_text=body_text,
@@ -212,7 +244,9 @@ class SesEmailProvider(EmailProvider):
             ]
 
         kwargs = {
-            "FromEmailAddress": from_address,
+            # SESv2 accepts a friendly-from here ("Name <addr>");
+            # _friendly_from quotes specials and RFC-2047-encodes non-ASCII.
+            "FromEmailAddress": _friendly_from(from_name, from_address),
             "Destination": destination,
             "Content": {"Simple": message},
         }

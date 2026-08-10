@@ -11,6 +11,7 @@ from hailhq.api.deps import get_s3_mail
 from hailhq.api.main import app
 from hailhq.api.routes import emails as emails_routes
 from hailhq.core.config import settings
+from hailhq.core.email_attachment_limits import MAX_EMAIL_ATTACHMENT_BYTES
 from hailhq.core.email_footer import SENT_FOOTER_TEXT
 from hailhq.core.hail_mail import org_prefix_from_id
 from hailhq.core.models import (
@@ -132,6 +133,123 @@ async def test_post_emails_with_attachment_ids_attaches_and_lists(
     assert attachments[0]["filename"] == "invoice.pdf"
 
 
+async def test_post_emails_from_name_persisted_and_passed_to_provider(
+    client: httpx.AsyncClient,
+    org_and_key: tuple,
+    email_mock: AsyncMock,
+) -> None:
+    _, _, plain = org_and_key
+    headers = {"Authorization": f"Bearer {plain}"}
+    await _register_custom_verified(client, headers, domain="acme.com")
+
+    resp = await client.post(
+        "/emails",
+        json={
+            "from": "billing@acme.com",
+            "from_name": "Acme Billing",
+            "to": ["alice@example.com"],
+            "subject": "hi",
+            "body_text": "hello",
+            "recipient_consent": True,
+        },
+        headers=headers,
+    )
+    assert resp.status_code == 201, resp.text
+    assert resp.json()["from_name"] == "Acme Billing"
+
+    call_kwargs = email_mock.send_email.call_args.kwargs
+    assert call_kwargs["from_address"] == "billing@acme.com"
+    assert call_kwargs["from_name"] == "Acme Billing"
+
+    get_resp = await client.get(f"/emails/{resp.json()['id']}", headers=headers)
+    assert get_resp.status_code == 200
+    assert get_resp.json()["from_name"] == "Acme Billing"
+
+
+async def test_post_emails_rejects_header_injection_in_from_name(
+    client: httpx.AsyncClient,
+    org_and_key: tuple,
+    email_mock: AsyncMock,
+) -> None:
+    _, _, plain = org_and_key
+    headers = {"Authorization": f"Bearer {plain}"}
+    await _register_custom_verified(client, headers, domain="acme.com")
+
+    resp = await client.post(
+        "/emails",
+        json={
+            "from_name": "Acme\r\nBcc: evil@example.com",
+            "to": ["alice@example.com"],
+            "subject": "hi",
+            "body_text": "hello",
+            "recipient_consent": True,
+        },
+        headers=headers,
+    )
+    assert resp.status_code == 422
+    email_mock.send_email.assert_not_awaited()
+
+
+async def test_post_emails_partial_attachment_fetch_failure_fails_send_cleanly(
+    client: httpx.AsyncClient,
+    org_and_key: tuple,
+    email_mock: AsyncMock,
+    async_session: AsyncSession,
+    s3_mail_mock: AsyncMock,
+) -> None:
+    """With concurrent payload fetches (asyncio.gather), one failed fetch
+    among several must still fail the send cleanly — 502, row 'failed',
+    provider never called."""
+    _, _, plain = org_and_key
+    headers = {"Authorization": f"Bearer {plain}"}
+    await _register_custom_verified(client, headers, domain="acme.com")
+    att_a = await _upload_attachment(client, headers)
+    att_b = await _upload_attachment(client, headers, content=b"other bytes")
+    s3_mail_mock.fetch_raw.side_effect = [b"ok bytes", Exception("NoSuchKey")]
+
+    resp = await client.post(
+        "/emails",
+        json={
+            "to": ["alice@example.com"],
+            "subject": "hi",
+            "body_text": "body",
+            "recipient_consent": True,
+            "attachment_ids": [att_a, att_b],
+        },
+        headers=headers,
+    )
+    assert resp.status_code == 502, resp.text
+    email_mock.send_email.assert_not_awaited()
+
+    stmt = select(Email).where(Email.organization_id == org_and_key[0])
+    email = (await async_session.execute(stmt)).scalar_one()
+    assert email.status == "failed"
+
+
+async def test_post_emails_rejects_oversize_body_without_attachments(
+    client: httpx.AsyncClient,
+    org_and_key: tuple,
+    email_mock: AsyncMock,
+) -> None:
+    """The per-send cap covers the body even when no attachments ride along."""
+    _, _, plain = org_and_key
+    headers = {"Authorization": f"Bearer {plain}"}
+    await _register_custom_verified(client, headers, domain="acme.com")
+
+    resp = await client.post(
+        "/emails",
+        json={
+            "to": ["alice@example.com"],
+            "subject": "hi",
+            "body_text": "x" * (MAX_EMAIL_ATTACHMENT_BYTES + 1),
+            "recipient_consent": True,
+        },
+        headers=headers,
+    )
+    assert resp.status_code == 422
+    email_mock.send_email.assert_not_awaited()
+
+
 async def test_post_emails_rejects_oversize_aggregate_attachments(
     client: httpx.AsyncClient,
     org_and_key: tuple,
@@ -141,7 +259,7 @@ async def test_post_emails_rejects_oversize_aggregate_attachments(
     _, _, plain = org_and_key
     headers = {"Authorization": f"Bearer {plain}"}
     await _register_custom_verified(client, headers, domain="acme.com")
-    big = b"x" * (10 * 1024 * 1024)
+    big = b"x" * MAX_EMAIL_ATTACHMENT_BYTES
     att_id = await _upload_attachment(client, headers, content=big)
 
     resp = await client.post(
@@ -149,7 +267,7 @@ async def test_post_emails_rejects_oversize_aggregate_attachments(
         json={
             "to": ["alice@example.com"],
             "subject": "hi",
-            "body_text": "this pushes it over the 10MB cap",
+            "body_text": "this pushes it over the aggregate cap",
             "recipient_consent": True,
             "attachment_ids": [att_id],
         },

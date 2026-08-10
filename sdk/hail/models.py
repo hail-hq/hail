@@ -331,6 +331,8 @@ class EmailCreate(BaseModel):
     to: list[str] = Field(min_length=1)
     subject: str = Field(min_length=1, max_length=998)
     from_: str | None = Field(default=None, alias="from")
+    # Display name for the From: header ("Acme Billing <billing@acme.com>").
+    from_name: str | None = Field(default=None, max_length=256)
     cc: list[str] | None = None
     bcc: list[str] | None = None
     reply_to: str | None = None
@@ -389,6 +391,7 @@ class EmailSummary(BaseModel):
     email_domain_id: UUID | None = None
     direction: Literal["outbound", "inbound"] = "outbound"
     from_address: str
+    from_name: str | None = None
     to_addresses: list[str]
     cc_addresses: list[str] | None = None
     bcc_addresses: list[str] | None = None

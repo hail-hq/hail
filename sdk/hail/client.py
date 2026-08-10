@@ -296,6 +296,7 @@ class _EmailsResource:
         body_text: str | None = None,
         body_html: str | None = None,
         from_: str | None = None,
+        from_name: str | None = None,
         cc: list[str] | None = None,
         bcc: list[str] | None = None,
         reply_to: str | None = None,
@@ -328,6 +329,8 @@ class _EmailsResource:
         }
         if from_ is not None:
             body["from"] = from_
+        if from_name is not None:
+            body["from_name"] = from_name
         if body_text is not None:
             body["body_text"] = body_text
         if body_html is not None:

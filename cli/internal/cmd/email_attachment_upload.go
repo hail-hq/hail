@@ -26,7 +26,7 @@ reusable attachment id.
 Pass the returned id to ` + "`hail email send --attach-id <id>`" + ` (or,
 simpler, use ` + "`hail email send --attach <file>`" + ` to upload and send
 in one step). The id can be reused across many sends until Hail
-garbage-collects it (24h if never referenced by a send). Files over 10MB
+garbage-collects it (24h if never referenced by a send). Files over 25MB
 (combined with the message body and any other attachments, per send) are
 rejected — host large files externally and link to them in the body
 instead.`,
