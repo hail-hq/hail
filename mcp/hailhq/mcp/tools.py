@@ -161,6 +161,7 @@ async def send_email(
     body_text: str | None = None,
     body_html: str | None = None,
     from_: str | None = None,
+    from_name: str | None = None,
     cc: list[str] | None = None,
     bcc: list[str] | None = None,
     reply_to: str | None = None,
@@ -181,6 +182,7 @@ async def send_email(
             body_text=body_text,
             body_html=body_html,
             from_=from_,
+            from_name=from_name,
             cc=cc,
             bcc=bcc,
             reply_to=reply_to,
@@ -632,6 +634,7 @@ def register_tools(
         body_text: str | None = None,
         body_html: str | None = None,
         from_: str | None = None,
+        from_name: str | None = None,
         cc: list[str] | None = None,
         bcc: list[str] | None = None,
         reply_to: str | None = None,
@@ -670,6 +673,10 @@ def register_tools(
         match a verified row already in ``email_domains`` (register
         one with the website console or ``POST /email-domains``).
 
+        ``from_name`` is an optional display name rendered on the
+        From: header ("Acme Billing <billing@acme.com>"). Control
+        characters are rejected.
+
         ``metadata`` is free-form JSON attached to the email record.
 
         ``idempotency_key`` defaults to a fresh UUID and is returned
@@ -700,6 +707,7 @@ def register_tools(
                     body_text=body_text,
                     body_html=body_html,
                     from_=from_,
+                    from_name=from_name,
                     cc=cc,
                     bcc=bcc,
                     reply_to=reply_to,
@@ -726,7 +734,7 @@ def register_tools(
         Returns ``{"id": ..., "filename": ..., "content_type": ...,
         "size_bytes": ...}`` — pass ``id`` in ``send_email``'s
         ``attachment_ids`` list. The id is reusable across many sends
-        and expires in 24h if never used. Files over 10MB (combined
+        and expires in 24h if never used. Files over 25MB (combined
         with the message body and any other attachments, per send) are
         rejected — host large files externally and link to them in the
         body instead.

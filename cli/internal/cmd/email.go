@@ -24,6 +24,7 @@ type emailSendFlags struct {
 	cc             []string
 	bcc            []string
 	from           string
+	fromName       string
 	replyTo        string
 	subject        string
 	body           string
@@ -99,6 +100,7 @@ Example (minimal):
 	cmd.Flags().StringSliceVar(&f.cc, "cc", nil, "CC recipient(s)")
 	cmd.Flags().StringSliceVar(&f.bcc, "bcc", nil, "BCC recipient(s)")
 	cmd.Flags().StringVar(&f.from, "from", "", "Override the from-address (must be a verified sender)")
+	cmd.Flags().StringVar(&f.fromName, "from-name", "", "Display name for the From header (\"Acme Billing <billing@acme.com>\")")
 	cmd.Flags().StringVar(&f.replyTo, "reply-to", "", "Reply-To header")
 	cmd.Flags().StringVar(&f.subject, "subject", "", "Subject line")
 	cmd.Flags().StringVar(&f.body, "body", "", "Plain-text body — one of --body/--body-html required")
@@ -162,6 +164,7 @@ func runEmailSend(ctx context.Context, cmd *cobra.Command, opts *Options, f *ema
 		To:       to,
 		Subject:  f.subject,
 		From:     strPtr(f.from),
+		FromName: strPtr(f.fromName),
 		ReplyTo:  strPtr(f.replyTo),
 		BodyText: strPtr(bodyText),
 		BodyHtml: strPtr(bodyHTML),

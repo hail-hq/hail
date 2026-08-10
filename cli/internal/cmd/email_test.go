@@ -94,6 +94,31 @@ func TestEmailSend_HappyPath(t *testing.T) {
 	}
 }
 
+func TestEmailSend_FromName(t *testing.T) {
+	srv := newFakeServer(t, http.StatusCreated, sampleEmailResponse())
+
+	_, _, err := runRoot(t,
+		map[string]string{"HAIL_API_KEY": "sk_test", "HAIL_API_URL": srv.URL},
+		"email", "send",
+		"--to", "x@example.com",
+		"--subject", "hi",
+		"--body", "hello",
+		"--from-name", "Acme Billing",
+		"--recipient-consent",
+	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var body client.EmailCreate
+	if err := json.Unmarshal(srv.lastBody, &body); err != nil {
+		t.Fatalf("body parse: %v; raw=%s", err, srv.lastBody)
+	}
+	if body.FromName == nil || *body.FromName != "Acme Billing" {
+		t.Fatalf("FromName = %v", body.FromName)
+	}
+}
+
 func TestEmailSend_RequiresBody(t *testing.T) {
 	srv := newFakeServer(t, http.StatusCreated, sampleEmailResponse())
 

@@ -1159,6 +1159,7 @@ type EmailCreate struct {
 	ConsentSource  *string             `json:"consent_source,omitempty"`
 	ConversationId *openapi_types.UUID `json:"conversation_id,omitempty"`
 	From           *string             `json:"from,omitempty"`
+	FromName       *string             `json:"from_name,omitempty"`
 
 	// MessageType 'marketing' additionally requires a non-empty consent_source. Use 'informational' for transactional/service communications.
 	MessageType *EmailCreateMessageType `json:"message_type,omitempty"`
@@ -1295,6 +1296,7 @@ type EmailResponse struct {
 	EndReason          *string                    `json:"end_reason"`
 	FailedAt           *time.Time                 `json:"failed_at"`
 	FromAddress        string                     `json:"from_address"`
+	FromName           *string                    `json:"from_name,omitempty"`
 	Id                 openapi_types.UUID         `json:"id"`
 	InReplyTo          *string                    `json:"in_reply_to,omitempty"`
 	LastEventAt        *time.Time                 `json:"last_event_at,omitempty"`
@@ -1391,6 +1393,7 @@ type EmailSummary struct {
 	EndReason         *string                 `json:"end_reason"`
 	FailedAt          *time.Time              `json:"failed_at"`
 	FromAddress       string                  `json:"from_address"`
+	FromName          *string                 `json:"from_name,omitempty"`
 	Id                openapi_types.UUID      `json:"id"`
 	Metadata          *map[string]interface{} `json:"metadata,omitempty"`
 	OrganizationId    openapi_types.UUID      `json:"organization_id"`

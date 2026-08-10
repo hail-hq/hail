@@ -101,6 +101,24 @@ async def test_emails_create_serializes_from_alias(base_url: str, api_key: str) 
 
 
 @respx.mock
+async def test_emails_create_sends_from_name(base_url: str, api_key: str) -> None:
+    route = respx.post(f"{base_url}/emails").mock(
+        return_value=httpx.Response(201, json=make_email_response())
+    )
+    async with Client(api_key=api_key, base_url=base_url) as c:
+        await c.emails.create(
+            to=["x@example.com"],
+            subject="hi",
+            body_text="body",
+            recipient_consent=True,
+            from_="alerts@acme.com",
+            from_name="Acme Billing",
+        )
+    body = json.loads(route.calls.last.request.content)
+    assert body["from_name"] == "Acme Billing"
+
+
+@respx.mock
 async def test_emails_create_with_cc_bcc_reply_to(base_url: str, api_key: str) -> None:
     route = respx.post(f"{base_url}/emails").mock(
         return_value=httpx.Response(201, json=make_email_response())

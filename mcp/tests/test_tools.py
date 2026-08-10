@@ -471,6 +471,28 @@ async def test_send_email_serializes_from_alias(client: HailClient) -> None:
 
 
 @respx.mock
+async def test_send_email_forwards_from_name(client: HailClient) -> None:
+    captured: dict = {}
+
+    def _handler(request: httpx.Request) -> httpx.Response:
+        captured["body"] = request.read().decode("utf-8")
+        return httpx.Response(201, json=_email_response())
+
+    respx.post(f"{_BASE_URL}/emails").mock(side_effect=_handler)
+
+    await tools.send_email(
+        client=client,
+        recipient_consent=True,
+        to=["x@example.com"],
+        subject="hi",
+        body_text="body",
+        from_name="Acme Billing",
+    )
+    body = httpx.Response(200, content=captured["body"]).json()
+    assert body["from_name"] == "Acme Billing"
+
+
+@respx.mock
 async def test_send_email_returns_idempotency_key_in_response(
     client: HailClient,
 ) -> None:
@@ -611,7 +633,7 @@ async def test_upload_email_attachment_maps_413_to_error_detail(
 ) -> None:
     respx.post(f"{_BASE_URL}/email-attachments").mock(
         return_value=httpx.Response(
-            413, json={"detail": "attachment exceeds 10MB limit"}
+            413, json={"detail": "attachment exceeds 25MB limit"}
         )
     )
     result = await tools.upload_email_attachment(
@@ -620,7 +642,7 @@ async def test_upload_email_attachment_maps_413_to_error_detail(
         filename="invoice.pdf",
         content_type="application/pdf",
     )
-    assert "10MB" in result["error"]
+    assert "25MB" in result["error"]
 
 
 # --------------------------------------------------------------------------- #

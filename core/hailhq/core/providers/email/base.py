@@ -97,6 +97,7 @@ class EmailProvider(ABC):
         self,
         *,
         from_address: str,
+        from_name: str | None = None,
         to_addresses: list[str],
         subject: str,
         body_text: str | None,

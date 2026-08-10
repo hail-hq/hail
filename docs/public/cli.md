@@ -73,7 +73,7 @@ hail email send --to alice@example.com --subject "Hi" --body "Hello"
 
 `hail email get <id>` prints headers, auth verdicts (SPF/DKIM/DMARC/spam/virus), the raw-MIME URL, and attachment metadata for inbound rows.
 
-`hail email send` flags: `--to` (repeatable / comma-separated), `--cc`, `--bcc`, `--from`, `--reply-to`, `--subject` (required), `--body`, `--body-html`, `--body-file`, `--body-html-file` (`-` reads stdin), `--idempotency-key`.
+`hail email send` flags: `--to` (repeatable / comma-separated), `--cc`, `--bcc`, `--from`, `--from-name`, `--reply-to`, `--subject` (required), `--body`, `--body-html`, `--body-file`, `--body-html-file` (`-` reads stdin), `--idempotency-key`.
 
 More email subcommands: `tail <id>`, `raw <id>`, `events <id>`, `stats`, `attachment`, `attachment-upload`. Run `hail email --help` for the list.
 

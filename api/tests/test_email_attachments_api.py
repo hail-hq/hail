@@ -8,6 +8,7 @@ import httpx
 import pytest
 from hailhq.api.deps import get_s3_mail
 from hailhq.api.main import app
+from hailhq.core.email_attachment_limits import MAX_EMAIL_ATTACHMENT_BYTES
 
 from .conftest import insert_org_and_key  # noqa: F401
 
@@ -47,7 +48,7 @@ async def test_upload_rejects_oversize_file(
 ) -> None:
     _, _, plain = org_and_key
     headers = {"Authorization": f"Bearer {plain}"}
-    oversize = b"x" * (10 * 1024 * 1024 + 1)
+    oversize = b"x" * (MAX_EMAIL_ATTACHMENT_BYTES + 1)
 
     resp = await client.post(
         "/email-attachments",

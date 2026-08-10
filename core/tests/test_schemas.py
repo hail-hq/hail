@@ -5,6 +5,7 @@ from uuid import UUID, uuid4
 import pytest
 from hailhq.core.schemas import (
     CallCreate,
+    EmailCreate,
     EmailResponse,
     EmailSummary,
     LLMConfig,
@@ -225,3 +226,58 @@ def test_email_create_still_requires_consent_after_mixin_refactor() -> None:
         EmailCreate(
             to=["a@example.com"], subject="hi", body_text="hi"
         )  # missing recipient_consent
+
+
+def test_email_create_accepts_from_name() -> None:
+    email = EmailCreate(
+        to=["a@example.com"],
+        subject="hi",
+        body_text="hi",
+        from_name="Acme Billing",
+        recipient_consent=True,
+    )
+    assert email.from_name == "Acme Billing"
+
+
+def test_email_create_rejects_newlines_in_from_name() -> None:
+    """A display name lands in the From: header — CR/LF would allow
+    header injection. U+0085 (NEL) is a C1 control some header parsers
+    treat as a line break."""
+    for bad in (
+        "Acme\r\nBcc: evil@x.com",
+        "Acme\nX",
+        "Acme\rX",
+        "Acme\x00X",
+        "Acme\x85X",
+    ):
+        with pytest.raises(ValidationError):
+            EmailCreate(
+                to=["a@example.com"],
+                subject="hi",
+                body_text="hi",
+                from_name=bad,
+                recipient_consent=True,
+            )
+
+
+def test_email_create_rejects_overlong_from_name() -> None:
+    with pytest.raises(ValidationError):
+        EmailCreate(
+            to=["a@example.com"],
+            subject="hi",
+            body_text="hi",
+            from_name="x" * 257,
+            recipient_consent=True,
+        )
+
+
+def test_email_create_strips_from_name_before_length_check() -> None:
+    """Whitespace padding must not push a valid name over max_length."""
+    email = EmailCreate(
+        to=["a@example.com"],
+        subject="hi",
+        body_text="hi",
+        from_name="Acme" + " " * 260,
+        recipient_consent=True,
+    )
+    assert email.from_name == "Acme"

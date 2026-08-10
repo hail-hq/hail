@@ -2605,6 +2605,12 @@ components:
             - type: string
             - type: "null"
           title: From
+        from_name:
+          anyOf:
+            - type: string
+              maxLength: 256
+            - type: "null"
+          title: From Name
         to:
           items:
             type: string
@@ -2988,6 +2994,11 @@ components:
         from_address:
           type: string
           title: From Address
+        from_name:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: From Name
         to_addresses:
           items:
             type: string
@@ -3350,6 +3361,11 @@ components:
         from_address:
           type: string
           title: From Address
+        from_name:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: From Name
         to_addresses:
           items:
             type: string
