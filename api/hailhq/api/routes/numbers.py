@@ -11,11 +11,13 @@ stays with the rest of the `/numbers` router rather than splitting onto
 from __future__ import annotations
 
 import logging
+from datetime import datetime, timezone
 from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from fastapi import status as http_status
+from hailhq.api.audit import write_audit_log
 from hailhq.api.deps import Principal, get_current_principal
 from hailhq.api.errors import unprocessable
 from hailhq.api.funds import require_funds
@@ -192,6 +194,86 @@ async def acquire_number(
     return number_response
 
 
+def _reject_if_released(number: PhoneNumber) -> None:
+    """422 on a released row. A released row is a tombstone: its PN is
+    deleted at Twilio, so any provisioning call against it would 404 into
+    an opaque 500."""
+    if number.provisioning_state == "released":
+        raise unprocessable(
+            "this number has been released; acquire a new number instead",
+            loc=["path", "number_id"],
+        )
+
+
+async def release_org_number(
+    db: AsyncSession, provider: VoiceProvider, number: PhoneNumber
+) -> PhoneNumber:
+    """Release a dedicated number at the carrier and mark the row released.
+
+    Idempotent: an already-released row is returned unchanged, and the
+    provider tolerates a number that is already gone at the carrier.
+    Shared by DELETE /numbers/{id} and the internal dunning release
+    (routes/internal/numbers.py) so both paths stay identical.
+    """
+    # Serialize against enable_sms: it re-checks provisioning_state under the
+    # org-keyed advisory lock and then talks to Twilio, so a release that does
+    # not contend for the same lock could delete the PN between that re-check
+    # and attach_number (an opaque Twilio 404 → 500, and a Messaging Service
+    # SID committed onto a tombstone). Transaction-scoped: released at the
+    # commit below (or at rollback).
+    await db.execute(
+        text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))"),
+        {"key": str(number.organization_id)},
+    )
+    # Re-read under the lock: a concurrent release may have already
+    # tombstoned the row after our caller loaded it.
+    await db.refresh(number, ["provisioning_state", "released_at"])
+    if number.provisioning_state == "released":
+        return number
+    await provider.release_number(number.provider_resource_id)
+    number.provisioning_state = "released"
+    number.released_at = datetime.now(timezone.utc)
+    try:
+        await db.commit()
+    except Exception:
+        # The carrier release already happened; until a retry converges the
+        # row, the monthly-fee rater keeps billing a number that is gone at
+        # Twilio. Loud on purpose.
+        logger.error(
+            "number %s released at carrier but the DB commit failed; "
+            "retry the release to stop billing",
+            number.id,
+        )
+        raise
+    return number
+
+
+@router.delete("/{number_id}", status_code=http_status.HTTP_204_NO_CONTENT)
+async def release_number(
+    number_id: UUID,
+    principal: Annotated[Principal, Depends(get_current_principal)],
+    db: Annotated[AsyncSession, Depends(get_session)],
+    provider: Annotated[VoiceProvider, Depends(get_voice_provider)],
+) -> None:
+    """Release a dedicated number. The monthly fee stops accruing after the
+    release month; months already accrued stay owed (the rater bills late,
+    never forgives)."""
+    number = await _get_org_number_or_404(db, number_id, principal.organization_id)
+    # Best-effort pre-check so an idempotent re-DELETE doesn't append a
+    # second audit entry (audit is a safety net, not a correctness gate).
+    was_released = number.provisioning_state == "released"
+    await release_org_number(db, provider, number)
+    if not was_released:
+        await write_audit_log(
+            organization_id=principal.organization_id,
+            api_key_id=principal.api_key_id,
+            action="number.release",
+            resource_type="phone_number",
+            resource_id=number.id,
+            payload={"e164": number.e164},
+        )
+
+
 @router.get("/{number_id}", response_model=PhoneNumberResponse)
 async def get_number(
     number_id: UUID,
@@ -237,6 +319,8 @@ async def enable_sms(
 ) -> PhoneNumberResponse:
     number = await _get_org_number_or_404(db, number_id, principal.organization_id)
 
+    _reject_if_released(number)
+
     if "sms" not in number.capabilities:
         raise unprocessable(
             "this number does not support sms (fixed at purchase time by the "
@@ -254,15 +338,19 @@ async def enable_sms(
     # otherwise both observe no existing service and each create one (leaving
     # orphaned duplicates). A transaction-scoped advisory lock keyed on the org
     # (auto-released at commit/rollback) makes any waiter see the first
-    # request's committed result. No other code path takes advisory locks, so
-    # the org-derived key can't collide.
+    # request's committed result. release_org_number takes the same org-keyed
+    # lock on purpose — that is what makes the released re-check below
+    # authoritative rather than a race window; no other code path takes
+    # advisory locks.
     await db.execute(
         text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))"),
         {"key": str(principal.organization_id)},
     )
     # Re-read under the lock: a concurrent enable of THIS number may have just
-    # attached it (its SID was NULL when the row was first loaded).
-    await db.refresh(number, ["messaging_service_sid"])
+    # attached it (its SID was NULL when the row was first loaded), and a
+    # concurrent release may have tombstoned it (its PN is gone at Twilio).
+    await db.refresh(number, ["messaging_service_sid", "provisioning_state"])
+    _reject_if_released(number)
     if number.messaging_service_sid is not None:
         return PhoneNumberResponse.model_validate(number)
 
@@ -299,4 +387,4 @@ async def enable_sms(
     return PhoneNumberResponse.model_validate(number)
 
 
-__all__ = ["get_voice_provider", "router"]
+__all__ = ["get_voice_provider", "release_org_number", "router"]
