@@ -3,16 +3,16 @@
 Rendered as "Name <addr>" via email.utils.formataddr at send time.
 NULL on inbound rows and on every send that predates the column.
 
-Revision ID: 0040
-Revises: 0039
+Revision ID: 0042
+Revises: 0041
 """
 
 from __future__ import annotations
 
 from alembic import op
 
-revision: str = "0040"
-down_revision: str | None = "0039"
+revision: str = "0042"
+down_revision: str | None = "0041"
 branch_labels = None
 depends_on = None
 
