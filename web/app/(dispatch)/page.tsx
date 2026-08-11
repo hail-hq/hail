@@ -50,14 +50,7 @@ export default function CostsPage() {
         }}
       >
         <div className="wrap">
-          <div
-            style={{
-              display: 'grid',
-              gridTemplateColumns: 'minmax(0, 1fr) minmax(220px, 280px)',
-              gap: 32,
-              alignItems: 'end',
-            }}
-          >
+          <div className="hero-grid">
             <h1 className="dispatch-h1">
               MODEL COSTS
             </h1>
