@@ -1,11 +1,14 @@
 const INK = '#0d0d0d';
 const BG = '#e9e7e3';
-const PAPER = '#f2f0ec';
-const MUTE = '#6e6b66';
 const ACCENT = '#c4362c';
+const MUTE = '#6e6b66';
 
 export const OG_SIZE = { width: 1200, height: 630 };
 
+/** Mirrors hail.so's own opengraph-image.tsx layout (accent square + wordmark,
+ * headline, tagline/domain footer) and palette, so /costs OG cards read as
+ * the same site rather than a neighbouring property. The default Satori
+ * sans is acceptable; do not fetch remote fonts here. */
 export function OgArt() {
   return (
     <div
@@ -14,77 +17,37 @@ export function OgArt() {
         height: '100%',
         display: 'flex',
         flexDirection: 'column',
+        justifyContent: 'space-between',
         background: BG,
         color: INK,
-        fontFamily: 'sans-serif',
+        padding: 72,
       }}
     >
+      <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+        <div style={{ width: 22, height: 22, background: ACCENT }} />
+        <div style={{ fontSize: 26, letterSpacing: 6, textTransform: 'uppercase' }}>Hail</div>
+      </div>
       <div
         style={{
-          display: 'flex',
-          justifyContent: 'space-between',
-          padding: '28px 56px',
-          fontSize: 20,
-          letterSpacing: 2,
-          textTransform: 'uppercase',
+          fontSize: 74,
           fontWeight: 700,
-          borderBottom: `3px solid ${INK}`,
+          lineHeight: 1.04,
+          letterSpacing: -3,
+          maxWidth: 1000,
         }}
       >
-        <div style={{ display: 'flex', alignItems: 'center' }}>
-          <span style={{ color: ACCENT, marginRight: 14 }}>●</span>
-          HAIL.SO / DISPATCH
-        </div>
-        <div style={{ color: MUTE }}>CC-BY-4.0 · WEEKLY</div>
+        Every AI model&#39;s price, verified weekly.
       </div>
-
-      <div
-        style={{
-          display: 'flex',
-          flexDirection: 'column',
-          justifyContent: 'center',
-          flex: 1,
-          padding: '0 56px',
-        }}
-      >
-        <div
-          style={{
-            fontSize: 128,
-            fontWeight: 800,
-            letterSpacing: -4,
-            lineHeight: 0.92,
-            textTransform: 'uppercase',
-          }}
-        >
-          Model Costs
-        </div>
-        <div
-          style={{
-            display: 'flex',
-            marginTop: 28,
-            fontSize: 26,
-            color: MUTE,
-          }}
-        >
-          Public, validated AI pricing — LLM · STT · TTS · SMS · Telephony
-        </div>
-      </div>
-
       <div
         style={{
           display: 'flex',
           justifyContent: 'space-between',
           alignItems: 'center',
-          padding: '26px 56px',
-          background: PAPER,
-          borderTop: `2px solid ${INK}`,
-          fontSize: 22,
-          fontWeight: 700,
-          letterSpacing: 1,
+          fontSize: 26,
         }}
       >
-        <div style={{ display: 'flex' }}>hail.so/costs</div>
-        <div style={{ display: 'flex', color: ACCENT }}>SCHEMA-VALIDATED</div>
+        <div style={{ color: ACCENT }}>Schema-validated · CC-BY-4.0</div>
+        <div style={{ color: MUTE }}>hail.so/costs</div>
       </div>
     </div>
   );
