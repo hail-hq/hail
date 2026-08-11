@@ -3,6 +3,7 @@ import { CopyableCode } from './copyable-code';
 import { isStale, daysSince } from '@/lib/staleness';
 import { formatCloning, langs, usd } from '@/lib/format';
 import { compareHrefRemove } from '@/lib/url';
+import { TableWrap } from './table-wrap';
 
 type Cell = React.ReactNode;
 type CompareRow = { label: string; cells: Cell[]; emphasis?: boolean };
@@ -23,7 +24,7 @@ function CompareGrid({
   removable?: boolean;
 }) {
   return (
-    <div className="table-wrap">
+    <TableWrap>
       <table className="compare-table">
         <thead>
           <tr>
@@ -61,7 +62,7 @@ function CompareGrid({
           ))}
         </tbody>
       </table>
-    </div>
+    </TableWrap>
   );
 }
 

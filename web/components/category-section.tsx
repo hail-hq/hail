@@ -11,6 +11,7 @@ import {
   useReactTable,
 } from "@tanstack/react-table";
 import posthog from "posthog-js";
+import { TableWrap } from "./table-wrap";
 
 export interface CategorySectionProps<T> {
   id: string;
@@ -76,7 +77,7 @@ export function CategorySection<T>({
           </span>
         </div>
 
-        <div className="table-wrap">
+        <TableWrap>
           <table className="wire-table">
             <thead>
               {table.getHeaderGroups().map((hg) => (
@@ -146,7 +147,7 @@ export function CategorySection<T>({
               ))}
             </tbody>
           </table>
-        </div>
+        </TableWrap>
       </div>
     </section>
   );

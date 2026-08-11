@@ -30,6 +30,33 @@ export const metadata = {
   title: 'Hail · model costs',
   description:
     'Public, validated pricing and capability data for AI model providers — LLMs, speech-to-text, and text-to-speech.',
+  icons: {
+    icon: '/costs/icon',
+    apple: '/costs/apple-icon',
+  },
+  openGraph: {
+    siteName: 'Hail',
+    type: 'website',
+    images: [
+      {
+        url: '/costs/opengraph-image',
+        width: 1200,
+        height: 630,
+        alt: 'Hail — AI model pricing database',
+      },
+    ],
+  },
+  twitter: {
+    card: 'summary_large_image',
+    images: [
+      {
+        url: '/costs/twitter-image',
+        width: 1200,
+        height: 630,
+        alt: 'Hail — AI model pricing database',
+      },
+    ],
+  },
 };
 
 export default function RootLayout({ children }: { children: ReactNode }) {

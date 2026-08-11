@@ -101,6 +101,24 @@
     margin: 0;
   }
 
+  /* ── HERO GRID ────────────────────────────── */
+  /* The filed-panel's minmax(220px, 280px) column otherwise squeezes the
+     heading column below its text's min-content width, pushing "MODEL
+     COSTS" to overflow and overlap the panel. */
+  .hero-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(220px, 280px);
+    gap: 32px;
+    align-items: end;
+  }
+  @media (max-width: 640px) {
+    .hero-grid {
+      grid-template-columns: 1fr;
+      gap: 20px;
+      align-items: start;
+    }
+  }
+
   /* ── FILED PANEL ─────────────────────────── */
   .filed-panel {
     font-family: var(--font-mono);
@@ -214,6 +232,7 @@
   }
   .toolbar .anchors {
     display: flex;
+    flex-wrap: wrap;
     gap: 4px;
   }
   .toolbar .anchors a,
@@ -360,10 +379,46 @@
   }
 
   /* ── WIRE TABLE ──────────────────────────── */
+  .table-wrap-outer {
+    position: relative;
+  }
   .table-wrap {
     overflow-x: auto;
     border: 1.5px solid var(--color-ink);
     background: var(--color-bg);
+  }
+  /* Fade + chevron pinned to the outer wrapper so they stay put while the
+     table itself scrolls; toggled by TableWrap based on scrollLeft. */
+  .scroll-hint {
+    position: absolute;
+    top: 1.5px;
+    bottom: 1.5px;
+    width: 40px;
+    display: flex;
+    align-items: center;
+    font-family: var(--font-mono);
+    font-size: 20px;
+    font-weight: 700;
+    color: var(--color-ink);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 150ms ease;
+    z-index: 2;
+  }
+  .scroll-hint.is-visible {
+    opacity: 0.55;
+  }
+  .scroll-hint-left {
+    left: 1.5px;
+    justify-content: flex-start;
+    padding-left: 4px;
+    background: linear-gradient(to right, var(--color-bg) 40%, transparent);
+  }
+  .scroll-hint-right {
+    right: 1.5px;
+    justify-content: flex-end;
+    padding-right: 4px;
+    background: linear-gradient(to left, var(--color-bg) 40%, transparent);
   }
   .wire-table {
     width: 100%;
@@ -844,7 +899,7 @@
   .site-nav {
     display: flex;
     align-items: center;
-    gap: 24px;
+    gap: 10px 24px;
     font-family: var(--font-mono);
     font-size: 11.5px;
     letter-spacing: 0.09em;
@@ -907,7 +962,7 @@
       display: none;
     }
   }
-  @media (max-width: 600px) {
+  @media (max-width: 660px) {
     .site-nav {
       gap: 14px;
       font-size: 10.5px;
@@ -922,6 +977,10 @@
   @media (max-width: 480px) {
     .site-header {
       position: static;
+    }
+    .site-header .row,
+    .site-nav {
+      flex-wrap: wrap;
     }
     .toolbar {
       top: 0;
