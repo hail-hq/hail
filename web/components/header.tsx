@@ -1,5 +1,4 @@
 import { siteHref } from "@/lib/url";
-import { GitHubIcon } from "./icons";
 
 /**
  * Mirrors hail.so's SiteHeader so /costs carries the same chrome as every
@@ -11,38 +10,41 @@ export function Header() {
     <header className="site-header">
       <div className="row">
         <a href={siteHref("/")} className="site-mark" aria-label="Hail home">
-          HAIL<span>.SO</span>
+          hail.so
         </a>
         <nav className="site-nav">
           <a href={siteHref("/compare")} className="nav-link">
-            Compare
+            compare
           </a>
           <a href={siteHref("/pricing")} className="nav-link">
-            Pricing
+            pricing
           </a>
           <a href={siteHref("/tools")} className="nav-link">
-            Tools
+            tools
           </a>
           <a href={siteHref("/mcp")} className="nav-link">
-            MCP
-          </a>
-          <a href={siteHref("/docs")} className="nav-link nav-hide">
-            Docs
+            mcp
           </a>
           <span className="nav-chip is-active nav-hide-lg" aria-current="page">
-            AI Model Pricing Database
+            database
           </span>
+          <a href={siteHref("/integrations")} className="nav-link nav-hide">
+            resources
+          </a>
+          <a href={siteHref("/docs")} className="nav-link nav-hide">
+            docs
+          </a>
           <a
             href="https://github.com/hail-hq/hail"
             target="_blank"
             rel="noopener"
-            aria-label="GitHub"
+            aria-label="github"
             className="nav-gh nav-hide"
           >
-            <GitHubIcon />
+            [ github ]
           </a>
           <a href={siteHref("/signup")} className="nav-cta">
-            Get started →
+            get started
           </a>
         </nav>
       </div>

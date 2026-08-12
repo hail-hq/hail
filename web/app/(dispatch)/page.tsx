@@ -6,17 +6,34 @@ import { SmsSection } from '@/components/categories/sms-section';
 import { TelephonySection } from '@/components/categories/telephony-section';
 import { Toolbar } from '@/components/toolbar';
 import { mostRecent, priceRange } from '@/lib/format';
+import { COSTS_HERO_COPY, COSTS_SITE_DESCRIPTION, COSTS_SITE_TITLE } from '@/lib/site-copy';
 
 export const dynamic = 'force-static';
 
 export const metadata = {
-  title: 'Model costs — Hail',
-  description:
-    'Public, validated pricing and capability data for AI model providers — LLMs, speech-to-text, text-to-speech, SMS, and telephony. Schema-validated, CC-BY-4.0, refreshed weekly.',
+  title: COSTS_SITE_TITLE,
+  description: COSTS_SITE_DESCRIPTION,
   alternates: {
+    canonical: '/costs',
     types: {
       'text/markdown': '/costs.md',
     },
+  },
+  openGraph: {
+    type: 'website',
+    url: '/costs',
+    siteName: 'Hail',
+    title: COSTS_SITE_TITLE,
+    description: COSTS_SITE_DESCRIPTION,
+    images: [{ url: '/costs/opengraph-image', width: 1200, height: 630, alt: COSTS_HERO_COPY.heading }],
+  },
+  twitter: {
+    card: 'summary_large_image',
+    site: '@hail_hq',
+    creator: '@hail_hq',
+    title: COSTS_SITE_TITLE,
+    description: COSTS_SITE_DESCRIPTION,
+    images: ['/costs/opengraph-image'],
   },
 };
 
@@ -35,25 +52,30 @@ export default function CostsPage() {
       <div className="dispatch-tape">
         <div className="wrap row">
           <div className="left">
-            <span className="dot">●</span> HAIL.SO / DISPATCH · {today} · MODEL COSTS
+            <span className="dot">●</span> {COSTS_HERO_COPY.badge}
           </div>
           <div className="right">
-            FILE: <b>COSTS</b> · CC-BY-4.0 · v0.2.0
+            updated {today} / cc-by-4.0 / v0.2.0
           </div>
         </div>
       </div>
 
       <header
         style={{
-          padding: '40px 0 28px',
-          borderBottom: '2px solid var(--color-ink)',
+          padding: 'clamp(72px,9vw,120px) 0 clamp(52px,7vw,88px)',
+          borderBottom: '1px solid var(--color-ink)',
         }}
       >
         <div className="wrap">
           <div className="hero-grid">
-            <h1 className="dispatch-h1">
-              MODEL COSTS
-            </h1>
+            <div className="costs-hero-copy">
+              <h1 className="dispatch-h1">{COSTS_HERO_COPY.heading}</h1>
+              <p>{COSTS_HERO_COPY.description}</p>
+              <div className="costs-hero-actions">
+                <a href="/costs/compare">compare models</a>
+                <a href="/costs.md">fetch markdown</a>
+              </div>
+            </div>
             <aside className="filed-panel">
               <b>FILED {today}</b>
               <span>Schema-validated public dataset.</span>

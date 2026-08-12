@@ -13,7 +13,7 @@ export function Footer() {
             className="site-mark"
             style={{ fontSize: 20 }}
           >
-            HAIL<span>.SO</span>
+            hail.so
           </a>
           <nav className="foot-nav">
             <a href={siteHref("/#channels")}>Channels</a>
@@ -53,7 +53,7 @@ export function Footer() {
             <a href="https://github.com/hail-hq/hail/tree/main/costs">source</a>
           </span>
           <span className="tagline">
-            Universal communication layer for AI agents.
+            phone + sms + email for ai agents.
           </span>
           <span>MCP · CLI · REST</span>
         </div>

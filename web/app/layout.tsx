@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react';
 import { Space_Grotesk, JetBrains_Mono, Instrument_Serif } from 'next/font/google';
 import { siteUrl } from '@/lib/url';
+import { COSTS_HERO_COPY, COSTS_SITE_DESCRIPTION, COSTS_SITE_TITLE } from '@/lib/site-copy';
 import './global.css';
 
 const fontSans = Space_Grotesk({
@@ -33,9 +34,8 @@ const fontSerif = Instrument_Serif({
 // this they'd resolve to hail.so/icon instead of hail.so/costs/icon.
 export const metadata = {
   metadataBase: siteUrl,
-  title: 'Hail · model costs',
-  description:
-    'Public, validated pricing and capability data for AI model providers — LLMs, speech-to-text, and text-to-speech.',
+  title: COSTS_SITE_TITLE,
+  description: COSTS_SITE_DESCRIPTION,
   icons: {
     icon: [
       { url: '/costs/assets/favicon-32.png', sizes: '32x32', type: 'image/png' },
@@ -46,12 +46,14 @@ export const metadata = {
   openGraph: {
     type: 'website',
     siteName: 'Hail',
+    title: COSTS_SITE_TITLE,
+    description: COSTS_SITE_DESCRIPTION,
     images: [
       {
         url: '/costs/opengraph-image',
         width: 1200,
         height: 630,
-        alt: 'Hail — AI model pricing database',
+        alt: COSTS_HERO_COPY.heading,
       },
     ],
   },
@@ -59,6 +61,8 @@ export const metadata = {
     card: 'summary_large_image',
     site: '@hail_hq',
     creator: '@hail_hq',
+    title: COSTS_SITE_TITLE,
+    description: COSTS_SITE_DESCRIPTION,
   },
 };
 
