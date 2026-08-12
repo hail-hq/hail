@@ -2,9 +2,9 @@
 
 /* Palette mirrors hail.so's marketing surface (`.hsite` in hail-website's
    app/(marketing)/marketing.css) so /costs reads as a page of the site rather
-   than a neighbouring property. Fonts are Space Grotesk / JetBrains Mono —
-   no serif face; headings stay in one typeface. Keep these in sync by hand —
-   the two repos share no build. */
+   than a neighbouring property. JetBrains Mono is the only face on this
+   surface — no sans, no serif — so headings and tables never mix typefaces.
+   Keep these in sync by hand — the two repos share no build. */
 @theme {
   --color-ink: #111111;
   --color-bg: #f5f3ed;
@@ -1068,7 +1068,7 @@
     border: 1.5px solid var(--color-ink);
     background: var(--color-bg);
     color: var(--color-ink);
-    font-family: var(--font-sans);
+    font-family: var(--font-mono);
     font-size: 13px;
     text-decoration: none;
     transition:

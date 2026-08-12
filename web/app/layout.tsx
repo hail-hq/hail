@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { Space_Grotesk, JetBrains_Mono } from "next/font/google";
+import { JetBrains_Mono } from "next/font/google";
 import { siteUrl } from "@/lib/url";
 import {
   COSTS_HERO_COPY,
@@ -7,13 +7,6 @@ import {
   COSTS_SITE_TITLE,
 } from "@/lib/site-copy";
 import "./global.css";
-
-const fontSans = Space_Grotesk({
-  subsets: ["latin"],
-  weight: ["400", "500", "600", "700"],
-  variable: "--font-sans",
-  display: "swap",
-});
 
 const fontMono = JetBrains_Mono({
   subsets: ["latin"],
@@ -78,11 +71,7 @@ export const metadata = {
 
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
-    <html
-      lang="en"
-      suppressHydrationWarning
-      className={`${fontSans.variable} ${fontMono.variable}`}
-    >
+    <html lang="en" suppressHydrationWarning className={fontMono.variable}>
       <body>{children}</body>
     </html>
   );
