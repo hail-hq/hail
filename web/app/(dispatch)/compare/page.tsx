@@ -25,9 +25,7 @@ export default function ComparePage() {
         }}
       >
         <div className="wrap">
-          <h1 className="dispatch-h1">
-            <em className="it">side</em> by side.
-          </h1>
+          <h1 className="dispatch-h1">side by side.</h1>
         </div>
       </header>
 

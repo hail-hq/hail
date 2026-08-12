@@ -1,16 +1,16 @@
-'use client';
+"use client";
 
-import type { ColumnDef } from '@tanstack/react-table';
-import type { SmsRateRow } from '@/lib/types';
-import { CategorySection } from '../category-section';
-import { VerifiedCell } from '../verified-cell';
-import { priceRange, usd } from '@/lib/format';
+import type { ColumnDef } from "@tanstack/react-table";
+import type { SmsRateRow } from "@/lib/types";
+import { CategorySection } from "../category-section";
+import { VerifiedCell } from "../verified-cell";
+import { priceRange, usd } from "@/lib/format";
 
 const columns: ColumnDef<SmsRateRow>[] = [
   {
-    id: 'provider',
-    accessorKey: 'provider',
-    header: 'Provider',
+    id: "provider",
+    accessorKey: "provider",
+    header: "Provider",
     cell: ({ row }) => (
       <div>
         <div style={{ fontWeight: 700 }}>{row.original.provider}</div>
@@ -21,19 +21,19 @@ const columns: ColumnDef<SmsRateRow>[] = [
     ),
   },
   {
-    id: 'price',
+    id: "price",
     accessorFn: (row) => Number(row.usd_per_segment),
-    header: '$/segment (base)',
+    header: "$/segment (base)",
     cell: ({ row }) => usd(row.original.usd_per_segment, 5),
-    sortingFn: 'basic',
+    sortingFn: "basic",
     meta: { num: true, killer: true },
   },
   {
-    id: 'verified',
-    accessorKey: 'last_verified',
-    header: 'Verified',
+    id: "verified",
+    accessorKey: "last_verified",
+    header: "Verified",
     cell: ({ row }) => <VerifiedCell date={row.original.last_verified} />,
-    sortingFn: 'alphanumeric',
+    sortingFn: "alphanumeric",
     meta: { num: true },
   },
 ];
@@ -43,16 +43,17 @@ export function SmsSection({ data }: { data: SmsRateRow[] }) {
     <CategorySection<SmsRateRow>
       id="sms"
       num="05"
-      title={
-        <>
-          <em className="it">SMS</em> base rates
-        </>
-      }
+      title="SMS base rates"
       count={data.length}
-      rangeLabel={priceRange(data.map((r) => r.usd_per_segment), 5, 5, 'segment')}
+      rangeLabel={priceRange(
+        data.map((r) => r.usd_per_segment),
+        5,
+        5,
+        "segment",
+      )}
       data={data}
       columns={columns}
-      defaultSort={{ id: 'price', desc: false }}
+      defaultSort={{ id: "price", desc: false }}
       noun="provider"
     />
   );

@@ -1,29 +1,25 @@
-import type { ReactNode } from 'react';
-import { Space_Grotesk, JetBrains_Mono, Instrument_Serif } from 'next/font/google';
-import { siteUrl } from '@/lib/url';
-import { COSTS_HERO_COPY, COSTS_SITE_DESCRIPTION, COSTS_SITE_TITLE } from '@/lib/site-copy';
-import './global.css';
+import type { ReactNode } from "react";
+import { Space_Grotesk, JetBrains_Mono } from "next/font/google";
+import { siteUrl } from "@/lib/url";
+import {
+  COSTS_HERO_COPY,
+  COSTS_SITE_DESCRIPTION,
+  COSTS_SITE_TITLE,
+} from "@/lib/site-copy";
+import "./global.css";
 
 const fontSans = Space_Grotesk({
-  subsets: ['latin'],
-  weight: ['400', '500', '600', '700'],
-  variable: '--font-sans',
-  display: 'swap',
+  subsets: ["latin"],
+  weight: ["400", "500", "600", "700"],
+  variable: "--font-sans",
+  display: "swap",
 });
 
 const fontMono = JetBrains_Mono({
-  subsets: ['latin'],
-  weight: ['400', '500', '700'],
-  variable: '--font-mono',
-  display: 'swap',
-});
-
-const fontSerif = Instrument_Serif({
-  subsets: ['latin'],
-  weight: '400',
-  style: 'italic',
-  variable: '--font-serif',
-  display: 'swap',
+  subsets: ["latin"],
+  weight: ["400", "500", "700"],
+  variable: "--font-mono",
+  display: "swap",
 });
 
 // Icons/OG match hail.so's own app/layout.tsx (same monogram, same palette,
@@ -38,19 +34,33 @@ export const metadata = {
   description: COSTS_SITE_DESCRIPTION,
   icons: {
     icon: [
-      { url: '/costs/assets/favicon-32.png', sizes: '32x32', type: 'image/png' },
-      { url: '/costs/assets/favicon-16.png', sizes: '16x16', type: 'image/png' },
+      {
+        url: "/costs/assets/favicon-32.png",
+        sizes: "32x32",
+        type: "image/png",
+      },
+      {
+        url: "/costs/assets/favicon-16.png",
+        sizes: "16x16",
+        type: "image/png",
+      },
     ],
-    apple: [{ url: '/costs/assets/apple-touch-180.png', sizes: '180x180', type: 'image/png' }],
+    apple: [
+      {
+        url: "/costs/assets/apple-touch-180.png",
+        sizes: "180x180",
+        type: "image/png",
+      },
+    ],
   },
   openGraph: {
-    type: 'website',
-    siteName: 'Hail',
+    type: "website",
+    siteName: "Hail",
     title: COSTS_SITE_TITLE,
     description: COSTS_SITE_DESCRIPTION,
     images: [
       {
-        url: '/costs/opengraph-image',
+        url: "/costs/opengraph-image",
         width: 1200,
         height: 630,
         alt: COSTS_HERO_COPY.heading,
@@ -58,9 +68,9 @@ export const metadata = {
     ],
   },
   twitter: {
-    card: 'summary_large_image',
-    site: '@hail_hq',
-    creator: '@hail_hq',
+    card: "summary_large_image",
+    site: "@hail_hq",
+    creator: "@hail_hq",
     title: COSTS_SITE_TITLE,
     description: COSTS_SITE_DESCRIPTION,
   },
@@ -71,7 +81,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
     <html
       lang="en"
       suppressHydrationWarning
-      className={`${fontSans.variable} ${fontMono.variable} ${fontSerif.variable}`}
+      className={`${fontSans.variable} ${fontMono.variable}`}
     >
       <body>{children}</body>
     </html>

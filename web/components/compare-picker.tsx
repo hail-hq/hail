@@ -28,8 +28,7 @@ export function CompareModels({ llm, stt, tts }: Props) {
   // ever reach state, so a garbage id can never occupy one of the
   // MAX_COMPARE slots and silently block later adds.
   const knownIds = useMemo(
-    () =>
-      new Set([...llm, ...stt, ...tts].map((m) => m.model_id)),
+    () => new Set([...llm, ...stt, ...tts].map((m) => m.model_id)),
     [llm, stt, tts],
   );
   const [ids, setIds] = useState<string[]>(() =>
@@ -138,9 +137,7 @@ export function CompareModels({ llm, stt, tts }: Props) {
           <div className="wrap">
             <div className="cat-bar">
               <span className="num">01</span>
-              <h2>
-                Large language <em className="it">models</em>
-              </h2>
+              <h2>Large language models</h2>
               <span className="count">
                 {selectedLLM.length}{" "}
                 {selectedLLM.length === 1 ? "model" : "models"}
@@ -156,9 +153,7 @@ export function CompareModels({ llm, stt, tts }: Props) {
           <div className="wrap">
             <div className="cat-bar">
               <span className="num">02</span>
-              <h2>
-                <em className="it">Speech</em> to text
-              </h2>
+              <h2>Speech to text</h2>
               <span className="count">
                 {selectedSTT.length}{" "}
                 {selectedSTT.length === 1 ? "model" : "models"}
@@ -174,9 +169,7 @@ export function CompareModels({ llm, stt, tts }: Props) {
           <div className="wrap">
             <div className="cat-bar">
               <span className="num">03</span>
-              <h2>
-                Text to <em className="it">speech</em>
-              </h2>
+              <h2>Text to speech</h2>
               <span className="count">
                 {selectedTTS.length}{" "}
                 {selectedTTS.length === 1 ? "model" : "models"}
@@ -221,9 +214,7 @@ export function CompareModels({ llm, stt, tts }: Props) {
               </div>
               <p
                 style={{
-                  fontFamily: "var(--font-serif)",
-                  fontStyle: "italic",
-                  fontSize: 22,
+                  fontSize: 18,
                   margin: 0,
                   maxWidth: "50ch",
                   marginInline: "auto",
@@ -312,13 +303,13 @@ function ModelGroup({
                 currentIds.length >= MAX_COMPARE ? "not-allowed" : undefined,
             }}
             onClick={() => {
-                posthog.capture("model_added_to_compare", {
-                  model_id: m.model_id,
-                  provider: m.provider,
-                  category: label,
-                });
-                onAdd(m.model_id);
-              }}
+              posthog.capture("model_added_to_compare", {
+                model_id: m.model_id,
+                provider: m.provider,
+                category: label,
+              });
+              onAdd(m.model_id);
+            }}
           >
             <span className="add-pill-plus">+</span>
             <span>
