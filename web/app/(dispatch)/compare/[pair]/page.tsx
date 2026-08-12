@@ -85,7 +85,7 @@ export default async function PairPage({
       >
         <div className="wrap">
           <h1 className="dispatch-h1">
-            {a.display_name} <em className="it">vs</em> {b.display_name}
+            {a.display_name} vs {b.display_name}
           </h1>
         </div>
       </header>
