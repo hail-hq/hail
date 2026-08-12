@@ -2,3 +2,347 @@
 @import "fumadocs-ui/css/neutral.css";
 @import "fumadocs-ui/css/preset.css";
 @import "fumadocs-openapi/css/preset.css";
+
+@layer base {
+  :root {
+    --hail-paper: #f4f1e9;
+    --hail-ink: #0a0a0a;
+    --hail-muted: #6f6c66;
+    --hail-blue: #1f6fff;
+    --hail-blue-wash: rgba(31, 111, 255, 0.08);
+
+    --color-fd-background: var(--hail-paper);
+    --color-fd-foreground: var(--hail-ink);
+    --color-fd-primary: var(--hail-blue);
+    --color-fd-primary-foreground: #ffffff;
+    --color-fd-muted: #e9e5dc;
+    --color-fd-muted-foreground: var(--hail-muted);
+    --color-fd-secondary: #ebe7de;
+    --color-fd-secondary-foreground: var(--hail-ink);
+    --color-fd-accent: var(--hail-blue-wash);
+    --color-fd-accent-foreground: var(--hail-ink);
+    --color-fd-card: #f8f6f0;
+    --color-fd-card-foreground: var(--hail-ink);
+    --color-fd-popover: #f8f6f0;
+    --color-fd-popover-foreground: var(--hail-ink);
+    --color-fd-border: rgba(10, 10, 10, 0.24);
+    --color-fd-ring: var(--hail-blue);
+  }
+
+  .dark {
+    --hail-paper: #0a0a0a;
+    --hail-ink: #f4f1e9;
+    --hail-muted: #aaa69d;
+    --hail-blue-wash: rgba(31, 111, 255, 0.16);
+
+    --color-fd-background: var(--hail-paper);
+    --color-fd-foreground: var(--hail-ink);
+    --color-fd-primary: #4f8cff;
+    --color-fd-primary-foreground: #050505;
+    --color-fd-muted: #171717;
+    --color-fd-muted-foreground: var(--hail-muted);
+    --color-fd-secondary: #151515;
+    --color-fd-secondary-foreground: var(--hail-ink);
+    --color-fd-accent: var(--hail-blue-wash);
+    --color-fd-accent-foreground: var(--hail-ink);
+    --color-fd-card: #101010;
+    --color-fd-card-foreground: var(--hail-ink);
+    --color-fd-popover: #101010;
+    --color-fd-popover-foreground: var(--hail-ink);
+    --color-fd-border: rgba(244, 241, 233, 0.2);
+    --color-fd-ring: #4f8cff;
+  }
+
+  html {
+    background: var(--color-fd-background);
+  }
+
+  .hail-docs {
+    font-family:
+      "Geist Mono", "JetBrains Mono", "SFMono-Regular", Consolas,
+      "Liberation Mono", monospace;
+    letter-spacing: -0.018em;
+  }
+
+  .hail-docs *,
+  .hail-docs *::before,
+  .hail-docs *::after {
+    border-radius: 0 !important;
+  }
+
+  .hail-docs :focus-visible {
+    outline: 2px solid var(--color-fd-primary);
+    outline-offset: 3px;
+  }
+}
+
+@layer components {
+  .docs-brand {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 0.55rem;
+    white-space: nowrap;
+    letter-spacing: -0.04em;
+  }
+
+  .docs-brand strong {
+    font-size: 1.08rem;
+    font-weight: 750;
+  }
+
+  .docs-brand span {
+    color: var(--color-fd-muted-foreground);
+    font-size: 0.8rem;
+    font-weight: 500;
+  }
+
+  .docs-cta {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.65rem;
+    text-transform: lowercase;
+  }
+
+  .docs-cta__mark {
+    position: relative;
+    display: inline-grid;
+    width: 1rem;
+    overflow: hidden;
+  }
+
+  .docs-cta__chevron,
+  .docs-cta__arrow {
+    grid-area: 1 / 1;
+    transition:
+      opacity 180ms ease,
+      transform 220ms cubic-bezier(0.22, 1, 0.36, 1);
+  }
+
+  .docs-cta__arrow {
+    opacity: 0;
+    transform: translateX(-0.45rem);
+  }
+
+  a:hover .docs-cta__chevron,
+  a:focus-visible .docs-cta__chevron {
+    opacity: 0;
+    transform: translateX(0.45rem);
+  }
+
+  a:hover .docs-cta__arrow,
+  a:focus-visible .docs-cta__arrow {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@layer utilities {
+  .hail-docs #nd-subnav {
+    border-color: var(--color-fd-border);
+    background: color-mix(in srgb, var(--color-fd-background) 94%, transparent);
+    box-shadow: none;
+  }
+
+  .hail-docs #nd-sidebar {
+    background: var(--color-fd-card);
+    border-color: var(--color-fd-border);
+  }
+
+  .hail-docs #nd-sidebar a,
+  .hail-docs #nd-sidebar button,
+  .hail-docs #nd-subnav a,
+  .hail-docs #nd-subnav button {
+    text-transform: lowercase;
+  }
+
+  .hail-docs #nd-sidebar a[data-active="true"],
+  .hail-docs #nd-sidebar a[aria-current="page"] {
+    color: var(--color-fd-primary);
+    background: var(--hail-blue-wash);
+    box-shadow: inset 2px 0 0 var(--color-fd-primary);
+  }
+
+  .hail-docs [data-sidebar-panel],
+  .hail-docs [role="dialog"],
+  .hail-docs [role="menu"] {
+    box-shadow: 8px 8px 0
+      color-mix(in srgb, var(--color-fd-foreground) 9%, transparent);
+  }
+
+  .hail-docs #nd-page {
+    max-width: 960px;
+    padding-top: clamp(2.5rem, 6vw, 5rem);
+  }
+
+  .hail-docs .prose {
+    font-size: 0.96rem;
+    line-height: 1.78;
+  }
+
+  .hail-docs .prose h1 {
+    max-width: 18ch;
+    margin-bottom: 1.5rem;
+    font-size: clamp(2.5rem, 7vw, 5.2rem);
+    font-weight: 500;
+    line-height: 0.98;
+    letter-spacing: -0.07em;
+    text-wrap: balance;
+  }
+
+  .hail-docs .prose h2 {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    margin-top: 4rem;
+    font-size: 1.25rem;
+    font-weight: 650;
+    letter-spacing: -0.04em;
+  }
+
+  .hail-docs .prose h2::before {
+    color: var(--color-fd-primary);
+    content: "──[";
+  }
+
+  .hail-docs .prose h2::after {
+    min-width: 2rem;
+    flex: 1;
+    overflow: hidden;
+    color: var(--color-fd-border);
+    content: "]────────────────────────────────────────";
+    white-space: nowrap;
+  }
+
+  .hail-docs .prose h3 {
+    margin-top: 2.75rem;
+    font-size: 1rem;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+  }
+
+  .hail-docs .prose p:first-of-type {
+    max-width: 68ch;
+    color: var(--color-fd-muted-foreground);
+    font-size: 1.02rem;
+  }
+
+  .hail-docs .prose a {
+    color: var(--color-fd-primary);
+    text-decoration-color: color-mix(
+      in srgb,
+      var(--color-fd-primary) 42%,
+      transparent
+    );
+    text-underline-offset: 0.22em;
+  }
+
+  .hail-docs .prose a:hover {
+    text-decoration-color: var(--color-fd-primary);
+  }
+
+  .hail-docs .prose :not(pre) > code {
+    border: 1px solid var(--color-fd-border);
+    background: var(--color-fd-secondary);
+    padding: 0.12em 0.38em;
+    color: var(--color-fd-foreground);
+    font-weight: 500;
+  }
+
+  .hail-docs .prose blockquote {
+    border-inline-start: 2px solid var(--color-fd-primary);
+    background: var(--hail-blue-wash);
+    padding: 0.85rem 1rem;
+    color: var(--color-fd-foreground);
+    font-style: normal;
+  }
+
+  .hail-docs .prose table {
+    border: 1px solid var(--color-fd-border);
+    font-size: 0.85rem;
+  }
+
+  .hail-docs .prose th {
+    background: var(--color-fd-foreground);
+    color: var(--color-fd-background);
+    font-weight: 600;
+  }
+
+  .hail-docs .prose th,
+  .hail-docs .prose td {
+    border-color: var(--color-fd-border);
+    padding: 0.75rem 0.9rem;
+  }
+
+  .hail-docs .prose hr {
+    border-style: dotted;
+  }
+
+  .hail-docs .shiki,
+  .hail-docs [data-card],
+  .hail-docs [role="tabpanel"],
+  .hail-docs .prose > div[class*="border"] {
+    box-shadow: none;
+  }
+
+  .hail-docs .shiki {
+    border-color: var(--color-fd-border);
+    background: #101010;
+    color: #e1e4e8;
+  }
+
+  /* Code blocks always use a dark terminal surface, including when the page
+     theme is light. Fumadocs otherwise selects Shiki's light token palette,
+     which makes default tokens (#24292e) disappear against #101010. */
+  .hail-docs .shiki code,
+  .hail-docs .shiki code span {
+    color: var(--shiki-dark, #e1e4e8) !important;
+    font-style: var(--shiki-dark-font-style, normal) !important;
+  }
+
+  .hail-docs .shiki figcaption,
+  .hail-docs .shiki [data-radix-scroll-area-viewport] {
+    font-family: inherit;
+  }
+
+  .hail-docs [data-card] {
+    border-color: var(--color-fd-border);
+    transition:
+      border-color 160ms ease,
+      background-color 160ms ease,
+      transform 180ms ease;
+  }
+
+  .hail-docs a[data-card]:hover {
+    border-color: var(--color-fd-primary);
+    background: var(--hail-blue-wash);
+    transform: translateY(-2px);
+  }
+
+  @media (max-width: 767px) {
+    .hail-docs #nd-page {
+      padding-top: 2rem;
+    }
+
+    .hail-docs .prose h1 {
+      font-size: clamp(2.35rem, 13vw, 4rem);
+    }
+
+    .hail-docs .prose h2 {
+      margin-top: 3rem;
+      font-size: 1.05rem;
+    }
+
+    .hail-docs .prose h2::after {
+      min-width: 0.75rem;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .hail-docs *,
+    .hail-docs *::before,
+    .hail-docs *::after {
+      scroll-behavior: auto !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
+}

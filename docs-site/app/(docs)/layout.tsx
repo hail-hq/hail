@@ -1,5 +1,6 @@
 import { DocsLayout } from "fumadocs-ui/layouts/docs";
 import type { ReactNode } from "react";
+import { DocsBrand, DocsCta } from "@/components/docs-brand";
 import { source } from "@/lib/source";
 
 export default function Layout({ children }: { children: ReactNode }) {
@@ -8,11 +9,17 @@ export default function Layout({ children }: { children: ReactNode }) {
       tree={source.pageTree}
       // Absolute, not basePath-relative: these point back at the marketing app
       // on the apex, which is a different Next zone.
-      nav={{ title: "Hail docs", url: "https://hail.so" }}
+      nav={{ title: <DocsBrand />, url: "https://hail.so" }}
       links={[
-        { text: "API Reference", url: "/api" },
-        { text: "Pricing", url: "https://hail.so/pricing" },
-        { text: "GitHub", url: "https://github.com/hail-hq/hail" },
+        { text: "api reference", url: "/api" },
+        { text: "pricing", url: "https://hail.so/pricing" },
+        { text: "github", url: "https://github.com/hail-hq/hail" },
+        {
+          type: "button",
+          text: <DocsCta>get started</DocsCta>,
+          url: "https://hail.so/signup",
+          secondary: false,
+        },
       ]}
     >
       {children}
