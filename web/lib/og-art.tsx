@@ -1,9 +1,9 @@
-import { COSTS_HERO_COPY } from './site-copy';
+import { COSTS_HERO_COPY } from "./site-copy";
 
-const INK = '#0d0d0d';
-const BG = '#f5f3ed';
-const ACCENT = '#1665ff';
-const MUTE = '#6e6b66';
+const INK = "#111111";
+const BG = "#f5f3ed";
+const ACCENT = "#1665ff";
+const MUTE = "#686868";
 
 export const OG_SIZE = { width: 1200, height: 630 };
 
@@ -15,19 +15,21 @@ export function OgArt() {
   return (
     <div
       style={{
-        width: '100%',
-        height: '100%',
-        display: 'flex',
-        flexDirection: 'column',
-        justifyContent: 'space-between',
+        width: "100%",
+        height: "100%",
+        display: "flex",
+        flexDirection: "column",
+        justifyContent: "space-between",
         background: BG,
         color: INK,
         padding: 72,
       }}
     >
-      <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
         <div style={{ fontSize: 30, fontWeight: 700 }}>hail.so / database</div>
-        <div style={{ color: ACCENT, fontSize: 22 }}>{COSTS_HERO_COPY.badge}</div>
+        <div style={{ color: ACCENT, fontSize: 22 }}>
+          {COSTS_HERO_COPY.badge}
+        </div>
       </div>
       <div
         style={{
@@ -42,9 +44,9 @@ export function OgArt() {
       </div>
       <div
         style={{
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
           fontSize: 26,
         }}
       >
