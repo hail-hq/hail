@@ -39,6 +39,7 @@ from hailhq.api.pagination import fetch_cursor_page
 from hailhq.core.config import settings
 from hailhq.core.db import get_session
 from hailhq.core.dns_lookup import custom_dns_records, resolve_mx, ses_inbound_host
+from hailhq.core.email_sender import from_address_for
 from hailhq.core.hail_mail import org_prefix_from_id
 from hailhq.core.models import Email, EmailDomain
 from hailhq.core.providers.email import EmailProvider, SesEmailProvider
@@ -190,6 +191,74 @@ def compose_hail_mail_address(user_prefix: str, org_prefix: str) -> str:
 
 
 # --------------------------------------------------------------------------- #
+# Sender selection — shared by POST /emails and GET /email-domains.
+# --------------------------------------------------------------------------- #
+
+
+async def verified_senders(
+    db: AsyncSession, organization_id: UUID
+) -> list[EmailDomain]:
+    """Every verified identity the org can send through, oldest first.
+
+    Ordered by ``created_at`` so a single-identity org resolves the same
+    row on every retry.
+    """
+    stmt = (
+        select(EmailDomain)
+        .where(EmailDomain.organization_id == organization_id)
+        .where(EmailDomain.verification_status == "verified")
+        .order_by(EmailDomain.created_at.asc())
+    )
+    return list((await db.execute(stmt)).scalars().all())
+
+
+async def first_pending_custom(db: AsyncSession, organization_id: UUID) -> str | None:
+    """The domain of one custom row still waiting on DKIM, if any."""
+    stmt = (
+        select(EmailDomain.domain)
+        .where(EmailDomain.organization_id == organization_id)
+        .where(EmailDomain.kind == "custom")
+        .where(EmailDomain.verification_status == "pending")
+        .limit(1)
+    )
+    return (await db.execute(stmt)).scalar_one_or_none()
+
+
+async def preview_default_from(db: AsyncSession, organization_id: UUID) -> str | None:
+    """The address a ``from``-less send would use right now, or ``None``.
+
+    ``None`` means "a ``from``-less send will not go out": either the org
+    owns several verified identities and must name one (``resolve_sender``
+    raises 422), or it owns none that can send yet. Mirrors
+    ``resolve_sender`` case for case — the two must not drift, which is
+    why both read ``verified_senders`` / ``first_pending_custom``.
+
+    Never raises: hail-mail being unconfigured is a normal deployment
+    posture and must not break ``GET /email-domains``.
+    """
+    verified = await verified_senders(db, organization_id)
+    if len(verified) != 1:
+        return None if verified else await _unminted_hail_mail(db, organization_id)
+    return from_address_for(verified[0])
+
+
+async def _unminted_hail_mail(db: AsyncSession, organization_id: UUID) -> str | None:
+    """The hail-mail address a first send would mint, if it would mint one."""
+    if await first_pending_custom(db, organization_id) is not None:
+        # resolve_sender 422s on this state instead of minting.
+        return None
+    try:
+        user_prefix, org_prefix = resolve_hail_mail_prefixes(
+            None, None, organization_id
+        )
+        return compose_hail_mail_address(user_prefix, org_prefix)
+    except HTTPException:
+        # 503 from either helper — the operator has not configured
+        # hail-mail. Not an error for a read; there simply is no default.
+        return None
+
+
+# --------------------------------------------------------------------------- #
 # POST /email-domains
 # --------------------------------------------------------------------------- #
 
@@ -330,6 +399,9 @@ async def list_email_domains(
     return EmailDomainListResponse(
         items=[EmailDomainResponse.model_validate(r) for r in rows],
         next_cursor=next_cursor,
+        # Whole-org answer, not a property of this page: computed from
+        # every verified row, so it stays correct while paging.
+        default_from=await preview_default_from(db, principal.organization_id),
     )
 
 

@@ -96,10 +96,12 @@ Hail validates both prefixes against `^[a-z0-9]([a-z0-9-]{0,18}[a-z0-9])?$` (1â€
 `POST /emails` picks a sender in this order:
 
 1. An explicit `from` â€” it must match a `verified` row that the caller's org owns.
-2. The first verified org-owned domain (ordered by `created_at`, so a tenant's "default sender" stays stable).
+2. The org's single verified domain. With two or more, there is no default: the request returns `422` listing them, and the caller must pass `from`.
 3. An auto-minted hail-mail row with the configured prefixes, if `HAIL_MAIL_BASE_DOMAIN` is set.
 
 If none of those resolve, the request returns `503` with instructions on how to register a domain.
+
+`GET /email-domains` answers the same question ahead of a send: its `default_from` field holds the address a `from`-less send would use, and is `null` when the caller must choose.
 
 Refer to [`docs/setup/aws-ses.md`](./self-host/aws-ses.md) for the operator-side setup. Refer to [`docs/superpowers/plans/2026-05-17-hail-mail-addressing.md`](https://github.com/hail-hq/hail/blob/main/docs/superpowers/plans/2026-05-17-hail-mail-addressing.md) for the addressing/configurability plan.
 

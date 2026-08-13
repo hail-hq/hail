@@ -83,9 +83,11 @@ and --body-html-file read content from disk. --attach uploads a local
 file and attaches it (repeatable); --attach-id attaches a file already
 uploaded via ` + "`hail email attachment-upload`" + ` (repeatable).
 
-If --from is omitted, the API picks the first verified sender domain
-on your organization, or auto-mints a hail-mail address if one is
-configured. See docs/public/self-host/aws-ses.md.
+--from is optional only while your org has one verified sender. With
+several, omitting it fails with a 422 listing them — run
+` + "`hail email domain list`" + ` and pass one. With none, the API
+auto-mints a hail-mail address if the operator configured one.
+See docs/public/self-host/aws-ses.md.
 
 Example (minimal):
   hail email send --to alice@example.com --subject "Hi" --body "Hello" --recipient-consent`,

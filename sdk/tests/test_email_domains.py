@@ -279,3 +279,45 @@ def test_email_domain_response_inbound_fields_default_to_safe_values() -> None:
     assert dom.webhook_url is None
     assert dom.webhook_secret is None
     assert dom.forward_rate_per_hour is None
+
+
+@respx.mock
+async def test_email_domains_list_exposes_default_from(
+    base_url: str, api_key: str
+) -> None:
+    """The address a send with no ``from_`` uses, before sending anything."""
+    respx.get(f"{base_url}/email-domains").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "items": [make_email_domain_response(kind="custom", domain="acme.com")],
+                "next_cursor": None,
+                "default_from": "noreply@acme.com",
+            },
+        )
+    )
+    async with Client(api_key=api_key, base_url=base_url) as c:
+        resp = await c.email_domains.list()
+    assert resp.default_from == "noreply@acme.com"
+
+
+@respx.mock
+async def test_email_domains_list_default_from_null_when_ambiguous(
+    base_url: str, api_key: str
+) -> None:
+    respx.get(f"{base_url}/email-domains").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "items": [
+                    make_email_domain_response(kind="custom", domain="acme.com"),
+                    make_email_domain_response(kind="custom", domain="mail.acme.io"),
+                ],
+                "next_cursor": None,
+                "default_from": None,
+            },
+        )
+    )
+    async with Client(api_key=api_key, base_url=base_url) as c:
+        resp = await c.email_domains.list()
+    assert resp.default_from is None

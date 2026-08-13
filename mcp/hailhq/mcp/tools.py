@@ -1,6 +1,6 @@
 """MCP tool surface for Hail's outbound-call API.
 
-Exposes eighteen tools to the calling agent:
+Exposes the following tools to the calling agent:
 
 * ``place_call`` — originate an outbound phone call
 * ``get_call`` — fetch the current state of one call
@@ -14,6 +14,10 @@ Exposes eighteen tools to the calling agent:
 * ``get_email_attachment`` — presigned URL for one inbound attachment
 * ``get_email_events`` — delivery/engagement timeline for one email
 * ``get_email_stats`` — account-level deliverability stats (counts, rates, series)
+* ``list_email_domains`` — the identities this org can send from, plus the
+  address a ``from_``-less send goes out as
+* ``whoami`` — the org/user behind the session (its ``email`` is what an
+  agent passes as ``reply_to``)
 * ``send_sms`` — send an outbound SMS
 * ``get_sms`` — fetch the current state of one SMS
 * ``list_sms`` — page through recent SMS messages
@@ -34,7 +38,7 @@ mapped to an ``{"error": ...}`` dict. Only the ``<type>:<uuid>``
 resource-id shape for ``get_events`` is still checked locally via
 ``parse_resource_id``.
 
-The fifteen tool functions are kept module-importable so unit tests can
+The tool functions are kept module-importable so unit tests can
 call them directly with a constructed ``HailClient``; ``register_tools``
 is the FastMCP wiring step. Each registered tool closure accepts a
 FastMCP ``Context`` (auto-injected on dispatch) and uses the
@@ -380,6 +384,29 @@ async def get_email_stats(
         return _format_api_error(exc)
 
 
+async def list_email_domains(
+    *,
+    client: HailClient,
+    cursor: str | None = None,
+    limit: int | None = None,
+) -> dict[str, Any]:
+    try:
+        return await client.list_email_domains(cursor=cursor, limit=limit)
+    except ValidationError as exc:
+        return {"error": _validation_error_message(exc)}
+    except HailAPIError as exc:
+        return _format_api_error(exc)
+
+
+async def whoami(*, client: HailClient) -> dict[str, Any]:
+    try:
+        return await client.whoami()
+    except ValidationError as exc:
+        return {"error": _validation_error_message(exc)}
+    except HailAPIError as exc:
+        return _format_api_error(exc)
+
+
 async def get_events(
     *,
     client: HailClient,
@@ -651,7 +678,9 @@ def register_tools(
         least one of ``body_text`` / ``body_html`` is required (both
         is fine — multipart-alternative). ``cc``, ``bcc``, and
         ``reply_to`` are optional and follow the usual mail
-        conventions.
+        conventions. Hail sets no ``reply_to`` of its own — to have
+        replies reach the human running this session, call ``whoami``
+        and pass their ``email``.
 
         ``recipient_consent`` is required: attest that you (the caller
         triggering this request) have obtained the lawful consent needed
@@ -662,16 +691,17 @@ def register_tools(
         how/where consent was obtained) — leave as the default
         ``"informational"`` for transactional/service email.
 
-        ``from_`` is optional. When omitted, Hail picks the first
-        verified sender domain on your organization, or — if the
-        operator configured ``HAIL_MAIL_BASE_DOMAIN`` — auto-mints a
-        per-org hail-mail address of the form ``<user>+<org>@<base>``
-        (the ``<org>`` part is derived from your organization id; the
-        ``<user>`` part comes from ``HAIL_MAIL_FROM`` /
-        ``HAIL_MAIL_DEFAULT_USER_PREFIX``, or an explicit row created
-        via ``POST /email-domains``). When supplied, it must
-        match a verified row already in ``email_domains`` (register
-        one with the website console or ``POST /email-domains``).
+        ``from_`` is optional only while the workspace has one verified
+        sender identity. With several, omitting it returns 422 listing
+        them — call ``list_email_domains`` and pass one. With none, the
+        server auto-mints a per-org hail-mail address of the form
+        ``<user>+<org>@<base>`` if the operator configured
+        ``HAIL_MAIL_BASE_DOMAIN`` (the ``<org>`` part is derived from your
+        organization id; the ``<user>`` part comes from ``HAIL_MAIL_FROM``
+        / ``HAIL_MAIL_DEFAULT_USER_PREFIX``, or an explicit row created
+        via ``POST /email-domains``). When supplied, ``from_`` must match
+        a verified row already in ``email_domains`` (register one with
+        the website console or ``POST /email-domains``).
 
         ``from_name`` is an optional display name rendered on the
         From: header ("Acme Billing <billing@acme.com>"). Control
@@ -1121,6 +1151,61 @@ def register_tools(
         except RuntimeError as exc:
             return {"error": str(exc)}
 
+    @mcp_app.tool(name="list_email_domains")
+    async def list_email_domains_tool(
+        ctx: Context,
+        cursor: str | None = None,
+        limit: int | None = None,
+    ) -> dict[str, Any]:
+        """List the addresses this workspace can send email from. Call this
+        BEFORE ``send_email`` when you do not already know the ``from_``
+        address — do not guess a domain.
+
+        Returns ``{"items": [...], "next_cursor": ..., "default_from": ...}``.
+        Each item carries ``domain``, ``kind`` (``"custom"`` or
+        ``"hail_mail"``) and ``verification_status``; only ``"verified"``
+        rows can send. A ``custom`` item's ``domain`` is a bare DNS name
+        that accepts any local-part (``sales@acme.com``); a ``hail_mail``
+        item's ``domain`` is already a full address.
+
+        ``default_from`` is the address a ``send_email`` with no ``from_``
+        goes out as. It is null when the workspace has several verified
+        identities — then ``send_email`` rejects a missing ``from_`` and you
+        must pass one from ``items``.
+
+        Example:
+            list_email_domains()
+        """
+        try:
+            async with _client_for(ctx, mode=mode, singleton=singleton) as client:
+                return await list_email_domains(
+                    client=client, cursor=cursor, limit=limit
+                )
+        except RuntimeError as exc:
+            return {"error": str(exc)}
+
+    @mcp_app.tool(name="whoami")
+    async def whoami_tool(ctx: Context) -> dict[str, Any]:
+        """Identify the human whose credentials this session runs under.
+
+        Use it to sign or route mail as that person: pass their address as
+        ``send_email(reply_to=...)`` so replies reach them rather than the
+        sending domain, which is often an unattended ``noreply@``.
+
+        Returns ``{"auth_kind", "organization_id", "user_id", "email",
+        "name"}``. ``user_id``/``email``/``name`` are null when the server
+        runs on a shared operator key (``auth_kind="shared"``) — there is no
+        human behind it, so send without a ``reply_to``.
+
+        Example:
+            whoami()
+        """
+        try:
+            async with _client_for(ctx, mode=mode, singleton=singleton) as client:
+                return await whoami(client=client)
+        except RuntimeError as exc:
+            return {"error": str(exc)}
+
     @mcp_app.tool(name="create_contact")
     async def create_contact_tool(
         ctx: Context,
@@ -1160,6 +1245,7 @@ __all__ = [
     "get_sms",
     "list_calls",
     "list_contacts",
+    "list_email_domains",
     "list_emails",
     "list_sms",
     "lookup_contact",
@@ -1167,4 +1253,5 @@ __all__ = [
     "register_tools",
     "send_email",
     "send_sms",
+    "whoami",
 ]

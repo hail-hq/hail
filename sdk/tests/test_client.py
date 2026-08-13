@@ -549,3 +549,48 @@ async def test_error_mapping_500(base_url: str, api_key: str) -> None:
     finally:
         await http.aclose()
     assert exc.value.status_code == 500
+
+
+@respx.mock
+async def test_whoami_returns_the_key_owner(base_url: str, api_key: str) -> None:
+    org_id = str(uuid4())
+    user_id = str(uuid4())
+    route = respx.get(f"{base_url}/whoami").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "auth_kind": "apikey",
+                "organization_id": org_id,
+                "user_id": user_id,
+                "email": "sarah@acme.test",
+                "name": "Sarah Chen",
+            },
+        )
+    )
+    async with Client(api_key=api_key, base_url=base_url) as c:
+        me = await c.whoami()
+    assert me.email == "sarah@acme.test"
+    assert str(me.organization_id) == org_id
+    assert str(me.user_id) == user_id
+    assert route.calls.last.request.url.path == "/whoami"
+
+
+@respx.mock
+async def test_whoami_shared_key_has_no_user(base_url: str, api_key: str) -> None:
+    respx.get(f"{base_url}/whoami").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "auth_kind": "shared",
+                "organization_id": str(uuid4()),
+                "user_id": None,
+                "email": None,
+                "name": None,
+            },
+        )
+    )
+    async with Client(api_key=api_key, base_url=base_url) as c:
+        me = await c.whoami()
+    assert me.auth_kind == "shared"
+    assert me.user_id is None
+    assert me.email is None

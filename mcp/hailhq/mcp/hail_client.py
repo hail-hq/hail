@@ -34,6 +34,7 @@ from hailhq.core.schemas import (
     ContactEntry,
     ContactListResponse,
     EmailCreate,
+    EmailDomainListResponse,
     EmailEventListResponse,
     EmailListResponse,
     EmailResponse,
@@ -42,6 +43,7 @@ from hailhq.core.schemas import (
     SmsCreate,
     SmsListResponse,
     SmsResponse,
+    WhoamiResponse,
 )
 from typing_extensions import Self
 
@@ -511,6 +513,33 @@ class HailClient:
         return EmailStatsResponse.model_validate(_decode(resp)).model_dump(
             mode="json", by_alias=True
         )
+
+    # ------------------------------------------------------------------ #
+    # GET /email-domains
+    # ------------------------------------------------------------------ #
+
+    async def list_email_domains(
+        self, *, cursor: str | None = None, limit: int | None = None
+    ) -> dict[str, Any]:
+        """GET /email-domains — the identities this org can send from."""
+        params: dict[str, Any] = {}
+        if cursor is not None:
+            params["cursor"] = cursor
+        if limit is not None:
+            params["limit"] = limit
+        resp = await self._client.get("/email-domains", params=params)
+        return EmailDomainListResponse.model_validate(_decode(resp)).model_dump(
+            mode="json"
+        )
+
+    # ------------------------------------------------------------------ #
+    # GET /whoami
+    # ------------------------------------------------------------------ #
+
+    async def whoami(self) -> dict[str, Any]:
+        """GET /whoami — the caller's identity behind this bearer token."""
+        resp = await self._client.get("/whoami")
+        return WhoamiResponse.model_validate(_decode(resp)).model_dump(mode="json")
 
 
 def _decode(resp: httpx.Response) -> Any:

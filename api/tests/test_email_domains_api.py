@@ -633,6 +633,115 @@ async def test_list_email_domains_is_org_scoped(
 
 
 # --------------------------------------------------------------------------- #
+# GET /email-domains — default_from
+#
+# The field answers "what does a send with no `from` go out as?", so every
+# case below is paired with the POST /emails behaviour it predicts.
+# --------------------------------------------------------------------------- #
+
+
+async def _verify(client: httpx.AsyncClient, headers: dict, domain: str) -> None:
+    created = await client.post(
+        "/email-domains", json={"kind": "custom", "domain": domain}, headers=headers
+    )
+    assert created.status_code == 201
+    await client.post(f"/email-domains/{created.json()['id']}/verify", headers=headers)
+
+
+async def test_default_from_is_the_single_verified_sender(
+    client: httpx.AsyncClient,
+    org_and_key: tuple,
+) -> None:
+    _, _, plain = org_and_key
+    headers = {"Authorization": f"Bearer {plain}"}
+    await _verify(client, headers, "acme.com")
+
+    resp = await client.get("/email-domains", headers=headers)
+
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["default_from"] == "noreply@acme.com"
+
+
+async def test_default_from_is_null_with_several_verified_senders(
+    client: httpx.AsyncClient,
+    org_and_key: tuple,
+) -> None:
+    """Null mirrors the 422 a ``from``-less POST /emails now returns."""
+    _, _, plain = org_and_key
+    headers = {"Authorization": f"Bearer {plain}"}
+    await _verify(client, headers, "acme.com")
+    await _verify(client, headers, "mail.acme.io")
+
+    resp = await client.get("/email-domains", headers=headers)
+
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["default_from"] is None
+
+
+async def test_default_from_shows_the_unminted_hail_mail_address(
+    client: httpx.AsyncClient,
+    org_and_key: tuple,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """With no rows at all the address exists nowhere else until a send."""
+    monkeypatch.setattr(settings, "hail_mail_base_domain", "mail.hail.so")
+    monkeypatch.setattr(settings, "hail_mail_default_user_prefix", "admin")
+    monkeypatch.setattr(settings, "hail_mail_from", "")
+    org_id, _, plain = org_and_key
+
+    resp = await client.get(
+        "/email-domains", headers={"Authorization": f"Bearer {plain}"}
+    )
+
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["items"] == []
+    assert body["default_from"] == f"admin+{org_prefix_from_id(org_id)}@mail.hail.so"
+
+
+async def test_default_from_is_null_while_a_custom_domain_is_pending(
+    client: httpx.AsyncClient,
+    org_and_key: tuple,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A pending row blocks auto-mint, so there is no default to report."""
+    monkeypatch.setattr(settings, "hail_mail_base_domain", "mail.hail.so")
+    monkeypatch.setattr(settings, "hail_mail_default_user_prefix", "admin")
+    _, _, plain = org_and_key
+    headers = {"Authorization": f"Bearer {plain}"}
+    created = await client.post(
+        "/email-domains",
+        json={"kind": "custom", "domain": "pending.com"},
+        headers=headers,
+    )
+    assert created.status_code == 201  # left unverified
+
+    resp = await client.get("/email-domains", headers=headers)
+
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["default_from"] is None
+
+
+async def test_default_from_is_null_when_hail_mail_is_unconfigured(
+    client: httpx.AsyncClient,
+    org_and_key: tuple,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An unconfigured deployment must not 503 a plain list read."""
+    monkeypatch.setattr(settings, "hail_mail_base_domain", "")
+    monkeypatch.setattr(settings, "hail_mail_default_user_prefix", "")
+    monkeypatch.setattr(settings, "hail_mail_from", "")
+    _, _, plain = org_and_key
+
+    resp = await client.get(
+        "/email-domains", headers={"Authorization": f"Bearer {plain}"}
+    )
+
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["default_from"] is None
+
+
+# --------------------------------------------------------------------------- #
 # POST /email-domains/{id}/verify
 # --------------------------------------------------------------------------- #
 

@@ -319,8 +319,9 @@ class EmailCreate(BaseModel):
     """Body shape for ``POST /emails``.
 
     At least one of ``body_text`` / ``body_html`` is required. ``to`` is a
-    non-empty list of recipient addresses. ``from_`` is optional; when
-    omitted the server picks a verified sender (or auto-mints a hail-mail
+    non-empty list of recipient addresses. ``from_`` is optional while the
+    org has one verified sender; with several the server 422s and the
+    caller must name one (or none at all, which auto-mints a hail-mail
     address per the operator's configuration). ``populate_by_name=True``
     so ``EmailCreate(from_="...")`` works at the Python boundary while
     ``model_dump(by_alias=True)`` still emits ``"from"`` on the wire.
@@ -632,6 +633,25 @@ class EmailDomainResponse(BaseModel):
 class EmailDomainListResponse(BaseModel):
     items: list[EmailDomainResponse]
     next_cursor: str | None = None
+    # The address a send with no ``from_`` goes out as. ``None`` when such
+    # a send would be rejected: several verified identities (name one), or
+    # none that can send yet. Whole-org answer, not per-page.
+    default_from: str | None = None
+
+
+class WhoamiResponse(BaseModel):
+    """Who the API key belongs to — the answer ``client.whoami()`` gives.
+
+    ``user_id``/``email``/``name`` are ``None`` when the caller is a
+    shared operator key (``auth_kind == "shared"``), which carries no
+    human identity.
+    """
+
+    auth_kind: Literal["apikey", "jwt", "shared"]
+    organization_id: UUID
+    user_id: UUID | None = None
+    email: str | None = None
+    name: str | None = None
 
 
 # --------------------------------------------------------------------------- #
@@ -716,4 +736,5 @@ __all__ = [
     "SuppressionListResponse",
     "SuppressionResponse",
     "VoiceConfig",
+    "WhoamiResponse",
 ]

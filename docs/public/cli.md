@@ -96,7 +96,22 @@ hail email domain delete <id>   # also drops the SES identity for custom rows
 
 `register` flags: `--kind` (`hail_mail|custom`, required), `--domain` (required for `custom`), `--local-prefix-user`, `--local-prefix-org` (for `hail_mail`), `--idempotency-key`. `list` takes `--limit` / `--cursor`. Aliases: `list`→`ls`, `delete`→`rm`.
 
+`hail email domain list` closes with the address a send without `--from` goes out as. Own two or more verified identities and there is no default: the line reads `No default sender — a send without --from is rejected.`, and a `--from`-less `hail email send` fails with a 422 listing them.
+
 > Renamed: `hail sender-domain ...` is now `hail email domain ...`. The old name no longer exists.
+
+## Whoami
+
+```bash
+hail whoami          # human-readable
+hail whoami --json   # for scripts
+```
+
+Prints the organization and the user the API key belongs to, plus how the
+request authenticated (`apikey`, `jwt`, or `shared`). A shared operator key
+carries no user, so the email and name come back empty. Use the email as
+`hail email send --reply-to` so replies reach the person rather than the
+sending domain.
 
 ## Contacts
 
