@@ -55,9 +55,10 @@ from hail.models import (
     SmsResponse,
     SmsStatus,
     VoiceConfig,
+    WhoamiResponse,
 )
 
-__version__ = "0.14.0"
+__version__ = "0.15.0"
 
 __all__ = [
     # helpers
@@ -110,6 +111,7 @@ __all__ = [
     "SmsResponse",
     "SmsStatus",
     "VoiceConfig",
+    "WhoamiResponse",
     "__version__",
     "parse_resource_id",
 ]

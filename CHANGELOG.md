@@ -4,6 +4,13 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 
 ## [Unreleased]
 
+## [0.21.0] — 2026-08-13
+
+No more guessing which address your mail goes out as, and a `whoami` on every surface.
+
+Component versions cut alongside this release:
+**`sdk-v0.15.0`** (PyPI: `hail-sdk==0.15.0`), **`cli-v0.20.0`** (Homebrew + GitHub Releases).
+
 ### Email sender resolution — breaking
 
 - `POST /emails` no longer guesses a sender. An org with **two or more**
