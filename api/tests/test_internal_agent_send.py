@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import httpx
 import pytest
@@ -547,3 +547,71 @@ async def test_send_sms_agent_caps_noop_for_human_org(
         "/internal/agent/send-sms", content=body, headers=_signed(body)
     )
     assert resp.json()["ok"] is True
+
+
+async def test_agent_send_email_still_picks_a_sender_with_several_verified(
+    client, async_session, email_mock, add_phone_number
+):
+    """The voicebot keeps the oldest-verified pick POST /emails now refuses.
+
+    A voice agent has no way to name a sending domain mid-call, so the
+    ambiguity that returns 422 on the public route must not silently turn
+    into "email is not configured" here.
+    """
+    org = uuid.uuid4()
+    call = await _insert_live_call(async_session, org, add_phone_number)
+    now = datetime.now(timezone.utc)
+    async_session.add(
+        EmailDomain(
+            organization_id=org,
+            kind="custom",
+            domain="first.test",
+            verification_status="verified",
+            created_at=now - timedelta(days=1),
+        )
+    )
+    async_session.add(
+        EmailDomain(
+            organization_id=org,
+            kind="custom",
+            domain="second.test",
+            verification_status="verified",
+            created_at=now,
+        )
+    )
+    user = User(
+        id=uuid.uuid4(),
+        name="Sarah Chen",
+        email="sarah@a.test",
+        created_at=now,
+    )
+    async_session.add(user)
+    async_session.add(
+        OrganizationMember(
+            id=uuid.uuid4(),
+            user_id=user.id,
+            organization_id=org,
+            role="member",
+            created_at=now,
+        )
+    )
+    await async_session.commit()
+
+    payload = json.dumps(
+        {
+            "call_id": str(call.id),
+            "tool_invocation_id": str(uuid.uuid4()),
+            "recipient_name": "Sarah Chen",
+            "subject": "Call summary",
+            "body_text": "Hello from the call.",
+        }
+    ).encode()
+    resp = await client.post(
+        "/internal/agent/send-email", content=payload, headers=_signed(payload)
+    )
+
+    assert resp.status_code == 200
+    assert resp.json()["ok"] is True
+    rows = (await async_session.execute(select(Email))).scalars().all()
+    assert len(rows) == 1
+    assert rows[0].from_address == "noreply@first.test"

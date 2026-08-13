@@ -638,6 +638,10 @@ class EmailDomainResponse(BaseModel):
 class EmailDomainListResponse(BaseModel):
     items: list[EmailDomainResponse]
     next_cursor: str | None = None
+    # The address a send with no ``from`` goes out as. ``None`` when such a
+    # send would be rejected: several verified identities (name one), or
+    # none that can send yet. Computed across the whole org, not the page.
+    default_from: str | None = None
 
 
 class EmailCreate(ConsentAttestationMixin):
@@ -1079,6 +1083,22 @@ class MemberPhonePut(BaseModel):
     phone_e164: str
 
     _validate_phone = field_validator("phone_e164")(_e164_or_error)
+
+
+class WhoamiResponse(BaseModel):
+    """Who the caller is — the answer ``GET /whoami`` gives.
+
+    ``user_id``/``email``/``name`` are ``None`` for shared-key
+    (``HAIL_API_KEY``) callers: that key carries no human identity. An
+    agent that wants to put the operator's address in ``Reply-To`` reads
+    ``email`` and skips the header when it is ``None``.
+    """
+
+    auth_kind: Literal["apikey", "jwt", "shared"]
+    organization_id: UUID
+    user_id: UUID | None = None
+    email: str | None = None
+    name: str | None = None
 
 
 # --------------------------------------------------------------------------- #

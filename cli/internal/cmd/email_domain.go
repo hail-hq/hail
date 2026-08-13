@@ -345,20 +345,32 @@ func printEmailDomainList(opts *Options, body *client.EmailDomainListResponse) e
 	}
 	if len(body.Items) == 0 {
 		fmt.Fprintln(opts.Stdout, "(no email domains)")
-		return nil
+	} else {
+		w := tabwriter.NewWriter(opts.Stdout, 0, 0, 2, ' ', 0)
+		fmt.Fprintln(w, "ID\tKIND\tDOMAIN\tSTATUS")
+		for _, sd := range body.Items {
+			fmt.Fprintf(
+				w, "%s\t%s\t%s\t%s\n",
+				sd.Id.String(),
+				string(sd.Kind),
+				sd.Domain,
+				string(sd.VerificationStatus),
+			)
+		}
+		_ = w.Flush()
 	}
-	w := tabwriter.NewWriter(opts.Stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(w, "ID\tKIND\tDOMAIN\tSTATUS")
-	for _, sd := range body.Items {
-		fmt.Fprintf(
-			w, "%s\t%s\t%s\t%s\n",
-			sd.Id.String(),
-			string(sd.Kind),
-			sd.Domain,
-			string(sd.VerificationStatus),
-		)
+	// Printed even on an empty page: with no domains at all it reveals the
+	// hail-mail address a first send would mint, which exists nowhere else
+	// until that send happens.
+	if body.DefaultFrom != nil && *body.DefaultFrom != "" {
+		fmt.Fprintf(opts.Stdout, "\nSends with no --from go out as: %s\n", *body.DefaultFrom)
+	} else if len(body.Items) > 0 {
+		// Covers both "several verified identities, pick one" and "nothing
+		// verified yet, so no --from is valid either" — the API returns a
+		// null default_from for each, and only the first is fixable by
+		// passing --from.
+		fmt.Fprintln(opts.Stdout, "\nNo default sender — a send without --from is rejected.")
 	}
-	_ = w.Flush()
 	if body.NextCursor != nil && *body.NextCursor != "" {
 		fmt.Fprintf(opts.Stdout, "\nMore: --cursor %s\n", *body.NextCursor)
 	}

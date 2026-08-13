@@ -855,6 +855,27 @@ func (e WebhookSubscriptionResponseStatus) Valid() bool {
 	}
 }
 
+// Defines values for WhoamiResponseAuthKind.
+const (
+	Apikey WhoamiResponseAuthKind = "apikey"
+	Jwt    WhoamiResponseAuthKind = "jwt"
+	Shared WhoamiResponseAuthKind = "shared"
+)
+
+// Valid indicates whether the value is a known member of the WhoamiResponseAuthKind enum.
+func (e WhoamiResponseAuthKind) Valid() bool {
+	switch e {
+	case Apikey:
+		return true
+	case Jwt:
+		return true
+	case Shared:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for ListCallsCallsGetParamsStatus.
 const (
 	ListCallsCallsGetParamsStatusBusy       ListCallsCallsGetParamsStatus = "busy"
@@ -1195,8 +1216,9 @@ type EmailDomainCreateKind string
 
 // EmailDomainListResponse defines model for EmailDomainListResponse.
 type EmailDomainListResponse struct {
-	Items      []EmailDomainResponse `json:"items"`
-	NextCursor *string               `json:"next_cursor,omitempty"`
+	DefaultFrom *string               `json:"default_from,omitempty"`
+	Items       []EmailDomainResponse `json:"items"`
+	NextCursor  *string               `json:"next_cursor,omitempty"`
 }
 
 // EmailDomainPatch Body for PATCH /email-domains/{id}.
@@ -1734,6 +1756,23 @@ type WebhookSubscriptionResponse struct {
 // WebhookSubscriptionResponseStatus defines model for WebhookSubscriptionResponse.Status.
 type WebhookSubscriptionResponseStatus string
 
+// WhoamiResponse Who the caller is — the answer “GET /whoami“ gives.
+//
+// “user_id“/“email“/“name“ are “None“ for shared-key
+// (“HAIL_API_KEY“) callers: that key carries no human identity. An
+// agent that wants to put the operator's address in “Reply-To“ reads
+// “email“ and skips the header when it is “None“.
+type WhoamiResponse struct {
+	AuthKind       WhoamiResponseAuthKind `json:"auth_kind"`
+	Email          *string                `json:"email,omitempty"`
+	Name           *string                `json:"name,omitempty"`
+	OrganizationId openapi_types.UUID     `json:"organization_id"`
+	UserId         *openapi_types.UUID    `json:"user_id,omitempty"`
+}
+
+// WhoamiResponseAuthKind defines model for WhoamiResponse.AuthKind.
+type WhoamiResponseAuthKind string
+
 // ListCallsCallsGetParams defines parameters for ListCallsCallsGet.
 type ListCallsCallsGetParams struct {
 	Cursor        *string                        `form:"cursor,omitempty" json:"cursor,omitempty"`
@@ -1909,6 +1948,11 @@ type AcquireNumberNumbersPostParams struct {
 	IdempotencyKey *string `json:"Idempotency-Key,omitempty"`
 }
 
+// ReleaseNumberNumbersNumberIdDeleteParams defines parameters for ReleaseNumberNumbersNumberIdDelete.
+type ReleaseNumberNumbersNumberIdDeleteParams struct {
+	Authorization *string `json:"authorization,omitempty"`
+}
+
 // GetNumberNumbersNumberIdGetParams defines parameters for GetNumberNumbersNumberIdGet.
 type GetNumberNumbersNumberIdGetParams struct {
 	Authorization *string `json:"authorization,omitempty"`
@@ -2035,6 +2079,11 @@ type RedeliverWebhooksSubIdDeliveriesDeliveryIdRedeliverPostParams struct {
 
 // RotateSecretWebhooksSubIdRotateSecretPostParams defines parameters for RotateSecretWebhooksSubIdRotateSecretPost.
 type RotateSecretWebhooksSubIdRotateSecretPostParams struct {
+	Authorization *string `json:"authorization,omitempty"`
+}
+
+// GetWhoamiWhoamiGetParams defines parameters for GetWhoamiWhoamiGet.
+type GetWhoamiWhoamiGetParams struct {
 	Authorization *string `json:"authorization,omitempty"`
 }
 
@@ -2430,6 +2479,9 @@ type ClientInterface interface {
 
 	AcquireNumberNumbersPost(ctx context.Context, params *AcquireNumberNumbersPostParams, body AcquireNumberNumbersPostJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
+	// ReleaseNumberNumbersNumberIdDelete request
+	ReleaseNumberNumbersNumberIdDelete(ctx context.Context, numberId openapi_types.UUID, params *ReleaseNumberNumbersNumberIdDeleteParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
 	// GetNumberNumbersNumberIdGet request
 	GetNumberNumbersNumberIdGet(ctx context.Context, numberId openapi_types.UUID, params *GetNumberNumbersNumberIdGetParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
@@ -2512,6 +2564,9 @@ type ClientInterface interface {
 
 	// RotateSecretWebhooksSubIdRotateSecretPost request
 	RotateSecretWebhooksSubIdRotateSecretPost(ctx context.Context, subId openapi_types.UUID, params *RotateSecretWebhooksSubIdRotateSecretPostParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// GetWhoamiWhoamiGet request
+	GetWhoamiWhoamiGet(ctx context.Context, params *GetWhoamiWhoamiGetParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 }
 
 func (c *Client) ListCallsCallsGet(ctx context.Context, params *ListCallsCallsGetParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
@@ -2946,6 +3001,18 @@ func (c *Client) AcquireNumberNumbersPost(ctx context.Context, params *AcquireNu
 	return c.Client.Do(req)
 }
 
+func (c *Client) ReleaseNumberNumbersNumberIdDelete(ctx context.Context, numberId openapi_types.UUID, params *ReleaseNumberNumbersNumberIdDeleteParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewReleaseNumberNumbersNumberIdDeleteRequest(c.Server, numberId, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
 func (c *Client) GetNumberNumbersNumberIdGet(ctx context.Context, numberId openapi_types.UUID, params *GetNumberNumbersNumberIdGetParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewGetNumberNumbersNumberIdGetRequest(c.Server, numberId, params)
 	if err != nil {
@@ -3296,6 +3363,18 @@ func (c *Client) RedeliverWebhooksSubIdDeliveriesDeliveryIdRedeliverPost(ctx con
 
 func (c *Client) RotateSecretWebhooksSubIdRotateSecretPost(ctx context.Context, subId openapi_types.UUID, params *RotateSecretWebhooksSubIdRotateSecretPostParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewRotateSecretWebhooksSubIdRotateSecretPostRequest(c.Server, subId, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) GetWhoamiWhoamiGet(ctx context.Context, params *GetWhoamiWhoamiGetParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetWhoamiWhoamiGetRequest(c.Server, params)
 	if err != nil {
 		return nil, err
 	}
@@ -5154,6 +5233,55 @@ func NewAcquireNumberNumbersPostRequestWithBody(server string, params *AcquireNu
 	return req, nil
 }
 
+// NewReleaseNumberNumbersNumberIdDeleteRequest generates requests for ReleaseNumberNumbersNumberIdDelete
+func NewReleaseNumberNumbersNumberIdDeleteRequest(server string, numberId openapi_types.UUID, params *ReleaseNumberNumbersNumberIdDeleteParams) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "number_id", numberId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/numbers/%s", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("DELETE", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+
+		if params.Authorization != nil {
+			var headerParam0 string
+
+			headerParam0, err = runtime.StyleParamWithOptions("simple", false, "authorization", *params.Authorization, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationHeader, Type: "string", Format: ""})
+			if err != nil {
+				return nil, err
+			}
+
+			req.Header.Set("authorization", headerParam0)
+		}
+
+	}
+
+	return req, nil
+}
+
 // NewGetNumberNumbersNumberIdGetRequest generates requests for GetNumberNumbersNumberIdGet
 func NewGetNumberNumbersNumberIdGetRequest(server string, numberId openapi_types.UUID, params *GetNumberNumbersNumberIdGetParams) (*http.Request, error) {
 	var err error
@@ -6521,6 +6649,48 @@ func NewRotateSecretWebhooksSubIdRotateSecretPostRequest(server string, subId op
 	return req, nil
 }
 
+// NewGetWhoamiWhoamiGetRequest generates requests for GetWhoamiWhoamiGet
+func NewGetWhoamiWhoamiGetRequest(server string, params *GetWhoamiWhoamiGetParams) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/whoami")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("GET", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+
+		if params.Authorization != nil {
+			var headerParam0 string
+
+			headerParam0, err = runtime.StyleParamWithOptions("simple", false, "authorization", *params.Authorization, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationHeader, Type: "string", Format: ""})
+			if err != nil {
+				return nil, err
+			}
+
+			req.Header.Set("authorization", headerParam0)
+		}
+
+	}
+
+	return req, nil
+}
+
 func (c *Client) applyEditors(ctx context.Context, req *http.Request, additionalEditors []RequestEditorFn) error {
 	for _, r := range c.RequestEditors {
 		if err := r(ctx, req); err != nil {
@@ -6664,6 +6834,9 @@ type ClientWithResponsesInterface interface {
 
 	AcquireNumberNumbersPostWithResponse(ctx context.Context, params *AcquireNumberNumbersPostParams, body AcquireNumberNumbersPostJSONRequestBody, reqEditors ...RequestEditorFn) (*AcquireNumberNumbersPostResponse, error)
 
+	// ReleaseNumberNumbersNumberIdDeleteWithResponse request
+	ReleaseNumberNumbersNumberIdDeleteWithResponse(ctx context.Context, numberId openapi_types.UUID, params *ReleaseNumberNumbersNumberIdDeleteParams, reqEditors ...RequestEditorFn) (*ReleaseNumberNumbersNumberIdDeleteResponse, error)
+
 	// GetNumberNumbersNumberIdGetWithResponse request
 	GetNumberNumbersNumberIdGetWithResponse(ctx context.Context, numberId openapi_types.UUID, params *GetNumberNumbersNumberIdGetParams, reqEditors ...RequestEditorFn) (*GetNumberNumbersNumberIdGetResponse, error)
 
@@ -6746,6 +6919,9 @@ type ClientWithResponsesInterface interface {
 
 	// RotateSecretWebhooksSubIdRotateSecretPostWithResponse request
 	RotateSecretWebhooksSubIdRotateSecretPostWithResponse(ctx context.Context, subId openapi_types.UUID, params *RotateSecretWebhooksSubIdRotateSecretPostParams, reqEditors ...RequestEditorFn) (*RotateSecretWebhooksSubIdRotateSecretPostResponse, error)
+
+	// GetWhoamiWhoamiGetWithResponse request
+	GetWhoamiWhoamiGetWithResponse(ctx context.Context, params *GetWhoamiWhoamiGetParams, reqEditors ...RequestEditorFn) (*GetWhoamiWhoamiGetResponse, error)
 }
 
 type ListCallsCallsGetResponse struct {
@@ -7388,6 +7564,28 @@ func (r AcquireNumberNumbersPostResponse) StatusCode() int {
 	return 0
 }
 
+type ReleaseNumberNumbersNumberIdDeleteResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON422      *HTTPValidationError
+}
+
+// Status returns HTTPResponse.Status
+func (r ReleaseNumberNumbersNumberIdDeleteResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ReleaseNumberNumbersNumberIdDeleteResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
 type GetNumberNumbersNumberIdGetResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
@@ -7913,6 +8111,29 @@ func (r RotateSecretWebhooksSubIdRotateSecretPostResponse) StatusCode() int {
 	return 0
 }
 
+type GetWhoamiWhoamiGetResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *WhoamiResponse
+	JSON422      *HTTPValidationError
+}
+
+// Status returns HTTPResponse.Status
+func (r GetWhoamiWhoamiGetResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetWhoamiWhoamiGetResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
 // ListCallsCallsGetWithResponse request returning *ListCallsCallsGetResponse
 func (c *ClientWithResponses) ListCallsCallsGetWithResponse(ctx context.Context, params *ListCallsCallsGetParams, reqEditors ...RequestEditorFn) (*ListCallsCallsGetResponse, error) {
 	rsp, err := c.ListCallsCallsGet(ctx, params, reqEditors...)
@@ -8229,6 +8450,15 @@ func (c *ClientWithResponses) AcquireNumberNumbersPostWithResponse(ctx context.C
 	return ParseAcquireNumberNumbersPostResponse(rsp)
 }
 
+// ReleaseNumberNumbersNumberIdDeleteWithResponse request returning *ReleaseNumberNumbersNumberIdDeleteResponse
+func (c *ClientWithResponses) ReleaseNumberNumbersNumberIdDeleteWithResponse(ctx context.Context, numberId openapi_types.UUID, params *ReleaseNumberNumbersNumberIdDeleteParams, reqEditors ...RequestEditorFn) (*ReleaseNumberNumbersNumberIdDeleteResponse, error) {
+	rsp, err := c.ReleaseNumberNumbersNumberIdDelete(ctx, numberId, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseReleaseNumberNumbersNumberIdDeleteResponse(rsp)
+}
+
 // GetNumberNumbersNumberIdGetWithResponse request returning *GetNumberNumbersNumberIdGetResponse
 func (c *ClientWithResponses) GetNumberNumbersNumberIdGetWithResponse(ctx context.Context, numberId openapi_types.UUID, params *GetNumberNumbersNumberIdGetParams, reqEditors ...RequestEditorFn) (*GetNumberNumbersNumberIdGetResponse, error) {
 	rsp, err := c.GetNumberNumbersNumberIdGet(ctx, numberId, params, reqEditors...)
@@ -8490,6 +8720,15 @@ func (c *ClientWithResponses) RotateSecretWebhooksSubIdRotateSecretPostWithRespo
 		return nil, err
 	}
 	return ParseRotateSecretWebhooksSubIdRotateSecretPostResponse(rsp)
+}
+
+// GetWhoamiWhoamiGetWithResponse request returning *GetWhoamiWhoamiGetResponse
+func (c *ClientWithResponses) GetWhoamiWhoamiGetWithResponse(ctx context.Context, params *GetWhoamiWhoamiGetParams, reqEditors ...RequestEditorFn) (*GetWhoamiWhoamiGetResponse, error) {
+	rsp, err := c.GetWhoamiWhoamiGet(ctx, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetWhoamiWhoamiGetResponse(rsp)
 }
 
 // ParseListCallsCallsGetResponse parses an HTTP response from a ListCallsCallsGetWithResponse call
@@ -9388,6 +9627,32 @@ func ParseAcquireNumberNumbersPostResponse(rsp *http.Response) (*AcquireNumberNu
 	return response, nil
 }
 
+// ParseReleaseNumberNumbersNumberIdDeleteResponse parses an HTTP response from a ReleaseNumberNumbersNumberIdDeleteWithResponse call
+func ParseReleaseNumberNumbersNumberIdDeleteResponse(rsp *http.Response) (*ReleaseNumberNumbersNumberIdDeleteResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ReleaseNumberNumbersNumberIdDeleteResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 422:
+		var dest HTTPValidationError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON422 = &dest
+
+	}
+
+	return response, nil
+}
+
 // ParseGetNumberNumbersNumberIdGetResponse parses an HTTP response from a GetNumberNumbersNumberIdGetWithResponse call
 func ParseGetNumberNumbersNumberIdGetResponse(rsp *http.Response) (*GetNumberNumbersNumberIdGetResponse, error) {
 	bodyBytes, err := io.ReadAll(rsp.Body)
@@ -10102,6 +10367,39 @@ func ParseRotateSecretWebhooksSubIdRotateSecretPostResponse(rsp *http.Response) 
 	switch {
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
 		var dest WebhookSubscriptionResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 422:
+		var dest HTTPValidationError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON422 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseGetWhoamiWhoamiGetResponse parses an HTTP response from a GetWhoamiWhoamiGetWithResponse call
+func ParseGetWhoamiWhoamiGetResponse(rsp *http.Response) (*GetWhoamiWhoamiGetResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetWhoamiWhoamiGetResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest WhoamiResponse
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err
 		}

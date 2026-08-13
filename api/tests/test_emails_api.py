@@ -903,6 +903,81 @@ async def test_post_emails_does_not_send_through_pending_domain(
     assert "verify" in detail
 
 
+async def test_post_emails_without_from_422s_on_several_verified_senders(
+    client: httpx.AsyncClient,
+    org_and_key: tuple,
+    email_mock: AsyncMock,
+) -> None:
+    """Two verified identities and no ``from`` → refuse, don't guess.
+
+    Guessing meant the sending identity silently changed whenever a domain
+    was added or removed. The 422 lists both addresses so the caller can
+    retry with one of them.
+    """
+    _, _, plain = org_and_key
+    headers = {"Authorization": f"Bearer {plain}"}
+    await _register_custom_verified(client, headers, domain="acme.com")
+    await _register_custom_verified(client, headers, domain="mail.acme.io")
+
+    resp = await client.post(
+        "/emails",
+        json={
+            "to": ["x@example.com"],
+            "subject": "hi",
+            "body_text": "body",
+            "recipient_consent": True,
+        },
+        headers=headers,
+    )
+
+    assert resp.status_code == 422
+    detail = resp.json()["detail"][0]["msg"]
+    assert "noreply@acme.com" in detail
+    assert "noreply@mail.acme.io" in detail
+    email_mock.send_email.assert_not_awaited()
+
+
+async def test_post_emails_without_from_sends_on_a_single_verified_sender(
+    client: httpx.AsyncClient,
+    org_and_key: tuple,
+    email_mock: AsyncMock,
+) -> None:
+    """One identity is unambiguous — no ``from`` needed."""
+    _, _, plain = org_and_key
+    headers = {"Authorization": f"Bearer {plain}"}
+    await _register_custom_verified(client, headers, domain="acme.com")
+
+    body = await _send_email(client, plain)
+
+    assert body["from_address"] == "noreply@acme.com"
+
+
+async def test_post_emails_named_from_still_works_with_several_senders(
+    client: httpx.AsyncClient,
+    org_and_key: tuple,
+    email_mock: AsyncMock,
+) -> None:
+    _, _, plain = org_and_key
+    headers = {"Authorization": f"Bearer {plain}"}
+    await _register_custom_verified(client, headers, domain="acme.com")
+    await _register_custom_verified(client, headers, domain="mail.acme.io")
+
+    resp = await client.post(
+        "/emails",
+        json={
+            "from": "sales@mail.acme.io",
+            "to": ["x@example.com"],
+            "subject": "hi",
+            "body_text": "body",
+            "recipient_consent": True,
+        },
+        headers=headers,
+    )
+
+    assert resp.status_code == 201, resp.text
+    assert resp.json()["from_address"] == "sales@mail.acme.io"
+
+
 # --------------------------------------------------------------------------- #
 # POST /emails — provider failure
 # --------------------------------------------------------------------------- #

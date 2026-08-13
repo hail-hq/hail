@@ -4,10 +4,14 @@ POST /emails - send an outbound message through SES.
 GET /emails/{id} - read a single email (org-scoped).
 GET /emails - cursor-paginated list (org-scoped).
 
-The from-address resolution mirrors POST /calls:
+From-address resolution:
 
-  explicit ``from`` → first verified org-owned domain →
+  explicit ``from`` → the org's one verified domain →
   freshly minted hail-mail address (if HAIL_MAIL_BASE_DOMAIN is set)
+
+An org with several verified domains has no default: a ``from``-less
+send returns 422 listing the choices. ``GET /email-domains`` exposes the
+same decision up front as ``default_from``.
 
 Unlike the phone-number pool, the hail-mail "pool" is not shared across
 orgs — every org gets its own row under the operator's pre-verified
@@ -44,8 +48,10 @@ from hailhq.api.idempotency import (
 from hailhq.api.pagination import fetch_cursor_page
 from hailhq.api.routes.email_domains import (
     compose_hail_mail_address,
+    first_pending_custom,
     get_email_provider,
     resolve_hail_mail_prefixes,
+    verified_senders,
 )
 from hailhq.api.usage import write_usage_event
 from hailhq.core.compliance_gate import check_email_allowed, normalize_recipient
@@ -56,6 +62,7 @@ from hailhq.core.email_attachment_limits import (
 )
 from hailhq.core.email_delivery_events import record_sent_event
 from hailhq.core.email_footer import append_sent_footer
+from hailhq.core.email_sender import from_address_for
 from hailhq.core.models import (
     Email,
     EmailAttachment,
@@ -107,17 +114,24 @@ async def resolve_sender(
     db: AsyncSession,
     organization_id: UUID,
     explicit_from: str | None,
+    *,
+    allow_ambiguous: bool = False,
 ) -> EmailDomain:
     """Find the EmailDomain row to send through, in priority order.
 
     1. Explicit ``from``: look up by full address (hail-mail row's
        ``domain`` is the full address; custom row's ``domain`` is the
        parent so we match by suffix).
-    2. First verified org-owned domain by ``created_at`` (deterministic
-       across retries — newest-last so the "default sender" stays
-       stable as orgs add more).
-    3. Mint a fresh hail-mail row on the fly if ``HAIL_MAIL_BASE_DOMAIN``
+    2. No ``from``, exactly one verified org-owned domain: that one.
+    3. No ``from``, several verified domains: 422 listing them. Picking
+       one for the caller means the sending identity changes silently
+       when domains are added or deleted, so the caller names it.
+    4. Mint a fresh hail-mail row on the fly if ``HAIL_MAIL_BASE_DOMAIN``
        is configured.
+
+    ``allow_ambiguous`` restores the old "oldest verified wins" pick for
+    callers that have no way to name a sender — the voicebot's internal
+    send route, where the choice is made by a phone conversation.
 
     Raises ``HTTPException`` if nothing resolves.
     """
@@ -156,30 +170,25 @@ async def resolve_sender(
             loc=["body", "from"],
         )
 
-    # No explicit `from` — prefer any verified domain, ordered by created_at.
-    stmt = (
-        select(EmailDomain)
-        .where(EmailDomain.organization_id == organization_id)
-        .where(EmailDomain.verification_status == "verified")
-        .order_by(EmailDomain.created_at.asc())
-        .limit(1)
-    )
-    sd = (await db.execute(stmt)).scalar_one_or_none()
-    if sd is not None:
-        return sd
+    # No explicit `from`. One verified identity is unambiguous; several
+    # are not — see the docstring for why we refuse to guess.
+    verified = await verified_senders(db, organization_id)
+    if len(verified) == 1 or (verified and allow_ambiguous):
+        return verified[0]
+    if verified:
+        choices = ", ".join(from_address_for(sd) for sd in verified)
+        raise unprocessable(
+            f"organization has {len(verified)} verified senders — pass an "
+            f"explicit `from` to choose one of: {choices} (a custom domain "
+            "accepts any local-part)",
+            loc=["body", "from"],
+        )
 
     # No verified row. If the org has *any* pending custom rows, return a
     # targeted 422 pointing at the verify endpoint rather than the generic
     # "set HAIL_MAIL_BASE_DOMAIN" message that would mislead the operator
     # into thinking hail-mail config was the problem.
-    pending_stmt = (
-        select(EmailDomain.domain)
-        .where(EmailDomain.organization_id == organization_id)
-        .where(EmailDomain.kind == "custom")
-        .where(EmailDomain.verification_status == "pending")
-        .limit(1)
-    )
-    pending_domain = (await db.execute(pending_stmt)).scalar_one_or_none()
+    pending_domain = await first_pending_custom(db, organization_id)
     if pending_domain is not None:
         raise unprocessable(
             f"sender domain {pending_domain!r} is pending DKIM verification; "
@@ -247,20 +256,6 @@ async def resolve_sender(
     # in the same request observes the materialized values.
     await db.refresh(sd)
     return sd
-
-
-def from_address_for(sd: EmailDomain, explicit: str | None) -> str:
-    """Resolve the wire ``From:`` for a send.
-
-    Hail-mail: ``sd.domain`` is the full address.
-    Custom:    ``sd.domain`` is just the DNS name; if the caller didn't
-               supply an explicit local-part, default to ``noreply``.
-    """
-    if explicit is not None:
-        return explicit
-    if sd.kind == "hail_mail":
-        return sd.domain
-    return f"noreply@{sd.domain}"
 
 
 # --------------------------------------------------------------------------- #
@@ -945,4 +940,4 @@ async def list_emails(
     )
 
 
-__all__ = ["deliver_email", "from_address_for", "resolve_sender", "router"]
+__all__ = ["deliver_email", "resolve_sender", "router"]

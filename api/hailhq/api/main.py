@@ -22,6 +22,7 @@ from hailhq.api.routes import providers as providers_routes
 from hailhq.api.routes import sms as sms_routes
 from hailhq.api.routes import unsubscribe as unsubscribe_routes
 from hailhq.api.routes import webhooks as webhooks_routes
+from hailhq.api.routes import whoami as whoami_routes
 from hailhq.api.routes.internal import agent as internal_agent
 from hailhq.api.routes.internal import dsar as internal_dsar
 from hailhq.api.routes.internal import numbers as internal_numbers
@@ -281,6 +282,7 @@ app.include_router(webhooks_routes.router)
 app.include_router(unsubscribe_routes.router)
 app.include_router(sms_routes.router)
 app.include_router(contacts_routes.router)
+app.include_router(whoami_routes.router)
 app.include_router(providers_routes.router)
 app.include_router(internal_ses_events.router)
 app.include_router(internal_org_closures.router)

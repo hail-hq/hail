@@ -15,7 +15,7 @@ The Streamable HTTP transport serves the MCP root path. There is no `/mcp` suffi
 
 ## Tools
 
-The server exposes 18 tools. Schemas (args, validation, return shapes) are the source of truth — refer to [`mcp/hailhq/mcp/tools.py`](https://github.com/hail-hq/hail/blob/main/mcp/hailhq/mcp/tools.py).
+The server exposes 20 tools. Schemas (args, validation, return shapes) are the source of truth — refer to [`mcp/hailhq/mcp/tools.py`](https://github.com/hail-hq/hail/blob/main/mcp/hailhq/mcp/tools.py).
 
 | Tool                      | Does                                                    |
 | ------------------------- | ------------------------------------------------------- |
@@ -34,6 +34,8 @@ The server exposes 18 tools. Schemas (args, validation, return shapes) are the s
 | `get_email_events`        | Page through one email's event history.                 |
 | `get_email_stats`         | Aggregate email counts for a time window.               |
 | `get_events`              | Page through the event stream.                          |
+| `list_email_domains`      | List sending identities + the default `from` address.   |
+| `whoami`                  | Identify the human behind the session (for `reply_to`). |
 | `list_contacts`           | List the org's contacts (members + manual contacts).    |
 | `lookup_contact`          | Find one contact by name, email, or phone fragment.     |
 | `create_contact`          | Add a manual contact.                                   |

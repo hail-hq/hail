@@ -354,6 +354,7 @@ or pass --api-key.`,
 	root.AddCommand(newTailCmd(opts))
 	root.AddCommand(newLoginCmd(opts))
 	root.AddCommand(newAuthCmd(opts))
+	root.AddCommand(newWhoamiCmd(opts))
 	root.AddCommand(newMcpCmd(opts))
 	root.AddCommand(newVersionCmd(opts))
 	root.AddCommand(newCompletionCmd(opts))

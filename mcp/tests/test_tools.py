@@ -1400,3 +1400,132 @@ async def test_api_error_mapping_409_idempotency(client: HailClient) -> None:
     )
     assert "error" in result
     assert "Idempotency-Key" in result["error"]
+
+
+# --------------------------------------------------------------------------- #
+# list_email_domains / whoami — the two discovery tools an agent calls
+# before it can address mail as a person.
+# --------------------------------------------------------------------------- #
+
+
+def _email_domain(domain: str = "acme.com", kind: str = "custom") -> dict:
+    return {
+        "id": str(uuid4()),
+        "organization_id": str(uuid4()),
+        "kind": kind,
+        "domain": domain,
+        "local_prefix_user": None,
+        "local_prefix_org": None,
+        "verification_status": "verified",
+        "dns_records": [],
+        "mail_from_domain": None,
+        "mail_from_status": None,
+        "provider": "ses",
+        "verified_at": "2026-01-01T00:00:00Z",
+        "inbound_enabled": False,
+        "forward_to": None,
+        "forward_rate_per_hour": None,
+        "created_at": "2026-01-01T00:00:00Z",
+        "updated_at": "2026-01-01T00:00:00Z",
+    }
+
+
+@respx.mock
+async def test_list_email_domains_surfaces_default_from(client: HailClient) -> None:
+    captured: dict = {}
+
+    def _handler(request: httpx.Request) -> httpx.Response:
+        captured["url"] = str(request.url)
+        return httpx.Response(
+            200,
+            json={
+                "items": [_email_domain()],
+                "next_cursor": None,
+                "default_from": "noreply@acme.com",
+            },
+        )
+
+    respx.get(f"{_BASE_URL}/email-domains").mock(side_effect=_handler)
+
+    result = await tools.list_email_domains(client=client)
+    assert "error" not in result, result
+    assert result["items"][0]["domain"] == "acme.com"
+    assert result["default_from"] == "noreply@acme.com"
+    assert captured["url"] == f"{_BASE_URL}/email-domains"
+
+
+@respx.mock
+async def test_list_email_domains_null_default_from_on_ambiguity(
+    client: HailClient,
+) -> None:
+    """Null is the signal that send_email needs an explicit from_."""
+    respx.get(f"{_BASE_URL}/email-domains").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "items": [_email_domain(), _email_domain("mail.acme.io")],
+                "next_cursor": None,
+                "default_from": None,
+            },
+        )
+    )
+
+    result = await tools.list_email_domains(client=client)
+    assert "error" not in result, result
+    assert result["default_from"] is None
+
+
+@respx.mock
+async def test_whoami_returns_the_caller_email(client: HailClient) -> None:
+    captured: dict = {}
+
+    def _handler(request: httpx.Request) -> httpx.Response:
+        captured["url"] = str(request.url)
+        return httpx.Response(
+            200,
+            json={
+                "auth_kind": "apikey",
+                "organization_id": str(uuid4()),
+                "user_id": str(uuid4()),
+                "email": "sarah@acme.test",
+                "name": "Sarah Chen",
+            },
+        )
+
+    respx.get(f"{_BASE_URL}/whoami").mock(side_effect=_handler)
+
+    result = await tools.whoami(client=client)
+    assert "error" not in result, result
+    assert result["email"] == "sarah@acme.test"
+    assert captured["url"] == f"{_BASE_URL}/whoami"
+
+
+@respx.mock
+async def test_whoami_has_no_human_on_a_shared_key(client: HailClient) -> None:
+    respx.get(f"{_BASE_URL}/whoami").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "auth_kind": "shared",
+                "organization_id": str(uuid4()),
+                "user_id": None,
+                "email": None,
+                "name": None,
+            },
+        )
+    )
+
+    result = await tools.whoami(client=client)
+    assert "error" not in result, result
+    assert result["email"] is None
+    assert result["auth_kind"] == "shared"
+
+
+@respx.mock
+async def test_whoami_maps_api_errors(client: HailClient) -> None:
+    respx.get(f"{_BASE_URL}/whoami").mock(
+        return_value=httpx.Response(401, json={"detail": "invalid api key"})
+    )
+
+    result = await tools.whoami(client=client)
+    assert "auth failed" in result["error"]

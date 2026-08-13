@@ -25,7 +25,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from hailhq.api.audit import write_audit_log
 from hailhq.api.numbers import resolve_org_number
 from hailhq.api.routes.email_domains import get_email_provider
-from hailhq.api.routes.emails import deliver_email, from_address_for, resolve_sender
+from hailhq.api.routes.emails import deliver_email, resolve_sender
 from hailhq.api.routes.internal.auth import verify_internal_request
 from hailhq.api.routes.sms import deliver_sms, get_sms_provider
 from hailhq.core.agent_caps import check_agent_send_allowed
@@ -45,6 +45,7 @@ from hailhq.core.compliance_gate import (
 )
 from hailhq.core.db import get_session
 from hailhq.core.directory import resolve_member_emails
+from hailhq.core.email_sender import from_address_for
 from hailhq.core.models import Call, Email, Sms
 from hailhq.core.providers.email import EmailProvider
 from hailhq.core.providers.sms import SmsProvider
@@ -415,7 +416,10 @@ async def agent_send_email(
         )
 
     try:
-        sd = await resolve_sender(db, org, None)
+        # A voice agent cannot name a sending domain mid-call, so this path
+        # keeps the old "oldest verified wins" pick that POST /emails now
+        # refuses. Public callers get the 422 and choose for themselves.
+        sd = await resolve_sender(db, org, None, allow_ambiguous=True)
     except HTTPException:
         return AgentSendResponse(ok=False, spoken=_SPOKEN_EMAIL_UNCONFIGURED)
 

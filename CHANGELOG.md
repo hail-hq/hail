@@ -4,6 +4,38 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 
 ## [Unreleased]
 
+## [0.21.0] — 2026-08-13
+
+No more guessing which address your mail goes out as, and a `whoami` on every surface.
+
+Component versions cut alongside this release:
+**`sdk-v0.15.0`** (PyPI: `hail-sdk==0.15.0`), **`cli-v0.20.0`** (Homebrew + GitHub Releases).
+
+### Email sender resolution — breaking
+
+- `POST /emails` no longer guesses a sender. An org with **two or more**
+  verified identities and no `from` now gets a `422` listing every address
+  it can send from, instead of silently using the oldest one — that pick
+  changed the sending identity whenever a domain was added or deleted.
+  One verified identity (or none, which auto-mints hail-mail) behaves as
+  before. The voicebot's internal send route keeps the old pick: a voice
+  agent has no way to name a domain mid-call.
+- `GET /email-domains` gained `default_from` — the address a `from`-less
+  send goes out as, `null` when the caller must choose. With no rows at all
+  it shows the hail-mail address a first send would mint, which was
+  previously unknowable until that send happened. Surfaced on the SDK
+  (`.default_from`) and the CLI (`hail email domain list` footer).
+
+### Whoami
+
+- New `GET /whoami` returns the caller's `auth_kind`, `organization_id`,
+  `user_id`, `email`, and `name`. The user fields are `null` for a shared
+  operator key. Exposed as `client.whoami()` (SDK), `hail whoami` (CLI),
+  and the `whoami` MCP tool — an agent reads `email` and passes it as
+  `reply_to` so replies reach the person, not an unattended `noreply@`.
+- New `list_email_domains` MCP tool, so an agent can discover sending
+  identities instead of guessing a domain.
+
 ## [0.20.0] — 2026-08-10
 
 Sender display names on outbound email, and a 25MB attachment cap.

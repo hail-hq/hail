@@ -60,6 +60,7 @@ from hail.models import (
     SmsResponse,
     SmsStatus,
     SuppressionListResponse,
+    WhoamiResponse,
 )
 
 _DEFAULT_BASE_URL = "https://api.hail.so"
@@ -312,9 +313,11 @@ class _EmailsResource:
 
         At least one of ``body_text`` / ``body_html`` is required; the
         server returns 422 if neither is supplied. ``recipient_consent``
-        is required — the server 422s without it. ``from_`` is optional:
-        when omitted the server picks the first verified sender on the
-        org or auto-mints a hail-mail address (operator-configured).
+        is required — the server 422s without it. ``from_`` is optional
+        while the org has one verified sender; with several the server
+        422s and you must name one (read ``default_from`` from
+        :meth:`Client.email_domains.list`). With none it auto-mints a
+        hail-mail address (operator-configured).
         ``idempotency_key`` defaults to a fresh UUIDv4.
         """
         # Build the body with the wire-side ``"from"`` alias. We don't
@@ -913,6 +916,17 @@ class Client:
         self.providers = _ProvidersResource(self._http)
         self.events = _EventsResource(self._http)
         self.base_url = resolved_base.rstrip("/")
+
+    async def whoami(self) -> WhoamiResponse:
+        """Identify the caller behind this API key.
+
+        Returns the organization plus the human the key belongs to.
+        ``user_id``/``email``/``name`` are ``None`` for a shared operator
+        key. Useful for addressing mail as that person — pass ``email``
+        as ``reply_to`` on :meth:`emails.create`.
+        """
+        data = await self._http.request("GET", "/whoami")
+        return WhoamiResponse.model_validate(data)
 
     async def aclose(self) -> None:
         await self._http.aclose()
