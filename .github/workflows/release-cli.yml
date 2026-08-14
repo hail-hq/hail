@@ -65,6 +65,29 @@ jobs:
             exit 1
           fi
 
+      # GoReleaser publishes the release page under the prefix-stripped name,
+      # so `cli-v0.20.0` creates (or reuses) a release on tag `v0.20.0`. If
+      # that tag already exists on the remote at another commit — someone
+      # tagged a repo release by hand — GitHub keeps the old tag and the
+      # binaries land on a page pointing at unrelated code. That shipped once
+      # on 2026-08-13. Fail here instead.
+      - name: Assert the stripped tag is free or already ours
+        env:
+          CURRENT: ${{ steps.tags.outputs.current }}
+        run: |
+          remote_sha=$(git ls-remote origin "refs/tags/${CURRENT}" | cut -f1)
+          if [ -z "${remote_sha}" ]; then
+            echo "${CURRENT} is free — GoReleaser will create it at HEAD"
+            exit 0
+          fi
+          peeled=$(git rev-parse "${remote_sha}^{}" 2>/dev/null || echo "${remote_sha}")
+          if [ "${peeled}" != "$(git rev-parse HEAD)" ]; then
+            echo "tag ${CURRENT} already exists on origin at ${peeled}, which is not HEAD." >&2
+            echo "GoReleaser would publish ${GITHUB_REF_NAME} binaries onto that commit's release page." >&2
+            echo "Delete the stray tag (refer to docs/public/self-host/operations.md) and re-run." >&2
+            exit 1
+          fi
+
       # GoReleaser's default changelog runs `git log <prev>..<current>` using
       # the prefix-stripped names from GORELEASER_{CURRENT,PREVIOUS}_TAG.
       # Those names don't exist as git refs (the real tags are `cli-v…`), so
@@ -72,8 +95,8 @@ jobs:
       # Lightweight tags created in this throwaway checkout never reach the
       # remote; they only need to satisfy GoReleaser's local git lookup.
       #
-      # `-f` is required because umbrella `v<semver>` tags can already exist
-      # (see docs/public/self-host/operations.md "Cutting an umbrella release") and would
+      # `-f` is required because a stray `v<semver>` tag can already exist in
+      # this checkout (refer to docs/public/self-host/operations.md) and would
       # collide with our mirror names. Force-replacing is safe because the
       # workflow never pushes tags back to origin.
       - name: Mirror prefix-stripped tags for GoReleaser
