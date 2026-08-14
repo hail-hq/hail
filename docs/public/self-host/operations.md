@@ -16,7 +16,6 @@ This document is the single source of truth for how to develop, deploy, migrate,
 | Regenerate OpenAPI + Go client | refer to _Development → Regenerating OpenAPI_ below                                                                                  |
 | Publish SDK                    | tag `sdk-v<X.Y.Z>` and push (fires `release-sdk.yml`)                                                                                |
 | Publish CLI                    | tag `cli-v<X.Y.Z>` and push (fires `release-cli.yml`)                                                                                |
-| Cut umbrella release           | tag `v<X.Y.Z>` and push (no workflow; just a marker)                                                                                 |
 
 ## Local development
 
@@ -293,11 +292,17 @@ The migration `0001_initial.py` issues `CREATE EXTENSION IF NOT EXISTS pgcrypto;
 
 Tag conventions:
 
-| tag prefix     | what fires                               | what it produces                                                                                      |
-| -------------- | ---------------------------------------- | ----------------------------------------------------------------------------------------------------- |
-| `sdk-v<X.Y.Z>` | `.github/workflows/release-sdk.yml`      | `hail-sdk` on PyPI (trusted publishing — no token)                                                    |
-| `cli-v<X.Y.Z>` | `.github/workflows/release-cli.yml`      | GoReleaser → multi-arch binaries on GitHub Releases + Homebrew formula push to `hail-hq/homebrew-tap` |
-| `v<X.Y.Z>`     | nothing — no workflow keys off bare `v*` | umbrella marker for "this is the v0.1.0 commit"                                                       |
+| tag prefix     | what fires                          | what it produces                                                                                                                                                |
+| -------------- | ----------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `sdk-v<X.Y.Z>` | `.github/workflows/release-sdk.yml` | `hail-sdk` on PyPI (trusted publishing — no token)                                                                                                              |
+| `cli-v<X.Y.Z>` | `.github/workflows/release-cli.yml` | GoReleaser → multi-arch binaries on GitHub Releases + Homebrew formula push to `hail-hq/homebrew-tap`                                                           |
+| `v<X.Y.Z>`     | nothing directly                    | **owned by the CLI release.** GoReleaser strips the `cli-` prefix, so `cli-v<X.Y.Z>` publishes its release page under `v<X.Y.Z>`. Never tag `v<X.Y.Z>` by hand. |
+
+There is no umbrella release tag. `CHANGELOG.md` is the record of what each repo
+version contains; the merge commit is the pointer. A hand-made `v<X.Y.Z>` tag
+collides with the CLI's release namespace — it did once (2026-08-13), and the CLI
+release then published its binaries onto a page whose tag pointed at older code.
+`release-cli.yml` now fails loudly if that tag already exists somewhere else.
 
 Hail does **not** release the service images (`hail-api`, `hail-voicebot`, `hail-mcp`) as versioned artifacts. The deploy workflow (`.github/workflows/deploy.yml`) pushes `latest` and `sha-<commit>` tags to GHCR on each push to `main` — the production VM pulls these. Self-hosters build from source via `docker compose up`. Versioned image releases are on the v1.x list.
 
@@ -332,18 +337,28 @@ GoReleaser quirks to know:
 - OSS GoReleaser does not have the Pro `monorepo:` block. The workflow strips the `cli-` prefix into the `GORELEASER_CURRENT_TAG` / `GORELEASER_PREVIOUS_TAG` env vars. It also passes `--skip=validate`, so GoReleaser does not reject the env-var-overridden tag. The manual `git rev-parse` and `git diff --exit-code HEAD` steps before GoReleaser keep the validate checks that _do_ matter.
 - The snapshot version template is the literal `0.0.0-snapshot-{{ .ShortCommit }}` (not `incpatch`), because the repo carries non-semver tags like `sdk-v0.0.1` that confuse the parser.
 
-### Cutting an umbrella release
+### Cutting a repo release
+
+A repo release is a CHANGELOG section, not a tag. Only components carry tags.
 
 ```bash
-# 1. Update CHANGELOG.md
+# 1. Move CHANGELOG.md's [Unreleased] block under the new version heading
 # 2. Tick newly-shipped milestones in README.md
-# 3. Commit
-# 4. Tag (no prefix)
-git tag v0.2.0
-git push origin v0.2.0
-# 5. Optional: GitHub Release page from the tag
-gh release create v0.2.0 --repo hail-hq/hail --notes-file CHANGELOG.md
+# 3. Bump sdk/pyproject.toml + sdk/hail/__init__.py if the SDK ships, then `uv lock`
+# 4. Commit as `chore(release): <X.Y.Z> — <summary>`, merge to main
+# 5. Tag the components that actually changed
+git tag sdk-v0.15.0 cli-v0.20.0
+git push origin sdk-v0.15.0 cli-v0.20.0
 ```
+
+Do **not** tag a bare `v<X.Y.Z>`. That name belongs to the CLI release: GoReleaser
+strips the `cli-` prefix, so `cli-v0.20.0` publishes its page under `v0.20.0`. A
+hand-made `v<X.Y.Z>` makes the next CLI release upload its binaries onto whatever
+commit that tag already points at. `release-cli.yml` fails the release when it
+detects this.
+
+The CLI release page carries the CHANGELOG prose for the matching repo version, so
+edit its body after GoReleaser publishes.
 
 ## Conventions
 
@@ -353,7 +368,7 @@ gh release create v0.2.0 --repo hail-hq/hail --notes-file CHANGELOG.md
   - Internal monorepo: `hailhq.*` (PEP 420 implicit namespace; no `hailhq/__init__.py` at the namespace root).
   - External SDK: `hail` — published as `hail-sdk` on PyPI, imports as `import hail`. Standalone — does **not** depend on any `hailhq.*` package.
 - **Provider model IDs**: live only in `.env.example`; `Settings` fields default to empty strings. Do not set `Settings.<provider>_model = "literal"` — that is wrong.
-- **Tag prefix grammar**: `<package>-v<semver>` for component releases (`sdk-v…`, `cli-v…`); bare `v<semver>` for the umbrella.
+- **Tag prefix grammar**: `<package>-v<semver>` for component releases (`sdk-v…`, `cli-v…`). Bare `v<semver>` is not a tag anyone creates by hand — GoReleaser mints it from `cli-v<semver>`.
 - **No Opero references** in any committed file.
 
 ## Footguns (every one of these has bitten us)

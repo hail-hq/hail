@@ -4,6 +4,14 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 
 ## [Unreleased]
 
+### Internal
+
+- Release tags: there is no umbrella `v<X.Y.Z>` tag any more. GoReleaser strips
+  the `cli-` prefix, so that name already belongs to the CLI's release page; a
+  hand-made one made `cli-v0.20.0` publish its binaries onto a page whose tag
+  pointed at older code. `release-cli.yml` now fails when the stripped tag
+  already exists on another commit, and the runbook documents the rule.
+
 ## [0.21.0] — 2026-08-13
 
 No more guessing which address your mail goes out as, and a `whoami` on every surface.
