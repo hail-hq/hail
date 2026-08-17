@@ -2,6 +2,39 @@
 
 `hail` is the Go CLI. It codegens its client from [`openapi/openapi.yaml`](https://github.com/hail-hq/hail/blob/main/openapi/openapi.yaml) — that spec is the canonical contract. This page is a brief summary of each command group. Run `hail <cmd> --help` for the full, authoritative flag list.
 
+## Install
+
+Homebrew is the recommended install path on macOS and Linux:
+
+```bash
+brew install hail-hq/tap/hail
+hail version
+```
+
+The fully qualified formula makes Homebrew add the `hail-hq/tap` tap
+automatically. Upgrade or remove the CLI with:
+
+```bash
+brew upgrade hail-hq/tap/hail
+brew uninstall hail
+```
+
+Alternatively, download the `darwin` or `linux` archive for your architecture
+from [GitHub Releases](https://github.com/hail-hq/hail/releases), extract it,
+and move the `hail` binary to a directory on your `PATH`. Release builds support
+Intel (`amd64`) and ARM64.
+
+After installation, choose the authentication mode:
+
+```bash
+# Hail Cloud: opens the device authorization flow and saves credentials.
+hail login
+
+# Self-host: point the CLI at your deployment; do not run hail login.
+export HAIL_API_URL=http://localhost:8080
+export HAIL_API_KEY='<the HAIL_API_KEY value from your server .env>'
+```
+
 Global flags (any command): `--api-url`, `--api-key`, `--json`. Auth resolves `--api-key > $HAIL_API_KEY > ~/.hail/credentials.json` (run `hail login`).
 
 ## Calls

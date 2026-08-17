@@ -62,9 +62,29 @@ Authentication differs by deployment:
 
 Full setup guides: [self-hosting](docs/public/self-host/README.md) · [Webhooks](docs/public/webhooks.md) · [MCP](docs/public/mcp.md) · [operations](docs/public/self-host/operations.md)
 
+## Install the CLI
+
+On macOS or Linux with [Homebrew](https://brew.sh):
+
+```bash
+brew install hail-hq/tap/hail
+hail version
+```
+
+Homebrew adds the `hail-hq/tap` tap automatically. To update later:
+
+```bash
+brew upgrade hail-hq/tap/hail
+```
+
+Alternatively, download the archive for your operating system and architecture
+from [GitHub Releases](https://github.com/hail-hq/hail/releases). Release
+binaries are available for macOS and Linux on Intel and ARM64. See the
+[CLI reference](docs/public/cli.md) for authentication and commands.
+
 ## Make your first call
 
-**CLI** ([install a binary from GitHub Releases](https://github.com/hail-hq/hail/releases)):
+**CLI**:
 
 ```bash
 hail login                        # Hail Cloud only (device flow)
