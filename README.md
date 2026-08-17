@@ -9,33 +9,65 @@
 
 Your agent needs to call a person to move an appointment. Hail connects to the telephone carrier and runs the voice pipeline — STT, TTS, turn detection. Your agent is the brain: point Hail at any OpenAI-compatible endpoint ([bring your own LLM](docs/public/byo-llm.md)), or let Hail's fallback chain (OpenAI → Gemini → Anthropic) do the talking. SMS and email work the same way — one MCP endpoint, one API key, one invoice.
 
-Self-hostable with `docker compose up`. Open source under AGPLv3.
+Self-hostable with Docker Compose; LiveKit Cloud and the communication
+providers remain external. Open source under AGPLv3.
 
 ![Animated terminal demo of hail tail streaming live call events](docs/assets/gifs/hail-tail-live-stream.gif)
 
-## Quick start
+## Self-host quick start
+
+Prerequisites: Git, Docker Engine, and Docker Compose v2. For a public
+production deployment you also need a domain, HTTPS, and a managed Postgres;
+start with the [VM deployment guide](docs/public/self-host/vm-deploy.md).
+
+The commands below run a local evaluation stack with bundled Postgres and
+MinIO. Voice calls additionally require LiveKit Cloud, Twilio, Deepgram,
+Cartesia, and at least one LLM provider. Email is optional and requires AWS SES.
 
 ```bash
 git clone https://github.com/hail-hq/hail
 cd hail
-cp .env.example .env   # add Twilio, LiveKit Cloud, Deepgram, Cartesia keys
-                       # + one of OpenAI / Gemini / Anthropic
-docker compose up
+cp .env.example .env
+
+# Generate a shared self-host key, then put it in .env as HAIL_API_KEY.
+printf 'hk_%s\n' "$(openssl rand -base64 32 | tr -d '/+=' | head -c 40)"
+
+# Edit .env and add the providers required for the channels you will use.
+docker compose -f docker-compose.yml -f docker-compose.local.yml \
+  run --rm api alembic upgrade head
+docker compose -f docker-compose.yml -f docker-compose.local.yml up -d
+docker compose -f docker-compose.yml -f docker-compose.local.yml ps
+curl --fail http://localhost:8080/healthz
 ```
 
-Then get an API key:
+Self-host authentication uses the `HAIL_API_KEY` value from `.env`; it does not
+need an API-key row in Postgres. Export the same key and API URL in the shell
+where you use the CLI or SDK (Compose does not export `.env` into your shell):
+
+```bash
+export HAIL_API_URL=http://localhost:8080
+export HAIL_API_KEY='<same value as .env>'
+```
+
+Next, follow [LiveKit Cloud](docs/public/self-host/livekit-cloud.md) and
+[Twilio](docs/public/self-host/twilio.md), then bind a phone number to the
+self-host organization using the
+[first-run setup](docs/public/self-host/operations.md#self-host-first-run-setup).
+To enable email, follow [AWS SES](docs/public/self-host/aws-ses.md).
+
+Authentication differs by deployment:
 
 - **Hail Cloud** (managed, at [hail.so](https://hail.so)): run `hail login`. The device flow writes a key to `~/.hail/credentials.json`.
-- **Self-host**: seed a key into your database — see [operations.md, "Self-host: first-run setup"](docs/public/operations.md#self-host-first-run-setup) — then set `HAIL_API_KEY` or pass `--api-key`.
+- **Self-host**: do not run `hail login`; set `HAIL_API_URL` and `HAIL_API_KEY` as shown above, or pass `--api-url` and `--api-key`.
 
-Full setup guides: [Twilio](docs/public/setup/twilio.md) · [LiveKit Cloud](docs/public/setup/livekit-cloud.md) · [AWS SES](docs/public/setup/aws-ses.md) · [Webhooks](docs/public/setup/webhooks.md) · [MCP](docs/public/setup/mcp.md)
+Full setup guides: [self-hosting](docs/public/self-host/README.md) · [Webhooks](docs/public/webhooks.md) · [MCP](docs/public/mcp.md) · [operations](docs/public/self-host/operations.md)
 
 ## Make your first call
 
-**CLI** ([GitHub Releases](https://github.com/hail-hq/hail/releases)):
+**CLI** ([install a binary from GitHub Releases](https://github.com/hail-hq/hail/releases)):
 
 ```bash
-hail login                        # authenticate (device flow)
+hail login                        # Hail Cloud only (device flow)
 hail auth logout                  # remove local credentials
 hail auth token                   # print bare API key for scripting
 
@@ -102,10 +134,13 @@ asyncio.run(main())
 ```bash
 curl -X POST http://localhost:8080/calls \
   -H "Authorization: Bearer $HAIL_API_KEY" \
+  -H "Content-Type: application/json" \
   -d '{"to":"+15551234567","recipient_consent":true,"system_prompt":"..."}'
 ```
 
-**MCP** (Claude.ai, Claude Code, ChatGPT, Cursor, …): add a remote MCP connector pointing at `http://<your-host>:8081` (self-hosted). See [setup/mcp.md](docs/public/setup/mcp.md).
+**MCP** (Claude.ai, Claude Code, ChatGPT, Cursor, …): local clients can use
+`http://localhost:8081`. Web-based clients require a publicly reachable HTTPS
+endpoint. See the [MCP setup guide](docs/public/mcp.md).
 
 ## Bring your own LLM
 
@@ -121,7 +156,8 @@ Any OpenAI chat-completions-compatible endpoint works. A complete runnable examp
 1. **Clear comms.** Explicit OpenAPI contracts. No hidden behavior.
 2. **Simple code.** Boring is best. No abstraction before it has two uses.
 3. **Brief docs.** Each page fits on one screen. Setup takes 10 minutes from a fresh clone.
-4. **Self-hostable.** `docker compose up` runs everything except LiveKit Cloud.
+4. **Self-hostable.** Docker Compose runs Hail's API, voicebot, MCP server,
+   Postgres, and MinIO; LiveKit Cloud and channel providers remain external.
 5. **Pluggable brain.** [BYO LLM endpoint](docs/public/byo-llm.md), or Hail's bundled fallback. The voice pipeline and transport are always Hail's.
 6. **Agent-first docs.** AI agents are first-class readers. Runnable examples first; links to canonical sources, not paraphrase.
 
@@ -186,7 +222,7 @@ A checked box is a released feature. Per-artifact changelogs (GitHub Releases fo
   - [x] `hail` binary via GitHub Releases
 - MCP server
   - [x] Remote Streamable HTTP endpoint included with each Hail deployment
-  - ~~PyPI stdio package~~ — deliberately not shipped; see [setup/mcp.md](docs/public/setup/mcp.md)
+  - ~~PyPI stdio package~~ — deliberately not shipped; see [MCP setup](docs/public/mcp.md)
 - Python SDK
   - [x] `hail-sdk` on PyPI, imports as `hail`
 

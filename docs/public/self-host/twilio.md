@@ -18,9 +18,22 @@ Go to **Phone Numbers → Buy a number**. Select a number with the Voice capabil
 ## 3. SIP trunk
 
 1. **Elastic SIP Trunking → Trunks → Create new Trunk**.
-2. **Origination**: add the URI from [LiveKit Cloud setup](./livekit-cloud.md).
-3. **Numbers**: attach the phone number from step 2.
-4. Put the Termination URI (for example, `your-trunk.pstn.twilio.com`) in `.env` as `TWILIO_SIP_TRUNK_DOMAIN`.
+2. Under **Termination**, choose a unique termination domain such as
+   `your-trunk.pstn.twilio.com`.
+3. Add a credential list with a SIP username and password. LiveKit's outbound
+   trunk must use the same credentials.
+4. Under **Numbers**, attach the phone number from step 2.
+5. Continue with [LiveKit Cloud setup](./livekit-cloud.md), using the Twilio
+   termination domain and credentials to create a LiveKit outbound trunk.
+
+Do not add the termination domain to Hail's `.env`: Hail uses the resulting
+LiveKit trunk ID (`LIVEKIT_SIP_OUTBOUND_TRUNK_ID`) at runtime. Twilio calls
+traffic from LiveKit to the PSTN “termination.” Its “origination” settings are
+for inbound PSTN calls, which Hail does not yet support.
+
+Twilio requires outbound destinations and caller IDs in E.164 format. Trial
+accounts can call only verified destination numbers. See Twilio's
+[Elastic SIP Trunking reference](https://www.twilio.com/docs/sip-trunking).
 
 ## 4. Outbound SMS
 

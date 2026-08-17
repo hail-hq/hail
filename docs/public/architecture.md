@@ -103,7 +103,7 @@ If none of those resolve, the request returns `503` with instructions on how to 
 
 `GET /email-domains` answers the same question ahead of a send: its `default_from` field holds the address a `from`-less send would use, and is `null` when the caller must choose.
 
-Refer to [`docs/setup/aws-ses.md`](./self-host/aws-ses.md) for the operator-side setup. Refer to [`docs/superpowers/plans/2026-05-17-hail-mail-addressing.md`](https://github.com/hail-hq/hail/blob/main/docs/superpowers/plans/2026-05-17-hail-mail-addressing.md) for the addressing/configurability plan.
+Refer to [AWS SES setup](./self-host/aws-ses.md) for the operator-side setup. Refer to [`docs/superpowers/plans/2026-05-17-hail-mail-addressing.md`](https://github.com/hail-hq/hail/blob/main/docs/superpowers/plans/2026-05-17-hail-mail-addressing.md) for the addressing/configurability plan.
 
 ## Inbound email
 
@@ -134,7 +134,7 @@ inbound SMTP ──► SES Receipt Rule
 
 The cloud-agnostic SMTP path is a stub
 ([`SmtpInboundProvider`](https://github.com/hail-hq/hail/blob/main/core/hailhq/core/providers/email/inbound/smtp.py)).
-[`docs/setup/smtp-inbound.md`](./self-host/smtp-inbound.md) tracks it.
+[SMTP inbound](./self-host/smtp-inbound.md) tracks it.
 
 ### Per-domain routing — forward and/or webhook
 
@@ -149,4 +149,4 @@ A separate `inbound_routes` table, for per-mailbox routing in custom domains, is
 
 The `/webhooks` CRUD surface is the firehose pattern — one subscription covers multiple event types (`email.received`, `email.bounced`, `email.complained`). Signatures are Stripe-style: `X-Hail-Signature: t=<unix>,v1=<hex>`. Hail retries deliveries on a fixed `0/30s/2m/10m/1h/6h/24h` ladder. After the last retry, Hail marks the delivery `dead`. After 50 consecutive dead deliveries, the subscription auto-disables.
 
-Refer to [`docs/setup/aws-ses.md`](./self-host/aws-ses.md) §10 for the operator runbook. Refer to [`docs/superpowers/specs/2026-06-06-inbound-email-design.md`](https://github.com/hail-hq/hail/blob/main/docs/superpowers/specs/2026-06-06-inbound-email-design.md) for the full spec.
+Refer to [AWS SES setup](./self-host/aws-ses.md) §10 for the operator runbook. Refer to [`docs/superpowers/specs/2026-06-06-inbound-email-design.md`](https://github.com/hail-hq/hail/blob/main/docs/superpowers/specs/2026-06-06-inbound-email-design.md) for the full spec.

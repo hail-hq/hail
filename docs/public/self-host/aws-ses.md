@@ -217,7 +217,7 @@ Hail garbage-collects unused uploads (not attached to any send) 24 hours after u
 Skip these until later milestones. This list names them so that you do not use SES features that are not wired yet:
 
 - **Templates** — the API takes raw `body_text` / `body_html`. SES templates are a v2 request.
-- **Cloud-agnostic inbound** — the SMTP listener is stubbed at [`docs/setup/smtp-inbound.md`](./smtp-inbound.md); inbound currently runs on AWS only.
+- **Cloud-agnostic inbound** — the SMTP listener is described in [SMTP inbound](./smtp-inbound.md); inbound currently runs on AWS only.
 
 ## 10. Inbound email
 
@@ -250,7 +250,7 @@ terragrunt apply
 Do a one-time bootstrap per AWS account before the first `terragrunt init`:
 the state bucket + lock table do not auto-create. Refer to the comment block
 at the top of [`infra/terragrunt.hcl`](https://github.com/hail-hq/hail/blob/main/infra/terragrunt.hcl) for
-the AWS CLI one-liners. Refer to [`docs/operations.md`](./operations.md) →
+the AWS CLI one-liners. Refer to [operations](./operations.md) →
 "Inbound email rollout → Stage 4" for the full sequence.
 
 Outputs:

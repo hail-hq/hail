@@ -83,7 +83,7 @@ cp .env.example .env
 
 Edit `/opt/hail/.env` and fill in:
 
-- All provider secrets (Twilio, LiveKit, Deepgram, Cartesia (+ optional ElevenLabs fallback), at least one LLM key — refer to `docs/setup/`).
+- All provider secrets (Twilio, LiveKit, Deepgram, Cartesia, optional ElevenLabs fallback, and at least one LLM key); see [Twilio](./twilio.md) and [LiveKit Cloud](./livekit-cloud.md).
 - `HAIL_API_KEY` — generate with `openssl rand -base64 32 | tr -d '/+=' | head -c 40 | sed 's/^/hk_/'`.
 - `DATABASE_URL` — the managed Postgres connection string. Most providers require `?sslmode=require`.
 - `HAIL_DOMAIN` — your apex (for example, `hail.example.com`). Both `api.` and `mcp.` subdomains derive from it.
@@ -112,7 +112,7 @@ docker compose -f docker-compose.yml -f docker-compose.prod.yml ps
 
 To skip the manual GHCR login, trigger the GitHub Actions workflow (step 6) first. Its `docker login` step writes credentials that the VM can use again.
 
-Seed your first phone number with the snippet in `docs/operations.md` → _Self-host: first-run setup_. Replace `docker compose exec postgres …` with `psql "$DATABASE_URL" -c …`.
+Bind your first phone number using [Self-host: first-run setup](./operations.md#self-host-first-run-setup). Because this deployment uses managed Postgres, replace `docker compose exec postgres …` with `psql "$DATABASE_URL" -c …`.
 
 Send a request to `https://api.<domain>/healthz` from your laptop. You must see `{"status":"ok"}`. Caddy gets a Let's Encrypt cert on the first request. The first call after boot can take 10–20 seconds.
 

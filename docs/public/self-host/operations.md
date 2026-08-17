@@ -4,18 +4,18 @@ This document is the single source of truth for how to develop, deploy, migrate,
 
 ## Quick reference
 
-| task                           | command                                                                                                                              |
-| ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------ |
-| Bring up stack (bundled DB)    | `docker compose -f docker-compose.yml -f docker-compose.local.yml up -d`                                                             |
-| Bring up stack (managed DB)    | `docker compose up -d`                                                                                                               |
-| Bring up stack (prod VM)       | `docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d` — pulls images from GHCR; refer to `docs/setup/vm-deploy.md` |
-| Tail one service               | `docker compose logs -f <api\|voicebot\|mcp\|postgres>`                                                                              |
-| Run all tests                  | `cd <core\|api\|voicebot\|mcp\|sdk> && uv run pytest` (per suite, **from each dir**)                                                 |
-| Lint                           | `uvx ruff check .` then `uvx black --check .` (repo root)                                                                            |
-| Apply DB migrations            | `docker compose run --rm api alembic upgrade head`                                                                                   |
-| Regenerate OpenAPI + Go client | refer to _Development → Regenerating OpenAPI_ below                                                                                  |
-| Publish SDK                    | tag `sdk-v<X.Y.Z>` and push (fires `release-sdk.yml`)                                                                                |
-| Publish CLI                    | tag `cli-v<X.Y.Z>` and push (fires `release-cli.yml`)                                                                                |
+| task                           | command                                                                                                                                   |
+| ------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| Bring up stack (bundled DB)    | `docker compose -f docker-compose.yml -f docker-compose.local.yml up -d`                                                                  |
+| Bring up stack (managed DB)    | `docker compose up -d`                                                                                                                    |
+| Bring up stack (prod VM)       | `docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d` — pulls images from GHCR; refer to the [VM guide](./vm-deploy.md) |
+| Tail one service               | `docker compose logs -f <api\|voicebot\|mcp\|postgres>`                                                                                   |
+| Run all tests                  | `cd <core\|api\|voicebot\|mcp\|sdk> && uv run pytest` (per suite, **from each dir**)                                                      |
+| Lint                           | `uvx ruff check .` then `uvx black --check .` (repo root)                                                                                 |
+| Apply DB migrations            | `docker compose run --rm api alembic upgrade head`                                                                                        |
+| Regenerate OpenAPI + Go client | refer to _Development → Regenerating OpenAPI_ below                                                                                       |
+| Publish SDK                    | tag `sdk-v<X.Y.Z>` and push (fires `release-sdk.yml`)                                                                                     |
+| Publish CLI                    | tag `cli-v<X.Y.Z>` and push (fires `release-cli.yml`)                                                                                     |
 
 ## Local development
 
@@ -28,7 +28,7 @@ docker compose \
   -f docker-compose.yml -f docker-compose.local.yml \
   up -d                                                    # postgres + minio + api + voicebot + mcp
 docker compose run --rm api alembic upgrade head           # apply schema
-# seed an org + api_key + phone_number (see Deployment → DB seed below)
+# bind a phone number to the self-host sentinel (see first-run setup below)
 ```
 
 ### Per-service dev loops (host-side, no Docker)
@@ -105,7 +105,10 @@ Put new adapters under `core/hailhq/core/providers/<channel>/<name>.py`. Each ad
 - **ElevenLabs** (fallback TTS, optional): API key + a voice ID. If `ELEVEN_API_KEY` is set, the system uses it automatically when Cartesia fails.
 - **At least one LLM provider**: OpenAI / Gemini / Anthropic API key. The voicebot's mode-A FallbackAdapter chains all three. Mode-B uses a caller-provided OpenAI-compatible endpoint for each call.
 
-For detailed setup walkthroughs, refer to `docs/setup/twilio.md`, `docs/setup/livekit-cloud.md`, and `docs/setup/mcp.md`. To run the whole stack on a single Ubuntu VM with HTTPS + auto-deploy from `main`, refer to `docs/setup/vm-deploy.md`.
+For detailed setup walkthroughs, see [Twilio](./twilio.md),
+[LiveKit Cloud](./livekit-cloud.md), and [MCP](../mcp.md). To run the stack on a
+single Ubuntu VM with HTTPS and automatic deployment from `main`, see the
+[VM deployment guide](./vm-deploy.md).
 
 ### Authentication
 
@@ -126,7 +129,8 @@ A managed-cloud user with no `member` row gets a **403 "user not provisioned"**,
 # 1) Generate a shared API key — used for BOTH directions:
 #    inbound (API checks bearer) + outbound (CLI/MCP/voicebot send it).
 HAIL_API_KEY="hk_$(openssl rand -base64 32 | tr -d '/+=' | head -c 40)"
-echo "HAIL_API_KEY=$HAIL_API_KEY" >> hail/.env
+printf '%s\n' "$HAIL_API_KEY"
+# Replace the blank HAIL_API_KEY= line in .env with this value.
 
 # 2) Add a phone number bound to the self-host sentinel org id.
 export TWILIO_E164='+1XXXXXXXXXX' TWILIO_PN_SID='PNxxxxxxxxxxxxxxxx'
