@@ -11,14 +11,36 @@ LiveKit Cloud supplies the media (SIP bridge + WebRTC) in v1. A self-hosted SFU 
    - `LIVEKIT_API_KEY`
    - `LIVEKIT_API_SECRET`
 
-## 2. SIP inbound trunk
+## 2. SIP outbound trunk
 
-1. **SIP → Inbound Trunks → Create**.
-2. Allow calls from your Twilio SIP trunk. Use the IP/user auth that matches your Twilio configuration.
-3. Add a **Dispatch Rule** that routes incoming calls to a per-call `individual` room.
+First create the Twilio trunk and credentials in the [Twilio guide](./twilio.md).
+Then, in LiveKit Cloud:
+
+1. Open **Telephony → SIP trunks → Create new trunk**.
+2. Select **Outbound** and use the Twilio termination domain
+   (`<name>.pstn.twilio.com`) as the address.
+3. Add the Twilio number in E.164 format and enter the same username/password
+   configured on the Twilio trunk.
+4. Create the trunk and copy its ID into `.env` as
+   `LIVEKIT_SIP_OUTBOUND_TRUNK_ID`.
+
+Hail passes this ID to LiveKit for every outbound call. It does not read a
+Twilio trunk-domain environment variable. See LiveKit's
+[outbound trunk reference](https://docs.livekit.io/telephony/making-calls/outbound-trunk/)
+for the current UI and JSON forms.
+
+`LIVEKIT_SIP_INBOUND_TRUNK_ID` is reserved for a future inbound-calling
+release and can remain empty today.
 
 ## 3. Voicebot worker
 
-Run `docker compose up voicebot`. At startup, the worker registers with LiveKit as a dispatchable agent. The Hail API dispatches it into a room for each call.
+With the local Compose overlay, run:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.local.yml up -d voicebot
+```
+
+At startup, the worker registers with LiveKit as a dispatchable agent. The
+Hail API dispatches it into a room for each call.
 
 For the full flow, refer to [Architecture](../architecture.md).
