@@ -424,10 +424,15 @@ async def speak_greeting(
     ``ai_disclosure`` default is ``True`` so a dispatch that predates the
     field (rolling deploy) keeps the disclosure.
 
-    A caller ``first_message`` is spoken verbatim. Without one, the LLM
-    generates the opening (see :func:`opening_instructions`) so the call
-    never opens in dead air — including with ``ai_disclosure: false``.
-    Call this right after ``session.start()``.
+    A caller ``first_message`` is spoken verbatim, concatenated onto the
+    disclosure as a single ``session.say()`` call — one spoken turn, not
+    two back-to-back utterances that sound like the agent introducing
+    itself twice. Without a ``first_message``, the LLM generates the
+    opening (see :func:`opening_instructions`) so the call never opens in
+    dead air — including with ``ai_disclosure: false``; that path stays a
+    separate turn since a generated reply's text isn't known until the
+    model produces it, so it can't be joined into the literal disclosure
+    string. Call this right after ``session.start()``.
 
     ``generate_opening=False`` skips that generated turn. It exists for
     the deferred IVR path (:func:`arm_deferred_greeting`), where the
@@ -436,13 +441,19 @@ async def speak_greeting(
     opening would race it and its "they have not said anything yet"
     premise would be false.
     """
-    if metadata.get("ai_disclosure", True):
-        await session.say(
-            disclosure_line(metadata.get("org_name")), allow_interruptions=True
-        )
-    if metadata.get("first_message"):
-        await session.say(metadata["first_message"], allow_interruptions=True)
-    elif generate_opening:
+    disclosure = (
+        disclosure_line(metadata.get("org_name"))
+        if metadata.get("ai_disclosure", True)
+        else None
+    )
+    first_message = metadata.get("first_message")
+    if first_message:
+        greeting = f"{disclosure} {first_message}" if disclosure else first_message
+        await session.say(greeting, allow_interruptions=True)
+        return
+    if disclosure:
+        await session.say(disclosure, allow_interruptions=True)
+    if generate_opening:
         session.generate_reply(instructions=opening_instructions(pickup_transcript))
 
 

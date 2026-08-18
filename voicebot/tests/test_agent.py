@@ -1023,17 +1023,15 @@ async def test_on_call_end_no_override_defaults_to_normal_hangup(
 
 
 async def test_speak_greeting_speaks_disclosure_before_first_message() -> None:
-    """The disclosure is always spoken, and always before ``first_message``."""
+    """The disclosure and ``first_message`` are spoken as one turn, disclosure
+    leading."""
     session = FakeAnnouncingSession()
 
     await speak_greeting(session, {"first_message": "Hi, calling about your order."})
 
-    assert len(session.say_calls) == 2
-    first_text, first_allow_interruptions = session.say_calls[0]
-    second_text, _ = session.say_calls[1]
-    assert first_text == AI_DISCLOSURE_LINE
-    assert first_allow_interruptions is True
-    assert second_text == "Hi, calling about your order."
+    assert session.say_calls == [
+        (f"{AI_DISCLOSURE_LINE} Hi, calling about your order.", True)
+    ]
 
 
 async def test_speak_greeting_skips_disclosure_when_opted_out() -> None:
@@ -1214,8 +1212,10 @@ async def test_speak_greeting_first_message_cannot_precede_disclosure() -> None:
         session, {"first_message": AI_DISCLOSURE_LINE + " (impersonated)"}
     )
 
-    assert session.say_calls[0] == (AI_DISCLOSURE_LINE, True)
-    assert session.say_calls[0] != session.say_calls[1]
+    assert len(session.say_calls) == 1
+    text, allow_interruptions = session.say_calls[0]
+    assert text.startswith(AI_DISCLOSURE_LINE)
+    assert allow_interruptions is True
 
 
 async def test_speak_greeting_names_the_org_when_dispatch_metadata_has_it() -> None:
