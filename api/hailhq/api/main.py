@@ -248,6 +248,36 @@ app.add_middleware(DeprecationHeaderMiddleware)
 app.add_middleware(GeneralRateLimitMiddleware)
 
 
+_default_openapi = app.openapi
+
+
+def _openapi_with_validation_error_description() -> dict:
+    """Add a field description to the ``detail`` property of
+    ``HTTPValidationError`` — FastAPI generates that schema itself (from a
+    hardcoded dict in ``fastapi.openapi.utils``, not a model we own), so it
+    can't get a ``Field(description=...)`` the normal way. Every route with
+    a request body or query params gets a 422 response built from this
+    shared schema.
+    """
+    schema = _default_openapi()
+    detail = (
+        schema.get("components", {})
+        .get("schemas", {})
+        .get("HTTPValidationError", {})
+        .get("properties", {})
+        .get("detail")
+    )
+    if detail is not None:
+        detail["description"] = (
+            "List of validation errors: each entry gives the field "
+            "location (loc), the problem (msg), and the error type (type)."
+        )
+    return schema
+
+
+app.openapi = _openapi_with_validation_error_description
+
+
 @app.exception_handler(SecretKeyMissing)
 async def _secret_key_missing(_request: Request, exc: SecretKeyMissing) -> JSONResponse:
     """A Fernet secret key (webhooks or provider keys) is unset/invalid; 503, not 500."""

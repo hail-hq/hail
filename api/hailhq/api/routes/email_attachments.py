@@ -44,7 +44,15 @@ async def create_email_attachment(
     principal: Annotated[Principal, Depends(get_current_principal)],
     db: Annotated[AsyncSession, Depends(get_session)],
     s3: Annotated[S3MailClient, Depends(get_s3_mail)],
-    file: Annotated[UploadFile, File()],
+    file: Annotated[
+        UploadFile,
+        File(
+            description=(
+                "The file to upload, as multipart/form-data. Size-limited; "
+                "an oversize upload is rejected with 422."
+            )
+        ),
+    ],
 ) -> EmailAttachmentUploadResponse:
     """Upload a file and get back a reusable attachment id.
 
