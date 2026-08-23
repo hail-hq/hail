@@ -12,6 +12,9 @@ import uuid
 
 import httpx
 import pytest
+from hailhq.api.agent_gate import RATE_LIMITED_RESPONSES
+from hailhq.api.main import app
+from hailhq.api.ratelimit import GENERAL_RATE_LIMITED_RESPONSES
 from hailhq.core.config import settings
 from hailhq.core.models import ApiKey
 
@@ -24,7 +27,13 @@ async def test_response_carries_ratelimit_headers(
         "/v1/whoami", headers={"Authorization": f"Bearer {plain_key}"}
     )
     assert resp.status_code == 200
-    assert "ratelimit-limit" in resp.headers or "x-ratelimit-limit" in resp.headers
+    # Exact IETF-draft header name only — GeneralRateLimitMiddleware sets
+    # these itself (see ratelimit.py), it does not go through slowapi's own
+    # header injection, which defaults to X-RateLimit-*. A regression to
+    # that default must fail this assertion, not slide past an "or".
+    assert "ratelimit-limit" in resp.headers
+    assert "ratelimit-remaining" in resp.headers
+    assert "ratelimit-reset" in resp.headers
 
 
 async def test_exceeding_the_limit_returns_429_with_retry_after(
@@ -98,3 +107,39 @@ async def test_healthz_is_not_rate_limited(
         resp = await client.get("/healthz")
         assert resp.status_code == 200
         assert "ratelimit-limit" not in resp.headers
+
+
+@pytest.mark.parametrize("path", ["/v1/calls", "/v1/sms", "/v1/emails"])
+def test_create_routes_merge_agent_gate_and_general_429_docs(path: str) -> None:
+    # calls.py/sms.py/emails.py's create routes already documented
+    # agent_gate.py's RATE_LIMITED_RESPONSES (the agent-abuse velocity-cap
+    # 429) before this task. This task must MERGE its own
+    # GENERAL_RATE_LIMITED_RESPONSES into that 429, not clobber it — both
+    # causes are real and independently reachable on these 3 routes. Assert
+    # against the live app.openapi() output (not the ratelimit.py helper in
+    # isolation), so a Task 3 edit to these same decorators that
+    # accidentally drops one side's responses= would fail this test.
+    schema = app.openapi()
+    responses = schema["paths"][path]["post"]["responses"]
+    assert "429" in responses
+    entry = responses["429"]
+
+    # Both real 429 causes are represented in the merged description —
+    # checked against the actual source strings, not a hardcoded guess.
+    agent_gate_description = RATE_LIMITED_RESPONSES[429]["description"]
+    general_description = GENERAL_RATE_LIMITED_RESPONSES[429]["description"]
+    assert agent_gate_description in entry["description"]
+    assert general_description in entry["description"]
+    assert "velocity cap" in entry["description"]
+    assert "general request-rate" in entry["description"]
+
+    # All 4 headers survive the merge (Retry-After is declared by both
+    # source dicts and collapses to one entry; the general limiter's other
+    # 3 headers are additive).
+    header_names = set(entry["headers"].keys())
+    assert header_names == {
+        "Retry-After",
+        "RateLimit-Limit",
+        "RateLimit-Remaining",
+        "RateLimit-Reset",
+    }
