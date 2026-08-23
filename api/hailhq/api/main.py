@@ -11,6 +11,7 @@ from fastapi.encoders import jsonable_encoder
 from fastapi.exception_handlers import request_validation_exception_handler
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, Response
+from hailhq.api.deprecation import DeprecationHeaderMiddleware
 from hailhq.api.routes import calls as calls_routes
 from hailhq.api.routes import contacts as contacts_routes
 from hailhq.api.routes import email_attachments as email_attachments_routes
@@ -239,6 +240,7 @@ app = FastAPI(
     servers=[{"url": "https://api.hail.so", "description": "Hail Cloud"}],
     lifespan=lifespan,
 )
+app.add_middleware(DeprecationHeaderMiddleware)
 
 
 @app.exception_handler(SecretKeyMissing)
@@ -272,18 +274,34 @@ async def _cache_422_for_idempotent_retry(
     return await request_validation_exception_handler(request, exc)
 
 
-app.include_router(calls_routes.router)
-app.include_router(email_attachments_routes.router)
-app.include_router(emails_routes.router)
-app.include_router(events_routes.router)
-app.include_router(email_domains_routes.router)
-app.include_router(numbers_routes.router)
-app.include_router(webhooks_routes.router)
-app.include_router(unsubscribe_routes.router)
-app.include_router(sms_routes.router)
-app.include_router(contacts_routes.router)
-app.include_router(whoami_routes.router)
-app.include_router(providers_routes.router)
+# Customer-facing routers are dual-mounted: /v1/<resource> is canonical
+# and the only mount that appears in the OpenAPI schema. The unprefixed
+# path keeps working for existing integrations (routable, real handler)
+# but is excluded from the schema (include_in_schema=False) so it does
+# not create a second, colliding operationId per operation — FastAPI
+# derives operationId from the function name, and a route mounted twice
+# with schema inclusion on both would produce duplicate IDs and a spec
+# with two paths per operation. The unprefixed path is marked
+# Deprecation: true instead (see deprecation.py). No route handler is
+# duplicated, both mounts point at the same router object.
+_CUSTOMER_ROUTERS = [
+    calls_routes.router,
+    email_attachments_routes.router,
+    emails_routes.router,
+    events_routes.router,
+    email_domains_routes.router,
+    numbers_routes.router,
+    webhooks_routes.router,
+    unsubscribe_routes.router,
+    sms_routes.router,
+    contacts_routes.router,
+    whoami_routes.router,
+    providers_routes.router,
+]
+for _router in _CUSTOMER_ROUTERS:
+    app.include_router(_router, prefix="/v1")
+    app.include_router(_router, include_in_schema=False)
+
 app.include_router(internal_ses_events.router)
 app.include_router(internal_org_closures.router)
 app.include_router(internal_provider_config.router)
