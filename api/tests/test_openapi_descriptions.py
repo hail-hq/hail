@@ -36,6 +36,10 @@ def _collect_schema_refs(node: object, found: set[str]) -> None:
         if isinstance(content, dict):
             for media in content.values():
                 _collect_schema_refs(media, found)
+        properties = node.get("properties")
+        if isinstance(properties, dict):
+            for prop_schema in properties.values():
+                _collect_schema_refs(prop_schema, found)
     elif isinstance(node, list):
         for item in node:
             _collect_schema_refs(item, found)

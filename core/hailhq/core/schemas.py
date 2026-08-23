@@ -100,9 +100,17 @@ def parse_resource_id(value: str) -> tuple[str, UUID]:
 class LLMConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    base_url: str
-    api_key: str
-    model: str
+    base_url: str = Field(
+        description=(
+            "Public HTTPS base URL of the BYO LLM endpoint the call runs "
+            "on. Must resolve to a public address — private/internal "
+            "hosts are rejected."
+        )
+    )
+    api_key: str = Field(
+        description="API key sent to the BYO LLM endpoint. Write-only — never echoed back."
+    )
+    model: str = Field(description="Model name to request from the BYO LLM endpoint.")
 
     @field_validator("base_url")
     @classmethod
@@ -127,12 +135,28 @@ class LLMConfig(BaseModel):
 class VoiceConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    tts: Literal["cartesia"] = "cartesia"
-    vad: Literal["silero"] = "silero"
-    turn_detection: Literal["livekit"] = "livekit"
+    tts: Literal["cartesia"] = Field(
+        default="cartesia",
+        description="Text-to-speech provider. Currently only 'cartesia'.",
+    )
+    vad: Literal["silero"] = Field(
+        default="silero",
+        description="Voice-activity-detection engine. Currently only 'silero'.",
+    )
+    turn_detection: Literal["livekit"] = Field(
+        default="livekit",
+        description="Turn-detection engine. Currently only 'livekit'.",
+    )
     # Per-call TTS voice override. Applies to whichever TTS provider serves
     # the call (org BYO config or Hail default). None → org/env default.
-    voice_id: str | None = None
+    voice_id: str | None = Field(
+        default=None,
+        description=(
+            "Per-call TTS voice override, applied to whichever TTS "
+            "provider serves the call. Omitted: the organization's or "
+            "environment's default voice."
+        ),
+    )
     language: Language | None = Field(
         default=None,
         description=(
@@ -550,12 +574,22 @@ class PhoneNumberListResponse(BaseModel):
 class SuppressionResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
-    id: UUID
-    recipient: str
-    channel: str
-    reason: str
-    source: str
-    created_at: datetime
+    id: UUID = Field(description="Unique identifier for this suppression entry.")
+    recipient: str = Field(
+        description="The suppressed recipient — E.164 phone number for voice/sms, lowercased email address for email."
+    )
+    channel: str = Field(
+        description="Channel this entry blocks sends on: 'voice', 'email', 'sms', or 'all' (every channel)."
+    )
+    reason: str = Field(
+        description="Why the recipient was suppressed (e.g. an unsubscribe or a bounce)."
+    )
+    source: str = Field(
+        description="How this entry was created: 'unsubscribe_link', 'manual' (an operator action), or 'bounce'."
+    )
+    created_at: datetime = Field(
+        description="When this entry was created, ISO 8601 timestamp."
+    )
 
 
 class SuppressionListResponse(BaseModel):
@@ -573,14 +607,31 @@ class EventResponse(BaseModel):
 
     model_config = ConfigDict(from_attributes=True)
 
-    id: UUID
-    source: Literal["call", "email", "sms"]
-    call_id: UUID | None = None
-    email_id: UUID | None = None
-    sms_id: UUID | None = None
-    kind: str
-    payload: dict[str, Any]
-    occurred_at: datetime
+    id: UUID = Field(description="Unique identifier for this event.")
+    source: Literal["call", "email", "sms"] = Field(
+        description="Which channel this event belongs to: 'call', 'email', or 'sms'."
+    )
+    call_id: UUID | None = Field(
+        default=None,
+        description="The call this event belongs to. Set only when source='call'.",
+    )
+    email_id: UUID | None = Field(
+        default=None,
+        description="The email this event belongs to. Set only when source='email'.",
+    )
+    sms_id: UUID | None = Field(
+        default=None,
+        description="The message this event belongs to. Set only when source='sms'.",
+    )
+    kind: str = Field(
+        description="Event kind within the source (e.g. 'queued', 'delivered', 'bounced'). Vocabulary differs per source."
+    )
+    payload: dict[str, Any] = Field(
+        description="Event-kind-specific detail, as a free-form JSON object."
+    )
+    occurred_at: datetime = Field(
+        description="When this event occurred, ISO 8601 timestamp."
+    )
 
 
 class EventStreamResponse(BaseModel):
@@ -646,10 +697,20 @@ class DnsRecordSchema(BaseModel):
 
     model_config = ConfigDict(from_attributes=True, extra="allow")
 
-    name: str
-    value: str
-    type: Literal["CNAME", "MX", "TXT"] = "CNAME"
-    priority: int | None = None
+    name: str = Field(
+        description="DNS record name/host to publish (e.g. a CNAME's subdomain)."
+    )
+    value: str = Field(
+        description="DNS record value to publish (e.g. a CNAME target or TXT content)."
+    )
+    type: Literal["CNAME", "MX", "TXT"] = Field(
+        default="CNAME",
+        description="DNS record type: 'CNAME' (DKIM), 'MX' (MAIL FROM), or 'TXT' (SPF).",
+    )
+    priority: int | None = Field(
+        default=None,
+        description="MX priority. Only present for type='MX'; null otherwise.",
+    )
 
 
 class DomainCheckResponse(BaseModel):
@@ -1070,11 +1131,20 @@ EmailEventKind = Literal[
 class EmailEventResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
-    id: UUID
-    email_id: UUID
-    kind: EmailEventKind
-    payload: dict[str, Any]
-    occurred_at: datetime
+    id: UUID = Field(description="Unique identifier for this event.")
+    email_id: UUID = Field(description="The email this event belongs to.")
+    kind: EmailEventKind = Field(
+        description=(
+            "Event kind: 'sent', 'delivered', 'delivery_delayed', "
+            "'bounced', 'complained', 'rejected', 'opened', or 'clicked'."
+        )
+    )
+    payload: dict[str, Any] = Field(
+        description="Event-kind-specific detail, as a free-form JSON object."
+    )
+    occurred_at: datetime = Field(
+        description="When this event occurred, ISO 8601 timestamp."
+    )
 
 
 class EmailEventListResponse(BaseModel):
@@ -1088,31 +1158,71 @@ class EmailEventListResponse(BaseModel):
 
 
 class EmailStatsCounts(BaseModel):
-    sent: int = 0
-    delivered: int = 0
-    delivery_delayed: int = 0
-    bounced: int = 0
-    bounced_hard: int = 0
-    complained: int = 0
-    rejected: int = 0
-    opened: int = 0
-    clicked: int = 0
-    unique_opened: int = 0
-    unique_clicked: int = 0
+    sent: int = Field(default=0, description="Emails sent in the window.")
+    delivered: int = Field(
+        default=0, description="Emails confirmed delivered in the window."
+    )
+    delivery_delayed: int = Field(
+        default=0, description="Emails with a delivery-delayed event in the window."
+    )
+    bounced: int = Field(
+        default=0, description="Emails bounced (soft or hard) in the window."
+    )
+    bounced_hard: int = Field(
+        default=0, description="Emails hard-bounced in the window. Subset of bounced."
+    )
+    complained: int = Field(
+        default=0, description="Emails that received a spam complaint in the window."
+    )
+    rejected: int = Field(
+        default=0,
+        description="Emails rejected by the provider before sending, in the window.",
+    )
+    opened: int = Field(
+        default=0,
+        description="Total open events in the window, including repeat opens by the same recipient.",
+    )
+    clicked: int = Field(
+        default=0,
+        description="Total click events in the window, including repeat clicks by the same recipient.",
+    )
+    unique_opened: int = Field(
+        default=0, description="Distinct emails opened at least once in the window."
+    )
+    unique_clicked: int = Field(
+        default=0, description="Distinct emails clicked at least once in the window."
+    )
 
 
 class EmailStatsBucket(EmailStatsCounts):
-    bucket_start: datetime
+    bucket_start: datetime = Field(
+        description="Start of this bucket, ISO 8601 timestamp."
+    )
 
 
 class EmailStatsRates(BaseModel):
     """All None when sent == 0 in the window."""
 
-    delivery: float | None = None
-    bounce: float | None = None  # hard bounces / sent
-    complaint: float | None = None
-    open: float | None = None  # unique_opened / sent
-    click: float | None = None  # unique_clicked / sent
+    delivery: float | None = Field(
+        default=None,
+        description="delivered / sent for the window. Null when sent == 0.",
+    )
+    bounce: float | None = Field(
+        default=None,
+        description="bounced_hard / sent for the window. Null when sent == 0.",
+    )  # hard bounces / sent
+    complaint: float | None = Field(
+        default=None,
+        description="complained / sent for the window. Null when sent == 0.",
+    )
+    open: float | None = Field(
+        default=None,
+        description="unique_opened / sent for the window. Null when sent == 0.",
+    )  # unique_opened / sent
+    click: float | None = Field(
+        default=None,
+        description="unique_clicked / sent for the window. Null when sent == 0.",
+    )  # unique_clicked / sent
 
 
 class EmailStatsResponse(BaseModel):
@@ -1135,7 +1245,10 @@ class EmailStatsResponse(BaseModel):
         description="Event counts summed across the whole window."
     )
     rates: EmailStatsRates = Field(
-        description="Derived rates (delivery, bounce, complaint, open, click) for the whole window. Null when sent == 0."
+        description=(
+            "Derived rates (delivery, bounce, complaint, open, click) for "
+            "the whole window. Each individual rate is null when sent == 0."
+        )
     )
     series: list[EmailStatsBucket] = Field(
         description="Per-bucket event counts across the window, in chronological order."
@@ -1230,12 +1343,17 @@ class EmailAttachmentResponse(BaseModel):
     presigned S3 URL on access — see GET /emails/{id}/attachments/{aid}.
     """
 
-    id: UUID
-    filename: str
-    content_type: str
-    size_bytes: int
-    content_id: str | None = None
-    url: str
+    id: UUID = Field(description="Unique identifier for this attachment.")
+    filename: str = Field(description="Original filename of the attachment.")
+    content_type: str = Field(description="MIME type of the attachment.")
+    size_bytes: int = Field(description="Size of the attachment in bytes.")
+    content_id: str | None = Field(
+        default=None,
+        description="MIME Content-ID, present when this attachment is referenced inline (cid:) from the HTML body. Null otherwise.",
+    )
+    url: str = Field(
+        description="API endpoint that 302-redirects to a presigned download URL for this attachment."
+    )
 
     model_config = ConfigDict(from_attributes=True)
 

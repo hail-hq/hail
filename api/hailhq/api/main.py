@@ -251,27 +251,44 @@ app.add_middleware(GeneralRateLimitMiddleware)
 _default_openapi = app.openapi
 
 
+_VALIDATION_ERROR_FIELD_DESCRIPTIONS = {
+    "loc": (
+        "Path to the invalid field within the request, as a list of "
+        "keys/indices (e.g. ['body', 'to'])."
+    ),
+    "msg": "Human-readable description of the validation failure.",
+    "type": "Machine-readable error type code (e.g. 'missing', 'string_type').",
+    "input": "The value that was actually provided and failed validation.",
+    "ctx": "Additional machine-readable context for the error, when the error type provides one.",
+}
+
+
 def _openapi_with_validation_error_description() -> dict:
-    """Add a field description to the ``detail`` property of
-    ``HTTPValidationError`` — FastAPI generates that schema itself (from a
-    hardcoded dict in ``fastapi.openapi.utils``, not a model we own), so it
-    can't get a ``Field(description=...)`` the normal way. Every route with
-    a request body or query params gets a 422 response built from this
-    shared schema.
+    """Add field descriptions to ``HTTPValidationError.detail`` and to its
+    nested ``ValidationError`` item schema — FastAPI generates both itself
+    (hardcoded dicts in ``fastapi.openapi.utils``, not models we own), so
+    they can't get a ``Field(description=...)`` the normal way. Every route
+    with a request body or query params gets a 422 response built from
+    these shared schemas.
     """
     schema = _default_openapi()
-    detail = (
-        schema.get("components", {})
-        .get("schemas", {})
-        .get("HTTPValidationError", {})
-        .get("properties", {})
-        .get("detail")
-    )
+    schemas = schema.get("components", {}).get("schemas", {})
+
+    detail = schemas.get("HTTPValidationError", {}).get("properties", {}).get("detail")
     if detail is not None:
         detail["description"] = (
             "List of validation errors: each entry gives the field "
             "location (loc), the problem (msg), and the error type (type)."
         )
+
+    validation_error_properties = schemas.get("ValidationError", {}).get(
+        "properties", {}
+    )
+    for field_name, description in _VALIDATION_ERROR_FIELD_DESCRIPTIONS.items():
+        field_schema = validation_error_properties.get(field_name)
+        if field_schema is not None:
+            field_schema["description"] = description
+
     return schema
 
 
