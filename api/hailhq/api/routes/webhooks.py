@@ -91,6 +91,13 @@ async def create_subscription(
     principal: Annotated[Principal, Depends(get_current_principal)],
     db: Annotated[AsyncSession, Depends(get_session)],
 ) -> WebhookSubscriptionResponse:
+    """Create a webhook subscription for one or more event types.
+
+    The response includes the plaintext signing secret — this is the only
+    time it is ever returned; store it now. Every later GET omits it. Use
+    POST /webhooks/{sub_id}/rotate-secret to get a new plaintext secret if
+    it is lost or compromised.
+    """
     try:
         validate_webhook_target(
             body.target_url,
@@ -131,6 +138,11 @@ async def list_subscriptions(
     cursor: str | None = Query(default=None),
     limit: int = Query(default=_DEFAULT_LIMIT, ge=1, le=_MAX_LIMIT),
 ) -> WebhookSubscriptionListResponse:
+    """List webhook subscriptions for the caller's organization.
+
+    Cursor-paginated, newest first. The signing secret is never included —
+    only POST /webhooks and POST /webhooks/{sub_id}/rotate-secret return it.
+    """
     stmt = select(WebhookSubscription).where(
         WebhookSubscription.organization_id == principal.organization_id
     )
@@ -158,6 +170,7 @@ async def get_subscription(
     principal: Annotated[Principal, Depends(get_current_principal)],
     db: Annotated[AsyncSession, Depends(get_session)],
 ) -> WebhookSubscriptionResponse:
+    """Fetch one webhook subscription by id. The signing secret is omitted."""
     sub = await _load_owned(db, sub_id, principal.organization_id)
     return _to_response(sub)
 
@@ -173,6 +186,13 @@ async def patch_subscription(
     principal: Annotated[Principal, Depends(get_current_principal)],
     db: Annotated[AsyncSession, Depends(get_session)],
 ) -> WebhookSubscriptionResponse:
+    """Update a webhook subscription's target_url, event_types, and/or status.
+
+    Only fields present in the request body are changed. Setting
+    status="active" resets the consecutive-failure counter, so a
+    subscription that was auto-disabled after 50 straight delivery
+    failures does not immediately re-disable itself.
+    """
     sub = await _load_owned(db, sub_id, principal.organization_id)
     updates: dict = {}
     if body.target_url is not None:
@@ -222,6 +242,11 @@ async def delete_subscription(
     principal: Annotated[Principal, Depends(get_current_principal)],
     db: Annotated[AsyncSession, Depends(get_session)],
 ) -> Response:
+    """Permanently remove a webhook subscription.
+
+    Irreversible — no further events are delivered to it, and its
+    delivery history is deleted with it.
+    """
     sub = await _load_owned(db, sub_id, principal.organization_id)
     await db.delete(sub)
     await db.commit()
@@ -246,6 +271,12 @@ async def rotate_secret(
     principal: Annotated[Principal, Depends(get_current_principal)],
     db: Annotated[AsyncSession, Depends(get_session)],
 ) -> WebhookSubscriptionResponse:
+    """Generate a new signing secret and immediately invalidate the old one.
+
+    The response includes the new plaintext secret — this is the only
+    time it is returned; update your verification code with it right away,
+    since the old secret stops validating new deliveries immediately.
+    """
     sub = await _load_owned(db, sub_id, principal.organization_id)
     secret = _new_secret()
     cipher = SecretCipher(settings.hail_webhook_secret_key)
@@ -283,6 +314,12 @@ async def list_deliveries(
     cursor: str | None = Query(default=None),
     limit: int = Query(default=_DEFAULT_LIMIT, ge=1, le=_MAX_LIMIT),
 ) -> WebhookDeliveryListResponse:
+    """List delivery attempts for one webhook subscription, newest first.
+
+    Cursor-paginated. Each entry shows the attempt count, response status,
+    and response body Hail recorded — use POST /webhooks/{sub_id}/
+    deliveries/{delivery_id}/redeliver to retry a failed one.
+    """
     await _load_owned(db, sub_id, principal.organization_id)  # auth gate
     stmt = select(WebhookDelivery).where(WebhookDelivery.subscription_id == sub_id)
     rows, next_cursor = await fetch_cursor_page(
@@ -311,6 +348,13 @@ async def redeliver(
     principal: Annotated[Principal, Depends(get_current_principal)],
     db: Annotated[AsyncSession, Depends(get_session)],
 ) -> WebhookDeliveryResponse:
+    """Retry one webhook delivery attempt.
+
+    Resets it to pending with a fresh attempt counter — the delivery
+    worker picks it up and re-sends the same event payload to target_url
+    shortly after. Useful after fixing an endpoint that was returning
+    errors.
+    """
     await _load_owned(db, sub_id, principal.organization_id)
     stmt = select(WebhookDelivery).where(
         WebhookDelivery.id == delivery_id,

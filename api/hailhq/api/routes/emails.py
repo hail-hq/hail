@@ -460,6 +460,15 @@ async def create_email(
     email_provider: Annotated[EmailProvider, Depends(get_email_provider)],
     idem: Annotated[IdempotencyContext | None, Depends(idempotency_dep)] = None,
 ) -> EmailResponse:
+    """Send an outbound email through SES.
+
+    Sends synchronously — the response reports the final status (sent or
+    failed), not a queued placeholder; no separate poll is needed for the
+    happy path, though a bounce or complaint can still arrive later as a
+    webhook or GET /emails/{email_id}/events entry. Requires
+    recipient_consent=true on the request body; Hail does not verify lawful
+    basis to contact the recipient, the caller warrants it.
+    """
     # Idempotency replay first — never re-send.
     if idem is not None and idem.is_replay:
         _, cached = replay_cached(idem, response, resource_prefix="/emails")
@@ -733,6 +742,12 @@ async def get_email_stats(
     to: Annotated[datetime | None, Query()] = None,
     bucket: Literal["hour", "day"] = Query(default="day"),
 ) -> EmailStatsResponse:
+    """Aggregate send/delivery/open/click/bounce counts and rates over a range.
+
+    Defaults to the last 7 days, bucketed by day. bucket=hour is limited to
+    an 8-day range; any bucket size is limited to a 92-day range. Registered
+    above GET /{email_id} so "stats" is not swallowed by the id path param.
+    """
     to_ts = to or datetime.now(timezone.utc)
     from_ts = from_ or to_ts - timedelta(days=7)
     if from_ts.tzinfo is None or to_ts.tzinfo is None:
@@ -827,6 +842,12 @@ async def get_email(
     principal: Annotated[Principal, Depends(get_current_principal)],
     db: Annotated[AsyncSession, Depends(get_session)],
 ) -> EmailResponse:
+    """Fetch one email by id, including attachments and last event time.
+
+    Org-scoped: returns 404 for an email belonging to a different
+    organization. For an inbound email with a stored raw MIME, raw_url
+    points at GET /emails/{email_id}/raw.
+    """
     last_event_at = (
         select(func.max(EmailEvent.occurred_at))
         .where(EmailEvent.email_id == Email.id)
@@ -940,6 +961,13 @@ async def list_emails(
     status: EmailStatus | None = Query(default=None),
     direction: Literal["outbound", "inbound"] | None = Query(default=None),
 ) -> EmailListResponse:
+    """List emails for the caller's organization, newest first.
+
+    Cursor-paginated: pass the returned next_cursor to fetch the next page;
+    a null next_cursor means there are no more results. Filter by status or
+    direction (outbound/inbound). List entries omit body_text/body_html —
+    fetch GET /emails/{email_id} for the full body.
+    """
     stmt = (
         select(Email)
         .options(defer(Email.body_text), defer(Email.body_html))

@@ -94,6 +94,14 @@ async def list_contacts(
     cursor: str | None = Query(default=None),
     limit: int = Query(default=_DEFAULT_LIMIT, ge=1, le=_MAX_LIMIT),
 ) -> ContactListResponse:
+    """List contacts for the caller's organization, newest first.
+
+    Merges two sources into one list: org members (kind="member", ids
+    prefixed "member:", managed via membership — not editable here) and
+    manually-created contacts (kind="manual", editable via PATCH/DELETE
+    /contacts/{contact_id}). Cursor-paginated; q does a substring search
+    over name/phone/email.
+    """
     u = contacts_union_stmt(principal.organization_id, q).subquery()
     rows, next_cursor = await fetch_cursor_page(
         db,
@@ -129,6 +137,12 @@ async def create_contact(
     principal: Annotated[Principal, Depends(get_current_principal)],
     db: Annotated[AsyncSession, Depends(get_session)],
 ) -> ContactEntry:
+    """Create a manual contact with a phone and/or an email.
+
+    Requires at least one of phone_e164 or email. Fails with 409 if a
+    contact with the same phone or email already exists in this
+    organization.
+    """
     row = Contact(
         organization_id=principal.organization_id,
         name=body.name,
@@ -160,6 +174,13 @@ async def patch_contact(
     principal: Annotated[Principal, Depends(get_current_principal)],
     db: Annotated[AsyncSession, Depends(get_session)],
 ) -> ContactEntry:
+    """Update a manual contact's fields. Only fields present in the body change.
+
+    Manual contacts only — a member: id (org members synced from
+    membership) returns 422; edit those via the membership APIs instead.
+    The contact must still have at least one of phone_e164 or email after
+    the update. Fails with 409 on a duplicate phone/email.
+    """
     row = await _get_manual_or_404(db, principal.organization_id, contact_id)
     data = body.model_dump(exclude_unset=True)
     next_phone = data.get("phone_e164", row.phone_e164)
@@ -190,6 +211,11 @@ async def delete_contact(
     principal: Annotated[Principal, Depends(get_current_principal)],
     db: Annotated[AsyncSession, Depends(get_session)],
 ) -> Response:
+    """Permanently remove a manual contact.
+
+    Manual contacts only — a member: id returns 422; org members are
+    removed via the membership APIs, not this route. Irreversible.
+    """
     row = await _get_manual_or_404(db, principal.organization_id, contact_id)
     await db.delete(row)
     await db.commit()
@@ -243,6 +269,12 @@ async def put_member_phone(
     principal: Annotated[Principal, Depends(get_current_principal)],
     db: Annotated[AsyncSession, Depends(get_session)],
 ) -> dict[str, str]:
+    """Set an org member's phone number.
+
+    Pass user_id="me" to set your own, or a member's user id — setting
+    another member's phone requires the caller to be an org owner or
+    admin. Returns 404 if the target is not a member of this organization.
+    """
     target = await _resolve_phone_target(db, principal, user_id)
     await db.execute(
         update(User).where(User.id == target).values(phone_number=body.phone_e164)
@@ -261,6 +293,12 @@ async def delete_member_phone(
     principal: Annotated[Principal, Depends(get_current_principal)],
     db: Annotated[AsyncSession, Depends(get_session)],
 ) -> Response:
+    """Clear an org member's phone number.
+
+    Pass user_id="me" to clear your own, or a member's user id — clearing
+    another member's phone requires the caller to be an org owner or
+    admin. Returns 404 if the target is not a member of this organization.
+    """
     target = await _resolve_phone_target(db, principal, user_id)
     await db.execute(update(User).where(User.id == target).values(phone_number=None))
     await db.commit()

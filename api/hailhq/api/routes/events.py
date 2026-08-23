@@ -157,6 +157,13 @@ async def list_events(
     id: str | None = Query(default=None),
     kind: str | None = Query(default=None),
 ) -> EventStreamResponse:
+    """Cursor-paginated forward stream of call, email, and SMS events.
+
+    Scoped to the caller's organization. Pass id (typed "<type>:<uuid>",
+    e.g. "call:<uuid>") to narrow to one resource's events, or kind to
+    narrow to one event kind. Walks forward in time — pass the returned
+    next_cursor to continue tailing where you left off.
+    """
     # Org scoping is the security-critical bit. We always join through Call so
     # the principal can never see another org's events, even by guessing a
     # call_id. The kind filter is a passthrough (no enum validation): event

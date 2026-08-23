@@ -277,6 +277,14 @@ async def create_email_domain(
     db: Annotated[AsyncSession, Depends(get_session)],
     email_provider: Annotated[EmailProvider, Depends(get_email_provider)],
 ) -> EmailDomainResponse:
+    """Register a sender identity to send outbound email through.
+
+    kind="hail_mail" mints an address on the shared hail-mail domain and is
+    immediately verified — no DNS work needed. kind="custom" registers your
+    own domain with SES and returns DKIM records; the domain stays
+    unverified (POST /email-domains/{domain_id}/verify) until you publish
+    those DNS records and Hail confirms them.
+    """
     if body.kind == "hail_mail":
         user_prefix, org_prefix = resolve_hail_mail_prefixes(
             body.local_prefix_user,
@@ -389,6 +397,12 @@ async def list_email_domains(
     cursor: str | None = Query(default=None),
     limit: int = Query(default=_DEFAULT_LIST_LIMIT, ge=1, le=_MAX_LIST_LIMIT),
 ) -> EmailDomainListResponse:
+    """List sender domains/identities for the caller's organization.
+
+    Cursor-paginated, newest first. The response also includes
+    default_from — the address a from-less POST /emails would use right
+    now given the org's current verified senders.
+    """
     stmt = select(EmailDomain).where(
         EmailDomain.organization_id == principal.organization_id
     )
@@ -452,6 +466,12 @@ async def get_email_domain(
     principal: Annotated[Principal, Depends(get_current_principal)],
     db: Annotated[AsyncSession, Depends(get_session)],
 ) -> EmailDomainResponse:
+    """Fetch one sender domain/identity by id, including its DNS records.
+
+    Org-scoped: returns 404 for a domain belonging to a different
+    organization. For a pending custom domain, dns_records lists the DKIM
+    records still to publish.
+    """
     stmt = select(EmailDomain).where(
         EmailDomain.id == domain_id,
         EmailDomain.organization_id == principal.organization_id,
@@ -696,6 +716,13 @@ async def delete_email_domain(
     db: Annotated[AsyncSession, Depends(get_session)],
     email_provider: Annotated[EmailProvider, Depends(get_email_provider)],
 ) -> Response:
+    """Permanently remove a sender domain/identity.
+
+    Irreversible — for a custom domain, also deletes the SES identity, so
+    the domain can no longer send until re-registered and re-verified.
+    Fails with 409 if any Email rows still reference this domain; delete
+    or wait for those to age out first.
+    """
     stmt = select(EmailDomain).where(
         EmailDomain.id == domain_id,
         EmailDomain.organization_id == principal.organization_id,

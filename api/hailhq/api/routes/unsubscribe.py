@@ -35,6 +35,13 @@ async def unsubscribe(
     db: Annotated[AsyncSession, Depends(get_session)],
     token: Annotated[str, Query()],
 ) -> HTMLResponse:
+    """One-click email opt-out (RFC 8058), reached by clicking a link in a sent email.
+
+    Public and unauthenticated — the signed token query param is the sole
+    credential, proving the caller holds a link Hail sent to that address.
+    On success, the address is added to the org's suppression list and all
+    future outbound email to it is blocked. Returns an HTML page, not JSON.
+    """
     try:
         email, organization_id = verify_unsubscribe_token(token)
     except InvalidUnsubscribeToken:

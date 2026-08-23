@@ -46,6 +46,13 @@ async def create_email_attachment(
     s3: Annotated[S3MailClient, Depends(get_s3_mail)],
     file: Annotated[UploadFile, File()],
 ) -> EmailAttachmentUploadResponse:
+    """Upload a file and get back a reusable attachment id.
+
+    The returned id can be referenced from attachment_ids on many later
+    POST /emails calls until it is garbage-collected for being unused; it is
+    not deleted immediately after first use. Uploads are size-limited and
+    scoped to the caller's organization.
+    """
     # Read in bounded chunks so an oversize body is rejected without ever
     # buffering more than ~MAX_EMAIL_ATTACHMENT_BYTES in memory — no layer
     # in front of this endpoint (ASGI server, reverse proxy) caps request

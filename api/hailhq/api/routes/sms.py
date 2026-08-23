@@ -204,6 +204,17 @@ async def create_sms(
     provider: Annotated[SmsProvider, Depends(get_sms_provider)],
     idem: Annotated[IdempotencyContext | None, Depends(idempotency_dep)] = None,
 ) -> SmsResponse:
+    """Send an outbound SMS.
+
+    Sends synchronously — the response reports the final status (sent or
+    failed), not a queued placeholder, though delivery confirmation from
+    the carrier can still arrive later as a webhook or GET /sms/{sms_id}
+    update. An explicit from resolves a dedicated number; otherwise Hail
+    picks an alphanumeric sender ID where the destination corridor allows
+    it, or requires a dedicated SMS-capable number otherwise. Requires
+    recipient_consent=true on the request body; Hail does not verify
+    lawful basis to contact the recipient, the caller warrants it.
+    """
     if idem is not None and idem.is_replay:
         cached_id, cached = replay_cached(idem, response, resource_prefix="/sms")
         await write_audit_log(
@@ -471,6 +482,11 @@ async def list_sms_suppressions(
     cursor: str | None = Query(default=None),
     limit: int = Query(default=_DEFAULT_LIST_LIMIT, ge=1, le=_MAX_LIST_LIMIT),
 ) -> SuppressionListResponse:
+    """List SMS numbers suppressed from receiving messages, newest first.
+
+    Cursor-paginated. A suppressed number blocks POST /sms sends to it
+    with a 403 until removed via DELETE /sms/suppressions/{number}.
+    """
     stmt = select(Suppression).where(
         Suppression.organization_id == principal.organization_id,
         Suppression.channel == "sms",
@@ -500,6 +516,12 @@ async def delete_sms_suppression(
     principal: Annotated[Principal, Depends(get_current_principal)],
     db: Annotated[AsyncSession, Depends(get_session)],
 ) -> None:
+    """Remove one number from the SMS suppression list, re-allowing sends to it.
+
+    Does not itself constitute renewed consent — the caller is responsible
+    for having a lawful basis (e.g. a fresh opt-in) before sending again.
+    Returns 404 if the number was not suppressed.
+    """
     removed = await remove_suppression(
         db, organization_id=principal.organization_id, recipient=number, channel="sms"
     )
@@ -519,6 +541,11 @@ async def get_sender_id(
     principal: Annotated[Principal, Depends(get_current_principal)],
     db: Annotated[AsyncSession, Depends(get_session)],
 ) -> SenderIdResponse:
+    """Get the org's custom alphanumeric SMS sender ID, if any is set.
+
+    effective_default is the platform sender id used for
+    alphanumeric-eligible corridors when custom_sender_id is null.
+    """
     stmt = select(SmsSenderIdentity).where(
         SmsSenderIdentity.organization_id == principal.organization_id
     )
@@ -539,6 +566,12 @@ async def patch_sender_id(
     principal: Annotated[Principal, Depends(get_current_principal)],
     db: Annotated[AsyncSession, Depends(get_session)],
 ) -> SenderIdResponse:
+    """Set or clear the org's custom alphanumeric SMS sender ID.
+
+    Pass custom_sender_id=null to clear it and fall back to the platform
+    default sender id. Only affects alphanumeric-eligible corridors — a
+    corridor requiring a dedicated number is unaffected.
+    """
     if body.custom_sender_id is None:
         # Clear: unconditional delete (a no-op when no row exists), so there is
         # no read-then-delete window.
@@ -583,6 +616,11 @@ async def get_sms(
     principal: Annotated[Principal, Depends(get_current_principal)],
     db: Annotated[AsyncSession, Depends(get_session)],
 ) -> SmsResponse:
+    """Fetch one SMS by id, including its current status.
+
+    Org-scoped: returns 404 for an SMS belonging to a different
+    organization.
+    """
     stmt = select(Sms).where(
         Sms.id == sms_id,
         Sms.organization_id == principal.organization_id,
@@ -608,6 +646,12 @@ async def list_sms(
     status: SmsStatus | None = Query(default=None),
     to: str | None = Query(default=None),
 ) -> SmsListResponse:
+    """List SMS messages for the caller's organization, newest first.
+
+    Cursor-paginated: pass the returned next_cursor to fetch the next page;
+    a null next_cursor means there are no more results. Filter by status or
+    destination number (to) to narrow the list.
+    """
     stmt = select(Sms).where(Sms.organization_id == principal.organization_id)
     if status is not None:
         stmt = stmt.where(Sms.status == status)

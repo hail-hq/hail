@@ -99,6 +99,13 @@ async def acquire_number(
     provider: Annotated[VoiceProvider, Depends(get_voice_provider)],
     idem: Annotated[IdempotencyContext | None, Depends(idempotency_dep)] = None,
 ) -> PhoneNumberResponse:
+    """Buy a dedicated phone number for the caller's organization.
+
+    This purchases a real number at the carrier and starts a recurring
+    monthly fee immediately — it is not a reservation. The number is usable
+    for voice, SMS, or both depending on the requested capabilities and
+    what the carrier offers for the given country_code/number_type.
+    """
     if idem is not None and idem.is_replay:
         _cached_id, cached = replay_cached(idem, response, resource_prefix="/numbers")
         return PhoneNumberResponse.model_validate(cached)
@@ -292,6 +299,11 @@ async def get_number(
     principal: Annotated[Principal, Depends(get_current_principal)],
     db: Annotated[AsyncSession, Depends(get_session)],
 ) -> PhoneNumberResponse:
+    """Fetch one dedicated number by id, including its capabilities and state.
+
+    Org-scoped: returns 404 for a number belonging to a different
+    organization.
+    """
     number = await _get_org_number_or_404(db, number_id, principal.organization_id)
     return PhoneNumberResponse.model_validate(number)
 
@@ -307,6 +319,11 @@ async def list_numbers(
     cursor: str | None = Query(default=None),
     limit: int = Query(default=_DEFAULT_LIST_LIMIT, ge=1, le=_MAX_LIST_LIMIT),
 ) -> PhoneNumberListResponse:
+    """List dedicated numbers owned by the caller's organization.
+
+    Cursor-paginated, newest first. Only org-owned numbers are listed —
+    shared pool numbers used for outbound calls never appear here.
+    """
     stmt = select(PhoneNumber).where(
         PhoneNumber.organization_id == principal.organization_id,
         PhoneNumber.is_pool.is_(False),
@@ -337,6 +354,14 @@ async def enable_sms(
     db: Annotated[AsyncSession, Depends(get_session)],
     provider: Annotated[SmsProvider, Depends(get_sms_provider)],
 ) -> PhoneNumberResponse:
+    """Attach a dedicated number to the org's shared SMS Messaging Service.
+
+    Required once per number before it can send/receive SMS; the number
+    must already have been acquired with sms capability. Idempotent —
+    calling this again on an already-enabled number just returns its
+    current state. Fails with 422 for a released number or one that lacks
+    sms capability.
+    """
     number = await _get_org_number_or_404(db, number_id, principal.organization_id)
 
     _reject_if_released(number)

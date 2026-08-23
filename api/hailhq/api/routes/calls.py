@@ -163,6 +163,14 @@ async def create_call(
     lk: Annotated[LiveKitClient, Depends(get_livekit)],
     idem: Annotated[IdempotencyContext | None, Depends(idempotency_dep)] = None,
 ) -> CallResponse:
+    """Place an outbound AI voice call.
+
+    The call is placed asynchronously — this returns as soon as the call is
+    queued, not when it completes. Poll GET /calls/{call_id} or configure a
+    webhook to get the final status and transcript. Requires
+    recipient_consent=true on the request body; Hail does not verify lawful
+    basis to contact the recipient, the caller warrants it.
+    """
     # Replay before any DB or LiveKit work — a retry must not re-dispatch.
     if idem is not None and idem.is_replay:
         cached_id, cached = replay_cached(idem, response, resource_prefix="/calls")
@@ -563,6 +571,12 @@ async def get_call(
     principal: Annotated[Principal, Depends(get_current_principal)],
     db: Annotated[AsyncSession, Depends(get_session)],
 ) -> CallResponse:
+    """Fetch one call by id, including its current status and end reason.
+
+    Org-scoped: returns 404 for a call belonging to a different organization
+    (not 403, to avoid confirming the id exists). Use this to poll for the
+    final outcome of a call placed with POST /calls.
+    """
     stmt = select(Call).where(
         Call.id == call_id,
         Call.organization_id == principal.organization_id,
@@ -594,6 +608,12 @@ async def list_calls(
     status: CallStatus | None = Query(default=None),
     to: str | None = Query(default=None),
 ) -> CallListResponse:
+    """List calls for the caller's organization, newest first.
+
+    Cursor-paginated: pass the returned next_cursor to fetch the next page;
+    a null next_cursor means there are no more results. Filter by status or
+    destination number (to) to narrow the list.
+    """
     stmt = select(Call).where(Call.organization_id == principal.organization_id)
     if status is not None:
         stmt = stmt.where(Call.status == status)

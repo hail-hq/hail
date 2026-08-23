@@ -35,6 +35,13 @@ async def get_whoami(
     principal: Annotated[Principal, Depends(get_current_principal)],
     db: Annotated[AsyncSession, Depends(get_session)],
 ) -> WhoamiResponse:
+    """Identify the caller: auth kind, organization, and (if resolvable) user.
+
+    Useful for an agent that needs the human's address to put in
+    Reply-To, since the bearer token itself only carries an organization.
+    user_id/email/name come back null for a shared-key
+    (HAIL_API_KEY) call, which has no individual user behind it.
+    """
     if principal.user_id is None:
         return WhoamiResponse(
             auth_kind=principal.auth_kind,

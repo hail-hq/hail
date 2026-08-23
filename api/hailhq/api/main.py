@@ -317,4 +317,5 @@ app.include_router(internal_numbers.router)
 
 @app.get("/healthz")
 def healthz() -> dict[str, str]:
+    """Liveness check. Returns {"status": "ok"} with no auth required."""
     return {"status": "ok"}
