@@ -245,6 +245,16 @@ class Settings(BaseSettings):
     agent_global_sms_per_hour: int = 30
     agent_global_voice_per_hour: int = 15
 
+    # General per-caller HTTP request-rate ceiling (api/hailhq/api/ratelimit.py).
+    # Distinct from the agent_* velocity caps above: those are a DB-backed,
+    # per-org, per-channel *send* cap for agent-origin orgs only; this is an
+    # in-memory request-rate limiter across every customer-facing route, for
+    # every caller. 300/min = 5 req/sec sustained per caller — generous for
+    # legitimate agent/automation traffic, still bounds a runaway loop. This
+    # is a starting point, not a researched-and-final threshold — tune
+    # post-launch same as the velocity caps above.
+    api_rate_limit_per_minute: int = 300
+
     # SMS compliance auto-replies (HELP/STOP/START). OFF by default: Twilio's
     # own opt-out handling already auto-replies to these keywords, so enabling
     # Hail replies on top would double-text. Enable only when Twilio's default

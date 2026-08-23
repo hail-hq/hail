@@ -19,6 +19,7 @@ from fastapi import status as http_status
 from hailhq.api.deps import Principal, get_current_principal
 from hailhq.api.errors import unprocessable
 from hailhq.api.pagination import fetch_cursor_page
+from hailhq.api.ratelimit import GENERAL_RATE_LIMITED_RESPONSES
 from hailhq.core.contacts import MEMBER_ID_PREFIX, contact_to_entry, contacts_union_stmt
 from hailhq.core.db import get_session
 from hailhq.core.models import Contact, OrganizationMember, User
@@ -81,7 +82,11 @@ async def _member_role(db: AsyncSession, org_id: UUID, user_id: UUID) -> str | N
     ).scalar_one_or_none()
 
 
-@router.get("/contacts", response_model=ContactListResponse)
+@router.get(
+    "/contacts",
+    response_model=ContactListResponse,
+    responses=GENERAL_RATE_LIMITED_RESPONSES,
+)
 async def list_contacts(
     principal: Annotated[Principal, Depends(get_current_principal)],
     db: Annotated[AsyncSession, Depends(get_session)],
@@ -114,7 +119,10 @@ async def list_contacts(
 
 
 @router.post(
-    "/contacts", response_model=ContactEntry, status_code=http_status.HTTP_201_CREATED
+    "/contacts",
+    response_model=ContactEntry,
+    status_code=http_status.HTTP_201_CREATED,
+    responses=GENERAL_RATE_LIMITED_RESPONSES,
 )
 async def create_contact(
     body: ContactCreate,
@@ -141,7 +149,11 @@ async def create_contact(
     return contact_to_entry(row)
 
 
-@router.patch("/contacts/{contact_id}", response_model=ContactEntry)
+@router.patch(
+    "/contacts/{contact_id}",
+    response_model=ContactEntry,
+    responses=GENERAL_RATE_LIMITED_RESPONSES,
+)
 async def patch_contact(
     contact_id: str,
     body: ContactPatch,
@@ -168,7 +180,11 @@ async def patch_contact(
     return contact_to_entry(row)
 
 
-@router.delete("/contacts/{contact_id}", status_code=http_status.HTTP_204_NO_CONTENT)
+@router.delete(
+    "/contacts/{contact_id}",
+    status_code=http_status.HTTP_204_NO_CONTENT,
+    responses=GENERAL_RATE_LIMITED_RESPONSES,
+)
 async def delete_contact(
     contact_id: str,
     principal: Annotated[Principal, Depends(get_current_principal)],
@@ -217,7 +233,10 @@ async def _resolve_phone_target(
     return target
 
 
-@router.put("/members/{user_id}/phone")
+@router.put(
+    "/members/{user_id}/phone",
+    responses=GENERAL_RATE_LIMITED_RESPONSES,
+)
 async def put_member_phone(
     user_id: str,
     body: MemberPhonePut,
@@ -232,7 +251,11 @@ async def put_member_phone(
     return {"user_id": str(target), "phone_e164": body.phone_e164}
 
 
-@router.delete("/members/{user_id}/phone", status_code=http_status.HTTP_204_NO_CONTENT)
+@router.delete(
+    "/members/{user_id}/phone",
+    status_code=http_status.HTTP_204_NO_CONTENT,
+    responses=GENERAL_RATE_LIMITED_RESPONSES,
+)
 async def delete_member_phone(
     user_id: str,
     principal: Annotated[Principal, Depends(get_current_principal)],

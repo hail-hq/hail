@@ -16,6 +16,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends
 from hailhq.api.deps import Principal, get_current_principal
+from hailhq.api.ratelimit import GENERAL_RATE_LIMITED_RESPONSES
 from hailhq.core.db import get_session
 from hailhq.core.models import User
 from hailhq.core.schemas import WhoamiResponse
@@ -25,7 +26,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 router = APIRouter(tags=["whoami"])
 
 
-@router.get("/whoami", response_model=WhoamiResponse)
+@router.get(
+    "/whoami",
+    response_model=WhoamiResponse,
+    responses=GENERAL_RATE_LIMITED_RESPONSES,
+)
 async def get_whoami(
     principal: Annotated[Principal, Depends(get_current_principal)],
     db: Annotated[AsyncSession, Depends(get_session)],

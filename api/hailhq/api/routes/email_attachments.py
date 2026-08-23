@@ -17,6 +17,7 @@ from uuid import uuid4
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from fastapi import status as http_status
 from hailhq.api.deps import Principal, get_current_principal, get_s3_mail
+from hailhq.api.ratelimit import GENERAL_RATE_LIMITED_RESPONSES
 from hailhq.core.db import get_session
 from hailhq.core.email_attachment_limits import (
     ATTACHMENT_TOO_LARGE_DETAIL,
@@ -37,6 +38,7 @@ _READ_CHUNK_BYTES = 1024 * 1024  # 1MB
     response_model=EmailAttachmentUploadResponse,
     status_code=http_status.HTTP_201_CREATED,
     operation_id="upload_email_attachment",
+    responses=GENERAL_RATE_LIMITED_RESPONSES,
 )
 async def create_email_attachment(
     principal: Annotated[Principal, Depends(get_current_principal)],

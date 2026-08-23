@@ -36,6 +36,7 @@ from hailhq.api.audit import write_audit_log
 from hailhq.api.deps import Principal, get_current_principal
 from hailhq.api.errors import unprocessable
 from hailhq.api.pagination import fetch_cursor_page
+from hailhq.api.ratelimit import GENERAL_RATE_LIMITED_RESPONSES
 from hailhq.core.config import settings
 from hailhq.core.db import get_session
 from hailhq.core.dns_lookup import custom_dns_records, resolve_mx, ses_inbound_host
@@ -267,6 +268,7 @@ async def _unminted_hail_mail(db: AsyncSession, organization_id: UUID) -> str | 
     "",
     response_model=EmailDomainResponse,
     status_code=http_status.HTTP_201_CREATED,
+    responses=GENERAL_RATE_LIMITED_RESPONSES,
 )
 async def create_email_domain(
     body: EmailDomainCreate,
@@ -376,7 +378,11 @@ async def create_email_domain(
 # --------------------------------------------------------------------------- #
 
 
-@router.get("", response_model=EmailDomainListResponse)
+@router.get(
+    "",
+    response_model=EmailDomainListResponse,
+    responses=GENERAL_RATE_LIMITED_RESPONSES,
+)
 async def list_email_domains(
     principal: Annotated[Principal, Depends(get_current_principal)],
     db: Annotated[AsyncSession, Depends(get_session)],
@@ -410,7 +416,11 @@ async def list_email_domains(
 # --------------------------------------------------------------------------- #
 
 
-@router.get("/check-domain", response_model=DomainCheckResponse)
+@router.get(
+    "/check-domain",
+    response_model=DomainCheckResponse,
+    responses=GENERAL_RATE_LIMITED_RESPONSES,
+)
 async def check_domain(
     domain: str,
     principal: Annotated[Principal, Depends(get_current_principal)],
@@ -432,7 +442,11 @@ async def check_domain(
 # --------------------------------------------------------------------------- #
 
 
-@router.get("/{domain_id}", response_model=EmailDomainResponse)
+@router.get(
+    "/{domain_id}",
+    response_model=EmailDomainResponse,
+    responses=GENERAL_RATE_LIMITED_RESPONSES,
+)
 async def get_email_domain(
     domain_id: UUID,
     principal: Annotated[Principal, Depends(get_current_principal)],
@@ -456,7 +470,11 @@ async def get_email_domain(
 # --------------------------------------------------------------------------- #
 
 
-@router.patch("/{domain_id}", response_model=EmailDomainResponse)
+@router.patch(
+    "/{domain_id}",
+    response_model=EmailDomainResponse,
+    responses=GENERAL_RATE_LIMITED_RESPONSES,
+)
 async def patch_email_domain(
     domain_id: UUID,
     body: EmailDomainPatch,
@@ -546,7 +564,11 @@ async def patch_email_domain(
 # --------------------------------------------------------------------------- #
 
 
-@router.post("/{domain_id}/verify", response_model=EmailDomainResponse)
+@router.post(
+    "/{domain_id}/verify",
+    response_model=EmailDomainResponse,
+    responses=GENERAL_RATE_LIMITED_RESPONSES,
+)
 async def verify_email_domain(
     domain_id: UUID,
     principal: Annotated[Principal, Depends(get_current_principal)],
@@ -663,7 +685,11 @@ async def verify_email_domain(
 # --------------------------------------------------------------------------- #
 
 
-@router.delete("/{domain_id}", status_code=http_status.HTTP_204_NO_CONTENT)
+@router.delete(
+    "/{domain_id}",
+    status_code=http_status.HTTP_204_NO_CONTENT,
+    responses=GENERAL_RATE_LIMITED_RESPONSES,
+)
 async def delete_email_domain(
     domain_id: UUID,
     principal: Annotated[Principal, Depends(get_current_principal)],

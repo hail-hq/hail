@@ -12,6 +12,7 @@ from fastapi.exception_handlers import request_validation_exception_handler
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, Response
 from hailhq.api.deprecation import DeprecationHeaderMiddleware
+from hailhq.api.ratelimit import GeneralRateLimitMiddleware
 from hailhq.api.routes import calls as calls_routes
 from hailhq.api.routes import contacts as contacts_routes
 from hailhq.api.routes import email_attachments as email_attachments_routes
@@ -241,6 +242,10 @@ app = FastAPI(
     lifespan=lifespan,
 )
 app.add_middleware(DeprecationHeaderMiddleware)
+# Starlette's add_middleware prepends, so the most-recently-added middleware
+# runs outermost/first. Rate limiting first means a 429 short-circuits
+# before the deprecation-header pass does any work on the same response.
+app.add_middleware(GeneralRateLimitMiddleware)
 
 
 @app.exception_handler(SecretKeyMissing)

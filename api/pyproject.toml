@@ -20,6 +20,7 @@ dependencies = [
     # Required by Starlette to parse the application/x-www-form-urlencoded
     # bodies Twilio POSTs to the inbound SMS webhook (request.form()).
     "python-multipart>=0.0.9",
+    "slowapi>=0.1.10",
 ]
 
 [project.optional-dependencies]

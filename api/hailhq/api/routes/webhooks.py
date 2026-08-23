@@ -28,6 +28,7 @@ from hailhq.api.audit import write_audit_log
 from hailhq.api.deps import Principal, get_current_principal
 from hailhq.api.errors import unprocessable
 from hailhq.api.pagination import fetch_cursor_page
+from hailhq.api.ratelimit import GENERAL_RATE_LIMITED_RESPONSES
 from hailhq.core.config import settings
 from hailhq.core.db import get_session
 from hailhq.core.http_post import validate_webhook_target
@@ -83,6 +84,7 @@ async def _load_owned(
     "",
     response_model=WebhookSubscriptionResponse,
     status_code=http_status.HTTP_201_CREATED,
+    responses=GENERAL_RATE_LIMITED_RESPONSES,
 )
 async def create_subscription(
     body: WebhookSubscriptionCreate,
@@ -118,7 +120,11 @@ async def create_subscription(
     return _to_response(sub, secret=secret)
 
 
-@router.get("", response_model=WebhookSubscriptionListResponse)
+@router.get(
+    "",
+    response_model=WebhookSubscriptionListResponse,
+    responses=GENERAL_RATE_LIMITED_RESPONSES,
+)
 async def list_subscriptions(
     principal: Annotated[Principal, Depends(get_current_principal)],
     db: Annotated[AsyncSession, Depends(get_session)],
@@ -142,7 +148,11 @@ async def list_subscriptions(
     )
 
 
-@router.get("/{sub_id}", response_model=WebhookSubscriptionResponse)
+@router.get(
+    "/{sub_id}",
+    response_model=WebhookSubscriptionResponse,
+    responses=GENERAL_RATE_LIMITED_RESPONSES,
+)
 async def get_subscription(
     sub_id: UUID,
     principal: Annotated[Principal, Depends(get_current_principal)],
@@ -152,7 +162,11 @@ async def get_subscription(
     return _to_response(sub)
 
 
-@router.patch("/{sub_id}", response_model=WebhookSubscriptionResponse)
+@router.patch(
+    "/{sub_id}",
+    response_model=WebhookSubscriptionResponse,
+    responses=GENERAL_RATE_LIMITED_RESPONSES,
+)
 async def patch_subscription(
     sub_id: UUID,
     body: WebhookSubscriptionPatch,
@@ -198,7 +212,11 @@ async def patch_subscription(
     return _to_response(sub)
 
 
-@router.delete("/{sub_id}", status_code=http_status.HTTP_204_NO_CONTENT)
+@router.delete(
+    "/{sub_id}",
+    status_code=http_status.HTTP_204_NO_CONTENT,
+    responses=GENERAL_RATE_LIMITED_RESPONSES,
+)
 async def delete_subscription(
     sub_id: UUID,
     principal: Annotated[Principal, Depends(get_current_principal)],
@@ -218,7 +236,11 @@ async def delete_subscription(
     return Response(status_code=http_status.HTTP_204_NO_CONTENT)
 
 
-@router.post("/{sub_id}/rotate-secret", response_model=WebhookSubscriptionResponse)
+@router.post(
+    "/{sub_id}/rotate-secret",
+    response_model=WebhookSubscriptionResponse,
+    responses=GENERAL_RATE_LIMITED_RESPONSES,
+)
 async def rotate_secret(
     sub_id: UUID,
     principal: Annotated[Principal, Depends(get_current_principal)],
@@ -249,7 +271,11 @@ async def rotate_secret(
     return _to_response(sub, secret=secret)
 
 
-@router.get("/{sub_id}/deliveries", response_model=WebhookDeliveryListResponse)
+@router.get(
+    "/{sub_id}/deliveries",
+    response_model=WebhookDeliveryListResponse,
+    responses=GENERAL_RATE_LIMITED_RESPONSES,
+)
 async def list_deliveries(
     sub_id: UUID,
     principal: Annotated[Principal, Depends(get_current_principal)],
@@ -277,6 +303,7 @@ async def list_deliveries(
 @router.post(
     "/{sub_id}/deliveries/{delivery_id}/redeliver",
     response_model=WebhookDeliveryResponse,
+    responses=GENERAL_RATE_LIMITED_RESPONSES,
 )
 async def redeliver(
     sub_id: UUID,

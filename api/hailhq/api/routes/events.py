@@ -24,6 +24,7 @@ from fastapi import status as http_status
 from hailhq.api.deps import Principal, get_current_principal
 from hailhq.api.errors import unprocessable
 from hailhq.api.pagination import fetch_cursor_page
+from hailhq.api.ratelimit import GENERAL_RATE_LIMITED_RESPONSES
 from hailhq.core.db import get_session
 from hailhq.core.models import Call, CallEvent, Email, EmailEvent, Sms, SmsEvent
 from hailhq.core.schemas import (
@@ -143,7 +144,11 @@ async def _require_owned(
 # --------------------------------------------------------------------------- #
 
 
-@router.get("", response_model=EventStreamResponse)
+@router.get(
+    "",
+    response_model=EventStreamResponse,
+    responses=GENERAL_RATE_LIMITED_RESPONSES,
+)
 async def list_events(
     principal: Annotated[Principal, Depends(get_current_principal)],
     db: Annotated[AsyncSession, Depends(get_session)],

@@ -33,6 +33,10 @@ from hailhq.api.idempotency import (
 )
 from hailhq.api.numbers import resolve_org_number
 from hailhq.api.pagination import fetch_cursor_page
+from hailhq.api.ratelimit import (
+    GENERAL_RATE_LIMITED_RESPONSES,
+    merge_rate_limited_responses,
+)
 from hailhq.core.agent_tools.registry import all_tools
 from hailhq.core.billing import CALL_META_BILLED
 from hailhq.core.call_end_reasons import CallEndReason
@@ -147,7 +151,9 @@ async def _cleanup_partial_livekit(
     "",
     response_model=CallResponse,
     status_code=http_status.HTTP_201_CREATED,
-    responses=RATE_LIMITED_RESPONSES,
+    responses=merge_rate_limited_responses(
+        RATE_LIMITED_RESPONSES, GENERAL_RATE_LIMITED_RESPONSES
+    ),
 )
 async def create_call(
     body: CallCreate,
@@ -547,7 +553,11 @@ async def create_call(
 # --------------------------------------------------------------------------- #
 
 
-@router.get("/{call_id}", response_model=CallResponse)
+@router.get(
+    "/{call_id}",
+    response_model=CallResponse,
+    responses=GENERAL_RATE_LIMITED_RESPONSES,
+)
 async def get_call(
     call_id: UUID,
     principal: Annotated[Principal, Depends(get_current_principal)],
@@ -571,7 +581,11 @@ async def get_call(
 # --------------------------------------------------------------------------- #
 
 
-@router.get("", response_model=CallListResponse)
+@router.get(
+    "",
+    response_model=CallListResponse,
+    responses=GENERAL_RATE_LIMITED_RESPONSES,
+)
 async def list_calls(
     principal: Annotated[Principal, Depends(get_current_principal)],
     db: Annotated[AsyncSession, Depends(get_session)],

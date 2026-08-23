@@ -46,6 +46,10 @@ from hailhq.api.idempotency import (
     replay_cached,
 )
 from hailhq.api.pagination import fetch_cursor_page
+from hailhq.api.ratelimit import (
+    GENERAL_RATE_LIMITED_RESPONSES,
+    merge_rate_limited_responses,
+)
 from hailhq.api.routes.email_domains import (
     compose_hail_mail_address,
     first_pending_custom,
@@ -444,7 +448,9 @@ async def deliver_email(
     "",
     response_model=EmailResponse,
     status_code=http_status.HTTP_201_CREATED,
-    responses=RATE_LIMITED_RESPONSES,
+    responses=merge_rate_limited_responses(
+        RATE_LIMITED_RESPONSES, GENERAL_RATE_LIMITED_RESPONSES
+    ),
 )
 async def create_email(
     body: EmailCreate,
@@ -634,7 +640,11 @@ _DEFAULT_EVENTS_LIMIT = 100
 _MAX_EVENTS_LIMIT = 1000
 
 
-@router.get("/{email_id}/events", response_model=EmailEventListResponse)
+@router.get(
+    "/{email_id}/events",
+    response_model=EmailEventListResponse,
+    responses=GENERAL_RATE_LIMITED_RESPONSES,
+)
 async def list_email_events(
     email_id: UUID,
     principal: Annotated[Principal, Depends(get_current_principal)],
@@ -711,7 +721,11 @@ def _truncate(ts: datetime, bucket: str) -> datetime:
     return ts.replace(hour=0, minute=0, second=0, microsecond=0)
 
 
-@router.get("/stats", response_model=EmailStatsResponse)
+@router.get(
+    "/stats",
+    response_model=EmailStatsResponse,
+    responses=GENERAL_RATE_LIMITED_RESPONSES,
+)
 async def get_email_stats(
     principal: Annotated[Principal, Depends(get_current_principal)],
     db: Annotated[AsyncSession, Depends(get_session)],
@@ -802,7 +816,11 @@ async def get_email_stats(
 # --------------------------------------------------------------------------- #
 
 
-@router.get("/{email_id}", response_model=EmailResponse)
+@router.get(
+    "/{email_id}",
+    response_model=EmailResponse,
+    responses=GENERAL_RATE_LIMITED_RESPONSES,
+)
 async def get_email(
     email_id: UUID,
     request: Request,
@@ -858,7 +876,7 @@ async def get_email(
 # --------------------------------------------------------------------------- #
 
 
-@router.get("/{email_id}/raw")
+@router.get("/{email_id}/raw", responses=GENERAL_RATE_LIMITED_RESPONSES)
 async def get_email_raw(
     email_id: UUID,
     principal: Annotated[Principal, Depends(get_current_principal)],
@@ -880,7 +898,10 @@ async def get_email_raw(
     return RedirectResponse(url=url, status_code=http_status.HTTP_302_FOUND)
 
 
-@router.get("/{email_id}/attachments/{attachment_id}")
+@router.get(
+    "/{email_id}/attachments/{attachment_id}",
+    responses=GENERAL_RATE_LIMITED_RESPONSES,
+)
 async def get_email_attachment(
     email_id: UUID,
     attachment_id: UUID,
@@ -906,7 +927,11 @@ async def get_email_attachment(
     return RedirectResponse(url=url, status_code=http_status.HTTP_302_FOUND)
 
 
-@router.get("", response_model=EmailListResponse)
+@router.get(
+    "",
+    response_model=EmailListResponse,
+    responses=GENERAL_RATE_LIMITED_RESPONSES,
+)
 async def list_emails(
     principal: Annotated[Principal, Depends(get_current_principal)],
     db: Annotated[AsyncSession, Depends(get_session)],

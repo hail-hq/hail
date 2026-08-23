@@ -15,6 +15,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query
 from fastapi.responses import HTMLResponse
+from hailhq.api.ratelimit import GENERAL_RATE_LIMITED_RESPONSES
 from hailhq.core.compliance_gate import add_suppression
 from hailhq.core.db import get_session
 from hailhq.core.unsubscribe import InvalidUnsubscribeToken, verify_unsubscribe_token
@@ -25,7 +26,11 @@ logger = logging.getLogger(__name__)
 router = APIRouter(tags=["unsubscribe"])
 
 
-@router.get("/unsubscribe", response_class=HTMLResponse)
+@router.get(
+    "/unsubscribe",
+    response_class=HTMLResponse,
+    responses=GENERAL_RATE_LIMITED_RESPONSES,
+)
 async def unsubscribe(
     db: Annotated[AsyncSession, Depends(get_session)],
     token: Annotated[str, Query()],

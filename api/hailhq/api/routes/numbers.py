@@ -28,6 +28,7 @@ from hailhq.api.idempotency import (
     replay_cached,
 )
 from hailhq.api.pagination import fetch_cursor_page
+from hailhq.api.ratelimit import GENERAL_RATE_LIMITED_RESPONSES
 from hailhq.api.routes.sms import get_sms_provider
 from hailhq.core import telephony_catalog
 from hailhq.core.db import get_session
@@ -85,7 +86,10 @@ async def _get_org_number_or_404(
 
 
 @router.post(
-    "", response_model=PhoneNumberResponse, status_code=http_status.HTTP_201_CREATED
+    "",
+    response_model=PhoneNumberResponse,
+    status_code=http_status.HTTP_201_CREATED,
+    responses=GENERAL_RATE_LIMITED_RESPONSES,
 )
 async def acquire_number(
     body: NumberAcquireRequest,
@@ -248,7 +252,11 @@ async def release_org_number(
     return number
 
 
-@router.delete("/{number_id}", status_code=http_status.HTTP_204_NO_CONTENT)
+@router.delete(
+    "/{number_id}",
+    status_code=http_status.HTTP_204_NO_CONTENT,
+    responses=GENERAL_RATE_LIMITED_RESPONSES,
+)
 async def release_number(
     number_id: UUID,
     principal: Annotated[Principal, Depends(get_current_principal)],
@@ -274,7 +282,11 @@ async def release_number(
         )
 
 
-@router.get("/{number_id}", response_model=PhoneNumberResponse)
+@router.get(
+    "/{number_id}",
+    response_model=PhoneNumberResponse,
+    responses=GENERAL_RATE_LIMITED_RESPONSES,
+)
 async def get_number(
     number_id: UUID,
     principal: Annotated[Principal, Depends(get_current_principal)],
@@ -284,7 +296,11 @@ async def get_number(
     return PhoneNumberResponse.model_validate(number)
 
 
-@router.get("", response_model=PhoneNumberListResponse)
+@router.get(
+    "",
+    response_model=PhoneNumberListResponse,
+    responses=GENERAL_RATE_LIMITED_RESPONSES,
+)
 async def list_numbers(
     principal: Annotated[Principal, Depends(get_current_principal)],
     db: Annotated[AsyncSession, Depends(get_session)],
@@ -310,7 +326,11 @@ async def list_numbers(
     )
 
 
-@router.post("/{number_id}/enable-sms", response_model=PhoneNumberResponse)
+@router.post(
+    "/{number_id}/enable-sms",
+    response_model=PhoneNumberResponse,
+    responses=GENERAL_RATE_LIMITED_RESPONSES,
+)
 async def enable_sms(
     number_id: UUID,
     principal: Annotated[Principal, Depends(get_current_principal)],

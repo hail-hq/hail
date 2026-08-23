@@ -35,6 +35,10 @@ from hailhq.api.idempotency import (
 )
 from hailhq.api.numbers import resolve_org_number
 from hailhq.api.pagination import fetch_cursor_page
+from hailhq.api.ratelimit import (
+    GENERAL_RATE_LIMITED_RESPONSES,
+    merge_rate_limited_responses,
+)
 from hailhq.api.usage import write_usage_event
 from hailhq.core.compliance_gate import check_sms_allowed, remove_suppression
 from hailhq.core.config import settings
@@ -188,7 +192,9 @@ async def deliver_sms(db: AsyncSession, provider: SmsProvider, sms: Sms) -> str 
     "",
     response_model=SmsResponse,
     status_code=http_status.HTTP_201_CREATED,
-    responses=RATE_LIMITED_RESPONSES,
+    responses=merge_rate_limited_responses(
+        RATE_LIMITED_RESPONSES, GENERAL_RATE_LIMITED_RESPONSES
+    ),
 )
 async def create_sms(
     body: SmsCreate,
@@ -454,7 +460,11 @@ async def receive_sms_status(
     return {"status": "applied"}
 
 
-@router.get("/suppressions", response_model=SuppressionListResponse)
+@router.get(
+    "/suppressions",
+    response_model=SuppressionListResponse,
+    responses=GENERAL_RATE_LIMITED_RESPONSES,
+)
 async def list_sms_suppressions(
     principal: Annotated[Principal, Depends(get_current_principal)],
     db: Annotated[AsyncSession, Depends(get_session)],
@@ -480,7 +490,11 @@ async def list_sms_suppressions(
     )
 
 
-@router.delete("/suppressions/{number}", status_code=http_status.HTTP_204_NO_CONTENT)
+@router.delete(
+    "/suppressions/{number}",
+    status_code=http_status.HTTP_204_NO_CONTENT,
+    responses=GENERAL_RATE_LIMITED_RESPONSES,
+)
 async def delete_sms_suppression(
     number: str,
     principal: Annotated[Principal, Depends(get_current_principal)],
@@ -496,7 +510,11 @@ async def delete_sms_suppression(
     await db.commit()
 
 
-@router.get("/sender-id", response_model=SenderIdResponse)
+@router.get(
+    "/sender-id",
+    response_model=SenderIdResponse,
+    responses=GENERAL_RATE_LIMITED_RESPONSES,
+)
 async def get_sender_id(
     principal: Annotated[Principal, Depends(get_current_principal)],
     db: Annotated[AsyncSession, Depends(get_session)],
@@ -511,7 +529,11 @@ async def get_sender_id(
     )
 
 
-@router.patch("/sender-id", response_model=SenderIdResponse)
+@router.patch(
+    "/sender-id",
+    response_model=SenderIdResponse,
+    responses=GENERAL_RATE_LIMITED_RESPONSES,
+)
 async def patch_sender_id(
     body: SenderIdPatch,
     principal: Annotated[Principal, Depends(get_current_principal)],
@@ -551,7 +573,11 @@ async def patch_sender_id(
     )
 
 
-@router.get("/{sms_id}", response_model=SmsResponse)
+@router.get(
+    "/{sms_id}",
+    response_model=SmsResponse,
+    responses=GENERAL_RATE_LIMITED_RESPONSES,
+)
 async def get_sms(
     sms_id: UUID,
     principal: Annotated[Principal, Depends(get_current_principal)],
@@ -569,7 +595,11 @@ async def get_sms(
     return SmsResponse.model_validate(sms)
 
 
-@router.get("", response_model=SmsListResponse)
+@router.get(
+    "",
+    response_model=SmsListResponse,
+    responses=GENERAL_RATE_LIMITED_RESPONSES,
+)
 async def list_sms(
     principal: Annotated[Principal, Depends(get_current_principal)],
     db: Annotated[AsyncSession, Depends(get_session)],
