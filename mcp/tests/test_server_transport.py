@@ -167,6 +167,35 @@ async def test_oauth_rs_unauth_tools_call_still_401s(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_oauth_rs_oversized_body_not_buffered_unbounded(monkeypatch):
+    """DiscoveryAuthMiddleware's pre-auth body peek is capped
+    (_MAX_PEEK_BYTES). A body past the cap must not get the synthetic
+    bearer injected, even if its (unparsed, because unread past the cap)
+    method name is "initialize" — it falls through to FastMCP's real auth
+    middleware unmodified and 401s exactly like any other unauthenticated,
+    non-safelisted request. This exercises the cap without sending a truly
+    huge body: 200 KiB is comfortably past the 64 KiB ceiling."""
+    srv = _boot(monkeypatch, oauth=True)
+    transport = httpx.ASGITransport(app=srv.app)
+    oversized_padding = "x" * (200 * 1024)
+    async with httpx.AsyncClient(transport=transport, base_url="http://t") as c:
+        resp = await c.post(
+            "/",
+            headers={"Accept": _MCP_ACCEPT},
+            json={
+                "jsonrpc": "2.0",
+                "id": 4,
+                "method": "initialize",
+                "params": {"padding": oversized_padding},
+            },
+        )
+    assert resp.status_code == 401
+    www = resp.headers.get("www-authenticate", "")
+    assert "Bearer" in www
+    assert "resource_metadata=" in www
+
+
+@pytest.mark.asyncio
 async def test_oauth_rs_publishes_protected_resource_metadata(monkeypatch):
     srv = _boot(monkeypatch, oauth=True)
     transport = httpx.ASGITransport(app=srv.app)

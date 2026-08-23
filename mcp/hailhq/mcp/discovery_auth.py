@@ -30,6 +30,17 @@ from starlette.types import ASGIApp, Receive, Scope, Send
 
 _DISCOVERY_METHODS = frozenset({"initialize", "tools/list"})
 
+# 64 KiB — comfortably above any real initialize/tools/list payload (both are
+# small JSON-RPC envelopes; neither carries bulk data), and small enough to
+# bound worst-case memory for this pre-auth body peek. Before this middleware
+# existed, FastMCP's auth layer 401'd before ever reading the body, so an
+# unbounded buffer here would be a new, unauthenticated DoS surface. Once a
+# request's body exceeds this, it cannot be a legitimate discovery request —
+# stop buffering and fall through with no header injected, so it hits
+# FastMCP's real auth middleware unmodified and 401s like any other
+# non-safelisted request today.
+_MAX_PEEK_BYTES = 64 * 1024
+
 
 class DiscoveryAuthMiddleware:
     """Pure ASGI middleware (not BaseHTTPMiddleware) so it can inspect and
@@ -55,11 +66,21 @@ class DiscoveryAuthMiddleware:
         body = b""
         more_body = True
         messages = []
+        oversized = False
         while more_body:
             message = await receive()
             messages.append(message)
             body += message.get("body", b"")
             more_body = message.get("more_body", False)
+            if len(body) > _MAX_PEEK_BYTES:
+                # Stop reading now — do not keep draining the client's
+                # body into memory just to discover it can never match
+                # the safelist. Whatever's left unread stays unread here;
+                # replay_receive()'s fallback to the real receive() below
+                # still hands it to the downstream app in order, so the
+                # ASGI message stream stays coherent.
+                oversized = True
+                break
 
         async def replay_receive() -> dict:
             # Replay the buffered body messages first; once exhausted,
@@ -77,12 +98,14 @@ class DiscoveryAuthMiddleware:
                 return messages.pop(0)
             return await receive()
 
-        try:
-            payload = json.loads(body) if body else {}
-        except (json.JSONDecodeError, UnicodeDecodeError):
-            payload = {}
+        method = None
+        if not oversized:
+            try:
+                payload = json.loads(body) if body else {}
+            except (json.JSONDecodeError, UnicodeDecodeError):
+                payload = {}
+            method = payload.get("method") if isinstance(payload, dict) else None
 
-        method = payload.get("method") if isinstance(payload, dict) else None
         if method in _DISCOVERY_METHODS:
             new_headers = list(scope.get("headers", []))
             new_headers.append((b"authorization", b"Bearer anonymous-discovery"))
