@@ -15,7 +15,7 @@ from datetime import datetime, timezone
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from fastapi import status as http_status
 from hailhq.api.audit import write_audit_log
 from hailhq.api.deps import Principal, get_current_principal
@@ -29,6 +29,7 @@ from hailhq.api.idempotency import (
 )
 from hailhq.api.pagination import fetch_cursor_page
 from hailhq.api.ratelimit import GENERAL_RATE_LIMITED_RESPONSES
+from hailhq.api.route_prefixes import request_mount_prefix
 from hailhq.api.routes.sms import get_sms_provider
 from hailhq.core import telephony_catalog
 from hailhq.core.db import get_session
@@ -94,6 +95,7 @@ async def _get_org_number_or_404(
 async def acquire_number(
     body: NumberAcquireRequest,
     response: Response,
+    request: Request,
     principal: Annotated[Principal, Depends(get_current_principal)],
     db: Annotated[AsyncSession, Depends(get_session)],
     provider: Annotated[VoiceProvider, Depends(get_voice_provider)],
@@ -107,7 +109,9 @@ async def acquire_number(
     what the carrier offers for the given country_code/number_type.
     """
     if idem is not None and idem.is_replay:
-        _cached_id, cached = replay_cached(idem, response, resource_prefix="/numbers")
+        _cached_id, cached = replay_cached(
+            idem, response, request, resource_prefix="/numbers"
+        )
         return PhoneNumberResponse.model_validate(cached)
 
     # Acquiring buys a real number at the carrier and starts a monthly fee —
@@ -195,7 +199,9 @@ async def acquire_number(
     # and expire_on_commit=False keeps it live; PhoneNumberResponse reads no
     # other server-generated column.
 
-    response.headers["Location"] = f"/numbers/{number.id}"
+    response.headers["Location"] = (
+        f"{request_mount_prefix(request)}/numbers/{number.id}"
+    )
     number_response = PhoneNumberResponse.model_validate(number)
     if idem is not None:
         await idem.store(

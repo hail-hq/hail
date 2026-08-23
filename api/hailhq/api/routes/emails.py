@@ -50,6 +50,7 @@ from hailhq.api.ratelimit import (
     GENERAL_RATE_LIMITED_RESPONSES,
     merge_rate_limited_responses,
 )
+from hailhq.api.route_prefixes import request_mount_prefix
 from hailhq.api.routes.email_domains import (
     compose_hail_mail_address,
     first_pending_custom,
@@ -455,6 +456,7 @@ async def deliver_email(
 async def create_email(
     body: EmailCreate,
     response: Response,
+    request: Request,
     principal: Annotated[Principal, Depends(get_current_principal)],
     db: Annotated[AsyncSession, Depends(get_session)],
     email_provider: Annotated[EmailProvider, Depends(get_email_provider)],
@@ -465,13 +467,13 @@ async def create_email(
     Sends synchronously — the response reports the final status (sent or
     failed), not a queued placeholder; no separate poll is needed for the
     happy path, though a bounce or complaint can still arrive later as a
-    webhook or GET /emails/{email_id}/events entry. Requires
+    webhook or GET /v1/emails/{email_id}/events entry. Requires
     recipient_consent=true on the request body; Hail does not verify lawful
     basis to contact the recipient, the caller warrants it.
     """
     # Idempotency replay first — never re-send.
     if idem is not None and idem.is_replay:
-        _, cached = replay_cached(idem, response, resource_prefix="/emails")
+        _, cached = replay_cached(idem, response, request, resource_prefix="/emails")
         return EmailResponse.model_validate(cached)
 
     # Consent attestation gate — reject before any Email row is created.
@@ -628,7 +630,7 @@ async def create_email(
             detail=_SEND_FAILED_DETAIL,
         )
 
-    response.headers["Location"] = f"/emails/{email.id}"
+    response.headers["Location"] = f"{request_mount_prefix(request)}/emails/{email.id}"
     email_response = EmailResponse.model_validate(email)
 
     if idem is not None:
@@ -746,7 +748,7 @@ async def get_email_stats(
 
     Defaults to the last 7 days, bucketed by day. bucket=hour is limited to
     an 8-day range; any bucket size is limited to a 92-day range. Registered
-    above GET /{email_id} so "stats" is not swallowed by the id path param.
+    above GET /v1/emails/{email_id} so "stats" is not swallowed by the id path param.
     """
     to_ts = to or datetime.now(timezone.utc)
     from_ts = from_ or to_ts - timedelta(days=7)
@@ -846,7 +848,7 @@ async def get_email(
 
     Org-scoped: returns 404 for an email belonging to a different
     organization. For an inbound email with a stored raw MIME, raw_url
-    points at GET /emails/{email_id}/raw.
+    points at GET /v1/emails/{email_id}/raw.
     """
     last_event_at = (
         select(func.max(EmailEvent.occurred_at))
@@ -966,7 +968,7 @@ async def list_emails(
     Cursor-paginated: pass the returned next_cursor to fetch the next page;
     a null next_cursor means there are no more results. Filter by status or
     direction (outbound/inbound). List entries omit body_text/body_html —
-    fetch GET /emails/{email_id} for the full body.
+    fetch GET /v1/emails/{email_id} for the full body.
     """
     stmt = (
         select(Email)

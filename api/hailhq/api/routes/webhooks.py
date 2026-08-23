@@ -95,7 +95,7 @@ async def create_subscription(
 
     The response includes the plaintext signing secret — this is the only
     time it is ever returned; store it now. Every later GET omits it. Use
-    POST /webhooks/{sub_id}/rotate-secret to get a new plaintext secret if
+    POST /v1/webhooks/{sub_id}/rotate-secret to get a new plaintext secret if
     it is lost or compromised.
     """
     try:
@@ -141,7 +141,7 @@ async def list_subscriptions(
     """List webhook subscriptions for the caller's organization.
 
     Cursor-paginated, newest first. The signing secret is never included —
-    only POST /webhooks and POST /webhooks/{sub_id}/rotate-secret return it.
+    only POST /v1/webhooks and POST /v1/webhooks/{sub_id}/rotate-secret return it.
     """
     stmt = select(WebhookSubscription).where(
         WebhookSubscription.organization_id == principal.organization_id
@@ -317,7 +317,7 @@ async def list_deliveries(
     """List delivery attempts for one webhook subscription, newest first.
 
     Cursor-paginated. Each entry shows the attempt count, response status,
-    and response body Hail recorded — use POST /webhooks/{sub_id}/
+    and response body Hail recorded — use POST /v1/webhooks/{sub_id}/
     deliveries/{delivery_id}/redeliver to retry a failed one.
     """
     await _load_owned(db, sub_id, principal.organization_id)  # auth gate

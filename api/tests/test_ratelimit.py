@@ -109,6 +109,57 @@ async def test_healthz_is_not_rate_limited(
         assert "ratelimit-limit" not in resp.headers
 
 
+@pytest.mark.parametrize("mount_prefix", ["", "/v1"])
+async def test_sms_inbound_is_not_rate_limited(
+    client: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch, mount_prefix: str
+) -> None:
+    # POST /sms/inbound has no Authorization header by design (Twilio
+    # signature auth). Without the exemption every anonymous caller falls
+    # into the shared remote-IP bucket in production. Bad signature -> 403,
+    # never 429, regardless of the ceiling or how many times it's called.
+    monkeypatch.setattr(settings, "api_rate_limit_per_minute", 1)
+    for _ in range(3):
+        resp = await client.post(
+            f"{mount_prefix}/sms/inbound",
+            data={"From": "+14155551234", "To": "+14155559999", "Body": "hi"},
+            headers={"X-Twilio-Signature": "sha1=bogus"},
+        )
+        assert resp.status_code == 403
+        assert "ratelimit-limit" not in resp.headers
+
+
+@pytest.mark.parametrize("mount_prefix", ["", "/v1"])
+async def test_sms_status_is_not_rate_limited(
+    client: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch, mount_prefix: str
+) -> None:
+    # POST /sms/status — same rationale as /sms/inbound above.
+    monkeypatch.setattr(settings, "api_rate_limit_per_minute", 1)
+    for _ in range(3):
+        resp = await client.post(
+            f"{mount_prefix}/sms/status",
+            data={"MessageSid": "SM1", "MessageStatus": "delivered"},
+            headers={"X-Twilio-Signature": "sha1=bogus"},
+        )
+        assert resp.status_code == 403
+        assert "ratelimit-limit" not in resp.headers
+
+
+@pytest.mark.parametrize("mount_prefix", ["", "/v1"])
+async def test_unsubscribe_is_not_rate_limited(
+    client: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch, mount_prefix: str
+) -> None:
+    # GET /unsubscribe has no Authorization header by design (HMAC token
+    # query param per RFC 8058, legally required to keep working). An
+    # invalid/garbage token must never draw a 429 no matter the ceiling.
+    monkeypatch.setattr(settings, "api_rate_limit_per_minute", 1)
+    for _ in range(3):
+        resp = await client.get(
+            f"{mount_prefix}/unsubscribe", params={"token": "bogus"}
+        )
+        assert resp.status_code != 429
+        assert "ratelimit-limit" not in resp.headers
+
+
 @pytest.mark.parametrize("path", ["/v1/calls", "/v1/sms", "/v1/emails"])
 def test_create_routes_merge_agent_gate_and_general_429_docs(path: str) -> None:
     # calls.py/sms.py/emails.py's create routes already documented

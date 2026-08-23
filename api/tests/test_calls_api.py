@@ -312,6 +312,35 @@ async def test_post_calls_happy_path_201(
     assert events[0].payload == {"from": "queued", "to": "dialing"}
 
 
+async def test_post_v1_calls_location_header_is_v1_prefixed(
+    client: httpx.AsyncClient,
+    async_session: AsyncSession,
+    org_and_key: tuple[str, ApiKey, str],
+    livekit_mock: AsyncMock,
+    add_phone_number,
+) -> None:
+    """A client that POSTs to the canonical /v1/calls mount must get back a
+    /v1/-prefixed Location, not the deprecated legacy path — the legacy
+    mount (test_post_calls_happy_path_201 above) still gets an unprefixed
+    one."""
+    org_id, _, plain = org_and_key
+    await add_phone_number(async_session, org_id, e164="+14155551234")
+
+    resp = await client.post(
+        "/v1/calls",
+        json={
+            "to": "+14155559999",
+            "system_prompt": "Be brief.",
+            "recipient_consent": True,
+        },
+        headers={"Authorization": f"Bearer {plain}"},
+    )
+
+    assert resp.status_code == 201
+    body = resp.json()
+    assert resp.headers["location"] == f"/v1/calls/{body['id']}"
+
+
 async def test_post_calls_ai_disclosure_opt_out_reaches_dispatch_and_audit(
     client: httpx.AsyncClient,
     async_session: AsyncSession,

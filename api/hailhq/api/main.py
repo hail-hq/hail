@@ -292,7 +292,12 @@ def _openapi_with_validation_error_description() -> dict:
     return schema
 
 
-app.openapi = _openapi_with_validation_error_description
+app.openapi = _openapi_with_validation_error_description  # type: ignore[method-assign]
+# FastAPI's own documented pattern for customizing OpenAPI generation
+# (https://fastapi.tiangolo.com/how-to/extending-openapi/): `openapi` is an
+# instance attribute FastAPI expects apps to overwrite, not a method the
+# type checker should treat as fixed. Safe and intentional; mypy just can't
+# model an instance attribute overriding a bound method.
 
 
 @app.exception_handler(SecretKeyMissing)

@@ -17,12 +17,11 @@ duplicating the router list here too.
 
 from __future__ import annotations
 
+from hailhq.api.route_prefixes import INTERNAL_PREFIX as _INTERNAL_PREFIX
+from hailhq.api.route_prefixes import V1_PREFIX as _V1_PREFIX
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 from starlette.requests import Request
 from starlette.responses import Response
-
-_V1_PREFIX = "/v1/"
-_INTERNAL_PREFIX = "/internal/"
 
 
 class DeprecationHeaderMiddleware(BaseHTTPMiddleware):

@@ -41,6 +41,7 @@ import hashlib
 import time
 from typing import Any
 
+from hailhq.api.route_prefixes import INTERNAL_PREFIX as _INTERNAL_PREFIX
 from hailhq.core.config import settings
 from limits import RateLimitItem, parse
 from slowapi import Limiter
@@ -76,15 +77,28 @@ def rate_limit_string() -> str:
 
 
 # Paths the general limiter never applies to: internal service-to-service
-# routes (HMAC-authenticated, not customer traffic — see routes/internal/)
-# and the health check. Matches on path shape, same convention as
-# deprecation.py's DeprecationHeaderMiddleware.
-_INTERNAL_PREFIX = "/internal/"
+# routes (HMAC-authenticated, not customer traffic — see routes/internal/),
+# the health check, and the 3 legitimate self-credentialed public routes
+# below. Matches on path shape, same convention as deprecation.py's
+# DeprecationHeaderMiddleware.
 _HEALTHZ_PATH = "/healthz"
+
+# Self-credentialed public routes with no Authorization header by design
+# (Twilio signature auth for the SMS webhooks; an HMAC token query param for
+# unsubscribe, RFC 8058). Without this exemption they fall back to the
+# remote-IP rate-limit key (_rate_limit_key below) — and in production every
+# anonymous caller resolves to the same upstream-proxy IP, so all anonymous
+# traffic would share one bucket with these legitimate routes. Listed
+# unprefixed; dual-mounted at both /v1/... and the legacy path (main.py), so
+# matching strips a leading /v1 before comparing.
+_EXEMPT_PATHS = frozenset({"/sms/inbound", "/sms/status", "/unsubscribe"})
 
 
 def _is_exempt(path: str) -> bool:
-    return path == _HEALTHZ_PATH or path.startswith(_INTERNAL_PREFIX)
+    if path == _HEALTHZ_PATH or path.startswith(_INTERNAL_PREFIX):
+        return True
+    unprefixed = path[len("/v1") :] if path.startswith("/v1/") else path
+    return unprefixed in _EXEMPT_PATHS
 
 
 class GeneralRateLimitMiddleware(BaseHTTPMiddleware):

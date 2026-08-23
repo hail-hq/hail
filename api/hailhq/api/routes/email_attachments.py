@@ -57,7 +57,7 @@ async def create_email_attachment(
     """Upload a file and get back a reusable attachment id.
 
     The returned id can be referenced from attachment_ids on many later
-    POST /emails calls until it is garbage-collected for being unused; it is
+    POST /v1/emails calls until it is garbage-collected for being unused; it is
     not deleted immediately after first use. Uploads are size-limited and
     scoped to the caller's organization.
     """

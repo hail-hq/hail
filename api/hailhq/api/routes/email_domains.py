@@ -30,13 +30,14 @@ from datetime import datetime, timezone
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from fastapi import status as http_status
 from hailhq.api.audit import write_audit_log
 from hailhq.api.deps import Principal, get_current_principal
 from hailhq.api.errors import unprocessable
 from hailhq.api.pagination import fetch_cursor_page
 from hailhq.api.ratelimit import GENERAL_RATE_LIMITED_RESPONSES
+from hailhq.api.route_prefixes import request_mount_prefix
 from hailhq.core.config import settings
 from hailhq.core.db import get_session
 from hailhq.core.dns_lookup import custom_dns_records, resolve_mx, ses_inbound_host
@@ -273,6 +274,7 @@ async def _unminted_hail_mail(db: AsyncSession, organization_id: UUID) -> str | 
 async def create_email_domain(
     body: EmailDomainCreate,
     response: Response,
+    request: Request,
     principal: Annotated[Principal, Depends(get_current_principal)],
     db: Annotated[AsyncSession, Depends(get_session)],
     email_provider: Annotated[EmailProvider, Depends(get_email_provider)],
@@ -282,7 +284,7 @@ async def create_email_domain(
     kind="hail_mail" mints an address on the shared hail-mail domain and is
     immediately verified — no DNS work needed. kind="custom" registers your
     own domain with SES and returns DKIM records; the domain stays
-    unverified (POST /email-domains/{domain_id}/verify) until you publish
+    unverified (POST /v1/email-domains/{domain_id}/verify) until you publish
     those DNS records and Hail confirms them.
     """
     if body.kind == "hail_mail":
@@ -326,7 +328,9 @@ async def create_email_domain(
             resource_id=sd.id,
             payload={"kind": "hail_mail", "domain": sd.domain},
         )
-        response.headers["Location"] = f"/email-domains/{sd.id}"
+        response.headers["Location"] = (
+            f"{request_mount_prefix(request)}/email-domains/{sd.id}"
+        )
         return EmailDomainResponse.model_validate(sd)
 
     # kind == 'custom' — call SES, persist DKIM records, ask the tenant to
@@ -377,7 +381,9 @@ async def create_email_domain(
         resource_id=sd.id,
         payload={"kind": "custom", "domain": sd.domain},
     )
-    response.headers["Location"] = f"/email-domains/{sd.id}"
+    response.headers["Location"] = (
+        f"{request_mount_prefix(request)}/email-domains/{sd.id}"
+    )
     return EmailDomainResponse.model_validate(sd)
 
 
@@ -400,7 +406,7 @@ async def list_email_domains(
     """List sender domains/identities for the caller's organization.
 
     Cursor-paginated, newest first. The response also includes
-    default_from — the address a from-less POST /emails would use right
+    default_from — the address a from-less POST /v1/emails would use right
     now given the org's current verified senders.
     """
     stmt = select(EmailDomain).where(

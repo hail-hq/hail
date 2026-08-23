@@ -39,6 +39,7 @@ from hailhq.api.ratelimit import (
     GENERAL_RATE_LIMITED_RESPONSES,
     merge_rate_limited_responses,
 )
+from hailhq.api.route_prefixes import request_mount_prefix
 from hailhq.api.usage import write_usage_event
 from hailhq.core.compliance_gate import check_sms_allowed, remove_suppression
 from hailhq.core.config import settings
@@ -199,6 +200,7 @@ async def deliver_sms(db: AsyncSession, provider: SmsProvider, sms: Sms) -> str 
 async def create_sms(
     body: SmsCreate,
     response: Response,
+    request: Request,
     principal: Annotated[Principal, Depends(get_current_principal)],
     db: Annotated[AsyncSession, Depends(get_session)],
     provider: Annotated[SmsProvider, Depends(get_sms_provider)],
@@ -208,7 +210,7 @@ async def create_sms(
 
     Sends synchronously — the response reports the final status (sent or
     failed), not a queued placeholder, though delivery confirmation from
-    the carrier can still arrive later as a webhook or GET /sms/{sms_id}
+    the carrier can still arrive later as a webhook or GET /v1/sms/{sms_id}
     update. An explicit from resolves a dedicated number; otherwise Hail
     picks an alphanumeric sender ID where the destination corridor allows
     it, or requires a dedicated SMS-capable number otherwise. Requires
@@ -216,7 +218,9 @@ async def create_sms(
     lawful basis to contact the recipient, the caller warrants it.
     """
     if idem is not None and idem.is_replay:
-        cached_id, cached = replay_cached(idem, response, resource_prefix="/sms")
+        cached_id, cached = replay_cached(
+            idem, response, request, resource_prefix="/sms"
+        )
         await write_audit_log(
             organization_id=principal.organization_id,
             api_key_id=principal.api_key_id,
@@ -348,7 +352,7 @@ async def create_sms(
     # carrier rejection: row already reconciled to failed; fall through and
     # return the SmsResponse exactly as before.
 
-    response.headers["Location"] = f"/sms/{sms.id}"
+    response.headers["Location"] = f"{request_mount_prefix(request)}/sms/{sms.id}"
     sms_response = SmsResponse.model_validate(sms)
 
     if idem is not None:
@@ -484,8 +488,8 @@ async def list_sms_suppressions(
 ) -> SuppressionListResponse:
     """List SMS numbers suppressed from receiving messages, newest first.
 
-    Cursor-paginated. A suppressed number blocks POST /sms sends to it
-    with a 403 until removed via DELETE /sms/suppressions/{number}.
+    Cursor-paginated. A suppressed number blocks POST /v1/sms sends to it
+    with a 403 until removed via DELETE /v1/sms/suppressions/{number}.
     """
     stmt = select(Suppression).where(
         Suppression.organization_id == principal.organization_id,
