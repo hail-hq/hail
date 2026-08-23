@@ -13,6 +13,7 @@ import json
 
 import httpx
 import pytest
+from hailhq.mcp import discovery_auth
 
 
 def _boot(
@@ -189,6 +190,54 @@ async def test_oauth_rs_oversized_body_not_buffered_unbounded(monkeypatch):
                 "params": {"padding": oversized_padding},
             },
         )
+    assert resp.status_code == 401
+    www = resp.headers.get("www-authenticate", "")
+    assert "Bearer" in www
+    assert "resource_metadata=" in www
+
+
+@pytest.mark.asyncio
+async def test_oauth_rs_anon_initialize_capped_per_ip(monkeypatch):
+    """Fix: an unauthenticated caller looping "initialize" must not
+    accumulate unbounded MCP sessions (this SDK version's session manager
+    has no idle timeout, so each successful anonymous initialize is a
+    permanent session). Once the per-IP cap
+    (discovery_auth._ANON_INIT_MAX_PER_WINDOW) is exceeded, further
+    anonymous initialize calls fall through to FastMCP's real auth
+    middleware unmodified (no synthetic bearer injected) — same
+    established pattern as test_oauth_rs_oversized_body_not_buffered_unbounded
+    above: a plain 401, not a bespoke response shape.
+    """
+    monkeypatch.setattr(discovery_auth, "_ANON_INIT_MAX_PER_WINDOW", 2)
+
+    def _init_payload(i: int) -> dict:
+        return {
+            "jsonrpc": "2.0",
+            "id": i,
+            "method": "initialize",
+            "params": {
+                "protocolVersion": "2025-06-18",
+                "capabilities": {},
+                "clientInfo": {"name": "test", "version": "0.0.0"},
+            },
+        }
+
+    srv = _boot(monkeypatch, oauth=True)
+    async with srv.app.router.lifespan_context(srv.app):
+        transport = httpx.ASGITransport(app=srv.app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://t") as c:
+            for i in range(2):
+                resp = await c.post(
+                    "/", headers={"Accept": _MCP_ACCEPT}, json=_init_payload(i)
+                )
+                assert resp.status_code == 200
+
+            # Cap now exceeded (httpx's ASGITransport uses the same
+            # synthetic client address, 127.0.0.1:123, for every request in
+            # this client — see httpx.ASGITransport.__init__).
+            resp = await c.post(
+                "/", headers={"Accept": _MCP_ACCEPT}, json=_init_payload(99)
+            )
     assert resp.status_code == 401
     www = resp.headers.get("www-authenticate", "")
     assert "Bearer" in www

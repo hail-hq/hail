@@ -20,11 +20,17 @@ is untouched: no header is injected, so a request with no real bearer
 401s exactly as it did before this file existed. This is a safelist, not
 a bypass — widening it later needs the same scrutiny as the original
 two entries, not a one-line addition.
+
+"initialize" additionally carries a per-remote-IP rate cap (see
+_ANON_INIT_MAX_PER_WINDOW below) — unlike tools/list, a real initialize
+call creates a permanent, stateful MCP session, so unrestricted anonymous
+initialize is a resource-exhaustion vector, not just an information leak.
 """
 
 from __future__ import annotations
 
 import json
+import time
 
 from starlette.types import ASGIApp, Receive, Scope, Send
 
@@ -40,6 +46,49 @@ _DISCOVERY_METHODS = frozenset({"initialize", "tools/list"})
 # FastMCP's real auth middleware unmodified and 401s like any other
 # non-safelisted request today.
 _MAX_PEEK_BYTES = 64 * 1024
+
+# Anonymous "initialize" rate cap. FastMCP's session manager (this SDK
+# version) has no idle timeout — session_idle_timeout defaults to None and
+# is never passed — so sessions are reaped only on explicit DELETE, crash,
+# or restart. A real "initialize" call through this safelist creates a
+# real, permanent, stateful session. Without a cap, an unauthenticated
+# caller can loop "initialize" and accumulate unbounded sessions/tasks — a
+# resource-exhaustion vector distinct from _MAX_PEEK_BYTES above (that
+# bounds per-request memory, not session count). Deliberately NOT applied
+# to "tools/list" — that method doesn't create a session, it only reads
+# one that already exists.
+#
+# Self-contained in-memory fixed-window counter keyed by remote IP —
+# approximate is fine, this only needs to bound the worst case, not be
+# perfectly precise (same reasoning as the body-peek cap; this package has
+# no rate-limiting dependency the way api/'s ratelimit.py does, so a bare
+# dict is simpler than adding one for a single counter).
+_ANON_INIT_WINDOW_SECONDS = 60.0
+_ANON_INIT_MAX_PER_WINDOW = 20
+
+_anon_init_counts: dict[str, tuple[int, float]] = {}
+
+
+def _remote_ip(scope: Scope) -> str:
+    client = scope.get("client")
+    return client[0] if client else "unknown"
+
+
+def _anon_init_cap_exceeded(remote_ip: str) -> bool:
+    now = time.monotonic()
+    count, window_start = _anon_init_counts.get(remote_ip, (0, now))
+    if now - window_start >= _ANON_INIT_WINDOW_SECONDS:
+        count, window_start = 0, now
+    count += 1
+    _anon_init_counts[remote_ip] = (count, window_start)
+    return count > _ANON_INIT_MAX_PER_WINDOW
+
+
+def _reset_anon_init_rate_state_for_tests() -> None:
+    """Test-only: clear accumulated per-IP counters between test cases so
+    one test's anonymous initialize calls can't trip the cap for another
+    (see tests/conftest.py's autouse fixture)."""
+    _anon_init_counts.clear()
 
 
 class DiscoveryAuthMiddleware:
@@ -106,9 +155,16 @@ class DiscoveryAuthMiddleware:
                 payload = {}
             method = payload.get("method") if isinstance(payload, dict) else None
 
-        if method in _DISCOVERY_METHODS:
+        cap_exceeded = method == "initialize" and _anon_init_cap_exceeded(
+            _remote_ip(scope)
+        )
+        if method in _DISCOVERY_METHODS and not cap_exceeded:
             new_headers = list(scope.get("headers", []))
             new_headers.append((b"authorization", b"Bearer anonymous-discovery"))
             scope = {**scope, "headers": new_headers}
+        # cap_exceeded (or method not in the safelist): no header injected,
+        # falls through to FastMCP's real auth middleware unmodified — same
+        # established pattern as the oversized-body case above (no bespoke
+        # response shape invented here).
 
         await self.app(scope, replay_receive, send)
