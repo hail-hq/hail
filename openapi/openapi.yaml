@@ -18,7 +18,7 @@ paths:
       description:
         "Place an outbound AI voice call.\n\nThe call is placed asynchronously\
         \ \u2014 this returns as soon as the call is\nqueued, not when it completes.\
-        \ Poll GET /calls/{call_id} or configure a\nwebhook to get the final status\
+        \ Poll GET /v1/calls/{call_id} or configure a\nwebhook to get the final status\
         \ and transcript. Requires\nrecipient_consent=true on the request body; Hail\
         \ does not verify lawful\nbasis to contact the recipient, the caller warrants\
         \ it."
@@ -194,7 +194,7 @@ paths:
 
         (not 403, to avoid confirming the id exists). Use this to poll for the
 
-        final outcome of a call placed with POST /calls."
+        final outcome of a call placed with POST /v1/calls."
       operationId: get_call_v1_calls__call_id__get
       parameters:
         - name: call_id
@@ -256,7 +256,7 @@ paths:
 
         The returned id can be referenced from attachment_ids on many later
 
-        POST /emails calls until it is garbage-collected for being unused; it is
+        POST /v1/emails calls until it is garbage-collected for being unused; it is
 
         not deleted immediately after first use. Uploads are size-limited and
 
@@ -320,9 +320,9 @@ paths:
         "Send an outbound email through SES.\n\nSends synchronously \u2014\
         \ the response reports the final status (sent or\nfailed), not a queued placeholder;\
         \ no separate poll is needed for the\nhappy path, though a bounce or complaint\
-        \ can still arrive later as a\nwebhook or GET /emails/{email_id}/events entry.\
-        \ Requires\nrecipient_consent=true on the request body; Hail does not verify\
-        \ lawful\nbasis to contact the recipient, the caller warrants it."
+        \ can still arrive later as a\nwebhook or GET /v1/emails/{email_id}/events\
+        \ entry. Requires\nrecipient_consent=true on the request body; Hail does not\
+        \ verify lawful\nbasis to contact the recipient, the caller warrants it."
       operationId: create_email_v1_emails_post
       parameters:
         - name: authorization
@@ -391,7 +391,7 @@ paths:
         "List emails for the caller's organization, newest first.\n\nCursor-paginated:\
         \ pass the returned next_cursor to fetch the next page;\na null next_cursor\
         \ means there are no more results. Filter by status or\ndirection (outbound/inbound).\
-        \ List entries omit body_text/body_html \u2014\nfetch GET /emails/{email_id}\
+        \ List entries omit body_text/body_html \u2014\nfetch GET /v1/emails/{email_id}\
         \ for the full body."
       operationId: list_emails_v1_emails_get
       parameters:
@@ -574,7 +574,8 @@ paths:
 
         an 8-day range; any bucket size is limited to a 92-day range. Registered
 
-        above GET /{email_id} so "stats" is not swallowed by the id path param.'
+        above GET /v1/emails/{email_id} so "stats" is not swallowed by the id path
+        param.'
       operationId: get_email_stats_v1_emails_stats_get
       parameters:
         - name: from
@@ -660,7 +661,7 @@ paths:
 
         organization. For an inbound email with a stored raw MIME, raw_url
 
-        points at GET /emails/{email_id}/raw."
+        points at GET /v1/emails/{email_id}/raw."
       operationId: get_email_v1_emails__email_id__get
       parameters:
         - name: email_id
@@ -931,8 +932,8 @@ paths:
         kind=\"hail_mail\" mints an address on the shared hail-mail domain and is\n\
         immediately verified \u2014 no DNS work needed. kind=\"custom\" registers\
         \ your\nown domain with SES and returns DKIM records; the domain stays\nunverified\
-        \ (POST /email-domains/{domain_id}/verify) until you publish\nthose DNS records\
-        \ and Hail confirms them."
+        \ (POST /v1/email-domains/{domain_id}/verify) until you publish\nthose DNS\
+        \ records and Hail confirms them."
       operationId: create_email_domain_v1_email_domains_post
       parameters:
         - name: authorization
@@ -990,8 +991,8 @@ paths:
       description:
         "List sender domains/identities for the caller's organization.\n\
         \nCursor-paginated, newest first. The response also includes\ndefault_from\
-        \ \u2014 the address a from-less POST /emails would use right\nnow given the\
-        \ org's current verified senders."
+        \ \u2014 the address a from-less POST /v1/emails would use right\nnow given\
+        \ the org's current verified senders."
       operationId: list_email_domains_v1_email_domains_get
       parameters:
         - name: cursor
@@ -1691,8 +1692,8 @@ paths:
         "Create a webhook subscription for one or more event types.\n\n\
         The response includes the plaintext signing secret \u2014 this is the only\n\
         time it is ever returned; store it now. Every later GET omits it. Use\nPOST\
-        \ /webhooks/{sub_id}/rotate-secret to get a new plaintext secret if\nit is\
-        \ lost or compromised."
+        \ /v1/webhooks/{sub_id}/rotate-secret to get a new plaintext secret if\nit\
+        \ is lost or compromised."
       operationId: create_subscription_v1_webhooks_post
       parameters:
         - name: authorization
@@ -1750,7 +1751,8 @@ paths:
       description:
         "List webhook subscriptions for the caller's organization.\n\n\
         Cursor-paginated, newest first. The signing secret is never included \u2014\
-        \nonly POST /webhooks and POST /webhooks/{sub_id}/rotate-secret return it."
+        \nonly POST /v1/webhooks and POST /v1/webhooks/{sub_id}/rotate-secret return\
+        \ it."
       operationId: list_subscriptions_v1_webhooks_get
       parameters:
         - name: cursor
@@ -2066,7 +2068,7 @@ paths:
       description:
         "List delivery attempts for one webhook subscription, newest first.\n\
         \nCursor-paginated. Each entry shows the attempt count, response status,\n\
-        and response body Hail recorded \u2014 use POST /webhooks/{sub_id}/\ndeliveries/{delivery_id}/redeliver\
+        and response body Hail recorded \u2014 use POST /v1/webhooks/{sub_id}/\ndeliveries/{delivery_id}/redeliver\
         \ to retry a failed one."
       operationId: list_deliveries_v1_webhooks__sub_id__deliveries_get
       parameters:
@@ -2267,7 +2269,7 @@ paths:
         "Send an outbound SMS.\n\nSends synchronously \u2014 the response\
         \ reports the final status (sent or\nfailed), not a queued placeholder, though\
         \ delivery confirmation from\nthe carrier can still arrive later as a webhook\
-        \ or GET /sms/{sms_id}\nupdate. An explicit from resolves a dedicated number;\
+        \ or GET /v1/sms/{sms_id}\nupdate. An explicit from resolves a dedicated number;\
         \ otherwise Hail\npicks an alphanumeric sender ID where the destination corridor\
         \ allows\nit, or requires a dedicated SMS-capable number otherwise. Requires\n\
         recipient_consent=true on the request body; Hail does not verify\nlawful basis\
@@ -2438,9 +2440,9 @@ paths:
         "List SMS numbers suppressed from receiving messages, newest first.
 
 
-        Cursor-paginated. A suppressed number blocks POST /sms sends to it
+        Cursor-paginated. A suppressed number blocks POST /v1/sms sends to it
 
-        with a 403 until removed via DELETE /sms/suppressions/{number}."
+        with a 403 until removed via DELETE /v1/sms/suppressions/{number}."
       operationId: list_sms_suppressions_v1_sms_suppressions_get
       parameters:
         - name: cursor
