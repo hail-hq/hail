@@ -46,9 +46,7 @@ Ranked by relevance/impact score, highest first. Update the **Status** column as
       `awesome-voice-agents-yzfly.md`, `awesome-ai-agents-e2b.md`,
       `mcp-registry.md` (here: `official-mcp-registry-modelcontextprotocol-io.md`). - Merge anything of value into this tree, add the missing targets to the
       table above, then delete `hail-website/submissions/`.
-- [ ] **Re-check `awesome-selfhosted-awesome-selfhosted-data.md`'s copy before
-      submitting.** It was drafted 2026-07-07 and deliberately omits SMS, which was
-      unshipped then. `core/hailhq/core/providers/sms/twilio.py` has since landed
-      and SMS is checked (outbound + inbound) in `README.md` Milestones, so that
-      draft now understates Hail. Other drafts of the same vintage may be stale for
-      the same reason.
+- [x] **Re-check `awesome-selfhosted-awesome-selfhosted-data.md`'s copy before
+      submitting.** Refreshed 2026-08-23: SMS added, platforms trimmed to
+      Python + Docker, submit date 2026-09-01. Other drafts of the 2026-07-07
+      vintage may still be stale for the same reason.

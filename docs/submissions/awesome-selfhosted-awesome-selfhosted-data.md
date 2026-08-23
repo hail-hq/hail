@@ -9,69 +9,102 @@ status: drafted
 
 # awesome-selfhosted (awesome-selfhosted-data)
 
+**Refreshed 2026-08-23 against current `CONTRIBUTING.md`, `addition.md`, `PULL_REQUEST_TEMPLATE.md`, `README.md` Milestones, and `hail-website/lib/home-copy.ts`.**
+
 ## TODO
 
-- [ ] **Blocker: first tagged release is not yet 4 months old.** The earliest actual GitHub Release is `Hail v0.1.0`, published 2026-05-01T05:58:35Z (verified via `gh release list`, not just `git tag`). Today is 2026-07-07 (~2.2 months old). The list's stated rule is "first released more than 4 months ago" — do not open the PR/issue before **2026-09-01**. (`sdk-v0.0.1` and `cli-v0.1.0` are earlier git tags but have no corresponding GitHub Release, so they likely don't count toward this rule — the safe reference point is `v0.1.0`.)
-- [ ] No account needed to open an issue; a free GitHub account is needed to submit a PR (fork-based).
-- [ ] Confirm `https://github.com/hail-hq/hail` is public and `v0.1.0` stays a real GitHub Release (not just a CHANGELOG entry) at submission time.
-- [ ] Confirm `hail.so` resolves and is the canonical marketing site (used as `website_url`).
-- [ ] Decide/confirm `depends_3rdparty: true` is acceptable messaging — Hail requires Twilio, LiveKit Cloud, AWS SES, Deepgram, Cartesia/ElevenLabs, and one LLM vendor even when self-hosted.
-- [ ] **Do not describe SMS as shipped in this submission.** Verified against `README.md` Milestones and `core/hailhq/core/providers/` (only `voice/twilio.py` and `email/ses.py` exist — no `sms/` module at all): SMS outbound and inbound are both unchecked/unshipped project-wide, not just missing a specific vendor. The drafted description below only claims voice + email, which are real, wired capabilities today.
-- [ ] Locally run `make awesome_lint` against `software/hail.yml` before opening the PR (see Steps).
-- [ ] Open PR or issue.
-- [ ] Address any maintainer review comments (they check licenses.yml/tags/platforms slugs and the 4-month rule by hand).
-- [ ] Confirm merged and live on awesome-selfhosted.net.
+- [ ] **Blocker: first release is not yet 4 months old.** Earliest GitHub Release is `v0.1.0`, published 2026-05-01 (`gh release list`). Earliest safe submit date: **2026-09-01**. Maintainers close early PRs with a canned reply.
+- [ ] **Risk: "Software that depends on a specific cloud provider" is in "What does not qualify".** Voice needs LiveKit Cloud (`docs/public/self-host/livekit-cloud.md`: self-hosted SFU is a later milestone). SMS and email run without it. Mitigation: `depends_3rdparty: true` + description leads with the channels. Decide: submit on 2026-09-01 anyway, or wait for the self-hosted SFU milestone.
+- [ ] **Ban risk: "Machine/LLM-generated contributions that do not respect project guidelines… will result in a ban."** Submit from `r13i`'s own account. PR = one file + checked template boxes. No extra prose.
+- [ ] Run `make awesome_lint` locally on `software/hail.yml` before pushing (Steps, step 4).
+- [ ] Re-verify the day you submit: no `software/hail*.yml` exists (checked 2026-08-23: none), no open/closed PR or issue mentions Hail (checked 2026-08-23: none).
+- [ ] Submit PR.
+- [ ] On merge: set `status: confirmed`, paste the `awesome-selfhosted.net` entry URL in Notes.
 
 ## Steps to submit
 
-1. Wait until **2026-09-01 or later** (4 months after the `v0.1.0` GitHub Release date) — the maintainers close submissions that fail this rule on sight.
-2. Go to https://github.com/awesome-selfhosted/awesome-selfhosted-data and click **Fork** (top right) to fork it to your own account. (Skip this and steps 3–6 if you'd rather file an issue — see step 7.)
-3. In your fork, create a new file at path `software/hail.yml` (use the web UI "Add file → Create new file", or clone locally and add it there).
-4. Paste the full YAML block from the **Content** section below into `software/hail.yml`, exactly as written (no comments, no unused optional fields).
-5. Commit directly to a new branch (the GitHub web UI prompts for this when you click "Propose changes"), e.g. branch name `add-hail`.
-6. Click **Compare & pull request**. Title the PR `Add Hail`. Leave the PR body empty or add one line: "New self-hosted software addition: Hail." Submit the PR against `awesome-selfhosted/awesome-selfhosted-data:master`.
-7. **Alternative if you don't want to use PRs:** open a new issue at https://github.com/awesome-selfhosted/awesome-selfhosted-data/issues/new/choose, pick the "New software addition" template, and paste the same YAML block from Content into the template's code block.
-8. Before submitting (PR route), verify locally: clone your fork, run `make awesome_lint` (see the repo's `Makefile` / `make help` for the exact target — it validates the YAML schema, license/tag/platform slugs, and description formatting). Fix any lint failures and re-run before pushing.
-9. Wait for CI (the repo runs the same lint in GitHub Actions on every PR) and for a maintainer review. Respond to any requested changes in the same PR.
-10. Once merged, the entry is picked up by the site build; check https://awesome-selfhosted.net (search "Hail") a day or two later to confirm it's live.
+1. Wait until **2026-09-01 or later**.
+2. Fork and clone:
+   ```bash
+   gh repo fork awesome-selfhosted/awesome-selfhosted-data --clone
+   cd awesome-selfhosted-data
+   git checkout -b add-hail
+   ```
+3. Create `software/hail.yml` with the exact YAML from **Content**.
+4. Lint:
+   ```bash
+   make install
+   make awesome_lint
+   ```
+   Fix anything it reports, re-run until clean.
+5. Commit and push:
+   ```bash
+   git add software/hail.yml
+   git commit -m "add Hail"
+   git push -u origin add-hail
+   ```
+6. Open the PR: `gh pr create --base master --title "add Hail" --body-file -` and paste the **PR body** from Content. Or open it in the GitHub web UI; the PR template auto-fills — check every box.
+7. Respond to review in the same PR. Merge happens ~1 week after approval.
+8. Confirm live: search "Hail" at https://awesome-selfhosted.net.
 
 ## Content
 
 File: `software/hail.yml`
 
 ```yaml
-name: "Hail"
-website_url: "https://hail.so"
-source_code_url: "https://github.com/hail-hq/hail"
-description: "API for placing phone calls and sending email as an AI agent, via CLI, Python SDK, OpenAPI, or a remote MCP server."
+name: Hail
+website_url: https://hail.so
+source_code_url: https://github.com/hail-hq/hail
+description: Phone calls, SMS, and email for AI agents, consumed via MCP server, REST API, CLI, or Python SDK.
 licenses:
   - AGPL-3.0
 platforms:
   - Python
-  - Go
   - Docker
 tags:
   - Communication - Custom Communication Systems
+  - Generative Artificial Intelligence (GenAI)
 depends_3rdparty: true
+```
+
+PR title: `add Hail`
+
+PR body (the repo's template; every box checked):
+
+```markdown
+Thanks for taking the time to suggest an addition to awesome-selfhosted!
+
+To ensure your Pull Request is dealt with swiftly, please check the following (check the boxes `[x]`):
+
+- [x] Submit one item per pull request. This eases reviewing and speeds up inclusion.
+- [x] You have searched the repository for any relevant [issues](https://github.com/awesome-selfhosted/awesome-selfhosted-data/issues) or [PRs](https://github.com/awesome-selfhosted/awesome-selfhosted-data/pulls), including closed ones.
+- [x] Any software you are adding is not already listed at any of [awesome-sysadmin](https://github.com/awesome-foss/awesome-sysadmin), [staticgen.com](https://www.staticgen.com/), [staticsitegenerators.bevry.me](https://staticsitegenerators.bevry.me/), [dbdb.io](https://dbdb.io/browse).
+- [x] The file you are adding is formatted as described in [addition.md](https://github.com/awesome-selfhosted/awesome-selfhosted-data/blob/master/.github/ISSUE_TEMPLATE/addition.md).
+- [x] `Demo` links should only be used for interactive demos, i.e. not video demonstrations. If login credentials are required to access the demo, please link to the credentials directly.
+- [x] Comments and unused optional fields have been removed.
+- [x] The file you are adding uses [kebab-case](https://en.wikipedia.org/wiki/Letter_case#Kebab_case) file naming, for example `my-awesome-software.yml`.
+- [x] Values for `platform` should match the platforms required to install and run the software.
+- [x] Any software project you are adding to the list is actively maintained.
+- [x] Any software project you are adding was first released more than 4 months ago.
+- [x] Any software project you are adding has working installation instructions.
+- [x] You understand that your Pull Request will be merged at least ~1 week after approval, depending on maintainers time.
 ```
 
 Field notes:
 
-- `name`: "Hail" (no suffix — check at submission time whether a name collision exists with any other already-listed "Hail"; rename the file/entry to disambiguate if needed, e.g. keep filename `hail.yml` but this is the only field maintainers would ask to change).
-- `description`: sentence case, no "self-hosted"/"open-source" (redundant on this list), under 250 chars. Deliberately says "phone calls and email," not "phone, SMS, and email" — SMS is not shipped in any form today (see Notes), and this listing is a factual capability statement, not marketing copy.
-- `licenses`: `AGPL-3.0` is the exact identifier used in `licenses.yml` (confirmed against an existing entry) — repo's own docs say "AGPL-3.0-or-later" but the data repo only has a single non-suffixed `AGPL-3.0` license slug.
-- `platforms`: Python (core API, SDK, MCP server), Go (CLI), Docker (the `docker compose up` distribution path).
-- `tags`: single tag, "Communication - Custom Communication Systems" — closest fit for a custom-protocol, API-first multi-channel comms system; no PBX/SIP-server tag fits (Hail isn't an IPBX) and no plain "Communication" catch-all tag exists.
-- `depends_3rdparty: true` — accurate: even self-hosted, Hail needs Twilio + LiveKit Cloud (voice), AWS SES (email), Deepgram/Cartesia/ElevenLabs (voice pipeline), and an LLM vendor.
-- No `demo_url` — Hail has no public interactive demo (it's an API/CLI, not a hosted app with a demo login).
-- No `related_software_url` — no third-party plugin/app ecosystem to point to.
-- No logo/icon field exists in this repo's schema; if a screenshot is wanted for the PR description (optional, not part of the YAML), use `/Users/r/playground/hail-website/public/assets/og-card-1200x630.png` or the wordmark at `/Users/r/playground/hail-website/public/assets/hail-wordmark.svg`.
+- `description`: 97 chars (limit 250). Sentence case. No "self-hosted", "open-source", "free" (redundant per guidelines). No leading "A …". Channel claims match `README.md` Milestones (2026-08-23): outbound calls, SMS in/out, email in/out — all checked. Matches site copy (`home-copy.ts`: "Give your AI agent a voice, a phone number, and an inbox… Send SMS and agent mail"). Leads with "Phone calls, SMS, and email" so it reads as a running service, not an SDK (SDKs are in "What does not qualify").
+- No `(alternative to …)` suffix. No single well-known product is a clean match; adding one invites review debate.
+- `licenses`: `AGPL-3.0` is the identifier in `licenses.yml` (line 10, checked 2026-08-23).
+- `platforms`: only what runs the server — Python (api, voicebot, mcp) and Docker (`docker compose up`). Go is dropped: the CLI is a client, and the PR template says platforms "match the platforms required to install and run the software".
+- `tags`: first tag is the only one shown in single-page mode. `Communication - Custom Communication Systems` is where Chatwoot lives. `Generative Artificial Intelligence (GenAI)` second. `Communication - SIP` skipped (PBX software).
+- `depends_3rdparty: true`: Twilio (calls, SMS), LiveKit Cloud (media), AWS SES (email), Deepgram/Speechmatics (STT), Cartesia/ElevenLabs (TTS), one LLM vendor or BYO endpoint.
+- No `demo_url`: no interactive demo. No `related_software_url`: no plugin ecosystem.
+- Do not add `stargazers_count`, `updated_at`, `commit_history`, `current_release` — a bot fills those after merge.
 
 ## Notes
 
-- **Eligibility gate, not a soft target:** the "first release > 4 months old" rule is enforced by maintainers reading the GitHub Releases page, not the CHANGELOG or git tags. `Hail v0.1.0` (published 2026-05-01T05:58:35Z, verified with `gh release list`) clears the bar on 2026-09-01. Submitting earlier risks an instant close via their canned "first release less than 4 months old" reply.
-- **SMS deliberately left out of the description.** Checked against `README.md`'s own Milestones section and `core/hailhq/core/providers/` (only `voice/twilio.py` and `email/ses.py` exist): SMS outbound and inbound are both unchecked/unbuilt project-wide — this isn't a missing-vendor gap, it's a missing capability. Awesome-selfhosted maintainers do sometimes spot-check descriptions against the linked repo before merging, and a false "SMS" claim here is easy to disprove by opening the README. The drafted description claims only voice (outbound, Twilio, real and working) and email (in/out, AWS SES, real and working) — both true today. Revisit this file once an `sms/` provider actually ships.
-- **Voice is outbound-only today** (inbound Twilio unchecked in Milestones) — "placing phone calls" in the description is accurate; avoid rewording to a bidirectional claim like "phone calls" without qualification if inbound isn't live yet by submission time.
-- **Review turnaround:** awesome-selfhosted-data PRs are typically reviewed within a few days to ~2 weeks by volunteer maintainers; issues (non-PR route) can take longer since a maintainer has to do the YAML work themselves.
-- **Contact used:** none yet — submission not filed. No account-specific contact info needed (public GitHub PR/issue).
-- **Roadmap items not yet shipped, referenced above:** SMS (any vendor, outbound or inbound), inbound calls, Telnyx voice, Whisper/AssemblyAI STT, additional TTS vendors, recording/diarization — none affect this submission's YAML fields directly, but are why SMS is omitted from the description rather than marked "coming soon" inline (the field itself is a factual capability list, not a pitch).
+- 4-month rule date math: `v0.1.0` published 2026-05-01T05:58:35Z → 4 months = 2026-09-01. `sdk-v0.0.1` (tag 2026-04-24) and `cli-v0.1.0` (tag 2026-04-29) have no GitHub Release; do not cite them.
+- Inbound calls are unchecked in Milestones. "Phone calls" without "inbound" is accurate. Do not reword to "answer calls".
+- Not-yet-shipped items that do not affect the YAML: inbound calls, Telnyx, Whisper/AssemblyAI STT, Deepgram Aura TTS, recording, self-hosted LiveKit SFU.
+- Review turnaround: days to ~2 weeks; merge ≥ ~1 week after approval.
+- Contact used: none yet. Public GitHub PR from `r13i`.
