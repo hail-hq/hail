@@ -14,8 +14,8 @@ Every response from a legacy path carries:
 
 - `Deprecation: true` — this path is deprecated (see the IETF Deprecation
   HTTP header field).
-- `Link: <https://api.hail.so/v1/...>; rel="successor-version"` — the
-  canonical `/v1` path that replaces it.
+- `Link: </v1/...>; rel="successor-version"` — the canonical `/v1` path
+  that replaces it, as a relative path (not an absolute URL).
 
 ## Sunset
 

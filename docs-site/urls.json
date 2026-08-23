@@ -12,5 +12,6 @@
   "/docs/self-host/smtp-inbound",
   "/docs/self-host/twilio",
   "/docs/self-host/vm-deploy",
+  "/docs/versioning",
   "/docs/webhooks"
 ]

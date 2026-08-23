@@ -3,6 +3,7 @@
     "README",
     "mcp",
     "webhooks",
+    "versioning",
     "byo-llm",
     "cli",
     "architecture",

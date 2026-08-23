@@ -133,7 +133,7 @@ shape comes from the event type. Inbound events use [`build_event_data`](https:/
     "spf_verdict": "PASS",
     "dkim_verdict": "PASS",
     "dmarc_verdict": "PASS",
-    "raw_url": "https://api.hail.so/emails/em-uuid/raw",
+    "raw_url": "https://api.hail.so/v1/emails/em-uuid/raw",
     "attachments": [
       {
         "id": "att-uuid",
@@ -214,7 +214,7 @@ re-enable it, set its status back to `active`. Replay a single delivery from the
 console or through the API:
 
 ```bash
-curl -X POST "$HAIL_API_URL/webhooks/<subscription-id>/deliveries/<delivery-id>/redeliver" \
+curl -X POST "$HAIL_API_URL/v1/webhooks/<subscription-id>/deliveries/<delivery-id>/redeliver" \
   -H "Authorization: Bearer $HAIL_API_KEY"
 ```
 
