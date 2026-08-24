@@ -53,7 +53,7 @@ func TestContactsList_HappyPath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if srv.lastReq.Method != http.MethodGet || srv.lastReq.URL.Path != "/contacts" {
+	if srv.lastReq.Method != http.MethodGet || srv.lastReq.URL.Path != "/v1/contacts" {
 		t.Fatalf("unexpected route: %s %s", srv.lastReq.Method, srv.lastReq.URL.Path)
 	}
 	if !strings.Contains(stdout, "Jane Doe") || !strings.Contains(stdout, "Alice Admin") {
@@ -112,7 +112,7 @@ func TestContactsCreate_HappyPath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if srv.lastReq.Method != http.MethodPost || srv.lastReq.URL.Path != "/contacts" {
+	if srv.lastReq.Method != http.MethodPost || srv.lastReq.URL.Path != "/v1/contacts" {
 		t.Fatalf("unexpected route: %s %s", srv.lastReq.Method, srv.lastReq.URL.Path)
 	}
 	if h := srv.lastReq.Header.Get("Idempotency-Key"); h == "" {
@@ -256,7 +256,7 @@ func TestContactsUpdate_HappyPath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if srv.lastReq.Method != http.MethodPatch || srv.lastReq.URL.Path != "/contacts/"+id {
+	if srv.lastReq.Method != http.MethodPatch || srv.lastReq.URL.Path != "/v1/contacts/"+id {
 		t.Fatalf("unexpected route: %s %s", srv.lastReq.Method, srv.lastReq.URL.Path)
 	}
 
@@ -348,7 +348,7 @@ func TestContactsDelete_HappyPath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if srv.lastReq.Method != http.MethodDelete || srv.lastReq.URL.Path != "/contacts/"+id {
+	if srv.lastReq.Method != http.MethodDelete || srv.lastReq.URL.Path != "/v1/contacts/"+id {
 		t.Fatalf("unexpected route: %s %s", srv.lastReq.Method, srv.lastReq.URL.Path)
 	}
 	if !strings.Contains(stdout, "deleted") {
@@ -392,7 +392,7 @@ func TestContactsDelete_MemberIDPassesThrough(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error from server")
 	}
-	if srv.lastReq.URL.Path != "/contacts/member:22222222-2222-2222-2222-222222222222" {
+	if srv.lastReq.URL.Path != "/v1/contacts/member:22222222-2222-2222-2222-222222222222" {
 		t.Errorf("unexpected route: %s", srv.lastReq.URL.Path)
 	}
 }
@@ -411,7 +411,7 @@ func TestContactsSetPhone_HappyPath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if srv.lastReq.Method != http.MethodPut || srv.lastReq.URL.Path != "/members/me/phone" {
+	if srv.lastReq.Method != http.MethodPut || srv.lastReq.URL.Path != "/v1/members/me/phone" {
 		t.Fatalf("unexpected route: %s %s", srv.lastReq.Method, srv.lastReq.URL.Path)
 	}
 
@@ -438,7 +438,7 @@ func TestContactsSetPhone_ExplicitUserID(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if srv.lastReq.URL.Path != "/members/"+userID+"/phone" {
+	if srv.lastReq.URL.Path != "/v1/members/"+userID+"/phone" {
 		t.Fatalf("unexpected route: %s", srv.lastReq.URL.Path)
 	}
 }
@@ -471,7 +471,7 @@ func TestContactsClearPhone_HappyPath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if srv.lastReq.Method != http.MethodDelete || srv.lastReq.URL.Path != "/members/me/phone" {
+	if srv.lastReq.Method != http.MethodDelete || srv.lastReq.URL.Path != "/v1/members/me/phone" {
 		t.Fatalf("unexpected route: %s %s", srv.lastReq.Method, srv.lastReq.URL.Path)
 	}
 	if !strings.Contains(stdout, "cleared") {
@@ -490,7 +490,7 @@ func TestContactsClearPhone_ExplicitUserID(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if srv.lastReq.URL.Path != "/members/"+userID+"/phone" {
+	if srv.lastReq.URL.Path != "/v1/members/"+userID+"/phone" {
 		t.Fatalf("unexpected route: %s", srv.lastReq.URL.Path)
 	}
 }

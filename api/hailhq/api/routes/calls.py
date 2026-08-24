@@ -69,7 +69,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/calls", tags=["calls"])
+router = APIRouter(
+    prefix="/calls", tags=["calls"], responses=GENERAL_RATE_LIMITED_RESPONSES
+)
 
 _DEFAULT_LIST_LIMIT = 50
 _MAX_LIST_LIMIT = 200
@@ -568,7 +570,6 @@ async def create_call(
 @router.get(
     "/{call_id}",
     response_model=CallResponse,
-    responses=GENERAL_RATE_LIMITED_RESPONSES,
 )
 async def get_call(
     call_id: UUID,
@@ -602,7 +603,6 @@ async def get_call(
 @router.get(
     "",
     response_model=CallListResponse,
-    responses=GENERAL_RATE_LIMITED_RESPONSES,
 )
 async def list_calls(
     principal: Annotated[Principal, Depends(get_current_principal)],

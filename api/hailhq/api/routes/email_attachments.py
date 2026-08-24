@@ -28,7 +28,11 @@ from hailhq.core.s3_mail import S3MailClient
 from hailhq.core.schemas import EmailAttachmentUploadResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
-router = APIRouter(prefix="/email-attachments", tags=["email-attachments"])
+router = APIRouter(
+    prefix="/email-attachments",
+    tags=["email-attachments"],
+    responses=GENERAL_RATE_LIMITED_RESPONSES,
+)
 
 _READ_CHUNK_BYTES = 1024 * 1024  # 1MB
 
@@ -38,7 +42,6 @@ _READ_CHUNK_BYTES = 1024 * 1024  # 1MB
     response_model=EmailAttachmentUploadResponse,
     status_code=http_status.HTTP_201_CREATED,
     operation_id="upload_email_attachment",
-    responses=GENERAL_RATE_LIMITED_RESPONSES,
 )
 async def create_email_attachment(
     principal: Annotated[Principal, Depends(get_current_principal)],

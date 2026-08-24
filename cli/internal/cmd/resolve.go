@@ -108,7 +108,7 @@ func resolveIDPrefix[T any](
 func resolveCallID(ctx context.Context, apiClient *client.ClientWithResponses, input string) (uuid.UUID, *client.CallResponse, error) {
 	return resolveIDPrefix(ctx, input, "call",
 		func(ctx context.Context, limit int) ([]client.CallResponse, error) {
-			resp, err := apiClient.ListCallsCallsGetWithResponse(ctx, &client.ListCallsCallsGetParams{Limit: &limit})
+			resp, err := apiClient.ListCallsV1CallsGetWithResponse(ctx, &client.ListCallsV1CallsGetParams{Limit: &limit})
 			if err != nil {
 				return nil, err
 			}
@@ -124,7 +124,7 @@ func resolveCallID(ctx context.Context, apiClient *client.ClientWithResponses, i
 func resolveEmailID(ctx context.Context, apiClient *client.ClientWithResponses, input string) (uuid.UUID, error) {
 	id, _, err := resolveIDPrefix(ctx, input, "email",
 		func(ctx context.Context, limit int) ([]client.EmailSummary, error) {
-			resp, err := apiClient.ListEmailsEmailsGetWithResponse(ctx, &client.ListEmailsEmailsGetParams{Limit: &limit})
+			resp, err := apiClient.ListEmailsV1EmailsGetWithResponse(ctx, &client.ListEmailsV1EmailsGetParams{Limit: &limit})
 			if err != nil {
 				return nil, err
 			}
@@ -141,7 +141,7 @@ func resolveEmailID(ctx context.Context, apiClient *client.ClientWithResponses, 
 func resolveNumberID(ctx context.Context, apiClient *client.ClientWithResponses, input string) (uuid.UUID, error) {
 	id, _, err := resolveIDPrefix(ctx, input, "number",
 		func(ctx context.Context, limit int) ([]client.PhoneNumberResponse, error) {
-			resp, err := apiClient.ListNumbersNumbersGetWithResponse(ctx, &client.ListNumbersNumbersGetParams{Limit: &limit})
+			resp, err := apiClient.ListNumbersV1NumbersGetWithResponse(ctx, &client.ListNumbersV1NumbersGetParams{Limit: &limit})
 			if err != nil {
 				return nil, err
 			}
@@ -158,7 +158,7 @@ func resolveNumberID(ctx context.Context, apiClient *client.ClientWithResponses,
 func resolveEmailDomainID(ctx context.Context, apiClient *client.ClientWithResponses, input string) (uuid.UUID, error) {
 	id, _, err := resolveIDPrefix(ctx, input, "email-domain",
 		func(ctx context.Context, limit int) ([]client.EmailDomainResponse, error) {
-			resp, err := apiClient.ListEmailDomainsEmailDomainsGetWithResponse(ctx, &client.ListEmailDomainsEmailDomainsGetParams{Limit: &limit})
+			resp, err := apiClient.ListEmailDomainsV1EmailDomainsGetWithResponse(ctx, &client.ListEmailDomainsV1EmailDomainsGetParams{Limit: &limit})
 			if err != nil {
 				return nil, err
 			}

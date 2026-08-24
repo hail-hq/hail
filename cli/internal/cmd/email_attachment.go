@@ -64,9 +64,9 @@ func runEmailAttachment(ctx context.Context, cmd *cobra.Command, opts *Options, 
 		return err
 	}
 
-	resp, err := apiClient.GetEmailAttachmentEmailsEmailIdAttachmentsAttachmentIdGet(
+	resp, err := apiClient.GetEmailAttachmentV1EmailsEmailIdAttachmentsAttachmentIdGet(
 		ctx, openapi_types.UUID(emailID), openapi_types.UUID(attachID),
-		&client.GetEmailAttachmentEmailsEmailIdAttachmentsAttachmentIdGetParams{},
+		&client.GetEmailAttachmentV1EmailsEmailIdAttachmentsAttachmentIdGetParams{},
 	)
 	if err != nil {
 		return fmt.Errorf("attachment API: %w", err)
@@ -101,8 +101,8 @@ func resolveAttachmentID(ctx context.Context, apiClient *client.ClientWithRespon
 		return parsed, nil
 	}
 
-	parent, err := apiClient.GetEmailEmailsEmailIdGetWithResponse(
-		ctx, openapi_types.UUID(emailID), &client.GetEmailEmailsEmailIdGetParams{},
+	parent, err := apiClient.GetEmailV1EmailsEmailIdGetWithResponse(
+		ctx, openapi_types.UUID(emailID), &client.GetEmailV1EmailsEmailIdGetParams{},
 	)
 	if err != nil {
 		return uuid.Nil, fmt.Errorf("email API: %w", err)

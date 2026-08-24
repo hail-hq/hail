@@ -144,6 +144,11 @@ async def test_post_calls_idempotency_replay_returns_cached(
     # Same Location header.
     assert second.headers["location"] == f"/calls/{first.json()['id']}"
 
+    # The LiveKit pipeline ran exactly once across both requests.
+    assert livekit_mock.create_room.await_count == 1
+    assert livekit_mock.dispatch_agent.await_count == 1
+    assert livekit_mock.create_sip_participant.await_count == 1
+
 
 async def test_post_v1_calls_idempotency_replay_location_is_v1_prefixed(
     client: httpx.AsyncClient,

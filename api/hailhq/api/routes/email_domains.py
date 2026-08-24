@@ -59,7 +59,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/email-domains", tags=["email-domains"])
+router = APIRouter(
+    prefix="/email-domains",
+    tags=["email-domains"],
+    responses=GENERAL_RATE_LIMITED_RESPONSES,
+)
 
 _DEFAULT_LIST_LIMIT = 50
 _MAX_LIST_LIMIT = 200
@@ -269,7 +273,6 @@ async def _unminted_hail_mail(db: AsyncSession, organization_id: UUID) -> str | 
     "",
     response_model=EmailDomainResponse,
     status_code=http_status.HTTP_201_CREATED,
-    responses=GENERAL_RATE_LIMITED_RESPONSES,
 )
 async def create_email_domain(
     body: EmailDomainCreate,
@@ -395,7 +398,6 @@ async def create_email_domain(
 @router.get(
     "",
     response_model=EmailDomainListResponse,
-    responses=GENERAL_RATE_LIMITED_RESPONSES,
 )
 async def list_email_domains(
     principal: Annotated[Principal, Depends(get_current_principal)],
@@ -439,7 +441,6 @@ async def list_email_domains(
 @router.get(
     "/check-domain",
     response_model=DomainCheckResponse,
-    responses=GENERAL_RATE_LIMITED_RESPONSES,
 )
 async def check_domain(
     domain: str,
@@ -465,7 +466,6 @@ async def check_domain(
 @router.get(
     "/{domain_id}",
     response_model=EmailDomainResponse,
-    responses=GENERAL_RATE_LIMITED_RESPONSES,
 )
 async def get_email_domain(
     domain_id: UUID,
@@ -499,7 +499,6 @@ async def get_email_domain(
 @router.patch(
     "/{domain_id}",
     response_model=EmailDomainResponse,
-    responses=GENERAL_RATE_LIMITED_RESPONSES,
 )
 async def patch_email_domain(
     domain_id: UUID,
@@ -593,7 +592,6 @@ async def patch_email_domain(
 @router.post(
     "/{domain_id}/verify",
     response_model=EmailDomainResponse,
-    responses=GENERAL_RATE_LIMITED_RESPONSES,
 )
 async def verify_email_domain(
     domain_id: UUID,
@@ -714,7 +712,6 @@ async def verify_email_domain(
 @router.delete(
     "/{domain_id}",
     status_code=http_status.HTTP_204_NO_CONTENT,
-    responses=GENERAL_RATE_LIMITED_RESPONSES,
 )
 async def delete_email_domain(
     domain_id: UUID,

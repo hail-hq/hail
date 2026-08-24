@@ -45,7 +45,9 @@ from hailhq.core.secret_cipher import SecretCipher
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-router = APIRouter(prefix="/webhooks", tags=["webhooks"])
+router = APIRouter(
+    prefix="/webhooks", tags=["webhooks"], responses=GENERAL_RATE_LIMITED_RESPONSES
+)
 
 _DEFAULT_LIMIT = 50
 _MAX_LIMIT = 200
@@ -84,7 +86,6 @@ async def _load_owned(
     "",
     response_model=WebhookSubscriptionResponse,
     status_code=http_status.HTTP_201_CREATED,
-    responses=GENERAL_RATE_LIMITED_RESPONSES,
 )
 async def create_subscription(
     body: WebhookSubscriptionCreate,
@@ -130,7 +131,6 @@ async def create_subscription(
 @router.get(
     "",
     response_model=WebhookSubscriptionListResponse,
-    responses=GENERAL_RATE_LIMITED_RESPONSES,
 )
 async def list_subscriptions(
     principal: Annotated[Principal, Depends(get_current_principal)],
@@ -163,7 +163,6 @@ async def list_subscriptions(
 @router.get(
     "/{sub_id}",
     response_model=WebhookSubscriptionResponse,
-    responses=GENERAL_RATE_LIMITED_RESPONSES,
 )
 async def get_subscription(
     sub_id: UUID,
@@ -178,7 +177,6 @@ async def get_subscription(
 @router.patch(
     "/{sub_id}",
     response_model=WebhookSubscriptionResponse,
-    responses=GENERAL_RATE_LIMITED_RESPONSES,
 )
 async def patch_subscription(
     sub_id: UUID,
@@ -235,7 +233,6 @@ async def patch_subscription(
 @router.delete(
     "/{sub_id}",
     status_code=http_status.HTTP_204_NO_CONTENT,
-    responses=GENERAL_RATE_LIMITED_RESPONSES,
 )
 async def delete_subscription(
     sub_id: UUID,
@@ -264,7 +261,6 @@ async def delete_subscription(
 @router.post(
     "/{sub_id}/rotate-secret",
     response_model=WebhookSubscriptionResponse,
-    responses=GENERAL_RATE_LIMITED_RESPONSES,
 )
 async def rotate_secret(
     sub_id: UUID,
@@ -305,7 +301,6 @@ async def rotate_secret(
 @router.get(
     "/{sub_id}/deliveries",
     response_model=WebhookDeliveryListResponse,
-    responses=GENERAL_RATE_LIMITED_RESPONSES,
 )
 async def list_deliveries(
     sub_id: UUID,
@@ -340,7 +335,6 @@ async def list_deliveries(
 @router.post(
     "/{sub_id}/deliveries/{delivery_id}/redeliver",
     response_model=WebhookDeliveryResponse,
-    responses=GENERAL_RATE_LIMITED_RESPONSES,
 )
 async def redeliver(
     sub_id: UUID,

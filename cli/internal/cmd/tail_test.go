@@ -110,7 +110,7 @@ func TestTail_HappyPath_OrgWide(t *testing.T) {
 	if got := atomic.LoadInt32(&hits); got < 2 {
 		t.Errorf("expected at least 2 polls, got %d", got)
 	}
-	if lastReq == nil || lastReq.URL.Path != "/events" {
+	if lastReq == nil || lastReq.URL.Path != "/v1/events" {
 		t.Errorf("expected request path /events, got %v", lastReq)
 	}
 	for _, want := range []string{
@@ -689,7 +689,7 @@ func TestTail_ShortPrefixResolvesViaCallsList(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		switch {
-		case strings.HasPrefix(r.URL.Path, "/calls"):
+		case strings.HasPrefix(r.URL.Path, "/v1/calls"):
 			_ = json.NewEncoder(w).Encode(client.CallListResponse{
 				Items: []client.CallResponse{sampleCall(uuid.UUID(callA).String(), "+15551234567", client.CallResponseStatusCompleted)},
 			})

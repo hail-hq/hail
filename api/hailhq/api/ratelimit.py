@@ -42,6 +42,7 @@ import time
 from typing import Any
 
 from hailhq.api.route_prefixes import INTERNAL_PREFIX as _INTERNAL_PREFIX
+from hailhq.api.route_prefixes import V1_PREFIX as _V1_PREFIX
 from hailhq.core.config import settings
 from limits import RateLimitItem, parse
 from slowapi import Limiter
@@ -97,7 +98,7 @@ _EXEMPT_PATHS = frozenset({"/sms/inbound", "/sms/status", "/unsubscribe"})
 def _is_exempt(path: str) -> bool:
     if path == _HEALTHZ_PATH or path.startswith(_INTERNAL_PREFIX):
         return True
-    unprefixed = path[len("/v1") :] if path.startswith("/v1/") else path
+    unprefixed = path[len(_V1_PREFIX) - 1 :] if path.startswith(_V1_PREFIX) else path
     return unprefixed in _EXEMPT_PATHS
 
 
@@ -118,9 +119,18 @@ class GeneralRateLimitMiddleware(BaseHTTPMiddleware):
 
         key = _rate_limit_key(request)
         item: RateLimitItem = parse(rate_limit_string())
-        allowed = limiter.limiter.hit(item, key)
-        stats = limiter.limiter.get_window_stats(item, key)
-        reset_in = max(int(stats.reset_time - time.time()), 0)
+        # Single atomic incr() instead of hit()+get_window_stats(): the
+        # latter is two separate storage calls, so a concurrent request's
+        # hit() could land between them and the returned Remaining/Reset
+        # headers would reflect that other caller's increment, not this
+        # request's own. incr() returns the post-increment count directly.
+        storage_key = item.key_for(key)
+        count = limiter.limiter.storage.incr(storage_key, item.get_expiry())
+        allowed = count <= item.amount
+        remaining = max(0, item.amount - count)
+        reset_in = max(
+            int(limiter.limiter.storage.get_expiry(storage_key) - time.time()), 0
+        )
 
         if not allowed:
             return JSONResponse(
@@ -134,14 +144,14 @@ class GeneralRateLimitMiddleware(BaseHTTPMiddleware):
                 headers={
                     "Retry-After": str(max(reset_in, 1)),
                     "RateLimit-Limit": str(item.amount),
-                    "RateLimit-Remaining": str(stats.remaining),
+                    "RateLimit-Remaining": str(remaining),
                     "RateLimit-Reset": str(reset_in),
                 },
             )
 
         response = await call_next(request)
         response.headers["RateLimit-Limit"] = str(item.amount)
-        response.headers["RateLimit-Remaining"] = str(stats.remaining)
+        response.headers["RateLimit-Remaining"] = str(remaining)
         response.headers["RateLimit-Reset"] = str(reset_in)
         return response
 

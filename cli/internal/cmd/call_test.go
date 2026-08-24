@@ -96,7 +96,7 @@ func TestCallSubcommand_ModeA_HappyPath(t *testing.T) {
 	if got := atomic.LoadInt32(&srv.hits); got != 1 {
 		t.Fatalf("expected 1 request, got %d", got)
 	}
-	if srv.lastReq.Method != http.MethodPost || srv.lastReq.URL.Path != "/calls" {
+	if srv.lastReq.Method != http.MethodPost || srv.lastReq.URL.Path != "/v1/calls" {
 		t.Fatalf("unexpected route: %s %s", srv.lastReq.Method, srv.lastReq.URL.Path)
 	}
 	if h := srv.lastReq.Header.Get("Authorization"); h != "Bearer sk_test" {

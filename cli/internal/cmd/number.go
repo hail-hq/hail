@@ -95,8 +95,8 @@ func runNumberAcquire(ctx context.Context, cmd *cobra.Command, opts *Options, f 
 		return err
 	}
 
-	resp, err := apiClient.AcquireNumberNumbersPostWithResponse(
-		ctx, &client.AcquireNumberNumbersPostParams{}, body,
+	resp, err := apiClient.AcquireNumberV1NumbersPostWithResponse(
+		ctx, &client.AcquireNumberV1NumbersPostParams{}, body,
 	)
 	if err != nil {
 		return fmt.Errorf("numbers API: %w", err)
@@ -138,11 +138,11 @@ func runNumberList(ctx context.Context, opts *Options, f *numberListFlags) error
 	if err != nil {
 		return err
 	}
-	params := &client.ListNumbersNumbersGetParams{
+	params := &client.ListNumbersV1NumbersGetParams{
 		Limit:  &f.limit,
 		Cursor: strPtr(f.cursor),
 	}
-	resp, err := apiClient.ListNumbersNumbersGetWithResponse(ctx, params)
+	resp, err := apiClient.ListNumbersV1NumbersGetWithResponse(ctx, params)
 	if err != nil {
 		return fmt.Errorf("numbers API: %w", err)
 	}
@@ -180,10 +180,10 @@ func runNumberGet(ctx context.Context, opts *Options, id uuid.UUID) error {
 	if err != nil {
 		return err
 	}
-	resp, err := apiClient.GetNumberNumbersNumberIdGetWithResponse(
+	resp, err := apiClient.GetNumberV1NumbersNumberIdGetWithResponse(
 		ctx,
 		openapi_types.UUID(id),
-		&client.GetNumberNumbersNumberIdGetParams{},
+		&client.GetNumberV1NumbersNumberIdGetParams{},
 	)
 	if err != nil {
 		return fmt.Errorf("numbers API: %w", err)
@@ -225,10 +225,10 @@ func runNumberEnableSms(ctx context.Context, opts *Options, id uuid.UUID) error 
 	if err != nil {
 		return err
 	}
-	resp, err := apiClient.EnableSmsNumbersNumberIdEnableSmsPostWithResponse(
+	resp, err := apiClient.EnableSmsV1NumbersNumberIdEnableSmsPostWithResponse(
 		ctx,
 		openapi_types.UUID(id),
-		&client.EnableSmsNumbersNumberIdEnableSmsPostParams{},
+		&client.EnableSmsV1NumbersNumberIdEnableSmsPostParams{},
 	)
 	if err != nil {
 		return fmt.Errorf("numbers API: %w", err)

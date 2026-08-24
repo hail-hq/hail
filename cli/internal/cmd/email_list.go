@@ -47,19 +47,19 @@ func runEmailList(ctx context.Context, opts *Options, f *emailListFlags) error {
 
 	items, next, err := walkCursor(f.all, f.cursor, opts.Stderr, "emails",
 		func(cursor string) (cursorPage[client.EmailSummary], error) {
-			params := &client.ListEmailsEmailsGetParams{
+			params := &client.ListEmailsV1EmailsGetParams{
 				Limit:  &f.limit,
 				Cursor: strPtr(cursor),
 			}
 			if f.status != "" {
-				s := client.ListEmailsEmailsGetParamsStatus(f.status)
+				s := client.ListEmailsV1EmailsGetParamsStatus(f.status)
 				params.Status = &s
 			}
 			if f.direction != "" {
-				d := client.ListEmailsEmailsGetParamsDirection(f.direction)
+				d := client.ListEmailsV1EmailsGetParamsDirection(f.direction)
 				params.Direction = &d
 			}
-			resp, err := apiClient.ListEmailsEmailsGetWithResponse(ctx, params)
+			resp, err := apiClient.ListEmailsV1EmailsGetWithResponse(ctx, params)
 			if err != nil {
 				return cursorPage[client.EmailSummary]{}, fmt.Errorf("email API: %w", err)
 			}

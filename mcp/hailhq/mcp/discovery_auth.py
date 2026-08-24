@@ -29,6 +29,7 @@ initialize is a resource-exhaustion vector, not just an information leak.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import time
 
@@ -46,6 +47,14 @@ _DISCOVERY_METHODS = frozenset({"initialize", "tools/list"})
 # FastMCP's real auth middleware unmodified and 401s like any other
 # non-safelisted request today.
 _MAX_PEEK_BYTES = 64 * 1024
+
+# Bounds wall-clock time, not just memory: without this, a client that
+# trickles the body in small chunks under _MAX_PEEK_BYTES and never sets
+# more_body=False keeps this coroutine (and its connection) blocked on
+# receive() indefinitely — a Slowloris-style hang the byte cap alone does
+# not catch. 5s is generous for a same-request body that's supposed to be a
+# small JSON-RPC envelope arriving in one or two chunks.
+_MAX_PEEK_SECONDS = 5.0
 
 # Anonymous "initialize" rate cap. FastMCP's session manager (this SDK
 # version) has no idle timeout — session_idle_timeout defaults to None and
@@ -116,8 +125,20 @@ class DiscoveryAuthMiddleware:
         more_body = True
         messages = []
         oversized = False
+        deadline = time.monotonic() + _MAX_PEEK_SECONDS
         while more_body:
-            message = await receive()
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                # Same fallthrough as the oversized case: stop waiting on
+                # this client's body and let the real auth middleware 401
+                # the request unmodified.
+                oversized = True
+                break
+            try:
+                message = await asyncio.wait_for(receive(), timeout=remaining)
+            except asyncio.TimeoutError:
+                oversized = True
+                break
             messages.append(message)
             body += message.get("body", b"")
             more_body = message.get("more_body", False)

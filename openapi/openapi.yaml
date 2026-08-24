@@ -2233,27 +2233,6 @@ paths:
             text/html:
               schema:
                 type: string
-        "429":
-          description:
-            Rate limited. This caller exceeded the general request-rate
-            ceiling. Retry after the Retry-After header (seconds).
-          headers:
-            Retry-After:
-              description: Seconds to wait before retrying.
-              schema:
-                type: integer
-            RateLimit-Limit:
-              description: The request ceiling for the current window.
-              schema:
-                type: integer
-            RateLimit-Remaining:
-              description: Requests remaining in the current window.
-              schema:
-                type: integer
-            RateLimit-Reset:
-              description: Seconds until the current window resets.
-              schema:
-                type: integer
         "422":
           description: Validation Error
           content:

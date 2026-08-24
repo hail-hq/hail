@@ -59,7 +59,7 @@ func TestEmailSend_HappyPath(t *testing.T) {
 	if got := atomic.LoadInt32(&srv.hits); got != 1 {
 		t.Fatalf("expected 1 request, got %d", got)
 	}
-	if srv.lastReq.Method != http.MethodPost || srv.lastReq.URL.Path != "/emails" {
+	if srv.lastReq.Method != http.MethodPost || srv.lastReq.URL.Path != "/v1/emails" {
 		t.Fatalf("unexpected route: %s %s", srv.lastReq.Method, srv.lastReq.URL.Path)
 	}
 	if h := srv.lastReq.Header.Get("Authorization"); h != "Bearer sk_test" {
@@ -367,7 +367,7 @@ func TestEmailSend_AttachFlag(t *testing.T) {
 
 	mux := http.NewServeMux()
 	var sendBody []byte
-	mux.HandleFunc("/email-attachments", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/v1/email-attachments", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusCreated)
 		_ = json.NewEncoder(w).Encode(map[string]any{
@@ -377,7 +377,7 @@ func TestEmailSend_AttachFlag(t *testing.T) {
 			"size_bytes":   9,
 		})
 	})
-	mux.HandleFunc("/emails", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/v1/emails", func(w http.ResponseWriter, r *http.Request) {
 		sendBody, _ = io.ReadAll(r.Body)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusCreated)

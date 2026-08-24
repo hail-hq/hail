@@ -146,7 +146,7 @@ func runCall(cmd *cobra.Command, opts *Options, f *callFlags, toNumber string) e
 		return err
 	}
 
-	resp, err := apiClient.CreateCallCallsPostWithResponse(ctx, &client.CreateCallCallsPostParams{}, body)
+	resp, err := apiClient.CreateCallV1CallsPostWithResponse(ctx, &client.CreateCallV1CallsPostParams{}, body)
 	if err != nil {
 		return fmt.Errorf("call API: %w", err)
 	}

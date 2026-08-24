@@ -34,7 +34,7 @@ from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-router = APIRouter(tags=["contacts"])
+router = APIRouter(tags=["contacts"], responses=GENERAL_RATE_LIMITED_RESPONSES)
 
 _MEMBER_ID_DETAIL = "member contacts are managed via membership"
 _DEFAULT_LIMIT = 100
@@ -85,7 +85,6 @@ async def _member_role(db: AsyncSession, org_id: UUID, user_id: UUID) -> str | N
 @router.get(
     "/contacts",
     response_model=ContactListResponse,
-    responses=GENERAL_RATE_LIMITED_RESPONSES,
 )
 async def list_contacts(
     principal: Annotated[Principal, Depends(get_current_principal)],
@@ -130,7 +129,6 @@ async def list_contacts(
     "/contacts",
     response_model=ContactEntry,
     status_code=http_status.HTTP_201_CREATED,
-    responses=GENERAL_RATE_LIMITED_RESPONSES,
 )
 async def create_contact(
     body: ContactCreate,
@@ -166,7 +164,6 @@ async def create_contact(
 @router.patch(
     "/contacts/{contact_id}",
     response_model=ContactEntry,
-    responses=GENERAL_RATE_LIMITED_RESPONSES,
 )
 async def patch_contact(
     contact_id: str,
@@ -204,7 +201,6 @@ async def patch_contact(
 @router.delete(
     "/contacts/{contact_id}",
     status_code=http_status.HTTP_204_NO_CONTENT,
-    responses=GENERAL_RATE_LIMITED_RESPONSES,
 )
 async def delete_contact(
     contact_id: str,
@@ -261,7 +257,6 @@ async def _resolve_phone_target(
 
 @router.put(
     "/members/{user_id}/phone",
-    responses=GENERAL_RATE_LIMITED_RESPONSES,
 )
 async def put_member_phone(
     user_id: str,
@@ -286,7 +281,6 @@ async def put_member_phone(
 @router.delete(
     "/members/{user_id}/phone",
     status_code=http_status.HTTP_204_NO_CONTENT,
-    responses=GENERAL_RATE_LIMITED_RESPONSES,
 )
 async def delete_member_phone(
     user_id: str,

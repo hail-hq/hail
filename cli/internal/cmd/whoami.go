@@ -37,8 +37,8 @@ func runWhoami(ctx context.Context, opts *Options) error {
 	if err != nil {
 		return err
 	}
-	resp, err := apiClient.GetWhoamiWhoamiGetWithResponse(
-		ctx, &client.GetWhoamiWhoamiGetParams{},
+	resp, err := apiClient.GetWhoamiV1WhoamiGetWithResponse(
+		ctx, &client.GetWhoamiV1WhoamiGetParams{},
 	)
 	if err != nil {
 		return fmt.Errorf("whoami API: %w", err)

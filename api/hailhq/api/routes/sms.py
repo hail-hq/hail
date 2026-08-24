@@ -69,7 +69,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/sms", tags=["sms"])
+router = APIRouter(
+    prefix="/sms", tags=["sms"], responses=GENERAL_RATE_LIMITED_RESPONSES
+)
 
 _DEFAULT_LIST_LIMIT = 50
 _MAX_LIST_LIMIT = 200
@@ -478,7 +480,6 @@ async def receive_sms_status(
 @router.get(
     "/suppressions",
     response_model=SuppressionListResponse,
-    responses=GENERAL_RATE_LIMITED_RESPONSES,
 )
 async def list_sms_suppressions(
     principal: Annotated[Principal, Depends(get_current_principal)],
@@ -513,7 +514,6 @@ async def list_sms_suppressions(
 @router.delete(
     "/suppressions/{number}",
     status_code=http_status.HTTP_204_NO_CONTENT,
-    responses=GENERAL_RATE_LIMITED_RESPONSES,
 )
 async def delete_sms_suppression(
     number: str,
@@ -539,7 +539,6 @@ async def delete_sms_suppression(
 @router.get(
     "/sender-id",
     response_model=SenderIdResponse,
-    responses=GENERAL_RATE_LIMITED_RESPONSES,
 )
 async def get_sender_id(
     principal: Annotated[Principal, Depends(get_current_principal)],
@@ -563,7 +562,6 @@ async def get_sender_id(
 @router.patch(
     "/sender-id",
     response_model=SenderIdResponse,
-    responses=GENERAL_RATE_LIMITED_RESPONSES,
 )
 async def patch_sender_id(
     body: SenderIdPatch,
@@ -613,7 +611,6 @@ async def patch_sender_id(
 @router.get(
     "/{sms_id}",
     response_model=SmsResponse,
-    responses=GENERAL_RATE_LIMITED_RESPONSES,
 )
 async def get_sms(
     sms_id: UUID,
@@ -640,7 +637,6 @@ async def get_sms(
 @router.get(
     "",
     response_model=SmsListResponse,
-    responses=GENERAL_RATE_LIMITED_RESPONSES,
 )
 async def list_sms(
     principal: Annotated[Principal, Depends(get_current_principal)],

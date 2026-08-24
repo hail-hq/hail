@@ -64,7 +64,7 @@ func TestEmailDomain_RegisterHailMail(t *testing.T) {
 	if got := atomic.LoadInt32(&srv.hits); got != 1 {
 		t.Fatalf("expected 1 request, got %d", got)
 	}
-	if srv.lastReq.URL.Path != "/email-domains" {
+	if srv.lastReq.URL.Path != "/v1/email-domains" {
 		t.Fatalf("unexpected path: %s", srv.lastReq.URL.Path)
 	}
 
@@ -190,7 +190,7 @@ func TestEmailDomain_Verify(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if srv.lastReq.URL.Path != "/email-domains/"+id+"/verify" {
+	if srv.lastReq.URL.Path != "/v1/email-domains/"+id+"/verify" {
 		t.Fatalf("unexpected path: %s", srv.lastReq.URL.Path)
 	}
 	if srv.lastReq.Method != http.MethodPost {

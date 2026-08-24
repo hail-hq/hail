@@ -23,13 +23,12 @@ from hailhq.core.schemas import WhoamiResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-router = APIRouter(tags=["whoami"])
+router = APIRouter(tags=["whoami"], responses=GENERAL_RATE_LIMITED_RESPONSES)
 
 
 @router.get(
     "/whoami",
     response_model=WhoamiResponse,
-    responses=GENERAL_RATE_LIMITED_RESPONSES,
 )
 async def get_whoami(
     principal: Annotated[Principal, Depends(get_current_principal)],

@@ -66,14 +66,15 @@ from hailhq.core.schemas import (
 )
 from sqlalchemy.ext.asyncio import AsyncSession
 
-router = APIRouter(prefix="/providers", tags=["providers"])
+router = APIRouter(
+    prefix="/providers", tags=["providers"], responses=GENERAL_RATE_LIMITED_RESPONSES
+)
 
 
 @router.get(
     "",
     response_model=ProviderConfigListResponse,
     operation_id="list_providers",
-    responses=GENERAL_RATE_LIMITED_RESPONSES,
 )
 async def list_providers(
     principal: Annotated[Principal, Depends(get_current_principal)],
@@ -87,7 +88,6 @@ async def list_providers(
     "/{layer}",
     response_model=ProviderConfigEntry,
     operation_id="upsert_provider",
-    responses=GENERAL_RATE_LIMITED_RESPONSES,
 )
 async def upsert_provider(
     layer: str,
@@ -141,7 +141,6 @@ async def upsert_provider(
     "/{layer}/{provider}",
     status_code=204,
     operation_id="delete_provider",
-    responses=GENERAL_RATE_LIMITED_RESPONSES,
 )
 async def delete_provider(
     layer: str,
@@ -159,7 +158,6 @@ async def delete_provider(
     "/{layer}/activate",
     response_model=ProviderConfigEntry,
     operation_id="activate_provider",
-    responses=GENERAL_RATE_LIMITED_RESPONSES,
 )
 async def activate_provider(
     layer: str,
@@ -178,7 +176,6 @@ async def activate_provider(
     "/{layer}/validate",
     response_model=ProviderValidateResult,
     operation_id="validate_provider",
-    responses=GENERAL_RATE_LIMITED_RESPONSES,
 )
 async def validate_provider(
     layer: str,

@@ -103,7 +103,9 @@ from sqlalchemy.orm import defer
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/emails", tags=["emails"])
+router = APIRouter(
+    prefix="/emails", tags=["emails"], responses=GENERAL_RATE_LIMITED_RESPONSES
+)
 
 _DEFAULT_LIST_LIMIT = 50
 _MAX_LIST_LIMIT = 200
@@ -654,7 +656,6 @@ _MAX_EVENTS_LIMIT = 1000
 @router.get(
     "/{email_id}/events",
     response_model=EmailEventListResponse,
-    responses=GENERAL_RATE_LIMITED_RESPONSES,
 )
 async def list_email_events(
     email_id: UUID,
@@ -735,7 +736,6 @@ def _truncate(ts: datetime, bucket: str) -> datetime:
 @router.get(
     "/stats",
     response_model=EmailStatsResponse,
-    responses=GENERAL_RATE_LIMITED_RESPONSES,
 )
 async def get_email_stats(
     principal: Annotated[Principal, Depends(get_current_principal)],
@@ -836,7 +836,6 @@ async def get_email_stats(
 @router.get(
     "/{email_id}",
     response_model=EmailResponse,
-    responses=GENERAL_RATE_LIMITED_RESPONSES,
 )
 async def get_email(
     email_id: UUID,
@@ -899,7 +898,7 @@ async def get_email(
 # --------------------------------------------------------------------------- #
 
 
-@router.get("/{email_id}/raw", responses=GENERAL_RATE_LIMITED_RESPONSES)
+@router.get("/{email_id}/raw")
 async def get_email_raw(
     email_id: UUID,
     principal: Annotated[Principal, Depends(get_current_principal)],
@@ -923,7 +922,6 @@ async def get_email_raw(
 
 @router.get(
     "/{email_id}/attachments/{attachment_id}",
-    responses=GENERAL_RATE_LIMITED_RESPONSES,
 )
 async def get_email_attachment(
     email_id: UUID,
@@ -953,7 +951,6 @@ async def get_email_attachment(
 @router.get(
     "",
     response_model=EmailListResponse,
-    responses=GENERAL_RATE_LIMITED_RESPONSES,
 )
 async def list_emails(
     principal: Annotated[Principal, Depends(get_current_principal)],

@@ -32,7 +32,7 @@ func TestEmailAttachmentUpload_HappyPath(t *testing.T) {
 	if !strings.Contains(stdout, "11111111-1111-1111-1111-111111111111") {
 		t.Errorf("stdout missing id: %q", stdout)
 	}
-	if srv.lastReq.URL.Path != "/email-attachments" {
+	if srv.lastReq.URL.Path != "/v1/email-attachments" {
 		t.Fatalf("unexpected route: %s", srv.lastReq.URL.Path)
 	}
 }

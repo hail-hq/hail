@@ -37,7 +37,9 @@ from sqlalchemy import literal, select, union_all
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.ext.asyncio import AsyncSession
 
-router = APIRouter(prefix="/events", tags=["events"])
+router = APIRouter(
+    prefix="/events", tags=["events"], responses=GENERAL_RATE_LIMITED_RESPONSES
+)
 
 
 # Typed NULL for the id columns a source doesn't own. An untyped
@@ -147,7 +149,6 @@ async def _require_owned(
 @router.get(
     "",
     response_model=EventStreamResponse,
-    responses=GENERAL_RATE_LIMITED_RESPONSES,
 )
 async def list_events(
     principal: Annotated[Principal, Depends(get_current_principal)],

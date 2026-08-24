@@ -876,86 +876,86 @@ func (e WhoamiResponseAuthKind) Valid() bool {
 	}
 }
 
-// Defines values for ListCallsCallsGetParamsStatus.
+// Defines values for ListCallsV1CallsGetParamsStatus.
 const (
-	ListCallsCallsGetParamsStatusBusy       ListCallsCallsGetParamsStatus = "busy"
-	ListCallsCallsGetParamsStatusCanceled   ListCallsCallsGetParamsStatus = "canceled"
-	ListCallsCallsGetParamsStatusCompleted  ListCallsCallsGetParamsStatus = "completed"
-	ListCallsCallsGetParamsStatusDialing    ListCallsCallsGetParamsStatus = "dialing"
-	ListCallsCallsGetParamsStatusFailed     ListCallsCallsGetParamsStatus = "failed"
-	ListCallsCallsGetParamsStatusInProgress ListCallsCallsGetParamsStatus = "in_progress"
-	ListCallsCallsGetParamsStatusNoAnswer   ListCallsCallsGetParamsStatus = "no_answer"
-	ListCallsCallsGetParamsStatusQueued     ListCallsCallsGetParamsStatus = "queued"
-	ListCallsCallsGetParamsStatusRinging    ListCallsCallsGetParamsStatus = "ringing"
+	ListCallsV1CallsGetParamsStatusBusy       ListCallsV1CallsGetParamsStatus = "busy"
+	ListCallsV1CallsGetParamsStatusCanceled   ListCallsV1CallsGetParamsStatus = "canceled"
+	ListCallsV1CallsGetParamsStatusCompleted  ListCallsV1CallsGetParamsStatus = "completed"
+	ListCallsV1CallsGetParamsStatusDialing    ListCallsV1CallsGetParamsStatus = "dialing"
+	ListCallsV1CallsGetParamsStatusFailed     ListCallsV1CallsGetParamsStatus = "failed"
+	ListCallsV1CallsGetParamsStatusInProgress ListCallsV1CallsGetParamsStatus = "in_progress"
+	ListCallsV1CallsGetParamsStatusNoAnswer   ListCallsV1CallsGetParamsStatus = "no_answer"
+	ListCallsV1CallsGetParamsStatusQueued     ListCallsV1CallsGetParamsStatus = "queued"
+	ListCallsV1CallsGetParamsStatusRinging    ListCallsV1CallsGetParamsStatus = "ringing"
 )
 
-// Valid indicates whether the value is a known member of the ListCallsCallsGetParamsStatus enum.
-func (e ListCallsCallsGetParamsStatus) Valid() bool {
+// Valid indicates whether the value is a known member of the ListCallsV1CallsGetParamsStatus enum.
+func (e ListCallsV1CallsGetParamsStatus) Valid() bool {
 	switch e {
-	case ListCallsCallsGetParamsStatusBusy:
+	case ListCallsV1CallsGetParamsStatusBusy:
 		return true
-	case ListCallsCallsGetParamsStatusCanceled:
+	case ListCallsV1CallsGetParamsStatusCanceled:
 		return true
-	case ListCallsCallsGetParamsStatusCompleted:
+	case ListCallsV1CallsGetParamsStatusCompleted:
 		return true
-	case ListCallsCallsGetParamsStatusDialing:
+	case ListCallsV1CallsGetParamsStatusDialing:
 		return true
-	case ListCallsCallsGetParamsStatusFailed:
+	case ListCallsV1CallsGetParamsStatusFailed:
 		return true
-	case ListCallsCallsGetParamsStatusInProgress:
+	case ListCallsV1CallsGetParamsStatusInProgress:
 		return true
-	case ListCallsCallsGetParamsStatusNoAnswer:
+	case ListCallsV1CallsGetParamsStatusNoAnswer:
 		return true
-	case ListCallsCallsGetParamsStatusQueued:
+	case ListCallsV1CallsGetParamsStatusQueued:
 		return true
-	case ListCallsCallsGetParamsStatusRinging:
+	case ListCallsV1CallsGetParamsStatusRinging:
 		return true
 	default:
 		return false
 	}
 }
 
-// Defines values for ListEmailsEmailsGetParamsStatus.
+// Defines values for ListEmailsV1EmailsGetParamsStatus.
 const (
-	ListEmailsEmailsGetParamsStatusBounced    ListEmailsEmailsGetParamsStatus = "bounced"
-	ListEmailsEmailsGetParamsStatusComplained ListEmailsEmailsGetParamsStatus = "complained"
-	ListEmailsEmailsGetParamsStatusDelivered  ListEmailsEmailsGetParamsStatus = "delivered"
-	ListEmailsEmailsGetParamsStatusFailed     ListEmailsEmailsGetParamsStatus = "failed"
-	ListEmailsEmailsGetParamsStatusQueued     ListEmailsEmailsGetParamsStatus = "queued"
-	ListEmailsEmailsGetParamsStatusReceived   ListEmailsEmailsGetParamsStatus = "received"
-	ListEmailsEmailsGetParamsStatusSent       ListEmailsEmailsGetParamsStatus = "sent"
+	ListEmailsV1EmailsGetParamsStatusBounced    ListEmailsV1EmailsGetParamsStatus = "bounced"
+	ListEmailsV1EmailsGetParamsStatusComplained ListEmailsV1EmailsGetParamsStatus = "complained"
+	ListEmailsV1EmailsGetParamsStatusDelivered  ListEmailsV1EmailsGetParamsStatus = "delivered"
+	ListEmailsV1EmailsGetParamsStatusFailed     ListEmailsV1EmailsGetParamsStatus = "failed"
+	ListEmailsV1EmailsGetParamsStatusQueued     ListEmailsV1EmailsGetParamsStatus = "queued"
+	ListEmailsV1EmailsGetParamsStatusReceived   ListEmailsV1EmailsGetParamsStatus = "received"
+	ListEmailsV1EmailsGetParamsStatusSent       ListEmailsV1EmailsGetParamsStatus = "sent"
 )
 
-// Valid indicates whether the value is a known member of the ListEmailsEmailsGetParamsStatus enum.
-func (e ListEmailsEmailsGetParamsStatus) Valid() bool {
+// Valid indicates whether the value is a known member of the ListEmailsV1EmailsGetParamsStatus enum.
+func (e ListEmailsV1EmailsGetParamsStatus) Valid() bool {
 	switch e {
-	case ListEmailsEmailsGetParamsStatusBounced:
+	case ListEmailsV1EmailsGetParamsStatusBounced:
 		return true
-	case ListEmailsEmailsGetParamsStatusComplained:
+	case ListEmailsV1EmailsGetParamsStatusComplained:
 		return true
-	case ListEmailsEmailsGetParamsStatusDelivered:
+	case ListEmailsV1EmailsGetParamsStatusDelivered:
 		return true
-	case ListEmailsEmailsGetParamsStatusFailed:
+	case ListEmailsV1EmailsGetParamsStatusFailed:
 		return true
-	case ListEmailsEmailsGetParamsStatusQueued:
+	case ListEmailsV1EmailsGetParamsStatusQueued:
 		return true
-	case ListEmailsEmailsGetParamsStatusReceived:
+	case ListEmailsV1EmailsGetParamsStatusReceived:
 		return true
-	case ListEmailsEmailsGetParamsStatusSent:
+	case ListEmailsV1EmailsGetParamsStatusSent:
 		return true
 	default:
 		return false
 	}
 }
 
-// Defines values for ListEmailsEmailsGetParamsDirection.
+// Defines values for ListEmailsV1EmailsGetParamsDirection.
 const (
-	Inbound  ListEmailsEmailsGetParamsDirection = "inbound"
-	Outbound ListEmailsEmailsGetParamsDirection = "outbound"
+	Inbound  ListEmailsV1EmailsGetParamsDirection = "inbound"
+	Outbound ListEmailsV1EmailsGetParamsDirection = "outbound"
 )
 
-// Valid indicates whether the value is a known member of the ListEmailsEmailsGetParamsDirection enum.
-func (e ListEmailsEmailsGetParamsDirection) Valid() bool {
+// Valid indicates whether the value is a known member of the ListEmailsV1EmailsGetParamsDirection enum.
+func (e ListEmailsV1EmailsGetParamsDirection) Valid() bool {
 	switch e {
 	case Inbound:
 		return true
@@ -966,36 +966,36 @@ func (e ListEmailsEmailsGetParamsDirection) Valid() bool {
 	}
 }
 
-// Defines values for GetEmailStatsEmailsStatsGetParamsBucket.
+// Defines values for GetEmailStatsV1EmailsStatsGetParamsBucket.
 const (
-	GetEmailStatsEmailsStatsGetParamsBucketDay  GetEmailStatsEmailsStatsGetParamsBucket = "day"
-	GetEmailStatsEmailsStatsGetParamsBucketHour GetEmailStatsEmailsStatsGetParamsBucket = "hour"
+	GetEmailStatsV1EmailsStatsGetParamsBucketDay  GetEmailStatsV1EmailsStatsGetParamsBucket = "day"
+	GetEmailStatsV1EmailsStatsGetParamsBucketHour GetEmailStatsV1EmailsStatsGetParamsBucket = "hour"
 )
 
-// Valid indicates whether the value is a known member of the GetEmailStatsEmailsStatsGetParamsBucket enum.
-func (e GetEmailStatsEmailsStatsGetParamsBucket) Valid() bool {
+// Valid indicates whether the value is a known member of the GetEmailStatsV1EmailsStatsGetParamsBucket enum.
+func (e GetEmailStatsV1EmailsStatsGetParamsBucket) Valid() bool {
 	switch e {
-	case GetEmailStatsEmailsStatsGetParamsBucketDay:
+	case GetEmailStatsV1EmailsStatsGetParamsBucketDay:
 		return true
-	case GetEmailStatsEmailsStatsGetParamsBucketHour:
+	case GetEmailStatsV1EmailsStatsGetParamsBucketHour:
 		return true
 	default:
 		return false
 	}
 }
 
-// Defines values for ListSmsSmsGetParamsStatus.
+// Defines values for ListSmsV1SmsGetParamsStatus.
 const (
-	Delivered   ListSmsSmsGetParamsStatus = "delivered"
-	Failed      ListSmsSmsGetParamsStatus = "failed"
-	Queued      ListSmsSmsGetParamsStatus = "queued"
-	Received    ListSmsSmsGetParamsStatus = "received"
-	Sent        ListSmsSmsGetParamsStatus = "sent"
-	Undelivered ListSmsSmsGetParamsStatus = "undelivered"
+	Delivered   ListSmsV1SmsGetParamsStatus = "delivered"
+	Failed      ListSmsV1SmsGetParamsStatus = "failed"
+	Queued      ListSmsV1SmsGetParamsStatus = "queued"
+	Received    ListSmsV1SmsGetParamsStatus = "received"
+	Sent        ListSmsV1SmsGetParamsStatus = "sent"
+	Undelivered ListSmsV1SmsGetParamsStatus = "undelivered"
 )
 
-// Valid indicates whether the value is a known member of the ListSmsSmsGetParamsStatus enum.
-func (e ListSmsSmsGetParamsStatus) Valid() bool {
+// Valid indicates whether the value is a known member of the ListSmsV1SmsGetParamsStatus enum.
+func (e ListSmsV1SmsGetParamsStatus) Valid() bool {
 	switch e {
 	case Delivered:
 		return true
@@ -1016,6 +1016,7 @@ func (e ListSmsSmsGetParamsStatus) Valid() bool {
 
 // BodyUploadEmailAttachment defines model for Body_upload_email_attachment.
 type BodyUploadEmailAttachment struct {
+	// File The file to upload, as multipart/form-data. Size-limited; an oversize upload is rejected with 422.
 	File string `json:"file"`
 }
 
@@ -1028,20 +1029,34 @@ type CallCreate struct {
 	ConsentObtainedAt *time.Time `json:"consent_obtained_at,omitempty"`
 
 	// ConsentSource Where/how consent was obtained (e.g. 'signup form', 'prior customer relationship'). Required (non-empty) when message_type is 'marketing'.
-	ConsentSource  *string             `json:"consent_source,omitempty"`
+	ConsentSource *string `json:"consent_source,omitempty"`
+
+	// ConversationId Groups this call with other calls/emails/SMS into one conversation thread. Omitted: the call is not linked to a conversation.
 	ConversationId *openapi_types.UUID `json:"conversation_id,omitempty"`
-	FirstMessage   *string             `json:"first_message,omitempty"`
-	From           *string             `json:"from,omitempty"`
-	Llm            *LLMConfig          `json:"llm,omitempty"`
+
+	// FirstMessage Opening line the agent speaks first. Omitted: the agent waits for the callee to speak first.
+	FirstMessage *string `json:"first_message,omitempty"`
+
+	// From Caller-id phone number, E.164 format. Must be a number owned by the organization with the voice capability. Omitted: an active org-owned number is used if one exists, else a number is claimed from the shared pool.
+	From *string `json:"from,omitempty"`
+
+	// Llm BYO LLM endpoint the call runs on instead of Hail's default model. At least one of system_prompt or llm is required; both together is also valid.
+	Llm *LLMConfig `json:"llm,omitempty"`
 
 	// MessageType 'marketing' additionally requires a non-empty consent_source. Use 'informational' for transactional/service communications.
-	MessageType *CallCreateMessageType  `json:"message_type,omitempty"`
-	Metadata    *map[string]interface{} `json:"metadata,omitempty"`
+	MessageType *CallCreateMessageType `json:"message_type,omitempty"`
+
+	// Metadata Free-form JSON object attached to the call and echoed back on reads. Not interpreted by Hail.
+	Metadata *map[string]interface{} `json:"metadata,omitempty"`
 
 	// RecipientConsent Attestation that you have obtained the lawful consent required to contact this recipient. Hail does not verify consent itself — you are responsible for a lawful basis under TCPA/ePrivacy/PECR/CAN-SPAM/GDPR as applicable. Rejected (422) if not true.
-	RecipientConsent bool    `json:"recipient_consent"`
-	SystemPrompt     *string `json:"system_prompt,omitempty"`
-	To               string  `json:"to"`
+	RecipientConsent bool `json:"recipient_consent"`
+
+	// SystemPrompt Task instructions for the agent, sent as its leading system message. At least one of system_prompt or llm is required; both together is also valid.
+	SystemPrompt *string `json:"system_prompt,omitempty"`
+
+	// To Recipient phone number, E.164 format (e.g. +14155551234).
+	To string `json:"to"`
 
 	// Tools Agent tools to allow on this call. Omitted: every tool the organization's configured channels support (new channels appear automatically). Empty list: no tools. Tool names are validated against the server's registry.
 	Tools       *[]string    `json:"tools,omitempty"`
@@ -1053,40 +1068,79 @@ type CallCreateMessageType string
 
 // CallListResponse defines model for CallListResponse.
 type CallListResponse struct {
-	Items      []CallResponse `json:"items"`
-	NextCursor *string        `json:"next_cursor,omitempty"`
+	// Items Calls in this page, newest first.
+	Items []CallResponse `json:"items"`
+
+	// NextCursor Opaque cursor for the next page. Null when there are no more results.
+	NextCursor *string `json:"next_cursor,omitempty"`
 }
 
 // CallResponse defines model for CallResponse.
 type CallResponse struct {
-	AnsweredAt      *time.Time            `json:"answered_at"`
-	ConversationId  *openapi_types.UUID   `json:"conversation_id"`
-	Direction       CallResponseDirection `json:"direction"`
-	EndReason       *string               `json:"end_reason"`
-	EndedAt         *time.Time            `json:"ended_at"`
-	FromE164        string                `json:"from_e164"`
-	Id              openapi_types.UUID    `json:"id"`
-	InitialPrompt   *string               `json:"initial_prompt"`
-	LivekitRoom     *string               `json:"livekit_room"`
-	OrganizationId  openapi_types.UUID    `json:"organization_id"`
-	ProviderCallSid *string               `json:"provider_call_sid"`
-	RecordingS3Key  *string               `json:"recording_s3_key"`
-	RequestedAt     time.Time             `json:"requested_at"`
-	StartedAt       *time.Time            `json:"started_at"`
-	Status          CallResponseStatus    `json:"status"`
-	ToE164          string                `json:"to_e164"`
+	// AnsweredAt When the callee answered, ISO 8601 timestamp. Null if never answered.
+	AnsweredAt *time.Time `json:"answered_at"`
+
+	// ConversationId Conversation thread this call is grouped into, if any. Null when the call was not linked to a conversation.
+	ConversationId *openapi_types.UUID `json:"conversation_id"`
+
+	// Direction 'outbound' for calls Hail placed, 'inbound' for calls received.
+	Direction CallResponseDirection `json:"direction"`
+
+	// EndReason Machine-readable reason the call reached a terminal status (e.g. 'normal_hangup', 'user_rejected', 'sip_trunk_failure'). Null while the call is still in progress.
+	EndReason *string `json:"end_reason"`
+
+	// EndedAt When the call ended, ISO 8601 timestamp. Null while still in progress.
+	EndedAt *time.Time `json:"ended_at"`
+
+	// FromE164 Caller-id phone number used, E.164 format.
+	FromE164 string `json:"from_e164"`
+
+	// Id Unique identifier for this call.
+	Id openapi_types.UUID `json:"id"`
+
+	// InitialPrompt The system_prompt this call was created with, if any.
+	InitialPrompt *string `json:"initial_prompt"`
+
+	// LivekitRoom Name of the LiveKit room hosting this call's media session, if one was created.
+	LivekitRoom *string `json:"livekit_room"`
+
+	// OrganizationId Organization that placed or received this call.
+	OrganizationId openapi_types.UUID `json:"organization_id"`
+
+	// ProviderCallSid The telephony provider's identifier for this call leg, if assigned.
+	ProviderCallSid *string `json:"provider_call_sid"`
+
+	// RecordingS3Key Internal storage key for the call recording. Not a directly fetchable URL.
+	RecordingS3Key *string `json:"recording_s3_key"`
+
+	// RequestedAt When the call was requested, ISO 8601 timestamp.
+	RequestedAt time.Time `json:"requested_at"`
+
+	// StartedAt When dialing began, ISO 8601 timestamp. Null until the call starts.
+	StartedAt *time.Time `json:"started_at"`
+
+	// Status Current call-progress state: 'queued', 'dialing', 'ringing', 'in_progress', or one of the terminal states 'completed', 'failed', 'busy', 'no_answer', 'canceled'.
+	Status CallResponseStatus `json:"status"`
+
+	// ToE164 Recipient phone number, E.164 format.
+	ToE164 string `json:"to_e164"`
 }
 
-// CallResponseDirection defines model for CallResponse.Direction.
+// CallResponseDirection 'outbound' for calls Hail placed, 'inbound' for calls received.
 type CallResponseDirection string
 
-// CallResponseStatus defines model for CallResponse.Status.
+// CallResponseStatus Current call-progress state: 'queued', 'dialing', 'ringing', 'in_progress', or one of the terminal states 'completed', 'failed', 'busy', 'no_answer', 'canceled'.
 type CallResponseStatus string
 
 // ContactCreate defines model for ContactCreate.
 type ContactCreate struct {
-	Email     *string `json:"email,omitempty"`
-	Name      string  `json:"name"`
+	// Email Email address, stored lowercased. At least one of phone_e164 or email is required.
+	Email *string `json:"email,omitempty"`
+
+	// Name Display name for the contact.
+	Name string `json:"name"`
+
+	// PhoneE164 Phone number, E.164 format. At least one of phone_e164 or email is required.
 	PhoneE164 *string `json:"phone_e164,omitempty"`
 }
 
@@ -1094,27 +1148,46 @@ type ContactCreate struct {
 // contact. “id“ is “member:<user_id>“ for members, the contact row's
 // UUID (as str) for manual rows.
 type ContactEntry struct {
-	Email     *string          `json:"email,omitempty"`
-	Id        string           `json:"id"`
-	Kind      ContactEntryKind `json:"kind"`
-	Name      string           `json:"name"`
-	PhoneE164 *string          `json:"phone_e164,omitempty"`
-	Role      *string          `json:"role,omitempty"`
+	// Email Email address. Null if none on file.
+	Email *string `json:"email,omitempty"`
+
+	// Id 'member:<user_id>' for an org member, or the contact row's UUID (as a string) for a manual contact.
+	Id string `json:"id"`
+
+	// Kind 'member' if this row is a member of the organization, 'manual' if it was added as a contact.
+	Kind ContactEntryKind `json:"kind"`
+
+	// Name Display name.
+	Name string `json:"name"`
+
+	// PhoneE164 Phone number, E.164 format. Null if none on file.
+	PhoneE164 *string `json:"phone_e164,omitempty"`
+
+	// Role Organization role (e.g. 'owner', 'admin', 'member') for kind='member'. Always null for kind='manual'.
+	Role *string `json:"role,omitempty"`
 }
 
-// ContactEntryKind defines model for ContactEntry.Kind.
+// ContactEntryKind 'member' if this row is a member of the organization, 'manual' if it was added as a contact.
 type ContactEntryKind string
 
 // ContactListResponse defines model for ContactListResponse.
 type ContactListResponse struct {
-	Items      []ContactEntry `json:"items"`
-	NextCursor *string        `json:"next_cursor,omitempty"`
+	// Items Contacts in this page.
+	Items []ContactEntry `json:"items"`
+
+	// NextCursor Opaque cursor for the next page. Null when there are no more results.
+	NextCursor *string `json:"next_cursor,omitempty"`
 }
 
 // ContactPatch defines model for ContactPatch.
 type ContactPatch struct {
-	Email     *string `json:"email,omitempty"`
-	Name      *string `json:"name,omitempty"`
+	// Email New email address, stored lowercased. Omit to leave unchanged; explicit null clears it. The contact must keep at least one of phone_e164 or email.
+	Email *string `json:"email,omitempty"`
+
+	// Name New display name. Omit to leave unchanged; cannot be set to null.
+	Name *string `json:"name,omitempty"`
+
+	// PhoneE164 New phone number, E.164 format. Omit to leave unchanged; explicit null clears it. The contact must keep at least one of phone_e164 or email.
 	PhoneE164 *string `json:"phone_e164,omitempty"`
 }
 
@@ -1122,22 +1195,36 @@ type ContactPatch struct {
 //
 // Covers DKIM CNAMEs, MAIL FROM MX, and SPF TXT records.
 type DnsRecordSchema struct {
-	Name                 string                 `json:"name"`
-	Priority             *int                   `json:"priority,omitempty"`
-	Type                 *DnsRecordSchemaType   `json:"type,omitempty"`
+	// Name DNS record name/host to publish (e.g. a CNAME's subdomain).
+	Name string `json:"name"`
+
+	// Priority MX priority. Only present for type='MX'; null otherwise.
+	Priority *int `json:"priority,omitempty"`
+
+	// Type DNS record type: 'CNAME' (DKIM), 'MX' (MAIL FROM), or 'TXT' (SPF).
+	Type *DnsRecordSchemaType `json:"type,omitempty"`
+
+	// Value DNS record value to publish (e.g. a CNAME target or TXT content).
 	Value                string                 `json:"value"`
 	AdditionalProperties map[string]interface{} `json:"-"`
 }
 
-// DnsRecordSchemaType defines model for DnsRecordSchema.Type.
+// DnsRecordSchemaType DNS record type: 'CNAME' (DKIM), 'MX' (MAIL FROM), or 'TXT' (SPF).
 type DnsRecordSchemaType string
 
 // DomainCheckResponse defines model for DomainCheckResponse.
 type DomainCheckResponse struct {
-	Domain          string   `json:"domain"`
-	ExistingMx      []string `json:"existing_mx"`
-	InUse           bool     `json:"in_use"`
-	SuggestedDomain string   `json:"suggested_domain"`
+	// Domain The apex domain that was checked, lowercased.
+	Domain string `json:"domain"`
+
+	// ExistingMx MX hostnames currently published for the domain. Empty when in_use is false.
+	ExistingMx []string `json:"existing_mx"`
+
+	// InUse True if the domain already has MX records — it receives mail elsewhere.
+	InUse bool `json:"in_use"`
+
+	// SuggestedDomain Domain to use for a custom sending identity: the apex domain if it is not already receiving mail, or an 'inbox.' subdomain if it is (so setup doesn't collide with existing mail).
+	SuggestedDomain string `json:"suggested_domain"`
 }
 
 // EmailAttachmentResponse One inbound MIME attachment as exposed to API consumers.
@@ -1145,12 +1232,23 @@ type DomainCheckResponse struct {
 // “url“ is the stable Hail API endpoint that 302-redirects to a
 // presigned S3 URL on access — see GET /emails/{id}/attachments/{aid}.
 type EmailAttachmentResponse struct {
-	ContentId   *string            `json:"content_id,omitempty"`
-	ContentType string             `json:"content_type"`
-	Filename    string             `json:"filename"`
-	Id          openapi_types.UUID `json:"id"`
-	SizeBytes   int                `json:"size_bytes"`
-	Url         string             `json:"url"`
+	// ContentId MIME Content-ID, present when this attachment is referenced inline (cid:) from the HTML body. Null otherwise.
+	ContentId *string `json:"content_id,omitempty"`
+
+	// ContentType MIME type of the attachment.
+	ContentType string `json:"content_type"`
+
+	// Filename Original filename of the attachment.
+	Filename string `json:"filename"`
+
+	// Id Unique identifier for this attachment.
+	Id openapi_types.UUID `json:"id"`
+
+	// SizeBytes Size of the attachment in bytes.
+	SizeBytes int `json:"size_bytes"`
+
+	// Url API endpoint that 302-redirects to a presigned download URL for this attachment.
+	Url string `json:"url"`
 }
 
 // EmailAttachmentUploadResponse Returned by POST /email-attachments.
@@ -1159,38 +1257,68 @@ type EmailAttachmentResponse struct {
 // “EmailCreate.attachment_ids“ until Hail garbage-collects it (24h
 // if never referenced by a send).
 type EmailAttachmentUploadResponse struct {
-	ContentType string             `json:"content_type"`
-	Filename    string             `json:"filename"`
-	Id          openapi_types.UUID `json:"id"`
-	SizeBytes   int                `json:"size_bytes"`
+	// ContentType MIME type of the uploaded file.
+	ContentType string `json:"content_type"`
+
+	// Filename Original filename of the uploaded file.
+	Filename string `json:"filename"`
+
+	// Id Reusable attachment id — pass it in EmailCreate.attachment_ids to attach it to a send.
+	Id openapi_types.UUID `json:"id"`
+
+	// SizeBytes Size of the uploaded file in bytes.
+	SizeBytes int `json:"size_bytes"`
 }
 
 // EmailCreate defines model for EmailCreate.
 type EmailCreate struct {
+	// AttachmentIds Ids returned by POST /email-attachments to attach to this send. Omitted: no attachments.
 	AttachmentIds *[]openapi_types.UUID `json:"attachment_ids,omitempty"`
-	Bcc           *[]string             `json:"bcc,omitempty"`
-	BodyHtml      *string               `json:"body_html,omitempty"`
-	BodyText      *string               `json:"body_text,omitempty"`
-	Cc            *[]string             `json:"cc,omitempty"`
+
+	// Bcc BCC recipient email addresses.
+	Bcc *[]string `json:"bcc,omitempty"`
+
+	// BodyHtml HTML body. Either body_text or body_html (or both) is required.
+	BodyHtml *string `json:"body_html,omitempty"`
+
+	// BodyText Plain-text body. Either body_text or body_html (or both) is required.
+	BodyText *string `json:"body_text,omitempty"`
+
+	// Cc CC recipient email addresses.
+	Cc *[]string `json:"cc,omitempty"`
 
 	// ConsentObtainedAt When consent was obtained, if known.
 	ConsentObtainedAt *time.Time `json:"consent_obtained_at,omitempty"`
 
 	// ConsentSource Where/how consent was obtained (e.g. 'signup form', 'prior customer relationship'). Required (non-empty) when message_type is 'marketing'.
-	ConsentSource  *string             `json:"consent_source,omitempty"`
+	ConsentSource *string `json:"consent_source,omitempty"`
+
+	// ConversationId Groups this email with other calls/emails/SMS into one conversation thread. Omitted: the email is not linked to a conversation.
 	ConversationId *openapi_types.UUID `json:"conversation_id,omitempty"`
-	From           *string             `json:"from,omitempty"`
-	FromName       *string             `json:"from_name,omitempty"`
+
+	// From Sender email address. Must be a verified identity on the organization's email domains. Omitted: the org's resolved default sending address, if one exists.
+	From *string `json:"from,omitempty"`
+
+	// FromName Display name for the From: header (e.g. 'Acme Billing'). Omitted: no display name.
+	FromName *string `json:"from_name,omitempty"`
 
 	// MessageType 'marketing' additionally requires a non-empty consent_source. Use 'informational' for transactional/service communications.
 	MessageType *EmailCreateMessageType `json:"message_type,omitempty"`
-	Metadata    *map[string]interface{} `json:"metadata,omitempty"`
+
+	// Metadata Free-form JSON object attached to the email and echoed back on reads. Not interpreted by Hail.
+	Metadata *map[string]interface{} `json:"metadata,omitempty"`
 
 	// RecipientConsent Attestation that you have obtained the lawful consent required to contact this recipient. Hail does not verify consent itself — you are responsible for a lawful basis under TCPA/ePrivacy/PECR/CAN-SPAM/GDPR as applicable. Rejected (422) if not true.
-	RecipientConsent bool     `json:"recipient_consent"`
-	ReplyTo          *string  `json:"reply_to,omitempty"`
-	Subject          string   `json:"subject"`
-	To               []string `json:"to"`
+	RecipientConsent bool `json:"recipient_consent"`
+
+	// ReplyTo Reply-To email address. Omitted: replies go to the From address.
+	ReplyTo *string `json:"reply_to,omitempty"`
+
+	// Subject Email subject line.
+	Subject string `json:"subject"`
+
+	// To Recipient email addresses. At least one required.
+	To []string `json:"to"`
 }
 
 // EmailCreateMessageType 'marketing' additionally requires a non-empty consent_source. Use 'informational' for transactional/service communications.
@@ -1205,20 +1333,32 @@ type EmailCreateMessageType string
 // neither is supplied. For “kind='custom'“ “domain“ is required and
 // the prefix fields must be omitted.
 type EmailDomainCreate struct {
-	Domain          *string               `json:"domain,omitempty"`
-	Kind            EmailDomainCreateKind `json:"kind"`
-	LocalPrefixOrg  *string               `json:"local_prefix_org,omitempty"`
-	LocalPrefixUser *string               `json:"local_prefix_user,omitempty"`
+	// Domain DNS domain to send from (e.g. 'acme.com'). Required for kind='custom'; must be omitted for kind='hail_mail'.
+	Domain *string `json:"domain,omitempty"`
+
+	// Kind 'hail_mail' for a Hail-hosted address (domain omitted, composed from the prefix fields), or 'custom' to send from your own domain (domain required, prefix fields omitted).
+	Kind EmailDomainCreateKind `json:"kind"`
+
+	// LocalPrefixOrg Org-chosen local-part prefix for a hail_mail address. Only valid for kind='hail_mail'. Falls back to HAIL_MAIL_DEFAULT_ORG_PREFIX if omitted.
+	LocalPrefixOrg *string `json:"local_prefix_org,omitempty"`
+
+	// LocalPrefixUser User-chosen local-part prefix for a hail_mail address. Only valid for kind='hail_mail'. Falls back to HAIL_MAIL_DEFAULT_USER_PREFIX if omitted.
+	LocalPrefixUser *string `json:"local_prefix_user,omitempty"`
 }
 
-// EmailDomainCreateKind defines model for EmailDomainCreate.Kind.
+// EmailDomainCreateKind 'hail_mail' for a Hail-hosted address (domain omitted, composed from the prefix fields), or 'custom' to send from your own domain (domain required, prefix fields omitted).
 type EmailDomainCreateKind string
 
 // EmailDomainListResponse defines model for EmailDomainListResponse.
 type EmailDomainListResponse struct {
-	DefaultFrom *string               `json:"default_from,omitempty"`
-	Items       []EmailDomainResponse `json:"items"`
-	NextCursor  *string               `json:"next_cursor,omitempty"`
+	// DefaultFrom The From address used when a send omits 'from'. Null when no such default can be resolved (e.g. multiple verified identities, or none that can send yet). Computed across the whole organization, not just this page.
+	DefaultFrom *string `json:"default_from,omitempty"`
+
+	// Items Email domains in this page.
+	Items []EmailDomainResponse `json:"items"`
+
+	// NextCursor Opaque cursor for the next page. Null when there are no more results.
+	NextCursor *string `json:"next_cursor,omitempty"`
 }
 
 // EmailDomainPatch Body for PATCH /email-domains/{id}.
@@ -1240,11 +1380,20 @@ type EmailDomainListResponse struct {
 // re-implement it here because the patch may merge with existing row
 // state to satisfy the invariant.
 type EmailDomainPatch struct {
-	ForwardRatePerHour *int      `json:"forward_rate_per_hour,omitempty"`
-	ForwardTo          *[]string `json:"forward_to,omitempty"`
-	InboundEnabled     *bool     `json:"inbound_enabled,omitempty"`
-	LocalPrefixOrg     *string   `json:"local_prefix_org,omitempty"`
-	LocalPrefixUser    *string   `json:"local_prefix_user,omitempty"`
+	// ForwardRatePerHour Cap on forwarded messages per hour. Omit to leave unchanged.
+	ForwardRatePerHour *int `json:"forward_rate_per_hour,omitempty"`
+
+	// ForwardTo Email addresses to forward inbound mail to. Omit to leave unchanged.
+	ForwardTo *[]string `json:"forward_to,omitempty"`
+
+	// InboundEnabled Whether to accept inbound mail on this domain. Requires forward_to (or an existing one) when true. Omit to leave unchanged.
+	InboundEnabled *bool `json:"inbound_enabled,omitempty"`
+
+	// LocalPrefixOrg New org local-part prefix. Only valid on kind='hail_mail' rows. Omit to leave unchanged.
+	LocalPrefixOrg *string `json:"local_prefix_org,omitempty"`
+
+	// LocalPrefixUser New user local-part prefix. Only valid on kind='hail_mail' rows. Omit to leave unchanged.
+	LocalPrefixUser *string `json:"local_prefix_user,omitempty"`
 }
 
 // EmailDomainResponse Read view for an email domain.
@@ -1253,152 +1402,327 @@ type EmailDomainPatch struct {
 // “forward_rate_per_hour“) surface what the row has configured for
 // incoming mail.
 type EmailDomainResponse struct {
-	CreatedAt          time.Time                             `json:"created_at"`
-	DnsRecords         []DnsRecordSchema                     `json:"dns_records"`
-	Domain             string                                `json:"domain"`
-	ForwardRatePerHour *int                                  `json:"forward_rate_per_hour,omitempty"`
-	ForwardTo          *[]string                             `json:"forward_to,omitempty"`
-	Id                 openapi_types.UUID                    `json:"id"`
-	InboundEnabled     *bool                                 `json:"inbound_enabled,omitempty"`
-	Kind               EmailDomainResponseKind               `json:"kind"`
-	LocalPrefixOrg     *string                               `json:"local_prefix_org"`
-	LocalPrefixUser    *string                               `json:"local_prefix_user"`
-	MailFromDomain     *string                               `json:"mail_from_domain"`
-	MailFromStatus     *string                               `json:"mail_from_status,omitempty"`
-	OrganizationId     openapi_types.UUID                    `json:"organization_id"`
-	Provider           string                                `json:"provider"`
-	ReceiveReady       *bool                                 `json:"receive_ready,omitempty"`
-	UpdatedAt          time.Time                             `json:"updated_at"`
+	// CreatedAt When this domain was added, ISO 8601 timestamp.
+	CreatedAt time.Time `json:"created_at"`
+
+	// DnsRecords DNS records (DKIM, MAIL FROM MX, SPF) the tenant must publish to verify this domain.
+	DnsRecords []DnsRecordSchema `json:"dns_records"`
+
+	// Domain The DNS domain mail is sent from.
+	Domain string `json:"domain"`
+
+	// ForwardRatePerHour Configured cap on forwarded messages per hour, if set.
+	ForwardRatePerHour *int `json:"forward_rate_per_hour,omitempty"`
+
+	// ForwardTo Email addresses inbound mail is forwarded to, if inbound is enabled.
+	ForwardTo *[]string `json:"forward_to,omitempty"`
+
+	// Id Unique identifier for this email domain.
+	Id openapi_types.UUID `json:"id"`
+
+	// InboundEnabled Whether this domain accepts and forwards inbound mail.
+	InboundEnabled *bool `json:"inbound_enabled,omitempty"`
+
+	// Kind 'hail_mail' (Hail-hosted address) or 'custom' (your own domain).
+	Kind EmailDomainResponseKind `json:"kind"`
+
+	// LocalPrefixOrg Org local-part prefix for a hail_mail address. Null for kind='custom'.
+	LocalPrefixOrg *string `json:"local_prefix_org"`
+
+	// LocalPrefixUser User local-part prefix for a hail_mail address. Null for kind='custom'.
+	LocalPrefixUser *string `json:"local_prefix_user"`
+
+	// MailFromDomain Custom MAIL FROM domain, if configured. Null when using the provider default.
+	MailFromDomain *string `json:"mail_from_domain"`
+
+	// MailFromStatus Verification status of the custom MAIL FROM domain, if one is configured. Secondary to verification_status.
+	MailFromStatus *string `json:"mail_from_status,omitempty"`
+
+	// OrganizationId Organization that owns this domain.
+	OrganizationId openapi_types.UUID `json:"organization_id"`
+
+	// Provider Email sending provider for this domain (currently always 'ses').
+	Provider string `json:"provider"`
+
+	// ReceiveReady True when the domain's published MX points at Hail's inbound host. Only populated by POST /{id}/verify on custom domains; null everywhere else.
+	ReceiveReady *bool `json:"receive_ready,omitempty"`
+
+	// UpdatedAt When this domain was last modified, ISO 8601 timestamp.
+	UpdatedAt time.Time `json:"updated_at"`
+
+	// VerificationStatus 'pending' (not yet verified), 'verified' (ready to send), or 'failed'.
 	VerificationStatus EmailDomainResponseVerificationStatus `json:"verification_status"`
-	VerifiedAt         *time.Time                            `json:"verified_at"`
+
+	// VerifiedAt When the domain became verified, ISO 8601 timestamp. Null until it is.
+	VerifiedAt *time.Time `json:"verified_at"`
 }
 
-// EmailDomainResponseKind defines model for EmailDomainResponse.Kind.
+// EmailDomainResponseKind 'hail_mail' (Hail-hosted address) or 'custom' (your own domain).
 type EmailDomainResponseKind string
 
-// EmailDomainResponseVerificationStatus defines model for EmailDomainResponse.VerificationStatus.
+// EmailDomainResponseVerificationStatus 'pending' (not yet verified), 'verified' (ready to send), or 'failed'.
 type EmailDomainResponseVerificationStatus string
 
 // EmailEventListResponse defines model for EmailEventListResponse.
 type EmailEventListResponse struct {
-	Items      []EmailEventResponse `json:"items"`
-	NextCursor *string              `json:"next_cursor,omitempty"`
+	// Items Events for this email, oldest first.
+	Items []EmailEventResponse `json:"items"`
+
+	// NextCursor Opaque cursor for the next page. Null when there are no more results.
+	NextCursor *string `json:"next_cursor,omitempty"`
 }
 
 // EmailEventResponse defines model for EmailEventResponse.
 type EmailEventResponse struct {
-	EmailId    openapi_types.UUID     `json:"email_id"`
-	Id         openapi_types.UUID     `json:"id"`
-	Kind       EmailEventResponseKind `json:"kind"`
-	OccurredAt time.Time              `json:"occurred_at"`
-	Payload    map[string]interface{} `json:"payload"`
+	// EmailId The email this event belongs to.
+	EmailId openapi_types.UUID `json:"email_id"`
+
+	// Id Unique identifier for this event.
+	Id openapi_types.UUID `json:"id"`
+
+	// Kind Event kind: 'sent', 'delivered', 'delivery_delayed', 'bounced', 'complained', 'rejected', 'opened', or 'clicked'.
+	Kind EmailEventResponseKind `json:"kind"`
+
+	// OccurredAt When this event occurred, ISO 8601 timestamp.
+	OccurredAt time.Time `json:"occurred_at"`
+
+	// Payload Event-kind-specific detail, as a free-form JSON object.
+	Payload map[string]interface{} `json:"payload"`
 }
 
-// EmailEventResponseKind defines model for EmailEventResponse.Kind.
+// EmailEventResponseKind Event kind: 'sent', 'delivered', 'delivery_delayed', 'bounced', 'complained', 'rejected', 'opened', or 'clicked'.
 type EmailEventResponseKind string
 
 // EmailListResponse defines model for EmailListResponse.
 type EmailListResponse struct {
-	Items      []EmailSummary `json:"items"`
-	NextCursor *string        `json:"next_cursor,omitempty"`
+	// Items Emails in this page, newest first.
+	Items []EmailSummary `json:"items"`
+
+	// NextCursor Opaque cursor for the next page. Null when there are no more results.
+	NextCursor *string `json:"next_cursor,omitempty"`
 }
 
 // EmailResponse defines model for EmailResponse.
 type EmailResponse struct {
-	Attachments        *[]EmailAttachmentResponse `json:"attachments,omitempty"`
-	BccAddresses       *[]string                  `json:"bcc_addresses"`
-	BodyHtml           *string                    `json:"body_html"`
-	BodyText           *string                    `json:"body_text"`
-	CcAddresses        *[]string                  `json:"cc_addresses"`
-	ConversationId     *openapi_types.UUID        `json:"conversation_id"`
-	Direction          *EmailResponseDirection    `json:"direction,omitempty"`
-	DkimVerdict        *string                    `json:"dkim_verdict,omitempty"`
-	DmarcVerdict       *string                    `json:"dmarc_verdict,omitempty"`
-	EmailDomainId      *openapi_types.UUID        `json:"email_domain_id"`
-	EndReason          *string                    `json:"end_reason"`
-	FailedAt           *time.Time                 `json:"failed_at"`
-	FromAddress        string                     `json:"from_address"`
-	FromName           *string                    `json:"from_name,omitempty"`
-	Id                 openapi_types.UUID         `json:"id"`
-	InReplyTo          *string                    `json:"in_reply_to,omitempty"`
-	LastEventAt        *time.Time                 `json:"last_event_at,omitempty"`
-	MessageId          *string                    `json:"message_id,omitempty"`
-	Metadata           *map[string]interface{}    `json:"metadata,omitempty"`
-	OrganizationId     openapi_types.UUID         `json:"organization_id"`
-	ProviderMessageId  *string                    `json:"provider_message_id"`
-	ProviderReceivedAt *time.Time                 `json:"provider_received_at,omitempty"`
-	RawUrl             *string                    `json:"raw_url,omitempty"`
-	ReferencesIds      *[]string                  `json:"references_ids,omitempty"`
-	ReplyTo            *string                    `json:"reply_to"`
-	RequestedAt        time.Time                  `json:"requested_at"`
-	SentAt             *time.Time                 `json:"sent_at"`
-	SpamVerdict        *string                    `json:"spam_verdict,omitempty"`
-	SpfVerdict         *string                    `json:"spf_verdict,omitempty"`
-	Status             EmailResponseStatus        `json:"status"`
-	Subject            string                     `json:"subject"`
-	ToAddresses        []string                   `json:"to_addresses"`
-	VirusVerdict       *string                    `json:"virus_verdict,omitempty"`
+	// Attachments Inbound MIME attachments on this email. Empty on outbound rows.
+	Attachments *[]EmailAttachmentResponse `json:"attachments,omitempty"`
+
+	// BccAddresses BCC recipient email addresses, if any.
+	BccAddresses *[]string `json:"bcc_addresses"`
+
+	// BodyHtml HTML body, if any.
+	BodyHtml *string `json:"body_html"`
+
+	// BodyText Plain-text body, if any.
+	BodyText *string `json:"body_text"`
+
+	// CcAddresses CC recipient email addresses, if any.
+	CcAddresses *[]string `json:"cc_addresses"`
+
+	// ConversationId Conversation thread this email is grouped into, if any. Null when it was not linked to a conversation.
+	ConversationId *openapi_types.UUID `json:"conversation_id"`
+
+	// Direction 'outbound' for emails Hail sent, 'inbound' for emails received.
+	Direction *EmailResponseDirection `json:"direction,omitempty"`
+
+	// DkimVerdict Provider DKIM-authentication verdict (e.g. 'PASS'/'FAIL'). Inbound emails only; null on outbound rows.
+	DkimVerdict *string `json:"dkim_verdict,omitempty"`
+
+	// DmarcVerdict Provider DMARC-authentication verdict (e.g. 'PASS'/'FAIL'). Inbound emails only; null on outbound rows.
+	DmarcVerdict *string `json:"dmarc_verdict,omitempty"`
+
+	// EmailDomainId The sending domain used, if from_address belongs to one of the org's configured domains.
+	EmailDomainId *openapi_types.UUID `json:"email_domain_id"`
+
+	// EndReason Reason delivery failed or bounced, if applicable. Null on success or while pending.
+	EndReason *string `json:"end_reason"`
+
+	// FailedAt When the send failed, ISO 8601 timestamp. Null unless it failed.
+	FailedAt *time.Time `json:"failed_at"`
+
+	// FromAddress Sender email address.
+	FromAddress string `json:"from_address"`
+
+	// FromName Display name used on the From: header, when the sender supplied one. Always null on inbound rows.
+	FromName *string `json:"from_name,omitempty"`
+
+	// Id Unique identifier for this email.
+	Id openapi_types.UUID `json:"id"`
+
+	// InReplyTo RFC 5322 In-Reply-To header. Inbound emails only; null on outbound rows.
+	InReplyTo *string `json:"in_reply_to,omitempty"`
+
+	// LastEventAt When the most recent delivery event for this email occurred, ISO 8601 timestamp.
+	LastEventAt *time.Time `json:"last_event_at,omitempty"`
+
+	// MessageId RFC 5322 Message-ID header. Inbound emails only; null on outbound rows.
+	MessageId *string `json:"message_id,omitempty"`
+
+	// Metadata Free-form JSON object attached to the email, as sent on create. Not interpreted by Hail.
+	Metadata *map[string]interface{} `json:"metadata,omitempty"`
+
+	// OrganizationId Organization that sent or received this email.
+	OrganizationId openapi_types.UUID `json:"organization_id"`
+
+	// ProviderMessageId The email provider's identifier for this message, if assigned.
+	ProviderMessageId *string `json:"provider_message_id"`
+
+	// ProviderReceivedAt When the provider received this email, ISO 8601 timestamp. Inbound emails only.
+	ProviderReceivedAt *time.Time `json:"provider_received_at,omitempty"`
+
+	// RawUrl API endpoint that redirects to the original MIME blob. Inbound emails only; null on outbound rows.
+	RawUrl *string `json:"raw_url,omitempty"`
+
+	// ReferencesIds RFC 5322 References header, split into ids. Inbound emails only; null on outbound rows.
+	ReferencesIds *[]string `json:"references_ids,omitempty"`
+
+	// ReplyTo Reply-To email address, if set.
+	ReplyTo *string `json:"reply_to"`
+
+	// RequestedAt When the send was requested, ISO 8601 timestamp.
+	RequestedAt time.Time `json:"requested_at"`
+
+	// SentAt When the message was handed to the provider, ISO 8601 timestamp. Null until sent.
+	SentAt *time.Time `json:"sent_at"`
+
+	// SpamVerdict Provider spam-scan verdict (e.g. 'PASS'/'FAIL'). Inbound emails only; null on outbound rows.
+	SpamVerdict *string `json:"spam_verdict,omitempty"`
+
+	// SpfVerdict Provider SPF-authentication verdict (e.g. 'PASS'/'FAIL'). Inbound emails only; null on outbound rows.
+	SpfVerdict *string `json:"spf_verdict,omitempty"`
+
+	// Status Delivery status: 'queued', 'sent', 'delivered', 'failed', 'bounced', 'complained', or 'received' (inbound emails).
+	Status EmailResponseStatus `json:"status"`
+
+	// Subject Email subject line.
+	Subject string `json:"subject"`
+
+	// ToAddresses Recipient email addresses.
+	ToAddresses []string `json:"to_addresses"`
+
+	// VirusVerdict Provider virus-scan verdict (e.g. 'PASS'/'FAIL'). Inbound emails only; null on outbound rows.
+	VirusVerdict *string `json:"virus_verdict,omitempty"`
 }
 
-// EmailResponseDirection defines model for EmailResponse.Direction.
+// EmailResponseDirection 'outbound' for emails Hail sent, 'inbound' for emails received.
 type EmailResponseDirection string
 
-// EmailResponseStatus defines model for EmailResponse.Status.
+// EmailResponseStatus Delivery status: 'queued', 'sent', 'delivered', 'failed', 'bounced', 'complained', or 'received' (inbound emails).
 type EmailResponseStatus string
 
 // EmailStatsBucket defines model for EmailStatsBucket.
 type EmailStatsBucket struct {
-	Bounced         *int      `json:"bounced,omitempty"`
-	BouncedHard     *int      `json:"bounced_hard,omitempty"`
-	BucketStart     time.Time `json:"bucket_start"`
-	Clicked         *int      `json:"clicked,omitempty"`
-	Complained      *int      `json:"complained,omitempty"`
-	Delivered       *int      `json:"delivered,omitempty"`
-	DeliveryDelayed *int      `json:"delivery_delayed,omitempty"`
-	Opened          *int      `json:"opened,omitempty"`
-	Rejected        *int      `json:"rejected,omitempty"`
-	Sent            *int      `json:"sent,omitempty"`
-	UniqueClicked   *int      `json:"unique_clicked,omitempty"`
-	UniqueOpened    *int      `json:"unique_opened,omitempty"`
+	// Bounced Emails bounced (soft or hard) in the window.
+	Bounced *int `json:"bounced,omitempty"`
+
+	// BouncedHard Emails hard-bounced in the window. Subset of bounced.
+	BouncedHard *int `json:"bounced_hard,omitempty"`
+
+	// BucketStart Start of this bucket, ISO 8601 timestamp.
+	BucketStart time.Time `json:"bucket_start"`
+
+	// Clicked Total click events in the window, including repeat clicks by the same recipient.
+	Clicked *int `json:"clicked,omitempty"`
+
+	// Complained Emails that received a spam complaint in the window.
+	Complained *int `json:"complained,omitempty"`
+
+	// Delivered Emails confirmed delivered in the window.
+	Delivered *int `json:"delivered,omitempty"`
+
+	// DeliveryDelayed Emails with a delivery-delayed event in the window.
+	DeliveryDelayed *int `json:"delivery_delayed,omitempty"`
+
+	// Opened Total open events in the window, including repeat opens by the same recipient.
+	Opened *int `json:"opened,omitempty"`
+
+	// Rejected Emails rejected by the provider before sending, in the window.
+	Rejected *int `json:"rejected,omitempty"`
+
+	// Sent Emails sent in the window.
+	Sent *int `json:"sent,omitempty"`
+
+	// UniqueClicked Distinct emails clicked at least once in the window.
+	UniqueClicked *int `json:"unique_clicked,omitempty"`
+
+	// UniqueOpened Distinct emails opened at least once in the window.
+	UniqueOpened *int `json:"unique_opened,omitempty"`
 }
 
 // EmailStatsCounts defines model for EmailStatsCounts.
 type EmailStatsCounts struct {
-	Bounced         *int `json:"bounced,omitempty"`
-	BouncedHard     *int `json:"bounced_hard,omitempty"`
-	Clicked         *int `json:"clicked,omitempty"`
-	Complained      *int `json:"complained,omitempty"`
-	Delivered       *int `json:"delivered,omitempty"`
+	// Bounced Emails bounced (soft or hard) in the window.
+	Bounced *int `json:"bounced,omitempty"`
+
+	// BouncedHard Emails hard-bounced in the window. Subset of bounced.
+	BouncedHard *int `json:"bounced_hard,omitempty"`
+
+	// Clicked Total click events in the window, including repeat clicks by the same recipient.
+	Clicked *int `json:"clicked,omitempty"`
+
+	// Complained Emails that received a spam complaint in the window.
+	Complained *int `json:"complained,omitempty"`
+
+	// Delivered Emails confirmed delivered in the window.
+	Delivered *int `json:"delivered,omitempty"`
+
+	// DeliveryDelayed Emails with a delivery-delayed event in the window.
 	DeliveryDelayed *int `json:"delivery_delayed,omitempty"`
-	Opened          *int `json:"opened,omitempty"`
-	Rejected        *int `json:"rejected,omitempty"`
-	Sent            *int `json:"sent,omitempty"`
-	UniqueClicked   *int `json:"unique_clicked,omitempty"`
-	UniqueOpened    *int `json:"unique_opened,omitempty"`
+
+	// Opened Total open events in the window, including repeat opens by the same recipient.
+	Opened *int `json:"opened,omitempty"`
+
+	// Rejected Emails rejected by the provider before sending, in the window.
+	Rejected *int `json:"rejected,omitempty"`
+
+	// Sent Emails sent in the window.
+	Sent *int `json:"sent,omitempty"`
+
+	// UniqueClicked Distinct emails clicked at least once in the window.
+	UniqueClicked *int `json:"unique_clicked,omitempty"`
+
+	// UniqueOpened Distinct emails opened at least once in the window.
+	UniqueOpened *int `json:"unique_opened,omitempty"`
 }
 
 // EmailStatsRates All None when sent == 0 in the window.
 type EmailStatsRates struct {
-	Bounce    *float32 `json:"bounce,omitempty"`
-	Click     *float32 `json:"click,omitempty"`
+	// Bounce bounced_hard / sent for the window. Null when sent == 0.
+	Bounce *float32 `json:"bounce,omitempty"`
+
+	// Click unique_clicked / sent for the window. Null when sent == 0.
+	Click *float32 `json:"click,omitempty"`
+
+	// Complaint complained / sent for the window. Null when sent == 0.
 	Complaint *float32 `json:"complaint,omitempty"`
-	Delivery  *float32 `json:"delivery,omitempty"`
-	Open      *float32 `json:"open,omitempty"`
+
+	// Delivery delivered / sent for the window. Null when sent == 0.
+	Delivery *float32 `json:"delivery,omitempty"`
+
+	// Open unique_opened / sent for the window. Null when sent == 0.
+	Open *float32 `json:"open,omitempty"`
 }
 
 // EmailStatsResponse defines model for EmailStatsResponse.
 type EmailStatsResponse struct {
+	// Bucket Time-bucket size used for the series.
 	Bucket EmailStatsResponseBucket `json:"bucket"`
-	From   time.Time                `json:"from"`
+
+	// From Start of the queried window, ISO 8601 timestamp (inclusive).
+	From time.Time `json:"from"`
 
 	// Rates All None when sent == 0 in the window.
-	Rates  EmailStatsRates    `json:"rates"`
+	Rates EmailStatsRates `json:"rates"`
+
+	// Series Per-bucket event counts across the window, in chronological order.
 	Series []EmailStatsBucket `json:"series"`
-	To     time.Time          `json:"to"`
-	Totals EmailStatsCounts   `json:"totals"`
+
+	// To End of the queried window, ISO 8601 timestamp (exclusive).
+	To     time.Time        `json:"to"`
+	Totals EmailStatsCounts `json:"totals"`
 }
 
-// EmailStatsResponseBucket defines model for EmailStatsResponse.Bucket.
+// EmailStatsResponseBucket Time-bucket size used for the series.
 type EmailStatsResponseBucket string
 
 // EmailSummary Trimmed view for list endpoints — drops the message bodies.
@@ -1407,104 +1731,190 @@ type EmailStatsResponseBucket string
 // shouldn't return every byte of every message just to render a list.
 // Use “EmailResponse“ (via “GET /emails/{id}“) for the full row.
 type EmailSummary struct {
-	BccAddresses      *[]string               `json:"bcc_addresses"`
-	CcAddresses       *[]string               `json:"cc_addresses"`
-	ConversationId    *openapi_types.UUID     `json:"conversation_id"`
-	Direction         *EmailSummaryDirection  `json:"direction,omitempty"`
-	EmailDomainId     *openapi_types.UUID     `json:"email_domain_id"`
-	EndReason         *string                 `json:"end_reason"`
-	FailedAt          *time.Time              `json:"failed_at"`
-	FromAddress       string                  `json:"from_address"`
-	FromName          *string                 `json:"from_name,omitempty"`
-	Id                openapi_types.UUID      `json:"id"`
-	Metadata          *map[string]interface{} `json:"metadata,omitempty"`
-	OrganizationId    openapi_types.UUID      `json:"organization_id"`
-	ProviderMessageId *string                 `json:"provider_message_id"`
-	ReplyTo           *string                 `json:"reply_to"`
-	RequestedAt       time.Time               `json:"requested_at"`
-	SentAt            *time.Time              `json:"sent_at"`
-	Status            EmailSummaryStatus      `json:"status"`
-	Subject           string                  `json:"subject"`
-	ToAddresses       []string                `json:"to_addresses"`
+	// BccAddresses BCC recipient email addresses, if any.
+	BccAddresses *[]string `json:"bcc_addresses"`
+
+	// CcAddresses CC recipient email addresses, if any.
+	CcAddresses *[]string `json:"cc_addresses"`
+
+	// ConversationId Conversation thread this email is grouped into, if any. Null when it was not linked to a conversation.
+	ConversationId *openapi_types.UUID `json:"conversation_id"`
+
+	// Direction 'outbound' for emails Hail sent, 'inbound' for emails received.
+	Direction *EmailSummaryDirection `json:"direction,omitempty"`
+
+	// EmailDomainId The sending domain used, if from_address belongs to one of the org's configured domains.
+	EmailDomainId *openapi_types.UUID `json:"email_domain_id"`
+
+	// EndReason Reason delivery failed or bounced, if applicable. Null on success or while pending.
+	EndReason *string `json:"end_reason"`
+
+	// FailedAt When the send failed, ISO 8601 timestamp. Null unless it failed.
+	FailedAt *time.Time `json:"failed_at"`
+
+	// FromAddress Sender email address.
+	FromAddress string `json:"from_address"`
+
+	// FromName Display name used on the From: header, when the sender supplied one. Always null on inbound rows.
+	FromName *string `json:"from_name,omitempty"`
+
+	// Id Unique identifier for this email.
+	Id openapi_types.UUID `json:"id"`
+
+	// Metadata Free-form JSON object attached to the email, as sent on create. Not interpreted by Hail.
+	Metadata *map[string]interface{} `json:"metadata,omitempty"`
+
+	// OrganizationId Organization that sent or received this email.
+	OrganizationId openapi_types.UUID `json:"organization_id"`
+
+	// ProviderMessageId The email provider's identifier for this message, if assigned.
+	ProviderMessageId *string `json:"provider_message_id"`
+
+	// ReplyTo Reply-To email address, if set.
+	ReplyTo *string `json:"reply_to"`
+
+	// RequestedAt When the send was requested, ISO 8601 timestamp.
+	RequestedAt time.Time `json:"requested_at"`
+
+	// SentAt When the message was handed to the provider, ISO 8601 timestamp. Null until sent.
+	SentAt *time.Time `json:"sent_at"`
+
+	// Status Delivery status: 'queued', 'sent', 'delivered', 'failed', 'bounced', 'complained', or 'received' (inbound emails).
+	Status EmailSummaryStatus `json:"status"`
+
+	// Subject Email subject line.
+	Subject string `json:"subject"`
+
+	// ToAddresses Recipient email addresses.
+	ToAddresses []string `json:"to_addresses"`
 }
 
-// EmailSummaryDirection defines model for EmailSummary.Direction.
+// EmailSummaryDirection 'outbound' for emails Hail sent, 'inbound' for emails received.
 type EmailSummaryDirection string
 
-// EmailSummaryStatus defines model for EmailSummary.Status.
+// EmailSummaryStatus Delivery status: 'queued', 'sent', 'delivered', 'failed', 'bounced', 'complained', or 'received' (inbound emails).
 type EmailSummaryStatus string
 
 // EventResponse One event on the unified GET /events stream (call, email, or SMS).
 type EventResponse struct {
-	CallId     *openapi_types.UUID    `json:"call_id,omitempty"`
-	EmailId    *openapi_types.UUID    `json:"email_id,omitempty"`
-	Id         openapi_types.UUID     `json:"id"`
-	Kind       string                 `json:"kind"`
-	OccurredAt time.Time              `json:"occurred_at"`
-	Payload    map[string]interface{} `json:"payload"`
-	SmsId      *openapi_types.UUID    `json:"sms_id,omitempty"`
-	Source     EventResponseSource    `json:"source"`
+	// CallId The call this event belongs to. Set only when source='call'.
+	CallId *openapi_types.UUID `json:"call_id,omitempty"`
+
+	// EmailId The email this event belongs to. Set only when source='email'.
+	EmailId *openapi_types.UUID `json:"email_id,omitempty"`
+
+	// Id Unique identifier for this event.
+	Id openapi_types.UUID `json:"id"`
+
+	// Kind Event kind within the source (e.g. 'queued', 'delivered', 'bounced'). Vocabulary differs per source.
+	Kind string `json:"kind"`
+
+	// OccurredAt When this event occurred, ISO 8601 timestamp.
+	OccurredAt time.Time `json:"occurred_at"`
+
+	// Payload Event-kind-specific detail, as a free-form JSON object.
+	Payload map[string]interface{} `json:"payload"`
+
+	// SmsId The message this event belongs to. Set only when source='sms'.
+	SmsId *openapi_types.UUID `json:"sms_id,omitempty"`
+
+	// Source Which channel this event belongs to: 'call', 'email', or 'sms'.
+	Source EventResponseSource `json:"source"`
 }
 
-// EventResponseSource defines model for EventResponse.Source.
+// EventResponseSource Which channel this event belongs to: 'call', 'email', or 'sms'.
 type EventResponseSource string
 
 // EventStreamResponse defines model for EventStreamResponse.
 type EventStreamResponse struct {
+	// CallStatus Current status of the call named by the id filter (e.g. id=call:<uuid>). Null for org-wide tails and non-call filters, since there is no single call to report a status for.
 	CallStatus *EventStreamResponseCallStatus `json:"call_status,omitempty"`
-	Items      []EventResponse                `json:"items"`
-	NextCursor *string                        `json:"next_cursor,omitempty"`
+
+	// Items Events in this page, oldest first.
+	Items []EventResponse `json:"items"`
+
+	// NextCursor Opaque cursor for the next page. Null when there are no more results.
+	NextCursor *string `json:"next_cursor,omitempty"`
 }
 
-// EventStreamResponseCallStatus defines model for EventStreamResponse.CallStatus.
+// EventStreamResponseCallStatus Current status of the call named by the id filter (e.g. id=call:<uuid>). Null for org-wide tails and non-call filters, since there is no single call to report a status for.
 type EventStreamResponseCallStatus string
 
 // HTTPValidationError defines model for HTTPValidationError.
 type HTTPValidationError struct {
+	// Detail List of validation errors: each entry gives the field location (loc), the problem (msg), and the error type (type).
 	Detail *[]ValidationError `json:"detail,omitempty"`
 }
 
 // LLMConfig defines model for LLMConfig.
 type LLMConfig struct {
-	ApiKey  string `json:"api_key"`
+	// ApiKey API key sent to the BYO LLM endpoint. Write-only — never echoed back.
+	ApiKey string `json:"api_key"`
+
+	// BaseUrl Public HTTPS base URL of the BYO LLM endpoint the call runs on. Must resolve to a public address — private/internal hosts are rejected.
 	BaseUrl string `json:"base_url"`
-	Model   string `json:"model"`
+
+	// Model Model name to request from the BYO LLM endpoint.
+	Model string `json:"model"`
 }
 
 // MemberPhonePut defines model for MemberPhonePut.
 type MemberPhonePut struct {
+	// PhoneE164 Phone number to save for the caller, E.164 format.
 	PhoneE164 string `json:"phone_e164"`
 }
 
 // NumberAcquireRequest defines model for NumberAcquireRequest.
 type NumberAcquireRequest struct {
-	CountryCode string                          `json:"country_code"`
-	NumberType  *NumberAcquireRequestNumberType `json:"number_type,omitempty"`
+	// CountryCode ISO alpha-2 country code to acquire a number in (e.g. 'US'). Case-insensitive.
+	CountryCode string `json:"country_code"`
+
+	// NumberType Kind of number to acquire: 'local', 'mobile', 'toll_free', or 'national'.
+	NumberType *NumberAcquireRequestNumberType `json:"number_type,omitempty"`
 }
 
-// NumberAcquireRequestNumberType defines model for NumberAcquireRequest.NumberType.
+// NumberAcquireRequestNumberType Kind of number to acquire: 'local', 'mobile', 'toll_free', or 'national'.
 type NumberAcquireRequestNumberType string
 
 // PhoneNumberListResponse defines model for PhoneNumberListResponse.
 type PhoneNumberListResponse struct {
-	Items      []PhoneNumberResponse `json:"items"`
-	NextCursor *string               `json:"next_cursor,omitempty"`
+	// Items Numbers in this page.
+	Items []PhoneNumberResponse `json:"items"`
+
+	// NextCursor Opaque cursor for the next page. Null when there are no more results.
+	NextCursor *string `json:"next_cursor,omitempty"`
 }
 
 // PhoneNumberResponse defines model for PhoneNumberResponse.
 type PhoneNumberResponse struct {
-	Capabilities        []string           `json:"capabilities"`
-	CountryCode         string             `json:"country_code"`
-	E164                string             `json:"e164"`
-	Id                  openapi_types.UUID `json:"id"`
-	IsDedicated         bool               `json:"is_dedicated"`
-	MessagingServiceSid *string            `json:"messaging_service_sid,omitempty"`
-	NumberType          string             `json:"number_type"`
-	ProvisioningState   string             `json:"provisioning_state"`
+	// Capabilities Channels this number supports, e.g. ['voice'], ['sms'], or both.
+	Capabilities []string `json:"capabilities"`
+
+	// CountryCode ISO alpha-2 country code this number belongs to.
+	CountryCode string `json:"country_code"`
+
+	// E164 The phone number, E.164 format.
+	E164 string `json:"e164"`
+
+	// Id Unique identifier for this number.
+	Id openapi_types.UUID `json:"id"`
+
+	// IsDedicated True if this number is owned by the organization. False for shared-pool numbers.
+	IsDedicated bool `json:"is_dedicated"`
+
+	// MessagingServiceSid Provider messaging-service identifier once SMS has been enabled on this number. Null until then.
+	MessagingServiceSid *string `json:"messaging_service_sid,omitempty"`
+
+	// NumberType Kind of number: 'local', 'mobile', 'toll_free', or 'national'.
+	NumberType string `json:"number_type"`
+
+	// ProvisioningState 'pending', 'active', 'failed', or 'released'.
+	ProvisioningState string `json:"provisioning_state"`
 }
 
 // ProviderActivateRequest Body of “POST /providers/{layer}/activate“.
 type ProviderActivateRequest struct {
+	// Provider Previously saved provider to make active for this layer.
 	Provider string `json:"provider"`
 }
 
@@ -1515,20 +1925,34 @@ type ProviderActivateRequest struct {
 // serializer always emits all of them, and required response fields
 // generate plain values instead of pointers in the Go CLI's client.
 type ProviderConfigEntry struct {
-	FallbackEnabled bool                     `json:"fallback_enabled"`
-	IsActive        bool                     `json:"is_active"`
-	KeyLast4        *string                  `json:"key_last4"`
-	KeySetAt        *string                  `json:"key_set_at"`
-	Layer           ProviderConfigEntryLayer `json:"layer"`
-	Params          map[string]interface{}   `json:"params"`
-	Provider        string                   `json:"provider"`
+	// FallbackEnabled Whether Hail's default provider is used as a fallback if this one fails.
+	FallbackEnabled bool `json:"fallback_enabled"`
+
+	// IsActive True if this is the row currently used by calls on this layer.
+	IsActive bool `json:"is_active"`
+
+	// KeyLast4 Last 4 characters of the saved API key, for display. Null if no key is saved.
+	KeyLast4 *string `json:"key_last4"`
+
+	// KeySetAt When the API key was last set, ISO 8601 timestamp. Null if no key is saved.
+	KeySetAt *string `json:"key_set_at"`
+
+	// Layer Voice-pipeline layer this config applies to.
+	Layer ProviderConfigEntryLayer `json:"layer"`
+
+	// Params Saved provider-specific config for this row.
+	Params map[string]interface{} `json:"params"`
+
+	// Provider Provider name (e.g. 'openai', 'cartesia').
+	Provider string `json:"provider"`
 }
 
-// ProviderConfigEntryLayer defines model for ProviderConfigEntry.Layer.
+// ProviderConfigEntryLayer Voice-pipeline layer this config applies to.
 type ProviderConfigEntryLayer string
 
 // ProviderConfigListResponse defines model for ProviderConfigListResponse.
 type ProviderConfigListResponse struct {
+	// Providers Every saved provider row for the organization, across all layers.
 	Providers []ProviderConfigEntry `json:"providers"`
 }
 
@@ -1548,10 +1972,17 @@ type ProviderConfigListResponse struct {
 //
 // Keys are write-only: no response ever echoes one back.
 type ProviderConfigUpsert struct {
-	ApiKey          *string                 `json:"api_key,omitempty"`
-	FallbackEnabled *bool                   `json:"fallback_enabled,omitempty"`
-	Params          *map[string]interface{} `json:"params,omitempty"`
-	Provider        string                  `json:"provider"`
+	// ApiKey API key for this provider. Omit to edit params without resending the key. Write-only — never echoed back.
+	ApiKey *string `json:"api_key,omitempty"`
+
+	// FallbackEnabled Whether to fall back to Hail's default provider on failure. Omit to leave unchanged; defaults to false on a new row.
+	FallbackEnabled *bool `json:"fallback_enabled,omitempty"`
+
+	// Params Provider-specific config, validated against the layer's schema (LLMParams/TTSParams/STTParams). Only the keys you send are changed; other saved keys are kept.
+	Params *map[string]interface{} `json:"params,omitempty"`
+
+	// Provider Provider name to save/activate for this layer (e.g. 'openai', 'cartesia').
+	Provider string `json:"provider"`
 }
 
 // ProviderValidateRequest Body of “POST /providers/{layer}/validate“ — a live key probe.
@@ -1560,30 +1991,43 @@ type ProviderConfigUpsert struct {
 // its stored key are tested. “provider“ tests that provider's stored key
 // instead. “api_key“ tests a key that has not been saved yet.
 type ProviderValidateRequest struct {
-	ApiKey   *string                 `json:"api_key,omitempty"`
-	Params   *map[string]interface{} `json:"params,omitempty"`
-	Provider *string                 `json:"provider,omitempty"`
+	// ApiKey Key to test instead of the stored one. Not persisted.
+	ApiKey *string `json:"api_key,omitempty"`
+
+	// Params Provider-specific config to test alongside the key.
+	Params *map[string]interface{} `json:"params,omitempty"`
+
+	// Provider Provider to test. Omitted: the layer's currently active provider.
+	Provider *string `json:"provider,omitempty"`
 }
 
 // ProviderValidateResult Outcome of a live provider-key probe.
 type ProviderValidateResult struct {
+	// Message Human-readable detail about the outcome. 'ok' on success, an error description otherwise.
 	Message *string `json:"message"`
-	Status  string  `json:"status"`
+
+	// Status Probe outcome: 'valid', 'invalid', or 'indeterminate' (the provider could not be reached).
+	Status string `json:"status"`
 }
 
 // SenderIdPatch defines model for SenderIdPatch.
 type SenderIdPatch struct {
+	// CustomSenderId Alphanumeric sender id (2-11 characters, letters/digits only) to use on alphanumeric-eligible corridors instead of a phone number. Explicit null clears it, reverting to the platform default.
 	CustomSenderId *string `json:"custom_sender_id,omitempty"`
 }
 
 // SenderIdResponse defines model for SenderIdResponse.
 type SenderIdResponse struct {
-	CustomSenderId   *string `json:"custom_sender_id"`
+	// CustomSenderId The organization's configured alphanumeric sender id. Null if none is set.
+	CustomSenderId *string `json:"custom_sender_id"`
+
+	// EffectiveDefault The platform's alphanumeric sender id, used on eligible corridors when custom_sender_id is null.
 	EffectiveDefault *string `json:"effective_default,omitempty"`
 }
 
 // SmsCreate defines model for SmsCreate.
 type SmsCreate struct {
+	// Body Message text. Long bodies are split into multiple carrier segments.
 	Body string `json:"body"`
 
 	// ConsentObtainedAt When consent was obtained, if known.
@@ -1591,15 +2035,21 @@ type SmsCreate struct {
 
 	// ConsentSource Where/how consent was obtained (e.g. 'signup form', 'prior customer relationship'). Required (non-empty) when message_type is 'marketing'.
 	ConsentSource *string `json:"consent_source,omitempty"`
-	From          *string `json:"from,omitempty"`
+
+	// From Sender phone number, E.164 format. Must be a number owned by the organization with the SMS capability. Omitted: an active org-owned number is used if one exists, else a number is claimed from the shared pool.
+	From *string `json:"from,omitempty"`
 
 	// MessageType 'marketing' additionally requires a non-empty consent_source. Use 'informational' for transactional/service communications.
-	MessageType *SmsCreateMessageType   `json:"message_type,omitempty"`
-	Metadata    *map[string]interface{} `json:"metadata,omitempty"`
+	MessageType *SmsCreateMessageType `json:"message_type,omitempty"`
+
+	// Metadata Free-form JSON object attached to the message and echoed back on reads. Not interpreted by Hail.
+	Metadata *map[string]interface{} `json:"metadata,omitempty"`
 
 	// RecipientConsent Attestation that you have obtained the lawful consent required to contact this recipient. Hail does not verify consent itself — you are responsible for a lawful basis under TCPA/ePrivacy/PECR/CAN-SPAM/GDPR as applicable. Rejected (422) if not true.
-	RecipientConsent bool   `json:"recipient_consent"`
-	To               string `json:"to"`
+	RecipientConsent bool `json:"recipient_consent"`
+
+	// To Recipient phone number, E.164 format (e.g. +14155551234).
+	To string `json:"to"`
 }
 
 // SmsCreateMessageType 'marketing' additionally requires a non-empty consent_source. Use 'informational' for transactional/service communications.
@@ -1607,55 +2057,104 @@ type SmsCreateMessageType string
 
 // SmsListResponse defines model for SmsListResponse.
 type SmsListResponse struct {
-	Items      []SmsResponse `json:"items"`
-	NextCursor *string       `json:"next_cursor,omitempty"`
+	// Items Messages in this page, newest first.
+	Items []SmsResponse `json:"items"`
+
+	// NextCursor Opaque cursor for the next page. Null when there are no more results.
+	NextCursor *string `json:"next_cursor,omitempty"`
 }
 
 // SmsResponse defines model for SmsResponse.
 type SmsResponse struct {
-	Body               string               `json:"body"`
-	Direction          SmsResponseDirection `json:"direction"`
-	ErrorCode          *string              `json:"error_code"`
-	FromE164           string               `json:"from_e164"`
-	Id                 openapi_types.UUID   `json:"id"`
-	OrganizationId     openapi_types.UUID   `json:"organization_id"`
-	ProviderMessageSid *string              `json:"provider_message_sid"`
-	RequestedAt        time.Time            `json:"requested_at"`
-	SegmentCount       int                  `json:"segment_count"`
-	SentAt             *time.Time           `json:"sent_at"`
-	Status             SmsResponseStatus    `json:"status"`
-	ToE164             string               `json:"to_e164"`
+	// Body Message text.
+	Body string `json:"body"`
+
+	// Direction 'outbound' for messages Hail sent, 'inbound' for messages received.
+	Direction SmsResponseDirection `json:"direction"`
+
+	// ErrorCode Carrier error code if delivery failed. Null on success or while pending.
+	ErrorCode *string `json:"error_code"`
+
+	// FromE164 Sender phone number, E.164 format.
+	FromE164 string `json:"from_e164"`
+
+	// Id Unique identifier for this message.
+	Id openapi_types.UUID `json:"id"`
+
+	// OrganizationId Organization that sent or received this message.
+	OrganizationId openapi_types.UUID `json:"organization_id"`
+
+	// ProviderMessageSid The carrier/provider's identifier for this message, if assigned.
+	ProviderMessageSid *string `json:"provider_message_sid"`
+
+	// RequestedAt When the send was requested, ISO 8601 timestamp.
+	RequestedAt time.Time `json:"requested_at"`
+
+	// SegmentCount Number of carrier SMS segments the body was split into.
+	SegmentCount int `json:"segment_count"`
+
+	// SentAt When the message was handed to the carrier, ISO 8601 timestamp. Null until sent.
+	SentAt *time.Time `json:"sent_at"`
+
+	// Status Delivery status: 'queued', 'sent', 'delivered', 'failed', 'undelivered', or 'received' (inbound messages).
+	Status SmsResponseStatus `json:"status"`
+
+	// ToE164 Recipient phone number, E.164 format.
+	ToE164 string `json:"to_e164"`
 }
 
-// SmsResponseDirection defines model for SmsResponse.Direction.
+// SmsResponseDirection 'outbound' for messages Hail sent, 'inbound' for messages received.
 type SmsResponseDirection string
 
-// SmsResponseStatus defines model for SmsResponse.Status.
+// SmsResponseStatus Delivery status: 'queued', 'sent', 'delivered', 'failed', 'undelivered', or 'received' (inbound messages).
 type SmsResponseStatus string
 
 // SuppressionListResponse defines model for SuppressionListResponse.
 type SuppressionListResponse struct {
-	Items      []SuppressionResponse `json:"items"`
-	NextCursor *string               `json:"next_cursor,omitempty"`
+	// Items Suppressed recipients in this page.
+	Items []SuppressionResponse `json:"items"`
+
+	// NextCursor Opaque cursor for the next page. Null when there are no more results.
+	NextCursor *string `json:"next_cursor,omitempty"`
 }
 
 // SuppressionResponse defines model for SuppressionResponse.
 type SuppressionResponse struct {
-	Channel   string             `json:"channel"`
-	CreatedAt time.Time          `json:"created_at"`
-	Id        openapi_types.UUID `json:"id"`
-	Reason    string             `json:"reason"`
-	Recipient string             `json:"recipient"`
-	Source    string             `json:"source"`
+	// Channel Channel this entry blocks sends on: 'voice', 'email', 'sms', or 'all' (every channel).
+	Channel string `json:"channel"`
+
+	// CreatedAt When this entry was created, ISO 8601 timestamp.
+	CreatedAt time.Time `json:"created_at"`
+
+	// Id Unique identifier for this suppression entry.
+	Id openapi_types.UUID `json:"id"`
+
+	// Reason Why the recipient was suppressed (e.g. an unsubscribe or a bounce).
+	Reason string `json:"reason"`
+
+	// Recipient The suppressed recipient — E.164 phone number for voice/sms, lowercased email address for email.
+	Recipient string `json:"recipient"`
+
+	// Source How this entry was created: 'unsubscribe_link', 'manual' (an operator action), or 'bounce'.
+	Source string `json:"source"`
 }
 
 // ValidationError defines model for ValidationError.
 type ValidationError struct {
-	Ctx   *map[string]interface{}    `json:"ctx,omitempty"`
-	Input interface{}                `json:"input,omitempty"`
-	Loc   []ValidationError_Loc_Item `json:"loc"`
-	Msg   string                     `json:"msg"`
-	Type  string                     `json:"type"`
+	// Ctx Additional machine-readable context for the error, when the error type provides one.
+	Ctx *map[string]interface{} `json:"ctx,omitempty"`
+
+	// Input The value that was actually provided and failed validation.
+	Input interface{} `json:"input,omitempty"`
+
+	// Loc Path to the invalid field within the request, as a list of keys/indices (e.g. ['body', 'to']).
+	Loc []ValidationError_Loc_Item `json:"loc"`
+
+	// Msg Human-readable description of the validation failure.
+	Msg string `json:"msg"`
+
+	// Type Machine-readable error type code (e.g. 'missing', 'string_type').
+	Type string `json:"type"`
 }
 
 // ValidationErrorLoc0 defines model for .
@@ -1672,11 +2171,19 @@ type ValidationError_Loc_Item struct {
 // VoiceConfig defines model for VoiceConfig.
 type VoiceConfig struct {
 	// Language Spoken language for the call as a lowercase ISO 639-1 code (e.g. 'da'). One of the 39 supported codes — see docs/languages.md. Applied to STT, TTS, and turn detection. Omitted: the providers' defaults (English).
-	Language      *VoiceConfigLanguage `json:"language,omitempty"`
-	Tts           *string              `json:"tts,omitempty"`
-	TurnDetection *string              `json:"turn_detection,omitempty"`
-	Vad           *string              `json:"vad,omitempty"`
-	VoiceId       *string              `json:"voice_id,omitempty"`
+	Language *VoiceConfigLanguage `json:"language,omitempty"`
+
+	// Tts Text-to-speech provider. Currently only 'cartesia'.
+	Tts *string `json:"tts,omitempty"`
+
+	// TurnDetection Turn-detection engine. Currently only 'livekit'.
+	TurnDetection *string `json:"turn_detection,omitempty"`
+
+	// Vad Voice-activity-detection engine. Currently only 'silero'.
+	Vad *string `json:"vad,omitempty"`
+
+	// VoiceId Per-call TTS voice override, applied to whichever TTS provider serves the call. Omitted: the organization's or environment's default voice.
+	VoiceId *string `json:"voice_id,omitempty"`
 }
 
 // VoiceConfigLanguage Spoken language for the call as a lowercase ISO 639-1 code (e.g. 'da'). One of the 39 supported codes — see docs/languages.md. Applied to STT, TTS, and turn detection. Omitted: the providers' defaults (English).
@@ -1684,33 +2191,62 @@ type VoiceConfigLanguage string
 
 // WebhookDeliveryListResponse defines model for WebhookDeliveryListResponse.
 type WebhookDeliveryListResponse struct {
-	Items      []WebhookDeliveryResponse `json:"items"`
-	NextCursor *string                   `json:"next_cursor,omitempty"`
+	// Items Delivery attempts in this page.
+	Items []WebhookDeliveryResponse `json:"items"`
+
+	// NextCursor Opaque cursor for the next page. Null when there are no more results.
+	NextCursor *string `json:"next_cursor,omitempty"`
 }
 
 // WebhookDeliveryResponse defines model for WebhookDeliveryResponse.
 type WebhookDeliveryResponse struct {
-	Attempt        int                           `json:"attempt"`
-	CreatedAt      time.Time                     `json:"created_at"`
-	EmailDomainId  *openapi_types.UUID           `json:"email_domain_id"`
-	EventId        openapi_types.UUID            `json:"event_id"`
-	EventType      string                        `json:"event_type"`
-	Id             openapi_types.UUID            `json:"id"`
-	NextAttemptAt  time.Time                     `json:"next_attempt_at"`
-	ResponseBody   *string                       `json:"response_body,omitempty"`
-	ResponseStatus *int                          `json:"response_status,omitempty"`
-	Status         WebhookDeliveryResponseStatus `json:"status"`
-	SubscriptionId *openapi_types.UUID           `json:"subscription_id"`
-	SucceededAt    *time.Time                    `json:"succeeded_at,omitempty"`
+	// Attempt Number of delivery attempts made so far for this event, starting at 0.
+	Attempt int `json:"attempt"`
+
+	// CreatedAt When this delivery was queued, ISO 8601 timestamp.
+	CreatedAt time.Time `json:"created_at"`
+
+	// EmailDomainId Email domain the triggering event relates to, if any. Informational only (surfaced as the X-Hail-Email-Domain header) — not a routing target.
+	EmailDomainId *openapi_types.UUID `json:"email_domain_id"`
+
+	// EventId Identifier of the underlying event that triggered this delivery.
+	EventId openapi_types.UUID `json:"event_id"`
+
+	// EventType The event type being delivered (e.g. 'call.completed').
+	EventType string `json:"event_type"`
+
+	// Id Unique identifier for this delivery attempt.
+	Id openapi_types.UUID `json:"id"`
+
+	// NextAttemptAt When the next delivery attempt is scheduled, ISO 8601 timestamp.
+	NextAttemptAt time.Time `json:"next_attempt_at"`
+
+	// ResponseBody Response body returned by the target URL on the last attempt, if any. Null before any attempt.
+	ResponseBody *string `json:"response_body,omitempty"`
+
+	// ResponseStatus HTTP status code returned by the target URL on the last attempt. Null before any attempt.
+	ResponseStatus *int `json:"response_status,omitempty"`
+
+	// Status 'pending' (queued/retrying), 'succeeded', 'failed' (will retry), or 'dead' (retries exhausted).
+	Status WebhookDeliveryResponseStatus `json:"status"`
+
+	// SubscriptionId Subscription this delivery belongs to.
+	SubscriptionId *openapi_types.UUID `json:"subscription_id"`
+
+	// SucceededAt When this delivery succeeded, ISO 8601 timestamp. Null until it does.
+	SucceededAt *time.Time `json:"succeeded_at,omitempty"`
 }
 
-// WebhookDeliveryResponseStatus defines model for WebhookDeliveryResponse.Status.
+// WebhookDeliveryResponseStatus 'pending' (queued/retrying), 'succeeded', 'failed' (will retry), or 'dead' (retries exhausted).
 type WebhookDeliveryResponseStatus string
 
 // WebhookSubscriptionCreate defines model for WebhookSubscriptionCreate.
 type WebhookSubscriptionCreate struct {
+	// EventTypes Event types to subscribe to (e.g. 'call.completed', 'email.bounced'). At least one required.
 	EventTypes []WebhookSubscriptionCreateEventTypes `json:"event_types"`
-	TargetUrl  string                                `json:"target_url"`
+
+	// TargetUrl HTTPS URL Hail POSTs event payloads to.
+	TargetUrl string `json:"target_url"`
 }
 
 // WebhookSubscriptionCreateEventTypes defines model for WebhookSubscriptionCreate.EventTypes.
@@ -1718,21 +2254,29 @@ type WebhookSubscriptionCreateEventTypes string
 
 // WebhookSubscriptionListResponse defines model for WebhookSubscriptionListResponse.
 type WebhookSubscriptionListResponse struct {
-	Items      []WebhookSubscriptionResponse `json:"items"`
-	NextCursor *string                       `json:"next_cursor,omitempty"`
+	// Items Subscriptions in this page.
+	Items []WebhookSubscriptionResponse `json:"items"`
+
+	// NextCursor Opaque cursor for the next page. Null when there are no more results.
+	NextCursor *string `json:"next_cursor,omitempty"`
 }
 
 // WebhookSubscriptionPatch defines model for WebhookSubscriptionPatch.
 type WebhookSubscriptionPatch struct {
+	// EventTypes New set of subscribed event types. Omit to leave unchanged.
 	EventTypes *[]WebhookSubscriptionPatchEventTypes `json:"event_types,omitempty"`
-	Status     *WebhookSubscriptionPatchStatus       `json:"status,omitempty"`
-	TargetUrl  *string                               `json:"target_url,omitempty"`
+
+	// Status Set to 'disabled' to pause deliveries, or 'active' to resume. Omit to leave unchanged.
+	Status *WebhookSubscriptionPatchStatus `json:"status,omitempty"`
+
+	// TargetUrl New delivery URL. Omit to leave unchanged.
+	TargetUrl *string `json:"target_url,omitempty"`
 }
 
 // WebhookSubscriptionPatchEventTypes defines model for WebhookSubscriptionPatch.EventTypes.
 type WebhookSubscriptionPatchEventTypes string
 
-// WebhookSubscriptionPatchStatus defines model for WebhookSubscriptionPatch.Status.
+// WebhookSubscriptionPatchStatus Set to 'disabled' to pause deliveries, or 'active' to resume. Omit to leave unchanged.
 type WebhookSubscriptionPatchStatus string
 
 // WebhookSubscriptionResponse Subscription as returned by the API.
@@ -1740,20 +2284,41 @@ type WebhookSubscriptionPatchStatus string
 // “secret“ is populated **only** by create + rotate-secret responses;
 // later GETs return “None“ so the plaintext never round-trips.
 type WebhookSubscriptionResponse struct {
-	ConsecutiveFailures int                               `json:"consecutive_failures"`
-	CreatedAt           time.Time                         `json:"created_at"`
-	EventTypes          []string                          `json:"event_types"`
-	Id                  openapi_types.UUID                `json:"id"`
-	LastFailureAt       *time.Time                        `json:"last_failure_at,omitempty"`
-	LastSuccessAt       *time.Time                        `json:"last_success_at,omitempty"`
-	OrganizationId      openapi_types.UUID                `json:"organization_id"`
-	Secret              *string                           `json:"secret,omitempty"`
-	Status              WebhookSubscriptionResponseStatus `json:"status"`
-	TargetUrl           string                            `json:"target_url"`
-	UpdatedAt           time.Time                         `json:"updated_at"`
+	// ConsecutiveFailures Consecutive failed delivery attempts since the last success. Resets to 0 on success.
+	ConsecutiveFailures int `json:"consecutive_failures"`
+
+	// CreatedAt When this subscription was created, ISO 8601 timestamp.
+	CreatedAt time.Time `json:"created_at"`
+
+	// EventTypes Event types this subscription receives.
+	EventTypes []string `json:"event_types"`
+
+	// Id Unique identifier for this subscription.
+	Id openapi_types.UUID `json:"id"`
+
+	// LastFailureAt When a delivery last failed, ISO 8601 timestamp. Null if never.
+	LastFailureAt *time.Time `json:"last_failure_at,omitempty"`
+
+	// LastSuccessAt When a delivery last succeeded, ISO 8601 timestamp. Null if never.
+	LastSuccessAt *time.Time `json:"last_success_at,omitempty"`
+
+	// OrganizationId Organization that owns this subscription.
+	OrganizationId openapi_types.UUID `json:"organization_id"`
+
+	// Secret Plaintext signing secret for verifying delivery payloads. Only present in the create and rotate-secret responses; every later read returns null.
+	Secret *string `json:"secret,omitempty"`
+
+	// Status 'active' (delivering) or 'disabled' (paused).
+	Status WebhookSubscriptionResponseStatus `json:"status"`
+
+	// TargetUrl HTTPS URL event payloads are POSTed to.
+	TargetUrl string `json:"target_url"`
+
+	// UpdatedAt When this subscription was last modified, ISO 8601 timestamp.
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
-// WebhookSubscriptionResponseStatus defines model for WebhookSubscriptionResponse.Status.
+// WebhookSubscriptionResponseStatus 'active' (delivering) or 'disabled' (paused).
 type WebhookSubscriptionResponseStatus string
 
 // WhoamiResponse Who the caller is — the answer “GET /whoami“ gives.
@@ -1763,59 +2328,68 @@ type WebhookSubscriptionResponseStatus string
 // agent that wants to put the operator's address in “Reply-To“ reads
 // “email“ and skips the header when it is “None“.
 type WhoamiResponse struct {
-	AuthKind       WhoamiResponseAuthKind `json:"auth_kind"`
-	Email          *string                `json:"email,omitempty"`
-	Name           *string                `json:"name,omitempty"`
-	OrganizationId openapi_types.UUID     `json:"organization_id"`
-	UserId         *openapi_types.UUID    `json:"user_id,omitempty"`
+	// AuthKind How the caller authenticated: 'apikey' (org API key), 'jwt' (logged-in user session), or 'shared' (the shared HAIL_API_KEY, which carries no human identity).
+	AuthKind WhoamiResponseAuthKind `json:"auth_kind"`
+
+	// Email The authenticated user's email. Null for 'shared' callers.
+	Email *string `json:"email,omitempty"`
+
+	// Name The authenticated user's display name. Null for 'shared' callers.
+	Name *string `json:"name,omitempty"`
+
+	// OrganizationId Organization the caller belongs to.
+	OrganizationId openapi_types.UUID `json:"organization_id"`
+
+	// UserId The authenticated user's id. Null for 'shared' callers.
+	UserId *openapi_types.UUID `json:"user_id,omitempty"`
 }
 
-// WhoamiResponseAuthKind defines model for WhoamiResponse.AuthKind.
+// WhoamiResponseAuthKind How the caller authenticated: 'apikey' (org API key), 'jwt' (logged-in user session), or 'shared' (the shared HAIL_API_KEY, which carries no human identity).
 type WhoamiResponseAuthKind string
 
-// ListCallsCallsGetParams defines parameters for ListCallsCallsGet.
-type ListCallsCallsGetParams struct {
-	Cursor        *string                        `form:"cursor,omitempty" json:"cursor,omitempty"`
-	Limit         *int                           `form:"limit,omitempty" json:"limit,omitempty"`
-	Status        *ListCallsCallsGetParamsStatus `form:"status,omitempty" json:"status,omitempty"`
-	To            *string                        `form:"to,omitempty" json:"to,omitempty"`
-	Authorization *string                        `json:"authorization,omitempty"`
+// ListCallsV1CallsGetParams defines parameters for ListCallsV1CallsGet.
+type ListCallsV1CallsGetParams struct {
+	Cursor        *string                          `form:"cursor,omitempty" json:"cursor,omitempty"`
+	Limit         *int                             `form:"limit,omitempty" json:"limit,omitempty"`
+	Status        *ListCallsV1CallsGetParamsStatus `form:"status,omitempty" json:"status,omitempty"`
+	To            *string                          `form:"to,omitempty" json:"to,omitempty"`
+	Authorization *string                          `json:"authorization,omitempty"`
 }
 
-// ListCallsCallsGetParamsStatus defines parameters for ListCallsCallsGet.
-type ListCallsCallsGetParamsStatus string
+// ListCallsV1CallsGetParamsStatus defines parameters for ListCallsV1CallsGet.
+type ListCallsV1CallsGetParamsStatus string
 
-// CreateCallCallsPostParams defines parameters for CreateCallCallsPost.
-type CreateCallCallsPostParams struct {
+// CreateCallV1CallsPostParams defines parameters for CreateCallV1CallsPost.
+type CreateCallV1CallsPostParams struct {
 	Authorization  *string `json:"authorization,omitempty"`
 	IdempotencyKey *string `json:"Idempotency-Key,omitempty"`
 }
 
-// GetCallCallsCallIdGetParams defines parameters for GetCallCallsCallIdGet.
-type GetCallCallsCallIdGetParams struct {
+// GetCallV1CallsCallIdGetParams defines parameters for GetCallV1CallsCallIdGet.
+type GetCallV1CallsCallIdGetParams struct {
 	Authorization *string `json:"authorization,omitempty"`
 }
 
-// ListContactsContactsGetParams defines parameters for ListContactsContactsGet.
-type ListContactsContactsGetParams struct {
+// ListContactsV1ContactsGetParams defines parameters for ListContactsV1ContactsGet.
+type ListContactsV1ContactsGetParams struct {
 	Q             *string `form:"q,omitempty" json:"q,omitempty"`
 	Cursor        *string `form:"cursor,omitempty" json:"cursor,omitempty"`
 	Limit         *int    `form:"limit,omitempty" json:"limit,omitempty"`
 	Authorization *string `json:"authorization,omitempty"`
 }
 
-// CreateContactContactsPostParams defines parameters for CreateContactContactsPost.
-type CreateContactContactsPostParams struct {
+// CreateContactV1ContactsPostParams defines parameters for CreateContactV1ContactsPost.
+type CreateContactV1ContactsPostParams struct {
 	Authorization *string `json:"authorization,omitempty"`
 }
 
-// DeleteContactContactsContactIdDeleteParams defines parameters for DeleteContactContactsContactIdDelete.
-type DeleteContactContactsContactIdDeleteParams struct {
+// DeleteContactV1ContactsContactIdDeleteParams defines parameters for DeleteContactV1ContactsContactIdDelete.
+type DeleteContactV1ContactsContactIdDeleteParams struct {
 	Authorization *string `json:"authorization,omitempty"`
 }
 
-// PatchContactContactsContactIdPatchParams defines parameters for PatchContactContactsContactIdPatch.
-type PatchContactContactsContactIdPatchParams struct {
+// PatchContactV1ContactsContactIdPatchParams defines parameters for PatchContactV1ContactsContactIdPatch.
+type PatchContactV1ContactsContactIdPatchParams struct {
 	Authorization *string `json:"authorization,omitempty"`
 }
 
@@ -1824,100 +2398,100 @@ type UploadEmailAttachmentParams struct {
 	Authorization *string `json:"authorization,omitempty"`
 }
 
-// ListEmailDomainsEmailDomainsGetParams defines parameters for ListEmailDomainsEmailDomainsGet.
-type ListEmailDomainsEmailDomainsGetParams struct {
+// ListEmailDomainsV1EmailDomainsGetParams defines parameters for ListEmailDomainsV1EmailDomainsGet.
+type ListEmailDomainsV1EmailDomainsGetParams struct {
 	Cursor        *string `form:"cursor,omitempty" json:"cursor,omitempty"`
 	Limit         *int    `form:"limit,omitempty" json:"limit,omitempty"`
 	Authorization *string `json:"authorization,omitempty"`
 }
 
-// CreateEmailDomainEmailDomainsPostParams defines parameters for CreateEmailDomainEmailDomainsPost.
-type CreateEmailDomainEmailDomainsPostParams struct {
+// CreateEmailDomainV1EmailDomainsPostParams defines parameters for CreateEmailDomainV1EmailDomainsPost.
+type CreateEmailDomainV1EmailDomainsPostParams struct {
 	Authorization *string `json:"authorization,omitempty"`
 }
 
-// CheckDomainEmailDomainsCheckDomainGetParams defines parameters for CheckDomainEmailDomainsCheckDomainGet.
-type CheckDomainEmailDomainsCheckDomainGetParams struct {
+// CheckDomainV1EmailDomainsCheckDomainGetParams defines parameters for CheckDomainV1EmailDomainsCheckDomainGet.
+type CheckDomainV1EmailDomainsCheckDomainGetParams struct {
 	Domain        string  `form:"domain" json:"domain"`
 	Authorization *string `json:"authorization,omitempty"`
 }
 
-// DeleteEmailDomainEmailDomainsDomainIdDeleteParams defines parameters for DeleteEmailDomainEmailDomainsDomainIdDelete.
-type DeleteEmailDomainEmailDomainsDomainIdDeleteParams struct {
+// DeleteEmailDomainV1EmailDomainsDomainIdDeleteParams defines parameters for DeleteEmailDomainV1EmailDomainsDomainIdDelete.
+type DeleteEmailDomainV1EmailDomainsDomainIdDeleteParams struct {
 	Authorization *string `json:"authorization,omitempty"`
 }
 
-// GetEmailDomainEmailDomainsDomainIdGetParams defines parameters for GetEmailDomainEmailDomainsDomainIdGet.
-type GetEmailDomainEmailDomainsDomainIdGetParams struct {
+// GetEmailDomainV1EmailDomainsDomainIdGetParams defines parameters for GetEmailDomainV1EmailDomainsDomainIdGet.
+type GetEmailDomainV1EmailDomainsDomainIdGetParams struct {
 	Authorization *string `json:"authorization,omitempty"`
 }
 
-// PatchEmailDomainEmailDomainsDomainIdPatchParams defines parameters for PatchEmailDomainEmailDomainsDomainIdPatch.
-type PatchEmailDomainEmailDomainsDomainIdPatchParams struct {
+// PatchEmailDomainV1EmailDomainsDomainIdPatchParams defines parameters for PatchEmailDomainV1EmailDomainsDomainIdPatch.
+type PatchEmailDomainV1EmailDomainsDomainIdPatchParams struct {
 	Authorization *string `json:"authorization,omitempty"`
 }
 
-// VerifyEmailDomainEmailDomainsDomainIdVerifyPostParams defines parameters for VerifyEmailDomainEmailDomainsDomainIdVerifyPost.
-type VerifyEmailDomainEmailDomainsDomainIdVerifyPostParams struct {
+// VerifyEmailDomainV1EmailDomainsDomainIdVerifyPostParams defines parameters for VerifyEmailDomainV1EmailDomainsDomainIdVerifyPost.
+type VerifyEmailDomainV1EmailDomainsDomainIdVerifyPostParams struct {
 	Authorization *string `json:"authorization,omitempty"`
 }
 
-// ListEmailsEmailsGetParams defines parameters for ListEmailsEmailsGet.
-type ListEmailsEmailsGetParams struct {
-	Cursor        *string                             `form:"cursor,omitempty" json:"cursor,omitempty"`
-	Limit         *int                                `form:"limit,omitempty" json:"limit,omitempty"`
-	Status        *ListEmailsEmailsGetParamsStatus    `form:"status,omitempty" json:"status,omitempty"`
-	Direction     *ListEmailsEmailsGetParamsDirection `form:"direction,omitempty" json:"direction,omitempty"`
-	Authorization *string                             `json:"authorization,omitempty"`
+// ListEmailsV1EmailsGetParams defines parameters for ListEmailsV1EmailsGet.
+type ListEmailsV1EmailsGetParams struct {
+	Cursor        *string                               `form:"cursor,omitempty" json:"cursor,omitempty"`
+	Limit         *int                                  `form:"limit,omitempty" json:"limit,omitempty"`
+	Status        *ListEmailsV1EmailsGetParamsStatus    `form:"status,omitempty" json:"status,omitempty"`
+	Direction     *ListEmailsV1EmailsGetParamsDirection `form:"direction,omitempty" json:"direction,omitempty"`
+	Authorization *string                               `json:"authorization,omitempty"`
 }
 
-// ListEmailsEmailsGetParamsStatus defines parameters for ListEmailsEmailsGet.
-type ListEmailsEmailsGetParamsStatus string
+// ListEmailsV1EmailsGetParamsStatus defines parameters for ListEmailsV1EmailsGet.
+type ListEmailsV1EmailsGetParamsStatus string
 
-// ListEmailsEmailsGetParamsDirection defines parameters for ListEmailsEmailsGet.
-type ListEmailsEmailsGetParamsDirection string
+// ListEmailsV1EmailsGetParamsDirection defines parameters for ListEmailsV1EmailsGet.
+type ListEmailsV1EmailsGetParamsDirection string
 
-// CreateEmailEmailsPostParams defines parameters for CreateEmailEmailsPost.
-type CreateEmailEmailsPostParams struct {
+// CreateEmailV1EmailsPostParams defines parameters for CreateEmailV1EmailsPost.
+type CreateEmailV1EmailsPostParams struct {
 	Authorization  *string `json:"authorization,omitempty"`
 	IdempotencyKey *string `json:"Idempotency-Key,omitempty"`
 }
 
-// GetEmailStatsEmailsStatsGetParams defines parameters for GetEmailStatsEmailsStatsGet.
-type GetEmailStatsEmailsStatsGetParams struct {
-	From          *time.Time                               `form:"from,omitempty" json:"from,omitempty"`
-	To            *time.Time                               `form:"to,omitempty" json:"to,omitempty"`
-	Bucket        *GetEmailStatsEmailsStatsGetParamsBucket `form:"bucket,omitempty" json:"bucket,omitempty"`
-	Authorization *string                                  `json:"authorization,omitempty"`
+// GetEmailStatsV1EmailsStatsGetParams defines parameters for GetEmailStatsV1EmailsStatsGet.
+type GetEmailStatsV1EmailsStatsGetParams struct {
+	From          *time.Time                                 `form:"from,omitempty" json:"from,omitempty"`
+	To            *time.Time                                 `form:"to,omitempty" json:"to,omitempty"`
+	Bucket        *GetEmailStatsV1EmailsStatsGetParamsBucket `form:"bucket,omitempty" json:"bucket,omitempty"`
+	Authorization *string                                    `json:"authorization,omitempty"`
 }
 
-// GetEmailStatsEmailsStatsGetParamsBucket defines parameters for GetEmailStatsEmailsStatsGet.
-type GetEmailStatsEmailsStatsGetParamsBucket string
+// GetEmailStatsV1EmailsStatsGetParamsBucket defines parameters for GetEmailStatsV1EmailsStatsGet.
+type GetEmailStatsV1EmailsStatsGetParamsBucket string
 
-// GetEmailEmailsEmailIdGetParams defines parameters for GetEmailEmailsEmailIdGet.
-type GetEmailEmailsEmailIdGetParams struct {
+// GetEmailV1EmailsEmailIdGetParams defines parameters for GetEmailV1EmailsEmailIdGet.
+type GetEmailV1EmailsEmailIdGetParams struct {
 	Authorization *string `json:"authorization,omitempty"`
 }
 
-// GetEmailAttachmentEmailsEmailIdAttachmentsAttachmentIdGetParams defines parameters for GetEmailAttachmentEmailsEmailIdAttachmentsAttachmentIdGet.
-type GetEmailAttachmentEmailsEmailIdAttachmentsAttachmentIdGetParams struct {
+// GetEmailAttachmentV1EmailsEmailIdAttachmentsAttachmentIdGetParams defines parameters for GetEmailAttachmentV1EmailsEmailIdAttachmentsAttachmentIdGet.
+type GetEmailAttachmentV1EmailsEmailIdAttachmentsAttachmentIdGetParams struct {
 	Authorization *string `json:"authorization,omitempty"`
 }
 
-// ListEmailEventsEmailsEmailIdEventsGetParams defines parameters for ListEmailEventsEmailsEmailIdEventsGet.
-type ListEmailEventsEmailsEmailIdEventsGetParams struct {
+// ListEmailEventsV1EmailsEmailIdEventsGetParams defines parameters for ListEmailEventsV1EmailsEmailIdEventsGet.
+type ListEmailEventsV1EmailsEmailIdEventsGetParams struct {
 	Cursor        *string `form:"cursor,omitempty" json:"cursor,omitempty"`
 	Limit         *int    `form:"limit,omitempty" json:"limit,omitempty"`
 	Authorization *string `json:"authorization,omitempty"`
 }
 
-// GetEmailRawEmailsEmailIdRawGetParams defines parameters for GetEmailRawEmailsEmailIdRawGet.
-type GetEmailRawEmailsEmailIdRawGetParams struct {
+// GetEmailRawV1EmailsEmailIdRawGetParams defines parameters for GetEmailRawV1EmailsEmailIdRawGet.
+type GetEmailRawV1EmailsEmailIdRawGetParams struct {
 	Authorization *string `json:"authorization,omitempty"`
 }
 
-// ListEventsEventsGetParams defines parameters for ListEventsEventsGet.
-type ListEventsEventsGetParams struct {
+// ListEventsV1EventsGetParams defines parameters for ListEventsV1EventsGet.
+type ListEventsV1EventsGetParams struct {
 	Cursor        *string `form:"cursor,omitempty" json:"cursor,omitempty"`
 	Limit         *int    `form:"limit,omitempty" json:"limit,omitempty"`
 	Id            *string `form:"id,omitempty" json:"id,omitempty"`
@@ -1925,41 +2499,41 @@ type ListEventsEventsGetParams struct {
 	Authorization *string `json:"authorization,omitempty"`
 }
 
-// DeleteMemberPhoneMembersUserIdPhoneDeleteParams defines parameters for DeleteMemberPhoneMembersUserIdPhoneDelete.
-type DeleteMemberPhoneMembersUserIdPhoneDeleteParams struct {
+// DeleteMemberPhoneV1MembersUserIdPhoneDeleteParams defines parameters for DeleteMemberPhoneV1MembersUserIdPhoneDelete.
+type DeleteMemberPhoneV1MembersUserIdPhoneDeleteParams struct {
 	Authorization *string `json:"authorization,omitempty"`
 }
 
-// PutMemberPhoneMembersUserIdPhonePutParams defines parameters for PutMemberPhoneMembersUserIdPhonePut.
-type PutMemberPhoneMembersUserIdPhonePutParams struct {
+// PutMemberPhoneV1MembersUserIdPhonePutParams defines parameters for PutMemberPhoneV1MembersUserIdPhonePut.
+type PutMemberPhoneV1MembersUserIdPhonePutParams struct {
 	Authorization *string `json:"authorization,omitempty"`
 }
 
-// ListNumbersNumbersGetParams defines parameters for ListNumbersNumbersGet.
-type ListNumbersNumbersGetParams struct {
+// ListNumbersV1NumbersGetParams defines parameters for ListNumbersV1NumbersGet.
+type ListNumbersV1NumbersGetParams struct {
 	Cursor        *string `form:"cursor,omitempty" json:"cursor,omitempty"`
 	Limit         *int    `form:"limit,omitempty" json:"limit,omitempty"`
 	Authorization *string `json:"authorization,omitempty"`
 }
 
-// AcquireNumberNumbersPostParams defines parameters for AcquireNumberNumbersPost.
-type AcquireNumberNumbersPostParams struct {
+// AcquireNumberV1NumbersPostParams defines parameters for AcquireNumberV1NumbersPost.
+type AcquireNumberV1NumbersPostParams struct {
 	Authorization  *string `json:"authorization,omitempty"`
 	IdempotencyKey *string `json:"Idempotency-Key,omitempty"`
 }
 
-// ReleaseNumberNumbersNumberIdDeleteParams defines parameters for ReleaseNumberNumbersNumberIdDelete.
-type ReleaseNumberNumbersNumberIdDeleteParams struct {
+// ReleaseNumberV1NumbersNumberIdDeleteParams defines parameters for ReleaseNumberV1NumbersNumberIdDelete.
+type ReleaseNumberV1NumbersNumberIdDeleteParams struct {
 	Authorization *string `json:"authorization,omitempty"`
 }
 
-// GetNumberNumbersNumberIdGetParams defines parameters for GetNumberNumbersNumberIdGet.
-type GetNumberNumbersNumberIdGetParams struct {
+// GetNumberV1NumbersNumberIdGetParams defines parameters for GetNumberV1NumbersNumberIdGet.
+type GetNumberV1NumbersNumberIdGetParams struct {
 	Authorization *string `json:"authorization,omitempty"`
 }
 
-// EnableSmsNumbersNumberIdEnableSmsPostParams defines parameters for EnableSmsNumbersNumberIdEnableSmsPost.
-type EnableSmsNumbersNumberIdEnableSmsPostParams struct {
+// EnableSmsV1NumbersNumberIdEnableSmsPostParams defines parameters for EnableSmsV1NumbersNumberIdEnableSmsPost.
+type EnableSmsV1NumbersNumberIdEnableSmsPostParams struct {
 	Authorization *string `json:"authorization,omitempty"`
 }
 
@@ -1988,131 +2562,131 @@ type DeleteProviderParams struct {
 	Authorization *string `json:"authorization,omitempty"`
 }
 
-// ListSmsSmsGetParams defines parameters for ListSmsSmsGet.
-type ListSmsSmsGetParams struct {
-	Cursor        *string                    `form:"cursor,omitempty" json:"cursor,omitempty"`
-	Limit         *int                       `form:"limit,omitempty" json:"limit,omitempty"`
-	Status        *ListSmsSmsGetParamsStatus `form:"status,omitempty" json:"status,omitempty"`
-	To            *string                    `form:"to,omitempty" json:"to,omitempty"`
-	Authorization *string                    `json:"authorization,omitempty"`
+// ListSmsV1SmsGetParams defines parameters for ListSmsV1SmsGet.
+type ListSmsV1SmsGetParams struct {
+	Cursor        *string                      `form:"cursor,omitempty" json:"cursor,omitempty"`
+	Limit         *int                         `form:"limit,omitempty" json:"limit,omitempty"`
+	Status        *ListSmsV1SmsGetParamsStatus `form:"status,omitempty" json:"status,omitempty"`
+	To            *string                      `form:"to,omitempty" json:"to,omitempty"`
+	Authorization *string                      `json:"authorization,omitempty"`
 }
 
-// ListSmsSmsGetParamsStatus defines parameters for ListSmsSmsGet.
-type ListSmsSmsGetParamsStatus string
+// ListSmsV1SmsGetParamsStatus defines parameters for ListSmsV1SmsGet.
+type ListSmsV1SmsGetParamsStatus string
 
-// CreateSmsSmsPostParams defines parameters for CreateSmsSmsPost.
-type CreateSmsSmsPostParams struct {
+// CreateSmsV1SmsPostParams defines parameters for CreateSmsV1SmsPost.
+type CreateSmsV1SmsPostParams struct {
 	Authorization  *string `json:"authorization,omitempty"`
 	IdempotencyKey *string `json:"Idempotency-Key,omitempty"`
 }
 
-// GetSenderIdSmsSenderIdGetParams defines parameters for GetSenderIdSmsSenderIdGet.
-type GetSenderIdSmsSenderIdGetParams struct {
+// GetSenderIdV1SmsSenderIdGetParams defines parameters for GetSenderIdV1SmsSenderIdGet.
+type GetSenderIdV1SmsSenderIdGetParams struct {
 	Authorization *string `json:"authorization,omitempty"`
 }
 
-// PatchSenderIdSmsSenderIdPatchParams defines parameters for PatchSenderIdSmsSenderIdPatch.
-type PatchSenderIdSmsSenderIdPatchParams struct {
+// PatchSenderIdV1SmsSenderIdPatchParams defines parameters for PatchSenderIdV1SmsSenderIdPatch.
+type PatchSenderIdV1SmsSenderIdPatchParams struct {
 	Authorization *string `json:"authorization,omitempty"`
 }
 
-// ListSmsSuppressionsSmsSuppressionsGetParams defines parameters for ListSmsSuppressionsSmsSuppressionsGet.
-type ListSmsSuppressionsSmsSuppressionsGetParams struct {
+// ListSmsSuppressionsV1SmsSuppressionsGetParams defines parameters for ListSmsSuppressionsV1SmsSuppressionsGet.
+type ListSmsSuppressionsV1SmsSuppressionsGetParams struct {
 	Cursor        *string `form:"cursor,omitempty" json:"cursor,omitempty"`
 	Limit         *int    `form:"limit,omitempty" json:"limit,omitempty"`
 	Authorization *string `json:"authorization,omitempty"`
 }
 
-// DeleteSmsSuppressionSmsSuppressionsNumberDeleteParams defines parameters for DeleteSmsSuppressionSmsSuppressionsNumberDelete.
-type DeleteSmsSuppressionSmsSuppressionsNumberDeleteParams struct {
+// DeleteSmsSuppressionV1SmsSuppressionsNumberDeleteParams defines parameters for DeleteSmsSuppressionV1SmsSuppressionsNumberDelete.
+type DeleteSmsSuppressionV1SmsSuppressionsNumberDeleteParams struct {
 	Authorization *string `json:"authorization,omitempty"`
 }
 
-// GetSmsSmsSmsIdGetParams defines parameters for GetSmsSmsSmsIdGet.
-type GetSmsSmsSmsIdGetParams struct {
+// GetSmsV1SmsSmsIdGetParams defines parameters for GetSmsV1SmsSmsIdGet.
+type GetSmsV1SmsSmsIdGetParams struct {
 	Authorization *string `json:"authorization,omitempty"`
 }
 
-// UnsubscribeUnsubscribeGetParams defines parameters for UnsubscribeUnsubscribeGet.
-type UnsubscribeUnsubscribeGetParams struct {
+// UnsubscribeV1UnsubscribeGetParams defines parameters for UnsubscribeV1UnsubscribeGet.
+type UnsubscribeV1UnsubscribeGetParams struct {
 	Token string `form:"token" json:"token"`
 }
 
-// ListSubscriptionsWebhooksGetParams defines parameters for ListSubscriptionsWebhooksGet.
-type ListSubscriptionsWebhooksGetParams struct {
+// ListSubscriptionsV1WebhooksGetParams defines parameters for ListSubscriptionsV1WebhooksGet.
+type ListSubscriptionsV1WebhooksGetParams struct {
 	Cursor        *string `form:"cursor,omitempty" json:"cursor,omitempty"`
 	Limit         *int    `form:"limit,omitempty" json:"limit,omitempty"`
 	Authorization *string `json:"authorization,omitempty"`
 }
 
-// CreateSubscriptionWebhooksPostParams defines parameters for CreateSubscriptionWebhooksPost.
-type CreateSubscriptionWebhooksPostParams struct {
+// CreateSubscriptionV1WebhooksPostParams defines parameters for CreateSubscriptionV1WebhooksPost.
+type CreateSubscriptionV1WebhooksPostParams struct {
 	Authorization *string `json:"authorization,omitempty"`
 }
 
-// DeleteSubscriptionWebhooksSubIdDeleteParams defines parameters for DeleteSubscriptionWebhooksSubIdDelete.
-type DeleteSubscriptionWebhooksSubIdDeleteParams struct {
+// DeleteSubscriptionV1WebhooksSubIdDeleteParams defines parameters for DeleteSubscriptionV1WebhooksSubIdDelete.
+type DeleteSubscriptionV1WebhooksSubIdDeleteParams struct {
 	Authorization *string `json:"authorization,omitempty"`
 }
 
-// GetSubscriptionWebhooksSubIdGetParams defines parameters for GetSubscriptionWebhooksSubIdGet.
-type GetSubscriptionWebhooksSubIdGetParams struct {
+// GetSubscriptionV1WebhooksSubIdGetParams defines parameters for GetSubscriptionV1WebhooksSubIdGet.
+type GetSubscriptionV1WebhooksSubIdGetParams struct {
 	Authorization *string `json:"authorization,omitempty"`
 }
 
-// PatchSubscriptionWebhooksSubIdPatchParams defines parameters for PatchSubscriptionWebhooksSubIdPatch.
-type PatchSubscriptionWebhooksSubIdPatchParams struct {
+// PatchSubscriptionV1WebhooksSubIdPatchParams defines parameters for PatchSubscriptionV1WebhooksSubIdPatch.
+type PatchSubscriptionV1WebhooksSubIdPatchParams struct {
 	Authorization *string `json:"authorization,omitempty"`
 }
 
-// ListDeliveriesWebhooksSubIdDeliveriesGetParams defines parameters for ListDeliveriesWebhooksSubIdDeliveriesGet.
-type ListDeliveriesWebhooksSubIdDeliveriesGetParams struct {
+// ListDeliveriesV1WebhooksSubIdDeliveriesGetParams defines parameters for ListDeliveriesV1WebhooksSubIdDeliveriesGet.
+type ListDeliveriesV1WebhooksSubIdDeliveriesGetParams struct {
 	Cursor        *string `form:"cursor,omitempty" json:"cursor,omitempty"`
 	Limit         *int    `form:"limit,omitempty" json:"limit,omitempty"`
 	Authorization *string `json:"authorization,omitempty"`
 }
 
-// RedeliverWebhooksSubIdDeliveriesDeliveryIdRedeliverPostParams defines parameters for RedeliverWebhooksSubIdDeliveriesDeliveryIdRedeliverPost.
-type RedeliverWebhooksSubIdDeliveriesDeliveryIdRedeliverPostParams struct {
+// RedeliverV1WebhooksSubIdDeliveriesDeliveryIdRedeliverPostParams defines parameters for RedeliverV1WebhooksSubIdDeliveriesDeliveryIdRedeliverPost.
+type RedeliverV1WebhooksSubIdDeliveriesDeliveryIdRedeliverPostParams struct {
 	Authorization *string `json:"authorization,omitempty"`
 }
 
-// RotateSecretWebhooksSubIdRotateSecretPostParams defines parameters for RotateSecretWebhooksSubIdRotateSecretPost.
-type RotateSecretWebhooksSubIdRotateSecretPostParams struct {
+// RotateSecretV1WebhooksSubIdRotateSecretPostParams defines parameters for RotateSecretV1WebhooksSubIdRotateSecretPost.
+type RotateSecretV1WebhooksSubIdRotateSecretPostParams struct {
 	Authorization *string `json:"authorization,omitempty"`
 }
 
-// GetWhoamiWhoamiGetParams defines parameters for GetWhoamiWhoamiGet.
-type GetWhoamiWhoamiGetParams struct {
+// GetWhoamiV1WhoamiGetParams defines parameters for GetWhoamiV1WhoamiGet.
+type GetWhoamiV1WhoamiGetParams struct {
 	Authorization *string `json:"authorization,omitempty"`
 }
 
-// CreateCallCallsPostJSONRequestBody defines body for CreateCallCallsPost for application/json ContentType.
-type CreateCallCallsPostJSONRequestBody = CallCreate
+// CreateCallV1CallsPostJSONRequestBody defines body for CreateCallV1CallsPost for application/json ContentType.
+type CreateCallV1CallsPostJSONRequestBody = CallCreate
 
-// CreateContactContactsPostJSONRequestBody defines body for CreateContactContactsPost for application/json ContentType.
-type CreateContactContactsPostJSONRequestBody = ContactCreate
+// CreateContactV1ContactsPostJSONRequestBody defines body for CreateContactV1ContactsPost for application/json ContentType.
+type CreateContactV1ContactsPostJSONRequestBody = ContactCreate
 
-// PatchContactContactsContactIdPatchJSONRequestBody defines body for PatchContactContactsContactIdPatch for application/json ContentType.
-type PatchContactContactsContactIdPatchJSONRequestBody = ContactPatch
+// PatchContactV1ContactsContactIdPatchJSONRequestBody defines body for PatchContactV1ContactsContactIdPatch for application/json ContentType.
+type PatchContactV1ContactsContactIdPatchJSONRequestBody = ContactPatch
 
 // UploadEmailAttachmentMultipartRequestBody defines body for UploadEmailAttachment for multipart/form-data ContentType.
 type UploadEmailAttachmentMultipartRequestBody = BodyUploadEmailAttachment
 
-// CreateEmailDomainEmailDomainsPostJSONRequestBody defines body for CreateEmailDomainEmailDomainsPost for application/json ContentType.
-type CreateEmailDomainEmailDomainsPostJSONRequestBody = EmailDomainCreate
+// CreateEmailDomainV1EmailDomainsPostJSONRequestBody defines body for CreateEmailDomainV1EmailDomainsPost for application/json ContentType.
+type CreateEmailDomainV1EmailDomainsPostJSONRequestBody = EmailDomainCreate
 
-// PatchEmailDomainEmailDomainsDomainIdPatchJSONRequestBody defines body for PatchEmailDomainEmailDomainsDomainIdPatch for application/json ContentType.
-type PatchEmailDomainEmailDomainsDomainIdPatchJSONRequestBody = EmailDomainPatch
+// PatchEmailDomainV1EmailDomainsDomainIdPatchJSONRequestBody defines body for PatchEmailDomainV1EmailDomainsDomainIdPatch for application/json ContentType.
+type PatchEmailDomainV1EmailDomainsDomainIdPatchJSONRequestBody = EmailDomainPatch
 
-// CreateEmailEmailsPostJSONRequestBody defines body for CreateEmailEmailsPost for application/json ContentType.
-type CreateEmailEmailsPostJSONRequestBody = EmailCreate
+// CreateEmailV1EmailsPostJSONRequestBody defines body for CreateEmailV1EmailsPost for application/json ContentType.
+type CreateEmailV1EmailsPostJSONRequestBody = EmailCreate
 
-// PutMemberPhoneMembersUserIdPhonePutJSONRequestBody defines body for PutMemberPhoneMembersUserIdPhonePut for application/json ContentType.
-type PutMemberPhoneMembersUserIdPhonePutJSONRequestBody = MemberPhonePut
+// PutMemberPhoneV1MembersUserIdPhonePutJSONRequestBody defines body for PutMemberPhoneV1MembersUserIdPhonePut for application/json ContentType.
+type PutMemberPhoneV1MembersUserIdPhonePutJSONRequestBody = MemberPhonePut
 
-// AcquireNumberNumbersPostJSONRequestBody defines body for AcquireNumberNumbersPost for application/json ContentType.
-type AcquireNumberNumbersPostJSONRequestBody = NumberAcquireRequest
+// AcquireNumberV1NumbersPostJSONRequestBody defines body for AcquireNumberV1NumbersPost for application/json ContentType.
+type AcquireNumberV1NumbersPostJSONRequestBody = NumberAcquireRequest
 
 // UpsertProviderJSONRequestBody defines body for UpsertProvider for application/json ContentType.
 type UpsertProviderJSONRequestBody = ProviderConfigUpsert
@@ -2123,17 +2697,17 @@ type ActivateProviderJSONRequestBody = ProviderActivateRequest
 // ValidateProviderJSONRequestBody defines body for ValidateProvider for application/json ContentType.
 type ValidateProviderJSONRequestBody = ProviderValidateRequest
 
-// CreateSmsSmsPostJSONRequestBody defines body for CreateSmsSmsPost for application/json ContentType.
-type CreateSmsSmsPostJSONRequestBody = SmsCreate
+// CreateSmsV1SmsPostJSONRequestBody defines body for CreateSmsV1SmsPost for application/json ContentType.
+type CreateSmsV1SmsPostJSONRequestBody = SmsCreate
 
-// PatchSenderIdSmsSenderIdPatchJSONRequestBody defines body for PatchSenderIdSmsSenderIdPatch for application/json ContentType.
-type PatchSenderIdSmsSenderIdPatchJSONRequestBody = SenderIdPatch
+// PatchSenderIdV1SmsSenderIdPatchJSONRequestBody defines body for PatchSenderIdV1SmsSenderIdPatch for application/json ContentType.
+type PatchSenderIdV1SmsSenderIdPatchJSONRequestBody = SenderIdPatch
 
-// CreateSubscriptionWebhooksPostJSONRequestBody defines body for CreateSubscriptionWebhooksPost for application/json ContentType.
-type CreateSubscriptionWebhooksPostJSONRequestBody = WebhookSubscriptionCreate
+// CreateSubscriptionV1WebhooksPostJSONRequestBody defines body for CreateSubscriptionV1WebhooksPost for application/json ContentType.
+type CreateSubscriptionV1WebhooksPostJSONRequestBody = WebhookSubscriptionCreate
 
-// PatchSubscriptionWebhooksSubIdPatchJSONRequestBody defines body for PatchSubscriptionWebhooksSubIdPatch for application/json ContentType.
-type PatchSubscriptionWebhooksSubIdPatchJSONRequestBody = WebhookSubscriptionPatch
+// PatchSubscriptionV1WebhooksSubIdPatchJSONRequestBody defines body for PatchSubscriptionV1WebhooksSubIdPatch for application/json ContentType.
+type PatchSubscriptionV1WebhooksSubIdPatchJSONRequestBody = WebhookSubscriptionPatch
 
 // Getter for additional properties for DnsRecordSchema. Returns the specified
 // element and whether it was found
@@ -2379,114 +2953,114 @@ func WithRequestEditorFn(fn RequestEditorFn) ClientOption {
 
 // The interface specification for the client above.
 type ClientInterface interface {
-	// ListCallsCallsGet request
-	ListCallsCallsGet(ctx context.Context, params *ListCallsCallsGetParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+	// HealthzHealthzGet request
+	HealthzHealthzGet(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
 
-	// CreateCallCallsPostWithBody request with any body
-	CreateCallCallsPostWithBody(ctx context.Context, params *CreateCallCallsPostParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+	// ListCallsV1CallsGet request
+	ListCallsV1CallsGet(ctx context.Context, params *ListCallsV1CallsGetParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
-	CreateCallCallsPost(ctx context.Context, params *CreateCallCallsPostParams, body CreateCallCallsPostJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+	// CreateCallV1CallsPostWithBody request with any body
+	CreateCallV1CallsPostWithBody(ctx context.Context, params *CreateCallV1CallsPostParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
 
-	// GetCallCallsCallIdGet request
-	GetCallCallsCallIdGet(ctx context.Context, callId openapi_types.UUID, params *GetCallCallsCallIdGetParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+	CreateCallV1CallsPost(ctx context.Context, params *CreateCallV1CallsPostParams, body CreateCallV1CallsPostJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
-	// ListContactsContactsGet request
-	ListContactsContactsGet(ctx context.Context, params *ListContactsContactsGetParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+	// GetCallV1CallsCallIdGet request
+	GetCallV1CallsCallIdGet(ctx context.Context, callId openapi_types.UUID, params *GetCallV1CallsCallIdGetParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
-	// CreateContactContactsPostWithBody request with any body
-	CreateContactContactsPostWithBody(ctx context.Context, params *CreateContactContactsPostParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+	// ListContactsV1ContactsGet request
+	ListContactsV1ContactsGet(ctx context.Context, params *ListContactsV1ContactsGetParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
-	CreateContactContactsPost(ctx context.Context, params *CreateContactContactsPostParams, body CreateContactContactsPostJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+	// CreateContactV1ContactsPostWithBody request with any body
+	CreateContactV1ContactsPostWithBody(ctx context.Context, params *CreateContactV1ContactsPostParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
 
-	// DeleteContactContactsContactIdDelete request
-	DeleteContactContactsContactIdDelete(ctx context.Context, contactId string, params *DeleteContactContactsContactIdDeleteParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+	CreateContactV1ContactsPost(ctx context.Context, params *CreateContactV1ContactsPostParams, body CreateContactV1ContactsPostJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
-	// PatchContactContactsContactIdPatchWithBody request with any body
-	PatchContactContactsContactIdPatchWithBody(ctx context.Context, contactId string, params *PatchContactContactsContactIdPatchParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+	// DeleteContactV1ContactsContactIdDelete request
+	DeleteContactV1ContactsContactIdDelete(ctx context.Context, contactId string, params *DeleteContactV1ContactsContactIdDeleteParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
-	PatchContactContactsContactIdPatch(ctx context.Context, contactId string, params *PatchContactContactsContactIdPatchParams, body PatchContactContactsContactIdPatchJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+	// PatchContactV1ContactsContactIdPatchWithBody request with any body
+	PatchContactV1ContactsContactIdPatchWithBody(ctx context.Context, contactId string, params *PatchContactV1ContactsContactIdPatchParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	PatchContactV1ContactsContactIdPatch(ctx context.Context, contactId string, params *PatchContactV1ContactsContactIdPatchParams, body PatchContactV1ContactsContactIdPatchJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// UploadEmailAttachmentWithBody request with any body
 	UploadEmailAttachmentWithBody(ctx context.Context, params *UploadEmailAttachmentParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
 
-	// ListEmailDomainsEmailDomainsGet request
-	ListEmailDomainsEmailDomainsGet(ctx context.Context, params *ListEmailDomainsEmailDomainsGetParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+	// ListEmailDomainsV1EmailDomainsGet request
+	ListEmailDomainsV1EmailDomainsGet(ctx context.Context, params *ListEmailDomainsV1EmailDomainsGetParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
-	// CreateEmailDomainEmailDomainsPostWithBody request with any body
-	CreateEmailDomainEmailDomainsPostWithBody(ctx context.Context, params *CreateEmailDomainEmailDomainsPostParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+	// CreateEmailDomainV1EmailDomainsPostWithBody request with any body
+	CreateEmailDomainV1EmailDomainsPostWithBody(ctx context.Context, params *CreateEmailDomainV1EmailDomainsPostParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
 
-	CreateEmailDomainEmailDomainsPost(ctx context.Context, params *CreateEmailDomainEmailDomainsPostParams, body CreateEmailDomainEmailDomainsPostJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+	CreateEmailDomainV1EmailDomainsPost(ctx context.Context, params *CreateEmailDomainV1EmailDomainsPostParams, body CreateEmailDomainV1EmailDomainsPostJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
-	// CheckDomainEmailDomainsCheckDomainGet request
-	CheckDomainEmailDomainsCheckDomainGet(ctx context.Context, params *CheckDomainEmailDomainsCheckDomainGetParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+	// CheckDomainV1EmailDomainsCheckDomainGet request
+	CheckDomainV1EmailDomainsCheckDomainGet(ctx context.Context, params *CheckDomainV1EmailDomainsCheckDomainGetParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
-	// DeleteEmailDomainEmailDomainsDomainIdDelete request
-	DeleteEmailDomainEmailDomainsDomainIdDelete(ctx context.Context, domainId openapi_types.UUID, params *DeleteEmailDomainEmailDomainsDomainIdDeleteParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+	// DeleteEmailDomainV1EmailDomainsDomainIdDelete request
+	DeleteEmailDomainV1EmailDomainsDomainIdDelete(ctx context.Context, domainId openapi_types.UUID, params *DeleteEmailDomainV1EmailDomainsDomainIdDeleteParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
-	// GetEmailDomainEmailDomainsDomainIdGet request
-	GetEmailDomainEmailDomainsDomainIdGet(ctx context.Context, domainId openapi_types.UUID, params *GetEmailDomainEmailDomainsDomainIdGetParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+	// GetEmailDomainV1EmailDomainsDomainIdGet request
+	GetEmailDomainV1EmailDomainsDomainIdGet(ctx context.Context, domainId openapi_types.UUID, params *GetEmailDomainV1EmailDomainsDomainIdGetParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
-	// PatchEmailDomainEmailDomainsDomainIdPatchWithBody request with any body
-	PatchEmailDomainEmailDomainsDomainIdPatchWithBody(ctx context.Context, domainId openapi_types.UUID, params *PatchEmailDomainEmailDomainsDomainIdPatchParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+	// PatchEmailDomainV1EmailDomainsDomainIdPatchWithBody request with any body
+	PatchEmailDomainV1EmailDomainsDomainIdPatchWithBody(ctx context.Context, domainId openapi_types.UUID, params *PatchEmailDomainV1EmailDomainsDomainIdPatchParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
 
-	PatchEmailDomainEmailDomainsDomainIdPatch(ctx context.Context, domainId openapi_types.UUID, params *PatchEmailDomainEmailDomainsDomainIdPatchParams, body PatchEmailDomainEmailDomainsDomainIdPatchJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+	PatchEmailDomainV1EmailDomainsDomainIdPatch(ctx context.Context, domainId openapi_types.UUID, params *PatchEmailDomainV1EmailDomainsDomainIdPatchParams, body PatchEmailDomainV1EmailDomainsDomainIdPatchJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
-	// VerifyEmailDomainEmailDomainsDomainIdVerifyPost request
-	VerifyEmailDomainEmailDomainsDomainIdVerifyPost(ctx context.Context, domainId openapi_types.UUID, params *VerifyEmailDomainEmailDomainsDomainIdVerifyPostParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+	// VerifyEmailDomainV1EmailDomainsDomainIdVerifyPost request
+	VerifyEmailDomainV1EmailDomainsDomainIdVerifyPost(ctx context.Context, domainId openapi_types.UUID, params *VerifyEmailDomainV1EmailDomainsDomainIdVerifyPostParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
-	// ListEmailsEmailsGet request
-	ListEmailsEmailsGet(ctx context.Context, params *ListEmailsEmailsGetParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+	// ListEmailsV1EmailsGet request
+	ListEmailsV1EmailsGet(ctx context.Context, params *ListEmailsV1EmailsGetParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
-	// CreateEmailEmailsPostWithBody request with any body
-	CreateEmailEmailsPostWithBody(ctx context.Context, params *CreateEmailEmailsPostParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+	// CreateEmailV1EmailsPostWithBody request with any body
+	CreateEmailV1EmailsPostWithBody(ctx context.Context, params *CreateEmailV1EmailsPostParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
 
-	CreateEmailEmailsPost(ctx context.Context, params *CreateEmailEmailsPostParams, body CreateEmailEmailsPostJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+	CreateEmailV1EmailsPost(ctx context.Context, params *CreateEmailV1EmailsPostParams, body CreateEmailV1EmailsPostJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
-	// GetEmailStatsEmailsStatsGet request
-	GetEmailStatsEmailsStatsGet(ctx context.Context, params *GetEmailStatsEmailsStatsGetParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+	// GetEmailStatsV1EmailsStatsGet request
+	GetEmailStatsV1EmailsStatsGet(ctx context.Context, params *GetEmailStatsV1EmailsStatsGetParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
-	// GetEmailEmailsEmailIdGet request
-	GetEmailEmailsEmailIdGet(ctx context.Context, emailId openapi_types.UUID, params *GetEmailEmailsEmailIdGetParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+	// GetEmailV1EmailsEmailIdGet request
+	GetEmailV1EmailsEmailIdGet(ctx context.Context, emailId openapi_types.UUID, params *GetEmailV1EmailsEmailIdGetParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
-	// GetEmailAttachmentEmailsEmailIdAttachmentsAttachmentIdGet request
-	GetEmailAttachmentEmailsEmailIdAttachmentsAttachmentIdGet(ctx context.Context, emailId openapi_types.UUID, attachmentId openapi_types.UUID, params *GetEmailAttachmentEmailsEmailIdAttachmentsAttachmentIdGetParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+	// GetEmailAttachmentV1EmailsEmailIdAttachmentsAttachmentIdGet request
+	GetEmailAttachmentV1EmailsEmailIdAttachmentsAttachmentIdGet(ctx context.Context, emailId openapi_types.UUID, attachmentId openapi_types.UUID, params *GetEmailAttachmentV1EmailsEmailIdAttachmentsAttachmentIdGetParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
-	// ListEmailEventsEmailsEmailIdEventsGet request
-	ListEmailEventsEmailsEmailIdEventsGet(ctx context.Context, emailId openapi_types.UUID, params *ListEmailEventsEmailsEmailIdEventsGetParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+	// ListEmailEventsV1EmailsEmailIdEventsGet request
+	ListEmailEventsV1EmailsEmailIdEventsGet(ctx context.Context, emailId openapi_types.UUID, params *ListEmailEventsV1EmailsEmailIdEventsGetParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
-	// GetEmailRawEmailsEmailIdRawGet request
-	GetEmailRawEmailsEmailIdRawGet(ctx context.Context, emailId openapi_types.UUID, params *GetEmailRawEmailsEmailIdRawGetParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+	// GetEmailRawV1EmailsEmailIdRawGet request
+	GetEmailRawV1EmailsEmailIdRawGet(ctx context.Context, emailId openapi_types.UUID, params *GetEmailRawV1EmailsEmailIdRawGetParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
-	// ListEventsEventsGet request
-	ListEventsEventsGet(ctx context.Context, params *ListEventsEventsGetParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+	// ListEventsV1EventsGet request
+	ListEventsV1EventsGet(ctx context.Context, params *ListEventsV1EventsGetParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
-	// HealthzHealthzGet request
-	HealthzHealthzGet(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
+	// DeleteMemberPhoneV1MembersUserIdPhoneDelete request
+	DeleteMemberPhoneV1MembersUserIdPhoneDelete(ctx context.Context, userId string, params *DeleteMemberPhoneV1MembersUserIdPhoneDeleteParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
-	// DeleteMemberPhoneMembersUserIdPhoneDelete request
-	DeleteMemberPhoneMembersUserIdPhoneDelete(ctx context.Context, userId string, params *DeleteMemberPhoneMembersUserIdPhoneDeleteParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+	// PutMemberPhoneV1MembersUserIdPhonePutWithBody request with any body
+	PutMemberPhoneV1MembersUserIdPhonePutWithBody(ctx context.Context, userId string, params *PutMemberPhoneV1MembersUserIdPhonePutParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
 
-	// PutMemberPhoneMembersUserIdPhonePutWithBody request with any body
-	PutMemberPhoneMembersUserIdPhonePutWithBody(ctx context.Context, userId string, params *PutMemberPhoneMembersUserIdPhonePutParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+	PutMemberPhoneV1MembersUserIdPhonePut(ctx context.Context, userId string, params *PutMemberPhoneV1MembersUserIdPhonePutParams, body PutMemberPhoneV1MembersUserIdPhonePutJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
-	PutMemberPhoneMembersUserIdPhonePut(ctx context.Context, userId string, params *PutMemberPhoneMembersUserIdPhonePutParams, body PutMemberPhoneMembersUserIdPhonePutJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+	// ListNumbersV1NumbersGet request
+	ListNumbersV1NumbersGet(ctx context.Context, params *ListNumbersV1NumbersGetParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
-	// ListNumbersNumbersGet request
-	ListNumbersNumbersGet(ctx context.Context, params *ListNumbersNumbersGetParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+	// AcquireNumberV1NumbersPostWithBody request with any body
+	AcquireNumberV1NumbersPostWithBody(ctx context.Context, params *AcquireNumberV1NumbersPostParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
 
-	// AcquireNumberNumbersPostWithBody request with any body
-	AcquireNumberNumbersPostWithBody(ctx context.Context, params *AcquireNumberNumbersPostParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+	AcquireNumberV1NumbersPost(ctx context.Context, params *AcquireNumberV1NumbersPostParams, body AcquireNumberV1NumbersPostJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
-	AcquireNumberNumbersPost(ctx context.Context, params *AcquireNumberNumbersPostParams, body AcquireNumberNumbersPostJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+	// ReleaseNumberV1NumbersNumberIdDelete request
+	ReleaseNumberV1NumbersNumberIdDelete(ctx context.Context, numberId openapi_types.UUID, params *ReleaseNumberV1NumbersNumberIdDeleteParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
-	// ReleaseNumberNumbersNumberIdDelete request
-	ReleaseNumberNumbersNumberIdDelete(ctx context.Context, numberId openapi_types.UUID, params *ReleaseNumberNumbersNumberIdDeleteParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+	// GetNumberV1NumbersNumberIdGet request
+	GetNumberV1NumbersNumberIdGet(ctx context.Context, numberId openapi_types.UUID, params *GetNumberV1NumbersNumberIdGetParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
-	// GetNumberNumbersNumberIdGet request
-	GetNumberNumbersNumberIdGet(ctx context.Context, numberId openapi_types.UUID, params *GetNumberNumbersNumberIdGetParams, reqEditors ...RequestEditorFn) (*http.Response, error)
-
-	// EnableSmsNumbersNumberIdEnableSmsPost request
-	EnableSmsNumbersNumberIdEnableSmsPost(ctx context.Context, numberId openapi_types.UUID, params *EnableSmsNumbersNumberIdEnableSmsPostParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+	// EnableSmsV1NumbersNumberIdEnableSmsPost request
+	EnableSmsV1NumbersNumberIdEnableSmsPost(ctx context.Context, numberId openapi_types.UUID, params *EnableSmsV1NumbersNumberIdEnableSmsPostParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// ListProviders request
 	ListProviders(ctx context.Context, params *ListProvidersParams, reqEditors ...RequestEditorFn) (*http.Response, error)
@@ -2509,68 +3083,68 @@ type ClientInterface interface {
 	// DeleteProvider request
 	DeleteProvider(ctx context.Context, layer string, provider string, params *DeleteProviderParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
-	// ListSmsSmsGet request
-	ListSmsSmsGet(ctx context.Context, params *ListSmsSmsGetParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+	// ListSmsV1SmsGet request
+	ListSmsV1SmsGet(ctx context.Context, params *ListSmsV1SmsGetParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
-	// CreateSmsSmsPostWithBody request with any body
-	CreateSmsSmsPostWithBody(ctx context.Context, params *CreateSmsSmsPostParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+	// CreateSmsV1SmsPostWithBody request with any body
+	CreateSmsV1SmsPostWithBody(ctx context.Context, params *CreateSmsV1SmsPostParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
 
-	CreateSmsSmsPost(ctx context.Context, params *CreateSmsSmsPostParams, body CreateSmsSmsPostJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+	CreateSmsV1SmsPost(ctx context.Context, params *CreateSmsV1SmsPostParams, body CreateSmsV1SmsPostJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
-	// GetSenderIdSmsSenderIdGet request
-	GetSenderIdSmsSenderIdGet(ctx context.Context, params *GetSenderIdSmsSenderIdGetParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+	// GetSenderIdV1SmsSenderIdGet request
+	GetSenderIdV1SmsSenderIdGet(ctx context.Context, params *GetSenderIdV1SmsSenderIdGetParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
-	// PatchSenderIdSmsSenderIdPatchWithBody request with any body
-	PatchSenderIdSmsSenderIdPatchWithBody(ctx context.Context, params *PatchSenderIdSmsSenderIdPatchParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+	// PatchSenderIdV1SmsSenderIdPatchWithBody request with any body
+	PatchSenderIdV1SmsSenderIdPatchWithBody(ctx context.Context, params *PatchSenderIdV1SmsSenderIdPatchParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
 
-	PatchSenderIdSmsSenderIdPatch(ctx context.Context, params *PatchSenderIdSmsSenderIdPatchParams, body PatchSenderIdSmsSenderIdPatchJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+	PatchSenderIdV1SmsSenderIdPatch(ctx context.Context, params *PatchSenderIdV1SmsSenderIdPatchParams, body PatchSenderIdV1SmsSenderIdPatchJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
-	// ListSmsSuppressionsSmsSuppressionsGet request
-	ListSmsSuppressionsSmsSuppressionsGet(ctx context.Context, params *ListSmsSuppressionsSmsSuppressionsGetParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+	// ListSmsSuppressionsV1SmsSuppressionsGet request
+	ListSmsSuppressionsV1SmsSuppressionsGet(ctx context.Context, params *ListSmsSuppressionsV1SmsSuppressionsGetParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
-	// DeleteSmsSuppressionSmsSuppressionsNumberDelete request
-	DeleteSmsSuppressionSmsSuppressionsNumberDelete(ctx context.Context, number string, params *DeleteSmsSuppressionSmsSuppressionsNumberDeleteParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+	// DeleteSmsSuppressionV1SmsSuppressionsNumberDelete request
+	DeleteSmsSuppressionV1SmsSuppressionsNumberDelete(ctx context.Context, number string, params *DeleteSmsSuppressionV1SmsSuppressionsNumberDeleteParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
-	// GetSmsSmsSmsIdGet request
-	GetSmsSmsSmsIdGet(ctx context.Context, smsId openapi_types.UUID, params *GetSmsSmsSmsIdGetParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+	// GetSmsV1SmsSmsIdGet request
+	GetSmsV1SmsSmsIdGet(ctx context.Context, smsId openapi_types.UUID, params *GetSmsV1SmsSmsIdGetParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
-	// UnsubscribeUnsubscribeGet request
-	UnsubscribeUnsubscribeGet(ctx context.Context, params *UnsubscribeUnsubscribeGetParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+	// UnsubscribeV1UnsubscribeGet request
+	UnsubscribeV1UnsubscribeGet(ctx context.Context, params *UnsubscribeV1UnsubscribeGetParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
-	// ListSubscriptionsWebhooksGet request
-	ListSubscriptionsWebhooksGet(ctx context.Context, params *ListSubscriptionsWebhooksGetParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+	// ListSubscriptionsV1WebhooksGet request
+	ListSubscriptionsV1WebhooksGet(ctx context.Context, params *ListSubscriptionsV1WebhooksGetParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
-	// CreateSubscriptionWebhooksPostWithBody request with any body
-	CreateSubscriptionWebhooksPostWithBody(ctx context.Context, params *CreateSubscriptionWebhooksPostParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+	// CreateSubscriptionV1WebhooksPostWithBody request with any body
+	CreateSubscriptionV1WebhooksPostWithBody(ctx context.Context, params *CreateSubscriptionV1WebhooksPostParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
 
-	CreateSubscriptionWebhooksPost(ctx context.Context, params *CreateSubscriptionWebhooksPostParams, body CreateSubscriptionWebhooksPostJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+	CreateSubscriptionV1WebhooksPost(ctx context.Context, params *CreateSubscriptionV1WebhooksPostParams, body CreateSubscriptionV1WebhooksPostJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
-	// DeleteSubscriptionWebhooksSubIdDelete request
-	DeleteSubscriptionWebhooksSubIdDelete(ctx context.Context, subId openapi_types.UUID, params *DeleteSubscriptionWebhooksSubIdDeleteParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+	// DeleteSubscriptionV1WebhooksSubIdDelete request
+	DeleteSubscriptionV1WebhooksSubIdDelete(ctx context.Context, subId openapi_types.UUID, params *DeleteSubscriptionV1WebhooksSubIdDeleteParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
-	// GetSubscriptionWebhooksSubIdGet request
-	GetSubscriptionWebhooksSubIdGet(ctx context.Context, subId openapi_types.UUID, params *GetSubscriptionWebhooksSubIdGetParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+	// GetSubscriptionV1WebhooksSubIdGet request
+	GetSubscriptionV1WebhooksSubIdGet(ctx context.Context, subId openapi_types.UUID, params *GetSubscriptionV1WebhooksSubIdGetParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
-	// PatchSubscriptionWebhooksSubIdPatchWithBody request with any body
-	PatchSubscriptionWebhooksSubIdPatchWithBody(ctx context.Context, subId openapi_types.UUID, params *PatchSubscriptionWebhooksSubIdPatchParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+	// PatchSubscriptionV1WebhooksSubIdPatchWithBody request with any body
+	PatchSubscriptionV1WebhooksSubIdPatchWithBody(ctx context.Context, subId openapi_types.UUID, params *PatchSubscriptionV1WebhooksSubIdPatchParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
 
-	PatchSubscriptionWebhooksSubIdPatch(ctx context.Context, subId openapi_types.UUID, params *PatchSubscriptionWebhooksSubIdPatchParams, body PatchSubscriptionWebhooksSubIdPatchJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+	PatchSubscriptionV1WebhooksSubIdPatch(ctx context.Context, subId openapi_types.UUID, params *PatchSubscriptionV1WebhooksSubIdPatchParams, body PatchSubscriptionV1WebhooksSubIdPatchJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
-	// ListDeliveriesWebhooksSubIdDeliveriesGet request
-	ListDeliveriesWebhooksSubIdDeliveriesGet(ctx context.Context, subId openapi_types.UUID, params *ListDeliveriesWebhooksSubIdDeliveriesGetParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+	// ListDeliveriesV1WebhooksSubIdDeliveriesGet request
+	ListDeliveriesV1WebhooksSubIdDeliveriesGet(ctx context.Context, subId openapi_types.UUID, params *ListDeliveriesV1WebhooksSubIdDeliveriesGetParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
-	// RedeliverWebhooksSubIdDeliveriesDeliveryIdRedeliverPost request
-	RedeliverWebhooksSubIdDeliveriesDeliveryIdRedeliverPost(ctx context.Context, subId openapi_types.UUID, deliveryId openapi_types.UUID, params *RedeliverWebhooksSubIdDeliveriesDeliveryIdRedeliverPostParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+	// RedeliverV1WebhooksSubIdDeliveriesDeliveryIdRedeliverPost request
+	RedeliverV1WebhooksSubIdDeliveriesDeliveryIdRedeliverPost(ctx context.Context, subId openapi_types.UUID, deliveryId openapi_types.UUID, params *RedeliverV1WebhooksSubIdDeliveriesDeliveryIdRedeliverPostParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
-	// RotateSecretWebhooksSubIdRotateSecretPost request
-	RotateSecretWebhooksSubIdRotateSecretPost(ctx context.Context, subId openapi_types.UUID, params *RotateSecretWebhooksSubIdRotateSecretPostParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+	// RotateSecretV1WebhooksSubIdRotateSecretPost request
+	RotateSecretV1WebhooksSubIdRotateSecretPost(ctx context.Context, subId openapi_types.UUID, params *RotateSecretV1WebhooksSubIdRotateSecretPostParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
-	// GetWhoamiWhoamiGet request
-	GetWhoamiWhoamiGet(ctx context.Context, params *GetWhoamiWhoamiGetParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+	// GetWhoamiV1WhoamiGet request
+	GetWhoamiV1WhoamiGet(ctx context.Context, params *GetWhoamiV1WhoamiGetParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 }
 
-func (c *Client) ListCallsCallsGet(ctx context.Context, params *ListCallsCallsGetParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewListCallsCallsGetRequest(c.Server, params)
+func (c *Client) HealthzHealthzGet(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewHealthzHealthzGetRequest(c.Server)
 	if err != nil {
 		return nil, err
 	}
@@ -2581,8 +3155,8 @@ func (c *Client) ListCallsCallsGet(ctx context.Context, params *ListCallsCallsGe
 	return c.Client.Do(req)
 }
 
-func (c *Client) CreateCallCallsPostWithBody(ctx context.Context, params *CreateCallCallsPostParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewCreateCallCallsPostRequestWithBody(c.Server, params, contentType, body)
+func (c *Client) ListCallsV1CallsGet(ctx context.Context, params *ListCallsV1CallsGetParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewListCallsV1CallsGetRequest(c.Server, params)
 	if err != nil {
 		return nil, err
 	}
@@ -2593,8 +3167,8 @@ func (c *Client) CreateCallCallsPostWithBody(ctx context.Context, params *Create
 	return c.Client.Do(req)
 }
 
-func (c *Client) CreateCallCallsPost(ctx context.Context, params *CreateCallCallsPostParams, body CreateCallCallsPostJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewCreateCallCallsPostRequest(c.Server, params, body)
+func (c *Client) CreateCallV1CallsPostWithBody(ctx context.Context, params *CreateCallV1CallsPostParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewCreateCallV1CallsPostRequestWithBody(c.Server, params, contentType, body)
 	if err != nil {
 		return nil, err
 	}
@@ -2605,8 +3179,8 @@ func (c *Client) CreateCallCallsPost(ctx context.Context, params *CreateCallCall
 	return c.Client.Do(req)
 }
 
-func (c *Client) GetCallCallsCallIdGet(ctx context.Context, callId openapi_types.UUID, params *GetCallCallsCallIdGetParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewGetCallCallsCallIdGetRequest(c.Server, callId, params)
+func (c *Client) CreateCallV1CallsPost(ctx context.Context, params *CreateCallV1CallsPostParams, body CreateCallV1CallsPostJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewCreateCallV1CallsPostRequest(c.Server, params, body)
 	if err != nil {
 		return nil, err
 	}
@@ -2617,8 +3191,8 @@ func (c *Client) GetCallCallsCallIdGet(ctx context.Context, callId openapi_types
 	return c.Client.Do(req)
 }
 
-func (c *Client) ListContactsContactsGet(ctx context.Context, params *ListContactsContactsGetParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewListContactsContactsGetRequest(c.Server, params)
+func (c *Client) GetCallV1CallsCallIdGet(ctx context.Context, callId openapi_types.UUID, params *GetCallV1CallsCallIdGetParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetCallV1CallsCallIdGetRequest(c.Server, callId, params)
 	if err != nil {
 		return nil, err
 	}
@@ -2629,8 +3203,8 @@ func (c *Client) ListContactsContactsGet(ctx context.Context, params *ListContac
 	return c.Client.Do(req)
 }
 
-func (c *Client) CreateContactContactsPostWithBody(ctx context.Context, params *CreateContactContactsPostParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewCreateContactContactsPostRequestWithBody(c.Server, params, contentType, body)
+func (c *Client) ListContactsV1ContactsGet(ctx context.Context, params *ListContactsV1ContactsGetParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewListContactsV1ContactsGetRequest(c.Server, params)
 	if err != nil {
 		return nil, err
 	}
@@ -2641,8 +3215,8 @@ func (c *Client) CreateContactContactsPostWithBody(ctx context.Context, params *
 	return c.Client.Do(req)
 }
 
-func (c *Client) CreateContactContactsPost(ctx context.Context, params *CreateContactContactsPostParams, body CreateContactContactsPostJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewCreateContactContactsPostRequest(c.Server, params, body)
+func (c *Client) CreateContactV1ContactsPostWithBody(ctx context.Context, params *CreateContactV1ContactsPostParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewCreateContactV1ContactsPostRequestWithBody(c.Server, params, contentType, body)
 	if err != nil {
 		return nil, err
 	}
@@ -2653,8 +3227,8 @@ func (c *Client) CreateContactContactsPost(ctx context.Context, params *CreateCo
 	return c.Client.Do(req)
 }
 
-func (c *Client) DeleteContactContactsContactIdDelete(ctx context.Context, contactId string, params *DeleteContactContactsContactIdDeleteParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewDeleteContactContactsContactIdDeleteRequest(c.Server, contactId, params)
+func (c *Client) CreateContactV1ContactsPost(ctx context.Context, params *CreateContactV1ContactsPostParams, body CreateContactV1ContactsPostJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewCreateContactV1ContactsPostRequest(c.Server, params, body)
 	if err != nil {
 		return nil, err
 	}
@@ -2665,8 +3239,8 @@ func (c *Client) DeleteContactContactsContactIdDelete(ctx context.Context, conta
 	return c.Client.Do(req)
 }
 
-func (c *Client) PatchContactContactsContactIdPatchWithBody(ctx context.Context, contactId string, params *PatchContactContactsContactIdPatchParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewPatchContactContactsContactIdPatchRequestWithBody(c.Server, contactId, params, contentType, body)
+func (c *Client) DeleteContactV1ContactsContactIdDelete(ctx context.Context, contactId string, params *DeleteContactV1ContactsContactIdDeleteParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewDeleteContactV1ContactsContactIdDeleteRequest(c.Server, contactId, params)
 	if err != nil {
 		return nil, err
 	}
@@ -2677,8 +3251,20 @@ func (c *Client) PatchContactContactsContactIdPatchWithBody(ctx context.Context,
 	return c.Client.Do(req)
 }
 
-func (c *Client) PatchContactContactsContactIdPatch(ctx context.Context, contactId string, params *PatchContactContactsContactIdPatchParams, body PatchContactContactsContactIdPatchJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewPatchContactContactsContactIdPatchRequest(c.Server, contactId, params, body)
+func (c *Client) PatchContactV1ContactsContactIdPatchWithBody(ctx context.Context, contactId string, params *PatchContactV1ContactsContactIdPatchParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewPatchContactV1ContactsContactIdPatchRequestWithBody(c.Server, contactId, params, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) PatchContactV1ContactsContactIdPatch(ctx context.Context, contactId string, params *PatchContactV1ContactsContactIdPatchParams, body PatchContactV1ContactsContactIdPatchJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewPatchContactV1ContactsContactIdPatchRequest(c.Server, contactId, params, body)
 	if err != nil {
 		return nil, err
 	}
@@ -2701,8 +3287,8 @@ func (c *Client) UploadEmailAttachmentWithBody(ctx context.Context, params *Uplo
 	return c.Client.Do(req)
 }
 
-func (c *Client) ListEmailDomainsEmailDomainsGet(ctx context.Context, params *ListEmailDomainsEmailDomainsGetParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewListEmailDomainsEmailDomainsGetRequest(c.Server, params)
+func (c *Client) ListEmailDomainsV1EmailDomainsGet(ctx context.Context, params *ListEmailDomainsV1EmailDomainsGetParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewListEmailDomainsV1EmailDomainsGetRequest(c.Server, params)
 	if err != nil {
 		return nil, err
 	}
@@ -2713,8 +3299,8 @@ func (c *Client) ListEmailDomainsEmailDomainsGet(ctx context.Context, params *Li
 	return c.Client.Do(req)
 }
 
-func (c *Client) CreateEmailDomainEmailDomainsPostWithBody(ctx context.Context, params *CreateEmailDomainEmailDomainsPostParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewCreateEmailDomainEmailDomainsPostRequestWithBody(c.Server, params, contentType, body)
+func (c *Client) CreateEmailDomainV1EmailDomainsPostWithBody(ctx context.Context, params *CreateEmailDomainV1EmailDomainsPostParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewCreateEmailDomainV1EmailDomainsPostRequestWithBody(c.Server, params, contentType, body)
 	if err != nil {
 		return nil, err
 	}
@@ -2725,8 +3311,8 @@ func (c *Client) CreateEmailDomainEmailDomainsPostWithBody(ctx context.Context, 
 	return c.Client.Do(req)
 }
 
-func (c *Client) CreateEmailDomainEmailDomainsPost(ctx context.Context, params *CreateEmailDomainEmailDomainsPostParams, body CreateEmailDomainEmailDomainsPostJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewCreateEmailDomainEmailDomainsPostRequest(c.Server, params, body)
+func (c *Client) CreateEmailDomainV1EmailDomainsPost(ctx context.Context, params *CreateEmailDomainV1EmailDomainsPostParams, body CreateEmailDomainV1EmailDomainsPostJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewCreateEmailDomainV1EmailDomainsPostRequest(c.Server, params, body)
 	if err != nil {
 		return nil, err
 	}
@@ -2737,8 +3323,8 @@ func (c *Client) CreateEmailDomainEmailDomainsPost(ctx context.Context, params *
 	return c.Client.Do(req)
 }
 
-func (c *Client) CheckDomainEmailDomainsCheckDomainGet(ctx context.Context, params *CheckDomainEmailDomainsCheckDomainGetParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewCheckDomainEmailDomainsCheckDomainGetRequest(c.Server, params)
+func (c *Client) CheckDomainV1EmailDomainsCheckDomainGet(ctx context.Context, params *CheckDomainV1EmailDomainsCheckDomainGetParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewCheckDomainV1EmailDomainsCheckDomainGetRequest(c.Server, params)
 	if err != nil {
 		return nil, err
 	}
@@ -2749,8 +3335,8 @@ func (c *Client) CheckDomainEmailDomainsCheckDomainGet(ctx context.Context, para
 	return c.Client.Do(req)
 }
 
-func (c *Client) DeleteEmailDomainEmailDomainsDomainIdDelete(ctx context.Context, domainId openapi_types.UUID, params *DeleteEmailDomainEmailDomainsDomainIdDeleteParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewDeleteEmailDomainEmailDomainsDomainIdDeleteRequest(c.Server, domainId, params)
+func (c *Client) DeleteEmailDomainV1EmailDomainsDomainIdDelete(ctx context.Context, domainId openapi_types.UUID, params *DeleteEmailDomainV1EmailDomainsDomainIdDeleteParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewDeleteEmailDomainV1EmailDomainsDomainIdDeleteRequest(c.Server, domainId, params)
 	if err != nil {
 		return nil, err
 	}
@@ -2761,8 +3347,8 @@ func (c *Client) DeleteEmailDomainEmailDomainsDomainIdDelete(ctx context.Context
 	return c.Client.Do(req)
 }
 
-func (c *Client) GetEmailDomainEmailDomainsDomainIdGet(ctx context.Context, domainId openapi_types.UUID, params *GetEmailDomainEmailDomainsDomainIdGetParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewGetEmailDomainEmailDomainsDomainIdGetRequest(c.Server, domainId, params)
+func (c *Client) GetEmailDomainV1EmailDomainsDomainIdGet(ctx context.Context, domainId openapi_types.UUID, params *GetEmailDomainV1EmailDomainsDomainIdGetParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetEmailDomainV1EmailDomainsDomainIdGetRequest(c.Server, domainId, params)
 	if err != nil {
 		return nil, err
 	}
@@ -2773,8 +3359,8 @@ func (c *Client) GetEmailDomainEmailDomainsDomainIdGet(ctx context.Context, doma
 	return c.Client.Do(req)
 }
 
-func (c *Client) PatchEmailDomainEmailDomainsDomainIdPatchWithBody(ctx context.Context, domainId openapi_types.UUID, params *PatchEmailDomainEmailDomainsDomainIdPatchParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewPatchEmailDomainEmailDomainsDomainIdPatchRequestWithBody(c.Server, domainId, params, contentType, body)
+func (c *Client) PatchEmailDomainV1EmailDomainsDomainIdPatchWithBody(ctx context.Context, domainId openapi_types.UUID, params *PatchEmailDomainV1EmailDomainsDomainIdPatchParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewPatchEmailDomainV1EmailDomainsDomainIdPatchRequestWithBody(c.Server, domainId, params, contentType, body)
 	if err != nil {
 		return nil, err
 	}
@@ -2785,8 +3371,8 @@ func (c *Client) PatchEmailDomainEmailDomainsDomainIdPatchWithBody(ctx context.C
 	return c.Client.Do(req)
 }
 
-func (c *Client) PatchEmailDomainEmailDomainsDomainIdPatch(ctx context.Context, domainId openapi_types.UUID, params *PatchEmailDomainEmailDomainsDomainIdPatchParams, body PatchEmailDomainEmailDomainsDomainIdPatchJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewPatchEmailDomainEmailDomainsDomainIdPatchRequest(c.Server, domainId, params, body)
+func (c *Client) PatchEmailDomainV1EmailDomainsDomainIdPatch(ctx context.Context, domainId openapi_types.UUID, params *PatchEmailDomainV1EmailDomainsDomainIdPatchParams, body PatchEmailDomainV1EmailDomainsDomainIdPatchJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewPatchEmailDomainV1EmailDomainsDomainIdPatchRequest(c.Server, domainId, params, body)
 	if err != nil {
 		return nil, err
 	}
@@ -2797,8 +3383,8 @@ func (c *Client) PatchEmailDomainEmailDomainsDomainIdPatch(ctx context.Context, 
 	return c.Client.Do(req)
 }
 
-func (c *Client) VerifyEmailDomainEmailDomainsDomainIdVerifyPost(ctx context.Context, domainId openapi_types.UUID, params *VerifyEmailDomainEmailDomainsDomainIdVerifyPostParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewVerifyEmailDomainEmailDomainsDomainIdVerifyPostRequest(c.Server, domainId, params)
+func (c *Client) VerifyEmailDomainV1EmailDomainsDomainIdVerifyPost(ctx context.Context, domainId openapi_types.UUID, params *VerifyEmailDomainV1EmailDomainsDomainIdVerifyPostParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewVerifyEmailDomainV1EmailDomainsDomainIdVerifyPostRequest(c.Server, domainId, params)
 	if err != nil {
 		return nil, err
 	}
@@ -2809,8 +3395,8 @@ func (c *Client) VerifyEmailDomainEmailDomainsDomainIdVerifyPost(ctx context.Con
 	return c.Client.Do(req)
 }
 
-func (c *Client) ListEmailsEmailsGet(ctx context.Context, params *ListEmailsEmailsGetParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewListEmailsEmailsGetRequest(c.Server, params)
+func (c *Client) ListEmailsV1EmailsGet(ctx context.Context, params *ListEmailsV1EmailsGetParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewListEmailsV1EmailsGetRequest(c.Server, params)
 	if err != nil {
 		return nil, err
 	}
@@ -2821,8 +3407,8 @@ func (c *Client) ListEmailsEmailsGet(ctx context.Context, params *ListEmailsEmai
 	return c.Client.Do(req)
 }
 
-func (c *Client) CreateEmailEmailsPostWithBody(ctx context.Context, params *CreateEmailEmailsPostParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewCreateEmailEmailsPostRequestWithBody(c.Server, params, contentType, body)
+func (c *Client) CreateEmailV1EmailsPostWithBody(ctx context.Context, params *CreateEmailV1EmailsPostParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewCreateEmailV1EmailsPostRequestWithBody(c.Server, params, contentType, body)
 	if err != nil {
 		return nil, err
 	}
@@ -2833,8 +3419,8 @@ func (c *Client) CreateEmailEmailsPostWithBody(ctx context.Context, params *Crea
 	return c.Client.Do(req)
 }
 
-func (c *Client) CreateEmailEmailsPost(ctx context.Context, params *CreateEmailEmailsPostParams, body CreateEmailEmailsPostJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewCreateEmailEmailsPostRequest(c.Server, params, body)
+func (c *Client) CreateEmailV1EmailsPost(ctx context.Context, params *CreateEmailV1EmailsPostParams, body CreateEmailV1EmailsPostJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewCreateEmailV1EmailsPostRequest(c.Server, params, body)
 	if err != nil {
 		return nil, err
 	}
@@ -2845,8 +3431,8 @@ func (c *Client) CreateEmailEmailsPost(ctx context.Context, params *CreateEmailE
 	return c.Client.Do(req)
 }
 
-func (c *Client) GetEmailStatsEmailsStatsGet(ctx context.Context, params *GetEmailStatsEmailsStatsGetParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewGetEmailStatsEmailsStatsGetRequest(c.Server, params)
+func (c *Client) GetEmailStatsV1EmailsStatsGet(ctx context.Context, params *GetEmailStatsV1EmailsStatsGetParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetEmailStatsV1EmailsStatsGetRequest(c.Server, params)
 	if err != nil {
 		return nil, err
 	}
@@ -2857,8 +3443,8 @@ func (c *Client) GetEmailStatsEmailsStatsGet(ctx context.Context, params *GetEma
 	return c.Client.Do(req)
 }
 
-func (c *Client) GetEmailEmailsEmailIdGet(ctx context.Context, emailId openapi_types.UUID, params *GetEmailEmailsEmailIdGetParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewGetEmailEmailsEmailIdGetRequest(c.Server, emailId, params)
+func (c *Client) GetEmailV1EmailsEmailIdGet(ctx context.Context, emailId openapi_types.UUID, params *GetEmailV1EmailsEmailIdGetParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetEmailV1EmailsEmailIdGetRequest(c.Server, emailId, params)
 	if err != nil {
 		return nil, err
 	}
@@ -2869,8 +3455,8 @@ func (c *Client) GetEmailEmailsEmailIdGet(ctx context.Context, emailId openapi_t
 	return c.Client.Do(req)
 }
 
-func (c *Client) GetEmailAttachmentEmailsEmailIdAttachmentsAttachmentIdGet(ctx context.Context, emailId openapi_types.UUID, attachmentId openapi_types.UUID, params *GetEmailAttachmentEmailsEmailIdAttachmentsAttachmentIdGetParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewGetEmailAttachmentEmailsEmailIdAttachmentsAttachmentIdGetRequest(c.Server, emailId, attachmentId, params)
+func (c *Client) GetEmailAttachmentV1EmailsEmailIdAttachmentsAttachmentIdGet(ctx context.Context, emailId openapi_types.UUID, attachmentId openapi_types.UUID, params *GetEmailAttachmentV1EmailsEmailIdAttachmentsAttachmentIdGetParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetEmailAttachmentV1EmailsEmailIdAttachmentsAttachmentIdGetRequest(c.Server, emailId, attachmentId, params)
 	if err != nil {
 		return nil, err
 	}
@@ -2881,8 +3467,8 @@ func (c *Client) GetEmailAttachmentEmailsEmailIdAttachmentsAttachmentIdGet(ctx c
 	return c.Client.Do(req)
 }
 
-func (c *Client) ListEmailEventsEmailsEmailIdEventsGet(ctx context.Context, emailId openapi_types.UUID, params *ListEmailEventsEmailsEmailIdEventsGetParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewListEmailEventsEmailsEmailIdEventsGetRequest(c.Server, emailId, params)
+func (c *Client) ListEmailEventsV1EmailsEmailIdEventsGet(ctx context.Context, emailId openapi_types.UUID, params *ListEmailEventsV1EmailsEmailIdEventsGetParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewListEmailEventsV1EmailsEmailIdEventsGetRequest(c.Server, emailId, params)
 	if err != nil {
 		return nil, err
 	}
@@ -2893,8 +3479,8 @@ func (c *Client) ListEmailEventsEmailsEmailIdEventsGet(ctx context.Context, emai
 	return c.Client.Do(req)
 }
 
-func (c *Client) GetEmailRawEmailsEmailIdRawGet(ctx context.Context, emailId openapi_types.UUID, params *GetEmailRawEmailsEmailIdRawGetParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewGetEmailRawEmailsEmailIdRawGetRequest(c.Server, emailId, params)
+func (c *Client) GetEmailRawV1EmailsEmailIdRawGet(ctx context.Context, emailId openapi_types.UUID, params *GetEmailRawV1EmailsEmailIdRawGetParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetEmailRawV1EmailsEmailIdRawGetRequest(c.Server, emailId, params)
 	if err != nil {
 		return nil, err
 	}
@@ -2905,8 +3491,8 @@ func (c *Client) GetEmailRawEmailsEmailIdRawGet(ctx context.Context, emailId ope
 	return c.Client.Do(req)
 }
 
-func (c *Client) ListEventsEventsGet(ctx context.Context, params *ListEventsEventsGetParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewListEventsEventsGetRequest(c.Server, params)
+func (c *Client) ListEventsV1EventsGet(ctx context.Context, params *ListEventsV1EventsGetParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewListEventsV1EventsGetRequest(c.Server, params)
 	if err != nil {
 		return nil, err
 	}
@@ -2917,8 +3503,8 @@ func (c *Client) ListEventsEventsGet(ctx context.Context, params *ListEventsEven
 	return c.Client.Do(req)
 }
 
-func (c *Client) HealthzHealthzGet(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewHealthzHealthzGetRequest(c.Server)
+func (c *Client) DeleteMemberPhoneV1MembersUserIdPhoneDelete(ctx context.Context, userId string, params *DeleteMemberPhoneV1MembersUserIdPhoneDeleteParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewDeleteMemberPhoneV1MembersUserIdPhoneDeleteRequest(c.Server, userId, params)
 	if err != nil {
 		return nil, err
 	}
@@ -2929,8 +3515,8 @@ func (c *Client) HealthzHealthzGet(ctx context.Context, reqEditors ...RequestEdi
 	return c.Client.Do(req)
 }
 
-func (c *Client) DeleteMemberPhoneMembersUserIdPhoneDelete(ctx context.Context, userId string, params *DeleteMemberPhoneMembersUserIdPhoneDeleteParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewDeleteMemberPhoneMembersUserIdPhoneDeleteRequest(c.Server, userId, params)
+func (c *Client) PutMemberPhoneV1MembersUserIdPhonePutWithBody(ctx context.Context, userId string, params *PutMemberPhoneV1MembersUserIdPhonePutParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewPutMemberPhoneV1MembersUserIdPhonePutRequestWithBody(c.Server, userId, params, contentType, body)
 	if err != nil {
 		return nil, err
 	}
@@ -2941,8 +3527,8 @@ func (c *Client) DeleteMemberPhoneMembersUserIdPhoneDelete(ctx context.Context, 
 	return c.Client.Do(req)
 }
 
-func (c *Client) PutMemberPhoneMembersUserIdPhonePutWithBody(ctx context.Context, userId string, params *PutMemberPhoneMembersUserIdPhonePutParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewPutMemberPhoneMembersUserIdPhonePutRequestWithBody(c.Server, userId, params, contentType, body)
+func (c *Client) PutMemberPhoneV1MembersUserIdPhonePut(ctx context.Context, userId string, params *PutMemberPhoneV1MembersUserIdPhonePutParams, body PutMemberPhoneV1MembersUserIdPhonePutJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewPutMemberPhoneV1MembersUserIdPhonePutRequest(c.Server, userId, params, body)
 	if err != nil {
 		return nil, err
 	}
@@ -2953,8 +3539,8 @@ func (c *Client) PutMemberPhoneMembersUserIdPhonePutWithBody(ctx context.Context
 	return c.Client.Do(req)
 }
 
-func (c *Client) PutMemberPhoneMembersUserIdPhonePut(ctx context.Context, userId string, params *PutMemberPhoneMembersUserIdPhonePutParams, body PutMemberPhoneMembersUserIdPhonePutJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewPutMemberPhoneMembersUserIdPhonePutRequest(c.Server, userId, params, body)
+func (c *Client) ListNumbersV1NumbersGet(ctx context.Context, params *ListNumbersV1NumbersGetParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewListNumbersV1NumbersGetRequest(c.Server, params)
 	if err != nil {
 		return nil, err
 	}
@@ -2965,8 +3551,8 @@ func (c *Client) PutMemberPhoneMembersUserIdPhonePut(ctx context.Context, userId
 	return c.Client.Do(req)
 }
 
-func (c *Client) ListNumbersNumbersGet(ctx context.Context, params *ListNumbersNumbersGetParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewListNumbersNumbersGetRequest(c.Server, params)
+func (c *Client) AcquireNumberV1NumbersPostWithBody(ctx context.Context, params *AcquireNumberV1NumbersPostParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewAcquireNumberV1NumbersPostRequestWithBody(c.Server, params, contentType, body)
 	if err != nil {
 		return nil, err
 	}
@@ -2977,8 +3563,8 @@ func (c *Client) ListNumbersNumbersGet(ctx context.Context, params *ListNumbersN
 	return c.Client.Do(req)
 }
 
-func (c *Client) AcquireNumberNumbersPostWithBody(ctx context.Context, params *AcquireNumberNumbersPostParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewAcquireNumberNumbersPostRequestWithBody(c.Server, params, contentType, body)
+func (c *Client) AcquireNumberV1NumbersPost(ctx context.Context, params *AcquireNumberV1NumbersPostParams, body AcquireNumberV1NumbersPostJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewAcquireNumberV1NumbersPostRequest(c.Server, params, body)
 	if err != nil {
 		return nil, err
 	}
@@ -2989,8 +3575,8 @@ func (c *Client) AcquireNumberNumbersPostWithBody(ctx context.Context, params *A
 	return c.Client.Do(req)
 }
 
-func (c *Client) AcquireNumberNumbersPost(ctx context.Context, params *AcquireNumberNumbersPostParams, body AcquireNumberNumbersPostJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewAcquireNumberNumbersPostRequest(c.Server, params, body)
+func (c *Client) ReleaseNumberV1NumbersNumberIdDelete(ctx context.Context, numberId openapi_types.UUID, params *ReleaseNumberV1NumbersNumberIdDeleteParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewReleaseNumberV1NumbersNumberIdDeleteRequest(c.Server, numberId, params)
 	if err != nil {
 		return nil, err
 	}
@@ -3001,8 +3587,8 @@ func (c *Client) AcquireNumberNumbersPost(ctx context.Context, params *AcquireNu
 	return c.Client.Do(req)
 }
 
-func (c *Client) ReleaseNumberNumbersNumberIdDelete(ctx context.Context, numberId openapi_types.UUID, params *ReleaseNumberNumbersNumberIdDeleteParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewReleaseNumberNumbersNumberIdDeleteRequest(c.Server, numberId, params)
+func (c *Client) GetNumberV1NumbersNumberIdGet(ctx context.Context, numberId openapi_types.UUID, params *GetNumberV1NumbersNumberIdGetParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetNumberV1NumbersNumberIdGetRequest(c.Server, numberId, params)
 	if err != nil {
 		return nil, err
 	}
@@ -3013,20 +3599,8 @@ func (c *Client) ReleaseNumberNumbersNumberIdDelete(ctx context.Context, numberI
 	return c.Client.Do(req)
 }
 
-func (c *Client) GetNumberNumbersNumberIdGet(ctx context.Context, numberId openapi_types.UUID, params *GetNumberNumbersNumberIdGetParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewGetNumberNumbersNumberIdGetRequest(c.Server, numberId, params)
-	if err != nil {
-		return nil, err
-	}
-	req = req.WithContext(ctx)
-	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
-		return nil, err
-	}
-	return c.Client.Do(req)
-}
-
-func (c *Client) EnableSmsNumbersNumberIdEnableSmsPost(ctx context.Context, numberId openapi_types.UUID, params *EnableSmsNumbersNumberIdEnableSmsPostParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewEnableSmsNumbersNumberIdEnableSmsPostRequest(c.Server, numberId, params)
+func (c *Client) EnableSmsV1NumbersNumberIdEnableSmsPost(ctx context.Context, numberId openapi_types.UUID, params *EnableSmsV1NumbersNumberIdEnableSmsPostParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewEnableSmsV1NumbersNumberIdEnableSmsPostRequest(c.Server, numberId, params)
 	if err != nil {
 		return nil, err
 	}
@@ -3133,8 +3707,8 @@ func (c *Client) DeleteProvider(ctx context.Context, layer string, provider stri
 	return c.Client.Do(req)
 }
 
-func (c *Client) ListSmsSmsGet(ctx context.Context, params *ListSmsSmsGetParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewListSmsSmsGetRequest(c.Server, params)
+func (c *Client) ListSmsV1SmsGet(ctx context.Context, params *ListSmsV1SmsGetParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewListSmsV1SmsGetRequest(c.Server, params)
 	if err != nil {
 		return nil, err
 	}
@@ -3145,8 +3719,8 @@ func (c *Client) ListSmsSmsGet(ctx context.Context, params *ListSmsSmsGetParams,
 	return c.Client.Do(req)
 }
 
-func (c *Client) CreateSmsSmsPostWithBody(ctx context.Context, params *CreateSmsSmsPostParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewCreateSmsSmsPostRequestWithBody(c.Server, params, contentType, body)
+func (c *Client) CreateSmsV1SmsPostWithBody(ctx context.Context, params *CreateSmsV1SmsPostParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewCreateSmsV1SmsPostRequestWithBody(c.Server, params, contentType, body)
 	if err != nil {
 		return nil, err
 	}
@@ -3157,8 +3731,8 @@ func (c *Client) CreateSmsSmsPostWithBody(ctx context.Context, params *CreateSms
 	return c.Client.Do(req)
 }
 
-func (c *Client) CreateSmsSmsPost(ctx context.Context, params *CreateSmsSmsPostParams, body CreateSmsSmsPostJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewCreateSmsSmsPostRequest(c.Server, params, body)
+func (c *Client) CreateSmsV1SmsPost(ctx context.Context, params *CreateSmsV1SmsPostParams, body CreateSmsV1SmsPostJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewCreateSmsV1SmsPostRequest(c.Server, params, body)
 	if err != nil {
 		return nil, err
 	}
@@ -3169,8 +3743,8 @@ func (c *Client) CreateSmsSmsPost(ctx context.Context, params *CreateSmsSmsPostP
 	return c.Client.Do(req)
 }
 
-func (c *Client) GetSenderIdSmsSenderIdGet(ctx context.Context, params *GetSenderIdSmsSenderIdGetParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewGetSenderIdSmsSenderIdGetRequest(c.Server, params)
+func (c *Client) GetSenderIdV1SmsSenderIdGet(ctx context.Context, params *GetSenderIdV1SmsSenderIdGetParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetSenderIdV1SmsSenderIdGetRequest(c.Server, params)
 	if err != nil {
 		return nil, err
 	}
@@ -3181,8 +3755,8 @@ func (c *Client) GetSenderIdSmsSenderIdGet(ctx context.Context, params *GetSende
 	return c.Client.Do(req)
 }
 
-func (c *Client) PatchSenderIdSmsSenderIdPatchWithBody(ctx context.Context, params *PatchSenderIdSmsSenderIdPatchParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewPatchSenderIdSmsSenderIdPatchRequestWithBody(c.Server, params, contentType, body)
+func (c *Client) PatchSenderIdV1SmsSenderIdPatchWithBody(ctx context.Context, params *PatchSenderIdV1SmsSenderIdPatchParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewPatchSenderIdV1SmsSenderIdPatchRequestWithBody(c.Server, params, contentType, body)
 	if err != nil {
 		return nil, err
 	}
@@ -3193,8 +3767,8 @@ func (c *Client) PatchSenderIdSmsSenderIdPatchWithBody(ctx context.Context, para
 	return c.Client.Do(req)
 }
 
-func (c *Client) PatchSenderIdSmsSenderIdPatch(ctx context.Context, params *PatchSenderIdSmsSenderIdPatchParams, body PatchSenderIdSmsSenderIdPatchJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewPatchSenderIdSmsSenderIdPatchRequest(c.Server, params, body)
+func (c *Client) PatchSenderIdV1SmsSenderIdPatch(ctx context.Context, params *PatchSenderIdV1SmsSenderIdPatchParams, body PatchSenderIdV1SmsSenderIdPatchJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewPatchSenderIdV1SmsSenderIdPatchRequest(c.Server, params, body)
 	if err != nil {
 		return nil, err
 	}
@@ -3205,8 +3779,8 @@ func (c *Client) PatchSenderIdSmsSenderIdPatch(ctx context.Context, params *Patc
 	return c.Client.Do(req)
 }
 
-func (c *Client) ListSmsSuppressionsSmsSuppressionsGet(ctx context.Context, params *ListSmsSuppressionsSmsSuppressionsGetParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewListSmsSuppressionsSmsSuppressionsGetRequest(c.Server, params)
+func (c *Client) ListSmsSuppressionsV1SmsSuppressionsGet(ctx context.Context, params *ListSmsSuppressionsV1SmsSuppressionsGetParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewListSmsSuppressionsV1SmsSuppressionsGetRequest(c.Server, params)
 	if err != nil {
 		return nil, err
 	}
@@ -3217,8 +3791,8 @@ func (c *Client) ListSmsSuppressionsSmsSuppressionsGet(ctx context.Context, para
 	return c.Client.Do(req)
 }
 
-func (c *Client) DeleteSmsSuppressionSmsSuppressionsNumberDelete(ctx context.Context, number string, params *DeleteSmsSuppressionSmsSuppressionsNumberDeleteParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewDeleteSmsSuppressionSmsSuppressionsNumberDeleteRequest(c.Server, number, params)
+func (c *Client) DeleteSmsSuppressionV1SmsSuppressionsNumberDelete(ctx context.Context, number string, params *DeleteSmsSuppressionV1SmsSuppressionsNumberDeleteParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewDeleteSmsSuppressionV1SmsSuppressionsNumberDeleteRequest(c.Server, number, params)
 	if err != nil {
 		return nil, err
 	}
@@ -3229,8 +3803,8 @@ func (c *Client) DeleteSmsSuppressionSmsSuppressionsNumberDelete(ctx context.Con
 	return c.Client.Do(req)
 }
 
-func (c *Client) GetSmsSmsSmsIdGet(ctx context.Context, smsId openapi_types.UUID, params *GetSmsSmsSmsIdGetParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewGetSmsSmsSmsIdGetRequest(c.Server, smsId, params)
+func (c *Client) GetSmsV1SmsSmsIdGet(ctx context.Context, smsId openapi_types.UUID, params *GetSmsV1SmsSmsIdGetParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetSmsV1SmsSmsIdGetRequest(c.Server, smsId, params)
 	if err != nil {
 		return nil, err
 	}
@@ -3241,8 +3815,8 @@ func (c *Client) GetSmsSmsSmsIdGet(ctx context.Context, smsId openapi_types.UUID
 	return c.Client.Do(req)
 }
 
-func (c *Client) UnsubscribeUnsubscribeGet(ctx context.Context, params *UnsubscribeUnsubscribeGetParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewUnsubscribeUnsubscribeGetRequest(c.Server, params)
+func (c *Client) UnsubscribeV1UnsubscribeGet(ctx context.Context, params *UnsubscribeV1UnsubscribeGetParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewUnsubscribeV1UnsubscribeGetRequest(c.Server, params)
 	if err != nil {
 		return nil, err
 	}
@@ -3253,8 +3827,8 @@ func (c *Client) UnsubscribeUnsubscribeGet(ctx context.Context, params *Unsubscr
 	return c.Client.Do(req)
 }
 
-func (c *Client) ListSubscriptionsWebhooksGet(ctx context.Context, params *ListSubscriptionsWebhooksGetParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewListSubscriptionsWebhooksGetRequest(c.Server, params)
+func (c *Client) ListSubscriptionsV1WebhooksGet(ctx context.Context, params *ListSubscriptionsV1WebhooksGetParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewListSubscriptionsV1WebhooksGetRequest(c.Server, params)
 	if err != nil {
 		return nil, err
 	}
@@ -3265,8 +3839,8 @@ func (c *Client) ListSubscriptionsWebhooksGet(ctx context.Context, params *ListS
 	return c.Client.Do(req)
 }
 
-func (c *Client) CreateSubscriptionWebhooksPostWithBody(ctx context.Context, params *CreateSubscriptionWebhooksPostParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewCreateSubscriptionWebhooksPostRequestWithBody(c.Server, params, contentType, body)
+func (c *Client) CreateSubscriptionV1WebhooksPostWithBody(ctx context.Context, params *CreateSubscriptionV1WebhooksPostParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewCreateSubscriptionV1WebhooksPostRequestWithBody(c.Server, params, contentType, body)
 	if err != nil {
 		return nil, err
 	}
@@ -3277,8 +3851,8 @@ func (c *Client) CreateSubscriptionWebhooksPostWithBody(ctx context.Context, par
 	return c.Client.Do(req)
 }
 
-func (c *Client) CreateSubscriptionWebhooksPost(ctx context.Context, params *CreateSubscriptionWebhooksPostParams, body CreateSubscriptionWebhooksPostJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewCreateSubscriptionWebhooksPostRequest(c.Server, params, body)
+func (c *Client) CreateSubscriptionV1WebhooksPost(ctx context.Context, params *CreateSubscriptionV1WebhooksPostParams, body CreateSubscriptionV1WebhooksPostJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewCreateSubscriptionV1WebhooksPostRequest(c.Server, params, body)
 	if err != nil {
 		return nil, err
 	}
@@ -3289,8 +3863,8 @@ func (c *Client) CreateSubscriptionWebhooksPost(ctx context.Context, params *Cre
 	return c.Client.Do(req)
 }
 
-func (c *Client) DeleteSubscriptionWebhooksSubIdDelete(ctx context.Context, subId openapi_types.UUID, params *DeleteSubscriptionWebhooksSubIdDeleteParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewDeleteSubscriptionWebhooksSubIdDeleteRequest(c.Server, subId, params)
+func (c *Client) DeleteSubscriptionV1WebhooksSubIdDelete(ctx context.Context, subId openapi_types.UUID, params *DeleteSubscriptionV1WebhooksSubIdDeleteParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewDeleteSubscriptionV1WebhooksSubIdDeleteRequest(c.Server, subId, params)
 	if err != nil {
 		return nil, err
 	}
@@ -3301,8 +3875,8 @@ func (c *Client) DeleteSubscriptionWebhooksSubIdDelete(ctx context.Context, subI
 	return c.Client.Do(req)
 }
 
-func (c *Client) GetSubscriptionWebhooksSubIdGet(ctx context.Context, subId openapi_types.UUID, params *GetSubscriptionWebhooksSubIdGetParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewGetSubscriptionWebhooksSubIdGetRequest(c.Server, subId, params)
+func (c *Client) GetSubscriptionV1WebhooksSubIdGet(ctx context.Context, subId openapi_types.UUID, params *GetSubscriptionV1WebhooksSubIdGetParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetSubscriptionV1WebhooksSubIdGetRequest(c.Server, subId, params)
 	if err != nil {
 		return nil, err
 	}
@@ -3313,8 +3887,8 @@ func (c *Client) GetSubscriptionWebhooksSubIdGet(ctx context.Context, subId open
 	return c.Client.Do(req)
 }
 
-func (c *Client) PatchSubscriptionWebhooksSubIdPatchWithBody(ctx context.Context, subId openapi_types.UUID, params *PatchSubscriptionWebhooksSubIdPatchParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewPatchSubscriptionWebhooksSubIdPatchRequestWithBody(c.Server, subId, params, contentType, body)
+func (c *Client) PatchSubscriptionV1WebhooksSubIdPatchWithBody(ctx context.Context, subId openapi_types.UUID, params *PatchSubscriptionV1WebhooksSubIdPatchParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewPatchSubscriptionV1WebhooksSubIdPatchRequestWithBody(c.Server, subId, params, contentType, body)
 	if err != nil {
 		return nil, err
 	}
@@ -3325,8 +3899,8 @@ func (c *Client) PatchSubscriptionWebhooksSubIdPatchWithBody(ctx context.Context
 	return c.Client.Do(req)
 }
 
-func (c *Client) PatchSubscriptionWebhooksSubIdPatch(ctx context.Context, subId openapi_types.UUID, params *PatchSubscriptionWebhooksSubIdPatchParams, body PatchSubscriptionWebhooksSubIdPatchJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewPatchSubscriptionWebhooksSubIdPatchRequest(c.Server, subId, params, body)
+func (c *Client) PatchSubscriptionV1WebhooksSubIdPatch(ctx context.Context, subId openapi_types.UUID, params *PatchSubscriptionV1WebhooksSubIdPatchParams, body PatchSubscriptionV1WebhooksSubIdPatchJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewPatchSubscriptionV1WebhooksSubIdPatchRequest(c.Server, subId, params, body)
 	if err != nil {
 		return nil, err
 	}
@@ -3337,8 +3911,8 @@ func (c *Client) PatchSubscriptionWebhooksSubIdPatch(ctx context.Context, subId 
 	return c.Client.Do(req)
 }
 
-func (c *Client) ListDeliveriesWebhooksSubIdDeliveriesGet(ctx context.Context, subId openapi_types.UUID, params *ListDeliveriesWebhooksSubIdDeliveriesGetParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewListDeliveriesWebhooksSubIdDeliveriesGetRequest(c.Server, subId, params)
+func (c *Client) ListDeliveriesV1WebhooksSubIdDeliveriesGet(ctx context.Context, subId openapi_types.UUID, params *ListDeliveriesV1WebhooksSubIdDeliveriesGetParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewListDeliveriesV1WebhooksSubIdDeliveriesGetRequest(c.Server, subId, params)
 	if err != nil {
 		return nil, err
 	}
@@ -3349,8 +3923,8 @@ func (c *Client) ListDeliveriesWebhooksSubIdDeliveriesGet(ctx context.Context, s
 	return c.Client.Do(req)
 }
 
-func (c *Client) RedeliverWebhooksSubIdDeliveriesDeliveryIdRedeliverPost(ctx context.Context, subId openapi_types.UUID, deliveryId openapi_types.UUID, params *RedeliverWebhooksSubIdDeliveriesDeliveryIdRedeliverPostParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewRedeliverWebhooksSubIdDeliveriesDeliveryIdRedeliverPostRequest(c.Server, subId, deliveryId, params)
+func (c *Client) RedeliverV1WebhooksSubIdDeliveriesDeliveryIdRedeliverPost(ctx context.Context, subId openapi_types.UUID, deliveryId openapi_types.UUID, params *RedeliverV1WebhooksSubIdDeliveriesDeliveryIdRedeliverPostParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewRedeliverV1WebhooksSubIdDeliveriesDeliveryIdRedeliverPostRequest(c.Server, subId, deliveryId, params)
 	if err != nil {
 		return nil, err
 	}
@@ -3361,8 +3935,8 @@ func (c *Client) RedeliverWebhooksSubIdDeliveriesDeliveryIdRedeliverPost(ctx con
 	return c.Client.Do(req)
 }
 
-func (c *Client) RotateSecretWebhooksSubIdRotateSecretPost(ctx context.Context, subId openapi_types.UUID, params *RotateSecretWebhooksSubIdRotateSecretPostParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewRotateSecretWebhooksSubIdRotateSecretPostRequest(c.Server, subId, params)
+func (c *Client) RotateSecretV1WebhooksSubIdRotateSecretPost(ctx context.Context, subId openapi_types.UUID, params *RotateSecretV1WebhooksSubIdRotateSecretPostParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewRotateSecretV1WebhooksSubIdRotateSecretPostRequest(c.Server, subId, params)
 	if err != nil {
 		return nil, err
 	}
@@ -3373,8 +3947,8 @@ func (c *Client) RotateSecretWebhooksSubIdRotateSecretPost(ctx context.Context, 
 	return c.Client.Do(req)
 }
 
-func (c *Client) GetWhoamiWhoamiGet(ctx context.Context, params *GetWhoamiWhoamiGetParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewGetWhoamiWhoamiGetRequest(c.Server, params)
+func (c *Client) GetWhoamiV1WhoamiGet(ctx context.Context, params *GetWhoamiV1WhoamiGetParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetWhoamiV1WhoamiGetRequest(c.Server, params)
 	if err != nil {
 		return nil, err
 	}
@@ -3385,8 +3959,8 @@ func (c *Client) GetWhoamiWhoamiGet(ctx context.Context, params *GetWhoamiWhoami
 	return c.Client.Do(req)
 }
 
-// NewListCallsCallsGetRequest generates requests for ListCallsCallsGet
-func NewListCallsCallsGetRequest(server string, params *ListCallsCallsGetParams) (*http.Request, error) {
+// NewHealthzHealthzGetRequest generates requests for HealthzHealthzGet
+func NewHealthzHealthzGetRequest(server string) (*http.Request, error) {
 	var err error
 
 	serverURL, err := url.Parse(server)
@@ -3394,7 +3968,34 @@ func NewListCallsCallsGetRequest(server string, params *ListCallsCallsGetParams)
 		return nil, err
 	}
 
-	operationPath := fmt.Sprintf("/calls")
+	operationPath := fmt.Sprintf("/healthz")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("GET", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewListCallsV1CallsGetRequest generates requests for ListCallsV1CallsGet
+func NewListCallsV1CallsGetRequest(server string, params *ListCallsV1CallsGetParams) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v1/calls")
 	if operationPath[0] == '/' {
 		operationPath = "." + operationPath
 	}
@@ -3497,19 +4098,19 @@ func NewListCallsCallsGetRequest(server string, params *ListCallsCallsGetParams)
 	return req, nil
 }
 
-// NewCreateCallCallsPostRequest calls the generic CreateCallCallsPost builder with application/json body
-func NewCreateCallCallsPostRequest(server string, params *CreateCallCallsPostParams, body CreateCallCallsPostJSONRequestBody) (*http.Request, error) {
+// NewCreateCallV1CallsPostRequest calls the generic CreateCallV1CallsPost builder with application/json body
+func NewCreateCallV1CallsPostRequest(server string, params *CreateCallV1CallsPostParams, body CreateCallV1CallsPostJSONRequestBody) (*http.Request, error) {
 	var bodyReader io.Reader
 	buf, err := json.Marshal(body)
 	if err != nil {
 		return nil, err
 	}
 	bodyReader = bytes.NewReader(buf)
-	return NewCreateCallCallsPostRequestWithBody(server, params, "application/json", bodyReader)
+	return NewCreateCallV1CallsPostRequestWithBody(server, params, "application/json", bodyReader)
 }
 
-// NewCreateCallCallsPostRequestWithBody generates requests for CreateCallCallsPost with any type of body
-func NewCreateCallCallsPostRequestWithBody(server string, params *CreateCallCallsPostParams, contentType string, body io.Reader) (*http.Request, error) {
+// NewCreateCallV1CallsPostRequestWithBody generates requests for CreateCallV1CallsPost with any type of body
+func NewCreateCallV1CallsPostRequestWithBody(server string, params *CreateCallV1CallsPostParams, contentType string, body io.Reader) (*http.Request, error) {
 	var err error
 
 	serverURL, err := url.Parse(server)
@@ -3517,7 +4118,7 @@ func NewCreateCallCallsPostRequestWithBody(server string, params *CreateCallCall
 		return nil, err
 	}
 
-	operationPath := fmt.Sprintf("/calls")
+	operationPath := fmt.Sprintf("/v1/calls")
 	if operationPath[0] == '/' {
 		operationPath = "." + operationPath
 	}
@@ -3563,8 +4164,8 @@ func NewCreateCallCallsPostRequestWithBody(server string, params *CreateCallCall
 	return req, nil
 }
 
-// NewGetCallCallsCallIdGetRequest generates requests for GetCallCallsCallIdGet
-func NewGetCallCallsCallIdGetRequest(server string, callId openapi_types.UUID, params *GetCallCallsCallIdGetParams) (*http.Request, error) {
+// NewGetCallV1CallsCallIdGetRequest generates requests for GetCallV1CallsCallIdGet
+func NewGetCallV1CallsCallIdGetRequest(server string, callId openapi_types.UUID, params *GetCallV1CallsCallIdGetParams) (*http.Request, error) {
 	var err error
 
 	var pathParam0 string
@@ -3579,7 +4180,7 @@ func NewGetCallCallsCallIdGetRequest(server string, callId openapi_types.UUID, p
 		return nil, err
 	}
 
-	operationPath := fmt.Sprintf("/calls/%s", pathParam0)
+	operationPath := fmt.Sprintf("/v1/calls/%s", pathParam0)
 	if operationPath[0] == '/' {
 		operationPath = "." + operationPath
 	}
@@ -3612,8 +4213,8 @@ func NewGetCallCallsCallIdGetRequest(server string, callId openapi_types.UUID, p
 	return req, nil
 }
 
-// NewListContactsContactsGetRequest generates requests for ListContactsContactsGet
-func NewListContactsContactsGetRequest(server string, params *ListContactsContactsGetParams) (*http.Request, error) {
+// NewListContactsV1ContactsGetRequest generates requests for ListContactsV1ContactsGet
+func NewListContactsV1ContactsGetRequest(server string, params *ListContactsV1ContactsGetParams) (*http.Request, error) {
 	var err error
 
 	serverURL, err := url.Parse(server)
@@ -3621,7 +4222,7 @@ func NewListContactsContactsGetRequest(server string, params *ListContactsContac
 		return nil, err
 	}
 
-	operationPath := fmt.Sprintf("/contacts")
+	operationPath := fmt.Sprintf("/v1/contacts")
 	if operationPath[0] == '/' {
 		operationPath = "." + operationPath
 	}
@@ -3708,19 +4309,19 @@ func NewListContactsContactsGetRequest(server string, params *ListContactsContac
 	return req, nil
 }
 
-// NewCreateContactContactsPostRequest calls the generic CreateContactContactsPost builder with application/json body
-func NewCreateContactContactsPostRequest(server string, params *CreateContactContactsPostParams, body CreateContactContactsPostJSONRequestBody) (*http.Request, error) {
+// NewCreateContactV1ContactsPostRequest calls the generic CreateContactV1ContactsPost builder with application/json body
+func NewCreateContactV1ContactsPostRequest(server string, params *CreateContactV1ContactsPostParams, body CreateContactV1ContactsPostJSONRequestBody) (*http.Request, error) {
 	var bodyReader io.Reader
 	buf, err := json.Marshal(body)
 	if err != nil {
 		return nil, err
 	}
 	bodyReader = bytes.NewReader(buf)
-	return NewCreateContactContactsPostRequestWithBody(server, params, "application/json", bodyReader)
+	return NewCreateContactV1ContactsPostRequestWithBody(server, params, "application/json", bodyReader)
 }
 
-// NewCreateContactContactsPostRequestWithBody generates requests for CreateContactContactsPost with any type of body
-func NewCreateContactContactsPostRequestWithBody(server string, params *CreateContactContactsPostParams, contentType string, body io.Reader) (*http.Request, error) {
+// NewCreateContactV1ContactsPostRequestWithBody generates requests for CreateContactV1ContactsPost with any type of body
+func NewCreateContactV1ContactsPostRequestWithBody(server string, params *CreateContactV1ContactsPostParams, contentType string, body io.Reader) (*http.Request, error) {
 	var err error
 
 	serverURL, err := url.Parse(server)
@@ -3728,7 +4329,7 @@ func NewCreateContactContactsPostRequestWithBody(server string, params *CreateCo
 		return nil, err
 	}
 
-	operationPath := fmt.Sprintf("/contacts")
+	operationPath := fmt.Sprintf("/v1/contacts")
 	if operationPath[0] == '/' {
 		operationPath = "." + operationPath
 	}
@@ -3763,8 +4364,8 @@ func NewCreateContactContactsPostRequestWithBody(server string, params *CreateCo
 	return req, nil
 }
 
-// NewDeleteContactContactsContactIdDeleteRequest generates requests for DeleteContactContactsContactIdDelete
-func NewDeleteContactContactsContactIdDeleteRequest(server string, contactId string, params *DeleteContactContactsContactIdDeleteParams) (*http.Request, error) {
+// NewDeleteContactV1ContactsContactIdDeleteRequest generates requests for DeleteContactV1ContactsContactIdDelete
+func NewDeleteContactV1ContactsContactIdDeleteRequest(server string, contactId string, params *DeleteContactV1ContactsContactIdDeleteParams) (*http.Request, error) {
 	var err error
 
 	var pathParam0 string
@@ -3779,7 +4380,7 @@ func NewDeleteContactContactsContactIdDeleteRequest(server string, contactId str
 		return nil, err
 	}
 
-	operationPath := fmt.Sprintf("/contacts/%s", pathParam0)
+	operationPath := fmt.Sprintf("/v1/contacts/%s", pathParam0)
 	if operationPath[0] == '/' {
 		operationPath = "." + operationPath
 	}
@@ -3812,19 +4413,19 @@ func NewDeleteContactContactsContactIdDeleteRequest(server string, contactId str
 	return req, nil
 }
 
-// NewPatchContactContactsContactIdPatchRequest calls the generic PatchContactContactsContactIdPatch builder with application/json body
-func NewPatchContactContactsContactIdPatchRequest(server string, contactId string, params *PatchContactContactsContactIdPatchParams, body PatchContactContactsContactIdPatchJSONRequestBody) (*http.Request, error) {
+// NewPatchContactV1ContactsContactIdPatchRequest calls the generic PatchContactV1ContactsContactIdPatch builder with application/json body
+func NewPatchContactV1ContactsContactIdPatchRequest(server string, contactId string, params *PatchContactV1ContactsContactIdPatchParams, body PatchContactV1ContactsContactIdPatchJSONRequestBody) (*http.Request, error) {
 	var bodyReader io.Reader
 	buf, err := json.Marshal(body)
 	if err != nil {
 		return nil, err
 	}
 	bodyReader = bytes.NewReader(buf)
-	return NewPatchContactContactsContactIdPatchRequestWithBody(server, contactId, params, "application/json", bodyReader)
+	return NewPatchContactV1ContactsContactIdPatchRequestWithBody(server, contactId, params, "application/json", bodyReader)
 }
 
-// NewPatchContactContactsContactIdPatchRequestWithBody generates requests for PatchContactContactsContactIdPatch with any type of body
-func NewPatchContactContactsContactIdPatchRequestWithBody(server string, contactId string, params *PatchContactContactsContactIdPatchParams, contentType string, body io.Reader) (*http.Request, error) {
+// NewPatchContactV1ContactsContactIdPatchRequestWithBody generates requests for PatchContactV1ContactsContactIdPatch with any type of body
+func NewPatchContactV1ContactsContactIdPatchRequestWithBody(server string, contactId string, params *PatchContactV1ContactsContactIdPatchParams, contentType string, body io.Reader) (*http.Request, error) {
 	var err error
 
 	var pathParam0 string
@@ -3839,7 +4440,7 @@ func NewPatchContactContactsContactIdPatchRequestWithBody(server string, contact
 		return nil, err
 	}
 
-	operationPath := fmt.Sprintf("/contacts/%s", pathParam0)
+	operationPath := fmt.Sprintf("/v1/contacts/%s", pathParam0)
 	if operationPath[0] == '/' {
 		operationPath = "." + operationPath
 	}
@@ -3883,7 +4484,7 @@ func NewUploadEmailAttachmentRequestWithBody(server string, params *UploadEmailA
 		return nil, err
 	}
 
-	operationPath := fmt.Sprintf("/email-attachments")
+	operationPath := fmt.Sprintf("/v1/email-attachments")
 	if operationPath[0] == '/' {
 		operationPath = "." + operationPath
 	}
@@ -3918,8 +4519,8 @@ func NewUploadEmailAttachmentRequestWithBody(server string, params *UploadEmailA
 	return req, nil
 }
 
-// NewListEmailDomainsEmailDomainsGetRequest generates requests for ListEmailDomainsEmailDomainsGet
-func NewListEmailDomainsEmailDomainsGetRequest(server string, params *ListEmailDomainsEmailDomainsGetParams) (*http.Request, error) {
+// NewListEmailDomainsV1EmailDomainsGetRequest generates requests for ListEmailDomainsV1EmailDomainsGet
+func NewListEmailDomainsV1EmailDomainsGetRequest(server string, params *ListEmailDomainsV1EmailDomainsGetParams) (*http.Request, error) {
 	var err error
 
 	serverURL, err := url.Parse(server)
@@ -3927,7 +4528,7 @@ func NewListEmailDomainsEmailDomainsGetRequest(server string, params *ListEmailD
 		return nil, err
 	}
 
-	operationPath := fmt.Sprintf("/email-domains")
+	operationPath := fmt.Sprintf("/v1/email-domains")
 	if operationPath[0] == '/' {
 		operationPath = "." + operationPath
 	}
@@ -3998,19 +4599,19 @@ func NewListEmailDomainsEmailDomainsGetRequest(server string, params *ListEmailD
 	return req, nil
 }
 
-// NewCreateEmailDomainEmailDomainsPostRequest calls the generic CreateEmailDomainEmailDomainsPost builder with application/json body
-func NewCreateEmailDomainEmailDomainsPostRequest(server string, params *CreateEmailDomainEmailDomainsPostParams, body CreateEmailDomainEmailDomainsPostJSONRequestBody) (*http.Request, error) {
+// NewCreateEmailDomainV1EmailDomainsPostRequest calls the generic CreateEmailDomainV1EmailDomainsPost builder with application/json body
+func NewCreateEmailDomainV1EmailDomainsPostRequest(server string, params *CreateEmailDomainV1EmailDomainsPostParams, body CreateEmailDomainV1EmailDomainsPostJSONRequestBody) (*http.Request, error) {
 	var bodyReader io.Reader
 	buf, err := json.Marshal(body)
 	if err != nil {
 		return nil, err
 	}
 	bodyReader = bytes.NewReader(buf)
-	return NewCreateEmailDomainEmailDomainsPostRequestWithBody(server, params, "application/json", bodyReader)
+	return NewCreateEmailDomainV1EmailDomainsPostRequestWithBody(server, params, "application/json", bodyReader)
 }
 
-// NewCreateEmailDomainEmailDomainsPostRequestWithBody generates requests for CreateEmailDomainEmailDomainsPost with any type of body
-func NewCreateEmailDomainEmailDomainsPostRequestWithBody(server string, params *CreateEmailDomainEmailDomainsPostParams, contentType string, body io.Reader) (*http.Request, error) {
+// NewCreateEmailDomainV1EmailDomainsPostRequestWithBody generates requests for CreateEmailDomainV1EmailDomainsPost with any type of body
+func NewCreateEmailDomainV1EmailDomainsPostRequestWithBody(server string, params *CreateEmailDomainV1EmailDomainsPostParams, contentType string, body io.Reader) (*http.Request, error) {
 	var err error
 
 	serverURL, err := url.Parse(server)
@@ -4018,7 +4619,7 @@ func NewCreateEmailDomainEmailDomainsPostRequestWithBody(server string, params *
 		return nil, err
 	}
 
-	operationPath := fmt.Sprintf("/email-domains")
+	operationPath := fmt.Sprintf("/v1/email-domains")
 	if operationPath[0] == '/' {
 		operationPath = "." + operationPath
 	}
@@ -4053,8 +4654,8 @@ func NewCreateEmailDomainEmailDomainsPostRequestWithBody(server string, params *
 	return req, nil
 }
 
-// NewCheckDomainEmailDomainsCheckDomainGetRequest generates requests for CheckDomainEmailDomainsCheckDomainGet
-func NewCheckDomainEmailDomainsCheckDomainGetRequest(server string, params *CheckDomainEmailDomainsCheckDomainGetParams) (*http.Request, error) {
+// NewCheckDomainV1EmailDomainsCheckDomainGetRequest generates requests for CheckDomainV1EmailDomainsCheckDomainGet
+func NewCheckDomainV1EmailDomainsCheckDomainGetRequest(server string, params *CheckDomainV1EmailDomainsCheckDomainGetParams) (*http.Request, error) {
 	var err error
 
 	serverURL, err := url.Parse(server)
@@ -4062,7 +4663,7 @@ func NewCheckDomainEmailDomainsCheckDomainGetRequest(server string, params *Chec
 		return nil, err
 	}
 
-	operationPath := fmt.Sprintf("/email-domains/check-domain")
+	operationPath := fmt.Sprintf("/v1/email-domains/check-domain")
 	if operationPath[0] == '/' {
 		operationPath = "." + operationPath
 	}
@@ -4113,8 +4714,8 @@ func NewCheckDomainEmailDomainsCheckDomainGetRequest(server string, params *Chec
 	return req, nil
 }
 
-// NewDeleteEmailDomainEmailDomainsDomainIdDeleteRequest generates requests for DeleteEmailDomainEmailDomainsDomainIdDelete
-func NewDeleteEmailDomainEmailDomainsDomainIdDeleteRequest(server string, domainId openapi_types.UUID, params *DeleteEmailDomainEmailDomainsDomainIdDeleteParams) (*http.Request, error) {
+// NewDeleteEmailDomainV1EmailDomainsDomainIdDeleteRequest generates requests for DeleteEmailDomainV1EmailDomainsDomainIdDelete
+func NewDeleteEmailDomainV1EmailDomainsDomainIdDeleteRequest(server string, domainId openapi_types.UUID, params *DeleteEmailDomainV1EmailDomainsDomainIdDeleteParams) (*http.Request, error) {
 	var err error
 
 	var pathParam0 string
@@ -4129,7 +4730,7 @@ func NewDeleteEmailDomainEmailDomainsDomainIdDeleteRequest(server string, domain
 		return nil, err
 	}
 
-	operationPath := fmt.Sprintf("/email-domains/%s", pathParam0)
+	operationPath := fmt.Sprintf("/v1/email-domains/%s", pathParam0)
 	if operationPath[0] == '/' {
 		operationPath = "." + operationPath
 	}
@@ -4162,8 +4763,8 @@ func NewDeleteEmailDomainEmailDomainsDomainIdDeleteRequest(server string, domain
 	return req, nil
 }
 
-// NewGetEmailDomainEmailDomainsDomainIdGetRequest generates requests for GetEmailDomainEmailDomainsDomainIdGet
-func NewGetEmailDomainEmailDomainsDomainIdGetRequest(server string, domainId openapi_types.UUID, params *GetEmailDomainEmailDomainsDomainIdGetParams) (*http.Request, error) {
+// NewGetEmailDomainV1EmailDomainsDomainIdGetRequest generates requests for GetEmailDomainV1EmailDomainsDomainIdGet
+func NewGetEmailDomainV1EmailDomainsDomainIdGetRequest(server string, domainId openapi_types.UUID, params *GetEmailDomainV1EmailDomainsDomainIdGetParams) (*http.Request, error) {
 	var err error
 
 	var pathParam0 string
@@ -4178,7 +4779,7 @@ func NewGetEmailDomainEmailDomainsDomainIdGetRequest(server string, domainId ope
 		return nil, err
 	}
 
-	operationPath := fmt.Sprintf("/email-domains/%s", pathParam0)
+	operationPath := fmt.Sprintf("/v1/email-domains/%s", pathParam0)
 	if operationPath[0] == '/' {
 		operationPath = "." + operationPath
 	}
@@ -4211,19 +4812,19 @@ func NewGetEmailDomainEmailDomainsDomainIdGetRequest(server string, domainId ope
 	return req, nil
 }
 
-// NewPatchEmailDomainEmailDomainsDomainIdPatchRequest calls the generic PatchEmailDomainEmailDomainsDomainIdPatch builder with application/json body
-func NewPatchEmailDomainEmailDomainsDomainIdPatchRequest(server string, domainId openapi_types.UUID, params *PatchEmailDomainEmailDomainsDomainIdPatchParams, body PatchEmailDomainEmailDomainsDomainIdPatchJSONRequestBody) (*http.Request, error) {
+// NewPatchEmailDomainV1EmailDomainsDomainIdPatchRequest calls the generic PatchEmailDomainV1EmailDomainsDomainIdPatch builder with application/json body
+func NewPatchEmailDomainV1EmailDomainsDomainIdPatchRequest(server string, domainId openapi_types.UUID, params *PatchEmailDomainV1EmailDomainsDomainIdPatchParams, body PatchEmailDomainV1EmailDomainsDomainIdPatchJSONRequestBody) (*http.Request, error) {
 	var bodyReader io.Reader
 	buf, err := json.Marshal(body)
 	if err != nil {
 		return nil, err
 	}
 	bodyReader = bytes.NewReader(buf)
-	return NewPatchEmailDomainEmailDomainsDomainIdPatchRequestWithBody(server, domainId, params, "application/json", bodyReader)
+	return NewPatchEmailDomainV1EmailDomainsDomainIdPatchRequestWithBody(server, domainId, params, "application/json", bodyReader)
 }
 
-// NewPatchEmailDomainEmailDomainsDomainIdPatchRequestWithBody generates requests for PatchEmailDomainEmailDomainsDomainIdPatch with any type of body
-func NewPatchEmailDomainEmailDomainsDomainIdPatchRequestWithBody(server string, domainId openapi_types.UUID, params *PatchEmailDomainEmailDomainsDomainIdPatchParams, contentType string, body io.Reader) (*http.Request, error) {
+// NewPatchEmailDomainV1EmailDomainsDomainIdPatchRequestWithBody generates requests for PatchEmailDomainV1EmailDomainsDomainIdPatch with any type of body
+func NewPatchEmailDomainV1EmailDomainsDomainIdPatchRequestWithBody(server string, domainId openapi_types.UUID, params *PatchEmailDomainV1EmailDomainsDomainIdPatchParams, contentType string, body io.Reader) (*http.Request, error) {
 	var err error
 
 	var pathParam0 string
@@ -4238,7 +4839,7 @@ func NewPatchEmailDomainEmailDomainsDomainIdPatchRequestWithBody(server string, 
 		return nil, err
 	}
 
-	operationPath := fmt.Sprintf("/email-domains/%s", pathParam0)
+	operationPath := fmt.Sprintf("/v1/email-domains/%s", pathParam0)
 	if operationPath[0] == '/' {
 		operationPath = "." + operationPath
 	}
@@ -4273,8 +4874,8 @@ func NewPatchEmailDomainEmailDomainsDomainIdPatchRequestWithBody(server string, 
 	return req, nil
 }
 
-// NewVerifyEmailDomainEmailDomainsDomainIdVerifyPostRequest generates requests for VerifyEmailDomainEmailDomainsDomainIdVerifyPost
-func NewVerifyEmailDomainEmailDomainsDomainIdVerifyPostRequest(server string, domainId openapi_types.UUID, params *VerifyEmailDomainEmailDomainsDomainIdVerifyPostParams) (*http.Request, error) {
+// NewVerifyEmailDomainV1EmailDomainsDomainIdVerifyPostRequest generates requests for VerifyEmailDomainV1EmailDomainsDomainIdVerifyPost
+func NewVerifyEmailDomainV1EmailDomainsDomainIdVerifyPostRequest(server string, domainId openapi_types.UUID, params *VerifyEmailDomainV1EmailDomainsDomainIdVerifyPostParams) (*http.Request, error) {
 	var err error
 
 	var pathParam0 string
@@ -4289,7 +4890,7 @@ func NewVerifyEmailDomainEmailDomainsDomainIdVerifyPostRequest(server string, do
 		return nil, err
 	}
 
-	operationPath := fmt.Sprintf("/email-domains/%s/verify", pathParam0)
+	operationPath := fmt.Sprintf("/v1/email-domains/%s/verify", pathParam0)
 	if operationPath[0] == '/' {
 		operationPath = "." + operationPath
 	}
@@ -4322,8 +4923,8 @@ func NewVerifyEmailDomainEmailDomainsDomainIdVerifyPostRequest(server string, do
 	return req, nil
 }
 
-// NewListEmailsEmailsGetRequest generates requests for ListEmailsEmailsGet
-func NewListEmailsEmailsGetRequest(server string, params *ListEmailsEmailsGetParams) (*http.Request, error) {
+// NewListEmailsV1EmailsGetRequest generates requests for ListEmailsV1EmailsGet
+func NewListEmailsV1EmailsGetRequest(server string, params *ListEmailsV1EmailsGetParams) (*http.Request, error) {
 	var err error
 
 	serverURL, err := url.Parse(server)
@@ -4331,7 +4932,7 @@ func NewListEmailsEmailsGetRequest(server string, params *ListEmailsEmailsGetPar
 		return nil, err
 	}
 
-	operationPath := fmt.Sprintf("/emails")
+	operationPath := fmt.Sprintf("/v1/emails")
 	if operationPath[0] == '/' {
 		operationPath = "." + operationPath
 	}
@@ -4434,19 +5035,19 @@ func NewListEmailsEmailsGetRequest(server string, params *ListEmailsEmailsGetPar
 	return req, nil
 }
 
-// NewCreateEmailEmailsPostRequest calls the generic CreateEmailEmailsPost builder with application/json body
-func NewCreateEmailEmailsPostRequest(server string, params *CreateEmailEmailsPostParams, body CreateEmailEmailsPostJSONRequestBody) (*http.Request, error) {
+// NewCreateEmailV1EmailsPostRequest calls the generic CreateEmailV1EmailsPost builder with application/json body
+func NewCreateEmailV1EmailsPostRequest(server string, params *CreateEmailV1EmailsPostParams, body CreateEmailV1EmailsPostJSONRequestBody) (*http.Request, error) {
 	var bodyReader io.Reader
 	buf, err := json.Marshal(body)
 	if err != nil {
 		return nil, err
 	}
 	bodyReader = bytes.NewReader(buf)
-	return NewCreateEmailEmailsPostRequestWithBody(server, params, "application/json", bodyReader)
+	return NewCreateEmailV1EmailsPostRequestWithBody(server, params, "application/json", bodyReader)
 }
 
-// NewCreateEmailEmailsPostRequestWithBody generates requests for CreateEmailEmailsPost with any type of body
-func NewCreateEmailEmailsPostRequestWithBody(server string, params *CreateEmailEmailsPostParams, contentType string, body io.Reader) (*http.Request, error) {
+// NewCreateEmailV1EmailsPostRequestWithBody generates requests for CreateEmailV1EmailsPost with any type of body
+func NewCreateEmailV1EmailsPostRequestWithBody(server string, params *CreateEmailV1EmailsPostParams, contentType string, body io.Reader) (*http.Request, error) {
 	var err error
 
 	serverURL, err := url.Parse(server)
@@ -4454,7 +5055,7 @@ func NewCreateEmailEmailsPostRequestWithBody(server string, params *CreateEmailE
 		return nil, err
 	}
 
-	operationPath := fmt.Sprintf("/emails")
+	operationPath := fmt.Sprintf("/v1/emails")
 	if operationPath[0] == '/' {
 		operationPath = "." + operationPath
 	}
@@ -4500,8 +5101,8 @@ func NewCreateEmailEmailsPostRequestWithBody(server string, params *CreateEmailE
 	return req, nil
 }
 
-// NewGetEmailStatsEmailsStatsGetRequest generates requests for GetEmailStatsEmailsStatsGet
-func NewGetEmailStatsEmailsStatsGetRequest(server string, params *GetEmailStatsEmailsStatsGetParams) (*http.Request, error) {
+// NewGetEmailStatsV1EmailsStatsGetRequest generates requests for GetEmailStatsV1EmailsStatsGet
+func NewGetEmailStatsV1EmailsStatsGetRequest(server string, params *GetEmailStatsV1EmailsStatsGetParams) (*http.Request, error) {
 	var err error
 
 	serverURL, err := url.Parse(server)
@@ -4509,7 +5110,7 @@ func NewGetEmailStatsEmailsStatsGetRequest(server string, params *GetEmailStatsE
 		return nil, err
 	}
 
-	operationPath := fmt.Sprintf("/emails/stats")
+	operationPath := fmt.Sprintf("/v1/emails/stats")
 	if operationPath[0] == '/' {
 		operationPath = "." + operationPath
 	}
@@ -4596,8 +5197,8 @@ func NewGetEmailStatsEmailsStatsGetRequest(server string, params *GetEmailStatsE
 	return req, nil
 }
 
-// NewGetEmailEmailsEmailIdGetRequest generates requests for GetEmailEmailsEmailIdGet
-func NewGetEmailEmailsEmailIdGetRequest(server string, emailId openapi_types.UUID, params *GetEmailEmailsEmailIdGetParams) (*http.Request, error) {
+// NewGetEmailV1EmailsEmailIdGetRequest generates requests for GetEmailV1EmailsEmailIdGet
+func NewGetEmailV1EmailsEmailIdGetRequest(server string, emailId openapi_types.UUID, params *GetEmailV1EmailsEmailIdGetParams) (*http.Request, error) {
 	var err error
 
 	var pathParam0 string
@@ -4612,7 +5213,7 @@ func NewGetEmailEmailsEmailIdGetRequest(server string, emailId openapi_types.UUI
 		return nil, err
 	}
 
-	operationPath := fmt.Sprintf("/emails/%s", pathParam0)
+	operationPath := fmt.Sprintf("/v1/emails/%s", pathParam0)
 	if operationPath[0] == '/' {
 		operationPath = "." + operationPath
 	}
@@ -4645,8 +5246,8 @@ func NewGetEmailEmailsEmailIdGetRequest(server string, emailId openapi_types.UUI
 	return req, nil
 }
 
-// NewGetEmailAttachmentEmailsEmailIdAttachmentsAttachmentIdGetRequest generates requests for GetEmailAttachmentEmailsEmailIdAttachmentsAttachmentIdGet
-func NewGetEmailAttachmentEmailsEmailIdAttachmentsAttachmentIdGetRequest(server string, emailId openapi_types.UUID, attachmentId openapi_types.UUID, params *GetEmailAttachmentEmailsEmailIdAttachmentsAttachmentIdGetParams) (*http.Request, error) {
+// NewGetEmailAttachmentV1EmailsEmailIdAttachmentsAttachmentIdGetRequest generates requests for GetEmailAttachmentV1EmailsEmailIdAttachmentsAttachmentIdGet
+func NewGetEmailAttachmentV1EmailsEmailIdAttachmentsAttachmentIdGetRequest(server string, emailId openapi_types.UUID, attachmentId openapi_types.UUID, params *GetEmailAttachmentV1EmailsEmailIdAttachmentsAttachmentIdGetParams) (*http.Request, error) {
 	var err error
 
 	var pathParam0 string
@@ -4668,7 +5269,7 @@ func NewGetEmailAttachmentEmailsEmailIdAttachmentsAttachmentIdGetRequest(server 
 		return nil, err
 	}
 
-	operationPath := fmt.Sprintf("/emails/%s/attachments/%s", pathParam0, pathParam1)
+	operationPath := fmt.Sprintf("/v1/emails/%s/attachments/%s", pathParam0, pathParam1)
 	if operationPath[0] == '/' {
 		operationPath = "." + operationPath
 	}
@@ -4701,8 +5302,8 @@ func NewGetEmailAttachmentEmailsEmailIdAttachmentsAttachmentIdGetRequest(server 
 	return req, nil
 }
 
-// NewListEmailEventsEmailsEmailIdEventsGetRequest generates requests for ListEmailEventsEmailsEmailIdEventsGet
-func NewListEmailEventsEmailsEmailIdEventsGetRequest(server string, emailId openapi_types.UUID, params *ListEmailEventsEmailsEmailIdEventsGetParams) (*http.Request, error) {
+// NewListEmailEventsV1EmailsEmailIdEventsGetRequest generates requests for ListEmailEventsV1EmailsEmailIdEventsGet
+func NewListEmailEventsV1EmailsEmailIdEventsGetRequest(server string, emailId openapi_types.UUID, params *ListEmailEventsV1EmailsEmailIdEventsGetParams) (*http.Request, error) {
 	var err error
 
 	var pathParam0 string
@@ -4717,7 +5318,7 @@ func NewListEmailEventsEmailsEmailIdEventsGetRequest(server string, emailId open
 		return nil, err
 	}
 
-	operationPath := fmt.Sprintf("/emails/%s/events", pathParam0)
+	operationPath := fmt.Sprintf("/v1/emails/%s/events", pathParam0)
 	if operationPath[0] == '/' {
 		operationPath = "." + operationPath
 	}
@@ -4788,8 +5389,8 @@ func NewListEmailEventsEmailsEmailIdEventsGetRequest(server string, emailId open
 	return req, nil
 }
 
-// NewGetEmailRawEmailsEmailIdRawGetRequest generates requests for GetEmailRawEmailsEmailIdRawGet
-func NewGetEmailRawEmailsEmailIdRawGetRequest(server string, emailId openapi_types.UUID, params *GetEmailRawEmailsEmailIdRawGetParams) (*http.Request, error) {
+// NewGetEmailRawV1EmailsEmailIdRawGetRequest generates requests for GetEmailRawV1EmailsEmailIdRawGet
+func NewGetEmailRawV1EmailsEmailIdRawGetRequest(server string, emailId openapi_types.UUID, params *GetEmailRawV1EmailsEmailIdRawGetParams) (*http.Request, error) {
 	var err error
 
 	var pathParam0 string
@@ -4804,7 +5405,7 @@ func NewGetEmailRawEmailsEmailIdRawGetRequest(server string, emailId openapi_typ
 		return nil, err
 	}
 
-	operationPath := fmt.Sprintf("/emails/%s/raw", pathParam0)
+	operationPath := fmt.Sprintf("/v1/emails/%s/raw", pathParam0)
 	if operationPath[0] == '/' {
 		operationPath = "." + operationPath
 	}
@@ -4837,8 +5438,8 @@ func NewGetEmailRawEmailsEmailIdRawGetRequest(server string, emailId openapi_typ
 	return req, nil
 }
 
-// NewListEventsEventsGetRequest generates requests for ListEventsEventsGet
-func NewListEventsEventsGetRequest(server string, params *ListEventsEventsGetParams) (*http.Request, error) {
+// NewListEventsV1EventsGetRequest generates requests for ListEventsV1EventsGet
+func NewListEventsV1EventsGetRequest(server string, params *ListEventsV1EventsGetParams) (*http.Request, error) {
 	var err error
 
 	serverURL, err := url.Parse(server)
@@ -4846,7 +5447,7 @@ func NewListEventsEventsGetRequest(server string, params *ListEventsEventsGetPar
 		return nil, err
 	}
 
-	operationPath := fmt.Sprintf("/events")
+	operationPath := fmt.Sprintf("/v1/events")
 	if operationPath[0] == '/' {
 		operationPath = "." + operationPath
 	}
@@ -4949,35 +5550,8 @@ func NewListEventsEventsGetRequest(server string, params *ListEventsEventsGetPar
 	return req, nil
 }
 
-// NewHealthzHealthzGetRequest generates requests for HealthzHealthzGet
-func NewHealthzHealthzGetRequest(server string) (*http.Request, error) {
-	var err error
-
-	serverURL, err := url.Parse(server)
-	if err != nil {
-		return nil, err
-	}
-
-	operationPath := fmt.Sprintf("/healthz")
-	if operationPath[0] == '/' {
-		operationPath = "." + operationPath
-	}
-
-	queryURL, err := serverURL.Parse(operationPath)
-	if err != nil {
-		return nil, err
-	}
-
-	req, err := http.NewRequest("GET", queryURL.String(), nil)
-	if err != nil {
-		return nil, err
-	}
-
-	return req, nil
-}
-
-// NewDeleteMemberPhoneMembersUserIdPhoneDeleteRequest generates requests for DeleteMemberPhoneMembersUserIdPhoneDelete
-func NewDeleteMemberPhoneMembersUserIdPhoneDeleteRequest(server string, userId string, params *DeleteMemberPhoneMembersUserIdPhoneDeleteParams) (*http.Request, error) {
+// NewDeleteMemberPhoneV1MembersUserIdPhoneDeleteRequest generates requests for DeleteMemberPhoneV1MembersUserIdPhoneDelete
+func NewDeleteMemberPhoneV1MembersUserIdPhoneDeleteRequest(server string, userId string, params *DeleteMemberPhoneV1MembersUserIdPhoneDeleteParams) (*http.Request, error) {
 	var err error
 
 	var pathParam0 string
@@ -4992,7 +5566,7 @@ func NewDeleteMemberPhoneMembersUserIdPhoneDeleteRequest(server string, userId s
 		return nil, err
 	}
 
-	operationPath := fmt.Sprintf("/members/%s/phone", pathParam0)
+	operationPath := fmt.Sprintf("/v1/members/%s/phone", pathParam0)
 	if operationPath[0] == '/' {
 		operationPath = "." + operationPath
 	}
@@ -5025,19 +5599,19 @@ func NewDeleteMemberPhoneMembersUserIdPhoneDeleteRequest(server string, userId s
 	return req, nil
 }
 
-// NewPutMemberPhoneMembersUserIdPhonePutRequest calls the generic PutMemberPhoneMembersUserIdPhonePut builder with application/json body
-func NewPutMemberPhoneMembersUserIdPhonePutRequest(server string, userId string, params *PutMemberPhoneMembersUserIdPhonePutParams, body PutMemberPhoneMembersUserIdPhonePutJSONRequestBody) (*http.Request, error) {
+// NewPutMemberPhoneV1MembersUserIdPhonePutRequest calls the generic PutMemberPhoneV1MembersUserIdPhonePut builder with application/json body
+func NewPutMemberPhoneV1MembersUserIdPhonePutRequest(server string, userId string, params *PutMemberPhoneV1MembersUserIdPhonePutParams, body PutMemberPhoneV1MembersUserIdPhonePutJSONRequestBody) (*http.Request, error) {
 	var bodyReader io.Reader
 	buf, err := json.Marshal(body)
 	if err != nil {
 		return nil, err
 	}
 	bodyReader = bytes.NewReader(buf)
-	return NewPutMemberPhoneMembersUserIdPhonePutRequestWithBody(server, userId, params, "application/json", bodyReader)
+	return NewPutMemberPhoneV1MembersUserIdPhonePutRequestWithBody(server, userId, params, "application/json", bodyReader)
 }
 
-// NewPutMemberPhoneMembersUserIdPhonePutRequestWithBody generates requests for PutMemberPhoneMembersUserIdPhonePut with any type of body
-func NewPutMemberPhoneMembersUserIdPhonePutRequestWithBody(server string, userId string, params *PutMemberPhoneMembersUserIdPhonePutParams, contentType string, body io.Reader) (*http.Request, error) {
+// NewPutMemberPhoneV1MembersUserIdPhonePutRequestWithBody generates requests for PutMemberPhoneV1MembersUserIdPhonePut with any type of body
+func NewPutMemberPhoneV1MembersUserIdPhonePutRequestWithBody(server string, userId string, params *PutMemberPhoneV1MembersUserIdPhonePutParams, contentType string, body io.Reader) (*http.Request, error) {
 	var err error
 
 	var pathParam0 string
@@ -5052,7 +5626,7 @@ func NewPutMemberPhoneMembersUserIdPhonePutRequestWithBody(server string, userId
 		return nil, err
 	}
 
-	operationPath := fmt.Sprintf("/members/%s/phone", pathParam0)
+	operationPath := fmt.Sprintf("/v1/members/%s/phone", pathParam0)
 	if operationPath[0] == '/' {
 		operationPath = "." + operationPath
 	}
@@ -5087,8 +5661,8 @@ func NewPutMemberPhoneMembersUserIdPhonePutRequestWithBody(server string, userId
 	return req, nil
 }
 
-// NewListNumbersNumbersGetRequest generates requests for ListNumbersNumbersGet
-func NewListNumbersNumbersGetRequest(server string, params *ListNumbersNumbersGetParams) (*http.Request, error) {
+// NewListNumbersV1NumbersGetRequest generates requests for ListNumbersV1NumbersGet
+func NewListNumbersV1NumbersGetRequest(server string, params *ListNumbersV1NumbersGetParams) (*http.Request, error) {
 	var err error
 
 	serverURL, err := url.Parse(server)
@@ -5096,7 +5670,7 @@ func NewListNumbersNumbersGetRequest(server string, params *ListNumbersNumbersGe
 		return nil, err
 	}
 
-	operationPath := fmt.Sprintf("/numbers")
+	operationPath := fmt.Sprintf("/v1/numbers")
 	if operationPath[0] == '/' {
 		operationPath = "." + operationPath
 	}
@@ -5167,19 +5741,19 @@ func NewListNumbersNumbersGetRequest(server string, params *ListNumbersNumbersGe
 	return req, nil
 }
 
-// NewAcquireNumberNumbersPostRequest calls the generic AcquireNumberNumbersPost builder with application/json body
-func NewAcquireNumberNumbersPostRequest(server string, params *AcquireNumberNumbersPostParams, body AcquireNumberNumbersPostJSONRequestBody) (*http.Request, error) {
+// NewAcquireNumberV1NumbersPostRequest calls the generic AcquireNumberV1NumbersPost builder with application/json body
+func NewAcquireNumberV1NumbersPostRequest(server string, params *AcquireNumberV1NumbersPostParams, body AcquireNumberV1NumbersPostJSONRequestBody) (*http.Request, error) {
 	var bodyReader io.Reader
 	buf, err := json.Marshal(body)
 	if err != nil {
 		return nil, err
 	}
 	bodyReader = bytes.NewReader(buf)
-	return NewAcquireNumberNumbersPostRequestWithBody(server, params, "application/json", bodyReader)
+	return NewAcquireNumberV1NumbersPostRequestWithBody(server, params, "application/json", bodyReader)
 }
 
-// NewAcquireNumberNumbersPostRequestWithBody generates requests for AcquireNumberNumbersPost with any type of body
-func NewAcquireNumberNumbersPostRequestWithBody(server string, params *AcquireNumberNumbersPostParams, contentType string, body io.Reader) (*http.Request, error) {
+// NewAcquireNumberV1NumbersPostRequestWithBody generates requests for AcquireNumberV1NumbersPost with any type of body
+func NewAcquireNumberV1NumbersPostRequestWithBody(server string, params *AcquireNumberV1NumbersPostParams, contentType string, body io.Reader) (*http.Request, error) {
 	var err error
 
 	serverURL, err := url.Parse(server)
@@ -5187,7 +5761,7 @@ func NewAcquireNumberNumbersPostRequestWithBody(server string, params *AcquireNu
 		return nil, err
 	}
 
-	operationPath := fmt.Sprintf("/numbers")
+	operationPath := fmt.Sprintf("/v1/numbers")
 	if operationPath[0] == '/' {
 		operationPath = "." + operationPath
 	}
@@ -5233,8 +5807,8 @@ func NewAcquireNumberNumbersPostRequestWithBody(server string, params *AcquireNu
 	return req, nil
 }
 
-// NewReleaseNumberNumbersNumberIdDeleteRequest generates requests for ReleaseNumberNumbersNumberIdDelete
-func NewReleaseNumberNumbersNumberIdDeleteRequest(server string, numberId openapi_types.UUID, params *ReleaseNumberNumbersNumberIdDeleteParams) (*http.Request, error) {
+// NewReleaseNumberV1NumbersNumberIdDeleteRequest generates requests for ReleaseNumberV1NumbersNumberIdDelete
+func NewReleaseNumberV1NumbersNumberIdDeleteRequest(server string, numberId openapi_types.UUID, params *ReleaseNumberV1NumbersNumberIdDeleteParams) (*http.Request, error) {
 	var err error
 
 	var pathParam0 string
@@ -5249,7 +5823,7 @@ func NewReleaseNumberNumbersNumberIdDeleteRequest(server string, numberId openap
 		return nil, err
 	}
 
-	operationPath := fmt.Sprintf("/numbers/%s", pathParam0)
+	operationPath := fmt.Sprintf("/v1/numbers/%s", pathParam0)
 	if operationPath[0] == '/' {
 		operationPath = "." + operationPath
 	}
@@ -5282,8 +5856,8 @@ func NewReleaseNumberNumbersNumberIdDeleteRequest(server string, numberId openap
 	return req, nil
 }
 
-// NewGetNumberNumbersNumberIdGetRequest generates requests for GetNumberNumbersNumberIdGet
-func NewGetNumberNumbersNumberIdGetRequest(server string, numberId openapi_types.UUID, params *GetNumberNumbersNumberIdGetParams) (*http.Request, error) {
+// NewGetNumberV1NumbersNumberIdGetRequest generates requests for GetNumberV1NumbersNumberIdGet
+func NewGetNumberV1NumbersNumberIdGetRequest(server string, numberId openapi_types.UUID, params *GetNumberV1NumbersNumberIdGetParams) (*http.Request, error) {
 	var err error
 
 	var pathParam0 string
@@ -5298,7 +5872,7 @@ func NewGetNumberNumbersNumberIdGetRequest(server string, numberId openapi_types
 		return nil, err
 	}
 
-	operationPath := fmt.Sprintf("/numbers/%s", pathParam0)
+	operationPath := fmt.Sprintf("/v1/numbers/%s", pathParam0)
 	if operationPath[0] == '/' {
 		operationPath = "." + operationPath
 	}
@@ -5331,8 +5905,8 @@ func NewGetNumberNumbersNumberIdGetRequest(server string, numberId openapi_types
 	return req, nil
 }
 
-// NewEnableSmsNumbersNumberIdEnableSmsPostRequest generates requests for EnableSmsNumbersNumberIdEnableSmsPost
-func NewEnableSmsNumbersNumberIdEnableSmsPostRequest(server string, numberId openapi_types.UUID, params *EnableSmsNumbersNumberIdEnableSmsPostParams) (*http.Request, error) {
+// NewEnableSmsV1NumbersNumberIdEnableSmsPostRequest generates requests for EnableSmsV1NumbersNumberIdEnableSmsPost
+func NewEnableSmsV1NumbersNumberIdEnableSmsPostRequest(server string, numberId openapi_types.UUID, params *EnableSmsV1NumbersNumberIdEnableSmsPostParams) (*http.Request, error) {
 	var err error
 
 	var pathParam0 string
@@ -5347,7 +5921,7 @@ func NewEnableSmsNumbersNumberIdEnableSmsPostRequest(server string, numberId ope
 		return nil, err
 	}
 
-	operationPath := fmt.Sprintf("/numbers/%s/enable-sms", pathParam0)
+	operationPath := fmt.Sprintf("/v1/numbers/%s/enable-sms", pathParam0)
 	if operationPath[0] == '/' {
 		operationPath = "." + operationPath
 	}
@@ -5389,7 +5963,7 @@ func NewListProvidersRequest(server string, params *ListProvidersParams) (*http.
 		return nil, err
 	}
 
-	operationPath := fmt.Sprintf("/providers")
+	operationPath := fmt.Sprintf("/v1/providers")
 	if operationPath[0] == '/' {
 		operationPath = "." + operationPath
 	}
@@ -5449,7 +6023,7 @@ func NewUpsertProviderRequestWithBody(server string, layer string, params *Upser
 		return nil, err
 	}
 
-	operationPath := fmt.Sprintf("/providers/%s", pathParam0)
+	operationPath := fmt.Sprintf("/v1/providers/%s", pathParam0)
 	if operationPath[0] == '/' {
 		operationPath = "." + operationPath
 	}
@@ -5511,7 +6085,7 @@ func NewActivateProviderRequestWithBody(server string, layer string, params *Act
 		return nil, err
 	}
 
-	operationPath := fmt.Sprintf("/providers/%s/activate", pathParam0)
+	operationPath := fmt.Sprintf("/v1/providers/%s/activate", pathParam0)
 	if operationPath[0] == '/' {
 		operationPath = "." + operationPath
 	}
@@ -5573,7 +6147,7 @@ func NewValidateProviderRequestWithBody(server string, layer string, params *Val
 		return nil, err
 	}
 
-	operationPath := fmt.Sprintf("/providers/%s/validate", pathParam0)
+	operationPath := fmt.Sprintf("/v1/providers/%s/validate", pathParam0)
 	if operationPath[0] == '/' {
 		operationPath = "." + operationPath
 	}
@@ -5631,7 +6205,7 @@ func NewDeleteProviderRequest(server string, layer string, provider string, para
 		return nil, err
 	}
 
-	operationPath := fmt.Sprintf("/providers/%s/%s", pathParam0, pathParam1)
+	operationPath := fmt.Sprintf("/v1/providers/%s/%s", pathParam0, pathParam1)
 	if operationPath[0] == '/' {
 		operationPath = "." + operationPath
 	}
@@ -5664,8 +6238,8 @@ func NewDeleteProviderRequest(server string, layer string, provider string, para
 	return req, nil
 }
 
-// NewListSmsSmsGetRequest generates requests for ListSmsSmsGet
-func NewListSmsSmsGetRequest(server string, params *ListSmsSmsGetParams) (*http.Request, error) {
+// NewListSmsV1SmsGetRequest generates requests for ListSmsV1SmsGet
+func NewListSmsV1SmsGetRequest(server string, params *ListSmsV1SmsGetParams) (*http.Request, error) {
 	var err error
 
 	serverURL, err := url.Parse(server)
@@ -5673,7 +6247,7 @@ func NewListSmsSmsGetRequest(server string, params *ListSmsSmsGetParams) (*http.
 		return nil, err
 	}
 
-	operationPath := fmt.Sprintf("/sms")
+	operationPath := fmt.Sprintf("/v1/sms")
 	if operationPath[0] == '/' {
 		operationPath = "." + operationPath
 	}
@@ -5776,19 +6350,19 @@ func NewListSmsSmsGetRequest(server string, params *ListSmsSmsGetParams) (*http.
 	return req, nil
 }
 
-// NewCreateSmsSmsPostRequest calls the generic CreateSmsSmsPost builder with application/json body
-func NewCreateSmsSmsPostRequest(server string, params *CreateSmsSmsPostParams, body CreateSmsSmsPostJSONRequestBody) (*http.Request, error) {
+// NewCreateSmsV1SmsPostRequest calls the generic CreateSmsV1SmsPost builder with application/json body
+func NewCreateSmsV1SmsPostRequest(server string, params *CreateSmsV1SmsPostParams, body CreateSmsV1SmsPostJSONRequestBody) (*http.Request, error) {
 	var bodyReader io.Reader
 	buf, err := json.Marshal(body)
 	if err != nil {
 		return nil, err
 	}
 	bodyReader = bytes.NewReader(buf)
-	return NewCreateSmsSmsPostRequestWithBody(server, params, "application/json", bodyReader)
+	return NewCreateSmsV1SmsPostRequestWithBody(server, params, "application/json", bodyReader)
 }
 
-// NewCreateSmsSmsPostRequestWithBody generates requests for CreateSmsSmsPost with any type of body
-func NewCreateSmsSmsPostRequestWithBody(server string, params *CreateSmsSmsPostParams, contentType string, body io.Reader) (*http.Request, error) {
+// NewCreateSmsV1SmsPostRequestWithBody generates requests for CreateSmsV1SmsPost with any type of body
+func NewCreateSmsV1SmsPostRequestWithBody(server string, params *CreateSmsV1SmsPostParams, contentType string, body io.Reader) (*http.Request, error) {
 	var err error
 
 	serverURL, err := url.Parse(server)
@@ -5796,7 +6370,7 @@ func NewCreateSmsSmsPostRequestWithBody(server string, params *CreateSmsSmsPostP
 		return nil, err
 	}
 
-	operationPath := fmt.Sprintf("/sms")
+	operationPath := fmt.Sprintf("/v1/sms")
 	if operationPath[0] == '/' {
 		operationPath = "." + operationPath
 	}
@@ -5842,8 +6416,8 @@ func NewCreateSmsSmsPostRequestWithBody(server string, params *CreateSmsSmsPostP
 	return req, nil
 }
 
-// NewGetSenderIdSmsSenderIdGetRequest generates requests for GetSenderIdSmsSenderIdGet
-func NewGetSenderIdSmsSenderIdGetRequest(server string, params *GetSenderIdSmsSenderIdGetParams) (*http.Request, error) {
+// NewGetSenderIdV1SmsSenderIdGetRequest generates requests for GetSenderIdV1SmsSenderIdGet
+func NewGetSenderIdV1SmsSenderIdGetRequest(server string, params *GetSenderIdV1SmsSenderIdGetParams) (*http.Request, error) {
 	var err error
 
 	serverURL, err := url.Parse(server)
@@ -5851,7 +6425,7 @@ func NewGetSenderIdSmsSenderIdGetRequest(server string, params *GetSenderIdSmsSe
 		return nil, err
 	}
 
-	operationPath := fmt.Sprintf("/sms/sender-id")
+	operationPath := fmt.Sprintf("/v1/sms/sender-id")
 	if operationPath[0] == '/' {
 		operationPath = "." + operationPath
 	}
@@ -5884,19 +6458,19 @@ func NewGetSenderIdSmsSenderIdGetRequest(server string, params *GetSenderIdSmsSe
 	return req, nil
 }
 
-// NewPatchSenderIdSmsSenderIdPatchRequest calls the generic PatchSenderIdSmsSenderIdPatch builder with application/json body
-func NewPatchSenderIdSmsSenderIdPatchRequest(server string, params *PatchSenderIdSmsSenderIdPatchParams, body PatchSenderIdSmsSenderIdPatchJSONRequestBody) (*http.Request, error) {
+// NewPatchSenderIdV1SmsSenderIdPatchRequest calls the generic PatchSenderIdV1SmsSenderIdPatch builder with application/json body
+func NewPatchSenderIdV1SmsSenderIdPatchRequest(server string, params *PatchSenderIdV1SmsSenderIdPatchParams, body PatchSenderIdV1SmsSenderIdPatchJSONRequestBody) (*http.Request, error) {
 	var bodyReader io.Reader
 	buf, err := json.Marshal(body)
 	if err != nil {
 		return nil, err
 	}
 	bodyReader = bytes.NewReader(buf)
-	return NewPatchSenderIdSmsSenderIdPatchRequestWithBody(server, params, "application/json", bodyReader)
+	return NewPatchSenderIdV1SmsSenderIdPatchRequestWithBody(server, params, "application/json", bodyReader)
 }
 
-// NewPatchSenderIdSmsSenderIdPatchRequestWithBody generates requests for PatchSenderIdSmsSenderIdPatch with any type of body
-func NewPatchSenderIdSmsSenderIdPatchRequestWithBody(server string, params *PatchSenderIdSmsSenderIdPatchParams, contentType string, body io.Reader) (*http.Request, error) {
+// NewPatchSenderIdV1SmsSenderIdPatchRequestWithBody generates requests for PatchSenderIdV1SmsSenderIdPatch with any type of body
+func NewPatchSenderIdV1SmsSenderIdPatchRequestWithBody(server string, params *PatchSenderIdV1SmsSenderIdPatchParams, contentType string, body io.Reader) (*http.Request, error) {
 	var err error
 
 	serverURL, err := url.Parse(server)
@@ -5904,7 +6478,7 @@ func NewPatchSenderIdSmsSenderIdPatchRequestWithBody(server string, params *Patc
 		return nil, err
 	}
 
-	operationPath := fmt.Sprintf("/sms/sender-id")
+	operationPath := fmt.Sprintf("/v1/sms/sender-id")
 	if operationPath[0] == '/' {
 		operationPath = "." + operationPath
 	}
@@ -5939,8 +6513,8 @@ func NewPatchSenderIdSmsSenderIdPatchRequestWithBody(server string, params *Patc
 	return req, nil
 }
 
-// NewListSmsSuppressionsSmsSuppressionsGetRequest generates requests for ListSmsSuppressionsSmsSuppressionsGet
-func NewListSmsSuppressionsSmsSuppressionsGetRequest(server string, params *ListSmsSuppressionsSmsSuppressionsGetParams) (*http.Request, error) {
+// NewListSmsSuppressionsV1SmsSuppressionsGetRequest generates requests for ListSmsSuppressionsV1SmsSuppressionsGet
+func NewListSmsSuppressionsV1SmsSuppressionsGetRequest(server string, params *ListSmsSuppressionsV1SmsSuppressionsGetParams) (*http.Request, error) {
 	var err error
 
 	serverURL, err := url.Parse(server)
@@ -5948,7 +6522,7 @@ func NewListSmsSuppressionsSmsSuppressionsGetRequest(server string, params *List
 		return nil, err
 	}
 
-	operationPath := fmt.Sprintf("/sms/suppressions")
+	operationPath := fmt.Sprintf("/v1/sms/suppressions")
 	if operationPath[0] == '/' {
 		operationPath = "." + operationPath
 	}
@@ -6019,8 +6593,8 @@ func NewListSmsSuppressionsSmsSuppressionsGetRequest(server string, params *List
 	return req, nil
 }
 
-// NewDeleteSmsSuppressionSmsSuppressionsNumberDeleteRequest generates requests for DeleteSmsSuppressionSmsSuppressionsNumberDelete
-func NewDeleteSmsSuppressionSmsSuppressionsNumberDeleteRequest(server string, number string, params *DeleteSmsSuppressionSmsSuppressionsNumberDeleteParams) (*http.Request, error) {
+// NewDeleteSmsSuppressionV1SmsSuppressionsNumberDeleteRequest generates requests for DeleteSmsSuppressionV1SmsSuppressionsNumberDelete
+func NewDeleteSmsSuppressionV1SmsSuppressionsNumberDeleteRequest(server string, number string, params *DeleteSmsSuppressionV1SmsSuppressionsNumberDeleteParams) (*http.Request, error) {
 	var err error
 
 	var pathParam0 string
@@ -6035,7 +6609,7 @@ func NewDeleteSmsSuppressionSmsSuppressionsNumberDeleteRequest(server string, nu
 		return nil, err
 	}
 
-	operationPath := fmt.Sprintf("/sms/suppressions/%s", pathParam0)
+	operationPath := fmt.Sprintf("/v1/sms/suppressions/%s", pathParam0)
 	if operationPath[0] == '/' {
 		operationPath = "." + operationPath
 	}
@@ -6068,8 +6642,8 @@ func NewDeleteSmsSuppressionSmsSuppressionsNumberDeleteRequest(server string, nu
 	return req, nil
 }
 
-// NewGetSmsSmsSmsIdGetRequest generates requests for GetSmsSmsSmsIdGet
-func NewGetSmsSmsSmsIdGetRequest(server string, smsId openapi_types.UUID, params *GetSmsSmsSmsIdGetParams) (*http.Request, error) {
+// NewGetSmsV1SmsSmsIdGetRequest generates requests for GetSmsV1SmsSmsIdGet
+func NewGetSmsV1SmsSmsIdGetRequest(server string, smsId openapi_types.UUID, params *GetSmsV1SmsSmsIdGetParams) (*http.Request, error) {
 	var err error
 
 	var pathParam0 string
@@ -6084,7 +6658,7 @@ func NewGetSmsSmsSmsIdGetRequest(server string, smsId openapi_types.UUID, params
 		return nil, err
 	}
 
-	operationPath := fmt.Sprintf("/sms/%s", pathParam0)
+	operationPath := fmt.Sprintf("/v1/sms/%s", pathParam0)
 	if operationPath[0] == '/' {
 		operationPath = "." + operationPath
 	}
@@ -6117,8 +6691,8 @@ func NewGetSmsSmsSmsIdGetRequest(server string, smsId openapi_types.UUID, params
 	return req, nil
 }
 
-// NewUnsubscribeUnsubscribeGetRequest generates requests for UnsubscribeUnsubscribeGet
-func NewUnsubscribeUnsubscribeGetRequest(server string, params *UnsubscribeUnsubscribeGetParams) (*http.Request, error) {
+// NewUnsubscribeV1UnsubscribeGetRequest generates requests for UnsubscribeV1UnsubscribeGet
+func NewUnsubscribeV1UnsubscribeGetRequest(server string, params *UnsubscribeV1UnsubscribeGetParams) (*http.Request, error) {
 	var err error
 
 	serverURL, err := url.Parse(server)
@@ -6126,7 +6700,7 @@ func NewUnsubscribeUnsubscribeGetRequest(server string, params *UnsubscribeUnsub
 		return nil, err
 	}
 
-	operationPath := fmt.Sprintf("/unsubscribe")
+	operationPath := fmt.Sprintf("/v1/unsubscribe")
 	if operationPath[0] == '/' {
 		operationPath = "." + operationPath
 	}
@@ -6162,8 +6736,8 @@ func NewUnsubscribeUnsubscribeGetRequest(server string, params *UnsubscribeUnsub
 	return req, nil
 }
 
-// NewListSubscriptionsWebhooksGetRequest generates requests for ListSubscriptionsWebhooksGet
-func NewListSubscriptionsWebhooksGetRequest(server string, params *ListSubscriptionsWebhooksGetParams) (*http.Request, error) {
+// NewListSubscriptionsV1WebhooksGetRequest generates requests for ListSubscriptionsV1WebhooksGet
+func NewListSubscriptionsV1WebhooksGetRequest(server string, params *ListSubscriptionsV1WebhooksGetParams) (*http.Request, error) {
 	var err error
 
 	serverURL, err := url.Parse(server)
@@ -6171,7 +6745,7 @@ func NewListSubscriptionsWebhooksGetRequest(server string, params *ListSubscript
 		return nil, err
 	}
 
-	operationPath := fmt.Sprintf("/webhooks")
+	operationPath := fmt.Sprintf("/v1/webhooks")
 	if operationPath[0] == '/' {
 		operationPath = "." + operationPath
 	}
@@ -6242,19 +6816,19 @@ func NewListSubscriptionsWebhooksGetRequest(server string, params *ListSubscript
 	return req, nil
 }
 
-// NewCreateSubscriptionWebhooksPostRequest calls the generic CreateSubscriptionWebhooksPost builder with application/json body
-func NewCreateSubscriptionWebhooksPostRequest(server string, params *CreateSubscriptionWebhooksPostParams, body CreateSubscriptionWebhooksPostJSONRequestBody) (*http.Request, error) {
+// NewCreateSubscriptionV1WebhooksPostRequest calls the generic CreateSubscriptionV1WebhooksPost builder with application/json body
+func NewCreateSubscriptionV1WebhooksPostRequest(server string, params *CreateSubscriptionV1WebhooksPostParams, body CreateSubscriptionV1WebhooksPostJSONRequestBody) (*http.Request, error) {
 	var bodyReader io.Reader
 	buf, err := json.Marshal(body)
 	if err != nil {
 		return nil, err
 	}
 	bodyReader = bytes.NewReader(buf)
-	return NewCreateSubscriptionWebhooksPostRequestWithBody(server, params, "application/json", bodyReader)
+	return NewCreateSubscriptionV1WebhooksPostRequestWithBody(server, params, "application/json", bodyReader)
 }
 
-// NewCreateSubscriptionWebhooksPostRequestWithBody generates requests for CreateSubscriptionWebhooksPost with any type of body
-func NewCreateSubscriptionWebhooksPostRequestWithBody(server string, params *CreateSubscriptionWebhooksPostParams, contentType string, body io.Reader) (*http.Request, error) {
+// NewCreateSubscriptionV1WebhooksPostRequestWithBody generates requests for CreateSubscriptionV1WebhooksPost with any type of body
+func NewCreateSubscriptionV1WebhooksPostRequestWithBody(server string, params *CreateSubscriptionV1WebhooksPostParams, contentType string, body io.Reader) (*http.Request, error) {
 	var err error
 
 	serverURL, err := url.Parse(server)
@@ -6262,7 +6836,7 @@ func NewCreateSubscriptionWebhooksPostRequestWithBody(server string, params *Cre
 		return nil, err
 	}
 
-	operationPath := fmt.Sprintf("/webhooks")
+	operationPath := fmt.Sprintf("/v1/webhooks")
 	if operationPath[0] == '/' {
 		operationPath = "." + operationPath
 	}
@@ -6297,8 +6871,8 @@ func NewCreateSubscriptionWebhooksPostRequestWithBody(server string, params *Cre
 	return req, nil
 }
 
-// NewDeleteSubscriptionWebhooksSubIdDeleteRequest generates requests for DeleteSubscriptionWebhooksSubIdDelete
-func NewDeleteSubscriptionWebhooksSubIdDeleteRequest(server string, subId openapi_types.UUID, params *DeleteSubscriptionWebhooksSubIdDeleteParams) (*http.Request, error) {
+// NewDeleteSubscriptionV1WebhooksSubIdDeleteRequest generates requests for DeleteSubscriptionV1WebhooksSubIdDelete
+func NewDeleteSubscriptionV1WebhooksSubIdDeleteRequest(server string, subId openapi_types.UUID, params *DeleteSubscriptionV1WebhooksSubIdDeleteParams) (*http.Request, error) {
 	var err error
 
 	var pathParam0 string
@@ -6313,7 +6887,7 @@ func NewDeleteSubscriptionWebhooksSubIdDeleteRequest(server string, subId openap
 		return nil, err
 	}
 
-	operationPath := fmt.Sprintf("/webhooks/%s", pathParam0)
+	operationPath := fmt.Sprintf("/v1/webhooks/%s", pathParam0)
 	if operationPath[0] == '/' {
 		operationPath = "." + operationPath
 	}
@@ -6346,8 +6920,8 @@ func NewDeleteSubscriptionWebhooksSubIdDeleteRequest(server string, subId openap
 	return req, nil
 }
 
-// NewGetSubscriptionWebhooksSubIdGetRequest generates requests for GetSubscriptionWebhooksSubIdGet
-func NewGetSubscriptionWebhooksSubIdGetRequest(server string, subId openapi_types.UUID, params *GetSubscriptionWebhooksSubIdGetParams) (*http.Request, error) {
+// NewGetSubscriptionV1WebhooksSubIdGetRequest generates requests for GetSubscriptionV1WebhooksSubIdGet
+func NewGetSubscriptionV1WebhooksSubIdGetRequest(server string, subId openapi_types.UUID, params *GetSubscriptionV1WebhooksSubIdGetParams) (*http.Request, error) {
 	var err error
 
 	var pathParam0 string
@@ -6362,7 +6936,7 @@ func NewGetSubscriptionWebhooksSubIdGetRequest(server string, subId openapi_type
 		return nil, err
 	}
 
-	operationPath := fmt.Sprintf("/webhooks/%s", pathParam0)
+	operationPath := fmt.Sprintf("/v1/webhooks/%s", pathParam0)
 	if operationPath[0] == '/' {
 		operationPath = "." + operationPath
 	}
@@ -6395,19 +6969,19 @@ func NewGetSubscriptionWebhooksSubIdGetRequest(server string, subId openapi_type
 	return req, nil
 }
 
-// NewPatchSubscriptionWebhooksSubIdPatchRequest calls the generic PatchSubscriptionWebhooksSubIdPatch builder with application/json body
-func NewPatchSubscriptionWebhooksSubIdPatchRequest(server string, subId openapi_types.UUID, params *PatchSubscriptionWebhooksSubIdPatchParams, body PatchSubscriptionWebhooksSubIdPatchJSONRequestBody) (*http.Request, error) {
+// NewPatchSubscriptionV1WebhooksSubIdPatchRequest calls the generic PatchSubscriptionV1WebhooksSubIdPatch builder with application/json body
+func NewPatchSubscriptionV1WebhooksSubIdPatchRequest(server string, subId openapi_types.UUID, params *PatchSubscriptionV1WebhooksSubIdPatchParams, body PatchSubscriptionV1WebhooksSubIdPatchJSONRequestBody) (*http.Request, error) {
 	var bodyReader io.Reader
 	buf, err := json.Marshal(body)
 	if err != nil {
 		return nil, err
 	}
 	bodyReader = bytes.NewReader(buf)
-	return NewPatchSubscriptionWebhooksSubIdPatchRequestWithBody(server, subId, params, "application/json", bodyReader)
+	return NewPatchSubscriptionV1WebhooksSubIdPatchRequestWithBody(server, subId, params, "application/json", bodyReader)
 }
 
-// NewPatchSubscriptionWebhooksSubIdPatchRequestWithBody generates requests for PatchSubscriptionWebhooksSubIdPatch with any type of body
-func NewPatchSubscriptionWebhooksSubIdPatchRequestWithBody(server string, subId openapi_types.UUID, params *PatchSubscriptionWebhooksSubIdPatchParams, contentType string, body io.Reader) (*http.Request, error) {
+// NewPatchSubscriptionV1WebhooksSubIdPatchRequestWithBody generates requests for PatchSubscriptionV1WebhooksSubIdPatch with any type of body
+func NewPatchSubscriptionV1WebhooksSubIdPatchRequestWithBody(server string, subId openapi_types.UUID, params *PatchSubscriptionV1WebhooksSubIdPatchParams, contentType string, body io.Reader) (*http.Request, error) {
 	var err error
 
 	var pathParam0 string
@@ -6422,7 +6996,7 @@ func NewPatchSubscriptionWebhooksSubIdPatchRequestWithBody(server string, subId 
 		return nil, err
 	}
 
-	operationPath := fmt.Sprintf("/webhooks/%s", pathParam0)
+	operationPath := fmt.Sprintf("/v1/webhooks/%s", pathParam0)
 	if operationPath[0] == '/' {
 		operationPath = "." + operationPath
 	}
@@ -6457,8 +7031,8 @@ func NewPatchSubscriptionWebhooksSubIdPatchRequestWithBody(server string, subId 
 	return req, nil
 }
 
-// NewListDeliveriesWebhooksSubIdDeliveriesGetRequest generates requests for ListDeliveriesWebhooksSubIdDeliveriesGet
-func NewListDeliveriesWebhooksSubIdDeliveriesGetRequest(server string, subId openapi_types.UUID, params *ListDeliveriesWebhooksSubIdDeliveriesGetParams) (*http.Request, error) {
+// NewListDeliveriesV1WebhooksSubIdDeliveriesGetRequest generates requests for ListDeliveriesV1WebhooksSubIdDeliveriesGet
+func NewListDeliveriesV1WebhooksSubIdDeliveriesGetRequest(server string, subId openapi_types.UUID, params *ListDeliveriesV1WebhooksSubIdDeliveriesGetParams) (*http.Request, error) {
 	var err error
 
 	var pathParam0 string
@@ -6473,7 +7047,7 @@ func NewListDeliveriesWebhooksSubIdDeliveriesGetRequest(server string, subId ope
 		return nil, err
 	}
 
-	operationPath := fmt.Sprintf("/webhooks/%s/deliveries", pathParam0)
+	operationPath := fmt.Sprintf("/v1/webhooks/%s/deliveries", pathParam0)
 	if operationPath[0] == '/' {
 		operationPath = "." + operationPath
 	}
@@ -6544,8 +7118,8 @@ func NewListDeliveriesWebhooksSubIdDeliveriesGetRequest(server string, subId ope
 	return req, nil
 }
 
-// NewRedeliverWebhooksSubIdDeliveriesDeliveryIdRedeliverPostRequest generates requests for RedeliverWebhooksSubIdDeliveriesDeliveryIdRedeliverPost
-func NewRedeliverWebhooksSubIdDeliveriesDeliveryIdRedeliverPostRequest(server string, subId openapi_types.UUID, deliveryId openapi_types.UUID, params *RedeliverWebhooksSubIdDeliveriesDeliveryIdRedeliverPostParams) (*http.Request, error) {
+// NewRedeliverV1WebhooksSubIdDeliveriesDeliveryIdRedeliverPostRequest generates requests for RedeliverV1WebhooksSubIdDeliveriesDeliveryIdRedeliverPost
+func NewRedeliverV1WebhooksSubIdDeliveriesDeliveryIdRedeliverPostRequest(server string, subId openapi_types.UUID, deliveryId openapi_types.UUID, params *RedeliverV1WebhooksSubIdDeliveriesDeliveryIdRedeliverPostParams) (*http.Request, error) {
 	var err error
 
 	var pathParam0 string
@@ -6567,7 +7141,7 @@ func NewRedeliverWebhooksSubIdDeliveriesDeliveryIdRedeliverPostRequest(server st
 		return nil, err
 	}
 
-	operationPath := fmt.Sprintf("/webhooks/%s/deliveries/%s/redeliver", pathParam0, pathParam1)
+	operationPath := fmt.Sprintf("/v1/webhooks/%s/deliveries/%s/redeliver", pathParam0, pathParam1)
 	if operationPath[0] == '/' {
 		operationPath = "." + operationPath
 	}
@@ -6600,8 +7174,8 @@ func NewRedeliverWebhooksSubIdDeliveriesDeliveryIdRedeliverPostRequest(server st
 	return req, nil
 }
 
-// NewRotateSecretWebhooksSubIdRotateSecretPostRequest generates requests for RotateSecretWebhooksSubIdRotateSecretPost
-func NewRotateSecretWebhooksSubIdRotateSecretPostRequest(server string, subId openapi_types.UUID, params *RotateSecretWebhooksSubIdRotateSecretPostParams) (*http.Request, error) {
+// NewRotateSecretV1WebhooksSubIdRotateSecretPostRequest generates requests for RotateSecretV1WebhooksSubIdRotateSecretPost
+func NewRotateSecretV1WebhooksSubIdRotateSecretPostRequest(server string, subId openapi_types.UUID, params *RotateSecretV1WebhooksSubIdRotateSecretPostParams) (*http.Request, error) {
 	var err error
 
 	var pathParam0 string
@@ -6616,7 +7190,7 @@ func NewRotateSecretWebhooksSubIdRotateSecretPostRequest(server string, subId op
 		return nil, err
 	}
 
-	operationPath := fmt.Sprintf("/webhooks/%s/rotate-secret", pathParam0)
+	operationPath := fmt.Sprintf("/v1/webhooks/%s/rotate-secret", pathParam0)
 	if operationPath[0] == '/' {
 		operationPath = "." + operationPath
 	}
@@ -6649,8 +7223,8 @@ func NewRotateSecretWebhooksSubIdRotateSecretPostRequest(server string, subId op
 	return req, nil
 }
 
-// NewGetWhoamiWhoamiGetRequest generates requests for GetWhoamiWhoamiGet
-func NewGetWhoamiWhoamiGetRequest(server string, params *GetWhoamiWhoamiGetParams) (*http.Request, error) {
+// NewGetWhoamiV1WhoamiGetRequest generates requests for GetWhoamiV1WhoamiGet
+func NewGetWhoamiV1WhoamiGetRequest(server string, params *GetWhoamiV1WhoamiGetParams) (*http.Request, error) {
 	var err error
 
 	serverURL, err := url.Parse(server)
@@ -6658,7 +7232,7 @@ func NewGetWhoamiWhoamiGetRequest(server string, params *GetWhoamiWhoamiGetParam
 		return nil, err
 	}
 
-	operationPath := fmt.Sprintf("/whoami")
+	operationPath := fmt.Sprintf("/v1/whoami")
 	if operationPath[0] == '/' {
 		operationPath = "." + operationPath
 	}
@@ -6734,114 +7308,114 @@ func WithBaseURL(baseURL string) ClientOption {
 
 // ClientWithResponsesInterface is the interface specification for the client with responses above.
 type ClientWithResponsesInterface interface {
-	// ListCallsCallsGetWithResponse request
-	ListCallsCallsGetWithResponse(ctx context.Context, params *ListCallsCallsGetParams, reqEditors ...RequestEditorFn) (*ListCallsCallsGetResponse, error)
+	// HealthzHealthzGetWithResponse request
+	HealthzHealthzGetWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*HealthzHealthzGetResponse, error)
 
-	// CreateCallCallsPostWithBodyWithResponse request with any body
-	CreateCallCallsPostWithBodyWithResponse(ctx context.Context, params *CreateCallCallsPostParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CreateCallCallsPostResponse, error)
+	// ListCallsV1CallsGetWithResponse request
+	ListCallsV1CallsGetWithResponse(ctx context.Context, params *ListCallsV1CallsGetParams, reqEditors ...RequestEditorFn) (*ListCallsV1CallsGetResponse, error)
 
-	CreateCallCallsPostWithResponse(ctx context.Context, params *CreateCallCallsPostParams, body CreateCallCallsPostJSONRequestBody, reqEditors ...RequestEditorFn) (*CreateCallCallsPostResponse, error)
+	// CreateCallV1CallsPostWithBodyWithResponse request with any body
+	CreateCallV1CallsPostWithBodyWithResponse(ctx context.Context, params *CreateCallV1CallsPostParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CreateCallV1CallsPostResponse, error)
 
-	// GetCallCallsCallIdGetWithResponse request
-	GetCallCallsCallIdGetWithResponse(ctx context.Context, callId openapi_types.UUID, params *GetCallCallsCallIdGetParams, reqEditors ...RequestEditorFn) (*GetCallCallsCallIdGetResponse, error)
+	CreateCallV1CallsPostWithResponse(ctx context.Context, params *CreateCallV1CallsPostParams, body CreateCallV1CallsPostJSONRequestBody, reqEditors ...RequestEditorFn) (*CreateCallV1CallsPostResponse, error)
 
-	// ListContactsContactsGetWithResponse request
-	ListContactsContactsGetWithResponse(ctx context.Context, params *ListContactsContactsGetParams, reqEditors ...RequestEditorFn) (*ListContactsContactsGetResponse, error)
+	// GetCallV1CallsCallIdGetWithResponse request
+	GetCallV1CallsCallIdGetWithResponse(ctx context.Context, callId openapi_types.UUID, params *GetCallV1CallsCallIdGetParams, reqEditors ...RequestEditorFn) (*GetCallV1CallsCallIdGetResponse, error)
 
-	// CreateContactContactsPostWithBodyWithResponse request with any body
-	CreateContactContactsPostWithBodyWithResponse(ctx context.Context, params *CreateContactContactsPostParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CreateContactContactsPostResponse, error)
+	// ListContactsV1ContactsGetWithResponse request
+	ListContactsV1ContactsGetWithResponse(ctx context.Context, params *ListContactsV1ContactsGetParams, reqEditors ...RequestEditorFn) (*ListContactsV1ContactsGetResponse, error)
 
-	CreateContactContactsPostWithResponse(ctx context.Context, params *CreateContactContactsPostParams, body CreateContactContactsPostJSONRequestBody, reqEditors ...RequestEditorFn) (*CreateContactContactsPostResponse, error)
+	// CreateContactV1ContactsPostWithBodyWithResponse request with any body
+	CreateContactV1ContactsPostWithBodyWithResponse(ctx context.Context, params *CreateContactV1ContactsPostParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CreateContactV1ContactsPostResponse, error)
 
-	// DeleteContactContactsContactIdDeleteWithResponse request
-	DeleteContactContactsContactIdDeleteWithResponse(ctx context.Context, contactId string, params *DeleteContactContactsContactIdDeleteParams, reqEditors ...RequestEditorFn) (*DeleteContactContactsContactIdDeleteResponse, error)
+	CreateContactV1ContactsPostWithResponse(ctx context.Context, params *CreateContactV1ContactsPostParams, body CreateContactV1ContactsPostJSONRequestBody, reqEditors ...RequestEditorFn) (*CreateContactV1ContactsPostResponse, error)
 
-	// PatchContactContactsContactIdPatchWithBodyWithResponse request with any body
-	PatchContactContactsContactIdPatchWithBodyWithResponse(ctx context.Context, contactId string, params *PatchContactContactsContactIdPatchParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*PatchContactContactsContactIdPatchResponse, error)
+	// DeleteContactV1ContactsContactIdDeleteWithResponse request
+	DeleteContactV1ContactsContactIdDeleteWithResponse(ctx context.Context, contactId string, params *DeleteContactV1ContactsContactIdDeleteParams, reqEditors ...RequestEditorFn) (*DeleteContactV1ContactsContactIdDeleteResponse, error)
 
-	PatchContactContactsContactIdPatchWithResponse(ctx context.Context, contactId string, params *PatchContactContactsContactIdPatchParams, body PatchContactContactsContactIdPatchJSONRequestBody, reqEditors ...RequestEditorFn) (*PatchContactContactsContactIdPatchResponse, error)
+	// PatchContactV1ContactsContactIdPatchWithBodyWithResponse request with any body
+	PatchContactV1ContactsContactIdPatchWithBodyWithResponse(ctx context.Context, contactId string, params *PatchContactV1ContactsContactIdPatchParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*PatchContactV1ContactsContactIdPatchResponse, error)
+
+	PatchContactV1ContactsContactIdPatchWithResponse(ctx context.Context, contactId string, params *PatchContactV1ContactsContactIdPatchParams, body PatchContactV1ContactsContactIdPatchJSONRequestBody, reqEditors ...RequestEditorFn) (*PatchContactV1ContactsContactIdPatchResponse, error)
 
 	// UploadEmailAttachmentWithBodyWithResponse request with any body
 	UploadEmailAttachmentWithBodyWithResponse(ctx context.Context, params *UploadEmailAttachmentParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*UploadEmailAttachmentResponse, error)
 
-	// ListEmailDomainsEmailDomainsGetWithResponse request
-	ListEmailDomainsEmailDomainsGetWithResponse(ctx context.Context, params *ListEmailDomainsEmailDomainsGetParams, reqEditors ...RequestEditorFn) (*ListEmailDomainsEmailDomainsGetResponse, error)
+	// ListEmailDomainsV1EmailDomainsGetWithResponse request
+	ListEmailDomainsV1EmailDomainsGetWithResponse(ctx context.Context, params *ListEmailDomainsV1EmailDomainsGetParams, reqEditors ...RequestEditorFn) (*ListEmailDomainsV1EmailDomainsGetResponse, error)
 
-	// CreateEmailDomainEmailDomainsPostWithBodyWithResponse request with any body
-	CreateEmailDomainEmailDomainsPostWithBodyWithResponse(ctx context.Context, params *CreateEmailDomainEmailDomainsPostParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CreateEmailDomainEmailDomainsPostResponse, error)
+	// CreateEmailDomainV1EmailDomainsPostWithBodyWithResponse request with any body
+	CreateEmailDomainV1EmailDomainsPostWithBodyWithResponse(ctx context.Context, params *CreateEmailDomainV1EmailDomainsPostParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CreateEmailDomainV1EmailDomainsPostResponse, error)
 
-	CreateEmailDomainEmailDomainsPostWithResponse(ctx context.Context, params *CreateEmailDomainEmailDomainsPostParams, body CreateEmailDomainEmailDomainsPostJSONRequestBody, reqEditors ...RequestEditorFn) (*CreateEmailDomainEmailDomainsPostResponse, error)
+	CreateEmailDomainV1EmailDomainsPostWithResponse(ctx context.Context, params *CreateEmailDomainV1EmailDomainsPostParams, body CreateEmailDomainV1EmailDomainsPostJSONRequestBody, reqEditors ...RequestEditorFn) (*CreateEmailDomainV1EmailDomainsPostResponse, error)
 
-	// CheckDomainEmailDomainsCheckDomainGetWithResponse request
-	CheckDomainEmailDomainsCheckDomainGetWithResponse(ctx context.Context, params *CheckDomainEmailDomainsCheckDomainGetParams, reqEditors ...RequestEditorFn) (*CheckDomainEmailDomainsCheckDomainGetResponse, error)
+	// CheckDomainV1EmailDomainsCheckDomainGetWithResponse request
+	CheckDomainV1EmailDomainsCheckDomainGetWithResponse(ctx context.Context, params *CheckDomainV1EmailDomainsCheckDomainGetParams, reqEditors ...RequestEditorFn) (*CheckDomainV1EmailDomainsCheckDomainGetResponse, error)
 
-	// DeleteEmailDomainEmailDomainsDomainIdDeleteWithResponse request
-	DeleteEmailDomainEmailDomainsDomainIdDeleteWithResponse(ctx context.Context, domainId openapi_types.UUID, params *DeleteEmailDomainEmailDomainsDomainIdDeleteParams, reqEditors ...RequestEditorFn) (*DeleteEmailDomainEmailDomainsDomainIdDeleteResponse, error)
+	// DeleteEmailDomainV1EmailDomainsDomainIdDeleteWithResponse request
+	DeleteEmailDomainV1EmailDomainsDomainIdDeleteWithResponse(ctx context.Context, domainId openapi_types.UUID, params *DeleteEmailDomainV1EmailDomainsDomainIdDeleteParams, reqEditors ...RequestEditorFn) (*DeleteEmailDomainV1EmailDomainsDomainIdDeleteResponse, error)
 
-	// GetEmailDomainEmailDomainsDomainIdGetWithResponse request
-	GetEmailDomainEmailDomainsDomainIdGetWithResponse(ctx context.Context, domainId openapi_types.UUID, params *GetEmailDomainEmailDomainsDomainIdGetParams, reqEditors ...RequestEditorFn) (*GetEmailDomainEmailDomainsDomainIdGetResponse, error)
+	// GetEmailDomainV1EmailDomainsDomainIdGetWithResponse request
+	GetEmailDomainV1EmailDomainsDomainIdGetWithResponse(ctx context.Context, domainId openapi_types.UUID, params *GetEmailDomainV1EmailDomainsDomainIdGetParams, reqEditors ...RequestEditorFn) (*GetEmailDomainV1EmailDomainsDomainIdGetResponse, error)
 
-	// PatchEmailDomainEmailDomainsDomainIdPatchWithBodyWithResponse request with any body
-	PatchEmailDomainEmailDomainsDomainIdPatchWithBodyWithResponse(ctx context.Context, domainId openapi_types.UUID, params *PatchEmailDomainEmailDomainsDomainIdPatchParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*PatchEmailDomainEmailDomainsDomainIdPatchResponse, error)
+	// PatchEmailDomainV1EmailDomainsDomainIdPatchWithBodyWithResponse request with any body
+	PatchEmailDomainV1EmailDomainsDomainIdPatchWithBodyWithResponse(ctx context.Context, domainId openapi_types.UUID, params *PatchEmailDomainV1EmailDomainsDomainIdPatchParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*PatchEmailDomainV1EmailDomainsDomainIdPatchResponse, error)
 
-	PatchEmailDomainEmailDomainsDomainIdPatchWithResponse(ctx context.Context, domainId openapi_types.UUID, params *PatchEmailDomainEmailDomainsDomainIdPatchParams, body PatchEmailDomainEmailDomainsDomainIdPatchJSONRequestBody, reqEditors ...RequestEditorFn) (*PatchEmailDomainEmailDomainsDomainIdPatchResponse, error)
+	PatchEmailDomainV1EmailDomainsDomainIdPatchWithResponse(ctx context.Context, domainId openapi_types.UUID, params *PatchEmailDomainV1EmailDomainsDomainIdPatchParams, body PatchEmailDomainV1EmailDomainsDomainIdPatchJSONRequestBody, reqEditors ...RequestEditorFn) (*PatchEmailDomainV1EmailDomainsDomainIdPatchResponse, error)
 
-	// VerifyEmailDomainEmailDomainsDomainIdVerifyPostWithResponse request
-	VerifyEmailDomainEmailDomainsDomainIdVerifyPostWithResponse(ctx context.Context, domainId openapi_types.UUID, params *VerifyEmailDomainEmailDomainsDomainIdVerifyPostParams, reqEditors ...RequestEditorFn) (*VerifyEmailDomainEmailDomainsDomainIdVerifyPostResponse, error)
+	// VerifyEmailDomainV1EmailDomainsDomainIdVerifyPostWithResponse request
+	VerifyEmailDomainV1EmailDomainsDomainIdVerifyPostWithResponse(ctx context.Context, domainId openapi_types.UUID, params *VerifyEmailDomainV1EmailDomainsDomainIdVerifyPostParams, reqEditors ...RequestEditorFn) (*VerifyEmailDomainV1EmailDomainsDomainIdVerifyPostResponse, error)
 
-	// ListEmailsEmailsGetWithResponse request
-	ListEmailsEmailsGetWithResponse(ctx context.Context, params *ListEmailsEmailsGetParams, reqEditors ...RequestEditorFn) (*ListEmailsEmailsGetResponse, error)
+	// ListEmailsV1EmailsGetWithResponse request
+	ListEmailsV1EmailsGetWithResponse(ctx context.Context, params *ListEmailsV1EmailsGetParams, reqEditors ...RequestEditorFn) (*ListEmailsV1EmailsGetResponse, error)
 
-	// CreateEmailEmailsPostWithBodyWithResponse request with any body
-	CreateEmailEmailsPostWithBodyWithResponse(ctx context.Context, params *CreateEmailEmailsPostParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CreateEmailEmailsPostResponse, error)
+	// CreateEmailV1EmailsPostWithBodyWithResponse request with any body
+	CreateEmailV1EmailsPostWithBodyWithResponse(ctx context.Context, params *CreateEmailV1EmailsPostParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CreateEmailV1EmailsPostResponse, error)
 
-	CreateEmailEmailsPostWithResponse(ctx context.Context, params *CreateEmailEmailsPostParams, body CreateEmailEmailsPostJSONRequestBody, reqEditors ...RequestEditorFn) (*CreateEmailEmailsPostResponse, error)
+	CreateEmailV1EmailsPostWithResponse(ctx context.Context, params *CreateEmailV1EmailsPostParams, body CreateEmailV1EmailsPostJSONRequestBody, reqEditors ...RequestEditorFn) (*CreateEmailV1EmailsPostResponse, error)
 
-	// GetEmailStatsEmailsStatsGetWithResponse request
-	GetEmailStatsEmailsStatsGetWithResponse(ctx context.Context, params *GetEmailStatsEmailsStatsGetParams, reqEditors ...RequestEditorFn) (*GetEmailStatsEmailsStatsGetResponse, error)
+	// GetEmailStatsV1EmailsStatsGetWithResponse request
+	GetEmailStatsV1EmailsStatsGetWithResponse(ctx context.Context, params *GetEmailStatsV1EmailsStatsGetParams, reqEditors ...RequestEditorFn) (*GetEmailStatsV1EmailsStatsGetResponse, error)
 
-	// GetEmailEmailsEmailIdGetWithResponse request
-	GetEmailEmailsEmailIdGetWithResponse(ctx context.Context, emailId openapi_types.UUID, params *GetEmailEmailsEmailIdGetParams, reqEditors ...RequestEditorFn) (*GetEmailEmailsEmailIdGetResponse, error)
+	// GetEmailV1EmailsEmailIdGetWithResponse request
+	GetEmailV1EmailsEmailIdGetWithResponse(ctx context.Context, emailId openapi_types.UUID, params *GetEmailV1EmailsEmailIdGetParams, reqEditors ...RequestEditorFn) (*GetEmailV1EmailsEmailIdGetResponse, error)
 
-	// GetEmailAttachmentEmailsEmailIdAttachmentsAttachmentIdGetWithResponse request
-	GetEmailAttachmentEmailsEmailIdAttachmentsAttachmentIdGetWithResponse(ctx context.Context, emailId openapi_types.UUID, attachmentId openapi_types.UUID, params *GetEmailAttachmentEmailsEmailIdAttachmentsAttachmentIdGetParams, reqEditors ...RequestEditorFn) (*GetEmailAttachmentEmailsEmailIdAttachmentsAttachmentIdGetResponse, error)
+	// GetEmailAttachmentV1EmailsEmailIdAttachmentsAttachmentIdGetWithResponse request
+	GetEmailAttachmentV1EmailsEmailIdAttachmentsAttachmentIdGetWithResponse(ctx context.Context, emailId openapi_types.UUID, attachmentId openapi_types.UUID, params *GetEmailAttachmentV1EmailsEmailIdAttachmentsAttachmentIdGetParams, reqEditors ...RequestEditorFn) (*GetEmailAttachmentV1EmailsEmailIdAttachmentsAttachmentIdGetResponse, error)
 
-	// ListEmailEventsEmailsEmailIdEventsGetWithResponse request
-	ListEmailEventsEmailsEmailIdEventsGetWithResponse(ctx context.Context, emailId openapi_types.UUID, params *ListEmailEventsEmailsEmailIdEventsGetParams, reqEditors ...RequestEditorFn) (*ListEmailEventsEmailsEmailIdEventsGetResponse, error)
+	// ListEmailEventsV1EmailsEmailIdEventsGetWithResponse request
+	ListEmailEventsV1EmailsEmailIdEventsGetWithResponse(ctx context.Context, emailId openapi_types.UUID, params *ListEmailEventsV1EmailsEmailIdEventsGetParams, reqEditors ...RequestEditorFn) (*ListEmailEventsV1EmailsEmailIdEventsGetResponse, error)
 
-	// GetEmailRawEmailsEmailIdRawGetWithResponse request
-	GetEmailRawEmailsEmailIdRawGetWithResponse(ctx context.Context, emailId openapi_types.UUID, params *GetEmailRawEmailsEmailIdRawGetParams, reqEditors ...RequestEditorFn) (*GetEmailRawEmailsEmailIdRawGetResponse, error)
+	// GetEmailRawV1EmailsEmailIdRawGetWithResponse request
+	GetEmailRawV1EmailsEmailIdRawGetWithResponse(ctx context.Context, emailId openapi_types.UUID, params *GetEmailRawV1EmailsEmailIdRawGetParams, reqEditors ...RequestEditorFn) (*GetEmailRawV1EmailsEmailIdRawGetResponse, error)
 
-	// ListEventsEventsGetWithResponse request
-	ListEventsEventsGetWithResponse(ctx context.Context, params *ListEventsEventsGetParams, reqEditors ...RequestEditorFn) (*ListEventsEventsGetResponse, error)
+	// ListEventsV1EventsGetWithResponse request
+	ListEventsV1EventsGetWithResponse(ctx context.Context, params *ListEventsV1EventsGetParams, reqEditors ...RequestEditorFn) (*ListEventsV1EventsGetResponse, error)
 
-	// HealthzHealthzGetWithResponse request
-	HealthzHealthzGetWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*HealthzHealthzGetResponse, error)
+	// DeleteMemberPhoneV1MembersUserIdPhoneDeleteWithResponse request
+	DeleteMemberPhoneV1MembersUserIdPhoneDeleteWithResponse(ctx context.Context, userId string, params *DeleteMemberPhoneV1MembersUserIdPhoneDeleteParams, reqEditors ...RequestEditorFn) (*DeleteMemberPhoneV1MembersUserIdPhoneDeleteResponse, error)
 
-	// DeleteMemberPhoneMembersUserIdPhoneDeleteWithResponse request
-	DeleteMemberPhoneMembersUserIdPhoneDeleteWithResponse(ctx context.Context, userId string, params *DeleteMemberPhoneMembersUserIdPhoneDeleteParams, reqEditors ...RequestEditorFn) (*DeleteMemberPhoneMembersUserIdPhoneDeleteResponse, error)
+	// PutMemberPhoneV1MembersUserIdPhonePutWithBodyWithResponse request with any body
+	PutMemberPhoneV1MembersUserIdPhonePutWithBodyWithResponse(ctx context.Context, userId string, params *PutMemberPhoneV1MembersUserIdPhonePutParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*PutMemberPhoneV1MembersUserIdPhonePutResponse, error)
 
-	// PutMemberPhoneMembersUserIdPhonePutWithBodyWithResponse request with any body
-	PutMemberPhoneMembersUserIdPhonePutWithBodyWithResponse(ctx context.Context, userId string, params *PutMemberPhoneMembersUserIdPhonePutParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*PutMemberPhoneMembersUserIdPhonePutResponse, error)
+	PutMemberPhoneV1MembersUserIdPhonePutWithResponse(ctx context.Context, userId string, params *PutMemberPhoneV1MembersUserIdPhonePutParams, body PutMemberPhoneV1MembersUserIdPhonePutJSONRequestBody, reqEditors ...RequestEditorFn) (*PutMemberPhoneV1MembersUserIdPhonePutResponse, error)
 
-	PutMemberPhoneMembersUserIdPhonePutWithResponse(ctx context.Context, userId string, params *PutMemberPhoneMembersUserIdPhonePutParams, body PutMemberPhoneMembersUserIdPhonePutJSONRequestBody, reqEditors ...RequestEditorFn) (*PutMemberPhoneMembersUserIdPhonePutResponse, error)
+	// ListNumbersV1NumbersGetWithResponse request
+	ListNumbersV1NumbersGetWithResponse(ctx context.Context, params *ListNumbersV1NumbersGetParams, reqEditors ...RequestEditorFn) (*ListNumbersV1NumbersGetResponse, error)
 
-	// ListNumbersNumbersGetWithResponse request
-	ListNumbersNumbersGetWithResponse(ctx context.Context, params *ListNumbersNumbersGetParams, reqEditors ...RequestEditorFn) (*ListNumbersNumbersGetResponse, error)
+	// AcquireNumberV1NumbersPostWithBodyWithResponse request with any body
+	AcquireNumberV1NumbersPostWithBodyWithResponse(ctx context.Context, params *AcquireNumberV1NumbersPostParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*AcquireNumberV1NumbersPostResponse, error)
 
-	// AcquireNumberNumbersPostWithBodyWithResponse request with any body
-	AcquireNumberNumbersPostWithBodyWithResponse(ctx context.Context, params *AcquireNumberNumbersPostParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*AcquireNumberNumbersPostResponse, error)
+	AcquireNumberV1NumbersPostWithResponse(ctx context.Context, params *AcquireNumberV1NumbersPostParams, body AcquireNumberV1NumbersPostJSONRequestBody, reqEditors ...RequestEditorFn) (*AcquireNumberV1NumbersPostResponse, error)
 
-	AcquireNumberNumbersPostWithResponse(ctx context.Context, params *AcquireNumberNumbersPostParams, body AcquireNumberNumbersPostJSONRequestBody, reqEditors ...RequestEditorFn) (*AcquireNumberNumbersPostResponse, error)
+	// ReleaseNumberV1NumbersNumberIdDeleteWithResponse request
+	ReleaseNumberV1NumbersNumberIdDeleteWithResponse(ctx context.Context, numberId openapi_types.UUID, params *ReleaseNumberV1NumbersNumberIdDeleteParams, reqEditors ...RequestEditorFn) (*ReleaseNumberV1NumbersNumberIdDeleteResponse, error)
 
-	// ReleaseNumberNumbersNumberIdDeleteWithResponse request
-	ReleaseNumberNumbersNumberIdDeleteWithResponse(ctx context.Context, numberId openapi_types.UUID, params *ReleaseNumberNumbersNumberIdDeleteParams, reqEditors ...RequestEditorFn) (*ReleaseNumberNumbersNumberIdDeleteResponse, error)
+	// GetNumberV1NumbersNumberIdGetWithResponse request
+	GetNumberV1NumbersNumberIdGetWithResponse(ctx context.Context, numberId openapi_types.UUID, params *GetNumberV1NumbersNumberIdGetParams, reqEditors ...RequestEditorFn) (*GetNumberV1NumbersNumberIdGetResponse, error)
 
-	// GetNumberNumbersNumberIdGetWithResponse request
-	GetNumberNumbersNumberIdGetWithResponse(ctx context.Context, numberId openapi_types.UUID, params *GetNumberNumbersNumberIdGetParams, reqEditors ...RequestEditorFn) (*GetNumberNumbersNumberIdGetResponse, error)
-
-	// EnableSmsNumbersNumberIdEnableSmsPostWithResponse request
-	EnableSmsNumbersNumberIdEnableSmsPostWithResponse(ctx context.Context, numberId openapi_types.UUID, params *EnableSmsNumbersNumberIdEnableSmsPostParams, reqEditors ...RequestEditorFn) (*EnableSmsNumbersNumberIdEnableSmsPostResponse, error)
+	// EnableSmsV1NumbersNumberIdEnableSmsPostWithResponse request
+	EnableSmsV1NumbersNumberIdEnableSmsPostWithResponse(ctx context.Context, numberId openapi_types.UUID, params *EnableSmsV1NumbersNumberIdEnableSmsPostParams, reqEditors ...RequestEditorFn) (*EnableSmsV1NumbersNumberIdEnableSmsPostResponse, error)
 
 	// ListProvidersWithResponse request
 	ListProvidersWithResponse(ctx context.Context, params *ListProvidersParams, reqEditors ...RequestEditorFn) (*ListProvidersResponse, error)
@@ -6864,67 +7438,89 @@ type ClientWithResponsesInterface interface {
 	// DeleteProviderWithResponse request
 	DeleteProviderWithResponse(ctx context.Context, layer string, provider string, params *DeleteProviderParams, reqEditors ...RequestEditorFn) (*DeleteProviderResponse, error)
 
-	// ListSmsSmsGetWithResponse request
-	ListSmsSmsGetWithResponse(ctx context.Context, params *ListSmsSmsGetParams, reqEditors ...RequestEditorFn) (*ListSmsSmsGetResponse, error)
+	// ListSmsV1SmsGetWithResponse request
+	ListSmsV1SmsGetWithResponse(ctx context.Context, params *ListSmsV1SmsGetParams, reqEditors ...RequestEditorFn) (*ListSmsV1SmsGetResponse, error)
 
-	// CreateSmsSmsPostWithBodyWithResponse request with any body
-	CreateSmsSmsPostWithBodyWithResponse(ctx context.Context, params *CreateSmsSmsPostParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CreateSmsSmsPostResponse, error)
+	// CreateSmsV1SmsPostWithBodyWithResponse request with any body
+	CreateSmsV1SmsPostWithBodyWithResponse(ctx context.Context, params *CreateSmsV1SmsPostParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CreateSmsV1SmsPostResponse, error)
 
-	CreateSmsSmsPostWithResponse(ctx context.Context, params *CreateSmsSmsPostParams, body CreateSmsSmsPostJSONRequestBody, reqEditors ...RequestEditorFn) (*CreateSmsSmsPostResponse, error)
+	CreateSmsV1SmsPostWithResponse(ctx context.Context, params *CreateSmsV1SmsPostParams, body CreateSmsV1SmsPostJSONRequestBody, reqEditors ...RequestEditorFn) (*CreateSmsV1SmsPostResponse, error)
 
-	// GetSenderIdSmsSenderIdGetWithResponse request
-	GetSenderIdSmsSenderIdGetWithResponse(ctx context.Context, params *GetSenderIdSmsSenderIdGetParams, reqEditors ...RequestEditorFn) (*GetSenderIdSmsSenderIdGetResponse, error)
+	// GetSenderIdV1SmsSenderIdGetWithResponse request
+	GetSenderIdV1SmsSenderIdGetWithResponse(ctx context.Context, params *GetSenderIdV1SmsSenderIdGetParams, reqEditors ...RequestEditorFn) (*GetSenderIdV1SmsSenderIdGetResponse, error)
 
-	// PatchSenderIdSmsSenderIdPatchWithBodyWithResponse request with any body
-	PatchSenderIdSmsSenderIdPatchWithBodyWithResponse(ctx context.Context, params *PatchSenderIdSmsSenderIdPatchParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*PatchSenderIdSmsSenderIdPatchResponse, error)
+	// PatchSenderIdV1SmsSenderIdPatchWithBodyWithResponse request with any body
+	PatchSenderIdV1SmsSenderIdPatchWithBodyWithResponse(ctx context.Context, params *PatchSenderIdV1SmsSenderIdPatchParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*PatchSenderIdV1SmsSenderIdPatchResponse, error)
 
-	PatchSenderIdSmsSenderIdPatchWithResponse(ctx context.Context, params *PatchSenderIdSmsSenderIdPatchParams, body PatchSenderIdSmsSenderIdPatchJSONRequestBody, reqEditors ...RequestEditorFn) (*PatchSenderIdSmsSenderIdPatchResponse, error)
+	PatchSenderIdV1SmsSenderIdPatchWithResponse(ctx context.Context, params *PatchSenderIdV1SmsSenderIdPatchParams, body PatchSenderIdV1SmsSenderIdPatchJSONRequestBody, reqEditors ...RequestEditorFn) (*PatchSenderIdV1SmsSenderIdPatchResponse, error)
 
-	// ListSmsSuppressionsSmsSuppressionsGetWithResponse request
-	ListSmsSuppressionsSmsSuppressionsGetWithResponse(ctx context.Context, params *ListSmsSuppressionsSmsSuppressionsGetParams, reqEditors ...RequestEditorFn) (*ListSmsSuppressionsSmsSuppressionsGetResponse, error)
+	// ListSmsSuppressionsV1SmsSuppressionsGetWithResponse request
+	ListSmsSuppressionsV1SmsSuppressionsGetWithResponse(ctx context.Context, params *ListSmsSuppressionsV1SmsSuppressionsGetParams, reqEditors ...RequestEditorFn) (*ListSmsSuppressionsV1SmsSuppressionsGetResponse, error)
 
-	// DeleteSmsSuppressionSmsSuppressionsNumberDeleteWithResponse request
-	DeleteSmsSuppressionSmsSuppressionsNumberDeleteWithResponse(ctx context.Context, number string, params *DeleteSmsSuppressionSmsSuppressionsNumberDeleteParams, reqEditors ...RequestEditorFn) (*DeleteSmsSuppressionSmsSuppressionsNumberDeleteResponse, error)
+	// DeleteSmsSuppressionV1SmsSuppressionsNumberDeleteWithResponse request
+	DeleteSmsSuppressionV1SmsSuppressionsNumberDeleteWithResponse(ctx context.Context, number string, params *DeleteSmsSuppressionV1SmsSuppressionsNumberDeleteParams, reqEditors ...RequestEditorFn) (*DeleteSmsSuppressionV1SmsSuppressionsNumberDeleteResponse, error)
 
-	// GetSmsSmsSmsIdGetWithResponse request
-	GetSmsSmsSmsIdGetWithResponse(ctx context.Context, smsId openapi_types.UUID, params *GetSmsSmsSmsIdGetParams, reqEditors ...RequestEditorFn) (*GetSmsSmsSmsIdGetResponse, error)
+	// GetSmsV1SmsSmsIdGetWithResponse request
+	GetSmsV1SmsSmsIdGetWithResponse(ctx context.Context, smsId openapi_types.UUID, params *GetSmsV1SmsSmsIdGetParams, reqEditors ...RequestEditorFn) (*GetSmsV1SmsSmsIdGetResponse, error)
 
-	// UnsubscribeUnsubscribeGetWithResponse request
-	UnsubscribeUnsubscribeGetWithResponse(ctx context.Context, params *UnsubscribeUnsubscribeGetParams, reqEditors ...RequestEditorFn) (*UnsubscribeUnsubscribeGetResponse, error)
+	// UnsubscribeV1UnsubscribeGetWithResponse request
+	UnsubscribeV1UnsubscribeGetWithResponse(ctx context.Context, params *UnsubscribeV1UnsubscribeGetParams, reqEditors ...RequestEditorFn) (*UnsubscribeV1UnsubscribeGetResponse, error)
 
-	// ListSubscriptionsWebhooksGetWithResponse request
-	ListSubscriptionsWebhooksGetWithResponse(ctx context.Context, params *ListSubscriptionsWebhooksGetParams, reqEditors ...RequestEditorFn) (*ListSubscriptionsWebhooksGetResponse, error)
+	// ListSubscriptionsV1WebhooksGetWithResponse request
+	ListSubscriptionsV1WebhooksGetWithResponse(ctx context.Context, params *ListSubscriptionsV1WebhooksGetParams, reqEditors ...RequestEditorFn) (*ListSubscriptionsV1WebhooksGetResponse, error)
 
-	// CreateSubscriptionWebhooksPostWithBodyWithResponse request with any body
-	CreateSubscriptionWebhooksPostWithBodyWithResponse(ctx context.Context, params *CreateSubscriptionWebhooksPostParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CreateSubscriptionWebhooksPostResponse, error)
+	// CreateSubscriptionV1WebhooksPostWithBodyWithResponse request with any body
+	CreateSubscriptionV1WebhooksPostWithBodyWithResponse(ctx context.Context, params *CreateSubscriptionV1WebhooksPostParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CreateSubscriptionV1WebhooksPostResponse, error)
 
-	CreateSubscriptionWebhooksPostWithResponse(ctx context.Context, params *CreateSubscriptionWebhooksPostParams, body CreateSubscriptionWebhooksPostJSONRequestBody, reqEditors ...RequestEditorFn) (*CreateSubscriptionWebhooksPostResponse, error)
+	CreateSubscriptionV1WebhooksPostWithResponse(ctx context.Context, params *CreateSubscriptionV1WebhooksPostParams, body CreateSubscriptionV1WebhooksPostJSONRequestBody, reqEditors ...RequestEditorFn) (*CreateSubscriptionV1WebhooksPostResponse, error)
 
-	// DeleteSubscriptionWebhooksSubIdDeleteWithResponse request
-	DeleteSubscriptionWebhooksSubIdDeleteWithResponse(ctx context.Context, subId openapi_types.UUID, params *DeleteSubscriptionWebhooksSubIdDeleteParams, reqEditors ...RequestEditorFn) (*DeleteSubscriptionWebhooksSubIdDeleteResponse, error)
+	// DeleteSubscriptionV1WebhooksSubIdDeleteWithResponse request
+	DeleteSubscriptionV1WebhooksSubIdDeleteWithResponse(ctx context.Context, subId openapi_types.UUID, params *DeleteSubscriptionV1WebhooksSubIdDeleteParams, reqEditors ...RequestEditorFn) (*DeleteSubscriptionV1WebhooksSubIdDeleteResponse, error)
 
-	// GetSubscriptionWebhooksSubIdGetWithResponse request
-	GetSubscriptionWebhooksSubIdGetWithResponse(ctx context.Context, subId openapi_types.UUID, params *GetSubscriptionWebhooksSubIdGetParams, reqEditors ...RequestEditorFn) (*GetSubscriptionWebhooksSubIdGetResponse, error)
+	// GetSubscriptionV1WebhooksSubIdGetWithResponse request
+	GetSubscriptionV1WebhooksSubIdGetWithResponse(ctx context.Context, subId openapi_types.UUID, params *GetSubscriptionV1WebhooksSubIdGetParams, reqEditors ...RequestEditorFn) (*GetSubscriptionV1WebhooksSubIdGetResponse, error)
 
-	// PatchSubscriptionWebhooksSubIdPatchWithBodyWithResponse request with any body
-	PatchSubscriptionWebhooksSubIdPatchWithBodyWithResponse(ctx context.Context, subId openapi_types.UUID, params *PatchSubscriptionWebhooksSubIdPatchParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*PatchSubscriptionWebhooksSubIdPatchResponse, error)
+	// PatchSubscriptionV1WebhooksSubIdPatchWithBodyWithResponse request with any body
+	PatchSubscriptionV1WebhooksSubIdPatchWithBodyWithResponse(ctx context.Context, subId openapi_types.UUID, params *PatchSubscriptionV1WebhooksSubIdPatchParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*PatchSubscriptionV1WebhooksSubIdPatchResponse, error)
 
-	PatchSubscriptionWebhooksSubIdPatchWithResponse(ctx context.Context, subId openapi_types.UUID, params *PatchSubscriptionWebhooksSubIdPatchParams, body PatchSubscriptionWebhooksSubIdPatchJSONRequestBody, reqEditors ...RequestEditorFn) (*PatchSubscriptionWebhooksSubIdPatchResponse, error)
+	PatchSubscriptionV1WebhooksSubIdPatchWithResponse(ctx context.Context, subId openapi_types.UUID, params *PatchSubscriptionV1WebhooksSubIdPatchParams, body PatchSubscriptionV1WebhooksSubIdPatchJSONRequestBody, reqEditors ...RequestEditorFn) (*PatchSubscriptionV1WebhooksSubIdPatchResponse, error)
 
-	// ListDeliveriesWebhooksSubIdDeliveriesGetWithResponse request
-	ListDeliveriesWebhooksSubIdDeliveriesGetWithResponse(ctx context.Context, subId openapi_types.UUID, params *ListDeliveriesWebhooksSubIdDeliveriesGetParams, reqEditors ...RequestEditorFn) (*ListDeliveriesWebhooksSubIdDeliveriesGetResponse, error)
+	// ListDeliveriesV1WebhooksSubIdDeliveriesGetWithResponse request
+	ListDeliveriesV1WebhooksSubIdDeliveriesGetWithResponse(ctx context.Context, subId openapi_types.UUID, params *ListDeliveriesV1WebhooksSubIdDeliveriesGetParams, reqEditors ...RequestEditorFn) (*ListDeliveriesV1WebhooksSubIdDeliveriesGetResponse, error)
 
-	// RedeliverWebhooksSubIdDeliveriesDeliveryIdRedeliverPostWithResponse request
-	RedeliverWebhooksSubIdDeliveriesDeliveryIdRedeliverPostWithResponse(ctx context.Context, subId openapi_types.UUID, deliveryId openapi_types.UUID, params *RedeliverWebhooksSubIdDeliveriesDeliveryIdRedeliverPostParams, reqEditors ...RequestEditorFn) (*RedeliverWebhooksSubIdDeliveriesDeliveryIdRedeliverPostResponse, error)
+	// RedeliverV1WebhooksSubIdDeliveriesDeliveryIdRedeliverPostWithResponse request
+	RedeliverV1WebhooksSubIdDeliveriesDeliveryIdRedeliverPostWithResponse(ctx context.Context, subId openapi_types.UUID, deliveryId openapi_types.UUID, params *RedeliverV1WebhooksSubIdDeliveriesDeliveryIdRedeliverPostParams, reqEditors ...RequestEditorFn) (*RedeliverV1WebhooksSubIdDeliveriesDeliveryIdRedeliverPostResponse, error)
 
-	// RotateSecretWebhooksSubIdRotateSecretPostWithResponse request
-	RotateSecretWebhooksSubIdRotateSecretPostWithResponse(ctx context.Context, subId openapi_types.UUID, params *RotateSecretWebhooksSubIdRotateSecretPostParams, reqEditors ...RequestEditorFn) (*RotateSecretWebhooksSubIdRotateSecretPostResponse, error)
+	// RotateSecretV1WebhooksSubIdRotateSecretPostWithResponse request
+	RotateSecretV1WebhooksSubIdRotateSecretPostWithResponse(ctx context.Context, subId openapi_types.UUID, params *RotateSecretV1WebhooksSubIdRotateSecretPostParams, reqEditors ...RequestEditorFn) (*RotateSecretV1WebhooksSubIdRotateSecretPostResponse, error)
 
-	// GetWhoamiWhoamiGetWithResponse request
-	GetWhoamiWhoamiGetWithResponse(ctx context.Context, params *GetWhoamiWhoamiGetParams, reqEditors ...RequestEditorFn) (*GetWhoamiWhoamiGetResponse, error)
+	// GetWhoamiV1WhoamiGetWithResponse request
+	GetWhoamiV1WhoamiGetWithResponse(ctx context.Context, params *GetWhoamiV1WhoamiGetParams, reqEditors ...RequestEditorFn) (*GetWhoamiV1WhoamiGetResponse, error)
 }
 
-type ListCallsCallsGetResponse struct {
+type HealthzHealthzGetResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *map[string]string
+}
+
+// Status returns HTTPResponse.Status
+func (r HealthzHealthzGetResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r HealthzHealthzGetResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type ListCallsV1CallsGetResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
 	JSON200      *CallListResponse
@@ -6932,7 +7528,7 @@ type ListCallsCallsGetResponse struct {
 }
 
 // Status returns HTTPResponse.Status
-func (r ListCallsCallsGetResponse) Status() string {
+func (r ListCallsV1CallsGetResponse) Status() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Status
 	}
@@ -6940,14 +7536,14 @@ func (r ListCallsCallsGetResponse) Status() string {
 }
 
 // StatusCode returns HTTPResponse.StatusCode
-func (r ListCallsCallsGetResponse) StatusCode() int {
+func (r ListCallsV1CallsGetResponse) StatusCode() int {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.StatusCode
 	}
 	return 0
 }
 
-type CreateCallCallsPostResponse struct {
+type CreateCallV1CallsPostResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
 	JSON201      *CallResponse
@@ -6955,7 +7551,7 @@ type CreateCallCallsPostResponse struct {
 }
 
 // Status returns HTTPResponse.Status
-func (r CreateCallCallsPostResponse) Status() string {
+func (r CreateCallV1CallsPostResponse) Status() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Status
 	}
@@ -6963,14 +7559,14 @@ func (r CreateCallCallsPostResponse) Status() string {
 }
 
 // StatusCode returns HTTPResponse.StatusCode
-func (r CreateCallCallsPostResponse) StatusCode() int {
+func (r CreateCallV1CallsPostResponse) StatusCode() int {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.StatusCode
 	}
 	return 0
 }
 
-type GetCallCallsCallIdGetResponse struct {
+type GetCallV1CallsCallIdGetResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
 	JSON200      *CallResponse
@@ -6978,7 +7574,7 @@ type GetCallCallsCallIdGetResponse struct {
 }
 
 // Status returns HTTPResponse.Status
-func (r GetCallCallsCallIdGetResponse) Status() string {
+func (r GetCallV1CallsCallIdGetResponse) Status() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Status
 	}
@@ -6986,14 +7582,14 @@ func (r GetCallCallsCallIdGetResponse) Status() string {
 }
 
 // StatusCode returns HTTPResponse.StatusCode
-func (r GetCallCallsCallIdGetResponse) StatusCode() int {
+func (r GetCallV1CallsCallIdGetResponse) StatusCode() int {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.StatusCode
 	}
 	return 0
 }
 
-type ListContactsContactsGetResponse struct {
+type ListContactsV1ContactsGetResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
 	JSON200      *ContactListResponse
@@ -7001,7 +7597,7 @@ type ListContactsContactsGetResponse struct {
 }
 
 // Status returns HTTPResponse.Status
-func (r ListContactsContactsGetResponse) Status() string {
+func (r ListContactsV1ContactsGetResponse) Status() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Status
 	}
@@ -7009,14 +7605,14 @@ func (r ListContactsContactsGetResponse) Status() string {
 }
 
 // StatusCode returns HTTPResponse.StatusCode
-func (r ListContactsContactsGetResponse) StatusCode() int {
+func (r ListContactsV1ContactsGetResponse) StatusCode() int {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.StatusCode
 	}
 	return 0
 }
 
-type CreateContactContactsPostResponse struct {
+type CreateContactV1ContactsPostResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
 	JSON201      *ContactEntry
@@ -7024,7 +7620,7 @@ type CreateContactContactsPostResponse struct {
 }
 
 // Status returns HTTPResponse.Status
-func (r CreateContactContactsPostResponse) Status() string {
+func (r CreateContactV1ContactsPostResponse) Status() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Status
 	}
@@ -7032,21 +7628,21 @@ func (r CreateContactContactsPostResponse) Status() string {
 }
 
 // StatusCode returns HTTPResponse.StatusCode
-func (r CreateContactContactsPostResponse) StatusCode() int {
+func (r CreateContactV1ContactsPostResponse) StatusCode() int {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.StatusCode
 	}
 	return 0
 }
 
-type DeleteContactContactsContactIdDeleteResponse struct {
+type DeleteContactV1ContactsContactIdDeleteResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
 	JSON422      *HTTPValidationError
 }
 
 // Status returns HTTPResponse.Status
-func (r DeleteContactContactsContactIdDeleteResponse) Status() string {
+func (r DeleteContactV1ContactsContactIdDeleteResponse) Status() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Status
 	}
@@ -7054,14 +7650,14 @@ func (r DeleteContactContactsContactIdDeleteResponse) Status() string {
 }
 
 // StatusCode returns HTTPResponse.StatusCode
-func (r DeleteContactContactsContactIdDeleteResponse) StatusCode() int {
+func (r DeleteContactV1ContactsContactIdDeleteResponse) StatusCode() int {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.StatusCode
 	}
 	return 0
 }
 
-type PatchContactContactsContactIdPatchResponse struct {
+type PatchContactV1ContactsContactIdPatchResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
 	JSON200      *ContactEntry
@@ -7069,7 +7665,7 @@ type PatchContactContactsContactIdPatchResponse struct {
 }
 
 // Status returns HTTPResponse.Status
-func (r PatchContactContactsContactIdPatchResponse) Status() string {
+func (r PatchContactV1ContactsContactIdPatchResponse) Status() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Status
 	}
@@ -7077,7 +7673,7 @@ func (r PatchContactContactsContactIdPatchResponse) Status() string {
 }
 
 // StatusCode returns HTTPResponse.StatusCode
-func (r PatchContactContactsContactIdPatchResponse) StatusCode() int {
+func (r PatchContactV1ContactsContactIdPatchResponse) StatusCode() int {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.StatusCode
 	}
@@ -7107,7 +7703,7 @@ func (r UploadEmailAttachmentResponse) StatusCode() int {
 	return 0
 }
 
-type ListEmailDomainsEmailDomainsGetResponse struct {
+type ListEmailDomainsV1EmailDomainsGetResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
 	JSON200      *EmailDomainListResponse
@@ -7115,7 +7711,7 @@ type ListEmailDomainsEmailDomainsGetResponse struct {
 }
 
 // Status returns HTTPResponse.Status
-func (r ListEmailDomainsEmailDomainsGetResponse) Status() string {
+func (r ListEmailDomainsV1EmailDomainsGetResponse) Status() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Status
 	}
@@ -7123,14 +7719,14 @@ func (r ListEmailDomainsEmailDomainsGetResponse) Status() string {
 }
 
 // StatusCode returns HTTPResponse.StatusCode
-func (r ListEmailDomainsEmailDomainsGetResponse) StatusCode() int {
+func (r ListEmailDomainsV1EmailDomainsGetResponse) StatusCode() int {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.StatusCode
 	}
 	return 0
 }
 
-type CreateEmailDomainEmailDomainsPostResponse struct {
+type CreateEmailDomainV1EmailDomainsPostResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
 	JSON201      *EmailDomainResponse
@@ -7138,7 +7734,7 @@ type CreateEmailDomainEmailDomainsPostResponse struct {
 }
 
 // Status returns HTTPResponse.Status
-func (r CreateEmailDomainEmailDomainsPostResponse) Status() string {
+func (r CreateEmailDomainV1EmailDomainsPostResponse) Status() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Status
 	}
@@ -7146,14 +7742,14 @@ func (r CreateEmailDomainEmailDomainsPostResponse) Status() string {
 }
 
 // StatusCode returns HTTPResponse.StatusCode
-func (r CreateEmailDomainEmailDomainsPostResponse) StatusCode() int {
+func (r CreateEmailDomainV1EmailDomainsPostResponse) StatusCode() int {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.StatusCode
 	}
 	return 0
 }
 
-type CheckDomainEmailDomainsCheckDomainGetResponse struct {
+type CheckDomainV1EmailDomainsCheckDomainGetResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
 	JSON200      *DomainCheckResponse
@@ -7161,7 +7757,7 @@ type CheckDomainEmailDomainsCheckDomainGetResponse struct {
 }
 
 // Status returns HTTPResponse.Status
-func (r CheckDomainEmailDomainsCheckDomainGetResponse) Status() string {
+func (r CheckDomainV1EmailDomainsCheckDomainGetResponse) Status() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Status
 	}
@@ -7169,21 +7765,21 @@ func (r CheckDomainEmailDomainsCheckDomainGetResponse) Status() string {
 }
 
 // StatusCode returns HTTPResponse.StatusCode
-func (r CheckDomainEmailDomainsCheckDomainGetResponse) StatusCode() int {
+func (r CheckDomainV1EmailDomainsCheckDomainGetResponse) StatusCode() int {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.StatusCode
 	}
 	return 0
 }
 
-type DeleteEmailDomainEmailDomainsDomainIdDeleteResponse struct {
+type DeleteEmailDomainV1EmailDomainsDomainIdDeleteResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
 	JSON422      *HTTPValidationError
 }
 
 // Status returns HTTPResponse.Status
-func (r DeleteEmailDomainEmailDomainsDomainIdDeleteResponse) Status() string {
+func (r DeleteEmailDomainV1EmailDomainsDomainIdDeleteResponse) Status() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Status
 	}
@@ -7191,37 +7787,14 @@ func (r DeleteEmailDomainEmailDomainsDomainIdDeleteResponse) Status() string {
 }
 
 // StatusCode returns HTTPResponse.StatusCode
-func (r DeleteEmailDomainEmailDomainsDomainIdDeleteResponse) StatusCode() int {
+func (r DeleteEmailDomainV1EmailDomainsDomainIdDeleteResponse) StatusCode() int {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.StatusCode
 	}
 	return 0
 }
 
-type GetEmailDomainEmailDomainsDomainIdGetResponse struct {
-	Body         []byte
-	HTTPResponse *http.Response
-	JSON200      *EmailDomainResponse
-	JSON422      *HTTPValidationError
-}
-
-// Status returns HTTPResponse.Status
-func (r GetEmailDomainEmailDomainsDomainIdGetResponse) Status() string {
-	if r.HTTPResponse != nil {
-		return r.HTTPResponse.Status
-	}
-	return http.StatusText(0)
-}
-
-// StatusCode returns HTTPResponse.StatusCode
-func (r GetEmailDomainEmailDomainsDomainIdGetResponse) StatusCode() int {
-	if r.HTTPResponse != nil {
-		return r.HTTPResponse.StatusCode
-	}
-	return 0
-}
-
-type PatchEmailDomainEmailDomainsDomainIdPatchResponse struct {
+type GetEmailDomainV1EmailDomainsDomainIdGetResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
 	JSON200      *EmailDomainResponse
@@ -7229,7 +7802,7 @@ type PatchEmailDomainEmailDomainsDomainIdPatchResponse struct {
 }
 
 // Status returns HTTPResponse.Status
-func (r PatchEmailDomainEmailDomainsDomainIdPatchResponse) Status() string {
+func (r GetEmailDomainV1EmailDomainsDomainIdGetResponse) Status() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Status
 	}
@@ -7237,14 +7810,14 @@ func (r PatchEmailDomainEmailDomainsDomainIdPatchResponse) Status() string {
 }
 
 // StatusCode returns HTTPResponse.StatusCode
-func (r PatchEmailDomainEmailDomainsDomainIdPatchResponse) StatusCode() int {
+func (r GetEmailDomainV1EmailDomainsDomainIdGetResponse) StatusCode() int {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.StatusCode
 	}
 	return 0
 }
 
-type VerifyEmailDomainEmailDomainsDomainIdVerifyPostResponse struct {
+type PatchEmailDomainV1EmailDomainsDomainIdPatchResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
 	JSON200      *EmailDomainResponse
@@ -7252,7 +7825,7 @@ type VerifyEmailDomainEmailDomainsDomainIdVerifyPostResponse struct {
 }
 
 // Status returns HTTPResponse.Status
-func (r VerifyEmailDomainEmailDomainsDomainIdVerifyPostResponse) Status() string {
+func (r PatchEmailDomainV1EmailDomainsDomainIdPatchResponse) Status() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Status
 	}
@@ -7260,14 +7833,37 @@ func (r VerifyEmailDomainEmailDomainsDomainIdVerifyPostResponse) Status() string
 }
 
 // StatusCode returns HTTPResponse.StatusCode
-func (r VerifyEmailDomainEmailDomainsDomainIdVerifyPostResponse) StatusCode() int {
+func (r PatchEmailDomainV1EmailDomainsDomainIdPatchResponse) StatusCode() int {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.StatusCode
 	}
 	return 0
 }
 
-type ListEmailsEmailsGetResponse struct {
+type VerifyEmailDomainV1EmailDomainsDomainIdVerifyPostResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *EmailDomainResponse
+	JSON422      *HTTPValidationError
+}
+
+// Status returns HTTPResponse.Status
+func (r VerifyEmailDomainV1EmailDomainsDomainIdVerifyPostResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r VerifyEmailDomainV1EmailDomainsDomainIdVerifyPostResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type ListEmailsV1EmailsGetResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
 	JSON200      *EmailListResponse
@@ -7275,7 +7871,7 @@ type ListEmailsEmailsGetResponse struct {
 }
 
 // Status returns HTTPResponse.Status
-func (r ListEmailsEmailsGetResponse) Status() string {
+func (r ListEmailsV1EmailsGetResponse) Status() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Status
 	}
@@ -7283,14 +7879,14 @@ func (r ListEmailsEmailsGetResponse) Status() string {
 }
 
 // StatusCode returns HTTPResponse.StatusCode
-func (r ListEmailsEmailsGetResponse) StatusCode() int {
+func (r ListEmailsV1EmailsGetResponse) StatusCode() int {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.StatusCode
 	}
 	return 0
 }
 
-type CreateEmailEmailsPostResponse struct {
+type CreateEmailV1EmailsPostResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
 	JSON201      *EmailResponse
@@ -7298,7 +7894,7 @@ type CreateEmailEmailsPostResponse struct {
 }
 
 // Status returns HTTPResponse.Status
-func (r CreateEmailEmailsPostResponse) Status() string {
+func (r CreateEmailV1EmailsPostResponse) Status() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Status
 	}
@@ -7306,14 +7902,14 @@ func (r CreateEmailEmailsPostResponse) Status() string {
 }
 
 // StatusCode returns HTTPResponse.StatusCode
-func (r CreateEmailEmailsPostResponse) StatusCode() int {
+func (r CreateEmailV1EmailsPostResponse) StatusCode() int {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.StatusCode
 	}
 	return 0
 }
 
-type GetEmailStatsEmailsStatsGetResponse struct {
+type GetEmailStatsV1EmailsStatsGetResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
 	JSON200      *EmailStatsResponse
@@ -7321,7 +7917,7 @@ type GetEmailStatsEmailsStatsGetResponse struct {
 }
 
 // Status returns HTTPResponse.Status
-func (r GetEmailStatsEmailsStatsGetResponse) Status() string {
+func (r GetEmailStatsV1EmailsStatsGetResponse) Status() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Status
 	}
@@ -7329,14 +7925,14 @@ func (r GetEmailStatsEmailsStatsGetResponse) Status() string {
 }
 
 // StatusCode returns HTTPResponse.StatusCode
-func (r GetEmailStatsEmailsStatsGetResponse) StatusCode() int {
+func (r GetEmailStatsV1EmailsStatsGetResponse) StatusCode() int {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.StatusCode
 	}
 	return 0
 }
 
-type GetEmailEmailsEmailIdGetResponse struct {
+type GetEmailV1EmailsEmailIdGetResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
 	JSON200      *EmailResponse
@@ -7344,7 +7940,7 @@ type GetEmailEmailsEmailIdGetResponse struct {
 }
 
 // Status returns HTTPResponse.Status
-func (r GetEmailEmailsEmailIdGetResponse) Status() string {
+func (r GetEmailV1EmailsEmailIdGetResponse) Status() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Status
 	}
@@ -7352,14 +7948,14 @@ func (r GetEmailEmailsEmailIdGetResponse) Status() string {
 }
 
 // StatusCode returns HTTPResponse.StatusCode
-func (r GetEmailEmailsEmailIdGetResponse) StatusCode() int {
+func (r GetEmailV1EmailsEmailIdGetResponse) StatusCode() int {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.StatusCode
 	}
 	return 0
 }
 
-type GetEmailAttachmentEmailsEmailIdAttachmentsAttachmentIdGetResponse struct {
+type GetEmailAttachmentV1EmailsEmailIdAttachmentsAttachmentIdGetResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
 	JSON200      *interface{}
@@ -7367,7 +7963,7 @@ type GetEmailAttachmentEmailsEmailIdAttachmentsAttachmentIdGetResponse struct {
 }
 
 // Status returns HTTPResponse.Status
-func (r GetEmailAttachmentEmailsEmailIdAttachmentsAttachmentIdGetResponse) Status() string {
+func (r GetEmailAttachmentV1EmailsEmailIdAttachmentsAttachmentIdGetResponse) Status() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Status
 	}
@@ -7375,14 +7971,14 @@ func (r GetEmailAttachmentEmailsEmailIdAttachmentsAttachmentIdGetResponse) Statu
 }
 
 // StatusCode returns HTTPResponse.StatusCode
-func (r GetEmailAttachmentEmailsEmailIdAttachmentsAttachmentIdGetResponse) StatusCode() int {
+func (r GetEmailAttachmentV1EmailsEmailIdAttachmentsAttachmentIdGetResponse) StatusCode() int {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.StatusCode
 	}
 	return 0
 }
 
-type ListEmailEventsEmailsEmailIdEventsGetResponse struct {
+type ListEmailEventsV1EmailsEmailIdEventsGetResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
 	JSON200      *EmailEventListResponse
@@ -7390,7 +7986,7 @@ type ListEmailEventsEmailsEmailIdEventsGetResponse struct {
 }
 
 // Status returns HTTPResponse.Status
-func (r ListEmailEventsEmailsEmailIdEventsGetResponse) Status() string {
+func (r ListEmailEventsV1EmailsEmailIdEventsGetResponse) Status() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Status
 	}
@@ -7398,14 +7994,14 @@ func (r ListEmailEventsEmailsEmailIdEventsGetResponse) Status() string {
 }
 
 // StatusCode returns HTTPResponse.StatusCode
-func (r ListEmailEventsEmailsEmailIdEventsGetResponse) StatusCode() int {
+func (r ListEmailEventsV1EmailsEmailIdEventsGetResponse) StatusCode() int {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.StatusCode
 	}
 	return 0
 }
 
-type GetEmailRawEmailsEmailIdRawGetResponse struct {
+type GetEmailRawV1EmailsEmailIdRawGetResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
 	JSON200      *interface{}
@@ -7413,7 +8009,7 @@ type GetEmailRawEmailsEmailIdRawGetResponse struct {
 }
 
 // Status returns HTTPResponse.Status
-func (r GetEmailRawEmailsEmailIdRawGetResponse) Status() string {
+func (r GetEmailRawV1EmailsEmailIdRawGetResponse) Status() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Status
 	}
@@ -7421,14 +8017,14 @@ func (r GetEmailRawEmailsEmailIdRawGetResponse) Status() string {
 }
 
 // StatusCode returns HTTPResponse.StatusCode
-func (r GetEmailRawEmailsEmailIdRawGetResponse) StatusCode() int {
+func (r GetEmailRawV1EmailsEmailIdRawGetResponse) StatusCode() int {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.StatusCode
 	}
 	return 0
 }
 
-type ListEventsEventsGetResponse struct {
+type ListEventsV1EventsGetResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
 	JSON200      *EventStreamResponse
@@ -7436,7 +8032,7 @@ type ListEventsEventsGetResponse struct {
 }
 
 // Status returns HTTPResponse.Status
-func (r ListEventsEventsGetResponse) Status() string {
+func (r ListEventsV1EventsGetResponse) Status() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Status
 	}
@@ -7444,43 +8040,21 @@ func (r ListEventsEventsGetResponse) Status() string {
 }
 
 // StatusCode returns HTTPResponse.StatusCode
-func (r ListEventsEventsGetResponse) StatusCode() int {
+func (r ListEventsV1EventsGetResponse) StatusCode() int {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.StatusCode
 	}
 	return 0
 }
 
-type HealthzHealthzGetResponse struct {
-	Body         []byte
-	HTTPResponse *http.Response
-	JSON200      *map[string]string
-}
-
-// Status returns HTTPResponse.Status
-func (r HealthzHealthzGetResponse) Status() string {
-	if r.HTTPResponse != nil {
-		return r.HTTPResponse.Status
-	}
-	return http.StatusText(0)
-}
-
-// StatusCode returns HTTPResponse.StatusCode
-func (r HealthzHealthzGetResponse) StatusCode() int {
-	if r.HTTPResponse != nil {
-		return r.HTTPResponse.StatusCode
-	}
-	return 0
-}
-
-type DeleteMemberPhoneMembersUserIdPhoneDeleteResponse struct {
+type DeleteMemberPhoneV1MembersUserIdPhoneDeleteResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
 	JSON422      *HTTPValidationError
 }
 
 // Status returns HTTPResponse.Status
-func (r DeleteMemberPhoneMembersUserIdPhoneDeleteResponse) Status() string {
+func (r DeleteMemberPhoneV1MembersUserIdPhoneDeleteResponse) Status() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Status
 	}
@@ -7488,14 +8062,14 @@ func (r DeleteMemberPhoneMembersUserIdPhoneDeleteResponse) Status() string {
 }
 
 // StatusCode returns HTTPResponse.StatusCode
-func (r DeleteMemberPhoneMembersUserIdPhoneDeleteResponse) StatusCode() int {
+func (r DeleteMemberPhoneV1MembersUserIdPhoneDeleteResponse) StatusCode() int {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.StatusCode
 	}
 	return 0
 }
 
-type PutMemberPhoneMembersUserIdPhonePutResponse struct {
+type PutMemberPhoneV1MembersUserIdPhonePutResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
 	JSON200      *map[string]string
@@ -7503,7 +8077,7 @@ type PutMemberPhoneMembersUserIdPhonePutResponse struct {
 }
 
 // Status returns HTTPResponse.Status
-func (r PutMemberPhoneMembersUserIdPhonePutResponse) Status() string {
+func (r PutMemberPhoneV1MembersUserIdPhonePutResponse) Status() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Status
 	}
@@ -7511,14 +8085,14 @@ func (r PutMemberPhoneMembersUserIdPhonePutResponse) Status() string {
 }
 
 // StatusCode returns HTTPResponse.StatusCode
-func (r PutMemberPhoneMembersUserIdPhonePutResponse) StatusCode() int {
+func (r PutMemberPhoneV1MembersUserIdPhonePutResponse) StatusCode() int {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.StatusCode
 	}
 	return 0
 }
 
-type ListNumbersNumbersGetResponse struct {
+type ListNumbersV1NumbersGetResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
 	JSON200      *PhoneNumberListResponse
@@ -7526,7 +8100,7 @@ type ListNumbersNumbersGetResponse struct {
 }
 
 // Status returns HTTPResponse.Status
-func (r ListNumbersNumbersGetResponse) Status() string {
+func (r ListNumbersV1NumbersGetResponse) Status() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Status
 	}
@@ -7534,14 +8108,14 @@ func (r ListNumbersNumbersGetResponse) Status() string {
 }
 
 // StatusCode returns HTTPResponse.StatusCode
-func (r ListNumbersNumbersGetResponse) StatusCode() int {
+func (r ListNumbersV1NumbersGetResponse) StatusCode() int {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.StatusCode
 	}
 	return 0
 }
 
-type AcquireNumberNumbersPostResponse struct {
+type AcquireNumberV1NumbersPostResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
 	JSON201      *PhoneNumberResponse
@@ -7549,7 +8123,7 @@ type AcquireNumberNumbersPostResponse struct {
 }
 
 // Status returns HTTPResponse.Status
-func (r AcquireNumberNumbersPostResponse) Status() string {
+func (r AcquireNumberV1NumbersPostResponse) Status() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Status
 	}
@@ -7557,21 +8131,21 @@ func (r AcquireNumberNumbersPostResponse) Status() string {
 }
 
 // StatusCode returns HTTPResponse.StatusCode
-func (r AcquireNumberNumbersPostResponse) StatusCode() int {
+func (r AcquireNumberV1NumbersPostResponse) StatusCode() int {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.StatusCode
 	}
 	return 0
 }
 
-type ReleaseNumberNumbersNumberIdDeleteResponse struct {
+type ReleaseNumberV1NumbersNumberIdDeleteResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
 	JSON422      *HTTPValidationError
 }
 
 // Status returns HTTPResponse.Status
-func (r ReleaseNumberNumbersNumberIdDeleteResponse) Status() string {
+func (r ReleaseNumberV1NumbersNumberIdDeleteResponse) Status() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Status
 	}
@@ -7579,37 +8153,14 @@ func (r ReleaseNumberNumbersNumberIdDeleteResponse) Status() string {
 }
 
 // StatusCode returns HTTPResponse.StatusCode
-func (r ReleaseNumberNumbersNumberIdDeleteResponse) StatusCode() int {
+func (r ReleaseNumberV1NumbersNumberIdDeleteResponse) StatusCode() int {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.StatusCode
 	}
 	return 0
 }
 
-type GetNumberNumbersNumberIdGetResponse struct {
-	Body         []byte
-	HTTPResponse *http.Response
-	JSON200      *PhoneNumberResponse
-	JSON422      *HTTPValidationError
-}
-
-// Status returns HTTPResponse.Status
-func (r GetNumberNumbersNumberIdGetResponse) Status() string {
-	if r.HTTPResponse != nil {
-		return r.HTTPResponse.Status
-	}
-	return http.StatusText(0)
-}
-
-// StatusCode returns HTTPResponse.StatusCode
-func (r GetNumberNumbersNumberIdGetResponse) StatusCode() int {
-	if r.HTTPResponse != nil {
-		return r.HTTPResponse.StatusCode
-	}
-	return 0
-}
-
-type EnableSmsNumbersNumberIdEnableSmsPostResponse struct {
+type GetNumberV1NumbersNumberIdGetResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
 	JSON200      *PhoneNumberResponse
@@ -7617,7 +8168,7 @@ type EnableSmsNumbersNumberIdEnableSmsPostResponse struct {
 }
 
 // Status returns HTTPResponse.Status
-func (r EnableSmsNumbersNumberIdEnableSmsPostResponse) Status() string {
+func (r GetNumberV1NumbersNumberIdGetResponse) Status() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Status
 	}
@@ -7625,7 +8176,30 @@ func (r EnableSmsNumbersNumberIdEnableSmsPostResponse) Status() string {
 }
 
 // StatusCode returns HTTPResponse.StatusCode
-func (r EnableSmsNumbersNumberIdEnableSmsPostResponse) StatusCode() int {
+func (r GetNumberV1NumbersNumberIdGetResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type EnableSmsV1NumbersNumberIdEnableSmsPostResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *PhoneNumberResponse
+	JSON422      *HTTPValidationError
+}
+
+// Status returns HTTPResponse.Status
+func (r EnableSmsV1NumbersNumberIdEnableSmsPostResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r EnableSmsV1NumbersNumberIdEnableSmsPostResponse) StatusCode() int {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.StatusCode
 	}
@@ -7746,7 +8320,7 @@ func (r DeleteProviderResponse) StatusCode() int {
 	return 0
 }
 
-type ListSmsSmsGetResponse struct {
+type ListSmsV1SmsGetResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
 	JSON200      *SmsListResponse
@@ -7754,7 +8328,7 @@ type ListSmsSmsGetResponse struct {
 }
 
 // Status returns HTTPResponse.Status
-func (r ListSmsSmsGetResponse) Status() string {
+func (r ListSmsV1SmsGetResponse) Status() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Status
 	}
@@ -7762,14 +8336,14 @@ func (r ListSmsSmsGetResponse) Status() string {
 }
 
 // StatusCode returns HTTPResponse.StatusCode
-func (r ListSmsSmsGetResponse) StatusCode() int {
+func (r ListSmsV1SmsGetResponse) StatusCode() int {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.StatusCode
 	}
 	return 0
 }
 
-type CreateSmsSmsPostResponse struct {
+type CreateSmsV1SmsPostResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
 	JSON201      *SmsResponse
@@ -7777,7 +8351,7 @@ type CreateSmsSmsPostResponse struct {
 }
 
 // Status returns HTTPResponse.Status
-func (r CreateSmsSmsPostResponse) Status() string {
+func (r CreateSmsV1SmsPostResponse) Status() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Status
 	}
@@ -7785,14 +8359,14 @@ func (r CreateSmsSmsPostResponse) Status() string {
 }
 
 // StatusCode returns HTTPResponse.StatusCode
-func (r CreateSmsSmsPostResponse) StatusCode() int {
+func (r CreateSmsV1SmsPostResponse) StatusCode() int {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.StatusCode
 	}
 	return 0
 }
 
-type GetSenderIdSmsSenderIdGetResponse struct {
+type GetSenderIdV1SmsSenderIdGetResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
 	JSON200      *SenderIdResponse
@@ -7800,7 +8374,7 @@ type GetSenderIdSmsSenderIdGetResponse struct {
 }
 
 // Status returns HTTPResponse.Status
-func (r GetSenderIdSmsSenderIdGetResponse) Status() string {
+func (r GetSenderIdV1SmsSenderIdGetResponse) Status() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Status
 	}
@@ -7808,14 +8382,14 @@ func (r GetSenderIdSmsSenderIdGetResponse) Status() string {
 }
 
 // StatusCode returns HTTPResponse.StatusCode
-func (r GetSenderIdSmsSenderIdGetResponse) StatusCode() int {
+func (r GetSenderIdV1SmsSenderIdGetResponse) StatusCode() int {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.StatusCode
 	}
 	return 0
 }
 
-type PatchSenderIdSmsSenderIdPatchResponse struct {
+type PatchSenderIdV1SmsSenderIdPatchResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
 	JSON200      *SenderIdResponse
@@ -7823,7 +8397,7 @@ type PatchSenderIdSmsSenderIdPatchResponse struct {
 }
 
 // Status returns HTTPResponse.Status
-func (r PatchSenderIdSmsSenderIdPatchResponse) Status() string {
+func (r PatchSenderIdV1SmsSenderIdPatchResponse) Status() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Status
 	}
@@ -7831,14 +8405,14 @@ func (r PatchSenderIdSmsSenderIdPatchResponse) Status() string {
 }
 
 // StatusCode returns HTTPResponse.StatusCode
-func (r PatchSenderIdSmsSenderIdPatchResponse) StatusCode() int {
+func (r PatchSenderIdV1SmsSenderIdPatchResponse) StatusCode() int {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.StatusCode
 	}
 	return 0
 }
 
-type ListSmsSuppressionsSmsSuppressionsGetResponse struct {
+type ListSmsSuppressionsV1SmsSuppressionsGetResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
 	JSON200      *SuppressionListResponse
@@ -7846,7 +8420,7 @@ type ListSmsSuppressionsSmsSuppressionsGetResponse struct {
 }
 
 // Status returns HTTPResponse.Status
-func (r ListSmsSuppressionsSmsSuppressionsGetResponse) Status() string {
+func (r ListSmsSuppressionsV1SmsSuppressionsGetResponse) Status() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Status
 	}
@@ -7854,21 +8428,21 @@ func (r ListSmsSuppressionsSmsSuppressionsGetResponse) Status() string {
 }
 
 // StatusCode returns HTTPResponse.StatusCode
-func (r ListSmsSuppressionsSmsSuppressionsGetResponse) StatusCode() int {
+func (r ListSmsSuppressionsV1SmsSuppressionsGetResponse) StatusCode() int {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.StatusCode
 	}
 	return 0
 }
 
-type DeleteSmsSuppressionSmsSuppressionsNumberDeleteResponse struct {
+type DeleteSmsSuppressionV1SmsSuppressionsNumberDeleteResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
 	JSON422      *HTTPValidationError
 }
 
 // Status returns HTTPResponse.Status
-func (r DeleteSmsSuppressionSmsSuppressionsNumberDeleteResponse) Status() string {
+func (r DeleteSmsSuppressionV1SmsSuppressionsNumberDeleteResponse) Status() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Status
 	}
@@ -7876,14 +8450,14 @@ func (r DeleteSmsSuppressionSmsSuppressionsNumberDeleteResponse) Status() string
 }
 
 // StatusCode returns HTTPResponse.StatusCode
-func (r DeleteSmsSuppressionSmsSuppressionsNumberDeleteResponse) StatusCode() int {
+func (r DeleteSmsSuppressionV1SmsSuppressionsNumberDeleteResponse) StatusCode() int {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.StatusCode
 	}
 	return 0
 }
 
-type GetSmsSmsSmsIdGetResponse struct {
+type GetSmsV1SmsSmsIdGetResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
 	JSON200      *SmsResponse
@@ -7891,7 +8465,7 @@ type GetSmsSmsSmsIdGetResponse struct {
 }
 
 // Status returns HTTPResponse.Status
-func (r GetSmsSmsSmsIdGetResponse) Status() string {
+func (r GetSmsV1SmsSmsIdGetResponse) Status() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Status
 	}
@@ -7899,21 +8473,21 @@ func (r GetSmsSmsSmsIdGetResponse) Status() string {
 }
 
 // StatusCode returns HTTPResponse.StatusCode
-func (r GetSmsSmsSmsIdGetResponse) StatusCode() int {
+func (r GetSmsV1SmsSmsIdGetResponse) StatusCode() int {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.StatusCode
 	}
 	return 0
 }
 
-type UnsubscribeUnsubscribeGetResponse struct {
+type UnsubscribeV1UnsubscribeGetResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
 	JSON422      *HTTPValidationError
 }
 
 // Status returns HTTPResponse.Status
-func (r UnsubscribeUnsubscribeGetResponse) Status() string {
+func (r UnsubscribeV1UnsubscribeGetResponse) Status() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Status
 	}
@@ -7921,14 +8495,14 @@ func (r UnsubscribeUnsubscribeGetResponse) Status() string {
 }
 
 // StatusCode returns HTTPResponse.StatusCode
-func (r UnsubscribeUnsubscribeGetResponse) StatusCode() int {
+func (r UnsubscribeV1UnsubscribeGetResponse) StatusCode() int {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.StatusCode
 	}
 	return 0
 }
 
-type ListSubscriptionsWebhooksGetResponse struct {
+type ListSubscriptionsV1WebhooksGetResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
 	JSON200      *WebhookSubscriptionListResponse
@@ -7936,7 +8510,7 @@ type ListSubscriptionsWebhooksGetResponse struct {
 }
 
 // Status returns HTTPResponse.Status
-func (r ListSubscriptionsWebhooksGetResponse) Status() string {
+func (r ListSubscriptionsV1WebhooksGetResponse) Status() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Status
 	}
@@ -7944,14 +8518,14 @@ func (r ListSubscriptionsWebhooksGetResponse) Status() string {
 }
 
 // StatusCode returns HTTPResponse.StatusCode
-func (r ListSubscriptionsWebhooksGetResponse) StatusCode() int {
+func (r ListSubscriptionsV1WebhooksGetResponse) StatusCode() int {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.StatusCode
 	}
 	return 0
 }
 
-type CreateSubscriptionWebhooksPostResponse struct {
+type CreateSubscriptionV1WebhooksPostResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
 	JSON201      *WebhookSubscriptionResponse
@@ -7959,7 +8533,7 @@ type CreateSubscriptionWebhooksPostResponse struct {
 }
 
 // Status returns HTTPResponse.Status
-func (r CreateSubscriptionWebhooksPostResponse) Status() string {
+func (r CreateSubscriptionV1WebhooksPostResponse) Status() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Status
 	}
@@ -7967,21 +8541,21 @@ func (r CreateSubscriptionWebhooksPostResponse) Status() string {
 }
 
 // StatusCode returns HTTPResponse.StatusCode
-func (r CreateSubscriptionWebhooksPostResponse) StatusCode() int {
+func (r CreateSubscriptionV1WebhooksPostResponse) StatusCode() int {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.StatusCode
 	}
 	return 0
 }
 
-type DeleteSubscriptionWebhooksSubIdDeleteResponse struct {
+type DeleteSubscriptionV1WebhooksSubIdDeleteResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
 	JSON422      *HTTPValidationError
 }
 
 // Status returns HTTPResponse.Status
-func (r DeleteSubscriptionWebhooksSubIdDeleteResponse) Status() string {
+func (r DeleteSubscriptionV1WebhooksSubIdDeleteResponse) Status() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Status
 	}
@@ -7989,37 +8563,14 @@ func (r DeleteSubscriptionWebhooksSubIdDeleteResponse) Status() string {
 }
 
 // StatusCode returns HTTPResponse.StatusCode
-func (r DeleteSubscriptionWebhooksSubIdDeleteResponse) StatusCode() int {
+func (r DeleteSubscriptionV1WebhooksSubIdDeleteResponse) StatusCode() int {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.StatusCode
 	}
 	return 0
 }
 
-type GetSubscriptionWebhooksSubIdGetResponse struct {
-	Body         []byte
-	HTTPResponse *http.Response
-	JSON200      *WebhookSubscriptionResponse
-	JSON422      *HTTPValidationError
-}
-
-// Status returns HTTPResponse.Status
-func (r GetSubscriptionWebhooksSubIdGetResponse) Status() string {
-	if r.HTTPResponse != nil {
-		return r.HTTPResponse.Status
-	}
-	return http.StatusText(0)
-}
-
-// StatusCode returns HTTPResponse.StatusCode
-func (r GetSubscriptionWebhooksSubIdGetResponse) StatusCode() int {
-	if r.HTTPResponse != nil {
-		return r.HTTPResponse.StatusCode
-	}
-	return 0
-}
-
-type PatchSubscriptionWebhooksSubIdPatchResponse struct {
+type GetSubscriptionV1WebhooksSubIdGetResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
 	JSON200      *WebhookSubscriptionResponse
@@ -8027,7 +8578,7 @@ type PatchSubscriptionWebhooksSubIdPatchResponse struct {
 }
 
 // Status returns HTTPResponse.Status
-func (r PatchSubscriptionWebhooksSubIdPatchResponse) Status() string {
+func (r GetSubscriptionV1WebhooksSubIdGetResponse) Status() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Status
 	}
@@ -8035,14 +8586,37 @@ func (r PatchSubscriptionWebhooksSubIdPatchResponse) Status() string {
 }
 
 // StatusCode returns HTTPResponse.StatusCode
-func (r PatchSubscriptionWebhooksSubIdPatchResponse) StatusCode() int {
+func (r GetSubscriptionV1WebhooksSubIdGetResponse) StatusCode() int {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.StatusCode
 	}
 	return 0
 }
 
-type ListDeliveriesWebhooksSubIdDeliveriesGetResponse struct {
+type PatchSubscriptionV1WebhooksSubIdPatchResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *WebhookSubscriptionResponse
+	JSON422      *HTTPValidationError
+}
+
+// Status returns HTTPResponse.Status
+func (r PatchSubscriptionV1WebhooksSubIdPatchResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r PatchSubscriptionV1WebhooksSubIdPatchResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type ListDeliveriesV1WebhooksSubIdDeliveriesGetResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
 	JSON200      *WebhookDeliveryListResponse
@@ -8050,7 +8624,7 @@ type ListDeliveriesWebhooksSubIdDeliveriesGetResponse struct {
 }
 
 // Status returns HTTPResponse.Status
-func (r ListDeliveriesWebhooksSubIdDeliveriesGetResponse) Status() string {
+func (r ListDeliveriesV1WebhooksSubIdDeliveriesGetResponse) Status() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Status
 	}
@@ -8058,14 +8632,14 @@ func (r ListDeliveriesWebhooksSubIdDeliveriesGetResponse) Status() string {
 }
 
 // StatusCode returns HTTPResponse.StatusCode
-func (r ListDeliveriesWebhooksSubIdDeliveriesGetResponse) StatusCode() int {
+func (r ListDeliveriesV1WebhooksSubIdDeliveriesGetResponse) StatusCode() int {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.StatusCode
 	}
 	return 0
 }
 
-type RedeliverWebhooksSubIdDeliveriesDeliveryIdRedeliverPostResponse struct {
+type RedeliverV1WebhooksSubIdDeliveriesDeliveryIdRedeliverPostResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
 	JSON200      *WebhookDeliveryResponse
@@ -8073,7 +8647,7 @@ type RedeliverWebhooksSubIdDeliveriesDeliveryIdRedeliverPostResponse struct {
 }
 
 // Status returns HTTPResponse.Status
-func (r RedeliverWebhooksSubIdDeliveriesDeliveryIdRedeliverPostResponse) Status() string {
+func (r RedeliverV1WebhooksSubIdDeliveriesDeliveryIdRedeliverPostResponse) Status() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Status
 	}
@@ -8081,14 +8655,14 @@ func (r RedeliverWebhooksSubIdDeliveriesDeliveryIdRedeliverPostResponse) Status(
 }
 
 // StatusCode returns HTTPResponse.StatusCode
-func (r RedeliverWebhooksSubIdDeliveriesDeliveryIdRedeliverPostResponse) StatusCode() int {
+func (r RedeliverV1WebhooksSubIdDeliveriesDeliveryIdRedeliverPostResponse) StatusCode() int {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.StatusCode
 	}
 	return 0
 }
 
-type RotateSecretWebhooksSubIdRotateSecretPostResponse struct {
+type RotateSecretV1WebhooksSubIdRotateSecretPostResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
 	JSON200      *WebhookSubscriptionResponse
@@ -8096,7 +8670,7 @@ type RotateSecretWebhooksSubIdRotateSecretPostResponse struct {
 }
 
 // Status returns HTTPResponse.Status
-func (r RotateSecretWebhooksSubIdRotateSecretPostResponse) Status() string {
+func (r RotateSecretV1WebhooksSubIdRotateSecretPostResponse) Status() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Status
 	}
@@ -8104,14 +8678,14 @@ func (r RotateSecretWebhooksSubIdRotateSecretPostResponse) Status() string {
 }
 
 // StatusCode returns HTTPResponse.StatusCode
-func (r RotateSecretWebhooksSubIdRotateSecretPostResponse) StatusCode() int {
+func (r RotateSecretV1WebhooksSubIdRotateSecretPostResponse) StatusCode() int {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.StatusCode
 	}
 	return 0
 }
 
-type GetWhoamiWhoamiGetResponse struct {
+type GetWhoamiV1WhoamiGetResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
 	JSON200      *WhoamiResponse
@@ -8119,7 +8693,7 @@ type GetWhoamiWhoamiGetResponse struct {
 }
 
 // Status returns HTTPResponse.Status
-func (r GetWhoamiWhoamiGetResponse) Status() string {
+func (r GetWhoamiV1WhoamiGetResponse) Status() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Status
 	}
@@ -8127,266 +8701,11 @@ func (r GetWhoamiWhoamiGetResponse) Status() string {
 }
 
 // StatusCode returns HTTPResponse.StatusCode
-func (r GetWhoamiWhoamiGetResponse) StatusCode() int {
+func (r GetWhoamiV1WhoamiGetResponse) StatusCode() int {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.StatusCode
 	}
 	return 0
-}
-
-// ListCallsCallsGetWithResponse request returning *ListCallsCallsGetResponse
-func (c *ClientWithResponses) ListCallsCallsGetWithResponse(ctx context.Context, params *ListCallsCallsGetParams, reqEditors ...RequestEditorFn) (*ListCallsCallsGetResponse, error) {
-	rsp, err := c.ListCallsCallsGet(ctx, params, reqEditors...)
-	if err != nil {
-		return nil, err
-	}
-	return ParseListCallsCallsGetResponse(rsp)
-}
-
-// CreateCallCallsPostWithBodyWithResponse request with arbitrary body returning *CreateCallCallsPostResponse
-func (c *ClientWithResponses) CreateCallCallsPostWithBodyWithResponse(ctx context.Context, params *CreateCallCallsPostParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CreateCallCallsPostResponse, error) {
-	rsp, err := c.CreateCallCallsPostWithBody(ctx, params, contentType, body, reqEditors...)
-	if err != nil {
-		return nil, err
-	}
-	return ParseCreateCallCallsPostResponse(rsp)
-}
-
-func (c *ClientWithResponses) CreateCallCallsPostWithResponse(ctx context.Context, params *CreateCallCallsPostParams, body CreateCallCallsPostJSONRequestBody, reqEditors ...RequestEditorFn) (*CreateCallCallsPostResponse, error) {
-	rsp, err := c.CreateCallCallsPost(ctx, params, body, reqEditors...)
-	if err != nil {
-		return nil, err
-	}
-	return ParseCreateCallCallsPostResponse(rsp)
-}
-
-// GetCallCallsCallIdGetWithResponse request returning *GetCallCallsCallIdGetResponse
-func (c *ClientWithResponses) GetCallCallsCallIdGetWithResponse(ctx context.Context, callId openapi_types.UUID, params *GetCallCallsCallIdGetParams, reqEditors ...RequestEditorFn) (*GetCallCallsCallIdGetResponse, error) {
-	rsp, err := c.GetCallCallsCallIdGet(ctx, callId, params, reqEditors...)
-	if err != nil {
-		return nil, err
-	}
-	return ParseGetCallCallsCallIdGetResponse(rsp)
-}
-
-// ListContactsContactsGetWithResponse request returning *ListContactsContactsGetResponse
-func (c *ClientWithResponses) ListContactsContactsGetWithResponse(ctx context.Context, params *ListContactsContactsGetParams, reqEditors ...RequestEditorFn) (*ListContactsContactsGetResponse, error) {
-	rsp, err := c.ListContactsContactsGet(ctx, params, reqEditors...)
-	if err != nil {
-		return nil, err
-	}
-	return ParseListContactsContactsGetResponse(rsp)
-}
-
-// CreateContactContactsPostWithBodyWithResponse request with arbitrary body returning *CreateContactContactsPostResponse
-func (c *ClientWithResponses) CreateContactContactsPostWithBodyWithResponse(ctx context.Context, params *CreateContactContactsPostParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CreateContactContactsPostResponse, error) {
-	rsp, err := c.CreateContactContactsPostWithBody(ctx, params, contentType, body, reqEditors...)
-	if err != nil {
-		return nil, err
-	}
-	return ParseCreateContactContactsPostResponse(rsp)
-}
-
-func (c *ClientWithResponses) CreateContactContactsPostWithResponse(ctx context.Context, params *CreateContactContactsPostParams, body CreateContactContactsPostJSONRequestBody, reqEditors ...RequestEditorFn) (*CreateContactContactsPostResponse, error) {
-	rsp, err := c.CreateContactContactsPost(ctx, params, body, reqEditors...)
-	if err != nil {
-		return nil, err
-	}
-	return ParseCreateContactContactsPostResponse(rsp)
-}
-
-// DeleteContactContactsContactIdDeleteWithResponse request returning *DeleteContactContactsContactIdDeleteResponse
-func (c *ClientWithResponses) DeleteContactContactsContactIdDeleteWithResponse(ctx context.Context, contactId string, params *DeleteContactContactsContactIdDeleteParams, reqEditors ...RequestEditorFn) (*DeleteContactContactsContactIdDeleteResponse, error) {
-	rsp, err := c.DeleteContactContactsContactIdDelete(ctx, contactId, params, reqEditors...)
-	if err != nil {
-		return nil, err
-	}
-	return ParseDeleteContactContactsContactIdDeleteResponse(rsp)
-}
-
-// PatchContactContactsContactIdPatchWithBodyWithResponse request with arbitrary body returning *PatchContactContactsContactIdPatchResponse
-func (c *ClientWithResponses) PatchContactContactsContactIdPatchWithBodyWithResponse(ctx context.Context, contactId string, params *PatchContactContactsContactIdPatchParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*PatchContactContactsContactIdPatchResponse, error) {
-	rsp, err := c.PatchContactContactsContactIdPatchWithBody(ctx, contactId, params, contentType, body, reqEditors...)
-	if err != nil {
-		return nil, err
-	}
-	return ParsePatchContactContactsContactIdPatchResponse(rsp)
-}
-
-func (c *ClientWithResponses) PatchContactContactsContactIdPatchWithResponse(ctx context.Context, contactId string, params *PatchContactContactsContactIdPatchParams, body PatchContactContactsContactIdPatchJSONRequestBody, reqEditors ...RequestEditorFn) (*PatchContactContactsContactIdPatchResponse, error) {
-	rsp, err := c.PatchContactContactsContactIdPatch(ctx, contactId, params, body, reqEditors...)
-	if err != nil {
-		return nil, err
-	}
-	return ParsePatchContactContactsContactIdPatchResponse(rsp)
-}
-
-// UploadEmailAttachmentWithBodyWithResponse request with arbitrary body returning *UploadEmailAttachmentResponse
-func (c *ClientWithResponses) UploadEmailAttachmentWithBodyWithResponse(ctx context.Context, params *UploadEmailAttachmentParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*UploadEmailAttachmentResponse, error) {
-	rsp, err := c.UploadEmailAttachmentWithBody(ctx, params, contentType, body, reqEditors...)
-	if err != nil {
-		return nil, err
-	}
-	return ParseUploadEmailAttachmentResponse(rsp)
-}
-
-// ListEmailDomainsEmailDomainsGetWithResponse request returning *ListEmailDomainsEmailDomainsGetResponse
-func (c *ClientWithResponses) ListEmailDomainsEmailDomainsGetWithResponse(ctx context.Context, params *ListEmailDomainsEmailDomainsGetParams, reqEditors ...RequestEditorFn) (*ListEmailDomainsEmailDomainsGetResponse, error) {
-	rsp, err := c.ListEmailDomainsEmailDomainsGet(ctx, params, reqEditors...)
-	if err != nil {
-		return nil, err
-	}
-	return ParseListEmailDomainsEmailDomainsGetResponse(rsp)
-}
-
-// CreateEmailDomainEmailDomainsPostWithBodyWithResponse request with arbitrary body returning *CreateEmailDomainEmailDomainsPostResponse
-func (c *ClientWithResponses) CreateEmailDomainEmailDomainsPostWithBodyWithResponse(ctx context.Context, params *CreateEmailDomainEmailDomainsPostParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CreateEmailDomainEmailDomainsPostResponse, error) {
-	rsp, err := c.CreateEmailDomainEmailDomainsPostWithBody(ctx, params, contentType, body, reqEditors...)
-	if err != nil {
-		return nil, err
-	}
-	return ParseCreateEmailDomainEmailDomainsPostResponse(rsp)
-}
-
-func (c *ClientWithResponses) CreateEmailDomainEmailDomainsPostWithResponse(ctx context.Context, params *CreateEmailDomainEmailDomainsPostParams, body CreateEmailDomainEmailDomainsPostJSONRequestBody, reqEditors ...RequestEditorFn) (*CreateEmailDomainEmailDomainsPostResponse, error) {
-	rsp, err := c.CreateEmailDomainEmailDomainsPost(ctx, params, body, reqEditors...)
-	if err != nil {
-		return nil, err
-	}
-	return ParseCreateEmailDomainEmailDomainsPostResponse(rsp)
-}
-
-// CheckDomainEmailDomainsCheckDomainGetWithResponse request returning *CheckDomainEmailDomainsCheckDomainGetResponse
-func (c *ClientWithResponses) CheckDomainEmailDomainsCheckDomainGetWithResponse(ctx context.Context, params *CheckDomainEmailDomainsCheckDomainGetParams, reqEditors ...RequestEditorFn) (*CheckDomainEmailDomainsCheckDomainGetResponse, error) {
-	rsp, err := c.CheckDomainEmailDomainsCheckDomainGet(ctx, params, reqEditors...)
-	if err != nil {
-		return nil, err
-	}
-	return ParseCheckDomainEmailDomainsCheckDomainGetResponse(rsp)
-}
-
-// DeleteEmailDomainEmailDomainsDomainIdDeleteWithResponse request returning *DeleteEmailDomainEmailDomainsDomainIdDeleteResponse
-func (c *ClientWithResponses) DeleteEmailDomainEmailDomainsDomainIdDeleteWithResponse(ctx context.Context, domainId openapi_types.UUID, params *DeleteEmailDomainEmailDomainsDomainIdDeleteParams, reqEditors ...RequestEditorFn) (*DeleteEmailDomainEmailDomainsDomainIdDeleteResponse, error) {
-	rsp, err := c.DeleteEmailDomainEmailDomainsDomainIdDelete(ctx, domainId, params, reqEditors...)
-	if err != nil {
-		return nil, err
-	}
-	return ParseDeleteEmailDomainEmailDomainsDomainIdDeleteResponse(rsp)
-}
-
-// GetEmailDomainEmailDomainsDomainIdGetWithResponse request returning *GetEmailDomainEmailDomainsDomainIdGetResponse
-func (c *ClientWithResponses) GetEmailDomainEmailDomainsDomainIdGetWithResponse(ctx context.Context, domainId openapi_types.UUID, params *GetEmailDomainEmailDomainsDomainIdGetParams, reqEditors ...RequestEditorFn) (*GetEmailDomainEmailDomainsDomainIdGetResponse, error) {
-	rsp, err := c.GetEmailDomainEmailDomainsDomainIdGet(ctx, domainId, params, reqEditors...)
-	if err != nil {
-		return nil, err
-	}
-	return ParseGetEmailDomainEmailDomainsDomainIdGetResponse(rsp)
-}
-
-// PatchEmailDomainEmailDomainsDomainIdPatchWithBodyWithResponse request with arbitrary body returning *PatchEmailDomainEmailDomainsDomainIdPatchResponse
-func (c *ClientWithResponses) PatchEmailDomainEmailDomainsDomainIdPatchWithBodyWithResponse(ctx context.Context, domainId openapi_types.UUID, params *PatchEmailDomainEmailDomainsDomainIdPatchParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*PatchEmailDomainEmailDomainsDomainIdPatchResponse, error) {
-	rsp, err := c.PatchEmailDomainEmailDomainsDomainIdPatchWithBody(ctx, domainId, params, contentType, body, reqEditors...)
-	if err != nil {
-		return nil, err
-	}
-	return ParsePatchEmailDomainEmailDomainsDomainIdPatchResponse(rsp)
-}
-
-func (c *ClientWithResponses) PatchEmailDomainEmailDomainsDomainIdPatchWithResponse(ctx context.Context, domainId openapi_types.UUID, params *PatchEmailDomainEmailDomainsDomainIdPatchParams, body PatchEmailDomainEmailDomainsDomainIdPatchJSONRequestBody, reqEditors ...RequestEditorFn) (*PatchEmailDomainEmailDomainsDomainIdPatchResponse, error) {
-	rsp, err := c.PatchEmailDomainEmailDomainsDomainIdPatch(ctx, domainId, params, body, reqEditors...)
-	if err != nil {
-		return nil, err
-	}
-	return ParsePatchEmailDomainEmailDomainsDomainIdPatchResponse(rsp)
-}
-
-// VerifyEmailDomainEmailDomainsDomainIdVerifyPostWithResponse request returning *VerifyEmailDomainEmailDomainsDomainIdVerifyPostResponse
-func (c *ClientWithResponses) VerifyEmailDomainEmailDomainsDomainIdVerifyPostWithResponse(ctx context.Context, domainId openapi_types.UUID, params *VerifyEmailDomainEmailDomainsDomainIdVerifyPostParams, reqEditors ...RequestEditorFn) (*VerifyEmailDomainEmailDomainsDomainIdVerifyPostResponse, error) {
-	rsp, err := c.VerifyEmailDomainEmailDomainsDomainIdVerifyPost(ctx, domainId, params, reqEditors...)
-	if err != nil {
-		return nil, err
-	}
-	return ParseVerifyEmailDomainEmailDomainsDomainIdVerifyPostResponse(rsp)
-}
-
-// ListEmailsEmailsGetWithResponse request returning *ListEmailsEmailsGetResponse
-func (c *ClientWithResponses) ListEmailsEmailsGetWithResponse(ctx context.Context, params *ListEmailsEmailsGetParams, reqEditors ...RequestEditorFn) (*ListEmailsEmailsGetResponse, error) {
-	rsp, err := c.ListEmailsEmailsGet(ctx, params, reqEditors...)
-	if err != nil {
-		return nil, err
-	}
-	return ParseListEmailsEmailsGetResponse(rsp)
-}
-
-// CreateEmailEmailsPostWithBodyWithResponse request with arbitrary body returning *CreateEmailEmailsPostResponse
-func (c *ClientWithResponses) CreateEmailEmailsPostWithBodyWithResponse(ctx context.Context, params *CreateEmailEmailsPostParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CreateEmailEmailsPostResponse, error) {
-	rsp, err := c.CreateEmailEmailsPostWithBody(ctx, params, contentType, body, reqEditors...)
-	if err != nil {
-		return nil, err
-	}
-	return ParseCreateEmailEmailsPostResponse(rsp)
-}
-
-func (c *ClientWithResponses) CreateEmailEmailsPostWithResponse(ctx context.Context, params *CreateEmailEmailsPostParams, body CreateEmailEmailsPostJSONRequestBody, reqEditors ...RequestEditorFn) (*CreateEmailEmailsPostResponse, error) {
-	rsp, err := c.CreateEmailEmailsPost(ctx, params, body, reqEditors...)
-	if err != nil {
-		return nil, err
-	}
-	return ParseCreateEmailEmailsPostResponse(rsp)
-}
-
-// GetEmailStatsEmailsStatsGetWithResponse request returning *GetEmailStatsEmailsStatsGetResponse
-func (c *ClientWithResponses) GetEmailStatsEmailsStatsGetWithResponse(ctx context.Context, params *GetEmailStatsEmailsStatsGetParams, reqEditors ...RequestEditorFn) (*GetEmailStatsEmailsStatsGetResponse, error) {
-	rsp, err := c.GetEmailStatsEmailsStatsGet(ctx, params, reqEditors...)
-	if err != nil {
-		return nil, err
-	}
-	return ParseGetEmailStatsEmailsStatsGetResponse(rsp)
-}
-
-// GetEmailEmailsEmailIdGetWithResponse request returning *GetEmailEmailsEmailIdGetResponse
-func (c *ClientWithResponses) GetEmailEmailsEmailIdGetWithResponse(ctx context.Context, emailId openapi_types.UUID, params *GetEmailEmailsEmailIdGetParams, reqEditors ...RequestEditorFn) (*GetEmailEmailsEmailIdGetResponse, error) {
-	rsp, err := c.GetEmailEmailsEmailIdGet(ctx, emailId, params, reqEditors...)
-	if err != nil {
-		return nil, err
-	}
-	return ParseGetEmailEmailsEmailIdGetResponse(rsp)
-}
-
-// GetEmailAttachmentEmailsEmailIdAttachmentsAttachmentIdGetWithResponse request returning *GetEmailAttachmentEmailsEmailIdAttachmentsAttachmentIdGetResponse
-func (c *ClientWithResponses) GetEmailAttachmentEmailsEmailIdAttachmentsAttachmentIdGetWithResponse(ctx context.Context, emailId openapi_types.UUID, attachmentId openapi_types.UUID, params *GetEmailAttachmentEmailsEmailIdAttachmentsAttachmentIdGetParams, reqEditors ...RequestEditorFn) (*GetEmailAttachmentEmailsEmailIdAttachmentsAttachmentIdGetResponse, error) {
-	rsp, err := c.GetEmailAttachmentEmailsEmailIdAttachmentsAttachmentIdGet(ctx, emailId, attachmentId, params, reqEditors...)
-	if err != nil {
-		return nil, err
-	}
-	return ParseGetEmailAttachmentEmailsEmailIdAttachmentsAttachmentIdGetResponse(rsp)
-}
-
-// ListEmailEventsEmailsEmailIdEventsGetWithResponse request returning *ListEmailEventsEmailsEmailIdEventsGetResponse
-func (c *ClientWithResponses) ListEmailEventsEmailsEmailIdEventsGetWithResponse(ctx context.Context, emailId openapi_types.UUID, params *ListEmailEventsEmailsEmailIdEventsGetParams, reqEditors ...RequestEditorFn) (*ListEmailEventsEmailsEmailIdEventsGetResponse, error) {
-	rsp, err := c.ListEmailEventsEmailsEmailIdEventsGet(ctx, emailId, params, reqEditors...)
-	if err != nil {
-		return nil, err
-	}
-	return ParseListEmailEventsEmailsEmailIdEventsGetResponse(rsp)
-}
-
-// GetEmailRawEmailsEmailIdRawGetWithResponse request returning *GetEmailRawEmailsEmailIdRawGetResponse
-func (c *ClientWithResponses) GetEmailRawEmailsEmailIdRawGetWithResponse(ctx context.Context, emailId openapi_types.UUID, params *GetEmailRawEmailsEmailIdRawGetParams, reqEditors ...RequestEditorFn) (*GetEmailRawEmailsEmailIdRawGetResponse, error) {
-	rsp, err := c.GetEmailRawEmailsEmailIdRawGet(ctx, emailId, params, reqEditors...)
-	if err != nil {
-		return nil, err
-	}
-	return ParseGetEmailRawEmailsEmailIdRawGetResponse(rsp)
-}
-
-// ListEventsEventsGetWithResponse request returning *ListEventsEventsGetResponse
-func (c *ClientWithResponses) ListEventsEventsGetWithResponse(ctx context.Context, params *ListEventsEventsGetParams, reqEditors ...RequestEditorFn) (*ListEventsEventsGetResponse, error) {
-	rsp, err := c.ListEventsEventsGet(ctx, params, reqEditors...)
-	if err != nil {
-		return nil, err
-	}
-	return ParseListEventsEventsGetResponse(rsp)
 }
 
 // HealthzHealthzGetWithResponse request returning *HealthzHealthzGetResponse
@@ -8398,83 +8717,338 @@ func (c *ClientWithResponses) HealthzHealthzGetWithResponse(ctx context.Context,
 	return ParseHealthzHealthzGetResponse(rsp)
 }
 
-// DeleteMemberPhoneMembersUserIdPhoneDeleteWithResponse request returning *DeleteMemberPhoneMembersUserIdPhoneDeleteResponse
-func (c *ClientWithResponses) DeleteMemberPhoneMembersUserIdPhoneDeleteWithResponse(ctx context.Context, userId string, params *DeleteMemberPhoneMembersUserIdPhoneDeleteParams, reqEditors ...RequestEditorFn) (*DeleteMemberPhoneMembersUserIdPhoneDeleteResponse, error) {
-	rsp, err := c.DeleteMemberPhoneMembersUserIdPhoneDelete(ctx, userId, params, reqEditors...)
+// ListCallsV1CallsGetWithResponse request returning *ListCallsV1CallsGetResponse
+func (c *ClientWithResponses) ListCallsV1CallsGetWithResponse(ctx context.Context, params *ListCallsV1CallsGetParams, reqEditors ...RequestEditorFn) (*ListCallsV1CallsGetResponse, error) {
+	rsp, err := c.ListCallsV1CallsGet(ctx, params, reqEditors...)
 	if err != nil {
 		return nil, err
 	}
-	return ParseDeleteMemberPhoneMembersUserIdPhoneDeleteResponse(rsp)
+	return ParseListCallsV1CallsGetResponse(rsp)
 }
 
-// PutMemberPhoneMembersUserIdPhonePutWithBodyWithResponse request with arbitrary body returning *PutMemberPhoneMembersUserIdPhonePutResponse
-func (c *ClientWithResponses) PutMemberPhoneMembersUserIdPhonePutWithBodyWithResponse(ctx context.Context, userId string, params *PutMemberPhoneMembersUserIdPhonePutParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*PutMemberPhoneMembersUserIdPhonePutResponse, error) {
-	rsp, err := c.PutMemberPhoneMembersUserIdPhonePutWithBody(ctx, userId, params, contentType, body, reqEditors...)
+// CreateCallV1CallsPostWithBodyWithResponse request with arbitrary body returning *CreateCallV1CallsPostResponse
+func (c *ClientWithResponses) CreateCallV1CallsPostWithBodyWithResponse(ctx context.Context, params *CreateCallV1CallsPostParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CreateCallV1CallsPostResponse, error) {
+	rsp, err := c.CreateCallV1CallsPostWithBody(ctx, params, contentType, body, reqEditors...)
 	if err != nil {
 		return nil, err
 	}
-	return ParsePutMemberPhoneMembersUserIdPhonePutResponse(rsp)
+	return ParseCreateCallV1CallsPostResponse(rsp)
 }
 
-func (c *ClientWithResponses) PutMemberPhoneMembersUserIdPhonePutWithResponse(ctx context.Context, userId string, params *PutMemberPhoneMembersUserIdPhonePutParams, body PutMemberPhoneMembersUserIdPhonePutJSONRequestBody, reqEditors ...RequestEditorFn) (*PutMemberPhoneMembersUserIdPhonePutResponse, error) {
-	rsp, err := c.PutMemberPhoneMembersUserIdPhonePut(ctx, userId, params, body, reqEditors...)
+func (c *ClientWithResponses) CreateCallV1CallsPostWithResponse(ctx context.Context, params *CreateCallV1CallsPostParams, body CreateCallV1CallsPostJSONRequestBody, reqEditors ...RequestEditorFn) (*CreateCallV1CallsPostResponse, error) {
+	rsp, err := c.CreateCallV1CallsPost(ctx, params, body, reqEditors...)
 	if err != nil {
 		return nil, err
 	}
-	return ParsePutMemberPhoneMembersUserIdPhonePutResponse(rsp)
+	return ParseCreateCallV1CallsPostResponse(rsp)
 }
 
-// ListNumbersNumbersGetWithResponse request returning *ListNumbersNumbersGetResponse
-func (c *ClientWithResponses) ListNumbersNumbersGetWithResponse(ctx context.Context, params *ListNumbersNumbersGetParams, reqEditors ...RequestEditorFn) (*ListNumbersNumbersGetResponse, error) {
-	rsp, err := c.ListNumbersNumbersGet(ctx, params, reqEditors...)
+// GetCallV1CallsCallIdGetWithResponse request returning *GetCallV1CallsCallIdGetResponse
+func (c *ClientWithResponses) GetCallV1CallsCallIdGetWithResponse(ctx context.Context, callId openapi_types.UUID, params *GetCallV1CallsCallIdGetParams, reqEditors ...RequestEditorFn) (*GetCallV1CallsCallIdGetResponse, error) {
+	rsp, err := c.GetCallV1CallsCallIdGet(ctx, callId, params, reqEditors...)
 	if err != nil {
 		return nil, err
 	}
-	return ParseListNumbersNumbersGetResponse(rsp)
+	return ParseGetCallV1CallsCallIdGetResponse(rsp)
 }
 
-// AcquireNumberNumbersPostWithBodyWithResponse request with arbitrary body returning *AcquireNumberNumbersPostResponse
-func (c *ClientWithResponses) AcquireNumberNumbersPostWithBodyWithResponse(ctx context.Context, params *AcquireNumberNumbersPostParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*AcquireNumberNumbersPostResponse, error) {
-	rsp, err := c.AcquireNumberNumbersPostWithBody(ctx, params, contentType, body, reqEditors...)
+// ListContactsV1ContactsGetWithResponse request returning *ListContactsV1ContactsGetResponse
+func (c *ClientWithResponses) ListContactsV1ContactsGetWithResponse(ctx context.Context, params *ListContactsV1ContactsGetParams, reqEditors ...RequestEditorFn) (*ListContactsV1ContactsGetResponse, error) {
+	rsp, err := c.ListContactsV1ContactsGet(ctx, params, reqEditors...)
 	if err != nil {
 		return nil, err
 	}
-	return ParseAcquireNumberNumbersPostResponse(rsp)
+	return ParseListContactsV1ContactsGetResponse(rsp)
 }
 
-func (c *ClientWithResponses) AcquireNumberNumbersPostWithResponse(ctx context.Context, params *AcquireNumberNumbersPostParams, body AcquireNumberNumbersPostJSONRequestBody, reqEditors ...RequestEditorFn) (*AcquireNumberNumbersPostResponse, error) {
-	rsp, err := c.AcquireNumberNumbersPost(ctx, params, body, reqEditors...)
+// CreateContactV1ContactsPostWithBodyWithResponse request with arbitrary body returning *CreateContactV1ContactsPostResponse
+func (c *ClientWithResponses) CreateContactV1ContactsPostWithBodyWithResponse(ctx context.Context, params *CreateContactV1ContactsPostParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CreateContactV1ContactsPostResponse, error) {
+	rsp, err := c.CreateContactV1ContactsPostWithBody(ctx, params, contentType, body, reqEditors...)
 	if err != nil {
 		return nil, err
 	}
-	return ParseAcquireNumberNumbersPostResponse(rsp)
+	return ParseCreateContactV1ContactsPostResponse(rsp)
 }
 
-// ReleaseNumberNumbersNumberIdDeleteWithResponse request returning *ReleaseNumberNumbersNumberIdDeleteResponse
-func (c *ClientWithResponses) ReleaseNumberNumbersNumberIdDeleteWithResponse(ctx context.Context, numberId openapi_types.UUID, params *ReleaseNumberNumbersNumberIdDeleteParams, reqEditors ...RequestEditorFn) (*ReleaseNumberNumbersNumberIdDeleteResponse, error) {
-	rsp, err := c.ReleaseNumberNumbersNumberIdDelete(ctx, numberId, params, reqEditors...)
+func (c *ClientWithResponses) CreateContactV1ContactsPostWithResponse(ctx context.Context, params *CreateContactV1ContactsPostParams, body CreateContactV1ContactsPostJSONRequestBody, reqEditors ...RequestEditorFn) (*CreateContactV1ContactsPostResponse, error) {
+	rsp, err := c.CreateContactV1ContactsPost(ctx, params, body, reqEditors...)
 	if err != nil {
 		return nil, err
 	}
-	return ParseReleaseNumberNumbersNumberIdDeleteResponse(rsp)
+	return ParseCreateContactV1ContactsPostResponse(rsp)
 }
 
-// GetNumberNumbersNumberIdGetWithResponse request returning *GetNumberNumbersNumberIdGetResponse
-func (c *ClientWithResponses) GetNumberNumbersNumberIdGetWithResponse(ctx context.Context, numberId openapi_types.UUID, params *GetNumberNumbersNumberIdGetParams, reqEditors ...RequestEditorFn) (*GetNumberNumbersNumberIdGetResponse, error) {
-	rsp, err := c.GetNumberNumbersNumberIdGet(ctx, numberId, params, reqEditors...)
+// DeleteContactV1ContactsContactIdDeleteWithResponse request returning *DeleteContactV1ContactsContactIdDeleteResponse
+func (c *ClientWithResponses) DeleteContactV1ContactsContactIdDeleteWithResponse(ctx context.Context, contactId string, params *DeleteContactV1ContactsContactIdDeleteParams, reqEditors ...RequestEditorFn) (*DeleteContactV1ContactsContactIdDeleteResponse, error) {
+	rsp, err := c.DeleteContactV1ContactsContactIdDelete(ctx, contactId, params, reqEditors...)
 	if err != nil {
 		return nil, err
 	}
-	return ParseGetNumberNumbersNumberIdGetResponse(rsp)
+	return ParseDeleteContactV1ContactsContactIdDeleteResponse(rsp)
 }
 
-// EnableSmsNumbersNumberIdEnableSmsPostWithResponse request returning *EnableSmsNumbersNumberIdEnableSmsPostResponse
-func (c *ClientWithResponses) EnableSmsNumbersNumberIdEnableSmsPostWithResponse(ctx context.Context, numberId openapi_types.UUID, params *EnableSmsNumbersNumberIdEnableSmsPostParams, reqEditors ...RequestEditorFn) (*EnableSmsNumbersNumberIdEnableSmsPostResponse, error) {
-	rsp, err := c.EnableSmsNumbersNumberIdEnableSmsPost(ctx, numberId, params, reqEditors...)
+// PatchContactV1ContactsContactIdPatchWithBodyWithResponse request with arbitrary body returning *PatchContactV1ContactsContactIdPatchResponse
+func (c *ClientWithResponses) PatchContactV1ContactsContactIdPatchWithBodyWithResponse(ctx context.Context, contactId string, params *PatchContactV1ContactsContactIdPatchParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*PatchContactV1ContactsContactIdPatchResponse, error) {
+	rsp, err := c.PatchContactV1ContactsContactIdPatchWithBody(ctx, contactId, params, contentType, body, reqEditors...)
 	if err != nil {
 		return nil, err
 	}
-	return ParseEnableSmsNumbersNumberIdEnableSmsPostResponse(rsp)
+	return ParsePatchContactV1ContactsContactIdPatchResponse(rsp)
+}
+
+func (c *ClientWithResponses) PatchContactV1ContactsContactIdPatchWithResponse(ctx context.Context, contactId string, params *PatchContactV1ContactsContactIdPatchParams, body PatchContactV1ContactsContactIdPatchJSONRequestBody, reqEditors ...RequestEditorFn) (*PatchContactV1ContactsContactIdPatchResponse, error) {
+	rsp, err := c.PatchContactV1ContactsContactIdPatch(ctx, contactId, params, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParsePatchContactV1ContactsContactIdPatchResponse(rsp)
+}
+
+// UploadEmailAttachmentWithBodyWithResponse request with arbitrary body returning *UploadEmailAttachmentResponse
+func (c *ClientWithResponses) UploadEmailAttachmentWithBodyWithResponse(ctx context.Context, params *UploadEmailAttachmentParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*UploadEmailAttachmentResponse, error) {
+	rsp, err := c.UploadEmailAttachmentWithBody(ctx, params, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseUploadEmailAttachmentResponse(rsp)
+}
+
+// ListEmailDomainsV1EmailDomainsGetWithResponse request returning *ListEmailDomainsV1EmailDomainsGetResponse
+func (c *ClientWithResponses) ListEmailDomainsV1EmailDomainsGetWithResponse(ctx context.Context, params *ListEmailDomainsV1EmailDomainsGetParams, reqEditors ...RequestEditorFn) (*ListEmailDomainsV1EmailDomainsGetResponse, error) {
+	rsp, err := c.ListEmailDomainsV1EmailDomainsGet(ctx, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseListEmailDomainsV1EmailDomainsGetResponse(rsp)
+}
+
+// CreateEmailDomainV1EmailDomainsPostWithBodyWithResponse request with arbitrary body returning *CreateEmailDomainV1EmailDomainsPostResponse
+func (c *ClientWithResponses) CreateEmailDomainV1EmailDomainsPostWithBodyWithResponse(ctx context.Context, params *CreateEmailDomainV1EmailDomainsPostParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CreateEmailDomainV1EmailDomainsPostResponse, error) {
+	rsp, err := c.CreateEmailDomainV1EmailDomainsPostWithBody(ctx, params, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseCreateEmailDomainV1EmailDomainsPostResponse(rsp)
+}
+
+func (c *ClientWithResponses) CreateEmailDomainV1EmailDomainsPostWithResponse(ctx context.Context, params *CreateEmailDomainV1EmailDomainsPostParams, body CreateEmailDomainV1EmailDomainsPostJSONRequestBody, reqEditors ...RequestEditorFn) (*CreateEmailDomainV1EmailDomainsPostResponse, error) {
+	rsp, err := c.CreateEmailDomainV1EmailDomainsPost(ctx, params, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseCreateEmailDomainV1EmailDomainsPostResponse(rsp)
+}
+
+// CheckDomainV1EmailDomainsCheckDomainGetWithResponse request returning *CheckDomainV1EmailDomainsCheckDomainGetResponse
+func (c *ClientWithResponses) CheckDomainV1EmailDomainsCheckDomainGetWithResponse(ctx context.Context, params *CheckDomainV1EmailDomainsCheckDomainGetParams, reqEditors ...RequestEditorFn) (*CheckDomainV1EmailDomainsCheckDomainGetResponse, error) {
+	rsp, err := c.CheckDomainV1EmailDomainsCheckDomainGet(ctx, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseCheckDomainV1EmailDomainsCheckDomainGetResponse(rsp)
+}
+
+// DeleteEmailDomainV1EmailDomainsDomainIdDeleteWithResponse request returning *DeleteEmailDomainV1EmailDomainsDomainIdDeleteResponse
+func (c *ClientWithResponses) DeleteEmailDomainV1EmailDomainsDomainIdDeleteWithResponse(ctx context.Context, domainId openapi_types.UUID, params *DeleteEmailDomainV1EmailDomainsDomainIdDeleteParams, reqEditors ...RequestEditorFn) (*DeleteEmailDomainV1EmailDomainsDomainIdDeleteResponse, error) {
+	rsp, err := c.DeleteEmailDomainV1EmailDomainsDomainIdDelete(ctx, domainId, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseDeleteEmailDomainV1EmailDomainsDomainIdDeleteResponse(rsp)
+}
+
+// GetEmailDomainV1EmailDomainsDomainIdGetWithResponse request returning *GetEmailDomainV1EmailDomainsDomainIdGetResponse
+func (c *ClientWithResponses) GetEmailDomainV1EmailDomainsDomainIdGetWithResponse(ctx context.Context, domainId openapi_types.UUID, params *GetEmailDomainV1EmailDomainsDomainIdGetParams, reqEditors ...RequestEditorFn) (*GetEmailDomainV1EmailDomainsDomainIdGetResponse, error) {
+	rsp, err := c.GetEmailDomainV1EmailDomainsDomainIdGet(ctx, domainId, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetEmailDomainV1EmailDomainsDomainIdGetResponse(rsp)
+}
+
+// PatchEmailDomainV1EmailDomainsDomainIdPatchWithBodyWithResponse request with arbitrary body returning *PatchEmailDomainV1EmailDomainsDomainIdPatchResponse
+func (c *ClientWithResponses) PatchEmailDomainV1EmailDomainsDomainIdPatchWithBodyWithResponse(ctx context.Context, domainId openapi_types.UUID, params *PatchEmailDomainV1EmailDomainsDomainIdPatchParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*PatchEmailDomainV1EmailDomainsDomainIdPatchResponse, error) {
+	rsp, err := c.PatchEmailDomainV1EmailDomainsDomainIdPatchWithBody(ctx, domainId, params, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParsePatchEmailDomainV1EmailDomainsDomainIdPatchResponse(rsp)
+}
+
+func (c *ClientWithResponses) PatchEmailDomainV1EmailDomainsDomainIdPatchWithResponse(ctx context.Context, domainId openapi_types.UUID, params *PatchEmailDomainV1EmailDomainsDomainIdPatchParams, body PatchEmailDomainV1EmailDomainsDomainIdPatchJSONRequestBody, reqEditors ...RequestEditorFn) (*PatchEmailDomainV1EmailDomainsDomainIdPatchResponse, error) {
+	rsp, err := c.PatchEmailDomainV1EmailDomainsDomainIdPatch(ctx, domainId, params, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParsePatchEmailDomainV1EmailDomainsDomainIdPatchResponse(rsp)
+}
+
+// VerifyEmailDomainV1EmailDomainsDomainIdVerifyPostWithResponse request returning *VerifyEmailDomainV1EmailDomainsDomainIdVerifyPostResponse
+func (c *ClientWithResponses) VerifyEmailDomainV1EmailDomainsDomainIdVerifyPostWithResponse(ctx context.Context, domainId openapi_types.UUID, params *VerifyEmailDomainV1EmailDomainsDomainIdVerifyPostParams, reqEditors ...RequestEditorFn) (*VerifyEmailDomainV1EmailDomainsDomainIdVerifyPostResponse, error) {
+	rsp, err := c.VerifyEmailDomainV1EmailDomainsDomainIdVerifyPost(ctx, domainId, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseVerifyEmailDomainV1EmailDomainsDomainIdVerifyPostResponse(rsp)
+}
+
+// ListEmailsV1EmailsGetWithResponse request returning *ListEmailsV1EmailsGetResponse
+func (c *ClientWithResponses) ListEmailsV1EmailsGetWithResponse(ctx context.Context, params *ListEmailsV1EmailsGetParams, reqEditors ...RequestEditorFn) (*ListEmailsV1EmailsGetResponse, error) {
+	rsp, err := c.ListEmailsV1EmailsGet(ctx, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseListEmailsV1EmailsGetResponse(rsp)
+}
+
+// CreateEmailV1EmailsPostWithBodyWithResponse request with arbitrary body returning *CreateEmailV1EmailsPostResponse
+func (c *ClientWithResponses) CreateEmailV1EmailsPostWithBodyWithResponse(ctx context.Context, params *CreateEmailV1EmailsPostParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CreateEmailV1EmailsPostResponse, error) {
+	rsp, err := c.CreateEmailV1EmailsPostWithBody(ctx, params, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseCreateEmailV1EmailsPostResponse(rsp)
+}
+
+func (c *ClientWithResponses) CreateEmailV1EmailsPostWithResponse(ctx context.Context, params *CreateEmailV1EmailsPostParams, body CreateEmailV1EmailsPostJSONRequestBody, reqEditors ...RequestEditorFn) (*CreateEmailV1EmailsPostResponse, error) {
+	rsp, err := c.CreateEmailV1EmailsPost(ctx, params, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseCreateEmailV1EmailsPostResponse(rsp)
+}
+
+// GetEmailStatsV1EmailsStatsGetWithResponse request returning *GetEmailStatsV1EmailsStatsGetResponse
+func (c *ClientWithResponses) GetEmailStatsV1EmailsStatsGetWithResponse(ctx context.Context, params *GetEmailStatsV1EmailsStatsGetParams, reqEditors ...RequestEditorFn) (*GetEmailStatsV1EmailsStatsGetResponse, error) {
+	rsp, err := c.GetEmailStatsV1EmailsStatsGet(ctx, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetEmailStatsV1EmailsStatsGetResponse(rsp)
+}
+
+// GetEmailV1EmailsEmailIdGetWithResponse request returning *GetEmailV1EmailsEmailIdGetResponse
+func (c *ClientWithResponses) GetEmailV1EmailsEmailIdGetWithResponse(ctx context.Context, emailId openapi_types.UUID, params *GetEmailV1EmailsEmailIdGetParams, reqEditors ...RequestEditorFn) (*GetEmailV1EmailsEmailIdGetResponse, error) {
+	rsp, err := c.GetEmailV1EmailsEmailIdGet(ctx, emailId, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetEmailV1EmailsEmailIdGetResponse(rsp)
+}
+
+// GetEmailAttachmentV1EmailsEmailIdAttachmentsAttachmentIdGetWithResponse request returning *GetEmailAttachmentV1EmailsEmailIdAttachmentsAttachmentIdGetResponse
+func (c *ClientWithResponses) GetEmailAttachmentV1EmailsEmailIdAttachmentsAttachmentIdGetWithResponse(ctx context.Context, emailId openapi_types.UUID, attachmentId openapi_types.UUID, params *GetEmailAttachmentV1EmailsEmailIdAttachmentsAttachmentIdGetParams, reqEditors ...RequestEditorFn) (*GetEmailAttachmentV1EmailsEmailIdAttachmentsAttachmentIdGetResponse, error) {
+	rsp, err := c.GetEmailAttachmentV1EmailsEmailIdAttachmentsAttachmentIdGet(ctx, emailId, attachmentId, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetEmailAttachmentV1EmailsEmailIdAttachmentsAttachmentIdGetResponse(rsp)
+}
+
+// ListEmailEventsV1EmailsEmailIdEventsGetWithResponse request returning *ListEmailEventsV1EmailsEmailIdEventsGetResponse
+func (c *ClientWithResponses) ListEmailEventsV1EmailsEmailIdEventsGetWithResponse(ctx context.Context, emailId openapi_types.UUID, params *ListEmailEventsV1EmailsEmailIdEventsGetParams, reqEditors ...RequestEditorFn) (*ListEmailEventsV1EmailsEmailIdEventsGetResponse, error) {
+	rsp, err := c.ListEmailEventsV1EmailsEmailIdEventsGet(ctx, emailId, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseListEmailEventsV1EmailsEmailIdEventsGetResponse(rsp)
+}
+
+// GetEmailRawV1EmailsEmailIdRawGetWithResponse request returning *GetEmailRawV1EmailsEmailIdRawGetResponse
+func (c *ClientWithResponses) GetEmailRawV1EmailsEmailIdRawGetWithResponse(ctx context.Context, emailId openapi_types.UUID, params *GetEmailRawV1EmailsEmailIdRawGetParams, reqEditors ...RequestEditorFn) (*GetEmailRawV1EmailsEmailIdRawGetResponse, error) {
+	rsp, err := c.GetEmailRawV1EmailsEmailIdRawGet(ctx, emailId, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetEmailRawV1EmailsEmailIdRawGetResponse(rsp)
+}
+
+// ListEventsV1EventsGetWithResponse request returning *ListEventsV1EventsGetResponse
+func (c *ClientWithResponses) ListEventsV1EventsGetWithResponse(ctx context.Context, params *ListEventsV1EventsGetParams, reqEditors ...RequestEditorFn) (*ListEventsV1EventsGetResponse, error) {
+	rsp, err := c.ListEventsV1EventsGet(ctx, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseListEventsV1EventsGetResponse(rsp)
+}
+
+// DeleteMemberPhoneV1MembersUserIdPhoneDeleteWithResponse request returning *DeleteMemberPhoneV1MembersUserIdPhoneDeleteResponse
+func (c *ClientWithResponses) DeleteMemberPhoneV1MembersUserIdPhoneDeleteWithResponse(ctx context.Context, userId string, params *DeleteMemberPhoneV1MembersUserIdPhoneDeleteParams, reqEditors ...RequestEditorFn) (*DeleteMemberPhoneV1MembersUserIdPhoneDeleteResponse, error) {
+	rsp, err := c.DeleteMemberPhoneV1MembersUserIdPhoneDelete(ctx, userId, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseDeleteMemberPhoneV1MembersUserIdPhoneDeleteResponse(rsp)
+}
+
+// PutMemberPhoneV1MembersUserIdPhonePutWithBodyWithResponse request with arbitrary body returning *PutMemberPhoneV1MembersUserIdPhonePutResponse
+func (c *ClientWithResponses) PutMemberPhoneV1MembersUserIdPhonePutWithBodyWithResponse(ctx context.Context, userId string, params *PutMemberPhoneV1MembersUserIdPhonePutParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*PutMemberPhoneV1MembersUserIdPhonePutResponse, error) {
+	rsp, err := c.PutMemberPhoneV1MembersUserIdPhonePutWithBody(ctx, userId, params, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParsePutMemberPhoneV1MembersUserIdPhonePutResponse(rsp)
+}
+
+func (c *ClientWithResponses) PutMemberPhoneV1MembersUserIdPhonePutWithResponse(ctx context.Context, userId string, params *PutMemberPhoneV1MembersUserIdPhonePutParams, body PutMemberPhoneV1MembersUserIdPhonePutJSONRequestBody, reqEditors ...RequestEditorFn) (*PutMemberPhoneV1MembersUserIdPhonePutResponse, error) {
+	rsp, err := c.PutMemberPhoneV1MembersUserIdPhonePut(ctx, userId, params, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParsePutMemberPhoneV1MembersUserIdPhonePutResponse(rsp)
+}
+
+// ListNumbersV1NumbersGetWithResponse request returning *ListNumbersV1NumbersGetResponse
+func (c *ClientWithResponses) ListNumbersV1NumbersGetWithResponse(ctx context.Context, params *ListNumbersV1NumbersGetParams, reqEditors ...RequestEditorFn) (*ListNumbersV1NumbersGetResponse, error) {
+	rsp, err := c.ListNumbersV1NumbersGet(ctx, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseListNumbersV1NumbersGetResponse(rsp)
+}
+
+// AcquireNumberV1NumbersPostWithBodyWithResponse request with arbitrary body returning *AcquireNumberV1NumbersPostResponse
+func (c *ClientWithResponses) AcquireNumberV1NumbersPostWithBodyWithResponse(ctx context.Context, params *AcquireNumberV1NumbersPostParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*AcquireNumberV1NumbersPostResponse, error) {
+	rsp, err := c.AcquireNumberV1NumbersPostWithBody(ctx, params, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseAcquireNumberV1NumbersPostResponse(rsp)
+}
+
+func (c *ClientWithResponses) AcquireNumberV1NumbersPostWithResponse(ctx context.Context, params *AcquireNumberV1NumbersPostParams, body AcquireNumberV1NumbersPostJSONRequestBody, reqEditors ...RequestEditorFn) (*AcquireNumberV1NumbersPostResponse, error) {
+	rsp, err := c.AcquireNumberV1NumbersPost(ctx, params, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseAcquireNumberV1NumbersPostResponse(rsp)
+}
+
+// ReleaseNumberV1NumbersNumberIdDeleteWithResponse request returning *ReleaseNumberV1NumbersNumberIdDeleteResponse
+func (c *ClientWithResponses) ReleaseNumberV1NumbersNumberIdDeleteWithResponse(ctx context.Context, numberId openapi_types.UUID, params *ReleaseNumberV1NumbersNumberIdDeleteParams, reqEditors ...RequestEditorFn) (*ReleaseNumberV1NumbersNumberIdDeleteResponse, error) {
+	rsp, err := c.ReleaseNumberV1NumbersNumberIdDelete(ctx, numberId, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseReleaseNumberV1NumbersNumberIdDeleteResponse(rsp)
+}
+
+// GetNumberV1NumbersNumberIdGetWithResponse request returning *GetNumberV1NumbersNumberIdGetResponse
+func (c *ClientWithResponses) GetNumberV1NumbersNumberIdGetWithResponse(ctx context.Context, numberId openapi_types.UUID, params *GetNumberV1NumbersNumberIdGetParams, reqEditors ...RequestEditorFn) (*GetNumberV1NumbersNumberIdGetResponse, error) {
+	rsp, err := c.GetNumberV1NumbersNumberIdGet(ctx, numberId, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetNumberV1NumbersNumberIdGetResponse(rsp)
+}
+
+// EnableSmsV1NumbersNumberIdEnableSmsPostWithResponse request returning *EnableSmsV1NumbersNumberIdEnableSmsPostResponse
+func (c *ClientWithResponses) EnableSmsV1NumbersNumberIdEnableSmsPostWithResponse(ctx context.Context, numberId openapi_types.UUID, params *EnableSmsV1NumbersNumberIdEnableSmsPostParams, reqEditors ...RequestEditorFn) (*EnableSmsV1NumbersNumberIdEnableSmsPostResponse, error) {
+	rsp, err := c.EnableSmsV1NumbersNumberIdEnableSmsPost(ctx, numberId, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseEnableSmsV1NumbersNumberIdEnableSmsPostResponse(rsp)
 }
 
 // ListProvidersWithResponse request returning *ListProvidersResponse
@@ -8546,200 +9120,226 @@ func (c *ClientWithResponses) DeleteProviderWithResponse(ctx context.Context, la
 	return ParseDeleteProviderResponse(rsp)
 }
 
-// ListSmsSmsGetWithResponse request returning *ListSmsSmsGetResponse
-func (c *ClientWithResponses) ListSmsSmsGetWithResponse(ctx context.Context, params *ListSmsSmsGetParams, reqEditors ...RequestEditorFn) (*ListSmsSmsGetResponse, error) {
-	rsp, err := c.ListSmsSmsGet(ctx, params, reqEditors...)
+// ListSmsV1SmsGetWithResponse request returning *ListSmsV1SmsGetResponse
+func (c *ClientWithResponses) ListSmsV1SmsGetWithResponse(ctx context.Context, params *ListSmsV1SmsGetParams, reqEditors ...RequestEditorFn) (*ListSmsV1SmsGetResponse, error) {
+	rsp, err := c.ListSmsV1SmsGet(ctx, params, reqEditors...)
 	if err != nil {
 		return nil, err
 	}
-	return ParseListSmsSmsGetResponse(rsp)
+	return ParseListSmsV1SmsGetResponse(rsp)
 }
 
-// CreateSmsSmsPostWithBodyWithResponse request with arbitrary body returning *CreateSmsSmsPostResponse
-func (c *ClientWithResponses) CreateSmsSmsPostWithBodyWithResponse(ctx context.Context, params *CreateSmsSmsPostParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CreateSmsSmsPostResponse, error) {
-	rsp, err := c.CreateSmsSmsPostWithBody(ctx, params, contentType, body, reqEditors...)
+// CreateSmsV1SmsPostWithBodyWithResponse request with arbitrary body returning *CreateSmsV1SmsPostResponse
+func (c *ClientWithResponses) CreateSmsV1SmsPostWithBodyWithResponse(ctx context.Context, params *CreateSmsV1SmsPostParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CreateSmsV1SmsPostResponse, error) {
+	rsp, err := c.CreateSmsV1SmsPostWithBody(ctx, params, contentType, body, reqEditors...)
 	if err != nil {
 		return nil, err
 	}
-	return ParseCreateSmsSmsPostResponse(rsp)
+	return ParseCreateSmsV1SmsPostResponse(rsp)
 }
 
-func (c *ClientWithResponses) CreateSmsSmsPostWithResponse(ctx context.Context, params *CreateSmsSmsPostParams, body CreateSmsSmsPostJSONRequestBody, reqEditors ...RequestEditorFn) (*CreateSmsSmsPostResponse, error) {
-	rsp, err := c.CreateSmsSmsPost(ctx, params, body, reqEditors...)
+func (c *ClientWithResponses) CreateSmsV1SmsPostWithResponse(ctx context.Context, params *CreateSmsV1SmsPostParams, body CreateSmsV1SmsPostJSONRequestBody, reqEditors ...RequestEditorFn) (*CreateSmsV1SmsPostResponse, error) {
+	rsp, err := c.CreateSmsV1SmsPost(ctx, params, body, reqEditors...)
 	if err != nil {
 		return nil, err
 	}
-	return ParseCreateSmsSmsPostResponse(rsp)
+	return ParseCreateSmsV1SmsPostResponse(rsp)
 }
 
-// GetSenderIdSmsSenderIdGetWithResponse request returning *GetSenderIdSmsSenderIdGetResponse
-func (c *ClientWithResponses) GetSenderIdSmsSenderIdGetWithResponse(ctx context.Context, params *GetSenderIdSmsSenderIdGetParams, reqEditors ...RequestEditorFn) (*GetSenderIdSmsSenderIdGetResponse, error) {
-	rsp, err := c.GetSenderIdSmsSenderIdGet(ctx, params, reqEditors...)
+// GetSenderIdV1SmsSenderIdGetWithResponse request returning *GetSenderIdV1SmsSenderIdGetResponse
+func (c *ClientWithResponses) GetSenderIdV1SmsSenderIdGetWithResponse(ctx context.Context, params *GetSenderIdV1SmsSenderIdGetParams, reqEditors ...RequestEditorFn) (*GetSenderIdV1SmsSenderIdGetResponse, error) {
+	rsp, err := c.GetSenderIdV1SmsSenderIdGet(ctx, params, reqEditors...)
 	if err != nil {
 		return nil, err
 	}
-	return ParseGetSenderIdSmsSenderIdGetResponse(rsp)
+	return ParseGetSenderIdV1SmsSenderIdGetResponse(rsp)
 }
 
-// PatchSenderIdSmsSenderIdPatchWithBodyWithResponse request with arbitrary body returning *PatchSenderIdSmsSenderIdPatchResponse
-func (c *ClientWithResponses) PatchSenderIdSmsSenderIdPatchWithBodyWithResponse(ctx context.Context, params *PatchSenderIdSmsSenderIdPatchParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*PatchSenderIdSmsSenderIdPatchResponse, error) {
-	rsp, err := c.PatchSenderIdSmsSenderIdPatchWithBody(ctx, params, contentType, body, reqEditors...)
+// PatchSenderIdV1SmsSenderIdPatchWithBodyWithResponse request with arbitrary body returning *PatchSenderIdV1SmsSenderIdPatchResponse
+func (c *ClientWithResponses) PatchSenderIdV1SmsSenderIdPatchWithBodyWithResponse(ctx context.Context, params *PatchSenderIdV1SmsSenderIdPatchParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*PatchSenderIdV1SmsSenderIdPatchResponse, error) {
+	rsp, err := c.PatchSenderIdV1SmsSenderIdPatchWithBody(ctx, params, contentType, body, reqEditors...)
 	if err != nil {
 		return nil, err
 	}
-	return ParsePatchSenderIdSmsSenderIdPatchResponse(rsp)
+	return ParsePatchSenderIdV1SmsSenderIdPatchResponse(rsp)
 }
 
-func (c *ClientWithResponses) PatchSenderIdSmsSenderIdPatchWithResponse(ctx context.Context, params *PatchSenderIdSmsSenderIdPatchParams, body PatchSenderIdSmsSenderIdPatchJSONRequestBody, reqEditors ...RequestEditorFn) (*PatchSenderIdSmsSenderIdPatchResponse, error) {
-	rsp, err := c.PatchSenderIdSmsSenderIdPatch(ctx, params, body, reqEditors...)
+func (c *ClientWithResponses) PatchSenderIdV1SmsSenderIdPatchWithResponse(ctx context.Context, params *PatchSenderIdV1SmsSenderIdPatchParams, body PatchSenderIdV1SmsSenderIdPatchJSONRequestBody, reqEditors ...RequestEditorFn) (*PatchSenderIdV1SmsSenderIdPatchResponse, error) {
+	rsp, err := c.PatchSenderIdV1SmsSenderIdPatch(ctx, params, body, reqEditors...)
 	if err != nil {
 		return nil, err
 	}
-	return ParsePatchSenderIdSmsSenderIdPatchResponse(rsp)
+	return ParsePatchSenderIdV1SmsSenderIdPatchResponse(rsp)
 }
 
-// ListSmsSuppressionsSmsSuppressionsGetWithResponse request returning *ListSmsSuppressionsSmsSuppressionsGetResponse
-func (c *ClientWithResponses) ListSmsSuppressionsSmsSuppressionsGetWithResponse(ctx context.Context, params *ListSmsSuppressionsSmsSuppressionsGetParams, reqEditors ...RequestEditorFn) (*ListSmsSuppressionsSmsSuppressionsGetResponse, error) {
-	rsp, err := c.ListSmsSuppressionsSmsSuppressionsGet(ctx, params, reqEditors...)
+// ListSmsSuppressionsV1SmsSuppressionsGetWithResponse request returning *ListSmsSuppressionsV1SmsSuppressionsGetResponse
+func (c *ClientWithResponses) ListSmsSuppressionsV1SmsSuppressionsGetWithResponse(ctx context.Context, params *ListSmsSuppressionsV1SmsSuppressionsGetParams, reqEditors ...RequestEditorFn) (*ListSmsSuppressionsV1SmsSuppressionsGetResponse, error) {
+	rsp, err := c.ListSmsSuppressionsV1SmsSuppressionsGet(ctx, params, reqEditors...)
 	if err != nil {
 		return nil, err
 	}
-	return ParseListSmsSuppressionsSmsSuppressionsGetResponse(rsp)
+	return ParseListSmsSuppressionsV1SmsSuppressionsGetResponse(rsp)
 }
 
-// DeleteSmsSuppressionSmsSuppressionsNumberDeleteWithResponse request returning *DeleteSmsSuppressionSmsSuppressionsNumberDeleteResponse
-func (c *ClientWithResponses) DeleteSmsSuppressionSmsSuppressionsNumberDeleteWithResponse(ctx context.Context, number string, params *DeleteSmsSuppressionSmsSuppressionsNumberDeleteParams, reqEditors ...RequestEditorFn) (*DeleteSmsSuppressionSmsSuppressionsNumberDeleteResponse, error) {
-	rsp, err := c.DeleteSmsSuppressionSmsSuppressionsNumberDelete(ctx, number, params, reqEditors...)
+// DeleteSmsSuppressionV1SmsSuppressionsNumberDeleteWithResponse request returning *DeleteSmsSuppressionV1SmsSuppressionsNumberDeleteResponse
+func (c *ClientWithResponses) DeleteSmsSuppressionV1SmsSuppressionsNumberDeleteWithResponse(ctx context.Context, number string, params *DeleteSmsSuppressionV1SmsSuppressionsNumberDeleteParams, reqEditors ...RequestEditorFn) (*DeleteSmsSuppressionV1SmsSuppressionsNumberDeleteResponse, error) {
+	rsp, err := c.DeleteSmsSuppressionV1SmsSuppressionsNumberDelete(ctx, number, params, reqEditors...)
 	if err != nil {
 		return nil, err
 	}
-	return ParseDeleteSmsSuppressionSmsSuppressionsNumberDeleteResponse(rsp)
+	return ParseDeleteSmsSuppressionV1SmsSuppressionsNumberDeleteResponse(rsp)
 }
 
-// GetSmsSmsSmsIdGetWithResponse request returning *GetSmsSmsSmsIdGetResponse
-func (c *ClientWithResponses) GetSmsSmsSmsIdGetWithResponse(ctx context.Context, smsId openapi_types.UUID, params *GetSmsSmsSmsIdGetParams, reqEditors ...RequestEditorFn) (*GetSmsSmsSmsIdGetResponse, error) {
-	rsp, err := c.GetSmsSmsSmsIdGet(ctx, smsId, params, reqEditors...)
+// GetSmsV1SmsSmsIdGetWithResponse request returning *GetSmsV1SmsSmsIdGetResponse
+func (c *ClientWithResponses) GetSmsV1SmsSmsIdGetWithResponse(ctx context.Context, smsId openapi_types.UUID, params *GetSmsV1SmsSmsIdGetParams, reqEditors ...RequestEditorFn) (*GetSmsV1SmsSmsIdGetResponse, error) {
+	rsp, err := c.GetSmsV1SmsSmsIdGet(ctx, smsId, params, reqEditors...)
 	if err != nil {
 		return nil, err
 	}
-	return ParseGetSmsSmsSmsIdGetResponse(rsp)
+	return ParseGetSmsV1SmsSmsIdGetResponse(rsp)
 }
 
-// UnsubscribeUnsubscribeGetWithResponse request returning *UnsubscribeUnsubscribeGetResponse
-func (c *ClientWithResponses) UnsubscribeUnsubscribeGetWithResponse(ctx context.Context, params *UnsubscribeUnsubscribeGetParams, reqEditors ...RequestEditorFn) (*UnsubscribeUnsubscribeGetResponse, error) {
-	rsp, err := c.UnsubscribeUnsubscribeGet(ctx, params, reqEditors...)
+// UnsubscribeV1UnsubscribeGetWithResponse request returning *UnsubscribeV1UnsubscribeGetResponse
+func (c *ClientWithResponses) UnsubscribeV1UnsubscribeGetWithResponse(ctx context.Context, params *UnsubscribeV1UnsubscribeGetParams, reqEditors ...RequestEditorFn) (*UnsubscribeV1UnsubscribeGetResponse, error) {
+	rsp, err := c.UnsubscribeV1UnsubscribeGet(ctx, params, reqEditors...)
 	if err != nil {
 		return nil, err
 	}
-	return ParseUnsubscribeUnsubscribeGetResponse(rsp)
+	return ParseUnsubscribeV1UnsubscribeGetResponse(rsp)
 }
 
-// ListSubscriptionsWebhooksGetWithResponse request returning *ListSubscriptionsWebhooksGetResponse
-func (c *ClientWithResponses) ListSubscriptionsWebhooksGetWithResponse(ctx context.Context, params *ListSubscriptionsWebhooksGetParams, reqEditors ...RequestEditorFn) (*ListSubscriptionsWebhooksGetResponse, error) {
-	rsp, err := c.ListSubscriptionsWebhooksGet(ctx, params, reqEditors...)
+// ListSubscriptionsV1WebhooksGetWithResponse request returning *ListSubscriptionsV1WebhooksGetResponse
+func (c *ClientWithResponses) ListSubscriptionsV1WebhooksGetWithResponse(ctx context.Context, params *ListSubscriptionsV1WebhooksGetParams, reqEditors ...RequestEditorFn) (*ListSubscriptionsV1WebhooksGetResponse, error) {
+	rsp, err := c.ListSubscriptionsV1WebhooksGet(ctx, params, reqEditors...)
 	if err != nil {
 		return nil, err
 	}
-	return ParseListSubscriptionsWebhooksGetResponse(rsp)
+	return ParseListSubscriptionsV1WebhooksGetResponse(rsp)
 }
 
-// CreateSubscriptionWebhooksPostWithBodyWithResponse request with arbitrary body returning *CreateSubscriptionWebhooksPostResponse
-func (c *ClientWithResponses) CreateSubscriptionWebhooksPostWithBodyWithResponse(ctx context.Context, params *CreateSubscriptionWebhooksPostParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CreateSubscriptionWebhooksPostResponse, error) {
-	rsp, err := c.CreateSubscriptionWebhooksPostWithBody(ctx, params, contentType, body, reqEditors...)
+// CreateSubscriptionV1WebhooksPostWithBodyWithResponse request with arbitrary body returning *CreateSubscriptionV1WebhooksPostResponse
+func (c *ClientWithResponses) CreateSubscriptionV1WebhooksPostWithBodyWithResponse(ctx context.Context, params *CreateSubscriptionV1WebhooksPostParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CreateSubscriptionV1WebhooksPostResponse, error) {
+	rsp, err := c.CreateSubscriptionV1WebhooksPostWithBody(ctx, params, contentType, body, reqEditors...)
 	if err != nil {
 		return nil, err
 	}
-	return ParseCreateSubscriptionWebhooksPostResponse(rsp)
+	return ParseCreateSubscriptionV1WebhooksPostResponse(rsp)
 }
 
-func (c *ClientWithResponses) CreateSubscriptionWebhooksPostWithResponse(ctx context.Context, params *CreateSubscriptionWebhooksPostParams, body CreateSubscriptionWebhooksPostJSONRequestBody, reqEditors ...RequestEditorFn) (*CreateSubscriptionWebhooksPostResponse, error) {
-	rsp, err := c.CreateSubscriptionWebhooksPost(ctx, params, body, reqEditors...)
+func (c *ClientWithResponses) CreateSubscriptionV1WebhooksPostWithResponse(ctx context.Context, params *CreateSubscriptionV1WebhooksPostParams, body CreateSubscriptionV1WebhooksPostJSONRequestBody, reqEditors ...RequestEditorFn) (*CreateSubscriptionV1WebhooksPostResponse, error) {
+	rsp, err := c.CreateSubscriptionV1WebhooksPost(ctx, params, body, reqEditors...)
 	if err != nil {
 		return nil, err
 	}
-	return ParseCreateSubscriptionWebhooksPostResponse(rsp)
+	return ParseCreateSubscriptionV1WebhooksPostResponse(rsp)
 }
 
-// DeleteSubscriptionWebhooksSubIdDeleteWithResponse request returning *DeleteSubscriptionWebhooksSubIdDeleteResponse
-func (c *ClientWithResponses) DeleteSubscriptionWebhooksSubIdDeleteWithResponse(ctx context.Context, subId openapi_types.UUID, params *DeleteSubscriptionWebhooksSubIdDeleteParams, reqEditors ...RequestEditorFn) (*DeleteSubscriptionWebhooksSubIdDeleteResponse, error) {
-	rsp, err := c.DeleteSubscriptionWebhooksSubIdDelete(ctx, subId, params, reqEditors...)
+// DeleteSubscriptionV1WebhooksSubIdDeleteWithResponse request returning *DeleteSubscriptionV1WebhooksSubIdDeleteResponse
+func (c *ClientWithResponses) DeleteSubscriptionV1WebhooksSubIdDeleteWithResponse(ctx context.Context, subId openapi_types.UUID, params *DeleteSubscriptionV1WebhooksSubIdDeleteParams, reqEditors ...RequestEditorFn) (*DeleteSubscriptionV1WebhooksSubIdDeleteResponse, error) {
+	rsp, err := c.DeleteSubscriptionV1WebhooksSubIdDelete(ctx, subId, params, reqEditors...)
 	if err != nil {
 		return nil, err
 	}
-	return ParseDeleteSubscriptionWebhooksSubIdDeleteResponse(rsp)
+	return ParseDeleteSubscriptionV1WebhooksSubIdDeleteResponse(rsp)
 }
 
-// GetSubscriptionWebhooksSubIdGetWithResponse request returning *GetSubscriptionWebhooksSubIdGetResponse
-func (c *ClientWithResponses) GetSubscriptionWebhooksSubIdGetWithResponse(ctx context.Context, subId openapi_types.UUID, params *GetSubscriptionWebhooksSubIdGetParams, reqEditors ...RequestEditorFn) (*GetSubscriptionWebhooksSubIdGetResponse, error) {
-	rsp, err := c.GetSubscriptionWebhooksSubIdGet(ctx, subId, params, reqEditors...)
+// GetSubscriptionV1WebhooksSubIdGetWithResponse request returning *GetSubscriptionV1WebhooksSubIdGetResponse
+func (c *ClientWithResponses) GetSubscriptionV1WebhooksSubIdGetWithResponse(ctx context.Context, subId openapi_types.UUID, params *GetSubscriptionV1WebhooksSubIdGetParams, reqEditors ...RequestEditorFn) (*GetSubscriptionV1WebhooksSubIdGetResponse, error) {
+	rsp, err := c.GetSubscriptionV1WebhooksSubIdGet(ctx, subId, params, reqEditors...)
 	if err != nil {
 		return nil, err
 	}
-	return ParseGetSubscriptionWebhooksSubIdGetResponse(rsp)
+	return ParseGetSubscriptionV1WebhooksSubIdGetResponse(rsp)
 }
 
-// PatchSubscriptionWebhooksSubIdPatchWithBodyWithResponse request with arbitrary body returning *PatchSubscriptionWebhooksSubIdPatchResponse
-func (c *ClientWithResponses) PatchSubscriptionWebhooksSubIdPatchWithBodyWithResponse(ctx context.Context, subId openapi_types.UUID, params *PatchSubscriptionWebhooksSubIdPatchParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*PatchSubscriptionWebhooksSubIdPatchResponse, error) {
-	rsp, err := c.PatchSubscriptionWebhooksSubIdPatchWithBody(ctx, subId, params, contentType, body, reqEditors...)
+// PatchSubscriptionV1WebhooksSubIdPatchWithBodyWithResponse request with arbitrary body returning *PatchSubscriptionV1WebhooksSubIdPatchResponse
+func (c *ClientWithResponses) PatchSubscriptionV1WebhooksSubIdPatchWithBodyWithResponse(ctx context.Context, subId openapi_types.UUID, params *PatchSubscriptionV1WebhooksSubIdPatchParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*PatchSubscriptionV1WebhooksSubIdPatchResponse, error) {
+	rsp, err := c.PatchSubscriptionV1WebhooksSubIdPatchWithBody(ctx, subId, params, contentType, body, reqEditors...)
 	if err != nil {
 		return nil, err
 	}
-	return ParsePatchSubscriptionWebhooksSubIdPatchResponse(rsp)
+	return ParsePatchSubscriptionV1WebhooksSubIdPatchResponse(rsp)
 }
 
-func (c *ClientWithResponses) PatchSubscriptionWebhooksSubIdPatchWithResponse(ctx context.Context, subId openapi_types.UUID, params *PatchSubscriptionWebhooksSubIdPatchParams, body PatchSubscriptionWebhooksSubIdPatchJSONRequestBody, reqEditors ...RequestEditorFn) (*PatchSubscriptionWebhooksSubIdPatchResponse, error) {
-	rsp, err := c.PatchSubscriptionWebhooksSubIdPatch(ctx, subId, params, body, reqEditors...)
+func (c *ClientWithResponses) PatchSubscriptionV1WebhooksSubIdPatchWithResponse(ctx context.Context, subId openapi_types.UUID, params *PatchSubscriptionV1WebhooksSubIdPatchParams, body PatchSubscriptionV1WebhooksSubIdPatchJSONRequestBody, reqEditors ...RequestEditorFn) (*PatchSubscriptionV1WebhooksSubIdPatchResponse, error) {
+	rsp, err := c.PatchSubscriptionV1WebhooksSubIdPatch(ctx, subId, params, body, reqEditors...)
 	if err != nil {
 		return nil, err
 	}
-	return ParsePatchSubscriptionWebhooksSubIdPatchResponse(rsp)
+	return ParsePatchSubscriptionV1WebhooksSubIdPatchResponse(rsp)
 }
 
-// ListDeliveriesWebhooksSubIdDeliveriesGetWithResponse request returning *ListDeliveriesWebhooksSubIdDeliveriesGetResponse
-func (c *ClientWithResponses) ListDeliveriesWebhooksSubIdDeliveriesGetWithResponse(ctx context.Context, subId openapi_types.UUID, params *ListDeliveriesWebhooksSubIdDeliveriesGetParams, reqEditors ...RequestEditorFn) (*ListDeliveriesWebhooksSubIdDeliveriesGetResponse, error) {
-	rsp, err := c.ListDeliveriesWebhooksSubIdDeliveriesGet(ctx, subId, params, reqEditors...)
+// ListDeliveriesV1WebhooksSubIdDeliveriesGetWithResponse request returning *ListDeliveriesV1WebhooksSubIdDeliveriesGetResponse
+func (c *ClientWithResponses) ListDeliveriesV1WebhooksSubIdDeliveriesGetWithResponse(ctx context.Context, subId openapi_types.UUID, params *ListDeliveriesV1WebhooksSubIdDeliveriesGetParams, reqEditors ...RequestEditorFn) (*ListDeliveriesV1WebhooksSubIdDeliveriesGetResponse, error) {
+	rsp, err := c.ListDeliveriesV1WebhooksSubIdDeliveriesGet(ctx, subId, params, reqEditors...)
 	if err != nil {
 		return nil, err
 	}
-	return ParseListDeliveriesWebhooksSubIdDeliveriesGetResponse(rsp)
+	return ParseListDeliveriesV1WebhooksSubIdDeliveriesGetResponse(rsp)
 }
 
-// RedeliverWebhooksSubIdDeliveriesDeliveryIdRedeliverPostWithResponse request returning *RedeliverWebhooksSubIdDeliveriesDeliveryIdRedeliverPostResponse
-func (c *ClientWithResponses) RedeliverWebhooksSubIdDeliveriesDeliveryIdRedeliverPostWithResponse(ctx context.Context, subId openapi_types.UUID, deliveryId openapi_types.UUID, params *RedeliverWebhooksSubIdDeliveriesDeliveryIdRedeliverPostParams, reqEditors ...RequestEditorFn) (*RedeliverWebhooksSubIdDeliveriesDeliveryIdRedeliverPostResponse, error) {
-	rsp, err := c.RedeliverWebhooksSubIdDeliveriesDeliveryIdRedeliverPost(ctx, subId, deliveryId, params, reqEditors...)
+// RedeliverV1WebhooksSubIdDeliveriesDeliveryIdRedeliverPostWithResponse request returning *RedeliverV1WebhooksSubIdDeliveriesDeliveryIdRedeliverPostResponse
+func (c *ClientWithResponses) RedeliverV1WebhooksSubIdDeliveriesDeliveryIdRedeliverPostWithResponse(ctx context.Context, subId openapi_types.UUID, deliveryId openapi_types.UUID, params *RedeliverV1WebhooksSubIdDeliveriesDeliveryIdRedeliverPostParams, reqEditors ...RequestEditorFn) (*RedeliverV1WebhooksSubIdDeliveriesDeliveryIdRedeliverPostResponse, error) {
+	rsp, err := c.RedeliverV1WebhooksSubIdDeliveriesDeliveryIdRedeliverPost(ctx, subId, deliveryId, params, reqEditors...)
 	if err != nil {
 		return nil, err
 	}
-	return ParseRedeliverWebhooksSubIdDeliveriesDeliveryIdRedeliverPostResponse(rsp)
+	return ParseRedeliverV1WebhooksSubIdDeliveriesDeliveryIdRedeliverPostResponse(rsp)
 }
 
-// RotateSecretWebhooksSubIdRotateSecretPostWithResponse request returning *RotateSecretWebhooksSubIdRotateSecretPostResponse
-func (c *ClientWithResponses) RotateSecretWebhooksSubIdRotateSecretPostWithResponse(ctx context.Context, subId openapi_types.UUID, params *RotateSecretWebhooksSubIdRotateSecretPostParams, reqEditors ...RequestEditorFn) (*RotateSecretWebhooksSubIdRotateSecretPostResponse, error) {
-	rsp, err := c.RotateSecretWebhooksSubIdRotateSecretPost(ctx, subId, params, reqEditors...)
+// RotateSecretV1WebhooksSubIdRotateSecretPostWithResponse request returning *RotateSecretV1WebhooksSubIdRotateSecretPostResponse
+func (c *ClientWithResponses) RotateSecretV1WebhooksSubIdRotateSecretPostWithResponse(ctx context.Context, subId openapi_types.UUID, params *RotateSecretV1WebhooksSubIdRotateSecretPostParams, reqEditors ...RequestEditorFn) (*RotateSecretV1WebhooksSubIdRotateSecretPostResponse, error) {
+	rsp, err := c.RotateSecretV1WebhooksSubIdRotateSecretPost(ctx, subId, params, reqEditors...)
 	if err != nil {
 		return nil, err
 	}
-	return ParseRotateSecretWebhooksSubIdRotateSecretPostResponse(rsp)
+	return ParseRotateSecretV1WebhooksSubIdRotateSecretPostResponse(rsp)
 }
 
-// GetWhoamiWhoamiGetWithResponse request returning *GetWhoamiWhoamiGetResponse
-func (c *ClientWithResponses) GetWhoamiWhoamiGetWithResponse(ctx context.Context, params *GetWhoamiWhoamiGetParams, reqEditors ...RequestEditorFn) (*GetWhoamiWhoamiGetResponse, error) {
-	rsp, err := c.GetWhoamiWhoamiGet(ctx, params, reqEditors...)
+// GetWhoamiV1WhoamiGetWithResponse request returning *GetWhoamiV1WhoamiGetResponse
+func (c *ClientWithResponses) GetWhoamiV1WhoamiGetWithResponse(ctx context.Context, params *GetWhoamiV1WhoamiGetParams, reqEditors ...RequestEditorFn) (*GetWhoamiV1WhoamiGetResponse, error) {
+	rsp, err := c.GetWhoamiV1WhoamiGet(ctx, params, reqEditors...)
 	if err != nil {
 		return nil, err
 	}
-	return ParseGetWhoamiWhoamiGetResponse(rsp)
+	return ParseGetWhoamiV1WhoamiGetResponse(rsp)
 }
 
-// ParseListCallsCallsGetResponse parses an HTTP response from a ListCallsCallsGetWithResponse call
-func ParseListCallsCallsGetResponse(rsp *http.Response) (*ListCallsCallsGetResponse, error) {
+// ParseHealthzHealthzGetResponse parses an HTTP response from a HealthzHealthzGetWithResponse call
+func ParseHealthzHealthzGetResponse(rsp *http.Response) (*HealthzHealthzGetResponse, error) {
 	bodyBytes, err := io.ReadAll(rsp.Body)
 	defer func() { _ = rsp.Body.Close() }()
 	if err != nil {
 		return nil, err
 	}
 
-	response := &ListCallsCallsGetResponse{
+	response := &HealthzHealthzGetResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest map[string]string
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseListCallsV1CallsGetResponse parses an HTTP response from a ListCallsV1CallsGetWithResponse call
+func ParseListCallsV1CallsGetResponse(rsp *http.Response) (*ListCallsV1CallsGetResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ListCallsV1CallsGetResponse{
 		Body:         bodyBytes,
 		HTTPResponse: rsp,
 	}
@@ -8764,15 +9364,15 @@ func ParseListCallsCallsGetResponse(rsp *http.Response) (*ListCallsCallsGetRespo
 	return response, nil
 }
 
-// ParseCreateCallCallsPostResponse parses an HTTP response from a CreateCallCallsPostWithResponse call
-func ParseCreateCallCallsPostResponse(rsp *http.Response) (*CreateCallCallsPostResponse, error) {
+// ParseCreateCallV1CallsPostResponse parses an HTTP response from a CreateCallV1CallsPostWithResponse call
+func ParseCreateCallV1CallsPostResponse(rsp *http.Response) (*CreateCallV1CallsPostResponse, error) {
 	bodyBytes, err := io.ReadAll(rsp.Body)
 	defer func() { _ = rsp.Body.Close() }()
 	if err != nil {
 		return nil, err
 	}
 
-	response := &CreateCallCallsPostResponse{
+	response := &CreateCallV1CallsPostResponse{
 		Body:         bodyBytes,
 		HTTPResponse: rsp,
 	}
@@ -8797,15 +9397,15 @@ func ParseCreateCallCallsPostResponse(rsp *http.Response) (*CreateCallCallsPostR
 	return response, nil
 }
 
-// ParseGetCallCallsCallIdGetResponse parses an HTTP response from a GetCallCallsCallIdGetWithResponse call
-func ParseGetCallCallsCallIdGetResponse(rsp *http.Response) (*GetCallCallsCallIdGetResponse, error) {
+// ParseGetCallV1CallsCallIdGetResponse parses an HTTP response from a GetCallV1CallsCallIdGetWithResponse call
+func ParseGetCallV1CallsCallIdGetResponse(rsp *http.Response) (*GetCallV1CallsCallIdGetResponse, error) {
 	bodyBytes, err := io.ReadAll(rsp.Body)
 	defer func() { _ = rsp.Body.Close() }()
 	if err != nil {
 		return nil, err
 	}
 
-	response := &GetCallCallsCallIdGetResponse{
+	response := &GetCallV1CallsCallIdGetResponse{
 		Body:         bodyBytes,
 		HTTPResponse: rsp,
 	}
@@ -8830,15 +9430,15 @@ func ParseGetCallCallsCallIdGetResponse(rsp *http.Response) (*GetCallCallsCallId
 	return response, nil
 }
 
-// ParseListContactsContactsGetResponse parses an HTTP response from a ListContactsContactsGetWithResponse call
-func ParseListContactsContactsGetResponse(rsp *http.Response) (*ListContactsContactsGetResponse, error) {
+// ParseListContactsV1ContactsGetResponse parses an HTTP response from a ListContactsV1ContactsGetWithResponse call
+func ParseListContactsV1ContactsGetResponse(rsp *http.Response) (*ListContactsV1ContactsGetResponse, error) {
 	bodyBytes, err := io.ReadAll(rsp.Body)
 	defer func() { _ = rsp.Body.Close() }()
 	if err != nil {
 		return nil, err
 	}
 
-	response := &ListContactsContactsGetResponse{
+	response := &ListContactsV1ContactsGetResponse{
 		Body:         bodyBytes,
 		HTTPResponse: rsp,
 	}
@@ -8863,15 +9463,15 @@ func ParseListContactsContactsGetResponse(rsp *http.Response) (*ListContactsCont
 	return response, nil
 }
 
-// ParseCreateContactContactsPostResponse parses an HTTP response from a CreateContactContactsPostWithResponse call
-func ParseCreateContactContactsPostResponse(rsp *http.Response) (*CreateContactContactsPostResponse, error) {
+// ParseCreateContactV1ContactsPostResponse parses an HTTP response from a CreateContactV1ContactsPostWithResponse call
+func ParseCreateContactV1ContactsPostResponse(rsp *http.Response) (*CreateContactV1ContactsPostResponse, error) {
 	bodyBytes, err := io.ReadAll(rsp.Body)
 	defer func() { _ = rsp.Body.Close() }()
 	if err != nil {
 		return nil, err
 	}
 
-	response := &CreateContactContactsPostResponse{
+	response := &CreateContactV1ContactsPostResponse{
 		Body:         bodyBytes,
 		HTTPResponse: rsp,
 	}
@@ -8896,15 +9496,15 @@ func ParseCreateContactContactsPostResponse(rsp *http.Response) (*CreateContactC
 	return response, nil
 }
 
-// ParseDeleteContactContactsContactIdDeleteResponse parses an HTTP response from a DeleteContactContactsContactIdDeleteWithResponse call
-func ParseDeleteContactContactsContactIdDeleteResponse(rsp *http.Response) (*DeleteContactContactsContactIdDeleteResponse, error) {
+// ParseDeleteContactV1ContactsContactIdDeleteResponse parses an HTTP response from a DeleteContactV1ContactsContactIdDeleteWithResponse call
+func ParseDeleteContactV1ContactsContactIdDeleteResponse(rsp *http.Response) (*DeleteContactV1ContactsContactIdDeleteResponse, error) {
 	bodyBytes, err := io.ReadAll(rsp.Body)
 	defer func() { _ = rsp.Body.Close() }()
 	if err != nil {
 		return nil, err
 	}
 
-	response := &DeleteContactContactsContactIdDeleteResponse{
+	response := &DeleteContactV1ContactsContactIdDeleteResponse{
 		Body:         bodyBytes,
 		HTTPResponse: rsp,
 	}
@@ -8922,15 +9522,15 @@ func ParseDeleteContactContactsContactIdDeleteResponse(rsp *http.Response) (*Del
 	return response, nil
 }
 
-// ParsePatchContactContactsContactIdPatchResponse parses an HTTP response from a PatchContactContactsContactIdPatchWithResponse call
-func ParsePatchContactContactsContactIdPatchResponse(rsp *http.Response) (*PatchContactContactsContactIdPatchResponse, error) {
+// ParsePatchContactV1ContactsContactIdPatchResponse parses an HTTP response from a PatchContactV1ContactsContactIdPatchWithResponse call
+func ParsePatchContactV1ContactsContactIdPatchResponse(rsp *http.Response) (*PatchContactV1ContactsContactIdPatchResponse, error) {
 	bodyBytes, err := io.ReadAll(rsp.Body)
 	defer func() { _ = rsp.Body.Close() }()
 	if err != nil {
 		return nil, err
 	}
 
-	response := &PatchContactContactsContactIdPatchResponse{
+	response := &PatchContactV1ContactsContactIdPatchResponse{
 		Body:         bodyBytes,
 		HTTPResponse: rsp,
 	}
@@ -8988,15 +9588,15 @@ func ParseUploadEmailAttachmentResponse(rsp *http.Response) (*UploadEmailAttachm
 	return response, nil
 }
 
-// ParseListEmailDomainsEmailDomainsGetResponse parses an HTTP response from a ListEmailDomainsEmailDomainsGetWithResponse call
-func ParseListEmailDomainsEmailDomainsGetResponse(rsp *http.Response) (*ListEmailDomainsEmailDomainsGetResponse, error) {
+// ParseListEmailDomainsV1EmailDomainsGetResponse parses an HTTP response from a ListEmailDomainsV1EmailDomainsGetWithResponse call
+func ParseListEmailDomainsV1EmailDomainsGetResponse(rsp *http.Response) (*ListEmailDomainsV1EmailDomainsGetResponse, error) {
 	bodyBytes, err := io.ReadAll(rsp.Body)
 	defer func() { _ = rsp.Body.Close() }()
 	if err != nil {
 		return nil, err
 	}
 
-	response := &ListEmailDomainsEmailDomainsGetResponse{
+	response := &ListEmailDomainsV1EmailDomainsGetResponse{
 		Body:         bodyBytes,
 		HTTPResponse: rsp,
 	}
@@ -9021,15 +9621,15 @@ func ParseListEmailDomainsEmailDomainsGetResponse(rsp *http.Response) (*ListEmai
 	return response, nil
 }
 
-// ParseCreateEmailDomainEmailDomainsPostResponse parses an HTTP response from a CreateEmailDomainEmailDomainsPostWithResponse call
-func ParseCreateEmailDomainEmailDomainsPostResponse(rsp *http.Response) (*CreateEmailDomainEmailDomainsPostResponse, error) {
+// ParseCreateEmailDomainV1EmailDomainsPostResponse parses an HTTP response from a CreateEmailDomainV1EmailDomainsPostWithResponse call
+func ParseCreateEmailDomainV1EmailDomainsPostResponse(rsp *http.Response) (*CreateEmailDomainV1EmailDomainsPostResponse, error) {
 	bodyBytes, err := io.ReadAll(rsp.Body)
 	defer func() { _ = rsp.Body.Close() }()
 	if err != nil {
 		return nil, err
 	}
 
-	response := &CreateEmailDomainEmailDomainsPostResponse{
+	response := &CreateEmailDomainV1EmailDomainsPostResponse{
 		Body:         bodyBytes,
 		HTTPResponse: rsp,
 	}
@@ -9054,15 +9654,15 @@ func ParseCreateEmailDomainEmailDomainsPostResponse(rsp *http.Response) (*Create
 	return response, nil
 }
 
-// ParseCheckDomainEmailDomainsCheckDomainGetResponse parses an HTTP response from a CheckDomainEmailDomainsCheckDomainGetWithResponse call
-func ParseCheckDomainEmailDomainsCheckDomainGetResponse(rsp *http.Response) (*CheckDomainEmailDomainsCheckDomainGetResponse, error) {
+// ParseCheckDomainV1EmailDomainsCheckDomainGetResponse parses an HTTP response from a CheckDomainV1EmailDomainsCheckDomainGetWithResponse call
+func ParseCheckDomainV1EmailDomainsCheckDomainGetResponse(rsp *http.Response) (*CheckDomainV1EmailDomainsCheckDomainGetResponse, error) {
 	bodyBytes, err := io.ReadAll(rsp.Body)
 	defer func() { _ = rsp.Body.Close() }()
 	if err != nil {
 		return nil, err
 	}
 
-	response := &CheckDomainEmailDomainsCheckDomainGetResponse{
+	response := &CheckDomainV1EmailDomainsCheckDomainGetResponse{
 		Body:         bodyBytes,
 		HTTPResponse: rsp,
 	}
@@ -9087,15 +9687,15 @@ func ParseCheckDomainEmailDomainsCheckDomainGetResponse(rsp *http.Response) (*Ch
 	return response, nil
 }
 
-// ParseDeleteEmailDomainEmailDomainsDomainIdDeleteResponse parses an HTTP response from a DeleteEmailDomainEmailDomainsDomainIdDeleteWithResponse call
-func ParseDeleteEmailDomainEmailDomainsDomainIdDeleteResponse(rsp *http.Response) (*DeleteEmailDomainEmailDomainsDomainIdDeleteResponse, error) {
+// ParseDeleteEmailDomainV1EmailDomainsDomainIdDeleteResponse parses an HTTP response from a DeleteEmailDomainV1EmailDomainsDomainIdDeleteWithResponse call
+func ParseDeleteEmailDomainV1EmailDomainsDomainIdDeleteResponse(rsp *http.Response) (*DeleteEmailDomainV1EmailDomainsDomainIdDeleteResponse, error) {
 	bodyBytes, err := io.ReadAll(rsp.Body)
 	defer func() { _ = rsp.Body.Close() }()
 	if err != nil {
 		return nil, err
 	}
 
-	response := &DeleteEmailDomainEmailDomainsDomainIdDeleteResponse{
+	response := &DeleteEmailDomainV1EmailDomainsDomainIdDeleteResponse{
 		Body:         bodyBytes,
 		HTTPResponse: rsp,
 	}
@@ -9113,48 +9713,15 @@ func ParseDeleteEmailDomainEmailDomainsDomainIdDeleteResponse(rsp *http.Response
 	return response, nil
 }
 
-// ParseGetEmailDomainEmailDomainsDomainIdGetResponse parses an HTTP response from a GetEmailDomainEmailDomainsDomainIdGetWithResponse call
-func ParseGetEmailDomainEmailDomainsDomainIdGetResponse(rsp *http.Response) (*GetEmailDomainEmailDomainsDomainIdGetResponse, error) {
+// ParseGetEmailDomainV1EmailDomainsDomainIdGetResponse parses an HTTP response from a GetEmailDomainV1EmailDomainsDomainIdGetWithResponse call
+func ParseGetEmailDomainV1EmailDomainsDomainIdGetResponse(rsp *http.Response) (*GetEmailDomainV1EmailDomainsDomainIdGetResponse, error) {
 	bodyBytes, err := io.ReadAll(rsp.Body)
 	defer func() { _ = rsp.Body.Close() }()
 	if err != nil {
 		return nil, err
 	}
 
-	response := &GetEmailDomainEmailDomainsDomainIdGetResponse{
-		Body:         bodyBytes,
-		HTTPResponse: rsp,
-	}
-
-	switch {
-	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
-		var dest EmailDomainResponse
-		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
-			return nil, err
-		}
-		response.JSON200 = &dest
-
-	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 422:
-		var dest HTTPValidationError
-		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
-			return nil, err
-		}
-		response.JSON422 = &dest
-
-	}
-
-	return response, nil
-}
-
-// ParsePatchEmailDomainEmailDomainsDomainIdPatchResponse parses an HTTP response from a PatchEmailDomainEmailDomainsDomainIdPatchWithResponse call
-func ParsePatchEmailDomainEmailDomainsDomainIdPatchResponse(rsp *http.Response) (*PatchEmailDomainEmailDomainsDomainIdPatchResponse, error) {
-	bodyBytes, err := io.ReadAll(rsp.Body)
-	defer func() { _ = rsp.Body.Close() }()
-	if err != nil {
-		return nil, err
-	}
-
-	response := &PatchEmailDomainEmailDomainsDomainIdPatchResponse{
+	response := &GetEmailDomainV1EmailDomainsDomainIdGetResponse{
 		Body:         bodyBytes,
 		HTTPResponse: rsp,
 	}
@@ -9179,15 +9746,15 @@ func ParsePatchEmailDomainEmailDomainsDomainIdPatchResponse(rsp *http.Response) 
 	return response, nil
 }
 
-// ParseVerifyEmailDomainEmailDomainsDomainIdVerifyPostResponse parses an HTTP response from a VerifyEmailDomainEmailDomainsDomainIdVerifyPostWithResponse call
-func ParseVerifyEmailDomainEmailDomainsDomainIdVerifyPostResponse(rsp *http.Response) (*VerifyEmailDomainEmailDomainsDomainIdVerifyPostResponse, error) {
+// ParsePatchEmailDomainV1EmailDomainsDomainIdPatchResponse parses an HTTP response from a PatchEmailDomainV1EmailDomainsDomainIdPatchWithResponse call
+func ParsePatchEmailDomainV1EmailDomainsDomainIdPatchResponse(rsp *http.Response) (*PatchEmailDomainV1EmailDomainsDomainIdPatchResponse, error) {
 	bodyBytes, err := io.ReadAll(rsp.Body)
 	defer func() { _ = rsp.Body.Close() }()
 	if err != nil {
 		return nil, err
 	}
 
-	response := &VerifyEmailDomainEmailDomainsDomainIdVerifyPostResponse{
+	response := &PatchEmailDomainV1EmailDomainsDomainIdPatchResponse{
 		Body:         bodyBytes,
 		HTTPResponse: rsp,
 	}
@@ -9212,15 +9779,48 @@ func ParseVerifyEmailDomainEmailDomainsDomainIdVerifyPostResponse(rsp *http.Resp
 	return response, nil
 }
 
-// ParseListEmailsEmailsGetResponse parses an HTTP response from a ListEmailsEmailsGetWithResponse call
-func ParseListEmailsEmailsGetResponse(rsp *http.Response) (*ListEmailsEmailsGetResponse, error) {
+// ParseVerifyEmailDomainV1EmailDomainsDomainIdVerifyPostResponse parses an HTTP response from a VerifyEmailDomainV1EmailDomainsDomainIdVerifyPostWithResponse call
+func ParseVerifyEmailDomainV1EmailDomainsDomainIdVerifyPostResponse(rsp *http.Response) (*VerifyEmailDomainV1EmailDomainsDomainIdVerifyPostResponse, error) {
 	bodyBytes, err := io.ReadAll(rsp.Body)
 	defer func() { _ = rsp.Body.Close() }()
 	if err != nil {
 		return nil, err
 	}
 
-	response := &ListEmailsEmailsGetResponse{
+	response := &VerifyEmailDomainV1EmailDomainsDomainIdVerifyPostResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest EmailDomainResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 422:
+		var dest HTTPValidationError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON422 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseListEmailsV1EmailsGetResponse parses an HTTP response from a ListEmailsV1EmailsGetWithResponse call
+func ParseListEmailsV1EmailsGetResponse(rsp *http.Response) (*ListEmailsV1EmailsGetResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ListEmailsV1EmailsGetResponse{
 		Body:         bodyBytes,
 		HTTPResponse: rsp,
 	}
@@ -9245,15 +9845,15 @@ func ParseListEmailsEmailsGetResponse(rsp *http.Response) (*ListEmailsEmailsGetR
 	return response, nil
 }
 
-// ParseCreateEmailEmailsPostResponse parses an HTTP response from a CreateEmailEmailsPostWithResponse call
-func ParseCreateEmailEmailsPostResponse(rsp *http.Response) (*CreateEmailEmailsPostResponse, error) {
+// ParseCreateEmailV1EmailsPostResponse parses an HTTP response from a CreateEmailV1EmailsPostWithResponse call
+func ParseCreateEmailV1EmailsPostResponse(rsp *http.Response) (*CreateEmailV1EmailsPostResponse, error) {
 	bodyBytes, err := io.ReadAll(rsp.Body)
 	defer func() { _ = rsp.Body.Close() }()
 	if err != nil {
 		return nil, err
 	}
 
-	response := &CreateEmailEmailsPostResponse{
+	response := &CreateEmailV1EmailsPostResponse{
 		Body:         bodyBytes,
 		HTTPResponse: rsp,
 	}
@@ -9278,15 +9878,15 @@ func ParseCreateEmailEmailsPostResponse(rsp *http.Response) (*CreateEmailEmailsP
 	return response, nil
 }
 
-// ParseGetEmailStatsEmailsStatsGetResponse parses an HTTP response from a GetEmailStatsEmailsStatsGetWithResponse call
-func ParseGetEmailStatsEmailsStatsGetResponse(rsp *http.Response) (*GetEmailStatsEmailsStatsGetResponse, error) {
+// ParseGetEmailStatsV1EmailsStatsGetResponse parses an HTTP response from a GetEmailStatsV1EmailsStatsGetWithResponse call
+func ParseGetEmailStatsV1EmailsStatsGetResponse(rsp *http.Response) (*GetEmailStatsV1EmailsStatsGetResponse, error) {
 	bodyBytes, err := io.ReadAll(rsp.Body)
 	defer func() { _ = rsp.Body.Close() }()
 	if err != nil {
 		return nil, err
 	}
 
-	response := &GetEmailStatsEmailsStatsGetResponse{
+	response := &GetEmailStatsV1EmailsStatsGetResponse{
 		Body:         bodyBytes,
 		HTTPResponse: rsp,
 	}
@@ -9311,15 +9911,15 @@ func ParseGetEmailStatsEmailsStatsGetResponse(rsp *http.Response) (*GetEmailStat
 	return response, nil
 }
 
-// ParseGetEmailEmailsEmailIdGetResponse parses an HTTP response from a GetEmailEmailsEmailIdGetWithResponse call
-func ParseGetEmailEmailsEmailIdGetResponse(rsp *http.Response) (*GetEmailEmailsEmailIdGetResponse, error) {
+// ParseGetEmailV1EmailsEmailIdGetResponse parses an HTTP response from a GetEmailV1EmailsEmailIdGetWithResponse call
+func ParseGetEmailV1EmailsEmailIdGetResponse(rsp *http.Response) (*GetEmailV1EmailsEmailIdGetResponse, error) {
 	bodyBytes, err := io.ReadAll(rsp.Body)
 	defer func() { _ = rsp.Body.Close() }()
 	if err != nil {
 		return nil, err
 	}
 
-	response := &GetEmailEmailsEmailIdGetResponse{
+	response := &GetEmailV1EmailsEmailIdGetResponse{
 		Body:         bodyBytes,
 		HTTPResponse: rsp,
 	}
@@ -9344,15 +9944,15 @@ func ParseGetEmailEmailsEmailIdGetResponse(rsp *http.Response) (*GetEmailEmailsE
 	return response, nil
 }
 
-// ParseGetEmailAttachmentEmailsEmailIdAttachmentsAttachmentIdGetResponse parses an HTTP response from a GetEmailAttachmentEmailsEmailIdAttachmentsAttachmentIdGetWithResponse call
-func ParseGetEmailAttachmentEmailsEmailIdAttachmentsAttachmentIdGetResponse(rsp *http.Response) (*GetEmailAttachmentEmailsEmailIdAttachmentsAttachmentIdGetResponse, error) {
+// ParseGetEmailAttachmentV1EmailsEmailIdAttachmentsAttachmentIdGetResponse parses an HTTP response from a GetEmailAttachmentV1EmailsEmailIdAttachmentsAttachmentIdGetWithResponse call
+func ParseGetEmailAttachmentV1EmailsEmailIdAttachmentsAttachmentIdGetResponse(rsp *http.Response) (*GetEmailAttachmentV1EmailsEmailIdAttachmentsAttachmentIdGetResponse, error) {
 	bodyBytes, err := io.ReadAll(rsp.Body)
 	defer func() { _ = rsp.Body.Close() }()
 	if err != nil {
 		return nil, err
 	}
 
-	response := &GetEmailAttachmentEmailsEmailIdAttachmentsAttachmentIdGetResponse{
+	response := &GetEmailAttachmentV1EmailsEmailIdAttachmentsAttachmentIdGetResponse{
 		Body:         bodyBytes,
 		HTTPResponse: rsp,
 	}
@@ -9377,15 +9977,15 @@ func ParseGetEmailAttachmentEmailsEmailIdAttachmentsAttachmentIdGetResponse(rsp 
 	return response, nil
 }
 
-// ParseListEmailEventsEmailsEmailIdEventsGetResponse parses an HTTP response from a ListEmailEventsEmailsEmailIdEventsGetWithResponse call
-func ParseListEmailEventsEmailsEmailIdEventsGetResponse(rsp *http.Response) (*ListEmailEventsEmailsEmailIdEventsGetResponse, error) {
+// ParseListEmailEventsV1EmailsEmailIdEventsGetResponse parses an HTTP response from a ListEmailEventsV1EmailsEmailIdEventsGetWithResponse call
+func ParseListEmailEventsV1EmailsEmailIdEventsGetResponse(rsp *http.Response) (*ListEmailEventsV1EmailsEmailIdEventsGetResponse, error) {
 	bodyBytes, err := io.ReadAll(rsp.Body)
 	defer func() { _ = rsp.Body.Close() }()
 	if err != nil {
 		return nil, err
 	}
 
-	response := &ListEmailEventsEmailsEmailIdEventsGetResponse{
+	response := &ListEmailEventsV1EmailsEmailIdEventsGetResponse{
 		Body:         bodyBytes,
 		HTTPResponse: rsp,
 	}
@@ -9410,15 +10010,15 @@ func ParseListEmailEventsEmailsEmailIdEventsGetResponse(rsp *http.Response) (*Li
 	return response, nil
 }
 
-// ParseGetEmailRawEmailsEmailIdRawGetResponse parses an HTTP response from a GetEmailRawEmailsEmailIdRawGetWithResponse call
-func ParseGetEmailRawEmailsEmailIdRawGetResponse(rsp *http.Response) (*GetEmailRawEmailsEmailIdRawGetResponse, error) {
+// ParseGetEmailRawV1EmailsEmailIdRawGetResponse parses an HTTP response from a GetEmailRawV1EmailsEmailIdRawGetWithResponse call
+func ParseGetEmailRawV1EmailsEmailIdRawGetResponse(rsp *http.Response) (*GetEmailRawV1EmailsEmailIdRawGetResponse, error) {
 	bodyBytes, err := io.ReadAll(rsp.Body)
 	defer func() { _ = rsp.Body.Close() }()
 	if err != nil {
 		return nil, err
 	}
 
-	response := &GetEmailRawEmailsEmailIdRawGetResponse{
+	response := &GetEmailRawV1EmailsEmailIdRawGetResponse{
 		Body:         bodyBytes,
 		HTTPResponse: rsp,
 	}
@@ -9443,15 +10043,15 @@ func ParseGetEmailRawEmailsEmailIdRawGetResponse(rsp *http.Response) (*GetEmailR
 	return response, nil
 }
 
-// ParseListEventsEventsGetResponse parses an HTTP response from a ListEventsEventsGetWithResponse call
-func ParseListEventsEventsGetResponse(rsp *http.Response) (*ListEventsEventsGetResponse, error) {
+// ParseListEventsV1EventsGetResponse parses an HTTP response from a ListEventsV1EventsGetWithResponse call
+func ParseListEventsV1EventsGetResponse(rsp *http.Response) (*ListEventsV1EventsGetResponse, error) {
 	bodyBytes, err := io.ReadAll(rsp.Body)
 	defer func() { _ = rsp.Body.Close() }()
 	if err != nil {
 		return nil, err
 	}
 
-	response := &ListEventsEventsGetResponse{
+	response := &ListEventsV1EventsGetResponse{
 		Body:         bodyBytes,
 		HTTPResponse: rsp,
 	}
@@ -9476,41 +10076,15 @@ func ParseListEventsEventsGetResponse(rsp *http.Response) (*ListEventsEventsGetR
 	return response, nil
 }
 
-// ParseHealthzHealthzGetResponse parses an HTTP response from a HealthzHealthzGetWithResponse call
-func ParseHealthzHealthzGetResponse(rsp *http.Response) (*HealthzHealthzGetResponse, error) {
+// ParseDeleteMemberPhoneV1MembersUserIdPhoneDeleteResponse parses an HTTP response from a DeleteMemberPhoneV1MembersUserIdPhoneDeleteWithResponse call
+func ParseDeleteMemberPhoneV1MembersUserIdPhoneDeleteResponse(rsp *http.Response) (*DeleteMemberPhoneV1MembersUserIdPhoneDeleteResponse, error) {
 	bodyBytes, err := io.ReadAll(rsp.Body)
 	defer func() { _ = rsp.Body.Close() }()
 	if err != nil {
 		return nil, err
 	}
 
-	response := &HealthzHealthzGetResponse{
-		Body:         bodyBytes,
-		HTTPResponse: rsp,
-	}
-
-	switch {
-	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
-		var dest map[string]string
-		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
-			return nil, err
-		}
-		response.JSON200 = &dest
-
-	}
-
-	return response, nil
-}
-
-// ParseDeleteMemberPhoneMembersUserIdPhoneDeleteResponse parses an HTTP response from a DeleteMemberPhoneMembersUserIdPhoneDeleteWithResponse call
-func ParseDeleteMemberPhoneMembersUserIdPhoneDeleteResponse(rsp *http.Response) (*DeleteMemberPhoneMembersUserIdPhoneDeleteResponse, error) {
-	bodyBytes, err := io.ReadAll(rsp.Body)
-	defer func() { _ = rsp.Body.Close() }()
-	if err != nil {
-		return nil, err
-	}
-
-	response := &DeleteMemberPhoneMembersUserIdPhoneDeleteResponse{
+	response := &DeleteMemberPhoneV1MembersUserIdPhoneDeleteResponse{
 		Body:         bodyBytes,
 		HTTPResponse: rsp,
 	}
@@ -9528,15 +10102,15 @@ func ParseDeleteMemberPhoneMembersUserIdPhoneDeleteResponse(rsp *http.Response) 
 	return response, nil
 }
 
-// ParsePutMemberPhoneMembersUserIdPhonePutResponse parses an HTTP response from a PutMemberPhoneMembersUserIdPhonePutWithResponse call
-func ParsePutMemberPhoneMembersUserIdPhonePutResponse(rsp *http.Response) (*PutMemberPhoneMembersUserIdPhonePutResponse, error) {
+// ParsePutMemberPhoneV1MembersUserIdPhonePutResponse parses an HTTP response from a PutMemberPhoneV1MembersUserIdPhonePutWithResponse call
+func ParsePutMemberPhoneV1MembersUserIdPhonePutResponse(rsp *http.Response) (*PutMemberPhoneV1MembersUserIdPhonePutResponse, error) {
 	bodyBytes, err := io.ReadAll(rsp.Body)
 	defer func() { _ = rsp.Body.Close() }()
 	if err != nil {
 		return nil, err
 	}
 
-	response := &PutMemberPhoneMembersUserIdPhonePutResponse{
+	response := &PutMemberPhoneV1MembersUserIdPhonePutResponse{
 		Body:         bodyBytes,
 		HTTPResponse: rsp,
 	}
@@ -9561,15 +10135,15 @@ func ParsePutMemberPhoneMembersUserIdPhonePutResponse(rsp *http.Response) (*PutM
 	return response, nil
 }
 
-// ParseListNumbersNumbersGetResponse parses an HTTP response from a ListNumbersNumbersGetWithResponse call
-func ParseListNumbersNumbersGetResponse(rsp *http.Response) (*ListNumbersNumbersGetResponse, error) {
+// ParseListNumbersV1NumbersGetResponse parses an HTTP response from a ListNumbersV1NumbersGetWithResponse call
+func ParseListNumbersV1NumbersGetResponse(rsp *http.Response) (*ListNumbersV1NumbersGetResponse, error) {
 	bodyBytes, err := io.ReadAll(rsp.Body)
 	defer func() { _ = rsp.Body.Close() }()
 	if err != nil {
 		return nil, err
 	}
 
-	response := &ListNumbersNumbersGetResponse{
+	response := &ListNumbersV1NumbersGetResponse{
 		Body:         bodyBytes,
 		HTTPResponse: rsp,
 	}
@@ -9594,15 +10168,15 @@ func ParseListNumbersNumbersGetResponse(rsp *http.Response) (*ListNumbersNumbers
 	return response, nil
 }
 
-// ParseAcquireNumberNumbersPostResponse parses an HTTP response from a AcquireNumberNumbersPostWithResponse call
-func ParseAcquireNumberNumbersPostResponse(rsp *http.Response) (*AcquireNumberNumbersPostResponse, error) {
+// ParseAcquireNumberV1NumbersPostResponse parses an HTTP response from a AcquireNumberV1NumbersPostWithResponse call
+func ParseAcquireNumberV1NumbersPostResponse(rsp *http.Response) (*AcquireNumberV1NumbersPostResponse, error) {
 	bodyBytes, err := io.ReadAll(rsp.Body)
 	defer func() { _ = rsp.Body.Close() }()
 	if err != nil {
 		return nil, err
 	}
 
-	response := &AcquireNumberNumbersPostResponse{
+	response := &AcquireNumberV1NumbersPostResponse{
 		Body:         bodyBytes,
 		HTTPResponse: rsp,
 	}
@@ -9627,15 +10201,15 @@ func ParseAcquireNumberNumbersPostResponse(rsp *http.Response) (*AcquireNumberNu
 	return response, nil
 }
 
-// ParseReleaseNumberNumbersNumberIdDeleteResponse parses an HTTP response from a ReleaseNumberNumbersNumberIdDeleteWithResponse call
-func ParseReleaseNumberNumbersNumberIdDeleteResponse(rsp *http.Response) (*ReleaseNumberNumbersNumberIdDeleteResponse, error) {
+// ParseReleaseNumberV1NumbersNumberIdDeleteResponse parses an HTTP response from a ReleaseNumberV1NumbersNumberIdDeleteWithResponse call
+func ParseReleaseNumberV1NumbersNumberIdDeleteResponse(rsp *http.Response) (*ReleaseNumberV1NumbersNumberIdDeleteResponse, error) {
 	bodyBytes, err := io.ReadAll(rsp.Body)
 	defer func() { _ = rsp.Body.Close() }()
 	if err != nil {
 		return nil, err
 	}
 
-	response := &ReleaseNumberNumbersNumberIdDeleteResponse{
+	response := &ReleaseNumberV1NumbersNumberIdDeleteResponse{
 		Body:         bodyBytes,
 		HTTPResponse: rsp,
 	}
@@ -9653,15 +10227,15 @@ func ParseReleaseNumberNumbersNumberIdDeleteResponse(rsp *http.Response) (*Relea
 	return response, nil
 }
 
-// ParseGetNumberNumbersNumberIdGetResponse parses an HTTP response from a GetNumberNumbersNumberIdGetWithResponse call
-func ParseGetNumberNumbersNumberIdGetResponse(rsp *http.Response) (*GetNumberNumbersNumberIdGetResponse, error) {
+// ParseGetNumberV1NumbersNumberIdGetResponse parses an HTTP response from a GetNumberV1NumbersNumberIdGetWithResponse call
+func ParseGetNumberV1NumbersNumberIdGetResponse(rsp *http.Response) (*GetNumberV1NumbersNumberIdGetResponse, error) {
 	bodyBytes, err := io.ReadAll(rsp.Body)
 	defer func() { _ = rsp.Body.Close() }()
 	if err != nil {
 		return nil, err
 	}
 
-	response := &GetNumberNumbersNumberIdGetResponse{
+	response := &GetNumberV1NumbersNumberIdGetResponse{
 		Body:         bodyBytes,
 		HTTPResponse: rsp,
 	}
@@ -9686,15 +10260,15 @@ func ParseGetNumberNumbersNumberIdGetResponse(rsp *http.Response) (*GetNumberNum
 	return response, nil
 }
 
-// ParseEnableSmsNumbersNumberIdEnableSmsPostResponse parses an HTTP response from a EnableSmsNumbersNumberIdEnableSmsPostWithResponse call
-func ParseEnableSmsNumbersNumberIdEnableSmsPostResponse(rsp *http.Response) (*EnableSmsNumbersNumberIdEnableSmsPostResponse, error) {
+// ParseEnableSmsV1NumbersNumberIdEnableSmsPostResponse parses an HTTP response from a EnableSmsV1NumbersNumberIdEnableSmsPostWithResponse call
+func ParseEnableSmsV1NumbersNumberIdEnableSmsPostResponse(rsp *http.Response) (*EnableSmsV1NumbersNumberIdEnableSmsPostResponse, error) {
 	bodyBytes, err := io.ReadAll(rsp.Body)
 	defer func() { _ = rsp.Body.Close() }()
 	if err != nil {
 		return nil, err
 	}
 
-	response := &EnableSmsNumbersNumberIdEnableSmsPostResponse{
+	response := &EnableSmsV1NumbersNumberIdEnableSmsPostResponse{
 		Body:         bodyBytes,
 		HTTPResponse: rsp,
 	}
@@ -9877,15 +10451,15 @@ func ParseDeleteProviderResponse(rsp *http.Response) (*DeleteProviderResponse, e
 	return response, nil
 }
 
-// ParseListSmsSmsGetResponse parses an HTTP response from a ListSmsSmsGetWithResponse call
-func ParseListSmsSmsGetResponse(rsp *http.Response) (*ListSmsSmsGetResponse, error) {
+// ParseListSmsV1SmsGetResponse parses an HTTP response from a ListSmsV1SmsGetWithResponse call
+func ParseListSmsV1SmsGetResponse(rsp *http.Response) (*ListSmsV1SmsGetResponse, error) {
 	bodyBytes, err := io.ReadAll(rsp.Body)
 	defer func() { _ = rsp.Body.Close() }()
 	if err != nil {
 		return nil, err
 	}
 
-	response := &ListSmsSmsGetResponse{
+	response := &ListSmsV1SmsGetResponse{
 		Body:         bodyBytes,
 		HTTPResponse: rsp,
 	}
@@ -9910,15 +10484,15 @@ func ParseListSmsSmsGetResponse(rsp *http.Response) (*ListSmsSmsGetResponse, err
 	return response, nil
 }
 
-// ParseCreateSmsSmsPostResponse parses an HTTP response from a CreateSmsSmsPostWithResponse call
-func ParseCreateSmsSmsPostResponse(rsp *http.Response) (*CreateSmsSmsPostResponse, error) {
+// ParseCreateSmsV1SmsPostResponse parses an HTTP response from a CreateSmsV1SmsPostWithResponse call
+func ParseCreateSmsV1SmsPostResponse(rsp *http.Response) (*CreateSmsV1SmsPostResponse, error) {
 	bodyBytes, err := io.ReadAll(rsp.Body)
 	defer func() { _ = rsp.Body.Close() }()
 	if err != nil {
 		return nil, err
 	}
 
-	response := &CreateSmsSmsPostResponse{
+	response := &CreateSmsV1SmsPostResponse{
 		Body:         bodyBytes,
 		HTTPResponse: rsp,
 	}
@@ -9943,15 +10517,15 @@ func ParseCreateSmsSmsPostResponse(rsp *http.Response) (*CreateSmsSmsPostRespons
 	return response, nil
 }
 
-// ParseGetSenderIdSmsSenderIdGetResponse parses an HTTP response from a GetSenderIdSmsSenderIdGetWithResponse call
-func ParseGetSenderIdSmsSenderIdGetResponse(rsp *http.Response) (*GetSenderIdSmsSenderIdGetResponse, error) {
+// ParseGetSenderIdV1SmsSenderIdGetResponse parses an HTTP response from a GetSenderIdV1SmsSenderIdGetWithResponse call
+func ParseGetSenderIdV1SmsSenderIdGetResponse(rsp *http.Response) (*GetSenderIdV1SmsSenderIdGetResponse, error) {
 	bodyBytes, err := io.ReadAll(rsp.Body)
 	defer func() { _ = rsp.Body.Close() }()
 	if err != nil {
 		return nil, err
 	}
 
-	response := &GetSenderIdSmsSenderIdGetResponse{
+	response := &GetSenderIdV1SmsSenderIdGetResponse{
 		Body:         bodyBytes,
 		HTTPResponse: rsp,
 	}
@@ -9976,15 +10550,15 @@ func ParseGetSenderIdSmsSenderIdGetResponse(rsp *http.Response) (*GetSenderIdSms
 	return response, nil
 }
 
-// ParsePatchSenderIdSmsSenderIdPatchResponse parses an HTTP response from a PatchSenderIdSmsSenderIdPatchWithResponse call
-func ParsePatchSenderIdSmsSenderIdPatchResponse(rsp *http.Response) (*PatchSenderIdSmsSenderIdPatchResponse, error) {
+// ParsePatchSenderIdV1SmsSenderIdPatchResponse parses an HTTP response from a PatchSenderIdV1SmsSenderIdPatchWithResponse call
+func ParsePatchSenderIdV1SmsSenderIdPatchResponse(rsp *http.Response) (*PatchSenderIdV1SmsSenderIdPatchResponse, error) {
 	bodyBytes, err := io.ReadAll(rsp.Body)
 	defer func() { _ = rsp.Body.Close() }()
 	if err != nil {
 		return nil, err
 	}
 
-	response := &PatchSenderIdSmsSenderIdPatchResponse{
+	response := &PatchSenderIdV1SmsSenderIdPatchResponse{
 		Body:         bodyBytes,
 		HTTPResponse: rsp,
 	}
@@ -10009,15 +10583,15 @@ func ParsePatchSenderIdSmsSenderIdPatchResponse(rsp *http.Response) (*PatchSende
 	return response, nil
 }
 
-// ParseListSmsSuppressionsSmsSuppressionsGetResponse parses an HTTP response from a ListSmsSuppressionsSmsSuppressionsGetWithResponse call
-func ParseListSmsSuppressionsSmsSuppressionsGetResponse(rsp *http.Response) (*ListSmsSuppressionsSmsSuppressionsGetResponse, error) {
+// ParseListSmsSuppressionsV1SmsSuppressionsGetResponse parses an HTTP response from a ListSmsSuppressionsV1SmsSuppressionsGetWithResponse call
+func ParseListSmsSuppressionsV1SmsSuppressionsGetResponse(rsp *http.Response) (*ListSmsSuppressionsV1SmsSuppressionsGetResponse, error) {
 	bodyBytes, err := io.ReadAll(rsp.Body)
 	defer func() { _ = rsp.Body.Close() }()
 	if err != nil {
 		return nil, err
 	}
 
-	response := &ListSmsSuppressionsSmsSuppressionsGetResponse{
+	response := &ListSmsSuppressionsV1SmsSuppressionsGetResponse{
 		Body:         bodyBytes,
 		HTTPResponse: rsp,
 	}
@@ -10042,15 +10616,15 @@ func ParseListSmsSuppressionsSmsSuppressionsGetResponse(rsp *http.Response) (*Li
 	return response, nil
 }
 
-// ParseDeleteSmsSuppressionSmsSuppressionsNumberDeleteResponse parses an HTTP response from a DeleteSmsSuppressionSmsSuppressionsNumberDeleteWithResponse call
-func ParseDeleteSmsSuppressionSmsSuppressionsNumberDeleteResponse(rsp *http.Response) (*DeleteSmsSuppressionSmsSuppressionsNumberDeleteResponse, error) {
+// ParseDeleteSmsSuppressionV1SmsSuppressionsNumberDeleteResponse parses an HTTP response from a DeleteSmsSuppressionV1SmsSuppressionsNumberDeleteWithResponse call
+func ParseDeleteSmsSuppressionV1SmsSuppressionsNumberDeleteResponse(rsp *http.Response) (*DeleteSmsSuppressionV1SmsSuppressionsNumberDeleteResponse, error) {
 	bodyBytes, err := io.ReadAll(rsp.Body)
 	defer func() { _ = rsp.Body.Close() }()
 	if err != nil {
 		return nil, err
 	}
 
-	response := &DeleteSmsSuppressionSmsSuppressionsNumberDeleteResponse{
+	response := &DeleteSmsSuppressionV1SmsSuppressionsNumberDeleteResponse{
 		Body:         bodyBytes,
 		HTTPResponse: rsp,
 	}
@@ -10068,15 +10642,15 @@ func ParseDeleteSmsSuppressionSmsSuppressionsNumberDeleteResponse(rsp *http.Resp
 	return response, nil
 }
 
-// ParseGetSmsSmsSmsIdGetResponse parses an HTTP response from a GetSmsSmsSmsIdGetWithResponse call
-func ParseGetSmsSmsSmsIdGetResponse(rsp *http.Response) (*GetSmsSmsSmsIdGetResponse, error) {
+// ParseGetSmsV1SmsSmsIdGetResponse parses an HTTP response from a GetSmsV1SmsSmsIdGetWithResponse call
+func ParseGetSmsV1SmsSmsIdGetResponse(rsp *http.Response) (*GetSmsV1SmsSmsIdGetResponse, error) {
 	bodyBytes, err := io.ReadAll(rsp.Body)
 	defer func() { _ = rsp.Body.Close() }()
 	if err != nil {
 		return nil, err
 	}
 
-	response := &GetSmsSmsSmsIdGetResponse{
+	response := &GetSmsV1SmsSmsIdGetResponse{
 		Body:         bodyBytes,
 		HTTPResponse: rsp,
 	}
@@ -10101,15 +10675,15 @@ func ParseGetSmsSmsSmsIdGetResponse(rsp *http.Response) (*GetSmsSmsSmsIdGetRespo
 	return response, nil
 }
 
-// ParseUnsubscribeUnsubscribeGetResponse parses an HTTP response from a UnsubscribeUnsubscribeGetWithResponse call
-func ParseUnsubscribeUnsubscribeGetResponse(rsp *http.Response) (*UnsubscribeUnsubscribeGetResponse, error) {
+// ParseUnsubscribeV1UnsubscribeGetResponse parses an HTTP response from a UnsubscribeV1UnsubscribeGetWithResponse call
+func ParseUnsubscribeV1UnsubscribeGetResponse(rsp *http.Response) (*UnsubscribeV1UnsubscribeGetResponse, error) {
 	bodyBytes, err := io.ReadAll(rsp.Body)
 	defer func() { _ = rsp.Body.Close() }()
 	if err != nil {
 		return nil, err
 	}
 
-	response := &UnsubscribeUnsubscribeGetResponse{
+	response := &UnsubscribeV1UnsubscribeGetResponse{
 		Body:         bodyBytes,
 		HTTPResponse: rsp,
 	}
@@ -10127,15 +10701,15 @@ func ParseUnsubscribeUnsubscribeGetResponse(rsp *http.Response) (*UnsubscribeUns
 	return response, nil
 }
 
-// ParseListSubscriptionsWebhooksGetResponse parses an HTTP response from a ListSubscriptionsWebhooksGetWithResponse call
-func ParseListSubscriptionsWebhooksGetResponse(rsp *http.Response) (*ListSubscriptionsWebhooksGetResponse, error) {
+// ParseListSubscriptionsV1WebhooksGetResponse parses an HTTP response from a ListSubscriptionsV1WebhooksGetWithResponse call
+func ParseListSubscriptionsV1WebhooksGetResponse(rsp *http.Response) (*ListSubscriptionsV1WebhooksGetResponse, error) {
 	bodyBytes, err := io.ReadAll(rsp.Body)
 	defer func() { _ = rsp.Body.Close() }()
 	if err != nil {
 		return nil, err
 	}
 
-	response := &ListSubscriptionsWebhooksGetResponse{
+	response := &ListSubscriptionsV1WebhooksGetResponse{
 		Body:         bodyBytes,
 		HTTPResponse: rsp,
 	}
@@ -10160,15 +10734,15 @@ func ParseListSubscriptionsWebhooksGetResponse(rsp *http.Response) (*ListSubscri
 	return response, nil
 }
 
-// ParseCreateSubscriptionWebhooksPostResponse parses an HTTP response from a CreateSubscriptionWebhooksPostWithResponse call
-func ParseCreateSubscriptionWebhooksPostResponse(rsp *http.Response) (*CreateSubscriptionWebhooksPostResponse, error) {
+// ParseCreateSubscriptionV1WebhooksPostResponse parses an HTTP response from a CreateSubscriptionV1WebhooksPostWithResponse call
+func ParseCreateSubscriptionV1WebhooksPostResponse(rsp *http.Response) (*CreateSubscriptionV1WebhooksPostResponse, error) {
 	bodyBytes, err := io.ReadAll(rsp.Body)
 	defer func() { _ = rsp.Body.Close() }()
 	if err != nil {
 		return nil, err
 	}
 
-	response := &CreateSubscriptionWebhooksPostResponse{
+	response := &CreateSubscriptionV1WebhooksPostResponse{
 		Body:         bodyBytes,
 		HTTPResponse: rsp,
 	}
@@ -10193,15 +10767,15 @@ func ParseCreateSubscriptionWebhooksPostResponse(rsp *http.Response) (*CreateSub
 	return response, nil
 }
 
-// ParseDeleteSubscriptionWebhooksSubIdDeleteResponse parses an HTTP response from a DeleteSubscriptionWebhooksSubIdDeleteWithResponse call
-func ParseDeleteSubscriptionWebhooksSubIdDeleteResponse(rsp *http.Response) (*DeleteSubscriptionWebhooksSubIdDeleteResponse, error) {
+// ParseDeleteSubscriptionV1WebhooksSubIdDeleteResponse parses an HTTP response from a DeleteSubscriptionV1WebhooksSubIdDeleteWithResponse call
+func ParseDeleteSubscriptionV1WebhooksSubIdDeleteResponse(rsp *http.Response) (*DeleteSubscriptionV1WebhooksSubIdDeleteResponse, error) {
 	bodyBytes, err := io.ReadAll(rsp.Body)
 	defer func() { _ = rsp.Body.Close() }()
 	if err != nil {
 		return nil, err
 	}
 
-	response := &DeleteSubscriptionWebhooksSubIdDeleteResponse{
+	response := &DeleteSubscriptionV1WebhooksSubIdDeleteResponse{
 		Body:         bodyBytes,
 		HTTPResponse: rsp,
 	}
@@ -10219,48 +10793,15 @@ func ParseDeleteSubscriptionWebhooksSubIdDeleteResponse(rsp *http.Response) (*De
 	return response, nil
 }
 
-// ParseGetSubscriptionWebhooksSubIdGetResponse parses an HTTP response from a GetSubscriptionWebhooksSubIdGetWithResponse call
-func ParseGetSubscriptionWebhooksSubIdGetResponse(rsp *http.Response) (*GetSubscriptionWebhooksSubIdGetResponse, error) {
+// ParseGetSubscriptionV1WebhooksSubIdGetResponse parses an HTTP response from a GetSubscriptionV1WebhooksSubIdGetWithResponse call
+func ParseGetSubscriptionV1WebhooksSubIdGetResponse(rsp *http.Response) (*GetSubscriptionV1WebhooksSubIdGetResponse, error) {
 	bodyBytes, err := io.ReadAll(rsp.Body)
 	defer func() { _ = rsp.Body.Close() }()
 	if err != nil {
 		return nil, err
 	}
 
-	response := &GetSubscriptionWebhooksSubIdGetResponse{
-		Body:         bodyBytes,
-		HTTPResponse: rsp,
-	}
-
-	switch {
-	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
-		var dest WebhookSubscriptionResponse
-		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
-			return nil, err
-		}
-		response.JSON200 = &dest
-
-	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 422:
-		var dest HTTPValidationError
-		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
-			return nil, err
-		}
-		response.JSON422 = &dest
-
-	}
-
-	return response, nil
-}
-
-// ParsePatchSubscriptionWebhooksSubIdPatchResponse parses an HTTP response from a PatchSubscriptionWebhooksSubIdPatchWithResponse call
-func ParsePatchSubscriptionWebhooksSubIdPatchResponse(rsp *http.Response) (*PatchSubscriptionWebhooksSubIdPatchResponse, error) {
-	bodyBytes, err := io.ReadAll(rsp.Body)
-	defer func() { _ = rsp.Body.Close() }()
-	if err != nil {
-		return nil, err
-	}
-
-	response := &PatchSubscriptionWebhooksSubIdPatchResponse{
+	response := &GetSubscriptionV1WebhooksSubIdGetResponse{
 		Body:         bodyBytes,
 		HTTPResponse: rsp,
 	}
@@ -10285,15 +10826,48 @@ func ParsePatchSubscriptionWebhooksSubIdPatchResponse(rsp *http.Response) (*Patc
 	return response, nil
 }
 
-// ParseListDeliveriesWebhooksSubIdDeliveriesGetResponse parses an HTTP response from a ListDeliveriesWebhooksSubIdDeliveriesGetWithResponse call
-func ParseListDeliveriesWebhooksSubIdDeliveriesGetResponse(rsp *http.Response) (*ListDeliveriesWebhooksSubIdDeliveriesGetResponse, error) {
+// ParsePatchSubscriptionV1WebhooksSubIdPatchResponse parses an HTTP response from a PatchSubscriptionV1WebhooksSubIdPatchWithResponse call
+func ParsePatchSubscriptionV1WebhooksSubIdPatchResponse(rsp *http.Response) (*PatchSubscriptionV1WebhooksSubIdPatchResponse, error) {
 	bodyBytes, err := io.ReadAll(rsp.Body)
 	defer func() { _ = rsp.Body.Close() }()
 	if err != nil {
 		return nil, err
 	}
 
-	response := &ListDeliveriesWebhooksSubIdDeliveriesGetResponse{
+	response := &PatchSubscriptionV1WebhooksSubIdPatchResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest WebhookSubscriptionResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 422:
+		var dest HTTPValidationError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON422 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseListDeliveriesV1WebhooksSubIdDeliveriesGetResponse parses an HTTP response from a ListDeliveriesV1WebhooksSubIdDeliveriesGetWithResponse call
+func ParseListDeliveriesV1WebhooksSubIdDeliveriesGetResponse(rsp *http.Response) (*ListDeliveriesV1WebhooksSubIdDeliveriesGetResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ListDeliveriesV1WebhooksSubIdDeliveriesGetResponse{
 		Body:         bodyBytes,
 		HTTPResponse: rsp,
 	}
@@ -10318,15 +10892,15 @@ func ParseListDeliveriesWebhooksSubIdDeliveriesGetResponse(rsp *http.Response) (
 	return response, nil
 }
 
-// ParseRedeliverWebhooksSubIdDeliveriesDeliveryIdRedeliverPostResponse parses an HTTP response from a RedeliverWebhooksSubIdDeliveriesDeliveryIdRedeliverPostWithResponse call
-func ParseRedeliverWebhooksSubIdDeliveriesDeliveryIdRedeliverPostResponse(rsp *http.Response) (*RedeliverWebhooksSubIdDeliveriesDeliveryIdRedeliverPostResponse, error) {
+// ParseRedeliverV1WebhooksSubIdDeliveriesDeliveryIdRedeliverPostResponse parses an HTTP response from a RedeliverV1WebhooksSubIdDeliveriesDeliveryIdRedeliverPostWithResponse call
+func ParseRedeliverV1WebhooksSubIdDeliveriesDeliveryIdRedeliverPostResponse(rsp *http.Response) (*RedeliverV1WebhooksSubIdDeliveriesDeliveryIdRedeliverPostResponse, error) {
 	bodyBytes, err := io.ReadAll(rsp.Body)
 	defer func() { _ = rsp.Body.Close() }()
 	if err != nil {
 		return nil, err
 	}
 
-	response := &RedeliverWebhooksSubIdDeliveriesDeliveryIdRedeliverPostResponse{
+	response := &RedeliverV1WebhooksSubIdDeliveriesDeliveryIdRedeliverPostResponse{
 		Body:         bodyBytes,
 		HTTPResponse: rsp,
 	}
@@ -10351,15 +10925,15 @@ func ParseRedeliverWebhooksSubIdDeliveriesDeliveryIdRedeliverPostResponse(rsp *h
 	return response, nil
 }
 
-// ParseRotateSecretWebhooksSubIdRotateSecretPostResponse parses an HTTP response from a RotateSecretWebhooksSubIdRotateSecretPostWithResponse call
-func ParseRotateSecretWebhooksSubIdRotateSecretPostResponse(rsp *http.Response) (*RotateSecretWebhooksSubIdRotateSecretPostResponse, error) {
+// ParseRotateSecretV1WebhooksSubIdRotateSecretPostResponse parses an HTTP response from a RotateSecretV1WebhooksSubIdRotateSecretPostWithResponse call
+func ParseRotateSecretV1WebhooksSubIdRotateSecretPostResponse(rsp *http.Response) (*RotateSecretV1WebhooksSubIdRotateSecretPostResponse, error) {
 	bodyBytes, err := io.ReadAll(rsp.Body)
 	defer func() { _ = rsp.Body.Close() }()
 	if err != nil {
 		return nil, err
 	}
 
-	response := &RotateSecretWebhooksSubIdRotateSecretPostResponse{
+	response := &RotateSecretV1WebhooksSubIdRotateSecretPostResponse{
 		Body:         bodyBytes,
 		HTTPResponse: rsp,
 	}
@@ -10384,15 +10958,15 @@ func ParseRotateSecretWebhooksSubIdRotateSecretPostResponse(rsp *http.Response) 
 	return response, nil
 }
 
-// ParseGetWhoamiWhoamiGetResponse parses an HTTP response from a GetWhoamiWhoamiGetWithResponse call
-func ParseGetWhoamiWhoamiGetResponse(rsp *http.Response) (*GetWhoamiWhoamiGetResponse, error) {
+// ParseGetWhoamiV1WhoamiGetResponse parses an HTTP response from a GetWhoamiV1WhoamiGetWithResponse call
+func ParseGetWhoamiV1WhoamiGetResponse(rsp *http.Response) (*GetWhoamiV1WhoamiGetResponse, error) {
 	bodyBytes, err := io.ReadAll(rsp.Body)
 	defer func() { _ = rsp.Body.Close() }()
 	if err != nil {
 		return nil, err
 	}
 
-	response := &GetWhoamiWhoamiGetResponse{
+	response := &GetWhoamiV1WhoamiGetResponse{
 		Body:         bodyBytes,
 		HTTPResponse: rsp,
 	}
