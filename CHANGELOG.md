@@ -4,8 +4,20 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 
 ## [Unreleased]
 
+### Email
+
+- `GET /email-domains` reports `default_from: null` when the hail-mail
+  address the org would mint is already claimed by another tenant. A pinned
+  `HAIL_MAIL_FROM` is one address per deployment, so the first org to send
+  takes it and every other org's send 409s — the preview promised an
+  address the send path refuses.
+
 ### Internal
 
+- Deploy prunes images older than two weeks on the production VM after a
+  successful rollout. Each deploy pulled `:latest` plus `sha-<commit>` for
+  three services and removed nothing, until the disk filled and a deploy
+  died mid-pull.
 - Release tags: there is no umbrella `v<X.Y.Z>` tag any more. GoReleaser strips
   the `cli-` prefix, so that name already belongs to the CLI's release page; a
   hand-made one made `cli-v0.20.0` publish its binaries onto a page whose tag

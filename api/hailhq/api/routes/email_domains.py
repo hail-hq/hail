@@ -227,9 +227,10 @@ async def first_pending_custom(db: AsyncSession, organization_id: UUID) -> str |
 async def preview_default_from(db: AsyncSession, organization_id: UUID) -> str | None:
     """The address a ``from``-less send would use right now, or ``None``.
 
-    ``None`` means "a ``from``-less send will not go out": either the org
-    owns several verified identities and must name one (``resolve_sender``
-    raises 422), or it owns none that can send yet. Mirrors
+    ``None`` means "a ``from``-less send will not go out": the org owns
+    several verified identities and must name one (``resolve_sender``
+    raises 422), it owns none that can send yet, or the hail-mail address
+    it would mint belongs to another tenant (409). Mirrors
     ``resolve_sender`` case for case — the two must not drift, which is
     why both read ``verified_senders`` / ``first_pending_custom``.
 
@@ -251,11 +252,29 @@ async def _unminted_hail_mail(db: AsyncSession, organization_id: UUID) -> str | 
         user_prefix, org_prefix = resolve_hail_mail_prefixes(
             None, None, organization_id
         )
-        return compose_hail_mail_address(user_prefix, org_prefix)
+        address = compose_hail_mail_address(user_prefix, org_prefix)
     except HTTPException:
         # 503 from either helper — the operator has not configured
         # hail-mail. Not an error for a read; there simply is no default.
         return None
+
+    # The hail-mail prefix pair is unique across the whole deployment, not
+    # per org. ``HAIL_MAIL_FROM`` pins one pair for every tenant, so on a
+    # multi-tenant deployment the first org to send claims it and the mint
+    # 409s for everyone else (emails.py, the IntegrityError branch). Report
+    # no default rather than an address the send would refuse.
+    owner = (
+        await db.execute(
+            select(EmailDomain.organization_id).where(
+                EmailDomain.kind == "hail_mail",
+                EmailDomain.local_prefix_user == user_prefix,
+                EmailDomain.local_prefix_org == org_prefix,
+            )
+        )
+    ).scalar_one_or_none()
+    if owner is not None and owner != organization_id:
+        return None
+    return address
 
 
 # --------------------------------------------------------------------------- #

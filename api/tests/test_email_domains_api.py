@@ -722,6 +722,57 @@ async def test_default_from_is_null_while_a_custom_domain_is_pending(
     assert resp.json()["default_from"] is None
 
 
+async def test_default_from_is_null_when_another_org_owns_the_hail_mail_address(
+    client: httpx.AsyncClient,
+    org_and_key: tuple,
+    monkeypatch: pytest.MonkeyPatch,
+    async_session: AsyncSession,
+    email_mock: AsyncMock,
+) -> None:
+    """A pinned HAIL_MAIL_FROM is one address for the whole deployment.
+
+    The first org to send claims it; every other org's mint 409s. Reporting
+    the address as ``default_from`` would promise a send the API refuses,
+    so the preview must go quiet in exactly the case the send path rejects.
+    """
+    monkeypatch.setattr(settings, "hail_mail_base_domain", "mail.hail.so")
+    monkeypatch.setattr(settings, "hail_mail_from", "admin+shared@mail.hail.so")
+    _, _, plain_a = org_and_key
+    _, _, plain_b = await insert_org_and_key(async_session)
+
+    # Org A sends first and claims admin+shared@mail.hail.so.
+    claimed = await client.post(
+        "/emails",
+        json={
+            "to": ["alice@example.com"],
+            "subject": "hi",
+            "body_text": "body",
+            "recipient_consent": True,
+        },
+        headers={"Authorization": f"Bearer {plain_a}"},
+    )
+    assert claimed.status_code == 201, claimed.text
+    assert claimed.json()["from_address"] == "admin+shared@mail.hail.so"
+
+    headers_b = {"Authorization": f"Bearer {plain_b}"}
+    listed = await client.get("/email-domains", headers=headers_b)
+    assert listed.status_code == 200, listed.text
+    assert listed.json()["default_from"] is None
+
+    # Parity: the send path org B would take really is a refusal.
+    sent = await client.post(
+        "/emails",
+        json={
+            "to": ["bob@example.com"],
+            "subject": "hi",
+            "body_text": "body",
+            "recipient_consent": True,
+        },
+        headers=headers_b,
+    )
+    assert sent.status_code == 409, sent.text
+
+
 async def test_default_from_is_null_when_hail_mail_is_unconfigured(
     client: httpx.AsyncClient,
     org_and_key: tuple,

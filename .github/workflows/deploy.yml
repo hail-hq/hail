@@ -156,6 +156,22 @@ jobs:
 
             $COMPOSE ps
 
+            # Reclaim disk. Every deploy pulls both `:latest` and
+            # `sha-<commit>` for three services, and the `sha-` tags are
+            # never removed — tagged images, so a plain dangling-only prune
+            # does not touch them. They accumulated until the VM filled and
+            # a deploy died mid-pull with "no space left on device"
+            # (2026-08-14). `-a` with `until` keeps anything in use by a
+            # running container plus the last two weeks of images (enough to
+            # roll back without a GHCR round-trip) and drops the tail.
+            # Never fail the deploy on cleanup: the rollout already
+            # succeeded by this point.
+            echo "=== disk before prune ==="
+            df -h /var/lib/docker || df -h /var/lib || true
+            docker image prune -af --filter "until=336h" || true
+            echo "=== disk after prune ==="
+            df -h /var/lib/docker || df -h /var/lib || true
+
             # Restore main so operators SSHing the VM see a normal branch
             # state. Deploy work above ran against the detached SHA; this
             # only moves the symbolic ref. Skip if origin/main moved past
