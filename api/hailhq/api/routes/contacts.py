@@ -19,6 +19,7 @@ from fastapi import status as http_status
 from hailhq.api.deps import Principal, get_current_principal
 from hailhq.api.errors import unprocessable
 from hailhq.api.pagination import fetch_cursor_page
+from hailhq.api.ratelimit import GENERAL_RATE_LIMITED_RESPONSES
 from hailhq.core.contacts import MEMBER_ID_PREFIX, contact_to_entry, contacts_union_stmt
 from hailhq.core.db import get_session
 from hailhq.core.models import Contact, OrganizationMember, User
@@ -33,7 +34,7 @@ from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-router = APIRouter(tags=["contacts"])
+router = APIRouter(tags=["contacts"], responses=GENERAL_RATE_LIMITED_RESPONSES)
 
 _MEMBER_ID_DETAIL = "member contacts are managed via membership"
 _DEFAULT_LIMIT = 100
@@ -81,7 +82,10 @@ async def _member_role(db: AsyncSession, org_id: UUID, user_id: UUID) -> str | N
     ).scalar_one_or_none()
 
 
-@router.get("/contacts", response_model=ContactListResponse)
+@router.get(
+    "/contacts",
+    response_model=ContactListResponse,
+)
 async def list_contacts(
     principal: Annotated[Principal, Depends(get_current_principal)],
     db: Annotated[AsyncSession, Depends(get_session)],
@@ -89,6 +93,14 @@ async def list_contacts(
     cursor: str | None = Query(default=None),
     limit: int = Query(default=_DEFAULT_LIMIT, ge=1, le=_MAX_LIMIT),
 ) -> ContactListResponse:
+    """List contacts for the caller's organization, newest first.
+
+    Merges two sources into one list: org members (kind="member", ids
+    prefixed "member:", managed via membership — not editable here) and
+    manually-created contacts (kind="manual", editable via PATCH/DELETE
+    /contacts/{contact_id}). Cursor-paginated; q does a substring search
+    over name/phone/email.
+    """
     u = contacts_union_stmt(principal.organization_id, q).subquery()
     rows, next_cursor = await fetch_cursor_page(
         db,
@@ -114,13 +126,21 @@ async def list_contacts(
 
 
 @router.post(
-    "/contacts", response_model=ContactEntry, status_code=http_status.HTTP_201_CREATED
+    "/contacts",
+    response_model=ContactEntry,
+    status_code=http_status.HTTP_201_CREATED,
 )
 async def create_contact(
     body: ContactCreate,
     principal: Annotated[Principal, Depends(get_current_principal)],
     db: Annotated[AsyncSession, Depends(get_session)],
 ) -> ContactEntry:
+    """Create a manual contact with a phone and/or an email.
+
+    Requires at least one of phone_e164 or email. Fails with 409 if a
+    contact with the same phone or email already exists in this
+    organization.
+    """
     row = Contact(
         organization_id=principal.organization_id,
         name=body.name,
@@ -141,13 +161,23 @@ async def create_contact(
     return contact_to_entry(row)
 
 
-@router.patch("/contacts/{contact_id}", response_model=ContactEntry)
+@router.patch(
+    "/contacts/{contact_id}",
+    response_model=ContactEntry,
+)
 async def patch_contact(
     contact_id: str,
     body: ContactPatch,
     principal: Annotated[Principal, Depends(get_current_principal)],
     db: Annotated[AsyncSession, Depends(get_session)],
 ) -> ContactEntry:
+    """Update a manual contact's fields. Only fields present in the body change.
+
+    Manual contacts only — a member: id (org members synced from
+    membership) returns 422; edit those via the membership APIs instead.
+    The contact must still have at least one of phone_e164 or email after
+    the update. Fails with 409 on a duplicate phone/email.
+    """
     row = await _get_manual_or_404(db, principal.organization_id, contact_id)
     data = body.model_dump(exclude_unset=True)
     next_phone = data.get("phone_e164", row.phone_e164)
@@ -168,12 +198,20 @@ async def patch_contact(
     return contact_to_entry(row)
 
 
-@router.delete("/contacts/{contact_id}", status_code=http_status.HTTP_204_NO_CONTENT)
+@router.delete(
+    "/contacts/{contact_id}",
+    status_code=http_status.HTTP_204_NO_CONTENT,
+)
 async def delete_contact(
     contact_id: str,
     principal: Annotated[Principal, Depends(get_current_principal)],
     db: Annotated[AsyncSession, Depends(get_session)],
 ) -> Response:
+    """Permanently remove a manual contact.
+
+    Manual contacts only — a member: id returns 422; org members are
+    removed via the membership APIs, not this route. Irreversible.
+    """
     row = await _get_manual_or_404(db, principal.organization_id, contact_id)
     await db.delete(row)
     await db.commit()
@@ -217,13 +255,21 @@ async def _resolve_phone_target(
     return target
 
 
-@router.put("/members/{user_id}/phone")
+@router.put(
+    "/members/{user_id}/phone",
+)
 async def put_member_phone(
     user_id: str,
     body: MemberPhonePut,
     principal: Annotated[Principal, Depends(get_current_principal)],
     db: Annotated[AsyncSession, Depends(get_session)],
 ) -> dict[str, str]:
+    """Set an org member's phone number.
+
+    Pass user_id="me" to set your own, or a member's user id — setting
+    another member's phone requires the caller to be an org owner or
+    admin. Returns 404 if the target is not a member of this organization.
+    """
     target = await _resolve_phone_target(db, principal, user_id)
     await db.execute(
         update(User).where(User.id == target).values(phone_number=body.phone_e164)
@@ -232,12 +278,21 @@ async def put_member_phone(
     return {"user_id": str(target), "phone_e164": body.phone_e164}
 
 
-@router.delete("/members/{user_id}/phone", status_code=http_status.HTTP_204_NO_CONTENT)
+@router.delete(
+    "/members/{user_id}/phone",
+    status_code=http_status.HTTP_204_NO_CONTENT,
+)
 async def delete_member_phone(
     user_id: str,
     principal: Annotated[Principal, Depends(get_current_principal)],
     db: Annotated[AsyncSession, Depends(get_session)],
 ) -> Response:
+    """Clear an org member's phone number.
+
+    Pass user_id="me" to clear your own, or a member's user id — clearing
+    another member's phone requires the caller to be an org owner or
+    admin. Returns 404 if the target is not a member of this organization.
+    """
     target = await _resolve_phone_target(db, principal, user_id)
     await db.execute(update(User).where(User.id == target).values(phone_number=None))
     await db.commit()

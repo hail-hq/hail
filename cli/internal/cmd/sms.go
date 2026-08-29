@@ -86,7 +86,7 @@ func runSms(ctx context.Context, cmd *cobra.Command, opts *Options, f *smsFlags,
 		return err
 	}
 
-	resp, err := apiClient.CreateSmsSmsPostWithResponse(ctx, &client.CreateSmsSmsPostParams{}, body)
+	resp, err := apiClient.CreateSmsV1SmsPostWithResponse(ctx, &client.CreateSmsV1SmsPostParams{}, body)
 	if err != nil {
 		return fmt.Errorf("sms API: %w", err)
 	}
@@ -158,7 +158,7 @@ func runSmsStatus(ctx context.Context, opts *Options, idStr string) error {
 		return err
 	}
 
-	resp, err := apiClient.GetSmsSmsSmsIdGetWithResponse(ctx, id, &client.GetSmsSmsSmsIdGetParams{})
+	resp, err := apiClient.GetSmsV1SmsSmsIdGetWithResponse(ctx, id, &client.GetSmsV1SmsSmsIdGetParams{})
 	if err != nil {
 		return fmt.Errorf("sms API: %w", err)
 	}
@@ -203,17 +203,17 @@ func runSmsList(ctx context.Context, opts *Options, f *smsListFlags) error {
 		return err
 	}
 
-	params := &client.ListSmsSmsGetParams{
+	params := &client.ListSmsV1SmsGetParams{
 		Limit:  &f.limit,
 		Cursor: strPtr(f.cursor),
 		To:     strPtr(f.to),
 	}
 	if f.status != "" {
-		s := client.ListSmsSmsGetParamsStatus(f.status)
+		s := client.ListSmsV1SmsGetParamsStatus(f.status)
 		params.Status = &s
 	}
 
-	resp, err := apiClient.ListSmsSmsGetWithResponse(ctx, params)
+	resp, err := apiClient.ListSmsV1SmsGetWithResponse(ctx, params)
 	if err != nil {
 		return fmt.Errorf("sms API: %w", err)
 	}
@@ -276,7 +276,7 @@ func newSmsSuppressionsListCmd(opts *Options) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			resp, err := apiClient.ListSmsSuppressionsSmsSuppressionsGetWithResponse(ctx, &client.ListSmsSuppressionsSmsSuppressionsGetParams{
+			resp, err := apiClient.ListSmsSuppressionsV1SmsSuppressionsGetWithResponse(ctx, &client.ListSmsSuppressionsV1SmsSuppressionsGetParams{
 				Limit:  &limit,
 				Cursor: strPtr(cursor),
 			})
@@ -327,7 +327,7 @@ func newSmsSenderIdGetCmd(opts *Options) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			resp, err := apiClient.GetSenderIdSmsSenderIdGetWithResponse(ctx, &client.GetSenderIdSmsSenderIdGetParams{})
+			resp, err := apiClient.GetSenderIdV1SmsSenderIdGetWithResponse(ctx, &client.GetSenderIdV1SmsSenderIdGetParams{})
 			if err != nil {
 				return fmt.Errorf("sms sender-id API: %w", err)
 			}
@@ -377,7 +377,7 @@ either an empty value or --clear:
 				return err
 			}
 			body := client.SenderIdPatch{CustomSenderId: value}
-			resp, err := apiClient.PatchSenderIdSmsSenderIdPatchWithResponse(ctx, &client.PatchSenderIdSmsSenderIdPatchParams{}, body)
+			resp, err := apiClient.PatchSenderIdV1SmsSenderIdPatchWithResponse(ctx, &client.PatchSenderIdV1SmsSenderIdPatchParams{}, body)
 			if err != nil {
 				return fmt.Errorf("sms sender-id API: %w", err)
 			}
@@ -430,7 +430,7 @@ func newSmsSuppressionsDeleteCmd(opts *Options) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			resp, err := apiClient.DeleteSmsSuppressionSmsSuppressionsNumberDeleteWithResponse(ctx, args[0], &client.DeleteSmsSuppressionSmsSuppressionsNumberDeleteParams{})
+			resp, err := apiClient.DeleteSmsSuppressionV1SmsSuppressionsNumberDeleteWithResponse(ctx, args[0], &client.DeleteSmsSuppressionV1SmsSuppressionsNumberDeleteParams{})
 			if err != nil {
 				return fmt.Errorf("sms suppressions API: %w", err)
 			}

@@ -100,9 +100,17 @@ def parse_resource_id(value: str) -> tuple[str, UUID]:
 class LLMConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    base_url: str
-    api_key: str
-    model: str
+    base_url: str = Field(
+        description=(
+            "Public HTTPS base URL of the BYO LLM endpoint the call runs "
+            "on. Must resolve to a public address — private/internal "
+            "hosts are rejected."
+        )
+    )
+    api_key: str = Field(
+        description="API key sent to the BYO LLM endpoint. Write-only — never echoed back."
+    )
+    model: str = Field(description="Model name to request from the BYO LLM endpoint.")
 
     @field_validator("base_url")
     @classmethod
@@ -127,12 +135,28 @@ class LLMConfig(BaseModel):
 class VoiceConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    tts: Literal["cartesia"] = "cartesia"
-    vad: Literal["silero"] = "silero"
-    turn_detection: Literal["livekit"] = "livekit"
+    tts: Literal["cartesia"] = Field(
+        default="cartesia",
+        description="Text-to-speech provider. Currently only 'cartesia'.",
+    )
+    vad: Literal["silero"] = Field(
+        default="silero",
+        description="Voice-activity-detection engine. Currently only 'silero'.",
+    )
+    turn_detection: Literal["livekit"] = Field(
+        default="livekit",
+        description="Turn-detection engine. Currently only 'livekit'.",
+    )
     # Per-call TTS voice override. Applies to whichever TTS provider serves
     # the call (org BYO config or Hail default). None → org/env default.
-    voice_id: str | None = None
+    voice_id: str | None = Field(
+        default=None,
+        description=(
+            "Per-call TTS voice override, applied to whichever TTS "
+            "provider serves the call. Omitted: the organization's or "
+            "environment's default voice."
+        ),
+    )
     language: Language | None = Field(
         default=None,
         description=(
@@ -183,11 +207,42 @@ class ConsentAttestationMixin(BaseModel):
 class CallCreate(ConsentAttestationMixin):
     model_config = ConfigDict(extra="forbid")
 
-    to: str
-    from_: str | None = Field(default=None, alias="from")
-    system_prompt: str | None = None
-    llm: LLMConfig | None = None
-    first_message: str | None = None
+    to: str = Field(
+        description="Recipient phone number, E.164 format (e.g. +14155551234)."
+    )
+    from_: str | None = Field(
+        default=None,
+        alias="from",
+        description=(
+            "Caller-id phone number, E.164 format. Must be a number owned "
+            "by the organization with the voice capability. Omitted: an "
+            "active org-owned number is used if one exists, else a number "
+            "is claimed from the shared pool."
+        ),
+    )
+    system_prompt: str | None = Field(
+        default=None,
+        description=(
+            "Task instructions for the agent, sent as its leading system "
+            "message. At least one of system_prompt or llm is required; "
+            "both together is also valid."
+        ),
+    )
+    llm: LLMConfig | None = Field(
+        default=None,
+        description=(
+            "BYO LLM endpoint the call runs on instead of Hail's default "
+            "model. At least one of system_prompt or llm is required; both "
+            "together is also valid."
+        ),
+    )
+    first_message: str | None = Field(
+        default=None,
+        description=(
+            "Opening line the agent speaks first. Omitted: the agent waits "
+            "for the callee to speak first."
+        ),
+    )
     ai_disclosure: bool = Field(
         default=True,
         description=(
@@ -202,9 +257,28 @@ class CallCreate(ConsentAttestationMixin):
             "itself as an AI if asked."
         ),
     )
-    voice_config: VoiceConfig = Field(default_factory=VoiceConfig)
-    conversation_id: UUID | None = None
-    metadata: dict = Field(default_factory=dict)
+    voice_config: VoiceConfig = Field(
+        default_factory=VoiceConfig,
+        description=(
+            "TTS voice, VAD, turn-detection, and spoken-language settings "
+            "for this call."
+        ),
+    )
+    conversation_id: UUID | None = Field(
+        default=None,
+        description=(
+            "Groups this call with other calls/emails/SMS into one "
+            "conversation thread. Omitted: the call is not linked to a "
+            "conversation."
+        ),
+    )
+    metadata: dict = Field(
+        default_factory=dict,
+        description=(
+            "Free-form JSON object attached to the call and echoed back on "
+            "reads. Not interpreted by Hail."
+        ),
+    )
     tools: list[str] | None = Field(
         default=None,
         description=(
@@ -258,36 +332,97 @@ NumberType = Literal["local", "mobile", "toll_free", "national"]
 class CallResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
-    id: UUID
-    organization_id: UUID
-    conversation_id: UUID | None
-    from_e164: str
-    to_e164: str
-    direction: Literal["outbound", "inbound"]
-    status: CallStatus
-    end_reason: str | None
-    provider_call_sid: str | None
-    livekit_room: str | None
-    initial_prompt: str | None
-    recording_s3_key: str | None
-    requested_at: datetime
-    started_at: datetime | None
-    answered_at: datetime | None
-    ended_at: datetime | None
+    id: UUID = Field(description="Unique identifier for this call.")
+    organization_id: UUID = Field(
+        description="Organization that placed or received this call."
+    )
+    conversation_id: UUID | None = Field(
+        description=(
+            "Conversation thread this call is grouped into, if any. Null "
+            "when the call was not linked to a conversation."
+        )
+    )
+    from_e164: str = Field(description="Caller-id phone number used, E.164 format.")
+    to_e164: str = Field(description="Recipient phone number, E.164 format.")
+    direction: Literal["outbound", "inbound"] = Field(
+        description="'outbound' for calls Hail placed, 'inbound' for calls received."
+    )
+    status: CallStatus = Field(
+        description=(
+            "Current call-progress state: 'queued', 'dialing', 'ringing', "
+            "'in_progress', or one of the terminal states 'completed', "
+            "'failed', 'busy', 'no_answer', 'canceled'."
+        )
+    )
+    end_reason: str | None = Field(
+        description=(
+            "Machine-readable reason the call reached a terminal status "
+            "(e.g. 'normal_hangup', 'user_rejected', 'sip_trunk_failure'). "
+            "Null while the call is still in progress."
+        )
+    )
+    provider_call_sid: str | None = Field(
+        description="The telephony provider's identifier for this call leg, if assigned."
+    )
+    livekit_room: str | None = Field(
+        description="Name of the LiveKit room hosting this call's media session, if one was created."
+    )
+    initial_prompt: str | None = Field(
+        description="The system_prompt this call was created with, if any."
+    )
+    recording_s3_key: str | None = Field(
+        description="Internal storage key for the call recording. Not a directly fetchable URL."
+    )
+    requested_at: datetime = Field(
+        description="When the call was requested, ISO 8601 timestamp."
+    )
+    started_at: datetime | None = Field(
+        description="When dialing began, ISO 8601 timestamp. Null until the call starts."
+    )
+    answered_at: datetime | None = Field(
+        description="When the callee answered, ISO 8601 timestamp. Null if never answered."
+    )
+    ended_at: datetime | None = Field(
+        description="When the call ended, ISO 8601 timestamp. Null while still in progress."
+    )
 
 
 class CallListResponse(BaseModel):
-    items: list[CallResponse]
-    next_cursor: str | None = None
+    items: list[CallResponse] = Field(description="Calls in this page, newest first.")
+    next_cursor: str | None = Field(
+        default=None,
+        description="Opaque cursor for the next page. Null when there are no more results.",
+    )
 
 
 class SmsCreate(ConsentAttestationMixin):
     model_config = ConfigDict(extra="forbid")
 
-    to: str
-    from_: str | None = Field(default=None, alias="from")
-    body: str = Field(min_length=1, max_length=1600)
-    metadata: dict = Field(default_factory=dict)
+    to: str = Field(
+        description="Recipient phone number, E.164 format (e.g. +14155551234)."
+    )
+    from_: str | None = Field(
+        default=None,
+        alias="from",
+        description=(
+            "Sender phone number, E.164 format. Must be a number owned by "
+            "the organization with the SMS capability. Omitted: an active "
+            "org-owned number is used if one exists, else a number is "
+            "claimed from the shared pool."
+        ),
+    )
+    body: str = Field(
+        min_length=1,
+        max_length=1600,
+        description="Message text. Long bodies are split into multiple carrier segments.",
+    )
+    metadata: dict = Field(
+        default_factory=dict,
+        description=(
+            "Free-form JSON object attached to the message and echoed back "
+            "on reads. Not interpreted by Hail."
+        ),
+    )
 
     _validate_e164 = field_validator("to", "from_")(_e164_or_error)
 
@@ -298,23 +433,45 @@ SmsStatus = Literal["queued", "sent", "delivered", "failed", "undelivered", "rec
 class SmsResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
-    id: UUID
-    organization_id: UUID
-    from_e164: str
-    to_e164: str
-    direction: Literal["outbound", "inbound"]
-    status: SmsStatus
-    body: str
-    provider_message_sid: str | None
-    segment_count: int
-    error_code: str | None
-    requested_at: datetime
-    sent_at: datetime | None
+    id: UUID = Field(description="Unique identifier for this message.")
+    organization_id: UUID = Field(
+        description="Organization that sent or received this message."
+    )
+    from_e164: str = Field(description="Sender phone number, E.164 format.")
+    to_e164: str = Field(description="Recipient phone number, E.164 format.")
+    direction: Literal["outbound", "inbound"] = Field(
+        description="'outbound' for messages Hail sent, 'inbound' for messages received."
+    )
+    status: SmsStatus = Field(
+        description=(
+            "Delivery status: 'queued', 'sent', 'delivered', 'failed', "
+            "'undelivered', or 'received' (inbound messages)."
+        )
+    )
+    body: str = Field(description="Message text.")
+    provider_message_sid: str | None = Field(
+        description="The carrier/provider's identifier for this message, if assigned."
+    )
+    segment_count: int = Field(
+        description="Number of carrier SMS segments the body was split into."
+    )
+    error_code: str | None = Field(
+        description="Carrier error code if delivery failed. Null on success or while pending."
+    )
+    requested_at: datetime = Field(
+        description="When the send was requested, ISO 8601 timestamp."
+    )
+    sent_at: datetime | None = Field(
+        description="When the message was handed to the carrier, ISO 8601 timestamp. Null until sent."
+    )
 
 
 class SmsListResponse(BaseModel):
-    items: list[SmsResponse]
-    next_cursor: str | None = None
+    items: list[SmsResponse] = Field(description="Messages in this page, newest first.")
+    next_cursor: str | None = Field(
+        default=None,
+        description="Opaque cursor for the next page. Null when there are no more results.",
+    )
 
 
 # ``\Z`` (not ``$``) so a trailing newline is rejected: in Python ``$`` also
@@ -326,7 +483,15 @@ SENDER_ID_RE = re.compile(r"^[A-Za-z0-9]{2,11}\Z")
 class SenderIdPatch(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    custom_sender_id: str | None = None
+    custom_sender_id: str | None = Field(
+        default=None,
+        description=(
+            "Alphanumeric sender id (2-11 characters, letters/digits only) "
+            "to use on alphanumeric-eligible corridors instead of a phone "
+            "number. Explicit null clears it, reverting to the platform "
+            "default."
+        ),
+    )
 
     @field_validator("custom_sender_id")
     @classmethod
@@ -339,15 +504,30 @@ class SenderIdPatch(BaseModel):
 
 
 class SenderIdResponse(BaseModel):
-    custom_sender_id: str | None
-    effective_default: str = PLATFORM_DEFAULT_SENDER_ID
+    custom_sender_id: str | None = Field(
+        description="The organization's configured alphanumeric sender id. Null if none is set."
+    )
+    effective_default: str = Field(
+        default=PLATFORM_DEFAULT_SENDER_ID,
+        description=(
+            "The platform's alphanumeric sender id, used on eligible "
+            "corridors when custom_sender_id is null."
+        ),
+    )
 
 
 class NumberAcquireRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    country_code: str = Field(min_length=2, max_length=2)
-    number_type: NumberType = "local"
+    country_code: str = Field(
+        min_length=2,
+        max_length=2,
+        description="ISO alpha-2 country code to acquire a number in (e.g. 'US'). Case-insensitive.",
+    )
+    number_type: NumberType = Field(
+        default="local",
+        description="Kind of number to acquire: 'local', 'mobile', 'toll_free', or 'national'.",
+    )
 
     @field_validator("country_code")
     @classmethod
@@ -360,35 +540,66 @@ class NumberAcquireRequest(BaseModel):
 class PhoneNumberResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
-    id: UUID
-    e164: str
-    country_code: str
-    number_type: str
-    capabilities: list[str]
-    provisioning_state: str
-    is_dedicated: bool
-    messaging_service_sid: str | None = None
+    id: UUID = Field(description="Unique identifier for this number.")
+    e164: str = Field(description="The phone number, E.164 format.")
+    country_code: str = Field(
+        description="ISO alpha-2 country code this number belongs to."
+    )
+    number_type: str = Field(
+        description="Kind of number: 'local', 'mobile', 'toll_free', or 'national'."
+    )
+    capabilities: list[str] = Field(
+        description="Channels this number supports, e.g. ['voice'], ['sms'], or both."
+    )
+    provisioning_state: str = Field(
+        description="'pending', 'active', 'failed', or 'released'."
+    )
+    is_dedicated: bool = Field(
+        description="True if this number is owned by the organization. False for shared-pool numbers."
+    )
+    messaging_service_sid: str | None = Field(
+        default=None,
+        description="Provider messaging-service identifier once SMS has been enabled on this number. Null until then.",
+    )
 
 
 class PhoneNumberListResponse(BaseModel):
-    items: list[PhoneNumberResponse]
-    next_cursor: str | None = None
+    items: list[PhoneNumberResponse] = Field(description="Numbers in this page.")
+    next_cursor: str | None = Field(
+        default=None,
+        description="Opaque cursor for the next page. Null when there are no more results.",
+    )
 
 
 class SuppressionResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
-    id: UUID
-    recipient: str
-    channel: str
-    reason: str
-    source: str
-    created_at: datetime
+    id: UUID = Field(description="Unique identifier for this suppression entry.")
+    recipient: str = Field(
+        description="The suppressed recipient — E.164 phone number for voice/sms, lowercased email address for email."
+    )
+    channel: str = Field(
+        description="Channel this entry blocks sends on: 'voice', 'email', 'sms', or 'all' (every channel)."
+    )
+    reason: str = Field(
+        description="Why the recipient was suppressed (e.g. an unsubscribe or a bounce)."
+    )
+    source: str = Field(
+        description="How this entry was created: 'unsubscribe_link', 'manual' (an operator action), or 'bounce'."
+    )
+    created_at: datetime = Field(
+        description="When this entry was created, ISO 8601 timestamp."
+    )
 
 
 class SuppressionListResponse(BaseModel):
-    items: list[SuppressionResponse]
-    next_cursor: str | None = None
+    items: list[SuppressionResponse] = Field(
+        description="Suppressed recipients in this page."
+    )
+    next_cursor: str | None = Field(
+        default=None,
+        description="Opaque cursor for the next page. Null when there are no more results.",
+    )
 
 
 class EventResponse(BaseModel):
@@ -396,23 +607,50 @@ class EventResponse(BaseModel):
 
     model_config = ConfigDict(from_attributes=True)
 
-    id: UUID
-    source: Literal["call", "email", "sms"]
-    call_id: UUID | None = None
-    email_id: UUID | None = None
-    sms_id: UUID | None = None
-    kind: str
-    payload: dict[str, Any]
-    occurred_at: datetime
+    id: UUID = Field(description="Unique identifier for this event.")
+    source: Literal["call", "email", "sms"] = Field(
+        description="Which channel this event belongs to: 'call', 'email', or 'sms'."
+    )
+    call_id: UUID | None = Field(
+        default=None,
+        description="The call this event belongs to. Set only when source='call'.",
+    )
+    email_id: UUID | None = Field(
+        default=None,
+        description="The email this event belongs to. Set only when source='email'.",
+    )
+    sms_id: UUID | None = Field(
+        default=None,
+        description="The message this event belongs to. Set only when source='sms'.",
+    )
+    kind: str = Field(
+        description="Event kind within the source (e.g. 'queued', 'delivered', 'bounced'). Vocabulary differs per source."
+    )
+    payload: dict[str, Any] = Field(
+        description="Event-kind-specific detail, as a free-form JSON object."
+    )
+    occurred_at: datetime = Field(
+        description="When this event occurred, ISO 8601 timestamp."
+    )
 
 
 class EventStreamResponse(BaseModel):
-    items: list[EventResponse]
-    next_cursor: str | None = None
+    items: list[EventResponse] = Field(description="Events in this page, oldest first.")
+    next_cursor: str | None = Field(
+        default=None,
+        description="Opaque cursor for the next page. Null when there are no more results.",
+    )
     # Only populated when the ``id`` query filter resolves to a call (e.g.
     # ``id=call:<uuid>``). Org-wide tails and non-call resource types leave
     # this null — there's no single "the" status to report.
-    call_status: CallStatus | None = None
+    call_status: CallStatus | None = Field(
+        default=None,
+        description=(
+            "Current status of the call named by the id filter (e.g. "
+            "id=call:<uuid>). Null for org-wide tails and non-call filters, "
+            "since there is no single call to report a status for."
+        ),
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -459,17 +697,37 @@ class DnsRecordSchema(BaseModel):
 
     model_config = ConfigDict(from_attributes=True, extra="allow")
 
-    name: str
-    value: str
-    type: Literal["CNAME", "MX", "TXT"] = "CNAME"
-    priority: int | None = None
+    name: str = Field(
+        description="DNS record name/host to publish (e.g. a CNAME's subdomain)."
+    )
+    value: str = Field(
+        description="DNS record value to publish (e.g. a CNAME target or TXT content)."
+    )
+    type: Literal["CNAME", "MX", "TXT"] = Field(
+        default="CNAME",
+        description="DNS record type: 'CNAME' (DKIM), 'MX' (MAIL FROM), or 'TXT' (SPF).",
+    )
+    priority: int | None = Field(
+        default=None,
+        description="MX priority. Only present for type='MX'; null otherwise.",
+    )
 
 
 class DomainCheckResponse(BaseModel):
-    domain: str
-    in_use: bool
-    existing_mx: list[str]
-    suggested_domain: str
+    domain: str = Field(description="The apex domain that was checked, lowercased.")
+    in_use: bool = Field(
+        description="True if the domain already has MX records — it receives mail elsewhere."
+    )
+    existing_mx: list[str] = Field(
+        description="MX hostnames currently published for the domain. Empty when in_use is false."
+    )
+    suggested_domain: str = Field(
+        description=(
+            "Domain to use for a custom sending identity: the apex domain "
+            "if it is not already receiving mail, or an 'inbox.' subdomain "
+            "if it is (so setup doesn't collide with existing mail)."
+        )
+    )
 
 
 class EmailDomainCreate(BaseModel):
@@ -485,10 +743,33 @@ class EmailDomainCreate(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    kind: EmailDomainKind
-    domain: str | None = None
-    local_prefix_user: str | None = None
-    local_prefix_org: str | None = None
+    kind: EmailDomainKind = Field(
+        description=(
+            "'hail_mail' for a Hail-hosted address (domain omitted, "
+            "composed from the prefix fields), or 'custom' to send from "
+            "your own domain (domain required, prefix fields omitted)."
+        )
+    )
+    domain: str | None = Field(
+        default=None,
+        description="DNS domain to send from (e.g. 'acme.com'). Required for kind='custom'; must be omitted for kind='hail_mail'.",
+    )
+    local_prefix_user: str | None = Field(
+        default=None,
+        description=(
+            "User-chosen local-part prefix for a hail_mail address. Only "
+            "valid for kind='hail_mail'. Falls back to "
+            "HAIL_MAIL_DEFAULT_USER_PREFIX if omitted."
+        ),
+    )
+    local_prefix_org: str | None = Field(
+        default=None,
+        description=(
+            "Org-chosen local-part prefix for a hail_mail address. Only "
+            "valid for kind='hail_mail'. Falls back to "
+            "HAIL_MAIL_DEFAULT_ORG_PREFIX if omitted."
+        ),
+    )
 
     @field_validator("domain")
     @classmethod
@@ -556,11 +837,26 @@ class EmailDomainPatch(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    local_prefix_user: str | None = None
-    local_prefix_org: str | None = None
-    inbound_enabled: bool | None = None
-    forward_to: list[str] | None = None
-    forward_rate_per_hour: int | None = None
+    local_prefix_user: str | None = Field(
+        default=None,
+        description="New user local-part prefix. Only valid on kind='hail_mail' rows. Omit to leave unchanged.",
+    )
+    local_prefix_org: str | None = Field(
+        default=None,
+        description="New org local-part prefix. Only valid on kind='hail_mail' rows. Omit to leave unchanged.",
+    )
+    inbound_enabled: bool | None = Field(
+        default=None,
+        description="Whether to accept inbound mail on this domain. Requires forward_to (or an existing one) when true. Omit to leave unchanged.",
+    )
+    forward_to: list[str] | None = Field(
+        default=None,
+        description="Email addresses to forward inbound mail to. Omit to leave unchanged.",
+    )
+    forward_rate_per_hour: int | None = Field(
+        default=None,
+        description="Cap on forwarded messages per hour. Omit to leave unchanged.",
+    )
 
     @field_validator("local_prefix_user", "local_prefix_org")
     @classmethod
@@ -613,57 +909,149 @@ class EmailDomainResponse(BaseModel):
 
     model_config = ConfigDict(from_attributes=True)
 
-    id: UUID
-    organization_id: UUID
-    kind: EmailDomainKind
-    domain: str
-    local_prefix_user: str | None
-    local_prefix_org: str | None
-    verification_status: EmailDomainVerificationStatus
-    dns_records: list[DnsRecordSchema]
-    mail_from_domain: str | None
-    mail_from_status: str | None = None
-    provider: str
-    verified_at: datetime | None
-    inbound_enabled: bool = False
-    forward_to: list[str] | None = None
-    forward_rate_per_hour: int | None = None
-    created_at: datetime
-    updated_at: datetime
+    id: UUID = Field(description="Unique identifier for this email domain.")
+    organization_id: UUID = Field(description="Organization that owns this domain.")
+    kind: EmailDomainKind = Field(
+        description="'hail_mail' (Hail-hosted address) or 'custom' (your own domain)."
+    )
+    domain: str = Field(description="The DNS domain mail is sent from.")
+    local_prefix_user: str | None = Field(
+        description="User local-part prefix for a hail_mail address. Null for kind='custom'."
+    )
+    local_prefix_org: str | None = Field(
+        description="Org local-part prefix for a hail_mail address. Null for kind='custom'."
+    )
+    verification_status: EmailDomainVerificationStatus = Field(
+        description="'pending' (not yet verified), 'verified' (ready to send), or 'failed'."
+    )
+    dns_records: list[DnsRecordSchema] = Field(
+        description="DNS records (DKIM, MAIL FROM MX, SPF) the tenant must publish to verify this domain."
+    )
+    mail_from_domain: str | None = Field(
+        description="Custom MAIL FROM domain, if configured. Null when using the provider default."
+    )
+    mail_from_status: str | None = Field(
+        default=None,
+        description="Verification status of the custom MAIL FROM domain, if one is configured. Secondary to verification_status.",
+    )
+    provider: str = Field(
+        description="Email sending provider for this domain (currently always 'ses')."
+    )
+    verified_at: datetime | None = Field(
+        description="When the domain became verified, ISO 8601 timestamp. Null until it is."
+    )
+    inbound_enabled: bool = Field(
+        default=False,
+        description="Whether this domain accepts and forwards inbound mail.",
+    )
+    forward_to: list[str] | None = Field(
+        default=None,
+        description="Email addresses inbound mail is forwarded to, if inbound is enabled.",
+    )
+    forward_rate_per_hour: int | None = Field(
+        default=None,
+        description="Configured cap on forwarded messages per hour, if set.",
+    )
+    created_at: datetime = Field(
+        description="When this domain was added, ISO 8601 timestamp."
+    )
+    updated_at: datetime = Field(
+        description="When this domain was last modified, ISO 8601 timestamp."
+    )
     # Populated by POST /{id}/verify on custom domains only; None everywhere else.
     # True when the domain's published MX points at the SES inbound host.
-    receive_ready: bool | None = None
+    receive_ready: bool | None = Field(
+        default=None,
+        description=(
+            "True when the domain's published MX points at Hail's inbound "
+            "host. Only populated by POST /{id}/verify on custom domains; "
+            "null everywhere else."
+        ),
+    )
 
 
 class EmailDomainListResponse(BaseModel):
-    items: list[EmailDomainResponse]
-    next_cursor: str | None = None
+    items: list[EmailDomainResponse] = Field(description="Email domains in this page.")
+    next_cursor: str | None = Field(
+        default=None,
+        description="Opaque cursor for the next page. Null when there are no more results.",
+    )
     # The address a send with no ``from`` goes out as. ``None`` when such a
     # send would be rejected: several verified identities (name one), or
     # none that can send yet. Computed across the whole org, not the page.
-    default_from: str | None = None
+    default_from: str | None = Field(
+        default=None,
+        description=(
+            "The From address used when a send omits 'from'. Null when no "
+            "such default can be resolved (e.g. multiple verified "
+            "identities, or none that can send yet). Computed across the "
+            "whole organization, not just this page."
+        ),
+    )
 
 
 class EmailCreate(ConsentAttestationMixin):
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
     # ``from`` is reserved; ``from_`` mirrors how CallCreate handles it.
-    from_: str | None = Field(default=None, alias="from")
+    from_: str | None = Field(
+        default=None,
+        alias="from",
+        description=(
+            "Sender email address. Must be a verified identity on the "
+            "organization's email domains. Omitted: the org's resolved "
+            "default sending address, if one exists."
+        ),
+    )
     # Friendly display name for the From: header ("Acme Billing
     # <billing@acme.com>"). Rendered by the email provider at send time
     # (see providers/email/ses.py); ``from_`` stays a bare address
     # everywhere else (sender resolution, compliance, events).
-    from_name: str | None = Field(default=None, max_length=256)
-    to: list[str] = Field(min_length=1)
-    cc: list[str] | None = None
-    bcc: list[str] | None = None
-    reply_to: str | None = None
-    subject: str = Field(min_length=1, max_length=998)
-    body_text: str | None = None
-    body_html: str | None = None
-    conversation_id: UUID | None = None
-    metadata: dict = Field(default_factory=dict)
-    attachment_ids: list[UUID] | None = None
+    from_name: str | None = Field(
+        default=None,
+        max_length=256,
+        description="Display name for the From: header (e.g. 'Acme Billing'). Omitted: no display name.",
+    )
+    to: list[str] = Field(
+        min_length=1, description="Recipient email addresses. At least one required."
+    )
+    cc: list[str] | None = Field(
+        default=None, description="CC recipient email addresses."
+    )
+    bcc: list[str] | None = Field(
+        default=None, description="BCC recipient email addresses."
+    )
+    reply_to: str | None = Field(
+        default=None,
+        description="Reply-To email address. Omitted: replies go to the From address.",
+    )
+    subject: str = Field(
+        min_length=1, max_length=998, description="Email subject line."
+    )
+    body_text: str | None = Field(
+        default=None,
+        description="Plain-text body. Either body_text or body_html (or both) is required.",
+    )
+    body_html: str | None = Field(
+        default=None,
+        description="HTML body. Either body_text or body_html (or both) is required.",
+    )
+    conversation_id: UUID | None = Field(
+        default=None,
+        description=(
+            "Groups this email with other calls/emails/SMS into one "
+            "conversation thread. Omitted: the email is not linked to a "
+            "conversation."
+        ),
+    )
+    metadata: dict = Field(
+        default_factory=dict,
+        description="Free-form JSON object attached to the email and echoed back on reads. Not interpreted by Hail.",
+    )
+    attachment_ids: list[UUID] | None = Field(
+        default=None,
+        description="Ids returned by POST /email-attachments to attach to this send. Omitted: no attachments.",
+    )
 
     @field_validator("from_name", mode="before")
     @classmethod
@@ -743,44 +1131,98 @@ EmailEventKind = Literal[
 class EmailEventResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
-    id: UUID
-    email_id: UUID
-    kind: EmailEventKind
-    payload: dict[str, Any]
-    occurred_at: datetime
+    id: UUID = Field(description="Unique identifier for this event.")
+    email_id: UUID = Field(description="The email this event belongs to.")
+    kind: EmailEventKind = Field(
+        description=(
+            "Event kind: 'sent', 'delivered', 'delivery_delayed', "
+            "'bounced', 'complained', 'rejected', 'opened', or 'clicked'."
+        )
+    )
+    payload: dict[str, Any] = Field(
+        description="Event-kind-specific detail, as a free-form JSON object."
+    )
+    occurred_at: datetime = Field(
+        description="When this event occurred, ISO 8601 timestamp."
+    )
 
 
 class EmailEventListResponse(BaseModel):
-    items: list[EmailEventResponse]
-    next_cursor: str | None = None
+    items: list[EmailEventResponse] = Field(
+        description="Events for this email, oldest first."
+    )
+    next_cursor: str | None = Field(
+        default=None,
+        description="Opaque cursor for the next page. Null when there are no more results.",
+    )
 
 
 class EmailStatsCounts(BaseModel):
-    sent: int = 0
-    delivered: int = 0
-    delivery_delayed: int = 0
-    bounced: int = 0
-    bounced_hard: int = 0
-    complained: int = 0
-    rejected: int = 0
-    opened: int = 0
-    clicked: int = 0
-    unique_opened: int = 0
-    unique_clicked: int = 0
+    sent: int = Field(default=0, description="Emails sent in the window.")
+    delivered: int = Field(
+        default=0, description="Emails confirmed delivered in the window."
+    )
+    delivery_delayed: int = Field(
+        default=0, description="Emails with a delivery-delayed event in the window."
+    )
+    bounced: int = Field(
+        default=0, description="Emails bounced (soft or hard) in the window."
+    )
+    bounced_hard: int = Field(
+        default=0, description="Emails hard-bounced in the window. Subset of bounced."
+    )
+    complained: int = Field(
+        default=0, description="Emails that received a spam complaint in the window."
+    )
+    rejected: int = Field(
+        default=0,
+        description="Emails rejected by the provider before sending, in the window.",
+    )
+    opened: int = Field(
+        default=0,
+        description="Total open events in the window, including repeat opens by the same recipient.",
+    )
+    clicked: int = Field(
+        default=0,
+        description="Total click events in the window, including repeat clicks by the same recipient.",
+    )
+    unique_opened: int = Field(
+        default=0, description="Distinct emails opened at least once in the window."
+    )
+    unique_clicked: int = Field(
+        default=0, description="Distinct emails clicked at least once in the window."
+    )
 
 
 class EmailStatsBucket(EmailStatsCounts):
-    bucket_start: datetime
+    bucket_start: datetime = Field(
+        description="Start of this bucket, ISO 8601 timestamp."
+    )
 
 
 class EmailStatsRates(BaseModel):
     """All None when sent == 0 in the window."""
 
-    delivery: float | None = None
-    bounce: float | None = None  # hard bounces / sent
-    complaint: float | None = None
-    open: float | None = None  # unique_opened / sent
-    click: float | None = None  # unique_clicked / sent
+    delivery: float | None = Field(
+        default=None,
+        description="delivered / sent for the window. Null when sent == 0.",
+    )
+    bounce: float | None = Field(
+        default=None,
+        description="bounced_hard / sent for the window. Null when sent == 0.",
+    )  # hard bounces / sent
+    complaint: float | None = Field(
+        default=None,
+        description="complained / sent for the window. Null when sent == 0.",
+    )
+    open: float | None = Field(
+        default=None,
+        description="unique_opened / sent for the window. Null when sent == 0.",
+    )  # unique_opened / sent
+    click: float | None = Field(
+        default=None,
+        description="unique_clicked / sent for the window. Null when sent == 0.",
+    )  # unique_clicked / sent
 
 
 class EmailStatsResponse(BaseModel):
@@ -789,15 +1231,28 @@ class EmailStatsResponse(BaseModel):
     from_ts: datetime = Field(
         serialization_alias="from",
         validation_alias=AliasChoices("from_ts", "from"),
+        description="Start of the queried window, ISO 8601 timestamp (inclusive).",
     )
     to_ts: datetime = Field(
         serialization_alias="to",
         validation_alias=AliasChoices("to_ts", "to"),
+        description="End of the queried window, ISO 8601 timestamp (exclusive).",
     )
-    bucket: Literal["hour", "day"]
-    totals: EmailStatsCounts
-    rates: EmailStatsRates
-    series: list[EmailStatsBucket]
+    bucket: Literal["hour", "day"] = Field(
+        description="Time-bucket size used for the series."
+    )
+    totals: EmailStatsCounts = Field(
+        description="Event counts summed across the whole window."
+    )
+    rates: EmailStatsRates = Field(
+        description=(
+            "Derived rates (delivery, bounce, complaint, open, click) for "
+            "the whole window. Each individual rate is null when sent == 0."
+        )
+    )
+    series: list[EmailStatsBucket] = Field(
+        description="Per-bucket event counts across the window, in chronological order."
+    )
 
 
 class EmailSummary(BaseModel):
@@ -810,31 +1265,75 @@ class EmailSummary(BaseModel):
 
     model_config = ConfigDict(from_attributes=True, populate_by_name=True)
 
-    id: UUID
-    organization_id: UUID
-    conversation_id: UUID | None
-    email_domain_id: UUID | None
-    direction: Literal["outbound", "inbound"] = "outbound"
-    from_address: str
+    id: UUID = Field(description="Unique identifier for this email.")
+    organization_id: UUID = Field(
+        description="Organization that sent or received this email."
+    )
+    conversation_id: UUID | None = Field(
+        description=(
+            "Conversation thread this email is grouped into, if any. Null "
+            "when it was not linked to a conversation."
+        )
+    )
+    email_domain_id: UUID | None = Field(
+        description="The sending domain used, if from_address belongs to one of the org's configured domains."
+    )
+    direction: Literal["outbound", "inbound"] = Field(
+        default="outbound",
+        description="'outbound' for emails Hail sent, 'inbound' for emails received.",
+    )
+    from_address: str = Field(description="Sender email address.")
     # Display name used on the From: header, when the sender supplied one.
     # Always None on inbound rows and pre-existing outbound rows.
-    from_name: str | None = None
-    to_addresses: list[str]
-    cc_addresses: list[str] | None
-    bcc_addresses: list[str] | None
-    reply_to: str | None
-    subject: str
-    status: EmailStatus
-    end_reason: str | None
-    provider_message_id: str | None
-    requested_at: datetime
-    sent_at: datetime | None
-    failed_at: datetime | None
+    from_name: str | None = Field(
+        default=None,
+        description=(
+            "Display name used on the From: header, when the sender "
+            "supplied one. Always null on inbound rows."
+        ),
+    )
+    to_addresses: list[str] = Field(description="Recipient email addresses.")
+    cc_addresses: list[str] | None = Field(
+        description="CC recipient email addresses, if any."
+    )
+    bcc_addresses: list[str] | None = Field(
+        description="BCC recipient email addresses, if any."
+    )
+    reply_to: str | None = Field(description="Reply-To email address, if set.")
+    subject: str = Field(description="Email subject line.")
+    status: EmailStatus = Field(
+        description=(
+            "Delivery status: 'queued', 'sent', 'delivered', 'failed', "
+            "'bounced', 'complained', or 'received' (inbound emails)."
+        )
+    )
+    end_reason: str | None = Field(
+        description="Reason delivery failed or bounced, if applicable. Null on success or while pending."
+    )
+    provider_message_id: str | None = Field(
+        description="The email provider's identifier for this message, if assigned."
+    )
+    requested_at: datetime = Field(
+        description="When the send was requested, ISO 8601 timestamp."
+    )
+    sent_at: datetime | None = Field(
+        description="When the message was handed to the provider, ISO 8601 timestamp. Null until sent."
+    )
+    failed_at: datetime | None = Field(
+        description="When the send failed, ISO 8601 timestamp. Null unless it failed."
+    )
     # ``Email.metadata_`` is the SQLAlchemy attribute (``metadata`` is
     # reserved by Declarative). The validation_alias bridges that name so
     # ``from_attributes=True`` reads the right column; the field on the
     # response is still called ``metadata`` on the wire.
-    metadata: dict[str, Any] = Field(default_factory=dict, validation_alias="metadata_")
+    metadata: dict[str, Any] = Field(
+        default_factory=dict,
+        validation_alias="metadata_",
+        description=(
+            "Free-form JSON object attached to the email, as sent on "
+            "create. Not interpreted by Hail."
+        ),
+    )
 
 
 class EmailAttachmentResponse(BaseModel):
@@ -844,12 +1343,17 @@ class EmailAttachmentResponse(BaseModel):
     presigned S3 URL on access — see GET /emails/{id}/attachments/{aid}.
     """
 
-    id: UUID
-    filename: str
-    content_type: str
-    size_bytes: int
-    content_id: str | None = None
-    url: str
+    id: UUID = Field(description="Unique identifier for this attachment.")
+    filename: str = Field(description="Original filename of the attachment.")
+    content_type: str = Field(description="MIME type of the attachment.")
+    size_bytes: int = Field(description="Size of the attachment in bytes.")
+    content_id: str | None = Field(
+        default=None,
+        description="MIME Content-ID, present when this attachment is referenced inline (cid:) from the HTML body. Null otherwise.",
+    )
+    url: str = Field(
+        description="API endpoint that 302-redirects to a presigned download URL for this attachment."
+    )
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -862,42 +1366,83 @@ class EmailAttachmentUploadResponse(BaseModel):
     if never referenced by a send).
     """
 
-    id: UUID
-    filename: str
-    content_type: str
-    size_bytes: int
+    id: UUID = Field(
+        description="Reusable attachment id — pass it in EmailCreate.attachment_ids to attach it to a send."
+    )
+    filename: str = Field(description="Original filename of the uploaded file.")
+    content_type: str = Field(description="MIME type of the uploaded file.")
+    size_bytes: int = Field(description="Size of the uploaded file in bytes.")
 
     model_config = ConfigDict(from_attributes=True)
 
 
 class EmailResponse(EmailSummary):
-    body_text: str | None
-    body_html: str | None
+    body_text: str | None = Field(description="Plain-text body, if any.")
+    body_html: str | None = Field(description="HTML body, if any.")
     # Inbound-only metadata. Outbound rows leave these all null/empty —
     # we surface them on the full-row endpoint (GET /emails/{id}) rather
     # than the list summary because most inbound consumers will fetch the
     # row anyway to read the body. Defaults match the outbound shape so
     # existing serializations keep working.
-    message_id: str | None = None
-    in_reply_to: str | None = None
-    references_ids: list[str] | None = None
-    spam_verdict: str | None = None
-    virus_verdict: str | None = None
-    dkim_verdict: str | None = None
-    spf_verdict: str | None = None
-    dmarc_verdict: str | None = None
-    provider_received_at: datetime | None = None
+    message_id: str | None = Field(
+        default=None,
+        description="RFC 5322 Message-ID header. Inbound emails only; null on outbound rows.",
+    )
+    in_reply_to: str | None = Field(
+        default=None,
+        description="RFC 5322 In-Reply-To header. Inbound emails only; null on outbound rows.",
+    )
+    references_ids: list[str] | None = Field(
+        default=None,
+        description="RFC 5322 References header, split into ids. Inbound emails only; null on outbound rows.",
+    )
+    spam_verdict: str | None = Field(
+        default=None,
+        description="Provider spam-scan verdict (e.g. 'PASS'/'FAIL'). Inbound emails only; null on outbound rows.",
+    )
+    virus_verdict: str | None = Field(
+        default=None,
+        description="Provider virus-scan verdict (e.g. 'PASS'/'FAIL'). Inbound emails only; null on outbound rows.",
+    )
+    dkim_verdict: str | None = Field(
+        default=None,
+        description="Provider DKIM-authentication verdict (e.g. 'PASS'/'FAIL'). Inbound emails only; null on outbound rows.",
+    )
+    spf_verdict: str | None = Field(
+        default=None,
+        description="Provider SPF-authentication verdict (e.g. 'PASS'/'FAIL'). Inbound emails only; null on outbound rows.",
+    )
+    dmarc_verdict: str | None = Field(
+        default=None,
+        description="Provider DMARC-authentication verdict (e.g. 'PASS'/'FAIL'). Inbound emails only; null on outbound rows.",
+    )
+    provider_received_at: datetime | None = Field(
+        default=None,
+        description="When the provider received this email, ISO 8601 timestamp. Inbound emails only.",
+    )
     # ``raw_url`` is the API endpoint that 302-redirects to a presigned
     # S3 URL for the original MIME blob; ``raw_s3_key`` is the column on
     # the row but we don't expose internal storage paths on the wire.
-    raw_url: str | None = None
-    attachments: list[EmailAttachmentResponse] = []
-    last_event_at: datetime | None = None
+    raw_url: str | None = Field(
+        default=None,
+        description="API endpoint that redirects to the original MIME blob. Inbound emails only; null on outbound rows.",
+    )
+    attachments: list[EmailAttachmentResponse] = Field(
+        default=[],
+        description="Inbound MIME attachments on this email. Empty on outbound rows.",
+    )
+    last_event_at: datetime | None = Field(
+        default=None,
+        description="When the most recent delivery event for this email occurred, ISO 8601 timestamp.",
+    )
 
 
 class EmailListResponse(BaseModel):
-    items: list[EmailSummary]
-    next_cursor: str | None = None
+    items: list[EmailSummary] = Field(description="Emails in this page, newest first.")
+    next_cursor: str | None = Field(
+        default=None,
+        description="Opaque cursor for the next page. Null when there are no more results.",
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -934,14 +1479,27 @@ WebhookDeliveryStatus = Literal["pending", "succeeded", "failed", "dead"]
 
 
 class WebhookSubscriptionCreate(BaseModel):
-    target_url: str = Field(min_length=1)
-    event_types: list[WebhookEventType] = Field(min_length=1)
+    target_url: str = Field(
+        min_length=1, description="HTTPS URL Hail POSTs event payloads to."
+    )
+    event_types: list[WebhookEventType] = Field(
+        min_length=1,
+        description="Event types to subscribe to (e.g. 'call.completed', 'email.bounced'). At least one required.",
+    )
 
 
 class WebhookSubscriptionPatch(BaseModel):
-    target_url: str | None = None
-    event_types: list[WebhookEventType] | None = None
-    status: WebhookSubscriptionStatus | None = None
+    target_url: str | None = Field(
+        default=None, description="New delivery URL. Omit to leave unchanged."
+    )
+    event_types: list[WebhookEventType] | None = Field(
+        default=None,
+        description="New set of subscribed event types. Omit to leave unchanged.",
+    )
+    status: WebhookSubscriptionStatus | None = Field(
+        default=None,
+        description="Set to 'disabled' to pause deliveries, or 'active' to resume. Omit to leave unchanged.",
+    )
 
 
 class WebhookSubscriptionResponse(BaseModel):
@@ -951,46 +1509,113 @@ class WebhookSubscriptionResponse(BaseModel):
     later GETs return ``None`` so the plaintext never round-trips.
     """
 
-    id: UUID
-    organization_id: UUID
-    target_url: str
-    event_types: list[str]
-    status: WebhookSubscriptionStatus
-    consecutive_failures: int
-    last_success_at: datetime | None = None
-    last_failure_at: datetime | None = None
-    created_at: datetime
-    updated_at: datetime
-    secret: str | None = None
+    id: UUID = Field(description="Unique identifier for this subscription.")
+    organization_id: UUID = Field(
+        description="Organization that owns this subscription."
+    )
+    target_url: str = Field(description="HTTPS URL event payloads are POSTed to.")
+    event_types: list[str] = Field(
+        description="Event types this subscription receives."
+    )
+    status: WebhookSubscriptionStatus = Field(
+        description="'active' (delivering) or 'disabled' (paused)."
+    )
+    consecutive_failures: int = Field(
+        description="Consecutive failed delivery attempts since the last success. Resets to 0 on success."
+    )
+    last_success_at: datetime | None = Field(
+        default=None,
+        description="When a delivery last succeeded, ISO 8601 timestamp. Null if never.",
+    )
+    last_failure_at: datetime | None = Field(
+        default=None,
+        description="When a delivery last failed, ISO 8601 timestamp. Null if never.",
+    )
+    created_at: datetime = Field(
+        description="When this subscription was created, ISO 8601 timestamp."
+    )
+    updated_at: datetime = Field(
+        description="When this subscription was last modified, ISO 8601 timestamp."
+    )
+    secret: str | None = Field(
+        default=None,
+        description=(
+            "Plaintext signing secret for verifying delivery payloads. "
+            "Only present in the create and rotate-secret responses; "
+            "every later read returns null."
+        ),
+    )
 
     model_config = ConfigDict(from_attributes=True)
 
 
 class WebhookSubscriptionListResponse(BaseModel):
-    items: list[WebhookSubscriptionResponse]
-    next_cursor: str | None = None
+    items: list[WebhookSubscriptionResponse] = Field(
+        description="Subscriptions in this page."
+    )
+    next_cursor: str | None = Field(
+        default=None,
+        description="Opaque cursor for the next page. Null when there are no more results.",
+    )
 
 
 class WebhookDeliveryResponse(BaseModel):
-    id: UUID
-    subscription_id: UUID | None
-    email_domain_id: UUID | None
-    event_type: str
-    event_id: UUID
-    attempt: int
-    status: WebhookDeliveryStatus
-    response_status: int | None = None
-    response_body: str | None = None
-    next_attempt_at: datetime
-    succeeded_at: datetime | None = None
-    created_at: datetime
+    id: UUID = Field(description="Unique identifier for this delivery attempt.")
+    subscription_id: UUID | None = Field(
+        description="Subscription this delivery belongs to."
+    )
+    email_domain_id: UUID | None = Field(
+        description=(
+            "Email domain the triggering event relates to, if any. "
+            "Informational only (surfaced as the X-Hail-Email-Domain "
+            "header) — not a routing target."
+        )
+    )
+    event_type: str = Field(
+        description="The event type being delivered (e.g. 'call.completed')."
+    )
+    event_id: UUID = Field(
+        description="Identifier of the underlying event that triggered this delivery."
+    )
+    attempt: int = Field(
+        description="Number of delivery attempts made so far for this event, starting at 0."
+    )
+    status: WebhookDeliveryStatus = Field(
+        description=(
+            "'pending' (queued/retrying), 'succeeded', 'failed' (will "
+            "retry), or 'dead' (retries exhausted)."
+        )
+    )
+    response_status: int | None = Field(
+        default=None,
+        description="HTTP status code returned by the target URL on the last attempt. Null before any attempt.",
+    )
+    response_body: str | None = Field(
+        default=None,
+        description="Response body returned by the target URL on the last attempt, if any. Null before any attempt.",
+    )
+    next_attempt_at: datetime = Field(
+        description="When the next delivery attempt is scheduled, ISO 8601 timestamp."
+    )
+    succeeded_at: datetime | None = Field(
+        default=None,
+        description="When this delivery succeeded, ISO 8601 timestamp. Null until it does.",
+    )
+    created_at: datetime = Field(
+        description="When this delivery was queued, ISO 8601 timestamp."
+    )
 
     model_config = ConfigDict(from_attributes=True)
 
 
 class WebhookDeliveryListResponse(BaseModel):
-    items: list[WebhookDeliveryResponse]
-    next_cursor: str | None = None
+    items: list[WebhookDeliveryResponse] = Field(
+        description="Delivery attempts in this page."
+    )
+    next_cursor: str | None = Field(
+        default=None,
+        description="Opaque cursor for the next page. Null when there are no more results.",
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -1025,20 +1650,41 @@ class ContactEntry(BaseModel):
 
     model_config = ConfigDict(from_attributes=True)
 
-    id: str
-    kind: Literal["member", "manual"]
-    name: str
-    phone_e164: str | None = None
-    email: str | None = None
-    role: str | None = None
+    id: str = Field(
+        description="'member:<user_id>' for an org member, or the contact row's UUID (as a string) for a manual contact."
+    )
+    kind: Literal["member", "manual"] = Field(
+        description="'member' if this row is a member of the organization, 'manual' if it was added as a contact."
+    )
+    name: str = Field(description="Display name.")
+    phone_e164: str | None = Field(
+        default=None, description="Phone number, E.164 format. Null if none on file."
+    )
+    email: str | None = Field(
+        default=None, description="Email address. Null if none on file."
+    )
+    role: str | None = Field(
+        default=None,
+        description="Organization role (e.g. 'owner', 'admin', 'member') for kind='member'. Always null for kind='manual'.",
+    )
 
 
 class ContactCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    name: str = Field(min_length=1, max_length=200)
-    phone_e164: str | None = None
-    email: str | None = None
+    name: str = Field(
+        min_length=1,
+        max_length=200,
+        description="Display name for the contact.",
+    )
+    phone_e164: str | None = Field(
+        default=None,
+        description="Phone number, E.164 format. At least one of phone_e164 or email is required.",
+    )
+    email: str | None = Field(
+        default=None,
+        description="Email address, stored lowercased. At least one of phone_e164 or email is required.",
+    )
 
     _validate_phone = field_validator("phone_e164")(_e164_or_error)
     _validate_email = field_validator("email")(_normalize_contact_email)
@@ -1053,9 +1699,28 @@ class ContactCreate(BaseModel):
 class ContactPatch(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    name: str | None = Field(default=None, min_length=1, max_length=200)
-    phone_e164: str | None = None
-    email: str | None = None
+    name: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=200,
+        description="New display name. Omit to leave unchanged; cannot be set to null.",
+    )
+    phone_e164: str | None = Field(
+        default=None,
+        description=(
+            "New phone number, E.164 format. Omit to leave unchanged; "
+            "explicit null clears it. The contact must keep at least one "
+            "of phone_e164 or email."
+        ),
+    )
+    email: str | None = Field(
+        default=None,
+        description=(
+            "New email address, stored lowercased. Omit to leave "
+            "unchanged; explicit null clears it. The contact must keep at "
+            "least one of phone_e164 or email."
+        ),
+    )
 
     _validate_phone = field_validator("phone_e164")(_e164_or_error)
     _validate_email = field_validator("email")(_normalize_contact_email)
@@ -1073,14 +1738,19 @@ class ContactPatch(BaseModel):
 
 
 class ContactListResponse(BaseModel):
-    items: list[ContactEntry]
-    next_cursor: str | None = None
+    items: list[ContactEntry] = Field(description="Contacts in this page.")
+    next_cursor: str | None = Field(
+        default=None,
+        description="Opaque cursor for the next page. Null when there are no more results.",
+    )
 
 
 class MemberPhonePut(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    phone_e164: str
+    phone_e164: str = Field(
+        description="Phone number to save for the caller, E.164 format."
+    )
 
     _validate_phone = field_validator("phone_e164")(_e164_or_error)
 
@@ -1094,11 +1764,26 @@ class WhoamiResponse(BaseModel):
     ``email`` and skips the header when it is ``None``.
     """
 
-    auth_kind: Literal["apikey", "jwt", "shared"]
-    organization_id: UUID
-    user_id: UUID | None = None
-    email: str | None = None
-    name: str | None = None
+    auth_kind: Literal["apikey", "jwt", "shared"] = Field(
+        description=(
+            "How the caller authenticated: 'apikey' (org API key), 'jwt' "
+            "(logged-in user session), or 'shared' (the shared HAIL_API_KEY, "
+            "which carries no human identity)."
+        )
+    )
+    organization_id: UUID = Field(description="Organization the caller belongs to.")
+    user_id: UUID | None = Field(
+        default=None,
+        description="The authenticated user's id. Null for 'shared' callers.",
+    )
+    email: str | None = Field(
+        default=None,
+        description="The authenticated user's email. Null for 'shared' callers.",
+    )
+    name: str | None = Field(
+        default=None,
+        description="The authenticated user's display name. Null for 'shared' callers.",
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -1139,10 +1824,25 @@ class ProviderConfigUpsert(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    provider: str
-    api_key: str | None = None
-    params: dict[str, Any] = Field(default_factory=dict)
-    fallback_enabled: bool | None = None
+    provider: str = Field(
+        description="Provider name to save/activate for this layer (e.g. 'openai', 'cartesia')."
+    )
+    api_key: str | None = Field(
+        default=None,
+        description="API key for this provider. Omit to edit params without resending the key. Write-only — never echoed back.",
+    )
+    params: dict[str, Any] = Field(
+        default_factory=dict,
+        description=(
+            "Provider-specific config, validated against the layer's "
+            "schema (LLMParams/TTSParams/STTParams). Only the keys you "
+            "send are changed; other saved keys are kept."
+        ),
+    )
+    fallback_enabled: bool | None = Field(
+        default=None,
+        description="Whether to fall back to Hail's default provider on failure. Omit to leave unchanged; defaults to false on a new row.",
+    )
 
 
 class ProviderActivateRequest(BaseModel):
@@ -1150,7 +1850,9 @@ class ProviderActivateRequest(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    provider: str
+    provider: str = Field(
+        description="Previously saved provider to make active for this layer."
+    )
 
 
 class ProviderValidateRequest(BaseModel):
@@ -1163,9 +1865,18 @@ class ProviderValidateRequest(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    api_key: str | None = None
-    provider: str | None = None
-    params: dict[str, Any] = Field(default_factory=dict)
+    api_key: str | None = Field(
+        default=None,
+        description="Key to test instead of the stored one. Not persisted.",
+    )
+    provider: str | None = Field(
+        default=None,
+        description="Provider to test. Omitted: the layer's currently active provider.",
+    )
+    params: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Provider-specific config to test alongside the key.",
+    )
 
 
 class ProviderConfigEntry(BaseModel):
@@ -1177,21 +1888,39 @@ class ProviderConfigEntry(BaseModel):
     generate plain values instead of pointers in the Go CLI's client.
     """
 
-    layer: Literal["llm", "tts", "stt"]
-    provider: str
-    key_last4: str | None
-    key_set_at: str | None
-    params: dict[str, Any]
-    fallback_enabled: bool
-    is_active: bool
+    layer: Literal["llm", "tts", "stt"] = Field(
+        description="Voice-pipeline layer this config applies to."
+    )
+    provider: str = Field(description="Provider name (e.g. 'openai', 'cartesia').")
+    key_last4: str | None = Field(
+        description="Last 4 characters of the saved API key, for display. Null if no key is saved."
+    )
+    key_set_at: str | None = Field(
+        description="When the API key was last set, ISO 8601 timestamp. Null if no key is saved."
+    )
+    params: dict[str, Any] = Field(
+        description="Saved provider-specific config for this row."
+    )
+    fallback_enabled: bool = Field(
+        description="Whether Hail's default provider is used as a fallback if this one fails."
+    )
+    is_active: bool = Field(
+        description="True if this is the row currently used by calls on this layer."
+    )
 
 
 class ProviderConfigListResponse(BaseModel):
-    providers: list[ProviderConfigEntry]
+    providers: list[ProviderConfigEntry] = Field(
+        description="Every saved provider row for the organization, across all layers."
+    )
 
 
 class ProviderValidateResult(BaseModel):
     """Outcome of a live provider-key probe."""
 
-    status: str
-    message: str | None
+    status: str = Field(
+        description="Probe outcome: 'valid', 'invalid', or 'indeterminate' (the provider could not be reached)."
+    )
+    message: str | None = Field(
+        description="Human-readable detail about the outcome. 'ok' on success, an error description otherwise."
+    )

@@ -34,10 +34,10 @@ func runEmailGet(ctx context.Context, opts *Options, idStr string) error {
 	if err != nil {
 		return err
 	}
-	resp, err := apiClient.GetEmailEmailsEmailIdGetWithResponse(
+	resp, err := apiClient.GetEmailV1EmailsEmailIdGetWithResponse(
 		ctx,
 		openapi_types.UUID(id),
-		&client.GetEmailEmailsEmailIdGetParams{},
+		&client.GetEmailV1EmailsEmailIdGetParams{},
 	)
 	if err != nil {
 		return fmt.Errorf("email API: %w", err)

@@ -29,9 +29,11 @@ from collections.abc import AsyncIterator
 
 from hailhq.core.config import settings
 from hailhq.mcp.auth import AuthMode, PassThroughVerifier, select_auth_mode
+from hailhq.mcp.discovery_auth import DiscoveryAuthMiddleware
 from hailhq.mcp.hail_client import HailClient
 from hailhq.mcp.tools import register_tools
 from starlette.applications import Starlette
+from starlette.middleware import Middleware
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 from starlette.routing import Route
@@ -94,13 +96,18 @@ def _build_app() -> tuple[FastMCP, HailClient | None, Starlette]:
     # http_app.user_middleware, NOT on its routes. Fold them into the
     # parent app's middleware stack so 401-with-WWW-Authenticate fires
     # before any route resolution.
+    #
+    # DiscoveryAuthMiddleware goes first in the list (= outermost = runs
+    # first on the way in), ahead of FastMCP's own auth middleware, so it
+    # can inject a synthetic bearer for the two capability-discovery
+    # methods before AuthenticationMiddleware reads the headers.
     app = Starlette(
         routes=[
             Route("/healthz", healthz, methods=["GET"]),
             Route("/.well-known/glama.json", glama_connector_claim, methods=["GET"]),
             *http_app.routes,
         ],
-        middleware=list(http_app.user_middleware),
+        middleware=[Middleware(DiscoveryAuthMiddleware), *http_app.user_middleware],
         lifespan=lifespan,
     )
     return mcp_app, singleton, app

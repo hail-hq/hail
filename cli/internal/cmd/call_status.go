@@ -43,8 +43,8 @@ func runCallStatus(ctx context.Context, opts *Options, idStr string) error {
 		return printCallStatus(opts, prefetched)
 	}
 
-	resp, err := apiClient.GetCallCallsCallIdGetWithResponse(
-		ctx, parsed, &client.GetCallCallsCallIdGetParams{},
+	resp, err := apiClient.GetCallV1CallsCallIdGetWithResponse(
+		ctx, parsed, &client.GetCallV1CallsCallIdGetParams{},
 	)
 	if err != nil {
 		return fmt.Errorf("call API: %w", err)

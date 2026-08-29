@@ -214,7 +214,7 @@ func runEmailSend(ctx context.Context, cmd *cobra.Command, opts *Options, f *ema
 	}
 
 	// Deliberately the raw (non-WithResponse) client method here, not
-	// CreateEmailEmailsPostWithResponse: its generated parser eagerly
+	// CreateEmailV1EmailsPostWithResponse: its generated parser eagerly
 	// unmarshals ANY non-2xx JSON body into the OpenAPI-declared
 	// HTTPValidationError shape ({"detail": []ValidationError}) and
 	// discards the raw body if that unmarshal fails — which it does for
@@ -223,8 +223,8 @@ func runEmailSend(ctx context.Context, cmd *cobra.Command, opts *Options, f *ema
 	// verification", etc.), surfacing a raw Go json.Unmarshal error
 	// instead of the real message. Parsing the response ourselves keeps
 	// the real body available for apiError's safe fallback.
-	httpResp, err := apiClient.CreateEmailEmailsPost(
-		ctx, &client.CreateEmailEmailsPostParams{}, body,
+	httpResp, err := apiClient.CreateEmailV1EmailsPost(
+		ctx, &client.CreateEmailV1EmailsPostParams{}, body,
 	)
 	if err != nil {
 		return fmt.Errorf("email API: %w", err)

@@ -27,7 +27,7 @@ func TestWhoami_PrintsEmailOrgAndAuthKind(t *testing.T) {
 	if got := atomic.LoadInt32(&srv.hits); got != 1 {
 		t.Fatalf("expected 1 request, got %d", got)
 	}
-	if srv.lastReq.Method != http.MethodGet || srv.lastReq.URL.Path != "/whoami" {
+	if srv.lastReq.Method != http.MethodGet || srv.lastReq.URL.Path != "/v1/whoami" {
 		t.Fatalf("unexpected route: %s %s", srv.lastReq.Method, srv.lastReq.URL.Path)
 	}
 	for _, want := range []string{

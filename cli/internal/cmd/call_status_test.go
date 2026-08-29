@@ -45,7 +45,7 @@ func TestCallStatus_HappyPath(t *testing.T) {
 	if !strings.Contains(stdout, "Recording: recordings/abc.wav") {
 		t.Errorf("missing recording in stdout: %q", stdout)
 	}
-	if srv.lastReq.URL.Path != "/calls/"+resp.Id.String() {
+	if srv.lastReq.URL.Path != "/v1/calls/"+resp.Id.String() {
 		t.Errorf("path = %s", srv.lastReq.URL.Path)
 	}
 	if srv.lastReq.Method != http.MethodGet {
@@ -109,8 +109,8 @@ func TestCallStatus_PrefixResolution(t *testing.T) {
 	if got := atomic.LoadInt32(&srv.hits); got != 1 {
 		t.Errorf("expected 1 request (list only, no follow-up GET), got %d", got)
 	}
-	if srv.lastReq.URL.Path != "/calls" {
-		t.Errorf("path = %s; want /calls", srv.lastReq.URL.Path)
+	if srv.lastReq.URL.Path != "/v1/calls" {
+		t.Errorf("path = %s; want /v1/calls", srv.lastReq.URL.Path)
 	}
 	if !strings.Contains(stdout, fullID) {
 		t.Errorf("stdout missing resolved UUID:\n%s", stdout)

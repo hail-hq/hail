@@ -47,16 +47,16 @@ func runCallList(ctx context.Context, opts *Options, f *callListFlags) error {
 
 	items, next, err := walkCursor(f.all, f.cursor, opts.Stderr, "calls",
 		func(cursor string) (cursorPage[client.CallResponse], error) {
-			params := &client.ListCallsCallsGetParams{
+			params := &client.ListCallsV1CallsGetParams{
 				Limit:  &f.limit,
 				Cursor: strPtr(cursor),
 				To:     strPtr(f.to),
 			}
 			if f.status != "" {
-				s := client.ListCallsCallsGetParamsStatus(f.status)
+				s := client.ListCallsV1CallsGetParamsStatus(f.status)
 				params.Status = &s
 			}
-			resp, err := apiClient.ListCallsCallsGetWithResponse(ctx, params)
+			resp, err := apiClient.ListCallsV1CallsGetWithResponse(ctx, params)
 			if err != nil {
 				return cursorPage[client.CallResponse]{}, fmt.Errorf("call API: %w", err)
 			}

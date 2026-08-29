@@ -17,6 +17,7 @@ from uuid import uuid4
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from fastapi import status as http_status
 from hailhq.api.deps import Principal, get_current_principal, get_s3_mail
+from hailhq.api.ratelimit import GENERAL_RATE_LIMITED_RESPONSES
 from hailhq.core.db import get_session
 from hailhq.core.email_attachment_limits import (
     ATTACHMENT_TOO_LARGE_DETAIL,
@@ -27,7 +28,11 @@ from hailhq.core.s3_mail import S3MailClient
 from hailhq.core.schemas import EmailAttachmentUploadResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
-router = APIRouter(prefix="/email-attachments", tags=["email-attachments"])
+router = APIRouter(
+    prefix="/email-attachments",
+    tags=["email-attachments"],
+    responses=GENERAL_RATE_LIMITED_RESPONSES,
+)
 
 _READ_CHUNK_BYTES = 1024 * 1024  # 1MB
 
@@ -42,8 +47,23 @@ async def create_email_attachment(
     principal: Annotated[Principal, Depends(get_current_principal)],
     db: Annotated[AsyncSession, Depends(get_session)],
     s3: Annotated[S3MailClient, Depends(get_s3_mail)],
-    file: Annotated[UploadFile, File()],
+    file: Annotated[
+        UploadFile,
+        File(
+            description=(
+                "The file to upload, as multipart/form-data. Size-limited; "
+                "an oversize upload is rejected with 422."
+            )
+        ),
+    ],
 ) -> EmailAttachmentUploadResponse:
+    """Upload a file and get back a reusable attachment id.
+
+    The returned id can be referenced from attachment_ids on many later
+    POST /v1/emails calls until it is garbage-collected for being unused; it is
+    not deleted immediately after first use. Uploads are size-limited and
+    scoped to the caller's organization.
+    """
     # Read in bounded chunks so an oversize body is rejected without ever
     # buffering more than ~MAX_EMAIL_ATTACHMENT_BYTES in memory — no layer
     # in front of this endpoint (ASGI server, reverse proxy) caps request

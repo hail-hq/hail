@@ -33,6 +33,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends
 from hailhq.api.deps import Principal, get_current_principal
+from hailhq.api.ratelimit import GENERAL_RATE_LIMITED_RESPONSES
 from hailhq.api.routes.internal.provider_config import (
     ActivateIn,
     ProviderConfigIn,
@@ -65,11 +66,15 @@ from hailhq.core.schemas import (
 )
 from sqlalchemy.ext.asyncio import AsyncSession
 
-router = APIRouter(prefix="/providers", tags=["providers"])
+router = APIRouter(
+    prefix="/providers", tags=["providers"], responses=GENERAL_RATE_LIMITED_RESPONSES
+)
 
 
 @router.get(
-    "", response_model=ProviderConfigListResponse, operation_id="list_providers"
+    "",
+    response_model=ProviderConfigListResponse,
+    operation_id="list_providers",
 )
 async def list_providers(
     principal: Annotated[Principal, Depends(get_current_principal)],
@@ -80,7 +85,9 @@ async def list_providers(
 
 
 @router.put(
-    "/{layer}", response_model=ProviderConfigEntry, operation_id="upsert_provider"
+    "/{layer}",
+    response_model=ProviderConfigEntry,
+    operation_id="upsert_provider",
 )
 async def upsert_provider(
     layer: str,
@@ -130,7 +137,11 @@ async def upsert_provider(
     )
 
 
-@router.delete("/{layer}/{provider}", status_code=204, operation_id="delete_provider")
+@router.delete(
+    "/{layer}/{provider}",
+    status_code=204,
+    operation_id="delete_provider",
+)
 async def delete_provider(
     layer: str,
     provider: str,

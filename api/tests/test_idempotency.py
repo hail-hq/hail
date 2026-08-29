@@ -150,6 +150,39 @@ async def test_post_calls_idempotency_replay_returns_cached(
     assert livekit_mock.create_sip_participant.await_count == 1
 
 
+async def test_post_v1_calls_idempotency_replay_location_is_v1_prefixed(
+    client: httpx.AsyncClient,
+    async_session: AsyncSession,
+    org_and_key: tuple[str, ApiKey, str],
+    livekit_mock: AsyncMock,
+    add_phone_number,
+) -> None:
+    """A replay through the /v1/calls mount must get back a /v1/-prefixed
+    Location too — replay_cached derives the prefix from the request that
+    triggered the replay, not a hardcoded legacy path."""
+    org_id, _, plain = org_and_key
+    await add_phone_number(async_session, org_id)
+
+    headers = {
+        "Authorization": f"Bearer {plain}",
+        "Idempotency-Key": "rerun-me-v1",
+    }
+    body = {"to": "+14155559999", "system_prompt": "hi", "recipient_consent": True}
+
+    first = await client.post("/v1/calls", json=body, headers=headers)
+    assert first.status_code == 201
+
+    second = await client.post("/v1/calls", json=body, headers=headers)
+    assert second.status_code == 201
+    assert second.headers.get("idempotency-replay") == "true"
+    assert second.headers["location"] == f"/v1/calls/{first.json()['id']}"
+
+    # The LiveKit pipeline ran exactly once across both requests.
+    assert livekit_mock.create_room.await_count == 1
+    assert livekit_mock.dispatch_agent.await_count == 1
+    assert livekit_mock.create_sip_participant.await_count == 1
+
+
 async def test_post_calls_idempotency_different_body_returns_409(
     client: httpx.AsyncClient,
     async_session: AsyncSession,

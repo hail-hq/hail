@@ -30,12 +30,14 @@ from datetime import datetime, timezone
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from fastapi import status as http_status
 from hailhq.api.audit import write_audit_log
 from hailhq.api.deps import Principal, get_current_principal
 from hailhq.api.errors import unprocessable
 from hailhq.api.pagination import fetch_cursor_page
+from hailhq.api.ratelimit import GENERAL_RATE_LIMITED_RESPONSES
+from hailhq.api.route_prefixes import request_mount_prefix
 from hailhq.core.config import settings
 from hailhq.core.db import get_session
 from hailhq.core.dns_lookup import custom_dns_records, resolve_mx, ses_inbound_host
@@ -57,7 +59,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/email-domains", tags=["email-domains"])
+router = APIRouter(
+    prefix="/email-domains",
+    tags=["email-domains"],
+    responses=GENERAL_RATE_LIMITED_RESPONSES,
+)
 
 _DEFAULT_LIST_LIMIT = 50
 _MAX_LIST_LIMIT = 200
@@ -290,10 +296,19 @@ async def _unminted_hail_mail(db: AsyncSession, organization_id: UUID) -> str | 
 async def create_email_domain(
     body: EmailDomainCreate,
     response: Response,
+    request: Request,
     principal: Annotated[Principal, Depends(get_current_principal)],
     db: Annotated[AsyncSession, Depends(get_session)],
     email_provider: Annotated[EmailProvider, Depends(get_email_provider)],
 ) -> EmailDomainResponse:
+    """Register a sender identity to send outbound email through.
+
+    kind="hail_mail" mints an address on the shared hail-mail domain and is
+    immediately verified — no DNS work needed. kind="custom" registers your
+    own domain with SES and returns DKIM records; the domain stays
+    unverified (POST /v1/email-domains/{domain_id}/verify) until you publish
+    those DNS records and Hail confirms them.
+    """
     if body.kind == "hail_mail":
         user_prefix, org_prefix = resolve_hail_mail_prefixes(
             body.local_prefix_user,
@@ -335,7 +350,9 @@ async def create_email_domain(
             resource_id=sd.id,
             payload={"kind": "hail_mail", "domain": sd.domain},
         )
-        response.headers["Location"] = f"/email-domains/{sd.id}"
+        response.headers["Location"] = (
+            f"{request_mount_prefix(request)}/email-domains/{sd.id}"
+        )
         return EmailDomainResponse.model_validate(sd)
 
     # kind == 'custom' — call SES, persist DKIM records, ask the tenant to
@@ -386,7 +403,9 @@ async def create_email_domain(
         resource_id=sd.id,
         payload={"kind": "custom", "domain": sd.domain},
     )
-    response.headers["Location"] = f"/email-domains/{sd.id}"
+    response.headers["Location"] = (
+        f"{request_mount_prefix(request)}/email-domains/{sd.id}"
+    )
     return EmailDomainResponse.model_validate(sd)
 
 
@@ -395,13 +414,22 @@ async def create_email_domain(
 # --------------------------------------------------------------------------- #
 
 
-@router.get("", response_model=EmailDomainListResponse)
+@router.get(
+    "",
+    response_model=EmailDomainListResponse,
+)
 async def list_email_domains(
     principal: Annotated[Principal, Depends(get_current_principal)],
     db: Annotated[AsyncSession, Depends(get_session)],
     cursor: str | None = Query(default=None),
     limit: int = Query(default=_DEFAULT_LIST_LIMIT, ge=1, le=_MAX_LIST_LIMIT),
 ) -> EmailDomainListResponse:
+    """List sender domains/identities for the caller's organization.
+
+    Cursor-paginated, newest first. The response also includes
+    default_from — the address a from-less POST /v1/emails would use right
+    now given the org's current verified senders.
+    """
     stmt = select(EmailDomain).where(
         EmailDomain.organization_id == principal.organization_id
     )
@@ -429,7 +457,10 @@ async def list_email_domains(
 # --------------------------------------------------------------------------- #
 
 
-@router.get("/check-domain", response_model=DomainCheckResponse)
+@router.get(
+    "/check-domain",
+    response_model=DomainCheckResponse,
+)
 async def check_domain(
     domain: str,
     principal: Annotated[Principal, Depends(get_current_principal)],
@@ -451,12 +482,21 @@ async def check_domain(
 # --------------------------------------------------------------------------- #
 
 
-@router.get("/{domain_id}", response_model=EmailDomainResponse)
+@router.get(
+    "/{domain_id}",
+    response_model=EmailDomainResponse,
+)
 async def get_email_domain(
     domain_id: UUID,
     principal: Annotated[Principal, Depends(get_current_principal)],
     db: Annotated[AsyncSession, Depends(get_session)],
 ) -> EmailDomainResponse:
+    """Fetch one sender domain/identity by id, including its DNS records.
+
+    Org-scoped: returns 404 for a domain belonging to a different
+    organization. For a pending custom domain, dns_records lists the DKIM
+    records still to publish.
+    """
     stmt = select(EmailDomain).where(
         EmailDomain.id == domain_id,
         EmailDomain.organization_id == principal.organization_id,
@@ -475,7 +515,10 @@ async def get_email_domain(
 # --------------------------------------------------------------------------- #
 
 
-@router.patch("/{domain_id}", response_model=EmailDomainResponse)
+@router.patch(
+    "/{domain_id}",
+    response_model=EmailDomainResponse,
+)
 async def patch_email_domain(
     domain_id: UUID,
     body: EmailDomainPatch,
@@ -565,7 +608,10 @@ async def patch_email_domain(
 # --------------------------------------------------------------------------- #
 
 
-@router.post("/{domain_id}/verify", response_model=EmailDomainResponse)
+@router.post(
+    "/{domain_id}/verify",
+    response_model=EmailDomainResponse,
+)
 async def verify_email_domain(
     domain_id: UUID,
     principal: Annotated[Principal, Depends(get_current_principal)],
@@ -682,13 +728,23 @@ async def verify_email_domain(
 # --------------------------------------------------------------------------- #
 
 
-@router.delete("/{domain_id}", status_code=http_status.HTTP_204_NO_CONTENT)
+@router.delete(
+    "/{domain_id}",
+    status_code=http_status.HTTP_204_NO_CONTENT,
+)
 async def delete_email_domain(
     domain_id: UUID,
     principal: Annotated[Principal, Depends(get_current_principal)],
     db: Annotated[AsyncSession, Depends(get_session)],
     email_provider: Annotated[EmailProvider, Depends(get_email_provider)],
 ) -> Response:
+    """Permanently remove a sender domain/identity.
+
+    Irreversible — for a custom domain, also deletes the SES identity, so
+    the domain can no longer send until re-registered and re-verified.
+    Fails with 409 if any Email rows still reference this domain; delete
+    or wait for those to age out first.
+    """
     stmt = select(EmailDomain).where(
         EmailDomain.id == domain_id,
         EmailDomain.organization_id == principal.organization_id,

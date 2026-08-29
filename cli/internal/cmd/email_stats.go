@@ -41,7 +41,7 @@ func runEmailStats(ctx context.Context, opts *Options, f *emailStatsFlags) error
 		return err
 	}
 
-	params := &client.GetEmailStatsEmailsStatsGetParams{}
+	params := &client.GetEmailStatsV1EmailsStatsGetParams{}
 	if f.from != "" {
 		t, err := time.Parse(time.RFC3339, f.from)
 		if err != nil {
@@ -57,11 +57,11 @@ func runEmailStats(ctx context.Context, opts *Options, f *emailStatsFlags) error
 		params.To = &t
 	}
 	if f.bucket != "" {
-		b := client.GetEmailStatsEmailsStatsGetParamsBucket(f.bucket)
+		b := client.GetEmailStatsV1EmailsStatsGetParamsBucket(f.bucket)
 		params.Bucket = &b
 	}
 
-	resp, err := apiClient.GetEmailStatsEmailsStatsGetWithResponse(ctx, params)
+	resp, err := apiClient.GetEmailStatsV1EmailsStatsGetWithResponse(ctx, params)
 	if err != nil {
 		return fmt.Errorf("email API: %w", err)
 	}

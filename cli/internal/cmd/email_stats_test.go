@@ -13,7 +13,7 @@ func TestEmailStatsRendersTotalsAndRates(t *testing.T) {
 	srv.Server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		atomic.AddInt32(&srv.hits, 1)
 		srv.lastReq = r.Clone(r.Context())
-		if r.URL.Path != "/emails/stats" {
+		if r.URL.Path != "/v1/emails/stats" {
 			t.Fatalf("unexpected path %s", r.URL.Path)
 		}
 		w.Header().Set("Content-Type", "application/json")

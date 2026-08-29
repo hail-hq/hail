@@ -15,7 +15,7 @@ from datetime import datetime, timezone
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from fastapi import status as http_status
 from hailhq.api.audit import write_audit_log
 from hailhq.api.deps import Principal, get_current_principal
@@ -28,6 +28,8 @@ from hailhq.api.idempotency import (
     replay_cached,
 )
 from hailhq.api.pagination import fetch_cursor_page
+from hailhq.api.ratelimit import GENERAL_RATE_LIMITED_RESPONSES
+from hailhq.api.route_prefixes import request_mount_prefix
 from hailhq.api.routes.sms import get_sms_provider
 from hailhq.core import telephony_catalog
 from hailhq.core.db import get_session
@@ -44,7 +46,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/numbers", tags=["numbers"])
+router = APIRouter(
+    prefix="/numbers", tags=["numbers"], responses=GENERAL_RATE_LIMITED_RESPONSES
+)
 
 _DEFAULT_LIST_LIMIT = 50
 _MAX_LIST_LIMIT = 200
@@ -85,18 +89,30 @@ async def _get_org_number_or_404(
 
 
 @router.post(
-    "", response_model=PhoneNumberResponse, status_code=http_status.HTTP_201_CREATED
+    "",
+    response_model=PhoneNumberResponse,
+    status_code=http_status.HTTP_201_CREATED,
 )
 async def acquire_number(
     body: NumberAcquireRequest,
     response: Response,
+    request: Request,
     principal: Annotated[Principal, Depends(get_current_principal)],
     db: Annotated[AsyncSession, Depends(get_session)],
     provider: Annotated[VoiceProvider, Depends(get_voice_provider)],
     idem: Annotated[IdempotencyContext | None, Depends(idempotency_dep)] = None,
 ) -> PhoneNumberResponse:
+    """Buy a dedicated phone number for the caller's organization.
+
+    This purchases a real number at the carrier and starts a recurring
+    monthly fee immediately — it is not a reservation. The number is usable
+    for voice, SMS, or both depending on the requested capabilities and
+    what the carrier offers for the given country_code/number_type.
+    """
     if idem is not None and idem.is_replay:
-        _cached_id, cached = replay_cached(idem, response, resource_prefix="/numbers")
+        _cached_id, cached = replay_cached(
+            idem, response, request, resource_prefix="/numbers"
+        )
         return PhoneNumberResponse.model_validate(cached)
 
     # Acquiring buys a real number at the carrier and starts a monthly fee —
@@ -184,7 +200,9 @@ async def acquire_number(
     # and expire_on_commit=False keeps it live; PhoneNumberResponse reads no
     # other server-generated column.
 
-    response.headers["Location"] = f"/numbers/{number.id}"
+    response.headers["Location"] = (
+        f"{request_mount_prefix(request)}/numbers/{number.id}"
+    )
     number_response = PhoneNumberResponse.model_validate(number)
     if idem is not None:
         await idem.store(
@@ -248,7 +266,10 @@ async def release_org_number(
     return number
 
 
-@router.delete("/{number_id}", status_code=http_status.HTTP_204_NO_CONTENT)
+@router.delete(
+    "/{number_id}",
+    status_code=http_status.HTTP_204_NO_CONTENT,
+)
 async def release_number(
     number_id: UUID,
     principal: Annotated[Principal, Depends(get_current_principal)],
@@ -274,23 +295,39 @@ async def release_number(
         )
 
 
-@router.get("/{number_id}", response_model=PhoneNumberResponse)
+@router.get(
+    "/{number_id}",
+    response_model=PhoneNumberResponse,
+)
 async def get_number(
     number_id: UUID,
     principal: Annotated[Principal, Depends(get_current_principal)],
     db: Annotated[AsyncSession, Depends(get_session)],
 ) -> PhoneNumberResponse:
+    """Fetch one dedicated number by id, including its capabilities and state.
+
+    Org-scoped: returns 404 for a number belonging to a different
+    organization.
+    """
     number = await _get_org_number_or_404(db, number_id, principal.organization_id)
     return PhoneNumberResponse.model_validate(number)
 
 
-@router.get("", response_model=PhoneNumberListResponse)
+@router.get(
+    "",
+    response_model=PhoneNumberListResponse,
+)
 async def list_numbers(
     principal: Annotated[Principal, Depends(get_current_principal)],
     db: Annotated[AsyncSession, Depends(get_session)],
     cursor: str | None = Query(default=None),
     limit: int = Query(default=_DEFAULT_LIST_LIMIT, ge=1, le=_MAX_LIST_LIMIT),
 ) -> PhoneNumberListResponse:
+    """List dedicated numbers owned by the caller's organization.
+
+    Cursor-paginated, newest first. Only org-owned numbers are listed —
+    shared pool numbers used for outbound calls never appear here.
+    """
     stmt = select(PhoneNumber).where(
         PhoneNumber.organization_id == principal.organization_id,
         PhoneNumber.is_pool.is_(False),
@@ -310,13 +347,24 @@ async def list_numbers(
     )
 
 
-@router.post("/{number_id}/enable-sms", response_model=PhoneNumberResponse)
+@router.post(
+    "/{number_id}/enable-sms",
+    response_model=PhoneNumberResponse,
+)
 async def enable_sms(
     number_id: UUID,
     principal: Annotated[Principal, Depends(get_current_principal)],
     db: Annotated[AsyncSession, Depends(get_session)],
     provider: Annotated[SmsProvider, Depends(get_sms_provider)],
 ) -> PhoneNumberResponse:
+    """Attach a dedicated number to the org's shared SMS Messaging Service.
+
+    Required once per number before it can send/receive SMS; the number
+    must already have been acquired with sms capability. Idempotent —
+    calling this again on an already-enabled number just returns its
+    current state. Fails with 422 for a released number or one that lacks
+    sms capability.
+    """
     number = await _get_org_number_or_404(db, number_id, principal.organization_id)
 
     _reject_if_released(number)

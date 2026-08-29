@@ -70,11 +70,11 @@ func runEmailEvents(ctx context.Context, opts *Options, f *emailEventsFlags, inp
 func fetchEmailEventsPage(
 	ctx context.Context, apiClient *client.ClientWithResponses, id uuid.UUID, limit int, cursor string,
 ) (*client.EmailEventListResponse, error) {
-	params := &client.ListEmailEventsEmailsEmailIdEventsGetParams{Limit: &limit}
+	params := &client.ListEmailEventsV1EmailsEmailIdEventsGetParams{Limit: &limit}
 	if cursor != "" {
 		params.Cursor = &cursor
 	}
-	resp, err := apiClient.ListEmailEventsEmailsEmailIdEventsGetWithResponse(ctx, id, params)
+	resp, err := apiClient.ListEmailEventsV1EmailsEmailIdEventsGetWithResponse(ctx, id, params)
 	if err != nil {
 		return nil, fmt.Errorf("email API: %w", err)
 	}

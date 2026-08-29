@@ -42,7 +42,7 @@ func TestNumberAcquire_HappyPath(t *testing.T) {
 	if got := atomic.LoadInt32(&srv.hits); got != 1 {
 		t.Fatalf("expected 1 request, got %d", got)
 	}
-	if srv.lastReq.Method != http.MethodPost || srv.lastReq.URL.Path != "/numbers" {
+	if srv.lastReq.Method != http.MethodPost || srv.lastReq.URL.Path != "/v1/numbers" {
 		t.Fatalf("unexpected route: %s %s", srv.lastReq.Method, srv.lastReq.URL.Path)
 	}
 	if h := srv.lastReq.Header.Get("Idempotency-Key"); h == "" {
@@ -154,7 +154,7 @@ func TestNumberList_RendersTable(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if srv.lastReq.URL.Path != "/numbers" {
+	if srv.lastReq.URL.Path != "/v1/numbers" {
 		t.Fatalf("unexpected path: %s", srv.lastReq.URL.Path)
 	}
 	for _, want := range []string{"ID", "E164", "TYPE", "CAPABILITIES", "STATE", "+15551110001", "+15551110002"} {
@@ -192,7 +192,7 @@ func TestNumberGet_HappyPath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if srv.lastReq.Method != http.MethodGet || srv.lastReq.URL.Path != "/numbers/"+resp.Id.String() {
+	if srv.lastReq.Method != http.MethodGet || srv.lastReq.URL.Path != "/v1/numbers/"+resp.Id.String() {
 		t.Fatalf("unexpected route: %s %s", srv.lastReq.Method, srv.lastReq.URL.Path)
 	}
 	if !strings.Contains(stdout, "+14155551234") {
@@ -230,7 +230,7 @@ func TestNumberEnableSms_HappyPath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if srv.lastReq.Method != http.MethodPost || srv.lastReq.URL.Path != "/numbers/"+resp.Id.String()+"/enable-sms" {
+	if srv.lastReq.Method != http.MethodPost || srv.lastReq.URL.Path != "/v1/numbers/"+resp.Id.String()+"/enable-sms" {
 		t.Fatalf("unexpected route: %s %s", srv.lastReq.Method, srv.lastReq.URL.Path)
 	}
 	if !strings.Contains(stdout, sid) {

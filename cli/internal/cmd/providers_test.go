@@ -69,7 +69,7 @@ func TestProvidersList_HappyPath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if srv.lastReq.Method != http.MethodGet || srv.lastReq.URL.Path != "/providers" {
+	if srv.lastReq.Method != http.MethodGet || srv.lastReq.URL.Path != "/v1/providers" {
 		t.Fatalf("unexpected route: %s %s", srv.lastReq.Method, srv.lastReq.URL.Path)
 	}
 	for _, want := range []string{"LAYER", "PROVIDER", "openai-compatible", "…ABCD", "my-model"} {
@@ -113,7 +113,7 @@ func TestProvidersSet_RequestBody(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if srv.lastReq.Method != http.MethodPut || srv.lastReq.URL.Path != "/providers/llm" {
+	if srv.lastReq.Method != http.MethodPut || srv.lastReq.URL.Path != "/v1/providers/llm" {
 		t.Fatalf("unexpected route: %s %s", srv.lastReq.Method, srv.lastReq.URL.Path)
 	}
 
@@ -320,7 +320,7 @@ func TestProvidersDelete_HappyPath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if srv.lastReq.Method != http.MethodDelete || srv.lastReq.URL.Path != "/providers/tts/cartesia" {
+	if srv.lastReq.Method != http.MethodDelete || srv.lastReq.URL.Path != "/v1/providers/tts/cartesia" {
 		t.Fatalf("unexpected route: %s %s", srv.lastReq.Method, srv.lastReq.URL.Path)
 	}
 	if !strings.Contains(stdout, "deleted") {
@@ -355,7 +355,7 @@ func TestProvidersActivate_RequestBody(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if srv.lastReq.Method != http.MethodPost || srv.lastReq.URL.Path != "/providers/tts/activate" {
+	if srv.lastReq.Method != http.MethodPost || srv.lastReq.URL.Path != "/v1/providers/tts/activate" {
 		t.Fatalf("unexpected route: %s %s", srv.lastReq.Method, srv.lastReq.URL.Path)
 	}
 	if body := decodeBody(t, srv.lastBody); body["provider"] != "cartesia" {
@@ -390,7 +390,7 @@ func TestProvidersTest_EmptyBodyByDefault(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if srv.lastReq.Method != http.MethodPost || srv.lastReq.URL.Path != "/providers/llm/validate" {
+	if srv.lastReq.Method != http.MethodPost || srv.lastReq.URL.Path != "/v1/providers/llm/validate" {
 		t.Fatalf("unexpected route: %s %s", srv.lastReq.Method, srv.lastReq.URL.Path)
 	}
 	if body := decodeBody(t, srv.lastBody); len(body) != 0 {

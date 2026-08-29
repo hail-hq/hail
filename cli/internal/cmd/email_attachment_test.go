@@ -35,7 +35,7 @@ func newAttachServer(t *testing.T, attID, payload string) *fakeServer {
 				"requested_at":"2026-06-28T00:00:00Z",
 				"attachments":[{"id":"`+attID+`","filename":"f.pdf","content_type":"application/pdf","size_bytes":4}]
 			}`)
-		case r.URL.Path == "/emails":
+		case r.URL.Path == "/v1/emails":
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusOK)
 			_, _ = io.WriteString(w, `{"items":[{"id":"44444444-4444-4444-4444-444444444444"}],"next_cursor":null}`)

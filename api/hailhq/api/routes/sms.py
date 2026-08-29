@@ -35,6 +35,11 @@ from hailhq.api.idempotency import (
 )
 from hailhq.api.numbers import resolve_org_number
 from hailhq.api.pagination import fetch_cursor_page
+from hailhq.api.ratelimit import (
+    GENERAL_RATE_LIMITED_RESPONSES,
+    merge_rate_limited_responses,
+)
+from hailhq.api.route_prefixes import request_mount_prefix
 from hailhq.api.usage import write_usage_event
 from hailhq.core.compliance_gate import check_sms_allowed, remove_suppression
 from hailhq.core.config import settings
@@ -64,7 +69,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/sms", tags=["sms"])
+router = APIRouter(
+    prefix="/sms", tags=["sms"], responses=GENERAL_RATE_LIMITED_RESPONSES
+)
 
 _DEFAULT_LIST_LIMIT = 50
 _MAX_LIST_LIMIT = 200
@@ -188,18 +195,34 @@ async def deliver_sms(db: AsyncSession, provider: SmsProvider, sms: Sms) -> str 
     "",
     response_model=SmsResponse,
     status_code=http_status.HTTP_201_CREATED,
-    responses=RATE_LIMITED_RESPONSES,
+    responses=merge_rate_limited_responses(
+        RATE_LIMITED_RESPONSES, GENERAL_RATE_LIMITED_RESPONSES
+    ),
 )
 async def create_sms(
     body: SmsCreate,
     response: Response,
+    request: Request,
     principal: Annotated[Principal, Depends(get_current_principal)],
     db: Annotated[AsyncSession, Depends(get_session)],
     provider: Annotated[SmsProvider, Depends(get_sms_provider)],
     idem: Annotated[IdempotencyContext | None, Depends(idempotency_dep)] = None,
 ) -> SmsResponse:
+    """Send an outbound SMS.
+
+    Sends synchronously — the response reports the final status (sent or
+    failed), not a queued placeholder, though delivery confirmation from
+    the carrier can still arrive later as a webhook or GET /v1/sms/{sms_id}
+    update. An explicit from resolves a dedicated number; otherwise Hail
+    picks an alphanumeric sender ID where the destination corridor allows
+    it, or requires a dedicated SMS-capable number otherwise. Requires
+    recipient_consent=true on the request body; Hail does not verify
+    lawful basis to contact the recipient, the caller warrants it.
+    """
     if idem is not None and idem.is_replay:
-        cached_id, cached = replay_cached(idem, response, resource_prefix="/sms")
+        cached_id, cached = replay_cached(
+            idem, response, request, resource_prefix="/sms"
+        )
         await write_audit_log(
             organization_id=principal.organization_id,
             api_key_id=principal.api_key_id,
@@ -331,7 +354,7 @@ async def create_sms(
     # carrier rejection: row already reconciled to failed; fall through and
     # return the SmsResponse exactly as before.
 
-    response.headers["Location"] = f"/sms/{sms.id}"
+    response.headers["Location"] = f"{request_mount_prefix(request)}/sms/{sms.id}"
     sms_response = SmsResponse.model_validate(sms)
 
     if idem is not None:
@@ -454,13 +477,21 @@ async def receive_sms_status(
     return {"status": "applied"}
 
 
-@router.get("/suppressions", response_model=SuppressionListResponse)
+@router.get(
+    "/suppressions",
+    response_model=SuppressionListResponse,
+)
 async def list_sms_suppressions(
     principal: Annotated[Principal, Depends(get_current_principal)],
     db: Annotated[AsyncSession, Depends(get_session)],
     cursor: str | None = Query(default=None),
     limit: int = Query(default=_DEFAULT_LIST_LIMIT, ge=1, le=_MAX_LIST_LIMIT),
 ) -> SuppressionListResponse:
+    """List SMS numbers suppressed from receiving messages, newest first.
+
+    Cursor-paginated. A suppressed number blocks POST /v1/sms sends to it
+    with a 403 until removed via DELETE /v1/sms/suppressions/{number}.
+    """
     stmt = select(Suppression).where(
         Suppression.organization_id == principal.organization_id,
         Suppression.channel == "sms",
@@ -480,12 +511,21 @@ async def list_sms_suppressions(
     )
 
 
-@router.delete("/suppressions/{number}", status_code=http_status.HTTP_204_NO_CONTENT)
+@router.delete(
+    "/suppressions/{number}",
+    status_code=http_status.HTTP_204_NO_CONTENT,
+)
 async def delete_sms_suppression(
     number: str,
     principal: Annotated[Principal, Depends(get_current_principal)],
     db: Annotated[AsyncSession, Depends(get_session)],
 ) -> None:
+    """Remove one number from the SMS suppression list, re-allowing sends to it.
+
+    Does not itself constitute renewed consent — the caller is responsible
+    for having a lawful basis (e.g. a fresh opt-in) before sending again.
+    Returns 404 if the number was not suppressed.
+    """
     removed = await remove_suppression(
         db, organization_id=principal.organization_id, recipient=number, channel="sms"
     )
@@ -496,11 +536,19 @@ async def delete_sms_suppression(
     await db.commit()
 
 
-@router.get("/sender-id", response_model=SenderIdResponse)
+@router.get(
+    "/sender-id",
+    response_model=SenderIdResponse,
+)
 async def get_sender_id(
     principal: Annotated[Principal, Depends(get_current_principal)],
     db: Annotated[AsyncSession, Depends(get_session)],
 ) -> SenderIdResponse:
+    """Get the org's custom alphanumeric SMS sender ID, if any is set.
+
+    effective_default is the platform sender id used for
+    alphanumeric-eligible corridors when custom_sender_id is null.
+    """
     stmt = select(SmsSenderIdentity).where(
         SmsSenderIdentity.organization_id == principal.organization_id
     )
@@ -511,12 +559,21 @@ async def get_sender_id(
     )
 
 
-@router.patch("/sender-id", response_model=SenderIdResponse)
+@router.patch(
+    "/sender-id",
+    response_model=SenderIdResponse,
+)
 async def patch_sender_id(
     body: SenderIdPatch,
     principal: Annotated[Principal, Depends(get_current_principal)],
     db: Annotated[AsyncSession, Depends(get_session)],
 ) -> SenderIdResponse:
+    """Set or clear the org's custom alphanumeric SMS sender ID.
+
+    Pass custom_sender_id=null to clear it and fall back to the platform
+    default sender id. Only affects alphanumeric-eligible corridors — a
+    corridor requiring a dedicated number is unaffected.
+    """
     if body.custom_sender_id is None:
         # Clear: unconditional delete (a no-op when no row exists), so there is
         # no read-then-delete window.
@@ -551,12 +608,20 @@ async def patch_sender_id(
     )
 
 
-@router.get("/{sms_id}", response_model=SmsResponse)
+@router.get(
+    "/{sms_id}",
+    response_model=SmsResponse,
+)
 async def get_sms(
     sms_id: UUID,
     principal: Annotated[Principal, Depends(get_current_principal)],
     db: Annotated[AsyncSession, Depends(get_session)],
 ) -> SmsResponse:
+    """Fetch one SMS by id, including its current status.
+
+    Org-scoped: returns 404 for an SMS belonging to a different
+    organization.
+    """
     stmt = select(Sms).where(
         Sms.id == sms_id,
         Sms.organization_id == principal.organization_id,
@@ -569,7 +634,10 @@ async def get_sms(
     return SmsResponse.model_validate(sms)
 
 
-@router.get("", response_model=SmsListResponse)
+@router.get(
+    "",
+    response_model=SmsListResponse,
+)
 async def list_sms(
     principal: Annotated[Principal, Depends(get_current_principal)],
     db: Annotated[AsyncSession, Depends(get_session)],
@@ -578,6 +646,12 @@ async def list_sms(
     status: SmsStatus | None = Query(default=None),
     to: str | None = Query(default=None),
 ) -> SmsListResponse:
+    """List SMS messages for the caller's organization, newest first.
+
+    Cursor-paginated: pass the returned next_cursor to fetch the next page;
+    a null next_cursor means there are no more results. Filter by status or
+    destination number (to) to narrow the list.
+    """
     stmt = select(Sms).where(Sms.organization_id == principal.organization_id)
     if status is not None:
         stmt = stmt.where(Sms.status == status)

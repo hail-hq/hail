@@ -10,12 +10,19 @@ servers:
   - url: https://api.hail.so
     description: Hail Cloud
 paths:
-  /calls:
+  /v1/calls:
     post:
       tags:
         - calls
       summary: Create Call
-      operationId: create_call_calls_post
+      description:
+        "Place an outbound AI voice call.\n\nThe call is placed asynchronously\
+        \ \u2014 this returns as soon as the call is\nqueued, not when it completes.\
+        \ Poll GET /v1/calls/{call_id} or configure a\nwebhook to get the final status\
+        \ and transcript. Requires\nrecipient_consent=true on the request body; Hail\
+        \ does not verify lawful\nbasis to contact the recipient, the caller warrants\
+        \ it."
+      operationId: create_call_v1_calls_post
       parameters:
         - name: authorization
           in: header
@@ -50,10 +57,23 @@ paths:
           description:
             Rate limited. The agent-origin workspace exceeded a per-channel
             velocity cap, or the platform kill switch is on. Retry after the Retry-After
-            header (seconds).
+            header (seconds). Rate limited. This caller exceeded the general request-rate
+            ceiling. Retry after the Retry-After header (seconds).
           headers:
             Retry-After:
               description: Seconds to wait before retrying.
+              schema:
+                type: integer
+            RateLimit-Limit:
+              description: The request ceiling for the current window.
+              schema:
+                type: integer
+            RateLimit-Remaining:
+              description: Requests remaining in the current window.
+              schema:
+                type: integer
+            RateLimit-Reset:
+              description: Seconds until the current window resets.
               schema:
                 type: integer
         "422":
@@ -66,7 +86,15 @@ paths:
       tags:
         - calls
       summary: List Calls
-      operationId: list_calls_calls_get
+      description: "List calls for the caller's organization, newest first.
+
+
+        Cursor-paginated: pass the returned next_cursor to fetch the next page;
+
+        a null next_cursor means there are no more results. Filter by status or
+
+        destination number (to) to narrow the list."
+      operationId: list_calls_v1_calls_get
       parameters:
         - name: cursor
           in: query
@@ -126,18 +154,48 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/CallListResponse"
+        "429":
+          description:
+            Rate limited. This caller exceeded the general request-rate
+            ceiling. Retry after the Retry-After header (seconds).
+          headers:
+            Retry-After:
+              description: Seconds to wait before retrying.
+              schema:
+                type: integer
+            RateLimit-Limit:
+              description: The request ceiling for the current window.
+              schema:
+                type: integer
+            RateLimit-Remaining:
+              description: Requests remaining in the current window.
+              schema:
+                type: integer
+            RateLimit-Reset:
+              description: Seconds until the current window resets.
+              schema:
+                type: integer
         "422":
           description: Validation Error
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/HTTPValidationError"
-  /calls/{call_id}:
+  /v1/calls/{call_id}:
     get:
       tags:
         - calls
       summary: Get Call
-      operationId: get_call_calls__call_id__get
+      description:
+        "Fetch one call by id, including its current status and end reason.
+
+
+        Org-scoped: returns 404 for a call belonging to a different organization
+
+        (not 403, to avoid confirming the id exists). Use this to poll for the
+
+        final outcome of a call placed with POST /v1/calls."
+      operationId: get_call_v1_calls__call_id__get
       parameters:
         - name: call_id
           in: path
@@ -161,17 +219,48 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/CallResponse"
+        "429":
+          description:
+            Rate limited. This caller exceeded the general request-rate
+            ceiling. Retry after the Retry-After header (seconds).
+          headers:
+            Retry-After:
+              description: Seconds to wait before retrying.
+              schema:
+                type: integer
+            RateLimit-Limit:
+              description: The request ceiling for the current window.
+              schema:
+                type: integer
+            RateLimit-Remaining:
+              description: Requests remaining in the current window.
+              schema:
+                type: integer
+            RateLimit-Reset:
+              description: Seconds until the current window resets.
+              schema:
+                type: integer
         "422":
           description: Validation Error
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/HTTPValidationError"
-  /email-attachments:
+  /v1/email-attachments:
     post:
       tags:
         - email-attachments
       summary: Create Email Attachment
+      description: "Upload a file and get back a reusable attachment id.
+
+
+        The returned id can be referenced from attachment_ids on many later
+
+        POST /v1/emails calls until it is garbage-collected for being unused; it is
+
+        not deleted immediately after first use. Uploads are size-limited and
+
+        scoped to the caller's organization."
       operationId: upload_email_attachment
       parameters:
         - name: authorization
@@ -195,18 +284,46 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/EmailAttachmentUploadResponse"
+        "429":
+          description:
+            Rate limited. This caller exceeded the general request-rate
+            ceiling. Retry after the Retry-After header (seconds).
+          headers:
+            Retry-After:
+              description: Seconds to wait before retrying.
+              schema:
+                type: integer
+            RateLimit-Limit:
+              description: The request ceiling for the current window.
+              schema:
+                type: integer
+            RateLimit-Remaining:
+              description: Requests remaining in the current window.
+              schema:
+                type: integer
+            RateLimit-Reset:
+              description: Seconds until the current window resets.
+              schema:
+                type: integer
         "422":
           description: Validation Error
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/HTTPValidationError"
-  /emails:
+  /v1/emails:
     post:
       tags:
         - emails
       summary: Create Email
-      operationId: create_email_emails_post
+      description:
+        "Send an outbound email through SES.\n\nSends synchronously \u2014\
+        \ the response reports the final status (sent or\nfailed), not a queued placeholder;\
+        \ no separate poll is needed for the\nhappy path, though a bounce or complaint\
+        \ can still arrive later as a\nwebhook or GET /v1/emails/{email_id}/events\
+        \ entry. Requires\nrecipient_consent=true on the request body; Hail does not\
+        \ verify lawful\nbasis to contact the recipient, the caller warrants it."
+      operationId: create_email_v1_emails_post
       parameters:
         - name: authorization
           in: header
@@ -241,10 +358,23 @@ paths:
           description:
             Rate limited. The agent-origin workspace exceeded a per-channel
             velocity cap, or the platform kill switch is on. Retry after the Retry-After
-            header (seconds).
+            header (seconds). Rate limited. This caller exceeded the general request-rate
+            ceiling. Retry after the Retry-After header (seconds).
           headers:
             Retry-After:
               description: Seconds to wait before retrying.
+              schema:
+                type: integer
+            RateLimit-Limit:
+              description: The request ceiling for the current window.
+              schema:
+                type: integer
+            RateLimit-Remaining:
+              description: Requests remaining in the current window.
+              schema:
+                type: integer
+            RateLimit-Reset:
+              description: Seconds until the current window resets.
               schema:
                 type: integer
         "422":
@@ -257,7 +387,13 @@ paths:
       tags:
         - emails
       summary: List Emails
-      operationId: list_emails_emails_get
+      description:
+        "List emails for the caller's organization, newest first.\n\nCursor-paginated:\
+        \ pass the returned next_cursor to fetch the next page;\na null next_cursor\
+        \ means there are no more results. Filter by status or\ndirection (outbound/inbound).\
+        \ List entries omit body_text/body_html \u2014\nfetch GET /v1/emails/{email_id}\
+        \ for the full body."
+      operationId: list_emails_v1_emails_get
       parameters:
         - name: cursor
           in: query
@@ -318,13 +454,34 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/EmailListResponse"
+        "429":
+          description:
+            Rate limited. This caller exceeded the general request-rate
+            ceiling. Retry after the Retry-After header (seconds).
+          headers:
+            Retry-After:
+              description: Seconds to wait before retrying.
+              schema:
+                type: integer
+            RateLimit-Limit:
+              description: The request ceiling for the current window.
+              schema:
+                type: integer
+            RateLimit-Remaining:
+              description: Requests remaining in the current window.
+              schema:
+                type: integer
+            RateLimit-Reset:
+              description: Seconds until the current window resets.
+              schema:
+                type: integer
         "422":
           description: Validation Error
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/HTTPValidationError"
-  /emails/{email_id}/events:
+  /v1/emails/{email_id}/events:
     get:
       tags:
         - emails
@@ -335,7 +492,7 @@ paths:
         Cursor-paginated with the same forward-walk shape as ``GET /events``:
 
         strictly-greater on ``(occurred_at, id)``, ascending."
-      operationId: list_email_events_emails__email_id__events_get
+      operationId: list_email_events_v1_emails__email_id__events_get
       parameters:
         - name: email_id
           in: path
@@ -376,18 +533,50 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/EmailEventListResponse"
+        "429":
+          description:
+            Rate limited. This caller exceeded the general request-rate
+            ceiling. Retry after the Retry-After header (seconds).
+          headers:
+            Retry-After:
+              description: Seconds to wait before retrying.
+              schema:
+                type: integer
+            RateLimit-Limit:
+              description: The request ceiling for the current window.
+              schema:
+                type: integer
+            RateLimit-Remaining:
+              description: Requests remaining in the current window.
+              schema:
+                type: integer
+            RateLimit-Reset:
+              description: Seconds until the current window resets.
+              schema:
+                type: integer
         "422":
           description: Validation Error
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/HTTPValidationError"
-  /emails/stats:
+  /v1/emails/stats:
     get:
       tags:
         - emails
       summary: Get Email Stats
-      operationId: get_email_stats_emails_stats_get
+      description:
+        'Aggregate send/delivery/open/click/bounce counts and rates over
+        a range.
+
+
+        Defaults to the last 7 days, bucketed by day. bucket=hour is limited to
+
+        an 8-day range; any bucket size is limited to a 92-day range. Registered
+
+        above GET /v1/emails/{email_id} so "stats" is not swallowed by the id path
+        param.'
+      operationId: get_email_stats_v1_emails_stats_get
       parameters:
         - name: from
           in: query
@@ -432,18 +621,48 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/EmailStatsResponse"
+        "429":
+          description:
+            Rate limited. This caller exceeded the general request-rate
+            ceiling. Retry after the Retry-After header (seconds).
+          headers:
+            Retry-After:
+              description: Seconds to wait before retrying.
+              schema:
+                type: integer
+            RateLimit-Limit:
+              description: The request ceiling for the current window.
+              schema:
+                type: integer
+            RateLimit-Remaining:
+              description: Requests remaining in the current window.
+              schema:
+                type: integer
+            RateLimit-Reset:
+              description: Seconds until the current window resets.
+              schema:
+                type: integer
         "422":
           description: Validation Error
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/HTTPValidationError"
-  /emails/{email_id}:
+  /v1/emails/{email_id}:
     get:
       tags:
         - emails
       summary: Get Email
-      operationId: get_email_emails__email_id__get
+      description:
+        "Fetch one email by id, including attachments and last event time.
+
+
+        Org-scoped: returns 404 for an email belonging to a different
+
+        organization. For an inbound email with a stored raw MIME, raw_url
+
+        points at GET /v1/emails/{email_id}/raw."
+      operationId: get_email_v1_emails__email_id__get
       parameters:
         - name: email_id
           in: path
@@ -467,13 +686,34 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/EmailResponse"
+        "429":
+          description:
+            Rate limited. This caller exceeded the general request-rate
+            ceiling. Retry after the Retry-After header (seconds).
+          headers:
+            Retry-After:
+              description: Seconds to wait before retrying.
+              schema:
+                type: integer
+            RateLimit-Limit:
+              description: The request ceiling for the current window.
+              schema:
+                type: integer
+            RateLimit-Remaining:
+              description: Requests remaining in the current window.
+              schema:
+                type: integer
+            RateLimit-Reset:
+              description: Seconds until the current window resets.
+              schema:
+                type: integer
         "422":
           description: Validation Error
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/HTTPValidationError"
-  /emails/{email_id}/raw:
+  /v1/emails/{email_id}/raw:
     get:
       tags:
         - emails
@@ -481,7 +721,7 @@ paths:
       description:
         "302 \u2192 presigned S3 URL for the raw inbound MIME (404 for\
         \ outbound)."
-      operationId: get_email_raw_emails__email_id__raw_get
+      operationId: get_email_raw_v1_emails__email_id__raw_get
       parameters:
         - name: email_id
           in: path
@@ -504,19 +744,40 @@ paths:
           content:
             application/json:
               schema: {}
+        "429":
+          description:
+            Rate limited. This caller exceeded the general request-rate
+            ceiling. Retry after the Retry-After header (seconds).
+          headers:
+            Retry-After:
+              description: Seconds to wait before retrying.
+              schema:
+                type: integer
+            RateLimit-Limit:
+              description: The request ceiling for the current window.
+              schema:
+                type: integer
+            RateLimit-Remaining:
+              description: Requests remaining in the current window.
+              schema:
+                type: integer
+            RateLimit-Reset:
+              description: Seconds until the current window resets.
+              schema:
+                type: integer
         "422":
           description: Validation Error
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/HTTPValidationError"
-  /emails/{email_id}/attachments/{attachment_id}:
+  /v1/emails/{email_id}/attachments/{attachment_id}:
     get:
       tags:
         - emails
       summary: Get Email Attachment
       description: "302 \u2192 presigned S3 URL for one attachment."
-      operationId: get_email_attachment_emails__email_id__attachments__attachment_id__get
+      operationId: get_email_attachment_v1_emails__email_id__attachments__attachment_id__get
       parameters:
         - name: email_id
           in: path
@@ -546,18 +807,45 @@ paths:
           content:
             application/json:
               schema: {}
+        "429":
+          description:
+            Rate limited. This caller exceeded the general request-rate
+            ceiling. Retry after the Retry-After header (seconds).
+          headers:
+            Retry-After:
+              description: Seconds to wait before retrying.
+              schema:
+                type: integer
+            RateLimit-Limit:
+              description: The request ceiling for the current window.
+              schema:
+                type: integer
+            RateLimit-Remaining:
+              description: Requests remaining in the current window.
+              schema:
+                type: integer
+            RateLimit-Reset:
+              description: Seconds until the current window resets.
+              schema:
+                type: integer
         "422":
           description: Validation Error
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/HTTPValidationError"
-  /events:
+  /v1/events:
     get:
       tags:
         - events
       summary: List Events
-      operationId: list_events_events_get
+      description:
+        "Cursor-paginated forward stream of call, email, and SMS events.\n\
+        \nScoped to the caller's organization. Pass id (typed \"<type>:<uuid>\",\n\
+        e.g. \"call:<uuid>\") to narrow to one resource's events, or kind to\nnarrow\
+        \ to one event kind. Walks forward in time \u2014 pass the returned\nnext_cursor\
+        \ to continue tailing where you left off."
+      operationId: list_events_v1_events_get
       parameters:
         - name: cursor
           in: query
@@ -607,18 +895,46 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/EventStreamResponse"
+        "429":
+          description:
+            Rate limited. This caller exceeded the general request-rate
+            ceiling. Retry after the Retry-After header (seconds).
+          headers:
+            Retry-After:
+              description: Seconds to wait before retrying.
+              schema:
+                type: integer
+            RateLimit-Limit:
+              description: The request ceiling for the current window.
+              schema:
+                type: integer
+            RateLimit-Remaining:
+              description: Requests remaining in the current window.
+              schema:
+                type: integer
+            RateLimit-Reset:
+              description: Seconds until the current window resets.
+              schema:
+                type: integer
         "422":
           description: Validation Error
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/HTTPValidationError"
-  /email-domains:
+  /v1/email-domains:
     post:
       tags:
         - email-domains
       summary: Create Email Domain
-      operationId: create_email_domain_email_domains_post
+      description:
+        "Register a sender identity to send outbound email through.\n\n\
+        kind=\"hail_mail\" mints an address on the shared hail-mail domain and is\n\
+        immediately verified \u2014 no DNS work needed. kind=\"custom\" registers\
+        \ your\nown domain with SES and returns DKIM records; the domain stays\nunverified\
+        \ (POST /v1/email-domains/{domain_id}/verify) until you publish\nthose DNS\
+        \ records and Hail confirms them."
+      operationId: create_email_domain_v1_email_domains_post
       parameters:
         - name: authorization
           in: header
@@ -641,6 +957,27 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/EmailDomainResponse"
+        "429":
+          description:
+            Rate limited. This caller exceeded the general request-rate
+            ceiling. Retry after the Retry-After header (seconds).
+          headers:
+            Retry-After:
+              description: Seconds to wait before retrying.
+              schema:
+                type: integer
+            RateLimit-Limit:
+              description: The request ceiling for the current window.
+              schema:
+                type: integer
+            RateLimit-Remaining:
+              description: Requests remaining in the current window.
+              schema:
+                type: integer
+            RateLimit-Reset:
+              description: Seconds until the current window resets.
+              schema:
+                type: integer
         "422":
           description: Validation Error
           content:
@@ -651,7 +988,12 @@ paths:
       tags:
         - email-domains
       summary: List Email Domains
-      operationId: list_email_domains_email_domains_get
+      description:
+        "List sender domains/identities for the caller's organization.\n\
+        \nCursor-paginated, newest first. The response also includes\ndefault_from\
+        \ \u2014 the address a from-less POST /v1/emails would use right\nnow given\
+        \ the org's current verified senders."
+      operationId: list_email_domains_v1_email_domains_get
       parameters:
         - name: cursor
           in: query
@@ -685,19 +1027,40 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/EmailDomainListResponse"
+        "429":
+          description:
+            Rate limited. This caller exceeded the general request-rate
+            ceiling. Retry after the Retry-After header (seconds).
+          headers:
+            Retry-After:
+              description: Seconds to wait before retrying.
+              schema:
+                type: integer
+            RateLimit-Limit:
+              description: The request ceiling for the current window.
+              schema:
+                type: integer
+            RateLimit-Remaining:
+              description: Requests remaining in the current window.
+              schema:
+                type: integer
+            RateLimit-Reset:
+              description: Seconds until the current window resets.
+              schema:
+                type: integer
         "422":
           description: Validation Error
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/HTTPValidationError"
-  /email-domains/check-domain:
+  /v1/email-domains/check-domain:
     get:
       tags:
         - email-domains
       summary: Check Domain
       description: Does this domain already receive mail? Drives apex-vs-prefix onboarding.
-      operationId: check_domain_email_domains_check_domain_get
+      operationId: check_domain_v1_email_domains_check_domain_get
       parameters:
         - name: domain
           in: query
@@ -720,18 +1083,48 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/DomainCheckResponse"
+        "429":
+          description:
+            Rate limited. This caller exceeded the general request-rate
+            ceiling. Retry after the Retry-After header (seconds).
+          headers:
+            Retry-After:
+              description: Seconds to wait before retrying.
+              schema:
+                type: integer
+            RateLimit-Limit:
+              description: The request ceiling for the current window.
+              schema:
+                type: integer
+            RateLimit-Remaining:
+              description: Requests remaining in the current window.
+              schema:
+                type: integer
+            RateLimit-Reset:
+              description: Seconds until the current window resets.
+              schema:
+                type: integer
         "422":
           description: Validation Error
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/HTTPValidationError"
-  /email-domains/{domain_id}:
+  /v1/email-domains/{domain_id}:
     get:
       tags:
         - email-domains
       summary: Get Email Domain
-      operationId: get_email_domain_email_domains__domain_id__get
+      description:
+        "Fetch one sender domain/identity by id, including its DNS records.
+
+
+        Org-scoped: returns 404 for a domain belonging to a different
+
+        organization. For a pending custom domain, dns_records lists the DKIM
+
+        records still to publish."
+      operationId: get_email_domain_v1_email_domains__domain_id__get
       parameters:
         - name: domain_id
           in: path
@@ -755,6 +1148,27 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/EmailDomainResponse"
+        "429":
+          description:
+            Rate limited. This caller exceeded the general request-rate
+            ceiling. Retry after the Retry-After header (seconds).
+          headers:
+            Retry-After:
+              description: Seconds to wait before retrying.
+              schema:
+                type: integer
+            RateLimit-Limit:
+              description: The request ceiling for the current window.
+              schema:
+                type: integer
+            RateLimit-Remaining:
+              description: Requests remaining in the current window.
+              schema:
+                type: integer
+            RateLimit-Reset:
+              description: Seconds until the current window resets.
+              schema:
+                type: integer
         "422":
           description: Validation Error
           content:
@@ -772,7 +1186,7 @@ paths:
         \ writes here when\n  an org admin changes the visible hail-mail address.\n\
         * **Inbound action edit** (``inbound_enabled`` / ``forward_to`` /\n  ``forward_rate_per_hour``):\
         \ any row kind."
-      operationId: patch_email_domain_email_domains__domain_id__patch
+      operationId: patch_email_domain_v1_email_domains__domain_id__patch
       parameters:
         - name: domain_id
           in: path
@@ -802,6 +1216,27 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/EmailDomainResponse"
+        "429":
+          description:
+            Rate limited. This caller exceeded the general request-rate
+            ceiling. Retry after the Retry-After header (seconds).
+          headers:
+            Retry-After:
+              description: Seconds to wait before retrying.
+              schema:
+                type: integer
+            RateLimit-Limit:
+              description: The request ceiling for the current window.
+              schema:
+                type: integer
+            RateLimit-Remaining:
+              description: Requests remaining in the current window.
+              schema:
+                type: integer
+            RateLimit-Reset:
+              description: Seconds until the current window resets.
+              schema:
+                type: integer
         "422":
           description: Validation Error
           content:
@@ -812,7 +1247,13 @@ paths:
       tags:
         - email-domains
       summary: Delete Email Domain
-      operationId: delete_email_domain_email_domains__domain_id__delete
+      description:
+        "Permanently remove a sender domain/identity.\n\nIrreversible \u2014\
+        \ for a custom domain, also deletes the SES identity, so\nthe domain can no\
+        \ longer send until re-registered and re-verified.\nFails with 409 if any\
+        \ Email rows still reference this domain; delete\nor wait for those to age\
+        \ out first."
+      operationId: delete_email_domain_v1_email_domains__domain_id__delete
       parameters:
         - name: domain_id
           in: path
@@ -832,13 +1273,34 @@ paths:
       responses:
         "204":
           description: Successful Response
+        "429":
+          description:
+            Rate limited. This caller exceeded the general request-rate
+            ceiling. Retry after the Retry-After header (seconds).
+          headers:
+            Retry-After:
+              description: Seconds to wait before retrying.
+              schema:
+                type: integer
+            RateLimit-Limit:
+              description: The request ceiling for the current window.
+              schema:
+                type: integer
+            RateLimit-Remaining:
+              description: Requests remaining in the current window.
+              schema:
+                type: integer
+            RateLimit-Reset:
+              description: Seconds until the current window resets.
+              schema:
+                type: integer
         "422":
           description: Validation Error
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/HTTPValidationError"
-  /email-domains/{domain_id}/verify:
+  /v1/email-domains/{domain_id}/verify:
     post:
       tags:
         - email-domains
@@ -848,7 +1310,7 @@ paths:
         \nOn-demand only \u2014 there is no background poller in v1. Operators /\n\
         tenants hit this after publishing DNS to flip the row to ``verified``.\nHail-mail\
         \ rows are no-ops (they're already verified by construction)."
-      operationId: verify_email_domain_email_domains__domain_id__verify_post
+      operationId: verify_email_domain_v1_email_domains__domain_id__verify_post
       parameters:
         - name: domain_id
           in: path
@@ -872,18 +1334,45 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/EmailDomainResponse"
+        "429":
+          description:
+            Rate limited. This caller exceeded the general request-rate
+            ceiling. Retry after the Retry-After header (seconds).
+          headers:
+            Retry-After:
+              description: Seconds to wait before retrying.
+              schema:
+                type: integer
+            RateLimit-Limit:
+              description: The request ceiling for the current window.
+              schema:
+                type: integer
+            RateLimit-Remaining:
+              description: Requests remaining in the current window.
+              schema:
+                type: integer
+            RateLimit-Reset:
+              description: Seconds until the current window resets.
+              schema:
+                type: integer
         "422":
           description: Validation Error
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/HTTPValidationError"
-  /numbers:
+  /v1/numbers:
     post:
       tags:
         - numbers
       summary: Acquire Number
-      operationId: acquire_number_numbers_post
+      description:
+        "Buy a dedicated phone number for the caller's organization.\n\n\
+        This purchases a real number at the carrier and starts a recurring\nmonthly\
+        \ fee immediately \u2014 it is not a reservation. The number is usable\nfor\
+        \ voice, SMS, or both depending on the requested capabilities and\nwhat the\
+        \ carrier offers for the given country_code/number_type."
+      operationId: acquire_number_v1_numbers_post
       parameters:
         - name: authorization
           in: header
@@ -914,6 +1403,27 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/PhoneNumberResponse"
+        "429":
+          description:
+            Rate limited. This caller exceeded the general request-rate
+            ceiling. Retry after the Retry-After header (seconds).
+          headers:
+            Retry-After:
+              description: Seconds to wait before retrying.
+              schema:
+                type: integer
+            RateLimit-Limit:
+              description: The request ceiling for the current window.
+              schema:
+                type: integer
+            RateLimit-Remaining:
+              description: Requests remaining in the current window.
+              schema:
+                type: integer
+            RateLimit-Reset:
+              description: Seconds until the current window resets.
+              schema:
+                type: integer
         "422":
           description: Validation Error
           content:
@@ -924,7 +1434,11 @@ paths:
       tags:
         - numbers
       summary: List Numbers
-      operationId: list_numbers_numbers_get
+      description:
+        "List dedicated numbers owned by the caller's organization.\n\n\
+        Cursor-paginated, newest first. Only org-owned numbers are listed \u2014\n\
+        shared pool numbers used for outbound calls never appear here."
+      operationId: list_numbers_v1_numbers_get
       parameters:
         - name: cursor
           in: query
@@ -958,13 +1472,34 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/PhoneNumberListResponse"
+        "429":
+          description:
+            Rate limited. This caller exceeded the general request-rate
+            ceiling. Retry after the Retry-After header (seconds).
+          headers:
+            Retry-After:
+              description: Seconds to wait before retrying.
+              schema:
+                type: integer
+            RateLimit-Limit:
+              description: The request ceiling for the current window.
+              schema:
+                type: integer
+            RateLimit-Remaining:
+              description: Requests remaining in the current window.
+              schema:
+                type: integer
+            RateLimit-Reset:
+              description: Seconds until the current window resets.
+              schema:
+                type: integer
         "422":
           description: Validation Error
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/HTTPValidationError"
-  /numbers/{number_id}:
+  /v1/numbers/{number_id}:
     delete:
       tags:
         - numbers
@@ -976,7 +1511,7 @@ paths:
         release month; months already accrued stay owed (the rater bills late,
 
         never forgives)."
-      operationId: release_number_numbers__number_id__delete
+      operationId: release_number_v1_numbers__number_id__delete
       parameters:
         - name: number_id
           in: path
@@ -996,6 +1531,27 @@ paths:
       responses:
         "204":
           description: Successful Response
+        "429":
+          description:
+            Rate limited. This caller exceeded the general request-rate
+            ceiling. Retry after the Retry-After header (seconds).
+          headers:
+            Retry-After:
+              description: Seconds to wait before retrying.
+              schema:
+                type: integer
+            RateLimit-Limit:
+              description: The request ceiling for the current window.
+              schema:
+                type: integer
+            RateLimit-Remaining:
+              description: Requests remaining in the current window.
+              schema:
+                type: integer
+            RateLimit-Reset:
+              description: Seconds until the current window resets.
+              schema:
+                type: integer
         "422":
           description: Validation Error
           content:
@@ -1006,7 +1562,15 @@ paths:
       tags:
         - numbers
       summary: Get Number
-      operationId: get_number_numbers__number_id__get
+      description:
+        "Fetch one dedicated number by id, including its capabilities and
+        state.
+
+
+        Org-scoped: returns 404 for a number belonging to a different
+
+        organization."
+      operationId: get_number_v1_numbers__number_id__get
       parameters:
         - name: number_id
           in: path
@@ -1030,18 +1594,45 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/PhoneNumberResponse"
+        "429":
+          description:
+            Rate limited. This caller exceeded the general request-rate
+            ceiling. Retry after the Retry-After header (seconds).
+          headers:
+            Retry-After:
+              description: Seconds to wait before retrying.
+              schema:
+                type: integer
+            RateLimit-Limit:
+              description: The request ceiling for the current window.
+              schema:
+                type: integer
+            RateLimit-Remaining:
+              description: Requests remaining in the current window.
+              schema:
+                type: integer
+            RateLimit-Reset:
+              description: Seconds until the current window resets.
+              schema:
+                type: integer
         "422":
           description: Validation Error
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/HTTPValidationError"
-  /numbers/{number_id}/enable-sms:
+  /v1/numbers/{number_id}/enable-sms:
     post:
       tags:
         - numbers
       summary: Enable Sms
-      operationId: enable_sms_numbers__number_id__enable_sms_post
+      description:
+        "Attach a dedicated number to the org's shared SMS Messaging Service.\n\
+        \nRequired once per number before it can send/receive SMS; the number\nmust\
+        \ already have been acquired with sms capability. Idempotent \u2014\ncalling\
+        \ this again on an already-enabled number just returns its\ncurrent state.\
+        \ Fails with 422 for a released number or one that lacks\nsms capability."
+      operationId: enable_sms_v1_numbers__number_id__enable_sms_post
       parameters:
         - name: number_id
           in: path
@@ -1065,18 +1656,45 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/PhoneNumberResponse"
+        "429":
+          description:
+            Rate limited. This caller exceeded the general request-rate
+            ceiling. Retry after the Retry-After header (seconds).
+          headers:
+            Retry-After:
+              description: Seconds to wait before retrying.
+              schema:
+                type: integer
+            RateLimit-Limit:
+              description: The request ceiling for the current window.
+              schema:
+                type: integer
+            RateLimit-Remaining:
+              description: Requests remaining in the current window.
+              schema:
+                type: integer
+            RateLimit-Reset:
+              description: Seconds until the current window resets.
+              schema:
+                type: integer
         "422":
           description: Validation Error
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/HTTPValidationError"
-  /webhooks:
+  /v1/webhooks:
     post:
       tags:
         - webhooks
       summary: Create Subscription
-      operationId: create_subscription_webhooks_post
+      description:
+        "Create a webhook subscription for one or more event types.\n\n\
+        The response includes the plaintext signing secret \u2014 this is the only\n\
+        time it is ever returned; store it now. Every later GET omits it. Use\nPOST\
+        \ /v1/webhooks/{sub_id}/rotate-secret to get a new plaintext secret if\nit\
+        \ is lost or compromised."
+      operationId: create_subscription_v1_webhooks_post
       parameters:
         - name: authorization
           in: header
@@ -1099,6 +1717,27 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/WebhookSubscriptionResponse"
+        "429":
+          description:
+            Rate limited. This caller exceeded the general request-rate
+            ceiling. Retry after the Retry-After header (seconds).
+          headers:
+            Retry-After:
+              description: Seconds to wait before retrying.
+              schema:
+                type: integer
+            RateLimit-Limit:
+              description: The request ceiling for the current window.
+              schema:
+                type: integer
+            RateLimit-Remaining:
+              description: Requests remaining in the current window.
+              schema:
+                type: integer
+            RateLimit-Reset:
+              description: Seconds until the current window resets.
+              schema:
+                type: integer
         "422":
           description: Validation Error
           content:
@@ -1109,7 +1748,12 @@ paths:
       tags:
         - webhooks
       summary: List Subscriptions
-      operationId: list_subscriptions_webhooks_get
+      description:
+        "List webhook subscriptions for the caller's organization.\n\n\
+        Cursor-paginated, newest first. The signing secret is never included \u2014\
+        \nonly POST /v1/webhooks and POST /v1/webhooks/{sub_id}/rotate-secret return\
+        \ it."
+      operationId: list_subscriptions_v1_webhooks_get
       parameters:
         - name: cursor
           in: query
@@ -1143,18 +1787,40 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/WebhookSubscriptionListResponse"
+        "429":
+          description:
+            Rate limited. This caller exceeded the general request-rate
+            ceiling. Retry after the Retry-After header (seconds).
+          headers:
+            Retry-After:
+              description: Seconds to wait before retrying.
+              schema:
+                type: integer
+            RateLimit-Limit:
+              description: The request ceiling for the current window.
+              schema:
+                type: integer
+            RateLimit-Remaining:
+              description: Requests remaining in the current window.
+              schema:
+                type: integer
+            RateLimit-Reset:
+              description: Seconds until the current window resets.
+              schema:
+                type: integer
         "422":
           description: Validation Error
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/HTTPValidationError"
-  /webhooks/{sub_id}:
+  /v1/webhooks/{sub_id}:
     get:
       tags:
         - webhooks
       summary: Get Subscription
-      operationId: get_subscription_webhooks__sub_id__get
+      description: Fetch one webhook subscription by id. The signing secret is omitted.
+      operationId: get_subscription_v1_webhooks__sub_id__get
       parameters:
         - name: sub_id
           in: path
@@ -1178,6 +1844,27 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/WebhookSubscriptionResponse"
+        "429":
+          description:
+            Rate limited. This caller exceeded the general request-rate
+            ceiling. Retry after the Retry-After header (seconds).
+          headers:
+            Retry-After:
+              description: Seconds to wait before retrying.
+              schema:
+                type: integer
+            RateLimit-Limit:
+              description: The request ceiling for the current window.
+              schema:
+                type: integer
+            RateLimit-Remaining:
+              description: Requests remaining in the current window.
+              schema:
+                type: integer
+            RateLimit-Reset:
+              description: Seconds until the current window resets.
+              schema:
+                type: integer
         "422":
           description: Validation Error
           content:
@@ -1188,7 +1875,19 @@ paths:
       tags:
         - webhooks
       summary: Patch Subscription
-      operationId: patch_subscription_webhooks__sub_id__patch
+      description:
+        'Update a webhook subscription''s target_url, event_types, and/or
+        status.
+
+
+        Only fields present in the request body are changed. Setting
+
+        status="active" resets the consecutive-failure counter, so a
+
+        subscription that was auto-disabled after 50 straight delivery
+
+        failures does not immediately re-disable itself.'
+      operationId: patch_subscription_v1_webhooks__sub_id__patch
       parameters:
         - name: sub_id
           in: path
@@ -1218,6 +1917,27 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/WebhookSubscriptionResponse"
+        "429":
+          description:
+            Rate limited. This caller exceeded the general request-rate
+            ceiling. Retry after the Retry-After header (seconds).
+          headers:
+            Retry-After:
+              description: Seconds to wait before retrying.
+              schema:
+                type: integer
+            RateLimit-Limit:
+              description: The request ceiling for the current window.
+              schema:
+                type: integer
+            RateLimit-Remaining:
+              description: Requests remaining in the current window.
+              schema:
+                type: integer
+            RateLimit-Reset:
+              description: Seconds until the current window resets.
+              schema:
+                type: integer
         "422":
           description: Validation Error
           content:
@@ -1228,7 +1948,11 @@ paths:
       tags:
         - webhooks
       summary: Delete Subscription
-      operationId: delete_subscription_webhooks__sub_id__delete
+      description:
+        "Permanently remove a webhook subscription.\n\nIrreversible \u2014\
+        \ no further events are delivered to it, and its\ndelivery history is deleted\
+        \ with it."
+      operationId: delete_subscription_v1_webhooks__sub_id__delete
       parameters:
         - name: sub_id
           in: path
@@ -1248,18 +1972,44 @@ paths:
       responses:
         "204":
           description: Successful Response
+        "429":
+          description:
+            Rate limited. This caller exceeded the general request-rate
+            ceiling. Retry after the Retry-After header (seconds).
+          headers:
+            Retry-After:
+              description: Seconds to wait before retrying.
+              schema:
+                type: integer
+            RateLimit-Limit:
+              description: The request ceiling for the current window.
+              schema:
+                type: integer
+            RateLimit-Remaining:
+              description: Requests remaining in the current window.
+              schema:
+                type: integer
+            RateLimit-Reset:
+              description: Seconds until the current window resets.
+              schema:
+                type: integer
         "422":
           description: Validation Error
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/HTTPValidationError"
-  /webhooks/{sub_id}/rotate-secret:
+  /v1/webhooks/{sub_id}/rotate-secret:
     post:
       tags:
         - webhooks
       summary: Rotate Secret
-      operationId: rotate_secret_webhooks__sub_id__rotate_secret_post
+      description:
+        "Generate a new signing secret and immediately invalidate the old\
+        \ one.\n\nThe response includes the new plaintext secret \u2014 this is the\
+        \ only\ntime it is returned; update your verification code with it right away,\n\
+        since the old secret stops validating new deliveries immediately."
+      operationId: rotate_secret_v1_webhooks__sub_id__rotate_secret_post
       parameters:
         - name: sub_id
           in: path
@@ -1283,18 +2033,44 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/WebhookSubscriptionResponse"
+        "429":
+          description:
+            Rate limited. This caller exceeded the general request-rate
+            ceiling. Retry after the Retry-After header (seconds).
+          headers:
+            Retry-After:
+              description: Seconds to wait before retrying.
+              schema:
+                type: integer
+            RateLimit-Limit:
+              description: The request ceiling for the current window.
+              schema:
+                type: integer
+            RateLimit-Remaining:
+              description: Requests remaining in the current window.
+              schema:
+                type: integer
+            RateLimit-Reset:
+              description: Seconds until the current window resets.
+              schema:
+                type: integer
         "422":
           description: Validation Error
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/HTTPValidationError"
-  /webhooks/{sub_id}/deliveries:
+  /v1/webhooks/{sub_id}/deliveries:
     get:
       tags:
         - webhooks
       summary: List Deliveries
-      operationId: list_deliveries_webhooks__sub_id__deliveries_get
+      description:
+        "List delivery attempts for one webhook subscription, newest first.\n\
+        \nCursor-paginated. Each entry shows the attempt count, response status,\n\
+        and response body Hail recorded \u2014 use POST /v1/webhooks/{sub_id}/\ndeliveries/{delivery_id}/redeliver\
+        \ to retry a failed one."
+      operationId: list_deliveries_v1_webhooks__sub_id__deliveries_get
       parameters:
         - name: sub_id
           in: path
@@ -1335,18 +2111,44 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/WebhookDeliveryListResponse"
+        "429":
+          description:
+            Rate limited. This caller exceeded the general request-rate
+            ceiling. Retry after the Retry-After header (seconds).
+          headers:
+            Retry-After:
+              description: Seconds to wait before retrying.
+              schema:
+                type: integer
+            RateLimit-Limit:
+              description: The request ceiling for the current window.
+              schema:
+                type: integer
+            RateLimit-Remaining:
+              description: Requests remaining in the current window.
+              schema:
+                type: integer
+            RateLimit-Reset:
+              description: Seconds until the current window resets.
+              schema:
+                type: integer
         "422":
           description: Validation Error
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/HTTPValidationError"
-  /webhooks/{sub_id}/deliveries/{delivery_id}/redeliver:
+  /v1/webhooks/{sub_id}/deliveries/{delivery_id}/redeliver:
     post:
       tags:
         - webhooks
       summary: Redeliver
-      operationId: redeliver_webhooks__sub_id__deliveries__delivery_id__redeliver_post
+      description:
+        "Retry one webhook delivery attempt.\n\nResets it to pending with\
+        \ a fresh attempt counter \u2014 the delivery\nworker picks it up and re-sends\
+        \ the same event payload to target_url\nshortly after. Useful after fixing\
+        \ an endpoint that was returning\nerrors."
+      operationId: redeliver_v1_webhooks__sub_id__deliveries__delivery_id__redeliver_post
       parameters:
         - name: sub_id
           in: path
@@ -1377,18 +2179,46 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/WebhookDeliveryResponse"
+        "429":
+          description:
+            Rate limited. This caller exceeded the general request-rate
+            ceiling. Retry after the Retry-After header (seconds).
+          headers:
+            Retry-After:
+              description: Seconds to wait before retrying.
+              schema:
+                type: integer
+            RateLimit-Limit:
+              description: The request ceiling for the current window.
+              schema:
+                type: integer
+            RateLimit-Remaining:
+              description: Requests remaining in the current window.
+              schema:
+                type: integer
+            RateLimit-Reset:
+              description: Seconds until the current window resets.
+              schema:
+                type: integer
         "422":
           description: Validation Error
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/HTTPValidationError"
-  /unsubscribe:
+  /v1/unsubscribe:
     get:
       tags:
         - unsubscribe
       summary: Unsubscribe
-      operationId: unsubscribe_unsubscribe_get
+      description:
+        "One-click email opt-out (RFC 8058), reached by clicking a link\
+        \ in a sent email.\n\nPublic and unauthenticated \u2014 the signed token query\
+        \ param is the sole\ncredential, proving the caller holds a link Hail sent\
+        \ to that address.\nOn success, the address is added to the org's suppression\
+        \ list and all\nfuture outbound email to it is blocked. Returns an HTML page,\
+        \ not JSON."
+      operationId: unsubscribe_v1_unsubscribe_get
       parameters:
         - name: token
           in: query
@@ -1409,12 +2239,21 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HTTPValidationError"
-  /sms:
+  /v1/sms:
     post:
       tags:
         - sms
       summary: Create Sms
-      operationId: create_sms_sms_post
+      description:
+        "Send an outbound SMS.\n\nSends synchronously \u2014 the response\
+        \ reports the final status (sent or\nfailed), not a queued placeholder, though\
+        \ delivery confirmation from\nthe carrier can still arrive later as a webhook\
+        \ or GET /v1/sms/{sms_id}\nupdate. An explicit from resolves a dedicated number;\
+        \ otherwise Hail\npicks an alphanumeric sender ID where the destination corridor\
+        \ allows\nit, or requires a dedicated SMS-capable number otherwise. Requires\n\
+        recipient_consent=true on the request body; Hail does not verify\nlawful basis\
+        \ to contact the recipient, the caller warrants it."
+      operationId: create_sms_v1_sms_post
       parameters:
         - name: authorization
           in: header
@@ -1449,10 +2288,23 @@ paths:
           description:
             Rate limited. The agent-origin workspace exceeded a per-channel
             velocity cap, or the platform kill switch is on. Retry after the Retry-After
-            header (seconds).
+            header (seconds). Rate limited. This caller exceeded the general request-rate
+            ceiling. Retry after the Retry-After header (seconds).
           headers:
             Retry-After:
               description: Seconds to wait before retrying.
+              schema:
+                type: integer
+            RateLimit-Limit:
+              description: The request ceiling for the current window.
+              schema:
+                type: integer
+            RateLimit-Remaining:
+              description: Requests remaining in the current window.
+              schema:
+                type: integer
+            RateLimit-Reset:
+              description: Seconds until the current window resets.
               schema:
                 type: integer
         "422":
@@ -1465,7 +2317,16 @@ paths:
       tags:
         - sms
       summary: List Sms
-      operationId: list_sms_sms_get
+      description:
+        "List SMS messages for the caller's organization, newest first.
+
+
+        Cursor-paginated: pass the returned next_cursor to fetch the next page;
+
+        a null next_cursor means there are no more results. Filter by status or
+
+        destination number (to) to narrow the list."
+      operationId: list_sms_v1_sms_get
       parameters:
         - name: cursor
           in: query
@@ -1522,18 +2383,46 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/SmsListResponse"
+        "429":
+          description:
+            Rate limited. This caller exceeded the general request-rate
+            ceiling. Retry after the Retry-After header (seconds).
+          headers:
+            Retry-After:
+              description: Seconds to wait before retrying.
+              schema:
+                type: integer
+            RateLimit-Limit:
+              description: The request ceiling for the current window.
+              schema:
+                type: integer
+            RateLimit-Remaining:
+              description: Requests remaining in the current window.
+              schema:
+                type: integer
+            RateLimit-Reset:
+              description: Seconds until the current window resets.
+              schema:
+                type: integer
         "422":
           description: Validation Error
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/HTTPValidationError"
-  /sms/suppressions:
+  /v1/sms/suppressions:
     get:
       tags:
         - sms
       summary: List Sms Suppressions
-      operationId: list_sms_suppressions_sms_suppressions_get
+      description:
+        "List SMS numbers suppressed from receiving messages, newest first.
+
+
+        Cursor-paginated. A suppressed number blocks POST /v1/sms sends to it
+
+        with a 403 until removed via DELETE /v1/sms/suppressions/{number}."
+      operationId: list_sms_suppressions_v1_sms_suppressions_get
       parameters:
         - name: cursor
           in: query
@@ -1567,18 +2456,44 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/SuppressionListResponse"
+        "429":
+          description:
+            Rate limited. This caller exceeded the general request-rate
+            ceiling. Retry after the Retry-After header (seconds).
+          headers:
+            Retry-After:
+              description: Seconds to wait before retrying.
+              schema:
+                type: integer
+            RateLimit-Limit:
+              description: The request ceiling for the current window.
+              schema:
+                type: integer
+            RateLimit-Remaining:
+              description: Requests remaining in the current window.
+              schema:
+                type: integer
+            RateLimit-Reset:
+              description: Seconds until the current window resets.
+              schema:
+                type: integer
         "422":
           description: Validation Error
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/HTTPValidationError"
-  /sms/suppressions/{number}:
+  /v1/sms/suppressions/{number}:
     delete:
       tags:
         - sms
       summary: Delete Sms Suppression
-      operationId: delete_sms_suppression_sms_suppressions__number__delete
+      description:
+        "Remove one number from the SMS suppression list, re-allowing sends\
+        \ to it.\n\nDoes not itself constitute renewed consent \u2014 the caller is\
+        \ responsible\nfor having a lawful basis (e.g. a fresh opt-in) before sending\
+        \ again.\nReturns 404 if the number was not suppressed."
+      operationId: delete_sms_suppression_v1_sms_suppressions__number__delete
       parameters:
         - name: number
           in: path
@@ -1597,18 +2512,46 @@ paths:
       responses:
         "204":
           description: Successful Response
+        "429":
+          description:
+            Rate limited. This caller exceeded the general request-rate
+            ceiling. Retry after the Retry-After header (seconds).
+          headers:
+            Retry-After:
+              description: Seconds to wait before retrying.
+              schema:
+                type: integer
+            RateLimit-Limit:
+              description: The request ceiling for the current window.
+              schema:
+                type: integer
+            RateLimit-Remaining:
+              description: Requests remaining in the current window.
+              schema:
+                type: integer
+            RateLimit-Reset:
+              description: Seconds until the current window resets.
+              schema:
+                type: integer
         "422":
           description: Validation Error
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/HTTPValidationError"
-  /sms/sender-id:
+  /v1/sms/sender-id:
     get:
       tags:
         - sms
       summary: Get Sender Id
-      operationId: get_sender_id_sms_sender_id_get
+      description:
+        "Get the org's custom alphanumeric SMS sender ID, if any is set.
+
+
+        effective_default is the platform sender id used for
+
+        alphanumeric-eligible corridors when custom_sender_id is null."
+      operationId: get_sender_id_v1_sms_sender_id_get
       parameters:
         - name: authorization
           in: header
@@ -1625,6 +2568,27 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/SenderIdResponse"
+        "429":
+          description:
+            Rate limited. This caller exceeded the general request-rate
+            ceiling. Retry after the Retry-After header (seconds).
+          headers:
+            Retry-After:
+              description: Seconds to wait before retrying.
+              schema:
+                type: integer
+            RateLimit-Limit:
+              description: The request ceiling for the current window.
+              schema:
+                type: integer
+            RateLimit-Remaining:
+              description: Requests remaining in the current window.
+              schema:
+                type: integer
+            RateLimit-Reset:
+              description: Seconds until the current window resets.
+              schema:
+                type: integer
         "422":
           description: Validation Error
           content:
@@ -1635,7 +2599,12 @@ paths:
       tags:
         - sms
       summary: Patch Sender Id
-      operationId: patch_sender_id_sms_sender_id_patch
+      description:
+        "Set or clear the org's custom alphanumeric SMS sender ID.\n\n\
+        Pass custom_sender_id=null to clear it and fall back to the platform\ndefault\
+        \ sender id. Only affects alphanumeric-eligible corridors \u2014 a\ncorridor\
+        \ requiring a dedicated number is unaffected."
+      operationId: patch_sender_id_v1_sms_sender_id_patch
       parameters:
         - name: authorization
           in: header
@@ -1658,18 +2627,45 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/SenderIdResponse"
+        "429":
+          description:
+            Rate limited. This caller exceeded the general request-rate
+            ceiling. Retry after the Retry-After header (seconds).
+          headers:
+            Retry-After:
+              description: Seconds to wait before retrying.
+              schema:
+                type: integer
+            RateLimit-Limit:
+              description: The request ceiling for the current window.
+              schema:
+                type: integer
+            RateLimit-Remaining:
+              description: Requests remaining in the current window.
+              schema:
+                type: integer
+            RateLimit-Reset:
+              description: Seconds until the current window resets.
+              schema:
+                type: integer
         "422":
           description: Validation Error
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/HTTPValidationError"
-  /sms/{sms_id}:
+  /v1/sms/{sms_id}:
     get:
       tags:
         - sms
       summary: Get Sms
-      operationId: get_sms_sms__sms_id__get
+      description: "Fetch one SMS by id, including its current status.
+
+
+        Org-scoped: returns 404 for an SMS belonging to a different
+
+        organization."
+      operationId: get_sms_v1_sms__sms_id__get
       parameters:
         - name: sms_id
           in: path
@@ -1693,18 +2689,45 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/SmsResponse"
+        "429":
+          description:
+            Rate limited. This caller exceeded the general request-rate
+            ceiling. Retry after the Retry-After header (seconds).
+          headers:
+            Retry-After:
+              description: Seconds to wait before retrying.
+              schema:
+                type: integer
+            RateLimit-Limit:
+              description: The request ceiling for the current window.
+              schema:
+                type: integer
+            RateLimit-Remaining:
+              description: Requests remaining in the current window.
+              schema:
+                type: integer
+            RateLimit-Reset:
+              description: Seconds until the current window resets.
+              schema:
+                type: integer
         "422":
           description: Validation Error
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/HTTPValidationError"
-  /contacts:
+  /v1/contacts:
     get:
       tags:
         - contacts
       summary: List Contacts
-      operationId: list_contacts_contacts_get
+      description:
+        "List contacts for the caller's organization, newest first.\n\n\
+        Merges two sources into one list: org members (kind=\"member\", ids\nprefixed\
+        \ \"member:\", managed via membership \u2014 not editable here) and\nmanually-created\
+        \ contacts (kind=\"manual\", editable via PATCH/DELETE\n/contacts/{contact_id}).\
+        \ Cursor-paginated; q does a substring search\nover name/phone/email."
+      operationId: list_contacts_v1_contacts_get
       parameters:
         - name: q
           in: query
@@ -1746,6 +2769,27 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ContactListResponse"
+        "429":
+          description:
+            Rate limited. This caller exceeded the general request-rate
+            ceiling. Retry after the Retry-After header (seconds).
+          headers:
+            Retry-After:
+              description: Seconds to wait before retrying.
+              schema:
+                type: integer
+            RateLimit-Limit:
+              description: The request ceiling for the current window.
+              schema:
+                type: integer
+            RateLimit-Remaining:
+              description: Requests remaining in the current window.
+              schema:
+                type: integer
+            RateLimit-Reset:
+              description: Seconds until the current window resets.
+              schema:
+                type: integer
         "422":
           description: Validation Error
           content:
@@ -1756,7 +2800,15 @@ paths:
       tags:
         - contacts
       summary: Create Contact
-      operationId: create_contact_contacts_post
+      description: "Create a manual contact with a phone and/or an email.
+
+
+        Requires at least one of phone_e164 or email. Fails with 409 if a
+
+        contact with the same phone or email already exists in this
+
+        organization."
+      operationId: create_contact_v1_contacts_post
       parameters:
         - name: authorization
           in: header
@@ -1779,18 +2831,45 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ContactEntry"
+        "429":
+          description:
+            Rate limited. This caller exceeded the general request-rate
+            ceiling. Retry after the Retry-After header (seconds).
+          headers:
+            Retry-After:
+              description: Seconds to wait before retrying.
+              schema:
+                type: integer
+            RateLimit-Limit:
+              description: The request ceiling for the current window.
+              schema:
+                type: integer
+            RateLimit-Remaining:
+              description: Requests remaining in the current window.
+              schema:
+                type: integer
+            RateLimit-Reset:
+              description: Seconds until the current window resets.
+              schema:
+                type: integer
         "422":
           description: Validation Error
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/HTTPValidationError"
-  /contacts/{contact_id}:
+  /v1/contacts/{contact_id}:
     patch:
       tags:
         - contacts
       summary: Patch Contact
-      operationId: patch_contact_contacts__contact_id__patch
+      description:
+        "Update a manual contact's fields. Only fields present in the body\
+        \ change.\n\nManual contacts only \u2014 a member: id (org members synced\
+        \ from\nmembership) returns 422; edit those via the membership APIs instead.\n\
+        The contact must still have at least one of phone_e164 or email after\nthe\
+        \ update. Fails with 409 on a duplicate phone/email."
+      operationId: patch_contact_v1_contacts__contact_id__patch
       parameters:
         - name: contact_id
           in: path
@@ -1819,6 +2898,27 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ContactEntry"
+        "429":
+          description:
+            Rate limited. This caller exceeded the general request-rate
+            ceiling. Retry after the Retry-After header (seconds).
+          headers:
+            Retry-After:
+              description: Seconds to wait before retrying.
+              schema:
+                type: integer
+            RateLimit-Limit:
+              description: The request ceiling for the current window.
+              schema:
+                type: integer
+            RateLimit-Remaining:
+              description: Requests remaining in the current window.
+              schema:
+                type: integer
+            RateLimit-Reset:
+              description: Seconds until the current window resets.
+              schema:
+                type: integer
         "422":
           description: Validation Error
           content:
@@ -1829,7 +2929,11 @@ paths:
       tags:
         - contacts
       summary: Delete Contact
-      operationId: delete_contact_contacts__contact_id__delete
+      description:
+        "Permanently remove a manual contact.\n\nManual contacts only \u2014\
+        \ a member: id returns 422; org members are\nremoved via the membership APIs,\
+        \ not this route. Irreversible."
+      operationId: delete_contact_v1_contacts__contact_id__delete
       parameters:
         - name: contact_id
           in: path
@@ -1848,18 +2952,44 @@ paths:
       responses:
         "204":
           description: Successful Response
+        "429":
+          description:
+            Rate limited. This caller exceeded the general request-rate
+            ceiling. Retry after the Retry-After header (seconds).
+          headers:
+            Retry-After:
+              description: Seconds to wait before retrying.
+              schema:
+                type: integer
+            RateLimit-Limit:
+              description: The request ceiling for the current window.
+              schema:
+                type: integer
+            RateLimit-Remaining:
+              description: Requests remaining in the current window.
+              schema:
+                type: integer
+            RateLimit-Reset:
+              description: Seconds until the current window resets.
+              schema:
+                type: integer
         "422":
           description: Validation Error
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/HTTPValidationError"
-  /members/{user_id}/phone:
+  /v1/members/{user_id}/phone:
     put:
       tags:
         - contacts
       summary: Put Member Phone
-      operationId: put_member_phone_members__user_id__phone_put
+      description:
+        "Set an org member's phone number.\n\nPass user_id=\"me\" to set\
+        \ your own, or a member's user id \u2014 setting\nanother member's phone requires\
+        \ the caller to be an org owner or\nadmin. Returns 404 if the target is not\
+        \ a member of this organization."
+      operationId: put_member_phone_v1_members__user_id__phone_put
       parameters:
         - name: user_id
           in: path
@@ -1890,7 +3020,28 @@ paths:
                 type: object
                 additionalProperties:
                   type: string
-                title: Response Put Member Phone Members  User Id  Phone Put
+                title: Response Put Member Phone V1 Members  User Id  Phone Put
+        "429":
+          description:
+            Rate limited. This caller exceeded the general request-rate
+            ceiling. Retry after the Retry-After header (seconds).
+          headers:
+            Retry-After:
+              description: Seconds to wait before retrying.
+              schema:
+                type: integer
+            RateLimit-Limit:
+              description: The request ceiling for the current window.
+              schema:
+                type: integer
+            RateLimit-Remaining:
+              description: Requests remaining in the current window.
+              schema:
+                type: integer
+            RateLimit-Reset:
+              description: Seconds until the current window resets.
+              schema:
+                type: integer
         "422":
           description: Validation Error
           content:
@@ -1901,7 +3052,12 @@ paths:
       tags:
         - contacts
       summary: Delete Member Phone
-      operationId: delete_member_phone_members__user_id__phone_delete
+      description:
+        "Clear an org member's phone number.\n\nPass user_id=\"me\" to\
+        \ clear your own, or a member's user id \u2014 clearing\nanother member's\
+        \ phone requires the caller to be an org owner or\nadmin. Returns 404 if the\
+        \ target is not a member of this organization."
+      operationId: delete_member_phone_v1_members__user_id__phone_delete
       parameters:
         - name: user_id
           in: path
@@ -1920,18 +3076,51 @@ paths:
       responses:
         "204":
           description: Successful Response
+        "429":
+          description:
+            Rate limited. This caller exceeded the general request-rate
+            ceiling. Retry after the Retry-After header (seconds).
+          headers:
+            Retry-After:
+              description: Seconds to wait before retrying.
+              schema:
+                type: integer
+            RateLimit-Limit:
+              description: The request ceiling for the current window.
+              schema:
+                type: integer
+            RateLimit-Remaining:
+              description: Requests remaining in the current window.
+              schema:
+                type: integer
+            RateLimit-Reset:
+              description: Seconds until the current window resets.
+              schema:
+                type: integer
         "422":
           description: Validation Error
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/HTTPValidationError"
-  /whoami:
+  /v1/whoami:
     get:
       tags:
         - whoami
       summary: Get Whoami
-      operationId: get_whoami_whoami_get
+      description:
+        "Identify the caller: auth kind, organization, and (if resolvable)
+        user.
+
+
+        Useful for an agent that needs the human's address to put in
+
+        Reply-To, since the bearer token itself only carries an organization.
+
+        user_id/email/name come back null for a shared-key
+
+        (HAIL_API_KEY) call, which has no individual user behind it."
+      operationId: get_whoami_v1_whoami_get
       parameters:
         - name: authorization
           in: header
@@ -1948,13 +3137,34 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/WhoamiResponse"
+        "429":
+          description:
+            Rate limited. This caller exceeded the general request-rate
+            ceiling. Retry after the Retry-After header (seconds).
+          headers:
+            Retry-After:
+              description: Seconds to wait before retrying.
+              schema:
+                type: integer
+            RateLimit-Limit:
+              description: The request ceiling for the current window.
+              schema:
+                type: integer
+            RateLimit-Remaining:
+              description: Requests remaining in the current window.
+              schema:
+                type: integer
+            RateLimit-Reset:
+              description: Seconds until the current window resets.
+              schema:
+                type: integer
         "422":
           description: Validation Error
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/HTTPValidationError"
-  /providers:
+  /v1/providers:
     get:
       tags:
         - providers
@@ -1977,13 +3187,34 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ProviderConfigListResponse"
+        "429":
+          description:
+            Rate limited. This caller exceeded the general request-rate
+            ceiling. Retry after the Retry-After header (seconds).
+          headers:
+            Retry-After:
+              description: Seconds to wait before retrying.
+              schema:
+                type: integer
+            RateLimit-Limit:
+              description: The request ceiling for the current window.
+              schema:
+                type: integer
+            RateLimit-Remaining:
+              description: Requests remaining in the current window.
+              schema:
+                type: integer
+            RateLimit-Reset:
+              description: Seconds until the current window resets.
+              schema:
+                type: integer
         "422":
           description: Validation Error
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/HTTPValidationError"
-  /providers/{layer}:
+  /v1/providers/{layer}:
     put:
       tags:
         - providers
@@ -2024,13 +3255,34 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ProviderConfigEntry"
+        "429":
+          description:
+            Rate limited. This caller exceeded the general request-rate
+            ceiling. Retry after the Retry-After header (seconds).
+          headers:
+            Retry-After:
+              description: Seconds to wait before retrying.
+              schema:
+                type: integer
+            RateLimit-Limit:
+              description: The request ceiling for the current window.
+              schema:
+                type: integer
+            RateLimit-Remaining:
+              description: Requests remaining in the current window.
+              schema:
+                type: integer
+            RateLimit-Reset:
+              description: Seconds until the current window resets.
+              schema:
+                type: integer
         "422":
           description: Validation Error
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/HTTPValidationError"
-  /providers/{layer}/{provider}:
+  /v1/providers/{layer}/{provider}:
     delete:
       tags:
         - providers
@@ -2066,13 +3318,34 @@ paths:
       responses:
         "204":
           description: Successful Response
+        "429":
+          description:
+            Rate limited. This caller exceeded the general request-rate
+            ceiling. Retry after the Retry-After header (seconds).
+          headers:
+            Retry-After:
+              description: Seconds to wait before retrying.
+              schema:
+                type: integer
+            RateLimit-Limit:
+              description: The request ceiling for the current window.
+              schema:
+                type: integer
+            RateLimit-Remaining:
+              description: Requests remaining in the current window.
+              schema:
+                type: integer
+            RateLimit-Reset:
+              description: Seconds until the current window resets.
+              schema:
+                type: integer
         "422":
           description: Validation Error
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/HTTPValidationError"
-  /providers/{layer}/activate:
+  /v1/providers/{layer}/activate:
     post:
       tags:
         - providers
@@ -2111,13 +3384,34 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ProviderConfigEntry"
+        "429":
+          description:
+            Rate limited. This caller exceeded the general request-rate
+            ceiling. Retry after the Retry-After header (seconds).
+          headers:
+            Retry-After:
+              description: Seconds to wait before retrying.
+              schema:
+                type: integer
+            RateLimit-Limit:
+              description: The request ceiling for the current window.
+              schema:
+                type: integer
+            RateLimit-Remaining:
+              description: Requests remaining in the current window.
+              schema:
+                type: integer
+            RateLimit-Reset:
+              description: Seconds until the current window resets.
+              schema:
+                type: integer
         "422":
           description: Validation Error
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/HTTPValidationError"
-  /providers/{layer}/validate:
+  /v1/providers/{layer}/validate:
     post:
       tags:
         - providers
@@ -2159,6 +3453,27 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ProviderValidateResult"
+        "429":
+          description:
+            Rate limited. This caller exceeded the general request-rate
+            ceiling. Retry after the Retry-After header (seconds).
+          headers:
+            Retry-After:
+              description: Seconds to wait before retrying.
+              schema:
+                type: integer
+            RateLimit-Limit:
+              description: The request ceiling for the current window.
+              schema:
+                type: integer
+            RateLimit-Remaining:
+              description: Requests remaining in the current window.
+              schema:
+                type: integer
+            RateLimit-Reset:
+              description: Seconds until the current window resets.
+              schema:
+                type: integer
         "422":
           description: Validation Error
           content:
@@ -2168,6 +3483,7 @@ paths:
   /healthz:
     get:
       summary: Healthz
+      description: 'Liveness check. Returns {"status": "ok"} with no auth required.'
       operationId: healthz_healthz_get
       responses:
         "200":
@@ -2187,6 +3503,9 @@ components:
           type: string
           contentMediaType: application/octet-stream
           title: File
+          description:
+            The file to upload, as multipart/form-data. Size-limited; an
+            oversize upload is rejected with 422.
       type: object
       required:
         - file
@@ -2229,25 +3548,42 @@ components:
         to:
           type: string
           title: To
+          description: Recipient phone number, E.164 format (e.g. +14155551234).
         from:
           anyOf:
             - type: string
             - type: "null"
           title: From
+          description:
+            "Caller-id phone number, E.164 format. Must be a number owned
+            by the organization with the voice capability. Omitted: an active org-owned
+            number is used if one exists, else a number is claimed from the shared
+            pool."
         system_prompt:
           anyOf:
             - type: string
             - type: "null"
           title: System Prompt
+          description:
+            Task instructions for the agent, sent as its leading system
+            message. At least one of system_prompt or llm is required; both together
+            is also valid.
         llm:
           anyOf:
             - $ref: "#/components/schemas/LLMConfig"
             - type: "null"
+          description:
+            BYO LLM endpoint the call runs on instead of Hail's default
+            model. At least one of system_prompt or llm is required; both together
+            is also valid.
         first_message:
           anyOf:
             - type: string
             - type: "null"
           title: First Message
+          description:
+            "Opening line the agent speaks first. Omitted: the agent waits
+            for the callee to speak first."
         ai_disclosure:
           type: boolean
           title: Ai Disclosure
@@ -2262,16 +3598,25 @@ components:
           default: true
         voice_config:
           $ref: "#/components/schemas/VoiceConfig"
+          description:
+            TTS voice, VAD, turn-detection, and spoken-language settings
+            for this call.
         conversation_id:
           anyOf:
             - type: string
               format: uuid
             - type: "null"
           title: Conversation Id
+          description:
+            "Groups this call with other calls/emails/SMS into one conversation
+            thread. Omitted: the call is not linked to a conversation."
         metadata:
           additionalProperties: true
           type: object
           title: Metadata
+          description:
+            Free-form JSON object attached to the call and echoed back
+            on reads. Not interpreted by Hail.
         tools:
           anyOf:
             - items:
@@ -2296,11 +3641,15 @@ components:
             $ref: "#/components/schemas/CallResponse"
           type: array
           title: Items
+          description: Calls in this page, newest first.
         next_cursor:
           anyOf:
             - type: string
             - type: "null"
           title: Next Cursor
+          description:
+            Opaque cursor for the next page. Null when there are no more
+            results.
       type: object
       required:
         - items
@@ -2311,28 +3660,37 @@ components:
           type: string
           format: uuid
           title: Id
+          description: Unique identifier for this call.
         organization_id:
           type: string
           format: uuid
           title: Organization Id
+          description: Organization that placed or received this call.
         conversation_id:
           anyOf:
             - type: string
               format: uuid
             - type: "null"
           title: Conversation Id
+          description:
+            Conversation thread this call is grouped into, if any. Null
+            when the call was not linked to a conversation.
         from_e164:
           type: string
           title: From E164
+          description: Caller-id phone number used, E.164 format.
         to_e164:
           type: string
           title: To E164
+          description: Recipient phone number, E.164 format.
         direction:
           type: string
           enum:
             - outbound
             - inbound
           title: Direction
+          description: "'outbound' for calls Hail placed, 'inbound' for calls
+            received."
         status:
           type: string
           enum:
@@ -2346,53 +3704,79 @@ components:
             - no_answer
             - canceled
           title: Status
+          description:
+            "Current call-progress state: 'queued', 'dialing', 'ringing',
+            'in_progress', or one of the terminal states 'completed', 'failed',
+            'busy', 'no_answer', 'canceled'."
         end_reason:
           anyOf:
             - type: string
             - type: "null"
           title: End Reason
+          description:
+            Machine-readable reason the call reached a terminal status
+            (e.g. 'normal_hangup', 'user_rejected', 'sip_trunk_failure'). Null while
+            the call is still in progress.
         provider_call_sid:
           anyOf:
             - type: string
             - type: "null"
           title: Provider Call Sid
+          description: The telephony provider's identifier for this call leg, if assigned.
         livekit_room:
           anyOf:
             - type: string
             - type: "null"
           title: Livekit Room
+          description:
+            Name of the LiveKit room hosting this call's media session,
+            if one was created.
         initial_prompt:
           anyOf:
             - type: string
             - type: "null"
           title: Initial Prompt
+          description: The system_prompt this call was created with, if any.
         recording_s3_key:
           anyOf:
             - type: string
             - type: "null"
           title: Recording S3 Key
+          description:
+            Internal storage key for the call recording. Not a directly
+            fetchable URL.
         requested_at:
           type: string
           format: date-time
           title: Requested At
+          description: When the call was requested, ISO 8601 timestamp.
         started_at:
           anyOf:
             - type: string
               format: date-time
             - type: "null"
           title: Started At
+          description:
+            When dialing began, ISO 8601 timestamp. Null until the call
+            starts.
         answered_at:
           anyOf:
             - type: string
               format: date-time
             - type: "null"
           title: Answered At
+          description:
+            When the callee answered, ISO 8601 timestamp. Null if never
+            answered.
         ended_at:
           anyOf:
             - type: string
               format: date-time
             - type: "null"
           title: Ended At
+          description:
+            When the call ended, ISO 8601 timestamp. Null while still in
+            progress.
       type: object
       required:
         - id
@@ -2419,16 +3803,23 @@ components:
           maxLength: 200
           minLength: 1
           title: Name
+          description: Display name for the contact.
         phone_e164:
           anyOf:
             - type: string
             - type: "null"
           title: Phone E164
+          description:
+            Phone number, E.164 format. At least one of phone_e164 or email
+            is required.
         email:
           anyOf:
             - type: string
             - type: "null"
           title: Email
+          description:
+            Email address, stored lowercased. At least one of phone_e164
+            or email is required.
       additionalProperties: false
       type: object
       required:
@@ -2439,30 +3830,42 @@ components:
         id:
           type: string
           title: Id
+          description:
+            "'member:<user_id>' for an org member, or the contact row's
+            UUID (as a string) for a manual contact."
         kind:
           type: string
           enum:
             - member
             - manual
           title: Kind
+          description:
+            "'member' if this row is a member of the organization, 'manual'
+            if it was added as a contact."
         name:
           type: string
           title: Name
+          description: Display name.
         phone_e164:
           anyOf:
             - type: string
             - type: "null"
           title: Phone E164
+          description: Phone number, E.164 format. Null if none on file.
         email:
           anyOf:
             - type: string
             - type: "null"
           title: Email
+          description: Email address. Null if none on file.
         role:
           anyOf:
             - type: string
             - type: "null"
           title: Role
+          description:
+            Organization role (e.g. 'owner', 'admin', 'member') for kind='member'.
+            Always null for kind='manual'.
       type: object
       required:
         - id
@@ -2480,11 +3883,15 @@ components:
             $ref: "#/components/schemas/ContactEntry"
           type: array
           title: Items
+          description: Contacts in this page.
         next_cursor:
           anyOf:
             - type: string
             - type: "null"
           title: Next Cursor
+          description:
+            Opaque cursor for the next page. Null when there are no more
+            results.
       type: object
       required:
         - items
@@ -2498,16 +3905,26 @@ components:
               minLength: 1
             - type: "null"
           title: Name
+          description:
+            New display name. Omit to leave unchanged; cannot be set to
+            null.
         phone_e164:
           anyOf:
             - type: string
             - type: "null"
           title: Phone E164
+          description:
+            New phone number, E.164 format. Omit to leave unchanged; explicit
+            null clears it. The contact must keep at least one of phone_e164 or email.
         email:
           anyOf:
             - type: string
             - type: "null"
           title: Email
+          description:
+            New email address, stored lowercased. Omit to leave unchanged;
+            explicit null clears it. The contact must keep at least one of phone_e164
+            or email.
       additionalProperties: false
       type: object
       title: ContactPatch
@@ -2516,9 +3933,11 @@ components:
         name:
           type: string
           title: Name
+          description: DNS record name/host to publish (e.g. a CNAME's subdomain).
         value:
           type: string
           title: Value
+          description: DNS record value to publish (e.g. a CNAME target or TXT content).
         type:
           type: string
           enum:
@@ -2526,12 +3945,15 @@ components:
             - MX
             - TXT
           title: Type
+          description: "DNS record type: 'CNAME' (DKIM), 'MX' (MAIL FROM), or
+            'TXT' (SPF)."
           default: CNAME
         priority:
           anyOf:
             - type: integer
             - type: "null"
           title: Priority
+          description: MX priority. Only present for type='MX'; null otherwise.
       additionalProperties: true
       type: object
       required:
@@ -2547,17 +3969,28 @@ components:
         domain:
           type: string
           title: Domain
+          description: The apex domain that was checked, lowercased.
         in_use:
           type: boolean
           title: In Use
+          description:
+            "True if the domain already has MX records \u2014 it receives\
+            \ mail elsewhere."
         existing_mx:
           items:
             type: string
           type: array
           title: Existing Mx
+          description:
+            MX hostnames currently published for the domain. Empty when
+            in_use is false.
         suggested_domain:
           type: string
           title: Suggested Domain
+          description:
+            "Domain to use for a custom sending identity: the apex domain
+            if it is not already receiving mail, or an 'inbox.' subdomain if it
+            is (so setup doesn't collide with existing mail)."
       type: object
       required:
         - domain
@@ -2571,23 +4004,33 @@ components:
           type: string
           format: uuid
           title: Id
+          description: Unique identifier for this attachment.
         filename:
           type: string
           title: Filename
+          description: Original filename of the attachment.
         content_type:
           type: string
           title: Content Type
+          description: MIME type of the attachment.
         size_bytes:
           type: integer
           title: Size Bytes
+          description: Size of the attachment in bytes.
         content_id:
           anyOf:
             - type: string
             - type: "null"
           title: Content Id
+          description:
+            MIME Content-ID, present when this attachment is referenced
+            inline (cid:) from the HTML body. Null otherwise.
         url:
           type: string
           title: Url
+          description:
+            API endpoint that 302-redirects to a presigned download URL
+            for this attachment.
       type: object
       required:
         - id
@@ -2606,15 +4049,21 @@ components:
           type: string
           format: uuid
           title: Id
+          description:
+            "Reusable attachment id \u2014 pass it in EmailCreate.attachment_ids\
+            \ to attach it to a send."
         filename:
           type: string
           title: Filename
+          description: Original filename of the uploaded file.
         content_type:
           type: string
           title: Content Type
+          description: MIME type of the uploaded file.
         size_bytes:
           type: integer
           title: Size Bytes
+          description: Size of the uploaded file in bytes.
       type: object
       required:
         - id
@@ -2670,18 +4119,25 @@ components:
             - type: string
             - type: "null"
           title: From
+          description:
+            "Sender email address. Must be a verified identity on the organization's
+            email domains. Omitted: the org's resolved default sending address, if
+            one exists."
         from_name:
           anyOf:
             - type: string
               maxLength: 256
             - type: "null"
           title: From Name
+          description: "Display name for the From: header (e.g. 'Acme Billing').
+            Omitted: no display name."
         to:
           items:
             type: string
           type: array
           minItems: 1
           title: To
+          description: Recipient email addresses. At least one required.
         cc:
           anyOf:
             - items:
@@ -2689,6 +4145,7 @@ components:
               type: array
             - type: "null"
           title: Cc
+          description: CC recipient email addresses.
         bcc:
           anyOf:
             - items:
@@ -2696,36 +4153,49 @@ components:
               type: array
             - type: "null"
           title: Bcc
+          description: BCC recipient email addresses.
         reply_to:
           anyOf:
             - type: string
             - type: "null"
           title: Reply To
+          description: "Reply-To email address. Omitted: replies go to the From address."
         subject:
           type: string
           maxLength: 998
           minLength: 1
           title: Subject
+          description: Email subject line.
         body_text:
           anyOf:
             - type: string
             - type: "null"
           title: Body Text
+          description:
+            Plain-text body. Either body_text or body_html (or both) is
+            required.
         body_html:
           anyOf:
             - type: string
             - type: "null"
           title: Body Html
+          description: HTML body. Either body_text or body_html (or both) is required.
         conversation_id:
           anyOf:
             - type: string
               format: uuid
             - type: "null"
           title: Conversation Id
+          description:
+            "Groups this email with other calls/emails/SMS into one conversation
+            thread. Omitted: the email is not linked to a conversation."
         metadata:
           additionalProperties: true
           type: object
           title: Metadata
+          description:
+            Free-form JSON object attached to the email and echoed back
+            on reads. Not interpreted by Hail.
         attachment_ids:
           anyOf:
             - items:
@@ -2734,6 +4204,9 @@ components:
               type: array
             - type: "null"
           title: Attachment Ids
+          description:
+            "Ids returned by POST /email-attachments to attach to this
+            send. Omitted: no attachments."
       additionalProperties: false
       type: object
       required:
@@ -2749,21 +4222,36 @@ components:
             - hail_mail
             - custom
           title: Kind
+          description:
+            "'hail_mail' for a Hail-hosted address (domain omitted, composed
+            from the prefix fields), or 'custom' to send from your own domain (domain
+            required, prefix fields omitted)."
         domain:
           anyOf:
             - type: string
             - type: "null"
           title: Domain
+          description:
+            DNS domain to send from (e.g. 'acme.com'). Required for kind='custom';
+            must be omitted for kind='hail_mail'.
         local_prefix_user:
           anyOf:
             - type: string
             - type: "null"
           title: Local Prefix User
+          description:
+            User-chosen local-part prefix for a hail_mail address. Only
+            valid for kind='hail_mail'. Falls back to HAIL_MAIL_DEFAULT_USER_PREFIX
+            if omitted.
         local_prefix_org:
           anyOf:
             - type: string
             - type: "null"
           title: Local Prefix Org
+          description:
+            Org-chosen local-part prefix for a hail_mail address. Only
+            valid for kind='hail_mail'. Falls back to HAIL_MAIL_DEFAULT_ORG_PREFIX
+            if omitted.
       additionalProperties: false
       type: object
       required:
@@ -2790,16 +4278,25 @@ components:
             $ref: "#/components/schemas/EmailDomainResponse"
           type: array
           title: Items
+          description: Email domains in this page.
         next_cursor:
           anyOf:
             - type: string
             - type: "null"
           title: Next Cursor
+          description:
+            Opaque cursor for the next page. Null when there are no more
+            results.
         default_from:
           anyOf:
             - type: string
             - type: "null"
           title: Default From
+          description:
+            The From address used when a send omits 'from'. Null when no
+            such default can be resolved (e.g. multiple verified identities, or none
+            that can send yet). Computed across the whole organization, not just this
+            page.
       type: object
       required:
         - items
@@ -2811,16 +4308,25 @@ components:
             - type: string
             - type: "null"
           title: Local Prefix User
+          description:
+            New user local-part prefix. Only valid on kind='hail_mail'
+            rows. Omit to leave unchanged.
         local_prefix_org:
           anyOf:
             - type: string
             - type: "null"
           title: Local Prefix Org
+          description:
+            New org local-part prefix. Only valid on kind='hail_mail' rows.
+            Omit to leave unchanged.
         inbound_enabled:
           anyOf:
             - type: boolean
             - type: "null"
           title: Inbound Enabled
+          description:
+            Whether to accept inbound mail on this domain. Requires forward_to
+            (or an existing one) when true. Omit to leave unchanged.
         forward_to:
           anyOf:
             - items:
@@ -2828,11 +4334,13 @@ components:
               type: array
             - type: "null"
           title: Forward To
+          description: Email addresses to forward inbound mail to. Omit to leave unchanged.
         forward_rate_per_hour:
           anyOf:
             - type: integer
             - type: "null"
           title: Forward Rate Per Hour
+          description: Cap on forwarded messages per hour. Omit to leave unchanged.
       additionalProperties: false
       type: object
       title: EmailDomainPatch
@@ -2855,29 +4363,36 @@ components:
           type: string
           format: uuid
           title: Id
+          description: Unique identifier for this email domain.
         organization_id:
           type: string
           format: uuid
           title: Organization Id
+          description: Organization that owns this domain.
         kind:
           type: string
           enum:
             - hail_mail
             - custom
           title: Kind
+          description: "'hail_mail' (Hail-hosted address) or 'custom' (your own
+            domain)."
         domain:
           type: string
           title: Domain
+          description: The DNS domain mail is sent from.
         local_prefix_user:
           anyOf:
             - type: string
             - type: "null"
           title: Local Prefix User
+          description: User local-part prefix for a hail_mail address. Null for kind='custom'.
         local_prefix_org:
           anyOf:
             - type: string
             - type: "null"
           title: Local Prefix Org
+          description: Org local-part prefix for a hail_mail address. Null for kind='custom'.
         verification_status:
           type: string
           enum:
@@ -2885,33 +4400,50 @@ components:
             - verified
             - failed
           title: Verification Status
+          description:
+            "'pending' (not yet verified), 'verified' (ready to send),
+            or 'failed'."
         dns_records:
           items:
             $ref: "#/components/schemas/DnsRecordSchema"
           type: array
           title: Dns Records
+          description:
+            DNS records (DKIM, MAIL FROM MX, SPF) the tenant must publish
+            to verify this domain.
         mail_from_domain:
           anyOf:
             - type: string
             - type: "null"
           title: Mail From Domain
+          description:
+            Custom MAIL FROM domain, if configured. Null when using the
+            provider default.
         mail_from_status:
           anyOf:
             - type: string
             - type: "null"
           title: Mail From Status
+          description:
+            Verification status of the custom MAIL FROM domain, if one
+            is configured. Secondary to verification_status.
         provider:
           type: string
           title: Provider
+          description: Email sending provider for this domain (currently always 'ses').
         verified_at:
           anyOf:
             - type: string
               format: date-time
             - type: "null"
           title: Verified At
+          description:
+            When the domain became verified, ISO 8601 timestamp. Null until
+            it is.
         inbound_enabled:
           type: boolean
           title: Inbound Enabled
+          description: Whether this domain accepts and forwards inbound mail.
           default: false
         forward_to:
           anyOf:
@@ -2920,24 +4452,34 @@ components:
               type: array
             - type: "null"
           title: Forward To
+          description:
+            Email addresses inbound mail is forwarded to, if inbound is
+            enabled.
         forward_rate_per_hour:
           anyOf:
             - type: integer
             - type: "null"
           title: Forward Rate Per Hour
+          description: Configured cap on forwarded messages per hour, if set.
         created_at:
           type: string
           format: date-time
           title: Created At
+          description: When this domain was added, ISO 8601 timestamp.
         updated_at:
           type: string
           format: date-time
           title: Updated At
+          description: When this domain was last modified, ISO 8601 timestamp.
         receive_ready:
           anyOf:
             - type: boolean
             - type: "null"
           title: Receive Ready
+          description:
+            True when the domain's published MX points at Hail's inbound
+            host. Only populated by POST /{id}/verify on custom domains; null everywhere
+            else.
       type: object
       required:
         - id
@@ -2969,11 +4511,15 @@ components:
             $ref: "#/components/schemas/EmailEventResponse"
           type: array
           title: Items
+          description: Events for this email, oldest first.
         next_cursor:
           anyOf:
             - type: string
             - type: "null"
           title: Next Cursor
+          description:
+            Opaque cursor for the next page. Null when there are no more
+            results.
       type: object
       required:
         - items
@@ -2984,10 +4530,12 @@ components:
           type: string
           format: uuid
           title: Id
+          description: Unique identifier for this event.
         email_id:
           type: string
           format: uuid
           title: Email Id
+          description: The email this event belongs to.
         kind:
           type: string
           enum:
@@ -3000,14 +4548,18 @@ components:
             - opened
             - clicked
           title: Kind
+          description: "Event kind: 'sent', 'delivered', 'delivery_delayed',
+            'bounced', 'complained', 'rejected', 'opened', or 'clicked'."
         payload:
           additionalProperties: true
           type: object
           title: Payload
+          description: Event-kind-specific detail, as a free-form JSON object.
         occurred_at:
           type: string
           format: date-time
           title: Occurred At
+          description: When this event occurred, ISO 8601 timestamp.
       type: object
       required:
         - id
@@ -3023,11 +4575,15 @@ components:
             $ref: "#/components/schemas/EmailSummary"
           type: array
           title: Items
+          description: Emails in this page, newest first.
         next_cursor:
           anyOf:
             - type: string
             - type: "null"
           title: Next Cursor
+          description:
+            Opaque cursor for the next page. Null when there are no more
+            results.
       type: object
       required:
         - items
@@ -3038,42 +4594,57 @@ components:
           type: string
           format: uuid
           title: Id
+          description: Unique identifier for this email.
         organization_id:
           type: string
           format: uuid
           title: Organization Id
+          description: Organization that sent or received this email.
         conversation_id:
           anyOf:
             - type: string
               format: uuid
             - type: "null"
           title: Conversation Id
+          description:
+            Conversation thread this email is grouped into, if any. Null
+            when it was not linked to a conversation.
         email_domain_id:
           anyOf:
             - type: string
               format: uuid
             - type: "null"
           title: Email Domain Id
+          description:
+            The sending domain used, if from_address belongs to one of
+            the org's configured domains.
         direction:
           type: string
           enum:
             - outbound
             - inbound
           title: Direction
+          description: "'outbound' for emails Hail sent, 'inbound' for emails
+            received."
           default: outbound
         from_address:
           type: string
           title: From Address
+          description: Sender email address.
         from_name:
           anyOf:
             - type: string
             - type: "null"
           title: From Name
+          description:
+            "Display name used on the From: header, when the sender supplied
+            one. Always null on inbound rows."
         to_addresses:
           items:
             type: string
           type: array
           title: To Addresses
+          description: Recipient email addresses.
         cc_addresses:
           anyOf:
             - items:
@@ -3081,6 +4652,7 @@ components:
               type: array
             - type: "null"
           title: Cc Addresses
+          description: CC recipient email addresses, if any.
         bcc_addresses:
           anyOf:
             - items:
@@ -3088,14 +4660,17 @@ components:
               type: array
             - type: "null"
           title: Bcc Addresses
+          description: BCC recipient email addresses, if any.
         reply_to:
           anyOf:
             - type: string
             - type: "null"
           title: Reply To
+          description: Reply-To email address, if set.
         subject:
           type: string
           title: Subject
+          description: Email subject line.
         status:
           type: string
           enum:
@@ -3107,56 +4682,79 @@ components:
             - complained
             - received
           title: Status
+          description:
+            "Delivery status: 'queued', 'sent', 'delivered', 'failed',
+            'bounced', 'complained', or 'received' (inbound emails)."
         end_reason:
           anyOf:
             - type: string
             - type: "null"
           title: End Reason
+          description:
+            Reason delivery failed or bounced, if applicable. Null on success
+            or while pending.
         provider_message_id:
           anyOf:
             - type: string
             - type: "null"
           title: Provider Message Id
+          description: The email provider's identifier for this message, if assigned.
         requested_at:
           type: string
           format: date-time
           title: Requested At
+          description: When the send was requested, ISO 8601 timestamp.
         sent_at:
           anyOf:
             - type: string
               format: date-time
             - type: "null"
           title: Sent At
+          description:
+            When the message was handed to the provider, ISO 8601 timestamp.
+            Null until sent.
         failed_at:
           anyOf:
             - type: string
               format: date-time
             - type: "null"
           title: Failed At
+          description: When the send failed, ISO 8601 timestamp. Null unless it failed.
         metadata:
           additionalProperties: true
           type: object
           title: Metadata
+          description:
+            Free-form JSON object attached to the email, as sent on create.
+            Not interpreted by Hail.
         body_text:
           anyOf:
             - type: string
             - type: "null"
           title: Body Text
+          description: Plain-text body, if any.
         body_html:
           anyOf:
             - type: string
             - type: "null"
           title: Body Html
+          description: HTML body, if any.
         message_id:
           anyOf:
             - type: string
             - type: "null"
           title: Message Id
+          description:
+            RFC 5322 Message-ID header. Inbound emails only; null on outbound
+            rows.
         in_reply_to:
           anyOf:
             - type: string
             - type: "null"
           title: In Reply To
+          description:
+            RFC 5322 In-Reply-To header. Inbound emails only; null on outbound
+            rows.
         references_ids:
           anyOf:
             - items:
@@ -3164,47 +4762,72 @@ components:
               type: array
             - type: "null"
           title: References Ids
+          description:
+            RFC 5322 References header, split into ids. Inbound emails
+            only; null on outbound rows.
         spam_verdict:
           anyOf:
             - type: string
             - type: "null"
           title: Spam Verdict
+          description:
+            Provider spam-scan verdict (e.g. 'PASS'/'FAIL'). Inbound emails
+            only; null on outbound rows.
         virus_verdict:
           anyOf:
             - type: string
             - type: "null"
           title: Virus Verdict
+          description:
+            Provider virus-scan verdict (e.g. 'PASS'/'FAIL'). Inbound emails
+            only; null on outbound rows.
         dkim_verdict:
           anyOf:
             - type: string
             - type: "null"
           title: Dkim Verdict
+          description:
+            Provider DKIM-authentication verdict (e.g. 'PASS'/'FAIL').
+            Inbound emails only; null on outbound rows.
         spf_verdict:
           anyOf:
             - type: string
             - type: "null"
           title: Spf Verdict
+          description:
+            Provider SPF-authentication verdict (e.g. 'PASS'/'FAIL'). Inbound
+            emails only; null on outbound rows.
         dmarc_verdict:
           anyOf:
             - type: string
             - type: "null"
           title: Dmarc Verdict
+          description:
+            Provider DMARC-authentication verdict (e.g. 'PASS'/'FAIL').
+            Inbound emails only; null on outbound rows.
         provider_received_at:
           anyOf:
             - type: string
               format: date-time
             - type: "null"
           title: Provider Received At
+          description:
+            When the provider received this email, ISO 8601 timestamp.
+            Inbound emails only.
         raw_url:
           anyOf:
             - type: string
             - type: "null"
           title: Raw Url
+          description:
+            API endpoint that redirects to the original MIME blob. Inbound
+            emails only; null on outbound rows.
         attachments:
           items:
             $ref: "#/components/schemas/EmailAttachmentResponse"
           type: array
           title: Attachments
+          description: Inbound MIME attachments on this email. Empty on outbound rows.
           default: []
         last_event_at:
           anyOf:
@@ -3212,6 +4835,9 @@ components:
               format: date-time
             - type: "null"
           title: Last Event At
+          description:
+            When the most recent delivery event for this email occurred,
+            ISO 8601 timestamp.
       type: object
       required:
         - id
@@ -3238,51 +4864,67 @@ components:
         sent:
           type: integer
           title: Sent
+          description: Emails sent in the window.
           default: 0
         delivered:
           type: integer
           title: Delivered
+          description: Emails confirmed delivered in the window.
           default: 0
         delivery_delayed:
           type: integer
           title: Delivery Delayed
+          description: Emails with a delivery-delayed event in the window.
           default: 0
         bounced:
           type: integer
           title: Bounced
+          description: Emails bounced (soft or hard) in the window.
           default: 0
         bounced_hard:
           type: integer
           title: Bounced Hard
+          description: Emails hard-bounced in the window. Subset of bounced.
           default: 0
         complained:
           type: integer
           title: Complained
+          description: Emails that received a spam complaint in the window.
           default: 0
         rejected:
           type: integer
           title: Rejected
+          description: Emails rejected by the provider before sending, in the window.
           default: 0
         opened:
           type: integer
           title: Opened
+          description:
+            Total open events in the window, including repeat opens by
+            the same recipient.
           default: 0
         clicked:
           type: integer
           title: Clicked
+          description:
+            Total click events in the window, including repeat clicks by
+            the same recipient.
           default: 0
         unique_opened:
           type: integer
           title: Unique Opened
+          description: Distinct emails opened at least once in the window.
           default: 0
         unique_clicked:
           type: integer
           title: Unique Clicked
+          description: Distinct emails clicked at least once in the window.
           default: 0
         bucket_start:
           type: string
           format: date-time
           title: Bucket Start
+          description: Start of this bucket, ISO 8601 timestamp.
       type: object
       required:
         - bucket_start
@@ -3292,46 +4934,61 @@ components:
         sent:
           type: integer
           title: Sent
+          description: Emails sent in the window.
           default: 0
         delivered:
           type: integer
           title: Delivered
+          description: Emails confirmed delivered in the window.
           default: 0
         delivery_delayed:
           type: integer
           title: Delivery Delayed
+          description: Emails with a delivery-delayed event in the window.
           default: 0
         bounced:
           type: integer
           title: Bounced
+          description: Emails bounced (soft or hard) in the window.
           default: 0
         bounced_hard:
           type: integer
           title: Bounced Hard
+          description: Emails hard-bounced in the window. Subset of bounced.
           default: 0
         complained:
           type: integer
           title: Complained
+          description: Emails that received a spam complaint in the window.
           default: 0
         rejected:
           type: integer
           title: Rejected
+          description: Emails rejected by the provider before sending, in the window.
           default: 0
         opened:
           type: integer
           title: Opened
+          description:
+            Total open events in the window, including repeat opens by
+            the same recipient.
           default: 0
         clicked:
           type: integer
           title: Clicked
+          description:
+            Total click events in the window, including repeat clicks by
+            the same recipient.
           default: 0
         unique_opened:
           type: integer
           title: Unique Opened
+          description: Distinct emails opened at least once in the window.
           default: 0
         unique_clicked:
           type: integer
           title: Unique Clicked
+          description: Distinct emails clicked at least once in the window.
           default: 0
       type: object
       title: EmailStatsCounts
@@ -3342,26 +4999,31 @@ components:
             - type: number
             - type: "null"
           title: Delivery
+          description: delivered / sent for the window. Null when sent == 0.
         bounce:
           anyOf:
             - type: number
             - type: "null"
           title: Bounce
+          description: bounced_hard / sent for the window. Null when sent == 0.
         complaint:
           anyOf:
             - type: number
             - type: "null"
           title: Complaint
+          description: complained / sent for the window. Null when sent == 0.
         open:
           anyOf:
             - type: number
             - type: "null"
           title: Open
+          description: unique_opened / sent for the window. Null when sent == 0.
         click:
           anyOf:
             - type: number
             - type: "null"
           title: Click
+          description: unique_clicked / sent for the window. Null when sent == 0.
       type: object
       title: EmailStatsRates
       description: All None when sent == 0 in the window.
@@ -3371,25 +5033,35 @@ components:
           type: string
           format: date-time
           title: From
+          description: Start of the queried window, ISO 8601 timestamp (inclusive).
         to:
           type: string
           format: date-time
           title: To
+          description: End of the queried window, ISO 8601 timestamp (exclusive).
         bucket:
           type: string
           enum:
             - hour
             - day
           title: Bucket
+          description: Time-bucket size used for the series.
         totals:
           $ref: "#/components/schemas/EmailStatsCounts"
+          description: Event counts summed across the whole window.
         rates:
           $ref: "#/components/schemas/EmailStatsRates"
+          description:
+            Derived rates (delivery, bounce, complaint, open, click) for
+            the whole window. Each individual rate is null when sent == 0.
         series:
           items:
             $ref: "#/components/schemas/EmailStatsBucket"
           type: array
           title: Series
+          description:
+            Per-bucket event counts across the window, in chronological
+            order.
       type: object
       required:
         - from
@@ -3405,42 +5077,57 @@ components:
           type: string
           format: uuid
           title: Id
+          description: Unique identifier for this email.
         organization_id:
           type: string
           format: uuid
           title: Organization Id
+          description: Organization that sent or received this email.
         conversation_id:
           anyOf:
             - type: string
               format: uuid
             - type: "null"
           title: Conversation Id
+          description:
+            Conversation thread this email is grouped into, if any. Null
+            when it was not linked to a conversation.
         email_domain_id:
           anyOf:
             - type: string
               format: uuid
             - type: "null"
           title: Email Domain Id
+          description:
+            The sending domain used, if from_address belongs to one of
+            the org's configured domains.
         direction:
           type: string
           enum:
             - outbound
             - inbound
           title: Direction
+          description: "'outbound' for emails Hail sent, 'inbound' for emails
+            received."
           default: outbound
         from_address:
           type: string
           title: From Address
+          description: Sender email address.
         from_name:
           anyOf:
             - type: string
             - type: "null"
           title: From Name
+          description:
+            "Display name used on the From: header, when the sender supplied
+            one. Always null on inbound rows."
         to_addresses:
           items:
             type: string
           type: array
           title: To Addresses
+          description: Recipient email addresses.
         cc_addresses:
           anyOf:
             - items:
@@ -3448,6 +5135,7 @@ components:
               type: array
             - type: "null"
           title: Cc Addresses
+          description: CC recipient email addresses, if any.
         bcc_addresses:
           anyOf:
             - items:
@@ -3455,14 +5143,17 @@ components:
               type: array
             - type: "null"
           title: Bcc Addresses
+          description: BCC recipient email addresses, if any.
         reply_to:
           anyOf:
             - type: string
             - type: "null"
           title: Reply To
+          description: Reply-To email address, if set.
         subject:
           type: string
           title: Subject
+          description: Email subject line.
         status:
           type: string
           enum:
@@ -3474,36 +5165,51 @@ components:
             - complained
             - received
           title: Status
+          description:
+            "Delivery status: 'queued', 'sent', 'delivered', 'failed',
+            'bounced', 'complained', or 'received' (inbound emails)."
         end_reason:
           anyOf:
             - type: string
             - type: "null"
           title: End Reason
+          description:
+            Reason delivery failed or bounced, if applicable. Null on success
+            or while pending.
         provider_message_id:
           anyOf:
             - type: string
             - type: "null"
           title: Provider Message Id
+          description: The email provider's identifier for this message, if assigned.
         requested_at:
           type: string
           format: date-time
           title: Requested At
+          description: When the send was requested, ISO 8601 timestamp.
         sent_at:
           anyOf:
             - type: string
               format: date-time
             - type: "null"
           title: Sent At
+          description:
+            When the message was handed to the provider, ISO 8601 timestamp.
+            Null until sent.
         failed_at:
           anyOf:
             - type: string
               format: date-time
             - type: "null"
           title: Failed At
+          description: When the send failed, ISO 8601 timestamp. Null unless it failed.
         metadata:
           additionalProperties: true
           type: object
           title: Metadata
+          description:
+            Free-form JSON object attached to the email, as sent on create.
+            Not interpreted by Hail.
       type: object
       required:
         - id
@@ -3534,6 +5240,7 @@ components:
           type: string
           format: uuid
           title: Id
+          description: Unique identifier for this event.
         source:
           type: string
           enum:
@@ -3541,35 +5248,45 @@ components:
             - email
             - sms
           title: Source
+          description: "Which channel this event belongs to: 'call', 'email',
+            or 'sms'."
         call_id:
           anyOf:
             - type: string
               format: uuid
             - type: "null"
           title: Call Id
+          description: The call this event belongs to. Set only when source='call'.
         email_id:
           anyOf:
             - type: string
               format: uuid
             - type: "null"
           title: Email Id
+          description: The email this event belongs to. Set only when source='email'.
         sms_id:
           anyOf:
             - type: string
               format: uuid
             - type: "null"
           title: Sms Id
+          description: The message this event belongs to. Set only when source='sms'.
         kind:
           type: string
           title: Kind
+          description:
+            Event kind within the source (e.g. 'queued', 'delivered', 'bounced').
+            Vocabulary differs per source.
         payload:
           additionalProperties: true
           type: object
           title: Payload
+          description: Event-kind-specific detail, as a free-form JSON object.
         occurred_at:
           type: string
           format: date-time
           title: Occurred At
+          description: When this event occurred, ISO 8601 timestamp.
       type: object
       required:
         - id
@@ -3586,11 +5303,15 @@ components:
             $ref: "#/components/schemas/EventResponse"
           type: array
           title: Items
+          description: Events in this page, oldest first.
         next_cursor:
           anyOf:
             - type: string
             - type: "null"
           title: Next Cursor
+          description:
+            Opaque cursor for the next page. Null when there are no more
+            results.
         call_status:
           anyOf:
             - type: string
@@ -3606,6 +5327,10 @@ components:
                 - canceled
             - type: "null"
           title: Call Status
+          description:
+            Current status of the call named by the id filter (e.g. id=call:<uuid>).
+            Null for org-wide tails and non-call filters, since there is no single
+            call to report a status for.
       type: object
       required:
         - items
@@ -3617,6 +5342,9 @@ components:
             $ref: "#/components/schemas/ValidationError"
           type: array
           title: Detail
+          description:
+            "List of validation errors: each entry gives the field location
+            (loc), the problem (msg), and the error type (type)."
       type: object
       title: HTTPValidationError
     LLMConfig:
@@ -3624,12 +5352,20 @@ components:
         base_url:
           type: string
           title: Base Url
+          description:
+            "Public HTTPS base URL of the BYO LLM endpoint the call runs\
+            \ on. Must resolve to a public address \u2014 private/internal hosts are\
+            \ rejected."
         api_key:
           type: string
           title: Api Key
+          description:
+            "API key sent to the BYO LLM endpoint. Write-only \u2014 never\
+            \ echoed back."
         model:
           type: string
           title: Model
+          description: Model name to request from the BYO LLM endpoint.
       additionalProperties: false
       type: object
       required:
@@ -3642,6 +5378,7 @@ components:
         phone_e164:
           type: string
           title: Phone E164
+          description: Phone number to save for the caller, E.164 format.
       additionalProperties: false
       type: object
       required:
@@ -3654,6 +5391,9 @@ components:
           maxLength: 2
           minLength: 2
           title: Country Code
+          description:
+            ISO alpha-2 country code to acquire a number in (e.g. 'US').
+            Case-insensitive.
         number_type:
           type: string
           enum:
@@ -3662,6 +5402,9 @@ components:
             - toll_free
             - national
           title: Number Type
+          description:
+            "Kind of number to acquire: 'local', 'mobile', 'toll_free',
+            or 'national'."
           default: local
       additionalProperties: false
       type: object
@@ -3675,11 +5418,15 @@ components:
             $ref: "#/components/schemas/PhoneNumberResponse"
           type: array
           title: Items
+          description: Numbers in this page.
         next_cursor:
           anyOf:
             - type: string
             - type: "null"
           title: Next Cursor
+          description:
+            Opaque cursor for the next page. Null when there are no more
+            results.
       type: object
       required:
         - items
@@ -3690,31 +5437,45 @@ components:
           type: string
           format: uuid
           title: Id
+          description: Unique identifier for this number.
         e164:
           type: string
           title: E164
+          description: The phone number, E.164 format.
         country_code:
           type: string
           title: Country Code
+          description: ISO alpha-2 country code this number belongs to.
         number_type:
           type: string
           title: Number Type
+          description: "Kind of number: 'local', 'mobile', 'toll_free', or 'national'."
         capabilities:
           items:
             type: string
           type: array
           title: Capabilities
+          description:
+            Channels this number supports, e.g. ['voice'], ['sms'], or
+            both.
         provisioning_state:
           type: string
           title: Provisioning State
+          description: "'pending', 'active', 'failed', or 'released'."
         is_dedicated:
           type: boolean
           title: Is Dedicated
+          description:
+            True if this number is owned by the organization. False for
+            shared-pool numbers.
         messaging_service_sid:
           anyOf:
             - type: string
             - type: "null"
           title: Messaging Service Sid
+          description:
+            Provider messaging-service identifier once SMS has been enabled
+            on this number. Null until then.
       type: object
       required:
         - id
@@ -3730,6 +5491,7 @@ components:
         provider:
           type: string
           title: Provider
+          description: Previously saved provider to make active for this layer.
       additionalProperties: false
       type: object
       required:
@@ -3745,29 +5507,42 @@ components:
             - tts
             - stt
           title: Layer
+          description: Voice-pipeline layer this config applies to.
         provider:
           type: string
           title: Provider
+          description: Provider name (e.g. 'openai', 'cartesia').
         key_last4:
           anyOf:
             - type: string
             - type: "null"
           title: Key Last4
+          description:
+            Last 4 characters of the saved API key, for display. Null if
+            no key is saved.
         key_set_at:
           anyOf:
             - type: string
             - type: "null"
           title: Key Set At
+          description:
+            When the API key was last set, ISO 8601 timestamp. Null if
+            no key is saved.
         params:
           additionalProperties: true
           type: object
           title: Params
+          description: Saved provider-specific config for this row.
         fallback_enabled:
           type: boolean
           title: Fallback Enabled
+          description:
+            Whether Hail's default provider is used as a fallback if this
+            one fails.
         is_active:
           type: boolean
           title: Is Active
+          description: True if this is the row currently used by calls on this layer.
       type: object
       required:
         - layer
@@ -3795,6 +5570,7 @@ components:
             $ref: "#/components/schemas/ProviderConfigEntry"
           type: array
           title: Providers
+          description: Every saved provider row for the organization, across all layers.
       type: object
       required:
         - providers
@@ -3804,20 +5580,33 @@ components:
         provider:
           type: string
           title: Provider
+          description:
+            Provider name to save/activate for this layer (e.g. 'openai',
+            'cartesia').
         api_key:
           anyOf:
             - type: string
             - type: "null"
           title: Api Key
+          description:
+            "API key for this provider. Omit to edit params without resending\
+            \ the key. Write-only \u2014 never echoed back."
         params:
           additionalProperties: true
           type: object
           title: Params
+          description:
+            Provider-specific config, validated against the layer's schema
+            (LLMParams/TTSParams/STTParams). Only the keys you send are changed; other
+            saved keys are kept.
         fallback_enabled:
           anyOf:
             - type: boolean
             - type: "null"
           title: Fallback Enabled
+          description:
+            Whether to fall back to Hail's default provider on failure.
+            Omit to leave unchanged; defaults to false on a new row.
       additionalProperties: false
       type: object
       required:
@@ -3843,15 +5632,18 @@ components:
             - type: string
             - type: "null"
           title: Api Key
+          description: Key to test instead of the stored one. Not persisted.
         provider:
           anyOf:
             - type: string
             - type: "null"
           title: Provider
+          description: "Provider to test. Omitted: the layer's currently active provider."
         params:
           additionalProperties: true
           type: object
           title: Params
+          description: Provider-specific config to test alongside the key.
       additionalProperties: false
       type: object
       title: ProviderValidateRequest
@@ -3865,11 +5657,16 @@ components:
         status:
           type: string
           title: Status
+          description: "Probe outcome: 'valid', 'invalid', or 'indeterminate'
+            (the provider could not be reached)."
         message:
           anyOf:
             - type: string
             - type: "null"
           title: Message
+          description:
+            Human-readable detail about the outcome. 'ok' on success, an
+            error description otherwise.
       type: object
       required:
         - status
@@ -3883,6 +5680,10 @@ components:
             - type: string
             - type: "null"
           title: Custom Sender Id
+          description:
+            Alphanumeric sender id (2-11 characters, letters/digits only)
+            to use on alphanumeric-eligible corridors instead of a phone number. Explicit
+            null clears it, reverting to the platform default.
       additionalProperties: false
       type: object
       title: SenderIdPatch
@@ -3893,9 +5694,15 @@ components:
             - type: string
             - type: "null"
           title: Custom Sender Id
+          description:
+            The organization's configured alphanumeric sender id. Null
+            if none is set.
         effective_default:
           type: string
           title: Effective Default
+          description:
+            The platform's alphanumeric sender id, used on eligible corridors
+            when custom_sender_id is null.
           default: HAIL
       type: object
       required:
@@ -3939,20 +5746,30 @@ components:
         to:
           type: string
           title: To
+          description: Recipient phone number, E.164 format (e.g. +14155551234).
         from:
           anyOf:
             - type: string
             - type: "null"
           title: From
+          description:
+            "Sender phone number, E.164 format. Must be a number owned
+            by the organization with the SMS capability. Omitted: an active org-owned
+            number is used if one exists, else a number is claimed from the shared
+            pool."
         body:
           type: string
           maxLength: 1600
           minLength: 1
           title: Body
+          description: Message text. Long bodies are split into multiple carrier segments.
         metadata:
           additionalProperties: true
           type: object
           title: Metadata
+          description:
+            Free-form JSON object attached to the message and echoed back
+            on reads. Not interpreted by Hail.
       additionalProperties: false
       type: object
       required:
@@ -3967,11 +5784,15 @@ components:
             $ref: "#/components/schemas/SmsResponse"
           type: array
           title: Items
+          description: Messages in this page, newest first.
         next_cursor:
           anyOf:
             - type: string
             - type: "null"
           title: Next Cursor
+          description:
+            Opaque cursor for the next page. Null when there are no more
+            results.
       type: object
       required:
         - items
@@ -3982,22 +5803,29 @@ components:
           type: string
           format: uuid
           title: Id
+          description: Unique identifier for this message.
         organization_id:
           type: string
           format: uuid
           title: Organization Id
+          description: Organization that sent or received this message.
         from_e164:
           type: string
           title: From E164
+          description: Sender phone number, E.164 format.
         to_e164:
           type: string
           title: To E164
+          description: Recipient phone number, E.164 format.
         direction:
           type: string
           enum:
             - outbound
             - inbound
           title: Direction
+          description:
+            "'outbound' for messages Hail sent, 'inbound' for messages
+            received."
         status:
           type: string
           enum:
@@ -4008,32 +5836,45 @@ components:
             - undelivered
             - received
           title: Status
+          description:
+            "Delivery status: 'queued', 'sent', 'delivered', 'failed',
+            'undelivered', or 'received' (inbound messages)."
         body:
           type: string
           title: Body
+          description: Message text.
         provider_message_sid:
           anyOf:
             - type: string
             - type: "null"
           title: Provider Message Sid
+          description: The carrier/provider's identifier for this message, if assigned.
         segment_count:
           type: integer
           title: Segment Count
+          description: Number of carrier SMS segments the body was split into.
         error_code:
           anyOf:
             - type: string
             - type: "null"
           title: Error Code
+          description:
+            Carrier error code if delivery failed. Null on success or while
+            pending.
         requested_at:
           type: string
           format: date-time
           title: Requested At
+          description: When the send was requested, ISO 8601 timestamp.
         sent_at:
           anyOf:
             - type: string
               format: date-time
             - type: "null"
           title: Sent At
+          description:
+            When the message was handed to the carrier, ISO 8601 timestamp.
+            Null until sent.
       type: object
       required:
         - id
@@ -4056,11 +5897,15 @@ components:
             $ref: "#/components/schemas/SuppressionResponse"
           type: array
           title: Items
+          description: Suppressed recipients in this page.
         next_cursor:
           anyOf:
             - type: string
             - type: "null"
           title: Next Cursor
+          description:
+            Opaque cursor for the next page. Null when there are no more
+            results.
       type: object
       required:
         - items
@@ -4071,22 +5916,34 @@ components:
           type: string
           format: uuid
           title: Id
+          description: Unique identifier for this suppression entry.
         recipient:
           type: string
           title: Recipient
+          description:
+            "The suppressed recipient \u2014 E.164 phone number for voice/sms,\
+            \ lowercased email address for email."
         channel:
           type: string
           title: Channel
+          description: "Channel this entry blocks sends on: 'voice', 'email',
+            'sms', or 'all' (every channel)."
         reason:
           type: string
           title: Reason
+          description:
+            Why the recipient was suppressed (e.g. an unsubscribe or a
+            bounce).
         source:
           type: string
           title: Source
+          description: "How this entry was created: 'unsubscribe_link', 'manual'
+            (an operator action), or 'bounce'."
         created_at:
           type: string
           format: date-time
           title: Created At
+          description: When this entry was created, ISO 8601 timestamp.
       type: object
       required:
         - id
@@ -4105,17 +5962,26 @@ components:
               - type: integer
           type: array
           title: Location
+          description:
+            Path to the invalid field within the request, as a list of
+            keys/indices (e.g. ['body', 'to']).
         msg:
           type: string
           title: Message
+          description: Human-readable description of the validation failure.
         type:
           type: string
           title: Error Type
+          description: Machine-readable error type code (e.g. 'missing', 'string_type').
         input:
           title: Input
+          description: The value that was actually provided and failed validation.
         ctx:
           type: object
           title: Context
+          description:
+            Additional machine-readable context for the error, when the
+            error type provides one.
       type: object
       required:
         - loc
@@ -4128,22 +5994,29 @@ components:
           type: string
           const: cartesia
           title: Tts
+          description: Text-to-speech provider. Currently only 'cartesia'.
           default: cartesia
         vad:
           type: string
           const: silero
           title: Vad
+          description: Voice-activity-detection engine. Currently only 'silero'.
           default: silero
         turn_detection:
           type: string
           const: livekit
           title: Turn Detection
+          description: Turn-detection engine. Currently only 'livekit'.
           default: livekit
         voice_id:
           anyOf:
             - type: string
             - type: "null"
           title: Voice Id
+          description:
+            "Per-call TTS voice override, applied to whichever TTS provider
+            serves the call. Omitted: the organization's or environment's default
+            voice."
         language:
           anyOf:
             - type: string
@@ -4204,11 +6077,15 @@ components:
             $ref: "#/components/schemas/WebhookDeliveryResponse"
           type: array
           title: Items
+          description: Delivery attempts in this page.
         next_cursor:
           anyOf:
             - type: string
             - type: "null"
           title: Next Cursor
+          description:
+            Opaque cursor for the next page. Null when there are no more
+            results.
       type: object
       required:
         - items
@@ -4219,28 +6096,39 @@ components:
           type: string
           format: uuid
           title: Id
+          description: Unique identifier for this delivery attempt.
         subscription_id:
           anyOf:
             - type: string
               format: uuid
             - type: "null"
           title: Subscription Id
+          description: Subscription this delivery belongs to.
         email_domain_id:
           anyOf:
             - type: string
               format: uuid
             - type: "null"
           title: Email Domain Id
+          description:
+            "Email domain the triggering event relates to, if any. Informational\
+            \ only (surfaced as the X-Hail-Email-Domain header) \u2014 not a routing\
+            \ target."
         event_type:
           type: string
           title: Event Type
+          description: The event type being delivered (e.g. 'call.completed').
         event_id:
           type: string
           format: uuid
           title: Event Id
+          description: Identifier of the underlying event that triggered this delivery.
         attempt:
           type: integer
           title: Attempt
+          description:
+            Number of delivery attempts made so far for this event, starting
+            at 0.
         status:
           type: string
           enum:
@@ -4249,30 +6137,43 @@ components:
             - failed
             - dead
           title: Status
+          description: "'pending' (queued/retrying), 'succeeded', 'failed' (will
+            retry), or 'dead' (retries exhausted)."
         response_status:
           anyOf:
             - type: integer
             - type: "null"
           title: Response Status
+          description:
+            HTTP status code returned by the target URL on the last attempt.
+            Null before any attempt.
         response_body:
           anyOf:
             - type: string
             - type: "null"
           title: Response Body
+          description:
+            Response body returned by the target URL on the last attempt,
+            if any. Null before any attempt.
         next_attempt_at:
           type: string
           format: date-time
           title: Next Attempt At
+          description: When the next delivery attempt is scheduled, ISO 8601 timestamp.
         succeeded_at:
           anyOf:
             - type: string
               format: date-time
             - type: "null"
           title: Succeeded At
+          description:
+            When this delivery succeeded, ISO 8601 timestamp. Null until
+            it does.
         created_at:
           type: string
           format: date-time
           title: Created At
+          description: When this delivery was queued, ISO 8601 timestamp.
       type: object
       required:
         - id
@@ -4291,6 +6192,7 @@ components:
           type: string
           minLength: 1
           title: Target Url
+          description: HTTPS URL Hail POSTs event payloads to.
         event_types:
           items:
             type: string
@@ -4316,6 +6218,9 @@ components:
           type: array
           minItems: 1
           title: Event Types
+          description:
+            Event types to subscribe to (e.g. 'call.completed', 'email.bounced').
+            At least one required.
       type: object
       required:
         - target_url
@@ -4328,11 +6233,15 @@ components:
             $ref: "#/components/schemas/WebhookSubscriptionResponse"
           type: array
           title: Items
+          description: Subscriptions in this page.
         next_cursor:
           anyOf:
             - type: string
             - type: "null"
           title: Next Cursor
+          description:
+            Opaque cursor for the next page. Null when there are no more
+            results.
       type: object
       required:
         - items
@@ -4344,6 +6253,7 @@ components:
             - type: string
             - type: "null"
           title: Target Url
+          description: New delivery URL. Omit to leave unchanged.
         event_types:
           anyOf:
             - items:
@@ -4370,6 +6280,7 @@ components:
               type: array
             - type: "null"
           title: Event Types
+          description: New set of subscribed event types. Omit to leave unchanged.
         status:
           anyOf:
             - type: string
@@ -4378,6 +6289,9 @@ components:
                 - disabled
             - type: "null"
           title: Status
+          description:
+            Set to 'disabled' to pause deliveries, or 'active' to resume.
+            Omit to leave unchanged.
       type: object
       title: WebhookSubscriptionPatch
     WebhookSubscriptionResponse:
@@ -4386,52 +6300,70 @@ components:
           type: string
           format: uuid
           title: Id
+          description: Unique identifier for this subscription.
         organization_id:
           type: string
           format: uuid
           title: Organization Id
+          description: Organization that owns this subscription.
         target_url:
           type: string
           title: Target Url
+          description: HTTPS URL event payloads are POSTed to.
         event_types:
           items:
             type: string
           type: array
           title: Event Types
+          description: Event types this subscription receives.
         status:
           type: string
           enum:
             - active
             - disabled
           title: Status
+          description: "'active' (delivering) or 'disabled' (paused)."
         consecutive_failures:
           type: integer
           title: Consecutive Failures
+          description:
+            Consecutive failed delivery attempts since the last success.
+            Resets to 0 on success.
         last_success_at:
           anyOf:
             - type: string
               format: date-time
             - type: "null"
           title: Last Success At
+          description:
+            When a delivery last succeeded, ISO 8601 timestamp. Null if
+            never.
         last_failure_at:
           anyOf:
             - type: string
               format: date-time
             - type: "null"
           title: Last Failure At
+          description: When a delivery last failed, ISO 8601 timestamp. Null if never.
         created_at:
           type: string
           format: date-time
           title: Created At
+          description: When this subscription was created, ISO 8601 timestamp.
         updated_at:
           type: string
           format: date-time
           title: Updated At
+          description: When this subscription was last modified, ISO 8601 timestamp.
         secret:
           anyOf:
             - type: string
             - type: "null"
           title: Secret
+          description:
+            Plaintext signing secret for verifying delivery payloads. Only
+            present in the create and rotate-secret responses; every later read returns
+            null.
       type: object
       required:
         - id
@@ -4458,26 +6390,34 @@ components:
             - jwt
             - shared
           title: Auth Kind
+          description:
+            "How the caller authenticated: 'apikey' (org API key), 'jwt'
+            (logged-in user session), or 'shared' (the shared HAIL_API_KEY, which
+            carries no human identity)."
         organization_id:
           type: string
           format: uuid
           title: Organization Id
+          description: Organization the caller belongs to.
         user_id:
           anyOf:
             - type: string
               format: uuid
             - type: "null"
           title: User Id
+          description: The authenticated user's id. Null for 'shared' callers.
         email:
           anyOf:
             - type: string
             - type: "null"
           title: Email
+          description: The authenticated user's email. Null for 'shared' callers.
         name:
           anyOf:
             - type: string
             - type: "null"
           title: Name
+          description: The authenticated user's display name. Null for 'shared' callers.
       type: object
       required:
         - auth_kind

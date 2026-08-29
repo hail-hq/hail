@@ -89,12 +89,12 @@ func runContactsList(ctx context.Context, opts *Options, f *contactsListFlags) e
 
 	items, next, err := walkCursor(f.all, f.cursor, opts.Stderr, "contacts",
 		func(cursor string) (cursorPage[client.ContactEntry], error) {
-			params := &client.ListContactsContactsGetParams{
+			params := &client.ListContactsV1ContactsGetParams{
 				Q:      strPtr(f.q),
 				Cursor: strPtr(cursor),
 				Limit:  &f.limit,
 			}
-			resp, err := apiClient.ListContactsContactsGetWithResponse(ctx, params)
+			resp, err := apiClient.ListContactsV1ContactsGetWithResponse(ctx, params)
 			if err != nil {
 				return cursorPage[client.ContactEntry]{}, fmt.Errorf("contacts API: %w", err)
 			}
@@ -163,7 +163,7 @@ func runContactsCreate(ctx context.Context, cmd *cobra.Command, opts *Options, f
 		return err
 	}
 
-	resp, err := apiClient.CreateContactContactsPostWithResponse(ctx, &client.CreateContactContactsPostParams{}, body)
+	resp, err := apiClient.CreateContactV1ContactsPostWithResponse(ctx, &client.CreateContactV1ContactsPostParams{}, body)
 	if err != nil {
 		return fmt.Errorf("contacts API: %w", err)
 	}
@@ -226,7 +226,7 @@ func runContactsUpdate(ctx context.Context, cmd *cobra.Command, opts *Options, f
 		return err
 	}
 
-	resp, err := apiClient.PatchContactContactsContactIdPatchWithResponse(ctx, id, &client.PatchContactContactsContactIdPatchParams{}, body)
+	resp, err := apiClient.PatchContactV1ContactsContactIdPatchWithResponse(ctx, id, &client.PatchContactV1ContactsContactIdPatchParams{}, body)
 	if err != nil {
 		return fmt.Errorf("contacts API: %w", err)
 	}
@@ -262,7 +262,7 @@ func runContactsDelete(ctx context.Context, opts *Options, id string) error {
 		return err
 	}
 
-	resp, err := apiClient.DeleteContactContactsContactIdDeleteWithResponse(ctx, id, &client.DeleteContactContactsContactIdDeleteParams{})
+	resp, err := apiClient.DeleteContactV1ContactsContactIdDeleteWithResponse(ctx, id, &client.DeleteContactV1ContactsContactIdDeleteParams{})
 	if err != nil {
 		return fmt.Errorf("contacts API: %w", err)
 	}
@@ -311,7 +311,7 @@ func runContactsSetPhone(ctx context.Context, opts *Options, f *contactsSetPhone
 	}
 
 	body := client.MemberPhonePut{PhoneE164: f.phone}
-	resp, err := apiClient.PutMemberPhoneMembersUserIdPhonePutWithResponse(ctx, userID, &client.PutMemberPhoneMembersUserIdPhonePutParams{}, body)
+	resp, err := apiClient.PutMemberPhoneV1MembersUserIdPhonePutWithResponse(ctx, userID, &client.PutMemberPhoneV1MembersUserIdPhonePutParams{}, body)
 	if err != nil {
 		return fmt.Errorf("members API: %w", err)
 	}
@@ -347,7 +347,7 @@ func runContactsClearPhone(ctx context.Context, opts *Options, userID string) er
 		return err
 	}
 
-	resp, err := apiClient.DeleteMemberPhoneMembersUserIdPhoneDeleteWithResponse(ctx, userID, &client.DeleteMemberPhoneMembersUserIdPhoneDeleteParams{})
+	resp, err := apiClient.DeleteMemberPhoneV1MembersUserIdPhoneDeleteWithResponse(ctx, userID, &client.DeleteMemberPhoneV1MembersUserIdPhoneDeleteParams{})
 	if err != nil {
 		return fmt.Errorf("members API: %w", err)
 	}

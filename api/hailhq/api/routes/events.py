@@ -24,6 +24,7 @@ from fastapi import status as http_status
 from hailhq.api.deps import Principal, get_current_principal
 from hailhq.api.errors import unprocessable
 from hailhq.api.pagination import fetch_cursor_page
+from hailhq.api.ratelimit import GENERAL_RATE_LIMITED_RESPONSES
 from hailhq.core.db import get_session
 from hailhq.core.models import Call, CallEvent, Email, EmailEvent, Sms, SmsEvent
 from hailhq.core.schemas import (
@@ -36,7 +37,9 @@ from sqlalchemy import literal, select, union_all
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.ext.asyncio import AsyncSession
 
-router = APIRouter(prefix="/events", tags=["events"])
+router = APIRouter(
+    prefix="/events", tags=["events"], responses=GENERAL_RATE_LIMITED_RESPONSES
+)
 
 
 # Typed NULL for the id columns a source doesn't own. An untyped
@@ -143,7 +146,10 @@ async def _require_owned(
 # --------------------------------------------------------------------------- #
 
 
-@router.get("", response_model=EventStreamResponse)
+@router.get(
+    "",
+    response_model=EventStreamResponse,
+)
 async def list_events(
     principal: Annotated[Principal, Depends(get_current_principal)],
     db: Annotated[AsyncSession, Depends(get_session)],
@@ -152,6 +158,13 @@ async def list_events(
     id: str | None = Query(default=None),
     kind: str | None = Query(default=None),
 ) -> EventStreamResponse:
+    """Cursor-paginated forward stream of call, email, and SMS events.
+
+    Scoped to the caller's organization. Pass id (typed "<type>:<uuid>",
+    e.g. "call:<uuid>") to narrow to one resource's events, or kind to
+    narrow to one event kind. Walks forward in time — pass the returned
+    next_cursor to continue tailing where you left off.
+    """
     # Org scoping is the security-critical bit. We always join through Call so
     # the principal can never see another org's events, even by guessing a
     # call_id. The kind filter is a passthrough (no enum validation): event

@@ -11,6 +11,8 @@ from fastapi.encoders import jsonable_encoder
 from fastapi.exception_handlers import request_validation_exception_handler
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, Response
+from hailhq.api.deprecation import DeprecationHeaderMiddleware
+from hailhq.api.ratelimit import GeneralRateLimitMiddleware
 from hailhq.api.routes import calls as calls_routes
 from hailhq.api.routes import contacts as contacts_routes
 from hailhq.api.routes import email_attachments as email_attachments_routes
@@ -239,6 +241,63 @@ app = FastAPI(
     servers=[{"url": "https://api.hail.so", "description": "Hail Cloud"}],
     lifespan=lifespan,
 )
+app.add_middleware(DeprecationHeaderMiddleware)
+# Starlette's add_middleware prepends, so the most-recently-added middleware
+# runs outermost/first. Rate limiting first means a 429 short-circuits
+# before the deprecation-header pass does any work on the same response.
+app.add_middleware(GeneralRateLimitMiddleware)
+
+
+_default_openapi = app.openapi
+
+
+_VALIDATION_ERROR_FIELD_DESCRIPTIONS = {
+    "loc": (
+        "Path to the invalid field within the request, as a list of "
+        "keys/indices (e.g. ['body', 'to'])."
+    ),
+    "msg": "Human-readable description of the validation failure.",
+    "type": "Machine-readable error type code (e.g. 'missing', 'string_type').",
+    "input": "The value that was actually provided and failed validation.",
+    "ctx": "Additional machine-readable context for the error, when the error type provides one.",
+}
+
+
+def _openapi_with_validation_error_description() -> dict:
+    """Add field descriptions to ``HTTPValidationError.detail`` and to its
+    nested ``ValidationError`` item schema — FastAPI generates both itself
+    (hardcoded dicts in ``fastapi.openapi.utils``, not models we own), so
+    they can't get a ``Field(description=...)`` the normal way. Every route
+    with a request body or query params gets a 422 response built from
+    these shared schemas.
+    """
+    schema = _default_openapi()
+    schemas = schema.get("components", {}).get("schemas", {})
+
+    detail = schemas.get("HTTPValidationError", {}).get("properties", {}).get("detail")
+    if detail is not None:
+        detail["description"] = (
+            "List of validation errors: each entry gives the field "
+            "location (loc), the problem (msg), and the error type (type)."
+        )
+
+    validation_error_properties = schemas.get("ValidationError", {}).get(
+        "properties", {}
+    )
+    for field_name, description in _VALIDATION_ERROR_FIELD_DESCRIPTIONS.items():
+        field_schema = validation_error_properties.get(field_name)
+        if field_schema is not None:
+            field_schema["description"] = description
+
+    return schema
+
+
+app.openapi = _openapi_with_validation_error_description  # type: ignore[method-assign]
+# FastAPI's own documented pattern for customizing OpenAPI generation
+# (https://fastapi.tiangolo.com/how-to/extending-openapi/): `openapi` is an
+# instance attribute FastAPI expects apps to overwrite, not a method the
+# type checker should treat as fixed. Safe and intentional; mypy just can't
+# model an instance attribute overriding a bound method.
 
 
 @app.exception_handler(SecretKeyMissing)
@@ -272,18 +331,34 @@ async def _cache_422_for_idempotent_retry(
     return await request_validation_exception_handler(request, exc)
 
 
-app.include_router(calls_routes.router)
-app.include_router(email_attachments_routes.router)
-app.include_router(emails_routes.router)
-app.include_router(events_routes.router)
-app.include_router(email_domains_routes.router)
-app.include_router(numbers_routes.router)
-app.include_router(webhooks_routes.router)
-app.include_router(unsubscribe_routes.router)
-app.include_router(sms_routes.router)
-app.include_router(contacts_routes.router)
-app.include_router(whoami_routes.router)
-app.include_router(providers_routes.router)
+# Customer-facing routers are dual-mounted: /v1/<resource> is canonical
+# and the only mount that appears in the OpenAPI schema. The unprefixed
+# path keeps working for existing integrations (routable, real handler)
+# but is excluded from the schema (include_in_schema=False) so it does
+# not create a second, colliding operationId per operation — FastAPI
+# derives operationId from the function name, and a route mounted twice
+# with schema inclusion on both would produce duplicate IDs and a spec
+# with two paths per operation. The unprefixed path is marked
+# Deprecation: true instead (see deprecation.py). No route handler is
+# duplicated, both mounts point at the same router object.
+_CUSTOMER_ROUTERS = [
+    calls_routes.router,
+    email_attachments_routes.router,
+    emails_routes.router,
+    events_routes.router,
+    email_domains_routes.router,
+    numbers_routes.router,
+    webhooks_routes.router,
+    unsubscribe_routes.router,
+    sms_routes.router,
+    contacts_routes.router,
+    whoami_routes.router,
+    providers_routes.router,
+]
+for _router in _CUSTOMER_ROUTERS:
+    app.include_router(_router, prefix="/v1")
+    app.include_router(_router, include_in_schema=False)
+
 app.include_router(internal_ses_events.router)
 app.include_router(internal_org_closures.router)
 app.include_router(internal_provider_config.router)
@@ -294,4 +369,5 @@ app.include_router(internal_numbers.router)
 
 @app.get("/healthz")
 def healthz() -> dict[str, str]:
+    """Liveness check. Returns {"status": "ok"} with no auth required."""
     return {"status": "ok"}

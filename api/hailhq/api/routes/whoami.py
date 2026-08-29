@@ -16,20 +16,31 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends
 from hailhq.api.deps import Principal, get_current_principal
+from hailhq.api.ratelimit import GENERAL_RATE_LIMITED_RESPONSES
 from hailhq.core.db import get_session
 from hailhq.core.models import User
 from hailhq.core.schemas import WhoamiResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-router = APIRouter(tags=["whoami"])
+router = APIRouter(tags=["whoami"], responses=GENERAL_RATE_LIMITED_RESPONSES)
 
 
-@router.get("/whoami", response_model=WhoamiResponse)
+@router.get(
+    "/whoami",
+    response_model=WhoamiResponse,
+)
 async def get_whoami(
     principal: Annotated[Principal, Depends(get_current_principal)],
     db: Annotated[AsyncSession, Depends(get_session)],
 ) -> WhoamiResponse:
+    """Identify the caller: auth kind, organization, and (if resolvable) user.
+
+    Useful for an agent that needs the human's address to put in
+    Reply-To, since the bearer token itself only carries an organization.
+    user_id/email/name come back null for a shared-key
+    (HAIL_API_KEY) call, which has no individual user behind it.
+    """
     if principal.user_id is None:
         return WhoamiResponse(
             auth_kind=principal.auth_kind,

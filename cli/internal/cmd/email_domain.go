@@ -111,8 +111,8 @@ func runEmailDomainRegister(
 		return err
 	}
 
-	resp, err := apiClient.CreateEmailDomainEmailDomainsPostWithResponse(
-		ctx, &client.CreateEmailDomainEmailDomainsPostParams{}, body,
+	resp, err := apiClient.CreateEmailDomainV1EmailDomainsPostWithResponse(
+		ctx, &client.CreateEmailDomainV1EmailDomainsPostParams{}, body,
 	)
 	if err != nil {
 		return fmt.Errorf("email-domain API: %w", err)
@@ -156,11 +156,11 @@ func runEmailDomainList(
 	if err != nil {
 		return err
 	}
-	params := &client.ListEmailDomainsEmailDomainsGetParams{
+	params := &client.ListEmailDomainsV1EmailDomainsGetParams{
 		Limit:  &f.limit,
 		Cursor: strPtr(f.cursor),
 	}
-	resp, err := apiClient.ListEmailDomainsEmailDomainsGetWithResponse(ctx, params)
+	resp, err := apiClient.ListEmailDomainsV1EmailDomainsGetWithResponse(ctx, params)
 	if err != nil {
 		return fmt.Errorf("email-domain API: %w", err)
 	}
@@ -199,10 +199,10 @@ func runEmailDomainGet(ctx context.Context, opts *Options, id uuid.UUID) error {
 	if err != nil {
 		return err
 	}
-	resp, err := apiClient.GetEmailDomainEmailDomainsDomainIdGetWithResponse(
+	resp, err := apiClient.GetEmailDomainV1EmailDomainsDomainIdGetWithResponse(
 		ctx,
 		openapi_types.UUID(id),
-		&client.GetEmailDomainEmailDomainsDomainIdGetParams{},
+		&client.GetEmailDomainV1EmailDomainsDomainIdGetParams{},
 	)
 	if err != nil {
 		return fmt.Errorf("email-domain API: %w", err)
@@ -242,10 +242,10 @@ func runEmailDomainVerify(ctx context.Context, opts *Options, id uuid.UUID) erro
 	if err != nil {
 		return err
 	}
-	resp, err := apiClient.VerifyEmailDomainEmailDomainsDomainIdVerifyPostWithResponse(
+	resp, err := apiClient.VerifyEmailDomainV1EmailDomainsDomainIdVerifyPostWithResponse(
 		ctx,
 		openapi_types.UUID(id),
-		&client.VerifyEmailDomainEmailDomainsDomainIdVerifyPostParams{},
+		&client.VerifyEmailDomainV1EmailDomainsDomainIdVerifyPostParams{},
 	)
 	if err != nil {
 		return fmt.Errorf("email-domain API: %w", err)
@@ -286,10 +286,10 @@ func runEmailDomainDelete(ctx context.Context, opts *Options, id uuid.UUID) erro
 	if err != nil {
 		return err
 	}
-	resp, err := apiClient.DeleteEmailDomainEmailDomainsDomainIdDelete(
+	resp, err := apiClient.DeleteEmailDomainV1EmailDomainsDomainIdDelete(
 		ctx,
 		openapi_types.UUID(id),
-		&client.DeleteEmailDomainEmailDomainsDomainIdDeleteParams{},
+		&client.DeleteEmailDomainV1EmailDomainsDomainIdDeleteParams{},
 	)
 	if err != nil {
 		return fmt.Errorf("email-domain API: %w", err)

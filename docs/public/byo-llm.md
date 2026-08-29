@@ -252,7 +252,7 @@ Reads never return it.
 Every surface takes the same three fields.
 
 ```bash
-curl -X POST https://api.hail.so/calls \
+curl -X POST https://api.hail.so/v1/calls \
   -H "Authorization: Bearer $HAIL_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{

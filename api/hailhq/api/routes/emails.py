@@ -46,6 +46,11 @@ from hailhq.api.idempotency import (
     replay_cached,
 )
 from hailhq.api.pagination import fetch_cursor_page
+from hailhq.api.ratelimit import (
+    GENERAL_RATE_LIMITED_RESPONSES,
+    merge_rate_limited_responses,
+)
+from hailhq.api.route_prefixes import request_mount_prefix
 from hailhq.api.routes.email_domains import (
     compose_hail_mail_address,
     first_pending_custom,
@@ -98,7 +103,9 @@ from sqlalchemy.orm import defer
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/emails", tags=["emails"])
+router = APIRouter(
+    prefix="/emails", tags=["emails"], responses=GENERAL_RATE_LIMITED_RESPONSES
+)
 
 _DEFAULT_LIST_LIMIT = 50
 _MAX_LIST_LIMIT = 200
@@ -444,19 +451,31 @@ async def deliver_email(
     "",
     response_model=EmailResponse,
     status_code=http_status.HTTP_201_CREATED,
-    responses=RATE_LIMITED_RESPONSES,
+    responses=merge_rate_limited_responses(
+        RATE_LIMITED_RESPONSES, GENERAL_RATE_LIMITED_RESPONSES
+    ),
 )
 async def create_email(
     body: EmailCreate,
     response: Response,
+    request: Request,
     principal: Annotated[Principal, Depends(get_current_principal)],
     db: Annotated[AsyncSession, Depends(get_session)],
     email_provider: Annotated[EmailProvider, Depends(get_email_provider)],
     idem: Annotated[IdempotencyContext | None, Depends(idempotency_dep)] = None,
 ) -> EmailResponse:
+    """Send an outbound email through SES.
+
+    Sends synchronously — the response reports the final status (sent or
+    failed), not a queued placeholder; no separate poll is needed for the
+    happy path, though a bounce or complaint can still arrive later as a
+    webhook or GET /v1/emails/{email_id}/events entry. Requires
+    recipient_consent=true on the request body; Hail does not verify lawful
+    basis to contact the recipient, the caller warrants it.
+    """
     # Idempotency replay first — never re-send.
     if idem is not None and idem.is_replay:
-        _, cached = replay_cached(idem, response, resource_prefix="/emails")
+        _, cached = replay_cached(idem, response, request, resource_prefix="/emails")
         return EmailResponse.model_validate(cached)
 
     # Consent attestation gate — reject before any Email row is created.
@@ -613,7 +632,7 @@ async def create_email(
             detail=_SEND_FAILED_DETAIL,
         )
 
-    response.headers["Location"] = f"/emails/{email.id}"
+    response.headers["Location"] = f"{request_mount_prefix(request)}/emails/{email.id}"
     email_response = EmailResponse.model_validate(email)
 
     if idem is not None:
@@ -634,7 +653,10 @@ _DEFAULT_EVENTS_LIMIT = 100
 _MAX_EVENTS_LIMIT = 1000
 
 
-@router.get("/{email_id}/events", response_model=EmailEventListResponse)
+@router.get(
+    "/{email_id}/events",
+    response_model=EmailEventListResponse,
+)
 async def list_email_events(
     email_id: UUID,
     principal: Annotated[Principal, Depends(get_current_principal)],
@@ -711,7 +733,10 @@ def _truncate(ts: datetime, bucket: str) -> datetime:
     return ts.replace(hour=0, minute=0, second=0, microsecond=0)
 
 
-@router.get("/stats", response_model=EmailStatsResponse)
+@router.get(
+    "/stats",
+    response_model=EmailStatsResponse,
+)
 async def get_email_stats(
     principal: Annotated[Principal, Depends(get_current_principal)],
     db: Annotated[AsyncSession, Depends(get_session)],
@@ -719,6 +744,12 @@ async def get_email_stats(
     to: Annotated[datetime | None, Query()] = None,
     bucket: Literal["hour", "day"] = Query(default="day"),
 ) -> EmailStatsResponse:
+    """Aggregate send/delivery/open/click/bounce counts and rates over a range.
+
+    Defaults to the last 7 days, bucketed by day. bucket=hour is limited to
+    an 8-day range; any bucket size is limited to a 92-day range. Registered
+    above GET /v1/emails/{email_id} so "stats" is not swallowed by the id path param.
+    """
     to_ts = to or datetime.now(timezone.utc)
     from_ts = from_ or to_ts - timedelta(days=7)
     if from_ts.tzinfo is None or to_ts.tzinfo is None:
@@ -802,13 +833,22 @@ async def get_email_stats(
 # --------------------------------------------------------------------------- #
 
 
-@router.get("/{email_id}", response_model=EmailResponse)
+@router.get(
+    "/{email_id}",
+    response_model=EmailResponse,
+)
 async def get_email(
     email_id: UUID,
     request: Request,
     principal: Annotated[Principal, Depends(get_current_principal)],
     db: Annotated[AsyncSession, Depends(get_session)],
 ) -> EmailResponse:
+    """Fetch one email by id, including attachments and last event time.
+
+    Org-scoped: returns 404 for an email belonging to a different
+    organization. For an inbound email with a stored raw MIME, raw_url
+    points at GET /v1/emails/{email_id}/raw.
+    """
     last_event_at = (
         select(func.max(EmailEvent.occurred_at))
         .where(EmailEvent.email_id == Email.id)
@@ -880,7 +920,9 @@ async def get_email_raw(
     return RedirectResponse(url=url, status_code=http_status.HTTP_302_FOUND)
 
 
-@router.get("/{email_id}/attachments/{attachment_id}")
+@router.get(
+    "/{email_id}/attachments/{attachment_id}",
+)
 async def get_email_attachment(
     email_id: UUID,
     attachment_id: UUID,
@@ -906,7 +948,10 @@ async def get_email_attachment(
     return RedirectResponse(url=url, status_code=http_status.HTTP_302_FOUND)
 
 
-@router.get("", response_model=EmailListResponse)
+@router.get(
+    "",
+    response_model=EmailListResponse,
+)
 async def list_emails(
     principal: Annotated[Principal, Depends(get_current_principal)],
     db: Annotated[AsyncSession, Depends(get_session)],
@@ -915,6 +960,13 @@ async def list_emails(
     status: EmailStatus | None = Query(default=None),
     direction: Literal["outbound", "inbound"] | None = Query(default=None),
 ) -> EmailListResponse:
+    """List emails for the caller's organization, newest first.
+
+    Cursor-paginated: pass the returned next_cursor to fetch the next page;
+    a null next_cursor means there are no more results. Filter by status or
+    direction (outbound/inbound). List entries omit body_text/body_html —
+    fetch GET /v1/emails/{email_id} for the full body.
+    """
     stmt = (
         select(Email)
         .options(defer(Email.body_text), defer(Email.body_html))

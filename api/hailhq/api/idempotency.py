@@ -32,6 +32,7 @@ from uuid import UUID
 from fastapi import Depends, Header, HTTPException, Request, Response
 from fastapi import status as http_status
 from hailhq.api.deps import Principal, get_current_principal
+from hailhq.api.route_prefixes import request_mount_prefix
 from hailhq.core.db import session_scope
 from hailhq.core.models import IdempotencyKey
 from sqlalchemy import delete, select, update
@@ -75,7 +76,11 @@ async def cache_failure(
 
 
 def replay_cached(
-    idem: IdempotencyContext, response: Response, *, resource_prefix: str
+    idem: IdempotencyContext,
+    response: Response,
+    request: Request,
+    *,
+    resource_prefix: str,
 ) -> tuple[UUID, dict[str, Any]]:
     """Shared replay choreography for the create routes.
 
@@ -83,7 +88,10 @@ def replay_cached(
     header; otherwise sets the Idempotency-Replay + Location headers and
     returns ``(cached_id, cached_body)`` for the route to audit and
     model-validate. ``resource_prefix`` is the Location path prefix, e.g.
-    ``"/sms"``.
+    ``"/sms"`` — ``request`` supplies which mount (/v1 or legacy) the
+    caller actually used, so the emitted Location reflects that mount
+    rather than always pointing at the legacy path (see
+    route_prefixes.request_mount_prefix).
     """
     cached = idem.cached_response or {}
     if idem.cached_status and idem.cached_status >= 400:
@@ -94,7 +102,9 @@ def replay_cached(
         )
     cached_id = UUID(cached["id"])
     response.headers["Idempotency-Replay"] = "true"
-    response.headers["Location"] = f"{resource_prefix}/{cached_id}"
+    response.headers["Location"] = (
+        f"{request_mount_prefix(request)}{resource_prefix}/{cached_id}"
+    )
     return cached_id, cached
 
 

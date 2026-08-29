@@ -48,7 +48,7 @@ func TestSmsSubcommand_HappyPath(t *testing.T) {
 	if got := atomic.LoadInt32(&srv.hits); got != 1 {
 		t.Fatalf("expected 1 request, got %d", got)
 	}
-	if srv.lastReq.Method != http.MethodPost || srv.lastReq.URL.Path != "/sms" {
+	if srv.lastReq.Method != http.MethodPost || srv.lastReq.URL.Path != "/v1/sms" {
 		t.Fatalf("unexpected route: %s %s", srv.lastReq.Method, srv.lastReq.URL.Path)
 	}
 	if h := srv.lastReq.Header.Get("Authorization"); h != "Bearer sk_test" {
@@ -318,7 +318,7 @@ func TestSmsStatus_HappyPath(t *testing.T) {
 	if !strings.Contains(stdout, "Provider:  "+sid) {
 		t.Errorf("missing provider sid in stdout: %q", stdout)
 	}
-	if srv.lastReq.URL.Path != "/sms/"+resp.Id.String() {
+	if srv.lastReq.URL.Path != "/v1/sms/"+resp.Id.String() {
 		t.Errorf("path = %s", srv.lastReq.URL.Path)
 	}
 	if srv.lastReq.Method != http.MethodGet {
@@ -447,7 +447,7 @@ func TestSmsSuppressionsList_RendersRows(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if srv.lastReq.Method != http.MethodGet || srv.lastReq.URL.Path != "/sms/suppressions" {
+	if srv.lastReq.Method != http.MethodGet || srv.lastReq.URL.Path != "/v1/sms/suppressions" {
 		t.Fatalf("unexpected route: %s %s", srv.lastReq.Method, srv.lastReq.URL.Path)
 	}
 	for _, want := range []string{"+15551110001", "stop_keyword", "inbound_sms", "+15551110002", "manual", "api"} {
@@ -504,7 +504,7 @@ func TestSmsSuppressionsDelete_HappyPath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if srv.lastReq.Method != http.MethodDelete || srv.lastReq.URL.Path != "/sms/suppressions/+15551110001" {
+	if srv.lastReq.Method != http.MethodDelete || srv.lastReq.URL.Path != "/v1/sms/suppressions/+15551110001" {
 		t.Fatalf("unexpected route: %s %s", srv.lastReq.Method, srv.lastReq.URL.Path)
 	}
 	if !strings.Contains(stdout, "Removed +15551110001") {
@@ -560,7 +560,7 @@ func TestSmsSenderIdGet_ShowsCustomAndDefault(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if srv.lastReq.Method != http.MethodGet || srv.lastReq.URL.Path != "/sms/sender-id" {
+	if srv.lastReq.Method != http.MethodGet || srv.lastReq.URL.Path != "/v1/sms/sender-id" {
 		t.Fatalf("unexpected route: %s %s", srv.lastReq.Method, srv.lastReq.URL.Path)
 	}
 	if !strings.Contains(stdout, "ACME") || !strings.Contains(stdout, "HAIL") {
@@ -594,7 +594,7 @@ func TestSmsSenderIdSet_SendsValue(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if srv.lastReq.Method != http.MethodPatch || srv.lastReq.URL.Path != "/sms/sender-id" {
+	if srv.lastReq.Method != http.MethodPatch || srv.lastReq.URL.Path != "/v1/sms/sender-id" {
 		t.Fatalf("unexpected route: %s %s", srv.lastReq.Method, srv.lastReq.URL.Path)
 	}
 	var body client.SenderIdPatch

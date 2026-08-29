@@ -246,8 +246,8 @@ func runTail(ctx context.Context, opts *Options, f *tailFlags) error {
 	interval := time.Duration(f.intervalMS) * time.Millisecond
 	// Generous limit so a single fetch can drain a long backlog.
 	limit := 1000
-	buildParams := func(cur string) *client.ListEventsEventsGetParams {
-		return &client.ListEventsEventsGetParams{
+	buildParams := func(cur string) *client.ListEventsV1EventsGetParams {
+		return &client.ListEventsV1EventsGetParams{
 			Limit:  &limit,
 			Cursor: strPtr(cur),
 			Id:     strPtr(idWire),
@@ -255,7 +255,7 @@ func runTail(ctx context.Context, opts *Options, f *tailFlags) error {
 		}
 	}
 	fetch := func(cur string) (*client.EventStreamResponse, error) {
-		resp, err := apiClient.ListEventsEventsGetWithResponse(tailCtx, buildParams(cur))
+		resp, err := apiClient.ListEventsV1EventsGetWithResponse(tailCtx, buildParams(cur))
 		if err != nil {
 			if tailCtx.Err() != nil {
 				return nil, errInterrupted

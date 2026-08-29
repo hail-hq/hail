@@ -57,8 +57,8 @@ func runEmailRaw(ctx context.Context, cmd *cobra.Command, opts *Options, input, 
 	if err != nil {
 		return err
 	}
-	resp, err := apiClient.GetEmailRawEmailsEmailIdRawGet(
-		ctx, openapi_types.UUID(id), &client.GetEmailRawEmailsEmailIdRawGetParams{},
+	resp, err := apiClient.GetEmailRawV1EmailsEmailIdRawGet(
+		ctx, openapi_types.UUID(id), &client.GetEmailRawV1EmailsEmailIdRawGetParams{},
 	)
 	if err != nil {
 		return fmt.Errorf("email raw API: %w", err)
