@@ -20,15 +20,22 @@ function ApiIndex() {
       <DocsBody>
         <h1>API Reference</h1>
         <p>
-          Hail exposes a REST API at <code>https://api.hail.so</code>. Every endpoint
-          below is generated from{" "}
-          <code>openapi/openapi.yaml</code>, the canonical contract that CI verifies
-          against the live service, so this reference never drifts from the code.
+          Hail exposes a REST API at <code>https://api.hail.so</code>. Every
+          endpoint below is generated from <code>openapi/openapi.yaml</code>,
+          the canonical contract that CI verifies against the live service, so
+          this reference never drifts from the code.
         </p>
         <p>
           Machine-readable spec:{" "}
           <a href="/docs/api/openapi.yaml">openapi.yaml</a> ·{" "}
           <a href="/docs/api/openapi.json">openapi.json</a>
+        </p>
+        <p>
+          Every page below (and every guide) is also available as plain markdown
+          — append <code>.md</code> to its URL, or fetch{" "}
+          <a href="/docs/llms.txt">llms.txt</a> (index) or{" "}
+          <a href="/docs/llms-full.txt">llms-full.txt</a> (everything,
+          concatenated).
         </p>
         <ul>
           {pages.map((page) => (
@@ -42,7 +49,9 @@ function ApiIndex() {
   );
 }
 
-export default async function Page(props: { params: Promise<{ slug?: string[] }> }) {
+export default async function Page(props: {
+  params: Promise<{ slug?: string[] }>;
+}) {
   const { slug } = await props.params;
   if (!slug || slug.length === 0) return <ApiIndex />;
 
@@ -60,7 +69,9 @@ export default async function Page(props: { params: Promise<{ slug?: string[] }>
   return (
     <DocsPage toc={page.data.toc} full={page.data.full}>
       <DocsBody>
-        <MDX components={getMDXComponents({ OpenAPIPage: PreloadedOpenAPIPage })} />
+        <MDX
+          components={getMDXComponents({ OpenAPIPage: PreloadedOpenAPIPage })}
+        />
       </DocsBody>
     </DocsPage>
   );
@@ -75,7 +86,10 @@ export async function generateMetadata(props: {
 }): Promise<Metadata> {
   const { slug } = await props.params;
   if (!slug || slug.length === 0) {
-    return { title: "API Reference", description: "REST API reference for Hail." };
+    return {
+      title: "API Reference",
+      description: "REST API reference for Hail.",
+    };
   }
   const page = apiSource.getPage(slug);
   if (!page) notFound();
