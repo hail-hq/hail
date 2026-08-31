@@ -1030,11 +1030,21 @@ class EmailCreate(ConsentAttestationMixin):
     )
     body_text: str | None = Field(
         default=None,
-        description="Plain-text body. Either body_text or body_html (or both) is required.",
+        description=(
+            "Plain-text body. Either body_text or body_html (or both) is "
+            "required. A plain-text-only email cannot be tracked for opens "
+            "or clicks; include body_html to get those events."
+        ),
     )
     body_html: str | None = Field(
         default=None,
-        description="HTML body. Either body_text or body_html (or both) is required.",
+        description=(
+            "HTML body. Either body_text or body_html (or both) is required. "
+            "Prefer including body_html: open and click tracking only works "
+            "for emails with an HTML body. Plain-text-only emails still get "
+            "sent, delivered, and bounce events, but opens and clicks are "
+            "never tracked."
+        ),
     )
     conversation_id: UUID | None = Field(
         default=None,
@@ -1136,7 +1146,9 @@ class EmailEventResponse(BaseModel):
     kind: EmailEventKind = Field(
         description=(
             "Event kind: 'sent', 'delivered', 'delivery_delayed', "
-            "'bounced', 'complained', 'rejected', 'opened', or 'clicked'."
+            "'bounced', 'complained', 'rejected', 'opened', or 'clicked'. "
+            "'opened' and 'clicked' only occur for emails sent with an HTML "
+            "body; plain-text-only emails never produce them."
         )
     )
     payload: dict[str, Any] = Field(
@@ -1180,17 +1192,31 @@ class EmailStatsCounts(BaseModel):
     )
     opened: int = Field(
         default=0,
-        description="Total open events in the window, including repeat opens by the same recipient.",
+        description=(
+            "Total open events in the window, including repeat opens by the "
+            "same recipient. HTML emails only; plain-text-only emails are "
+            "never tracked for opens."
+        ),
     )
     clicked: int = Field(
         default=0,
-        description="Total click events in the window, including repeat clicks by the same recipient.",
+        description=(
+            "Total click events in the window, including repeat clicks by "
+            "the same recipient. HTML emails only; plain-text-only emails "
+            "are never tracked for clicks."
+        ),
     )
     unique_opened: int = Field(
-        default=0, description="Distinct emails opened at least once in the window."
+        default=0,
+        description=(
+            "Distinct emails opened at least once in the window " "(HTML emails only)."
+        ),
     )
     unique_clicked: int = Field(
-        default=0, description="Distinct emails clicked at least once in the window."
+        default=0,
+        description=(
+            "Distinct emails clicked at least once in the window " "(HTML emails only)."
+        ),
     )
 
 
@@ -1217,11 +1243,19 @@ class EmailStatsRates(BaseModel):
     )
     open: float | None = Field(
         default=None,
-        description="unique_opened / sent for the window. Null when sent == 0.",
+        description=(
+            "unique_opened / sent for the window. Null when sent == 0. "
+            "Only HTML emails can be opened-tracked, so plain-text sends "
+            "lower this rate."
+        ),
     )  # unique_opened / sent
     click: float | None = Field(
         default=None,
-        description="unique_clicked / sent for the window. Null when sent == 0.",
+        description=(
+            "unique_clicked / sent for the window. Null when sent == 0. "
+            "Only HTML emails can be click-tracked, so plain-text sends "
+            "lower this rate."
+        ),
     )  # unique_clicked / sent
 
 

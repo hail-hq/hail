@@ -318,7 +318,10 @@ TERMINAL_EMAIL_STATUSES: frozenset[str] = frozenset(
 class EmailCreate(BaseModel):
     """Body shape for ``POST /emails``.
 
-    At least one of ``body_text`` / ``body_html`` is required. ``to`` is a
+    At least one of ``body_text`` / ``body_html`` is required. Prefer
+    including ``body_html``: open and click tracking only works for emails
+    with an HTML body; a plain-text-only email is never tracked for opens
+    or clicks. ``to`` is a
     non-empty list of recipient addresses. ``from_`` is optional while the
     org has one verified sender; with several the server 422s and the
     caller must name one (or none at all, which auto-mints a hail-mail

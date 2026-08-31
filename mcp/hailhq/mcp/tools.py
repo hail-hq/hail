@@ -676,7 +676,11 @@ def register_tools(
 
         ``to`` is a non-empty list of RFC-style email addresses. At
         least one of ``body_text`` / ``body_html`` is required (both
-        is fine — multipart-alternative). ``cc``, ``bcc``, and
+        is fine — multipart-alternative). Prefer including
+        ``body_html``: open and click tracking only works for emails
+        with an HTML body. A plain-text-only email still gets sent,
+        delivered, and bounce events, but opens and clicks are never
+        tracked. ``cc``, ``bcc``, and
         ``reply_to`` are optional and follow the usual mail
         conventions. Hail sets no ``reply_to`` of its own — to have
         replies reach the human running this session, call ``whoami``
@@ -1024,7 +1028,10 @@ def register_tools(
         Returns ``{"items": [...], "next_cursor": ...}`` where each item has
         ``kind`` (one of sent, delivered, delivery_delayed, bounced,
         complained, rejected, opened, clicked), ``payload``, and
-        ``occurred_at``. Pass ``cursor`` from a previous ``next_cursor`` to
+        ``occurred_at``. ``opened`` and ``clicked`` only occur for emails
+        sent with an HTML body. A plain-text-only email still gets sent,
+        delivered, and bounce events, but opens and clicks are never
+        tracked. Pass ``cursor`` from a previous ``next_cursor`` to
         page (``limit`` 1..1000, default 100). On failure returns
         ``{"error": "resource not found"}`` for an unknown id.
         """
@@ -1058,7 +1065,9 @@ def register_tools(
         "rates": {...}, "series": [...]}`` — ``totals``/each ``series``
         bucket carry counts (sent, delivered, bounced, opened, ...) and
         ``rates`` carries derived ratios (delivery, bounce, open, click),
-        each ``None`` when ``totals.sent`` is 0. On failure returns
+        each ``None`` when ``totals.sent`` is 0. Open and click numbers
+        only count HTML emails. Plain-text-only emails are never tracked
+        for opens or clicks, so they lower those rates. On failure returns
         ``{"error": "<message>"}`` instead.
         """
         try:

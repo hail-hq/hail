@@ -86,7 +86,11 @@ The full set is the `WebhookEventType` enum in
 - **`email.bounced`** — the recipient mail server rejected the message (permanent or soft bounce).
 - **`email.complained`** — the recipient marked the message as spam.
 - **`email.opened`** — the recipient opened the message (image tracked, approximate).
-- **`email.clicked`** — the recipient clicked a tracked link.
+  Only fires for emails sent with an HTML body; plain-text-only emails are never
+  tracked for opens.
+- **`email.clicked`** — the recipient clicked a tracked link. Only fires for
+  emails sent with an HTML body; plain-text-only emails are never tracked for
+  clicks.
 - **`email.send_failed`** — an outbound email failed to send.
 - **`sms.received`** — an inbound SMS arrived, and Hail accepted it. Hail delivers
   it through the same signed, retried webhook worker as the email events
@@ -197,7 +201,7 @@ presigned S3 URL on access. `email.received.suppressed` carries a trimmed `data`
 }
 ```
 
-The `detail` field varies by event type. `bounced` and `complained` carry SES metadata. `delivered` and `delivery_delayed` carry SES status details. `opened` and `clicked` carry `ip_address` and `user_agent`; `clicked` adds `link` (the event time is the sibling `occurred_at` field). For `bounced`, the provider-neutral `hard` flag distinguishes hard bounces from soft bounces. Only hard bounces move the email to `status=bounced` and count toward `bounced_hard` in `GET /emails/stats`.
+The `detail` field varies by event type. `bounced` and `complained` carry SES metadata. `delivered` and `delivery_delayed` carry SES status details. `opened` and `clicked` carry `ip_address` and `user_agent`; `clicked` adds `link` (the event time is the sibling `occurred_at` field). Both only occur for emails sent with an HTML body: the tracking pixel and link rewriting live in the HTML part, so plain-text-only emails never produce them. For `bounced`, the provider-neutral `hard` flag distinguishes hard bounces from soft bounces. Only hard bounces move the email to `status=bounced` and count toward `bounced_hard` in `GET /emails/stats`.
 
 ## Retries
 

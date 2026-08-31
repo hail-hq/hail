@@ -4173,13 +4173,18 @@ components:
           title: Body Text
           description:
             Plain-text body. Either body_text or body_html (or both) is
-            required.
+            required. A plain-text-only email cannot be tracked for opens or clicks;
+            include body_html to get those events.
         body_html:
           anyOf:
             - type: string
             - type: "null"
           title: Body Html
-          description: HTML body. Either body_text or body_html (or both) is required.
+          description:
+            "HTML body. Either body_text or body_html (or both) is required.
+            Prefer including body_html: open and click tracking only works for emails
+            with an HTML body. Plain-text-only emails still get sent, delivered, and
+            bounce events, but opens and clicks are never tracked."
         conversation_id:
           anyOf:
             - type: string
@@ -4549,7 +4554,9 @@ components:
             - clicked
           title: Kind
           description: "Event kind: 'sent', 'delivered', 'delivery_delayed',
-            'bounced', 'complained', 'rejected', 'opened', or 'clicked'."
+            'bounced', 'complained', 'rejected', 'opened', or 'clicked'.
+            'opened' and 'clicked' only occur for emails sent with an HTML body;
+            plain-text-only emails never produce them."
         payload:
           additionalProperties: true
           type: object
@@ -4901,24 +4908,30 @@ components:
           title: Opened
           description:
             Total open events in the window, including repeat opens by
-            the same recipient.
+            the same recipient. HTML emails only; plain-text-only emails are never
+            tracked for opens.
           default: 0
         clicked:
           type: integer
           title: Clicked
           description:
             Total click events in the window, including repeat clicks by
-            the same recipient.
+            the same recipient. HTML emails only; plain-text-only emails are never
+            tracked for clicks.
           default: 0
         unique_opened:
           type: integer
           title: Unique Opened
-          description: Distinct emails opened at least once in the window.
+          description:
+            Distinct emails opened at least once in the window (HTML emails
+            only).
           default: 0
         unique_clicked:
           type: integer
           title: Unique Clicked
-          description: Distinct emails clicked at least once in the window.
+          description:
+            Distinct emails clicked at least once in the window (HTML emails
+            only).
           default: 0
         bucket_start:
           type: string
@@ -4971,24 +4984,30 @@ components:
           title: Opened
           description:
             Total open events in the window, including repeat opens by
-            the same recipient.
+            the same recipient. HTML emails only; plain-text-only emails are never
+            tracked for opens.
           default: 0
         clicked:
           type: integer
           title: Clicked
           description:
             Total click events in the window, including repeat clicks by
-            the same recipient.
+            the same recipient. HTML emails only; plain-text-only emails are never
+            tracked for clicks.
           default: 0
         unique_opened:
           type: integer
           title: Unique Opened
-          description: Distinct emails opened at least once in the window.
+          description:
+            Distinct emails opened at least once in the window (HTML emails
+            only).
           default: 0
         unique_clicked:
           type: integer
           title: Unique Clicked
-          description: Distinct emails clicked at least once in the window.
+          description:
+            Distinct emails clicked at least once in the window (HTML emails
+            only).
           default: 0
       type: object
       title: EmailStatsCounts
@@ -5017,13 +5036,18 @@ components:
             - type: number
             - type: "null"
           title: Open
-          description: unique_opened / sent for the window. Null when sent == 0.
+          description:
+            unique_opened / sent for the window. Null when sent == 0. Only
+            HTML emails can be opened-tracked, so plain-text sends lower this rate.
         click:
           anyOf:
             - type: number
             - type: "null"
           title: Click
-          description: unique_clicked / sent for the window. Null when sent == 0.
+          description:
+            unique_clicked / sent for the window. Null when sent == 0.
+            Only HTML emails can be click-tracked, so plain-text sends lower this
+            rate.
       type: object
       title: EmailStatsRates
       description: All None when sent == 0 in the window.
