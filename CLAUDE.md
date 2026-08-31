@@ -4,7 +4,7 @@ Notes for Claude (and other AI assistants) working in this repo.
 
 ## What Hail is
 
-A universal communication platform for AI agents. Outbound phone calls in v1; SMS, email, inbound to follow. Self-hostable via Docker Compose. Consumed via OpenAPI, CLI (`hail`), and an MCP server. AGPLv3.
+Give your AI agent a voice, a real phone number, and an inbox. Outbound phone calls in v1; SMS, email, inbound to follow. Self-hostable via Docker Compose. Consumed via OpenAPI, CLI (`hail`), and an MCP server. AGPLv3.
 
 ## Repo layout
 
