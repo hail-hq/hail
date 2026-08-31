@@ -29,7 +29,7 @@ export function GET() {
 
   const body = [
     "# Hail",
-    "Universal communication platform for AI agents — outbound calls, SMS, and email over one REST API, CLI, and MCP server.",
+    "Give your AI agent a voice, a real phone number, and an inbox — place AI phone calls with ElevenLabs voices, run an AI call center, send SMS and agent mail, all from one API, CLI, and MCP server.",
     "## Guides",
     guides.join("\n"),
     "## API reference",
