@@ -1,6 +1,6 @@
 # Hail documentation
 
-Hail is a universal communication platform for AI agents — outbound phone calls, SMS, and email behind one MCP endpoint, one API key, one invoice. Most people use [Hail Cloud](https://hail.so); Hail's services are also self-hostable under AGPLv3, with LiveKit Cloud and channel providers remaining external.
+Hail gives your AI agent a voice, a real phone number, and an inbox — place AI phone calls with ElevenLabs voices, run an AI call center, send SMS and agent mail, all behind one MCP endpoint, one API key, one invoice. Most people use [Hail Cloud](https://hail.so); Hail's services are also self-hostable under AGPLv3, with LiveKit Cloud and channel providers remaining external.
 
 ## Using Hail Cloud
 

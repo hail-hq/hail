@@ -68,7 +68,7 @@ release:
   header: |
     ## hail CLI {{ .Tag }}
 
-    Universal communication platform for AI agents — `hail` CLI binaries.
+    Give your AI agent a voice, a real phone number, and an inbox — `hail` CLI binaries.
 
     Install via Homebrew:
 
@@ -83,7 +83,7 @@ brews:
       name: homebrew-tap
       token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
     homepage: https://hail.so
-    description: Universal communication platform for AI agents (CLI)
+    description: Give your AI agent a voice, a phone number, and an inbox (CLI)
     license: AGPL-3.0-or-later
     install: |
       bin.install "hail"

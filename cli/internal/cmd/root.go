@@ -242,8 +242,8 @@ func NewRootCmd(stdout, stderr io.Writer, getenv func(string) string) *cobra.Com
 
 	root := &cobra.Command{
 		Use:   "hail",
-		Short: "hail — universal communication platform for AI agents",
-		Long: `hail — universal communication platform for AI agents.
+		Short: "hail — give your AI agent a voice, a phone number, and an inbox",
+		Long: `hail — give your AI agent a voice, a phone number, and an inbox.
 
 Works with Hail Cloud (the managed offering at https://hail.so) and self-hosted
 deployments. Cloud users authenticate via ` + "`hail login`" + `; self-hosters seed an
@@ -324,7 +324,7 @@ or pass --api-key.`,
 		}
 
 		out := cmd.OutOrStdout()
-		fmt.Fprintln(out, "hail — universal communication platform for AI agents.")
+		fmt.Fprintln(out, "hail — give your AI agent a voice, a phone number, and an inbox.")
 		fmt.Fprintln(out)
 		if apiKey == "" {
 			fmt.Fprintln(out, "Get started:")

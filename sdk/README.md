@@ -1,6 +1,6 @@
 # hail-sdk
 
-Python SDK for [Hail](https://hail.so) — universal communication platform for AI agents.
+Python SDK for [Hail](https://hail.so) — give your AI agent a voice, a real phone number, and an inbox.
 
 ## Install
 

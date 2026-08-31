@@ -2,9 +2,9 @@ openapi: 3.1.0
 info:
   title: Hail
   description:
-    "Universal communication platform for AI agents.\n\nThis file is the\
-    \ source of truth for the Go CLI. Regenerate it after\nchanging API routes \u2014\
-    \ see docs/public/contributing.md.\n"
+    "Give your AI agent a voice, a real phone number, and an inbox.\n\n\
+    This file is the source of truth for the Go CLI. Regenerate it after\nchanging\
+    \ API routes \u2014 see docs/public/contributing.md.\n"
   version: 0.1.0
 servers:
   - url: https://api.hail.so
