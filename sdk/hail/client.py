@@ -312,7 +312,11 @@ class _EmailsResource:
         """Send an outbound email.
 
         At least one of ``body_text`` / ``body_html`` is required; the
-        server returns 422 if neither is supplied. ``recipient_consent``
+        server returns 422 if neither is supplied. Prefer including
+        ``body_html``: open and click tracking only works for emails
+        with an HTML body. A plain-text-only email still gets sent,
+        delivered, and bounce events, but opens and clicks are never
+        tracked. ``recipient_consent``
         is required — the server 422s without it. ``from_`` is optional
         while the org has one verified sender; with several the server
         422s and you must name one (read ``default_from`` from

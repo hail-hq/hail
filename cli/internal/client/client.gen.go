@@ -1278,10 +1278,10 @@ type EmailCreate struct {
 	// Bcc BCC recipient email addresses.
 	Bcc *[]string `json:"bcc,omitempty"`
 
-	// BodyHtml HTML body. Either body_text or body_html (or both) is required.
+	// BodyHtml HTML body. Either body_text or body_html (or both) is required. Prefer including body_html: open and click tracking only works for emails with an HTML body. Plain-text-only emails still get sent, delivered, and bounce events, but opens and clicks are never tracked.
 	BodyHtml *string `json:"body_html,omitempty"`
 
-	// BodyText Plain-text body. Either body_text or body_html (or both) is required.
+	// BodyText Plain-text body. Either body_text or body_html (or both) is required. A plain-text-only email cannot be tracked for opens or clicks; include body_html to get those events.
 	BodyText *string `json:"body_text,omitempty"`
 
 	// Cc CC recipient email addresses.
@@ -1480,7 +1480,7 @@ type EmailEventResponse struct {
 	// Id Unique identifier for this event.
 	Id openapi_types.UUID `json:"id"`
 
-	// Kind Event kind: 'sent', 'delivered', 'delivery_delayed', 'bounced', 'complained', 'rejected', 'opened', or 'clicked'.
+	// Kind Event kind: 'sent', 'delivered', 'delivery_delayed', 'bounced', 'complained', 'rejected', 'opened', or 'clicked'. 'opened' and 'clicked' only occur for emails sent with an HTML body; plain-text-only emails never produce them.
 	Kind EmailEventResponseKind `json:"kind"`
 
 	// OccurredAt When this event occurred, ISO 8601 timestamp.
@@ -1490,7 +1490,7 @@ type EmailEventResponse struct {
 	Payload map[string]interface{} `json:"payload"`
 }
 
-// EmailEventResponseKind Event kind: 'sent', 'delivered', 'delivery_delayed', 'bounced', 'complained', 'rejected', 'opened', or 'clicked'.
+// EmailEventResponseKind Event kind: 'sent', 'delivered', 'delivery_delayed', 'bounced', 'complained', 'rejected', 'opened', or 'clicked'. 'opened' and 'clicked' only occur for emails sent with an HTML body; plain-text-only emails never produce them.
 type EmailEventResponseKind string
 
 // EmailListResponse defines model for EmailListResponse.
@@ -1621,7 +1621,7 @@ type EmailStatsBucket struct {
 	// BucketStart Start of this bucket, ISO 8601 timestamp.
 	BucketStart time.Time `json:"bucket_start"`
 
-	// Clicked Total click events in the window, including repeat clicks by the same recipient.
+	// Clicked Total click events in the window, including repeat clicks by the same recipient. HTML emails only; plain-text-only emails are never tracked for clicks.
 	Clicked *int `json:"clicked,omitempty"`
 
 	// Complained Emails that received a spam complaint in the window.
@@ -1633,7 +1633,7 @@ type EmailStatsBucket struct {
 	// DeliveryDelayed Emails with a delivery-delayed event in the window.
 	DeliveryDelayed *int `json:"delivery_delayed,omitempty"`
 
-	// Opened Total open events in the window, including repeat opens by the same recipient.
+	// Opened Total open events in the window, including repeat opens by the same recipient. HTML emails only; plain-text-only emails are never tracked for opens.
 	Opened *int `json:"opened,omitempty"`
 
 	// Rejected Emails rejected by the provider before sending, in the window.
@@ -1642,10 +1642,10 @@ type EmailStatsBucket struct {
 	// Sent Emails sent in the window.
 	Sent *int `json:"sent,omitempty"`
 
-	// UniqueClicked Distinct emails clicked at least once in the window.
+	// UniqueClicked Distinct emails clicked at least once in the window (HTML emails only).
 	UniqueClicked *int `json:"unique_clicked,omitempty"`
 
-	// UniqueOpened Distinct emails opened at least once in the window.
+	// UniqueOpened Distinct emails opened at least once in the window (HTML emails only).
 	UniqueOpened *int `json:"unique_opened,omitempty"`
 }
 
@@ -1657,7 +1657,7 @@ type EmailStatsCounts struct {
 	// BouncedHard Emails hard-bounced in the window. Subset of bounced.
 	BouncedHard *int `json:"bounced_hard,omitempty"`
 
-	// Clicked Total click events in the window, including repeat clicks by the same recipient.
+	// Clicked Total click events in the window, including repeat clicks by the same recipient. HTML emails only; plain-text-only emails are never tracked for clicks.
 	Clicked *int `json:"clicked,omitempty"`
 
 	// Complained Emails that received a spam complaint in the window.
@@ -1669,7 +1669,7 @@ type EmailStatsCounts struct {
 	// DeliveryDelayed Emails with a delivery-delayed event in the window.
 	DeliveryDelayed *int `json:"delivery_delayed,omitempty"`
 
-	// Opened Total open events in the window, including repeat opens by the same recipient.
+	// Opened Total open events in the window, including repeat opens by the same recipient. HTML emails only; plain-text-only emails are never tracked for opens.
 	Opened *int `json:"opened,omitempty"`
 
 	// Rejected Emails rejected by the provider before sending, in the window.
@@ -1678,10 +1678,10 @@ type EmailStatsCounts struct {
 	// Sent Emails sent in the window.
 	Sent *int `json:"sent,omitempty"`
 
-	// UniqueClicked Distinct emails clicked at least once in the window.
+	// UniqueClicked Distinct emails clicked at least once in the window (HTML emails only).
 	UniqueClicked *int `json:"unique_clicked,omitempty"`
 
-	// UniqueOpened Distinct emails opened at least once in the window.
+	// UniqueOpened Distinct emails opened at least once in the window (HTML emails only).
 	UniqueOpened *int `json:"unique_opened,omitempty"`
 }
 
@@ -1690,7 +1690,7 @@ type EmailStatsRates struct {
 	// Bounce bounced_hard / sent for the window. Null when sent == 0.
 	Bounce *float32 `json:"bounce,omitempty"`
 
-	// Click unique_clicked / sent for the window. Null when sent == 0.
+	// Click unique_clicked / sent for the window. Null when sent == 0. Only HTML emails can be click-tracked, so plain-text sends lower this rate.
 	Click *float32 `json:"click,omitempty"`
 
 	// Complaint complained / sent for the window. Null when sent == 0.
@@ -1699,7 +1699,7 @@ type EmailStatsRates struct {
 	// Delivery delivered / sent for the window. Null when sent == 0.
 	Delivery *float32 `json:"delivery,omitempty"`
 
-	// Open unique_opened / sent for the window. Null when sent == 0.
+	// Open unique_opened / sent for the window. Null when sent == 0. Only HTML emails can be opened-tracked, so plain-text sends lower this rate.
 	Open *float32 `json:"open,omitempty"`
 }
 

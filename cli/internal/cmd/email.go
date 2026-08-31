@@ -78,7 +78,10 @@ The recipient flag may be repeated, or comma-separated:
   --to alice@example.com --to bob@example.com
   --to alice@example.com,bob@example.com
 
-Either --body or --body-html (or both) must be supplied. --body-file
+Either --body or --body-html (or both) must be supplied. Prefer
+--body-html: open and click tracking only works for emails with an
+HTML body. A plain-text-only email still gets sent, delivered, and
+bounce events, but opens and clicks are never tracked. --body-file
 and --body-html-file read content from disk. --attach uploads a local
 file and attaches it (repeatable); --attach-id attaches a file already
 uploaded via ` + "`hail email attachment-upload`" + ` (repeatable).
@@ -106,7 +109,7 @@ Example (minimal):
 	cmd.Flags().StringVar(&f.replyTo, "reply-to", "", "Reply-To header")
 	cmd.Flags().StringVar(&f.subject, "subject", "", "Subject line")
 	cmd.Flags().StringVar(&f.body, "body", "", "Plain-text body — one of --body/--body-html required")
-	cmd.Flags().StringVar(&f.bodyHTML, "body-html", "", "HTML body — one of --body/--body-html required")
+	cmd.Flags().StringVar(&f.bodyHTML, "body-html", "", "HTML body — one of --body/--body-html required; needed for open/click tracking")
 	cmd.Flags().StringVar(&f.bodyFile, "body-file", "", "Read plain-text body from this file (use '-' for stdin); exclusive with --body")
 	cmd.Flags().StringVar(&f.bodyHTMLFile, "body-html-file", "", "Read HTML body from this file (use '-' for stdin); exclusive with --body-html")
 	cmd.Flags().StringVar(&f.idempotencyKey, "idempotency-key", "", "Defaults to a fresh UUID")
