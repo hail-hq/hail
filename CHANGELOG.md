@@ -4,6 +4,48 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 
 ## [Unreleased]
 
+## [0.22.0] — 2026-08-31
+
+An agent-ready API surface: `/v1` URLs, rate-limit headers on every response,
+a fully described OpenAPI spec, and MCP capability discovery without auth.
+
+Component versions cut alongside this release:
+**`sdk-v0.15.1`** (PyPI: `hail-sdk==0.15.1`), **`cli-v0.21.0`** (Homebrew + GitHub Releases).
+
+### API versioning — `/v1`
+
+- Every customer-facing route is now canonical under `/v1/<resource>`, and
+  `/v1` is the only mount in the OpenAPI schema. The legacy unprefixed paths
+  still work but carry `Deprecation: true` plus a successor-version `Link`
+  header and are excluded from the schema. See
+  [docs/public/versioning.md](docs/public/versioning.md).
+- The regenerated spec and Go CLI client talk to `/v1`.
+
+### Rate limiting
+
+- Every customer response carries `RateLimit-Limit` / `RateLimit-Remaining` /
+  `RateLimit-Reset`; exceeding the limit returns `429` with `Retry-After`.
+  Documented in the OpenAPI spec. Three public, self-credentialed routes
+  (Twilio webhook receivers, the RFC 8058 unsubscribe endpoint) are exempt so
+  they don't share a bucket with anonymous internet traffic.
+
+### OpenAPI descriptions
+
+- Every schema-visible operation and every transitively-referenced schema
+  field (56 schemas) now has a real, accurate description.
+
+### MCP discovery
+
+- `initialize` and `tools/list` succeed without a bearer token, so an agent
+  can see what Hail offers before authenticating. Every other method still
+  401s. A 64 KiB cap bounds the pre-auth body peek; a per-IP rate cap bounds
+  anonymous session creation.
+
+### Voicebot
+
+- The AI-disclosure line and `first_message` are spoken as one turn. They
+  were two separate utterances with an awkward gap between them.
+
 ### Email
 
 - `GET /email-domains` reports `default_from: null` when the hail-mail
@@ -11,6 +53,24 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
   `HAIL_MAIL_FROM` is one address per deployment, so the first org to send
   takes it and every other org's send 409s — the preview promised an
   address the send path refuses.
+- Every surface that mentions opens or clicks now says that open and click
+  tracking only works for emails with an HTML body: a plain-text-only email
+  still gets `sent` / `delivered` / bounce events, but never `opened` /
+  `clicked` (the SES tracking pixel and link rewriting live in the HTML
+  part). Stated in the API schema descriptions, MCP tool docstrings, SDK
+  docstrings, CLI help, and [docs/public/webhooks.md](docs/public/webhooks.md).
+  The website console shows matching notes in the email drawer and the
+  deliverability dashboard.
+
+### Docs
+
+- Every docs page and every generated API reference page is also served as
+  plain markdown: append `.md` to its URL. `/docs/llms.txt` indexes every
+  guide and API operation; `/docs/llms-full.txt` concatenates everything
+  into one file. The API markdown carries the same field descriptions as
+  the HTML pages.
+- Tagline refreshed everywhere to "Give your AI agent a voice, a real phone
+  number, and an inbox."
 
 ### Internal
 
