@@ -135,10 +135,12 @@ async def test_email_domains_dns_check(base_url: str, api_key: str) -> None:
     assert check.dns_provider.name == "Cloudflare"
     assert check.dns_provider.dns_url == "https://dash.cloudflare.com"
     assert check.dns_provider.note is None
-    assert len(check.records) == 2
+    assert len(check.records) == 3
     assert check.records[0].name == "sel1._domainkey.acme.com"
     assert check.records[0].observed is True
     assert check.records[1].observed is False
+    assert check.records[2].observed is None
+    assert check.kind == "custom"
     assert check.dmarc.present is False
     assert check.dmarc.suggested is not None
     assert check.dmarc.suggested.name == "_dmarc.acme.com"
@@ -157,6 +159,7 @@ async def test_email_domains_dns_check_no_provider_hail_mail(
         zone=None,
         records=[],
         dmarc_present=True,
+        kind="hail_mail",
     )
     respx.get(f"{base_url}/email-domains/{domain_id}/dns-check").mock(
         return_value=httpx.Response(200, json=payload)
@@ -164,6 +167,7 @@ async def test_email_domains_dns_check_no_provider_hail_mail(
     async with Client(api_key=api_key, base_url=base_url) as c:
         check = await c.email_domains.dns_check(domain_id)
 
+    assert check.kind == "hail_mail"
     assert check.dns_provider is None
     assert check.zone is None
     assert check.records == []
@@ -182,6 +186,7 @@ async def test_email_domains_dns_check_degraded_shape_on_lookup_failure(
     # fills in a default DMARC suggestion when dmarc_present is False, but
     # the degraded shape must not suggest a record off unreliable data.
     payload = {
+        "kind": "custom",
         "dns_provider": None,
         "zone": None,
         "records": [
@@ -190,7 +195,7 @@ async def test_email_domains_dns_check_degraded_shape_on_lookup_failure(
                 "name": "sel1._domainkey.acme.com",
                 "value": "sel1.dkim.amazonses.com",
                 "priority": None,
-                "observed": False,
+                "observed": None,
             },
         ],
         "dmarc": {"present": False, "suggested": None},
@@ -205,7 +210,7 @@ async def test_email_domains_dns_check_degraded_shape_on_lookup_failure(
     assert check.lookup_ok is False
     assert check.dns_provider is None
     assert check.zone is None
-    assert check.records[0].observed is False
+    assert check.records[0].observed is None
     assert check.dmarc.present is False
     assert check.dmarc.suggested is None
 

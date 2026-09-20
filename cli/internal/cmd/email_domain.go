@@ -398,10 +398,9 @@ func printEmailDomainDnsCheck(opts *Options, check *client.EmailDomainDnsCheck) 
 		return nil
 	}
 
-	// A hail_mail row: no zone was ever looked up. That domain is Hail's,
-	// not the customer's, so a "DMARC: not found" line would point them at
-	// the wrong DNS zone.
-	isHailMail := len(check.Records) == 0 && check.Zone == nil
+	// A hail_mail row: that domain is Hail's, not the customer's, so a
+	// "DMARC: not found" line would point them at the wrong DNS zone.
+	isHailMail := check.Kind == client.EmailDomainDnsCheckKindHailMail
 
 	if check.DnsProvider == nil {
 		fmt.Fprintln(opts.Stdout, "DNS host: not recognised")
@@ -420,9 +419,14 @@ func printEmailDomainDnsCheck(opts *Options, check *client.EmailDomainDnsCheck) 
 			if r.Type != nil {
 				typ = string(*r.Type)
 			}
-			seen := "no"
-			if r.Observed {
-				seen = "yes"
+			// nil: this record's own lookup failed — "could not check",
+			// which must not read as "no".
+			seen := "?"
+			if r.Observed != nil {
+				seen = "no"
+				if *r.Observed {
+					seen = "yes"
+				}
 			}
 			fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", typ, r.Name, r.Value, seen)
 		}

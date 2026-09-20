@@ -15,10 +15,43 @@ from dataclasses import dataclass
 from typing import Any
 
 import httpx
+import tldextract
 from hailhq.core.config import settings
 from hailhq.core.providers.email import DkimRecord
 
 _DOH_URL = "https://dns.google/resolve"
+_DOH_TIMEOUT_S = 5.0
+
+# Public Suffix List, from the snapshot bundled in the tldextract wheel:
+# ``suffix_list_urls=()`` means no network fetch and ``cache_dir=None`` no
+# cache write — the runtime image has a read-only, non-root home. Private
+# suffixes are on so ``vercel.app`` / ``github.io`` count as suffixes too.
+_psl = tldextract.TLDExtract(
+    suffix_list_urls=(), cache_dir=None, include_psl_private_domains=True
+)
+
+
+def organizational_domain(domain: str) -> str:
+    """The registrable domain: one label under the public suffix.
+
+    ``mail.acme.co.uk`` → ``acme.co.uk``; ``foo.vercel.app`` →
+    ``foo.vercel.app``. This is RFC 7489 §3.2's Organizational Domain — the
+    name a DMARC receiver falls back to — and the highest name a customer
+    can hold a DNS zone for. Returns ``""`` when ``domain`` is itself a
+    public suffix or sits under none (``co.uk``, ``localhost``).
+    """
+    name = domain.strip().lower().rstrip(".")
+    return _psl(name).top_domain_under_public_suffix
+
+
+def doh_client() -> httpx.AsyncClient:
+    """One client for a batch of lookups, so they share a TLS connection.
+
+    Pass it as ``client=`` to the helpers below. Without it each lookup
+    opens (and closes) its own client — fine for a single ``resolve_mx``.
+    """
+    return httpx.AsyncClient(timeout=_DOH_TIMEOUT_S)
+
 
 # Google DoH numeric record types. https://developers.google.com/speed/public-dns/docs/doh/json
 _TYPE_NUMBERS: dict[str, int] = {"NS": 2, "CNAME": 5, "MX": 15, "TXT": 16}
@@ -42,8 +75,17 @@ class DnsLookupError(Exception):
     """
 
 
-async def _resolve(name: str, rtype: str, *, raise_on_error: bool = False) -> list[str]:
+async def _resolve(
+    name: str,
+    rtype: str,
+    *,
+    raise_on_error: bool = False,
+    client: httpx.AsyncClient | None = None,
+) -> list[str]:
     """Shared DoH call. Returns raw ``Answer[].data`` strings for ``rtype``.
+
+    ``client`` is a caller-owned client from ``doh_client()`` (left open);
+    without one, a client is opened for this single lookup.
 
     ``resolve_mx`` passes ``raise_on_error=True`` to keep its pre-existing
     behaviour: on any httpx/JSON error it re-raises the raw error unchanged
@@ -63,11 +105,15 @@ async def _resolve(name: str, rtype: str, *, raise_on_error: bool = False) -> li
     ``resolve_mx`` keeps returning ``[]`` on a bad ``Status`` unchanged, as
     it always has (it never inspected ``Status`` before this).
     """
+    params = {"name": name, "type": rtype}
     try:
-        async with httpx.AsyncClient(timeout=5.0) as client:
-            resp = await client.get(_DOH_URL, params={"name": name, "type": rtype})
-            resp.raise_for_status()
-            data = resp.json()
+        if client is not None:
+            resp = await client.get(_DOH_URL, params=params)
+        else:
+            async with doh_client() as own_client:
+                resp = await own_client.get(_DOH_URL, params=params)
+        resp.raise_for_status()
+        data = resp.json()
     except (httpx.HTTPError, ValueError) as exc:
         if raise_on_error:
             raise
@@ -117,14 +163,20 @@ async def resolve_mx(domain: str) -> list[str]:
     return _mx_hosts(raw)
 
 
-async def resolve_zone_ns(domain: str) -> tuple[str, list[str]]:
+async def resolve_zone_ns(
+    domain: str, *, client: httpx.AsyncClient | None = None
+) -> tuple[str, list[str]]:
     """Find the zone apex for ``domain`` and its nameservers.
 
     An NS query on a non-apex name returns no ``Answer`` (only an
     ``Authority`` SOA), so this strips the left label and retries until an
-    NS answer comes back. Stops before querying a bare TLD (a name with no
-    dot). Returns ``("", [])`` if every label up to the TLD gave a genuine
-    "no answer".
+    NS answer comes back. The walk ends at the organizational domain (see
+    ``organizational_domain``) and never queries a public suffix: ``co.uk``
+    and ``vercel.app`` have NS records of their own, and answering with
+    them would name the registry as the customer's DNS host and suggest
+    records in a zone the customer does not hold. Returns ``("", [])`` if
+    every name up to the organizational domain gave a genuine "no answer",
+    or if ``domain`` has no organizational domain at all.
 
     Raises ``DnsLookupError`` (propagated from ``_resolve``, uncaught here)
     the moment any single NS query fails — the walk aborts immediately
@@ -133,13 +185,17 @@ async def resolve_zone_ns(domain: str) -> tuple[str, list[str]]:
     on ``acme.co.uk`` must never fall through to ``co.uk``).
     """
     name = domain.strip().lower().rstrip(".")
-    while "." in name:
-        answers = await _resolve(name, "NS")
+    top = organizational_domain(name)
+    if not top:
+        return "", []
+    while True:
+        answers = await _resolve(name, "NS", client=client)
         if answers:
             nameservers = sorted({_norm_host(a) for a in answers})
             return name, nameservers
+        if name == top:
+            return "", []
         name = name.split(".", 1)[1]
-    return "", []
 
 
 @dataclass(frozen=True)
@@ -329,7 +385,9 @@ def detect_dns_provider(nameservers: list[str]) -> DnsProvider | None:
     return None
 
 
-async def observe_record(record: dict[str, Any]) -> bool:
+async def observe_record(
+    record: dict[str, Any], *, client: httpx.AsyncClient | None = None
+) -> bool:
     """Does public DNS already show this record?
 
     ``record`` carries ``type`` (``CNAME`` | ``MX`` | ``TXT``), ``name`` and
@@ -348,30 +406,31 @@ async def observe_record(record: dict[str, Any]) -> bool:
     value = str(record.get("value", ""))
 
     if rtype == "CNAME":
-        answers = await _resolve(name, "CNAME")
+        answers = await _resolve(name, "CNAME", client=client)
         target = _norm_host(value)
         return any(_norm_host(a) == target for a in answers)
     if rtype == "MX":
-        answers = await _resolve(name, "MX")
+        answers = await _resolve(name, "MX", client=client)
         return _norm_host(value) in _mx_hosts(answers)
     if rtype == "TXT":
-        answers = await _resolve(name, "TXT")
+        answers = await _resolve(name, "TXT", client=client)
         wanted = _unquote_txt(value.strip())
         return any(wanted == _unquote_txt(a) for a in answers)
     return False
 
 
-async def dmarc_present(name: str) -> bool:
+async def dmarc_present(name: str, *, client: httpx.AsyncClient | None = None) -> bool:
     """Is there a TXT record at ``_dmarc.<name>`` starting ``v=DMARC1``?
 
-    ``name`` is either the sending domain or its zone apex — per RFC 7489
-    §6.6.3 a receiver checks ``_dmarc.<sending domain>`` before falling back
-    to the organisational domain, so the dns-check route calls this once
-    for each and treats DMARC as present if either answers. Raises
+    ``name`` is either the sending domain or its organizational domain —
+    per RFC 7489 §6.6.3 a receiver checks ``_dmarc.<sending domain>`` before
+    falling back to ``_dmarc.<organizational domain>``, so the dns-check
+    route calls this once for each and treats DMARC as present if either
+    answers. Raises
     ``DnsLookupError`` (propagated from ``_resolve``, uncaught here) on a
     DoH failure.
     """
-    answers = await _resolve(f"_dmarc.{name}", "TXT")
+    answers = await _resolve(f"_dmarc.{name}", "TXT", client=client)
     return any(_unquote_txt(a).startswith("v=DMARC1") for a in answers)
 
 
