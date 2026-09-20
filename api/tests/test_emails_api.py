@@ -1589,5 +1589,6 @@ async def test_post_emails_sends_full_document_html_byte_identical(
     assert resp.status_code == 201, resp.text
 
     call_kwargs = email_mock.send_email.call_args.kwargs
+    assert call_kwargs["body_text"] == "x"
     assert call_kwargs["body_html"] == full_doc
     assert resp.json()["body_html"] == full_doc

@@ -242,11 +242,12 @@ async def test_send_email_full_document_html_byte_identical_raw_path() -> None:
     decoded = html_part.get_payload(decode=True)
     assert decoded is not None
     charset = html_part.get_content_charset() or "utf-8"
-    # stdlib email.contentmanager always appends one trailing linesep when
-    # serializing a text part (email/contentmanager.py _encode_text) —
-    # that's the MIME transport layer, not Hail rewriting the body, so
-    # strip it before comparing byte-for-byte.
-    assert decoded.decode(charset).rstrip("\n") == FULL_DOCUMENT_HTML
+    # stdlib email.contentmanager always appends exactly one trailing
+    # linesep when serializing a text part (email/contentmanager.py
+    # _encode_text) — that's the MIME transport layer, not Hail rewriting
+    # the body. removesuffix (not rstrip) proves it's exactly one linesep
+    # and nothing else.
+    assert decoded.decode(charset).removesuffix("\n") == FULL_DOCUMENT_HTML
 
 
 async def test_send_email_simple_path_with_from_name(ses_client, stub: Stubber) -> None:
