@@ -44,10 +44,31 @@ Response `EmailDomainDnsCheck`:
 
 ```json
 {
-  "dns_provider": {"id": "cloudflare", "name": "Cloudflare", "dns_url": "https://dash.cloudflare.com/?to=/:account/:zone/dns/records", "note": "Set Proxy status to DNS only for every CNAME."},
+  "dns_provider": {
+    "id": "cloudflare",
+    "name": "Cloudflare",
+    "dns_url": "https://dash.cloudflare.com/?to=/:account/:zone/dns/records",
+    "note": "Set Proxy status to DNS only for every CNAME."
+  },
   "zone": "wdstck.co",
-  "records": [{"type": "CNAME", "name": "…", "value": "…", "priority": null, "observed": true}],
-  "dmarc": {"present": false, "suggested": {"type": "TXT", "name": "_dmarc.wdstck.co", "value": "v=DMARC1; p=none;", "priority": null}}
+  "records": [
+    {
+      "type": "CNAME",
+      "name": "…",
+      "value": "…",
+      "priority": null,
+      "observed": true
+    }
+  ],
+  "dmarc": {
+    "present": false,
+    "suggested": {
+      "type": "TXT",
+      "name": "_dmarc.wdstck.co",
+      "value": "v=DMARC1; p=none;",
+      "priority": null
+    }
+  }
 }
 ```
 
@@ -60,7 +81,7 @@ Code, all in `core/hailhq/core/dns_lookup.py` (DNS-over-HTTPS, no new dependency
 
 - `_resolve(name, rtype) -> list[str]`: shared DoH call; `resolve_mx` is rebuilt on it.
 - `resolve_zone_ns(domain) -> tuple[str, list[str]]`: query NS on the name, strip the left label until an answer comes back. Returns the zone and its nameservers.
-- `detect_dns_provider(nameservers) -> DnsProvider | None`: suffix table — `ns.cloudflare.com`, `domaincontrol.com` (GoDaddy), `registrar-servers.com` (Namecheap), `awsdns-` (Route 53), `googledomains.com` / `google.com` (Google), `squarespacedns.com`, `vercel-dns.com`, `digitalocean.com`, `ui-dns.` (IONOS), `hover.com`, `name.com`, `porkbun.com`, `gandi.net`, `ovh.net`. Each `dns_url` is checked against the host's own docs before it is committed; an unverified host gets its login page.
+- `detect_dns_provider(nameservers) -> DnsProvider | None`: suffix table — `ns.cloudflare.com`, `domaincontrol.com` (GoDaddy), `registrar-servers.com` (Namecheap), `.awsdns-` (Route 53), `squarespacedns.com`, `vercel-dns.com`, `digitalocean.com`, `ui-dns.` (IONOS), `hover.com`, `name.com`, `porkbun.com`, `gandi.net`, `ovh.net`. No Google entry: legacy Google Domains and Google Cloud DNS share `ns-cloud-*.googledomains.com`, so those return `null`. Suffixes match whole labels only. Each `dns_url` is checked against the host's own docs before it is committed; an unverified host gets its login page.
 - `observe_record(record) -> bool`: CNAME → target equals value; MX → host in answers; TXT → value in answers. Trailing dots and case ignored.
 - Lookups run with `asyncio.gather`; a DoH failure gives `observed: false`, never a 5xx.
 
