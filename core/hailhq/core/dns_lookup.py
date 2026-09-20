@@ -54,6 +54,14 @@ async def _resolve(name: str, rtype: str, *, raise_on_error: bool = False) -> li
     swallowing a transient failure as "no answer" is what let
     ``resolve_zone_ns`` mistake a failed NS query for an empty one and keep
     climbing to the wrong zone.
+
+    The same treatment applies to a DoH ``Status`` other than ``0``
+    (NOERROR) or ``3`` (NXDOMAIN) — SERVFAIL and friends arrive as HTTP 200
+    with an empty ``Answer``, which reads exactly like "no answer" unless
+    ``Status`` is checked. That's the same bug for ``resolve_zone_ns`` as a
+    transport error: only checked for ``raise_on_error=False`` callers, so
+    ``resolve_mx`` keeps returning ``[]`` on a bad ``Status`` unchanged, as
+    it always has (it never inspected ``Status`` before this).
     """
     try:
         async with httpx.AsyncClient(timeout=5.0) as client:
@@ -64,6 +72,9 @@ async def _resolve(name: str, rtype: str, *, raise_on_error: bool = False) -> li
         if raise_on_error:
             raise
         raise DnsLookupError(f"DoH lookup failed for {rtype} {name}") from exc
+    status = data.get("Status", 0)
+    if status not in (0, 3) and not raise_on_error:
+        raise DnsLookupError(f"DoH lookup returned Status={status} for {rtype} {name}")
     type_number = _TYPE_NUMBERS.get(rtype.upper())
     return [
         str(answer.get("data", ""))

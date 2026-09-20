@@ -152,6 +152,97 @@ async def test_resolve_zone_ns_aborts_on_first_lookup_failure_without_climbing(
 
 
 # --------------------------------------------------------------------------- #
+# resolve_zone_ns / observe_record — a DoH ``Status`` other than NOERROR (0)
+# or NXDOMAIN (3), e.g. SERVFAIL (2), is HTTP 200 with an empty ``Answer``
+# and must not be read as "no answer" — same bug class as finding 1's
+# transport-error case.
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.asyncio
+async def test_resolve_zone_ns_servfail_raises_and_queries_once(
+    doh_client: AsyncMock,
+) -> None:
+    calls: list[str] = []
+
+    async def fake_get(url: str, params: dict[str, str]) -> AsyncMock:
+        calls.append(params["name"])
+        return _fake_response({"Status": 2, "Answer": []})
+
+    doh_client.get = AsyncMock(side_effect=fake_get)
+    with pytest.raises(DnsLookupError):
+        await resolve_zone_ns("acme.co.uk")
+    assert calls == ["acme.co.uk"]
+
+
+@pytest.mark.asyncio
+async def test_resolve_zone_ns_nxdomain_continues_climbing(
+    doh_client: AsyncMock,
+) -> None:
+    """NXDOMAIN (Status 3) is a genuine "no answer" — the walk must still
+    climb to the next label, unlike SERVFAIL."""
+    responses = {
+        "mail.example.com": {"Status": 3, "Answer": []},
+        "example.com": {
+            "Status": 0,
+            "Answer": [{"type": 2, "data": "ns1.example.com."}],
+        },
+    }
+    calls: list[str] = []
+
+    async def fake_get(url: str, params: dict[str, str]) -> AsyncMock:
+        calls.append(params["name"])
+        return _fake_response(responses[params["name"]])
+
+    doh_client.get = AsyncMock(side_effect=fake_get)
+    zone, nameservers = await resolve_zone_ns("mail.example.com")
+    assert zone == "example.com"
+    assert nameservers == ["ns1.example.com"]
+    assert calls == ["mail.example.com", "example.com"]
+
+
+@pytest.mark.asyncio
+async def test_observe_record_servfail_raises_dns_lookup_error(
+    doh_client: AsyncMock,
+) -> None:
+    doh_client.get = AsyncMock(return_value=_fake_response({"Status": 2, "Answer": []}))
+    with pytest.raises(DnsLookupError):
+        await observe_record(
+            {
+                "type": "CNAME",
+                "name": "s1._domainkey.acme.com",
+                "value": "target.example.com",
+            }
+        )
+
+
+@pytest.mark.asyncio
+async def test_observe_record_nxdomain_returns_false(doh_client: AsyncMock) -> None:
+    doh_client.get = AsyncMock(return_value=_fake_response({"Status": 3, "Answer": []}))
+    observed = await observe_record(
+        {
+            "type": "CNAME",
+            "name": "s1._domainkey.acme.com",
+            "value": "target.example.com",
+        }
+    )
+    assert observed is False
+
+
+@pytest.mark.asyncio
+async def test_resolve_mx_servfail_returns_empty_list_unchanged(
+    doh_client: AsyncMock,
+) -> None:
+    """resolve_mx's raise_on_error=True path keeps today's outward
+    behaviour: it never inspected Status before this fix (only
+    httpx/JSON errors raise), so a SERVFAIL response silently yields an
+    empty list, same as before — check_domain and verify already depend on
+    that (see _resolve's docstring)."""
+    doh_client.get = AsyncMock(return_value=_fake_response({"Status": 2, "Answer": []}))
+    assert await resolve_mx("acme.com") == []
+
+
+# --------------------------------------------------------------------------- #
 # detect_dns_provider — suffix table from the A3 spec
 # --------------------------------------------------------------------------- #
 
