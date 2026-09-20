@@ -177,6 +177,137 @@ func TestEmailDomain_List(t *testing.T) {
 	}
 }
 
+func sampleDnsCheckResponse(withProvider bool, dmarcPresent bool) client.EmailDomainDnsCheck {
+	cnameType := client.ObservedDnsRecordTypeCNAME
+	suggestedTxtType := client.DnsRecordSchemaTypeTXT
+	check := client.EmailDomainDnsCheck{
+		Zone: strPtr("acme.com"),
+		Records: []client.ObservedDnsRecord{
+			{
+				Type:     &cnameType,
+				Name:     "sel1._domainkey.acme.com",
+				Value:    "sel1.dkim.amazonses.com",
+				Observed: true,
+			},
+			{
+				Type:     &cnameType,
+				Name:     "sel2._domainkey.acme.com",
+				Value:    "sel2.dkim.amazonses.com",
+				Observed: false,
+			},
+		},
+		Dmarc: client.DmarcCheck{
+			Present: dmarcPresent,
+		},
+	}
+	if !dmarcPresent {
+		check.Dmarc.Suggested = &client.DnsRecordSchema{
+			Type:  &suggestedTxtType,
+			Name:  "_dmarc.acme.com",
+			Value: "v=DMARC1; p=none;",
+		}
+	}
+	if withProvider {
+		note := "Records tab is under DNS > Records."
+		check.DnsProvider = &client.DnsProviderSchema{
+			Id:     "cloudflare",
+			Name:   "Cloudflare",
+			DnsUrl: "https://dash.cloudflare.com",
+			Note:   &note,
+		}
+	}
+	return check
+}
+
+func TestEmailDomain_DnsCheck_Human(t *testing.T) {
+	srv := newFakeServer(t, http.StatusOK, sampleDnsCheckResponse(true, false))
+
+	id := "11111111-1111-1111-1111-111111111111"
+	stdout, _, err := runRoot(t,
+		map[string]string{"HAIL_API_KEY": "sk_test", "HAIL_API_URL": srv.URL},
+		"email", "domain", "dns-check", id,
+	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if srv.lastReq.URL.Path != "/v1/email-domains/"+id+"/dns-check" {
+		t.Fatalf("unexpected path: %s", srv.lastReq.URL.Path)
+	}
+	if srv.lastReq.Method != http.MethodGet {
+		t.Fatalf("expected GET, got %s", srv.lastReq.Method)
+	}
+	if !strings.Contains(stdout, "DNS host: Cloudflare — https://dash.cloudflare.com") {
+		t.Errorf("stdout missing dns host line: %q", stdout)
+	}
+	if !strings.Contains(stdout, "Records tab is under DNS > Records.") {
+		t.Errorf("stdout missing note: %q", stdout)
+	}
+	if !strings.Contains(stdout, "TYPE") || !strings.Contains(stdout, "SEEN") {
+		t.Errorf("stdout missing table header: %q", stdout)
+	}
+	seenFor := func(name string) string {
+		for _, line := range strings.Split(stdout, "\n") {
+			if strings.Contains(line, name) {
+				if f := strings.Fields(line); len(f) == 4 {
+					return f[3]
+				}
+			}
+		}
+		return ""
+	}
+	if got := seenFor("sel1._domainkey.acme.com"); got != "yes" {
+		t.Errorf("sel1 SEEN column = %q, want yes; stdout=%q", got, stdout)
+	}
+	if got := seenFor("sel2._domainkey.acme.com"); got != "no" {
+		t.Errorf("sel2 SEEN column = %q, want no; stdout=%q", got, stdout)
+	}
+	if !strings.Contains(stdout, `DMARC: not found — add TXT _dmarc.acme.com "v=DMARC1; p=none;"`) {
+		t.Errorf("stdout missing dmarc line: %q", stdout)
+	}
+}
+
+func TestEmailDomain_DnsCheck_NoProvider(t *testing.T) {
+	srv := newFakeServer(t, http.StatusOK, sampleDnsCheckResponse(false, true))
+
+	id := "11111111-1111-1111-1111-111111111111"
+	stdout, _, err := runRoot(t,
+		map[string]string{"HAIL_API_KEY": "sk_test", "HAIL_API_URL": srv.URL},
+		"email", "domain", "dns-check", id,
+	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(stdout, "DNS host: not recognised") {
+		t.Errorf("stdout missing not-recognised line: %q", stdout)
+	}
+	if !strings.Contains(stdout, "DMARC: found") {
+		t.Errorf("stdout missing dmarc found line: %q", stdout)
+	}
+}
+
+func TestEmailDomain_DnsCheck_JSON(t *testing.T) {
+	srv := newFakeServer(t, http.StatusOK, sampleDnsCheckResponse(true, false))
+
+	id := "11111111-1111-1111-1111-111111111111"
+	stdout, _, err := runRoot(t,
+		map[string]string{"HAIL_API_KEY": "sk_test", "HAIL_API_URL": srv.URL},
+		"--json", "email", "domain", "dns-check", id,
+	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	var body client.EmailDomainDnsCheck
+	if err := json.Unmarshal([]byte(stdout), &body); err != nil {
+		t.Fatalf("stdout not valid JSON: %v; raw=%s", err, stdout)
+	}
+	if body.DnsProvider == nil || body.DnsProvider.Id != "cloudflare" {
+		t.Fatalf("DnsProvider = %+v", body.DnsProvider)
+	}
+	if len(body.Records) != 2 {
+		t.Fatalf("Records len = %d", len(body.Records))
+	}
+}
+
 func TestEmailDomain_Verify(t *testing.T) {
 	verified := sampleEmailDomainResponse("custom")
 	verified.VerificationStatus = client.EmailDomainResponseVerificationStatusVerified

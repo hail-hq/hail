@@ -162,6 +162,60 @@ def make_email_domain_response(
     }
 
 
+_DNS_PROVIDER_UNSET = object()
+
+
+def make_dns_check_response(
+    *,
+    dns_provider: dict | None = _DNS_PROVIDER_UNSET,  # type: ignore[assignment]
+    zone: str | None = "acme.com",
+    records: list[dict] | None = None,
+    dmarc_present: bool = False,
+    dmarc_suggested: dict | None = None,
+) -> dict:
+    """Server-shaped JSON for an EmailDomainDnsCheck."""
+    if records is None:
+        records = [
+            {
+                "type": "CNAME",
+                "name": "sel1._domainkey.acme.com",
+                "value": "sel1.dkim.amazonses.com",
+                "priority": None,
+                "observed": True,
+            },
+            {
+                "type": "CNAME",
+                "name": "sel2._domainkey.acme.com",
+                "value": "sel2.dkim.amazonses.com",
+                "priority": None,
+                "observed": False,
+            },
+        ]
+    if not dmarc_present and dmarc_suggested is None:
+        dmarc_suggested = {
+            "type": "TXT",
+            "name": "_dmarc.acme.com",
+            "value": "v=DMARC1; p=none;",
+            "priority": None,
+        }
+    if dns_provider is _DNS_PROVIDER_UNSET:
+        dns_provider = {
+            "id": "cloudflare",
+            "name": "Cloudflare",
+            "dns_url": "https://dash.cloudflare.com",
+            "note": None,
+        }
+    return {
+        "dns_provider": dns_provider,
+        "zone": zone,
+        "records": records,
+        "dmarc": {
+            "present": dmarc_present,
+            "suggested": dmarc_suggested,
+        },
+    }
+
+
 def make_email_response(
     *,
     email_id: UUID | None = None,

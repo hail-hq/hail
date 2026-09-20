@@ -17,7 +17,7 @@ import (
 //
 // Self-hosters don't have the managed-cloud web console, so the CLI is
 // the only way for them to register a hail-mail row or a custom domain.
-// Subcommand verbs follow the API: register, list, get, verify, delete.
+// Subcommand verbs follow the API: register, list, get, verify, dns-check, delete.
 func newEmailDomainCmd(opts *Options) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "domain",
@@ -35,6 +35,7 @@ Two flavors of identity (POST body 'kind' field):
 	cmd.AddCommand(newEmailDomainListCmd(opts))
 	cmd.AddCommand(newEmailDomainGetCmd(opts))
 	cmd.AddCommand(newEmailDomainVerifyCmd(opts))
+	cmd.AddCommand(newEmailDomainDnsCheckCmd(opts))
 	cmd.AddCommand(newEmailDomainDeleteCmd(opts))
 	return cmd
 }
@@ -257,6 +258,49 @@ func runEmailDomainVerify(ctx context.Context, opts *Options, id uuid.UUID) erro
 }
 
 // --------------------------------------------------------------------------- //
+// dns-check
+// --------------------------------------------------------------------------- //
+
+func newEmailDomainDnsCheckCmd(opts *Options) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "dns-check <id>",
+		Short: "Guided DNS check: detect the DNS host and confirm published records (full UUID or 4+ char prefix)",
+		Args:  argsOrHelp(1, "<id>"),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			apiClient, err := opts.newClient()
+			if err != nil {
+				return err
+			}
+			id, err := resolveEmailDomainID(cmd.Context(), apiClient, args[0])
+			if err != nil {
+				return err
+			}
+			return runEmailDomainDnsCheck(cmd.Context(), opts, id)
+		},
+	}
+	return cmd
+}
+
+func runEmailDomainDnsCheck(ctx context.Context, opts *Options, id uuid.UUID) error {
+	apiClient, err := opts.newClient()
+	if err != nil {
+		return err
+	}
+	resp, err := apiClient.DnsCheckEmailDomainV1EmailDomainsDomainIdDnsCheckGetWithResponse(
+		ctx,
+		openapi_types.UUID(id),
+		&client.DnsCheckEmailDomainV1EmailDomainsDomainIdDnsCheckGetParams{},
+	)
+	if err != nil {
+		return fmt.Errorf("email-domain API: %w", err)
+	}
+	if resp.HTTPResponse.StatusCode != http.StatusOK || resp.JSON200 == nil {
+		return apiError(resp.HTTPResponse.StatusCode, resp.Body)
+	}
+	return printEmailDomainDnsCheck(opts, resp.JSON200)
+}
+
+// --------------------------------------------------------------------------- //
 // delete
 // --------------------------------------------------------------------------- //
 
@@ -335,6 +379,47 @@ func printEmailDomain(opts *Options, sd *client.EmailDomainResponse) error {
 			fmt.Fprintf(w, "    %s\t%s\t%s\n", typ, r.Name, r.Value)
 		}
 		_ = w.Flush()
+	}
+	return nil
+}
+
+func printEmailDomainDnsCheck(opts *Options, check *client.EmailDomainDnsCheck) error {
+	if opts.JSON {
+		return printJSON(opts.Stdout, check)
+	}
+	if check.DnsProvider == nil {
+		fmt.Fprintln(opts.Stdout, "DNS host: not recognised")
+	} else {
+		fmt.Fprintf(opts.Stdout, "DNS host: %s — %s\n", check.DnsProvider.Name, check.DnsProvider.DnsUrl)
+		if check.DnsProvider.Note != nil && *check.DnsProvider.Note != "" {
+			fmt.Fprintln(opts.Stdout, *check.DnsProvider.Note)
+		}
+	}
+
+	if len(check.Records) > 0 {
+		w := tabwriter.NewWriter(opts.Stdout, 0, 0, 2, ' ', 0)
+		fmt.Fprintln(w, "TYPE\tNAME\tVALUE\tSEEN")
+		for _, r := range check.Records {
+			typ := "CNAME"
+			if r.Type != nil {
+				typ = string(*r.Type)
+			}
+			seen := "no"
+			if r.Observed {
+				seen = "yes"
+			}
+			fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", typ, r.Name, r.Value, seen)
+		}
+		_ = w.Flush()
+	}
+
+	if check.Dmarc.Present {
+		fmt.Fprintln(opts.Stdout, "DMARC: found")
+	} else if check.Dmarc.Suggested != nil {
+		s := check.Dmarc.Suggested
+		fmt.Fprintf(opts.Stdout, "DMARC: not found — add TXT %s %q\n", s.Name, s.Value)
+	} else {
+		fmt.Fprintln(opts.Stdout, "DMARC: not found")
 	}
 	return nil
 }

@@ -41,6 +41,7 @@ from hail.models import (
     CallResponse,
     CallStatus,
     EmailAttachmentUploadResponse,
+    EmailDomainDnsCheck,
     EmailDomainListResponse,
     EmailDomainResponse,
     EmailListResponse,
@@ -516,6 +517,28 @@ class _EmailDomainsResource:
         did = str(domain_id)
         data = await self._http.request("POST", f"/email-domains/{did}/verify")
         return EmailDomainResponse.model_validate(data)
+
+    async def dns_check(self, domain_id: str | UUID) -> EmailDomainDnsCheck:
+        """Guided DNS check: detect the tenant's DNS host and confirm published records.
+
+        Read-only — runs live lookups against public DNS and never touches
+        ``verification_status``; SES stays the authority for that (see
+        :meth:`verify`). ``kind='hail_mail'`` rows do no DNS lookups at all —
+        the shared hail-mail domain has nothing for the tenant to publish.
+
+        Example::
+
+            check = await client.email_domains.dns_check(domain_id)
+            if check.dns_provider:
+                print(check.dns_provider.name, check.dns_provider.dns_url)
+            for record in check.records:
+                print(record.type, record.name, "seen" if record.observed else "missing")
+            if not check.dmarc.present:
+                print("suggested DMARC:", check.dmarc.suggested)
+        """
+        did = str(domain_id)
+        data = await self._http.request("GET", f"/email-domains/{did}/dns-check")
+        return EmailDomainDnsCheck.model_validate(data)
 
     async def patch(
         self,

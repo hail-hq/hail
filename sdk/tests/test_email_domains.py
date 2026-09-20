@@ -11,7 +11,7 @@ import respx
 from hail import Client, EmailDomainCreate, EmailDomainPatch
 from pydantic import ValidationError
 
-from tests.conftest import make_email_domain_response
+from tests.conftest import make_dns_check_response, make_email_domain_response
 
 # --------------------------------------------------------------------------- #
 # create
@@ -111,6 +111,63 @@ async def test_email_domains_list(base_url: str, api_key: str) -> None:
         resp = await c.email_domains.list(limit=25)
     assert len(resp.items) == 2
     assert route.calls.last.request.url.params["limit"] == "25"
+
+
+# --------------------------------------------------------------------------- #
+# dns_check
+# --------------------------------------------------------------------------- #
+
+
+@respx.mock
+async def test_email_domains_dns_check(base_url: str, api_key: str) -> None:
+    domain_id = "11111111-1111-1111-1111-111111111111"
+    payload = make_dns_check_response()
+    route = respx.get(f"{base_url}/email-domains/{domain_id}/dns-check").mock(
+        return_value=httpx.Response(200, json=payload)
+    )
+    async with Client(api_key=api_key, base_url=base_url) as c:
+        check = await c.email_domains.dns_check(domain_id)
+
+    assert route.calls.last.request.method == "GET"
+    assert check.zone == "acme.com"
+    assert check.dns_provider is not None
+    assert check.dns_provider.id == "cloudflare"
+    assert check.dns_provider.name == "Cloudflare"
+    assert check.dns_provider.dns_url == "https://dash.cloudflare.com"
+    assert check.dns_provider.note is None
+    assert len(check.records) == 2
+    assert check.records[0].name == "sel1._domainkey.acme.com"
+    assert check.records[0].observed is True
+    assert check.records[1].observed is False
+    assert check.dmarc.present is False
+    assert check.dmarc.suggested is not None
+    assert check.dmarc.suggested.name == "_dmarc.acme.com"
+    assert check.dmarc.suggested.value == "v=DMARC1; p=none;"
+
+
+@respx.mock
+async def test_email_domains_dns_check_no_provider_hail_mail(
+    base_url: str, api_key: str
+) -> None:
+    """kind='hail_mail' rows do no DNS lookups: provider/zone are null, no records."""
+    domain_id = "22222222-2222-2222-2222-222222222222"
+    payload = make_dns_check_response(
+        dns_provider=None,
+        zone=None,
+        records=[],
+        dmarc_present=True,
+    )
+    respx.get(f"{base_url}/email-domains/{domain_id}/dns-check").mock(
+        return_value=httpx.Response(200, json=payload)
+    )
+    async with Client(api_key=api_key, base_url=base_url) as c:
+        check = await c.email_domains.dns_check(domain_id)
+
+    assert check.dns_provider is None
+    assert check.zone is None
+    assert check.records == []
+    assert check.dmarc.present is True
+    assert check.dmarc.suggested is None
 
 
 # --------------------------------------------------------------------------- #

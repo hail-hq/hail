@@ -642,6 +642,41 @@ class EmailDomainListResponse(BaseModel):
     default_from: str | None = None
 
 
+class DnsProvider(BaseModel):
+    """A DNS host detected from a domain's nameservers, with its records UI."""
+
+    id: str
+    name: str
+    dns_url: str
+    note: str | None = None
+
+
+class ObservedDnsRecord(DnsRecord):
+    """One record from EmailDomainResponse.dns_records, with a live DNS observation.
+
+    ``observed`` means Hail saw this record in public DNS. It is not the
+    verification verdict — SES stays the authority for that.
+    """
+
+    observed: bool
+
+
+class DmarcCheck(BaseModel):
+    """Whether a DMARC record is published for the domain's zone."""
+
+    present: bool
+    suggested: DnsRecord | None = None
+
+
+class EmailDomainDnsCheck(BaseModel):
+    """Response for GET /email-domains/{id}/dns-check."""
+
+    dns_provider: DnsProvider | None = None
+    zone: str | None = None
+    records: list[ObservedDnsRecord]
+    dmarc: DmarcCheck
+
+
 class WhoamiResponse(BaseModel):
     """Who the API key belongs to — the answer ``client.whoami()`` gives.
 
@@ -708,11 +743,14 @@ __all__ = [
     "CallResponse",
     "CallStatus",
     "DkimRecord",
+    "DmarcCheck",
+    "DnsProvider",
     "DnsRecord",
     "EmailAttachmentResponse",
     "EmailAttachmentUploadResponse",
     "EmailCreate",
     "EmailDomainCreate",
+    "EmailDomainDnsCheck",
     "EmailDomainKind",
     "EmailDomainListResponse",
     "EmailDomainPatch",
@@ -725,6 +763,7 @@ __all__ = [
     "EventStreamResponse",
     "LLMConfig",
     "NumberType",
+    "ObservedDnsRecord",
     "PhoneNumberListResponse",
     "PhoneNumberResponse",
     "ProviderConfigEntry",
