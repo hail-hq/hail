@@ -1032,6 +1032,17 @@ class EmailDomainDnsCheck(BaseModel):
     dmarc: DmarcCheck = Field(
         description="Whether DMARC is published for this domain, and a suggested record if not."
     )
+    lookup_ok: bool = Field(
+        description=(
+            "True when every DNS lookup this check needed finished, "
+            "whatever it found. False when a lookup failed or the check "
+            "timed out — when false, dns_provider, zone, every record's "
+            "observed, and dmarc are not reliable and do not mean the "
+            "records are missing; retry later instead of telling the "
+            "customer to republish anything. Always true for kind="
+            "'hail_mail' rows, which run no lookups."
+        )
+    )
 
 
 class EmailDomainListResponse(BaseModel):

@@ -1402,6 +1402,9 @@ type EmailDomainDnsCheck struct {
 	// DnsProvider The DNS host detected from the domain's nameservers. Null when no known host matched, when the domain's zone could not be resolved, or for kind='hail_mail' rows.
 	DnsProvider *DnsProviderSchema `json:"dns_provider"`
 
+	// LookupOk True when every DNS lookup this check needed finished, whatever it found. False when a lookup failed or the check timed out — when false, dns_provider, zone, every record's observed, and dmarc are not reliable and do not mean the records are missing; retry later instead of telling the customer to republish anything. Always true for kind='hail_mail' rows, which run no lookups.
+	LookupOk bool `json:"lookup_ok"`
+
 	// Records The domain's dns_records, each annotated with whether Hail currently observes it in public DNS. Empty for kind='hail_mail' rows.
 	Records []ObservedDnsRecord `json:"records"`
 

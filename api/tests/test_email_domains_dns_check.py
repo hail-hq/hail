@@ -7,13 +7,14 @@ route imports them, so these tests never touch real DNS.
 
 from __future__ import annotations
 
+import asyncio
 import uuid
 from datetime import datetime, timezone
 
 import httpx
 import pytest
 from hailhq.api.routes import email_domains as email_domains_routes
-from hailhq.core.dns_lookup import DnsProvider
+from hailhq.core.dns_lookup import DnsLookupError, DnsProvider
 from hailhq.core.models import EmailDomain
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -102,10 +103,22 @@ def _patch_dns(
     nameservers: list[str] | None = None,
     provider: DnsProvider | None = CLOUDFLARE,
     observed: dict[str, bool] | None = None,
-    dmarc: bool = False,
+    dmarc: bool | set[str] = False,
 ) -> None:
+    """Wire up the four DNS helpers the route imports.
+
+    ``dmarc`` is either a bool (``True`` → present at the zone apex only,
+    matching the old single-name tests) or an explicit set of names that
+    have a ``v=DMARC1`` record — the route now calls ``dmarc_present`` once
+    for the sending domain and once for the zone (finding 5: RFC 7489
+    §6.6.3 checks the sending domain before falling back to the
+    organisational domain).
+    """
     nameservers = nameservers if nameservers is not None else ["ns1.cloudflare.com"]
     observed = observed if observed is not None else {"CNAME": True, "MX": False}
+    dmarc_names: set[str] = (
+        dmarc if isinstance(dmarc, set) else ({zone} if dmarc else set())
+    )
 
     async def _resolve_zone_ns(domain: str):
         return zone, nameservers
@@ -117,9 +130,8 @@ def _patch_dns(
     async def _observe_record(record: dict) -> bool:
         return observed.get(record["type"], False)
 
-    async def _dmarc_present(z: str) -> bool:
-        assert z == zone
-        return dmarc
+    async def _dmarc_present(name: str) -> bool:
+        return name in dmarc_names
 
     monkeypatch.setattr(email_domains_routes, "resolve_zone_ns", _resolve_zone_ns)
     monkeypatch.setattr(
@@ -168,6 +180,7 @@ async def test_dns_check_happy_path(
             "priority": None,
         },
     }
+    assert body["lookup_ok"] is True
 
 
 async def test_dns_check_no_known_provider(
@@ -239,6 +252,7 @@ async def test_dns_check_hail_mail_does_no_dns_lookups(
         "zone": None,
         "records": [],
         "dmarc": {"present": False, "suggested": None},
+        "lookup_ok": True,
     }
 
 
@@ -259,7 +273,9 @@ async def test_dns_check_dmarc_present_has_no_suggestion(
 
     resp = await client.get(f"/email-domains/{sd.id}/dns-check", headers=hdrs)
     assert resp.status_code == 200, resp.text
-    assert resp.json()["dmarc"] == {"present": True, "suggested": None}
+    body = resp.json()
+    assert body["dmarc"] == {"present": True, "suggested": None}
+    assert body["lookup_ok"] is True
 
 
 async def test_dns_check_dmarc_absent_suggests_p_none(
@@ -271,6 +287,64 @@ async def test_dns_check_dmarc_absent_suggests_p_none(
     org, hdrs = headers
     sd = await _make_custom_domain(async_session, org)
     _patch_dns(monkeypatch, dmarc=False)
+
+    resp = await client.get(f"/email-domains/{sd.id}/dns-check", headers=hdrs)
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["dmarc"] == {
+        "present": False,
+        "suggested": {
+            "type": "TXT",
+            "name": "_dmarc.acme.com",
+            "value": "v=DMARC1; p=none;",
+            "priority": None,
+        },
+    }
+    assert body["lookup_ok"] is True
+
+
+async def test_dns_check_dmarc_present_only_at_sending_domain(
+    client: httpx.AsyncClient,
+    headers: tuple,
+    async_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """RFC 7489 §6.6.3: a receiver checks _dmarc.<sending domain> before
+    falling back to the organisational domain. A record only at the
+    sending domain (not the zone apex) must still count as present."""
+    org, hdrs = headers
+    sd = await _make_custom_domain(async_session, org, domain="mail.acme.com")
+    _patch_dns(monkeypatch, zone="acme.com", dmarc={"mail.acme.com"})
+
+    resp = await client.get(f"/email-domains/{sd.id}/dns-check", headers=hdrs)
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["dmarc"] == {"present": True, "suggested": None}
+
+
+async def test_dns_check_dmarc_present_only_at_zone_apex(
+    client: httpx.AsyncClient,
+    headers: tuple,
+    async_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    org, hdrs = headers
+    sd = await _make_custom_domain(async_session, org, domain="mail.acme.com")
+    _patch_dns(monkeypatch, zone="acme.com", dmarc={"acme.com"})
+
+    resp = await client.get(f"/email-domains/{sd.id}/dns-check", headers=hdrs)
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["dmarc"] == {"present": True, "suggested": None}
+
+
+async def test_dns_check_dmarc_absent_at_both_names(
+    client: httpx.AsyncClient,
+    headers: tuple,
+    async_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    org, hdrs = headers
+    sd = await _make_custom_domain(async_session, org, domain="mail.acme.com")
+    _patch_dns(monkeypatch, zone="acme.com", dmarc=set())
 
     resp = await client.get(f"/email-domains/{sd.id}/dns-check", headers=hdrs)
     assert resp.status_code == 200, resp.text
@@ -322,3 +396,94 @@ async def test_dns_check_no_zone_returns_nulls(
     assert body["zone"] is None
     assert body["dns_provider"] is None
     assert body["dmarc"] == {"present": False, "suggested": None}
+    # A completed walk that simply found no NS answer is not a lookup
+    # failure — every lookup that ran, ran to completion.
+    assert body["lookup_ok"] is True
+
+
+# --------------------------------------------------------------------------- #
+# Lookup failure / deadline: degraded shape, never a 5xx (findings 1-3)
+# --------------------------------------------------------------------------- #
+
+
+async def test_dns_check_doh_failure_returns_degraded_shape(
+    client: httpx.AsyncClient,
+    headers: tuple,
+    async_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    org, hdrs = headers
+    sd = await _make_custom_domain(async_session, org)
+
+    async def _boom_zone(domain: str):
+        raise DnsLookupError("boom")
+
+    async def _boom_observe(record: dict) -> bool:
+        raise DnsLookupError("boom")
+
+    def _boom_detect(*args, **kwargs):
+        raise AssertionError("a failed lookup must not reach provider detection")
+
+    async def _boom_dmarc(*args, **kwargs):
+        raise AssertionError("a failed lookup must not reach DMARC lookup")
+
+    monkeypatch.setattr(email_domains_routes, "resolve_zone_ns", _boom_zone)
+    monkeypatch.setattr(email_domains_routes, "observe_record", _boom_observe)
+    monkeypatch.setattr(email_domains_routes, "detect_dns_provider", _boom_detect)
+    monkeypatch.setattr(email_domains_routes, "dmarc_present", _boom_dmarc)
+
+    resp = await client.get(f"/email-domains/{sd.id}/dns-check", headers=hdrs)
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["lookup_ok"] is False
+    assert body["dns_provider"] is None
+    assert body["zone"] is None
+    assert all(r["observed"] is False for r in body["records"])
+    assert len(body["records"]) == len(_RECORDS)
+    # No _dmarc.<public suffix> suggestion off unreliable data.
+    assert body["dmarc"] == {"present": False, "suggested": None}
+
+
+async def test_dns_check_deadline_returns_degraded_shape(
+    client: httpx.AsyncClient,
+    headers: tuple,
+    async_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    org, hdrs = headers
+    sd = await _make_custom_domain(async_session, org)
+    monkeypatch.setattr(email_domains_routes, "_DNS_CHECK_DEADLINE_S", 0.05)
+
+    async def _slow_zone(domain: str):
+        await asyncio.sleep(1)
+        return "acme.com", ["ns1.cloudflare.com"]
+
+    async def _slow_observe(record: dict) -> bool:
+        await asyncio.sleep(1)
+        return False
+
+    monkeypatch.setattr(email_domains_routes, "resolve_zone_ns", _slow_zone)
+    monkeypatch.setattr(email_domains_routes, "observe_record", _slow_observe)
+
+    resp = await client.get(f"/email-domains/{sd.id}/dns-check", headers=hdrs)
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["lookup_ok"] is False
+    assert body["dns_provider"] is None
+    assert body["zone"] is None
+    assert all(r["observed"] is False for r in body["records"])
+    assert body["dmarc"] == {"present": False, "suggested": None}
+
+
+async def test_dns_check_hail_mail_lookup_ok_true(
+    client: httpx.AsyncClient,
+    headers: tuple,
+    async_session: AsyncSession,
+) -> None:
+    """hail_mail rows run no lookups at all, so lookup_ok is trivially true."""
+    org, hdrs = headers
+    sd = await _make_hail_mail_domain(async_session, org)
+
+    resp = await client.get(f"/email-domains/{sd.id}/dns-check", headers=hdrs)
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["lookup_ok"] is True

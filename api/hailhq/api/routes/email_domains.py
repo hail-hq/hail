@@ -43,6 +43,7 @@ from hailhq.api.route_prefixes import request_mount_prefix
 from hailhq.core.config import settings
 from hailhq.core.db import get_session
 from hailhq.core.dns_lookup import (
+    DnsLookupError,
     custom_dns_records,
     detect_dns_provider,
     dmarc_present,
@@ -82,6 +83,12 @@ router = APIRouter(
 
 _DEFAULT_LIST_LIMIT = 50
 _MAX_LIST_LIMIT = 200
+
+# GET /{id}/dns-check: worst-case sequential cost is a ~4-label zone walk
+# (up to 4 x 5s DoH calls) plus two DMARC lookups, so bound the whole
+# lookup section well under the console's 10s poll interval for a pending
+# domain — a timeout degrades to lookup_ok=False, never a 5xx or a hang.
+_DNS_CHECK_DEADLINE_S = 10.0
 
 
 # --------------------------------------------------------------------------- #
@@ -565,56 +572,84 @@ async def dns_check_email_domain(
             zone=None,
             records=[],
             dmarc=DmarcCheck(present=False, suggested=None),
+            lookup_ok=True,
         )
 
-    # Zone resolution and per-record observation are independent of each
-    # other, so they run concurrently. DMARC needs the resolved zone, so it
-    # can only be looked up afterwards (and only when a zone was found).
-    (zone, nameservers), *observed_flags = await asyncio.gather(
-        resolve_zone_ns(sd.domain),
-        *(observe_record(record) for record in sd.dns_records),
-    )
-    records = [
-        ObservedDnsRecord(**record, observed=observed)
-        for record, observed in zip(sd.dns_records, observed_flags)
-    ]
+    try:
+        async with asyncio.timeout(_DNS_CHECK_DEADLINE_S):
+            # Zone resolution and per-record observation are independent
+            # of each other, so they run concurrently. DMARC needs the
+            # resolved zone, so it can only be looked up afterwards (and
+            # only when a zone was found).
+            (zone, nameservers), *observed_flags = await asyncio.gather(
+                resolve_zone_ns(sd.domain),
+                *(observe_record(record) for record in sd.dns_records),
+            )
+            records = [
+                ObservedDnsRecord(**record, observed=observed)
+                for record, observed in zip(sd.dns_records, observed_flags)
+            ]
 
-    if not zone:
-        # No zone → nowhere to point a provider link or a DMARC record at.
+            if not zone:
+                # No zone → nowhere to point a provider link or a DMARC
+                # record at. Every lookup that ran, ran to completion, so
+                # this is a genuine "not found", not a failure.
+                return EmailDomainDnsCheck(
+                    dns_provider=None,
+                    zone=None,
+                    records=records,
+                    dmarc=DmarcCheck(present=False, suggested=None),
+                    lookup_ok=True,
+                )
+
+            provider = detect_dns_provider(nameservers)
+            # RFC 7489 §6.6.3: a receiver checks _dmarc.<sending domain>
+            # before falling back to the organisational domain. DMARC
+            # counts as present when either answers; the suggestion still
+            # points at the zone apex.
+            dmarc_hits = await asyncio.gather(
+                dmarc_present(sd.domain), dmarc_present(zone)
+            )
+            dmarc_ok = any(dmarc_hits)
+            suggested = (
+                None
+                if dmarc_ok
+                else DnsRecordSchema(
+                    type="TXT",
+                    name=f"_dmarc.{zone}",
+                    value="v=DMARC1; p=none;",
+                    priority=None,
+                )
+            )
+            return EmailDomainDnsCheck(
+                dns_provider=(
+                    DnsProviderSchema(
+                        id=provider.id,
+                        name=provider.name,
+                        dns_url=provider.dns_url,
+                        note=provider.note,
+                    )
+                    if provider is not None
+                    else None
+                ),
+                zone=zone,
+                records=records,
+                dmarc=DmarcCheck(present=dmarc_ok, suggested=suggested),
+                lookup_ok=True,
+            )
+    except (DnsLookupError, TimeoutError):
+        # A lookup failed, or the whole section blew the deadline. Nothing
+        # looked up so far is reliable enough to tell the customer their
+        # records are missing — degrade instead of guessing or 5xx-ing.
         return EmailDomainDnsCheck(
             dns_provider=None,
             zone=None,
-            records=records,
+            records=[
+                ObservedDnsRecord(**record, observed=False) for record in sd.dns_records
+            ],
             dmarc=DmarcCheck(present=False, suggested=None),
+            lookup_ok=False,
         )
-
-    provider = detect_dns_provider(nameservers)
-    dmarc_ok = await dmarc_present(zone)
-    suggested = (
-        None
-        if dmarc_ok
-        else DnsRecordSchema(
-            type="TXT",
-            name=f"_dmarc.{zone}",
-            value="v=DMARC1; p=none;",
-            priority=None,
-        )
-    )
-    return EmailDomainDnsCheck(
-        dns_provider=(
-            DnsProviderSchema(
-                id=provider.id,
-                name=provider.name,
-                dns_url=provider.dns_url,
-                note=provider.note,
-            )
-            if provider is not None
-            else None
-        ),
-        zone=zone,
-        records=records,
-        dmarc=DmarcCheck(present=dmarc_ok, suggested=suggested),
-    )
 
 
 # --------------------------------------------------------------------------- #

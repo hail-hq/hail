@@ -3,6 +3,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import httpx
 import pytest
 from hailhq.core.dns_lookup import (
+    DnsLookupError,
     detect_dns_provider,
     dmarc_present,
     observe_record,
@@ -122,11 +123,32 @@ async def test_resolve_zone_ns_stops_before_querying_a_bare_tld(
 
 
 @pytest.mark.asyncio
-async def test_resolve_zone_ns_returns_empty_tuple_on_doh_error(
+async def test_resolve_zone_ns_raises_dns_lookup_error_on_doh_failure(
     doh_client: AsyncMock,
 ) -> None:
+    """A lookup failure is not "no answer" — it must not resolve to a zone."""
     doh_client.get = AsyncMock(side_effect=httpx.ConnectError("boom"))
-    assert await resolve_zone_ns("mail.example.com") == ("", [])
+    with pytest.raises(DnsLookupError):
+        await resolve_zone_ns("mail.example.com")
+
+
+@pytest.mark.asyncio
+async def test_resolve_zone_ns_aborts_on_first_lookup_failure_without_climbing(
+    doh_client: AsyncMock,
+) -> None:
+    """A transient DoH failure on the first NS query must abort the walk,
+    not be treated as "no answer" and retried one label up. Regression for:
+    a failed NS query on acme.co.uk must never fall through to co.uk."""
+    calls: list[str] = []
+
+    async def fake_get(url: str, params: dict[str, str]) -> AsyncMock:
+        calls.append(params["name"])
+        raise httpx.ConnectError("boom")
+
+    doh_client.get = AsyncMock(side_effect=fake_get)
+    with pytest.raises(DnsLookupError):
+        await resolve_zone_ns("acme.co.uk")
+    assert calls == ["acme.co.uk"]
 
 
 # --------------------------------------------------------------------------- #
@@ -204,6 +226,21 @@ def test_detect_dns_provider_ionos_fragment_anchored_at_label_boundary() -> None
     """The ui-dns fragment must anchor on a label start (".ui-dns.") so it
     cannot match mid-label — only real IONOS-shaped nameservers qualify."""
     assert detect_dns_provider(["ns1.notui-dns.com"]) is None
+
+
+def test_detect_dns_provider_vercel_dns_url_points_at_domains_page() -> None:
+    """Finding 6: not the generic dashboard landing page."""
+    provider = detect_dns_provider(["ns1.vercel-dns.com"])
+    assert provider is not None
+    assert provider.dns_url == "https://vercel.com/dashboard/domains"
+
+
+def test_detect_dns_provider_porkbun_dns_url_is_the_login_page() -> None:
+    """Finding 6: the deep-link URL could not be verified against
+    Porkbun's own docs, so this falls back to the login page."""
+    provider = detect_dns_provider(["curitiba.ns.porkbun.com"])
+    assert provider is not None
+    assert provider.dns_url == "https://porkbun.com/account/login"
 
 
 def test_detect_dns_provider_google_cloud_dns_returns_none() -> None:
@@ -315,18 +352,18 @@ async def test_observe_record_txt_no_match(doh_client: AsyncMock) -> None:
 
 
 @pytest.mark.asyncio
-async def test_observe_record_returns_false_on_doh_error(
+async def test_observe_record_raises_dns_lookup_error_on_doh_failure(
     doh_client: AsyncMock,
 ) -> None:
     doh_client.get = AsyncMock(side_effect=httpx.ConnectError("boom"))
-    observed = await observe_record(
-        {
-            "type": "CNAME",
-            "name": "s1._domainkey.acme.com",
-            "value": "target.example.com",
-        }
-    )
-    assert observed is False
+    with pytest.raises(DnsLookupError):
+        await observe_record(
+            {
+                "type": "CNAME",
+                "name": "s1._domainkey.acme.com",
+                "value": "target.example.com",
+            }
+        )
 
 
 @pytest.mark.asyncio
@@ -359,6 +396,9 @@ async def test_dmarc_present_false_when_absent(doh_client: AsyncMock) -> None:
 
 
 @pytest.mark.asyncio
-async def test_dmarc_present_false_on_doh_error(doh_client: AsyncMock) -> None:
+async def test_dmarc_present_raises_dns_lookup_error_on_doh_failure(
+    doh_client: AsyncMock,
+) -> None:
     doh_client.get = AsyncMock(side_effect=httpx.ConnectError("boom"))
-    assert await dmarc_present("acme.com") is False
+    with pytest.raises(DnsLookupError):
+        await dmarc_present("acme.com")

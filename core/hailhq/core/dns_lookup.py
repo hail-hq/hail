@@ -28,25 +28,42 @@ def ses_inbound_host(region: str) -> str:
     return f"inbound-smtp.{region}.amazonaws.com"
 
 
+class DnsLookupError(Exception):
+    """A DoH lookup failed (transport error or unparseable response).
+
+    Raised by ``_resolve`` to every caller except ``resolve_mx``, so a
+    lookup failure can be told apart from "no answer": ``resolve_zone_ns``
+    aborts its zone walk on this instead of treating the failure as an
+    empty NS answer and climbing to the wrong zone, and
+    ``dns_check_email_domain`` (the only external catcher) turns it into a
+    degraded response (``lookup_ok=False``) instead of a 5xx. ``resolve_mx``
+    is unaffected — it still raises the raw
+    ``httpx.HTTPError``/``ValueError`` via ``raise_on_error=True``.
+    """
+
+
 async def _resolve(name: str, rtype: str, *, raise_on_error: bool = False) -> list[str]:
     """Shared DoH call. Returns raw ``Answer[].data`` strings for ``rtype``.
 
-    On any httpx/JSON error this returns ``[]`` — callers such as
-    ``resolve_zone_ns``, ``observe_record`` and ``dmarc_present`` must never
-    raise on a DoH failure. ``resolve_mx`` passes ``raise_on_error=True`` to
-    keep its pre-existing behaviour: its callers (``check_domain``, which
-    lets the error 500, and ``verify``, which catches ``Exception`` itself
-    to degrade ``receive_ready`` to ``None``) already depend on it raising.
+    ``resolve_mx`` passes ``raise_on_error=True`` to keep its pre-existing
+    behaviour: on any httpx/JSON error it re-raises the raw error unchanged
+    — its callers (``check_domain``, which lets the error 500, and
+    ``verify``, which catches ``Exception`` itself to degrade
+    ``receive_ready`` to ``None``) already depend on that. Every other
+    caller gets ``DnsLookupError`` instead of a silently swallowed ``[]`` —
+    swallowing a transient failure as "no answer" is what let
+    ``resolve_zone_ns`` mistake a failed NS query for an empty one and keep
+    climbing to the wrong zone.
     """
     try:
         async with httpx.AsyncClient(timeout=5.0) as client:
             resp = await client.get(_DOH_URL, params={"name": name, "type": rtype})
             resp.raise_for_status()
             data = resp.json()
-    except (httpx.HTTPError, ValueError):
+    except (httpx.HTTPError, ValueError) as exc:
         if raise_on_error:
             raise
-        return []
+        raise DnsLookupError(f"DoH lookup failed for {rtype} {name}") from exc
     type_number = _TYPE_NUMBERS.get(rtype.upper())
     return [
         str(answer.get("data", ""))
@@ -95,8 +112,14 @@ async def resolve_zone_ns(domain: str) -> tuple[str, list[str]]:
     An NS query on a non-apex name returns no ``Answer`` (only an
     ``Authority`` SOA), so this strips the left label and retries until an
     NS answer comes back. Stops before querying a bare TLD (a name with no
-    dot). Returns ``("", [])`` if no NS answer is found (including on a DoH
-    failure, since ``_resolve`` swallows those by default).
+    dot). Returns ``("", [])`` if every label up to the TLD gave a genuine
+    "no answer".
+
+    Raises ``DnsLookupError`` (propagated from ``_resolve``, uncaught here)
+    the moment any single NS query fails — the walk aborts immediately
+    rather than treating the failure as "no answer" and climbing to the
+    next label up, which would report the wrong zone (e.g. a failed lookup
+    on ``acme.co.uk`` must never fall through to ``co.uk``).
     """
     name = domain.strip().lower().rstrip(".")
     while "." in name:
@@ -187,7 +210,11 @@ _PROVIDER_TABLE: list[tuple[DnsProvider, tuple[str, ...], tuple[str, ...]]] = [
         DnsProvider(
             id="vercel",
             name="Vercel",
-            dns_url="https://vercel.com/dashboard",
+            # Verified: https://vercel.com/docs/domains/managing-dns-records
+            # links this exact URL for "manage nameservers from the domains
+            # page" — a real Vercel DNS-records destination, not a generic
+            # dashboard landing page.
+            dns_url="https://vercel.com/dashboard/domains",
             note=None,
         ),
         ("vercel-dns.com",),
@@ -237,7 +264,11 @@ _PROVIDER_TABLE: list[tuple[DnsProvider, tuple[str, ...], tuple[str, ...]]] = [
         DnsProvider(
             id="porkbun",
             name="Porkbun",
-            dns_url="https://porkbun.com/",
+            # porkbun.com/account/domainsSpeedy could not be verified
+            # against Porkbun's own docs/KB (kb.porkbun.com), and fetching
+            # it directly only redirects to login — so this points at the
+            # login page instead of an unverified deep link.
+            dns_url="https://porkbun.com/account/login",
             note=None,
         ),
         ("porkbun.com",),
@@ -294,8 +325,12 @@ async def observe_record(record: dict[str, Any]) -> bool:
     ``value``. CNAME matches when the answer target equals ``value``; MX
     when ``value`` is among the MX hosts; TXT when ``value`` equals one of
     the (unquoted, chunk-joined) TXT strings. Host comparisons are
-    case-insensitive and ignore trailing dots and surrounding quotes. Never
-    raises — a DoH failure reports ``False``, same as "not observed".
+    case-insensitive and ignore trailing dots and surrounding quotes.
+
+    Raises ``DnsLookupError`` (propagated from ``_resolve``, uncaught here)
+    on a DoH failure — the caller (the dns-check route) decides how to
+    degrade, rather than this function silently reporting "not observed"
+    for what may actually be a transient lookup failure.
     """
     rtype = str(record.get("type", "")).upper()
     name = str(record.get("name", ""))
@@ -315,9 +350,17 @@ async def observe_record(record: dict[str, Any]) -> bool:
     return False
 
 
-async def dmarc_present(zone: str) -> bool:
-    """Is there a TXT record at ``_dmarc.<zone>`` starting ``v=DMARC1``?"""
-    answers = await _resolve(f"_dmarc.{zone}", "TXT")
+async def dmarc_present(name: str) -> bool:
+    """Is there a TXT record at ``_dmarc.<name>`` starting ``v=DMARC1``?
+
+    ``name`` is either the sending domain or its zone apex — per RFC 7489
+    §6.6.3 a receiver checks ``_dmarc.<sending domain>`` before falling back
+    to the organisational domain, so the dns-check route calls this once
+    for each and treats DMARC as present if either answers. Raises
+    ``DnsLookupError`` (propagated from ``_resolve``, uncaught here) on a
+    DoH failure.
+    """
+    answers = await _resolve(f"_dmarc.{name}", "TXT")
     return any(_unquote_txt(a).startswith("v=DMARC1") for a in answers)
 
 
