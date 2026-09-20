@@ -172,6 +172,7 @@ def make_dns_check_response(
     records: list[dict] | None = None,
     dmarc_present: bool = False,
     dmarc_suggested: dict | None = None,
+    lookup_ok: bool = True,
 ) -> dict:
     """Server-shaped JSON for an EmailDomainDnsCheck."""
     if records is None:
@@ -213,6 +214,7 @@ def make_dns_check_response(
             "present": dmarc_present,
             "suggested": dmarc_suggested,
         },
+        "lookup_ok": lookup_ok,
     }
 
 

@@ -143,6 +143,7 @@ async def test_email_domains_dns_check(base_url: str, api_key: str) -> None:
     assert check.dmarc.suggested is not None
     assert check.dmarc.suggested.name == "_dmarc.acme.com"
     assert check.dmarc.suggested.value == "v=DMARC1; p=none;"
+    assert check.lookup_ok is True
 
 
 @respx.mock
@@ -167,6 +168,45 @@ async def test_email_domains_dns_check_no_provider_hail_mail(
     assert check.zone is None
     assert check.records == []
     assert check.dmarc.present is True
+    assert check.dmarc.suggested is None
+    assert check.lookup_ok is True
+
+
+@respx.mock
+async def test_email_domains_dns_check_degraded_shape_on_lookup_failure(
+    base_url: str, api_key: str
+) -> None:
+    """lookup_ok=False means dns_provider/zone/observed/dmarc are unreliable."""
+    domain_id = "33333333-3333-3333-3333-333333333333"
+    # Built directly, not via make_dns_check_response: that helper always
+    # fills in a default DMARC suggestion when dmarc_present is False, but
+    # the degraded shape must not suggest a record off unreliable data.
+    payload = {
+        "dns_provider": None,
+        "zone": None,
+        "records": [
+            {
+                "type": "CNAME",
+                "name": "sel1._domainkey.acme.com",
+                "value": "sel1.dkim.amazonses.com",
+                "priority": None,
+                "observed": False,
+            },
+        ],
+        "dmarc": {"present": False, "suggested": None},
+        "lookup_ok": False,
+    }
+    respx.get(f"{base_url}/email-domains/{domain_id}/dns-check").mock(
+        return_value=httpx.Response(200, json=payload)
+    )
+    async with Client(api_key=api_key, base_url=base_url) as c:
+        check = await c.email_domains.dns_check(domain_id)
+
+    assert check.lookup_ok is False
+    assert check.dns_provider is None
+    assert check.zone is None
+    assert check.records[0].observed is False
+    assert check.dmarc.present is False
     assert check.dmarc.suggested is None
 
 

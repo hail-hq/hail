@@ -1,14 +1,14 @@
 # react-email
 
-Hail sends the HTML body exactly as given — a full
-`<!DOCTYPE html>…</html>` document from a [react-email](https://react.email)
-render passes through unchanged. Render your template, then send the result
-to POST /v1/emails.
+Hail doesn't render React or store templates — you render a
+[react-email](https://react.email) component to a string and send that
+string. The body goes out exactly as given: a full
+`<!DOCTYPE html>…</html>` document passes through unchanged.
 
 ## Render the template
 
 ```bash
-npm install react-email -E
+npm install react-email react react-dom -E
 ```
 
 ```tsx

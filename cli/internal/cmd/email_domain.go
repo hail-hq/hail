@@ -387,6 +387,22 @@ func printEmailDomainDnsCheck(opts *Options, check *client.EmailDomainDnsCheck) 
 	if opts.JSON {
 		return printJSON(opts.Stdout, check)
 	}
+
+	if !check.LookupOk {
+		// A lookup failed or the check timed out: dns_provider, zone,
+		// every record's observed, and dmarc are not reliable. Don't
+		// print any of it — printing "not found"/"not observed" would
+		// tell the customer their records are missing when Hail simply
+		// couldn't check.
+		fmt.Fprintln(opts.Stdout, "DNS check could not be completed. Try again in a minute.")
+		return nil
+	}
+
+	// A hail_mail row: no zone was ever looked up. That domain is Hail's,
+	// not the customer's, so a "DMARC: not found" line would point them at
+	// the wrong DNS zone.
+	isHailMail := len(check.Records) == 0 && check.Zone == nil
+
 	if check.DnsProvider == nil {
 		fmt.Fprintln(opts.Stdout, "DNS host: not recognised")
 	} else {
@@ -411,6 +427,10 @@ func printEmailDomainDnsCheck(opts *Options, check *client.EmailDomainDnsCheck) 
 			fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", typ, r.Name, r.Value, seen)
 		}
 		_ = w.Flush()
+	}
+
+	if isHailMail {
+		return nil
 	}
 
 	if check.Dmarc.Present {

@@ -181,7 +181,8 @@ func sampleDnsCheckResponse(withProvider bool, dmarcPresent bool) client.EmailDo
 	cnameType := client.ObservedDnsRecordTypeCNAME
 	suggestedTxtType := client.DnsRecordSchemaTypeTXT
 	check := client.EmailDomainDnsCheck{
-		Zone: strPtr("acme.com"),
+		Zone:     strPtr("acme.com"),
+		LookupOk: true,
 		Records: []client.ObservedDnsRecord{
 			{
 				Type:     &cnameType,
@@ -305,6 +306,72 @@ func TestEmailDomain_DnsCheck_JSON(t *testing.T) {
 	}
 	if len(body.Records) != 2 {
 		t.Fatalf("Records len = %d", len(body.Records))
+	}
+}
+
+func TestEmailDomain_DnsCheck_HailMail(t *testing.T) {
+	check := client.EmailDomainDnsCheck{
+		Zone:     nil,
+		LookupOk: true,
+		Records:  []client.ObservedDnsRecord{},
+		Dmarc:    client.DmarcCheck{Present: false, Suggested: nil},
+	}
+	srv := newFakeServer(t, http.StatusOK, check)
+
+	id := "11111111-1111-1111-1111-111111111111"
+	stdout, _, err := runRoot(t,
+		map[string]string{"HAIL_API_KEY": "sk_test", "HAIL_API_URL": srv.URL},
+		"email", "domain", "dns-check", id,
+	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if stdout != "DNS host: not recognised\n" {
+		t.Fatalf("stdout = %q, want exactly the not-recognised line and nothing else", stdout)
+	}
+}
+
+func TestEmailDomain_DnsCheck_LookupNotOk(t *testing.T) {
+	check := sampleDnsCheckResponse(true, false)
+	check.LookupOk = false
+	srv := newFakeServer(t, http.StatusOK, check)
+
+	id := "11111111-1111-1111-1111-111111111111"
+	stdout, _, err := runRoot(t,
+		map[string]string{"HAIL_API_KEY": "sk_test", "HAIL_API_URL": srv.URL},
+		"email", "domain", "dns-check", id,
+	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	want := "DNS check could not be completed. Try again in a minute.\n"
+	if stdout != want {
+		t.Fatalf("stdout = %q, want exactly %q", stdout, want)
+	}
+}
+
+func TestEmailDomain_DnsCheck_LookupNotOk_JSONPrintsBodyAsIs(t *testing.T) {
+	check := sampleDnsCheckResponse(true, false)
+	check.LookupOk = false
+	srv := newFakeServer(t, http.StatusOK, check)
+
+	id := "11111111-1111-1111-1111-111111111111"
+	stdout, _, err := runRoot(t,
+		map[string]string{"HAIL_API_KEY": "sk_test", "HAIL_API_URL": srv.URL},
+		"--json", "email", "domain", "dns-check", id,
+	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	var body client.EmailDomainDnsCheck
+	if err := json.Unmarshal([]byte(stdout), &body); err != nil {
+		t.Fatalf("stdout not valid JSON: %v; raw=%s", err, stdout)
+	}
+	if body.LookupOk {
+		t.Fatalf("LookupOk = true, want false (body printed as-is)")
+	}
+	if body.DnsProvider == nil || body.DnsProvider.Id != "cloudflare" {
+		t.Fatalf("DnsProvider = %+v, want the raw body unchanged", body.DnsProvider)
 	}
 }
 

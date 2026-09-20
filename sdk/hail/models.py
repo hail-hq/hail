@@ -669,12 +669,20 @@ class DmarcCheck(BaseModel):
 
 
 class EmailDomainDnsCheck(BaseModel):
-    """Response for GET /email-domains/{id}/dns-check."""
+    """Response for GET /email-domains/{id}/dns-check.
+
+    ``lookup_ok`` is ``True`` when every DNS lookup this check needed
+    finished, whatever it found. ``False`` means a lookup failed or the
+    check timed out — ``dns_provider``, ``zone``, every record's
+    ``observed``, and ``dmarc`` are then not reliable and do not mean the
+    records are missing.
+    """
 
     dns_provider: DnsProvider | None = None
     zone: str | None = None
     records: list[ObservedDnsRecord]
     dmarc: DmarcCheck
+    lookup_ok: bool
 
 
 class WhoamiResponse(BaseModel):
