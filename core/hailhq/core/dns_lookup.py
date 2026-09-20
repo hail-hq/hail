@@ -117,11 +117,22 @@ class DnsProvider:
 
 
 # Suffix table per docs/superpowers/specs/2026-09-19-email-unbranded-react-domains-tracking-design.md
-# section A3. Matched as a substring against each (lowercased, trailing-dot-
-# stripped) nameserver — a plain suffix for most hosts, and a mid-hostname
-# fragment for Route 53 (`.awsdns-`) and IONOS (`ui-dns.`), whose
-# nameservers vary the characters that follow.
-_PROVIDER_TABLE: list[tuple[DnsProvider, tuple[str, ...]]] = [
+# section A3, matched against each (lowercased, trailing-dot-stripped)
+# nameserver. Two distinct match kinds, kept in separate fields so a suffix
+# can never silently be checked as a substring:
+#   - suffixes: the nameserver must equal the token or end with "." + token
+#     (a true DNS-label suffix, e.g. "domaincontrol.com").
+#   - fragments: the token is checked as a raw substring. Only for hosts
+#     whose nameservers vary the characters *after* the token — Route 53
+#     ("ns-123.awsdns-45.org") and IONOS ("ns1234.ui-dns.com/.de/.org/.biz").
+#     Both fragments are written with a leading/trailing dot so they can
+#     only match on a label boundary, not mid-label.
+#
+# No entry for Google: legacy Google Domains and Google Cloud DNS both hand
+# out ns-cloud-*.googledomains.com nameservers, so the suffix can't tell
+# them apart, and a Google Cloud DNS customer manages DNS in GCP, not
+# Squarespace. See test_detect_dns_provider_google_cloud_dns_returns_none.
+_PROVIDER_TABLE: list[tuple[DnsProvider, tuple[str, ...], tuple[str, ...]]] = [
     (
         DnsProvider(
             id="cloudflare",
@@ -130,6 +141,7 @@ _PROVIDER_TABLE: list[tuple[DnsProvider, tuple[str, ...]]] = [
             note="Set Proxy status to DNS only for every CNAME.",
         ),
         ("ns.cloudflare.com",),
+        (),
     ),
     (
         DnsProvider(
@@ -139,6 +151,7 @@ _PROVIDER_TABLE: list[tuple[DnsProvider, tuple[str, ...]]] = [
             note=None,
         ),
         ("domaincontrol.com",),
+        (),
     ),
     (
         DnsProvider(
@@ -148,6 +161,7 @@ _PROVIDER_TABLE: list[tuple[DnsProvider, tuple[str, ...]]] = [
             note=None,
         ),
         ("registrar-servers.com",),
+        (),
     ),
     (
         DnsProvider(
@@ -156,16 +170,8 @@ _PROVIDER_TABLE: list[tuple[DnsProvider, tuple[str, ...]]] = [
             dns_url="https://console.aws.amazon.com/route53/",
             note=None,
         ),
+        (),
         (".awsdns-",),
-    ),
-    (
-        DnsProvider(
-            id="google",
-            name="Google Domains",
-            dns_url="https://domains.squarespace.com/google-domains/",
-            note=None,
-        ),
-        ("googledomains.com", "google.com"),
     ),
     (
         DnsProvider(
@@ -175,6 +181,7 @@ _PROVIDER_TABLE: list[tuple[DnsProvider, tuple[str, ...]]] = [
             note=None,
         ),
         ("squarespacedns.com",),
+        (),
     ),
     (
         DnsProvider(
@@ -184,6 +191,7 @@ _PROVIDER_TABLE: list[tuple[DnsProvider, tuple[str, ...]]] = [
             note=None,
         ),
         ("vercel-dns.com",),
+        (),
     ),
     (
         DnsProvider(
@@ -193,6 +201,7 @@ _PROVIDER_TABLE: list[tuple[DnsProvider, tuple[str, ...]]] = [
             note=None,
         ),
         ("digitalocean.com",),
+        (),
     ),
     (
         DnsProvider(
@@ -201,7 +210,8 @@ _PROVIDER_TABLE: list[tuple[DnsProvider, tuple[str, ...]]] = [
             dns_url="https://my.ionos.com/domains",
             note=None,
         ),
-        ("ui-dns.",),
+        (),
+        (".ui-dns.",),
     ),
     (
         DnsProvider(
@@ -211,6 +221,7 @@ _PROVIDER_TABLE: list[tuple[DnsProvider, tuple[str, ...]]] = [
             note=None,
         ),
         ("hover.com",),
+        (),
     ),
     (
         DnsProvider(
@@ -220,6 +231,7 @@ _PROVIDER_TABLE: list[tuple[DnsProvider, tuple[str, ...]]] = [
             note=None,
         ),
         ("name.com",),
+        (),
     ),
     (
         DnsProvider(
@@ -229,6 +241,7 @@ _PROVIDER_TABLE: list[tuple[DnsProvider, tuple[str, ...]]] = [
             note=None,
         ),
         ("porkbun.com",),
+        (),
     ),
     (
         DnsProvider(
@@ -238,6 +251,7 @@ _PROVIDER_TABLE: list[tuple[DnsProvider, tuple[str, ...]]] = [
             note=None,
         ),
         ("gandi.net",),
+        (),
     ),
     (
         DnsProvider(
@@ -247,8 +261,14 @@ _PROVIDER_TABLE: list[tuple[DnsProvider, tuple[str, ...]]] = [
             note=None,
         ),
         ("ovh.net",),
+        (),
     ),
 ]
+
+
+def _matches_suffix(ns: str, suffix: str) -> bool:
+    """True DNS-label suffix match: exact, or preceded by a label boundary."""
+    return ns == suffix or ns.endswith("." + suffix)
 
 
 def detect_dns_provider(nameservers: list[str]) -> DnsProvider | None:
@@ -258,9 +278,12 @@ def detect_dns_provider(nameservers: list[str]) -> DnsProvider | None:
     nameserver matches any known host.
     """
     normalized = [_norm_host(ns) for ns in nameservers]
-    for provider, tokens in _PROVIDER_TABLE:
-        if any(token in ns for ns in normalized for token in tokens):
-            return provider
+    for provider, suffixes, fragments in _PROVIDER_TABLE:
+        for ns in normalized:
+            if any(_matches_suffix(ns, suffix) for suffix in suffixes) or any(
+                fragment in ns for fragment in fragments
+            ):
+                return provider
     return None
 
 

@@ -141,13 +141,11 @@ async def test_resolve_zone_ns_returns_empty_tuple_on_doh_error(
         ("godaddy", "ns15.domaincontrol.com"),
         ("namecheap", "dns1.registrar-servers.com"),
         ("route53", "ns-123.awsdns-45.org"),
-        ("google", "ns-cloud-a1.googledomains.com"),
-        ("google", "ns1.google.com"),
         ("squarespace", "ns1.squarespacedns.com"),
         ("vercel", "ns1.vercel-dns.com"),
         ("digitalocean", "ns1.digitalocean.com"),
         ("ionos", "ns1067.ui-dns.com"),
-        ("ionos", "ns1067.ui-dns.de"),
+        ("ionos", "ns1045.ui-dns.de"),
         ("hover", "ns1.hover.com"),
         ("namecom", "ns1.name.com"),
         ("porkbun", "curitiba.ns.porkbun.com"),
@@ -181,6 +179,42 @@ def test_detect_dns_provider_non_cloudflare_has_no_note() -> None:
     provider = detect_dns_provider(["ns15.domaincontrol.com"])
     assert provider is not None
     assert provider.note is None
+
+
+def test_detect_dns_provider_suffix_does_not_match_as_bare_substring() -> None:
+    """ "hover.com" must match as a suffix, not anywhere in the nameserver —
+    ns1.hover.company.com is a different (unknown) domain, not Hover."""
+    assert detect_dns_provider(["ns.hover.company.com"]) is None
+
+
+def test_detect_dns_provider_suffix_does_not_match_a_different_tail() -> None:
+    """hover.com followed by more labels is not a match for the Hover suffix."""
+    assert detect_dns_provider(["hover.com.evil.net"]) is None
+
+
+def test_detect_dns_provider_suffix_matches_case_and_trailing_dot_insensitively() -> (
+    None
+):
+    provider = detect_dns_provider(["NS1.HOVER.COM."])
+    assert provider is not None
+    assert provider.id == "hover"
+
+
+def test_detect_dns_provider_ionos_fragment_anchored_at_label_boundary() -> None:
+    """The ui-dns fragment must anchor on a label start (".ui-dns.") so it
+    cannot match mid-label — only real IONOS-shaped nameservers qualify."""
+    assert detect_dns_provider(["ns1.notui-dns.com"]) is None
+
+
+def test_detect_dns_provider_google_cloud_dns_returns_none() -> None:
+    """Legacy Google Domains and Google Cloud DNS both hand out
+    ns-cloud-*.googledomains.com nameservers, so this suffix cannot tell
+    them apart — Google Cloud DNS customers manage DNS in GCP, not
+    Squarespace, so the table has no Google entry and this must be None."""
+    provider = detect_dns_provider(
+        ["ns-cloud-a1.googledomains.com", "ns-cloud-a2.googledomains.com"]
+    )
+    assert provider is None
 
 
 # --------------------------------------------------------------------------- #
