@@ -1,39 +1,301 @@
 """DNS lookups over DNS-over-HTTPS (no resolver dependency).
 
 Used to (a) detect whether a domain already receives mail elsewhere
-(Google/Outlook) so onboarding can pick apex vs a prefix, and (b) confirm a
-domain's receive MX points at SES inbound after the user publishes DNS.
+(Google/Outlook) so onboarding can pick apex vs a prefix, (b) confirm a
+domain's receive MX points at SES inbound after the user publishes DNS, and
+(c) power the guided DNS-check route: find the customer's DNS host, and
+report which of the records we asked them to publish are already visible in
+public DNS.
 """
 
 from __future__ import annotations
+
+import re
+from dataclasses import dataclass
+from typing import Any
 
 import httpx
 from hailhq.core.config import settings
 from hailhq.core.providers.email import DkimRecord
 
 _DOH_URL = "https://dns.google/resolve"
-_MX_TYPE = 15
+
+# Google DoH numeric record types. https://developers.google.com/speed/public-dns/docs/doh/json
+_TYPE_NUMBERS: dict[str, int] = {"NS": 2, "CNAME": 5, "MX": 15, "TXT": 16}
 
 
 def ses_inbound_host(region: str) -> str:
     return f"inbound-smtp.{region}.amazonaws.com"
 
 
+async def _resolve(name: str, rtype: str, *, raise_on_error: bool = False) -> list[str]:
+    """Shared DoH call. Returns raw ``Answer[].data`` strings for ``rtype``.
+
+    On any httpx/JSON error this returns ``[]`` — callers such as
+    ``resolve_zone_ns``, ``observe_record`` and ``dmarc_present`` must never
+    raise on a DoH failure. ``resolve_mx`` passes ``raise_on_error=True`` to
+    keep its pre-existing behaviour: its callers (``check_domain``, which
+    lets the error 500, and ``verify``, which catches ``Exception`` itself
+    to degrade ``receive_ready`` to ``None``) already depend on it raising.
+    """
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            resp = await client.get(_DOH_URL, params={"name": name, "type": rtype})
+            resp.raise_for_status()
+            data = resp.json()
+    except (httpx.HTTPError, ValueError):
+        if raise_on_error:
+            raise
+        return []
+    type_number = _TYPE_NUMBERS.get(rtype.upper())
+    return [
+        str(answer.get("data", ""))
+        for answer in data.get("Answer", [])
+        if type_number is None or answer.get("type") == type_number
+    ]
+
+
+def _norm_host(value: str) -> str:
+    """Lowercase, and strip a trailing dot and surrounding quotes."""
+    return value.strip().strip('"').rstrip(".").lower()
+
+
+def _unquote_txt(raw: str) -> str:
+    """Join a (possibly chunked) double-quoted DoH TXT ``data`` string.
+
+    Long TXT values come back as several quoted chunks, e.g.
+    ``'"part1" "part2"'``; join their contents. A bare, unquoted value is
+    returned unchanged.
+    """
+    chunks = re.findall(r'"([^"]*)"', raw)
+    if chunks:
+        return "".join(chunks)
+    return raw
+
+
+def _mx_hosts(raw: list[str]) -> list[str]:
+    """Parse ``"<priority> <host>."`` MX answer strings into lowercased hosts."""
+    hosts: list[str] = []
+    for item in raw:
+        parts = item.split()
+        if parts:
+            hosts.append(_norm_host(parts[-1]))
+    return hosts
+
+
 async def resolve_mx(domain: str) -> list[str]:
     """Return the MX target hosts for ``domain`` (lowercased, no trailing dot)."""
-    async with httpx.AsyncClient(timeout=5.0) as client:
-        resp = await client.get(_DOH_URL, params={"name": domain, "type": "MX"})
-        resp.raise_for_status()
-        data = resp.json()
-    hosts: list[str] = []
-    for answer in data.get("Answer", []):
-        if answer.get("type") != _MX_TYPE:
-            continue
-        # data looks like "10 inbound-smtp.eu-west-1.amazonaws.com."
-        parts = str(answer.get("data", "")).split()
-        if parts:
-            hosts.append(parts[-1].rstrip(".").lower())
-    return hosts
+    raw = await _resolve(domain, "MX", raise_on_error=True)
+    return _mx_hosts(raw)
+
+
+async def resolve_zone_ns(domain: str) -> tuple[str, list[str]]:
+    """Find the zone apex for ``domain`` and its nameservers.
+
+    An NS query on a non-apex name returns no ``Answer`` (only an
+    ``Authority`` SOA), so this strips the left label and retries until an
+    NS answer comes back. Stops before querying a bare TLD (a name with no
+    dot). Returns ``("", [])`` if no NS answer is found (including on a DoH
+    failure, since ``_resolve`` swallows those by default).
+    """
+    name = domain.strip().lower().rstrip(".")
+    while "." in name:
+        answers = await _resolve(name, "NS")
+        if answers:
+            nameservers = sorted({_norm_host(a) for a in answers})
+            return name, nameservers
+        name = name.split(".", 1)[1]
+    return "", []
+
+
+@dataclass(frozen=True)
+class DnsProvider:
+    id: str
+    name: str
+    dns_url: str
+    note: str | None
+
+
+# Suffix table per docs/superpowers/specs/2026-09-19-email-unbranded-react-domains-tracking-design.md
+# section A3. Matched as a substring against each (lowercased, trailing-dot-
+# stripped) nameserver — a plain suffix for most hosts, and a mid-hostname
+# fragment for Route 53 (`.awsdns-`) and IONOS (`ui-dns.`), whose
+# nameservers vary the characters that follow.
+_PROVIDER_TABLE: list[tuple[DnsProvider, tuple[str, ...]]] = [
+    (
+        DnsProvider(
+            id="cloudflare",
+            name="Cloudflare",
+            dns_url="https://dash.cloudflare.com/?to=/:account/:zone/dns/records",
+            note="Set Proxy status to DNS only for every CNAME.",
+        ),
+        ("ns.cloudflare.com",),
+    ),
+    (
+        DnsProvider(
+            id="godaddy",
+            name="GoDaddy",
+            dns_url="https://sso.godaddy.com/",
+            note=None,
+        ),
+        ("domaincontrol.com",),
+    ),
+    (
+        DnsProvider(
+            id="namecheap",
+            name="Namecheap",
+            dns_url="https://www.namecheap.com/myaccount/login.aspx",
+            note=None,
+        ),
+        ("registrar-servers.com",),
+    ),
+    (
+        DnsProvider(
+            id="route53",
+            name="Route 53",
+            dns_url="https://console.aws.amazon.com/route53/",
+            note=None,
+        ),
+        (".awsdns-",),
+    ),
+    (
+        DnsProvider(
+            id="google",
+            name="Google Domains",
+            dns_url="https://domains.squarespace.com/google-domains/",
+            note=None,
+        ),
+        ("googledomains.com", "google.com"),
+    ),
+    (
+        DnsProvider(
+            id="squarespace",
+            name="Squarespace",
+            dns_url="https://account.squarespace.com/domains",
+            note=None,
+        ),
+        ("squarespacedns.com",),
+    ),
+    (
+        DnsProvider(
+            id="vercel",
+            name="Vercel",
+            dns_url="https://vercel.com/dashboard",
+            note=None,
+        ),
+        ("vercel-dns.com",),
+    ),
+    (
+        DnsProvider(
+            id="digitalocean",
+            name="DigitalOcean",
+            dns_url="https://cloud.digitalocean.com/networking/domains",
+            note=None,
+        ),
+        ("digitalocean.com",),
+    ),
+    (
+        DnsProvider(
+            id="ionos",
+            name="IONOS",
+            dns_url="https://my.ionos.com/domains",
+            note=None,
+        ),
+        ("ui-dns.",),
+    ),
+    (
+        DnsProvider(
+            id="hover",
+            name="Hover",
+            dns_url="https://hover.com/signin",
+            note=None,
+        ),
+        ("hover.com",),
+    ),
+    (
+        DnsProvider(
+            id="namecom",
+            name="Name.com",
+            dns_url="https://www.name.com/account/login",
+            note=None,
+        ),
+        ("name.com",),
+    ),
+    (
+        DnsProvider(
+            id="porkbun",
+            name="Porkbun",
+            dns_url="https://porkbun.com/",
+            note=None,
+        ),
+        ("porkbun.com",),
+    ),
+    (
+        DnsProvider(
+            id="gandi",
+            name="Gandi",
+            dns_url="https://admin.gandi.net/",
+            note=None,
+        ),
+        ("gandi.net",),
+    ),
+    (
+        DnsProvider(
+            id="ovh",
+            name="OVH",
+            dns_url="https://www.ovh.com/manager/",
+            note=None,
+        ),
+        ("ovh.net",),
+    ),
+]
+
+
+def detect_dns_provider(nameservers: list[str]) -> DnsProvider | None:
+    """Match a zone's nameservers against the known-host suffix table.
+
+    Case-insensitive, ignoring a trailing dot. Returns ``None`` when no
+    nameserver matches any known host.
+    """
+    normalized = [_norm_host(ns) for ns in nameservers]
+    for provider, tokens in _PROVIDER_TABLE:
+        if any(token in ns for ns in normalized for token in tokens):
+            return provider
+    return None
+
+
+async def observe_record(record: dict[str, Any]) -> bool:
+    """Does public DNS already show this record?
+
+    ``record`` carries ``type`` (``CNAME`` | ``MX`` | ``TXT``), ``name`` and
+    ``value``. CNAME matches when the answer target equals ``value``; MX
+    when ``value`` is among the MX hosts; TXT when ``value`` equals one of
+    the (unquoted, chunk-joined) TXT strings. Host comparisons are
+    case-insensitive and ignore trailing dots and surrounding quotes. Never
+    raises — a DoH failure reports ``False``, same as "not observed".
+    """
+    rtype = str(record.get("type", "")).upper()
+    name = str(record.get("name", ""))
+    value = str(record.get("value", ""))
+
+    if rtype == "CNAME":
+        answers = await _resolve(name, "CNAME")
+        target = _norm_host(value)
+        return any(_norm_host(a) == target for a in answers)
+    if rtype == "MX":
+        answers = await _resolve(name, "MX")
+        return _norm_host(value) in _mx_hosts(answers)
+    if rtype == "TXT":
+        answers = await _resolve(name, "TXT")
+        wanted = _unquote_txt(value.strip())
+        return any(wanted == _unquote_txt(a) for a in answers)
+    return False
+
+
+async def dmarc_present(zone: str) -> bool:
+    """Is there a TXT record at ``_dmarc.<zone>`` starting ``v=DMARC1``?"""
+    answers = await _resolve(f"_dmarc.{zone}", "TXT")
+    return any(_unquote_txt(a).startswith("v=DMARC1") for a in answers)
 
 
 def custom_dns_records(domain: str, dkim_records: list[DkimRecord]) -> list[dict]:
