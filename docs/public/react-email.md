@@ -13,6 +13,7 @@ npm install react-email -E
 
 ```tsx
 // Welcome.tsx
+import * as React from "react";
 import { Html, Body, Text, Button } from "react-email";
 
 export function Welcome({ name }: { name: string }) {
@@ -32,7 +33,9 @@ the HTML body, once with `{ plainText: true }` for the text body.
 
 ## Send it (Node)
 
-```js
+```tsx
+// send.tsx
+import * as React from "react";
 import { render } from "react-email";
 import { Welcome } from "./Welcome";
 
@@ -56,6 +59,12 @@ const res = await fetch(`${process.env.HAIL_API_URL}/v1/emails`, {
 });
 ```
 
+Run it with [`tsx`](https://github.com/privatenumber/tsx) (`npm install -D tsx`; needs `"type": "module"` in `package.json`):
+
+```bash
+npx tsx send.tsx
+```
+
 ## Send it (Python SDK)
 
 There is no JS/TS SDK. Render in Node — at build time, or in a small script —
@@ -68,7 +77,7 @@ from hail import Client
 
 html = Path("welcome.html").read_text()
 
-async with Client(api_key="sk-...") as client:
+async with Client() as client:  # reads HAIL_API_KEY / HAIL_API_URL from env
     await client.emails.create(
         to=["ada@example.com"],
         from_="onboarding@yourdomain.com",
