@@ -185,7 +185,7 @@ def test_build_forwarded_strips_crlf_from_hostile_headers():
         assert "\r" not in value and "\n" not in value
 
 
-def test_build_forwarded_appends_branding_footer():
+def test_build_forwarded_does_not_append_footer():
     parsed = ParsedMime(
         from_address="alice@example.com",
         to_addresses=["alice+acme@mail.hail.so"],
@@ -204,9 +204,11 @@ def test_build_forwarded_appends_branding_footer():
         inbound_id=uuid4(),
         hops=0,
     )
-    assert "Forwarded by Hail.so" in fwd.body_text
-    assert fwd.body_text.index("original") < fwd.body_text.index("Forwarded by")
-    assert 'href="https://hail.so"' in fwd.body_html
+    assert "Hail.so" not in fwd.body_text
+    assert fwd.body_text.endswith("original")
+    assert fwd.body_html is not None
+    assert fwd.body_html.endswith("<p>original</p>")
+    assert "Hail.so" not in fwd.body_html
 
 
 def test_loop_detected_carries_cause():

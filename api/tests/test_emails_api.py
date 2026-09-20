@@ -12,7 +12,6 @@ from hailhq.api.main import app
 from hailhq.api.routes import emails as emails_routes
 from hailhq.core.config import settings
 from hailhq.core.email_attachment_limits import MAX_EMAIL_ATTACHMENT_BYTES
-from hailhq.core.email_footer import SENT_FOOTER_TEXT
 from hailhq.core.hail_mail import org_prefix_from_id
 from hailhq.core.models import (
     ApiKey,
@@ -1520,17 +1519,17 @@ async def test_post_emails_usage_event_failure_does_not_fail_send(
 
 
 # --------------------------------------------------------------------------- #
-# POST /emails — branding footer
+# POST /emails — body reaches the wire unchanged (no footer)
 # --------------------------------------------------------------------------- #
 
 
-async def test_post_emails_appends_footer_on_wire_only(
+async def test_post_emails_sends_body_unchanged_on_wire(
     client: httpx.AsyncClient,
     org_and_key: tuple,
     email_mock: AsyncMock,
 ) -> None:
-    """The provider send carries the branding footer; the stored row and
-    API responses keep the tenant-authored body untouched."""
+    """The provider send, the stored row, and API responses all carry the
+    exact tenant-authored body — hail appends nothing."""
     _, _, plain = org_and_key
     headers = {"Authorization": f"Bearer {plain}"}
     await _register_custom_verified(client, headers, domain="acme.com")
@@ -1549,19 +1548,46 @@ async def test_post_emails_appends_footer_on_wire_only(
     assert resp.status_code == 201, resp.text
 
     call_kwargs = email_mock.send_email.call_args.kwargs
-    assert call_kwargs["body_text"].startswith("body")
-    assert SENT_FOOTER_TEXT in call_kwargs["body_text"]
-    assert call_kwargs["body_html"].startswith("<p>body</p>")
-    assert 'href="https://hail.so"' in call_kwargs["body_html"]
-    # Branding + AI disclosure are one blended footer line on the wire
-    # message — never part of the stored/returned body (see below).
-    assert "an AI communication platform" in call_kwargs["body_html"]
-    assert "Sent by Hail.so" not in call_kwargs["body_text"]
+    assert call_kwargs["body_text"] == "body"
+    assert call_kwargs["body_html"] == "<p>body</p>"
+    assert "Hail.so" not in call_kwargs["body_text"]
+    assert "Hail.so" not in call_kwargs["body_html"]
 
-    # POST response and GET both return the original body, footer-free.
+    # POST response and GET both return the same, untouched body.
     assert resp.json()["body_text"] == "body"
     assert resp.json()["body_html"] == "<p>body</p>"
     got = await client.get(f"/emails/{resp.json()['id']}", headers=headers)
     assert got.status_code == 200
     assert got.json()["body_text"] == "body"
     assert got.json()["body_html"] == "<p>body</p>"
+
+
+async def test_post_emails_sends_full_document_html_byte_identical(
+    client: httpx.AsyncClient,
+    org_and_key: tuple,
+    email_mock: AsyncMock,
+) -> None:
+    """A full react-email-rendered HTML document passes through to the
+    provider byte-identical — no footer appended, nothing rewritten."""
+    _, _, plain = org_and_key
+    headers = {"Authorization": f"Bearer {plain}"}
+    await _register_custom_verified(client, headers, domain="acme.com")
+
+    full_doc = "<!DOCTYPE html><html><head></head><body><p>x</p></body></html>"
+
+    resp = await client.post(
+        "/emails",
+        json={
+            "to": ["alice@example.com"],
+            "subject": "hi",
+            "body_text": "x",
+            "body_html": full_doc,
+            "recipient_consent": True,
+        },
+        headers=headers,
+    )
+    assert resp.status_code == 201, resp.text
+
+    call_kwargs = email_mock.send_email.call_args.kwargs
+    assert call_kwargs["body_html"] == full_doc
+    assert resp.json()["body_html"] == full_doc
