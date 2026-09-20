@@ -1214,7 +1214,7 @@ type ContactPatch struct {
 
 // DmarcCheck Whether a DMARC record is published for the domain's zone.
 type DmarcCheck struct {
-	// Present True if a DMARC TXT record already exists at _dmarc.<zone>.
+	// Present True if a DMARC TXT record exists at _dmarc.<domain> or at _dmarc.<zone>.
 	Present bool `json:"present"`
 
 	// Suggested A minimal DMARC record to publish. Null when present is true.

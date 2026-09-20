@@ -85,10 +85,10 @@ _DEFAULT_LIST_LIMIT = 50
 _MAX_LIST_LIMIT = 200
 
 # GET /{id}/dns-check: worst-case sequential cost is a ~4-label zone walk
-# (up to 4 x 5s DoH calls) plus two DMARC lookups, so bound the whole
-# lookup section well under the console's 10s poll interval for a pending
+# (up to 4 x 5s DoH calls) plus the DMARC lookups, so bound the whole
+# lookup section under the console's 10s poll interval for a pending
 # domain — a timeout degrades to lookup_ok=False, never a 5xx or a hang.
-_DNS_CHECK_DEADLINE_S = 10.0
+_DNS_CHECK_DEADLINE_S = 8.0
 
 
 # --------------------------------------------------------------------------- #
@@ -606,9 +606,10 @@ async def dns_check_email_domain(
             # RFC 7489 §6.6.3: a receiver checks _dmarc.<sending domain>
             # before falling back to the organisational domain. DMARC
             # counts as present when either answers; the suggestion still
-            # points at the zone apex.
+            # points at the zone apex. An apex domain is its own zone, so
+            # the set keeps that case to one lookup.
             dmarc_hits = await asyncio.gather(
-                dmarc_present(sd.domain), dmarc_present(zone)
+                *(dmarc_present(name) for name in {sd.domain.lower(), zone})
             )
             dmarc_ok = any(dmarc_hits)
             suggested = (

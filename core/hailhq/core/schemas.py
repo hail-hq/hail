@@ -999,7 +999,10 @@ class DmarcCheck(BaseModel):
     """Whether a DMARC record is published for the domain's zone."""
 
     present: bool = Field(
-        description="True if a DMARC TXT record already exists at _dmarc.<zone>."
+        description=(
+            "True if a DMARC TXT record exists at _dmarc.<domain> or at "
+            "_dmarc.<zone>."
+        )
     )
     suggested: DnsRecordSchema | None = Field(
         description="A minimal DMARC record to publish. Null when present is true."

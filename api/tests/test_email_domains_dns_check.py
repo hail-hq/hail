@@ -110,7 +110,7 @@ def _patch_dns(
     ``dmarc`` is either a bool (``True`` → present at the zone apex only,
     matching the old single-name tests) or an explicit set of names that
     have a ``v=DMARC1`` record — the route now calls ``dmarc_present`` once
-    for the sending domain and once for the zone (finding 5: RFC 7489
+    for each distinct name of the sending domain and the zone (finding 5: RFC 7489
     §6.6.3 checks the sending domain before falling back to the
     organisational domain).
     """
@@ -357,6 +357,29 @@ async def test_dns_check_dmarc_absent_at_both_names(
             "priority": None,
         },
     }
+
+
+async def test_dns_check_apex_domain_looks_up_dmarc_once(
+    client: httpx.AsyncClient,
+    headers: tuple,
+    async_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An apex domain is its own zone — one DMARC lookup, not two."""
+    org, hdrs = headers
+    sd = await _make_custom_domain(async_session, org, domain="acme.com")
+    _patch_dns(monkeypatch, zone="acme.com")
+    calls: list[str] = []
+
+    async def _dmarc_present(name: str) -> bool:
+        calls.append(name)
+        return False
+
+    monkeypatch.setattr(email_domains_routes, "dmarc_present", _dmarc_present)
+
+    resp = await client.get(f"/email-domains/{sd.id}/dns-check", headers=hdrs)
+    assert resp.status_code == 200, resp.text
+    assert calls == ["acme.com"]
 
 
 # --------------------------------------------------------------------------- #

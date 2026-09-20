@@ -3997,7 +3997,7 @@ components:
         present:
           type: boolean
           title: Present
-          description: True if a DMARC TXT record already exists at _dmarc.<zone>.
+          description: True if a DMARC TXT record exists at _dmarc.<domain> or at _dmarc.<zone>.
         suggested:
           anyOf:
             - $ref: "#/components/schemas/DnsRecordSchema"
