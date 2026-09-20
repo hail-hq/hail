@@ -3,6 +3,7 @@
 POST   /email-domains             — register a custom domain or mint a hail-mail address.
 GET    /email-domains             — cursor-paginated list (org-scoped).
 GET    /email-domains/{id}        — single domain (org-scoped).
+GET    /email-domains/{id}/dns-check — DNS host + record observation + DMARC (org-scoped, read-only).
 PATCH  /email-domains/{id}        — edit the user/org prefix on a hail-mail row.
 POST   /email-domains/{id}/verify — re-poll the email provider's view of the identity.
 DELETE /email-domains/{id}        — delete from provider + DB (idempotent on missing).
@@ -25,6 +26,7 @@ Two flavors of row land here:
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import datetime, timezone
 from typing import Annotated
@@ -40,18 +42,31 @@ from hailhq.api.ratelimit import GENERAL_RATE_LIMITED_RESPONSES
 from hailhq.api.route_prefixes import request_mount_prefix
 from hailhq.core.config import settings
 from hailhq.core.db import get_session
-from hailhq.core.dns_lookup import custom_dns_records, resolve_mx, ses_inbound_host
+from hailhq.core.dns_lookup import (
+    custom_dns_records,
+    detect_dns_provider,
+    dmarc_present,
+    observe_record,
+    resolve_mx,
+    resolve_zone_ns,
+    ses_inbound_host,
+)
 from hailhq.core.email_sender import from_address_for
 from hailhq.core.hail_mail import org_prefix_from_id
 from hailhq.core.models import Email, EmailDomain
 from hailhq.core.providers.email import EmailProvider, SesEmailProvider
 from hailhq.core.schemas import (
     LOCAL_PREFIX,
+    DmarcCheck,
+    DnsProviderSchema,
+    DnsRecordSchema,
     DomainCheckResponse,
     EmailDomainCreate,
+    EmailDomainDnsCheck,
     EmailDomainListResponse,
     EmailDomainPatch,
     EmailDomainResponse,
+    ObservedDnsRecord,
 )
 from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
@@ -508,6 +523,98 @@ async def get_email_domain(
             detail="sender domain not found",
         )
     return EmailDomainResponse.model_validate(sd)
+
+
+# --------------------------------------------------------------------------- #
+# GET /email-domains/{id}/dns-check
+# --------------------------------------------------------------------------- #
+
+
+@router.get(
+    "/{domain_id}/dns-check",
+    response_model=EmailDomainDnsCheck,
+)
+async def dns_check_email_domain(
+    domain_id: UUID,
+    principal: Annotated[Principal, Depends(get_current_principal)],
+    db: Annotated[AsyncSession, Depends(get_session)],
+) -> EmailDomainDnsCheck:
+    """Guided DNS check: detect the tenant's DNS host and confirm published records.
+
+    Read-only — runs live lookups against public DNS (no resolver
+    dependency) and never touches verification_status; SES stays the
+    authority for that (see POST /{domain_id}/verify). Org-scoped: returns
+    404 for a domain belonging to a different organization. kind='hail_mail'
+    rows do no DNS lookups at all — the shared hail-mail domain has nothing
+    for the tenant to publish.
+    """
+    stmt = select(EmailDomain).where(
+        EmailDomain.id == domain_id,
+        EmailDomain.organization_id == principal.organization_id,
+    )
+    sd = (await db.execute(stmt)).scalar_one_or_none()
+    if sd is None:
+        raise HTTPException(
+            status_code=http_status.HTTP_404_NOT_FOUND,
+            detail="sender domain not found",
+        )
+
+    if sd.kind == "hail_mail":
+        return EmailDomainDnsCheck(
+            dns_provider=None,
+            zone=None,
+            records=[],
+            dmarc=DmarcCheck(present=False, suggested=None),
+        )
+
+    # Zone resolution and per-record observation are independent of each
+    # other, so they run concurrently. DMARC needs the resolved zone, so it
+    # can only be looked up afterwards (and only when a zone was found).
+    (zone, nameservers), *observed_flags = await asyncio.gather(
+        resolve_zone_ns(sd.domain),
+        *(observe_record(record) for record in sd.dns_records),
+    )
+    records = [
+        ObservedDnsRecord(**record, observed=observed)
+        for record, observed in zip(sd.dns_records, observed_flags)
+    ]
+
+    if not zone:
+        # No zone → nowhere to point a provider link or a DMARC record at.
+        return EmailDomainDnsCheck(
+            dns_provider=None,
+            zone=None,
+            records=records,
+            dmarc=DmarcCheck(present=False, suggested=None),
+        )
+
+    provider = detect_dns_provider(nameservers)
+    dmarc_ok = await dmarc_present(zone)
+    suggested = (
+        None
+        if dmarc_ok
+        else DnsRecordSchema(
+            type="TXT",
+            name=f"_dmarc.{zone}",
+            value="v=DMARC1; p=none;",
+            priority=None,
+        )
+    )
+    return EmailDomainDnsCheck(
+        dns_provider=(
+            DnsProviderSchema(
+                id=provider.id,
+                name=provider.name,
+                dns_url=provider.dns_url,
+                note=provider.note,
+            )
+            if provider is not None
+            else None
+        ),
+        zone=zone,
+        records=records,
+        dmarc=DmarcCheck(present=dmarc_ok, suggested=suggested),
+    )
 
 
 # --------------------------------------------------------------------------- #

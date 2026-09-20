@@ -113,19 +113,19 @@ func (e ContactEntryKind) Valid() bool {
 
 // Defines values for DnsRecordSchemaType.
 const (
-	CNAME DnsRecordSchemaType = "CNAME"
-	MX    DnsRecordSchemaType = "MX"
-	TXT   DnsRecordSchemaType = "TXT"
+	DnsRecordSchemaTypeCNAME DnsRecordSchemaType = "CNAME"
+	DnsRecordSchemaTypeMX    DnsRecordSchemaType = "MX"
+	DnsRecordSchemaTypeTXT   DnsRecordSchemaType = "TXT"
 )
 
 // Valid indicates whether the value is a known member of the DnsRecordSchemaType enum.
 func (e DnsRecordSchemaType) Valid() bool {
 	switch e {
-	case CNAME:
+	case DnsRecordSchemaTypeCNAME:
 		return true
-	case MX:
+	case DnsRecordSchemaTypeMX:
 		return true
-	case TXT:
+	case DnsRecordSchemaTypeTXT:
 		return true
 	default:
 		return false
@@ -441,6 +441,27 @@ func (e NumberAcquireRequestNumberType) Valid() bool {
 	case National:
 		return true
 	case TollFree:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ObservedDnsRecordType.
+const (
+	ObservedDnsRecordTypeCNAME ObservedDnsRecordType = "CNAME"
+	ObservedDnsRecordTypeMX    ObservedDnsRecordType = "MX"
+	ObservedDnsRecordTypeTXT   ObservedDnsRecordType = "TXT"
+)
+
+// Valid indicates whether the value is a known member of the ObservedDnsRecordType enum.
+func (e ObservedDnsRecordType) Valid() bool {
+	switch e {
+	case ObservedDnsRecordTypeCNAME:
+		return true
+	case ObservedDnsRecordTypeMX:
+		return true
+	case ObservedDnsRecordTypeTXT:
 		return true
 	default:
 		return false
@@ -1191,6 +1212,30 @@ type ContactPatch struct {
 	PhoneE164 *string `json:"phone_e164,omitempty"`
 }
 
+// DmarcCheck Whether a DMARC record is published for the domain's zone.
+type DmarcCheck struct {
+	// Present True if a DMARC TXT record already exists at _dmarc.<zone>.
+	Present bool `json:"present"`
+
+	// Suggested A minimal DMARC record to publish. Null when present is true.
+	Suggested *DnsRecordSchema `json:"suggested"`
+}
+
+// DnsProviderSchema A DNS host detected from a domain's nameservers, with its records UI.
+type DnsProviderSchema struct {
+	// DnsUrl URL to the DNS host's records-management UI.
+	DnsUrl string `json:"dns_url"`
+
+	// Id Short identifier for the detected DNS host (e.g. 'cloudflare').
+	Id string `json:"id"`
+
+	// Name Human-readable name of the detected DNS host.
+	Name string `json:"name"`
+
+	// Note Host-specific tip for publishing records correctly. Null when there is none.
+	Note *string `json:"note"`
+}
+
 // DnsRecordSchema One DNS record the tenant must publish for a sending domain.
 //
 // Covers DKIM CNAMEs, MAIL FROM MX, and SPF TXT records.
@@ -1348,6 +1393,21 @@ type EmailDomainCreate struct {
 
 // EmailDomainCreateKind 'hail_mail' for a Hail-hosted address (domain omitted, composed from the prefix fields), or 'custom' to send from your own domain (domain required, prefix fields omitted).
 type EmailDomainCreateKind string
+
+// EmailDomainDnsCheck Response for GET /email-domains/{id}/dns-check.
+type EmailDomainDnsCheck struct {
+	// Dmarc Whether a DMARC record is published for the domain's zone.
+	Dmarc DmarcCheck `json:"dmarc"`
+
+	// DnsProvider The DNS host detected from the domain's nameservers. Null when no known host matched, when the domain's zone could not be resolved, or for kind='hail_mail' rows.
+	DnsProvider *DnsProviderSchema `json:"dns_provider"`
+
+	// Records The domain's dns_records, each annotated with whether Hail currently observes it in public DNS. Empty for kind='hail_mail' rows.
+	Records []ObservedDnsRecord `json:"records"`
+
+	// Zone The DNS zone apex found for this domain. Null when it could not be resolved, or for kind='hail_mail' rows.
+	Zone *string `json:"zone"`
+}
 
 // EmailDomainListResponse defines model for EmailDomainListResponse.
 type EmailDomainListResponse struct {
@@ -1875,6 +1935,28 @@ type NumberAcquireRequest struct {
 
 // NumberAcquireRequestNumberType Kind of number to acquire: 'local', 'mobile', 'toll_free', or 'national'.
 type NumberAcquireRequestNumberType string
+
+// ObservedDnsRecord One record from EmailDomainResponse.dns_records, with a live DNS observation.
+type ObservedDnsRecord struct {
+	// Name DNS record name/host to publish (e.g. a CNAME's subdomain).
+	Name string `json:"name"`
+
+	// Observed True if Hail saw this record in public DNS. This does not change verification_status on the domain — SES stays the authority for that.
+	Observed bool `json:"observed"`
+
+	// Priority MX priority. Only present for type='MX'; null otherwise.
+	Priority *int `json:"priority,omitempty"`
+
+	// Type DNS record type: 'CNAME' (DKIM), 'MX' (MAIL FROM), or 'TXT' (SPF).
+	Type *ObservedDnsRecordType `json:"type,omitempty"`
+
+	// Value DNS record value to publish (e.g. a CNAME target or TXT content).
+	Value                string                 `json:"value"`
+	AdditionalProperties map[string]interface{} `json:"-"`
+}
+
+// ObservedDnsRecordType DNS record type: 'CNAME' (DKIM), 'MX' (MAIL FROM), or 'TXT' (SPF).
+type ObservedDnsRecordType string
 
 // PhoneNumberListResponse defines model for PhoneNumberListResponse.
 type PhoneNumberListResponse struct {
@@ -2431,6 +2513,11 @@ type PatchEmailDomainV1EmailDomainsDomainIdPatchParams struct {
 	Authorization *string `json:"authorization,omitempty"`
 }
 
+// DnsCheckEmailDomainV1EmailDomainsDomainIdDnsCheckGetParams defines parameters for DnsCheckEmailDomainV1EmailDomainsDomainIdDnsCheckGet.
+type DnsCheckEmailDomainV1EmailDomainsDomainIdDnsCheckGetParams struct {
+	Authorization *string `json:"authorization,omitempty"`
+}
+
 // VerifyEmailDomainV1EmailDomainsDomainIdVerifyPostParams defines parameters for VerifyEmailDomainV1EmailDomainsDomainIdVerifyPost.
 type VerifyEmailDomainV1EmailDomainsDomainIdVerifyPostParams struct {
 	Authorization *string `json:"authorization,omitempty"`
@@ -2818,6 +2905,128 @@ func (a DnsRecordSchema) MarshalJSON() ([]byte, error) {
 	return json.Marshal(object)
 }
 
+// Getter for additional properties for ObservedDnsRecord. Returns the specified
+// element and whether it was found
+func (a ObservedDnsRecord) Get(fieldName string) (value interface{}, found bool) {
+	if a.AdditionalProperties != nil {
+		value, found = a.AdditionalProperties[fieldName]
+	}
+	return
+}
+
+// Setter for additional properties for ObservedDnsRecord
+func (a *ObservedDnsRecord) Set(fieldName string, value interface{}) {
+	if a.AdditionalProperties == nil {
+		a.AdditionalProperties = make(map[string]interface{})
+	}
+	a.AdditionalProperties[fieldName] = value
+}
+
+// Override default JSON handling for ObservedDnsRecord to handle AdditionalProperties
+func (a *ObservedDnsRecord) UnmarshalJSON(b []byte) error {
+	object := make(map[string]json.RawMessage)
+	err := json.Unmarshal(b, &object)
+	if err != nil {
+		return err
+	}
+
+	if raw, found := object["name"]; found {
+		err = json.Unmarshal(raw, &a.Name)
+		if err != nil {
+			return fmt.Errorf("error reading 'name': %w", err)
+		}
+		delete(object, "name")
+	}
+
+	if raw, found := object["observed"]; found {
+		err = json.Unmarshal(raw, &a.Observed)
+		if err != nil {
+			return fmt.Errorf("error reading 'observed': %w", err)
+		}
+		delete(object, "observed")
+	}
+
+	if raw, found := object["priority"]; found {
+		err = json.Unmarshal(raw, &a.Priority)
+		if err != nil {
+			return fmt.Errorf("error reading 'priority': %w", err)
+		}
+		delete(object, "priority")
+	}
+
+	if raw, found := object["type"]; found {
+		err = json.Unmarshal(raw, &a.Type)
+		if err != nil {
+			return fmt.Errorf("error reading 'type': %w", err)
+		}
+		delete(object, "type")
+	}
+
+	if raw, found := object["value"]; found {
+		err = json.Unmarshal(raw, &a.Value)
+		if err != nil {
+			return fmt.Errorf("error reading 'value': %w", err)
+		}
+		delete(object, "value")
+	}
+
+	if len(object) != 0 {
+		a.AdditionalProperties = make(map[string]interface{})
+		for fieldName, fieldBuf := range object {
+			var fieldVal interface{}
+			err := json.Unmarshal(fieldBuf, &fieldVal)
+			if err != nil {
+				return fmt.Errorf("error unmarshaling field %s: %w", fieldName, err)
+			}
+			a.AdditionalProperties[fieldName] = fieldVal
+		}
+	}
+	return nil
+}
+
+// Override default JSON handling for ObservedDnsRecord to handle AdditionalProperties
+func (a ObservedDnsRecord) MarshalJSON() ([]byte, error) {
+	var err error
+	object := make(map[string]json.RawMessage)
+
+	object["name"], err = json.Marshal(a.Name)
+	if err != nil {
+		return nil, fmt.Errorf("error marshaling 'name': %w", err)
+	}
+
+	object["observed"], err = json.Marshal(a.Observed)
+	if err != nil {
+		return nil, fmt.Errorf("error marshaling 'observed': %w", err)
+	}
+
+	if a.Priority != nil {
+		object["priority"], err = json.Marshal(a.Priority)
+		if err != nil {
+			return nil, fmt.Errorf("error marshaling 'priority': %w", err)
+		}
+	}
+
+	if a.Type != nil {
+		object["type"], err = json.Marshal(a.Type)
+		if err != nil {
+			return nil, fmt.Errorf("error marshaling 'type': %w", err)
+		}
+	}
+
+	object["value"], err = json.Marshal(a.Value)
+	if err != nil {
+		return nil, fmt.Errorf("error marshaling 'value': %w", err)
+	}
+
+	for fieldName, field := range a.AdditionalProperties {
+		object[fieldName], err = json.Marshal(field)
+		if err != nil {
+			return nil, fmt.Errorf("error marshaling '%s': %w", fieldName, err)
+		}
+	}
+	return json.Marshal(object)
+}
+
 // AsValidationErrorLoc0 returns the union data inside the ValidationError_Loc_Item as a ValidationErrorLoc0
 func (t ValidationError_Loc_Item) AsValidationErrorLoc0() (ValidationErrorLoc0, error) {
 	var body ValidationErrorLoc0
@@ -3007,6 +3216,9 @@ type ClientInterface interface {
 	PatchEmailDomainV1EmailDomainsDomainIdPatchWithBody(ctx context.Context, domainId openapi_types.UUID, params *PatchEmailDomainV1EmailDomainsDomainIdPatchParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	PatchEmailDomainV1EmailDomainsDomainIdPatch(ctx context.Context, domainId openapi_types.UUID, params *PatchEmailDomainV1EmailDomainsDomainIdPatchParams, body PatchEmailDomainV1EmailDomainsDomainIdPatchJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// DnsCheckEmailDomainV1EmailDomainsDomainIdDnsCheckGet request
+	DnsCheckEmailDomainV1EmailDomainsDomainIdDnsCheckGet(ctx context.Context, domainId openapi_types.UUID, params *DnsCheckEmailDomainV1EmailDomainsDomainIdDnsCheckGetParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// VerifyEmailDomainV1EmailDomainsDomainIdVerifyPost request
 	VerifyEmailDomainV1EmailDomainsDomainIdVerifyPost(ctx context.Context, domainId openapi_types.UUID, params *VerifyEmailDomainV1EmailDomainsDomainIdVerifyPostParams, reqEditors ...RequestEditorFn) (*http.Response, error)
@@ -3373,6 +3585,18 @@ func (c *Client) PatchEmailDomainV1EmailDomainsDomainIdPatchWithBody(ctx context
 
 func (c *Client) PatchEmailDomainV1EmailDomainsDomainIdPatch(ctx context.Context, domainId openapi_types.UUID, params *PatchEmailDomainV1EmailDomainsDomainIdPatchParams, body PatchEmailDomainV1EmailDomainsDomainIdPatchJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewPatchEmailDomainV1EmailDomainsDomainIdPatchRequest(c.Server, domainId, params, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) DnsCheckEmailDomainV1EmailDomainsDomainIdDnsCheckGet(ctx context.Context, domainId openapi_types.UUID, params *DnsCheckEmailDomainV1EmailDomainsDomainIdDnsCheckGetParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewDnsCheckEmailDomainV1EmailDomainsDomainIdDnsCheckGetRequest(c.Server, domainId, params)
 	if err != nil {
 		return nil, err
 	}
@@ -4855,6 +5079,55 @@ func NewPatchEmailDomainV1EmailDomainsDomainIdPatchRequestWithBody(server string
 	}
 
 	req.Header.Add("Content-Type", contentType)
+
+	if params != nil {
+
+		if params.Authorization != nil {
+			var headerParam0 string
+
+			headerParam0, err = runtime.StyleParamWithOptions("simple", false, "authorization", *params.Authorization, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationHeader, Type: "string", Format: ""})
+			if err != nil {
+				return nil, err
+			}
+
+			req.Header.Set("authorization", headerParam0)
+		}
+
+	}
+
+	return req, nil
+}
+
+// NewDnsCheckEmailDomainV1EmailDomainsDomainIdDnsCheckGetRequest generates requests for DnsCheckEmailDomainV1EmailDomainsDomainIdDnsCheckGet
+func NewDnsCheckEmailDomainV1EmailDomainsDomainIdDnsCheckGetRequest(server string, domainId openapi_types.UUID, params *DnsCheckEmailDomainV1EmailDomainsDomainIdDnsCheckGetParams) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "domain_id", domainId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v1/email-domains/%s/dns-check", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("GET", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
 
 	if params != nil {
 
@@ -7363,6 +7636,9 @@ type ClientWithResponsesInterface interface {
 
 	PatchEmailDomainV1EmailDomainsDomainIdPatchWithResponse(ctx context.Context, domainId openapi_types.UUID, params *PatchEmailDomainV1EmailDomainsDomainIdPatchParams, body PatchEmailDomainV1EmailDomainsDomainIdPatchJSONRequestBody, reqEditors ...RequestEditorFn) (*PatchEmailDomainV1EmailDomainsDomainIdPatchResponse, error)
 
+	// DnsCheckEmailDomainV1EmailDomainsDomainIdDnsCheckGetWithResponse request
+	DnsCheckEmailDomainV1EmailDomainsDomainIdDnsCheckGetWithResponse(ctx context.Context, domainId openapi_types.UUID, params *DnsCheckEmailDomainV1EmailDomainsDomainIdDnsCheckGetParams, reqEditors ...RequestEditorFn) (*DnsCheckEmailDomainV1EmailDomainsDomainIdDnsCheckGetResponse, error)
+
 	// VerifyEmailDomainV1EmailDomainsDomainIdVerifyPostWithResponse request
 	VerifyEmailDomainV1EmailDomainsDomainIdVerifyPostWithResponse(ctx context.Context, domainId openapi_types.UUID, params *VerifyEmailDomainV1EmailDomainsDomainIdVerifyPostParams, reqEditors ...RequestEditorFn) (*VerifyEmailDomainV1EmailDomainsDomainIdVerifyPostResponse, error)
 
@@ -7834,6 +8110,29 @@ func (r PatchEmailDomainV1EmailDomainsDomainIdPatchResponse) Status() string {
 
 // StatusCode returns HTTPResponse.StatusCode
 func (r PatchEmailDomainV1EmailDomainsDomainIdPatchResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type DnsCheckEmailDomainV1EmailDomainsDomainIdDnsCheckGetResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *EmailDomainDnsCheck
+	JSON422      *HTTPValidationError
+}
+
+// Status returns HTTPResponse.Status
+func (r DnsCheckEmailDomainV1EmailDomainsDomainIdDnsCheckGetResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r DnsCheckEmailDomainV1EmailDomainsDomainIdDnsCheckGetResponse) StatusCode() int {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.StatusCode
 	}
@@ -8883,6 +9182,15 @@ func (c *ClientWithResponses) PatchEmailDomainV1EmailDomainsDomainIdPatchWithRes
 	return ParsePatchEmailDomainV1EmailDomainsDomainIdPatchResponse(rsp)
 }
 
+// DnsCheckEmailDomainV1EmailDomainsDomainIdDnsCheckGetWithResponse request returning *DnsCheckEmailDomainV1EmailDomainsDomainIdDnsCheckGetResponse
+func (c *ClientWithResponses) DnsCheckEmailDomainV1EmailDomainsDomainIdDnsCheckGetWithResponse(ctx context.Context, domainId openapi_types.UUID, params *DnsCheckEmailDomainV1EmailDomainsDomainIdDnsCheckGetParams, reqEditors ...RequestEditorFn) (*DnsCheckEmailDomainV1EmailDomainsDomainIdDnsCheckGetResponse, error) {
+	rsp, err := c.DnsCheckEmailDomainV1EmailDomainsDomainIdDnsCheckGet(ctx, domainId, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseDnsCheckEmailDomainV1EmailDomainsDomainIdDnsCheckGetResponse(rsp)
+}
+
 // VerifyEmailDomainV1EmailDomainsDomainIdVerifyPostWithResponse request returning *VerifyEmailDomainV1EmailDomainsDomainIdVerifyPostResponse
 func (c *ClientWithResponses) VerifyEmailDomainV1EmailDomainsDomainIdVerifyPostWithResponse(ctx context.Context, domainId openapi_types.UUID, params *VerifyEmailDomainV1EmailDomainsDomainIdVerifyPostParams, reqEditors ...RequestEditorFn) (*VerifyEmailDomainV1EmailDomainsDomainIdVerifyPostResponse, error) {
 	rsp, err := c.VerifyEmailDomainV1EmailDomainsDomainIdVerifyPost(ctx, domainId, params, reqEditors...)
@@ -9762,6 +10070,39 @@ func ParsePatchEmailDomainV1EmailDomainsDomainIdPatchResponse(rsp *http.Response
 	switch {
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
 		var dest EmailDomainResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 422:
+		var dest HTTPValidationError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON422 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseDnsCheckEmailDomainV1EmailDomainsDomainIdDnsCheckGetResponse parses an HTTP response from a DnsCheckEmailDomainV1EmailDomainsDomainIdDnsCheckGetWithResponse call
+func ParseDnsCheckEmailDomainV1EmailDomainsDomainIdDnsCheckGetResponse(rsp *http.Response) (*DnsCheckEmailDomainV1EmailDomainsDomainIdDnsCheckGetResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &DnsCheckEmailDomainV1EmailDomainsDomainIdDnsCheckGetResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest EmailDomainDnsCheck
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err
 		}

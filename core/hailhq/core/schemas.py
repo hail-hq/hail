@@ -970,6 +970,70 @@ class EmailDomainResponse(BaseModel):
     )
 
 
+class DnsProviderSchema(BaseModel):
+    """A DNS host detected from a domain's nameservers, with its records UI."""
+
+    id: str = Field(
+        description="Short identifier for the detected DNS host (e.g. 'cloudflare')."
+    )
+    name: str = Field(description="Human-readable name of the detected DNS host.")
+    dns_url: str = Field(description="URL to the DNS host's records-management UI.")
+    note: str | None = Field(
+        description="Host-specific tip for publishing records correctly. Null when there is none."
+    )
+
+
+class ObservedDnsRecord(DnsRecordSchema):
+    """One record from EmailDomainResponse.dns_records, with a live DNS observation."""
+
+    observed: bool = Field(
+        description=(
+            "True if Hail saw this record in public DNS. This does not "
+            "change verification_status on the domain — SES stays the "
+            "authority for that."
+        )
+    )
+
+
+class DmarcCheck(BaseModel):
+    """Whether a DMARC record is published for the domain's zone."""
+
+    present: bool = Field(
+        description="True if a DMARC TXT record already exists at _dmarc.<zone>."
+    )
+    suggested: DnsRecordSchema | None = Field(
+        description="A minimal DMARC record to publish. Null when present is true."
+    )
+
+
+class EmailDomainDnsCheck(BaseModel):
+    """Response for GET /email-domains/{id}/dns-check."""
+
+    dns_provider: DnsProviderSchema | None = Field(
+        description=(
+            "The DNS host detected from the domain's nameservers. Null when "
+            "no known host matched, when the domain's zone could not be "
+            "resolved, or for kind='hail_mail' rows."
+        )
+    )
+    zone: str | None = Field(
+        description=(
+            "The DNS zone apex found for this domain. Null when it could "
+            "not be resolved, or for kind='hail_mail' rows."
+        )
+    )
+    records: list[ObservedDnsRecord] = Field(
+        description=(
+            "The domain's dns_records, each annotated with whether Hail "
+            "currently observes it in public DNS. Empty for kind='hail_mail' "
+            "rows."
+        )
+    )
+    dmarc: DmarcCheck = Field(
+        description="Whether DMARC is published for this domain, and a suggested record if not."
+    )
+
+
 class EmailDomainListResponse(BaseModel):
     items: list[EmailDomainResponse] = Field(description="Email domains in this page.")
     next_cursor: str | None = Field(

@@ -37,7 +37,7 @@ func sampleEmailDomainResponse(kind string) client.EmailDomainResponse {
 	} else {
 		resp.Domain = "acme.com"
 		resp.VerificationStatus = client.EmailDomainResponseVerificationStatusPending
-		typ := client.CNAME
+		typ := client.DnsRecordSchemaTypeCNAME
 		resp.DnsRecords = []client.DnsRecordSchema{
 			{Name: "sel1._domainkey.acme.com", Value: "sel1.dkim.amazonses.com", Type: &typ},
 			{Name: "sel2._domainkey.acme.com", Value: "sel2.dkim.amazonses.com", Type: &typ},
