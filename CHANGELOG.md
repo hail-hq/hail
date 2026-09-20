@@ -4,6 +4,51 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 
 ## [Unreleased]
 
+## [0.23.0] — 2026-09-20
+
+Email goes out exactly as you wrote it: no Hail footer, full react-email HTML
+documents pass through unchanged, and custom-domain setup now tells you which
+DNS records Hail can already see.
+
+Component versions cut alongside this release:
+**`sdk-v0.16.0`** (PyPI: `hail-sdk==0.16.0`), **`cli-v0.22.0`** (Homebrew + GitHub Releases).
+
+### Changed — Hail no longer adds a footer to email
+
+- **Behaviour change for every org.** Sent email no longer ends with
+  "Sent via Hail.so (https://hail.so), an AI communication platform.", and
+  forwarded inbound email no longer ends with "Forwarded by Hail.so". There is
+  no setting and no replacement line. The message on the wire now equals the
+  stored `body_text` / `body_html`.
+- That line was also Hail's AI disclosure for email. **The sender now discloses
+  AI use where the law asks for it.** Voice-call disclosure is unchanged.
+- Unchanged: the `X-Hail-*` headers on forwarded mail and the
+  `List-Unsubscribe` / `List-Unsubscribe-Post` headers.
+
+### react-email
+
+- A full `<!DOCTYPE html>…</html>` document in `body_html` reaches SES
+  unchanged, on both the simple and the raw-MIME (attachments) path. Before
+  this release the footer was appended after `</html>`.
+- New guide: [docs/public/react-email.md](docs/public/react-email.md) — render
+  with `react-email`, send the strings as `body_html` and `body_text`. Hail does
+  not render React and does not store templates.
+
+### Custom domains — DNS check
+
+- New read-only route `GET /v1/email-domains/{id}/dns-check`. It returns:
+  - `dns_provider` — the DNS host found from the domain's nameservers, with a
+    link to its DNS page (13 hosts; `null` when not recognised).
+  - `records[].observed` — whether Hail saw each required record in public DNS.
+    SES stays the authority for `verification_status`.
+  - `dmarc` — whether a DMARC record exists on the sending domain or its zone,
+    and a suggested `v=DMARC1; p=none;` record when none does.
+  - `lookup_ok` — `false` when Hail's own DNS lookup failed or hit the 10 s
+    deadline. Clients must not report records as missing in that case.
+- SDK: `client.email_domains.dns_check(domain_id)`.
+- CLI: `hail email domain dns-check <id>`.
+- The OpenAPI change is additive.
+
 ## [0.22.0] — 2026-08-31
 
 An agent-ready API surface: `/v1` URLs, rate-limit headers on every response,
