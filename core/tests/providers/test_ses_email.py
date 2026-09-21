@@ -8,6 +8,8 @@ break the same way real usage would.
 
 from __future__ import annotations
 
+import email as email_lib
+
 import boto3
 import pytest
 from botocore.stub import ANY, Stubber
@@ -18,6 +20,8 @@ from hailhq.core.providers.email.base import (
     ProviderIdentity,
     ProviderSendResult,
 )
+
+FULL_DOCUMENT_HTML = "<!DOCTYPE html><html><head></head><body><p>x</p></body></html>"
 
 
 @pytest.fixture()
@@ -188,6 +192,62 @@ async def test_send_email_with_attachments_uses_raw_mime() -> None:
     assert b"invoice.pdf" in raw
     assert b"X-Hail-Forward-Hops" in raw
     assert b"base64" in raw  # attachment payload is base64-encoded
+
+
+async def test_send_email_full_document_html_byte_identical_simple_path() -> None:
+    """A full react-email HTML document reaches SES unchanged — no footer,
+    no reflow — via the Simple content path (no attachments)."""
+    fake = FakeClient("m-doc-simple")
+    provider = SesEmailProvider(client=fake)
+    result = await provider.send_email(
+        from_address="alerts@acme.com",
+        to_addresses=["alice@example.com"],
+        subject="hi",
+        body_text="x",
+        body_html=FULL_DOCUMENT_HTML,
+    )
+
+    assert result.provider_message_id == "m-doc-simple"
+    assert fake.kwargs is not None
+    body = fake.kwargs["Content"]["Simple"]["Body"]
+    assert body["Html"]["Data"] == FULL_DOCUMENT_HTML
+    assert body["Text"]["Data"] == "x"
+
+
+async def test_send_email_full_document_html_byte_identical_raw_path() -> None:
+    """Same guarantee on the Raw (attachment) path: the HTML part decodes
+    back to the exact original document, whatever CTE the MIME layer picks."""
+    fake = FakeClient("m-doc-raw")
+    provider = SesEmailProvider(client=fake)
+    result = await provider.send_email(
+        from_address="forwarder+acme@mail.hail.so",
+        to_addresses=["ops@example.com"],
+        subject="hi",
+        body_text="x",
+        body_html=FULL_DOCUMENT_HTML,
+        attachments=[
+            ProviderAttachment(
+                filename="invoice.pdf",
+                content_type="application/pdf",
+                payload=b"%PDF-1.4",
+            )
+        ],
+    )
+
+    assert result.provider_message_id == "m-doc-raw"
+    assert fake.kwargs is not None
+    raw = fake.kwargs["Content"]["Raw"]["Data"]
+    msg = email_lib.message_from_bytes(raw)
+    html_part = next(p for p in msg.walk() if p.get_content_type() == "text/html")
+    decoded = html_part.get_payload(decode=True)
+    assert decoded is not None
+    charset = html_part.get_content_charset() or "utf-8"
+    # stdlib email.contentmanager always appends exactly one trailing
+    # linesep when serializing a text part (email/contentmanager.py
+    # _encode_text) — that's the MIME transport layer, not Hail rewriting
+    # the body. removesuffix (not rstrip) proves it's exactly one linesep
+    # and nothing else.
+    assert decoded.decode(charset).removesuffix("\n") == FULL_DOCUMENT_HTML
 
 
 async def test_send_email_simple_path_with_from_name(ses_client, stub: Stubber) -> None:

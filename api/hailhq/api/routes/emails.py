@@ -66,7 +66,6 @@ from hailhq.core.email_attachment_limits import (
     MAX_EMAIL_ATTACHMENT_BYTES,
 )
 from hailhq.core.email_delivery_events import record_sent_event
-from hailhq.core.email_footer import append_sent_footer
 from hailhq.core.email_sender import from_address_for
 from hailhq.core.models import (
     Email,
@@ -301,18 +300,15 @@ async def deliver_email(
 
     Shared by POST /emails and the internal agent-send route (spec:
     docs/superpowers/specs/2026-07-11-voicebot-agent-tools-design.md).
-    Appends the blended branding + AI-disclosure footer, mints the
-    one-click unsubscribe header, sends (with ``attachment_rows``
-    payloads when the caller resolved any), and writes sent/failed back.
-    Bills the flat 1¢ usage event on success. Returns None on success or
-    the exception class name on transport failure — the caller owns HTTP
-    semantics (502 + audit for the public route, a spoken sentence for
-    the agent route). Never raises for provider errors.
+    Mints the one-click unsubscribe header, sends the stored body exactly
+    as authored (with ``attachment_rows`` payloads when the caller
+    resolved any), and writes sent/failed back. Bills the flat 1¢ usage
+    event on success. Returns None on success or the exception class name
+    on transport failure — the caller owns HTTP semantics (502 + audit
+    for the public route, a spoken sentence for the agent route). Never
+    raises for provider errors.
     """
     attachment_rows = attachment_rows or []
-    # Blended branding + AI-disclosure footer rides the wire message only;
-    # the stored row keeps the tenant-authored body.
-    wire_text, wire_html = append_sent_footer(email.body_text, email.body_html)
     # One-click unsubscribe (RFC 8058) — minted per-send against the primary
     # recipient. A single send can target multiple `to` addresses; the
     # header necessarily picks one (the first) since SES/RFC only support
@@ -348,8 +344,8 @@ async def deliver_email(
             from_name=email.from_name,
             to_addresses=email.to_addresses,
             subject=email.subject,
-            body_text=wire_text,
-            body_html=wire_html,
+            body_text=email.body_text,
+            body_html=email.body_html,
             cc=email.cc_addresses,
             bcc=email.bcc_addresses,
             reply_to=email.reply_to,

@@ -1300,6 +1300,70 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HTTPValidationError"
+  /v1/email-domains/{domain_id}/dns-check:
+    get:
+      tags:
+        - email-domains
+      summary: Dns Check Email Domain
+      description:
+        "Guided DNS check: detect the tenant's DNS host and confirm published\
+        \ records.\n\nRead-only \u2014 runs live lookups against public DNS (no resolver\n\
+        dependency) and never touches verification_status; SES stays the\nauthority\
+        \ for that (see POST /{domain_id}/verify). Org-scoped: returns\n404 for a\
+        \ domain belonging to a different organization. kind='hail_mail'\nrows do\
+        \ no DNS lookups at all \u2014 the shared hail-mail domain has nothing\nfor\
+        \ the tenant to publish."
+      operationId: dns_check_email_domain_v1_email_domains__domain_id__dns_check_get
+      parameters:
+        - name: domain_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+            title: Domain Id
+        - name: authorization
+          in: header
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            title: Authorization
+      responses:
+        "200":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EmailDomainDnsCheck"
+        "429":
+          description:
+            Rate limited. This caller exceeded the general request-rate
+            ceiling. Retry after the Retry-After header (seconds).
+          headers:
+            Retry-After:
+              description: Seconds to wait before retrying.
+              schema:
+                type: integer
+            RateLimit-Limit:
+              description: The request ceiling for the current window.
+              schema:
+                type: integer
+            RateLimit-Remaining:
+              description: Requests remaining in the current window.
+              schema:
+                type: integer
+            RateLimit-Reset:
+              description: Seconds until the current window resets.
+              schema:
+                type: integer
+        "422":
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
   /v1/email-domains/{domain_id}/verify:
     post:
       tags:
@@ -3928,6 +3992,61 @@ components:
       additionalProperties: false
       type: object
       title: ContactPatch
+    DmarcCheck:
+      properties:
+        present:
+          type: boolean
+          title: Present
+          description:
+            "True if a DMARC TXT record exists at _dmarc.<domain> or at\
+            \ _dmarc.<organizational domain> \u2014 the two names a receiver checks\
+            \ (RFC 7489 section 6.6.3). The organizational domain is one label under\
+            \ the public suffix: acme.co.uk for mail.acme.co.uk."
+        suggested:
+          anyOf:
+            - $ref: "#/components/schemas/DnsRecordSchema"
+            - type: "null"
+          description:
+            A minimal DMARC record to publish, named _dmarc.<zone>. Null
+            when present is true.
+      type: object
+      required:
+        - present
+        - suggested
+      title: DmarcCheck
+      description: Whether a DMARC record covers the domain.
+    DnsProviderSchema:
+      properties:
+        id:
+          type: string
+          title: Id
+          description: Short identifier for the detected DNS host (e.g. 'cloudflare').
+        name:
+          type: string
+          title: Name
+          description: Human-readable name of the detected DNS host.
+        dns_url:
+          type: string
+          title: Dns Url
+          description: URL to the DNS host's records-management UI.
+        note:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Note
+          description:
+            Host-specific tip for publishing records correctly. Null when
+            there is none.
+      type: object
+      required:
+        - id
+        - name
+        - dns_url
+        - note
+      title: DnsProviderSchema
+      description:
+        A DNS host detected from a domain's nameservers, with its records
+        UI.
     DnsRecordSchema:
       properties:
         name:
@@ -4276,6 +4395,68 @@ components:
         neither is supplied. For ``kind='custom'`` ``domain`` is required and
 
         the prefix fields must be omitted."
+    EmailDomainDnsCheck:
+      properties:
+        kind:
+          type: string
+          enum:
+            - hail_mail
+            - custom
+          title: Kind
+          description: "The domain's kind. 'hail_mail' rows run no lookups: the
+            domain is Hail's, so there is nothing for the customer to publish."
+        dns_provider:
+          anyOf:
+            - $ref: "#/components/schemas/DnsProviderSchema"
+            - type: "null"
+          description:
+            The DNS host detected from the domain's nameservers. Null when
+            no known host matched, when the domain's zone could not be resolved, or
+            for kind='hail_mail' rows.
+        zone:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Zone
+          description:
+            "The DNS zone apex found for this domain: the nearest name
+            at or above it with NS records, never above the organizational domain
+            (a public suffix such as co.uk is never returned). Null when it could
+            not be resolved, or for kind='hail_mail' rows."
+        records:
+          items:
+            $ref: "#/components/schemas/ObservedDnsRecord"
+          type: array
+          title: Records
+          description:
+            The domain's dns_records, each annotated with whether Hail
+            currently observes it in public DNS. Empty for kind='hail_mail' rows.
+        dmarc:
+          $ref: "#/components/schemas/DmarcCheck"
+          description:
+            Whether DMARC is published for this domain, and a suggested
+            record if not.
+        lookup_ok:
+          type: boolean
+          title: Lookup Ok
+          description:
+            "False when the zone or DMARC lookup failed or the check timed\
+            \ out \u2014 then dns_provider and zone are null, every record's observed\
+            \ is null, and dmarc is not reliable; none of it means the records are\
+            \ missing, so retry later instead of telling the customer to republish\
+            \ anything. True otherwise, whatever the lookups found. A single record\
+            \ whose own lookup failed has observed: null while lookup_ok stays true.\
+            \ Always true for kind='hail_mail' rows, which run no lookups."
+      type: object
+      required:
+        - kind
+        - dns_provider
+        - zone
+        - records
+        - dmarc
+        - lookup_ok
+      title: EmailDomainDnsCheck
+      description: Response for GET /email-domains/{id}/dns-check.
     EmailDomainListResponse:
       properties:
         items:
@@ -5435,6 +5616,53 @@ components:
       required:
         - country_code
       title: NumberAcquireRequest
+    ObservedDnsRecord:
+      properties:
+        name:
+          type: string
+          title: Name
+          description: DNS record name/host to publish (e.g. a CNAME's subdomain).
+        value:
+          type: string
+          title: Value
+          description: DNS record value to publish (e.g. a CNAME target or TXT content).
+        type:
+          type: string
+          enum:
+            - CNAME
+            - MX
+            - TXT
+          title: Type
+          description: "DNS record type: 'CNAME' (DKIM), 'MX' (MAIL FROM), or
+            'TXT' (SPF)."
+          default: CNAME
+        priority:
+          anyOf:
+            - type: integer
+            - type: "null"
+          title: Priority
+          description: MX priority. Only present for type='MX'; null otherwise.
+        observed:
+          anyOf:
+            - type: boolean
+            - type: "null"
+          title: Observed
+          description:
+            "True if Hail saw this record in public DNS, false if it looked\
+            \ and did not. Null when the lookup for this record failed or lookup_ok\
+            \ is false \u2014 null means 'could not check', never 'not published'.\
+            \ This does not change verification_status on the domain \u2014 SES stays\
+            \ the authority for that."
+      additionalProperties: true
+      type: object
+      required:
+        - name
+        - value
+        - observed
+      title: ObservedDnsRecord
+      description:
+        One record from EmailDomainResponse.dns_records, with a live DNS
+        observation.
     PhoneNumberListResponse:
       properties:
         items:

@@ -8,8 +8,8 @@ One constant enforced at two layers — the single-file upload endpoint
 SESv2 hard-caps the wire message at 40MB *after* base64 encoding
 (not adjustable). This cap is on raw bytes before encoding; base64 plus
 MIME line breaks inflate by ~1.37×, so 25MB raw ≈ 34MB encoded, leaving
-headroom for bodies, the branding footer, and headers. Note SES
-bandwidth-throttles messages over 10MB.
+headroom for bodies and headers. Note SES bandwidth-throttles messages
+over 10MB.
 """
 
 MAX_EMAIL_ATTACHMENT_BYTES = 25 * 1024 * 1024

@@ -1,8 +1,8 @@
 """Voicebot → API agent-send routes.
 
 The voice agent's send tools execute here so the full existing outbound
-stack — suppression/velocity gate, funds, audit, disclosure footer,
-billing — runs unchanged (spec: docs/superpowers/specs/
+stack — suppression/velocity gate, funds, audit, billing — runs
+unchanged (spec: docs/superpowers/specs/
 2026-07-11-voicebot-agent-tools-design.md). Auth is the shared
 HAIL_INTERNAL_SECRET HMAC (routes/internal/auth.py).
 

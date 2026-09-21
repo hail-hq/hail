@@ -642,6 +642,59 @@ class EmailDomainListResponse(BaseModel):
     default_from: str | None = None
 
 
+class DnsProvider(BaseModel):
+    """A DNS host detected from a domain's nameservers, with its records UI."""
+
+    id: str
+    name: str
+    dns_url: str
+    note: str | None = None
+
+
+class ObservedDnsRecord(DnsRecord):
+    """One record from EmailDomainResponse.dns_records, with a live DNS observation.
+
+    ``observed`` is ``True`` when Hail saw this record in public DNS and
+    ``False`` when it looked and did not. ``None`` means the lookup for this
+    record failed (or ``lookup_ok`` is ``False``): "could not check", never
+    "not published". It is not the verification verdict — SES stays the
+    authority for that.
+    """
+
+    observed: bool | None = None
+
+
+class DmarcCheck(BaseModel):
+    """Whether a DMARC record covers the domain.
+
+    ``present`` is ``True`` when one exists at ``_dmarc.<domain>`` or at
+    ``_dmarc.<organizational domain>`` — the two names a receiver checks.
+    """
+
+    present: bool
+    suggested: DnsRecord | None = None
+
+
+class EmailDomainDnsCheck(BaseModel):
+    """Response for GET /email-domains/{id}/dns-check.
+
+    ``lookup_ok`` is ``False`` when the zone or DMARC lookup failed or the
+    check timed out — ``dns_provider`` and ``zone`` are then ``None``, every
+    record's ``observed`` is ``None``, and ``dmarc`` is not reliable; none
+    of it means the records are missing. A single record whose own lookup
+    failed has ``observed=None`` while ``lookup_ok`` stays ``True``.
+
+    ``kind='hail_mail'`` rows run no lookups: that domain is Hail's.
+    """
+
+    kind: EmailDomainKind
+    dns_provider: DnsProvider | None = None
+    zone: str | None = None
+    records: list[ObservedDnsRecord]
+    dmarc: DmarcCheck
+    lookup_ok: bool
+
+
 class WhoamiResponse(BaseModel):
     """Who the API key belongs to — the answer ``client.whoami()`` gives.
 
@@ -708,11 +761,14 @@ __all__ = [
     "CallResponse",
     "CallStatus",
     "DkimRecord",
+    "DmarcCheck",
+    "DnsProvider",
     "DnsRecord",
     "EmailAttachmentResponse",
     "EmailAttachmentUploadResponse",
     "EmailCreate",
     "EmailDomainCreate",
+    "EmailDomainDnsCheck",
     "EmailDomainKind",
     "EmailDomainListResponse",
     "EmailDomainPatch",
@@ -725,6 +781,7 @@ __all__ = [
     "EventStreamResponse",
     "LLMConfig",
     "NumberType",
+    "ObservedDnsRecord",
     "PhoneNumberListResponse",
     "PhoneNumberResponse",
     "ProviderConfigEntry",

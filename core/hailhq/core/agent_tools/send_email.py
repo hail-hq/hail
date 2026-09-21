@@ -2,8 +2,8 @@
 
 Recipients are directory names only (see ``list_contacts``); dictated
 addresses are unverifiable over voice, so raw addresses are never
-accepted. Resolution, gate, cap, disclosure footer, and billing run
-server-side in ``/internal/agent/send-email``.
+accepted. Resolution, gate, cap, and billing run server-side in
+``/internal/agent/send-email``.
 """
 
 from __future__ import annotations
