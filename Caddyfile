@@ -1,8 +1,9 @@
 # Caddy edge config for the Hail self-host VM.
 #
-# Two public hostnames:
-#   api.{$HAIL_DOMAIN}  → api:8080   (FastAPI / OpenAPI)
-#   mcp.{$HAIL_DOMAIN}  → mcp:8081   (MCP, Streamable HTTP)
+# Public hostnames:
+#   api.{$HAIL_DOMAIN}        → api:8080   (FastAPI / OpenAPI)
+#   mcp.{$HAIL_DOMAIN}        → mcp:8081   (MCP, Streamable HTTP)
+#   {$HAIL_TRACKING_DOMAIN}   → SES open/click tracking server (optional)
 #
 # Auto-HTTPS: Caddy fetches Let's Encrypt certs on first start and renews
 # them in the background. The TLS-ALPN-01 challenge is used (no DNS plumbing),
@@ -35,5 +36,20 @@ mcp.{$HAIL_DOMAIN} {
 		health_uri /healthz
 		health_interval 10s
 		health_timeout 3s
+	}
+}
+
+# Email open/click tracking links on your own host name instead of
+# awstrack.me (docs/public/self-host/aws-ses.md → "Tracking domain").
+# SES picks the configuration set from the Host header, so the header is
+# passed through unchanged; the TLS name must stay the SES host or the
+# upstream certificate check fails. Unset → the block binds the unused
+# `tracking.localhost` name (internal certificate, no ACME request).
+{$HAIL_TRACKING_DOMAIN:tracking.localhost} {
+	reverse_proxy https://r.{$AWS_REGION:us-east-1}.awstrack.me {
+		header_up Host {host}
+		transport http {
+			tls_server_name r.{$AWS_REGION:us-east-1}.awstrack.me
+		}
 	}
 }

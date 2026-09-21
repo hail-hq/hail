@@ -45,3 +45,14 @@ output "iam_secret_access_key" {
 output "ses_configuration_set_name" {
   value = aws_sesv2_configuration_set.events.configuration_set_name
 }
+
+output "ses_tracking_domain_dkim_records" {
+  description = "CNAME records to publish so SES verifies the tracking domain. Empty when ses_tracking_domain is unset."
+  value = [
+    for token in try(aws_sesv2_email_identity.tracking[0].dkim_signing_attributes[0].tokens, []) : {
+      type  = "CNAME"
+      name  = "${token}._domainkey.${var.ses_tracking_domain}"
+      value = "${token}.dkim.amazonses.com"
+    }
+  ]
+}

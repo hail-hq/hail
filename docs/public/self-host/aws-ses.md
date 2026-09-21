@@ -334,13 +334,59 @@ hail email stats --from 2026-06-01T00:00:00Z --bucket day
 Notes:
 
 - Open/Click tracking rewrites links through the default SES tracking
-  domain. Hail does not yet support a custom tracking domain.
+  domain (`awstrack.me`) unless you set up a [tracking domain](#tracking-domain).
 - Open counts are approximate (mail clients that proxy images inflate them).
 - Hail acknowledges and drops events for mail sent outside Hail from the
   same SES account (`status: unmatched` in the API log).
 - Hail re-sends forwarded inbound mail (refer to §10.5) as normal outbound.
   It carries the config set and writes a synthetic `sent` event, so it
   counts in `/emails/stats` like any other send.
+
+### Tracking domain
+
+Tracked links and the open pixel point at `awstrack.me` by default. Ad
+blockers skip or block that host, so clicks from those recipients never
+reach SES and no `clicked` event is stored. To use your own host name
+(example: `go.example.com`), do these steps **in this order**:
+
+```bash
+# 1. DNS: point the host at the VM, same target as api.<HAIL_DOMAIN>.
+#    go.example.com  CNAME  api.example.com
+
+# 2. VM .env, then redeploy (Caddy gets a certificate and starts proxying):
+HAIL_TRACKING_DOMAIN=go.example.com
+
+# 3. Check the proxy. Both x-amz-ses-* headers must be present, the region
+#    must be your AWS_REGION and the protocol must be https.
+curl --head https://go.example.com/favicon.ico
+
+# 4. Create the SES identity for the host and print its DKIM records.
+#    In the .env that Terragrunt reads:
+HAIL_SES_TRACKING_DOMAIN=go.example.com
+cd infra && terragrunt apply
+terragrunt output ses_tracking_domain_dkim_records
+
+# 5. Publish the 3 CNAME records. Wait until the identity is verified.
+#    Use your AWS_REGION (and AWS_PROFILE) or the lookup returns NotFound.
+aws sesv2 get-email-identity --email-identity go.example.com \
+  --region us-east-1 --query VerifiedForSendingStatus
+
+# 6. Switch the configuration set. New emails use the host from now on.
+#    In the same .env:
+HAIL_SES_TRACKING_ENABLED=true
+terragrunt apply
+```
+
+Step 4 only creates the identity, so other applies keep working while the DKIM
+records propagate. SES refuses step 6 until step 5 reports `true`. Do not run step 6 before
+step 3 passes: SES would write a host into every link that does not answer.
+Links in emails sent earlier keep their `awstrack.me` host and keep working.
+While the VM is down, links on your tracking domain do not open.
+To go back, empty `HAIL_SES_TRACKING_ENABLED` and run `terragrunt apply`. Keep
+`HAIL_TRACKING_DOMAIN` and the DNS record: links in emails already sent with
+your host stop working the moment the proxy goes away.
+The proxy lives in [`Caddyfile`](https://github.com/hail-hq/hail/blob/main/Caddyfile);
+the SES side in [`infra/terraform/ses_events.tf`](https://github.com/hail-hq/hail/blob/main/infra/terraform/ses_events.tf).
 
 ### 10.5 Forwarding and webhooks
 
