@@ -58,4 +58,9 @@ variable "ses_tracking_domain" {
   description = "Host name for open/click tracking links (e.g. go.example.com). Empty keeps the default SES tracking domain. Set it only after the HTTPS proxy for this host answers (see docs/public/self-host/aws-ses.md, \"Tracking domain\")."
   type        = string
   default     = ""
+
+  validation {
+    condition     = var.ses_tracking_domain == "" || can(regex("^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$", var.ses_tracking_domain))
+    error_message = "ses_tracking_domain must be a bare lowercase host name such as go.example.com (no https://, path, or spaces)."
+  }
 }
