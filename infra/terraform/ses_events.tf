@@ -1,9 +1,26 @@
 # SES configuration set → SNS → ingest Lambda → POST /internal/ses-events.
-# Open/Click tracking uses the default SES tracking domain in v1; a custom
-# tracking domain is a fast-follow (see the deliverability design spec).
+# Open/Click tracking uses the default SES tracking domain unless
+# var.ses_tracking_domain is set. SES only accepts a custom redirect domain
+# that is a verified identity, so the identity is created here; publish its
+# DKIM records (output `ses_tracking_domain_dkim_records`) before it verifies.
+
+resource "aws_sesv2_email_identity" "tracking" {
+  count          = var.ses_tracking_domain == "" ? 0 : 1
+  email_identity = var.ses_tracking_domain
+}
 
 resource "aws_sesv2_configuration_set" "events" {
   configuration_set_name = var.ses_configuration_set_name
+
+  dynamic "tracking_options" {
+    for_each = var.ses_tracking_domain == "" ? [] : [var.ses_tracking_domain]
+    content {
+      custom_redirect_domain = tracking_options.value
+      https_policy           = "REQUIRE"
+    }
+  }
+
+  depends_on = [aws_sesv2_email_identity.tracking]
 }
 
 resource "aws_sns_topic" "ses_events" {

@@ -26,7 +26,7 @@ services:
       - "80:80"
       - "443:443"
       - "443:443/udp" # HTTP/3
-    # Only the two vars Caddy actually reads — not the full .env, so no
+    # Only the vars Caddy actually reads — not the full .env, so no
     # provider secret leaks into Caddy's process env. The `:-` default-to-
     # empty lets `compose config` parse cleanly when HAIL_DOMAIN isn't set;
     # if Caddy actually starts with HAIL_DOMAIN empty, it fails its config
@@ -34,6 +34,10 @@ services:
     environment:
       HAIL_DOMAIN: ${HAIL_DOMAIN:-}
       CADDY_ACME_EMAIL: ${CADDY_ACME_EMAIL:-hi@hail.so}
+      # Optional tracking-link host (see Caddyfile). Empty → Caddy falls
+      # back to its `tracking.localhost` placeholder.
+      HAIL_TRACKING_DOMAIN: ${HAIL_TRACKING_DOMAIN:-tracking.localhost}
+      AWS_REGION: ${AWS_REGION:-us-east-1}
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy-data:/data

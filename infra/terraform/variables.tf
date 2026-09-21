@@ -53,3 +53,9 @@ variable "ses_configuration_set_name" {
   type        = string
   default     = "hail-events"
 }
+
+variable "ses_tracking_domain" {
+  description = "Host name for open/click tracking links (e.g. go.example.com). Empty keeps the default SES tracking domain. Set it only after the HTTPS proxy for this host answers (see docs/public/self-host/aws-ses.md, \"Tracking domain\")."
+  type        = string
+  default     = ""
+}

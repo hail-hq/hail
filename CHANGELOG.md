@@ -4,6 +4,15 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 
 ## [Unreleased]
 
+### Added
+
+- Optional tracking domain for email open and click links. Set
+  `HAIL_TRACKING_DOMAIN` and Caddy proxies that host to the SES tracking
+  server; set `HAIL_SES_TRACKING_DOMAIN` and Terraform makes SES write it into
+  every tracked link instead of `awstrack.me`, which ad blockers skip. No API
+  change. Steps and their required order:
+  [docs/public/self-host/aws-ses.md](docs/public/self-host/aws-ses.md#tracking-domain).
+
 ### Fixed
 
 - `GET /v1/emails/{id}` built `raw_url` and attachment `url` values from the
