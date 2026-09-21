@@ -4,7 +4,7 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 
 ## [Unreleased]
 
-## [0.23.0] — 2026-09-20
+## [0.23.0] — 2026-09-21
 
 Email goes out exactly as you wrote it: no Hail footer, full react-email HTML
 documents pass through unchanged, and custom-domain setup now tells you which
@@ -37,17 +37,31 @@ Component versions cut alongside this release:
 ### Custom domains — DNS check
 
 - New read-only route `GET /v1/email-domains/{id}/dns-check`. It returns:
+  - `kind` — `custom` or `hail_mail`. A `hail_mail` address has no records to
+    check.
   - `dns_provider` — the DNS host found from the domain's nameservers, with a
     link to its DNS page (13 hosts; `null` when not recognised).
-  - `records[].observed` — whether Hail saw each required record in public DNS.
+  - `records[].observed` — `true` when Hail saw the record in public DNS,
+    `false` when it looked and did not, `null` when that one lookup failed.
     SES stays the authority for `verification_status`.
-  - `dmarc` — whether a DMARC record exists on the sending domain or its zone,
-    and a suggested `v=DMARC1; p=none;` record when none does.
-  - `lookup_ok` — `false` when Hail's own DNS lookup failed or hit the 10 s
-    deadline. Clients must not report records as missing in that case.
+  - `dmarc` — whether a DMARC record exists at `_dmarc.<domain>` or at the
+    organizational domain, and a suggested `v=DMARC1; p=none;` record when
+    none does.
+  - `lookup_ok` — `false` when the zone or DMARC lookup failed or the check hit
+    its 8 s deadline. Every `observed` is then `null`. Clients must not report
+    records as missing in that case.
+- The zone search stops at the organizational domain (`acme.co.uk`), so Hail
+  never suggests a record on a public suffix such as `co.uk`.
 - SDK: `client.email_domains.dns_check(domain_id)`.
-- CLI: `hail email domain dns-check <id>`.
+- CLI: `hail email domain dns-check <id>`. The `SEEN` column prints `?` for a
+  record that could not be checked.
 - The OpenAPI change is additive.
+
+### Internal
+
+- New dependency in `core`: `tldextract` (BSD-3-Clause), for the Public Suffix
+  List. It reads the list snapshot shipped in the package: no network fetch
+  and no cache write at runtime.
 
 ## [0.22.0] — 2026-08-31
 
