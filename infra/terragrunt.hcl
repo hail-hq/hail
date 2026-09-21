@@ -16,6 +16,7 @@ locals {
   hail_inbound_secret   = run_cmd("--terragrunt-quiet", "bash", "-c", "source ${local.env_file} && echo -n \"$HAIL_INBOUND_HMAC_SECRET\"")
   hail_mail_base_domain = run_cmd("--terragrunt-quiet", "bash", "-c", "source ${local.env_file} && echo -n \"$HAIL_MAIL_BASE_DOMAIN\"")
   ses_tracking_domain   = run_cmd("--terragrunt-quiet", "bash", "-c", "source ${local.env_file} && echo -n \"$HAIL_SES_TRACKING_DOMAIN\"")
+  ses_tracking_enabled  = run_cmd("--terragrunt-quiet", "bash", "-c", "source ${local.env_file} && echo -n \"$HAIL_SES_TRACKING_ENABLED\"")
 }
 
 terraform {
@@ -39,13 +40,14 @@ remote_state {
 }
 
 inputs = {
-  name_prefix              = local.name_prefix
-  region                   = local.aws_region
-  hail_api_url             = local.hail_api_url
-  hail_inbound_hmac_secret = local.hail_inbound_secret
-  hail_mail_base_domain    = local.hail_mail_base_domain
-  ses_tracking_domain      = local.ses_tracking_domain
-  aws_profile              = local.aws_profile
-  iam_user_name            = local.iam_user_name
-  lambda_source_dir        = "${get_repo_root()}/infra/ses-ingest-lambda"
+  name_prefix                 = local.name_prefix
+  region                      = local.aws_region
+  hail_api_url                = local.hail_api_url
+  hail_inbound_hmac_secret    = local.hail_inbound_secret
+  hail_mail_base_domain       = local.hail_mail_base_domain
+  ses_tracking_domain         = local.ses_tracking_domain
+  ses_tracking_domain_enabled = local.ses_tracking_enabled == "true"
+  aws_profile                 = local.aws_profile
+  iam_user_name               = local.iam_user_name
+  lambda_source_dir           = "${get_repo_root()}/infra/ses-ingest-lambda"
 }

@@ -64,3 +64,9 @@ variable "ses_tracking_domain" {
     error_message = "ses_tracking_domain must be a bare lowercase host name such as go.example.com (no https://, path, or spaces)."
   }
 }
+
+variable "ses_tracking_domain_enabled" {
+  description = "Write ses_tracking_domain into tracked links. Keep false until the SES identity for that host is verified and its HTTPS proxy answers; with false, only the identity is created, so other applies keep working while DKIM records propagate."
+  type        = bool
+  default     = false
+}

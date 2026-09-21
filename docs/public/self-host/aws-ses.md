@@ -363,23 +363,26 @@ curl --head https://go.example.com/favicon.ico
 # 4. Create the SES identity for the host and print its DKIM records.
 #    In the .env that Terragrunt reads:
 HAIL_SES_TRACKING_DOMAIN=go.example.com
-cd infra && terragrunt apply -target=aws_sesv2_email_identity.tracking
+cd infra && terragrunt apply
 terragrunt output ses_tracking_domain_dkim_records
 
-# 5. Publish the 3 CNAME records. Wait until the identity is verified:
+# 5. Publish the 3 CNAME records. Wait until the identity is verified.
 #    Use your AWS_REGION (and AWS_PROFILE) or the lookup returns NotFound.
 aws sesv2 get-email-identity --email-identity go.example.com \
   --region us-east-1 --query VerifiedForSendingStatus
 
 # 6. Switch the configuration set. New emails use the host from now on.
+#    In the same .env:
+HAIL_SES_TRACKING_ENABLED=true
 terragrunt apply
 ```
 
-SES refuses step 6 until step 5 reports `true`. Do not run step 6 before
+Step 4 only creates the identity, so other applies keep working while the DKIM
+records propagate. SES refuses step 6 until step 5 reports `true`. Do not run step 6 before
 step 3 passes: SES would write a host into every link that does not answer.
 Links in emails sent earlier keep their `awstrack.me` host and keep working.
 While the VM is down, links on your tracking domain do not open.
-To go back, unset `HAIL_SES_TRACKING_DOMAIN` and run `terragrunt apply`. Keep
+To go back, empty `HAIL_SES_TRACKING_ENABLED` and run `terragrunt apply`. Keep
 `HAIL_TRACKING_DOMAIN` and the DNS record: links in emails already sent with
 your host stop working the moment the proxy goes away.
 The proxy lives in [`Caddyfile`](https://github.com/hail-hq/hail/blob/main/Caddyfile);
