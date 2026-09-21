@@ -60,6 +60,7 @@ from hailhq.api.routes.email_domains import (
 )
 from hailhq.api.usage import write_usage_event
 from hailhq.core.compliance_gate import check_email_allowed, normalize_recipient
+from hailhq.core.config import settings
 from hailhq.core.db import get_session
 from hailhq.core.email_attachment_limits import (
     ATTACHMENT_TOO_LARGE_DETAIL,
@@ -835,7 +836,6 @@ async def get_email_stats(
 )
 async def get_email(
     email_id: UUID,
-    request: Request,
     principal: Annotated[Principal, Depends(get_current_principal)],
     db: Annotated[AsyncSession, Depends(get_session)],
 ) -> EmailResponse:
@@ -863,7 +863,10 @@ async def get_email(
     email, last_event = row
     resp = EmailResponse.model_validate(email)
     resp.last_event_at = last_event
-    base = str(request.base_url)
+    # Built from the public API URL, not request.base_url: the MCP server and
+    # the voicebot reach the API at http://api:8080, and a URL on that host
+    # is useless to their callers.
+    base = join_url(settings.hail_api_url, "v1")
     if email.raw_s3_key:
         resp.raw_url = join_url(base, f"emails/{email.id}/raw")
     att_rows = (
