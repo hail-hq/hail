@@ -44,6 +44,7 @@ Response `EmailDomainDnsCheck`:
 
 ```json
 {
+  "kind": "custom",
   "dns_provider": {
     "id": "cloudflare",
     "name": "Cloudflare",
@@ -68,22 +69,27 @@ Response `EmailDomainDnsCheck`:
       "value": "v=DMARC1; p=none;",
       "priority": null
     }
-  }
+  },
+  "lookup_ok": true
 }
 ```
 
 - `dns_provider` is `null` when the nameservers match no known host.
-- `observed` means "hail saw this record in public DNS". SES stays the authority for `verification_status`. Field description says so.
-- `dmarc.suggested` is `null` when `present` is true. Suggestion is `p=none` only, no `rua`.
+- `kind` is the domain's kind. Clients use it to tell a `hail_mail` row from a `custom` row with no records.
+- `observed` is `true` when hail saw this record in public DNS and `false` when it looked and did not. It is `null` when the lookup for that record failed: "could not check", never "not published". SES stays the authority for `verification_status`. Field description says so.
+- `dmarc.present` is true when a record exists at `_dmarc.<domain>` or at `_dmarc.<organizational domain>` (RFC 7489 section 6.6.3). A delegated subzone (`mail.acme.com`) thus sees the policy at `_dmarc.acme.com`.
+- `dmarc.suggested` is `null` when `present` is true. Suggestion is `p=none` only, no `rua`, named `_dmarc.<zone>`.
+- `lookup_ok` is `false` when the zone or DMARC lookup failed, or the check passed its 8 s deadline. Then `dns_provider` and `zone` are `null` and each `observed` is `null`. One failed record lookup does not set it to `false`.
 - 404 for another org's domain; `hail_mail` rows return empty `records`, `dns_provider: null`.
 
-Code, all in `core/hailhq/core/dns_lookup.py` (DNS-over-HTTPS, no new dependency):
+Code, all in `core/hailhq/core/dns_lookup.py` (DNS-over-HTTPS). One new dependency: `tldextract` (BSD-3-Clause) for the Public Suffix List. It uses the snapshot in the wheel: no network fetch, no cache write.
 
 - `_resolve(name, rtype) -> list[str]`: shared DoH call; `resolve_mx` is rebuilt on it.
-- `resolve_zone_ns(domain) -> tuple[str, list[str]]`: query NS on the name, strip the left label until an answer comes back. Returns the zone and its nameservers.
+- `organizational_domain(domain) -> str`: one label under the public suffix (`acme.co.uk` for `mail.acme.co.uk`). Private suffixes count (`vercel.app`, `github.io`).
+- `resolve_zone_ns(domain) -> tuple[str, list[str]]`: query NS on the name, strip the left label until an answer comes back. The walk stops at the organizational domain and never queries a public suffix: `co.uk` has NS records of its own. Returns the zone and its nameservers.
 - `detect_dns_provider(nameservers) -> DnsProvider | None`: suffix table — `ns.cloudflare.com`, `domaincontrol.com` (GoDaddy), `registrar-servers.com` (Namecheap), `.awsdns-` (Route 53), `squarespacedns.com`, `vercel-dns.com`, `digitalocean.com`, `ui-dns.` (IONOS), `hover.com`, `name.com`, `porkbun.com`, `gandi.net`, `ovh.net`. No Google entry: legacy Google Domains and Google Cloud DNS share `ns-cloud-*.googledomains.com`, so those return `null`. Suffixes match whole labels only. Each `dns_url` is checked against the host's own docs before it is committed; an unverified host gets its login page.
 - `observe_record(record) -> bool`: CNAME → target equals value; MX → host in answers; TXT → value in answers. Trailing dots and case ignored.
-- Lookups run with `asyncio.gather`; a DoH failure gives `observed: false`, never a 5xx.
+- Lookups run in an `asyncio.TaskGroup` on one shared `httpx.AsyncClient` (`doh_client()`). A failed zone walk cancels the record lookups still in flight. A DoH failure is never a 5xx: see `observed` and `lookup_ok` above.
 
 Surfaces: `openapi/openapi.yaml` regenerated + `pnpm exec prettier --write`; Go client regenerated; CLI `hail email domain dns-check <id>`; SDK method `dns_check_email_domain(id)` next to the existing domain methods in `sdk/hail/client.py`. No MCP tool (not asked for).
 

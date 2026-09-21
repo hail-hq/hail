@@ -168,18 +168,36 @@ func (e EmailDomainCreateKind) Valid() bool {
 	}
 }
 
+// Defines values for EmailDomainDnsCheckKind.
+const (
+	EmailDomainDnsCheckKindCustom   EmailDomainDnsCheckKind = "custom"
+	EmailDomainDnsCheckKindHailMail EmailDomainDnsCheckKind = "hail_mail"
+)
+
+// Valid indicates whether the value is a known member of the EmailDomainDnsCheckKind enum.
+func (e EmailDomainDnsCheckKind) Valid() bool {
+	switch e {
+	case EmailDomainDnsCheckKindCustom:
+		return true
+	case EmailDomainDnsCheckKindHailMail:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for EmailDomainResponseKind.
 const (
-	EmailDomainResponseKindCustom   EmailDomainResponseKind = "custom"
-	EmailDomainResponseKindHailMail EmailDomainResponseKind = "hail_mail"
+	Custom   EmailDomainResponseKind = "custom"
+	HailMail EmailDomainResponseKind = "hail_mail"
 )
 
 // Valid indicates whether the value is a known member of the EmailDomainResponseKind enum.
 func (e EmailDomainResponseKind) Valid() bool {
 	switch e {
-	case EmailDomainResponseKindCustom:
+	case Custom:
 		return true
-	case EmailDomainResponseKindHailMail:
+	case HailMail:
 		return true
 	default:
 		return false
@@ -1212,12 +1230,12 @@ type ContactPatch struct {
 	PhoneE164 *string `json:"phone_e164,omitempty"`
 }
 
-// DmarcCheck Whether a DMARC record is published for the domain's zone.
+// DmarcCheck Whether a DMARC record covers the domain.
 type DmarcCheck struct {
-	// Present True if a DMARC TXT record already exists at _dmarc.<zone>.
+	// Present True if a DMARC TXT record exists at _dmarc.<domain> or at _dmarc.<organizational domain> — the two names a receiver checks (RFC 7489 section 6.6.3). The organizational domain is one label under the public suffix: acme.co.uk for mail.acme.co.uk.
 	Present bool `json:"present"`
 
-	// Suggested A minimal DMARC record to publish. Null when present is true.
+	// Suggested A minimal DMARC record to publish, named _dmarc.<zone>. Null when present is true.
 	Suggested *DnsRecordSchema `json:"suggested"`
 }
 
@@ -1396,21 +1414,27 @@ type EmailDomainCreateKind string
 
 // EmailDomainDnsCheck Response for GET /email-domains/{id}/dns-check.
 type EmailDomainDnsCheck struct {
-	// Dmarc Whether a DMARC record is published for the domain's zone.
+	// Dmarc Whether a DMARC record covers the domain.
 	Dmarc DmarcCheck `json:"dmarc"`
 
 	// DnsProvider The DNS host detected from the domain's nameservers. Null when no known host matched, when the domain's zone could not be resolved, or for kind='hail_mail' rows.
 	DnsProvider *DnsProviderSchema `json:"dns_provider"`
 
-	// LookupOk True when every DNS lookup this check needed finished, whatever it found. False when a lookup failed or the check timed out — when false, dns_provider, zone, every record's observed, and dmarc are not reliable and do not mean the records are missing; retry later instead of telling the customer to republish anything. Always true for kind='hail_mail' rows, which run no lookups.
+	// Kind The domain's kind. 'hail_mail' rows run no lookups: the domain is Hail's, so there is nothing for the customer to publish.
+	Kind EmailDomainDnsCheckKind `json:"kind"`
+
+	// LookupOk False when the zone or DMARC lookup failed or the check timed out — then dns_provider and zone are null, every record's observed is null, and dmarc is not reliable; none of it means the records are missing, so retry later instead of telling the customer to republish anything. True otherwise, whatever the lookups found. A single record whose own lookup failed has observed: null while lookup_ok stays true. Always true for kind='hail_mail' rows, which run no lookups.
 	LookupOk bool `json:"lookup_ok"`
 
 	// Records The domain's dns_records, each annotated with whether Hail currently observes it in public DNS. Empty for kind='hail_mail' rows.
 	Records []ObservedDnsRecord `json:"records"`
 
-	// Zone The DNS zone apex found for this domain. Null when it could not be resolved, or for kind='hail_mail' rows.
+	// Zone The DNS zone apex found for this domain: the nearest name at or above it with NS records, never above the organizational domain (a public suffix such as co.uk is never returned). Null when it could not be resolved, or for kind='hail_mail' rows.
 	Zone *string `json:"zone"`
 }
+
+// EmailDomainDnsCheckKind The domain's kind. 'hail_mail' rows run no lookups: the domain is Hail's, so there is nothing for the customer to publish.
+type EmailDomainDnsCheckKind string
 
 // EmailDomainListResponse defines model for EmailDomainListResponse.
 type EmailDomainListResponse struct {
@@ -1944,8 +1968,8 @@ type ObservedDnsRecord struct {
 	// Name DNS record name/host to publish (e.g. a CNAME's subdomain).
 	Name string `json:"name"`
 
-	// Observed True if Hail saw this record in public DNS. This does not change verification_status on the domain — SES stays the authority for that.
-	Observed bool `json:"observed"`
+	// Observed True if Hail saw this record in public DNS, false if it looked and did not. Null when the lookup for this record failed or lookup_ok is false — null means 'could not check', never 'not published'. This does not change verification_status on the domain — SES stays the authority for that.
+	Observed *bool `json:"observed"`
 
 	// Priority MX priority. Only present for type='MX'; null otherwise.
 	Priority *int `json:"priority,omitempty"`

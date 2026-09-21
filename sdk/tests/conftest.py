@@ -173,6 +173,7 @@ def make_dns_check_response(
     dmarc_present: bool = False,
     dmarc_suggested: dict | None = None,
     lookup_ok: bool = True,
+    kind: str = "custom",
 ) -> dict:
     """Server-shaped JSON for an EmailDomainDnsCheck."""
     if records is None:
@@ -191,6 +192,14 @@ def make_dns_check_response(
                 "priority": None,
                 "observed": False,
             },
+            {
+                # This record's own lookup failed: could not check.
+                "type": "CNAME",
+                "name": "sel3._domainkey.acme.com",
+                "value": "sel3.dkim.amazonses.com",
+                "priority": None,
+                "observed": None,
+            },
         ]
     if not dmarc_present and dmarc_suggested is None:
         dmarc_suggested = {
@@ -207,6 +216,7 @@ def make_dns_check_response(
             "note": None,
         }
     return {
+        "kind": kind,
         "dns_provider": dns_provider,
         "zone": zone,
         "records": records,

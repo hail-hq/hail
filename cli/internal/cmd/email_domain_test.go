@@ -180,7 +180,9 @@ func TestEmailDomain_List(t *testing.T) {
 func sampleDnsCheckResponse(withProvider bool, dmarcPresent bool) client.EmailDomainDnsCheck {
 	cnameType := client.ObservedDnsRecordTypeCNAME
 	suggestedTxtType := client.DnsRecordSchemaTypeTXT
+	yes, no := true, false
 	check := client.EmailDomainDnsCheck{
+		Kind:     client.EmailDomainDnsCheckKindCustom,
 		Zone:     strPtr("acme.com"),
 		LookupOk: true,
 		Records: []client.ObservedDnsRecord{
@@ -188,13 +190,20 @@ func sampleDnsCheckResponse(withProvider bool, dmarcPresent bool) client.EmailDo
 				Type:     &cnameType,
 				Name:     "sel1._domainkey.acme.com",
 				Value:    "sel1.dkim.amazonses.com",
-				Observed: true,
+				Observed: &yes,
 			},
 			{
 				Type:     &cnameType,
 				Name:     "sel2._domainkey.acme.com",
 				Value:    "sel2.dkim.amazonses.com",
-				Observed: false,
+				Observed: &no,
+			},
+			{
+				// This record's own lookup failed: observed is null.
+				Type:     &cnameType,
+				Name:     "sel3._domainkey.acme.com",
+				Value:    "sel3.dkim.amazonses.com",
+				Observed: nil,
 			},
 		},
 		Dmarc: client.DmarcCheck{
@@ -262,6 +271,9 @@ func TestEmailDomain_DnsCheck_Human(t *testing.T) {
 	if got := seenFor("sel2._domainkey.acme.com"); got != "no" {
 		t.Errorf("sel2 SEEN column = %q, want no; stdout=%q", got, stdout)
 	}
+	if got := seenFor("sel3._domainkey.acme.com"); got != "?" {
+		t.Errorf("sel3 SEEN column = %q, want ? (lookup failed); stdout=%q", got, stdout)
+	}
 	if !strings.Contains(stdout, `DMARC: not found — add TXT _dmarc.acme.com "v=DMARC1; p=none;"`) {
 		t.Errorf("stdout missing dmarc line: %q", stdout)
 	}
@@ -304,13 +316,17 @@ func TestEmailDomain_DnsCheck_JSON(t *testing.T) {
 	if body.DnsProvider == nil || body.DnsProvider.Id != "cloudflare" {
 		t.Fatalf("DnsProvider = %+v", body.DnsProvider)
 	}
-	if len(body.Records) != 2 {
+	if len(body.Records) != 3 {
 		t.Fatalf("Records len = %d", len(body.Records))
+	}
+	if body.Records[2].Observed != nil {
+		t.Fatalf("Records[2].Observed = %v, want null passed through", *body.Records[2].Observed)
 	}
 }
 
 func TestEmailDomain_DnsCheck_HailMail(t *testing.T) {
 	check := client.EmailDomainDnsCheck{
+		Kind:     client.EmailDomainDnsCheckKindHailMail,
 		Zone:     nil,
 		LookupOk: true,
 		Records:  []client.ObservedDnsRecord{},
@@ -328,6 +344,31 @@ func TestEmailDomain_DnsCheck_HailMail(t *testing.T) {
 	}
 	if stdout != "DNS host: not recognised\n" {
 		t.Fatalf("stdout = %q, want exactly the not-recognised line and nothing else", stdout)
+	}
+}
+
+// A custom row can have the same shape as a hail_mail one (no records, no
+// zone found). It is told apart by kind, so it still gets its DMARC line.
+func TestEmailDomain_DnsCheck_CustomWithNoZoneStillPrintsDmarc(t *testing.T) {
+	check := client.EmailDomainDnsCheck{
+		Kind:     client.EmailDomainDnsCheckKindCustom,
+		Zone:     nil,
+		LookupOk: true,
+		Records:  []client.ObservedDnsRecord{},
+		Dmarc:    client.DmarcCheck{Present: false, Suggested: nil},
+	}
+	srv := newFakeServer(t, http.StatusOK, check)
+
+	id := "11111111-1111-1111-1111-111111111111"
+	stdout, _, err := runRoot(t,
+		map[string]string{"HAIL_API_KEY": "sk_test", "HAIL_API_URL": srv.URL},
+		"email", "domain", "dns-check", id,
+	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if stdout != "DNS host: not recognised\nDMARC: not found\n" {
+		t.Fatalf("stdout = %q, want the DMARC line too", stdout)
 	}
 }
 

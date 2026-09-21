@@ -7,6 +7,7 @@ from hailhq.core.dns_lookup import (
     detect_dns_provider,
     dmarc_present,
     observe_record,
+    organizational_domain,
     resolve_mx,
     resolve_zone_ns,
     ses_inbound_host,
@@ -104,6 +105,80 @@ async def test_resolve_zone_ns_walks_up_to_the_apex(doh_client: AsyncMock) -> No
     assert zone == "example.com"
     assert nameservers == ["ns1.example.com", "ns2.example.com"]
     assert calls == ["inbox.mail.example.com", "mail.example.com", "example.com"]
+
+
+@pytest.mark.parametrize(
+    ("domain", "expected"),
+    [
+        ("acme.com", "acme.com"),
+        ("A.Mail.Acme.COM.", "acme.com"),
+        ("mail.acme.co.uk", "acme.co.uk"),
+        # Private suffixes count: a customer on a shared host holds only
+        # their own label, never vercel.app / github.io.
+        ("foo.vercel.app", "foo.vercel.app"),
+        ("x.github.io", "x.github.io"),
+        # A public suffix, or a name under none, has no organizational domain.
+        ("co.uk", ""),
+        ("vercel.app", ""),
+        ("localhost", ""),
+    ],
+)
+def test_organizational_domain(domain: str, expected: str) -> None:
+    assert organizational_domain(domain) == expected
+
+
+@pytest.mark.parametrize(
+    ("domain", "expected_calls"),
+    [
+        # acme.co.uk is not delegated; co.uk HAS NS records of its own, so
+        # querying it would report the registry as the customer's zone.
+        ("mail.acme.co.uk", ["mail.acme.co.uk", "acme.co.uk"]),
+        ("foo.vercel.app", ["foo.vercel.app"]),
+    ],
+)
+@pytest.mark.asyncio
+async def test_resolve_zone_ns_never_climbs_into_a_public_suffix(
+    doh_client: AsyncMock, domain: str, expected_calls: list[str]
+) -> None:
+    calls: list[str] = []
+
+    async def fake_get(url: str, params: dict[str, str]) -> AsyncMock:
+        calls.append(params["name"])
+        if params["name"] in ("co.uk", "vercel.app"):
+            return _fake_response({"Answer": [{"type": 2, "data": "ns1.nic.uk."}]})
+        return _fake_response({"Answer": []})
+
+    doh_client.get = AsyncMock(side_effect=fake_get)
+    assert await resolve_zone_ns(domain) == ("", [])
+    assert calls == expected_calls
+
+
+@pytest.mark.asyncio
+async def test_resolve_zone_ns_public_suffix_itself_does_no_lookups(
+    doh_client: AsyncMock,
+) -> None:
+    doh_client.get = AsyncMock(side_effect=AssertionError("must not query"))
+    assert await resolve_zone_ns("co.uk") == ("", [])
+
+
+@pytest.mark.asyncio
+async def test_helpers_use_a_passed_client_and_open_none_of_their_own() -> None:
+    """The dns-check route passes one client to every helper so its ~8
+    lookups share a TLS connection."""
+    shared = AsyncMock()
+    shared.get = AsyncMock(
+        return_value=_fake_response(
+            {"Answer": [{"type": 16, "data": '"v=DMARC1; p=none;"'}]}
+        )
+    )
+    with patch("hailhq.core.dns_lookup.httpx.AsyncClient") as client_cls:
+        assert await dmarc_present("acme.com", client=shared) is True
+        await observe_record(
+            {"type": "TXT", "name": "acme.com", "value": "x"}, client=shared
+        )
+        await resolve_zone_ns("acme.com", client=shared)
+    client_cls.assert_not_called()
+    assert shared.get.await_count == 3
 
 
 @pytest.mark.asyncio

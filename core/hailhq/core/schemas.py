@@ -986,29 +986,46 @@ class DnsProviderSchema(BaseModel):
 class ObservedDnsRecord(DnsRecordSchema):
     """One record from EmailDomainResponse.dns_records, with a live DNS observation."""
 
-    observed: bool = Field(
+    observed: bool | None = Field(
         description=(
-            "True if Hail saw this record in public DNS. This does not "
-            "change verification_status on the domain — SES stays the "
-            "authority for that."
+            "True if Hail saw this record in public DNS, false if it looked "
+            "and did not. Null when the lookup for this record failed or "
+            "lookup_ok is false — null means 'could not check', never 'not "
+            "published'. This does not change verification_status on the "
+            "domain — SES stays the authority for that."
         )
     )
 
 
 class DmarcCheck(BaseModel):
-    """Whether a DMARC record is published for the domain's zone."""
+    """Whether a DMARC record covers the domain."""
 
     present: bool = Field(
-        description="True if a DMARC TXT record already exists at _dmarc.<zone>."
+        description=(
+            "True if a DMARC TXT record exists at _dmarc.<domain> or at "
+            "_dmarc.<organizational domain> — the two names a receiver "
+            "checks (RFC 7489 section 6.6.3). The organizational domain is "
+            "one label under the public suffix: acme.co.uk for "
+            "mail.acme.co.uk."
+        )
     )
     suggested: DnsRecordSchema | None = Field(
-        description="A minimal DMARC record to publish. Null when present is true."
+        description=(
+            "A minimal DMARC record to publish, named _dmarc.<zone>. Null "
+            "when present is true."
+        )
     )
 
 
 class EmailDomainDnsCheck(BaseModel):
     """Response for GET /email-domains/{id}/dns-check."""
 
+    kind: EmailDomainKind = Field(
+        description=(
+            "The domain's kind. 'hail_mail' rows run no lookups: the domain "
+            "is Hail's, so there is nothing for the customer to publish."
+        )
+    )
     dns_provider: DnsProviderSchema | None = Field(
         description=(
             "The DNS host detected from the domain's nameservers. Null when "
@@ -1018,8 +1035,10 @@ class EmailDomainDnsCheck(BaseModel):
     )
     zone: str | None = Field(
         description=(
-            "The DNS zone apex found for this domain. Null when it could "
-            "not be resolved, or for kind='hail_mail' rows."
+            "The DNS zone apex found for this domain: the nearest name at "
+            "or above it with NS records, never above the organizational "
+            "domain (a public suffix such as co.uk is never returned). Null "
+            "when it could not be resolved, or for kind='hail_mail' rows."
         )
     )
     records: list[ObservedDnsRecord] = Field(
@@ -1034,13 +1053,14 @@ class EmailDomainDnsCheck(BaseModel):
     )
     lookup_ok: bool = Field(
         description=(
-            "True when every DNS lookup this check needed finished, "
-            "whatever it found. False when a lookup failed or the check "
-            "timed out — when false, dns_provider, zone, every record's "
-            "observed, and dmarc are not reliable and do not mean the "
-            "records are missing; retry later instead of telling the "
-            "customer to republish anything. Always true for kind="
-            "'hail_mail' rows, which run no lookups."
+            "False when the zone or DMARC lookup failed or the check timed "
+            "out — then dns_provider and zone are null, every record's "
+            "observed is null, and dmarc is not reliable; none of it means "
+            "the records are missing, so retry later instead of telling the "
+            "customer to republish anything. True otherwise, whatever the "
+            "lookups found. A single record whose own lookup failed has "
+            "observed: null while lookup_ok stays true. Always true for "
+            "kind='hail_mail' rows, which run no lookups."
         )
     )
 
