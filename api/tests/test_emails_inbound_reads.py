@@ -245,6 +245,32 @@ async def test_get_email_populates_raw_url_and_attachments(
 
 
 @pytest.mark.asyncio
+async def test_get_email_urls_use_public_api_url_not_request_host(
+    client: httpx.AsyncClient,
+    auth_headers,
+    async_session: AsyncSession,
+    monkeypatch,
+):
+    """The MCP server calls the API at http://api:8080. raw_url and attachment
+    urls must still point at the public API, under /v1."""
+    from hailhq.core.config import settings
+
+    monkeypatch.setattr(settings, "hail_api_url", "https://api.example.test")
+    org_id, headers = auth_headers
+    inbound, att = await _make_inbound_pair(async_session, org_id)
+
+    r = await client.get(
+        f"/emails/{inbound.id}", headers={**headers, "host": "api:8080"}
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["raw_url"] == f"https://api.example.test/v1/emails/{inbound.id}/raw"
+    assert body["attachments"][0]["url"] == (
+        f"https://api.example.test/v1/emails/{inbound.id}/attachments/{att.id}"
+    )
+
+
+@pytest.mark.asyncio
 async def test_get_outbound_email_no_raw_url_no_attachments(
     client: httpx.AsyncClient,
     auth_headers,

@@ -4,6 +4,13 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 
 ## [Unreleased]
 
+### Fixed
+
+- `GET /v1/emails/{id}` built `raw_url` and attachment `url` values from the
+  host of the incoming request. Through the MCP server that host is the
+  internal `http://api:8080`, so agents got links they could not open. Both
+  are now built from `HAIL_API_URL` and point at `/v1`.
+
 ## [0.23.0] — 2026-09-21
 
 Email goes out exactly as you wrote it: no Hail footer, full react-email HTML
