@@ -49,6 +49,7 @@ from hail.models import (
     EmailStatus,
     EventStreamResponse,
     LLMConfig,
+    NumberQuotesResponse,
     NumberType,
     PhoneNumberListResponse,
     PhoneNumberResponse,
@@ -606,6 +607,8 @@ class _NumbersResource:
         country: str,
         number_type: NumberType = "local",
         idempotency_key: str | None = None,
+        quote_id: str | UUID | None = None,
+        provider: Literal["auto", "twilio", "telnyx"] | None = None,
     ) -> PhoneNumberResponse:
         """Provision a new dedicated number from the carrier.
 
@@ -613,6 +616,10 @@ class _NumbersResource:
         ``idempotency_key`` defaults to a fresh UUIDv4.
         """
         body: dict[str, Any] = {"country_code": country, "number_type": number_type}
+        if quote_id is not None:
+            body["quote_id"] = str(quote_id)
+        if provider is not None:
+            body["provider"] = provider
         key = idempotency_key or generate_idempotency_key()
         data = await self._http.request(
             "POST",
@@ -621,6 +628,31 @@ class _NumbersResource:
             headers={"Idempotency-Key": key},
         )
         return PhoneNumberResponse.model_validate(data)
+
+    async def quotes(
+        self,
+        *,
+        country: str,
+        capabilities: list[Literal["voice", "sms"]],
+        number_type: NumberType | None = None,
+        provider: Literal["auto", "twilio", "telnyx"] = "auto",
+    ) -> NumberQuotesResponse:
+        """Compare live inventory, rental/setup costs and regulatory readiness.
+
+        Pass the selected quote_id to acquire. A quote is organization-scoped
+        and expires; acquisition rechecks it before reserving credits.
+        """
+        data = await self._http.request(
+            "POST",
+            "/numbers/quotes",
+            json={
+                "country_code": country.upper(),
+                "capabilities": capabilities,
+                "number_type": number_type,
+                "provider": provider,
+            },
+        )
+        return NumberQuotesResponse.model_validate(data)
 
     async def get(self, number_id: str | UUID) -> PhoneNumberResponse:
         """Fetch a single dedicated number by id."""

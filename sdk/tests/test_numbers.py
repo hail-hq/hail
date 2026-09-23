@@ -113,3 +113,50 @@ async def test_numbers_enable_sms_happy_path(base_url: str, api_key: str) -> Non
     assert number.messaging_service_sid == "MGnew"
     assert route.called
     assert route.calls.last.request.method == "POST"
+
+
+@respx.mock
+async def test_live_quotes_and_explicit_carrier_purchase(base_url: str, api_key: str):
+    quote_id = str(uuid4())
+    quotes_route = respx.post(f"{base_url}/numbers/quotes").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "offers": [
+                    {
+                        "quote_id": quote_id,
+                        "provider": "telnyx",
+                        "e164": "+351211234567",
+                        "country_code": "PT",
+                        "number_type": "local",
+                        "capabilities": ["voice"],
+                        "monthly_cents": 200,
+                        "setup_cents": 100,
+                        "currency": "USD",
+                        "readiness": "ready",
+                        "requirements": [],
+                    }
+                ],
+                "recommended_quote_id": quote_id,
+                "unavailable_providers": [],
+                "expires_at": "2026-09-23T12:00:00Z",
+            },
+        )
+    )
+    payload = {
+        **make_phone_number_response(),
+        "provider": "telnyx",
+        "provisioning_state": "pending",
+    }
+    purchase = respx.post(f"{base_url}/numbers").mock(
+        return_value=httpx.Response(201, json=payload)
+    )
+    async with Client(api_key=api_key, base_url=base_url) as c:
+        quotes = await c.numbers.quotes(country="pt", capabilities=["voice"])
+        assert str(quotes.recommended_quote_id) == quote_id
+        number = await c.numbers.acquire(
+            country="PT", quote_id=quotes.recommended_quote_id, provider="telnyx"
+        )
+        assert number.provider == "telnyx" and number.provisioning_state == "pending"
+    assert json.loads(quotes_route.calls.last.request.content)["country_code"] == "PT"
+    assert json.loads(purchase.calls.last.request.content)["quote_id"] == quote_id

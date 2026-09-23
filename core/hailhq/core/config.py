@@ -41,6 +41,11 @@ class Settings(BaseSettings):
     # Carriers
     twilio_account_sid: str = ""
     twilio_auth_token: str = ""
+    telnyx_api_key: str = ""
+    telnyx_connection_id: str = ""
+    telnyx_sip_username: str = ""
+    telnyx_public_key: str = ""
+    livekit_telnyx_sip_outbound_trunk_id: str = ""
 
     # AWS — used today for SES (outbound email). boto3 falls back to its
     # default credential chain (env / config file / IAM role) when these

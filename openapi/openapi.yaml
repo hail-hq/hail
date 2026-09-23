@@ -1756,6 +1756,69 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HTTPValidationError"
+  /v1/numbers/quotes:
+    post:
+      tags:
+        - numbers
+      summary: Quote Numbers
+      description:
+        "Compare live, org-specific offers. Prices include setup + monthly
+        rent.
+
+
+        Auto recommends a ready offer with the lowest monthly rent, then setup
+
+        cost. SMS capability does not waive messaging registration requirements."
+      operationId: quote_numbers_v1_numbers_quotes_post
+      parameters:
+        - name: authorization
+          in: header
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            title: Authorization
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/NumberQuoteRequest"
+      responses:
+        "200":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NumberQuotesResponse"
+        "429":
+          description:
+            Rate limited. This caller exceeded the general request-rate
+            ceiling. Retry after the Retry-After header (seconds).
+          headers:
+            Retry-After:
+              description: Seconds to wait before retrying.
+              schema:
+                type: integer
+            RateLimit-Limit:
+              description: The request ceiling for the current window.
+              schema:
+                type: integer
+            RateLimit-Remaining:
+              description: Requests remaining in the current window.
+              schema:
+                type: integer
+            RateLimit-Reset:
+              description: Seconds until the current window resets.
+              schema:
+                type: integer
+        "422":
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
   /v1/webhooks:
     post:
       tags:
@@ -3871,6 +3934,84 @@ components:
         - answered_at
         - ended_at
       title: CallResponse
+    CarrierOffer:
+      properties:
+        provider:
+          type: string
+          enum:
+            - twilio
+            - telnyx
+          title: Provider
+        e164:
+          type: string
+          title: E164
+        country_code:
+          type: string
+          title: Country Code
+        number_type:
+          type: string
+          enum:
+            - local
+            - mobile
+            - toll_free
+            - national
+          title: Number Type
+        capabilities:
+          items:
+            type: string
+          type: array
+          title: Capabilities
+        monthly_cents:
+          type: integer
+          exclusiveMinimum: 0.0
+          title: Monthly Cents
+        setup_cents:
+          type: integer
+          minimum: 0.0
+          title: Setup Cents
+        currency:
+          type: string
+          const: USD
+          title: Currency
+          default: USD
+        readiness:
+          type: string
+          enum:
+            - ready
+            - verification_required
+          title: Readiness
+        requirements:
+          items:
+            type: string
+          type: array
+          title: Requirements
+        verification_id:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Verification Id
+        address_id:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Address Id
+        quote_id:
+          anyOf:
+            - type: string
+              format: uuid
+            - type: "null"
+          title: Quote Id
+      type: object
+      required:
+        - provider
+        - e164
+        - country_code
+        - number_type
+        - capabilities
+        - monthly_cents
+        - setup_cents
+        - readiness
+      title: CarrierOffer
     ContactCreate:
       properties:
         name:
@@ -5602,6 +5743,25 @@ components:
       title: MemberPhonePut
     NumberAcquireRequest:
       properties:
+        provider:
+          anyOf:
+            - type: string
+              enum:
+                - auto
+                - twilio
+                - telnyx
+            - type: "null"
+          title: Provider
+          description:
+            Carrier restriction for a quote from POST /numbers/quotes.
+            Auto accepts the recommended carrier. Omitted without a quote preserves
+            the legacy Twilio purchase contract.
+        quote_id:
+          anyOf:
+            - type: string
+              format: uuid
+            - type: "null"
+          title: Quote Id
         country_code:
           type: string
           maxLength: 2
@@ -5627,6 +5787,75 @@ components:
       required:
         - country_code
       title: NumberAcquireRequest
+    NumberQuoteRequest:
+      properties:
+        country_code:
+          type: string
+          pattern: ^[A-Z]{2}$
+          title: Country Code
+        number_type:
+          anyOf:
+            - type: string
+              enum:
+                - local
+                - mobile
+                - toll_free
+                - national
+            - type: "null"
+          title: Number Type
+        capabilities:
+          items:
+            type: string
+            enum:
+              - voice
+              - sms
+          type: array
+          maxItems: 2
+          minItems: 1
+          title: Capabilities
+        provider:
+          type: string
+          enum:
+            - auto
+            - twilio
+            - telnyx
+          title: Provider
+          default: auto
+      additionalProperties: false
+      type: object
+      required:
+        - country_code
+        - capabilities
+      title: NumberQuoteRequest
+    NumberQuotesResponse:
+      properties:
+        offers:
+          items:
+            $ref: "#/components/schemas/CarrierOffer"
+          type: array
+          title: Offers
+        recommended_quote_id:
+          anyOf:
+            - type: string
+              format: uuid
+            - type: "null"
+          title: Recommended Quote Id
+        unavailable_providers:
+          items:
+            type: string
+          type: array
+          title: Unavailable Providers
+        expires_at:
+          type: string
+          format: date-time
+          title: Expires At
+      type: object
+      required:
+        - offers
+        - recommended_quote_id
+        - unavailable_providers
+        - expires_at
+      title: NumberQuotesResponse
     ObservedDnsRecord:
       properties:
         name:
@@ -5696,6 +5925,10 @@ components:
       title: PhoneNumberListResponse
     PhoneNumberResponse:
       properties:
+        provider:
+          type: string
+          title: Provider
+          default: twilio
         id:
           type: string
           format: uuid

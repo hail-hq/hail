@@ -3,6 +3,7 @@
 from decimal import Decimal
 
 import httpx
+import phonenumbers
 from hailhq.core.schemas import NumberType
 from pydantic import BaseModel, Field
 
@@ -39,6 +40,9 @@ class TelnyxNumberDiscovery:
         number_type: NumberType,
         capabilities: list[str],
         limit: int = 20,
+        *,
+        outbound: bool = False,
+        e164: str | None = None,
     ) -> list[NumberQuote]:
         country_code = country_code.upper()
         if (
@@ -52,13 +56,21 @@ class TelnyxNumberDiscovery:
         requested = set(capabilities)
         if not requested or not requested <= {"voice", "sms", "mms", "fax"}:
             raise ValueError("Unsupported or empty capability selection")
+        # Telnyx documents the emergency feature filter for outbound-capable
+        # inventory. Voice alone establishes inbound voice, not origination.
+        if outbound:
+            requested.add("emergency")
         params = {
             "filter[country_code]": country_code,
-            "filter[phone_number_type]": number_type.replace("_", "-"),
+            "filter[phone_number_type]": number_type,
             "filter[features]": ",".join(sorted(requested)),
             "filter[limit]": str(limit),
             "filter[best_effort]": "false",
         }
+        if e164:
+            params["filter[phone_number][ends_with]"] = (
+                phonenumbers.national_significant_number(phonenumbers.parse(e164, None))
+            )
         response = await self._client.get(
             "https://api.telnyx.com/v2/available_phone_numbers",
             headers={"Authorization": f"Bearer {self._api_key}"},
@@ -69,6 +81,8 @@ class TelnyxNumberDiscovery:
         response.raise_for_status()
         quotes = []
         for item in response.json()["data"]:
+            if e164 and item["phone_number"] != e164:
+                continue
             available = {feature["name"] for feature in item.get("features", [])}
             if item.get("best_effort") or not requested <= available:
                 continue

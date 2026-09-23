@@ -1380,3 +1380,20 @@ class PlatformFlag(Base):
     updated_at: Mapped[datetime] = mapped_column(
         TS, nullable=False, server_default=text("now()")
     )
+
+
+class NumberOffer(Base):
+    """Short-lived, server-priced offer; consuming it is serialized by row lock."""
+
+    __tablename__ = "number_offers"
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    organization_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), nullable=False, index=True
+    )
+    offer: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(TS, nullable=False)
+    number_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), nullable=True
+    )

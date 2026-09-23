@@ -41,6 +41,7 @@ from hailhq.api.ratelimit import (
 )
 from hailhq.api.route_prefixes import request_mount_prefix
 from hailhq.api.usage import write_usage_event
+from hailhq.core.carrier_routing import sms_route
 from hailhq.core.compliance_gate import check_sms_allowed, remove_suppression
 from hailhq.core.config import settings
 from hailhq.core.db import get_session
@@ -98,8 +99,12 @@ async def deliver_sms(db: AsyncSession, provider: SmsProvider, sms: Sms) -> str 
     'provider_error' on transport failure, or the carrier error code on
     rejection. Never raises — the caller owns HTTP semantics.
     """
-    callback_url = join_url(settings.hail_api_url, "sms/status")
+    callback_url = join_url(
+        settings.hail_api_url,
+        "sms/telnyx" if sms.provider == "telnyx" else "sms/status",
+    )
     try:
+        provider = sms_route(sms.provider, provider)
         result = await provider.send_sms(
             from_e164=sms.from_e164,
             to_e164=sms.to_e164,
@@ -314,6 +319,7 @@ async def create_sms(
 
     sms = Sms(
         organization_id=principal.organization_id,
+        provider=from_number.provider if from_number is not None else "twilio",
         from_number_id=from_number.id if from_number is not None else None,
         from_e164=from_e164,
         to_e164=body.to,
@@ -440,7 +446,9 @@ async def receive_sms_status(
         return {"status": "unmatched"}
     sms = (
         await db.execute(
-            select(Sms).where(Sms.provider_message_sid == sid).with_for_update()
+            select(Sms)
+            .where(Sms.provider_message_sid == sid, Sms.provider == "twilio")
+            .with_for_update()
         )
     ).scalar_one_or_none()
     if sms is None:
@@ -670,3 +678,96 @@ async def list_sms(
 
 
 __all__ = ["deliver_sms", "get_sms_provider", "router"]
+
+
+@router.post("/telnyx", include_in_schema=False)
+async def receive_telnyx_sms(
+    request: Request, db: Annotated[AsyncSession, Depends(get_session)]
+) -> dict[str, str]:
+    """One signed Telnyx endpoint for inbound messages and delivery receipts."""
+    from hailhq.core.providers.sms.telnyx import TelnyxSmsProvider
+    from hailhq.core.providers.telnyx import verify_webhook
+
+    raw = await request.body()
+    if not verify_webhook(
+        raw,
+        request.headers.get("telnyx-signature-ed25519"),
+        request.headers.get("telnyx-timestamp"),
+        settings.telnyx_public_key,
+    ):
+        raise HTTPException(status_code=403, detail="invalid signature")
+    try:
+        event = (await request.json())["data"]
+        payload = event["payload"]
+        message_id = payload["id"]
+        event_type = event["event_type"]
+        recipients = payload["to"]
+        if not message_id or len(recipients) != 1:
+            raise ValueError("Expected one SMS recipient")
+        recipient = recipients[0]
+    except (KeyError, TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="invalid messaging event") from None
+    if event_type == "message.received":
+        await ingest_inbound_sms(
+            db,
+            from_e164=payload["from"]["phone_number"],
+            to_e164=recipient["phone_number"],
+            body=payload.get("text") or "",
+            provider_message_sid=message_id,
+            opt_out_type=None,
+            provider=TelnyxSmsProvider(),
+            carrier="telnyx",
+        )
+        await db.commit()
+        return {"status": "received"}
+    if event_type != "message.finalized":
+        return {"status": "ignored"}
+    new_status = {
+        "delivered": "delivered",
+        "delivery_failed": "undelivered",
+        "sending_failed": "failed",
+    }.get(recipient.get("status"))
+    if not new_status:
+        return {"status": "ignored"}
+    sms = (
+        await db.execute(
+            select(Sms)
+            .where(
+                Sms.provider == "telnyx",
+                Sms.provider_message_sid == message_id,
+                Sms.direction == "outbound",
+            )
+            .with_for_update()
+        )
+    ).scalar_one_or_none()
+    if sms is None:
+        # Carrier may beat POST /messages' response/DB commit. Ask for retry.
+        raise HTTPException(status_code=503, detail="message not yet recorded")
+    if sms.status in _TERMINAL_SMS_STATUSES:
+        return {"status": "duplicate"}
+    prior = sms.status
+    sms.status = new_status
+    errors = payload.get("errors") or []
+    sms.error_code = str(errors[0]["code"]) if errors else None
+    db.add(
+        SmsEvent(
+            sms_id=sms.id,
+            organization_id=sms.organization_id,
+            kind="state_change",
+            payload={"from": prior, "to": new_status},
+        )
+    )
+    await fanout_sms_event(
+        db,
+        organization_id=sms.organization_id,
+        event_type=f"sms.{new_status}",
+        event_id=sms.id,
+        data={
+            "id": str(sms.id),
+            "to": sms.to_e164,
+            "from": sms.from_e164,
+            "status": new_status,
+        },
+    )
+    await db.commit()
+    return {"status": "applied"}

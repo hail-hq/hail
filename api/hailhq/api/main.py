@@ -95,6 +95,9 @@ async def _backstop_sweeper_loop() -> None:
                 stale_calls = await sweep_stale_calls(session, grace_seconds=grace)
                 released = await sweep_pool_reservations(session, grace_seconds=grace)
                 await session.commit()
+            from hailhq.api.number_orders import reconcile_pending_orders
+
+            await reconcile_pending_orders()
             if stale_calls:
                 logger.warning(
                     "call reconciler force-closed %d stale call(s): %s",

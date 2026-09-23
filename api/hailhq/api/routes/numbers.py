@@ -13,7 +13,7 @@ from __future__ import annotations
 import logging
 from datetime import datetime, timezone
 from decimal import ROUND_HALF_UP
-from typing import Annotated
+from typing import Annotated, Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
@@ -36,13 +36,16 @@ from hailhq.core import telephony_catalog
 from hailhq.core.billing import get_balance_cents
 from hailhq.core.db import get_session
 from hailhq.core.models import AccountCredit, PhoneNumber
+from hailhq.core.number_offers import CarrierOffer
 from hailhq.core.providers.sms import SmsProvider
 from hailhq.core.providers.voice import NumberNotProvisionable, VoiceProvider
 from hailhq.core.schemas import (
     NumberAcquireRequest,
+    NumberType,
     PhoneNumberListResponse,
     PhoneNumberResponse,
 )
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -129,8 +132,38 @@ async def acquire_number(
     # Acquiring buys a real number at the carrier and starts a monthly fee —
     # same balance gate as the other paid create routes (/calls, /sms,
     # /emails). Must run before the carrier purchase below.
-    await require_funds(db, principal, idem)
+    if body.quote_id is None and body.provider in ("auto", "telnyx"):
+        raise await cache_failure(
+            idem,
+            HTTPException(
+                status_code=422,
+                detail="Request a live quote from POST /numbers/quotes, then pass its quote_id",
+            ),
+        )
+    if body.quote_id is not None:
+        from hailhq.api.number_orders import acquire_offer
 
+        try:
+            number = await acquire_offer(
+                db,
+                principal.organization_id,
+                body.quote_id,
+                country=body.country_code,
+                kind=body.number_type,
+                provider=body.provider or "auto",
+                billed=principal.auth_kind != "shared",
+            )
+        except HTTPException as exc:
+            raise await cache_failure(idem, exc)
+        response.headers["Location"] = (
+            f"{request_mount_prefix(request)}/numbers/{number.id}"
+        )
+        result = PhoneNumberResponse.model_validate(number)
+        if idem is not None:
+            await idem.store(status_code=201, body=result.model_dump(mode="json"))
+        return result
+
+    await require_funds(db, principal, idem)
     caps = telephony_catalog.capabilities(body.country_code, body.number_type)
     if caps is None:
         raise await cache_failure(
@@ -286,9 +319,9 @@ def _reject_if_released(number: PhoneNumber) -> None:
     """422 on a released row. A released row is a tombstone: its PN is
     deleted at Twilio, so any provisioning call against it would 404 into
     an opaque 500."""
-    if number.provisioning_state == "released":
+    if number.provisioning_state != "active":
         raise unprocessable(
-            "this number has been released; acquire a new number instead",
+            f"this number is {number.provisioning_state}; wait for provisioning or acquire a new number",
             loc=["path", "number_id"],
         )
 
@@ -318,7 +351,25 @@ async def release_org_number(
     await db.refresh(number, ["provisioning_state", "released_at"])
     if number.provisioning_state == "released":
         return number
-    await provider.release_number(number.provider_resource_id)
+    if number.provisioning_state == "failed":
+        number.provisioning_state = "released"
+        # Never activated: no release-month rental charge is owed.
+        number.released_at = None
+        await db.commit()
+        return number
+    if number.provisioning_state == "pending":
+        raise HTTPException(
+            status_code=409,
+            detail="Number order is still pending; refresh its status before releasing",
+        )
+    if number.provider == "telnyx":
+        from hailhq.core.providers.telnyx import TelnyxClient
+
+        await TelnyxClient().release_number(number.provider_resource_id)
+    elif number.provider == "twilio":
+        await provider.release_number(number.provider_resource_id)
+    else:
+        raise HTTPException(status_code=409, detail="Unsupported number carrier")
     number.provisioning_state = "released"
     number.released_at = datetime.now(timezone.utc)
     try:
@@ -380,6 +431,13 @@ async def get_number(
     organization.
     """
     number = await _get_org_number_or_404(db, number_id, principal.organization_id)
+    if (
+        number.provisioning_state == "pending"
+        and "offer" in number.provisioning_metadata
+    ):
+        from hailhq.api.number_orders import reconcile_order
+
+        await reconcile_order(db, number)
     return PhoneNumberResponse.model_validate(number)
 
 
@@ -482,11 +540,15 @@ async def enable_sms(
             .where(
                 PhoneNumber.organization_id == principal.organization_id,
                 PhoneNumber.messaging_service_sid.is_not(None),
+                PhoneNumber.provider == number.provider,
             )
             .limit(1)
         )
     ).scalar_one_or_none()
 
+    from hailhq.core.carrier_routing import sms_route
+
+    provider = sms_route(number.provider, provider)
     messaging_service_sid = await provider.ensure_messaging_service(
         organization_id=principal.organization_id, existing_sid=existing_sid
     )
@@ -506,3 +568,70 @@ async def enable_sms(
 
 
 __all__ = ["get_voice_provider", "release_org_number", "router"]
+
+
+class NumberQuoteRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    country_code: str = Field(pattern=r"^[A-Z]{2}$")
+    number_type: NumberType | None = None
+    capabilities: list[Literal["voice", "sms"]] = Field(min_length=1, max_length=2)
+    provider: Literal["auto", "twilio", "telnyx"] = "auto"
+
+
+class NumberQuotesResponse(BaseModel):
+    offers: list[CarrierOffer]
+    recommended_quote_id: UUID | None
+    unavailable_providers: list[str]
+    expires_at: datetime
+
+
+@router.post("/quotes", response_model=NumberQuotesResponse)
+async def quote_numbers(
+    body: NumberQuoteRequest,
+    principal: Annotated[Principal, Depends(get_current_principal)],
+    db: Annotated[AsyncSession, Depends(get_session)],
+):
+    """Compare live, org-specific offers. Prices include setup + monthly rent.
+
+    Auto recommends a ready offer with the lowest monthly rent, then setup
+    cost. SMS capability does not waive messaging registration requirements.
+    """
+    import asyncio
+    from datetime import timedelta
+
+    from hailhq.core.models import NumberOffer
+    from hailhq.core.number_offers import discover_offers, rank_offers
+
+    batches = await asyncio.gather(
+        *(
+            discover_offers(
+                principal.organization_id, body.country_code, kind, body.capabilities
+            )
+            for kind in (
+                [body.number_type]
+                if body.number_type
+                else ["local", "mobile", "national", "toll_free"]
+            )
+        )
+    )
+    offers = rank_offers([offer for batch, _ in batches for offer in batch])
+    unavailable = sorted({p for _, failures in batches for p in failures})
+    expires = datetime.now(timezone.utc) + timedelta(minutes=10)
+    for offer in offers:
+        row = NumberOffer(
+            organization_id=principal.organization_id,
+            offer=offer.model_dump(mode="json"),
+            expires_at=expires,
+        )
+        db.add(row)
+        await db.flush()
+        offer.quote_id = row.id
+    await db.commit()
+    ranked = rank_offers(offers, body.provider)
+    recommended = next((o for o in ranked if o.readiness == "ready"), None)
+    return {
+        "offers": offers,
+        "recommended_quote_id": recommended.quote_id if recommended else None,
+        "unavailable_providers": unavailable,
+        "expires_at": expires,
+    }

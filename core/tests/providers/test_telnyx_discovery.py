@@ -25,7 +25,7 @@ async def test_search_preserves_quotes_and_filters_capabilities():
         assert request.method == "GET"
         assert request.headers["Authorization"] == "Bearer test-key"
         assert request.url.params["filter[country_code]"] == "PT"
-        assert request.url.params["filter[phone_number_type]"] == "toll-free"
+        assert request.url.params["filter[phone_number_type]"] == "toll_free"
         assert request.url.params["filter[features]"] == "sms,voice"
         return httpx.Response(
             200,
@@ -89,3 +89,27 @@ async def test_invalid_prices_fail_closed(amount):
             await TelnyxNumberDiscovery("test-key", client).search(
                 "PT", "local", ["voice"]
             )
+
+
+async def test_exact_number_preflight_uses_national_digits_and_checks_e164():
+    def handler(request):
+        assert request.url.params["filter[phone_number][ends_with]"] == "300000001"
+        assert request.url.params["filter[features]"] == "emergency,voice"
+        return httpx.Response(
+            200,
+            json={
+                "data": [
+                    offer(features=[{"name": "voice"}, {"name": "emergency"}]),
+                    offer(
+                        phone_number="+351300000002",
+                        features=[{"name": "voice"}, {"name": "emergency"}],
+                    ),
+                ]
+            },
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        quotes = await TelnyxNumberDiscovery("key", client).search(
+            "PT", "local", ["voice"], outbound=True, e164="+351300000001"
+        )
+    assert [q.e164 for q in quotes] == ["+351300000001"]

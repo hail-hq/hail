@@ -41,6 +41,7 @@ from hailhq.api.route_prefixes import request_mount_prefix
 from hailhq.core.agent_tools.registry import all_tools
 from hailhq.core.billing import CALL_META_BILLED
 from hailhq.core.call_end_reasons import CallEndReason
+from hailhq.core.carrier_routing import voice_route
 from hailhq.core.compliance_gate import check_call_allowed
 from hailhq.core.config import settings
 from hailhq.core.db import get_session
@@ -373,6 +374,7 @@ async def create_call(
     call = Call(
         organization_id=principal.organization_id,
         conversation_id=body.conversation_id,
+        provider=from_number.provider,
         from_number_id=from_number.id,
         from_e164=from_number.e164,
         to_e164=body.to,
@@ -464,12 +466,14 @@ async def create_call(
             },
         )
         setup_stage = "sip_participant"
+        trunk_id, sip_headers = voice_route(call.provider)
         participant = await lk.create_sip_participant(
             room_name=room_name,
             to_e164=call.to_e164,
             from_e164=call.from_e164,
-            sip_trunk_id=settings.livekit_sip_outbound_trunk_id,
+            sip_trunk_id=trunk_id,
             participant_identity=f"caller-{call.id}",
+            **({"headers": sip_headers} if sip_headers else {}),
         )
     except Exception as exc:
         logger.warning(
