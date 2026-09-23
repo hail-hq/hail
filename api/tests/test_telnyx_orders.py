@@ -1,6 +1,6 @@
 from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import httpx
 import pytest
@@ -191,34 +191,44 @@ async def test_recheck_price_and_verification_before_charging(
     assert (await async_session.execute(select(PhoneNumber))).scalars().all() == []
 
 
+@pytest.mark.parametrize(
+    "preference,ready", [(None, True), (None, False), ("auto", True), ("auto", False)]
+)
 async def test_quote_api_returns_live_recommendation_and_persists_org_scope(
-    client, async_session, org_and_key, monkeypatch
+    client, async_session, org_and_key, monkeypatch, preference, ready
 ):
     org, _, key = org_and_key
     _, offer = await seed_quote(async_session, org)
     blocked = offer.model_copy(
         update={
             "provider": "twilio",
-            "monthly_cents": 10,
-            "readiness": "verification_required",
+            "monthly_cents": 200,
+            "readiness": "ready" if ready else "verification_required",
         }
     )
     monkeypatch.setattr(
-        "hailhq.core.number_offers.discover_offers",
+        "hailhq.api.routes.numbers.discover_offers",
         AsyncMock(return_value=([blocked, offer], [])),
     )
     response = await client.post(
         "/numbers/quotes",
         headers={"Authorization": f"Bearer {key}"},
-        json={"country_code": "PT", "number_type": "local", "capabilities": ["voice"]},
+        json={
+            "country_code": "PT",
+            "number_type": "local",
+            "capabilities": ["voice"],
+            **({"provider": preference} if preference else {}),
+        },
     )
     assert response.status_code == 200, response.text
     result = response.json()
+    if preference is None and not ready:
+        assert result["recommended_quote_id"] is None
+        return
     recommended = next(
         o for o in result["offers"] if o["quote_id"] == result["recommended_quote_id"]
     )
-    assert recommended["provider"] == "telnyx"
-    from uuid import UUID
+    assert recommended["provider"] == ("twilio" if preference is None else "telnyx")
 
     row = await async_session.get(NumberOffer, UUID(recommended["quote_id"]))
     assert row.organization_id == org

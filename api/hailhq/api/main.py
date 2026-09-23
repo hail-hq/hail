@@ -12,6 +12,7 @@ from fastapi.exception_handlers import request_validation_exception_handler
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, Response
 from hailhq.api.deprecation import DeprecationHeaderMiddleware
+from hailhq.api.number_orders import reconcile_pending_orders
 from hailhq.api.ratelimit import GeneralRateLimitMiddleware
 from hailhq.api.routes import calls as calls_routes
 from hailhq.api.routes import contacts as contacts_routes
@@ -95,7 +96,6 @@ async def _backstop_sweeper_loop() -> None:
                 stale_calls = await sweep_stale_calls(session, grace_seconds=grace)
                 released = await sweep_pool_reservations(session, grace_seconds=grace)
                 await session.commit()
-            from hailhq.api.number_orders import reconcile_pending_orders
 
             await reconcile_pending_orders()
             if stale_calls:

@@ -1,4 +1,4 @@
-from pydantic import computed_field
+from pydantic import AliasChoices, Field, computed_field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -45,7 +45,6 @@ class Settings(BaseSettings):
     telnyx_connection_id: str = ""
     telnyx_sip_username: str = ""
     telnyx_public_key: str = ""
-    livekit_telnyx_sip_outbound_trunk_id: str = ""
 
     # AWS — used today for SES (outbound email). boto3 falls back to its
     # default credential chain (env / config file / IAM role) when these
@@ -129,8 +128,20 @@ class Settings(BaseSettings):
     # POST /calls (CreateSIPParticipantRequest.sip_trunk_id). Inbound is for
     # the v1.1 inbound-calls milestone — kept here so the config schema is
     # ready and operators only set both up once.
-    livekit_sip_outbound_trunk_id: str = ""
-    livekit_sip_inbound_trunk_id: str = ""
+    # Canonical carrier-specific names; aliases keep existing deployments working.
+    livekit_twilio_sip_outbound_trunk_id: str = Field(
+        default="",
+        validation_alias=AliasChoices(
+            "livekit_twilio_sip_outbound_trunk_id", "livekit_sip_outbound_trunk_id"
+        ),
+    )
+    livekit_twilio_sip_inbound_trunk_id: str = Field(
+        default="",
+        validation_alias=AliasChoices(
+            "livekit_twilio_sip_inbound_trunk_id", "livekit_sip_inbound_trunk_id"
+        ),
+    )
+    livekit_telnyx_sip_outbound_trunk_id: str = ""
 
     # Storage
     database_url: str = "postgresql://hail:hail@postgres:5432/hail"

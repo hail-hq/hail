@@ -10,8 +10,9 @@ stays with the rest of the `/numbers` router rather than splitting onto
 
 from __future__ import annotations
 
+import asyncio
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from decimal import ROUND_HALF_UP
 from typing import Annotated, Literal
 from uuid import UUID
@@ -28,17 +29,24 @@ from hailhq.api.idempotency import (
     idempotency_dep,
     replay_cached,
 )
+from hailhq.api.number_orders import acquire_offer, reconcile_order
 from hailhq.api.pagination import fetch_cursor_page
 from hailhq.api.ratelimit import GENERAL_RATE_LIMITED_RESPONSES
 from hailhq.api.route_prefixes import request_mount_prefix
 from hailhq.api.routes.sms import get_sms_provider
 from hailhq.core import telephony_catalog
 from hailhq.core.billing import get_balance_cents
+from hailhq.core.carrier_routing import sms_route
 from hailhq.core.db import get_session
-from hailhq.core.models import AccountCredit, PhoneNumber
-from hailhq.core.number_offers import CarrierOffer
+from hailhq.core.models import AccountCredit, NumberOffer, PhoneNumber
+from hailhq.core.number_offers import CarrierOffer, discover_offers, rank_offers
 from hailhq.core.providers.sms import SmsProvider
-from hailhq.core.providers.voice import NumberNotProvisionable, VoiceProvider
+from hailhq.core.providers.telnyx import TelnyxClient
+from hailhq.core.providers.voice import (
+    NumberNotProvisionable,
+    TwilioVoiceProvider,
+    VoiceProvider,
+)
 from hailhq.core.schemas import (
     NumberAcquireRequest,
     NumberType,
@@ -68,8 +76,6 @@ _voice_provider_singleton: VoiceProvider | None = None
 def get_voice_provider() -> VoiceProvider:
     global _voice_provider_singleton
     if _voice_provider_singleton is None:
-        from hailhq.core.providers.voice import TwilioVoiceProvider
-
         _voice_provider_singleton = TwilioVoiceProvider()
     return _voice_provider_singleton
 
@@ -141,8 +147,6 @@ async def acquire_number(
             ),
         )
     if body.quote_id is not None:
-        from hailhq.api.number_orders import acquire_offer
-
         try:
             number = await acquire_offer(
                 db,
@@ -150,7 +154,7 @@ async def acquire_number(
                 body.quote_id,
                 country=body.country_code,
                 kind=body.number_type,
-                provider=body.provider or "auto",
+                provider=body.provider or "twilio",
                 billed=principal.auth_kind != "shared",
             )
         except HTTPException as exc:
@@ -363,8 +367,6 @@ async def release_org_number(
             detail="Number order is still pending; refresh its status before releasing",
         )
     if number.provider == "telnyx":
-        from hailhq.core.providers.telnyx import TelnyxClient
-
         await TelnyxClient().release_number(number.provider_resource_id)
     elif number.provider == "twilio":
         await provider.release_number(number.provider_resource_id)
@@ -435,8 +437,6 @@ async def get_number(
         number.provisioning_state == "pending"
         and "offer" in number.provisioning_metadata
     ):
-        from hailhq.api.number_orders import reconcile_order
-
         await reconcile_order(db, number)
     return PhoneNumberResponse.model_validate(number)
 
@@ -546,8 +546,6 @@ async def enable_sms(
         )
     ).scalar_one_or_none()
 
-    from hailhq.core.carrier_routing import sms_route
-
     provider = sms_route(number.provider, provider)
     messaging_service_sid = await provider.ensure_messaging_service(
         organization_id=principal.organization_id, existing_sid=existing_sid
@@ -586,8 +584,8 @@ class NumberQuoteRequest(BaseModel):
         description="Required channels; every returned offer must support all requested capabilities.",
     )
     provider: Literal["auto", "twilio", "telnyx"] = Field(
-        default="auto",
-        description="Carrier preference for the recommendation; auto compares both configured carriers.",
+        default="twilio",
+        description="Carrier preference for the recommendation. Defaults to Twilio; explicit auto compares both configured carriers.",
     )
 
 
@@ -617,11 +615,6 @@ async def quote_numbers(
     Auto recommends a ready offer with the lowest monthly rent, then setup
     cost. SMS capability does not waive messaging registration requirements.
     """
-    import asyncio
-    from datetime import timedelta
-
-    from hailhq.core.models import NumberOffer
-    from hailhq.core.number_offers import discover_offers, rank_offers
 
     batches = await asyncio.gather(
         *(

@@ -8,7 +8,8 @@ completed; no paid carrier test has been run.
 ## Routing implemented
 
 An owned number's carrier is authoritative. New calls store that carrier and use
-its LiveKit outbound SIP trunk; Telnyx also sends `X-Telnyx-Username` on the first
+its LiveKit outbound SIP trunk (`LIVEKIT_TWILIO_SIP_OUTBOUND_TRUNK_ID` or
+`LIVEKIT_TELNYX_SIP_OUTBOUND_TRUNK_ID`); Telnyx also sends `X-Telnyx-Username` on the first
 INVITE. The existing Twilio trunk remains separate. Hangup and call lifecycle
 continue through LiveKit's room/participant flow; a SIP call ID is not a Telnyx
 Call Control ID and must not be passed to Call Control's hangup API.
@@ -41,7 +42,9 @@ live regulatory requirements. Omitting `number_type` compares all supported type
 Only USD offers with valid, positive monthly prices are eligible. Carrier errors
 are reported as an incomplete comparison, never as zero prices or exemptions.
 
-Automatic selection ranks ready-to-purchase offers ahead of blocked offers, then
+Twilio is the default in the console, quote API and SDK. Missing Twilio stock or
+verification never silently switches to Telnyx. Advanced settings can explicitly
+select Telnyx or automatic comparison. Opt-in automatic selection ranks ready-to-purchase offers ahead of blocked offers, then
 monthly rental, setup cost, and remaining requirement count. The console's Advanced
 settings can restrict provider/type. This is the lowest rental among returned,
 ready offers—not a claim to optimize all future call/SMS usage. Existing numbers
@@ -141,7 +144,9 @@ Source: [Telnyx number orders](https://developers.telnyx.com/docs/numbers/phone-
 1. Apply migration 0044 before deploying the quote API. Deploy the companion
    website changes before enabling Telnyx purchases so renewal billing reads the
    price snapshots.
-2. Configure `TELNYX_API_KEY`, `TELNYX_CONNECTION_ID`, `TELNYX_SIP_USERNAME`,
+2. The legacy `LIVEKIT_SIP_OUTBOUND_TRUNK_ID` and `LIVEKIT_SIP_INBOUND_TRUNK_ID`
+   remain accepted as Twilio aliases; the explicit Twilio names take precedence.
+   Configure `TELNYX_API_KEY`, `TELNYX_CONNECTION_ID`, `TELNYX_SIP_USERNAME`,
    `TELNYX_PUBLIC_KEY`, and `LIVEKIT_TELNYX_SIP_OUTBOUND_TRUNK_ID`. All are documented
    in `.env.example`; no secret belongs in the browser or repository.
 3. Telnyx account verification, SIP outbound voice profile/destination permissions,

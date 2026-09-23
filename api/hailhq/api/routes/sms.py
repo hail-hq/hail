@@ -49,6 +49,8 @@ from hailhq.core.models import Sms, SmsEvent, SmsSenderIdentity, Suppression
 from hailhq.core.pricing_tier import classify_pricing_tier
 from hailhq.core.providers.sms import SmsProvider, TwilioSmsProvider
 from hailhq.core.providers.sms.status_map import map_twilio_message_status
+from hailhq.core.providers.sms.telnyx import TelnyxSmsProvider
+from hailhq.core.providers.telnyx import verify_webhook
 from hailhq.core.schemas import (
     SenderIdPatch,
     SenderIdResponse,
@@ -685,8 +687,6 @@ async def receive_telnyx_sms(
     request: Request, db: Annotated[AsyncSession, Depends(get_session)]
 ) -> dict[str, str]:
     """One signed Telnyx endpoint for inbound messages and delivery receipts."""
-    from hailhq.core.providers.sms.telnyx import TelnyxSmsProvider
-    from hailhq.core.providers.telnyx import verify_webhook
 
     raw = await request.body()
     if not verify_webhook(

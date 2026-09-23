@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import time
+from uuid import UUID
 
 import httpx
 from cryptography.exceptions import InvalidSignature
@@ -40,8 +41,6 @@ class TelnyxClient:
 
     async def release_number(self, resource_id: str) -> None:
         # Only persisted carrier UUIDs belong here, never a number-order id.
-        from uuid import UUID
-
         resource_id = str(UUID(resource_id))
         try:
             await self.request("DELETE", f"/phone_numbers/{resource_id}")

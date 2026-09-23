@@ -1,5 +1,7 @@
 import base64
 import json
+from types import SimpleNamespace
+from unittest.mock import MagicMock
 from uuid import uuid4
 
 import httpx
@@ -7,7 +9,12 @@ import pytest
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from hailhq.core.carrier_routing import voice_route
 from hailhq.core.config import settings
-from hailhq.core.number_offers import CarrierOffer, rank_offers, telnyx_offers
+from hailhq.core.number_offers import (
+    CarrierOffer,
+    rank_offers,
+    telnyx_offers,
+    twilio_offers,
+)
 from hailhq.core.providers.sms.telnyx import TelnyxSmsProvider
 from hailhq.core.providers.telnyx import TelnyxClient, verify_webhook
 
@@ -26,7 +33,7 @@ def test_signature_rejects_tampering_and_replay():
 
 
 def test_voice_route_never_uses_twilio_trunk_for_telnyx(monkeypatch):
-    monkeypatch.setattr(settings, "livekit_sip_outbound_trunk_id", "ST_twilio")
+    monkeypatch.setattr(settings, "livekit_twilio_sip_outbound_trunk_id", "ST_twilio")
     monkeypatch.setattr(settings, "livekit_telnyx_sip_outbound_trunk_id", "ST_telnyx")
     monkeypatch.setattr(settings, "telnyx_sip_username", "hail-sip")
     assert voice_route("telnyx") == ("ST_telnyx", {"X-Telnyx-Username": "hail-sip"})
@@ -161,10 +168,6 @@ async def test_live_portugal_rules_and_org_group(
 
 
 async def test_twilio_empty_rules_are_not_a_bundle_requirement(monkeypatch):
-    from types import SimpleNamespace
-    from unittest.mock import MagicMock
-
-    from hailhq.core.number_offers import twilio_offers
 
     api = MagicMock()
     api.available_phone_numbers.return_value.local.list.return_value = [

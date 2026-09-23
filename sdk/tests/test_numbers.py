@@ -152,7 +152,9 @@ async def test_live_quotes_and_explicit_carrier_purchase(base_url: str, api_key:
         return_value=httpx.Response(201, json=payload)
     )
     async with Client(api_key=api_key, base_url=base_url) as c:
-        quotes = await c.numbers.quotes(country="pt", capabilities=["voice"])
+        quotes = await c.numbers.quotes(
+            country="pt", capabilities=["voice"], provider="telnyx"
+        )
         assert str(quotes.recommended_quote_id) == quote_id
         number = await c.numbers.acquire(
             country="PT", quote_id=quotes.recommended_quote_id, provider="telnyx"
@@ -160,3 +162,21 @@ async def test_live_quotes_and_explicit_carrier_purchase(base_url: str, api_key:
         assert number.provider == "telnyx" and number.provisioning_state == "pending"
     assert json.loads(quotes_route.calls.last.request.content)["country_code"] == "PT"
     assert json.loads(purchase.calls.last.request.content)["quote_id"] == quote_id
+
+
+@respx.mock
+async def test_quotes_default_to_twilio(base_url: str, api_key: str):
+    route = respx.post(f"{base_url}/numbers/quotes").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "offers": [],
+                "recommended_quote_id": None,
+                "unavailable_providers": [],
+                "expires_at": "2026-09-23T12:00:00Z",
+            },
+        )
+    )
+    async with Client(api_key=api_key, base_url=base_url) as c:
+        await c.numbers.quotes(country="PT", capabilities=["voice"])
+    assert json.loads(route.calls.last.request.content)["provider"] == "twilio"

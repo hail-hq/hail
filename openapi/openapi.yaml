@@ -5783,8 +5783,8 @@ components:
           title: Provider
           description:
             Carrier restriction for a quote from POST /numbers/quotes.
-            Auto accepts the recommended carrier. Omitted without a quote preserves
-            the legacy Twilio purchase contract.
+            Explicit auto accepts either quoted carrier. Omitted defaults to Twilio,
+            with or without a quote.
         quote_id:
           anyOf:
             - type: string
@@ -5858,9 +5858,9 @@ components:
             - telnyx
           title: Provider
           description:
-            Carrier preference for the recommendation; auto compares both
-            configured carriers.
-          default: auto
+            Carrier preference for the recommendation. Defaults to Twilio;
+            explicit auto compares both configured carriers.
+          default: twilio
       additionalProperties: false
       type: object
       required:

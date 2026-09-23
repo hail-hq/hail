@@ -11,6 +11,7 @@ import httpx
 from fastapi import HTTPException
 from hailhq.core.billing import get_balance_cents
 from hailhq.core.config import settings
+from hailhq.core.db import session_scope
 from hailhq.core.models import AccountCredit, NumberOffer, PhoneNumber
 from hailhq.core.number_offers import CarrierOffer, discover_offers
 from hailhq.core.providers.telnyx import TelnyxClient
@@ -364,7 +365,6 @@ async def acquire_offer(
 
 async def reconcile_pending_orders():
     """Fresh session per number: one carrier/DB failure cannot stall the batch."""
-    from hailhq.core.db import session_scope
 
     async with session_scope() as db:
         ids = (
