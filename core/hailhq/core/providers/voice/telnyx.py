@@ -78,6 +78,22 @@ class TelnyxNumberDiscovery:
             timeout=20,
             follow_redirects=False,
         )
+        # Telnyx returns this specific 400 for unsupported country/capability
+        # combinations (verified live for PT voice + SMS). It is empty coverage,
+        # not a carrier outage. Other validation/authentication errors still fail.
+        if response.status_code == 400:
+            try:
+                errors = response.json().get("errors", [])
+            except ValueError:
+                errors = []
+            if errors and all(
+                str(error.get("code")) == "10015"
+                and error.get("detail", "").startswith(
+                    "No coverage found in the specified country"
+                )
+                for error in errors
+            ):
+                return []
         response.raise_for_status()
         quotes = []
         for item in response.json()["data"]:

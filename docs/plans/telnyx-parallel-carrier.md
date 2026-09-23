@@ -2,7 +2,8 @@
 
 Reviewed 2026-09-23. Continues service PR #103 with a companion hail-website PR.
 This supersedes the discovery-only plan. Telnyx is unavailable until its API,
-SIP and webhook configuration is supplied. No paid carrier test has been run.
+SIP and webhook configuration is supplied. Read-only Telnyx account checks were
+completed; no paid carrier test has been run.
 
 ## Routing implemented
 
@@ -85,8 +86,26 @@ unsupported SMS. A separate SMS number may be needed.
 
 Twilio's pricing catalogue can list PT without purchasable stock. The local PT
 inventory request did not yield a verified offer during this session; this does
-not prove permanent unavailability. Telnyx PT inventory and account eligibility
-remain unverified because Telnyx credentials have not been available.
+not prove permanent unavailability. Live Telnyx checks on 2026-09-23 returned Portuguese local outbound-capable
+voice inventory at USD 1.00/month plus USD 1.00 setup. Combined voice/SMS searches
+returned explicit no-coverage responses; mobile and toll-free searches also found
+no matching coverage. These are observations of current stock, not permanent
+country rules. The explicit Telnyx no-coverage 400 is treated as an empty result;
+other 400 errors remain errors.
+
+The account has two PT/local ordering requirement groups, both unapproved and
+without an organization binding, one existing credential connection named
+“Forward Only”, no outbound voice profiles, and no messaging profiles. Existing
+resources were not modified. The read-only offer pipeline successfully returned
+PT inventory as verification-required using temporary in-memory routing markers;
+those markers were never persisted and do not establish a functioning SIP route.
+
+The current PT/local API requirements include contact name/phone/email, legal
+company name and Portuguese registration/tax identifiers, a Portuguese company
+registration document, recent local address evidence, and an address within the
+DID's geographic area. The approved end-user group must belong to the Hail org;
+none of the existing unapproved groups is reused implicitly. Actual activation,
+SIP calls, and SMS remain unverified.
 
 Source: [Telnyx inventory constraints and capabilities](https://developers.telnyx.com/docs/numbers/phone-numbers/number-search/).
 

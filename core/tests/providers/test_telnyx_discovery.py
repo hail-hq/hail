@@ -113,3 +113,25 @@ async def test_exact_number_preflight_uses_national_digits_and_checks_e164():
             "PT", "local", ["voice"], outbound=True, e164="+351300000001"
         )
     assert [q.e164 for q in quotes] == ["+351300000001"]
+
+
+@pytest.mark.parametrize("no_coverage", [True, False])
+async def test_only_explicit_no_coverage_is_empty_inventory(no_coverage):
+    detail = (
+        "No coverage found in the specified country based on the provided search parameters."
+        if no_coverage
+        else "Invalid search filter"
+    )
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(
+            lambda request: httpx.Response(
+                400, json={"errors": [{"code": "10015", "detail": detail}]}
+            )
+        )
+    ) as client:
+        discovery = TelnyxNumberDiscovery("key", client)
+        if no_coverage:
+            assert await discovery.search("PT", "local", ["voice", "sms"]) == []
+        else:
+            with pytest.raises(httpx.HTTPStatusError):
+                await discovery.search("PT", "local", ["voice", "sms"])
