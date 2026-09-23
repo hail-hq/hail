@@ -247,3 +247,32 @@ async def test_finalized_event_for_unrecorded_message_only_retries_when_racing_o
         raw, headers = await finalized(monkeypatch, sender, occurred_at)
         response = await client.post("/sms/telnyx", content=raw, headers=headers)
         assert response.status_code == expected, (sender, response.text)
+
+
+async def test_failed_number_cannot_be_released_or_enter_renewal_billing(
+    client,
+    async_session,
+    org_and_key,
+    add_phone_number,
+    monkeypatch,
+    voice_provider_mock,
+):
+    org, _, key = org_and_key
+    number = await telnyx_number(async_session, org, add_phone_number)
+    number.provisioning_state = "failed"
+    number.provider_resource_id = None
+    number.acquired_at = None
+    await async_session.commit()
+    release = AsyncMock()
+    monkeypatch.setattr(
+        "hailhq.core.providers.telnyx.TelnyxClient.release_number", release
+    )
+    response = await client.delete(
+        f"/numbers/{number.id}", headers={"Authorization": f"Bearer {key}"}
+    )
+    assert response.status_code == 409
+    await async_session.refresh(number)
+    assert number.provisioning_state == "failed"
+    assert number.released_at is None
+    release.assert_not_awaited()
+    voice_provider_mock.release_number.assert_not_awaited()

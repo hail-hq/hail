@@ -7,9 +7,8 @@ import httpx
 import phonenumbers
 from hailhq.core.carrier_offer import CarrierOffer, cents
 from hailhq.core.config import settings
-from hailhq.core.providers.telnyx import TELNYX_API_BASE, TelnyxClient
+from hailhq.core.providers.telnyx import TelnyxClient
 from hailhq.core.schemas import NumberType
-from hailhq.core.urls import join_url
 from pydantic import BaseModel, Field
 
 
@@ -76,32 +75,32 @@ class TelnyxNumberDiscovery:
             params["filter[phone_number][ends_with]"] = (
                 phonenumbers.national_significant_number(phonenumbers.parse(e164, None))
             )
-        response = await self._client.get(
-            join_url(TELNYX_API_BASE, "available_phone_numbers"),
-            headers={"Authorization": f"Bearer {self._api_key}"},
-            params=params,
-            timeout=20,
-            follow_redirects=False,
-        )
-        # Telnyx returns this specific 400 for unsupported country/capability
-        # combinations (verified live for PT voice + SMS). It is empty coverage,
-        # not a carrier outage. Other validation/authentication errors still fail.
-        if response.status_code == 400:
+        try:
+            data = await TelnyxClient(self._api_key, self._client).request(
+                "GET", "/available_phone_numbers", params=params
+            )
+        except httpx.HTTPStatusError as exc:
+            # HTTPStatusError retains the raw body. Only explicit no-coverage
+            # responses become empty inventory; other errors stay errors.
             try:
-                errors = response.json().get("errors", [])
+                errors = exc.response.json().get("errors", [])
             except ValueError:
                 errors = []
-            if errors and all(
-                str(error.get("code")) == "10015"
-                and error.get("detail", "").startswith(
-                    "No coverage found in the specified country"
+            if (
+                exc.response.status_code == 400
+                and errors
+                and all(
+                    str(error.get("code")) == "10015"
+                    and error.get("detail", "").startswith(
+                        "No coverage found in the specified country"
+                    )
+                    for error in errors
                 )
-                for error in errors
             ):
                 return []
-        response.raise_for_status()
+            raise
         quotes = []
-        for item in response.json()["data"]:
+        for item in data["data"]:
             if e164 and item["phone_number"] != e164:
                 continue
             available = {feature["name"] for feature in item.get("features", [])}

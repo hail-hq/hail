@@ -37,13 +37,13 @@ Schemas: [`openapi/openapi.yaml`](../../openapi/openapi.yaml). Code: [`number_of
 3. Under the org lock it reserves setup plus first month in credits. It then commits the pending number and consumes the quote.
 4. Only then does it call the carrier. An unclear result is never retried and never moved to another carrier.
 5. Success swaps the reservation for the monthly fee (plus setup). A definite failure refunds it once.
-6. Telnyx orders are asynchronous. The sweeper and `GET /numbers/{id}` check the order. A carrier error on `GET` returns the last saved state.
-7. If the carrier has no record of the order 1 hour after submit, the order is marked failed and refunded. A Telnyx order that exists but is not finished stays pending. The carrier decides.
+6. Telnyx orders are asynchronous. The sweeper and `GET /numbers/{id}` check the order, with a persisted 15-second polling interval. A carrier error on `GET` returns the last saved state.
+7. If the carrier has no record after 1 hour, the order is flagged for operator review. Credits remain reserved: absence from a lookup is not proof of failure. A Telnyx order that exists but is not finished stays pending. The carrier decides.
 8. A failed order does not hold its number. It can be quoted and bought again.
 
 ## Deploy
 
-1. Apply migration `0044` before the quote API. It also makes `provider_resource_id` nullable and lets failed orders free their number.
+1. Apply migrations `0044` and `0045` before the quote API. The additive `0045` makes `provider_resource_id` nullable and lets failed orders free their number.
 2. Deploy the hail-website change first. Renewal billing reads the stored price.
 3. Telnyx account: outbound voice profile, credentials, LiveKit trunk to `sip.telnyx.com` with `numbers: ["*"]`, destination format `+E.164`. The SIP password stays in the LiveKit trunk.
 4. Verify: a PT voice quote and order, call setup and hangup, SMS send and receipt, signed callbacks, STOP, repeated purchase, exact-balance purchase, failed-order refund, carrier release.

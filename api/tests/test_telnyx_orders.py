@@ -6,7 +6,7 @@ import httpx
 import pytest
 from fastapi import HTTPException
 from hailhq.api.number_orders import (
-    UNFOUND_ORDER_TIMEOUT,
+    UNFOUND_ORDER_REVIEW_AFTER,
     acquire_offer,
     reconcile_order,
 )
@@ -107,7 +107,7 @@ async def test_pending_order_reserved_once_and_reconciles_to_owned_id(
             ]
         },
     ]
-    await reconcile_order(async_session, number)
+    await reconcile_order(async_session, number, force=True)
     assert number.provisioning_state == "active"
     assert number.provider_resource_id == resource_id
     assert number.provider_resource_id != order_phone_id
@@ -125,7 +125,7 @@ async def test_pending_order_reserved_once_and_reconciles_to_owned_id(
         .all()
     )
     assert len(debits) == 1 and debits[0].amount_cents == -100
-    await reconcile_order(async_session, number)
+    await reconcile_order(async_session, number, force=True)
     assert wire.await_count == 4
 
 
@@ -165,7 +165,7 @@ async def test_failed_order_refunds_once(async_session, org_and_key, monkeypatch
     number = await buy(async_session, org, row)
     assert number.provisioning_state == "failed"
     assert await get_balance_cents(async_session, org) == 100000
-    await reconcile_order(async_session, number)
+    await reconcile_order(async_session, number, force=True)
     await buy(async_session, org, row)
     assert await get_balance_cents(async_session, org) == 100000
     assert wire.await_count == 2
@@ -280,11 +280,11 @@ async def test_status_lookup_rejection_does_not_refund_accepted_order(
 
 
 async def age(db, number):
-    number.created_at = datetime.now(timezone.utc) - UNFOUND_ORDER_TIMEOUT * 2
+    number.created_at = datetime.now(timezone.utc) - UNFOUND_ORDER_REVIEW_AFTER * 2
     await db.commit()
 
 
-async def test_telnyx_order_the_carrier_never_received_is_refunded_after_timeout(
+async def test_unfound_telnyx_order_requires_review_without_refund(
     async_session, org_and_key, monkeypatch
 ):
     org, _, _ = org_and_key
@@ -301,18 +301,27 @@ async def test_telnyx_order_the_carrier_never_received_is_refunded_after_timeout
     wire.side_effect = None
     wire.return_value = {"data": []}
     # No carrier record yet, but too early to conclude the POST was lost.
-    await reconcile_order(async_session, number)
+    await reconcile_order(async_session, number, force=True)
     assert number.provisioning_state == "pending"
     assert await get_balance_cents(async_session, org) == 99850
     await age(async_session, number)
-    await reconcile_order(async_session, number)
-    assert number.provisioning_state == "failed"
-    assert await get_balance_cents(async_session, org) == 100000
-    await reconcile_order(async_session, number)
-    assert await get_balance_cents(async_session, org) == 100000
+    await reconcile_order(async_session, number, force=True)
+    assert number.provisioning_state == "pending"
+    assert number.provisioning_metadata["needs_review"] is True
+    assert await get_balance_cents(async_session, org) == 99850
+    await reconcile_order(async_session, number, force=True)
+    assert await get_balance_cents(async_session, org) == 99850
+
+    # Later authoritative activation is still reconciled and billed once.
+    recovered = AsyncMock(return_value=("active", str(uuid4()), str(uuid4())))
+    monkeypatch.setattr("hailhq.api.number_orders.carrier_outcome", recovered)
+    await reconcile_order(async_session, number, force=True)
+    assert number.provisioning_state == "active"
+    assert "needs_review" not in number.provisioning_metadata
+    assert await get_balance_cents(async_session, org) == 99850
 
 
-async def test_twilio_order_is_recovered_or_refunded_after_timeout(
+async def test_unfound_twilio_order_requires_review_without_refund(
     async_session, org_and_key, monkeypatch
 ):
     org, _, _ = org_and_key
@@ -329,13 +338,14 @@ async def test_twilio_order_is_recovered_or_refunded_after_timeout(
     monkeypatch.setattr("hailhq.api.number_orders.find_ordered_number", find)
     number = await buy(async_session, org, row)
     assert number.provisioning_state == "pending"
-    await reconcile_order(async_session, number)
+    await reconcile_order(async_session, number, force=True)
     assert number.provisioning_state == "pending"
     assert await get_balance_cents(async_session, org) == 99850
     await age(async_session, number)
-    await reconcile_order(async_session, number)
-    assert number.provisioning_state == "failed"
-    assert await get_balance_cents(async_session, org) == 100000
+    await reconcile_order(async_session, number, force=True)
+    assert number.provisioning_state == "pending"
+    assert number.provisioning_metadata["needs_review"] is True
+    assert await get_balance_cents(async_session, org) == 99850
 
 
 async def test_twilio_order_found_at_carrier_is_activated(
@@ -356,7 +366,7 @@ async def test_twilio_order_found_at_carrier_is_activated(
         AsyncMock(return_value="PN_found"),
     )
     number = await buy(async_session, org, row)
-    await reconcile_order(async_session, number)
+    await reconcile_order(async_session, number, force=True)
     assert number.provisioning_state == "active"
     assert number.provider_resource_id == "PN_found"
 
@@ -498,3 +508,39 @@ async def test_get_number_survives_a_carrier_outage_while_pending(
     )
     assert response.status_code == 200, response.text
     assert response.json()["provisioning_state"] == "pending"
+
+
+async def test_pending_gets_share_a_persisted_poll_interval(
+    client, async_session, org_and_key, monkeypatch
+):
+    org, _, key = org_and_key
+    row, offer = await seed_quote(async_session, org)
+    monkeypatch.setattr(
+        "hailhq.api.number_orders.discover_offers",
+        AsyncMock(return_value=([offer], [])),
+    )
+    monkeypatch.setattr("hailhq.core.config.settings.telnyx_api_key", "test")
+    wire = AsyncMock(side_effect=httpx.ReadTimeout("lost response"))
+    monkeypatch.setattr("hailhq.api.number_orders.TelnyxClient.request", wire)
+    number = await buy(async_session, org, row)
+    lookup = AsyncMock(return_value=("pending", None, None))
+    monkeypatch.setattr("hailhq.api.number_orders.carrier_outcome", lookup)
+    for _ in range(3):
+        response = await client.get(
+            f"/numbers/{number.id}", headers={"Authorization": f"Bearer {key}"}
+        )
+        assert response.status_code == 200
+        assert response.json()["provisioning_state"] == "pending"
+    assert lookup.await_count == 1
+    await async_session.refresh(number)
+    number.provisioning_metadata = {
+        **number.provisioning_metadata,
+        "last_checked_at": (
+            datetime.now(timezone.utc) - timedelta(minutes=1)
+        ).isoformat(),
+    }
+    await async_session.commit()
+    await client.get(
+        f"/numbers/{number.id}", headers={"Authorization": f"Bearer {key}"}
+    )
+    assert lookup.await_count == 2

@@ -356,11 +356,9 @@ async def release_org_number(
     if number.provisioning_state == "released":
         return number
     if number.provisioning_state == "failed":
-        number.provisioning_state = "released"
-        # Never activated: no release-month rental charge is owed.
-        number.released_at = None
-        await db.commit()
-        return number
+        raise HTTPException(
+            status_code=409, detail="Failed orders have no active number to release"
+        )
     if number.provisioning_state == "pending":
         raise HTTPException(
             status_code=409,

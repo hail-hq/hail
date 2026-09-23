@@ -27,9 +27,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
 
-# A carrier that still has no record of our order this long after we submitted
-# it never received it. The reservation is then returned instead of held forever.
-UNFOUND_ORDER_TIMEOUT = timedelta(hours=1)
+# Missing inventory/order lookups cannot prove a paid POST was rejected.
+# Escalate old ambiguous orders while retaining the reservation and number claim.
+UNFOUND_ORDER_REVIEW_AFTER = timedelta(hours=1)
+
+ORDER_POLL_INTERVAL = timedelta(seconds=15)
 
 NUMBER_TAKEN_DETAIL = "This number is already held or has a pending order"
 
@@ -97,6 +99,7 @@ async def finish_order(
     if not failed:
         number.provider_resource_id = resource_id
         number.acquired_at = now
+    meta.pop("needs_review", None)
     meta["order_state"] = "failed" if failed else "complete"
     number.provisioning_metadata = meta
     await db.commit()
@@ -176,11 +179,31 @@ async def carrier_outcome(
     return ("active", sid, None) if sid else ("missing", None, None)
 
 
-async def reconcile_order(db: AsyncSession, number: PhoneNumber):
+async def reconcile_order(
+    db: AsyncSession, number: PhoneNumber, *, force: bool = False
+):
     if number.provisioning_state != "pending":
         return
     org = number.organization_id
-    # Carrier calls are slow: hold neither a transaction nor the org lock.
+    # Claim a poll under the org lock, then release it before carrier I/O.
+    await org_lock(db, org)
+    await db.refresh(number)
+    if number.provisioning_state != "pending":
+        await db.commit()
+        return
+    now = datetime.now(timezone.utc)
+    last_check = number.provisioning_metadata.get("last_checked_at")
+    if (
+        not force
+        and last_check
+        and now - datetime.fromisoformat(last_check) < ORDER_POLL_INTERVAL
+    ):
+        await db.commit()
+        return
+    number.provisioning_metadata = {
+        **number.provisioning_metadata,
+        "last_checked_at": now.isoformat(),
+    }
     await db.commit()
     state, resource_id, order_id = await carrier_outcome(number)
     await org_lock(db, org)
@@ -195,12 +218,20 @@ async def reconcile_order(db: AsyncSession, number: PhoneNumber):
         }
     unfound = (
         state == "missing"
-        and datetime.now(timezone.utc) - number.created_at > UNFOUND_ORDER_TIMEOUT
+        and datetime.now(timezone.utc) - number.created_at > UNFOUND_ORDER_REVIEW_AFTER
     )
     if state == "active":
         await finish_order(db, number, resource_id=resource_id)
-    elif state == "failed" or unfound:
+    elif state == "failed":
         await finish_order(db, number, resource_id=None, failed=True)
+    elif unfound:
+        number.provisioning_metadata = {
+            **number.provisioning_metadata,
+            "needs_review": True,
+        }
+        logger.warning(
+            "Carrier order remains unconfirmed; review required: number=%s", number.id
+        )
     await db.commit()
 
 
