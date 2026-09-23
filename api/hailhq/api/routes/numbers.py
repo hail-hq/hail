@@ -21,7 +21,7 @@ from fastapi import status as http_status
 from hailhq.api.audit import write_audit_log
 from hailhq.api.deps import Principal, get_current_principal
 from hailhq.api.errors import unprocessable
-from hailhq.api.funds import require_funds
+from hailhq.api.funds import FUNDS_RESPONSES, require_funds
 from hailhq.api.idempotency import (
     IdempotencyContext,
     cache_failure,
@@ -94,6 +94,15 @@ async def _get_org_number_or_404(
     "",
     response_model=PhoneNumberResponse,
     status_code=http_status.HTTP_201_CREATED,
+    responses={
+        402: {
+            "description": (
+                FUNDS_RESPONSES[402]["description"]
+                + ". Also returned when the balance doesn't cover this "
+                "number's full monthly price."
+            ),
+        },
+    },
 )
 async def acquire_number(
     body: NumberAcquireRequest,

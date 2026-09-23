@@ -6,6 +6,8 @@ verbatim copies, one per route.
 
 from __future__ import annotations
 
+from typing import Any
+
 from fastapi import HTTPException
 from fastapi import status as http_status
 from hailhq.api.deps import Principal
@@ -13,9 +15,20 @@ from hailhq.api.idempotency import IdempotencyContext, cache_failure
 from hailhq.core.billing import has_funds
 from sqlalchemy.ext.asyncio import AsyncSession
 
-__all__ = ["require_funds"]
+__all__ = ["FUNDS_RESPONSES", "require_funds"]
 
 _NO_FUNDS_DETAIL = "insufficient credits; top up at https://hail.so/console/billing"
+
+# OpenAPI doc for the 402 `require_funds` can raise. FastAPI does not infer
+# statuses from a plain `raise HTTPException` any more than it does from a
+# middleware short-circuit, so every route decorator that calls
+# `require_funds` must declare this (`responses=FUNDS_RESPONSES`, merged with
+# any route-specific responses) for the generated spec — and the CLI codegen
+# from it — to reflect the 402. Regenerate openapi/openapi.yaml after
+# touching this (see docs/public/contributing.md).
+FUNDS_RESPONSES: dict[int | str, dict[str, Any]] = {
+    402: {"description": _NO_FUNDS_DETAIL},
+}
 
 
 async def require_funds(

@@ -76,6 +76,8 @@ paths:
               description: Seconds until the current window resets.
               schema:
                 type: integer
+        "402":
+          description: insufficient credits; top up at https://hail.so/console/billing
         "422":
           description: Validation Error
           content:
@@ -377,6 +379,8 @@ paths:
               description: Seconds until the current window resets.
               schema:
                 type: integer
+        "402":
+          description: insufficient credits; top up at https://hail.so/console/billing
         "422":
           description: Validation Error
           content:
@@ -1488,6 +1492,11 @@ paths:
               description: Seconds until the current window resets.
               schema:
                 type: integer
+        "402":
+          description:
+            insufficient credits; top up at https://hail.so/console/billing.
+            Also returned when the balance doesn't cover this number's full monthly
+            price.
         "422":
           description: Validation Error
           content:
@@ -2371,6 +2380,8 @@ paths:
               description: Seconds until the current window resets.
               schema:
                 type: integer
+        "402":
+          description: insufficient credits; top up at https://hail.so/console/billing
         "422":
           description: Validation Error
           content:

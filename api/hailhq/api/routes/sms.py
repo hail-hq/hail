@@ -26,7 +26,7 @@ from hailhq.api.audit import write_audit_log
 from hailhq.api.consent import enforce_consent, isoformat_or_none
 from hailhq.api.deps import Principal, get_current_principal
 from hailhq.api.errors import unprocessable
-from hailhq.api.funds import require_funds
+from hailhq.api.funds import FUNDS_RESPONSES, require_funds
 from hailhq.api.idempotency import (
     IdempotencyContext,
     cache_failure,
@@ -195,9 +195,12 @@ async def deliver_sms(db: AsyncSession, provider: SmsProvider, sms: Sms) -> str 
     "",
     response_model=SmsResponse,
     status_code=http_status.HTTP_201_CREATED,
-    responses=merge_rate_limited_responses(
-        RATE_LIMITED_RESPONSES, GENERAL_RATE_LIMITED_RESPONSES
-    ),
+    responses={
+        **merge_rate_limited_responses(
+            RATE_LIMITED_RESPONSES, GENERAL_RATE_LIMITED_RESPONSES
+        ),
+        **FUNDS_RESPONSES,
+    },
 )
 async def create_sms(
     body: SmsCreate,
