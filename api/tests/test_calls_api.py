@@ -1448,3 +1448,38 @@ async def test_byo_tts_incapable_language_with_fallback_201(
         headers={"Authorization": f"Bearer {plain}"},
     )
     assert resp.status_code == 201, resp.text
+
+
+async def test_workspace_call_duration_is_snapshotted_and_dispatched(
+    client,
+    async_session,
+    org_and_key,
+    livekit_mock,
+    add_phone_number,
+):
+    from hailhq.core.models import OrganizationCallSettings
+
+    org, _, key = org_and_key
+    async_session.add(
+        OrganizationCallSettings(organization_id=org, max_duration_seconds=720)
+    )
+    await async_session.commit()
+    await add_phone_number(async_session, organization_id=org, e164="+14155550100")
+    response = await client.post(
+        "/calls",
+        json={
+            "to": "+14155559999",
+            "system_prompt": "hi",
+            "recipient_consent": True,
+        },
+        headers={"Authorization": f"Bearer {key}"},
+    )
+    assert response.status_code == 201, response.text
+    call = (await async_session.execute(select(Call))).scalar_one()
+    assert call.max_duration_seconds == 720
+    assert (
+        livekit_mock.dispatch_agent.await_args.kwargs["metadata"][
+            "max_duration_seconds"
+        ]
+        == 720
+    )

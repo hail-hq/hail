@@ -469,3 +469,100 @@ async def test_enable_sms_is_idempotent_when_already_enabled(
     assert resp.json()["messaging_service_sid"] == "MG_done"
     sms_mock.ensure_messaging_service.assert_not_awaited()
     sms_mock.attach_number.assert_not_awaited()
+
+
+@pytest.mark.parametrize("credit, expected", [(114, 402), (115, 201), (1000, 201)])
+async def test_number_purchase_debits_full_price(
+    client, async_session, voice_provider_mock, credit, expected
+):
+    from hailhq.core.billing import get_balance_cents
+
+    from .conftest import insert_org_and_key
+
+    org, _, key = await insert_org_and_key(async_session, initial_credit_cents=credit)
+    response = await client.post(
+        "/numbers",
+        json={"country_code": "US", "number_type": "local"},
+        headers={"Authorization": f"Bearer {key}"},
+    )
+    assert response.status_code == expected, response.text
+    assert await get_balance_cents(async_session, org) == credit - (
+        115 if expected == 201 else 0
+    )
+    if expected == 402:
+        voice_provider_mock.acquire_number.assert_not_awaited()
+
+
+async def test_purchase_failure_does_not_charge(
+    client, org_and_key, async_session, voice_provider_mock
+):
+    from hailhq.core.billing import get_balance_cents
+
+    org, _, key = org_and_key
+    before = await get_balance_cents(async_session, org)
+    voice_provider_mock.acquire_number.side_effect = LookupError("No inventory")
+    response = await client.post(
+        "/numbers",
+        json={"country_code": "US", "number_type": "local"},
+        headers={"Authorization": f"Bearer {key}"},
+    )
+    assert response.status_code == 503
+    assert await get_balance_cents(async_session, org) == before
+
+
+async def test_ten_dollars_cannot_buy_more_expensive_number(
+    client,
+    async_session,
+    voice_provider_mock,
+    monkeypatch,
+):
+    from decimal import Decimal
+
+    from .conftest import insert_org_and_key
+
+    monkeypatch.setattr(
+        telephony_catalog, "price_usd_per_month", lambda *_: Decimal("10.01")
+    )
+    _, _, key = await insert_org_and_key(async_session, initial_credit_cents=1000)
+    response = await client.post(
+        "/numbers",
+        json={"country_code": "US", "number_type": "local"},
+        headers={"Authorization": f"Bearer {key}"},
+    )
+    assert response.status_code == 402
+    voice_provider_mock.acquire_number.assert_not_awaited()
+
+
+async def test_purchase_debit_uses_monthly_rater_key_and_replay_does_not_charge_twice(
+    client,
+    org_and_key,
+    async_session,
+):
+    from hailhq.core.models import AccountCredit, PhoneNumber
+    from sqlalchemy import select
+
+    org, _, key = org_and_key
+    headers = {"Authorization": f"Bearer {key}", "Idempotency-Key": "debit-once"}
+    body = {"country_code": "US", "number_type": "local"}
+    first = await client.post("/numbers", json=body, headers=headers)
+    assert first.status_code == 201
+    second = await client.post("/numbers", json=body, headers=headers)
+    assert second.status_code == 201
+    number = await async_session.get(PhoneNumber, uuid.UUID(first.json()["id"]))
+    debits = (
+        (
+            await async_session.execute(
+                select(AccountCredit).where(
+                    AccountCredit.organization_id == org, AccountCredit.kind == "debit"
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert len(debits) == 1
+    assert debits[0].amount_cents == -115
+    assert (
+        debits[0].ref
+        == f"monthly_fee:{org}:{number.id}:dedicated_number:{number.acquired_at:%Y-%m}"
+    )
