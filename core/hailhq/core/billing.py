@@ -1,7 +1,8 @@
 """Balance read primitives for the POST /v1/calls gate.
 
 After the usage_events / rater split, hail/api no longer writes ledger rows
-directly — the website's private rater is the sole producer of debit rows.
+for usage — the website's private rater prices usage. Number acquisition
+writes the first monthly debit immediately at the public catalog price.
 This module exists only to read the balance for the gate.
 
 Self-host behavior: the seeded "Self-hosted" organization carries a large

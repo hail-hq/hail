@@ -34,6 +34,16 @@ TS = DateTime(timezone=True)
 # so the two migration tools don't need to coordinate.
 
 
+class OrganizationCallSettings(Base):
+    __tablename__ = "organization_call_settings"
+
+    organization_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True
+    )
+    max_duration_seconds: Mapped[int] = mapped_column(Integer, nullable=False)
+    __table_args__ = (CheckConstraint("max_duration_seconds BETWEEN 60 AND 3600"),)
+
+
 class OrganizationMember(Base):
     """Read-only mirror of the website's ``members`` table.
 

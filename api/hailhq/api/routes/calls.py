@@ -24,7 +24,7 @@ from hailhq.api.audit import write_audit_log
 from hailhq.api.consent import enforce_consent, isoformat_or_none
 from hailhq.api.deps import Principal, get_current_principal
 from hailhq.api.errors import unprocessable
-from hailhq.api.funds import require_funds
+from hailhq.api.funds import FUNDS_RESPONSES, require_funds
 from hailhq.api.idempotency import (
     IdempotencyContext,
     cache_failure,
@@ -47,7 +47,7 @@ from hailhq.core.db import get_session
 from hailhq.core.internal_webhook import fetch_organization_name
 from hailhq.core.languages import SUPPORTED_LANGUAGES
 from hailhq.core.livekit import LiveKitClient
-from hailhq.core.models import Call, CallEvent, PhoneNumber
+from hailhq.core.models import Call, CallEvent, OrganizationCallSettings, PhoneNumber
 from hailhq.core.pool import (
     CALL_META_FROM_POOL,
     claim_pool_number,
@@ -154,9 +154,12 @@ async def _cleanup_partial_livekit(
     "",
     response_model=CallResponse,
     status_code=http_status.HTTP_201_CREATED,
-    responses=merge_rate_limited_responses(
-        RATE_LIMITED_RESPONSES, GENERAL_RATE_LIMITED_RESPONSES
-    ),
+    responses={
+        **merge_rate_limited_responses(
+            RATE_LIMITED_RESPONSES, GENERAL_RATE_LIMITED_RESPONSES
+        ),
+        **FUNDS_RESPONSES,
+    },
 )
 async def create_call(
     body: CallCreate,
@@ -359,6 +362,14 @@ async def create_call(
     # ``api_key_id is not None`` would wrongly exempt every JWT-placed call.
     call_metadata[CALL_META_BILLED] = principal.auth_kind != "shared"
 
+    org_call_settings = await db.get(
+        OrganizationCallSettings, principal.organization_id
+    )
+    max_duration_seconds = (
+        org_call_settings.max_duration_seconds
+        if org_call_settings
+        else settings.hail_voice_max_duration_seconds
+    )
     call = Call(
         organization_id=principal.organization_id,
         conversation_id=body.conversation_id,
@@ -369,7 +380,7 @@ async def create_call(
         status="queued",
         voice_config=voice_config,
         initial_prompt=body.system_prompt,
-        max_duration_seconds=settings.hail_voice_max_duration_seconds,
+        max_duration_seconds=max_duration_seconds,
         metadata_=call_metadata,
     )
     db.add(call)
@@ -441,6 +452,7 @@ async def create_call(
             agent_name="hail-voicebot",
             metadata={
                 "call_id": str(call.id),
+                "max_duration_seconds": call.max_duration_seconds,
                 "organization_id": str(call.organization_id),
                 "voice_config": voice_config,
                 "system_prompt": body.system_prompt,

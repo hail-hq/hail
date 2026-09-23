@@ -1366,7 +1366,9 @@ async def entrypoint(ctx: JobContext) -> None:
 
     room_name = ctx.room.name
 
-    soft_cap_seconds = settings.hail_voice_max_duration_seconds
+    soft_cap_seconds = metadata.get(
+        "max_duration_seconds", settings.hail_voice_max_duration_seconds
+    )
     soft_cap_task: asyncio.Task[None] | None = None
     if soft_cap_seconds > 0:
         # Armed here, before AMD and before the greeting, so the cap bounds

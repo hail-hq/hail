@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timezone
+from decimal import ROUND_HALF_UP
 from typing import Annotated
 from uuid import UUID
 
@@ -20,7 +21,7 @@ from fastapi import status as http_status
 from hailhq.api.audit import write_audit_log
 from hailhq.api.deps import Principal, get_current_principal
 from hailhq.api.errors import unprocessable
-from hailhq.api.funds import require_funds
+from hailhq.api.funds import FUNDS_RESPONSES, require_funds
 from hailhq.api.idempotency import (
     IdempotencyContext,
     cache_failure,
@@ -32,8 +33,9 @@ from hailhq.api.ratelimit import GENERAL_RATE_LIMITED_RESPONSES
 from hailhq.api.route_prefixes import request_mount_prefix
 from hailhq.api.routes.sms import get_sms_provider
 from hailhq.core import telephony_catalog
+from hailhq.core.billing import get_balance_cents
 from hailhq.core.db import get_session
-from hailhq.core.models import PhoneNumber
+from hailhq.core.models import AccountCredit, PhoneNumber
 from hailhq.core.providers.sms import SmsProvider
 from hailhq.core.providers.voice import NumberNotProvisionable, VoiceProvider
 from hailhq.core.schemas import (
@@ -92,6 +94,15 @@ async def _get_org_number_or_404(
     "",
     response_model=PhoneNumberResponse,
     status_code=http_status.HTTP_201_CREATED,
+    responses={
+        402: {
+            "description": (
+                FUNDS_RESPONSES[402]["description"]
+                + ". Also returned when the balance doesn't cover this "
+                "number's full monthly price."
+            ),
+        },
+    },
 )
 async def acquire_number(
     body: NumberAcquireRequest,
@@ -145,6 +156,39 @@ async def acquire_number(
             ),
         )
 
+    price = telephony_catalog.price_usd_per_month(body.country_code, body.number_type)
+    if price is None or not price.is_finite() or price <= 0:
+        raise await cache_failure(
+            idem,
+            HTTPException(
+                status_code=503, detail="number price unavailable; try again later"
+            ),
+        )
+    amount_cents = int((price * 100).quantize(1, rounding=ROUND_HALF_UP))
+    if amount_cents <= 0:
+        raise await cache_failure(
+            idem,
+            HTTPException(
+                status_code=503, detail="number price unavailable; try again later"
+            ),
+        )
+    billed = principal.auth_kind != "shared"
+    if billed:
+        # Serialize purchases and monthly debits for this organization.
+        await db.execute(
+            text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))"),
+            {"key": str(principal.organization_id)},
+        )
+        if await get_balance_cents(db, principal.organization_id) < amount_cents:
+            raise await cache_failure(
+                idem,
+                HTTPException(
+                    status_code=402,
+                    detail=f"insufficient credits; this number costs ${price:.2f} per month; "
+                    "top up at https://hail.so/console/billing",
+                ),
+            )
+
     try:
         acquired = await provider.acquire_number(
             country_code=body.country_code,
@@ -194,8 +238,34 @@ async def acquire_number(
         provisioning_state="active",
         is_pool=False,
     )
+    acquired_at = datetime.now(timezone.utc)
+    number.acquired_at = acquired_at
     db.add(number)
-    await db.commit()
+    try:
+        await db.flush()
+        if billed:
+            db.add(
+                AccountCredit(
+                    organization_id=principal.organization_id,
+                    kind="debit",
+                    channel="voice" if "voice" in acquired.capabilities else "sms",
+                    amount_cents=-amount_cents,
+                    qty=1,
+                    ref=f"monthly_fee:{principal.organization_id}:{number.id}:dedicated_number:{acquired_at:%Y-%m}",
+                    source="monthly_fee",
+                )
+            )
+        await db.commit()
+    except Exception:
+        await db.rollback()
+        try:
+            await provider.release_number(acquired.provider_resource_id)
+        except Exception:
+            logger.exception(
+                "failed to release number after failed purchase commit: %s",
+                acquired.provider_resource_id,
+            )
+        raise
     # No refresh: `id` (the PK) is populated via the INSERT's implicit RETURNING
     # and expire_on_commit=False keeps it live; PhoneNumberResponse reads no
     # other server-generated column.
