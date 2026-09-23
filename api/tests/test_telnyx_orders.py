@@ -222,3 +222,37 @@ async def test_quote_api_returns_live_recommendation_and_persists_org_scope(
 
     row = await async_session.get(NumberOffer, UUID(recommended["quote_id"]))
     assert row.organization_id == org
+
+
+async def test_status_lookup_rejection_does_not_refund_accepted_order(
+    async_session, org_and_key, monkeypatch
+):
+    org, _, _ = org_and_key
+    row, offer = await seed_quote(async_session, org)
+    monkeypatch.setattr(
+        "hailhq.api.number_orders.discover_offers",
+        AsyncMock(return_value=([offer], [])),
+    )
+    monkeypatch.setattr("hailhq.core.config.settings.telnyx_api_key", "test")
+    order_id = str(uuid4())
+    request = httpx.Request(
+        "GET", f"https://api.telnyx.com/v2/number_orders/{order_id}"
+    )
+    wire = AsyncMock(
+        side_effect=[
+            {"data": {"id": order_id}},
+            httpx.HTTPStatusError(
+                "not visible yet",
+                request=request,
+                response=httpx.Response(404, request=request),
+            ),
+        ]
+    )
+    monkeypatch.setattr("hailhq.api.number_orders.TelnyxClient.request", wire)
+    number = await buy(async_session, org, row)
+    assert number.provisioning_state == "pending"
+    assert number.provisioning_metadata["order_id"] == order_id
+    assert await get_balance_cents(async_session, org) == 99850
+    await async_session.refresh(row)
+    await buy(async_session, org, row)
+    assert wire.await_count == 2

@@ -309,7 +309,6 @@ async def acquire_offer(
                 "order_state": "pending",
             }
             await db.commit()
-            await reconcile_order(db, number)
         else:
 
             def purchase():
@@ -347,6 +346,19 @@ async def acquire_offer(
         await db.rollback()
         await db.refresh(number)
         logger.warning("Carrier order requires reconciliation: number=%s", number.id)
+    # Status reads can fail after a successful POST. They must never enter the
+    # submission rejection/refund handler above.
+    if (
+        number.provider == "telnyx"
+        and number.provisioning_state == "pending"
+        and number.provisioning_metadata.get("order_id")
+    ):
+        try:
+            await reconcile_order(db, number)
+        except Exception:
+            await db.rollback()
+            await db.refresh(number)
+            logger.warning("Carrier order status unavailable: number=%s", number.id)
     return number
 
 
