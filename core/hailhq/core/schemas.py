@@ -522,7 +522,10 @@ class NumberAcquireRequest(BaseModel):
         default=None,
         description="Carrier restriction for a quote from POST /numbers/quotes. Auto accepts the recommended carrier. Omitted without a quote preserves the legacy Twilio purchase contract.",
     )
-    quote_id: UUID | None = None
+    quote_id: UUID | None = Field(
+        default=None,
+        description="Unexpired organization-bound quote from POST /numbers/quotes; required for multi-carrier purchases.",
+    )
 
     country_code: str = Field(
         min_length=2,
@@ -544,7 +547,10 @@ class NumberAcquireRequest(BaseModel):
 
 class PhoneNumberResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
-    provider: str = "twilio"
+    provider: str = Field(
+        default="twilio",
+        description="Carrier that owns and routes this number, such as twilio or telnyx.",
+    )
 
     id: UUID = Field(description="Unique identifier for this number.")
     e164: str = Field(description="The phone number, E.164 format.")

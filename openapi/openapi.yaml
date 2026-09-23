@@ -3942,12 +3942,15 @@ components:
             - twilio
             - telnyx
           title: Provider
+          description: Carrier supplying this exact number.
         e164:
           type: string
           title: E164
+          description: Available phone number in E.164 format.
         country_code:
           type: string
           title: Country Code
+          description: ISO alpha-2 country code of the number.
         number_type:
           type: string
           enum:
@@ -3956,23 +3959,34 @@ components:
             - toll_free
             - national
           title: Number Type
+          description: Local, mobile, national, or toll-free number type.
         capabilities:
           items:
             type: string
           type: array
           title: Capabilities
+          description:
+            Voice/SMS capabilities reported by live carrier inventory;
+            SMS registration may still be required.
         monthly_cents:
           type: integer
           exclusiveMinimum: 0.0
           title: Monthly Cents
+          description:
+            Monthly number rental in USD cents, charged from organization
+            credits.
         setup_cents:
           type: integer
           minimum: 0.0
           title: Setup Cents
+          description:
+            One-time setup charge in USD cents, payable with the first
+            month.
         currency:
           type: string
           const: USD
           title: Currency
+          description: Currency of the quoted rental and setup amounts.
           default: USD
         readiness:
           type: string
@@ -3980,27 +3994,42 @@ components:
             - ready
             - verification_required
           title: Readiness
+          description:
+            Whether regulatory preflight permits purchase for this organization;
+            rechecked at purchase.
         requirements:
           items:
             type: string
           type: array
           title: Requirements
+          description:
+            Carrier regulatory requirement labels associated with this
+            offer.
         verification_id:
           anyOf:
             - type: string
             - type: "null"
           title: Verification Id
+          description:
+            Server-selected organization-bound approved bundle or requirement-group
+            identifier, if any.
         address_id:
           anyOf:
             - type: string
             - type: "null"
           title: Address Id
+          description:
+            Server-selected verified address identifier, when supported;
+            null otherwise.
         quote_id:
           anyOf:
             - type: string
               format: uuid
             - type: "null"
           title: Quote Id
+          description:
+            Organization-bound quote identifier to pass to POST /numbers
+            before expiry.
       type: object
       required:
         - provider
@@ -5762,6 +5791,9 @@ components:
               format: uuid
             - type: "null"
           title: Quote Id
+          description:
+            Unexpired organization-bound quote from POST /numbers/quotes;
+            required for multi-carrier purchases.
         country_code:
           type: string
           maxLength: 2
@@ -5793,6 +5825,7 @@ components:
           type: string
           pattern: ^[A-Z]{2}$
           title: Country Code
+          description: Uppercase ISO alpha-2 country code to search.
         number_type:
           anyOf:
             - type: string
@@ -5803,6 +5836,7 @@ components:
                 - national
             - type: "null"
           title: Number Type
+          description: Restrict number type; omit to compare all supported types.
         capabilities:
           items:
             type: string
@@ -5813,6 +5847,9 @@ components:
           maxItems: 2
           minItems: 1
           title: Capabilities
+          description:
+            Required channels; every returned offer must support all requested
+            capabilities.
         provider:
           type: string
           enum:
@@ -5820,6 +5857,9 @@ components:
             - twilio
             - telnyx
           title: Provider
+          description:
+            Carrier preference for the recommendation; auto compares both
+            configured carriers.
           default: auto
       additionalProperties: false
       type: object
@@ -5834,21 +5874,33 @@ components:
             $ref: "#/components/schemas/CarrierOffer"
           type: array
           title: Offers
+          description:
+            Live carrier offers ordered by readiness, monthly price, setup
+            price, and remaining requirements.
         recommended_quote_id:
           anyOf:
             - type: string
               format: uuid
             - type: "null"
           title: Recommended Quote Id
+          description:
+            Recommended ready offer matching the requested carrier preference,
+            or null if none qualifies.
         unavailable_providers:
           items:
             type: string
           type: array
           title: Unavailable Providers
+          description:
+            Carriers whose inventory, price, or regulatory lookup failed;
+            comparison may be incomplete.
         expires_at:
           type: string
           format: date-time
           title: Expires At
+          description:
+            UTC expiry of these persisted quotes; request fresh offers
+            afterward.
       type: object
       required:
         - offers
@@ -5928,6 +5980,9 @@ components:
         provider:
           type: string
           title: Provider
+          description:
+            Carrier that owns and routes this number, such as twilio or
+            telnyx.
           default: twilio
         id:
           type: string

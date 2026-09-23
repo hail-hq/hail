@@ -572,17 +572,38 @@ __all__ = ["get_voice_provider", "release_org_number", "router"]
 
 class NumberQuoteRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    country_code: str = Field(pattern=r"^[A-Z]{2}$")
-    number_type: NumberType | None = None
-    capabilities: list[Literal["voice", "sms"]] = Field(min_length=1, max_length=2)
-    provider: Literal["auto", "twilio", "telnyx"] = "auto"
+    country_code: str = Field(
+        pattern=r"^[A-Z]{2}$",
+        description="Uppercase ISO alpha-2 country code to search.",
+    )
+    number_type: NumberType | None = Field(
+        default=None,
+        description="Restrict number type; omit to compare all supported types.",
+    )
+    capabilities: list[Literal["voice", "sms"]] = Field(
+        min_length=1,
+        max_length=2,
+        description="Required channels; every returned offer must support all requested capabilities.",
+    )
+    provider: Literal["auto", "twilio", "telnyx"] = Field(
+        default="auto",
+        description="Carrier preference for the recommendation; auto compares both configured carriers.",
+    )
 
 
 class NumberQuotesResponse(BaseModel):
-    offers: list[CarrierOffer]
-    recommended_quote_id: UUID | None
-    unavailable_providers: list[str]
-    expires_at: datetime
+    offers: list[CarrierOffer] = Field(
+        description="Live carrier offers ordered by readiness, monthly price, setup price, and remaining requirements."
+    )
+    recommended_quote_id: UUID | None = Field(
+        description="Recommended ready offer matching the requested carrier preference, or null if none qualifies."
+    )
+    unavailable_providers: list[str] = Field(
+        description="Carriers whose inventory, price, or regulatory lookup failed; comparison may be incomplete."
+    )
+    expires_at: datetime = Field(
+        description="UTC expiry of these persisted quotes; request fresh offers afterward."
+    )
 
 
 @router.post("/quotes", response_model=NumberQuotesResponse)

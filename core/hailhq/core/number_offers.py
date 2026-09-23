@@ -18,19 +18,47 @@ from twilio.rest import Client as TwilioClient
 
 
 class CarrierOffer(BaseModel):
-    provider: Literal["twilio", "telnyx"]
-    e164: str
-    country_code: str
-    number_type: NumberType
-    capabilities: list[str]
-    monthly_cents: int = Field(gt=0)
-    setup_cents: int = Field(ge=0)
-    currency: Literal["USD"] = "USD"
-    readiness: Literal["ready", "verification_required"]
-    requirements: list[str] = Field(default_factory=list)
-    verification_id: str | None = None
-    address_id: str | None = None
-    quote_id: UUID | None = None
+    provider: Literal["twilio", "telnyx"] = Field(
+        description="Carrier supplying this exact number."
+    )
+    e164: str = Field(description="Available phone number in E.164 format.")
+    country_code: str = Field(description="ISO alpha-2 country code of the number.")
+    number_type: NumberType = Field(
+        description="Local, mobile, national, or toll-free number type."
+    )
+    capabilities: list[str] = Field(
+        description="Voice/SMS capabilities reported by live carrier inventory; SMS registration may still be required."
+    )
+    monthly_cents: int = Field(
+        gt=0,
+        description="Monthly number rental in USD cents, charged from organization credits.",
+    )
+    setup_cents: int = Field(
+        ge=0,
+        description="One-time setup charge in USD cents, payable with the first month.",
+    )
+    currency: Literal["USD"] = Field(
+        default="USD", description="Currency of the quoted rental and setup amounts."
+    )
+    readiness: Literal["ready", "verification_required"] = Field(
+        description="Whether regulatory preflight permits purchase for this organization; rechecked at purchase."
+    )
+    requirements: list[str] = Field(
+        default_factory=list,
+        description="Carrier regulatory requirement labels associated with this offer.",
+    )
+    verification_id: str | None = Field(
+        default=None,
+        description="Server-selected organization-bound approved bundle or requirement-group identifier, if any.",
+    )
+    address_id: str | None = Field(
+        default=None,
+        description="Server-selected verified address identifier, when supported; null otherwise.",
+    )
+    quote_id: UUID | None = Field(
+        default=None,
+        description="Organization-bound quote identifier to pass to POST /numbers before expiry.",
+    )
 
 
 def cents(value) -> int:
