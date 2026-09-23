@@ -520,7 +520,7 @@ class NumberAcquireRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     provider: Literal["auto", "twilio", "telnyx"] | None = Field(
         default=None,
-        description="Carrier restriction for a quote from POST /numbers/quotes. Explicit auto accepts either quoted carrier. Omitted defaults to Twilio, with or without a quote.",
+        description="Carrier restriction for a quote from POST /numbers/quotes. Auto or omitted accepts the selected quoted carrier. Omitted without a quote preserves the legacy Twilio purchase contract.",
     )
     quote_id: UUID | None = Field(
         default=None,

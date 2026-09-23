@@ -43,6 +43,10 @@ class CarrierOffer(BaseModel):
     readiness: Literal["ready", "verification_required"] = Field(
         description="Whether regulatory preflight permits purchase for this organization; rechecked at purchase."
     )
+    regulatory_friction: Literal["none", "information", "documents", "unknown"] = Field(
+        default="unknown",
+        description="Remaining verification effort derived from live requirements: none, information/address entry, document uploads, or unknown. This does not establish legal eligibility.",
+    )
     requirements: list[str] = Field(
         default_factory=list,
         description="Carrier regulatory requirement labels associated with this offer.",
@@ -71,7 +75,7 @@ def cents(value) -> int:
 def rank_offers(
     offers: list[CarrierOffer], provider: str = "auto"
 ) -> list[CarrierOffer]:
-    """Ready first; cheapest monthly, then setup, then remaining requirements.
+    """Ready first; lowest remaining verification effort, then rental/setup cost.
 
     Legally blocked stock is never recommended over activatable stock. Unknown
     prices/readiness are excluded by discovery, never interpreted as free/ready.
@@ -80,10 +84,16 @@ def rank_offers(
         (o for o in offers if provider == "auto" or o.provider == provider),
         key=lambda o: (
             o.readiness != "ready",
+            (
+                0
+                if o.readiness == "ready"
+                else {"none": 0, "information": 1, "documents": 2, "unknown": 3}[
+                    o.regulatory_friction
+                ]
+            ),
             o.monthly_cents,
             o.setup_cents,
-            len(o.requirements),
-            o.provider,
+            o.provider != "twilio",
             o.e164,
         ),
     )
@@ -181,6 +191,22 @@ async def telnyx_offers(
                 readiness=(
                     "ready" if not requirements or group else "verification_required"
                 ),
+                regulatory_friction=(
+                    "none"
+                    if not requirements or group
+                    else (
+                        "documents"
+                        if any(r.get("field_type") == "document" for r in requirements)
+                        else (
+                            "information"
+                            if all(
+                                r.get("field_type") in {"textual", "address"}
+                                for r in requirements
+                            )
+                            else "unknown"
+                        )
+                    )
+                ),
                 requirements=labels,
                 verification_id=group["id"] if group else None,
             )
@@ -256,7 +282,22 @@ async def twilio_offers(
         result = []
         for n in inventory:
             address_required = n.address_requirements not in (None, "none")
-            labels = ["Approved regulatory bundle"] if rules and not bundle else []
+            needs_documents = bool(
+                rules
+                and not bundle
+                and any(r.requirements.get("supporting_document") for r in rules)
+            )
+            labels = (
+                [
+                    (
+                        "Supporting documents and regulatory bundle"
+                        if needs_documents
+                        else "Business information verification"
+                    )
+                ]
+                if rules and not bundle
+                else []
+            )
             if address_required:
                 labels.append("Verified address for this number")
             result.append(
@@ -273,6 +314,11 @@ async def twilio_offers(
                     monthly_cents=cents(prices[0]["current_price"]),
                     setup_cents=0,
                     readiness="verification_required" if labels else "ready",
+                    regulatory_friction=(
+                        "none"
+                        if not labels
+                        else "documents" if needs_documents else "information"
+                    ),
                     requirements=labels,
                     verification_id=bundle.sid if bundle else None,
                 )

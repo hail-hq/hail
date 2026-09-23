@@ -154,7 +154,7 @@ async def acquire_number(
                 body.quote_id,
                 country=body.country_code,
                 kind=body.number_type,
-                provider=body.provider or "twilio",
+                provider=body.provider or "auto",
                 billed=principal.auth_kind != "shared",
             )
         except HTTPException as exc:
@@ -584,14 +584,14 @@ class NumberQuoteRequest(BaseModel):
         description="Required channels; every returned offer must support all requested capabilities.",
     )
     provider: Literal["auto", "twilio", "telnyx"] = Field(
-        default="twilio",
-        description="Carrier preference for the recommendation. Defaults to Twilio; explicit auto compares both configured carriers.",
+        default="auto",
+        description="Carrier preference; auto compares readiness, remaining verification effort, and rental/setup costs. Twilio wins equivalent ties.",
     )
 
 
 class NumberQuotesResponse(BaseModel):
     offers: list[CarrierOffer] = Field(
-        description="Live carrier offers ordered by readiness, monthly price, setup price, and remaining requirements."
+        description="Live carrier offers ordered by readiness, remaining verification effort, monthly price, setup price, and Twilio tie-break."
     )
     recommended_quote_id: UUID | None = Field(
         description="Recommended ready offer matching the requested carrier preference, or null if none qualifies."
@@ -613,7 +613,7 @@ async def quote_numbers(
     """Compare live, org-specific offers. Prices include setup + monthly rent.
 
     Auto recommends a ready offer with the lowest monthly rent, then setup
-    cost. SMS capability does not waive messaging registration requirements.
+    cost, preferring Twilio on equivalent ties. Blocked offers sort by verification effort. SMS capability does not waive messaging registration requirements.
     """
 
     batches = await asyncio.gather(

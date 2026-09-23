@@ -635,7 +635,7 @@ class _NumbersResource:
         country: str,
         capabilities: list[Literal["voice", "sms"]],
         number_type: NumberType | None = None,
-        provider: Literal["auto", "twilio", "telnyx"] = "twilio",
+        provider: Literal["auto", "twilio", "telnyx"] = "auto",
     ) -> NumberQuotesResponse:
         """Compare live inventory, rental/setup costs and regulatory readiness.
 

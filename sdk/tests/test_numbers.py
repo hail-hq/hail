@@ -165,7 +165,7 @@ async def test_live_quotes_and_explicit_carrier_purchase(base_url: str, api_key:
 
 
 @respx.mock
-async def test_quotes_default_to_twilio(base_url: str, api_key: str):
+async def test_quotes_default_to_automatic_comparison(base_url: str, api_key: str):
     route = respx.post(f"{base_url}/numbers/quotes").mock(
         return_value=httpx.Response(
             200,
@@ -179,4 +179,4 @@ async def test_quotes_default_to_twilio(base_url: str, api_key: str):
     )
     async with Client(api_key=api_key, base_url=base_url) as c:
         await c.numbers.quotes(country="PT", capabilities=["voice"])
-    assert json.loads(route.calls.last.request.content)["provider"] == "twilio"
+    assert json.loads(route.calls.last.request.content)["provider"] == "auto"

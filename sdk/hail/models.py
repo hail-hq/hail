@@ -233,6 +233,9 @@ class NumberOffer(BaseModel):
     setup_cents: int
     currency: str
     readiness: Literal["ready", "verification_required"]
+    regulatory_friction: Literal["none", "information", "documents", "unknown"] = (
+        "unknown"
+    )
     requirements: list[str]
 
 

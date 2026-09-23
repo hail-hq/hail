@@ -112,8 +112,12 @@ async def test_sms_uses_messaging_api_and_no_mutation_retry():
         ("own", "pending-approval", "verification_required"),
     ],
 )
+@pytest.mark.parametrize(
+    "field_type,friction",
+    [("textual", "information"), ("document", "documents"), ("new_type", "unknown")],
+)
 async def test_live_portugal_rules_and_org_group(
-    monkeypatch, group_owner, group_status, expected
+    monkeypatch, group_owner, group_status, expected, field_type, friction
 ):
     org = uuid4()
     monkeypatch.setattr(settings, "telnyx_api_key", "secret")
@@ -154,7 +158,9 @@ async def test_live_portugal_rules_and_org_group(
                     "country_code": "PT",
                     "phone_number_type": "local",
                     "action": "ordering",
-                    "regulatory_requirements": [{"name": "Local business address"}],
+                    "regulatory_requirements": [
+                        {"name": "Local business address", "field_type": field_type}
+                    ],
                 }
             ]
         return httpx.Response(200, json={"data": data})
@@ -162,12 +168,31 @@ async def test_live_portugal_rules_and_org_group(
     async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as http:
         result = await telnyx_offers(org, "PT", "local", ["voice"], http)
     assert len(result) == 1
+    assert result[0].regulatory_friction == (
+        "none" if expected == "ready" else friction
+    )
     assert result[0].readiness == expected
     assert result[0].monthly_cents == 230
     assert result[0].setup_cents == 100
 
 
-async def test_twilio_empty_rules_are_not_a_bundle_requirement(monkeypatch):
+@pytest.mark.parametrize(
+    "requirements,friction",
+    [
+        ({"end_user": [], "supporting_document": []}, "none"),
+        (
+            {"end_user": [{"name": "Business"}], "supporting_document": []},
+            "information",
+        ),
+        (
+            {"end_user": [], "supporting_document": [{"name": "Proof of address"}]},
+            "documents",
+        ),
+    ],
+)
+async def test_twilio_live_rules_classify_verification_effort(
+    monkeypatch, requirements, friction
+):
 
     api = MagicMock()
     api.available_phone_numbers.return_value.local.list.return_value = [
@@ -184,18 +209,41 @@ async def test_twilio_empty_rules_are_not_a_bundle_requirement(monkeypatch):
         )
     )
     api.numbers.v2.regulatory_compliance.regulations.list.return_value = [
-        SimpleNamespace(
-            sid="RN_us", requirements={"end_user": [], "supporting_document": []}
-        )
+        SimpleNamespace(sid="RN_us", requirements=requirements)
     ]
     monkeypatch.setattr(settings, "twilio_account_sid", "AC_test")
     monkeypatch.setattr(settings, "twilio_auth_token", "test")
     monkeypatch.setattr("hailhq.core.number_offers.TwilioClient", lambda *a, **kw: api)
     offers = await twilio_offers(uuid4(), "US", "local", ["voice"], e164="+12125550100")
-    assert offers[0].readiness == "ready"
+    assert offers[0].regulatory_friction == friction
+    assert offers[0].readiness == (
+        "ready" if friction == "none" else "verification_required"
+    )
     assert offers[0].monthly_cents == 115
-    api.numbers.v2.regulatory_compliance.bundles.list.assert_not_called()
+    if friction == "none":
+        api.numbers.v2.regulatory_compliance.bundles.list.assert_not_called()
     assert (
         api.available_phone_numbers.return_value.local.list.call_args.kwargs["contains"]
         == "+12125550100"
     )
+
+
+def test_equal_ready_prices_use_twilio_but_cheaper_telnyx_wins():
+    twilio = offer(provider="twilio", monthly=100)
+    telnyx = offer(monthly=100)
+    assert rank_offers([telnyx, twilio])[0] == twilio
+    telnyx.monthly_cents = 90
+    assert rank_offers([twilio, telnyx])[0] == telnyx
+
+
+def test_info_only_verification_precedes_cheaper_document_uploads():
+    info = offer(provider="twilio", monthly=200, readiness="verification_required")
+    info.regulatory_friction = "information"
+    docs = offer(monthly=50, readiness="verification_required")
+    docs.regulatory_friction = "documents"
+    unknown = offer(monthly=10, readiness="verification_required")
+    assert rank_offers([unknown, docs, info]) == [info, docs, unknown]
+    docs.readiness = (
+        "ready"  # This organization's approved group removes remaining work.
+    )
+    assert rank_offers([info, docs])[0] == docs

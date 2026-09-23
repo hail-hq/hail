@@ -1768,7 +1768,8 @@ paths:
 
         Auto recommends a ready offer with the lowest monthly rent, then setup
 
-        cost. SMS capability does not waive messaging registration requirements."
+        cost, preferring Twilio on equivalent ties. Blocked offers sort by verification
+        effort. SMS capability does not waive messaging registration requirements."
       operationId: quote_numbers_v1_numbers_quotes_post
       parameters:
         - name: authorization
@@ -3997,6 +3998,19 @@ components:
           description:
             Whether regulatory preflight permits purchase for this organization;
             rechecked at purchase.
+        regulatory_friction:
+          type: string
+          enum:
+            - none
+            - information
+            - documents
+            - unknown
+          title: Regulatory Friction
+          description:
+            "Remaining verification effort derived from live requirements:
+            none, information/address entry, document uploads, or unknown. This does
+            not establish legal eligibility."
+          default: unknown
         requirements:
           items:
             type: string
@@ -5783,8 +5797,8 @@ components:
           title: Provider
           description:
             Carrier restriction for a quote from POST /numbers/quotes.
-            Explicit auto accepts either quoted carrier. Omitted defaults to Twilio,
-            with or without a quote.
+            Auto or omitted accepts the selected quoted carrier. Omitted without a
+            quote preserves the legacy Twilio purchase contract.
         quote_id:
           anyOf:
             - type: string
@@ -5858,9 +5872,9 @@ components:
             - telnyx
           title: Provider
           description:
-            Carrier preference for the recommendation. Defaults to Twilio;
-            explicit auto compares both configured carriers.
-          default: twilio
+            Carrier preference; auto compares readiness, remaining verification
+            effort, and rental/setup costs. Twilio wins equivalent ties.
+          default: auto
       additionalProperties: false
       type: object
       required:
@@ -5875,8 +5889,8 @@ components:
           type: array
           title: Offers
           description:
-            Live carrier offers ordered by readiness, monthly price, setup
-            price, and remaining requirements.
+            Live carrier offers ordered by readiness, remaining verification
+            effort, monthly price, setup price, and Twilio tie-break.
         recommended_quote_id:
           anyOf:
             - type: string

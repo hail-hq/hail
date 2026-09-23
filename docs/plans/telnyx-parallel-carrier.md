@@ -42,11 +42,19 @@ live regulatory requirements. Omitting `number_type` compares all supported type
 Only USD offers with valid, positive monthly prices are eligible. Carrier errors
 are reported as an incomplete comparison, never as zero prices or exemptions.
 
-Twilio is the default in the console, quote API and SDK. Missing Twilio stock or
-verification never silently switches to Telnyx. Advanced settings can explicitly
-select Telnyx or automatic comparison. Opt-in automatic selection ranks ready-to-purchase offers ahead of blocked offers, then
-monthly rental, setup cost, and remaining requirement count. The console's Advanced
-settings can restrict provider/type. This is the lowest rental among returned,
+Automatic comparison is the default in the console, quote API and SDK. As the
+comparison document explains, information-only verification is less effort than
+document uploads; country-wide provider defaults would miss number-type and
+end-user differences. Hail derives remaining effort from live structured
+requirements, not country names or a count of requirement labels.
+
+Ready-to-purchase offers rank first. Blocked offers rank by remaining verification
+effort (information/address entry, documents, unknown), then monthly rental and
+setup cost. Approved verification has no remaining onboarding effort. Twilio is
+the safe tie-breaker when readiness, effort and prices are equivalent. Unknown
+rules never establish eligibility. Local-presence, use-case and ISV restrictions
+remain legal gates, not something a cheaper price can waive. Advanced settings
+can explicitly restrict the provider/type. This is the lowest rental among returned,
 ready offers—not a claim to optimize all future call/SMS usage. Existing numbers
 never switch carriers implicitly.
 

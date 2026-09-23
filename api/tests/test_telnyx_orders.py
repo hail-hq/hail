@@ -192,7 +192,8 @@ async def test_recheck_price_and_verification_before_charging(
 
 
 @pytest.mark.parametrize(
-    "preference,ready", [(None, True), (None, False), ("auto", True), ("auto", False)]
+    "preference,ready",
+    [(None, True), (None, False), ("twilio", True), ("twilio", False)],
 )
 async def test_quote_api_returns_live_recommendation_and_persists_org_scope(
     client, async_session, org_and_key, monkeypatch, preference, ready
@@ -222,13 +223,13 @@ async def test_quote_api_returns_live_recommendation_and_persists_org_scope(
     )
     assert response.status_code == 200, response.text
     result = response.json()
-    if preference is None and not ready:
+    if preference == "twilio" and not ready:
         assert result["recommended_quote_id"] is None
         return
     recommended = next(
         o for o in result["offers"] if o["quote_id"] == result["recommended_quote_id"]
     )
-    assert recommended["provider"] == ("twilio" if preference is None else "telnyx")
+    assert recommended["provider"] == ("twilio" if preference == "twilio" else "telnyx")
 
     row = await async_session.get(NumberOffer, UUID(recommended["quote_id"]))
     assert row.organization_id == org
