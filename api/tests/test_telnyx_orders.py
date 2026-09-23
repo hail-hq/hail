@@ -5,16 +5,26 @@ from uuid import UUID, uuid4
 import httpx
 import pytest
 from fastapi import HTTPException
-from hailhq.api.number_orders import acquire_offer, reconcile_order
+from hailhq.api.number_orders import (
+    UNFOUND_ORDER_TIMEOUT,
+    acquire_offer,
+    reconcile_order,
+)
 from hailhq.core.billing import get_balance_cents
 from hailhq.core.models import AccountCredit, NumberOffer, PhoneNumber
 from hailhq.core.number_offers import CarrierOffer
-from sqlalchemy import select
+from hailhq.core.providers.voice import CarrierRequestError
+from sqlalchemy import select, text
+from sqlalchemy.exc import IntegrityError
+
+from .conftest import insert_org_and_key
 
 
-async def seed_quote(db, org, monthly=100, setup=50, readiness="ready"):
+async def seed_quote(
+    db, org, monthly=100, setup=50, readiness="ready", provider="telnyx"
+):
     offer = CarrierOffer(
-        provider="telnyx",
+        provider=provider,
         e164="+351211234567",
         country_code="PT",
         number_type="local",
@@ -267,3 +277,224 @@ async def test_status_lookup_rejection_does_not_refund_accepted_order(
     await async_session.refresh(row)
     await buy(async_session, org, row)
     assert wire.await_count == 2
+
+
+async def age(db, number):
+    number.created_at = datetime.now(timezone.utc) - UNFOUND_ORDER_TIMEOUT * 2
+    await db.commit()
+
+
+async def test_telnyx_order_the_carrier_never_received_is_refunded_after_timeout(
+    async_session, org_and_key, monkeypatch
+):
+    org, _, _ = org_and_key
+    row, offer = await seed_quote(async_session, org)
+    monkeypatch.setattr(
+        "hailhq.api.number_orders.discover_offers",
+        AsyncMock(return_value=([offer], [])),
+    )
+    monkeypatch.setattr("hailhq.core.config.settings.telnyx_api_key", "test")
+    wire = AsyncMock(side_effect=httpx.ReadTimeout("lost response"))
+    monkeypatch.setattr("hailhq.api.number_orders.TelnyxClient.request", wire)
+    number = await buy(async_session, org, row)
+    assert await get_balance_cents(async_session, org) == 99850
+    wire.side_effect = None
+    wire.return_value = {"data": []}
+    # No carrier record yet, but too early to conclude the POST was lost.
+    await reconcile_order(async_session, number)
+    assert number.provisioning_state == "pending"
+    assert await get_balance_cents(async_session, org) == 99850
+    await age(async_session, number)
+    await reconcile_order(async_session, number)
+    assert number.provisioning_state == "failed"
+    assert await get_balance_cents(async_session, org) == 100000
+    await reconcile_order(async_session, number)
+    assert await get_balance_cents(async_session, org) == 100000
+
+
+async def test_twilio_order_is_recovered_or_refunded_after_timeout(
+    async_session, org_and_key, monkeypatch
+):
+    org, _, _ = org_and_key
+    row, offer = await seed_quote(async_session, org, provider="twilio")
+    monkeypatch.setattr(
+        "hailhq.api.number_orders.discover_offers",
+        AsyncMock(return_value=([offer], [])),
+    )
+    monkeypatch.setattr(
+        "hailhq.api.number_orders.purchase_ordered_number",
+        AsyncMock(side_effect=CarrierRequestError(503)),
+    )
+    find = AsyncMock(return_value=None)
+    monkeypatch.setattr("hailhq.api.number_orders.find_ordered_number", find)
+    number = await buy(async_session, org, row)
+    assert number.provisioning_state == "pending"
+    await reconcile_order(async_session, number)
+    assert number.provisioning_state == "pending"
+    assert await get_balance_cents(async_session, org) == 99850
+    await age(async_session, number)
+    await reconcile_order(async_session, number)
+    assert number.provisioning_state == "failed"
+    assert await get_balance_cents(async_session, org) == 100000
+
+
+async def test_twilio_order_found_at_carrier_is_activated(
+    async_session, org_and_key, monkeypatch
+):
+    org, _, _ = org_and_key
+    row, offer = await seed_quote(async_session, org, provider="twilio")
+    monkeypatch.setattr(
+        "hailhq.api.number_orders.discover_offers",
+        AsyncMock(return_value=([offer], [])),
+    )
+    monkeypatch.setattr(
+        "hailhq.api.number_orders.purchase_ordered_number",
+        AsyncMock(side_effect=CarrierRequestError(503)),
+    )
+    monkeypatch.setattr(
+        "hailhq.api.number_orders.find_ordered_number",
+        AsyncMock(return_value="PN_found"),
+    )
+    number = await buy(async_session, org, row)
+    await reconcile_order(async_session, number)
+    assert number.provisioning_state == "active"
+    assert number.provider_resource_id == "PN_found"
+
+
+async def test_failed_order_frees_the_number_for_a_new_order(
+    async_session, org_and_key, monkeypatch
+):
+    org, _, _ = org_and_key
+    row, offer = await seed_quote(async_session, org)
+    monkeypatch.setattr(
+        "hailhq.api.number_orders.discover_offers",
+        AsyncMock(return_value=([offer], [])),
+    )
+    monkeypatch.setattr("hailhq.core.config.settings.telnyx_api_key", "test")
+    wire = AsyncMock(
+        side_effect=[{"data": {"id": str(uuid4())}}, {"data": {"status": "failure"}}]
+    )
+    monkeypatch.setattr("hailhq.api.number_orders.TelnyxClient.request", wire)
+    failed = await buy(async_session, org, row)
+    assert failed.provisioning_state == "failed"
+    assert failed.provider_resource_id is None
+    again, _ = await seed_quote(async_session, org)
+    wire.side_effect = [{"data": {"id": str(uuid4()), "status": "pending"}}] * 2
+    retry = await buy(async_session, org, again)
+    assert retry.id != failed.id
+    assert retry.provisioning_state == "pending"
+
+
+async def test_number_held_by_another_org_is_a_409(
+    async_session, org_and_key, monkeypatch
+):
+    org, _, _ = org_and_key
+    row, offer = await seed_quote(async_session, org)
+    monkeypatch.setattr(
+        "hailhq.api.number_orders.discover_offers",
+        AsyncMock(return_value=([offer], [])),
+    )
+    rival = (await insert_org_and_key(async_session, org_slug="rival"))[0]
+    async_session.add(
+        PhoneNumber(
+            organization_id=rival,
+            e164=offer.e164,
+            country_code="PT",
+            number_type="local",
+            provisioning_state="pending",
+        )
+    )
+    await async_session.commit()
+    wire = AsyncMock()
+    monkeypatch.setattr("hailhq.api.number_orders.TelnyxClient.request", wire)
+    with pytest.raises(HTTPException) as exc:
+        await buy(async_session, org, row)
+    assert exc.value.status_code == 409
+    wire.assert_not_awaited()
+
+
+async def test_losing_a_cross_org_insert_race_is_a_409_and_charges_nothing(
+    async_session, org_and_key, monkeypatch
+):
+    org, _, _ = org_and_key
+    row, offer = await seed_quote(async_session, org)
+    monkeypatch.setattr(
+        "hailhq.api.number_orders.discover_offers",
+        AsyncMock(return_value=([offer], [])),
+    )
+    wire = AsyncMock()
+    monkeypatch.setattr("hailhq.api.number_orders.TelnyxClient.request", wire)
+    real_commit, calls = async_session.commit, []
+
+    async def commit():
+        calls.append(1)
+        # 1st commit ends the pre-discovery step; 2nd inserts the number.
+        if len(calls) == 2:
+            raise IntegrityError(
+                "INSERT", {}, Exception("phone_numbers_e164_live_uniq")
+            )
+        await real_commit()
+
+    monkeypatch.setattr(async_session, "commit", commit)
+    with pytest.raises(HTTPException) as exc:
+        await buy(async_session, org, row)
+    assert exc.value.status_code == 409
+    wire.assert_not_awaited()
+    assert await get_balance_cents(async_session, org) == 100000
+    await async_session.refresh(row)
+    assert row.number_id is None
+
+
+async def test_discovery_runs_without_the_org_lock_or_a_transaction(
+    async_session, org_and_key, monkeypatch, session_factory
+):
+    org, _, _ = org_and_key
+    row, offer = await seed_quote(async_session, org)
+    monkeypatch.setattr("hailhq.core.config.settings.telnyx_api_key", "test")
+    monkeypatch.setattr(
+        "hailhq.api.number_orders.TelnyxClient.request",
+        AsyncMock(return_value={"data": {"id": str(uuid4()), "status": "pending"}}),
+    )
+    seen = {}
+
+    async def discover(*args, **kwargs):
+        async with session_factory() as other:
+            seen["lock_free"] = (
+                await other.execute(
+                    text("SELECT pg_try_advisory_xact_lock(hashtextextended(:k, 0))"),
+                    {"k": str(org)},
+                )
+            ).scalar_one()
+            seen["row_free"] = (
+                await other.execute(
+                    select(NumberOffer.id)
+                    .where(NumberOffer.id == row.id)
+                    .with_for_update(nowait=True)
+                )
+            ).scalar_one()
+        return [offer], []
+
+    monkeypatch.setattr("hailhq.api.number_orders.discover_offers", discover)
+    await buy(async_session, org, row)
+    assert seen == {"lock_free": True, "row_free": row.id}
+
+
+async def test_get_number_survives_a_carrier_outage_while_pending(
+    client, async_session, org_and_key, monkeypatch
+):
+    org, _, key = org_and_key
+    row, offer = await seed_quote(async_session, org)
+    monkeypatch.setattr(
+        "hailhq.api.number_orders.discover_offers",
+        AsyncMock(return_value=([offer], [])),
+    )
+    monkeypatch.setattr("hailhq.core.config.settings.telnyx_api_key", "test")
+    wire = AsyncMock(side_effect=httpx.ReadTimeout("lost response"))
+    monkeypatch.setattr("hailhq.api.number_orders.TelnyxClient.request", wire)
+    number = await buy(async_session, org, row)
+    wire.side_effect = httpx.ConnectError("carrier down")
+    response = await client.get(
+        f"/numbers/{number.id}", headers={"Authorization": f"Bearer {key}"}
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["provisioning_state"] == "pending"

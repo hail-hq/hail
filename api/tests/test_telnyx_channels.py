@@ -1,6 +1,7 @@
 import base64
 import json
 import time
+from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock
 from uuid import uuid4
 
@@ -215,3 +216,34 @@ async def test_enable_sms_does_not_reuse_a_twilio_service(
         messaging_service_sid=profile_id,
         provider_resource_id=number.provider_resource_id,
     )
+
+
+async def finalized(monkeypatch, sender, occurred_at):
+    return signed_event(
+        monkeypatch,
+        {
+            "event_type": "message.finalized",
+            "occurred_at": occurred_at,
+            "payload": {
+                "id": str(uuid4()),
+                "from": {"phone_number": sender},
+                "to": [{"phone_number": "+14155559999", "status": "delivered"}],
+            },
+        },
+    )
+
+
+async def test_finalized_event_for_unrecorded_message_only_retries_when_racing_our_send(
+    client, async_session, org_and_key, add_phone_number, monkeypatch
+):
+    org, _, _ = org_and_key
+    number = await telnyx_number(async_session, org, add_phone_number)
+    now = datetime.now(timezone.utc)
+    for sender, occurred_at, expected in [
+        (number.e164, now.isoformat(), 503),
+        (number.e164, (now - timedelta(minutes=30)).isoformat(), 200),
+        ("+14155550123", now.isoformat(), 200),
+    ]:
+        raw, headers = await finalized(monkeypatch, sender, occurred_at)
+        response = await client.post("/sms/telnyx", content=raw, headers=headers)
+        assert response.status_code == expected, (sender, response.text)

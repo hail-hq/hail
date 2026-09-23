@@ -403,8 +403,8 @@ class PhoneNumber(Base):
     organization_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), nullable=True
     )
-    # Uniqueness is partial (see __table_args__): released rows are tombstones
-    # and must not block re-acquiring a number Twilio later recycles — with a
+    # Uniqueness is partial (see __table_args__): released and failed rows are
+    # tombstones (a failed order never owned the number) and must not block re-acquiring a number Twilio later recycles — with a
     # full UNIQUE, that re-acquire would buy the number at the carrier and
     # then 500 on the INSERT, orphaning a paid number (migration 0041).
     e164: Mapped[str] = mapped_column(Text, nullable=False)
@@ -414,7 +414,8 @@ class PhoneNumber(Base):
         ARRAY(Text), server_default=text("ARRAY['voice','sms']"), nullable=False
     )
     provider: Mapped[str] = mapped_column(Text, server_default="twilio", nullable=False)
-    provider_resource_id: Mapped[str] = mapped_column(Text, nullable=False)
+    # NULL until the carrier confirms the order (pending / failed rows).
+    provider_resource_id: Mapped[str | None] = mapped_column(Text, nullable=True)
     provisioning_state: Mapped[str] = mapped_column(
         Text, server_default="pending", nullable=False
     )
@@ -469,7 +470,7 @@ class PhoneNumber(Base):
             "phone_numbers_e164_live_uniq",
             "e164",
             unique=True,
-            postgresql_where=text("provisioning_state <> 'released'"),
+            postgresql_where=text("provisioning_state NOT IN ('released', 'failed')"),
         ),
     )
 

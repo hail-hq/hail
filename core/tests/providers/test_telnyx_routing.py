@@ -213,7 +213,9 @@ async def test_twilio_live_rules_classify_verification_effort(
     ]
     monkeypatch.setattr(settings, "twilio_account_sid", "AC_test")
     monkeypatch.setattr(settings, "twilio_auth_token", "test")
-    monkeypatch.setattr("hailhq.core.number_offers.TwilioClient", lambda *a, **kw: api)
+    monkeypatch.setattr(
+        "hailhq.core.providers.voice.twilio.TwilioClient", lambda *a, **kw: api
+    )
     offers = await twilio_offers(uuid4(), "US", "local", ["voice"], e164="+12125550100")
     assert offers[0].regulatory_friction == friction
     assert offers[0].readiness == (

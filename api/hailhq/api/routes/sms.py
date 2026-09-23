@@ -12,7 +12,7 @@ number-to-org routing, which a shared pool number can't provide.
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Annotated, Any
 from uuid import UUID
 
@@ -45,7 +45,13 @@ from hailhq.core.carrier_routing import sms_route
 from hailhq.core.compliance_gate import check_sms_allowed, remove_suppression
 from hailhq.core.config import settings
 from hailhq.core.db import get_session
-from hailhq.core.models import Sms, SmsEvent, SmsSenderIdentity, Suppression
+from hailhq.core.models import (
+    PhoneNumber,
+    Sms,
+    SmsEvent,
+    SmsSenderIdentity,
+    Suppression,
+)
 from hailhq.core.pricing_tier import classify_pricing_tier
 from hailhq.core.providers.sms import SmsProvider, TwilioSmsProvider
 from hailhq.core.providers.sms.status_map import map_twilio_message_status
@@ -682,6 +688,17 @@ async def list_sms(
 __all__ = ["deliver_sms", "get_sms_provider", "router"]
 
 
+def _finalized_within(occurred_at: object, window: timedelta) -> bool:
+    """True when the event time is unknown or newer than ``window``."""
+    try:
+        when = datetime.fromisoformat(str(occurred_at).replace("Z", "+00:00"))
+    except ValueError:
+        return True
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=timezone.utc)
+    return datetime.now(timezone.utc) - when < window
+
+
 @router.post("/telnyx", include_in_schema=False)
 async def receive_telnyx_sms(
     request: Request, db: Annotated[AsyncSession, Depends(get_session)]
@@ -741,8 +758,29 @@ async def receive_telnyx_sms(
         )
     ).scalar_one_or_none()
     if sms is None:
-        # Carrier may beat POST /messages' response/DB commit. Ask for retry.
-        raise HTTPException(status_code=503, detail="message not yet recorded")
+        # The profile-level webhook reports every message on the profile,
+        # including ones Hail never recorded (sent from the Telnyx portal).
+        # Only a message from one of our numbers, reported moments ago, can be
+        # racing POST /messages' DB commit. Ask for a retry only then.
+        sender = (payload.get("from") or {}).get("phone_number")
+        ours = (
+            sender is not None
+            and (
+                await db.execute(
+                    select(PhoneNumber.id)
+                    .where(
+                        PhoneNumber.provider == "telnyx",
+                        PhoneNumber.e164 == sender,
+                        PhoneNumber.provisioning_state == "active",
+                    )
+                    .limit(1)
+                )
+            ).first()
+            is not None
+        )
+        if ours and _finalized_within(event.get("occurred_at"), timedelta(minutes=5)):
+            raise HTTPException(status_code=503, detail="message not yet recorded")
+        return {"status": "unrecorded"}
     if sms.status in _TERMINAL_SMS_STATUSES:
         return {"status": "duplicate"}
     prior = sms.status

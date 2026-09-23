@@ -1,10 +1,15 @@
 """Read-only Telnyx inventory discovery; purchase integration is staged separately."""
 
 from decimal import Decimal
+from uuid import UUID
 
 import httpx
 import phonenumbers
+from hailhq.core.carrier_offer import CarrierOffer, cents
+from hailhq.core.config import settings
+from hailhq.core.providers.telnyx import TELNYX_API_BASE, TelnyxClient
 from hailhq.core.schemas import NumberType
+from hailhq.core.urls import join_url
 from pydantic import BaseModel, Field
 
 
@@ -72,7 +77,7 @@ class TelnyxNumberDiscovery:
                 phonenumbers.national_significant_number(phonenumbers.parse(e164, None))
             )
         response = await self._client.get(
-            "https://api.telnyx.com/v2/available_phone_numbers",
+            join_url(TELNYX_API_BASE, "available_phone_numbers"),
             headers={"Authorization": f"Bearer {self._api_key}"},
             params=params,
             timeout=20,
@@ -117,3 +122,118 @@ class TelnyxNumberDiscovery:
                 )
             )
         return quotes
+
+
+async def telnyx_offers(
+    org: UUID,
+    country: str,
+    kind: NumberType,
+    capabilities: list[str],
+    client: httpx.AsyncClient,
+    e164: str | None = None,
+) -> list[CarrierOffer]:
+    if not settings.telnyx_api_key:
+        return []
+    if "voice" in capabilities and not all(
+        (
+            settings.telnyx_connection_id,
+            settings.livekit_telnyx_sip_outbound_trunk_id,
+            settings.telnyx_sip_username,
+        )
+    ):
+        return []
+    if "sms" in capabilities and not settings.telnyx_public_key:
+        return []
+    api = TelnyxClient(client=client)
+    quotes = await TelnyxNumberDiscovery(settings.telnyx_api_key, client).search(
+        country,
+        kind,
+        capabilities,
+        limit=1,
+        outbound="voice" in capabilities,
+        e164=e164,
+    )
+    if not quotes:
+        return []
+    groups = (
+        await api.request(
+            "GET",
+            "/requirement_groups",
+            params={
+                "filter[country_code]": country,
+                "filter[phone_number_type]": kind,
+                "filter[action]": "ordering",
+                "filter[status]": "approved",
+                "filter[customer_reference]": f"hail-{org}",
+            },
+        )
+    )["data"]
+    group = next(
+        (
+            g
+            for g in groups
+            if g.get("customer_reference") == f"hail-{org}"
+            and g.get("status") == "approved"
+            and g.get("country_code") == country
+            and g.get("phone_number_type") == kind
+            and g.get("action") == "ordering"
+        ),
+        None,
+    )
+    results = []
+    for q in quotes:
+        if q.currency != "USD":
+            continue
+        params = {"filter[phone_number]": q.e164, "filter[action]": "ordering"}
+        if group:
+            params["filter[requirement_group_id]"] = group["id"]
+        rules = (await api.request("GET", "/regulatory_requirements", params=params))[
+            "data"
+        ]
+        # Missing country/type coverage is unknown, not an exemption.
+        matched = [
+            r
+            for r in rules
+            if r.get("country_code") == country
+            and r.get("phone_number_type") == kind
+            and r.get("action") == "ordering"
+        ]
+        if not matched:
+            continue
+        requirements = [r for rule in matched for r in rule["regulatory_requirements"]]
+        labels = [
+            r.get("name") or r.get("field_type") or "Verification" for r in requirements
+        ]
+        results.append(
+            CarrierOffer(
+                provider="telnyx",
+                e164=q.e164,
+                country_code=country,
+                number_type=kind,
+                capabilities=sorted(set(q.capabilities) & {"voice", "sms"}),
+                monthly_cents=cents(q.monthly_cost),
+                setup_cents=cents(q.upfront_cost),
+                readiness=(
+                    "ready" if not requirements or group else "verification_required"
+                ),
+                regulatory_friction=(
+                    "none"
+                    if not requirements or group
+                    else (
+                        "documents"
+                        if any(r.get("field_type") == "document" for r in requirements)
+                        else (
+                            "information"
+                            if all(
+                                r.get("field_type") in {"textual", "address"}
+                                for r in requirements
+                            )
+                            else "unknown"
+                        )
+                    )
+                ),
+                requirements=labels,
+                verification_id=group["id"] if group else None,
+            )
+        )
+    return results

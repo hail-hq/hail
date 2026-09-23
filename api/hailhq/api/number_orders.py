@@ -2,26 +2,36 @@
 
 from __future__ import annotations
 
-import asyncio
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+from typing import Literal
 from uuid import UUID, uuid4
 
 import httpx
 from fastapi import HTTPException
+from hailhq.api.funds import BILLING_URL
 from hailhq.core.billing import get_balance_cents
 from hailhq.core.config import settings
 from hailhq.core.db import session_scope
 from hailhq.core.models import AccountCredit, NumberOffer, PhoneNumber
 from hailhq.core.number_offers import CarrierOffer, discover_offers
 from hailhq.core.providers.telnyx import TelnyxClient
+from hailhq.core.providers.voice import CarrierRequestError
+from hailhq.core.providers.voice.twilio import (
+    find_ordered_number,
+    purchase_ordered_number,
+)
 from sqlalchemy import select, text
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
-from twilio.base.exceptions import TwilioRestException
-from twilio.http.http_client import TwilioHttpClient
-from twilio.rest import Client as TwilioClient
 
 logger = logging.getLogger(__name__)
+
+# A carrier that still has no record of our order this long after we submitted
+# it never received it. The reservation is then returned instead of held forever.
+UNFOUND_ORDER_TIMEOUT = timedelta(hours=1)
+
+NUMBER_TAKEN_DETAIL = "This number is already held or has a pending order"
 
 
 async def org_lock(db, org):
@@ -92,24 +102,25 @@ async def finish_order(
     await db.commit()
 
 
-async def reconcile_order(db: AsyncSession, number: PhoneNumber):
-    if number.provisioning_state != "pending":
-        return
-    await org_lock(db, number.organization_id)
-    await db.refresh(number)
-    if number.provisioning_state != "pending":
-        return
-    meta = dict(number.provisioning_metadata)
+async def carrier_outcome(
+    number: PhoneNumber,
+) -> tuple[Literal["active", "failed", "pending", "missing"], str | None, str | None]:
+    """Ask the carrier what happened to this order. Holds no DB lock.
+
+    Returns (state, owned resource id, Telnyx order id). ``missing`` means the
+    carrier has no record of the order; it is never treated as permission to
+    submit another paid purchase.
+    """
     if number.provider == "telnyx":
         api = TelnyxClient()
-        order_id = meta.get("order_id")
+        order_id = number.provisioning_metadata.get("order_id")
         if order_id:
             order = (await api.request("GET", f"/number_orders/{UUID(order_id)}"))[
                 "data"
             ]
         else:
             # A crash/timeout after POST may lose the response. Recover by our
-            # durable reference; no match does NOT authorize another paid POST.
+            # durable reference.
             result = await api.request(
                 "GET",
                 "/number_orders",
@@ -123,17 +134,16 @@ async def reconcile_order(db: AsyncSession, number: PhoneNumber):
                 for o in result["data"]
                 if o.get("customer_reference") == str(number.id)
             ]
-            if len(matches) != 1:
-                return
+            if not matches:
+                return "missing", None, None
+            if len(matches) > 1:
+                return "pending", None, None
             order = matches[0]
-            meta["order_id"] = order["id"]
-            number.provisioning_metadata = meta
+        order_id = order.get("id") or order_id
         if order["status"] == "failure":
-            await finish_order(db, number, resource_id=None, failed=True)
-            return
+            return "failed", None, order_id
         if order["status"] != "success" or not order.get("requirements_met"):
-            await db.commit()
-            return
+            return "pending", None, order_id
         owned = (
             await api.request(
                 "GET",
@@ -152,33 +162,61 @@ async def reconcile_order(db: AsyncSession, number: PhoneNumber):
             ),
             None,
         )
-        if match:
-            # Order-phone IDs and owned-phone IDs are distinct Telnyx resources.
-            await finish_order(db, number, resource_id=match["id"])
-        else:
-            await db.commit()
-    elif number.provider == "twilio":
-
-        def lookup():
-            api = TwilioClient(
-                settings.twilio_account_sid,
-                settings.twilio_auth_token,
-                http_client=TwilioHttpClient(timeout=10, max_retries=0),
+        # Order-phone IDs and owned-phone IDs are distinct Telnyx resources.
+        return (
+            ("active", match["id"], order["id"])
+            if match
+            else (
+                "pending",
+                None,
+                order["id"],
             )
-            return api.incoming_phone_numbers.list(phone_number=number.e164, limit=10)
-
-        found = await asyncio.to_thread(lookup)
-        match = next(
-            (
-                n
-                for n in found
-                if n.phone_number == number.e164
-                and n.friendly_name == f"hail-order-{number.id}"
-            ),
-            None,
         )
-        if match:
-            await finish_order(db, number, resource_id=match.sid)
+    sid = await find_ordered_number(number.e164, number.id)
+    return ("active", sid, None) if sid else ("missing", None, None)
+
+
+async def reconcile_order(db: AsyncSession, number: PhoneNumber):
+    if number.provisioning_state != "pending":
+        return
+    org = number.organization_id
+    # Carrier calls are slow: hold neither a transaction nor the org lock.
+    await db.commit()
+    state, resource_id, order_id = await carrier_outcome(number)
+    await org_lock(db, org)
+    await db.refresh(number)
+    if number.provisioning_state != "pending":
+        await db.commit()
+        return
+    if order_id and number.provisioning_metadata.get("order_id") != order_id:
+        number.provisioning_metadata = {
+            **number.provisioning_metadata,
+            "order_id": order_id,
+        }
+    unfound = (
+        state == "missing"
+        and datetime.now(timezone.utc) - number.created_at > UNFOUND_ORDER_TIMEOUT
+    )
+    if state == "active":
+        await finish_order(db, number, resource_id=resource_id)
+    elif state == "failed" or unfound:
+        await finish_order(db, number, resource_id=None, failed=True)
+    await db.commit()
+
+
+async def load_quote(db: AsyncSession, org: UUID, quote_id: UUID) -> NumberOffer:
+    """Caller holds org lock. Locks the quote row and re-reads it from the DB."""
+    row = (
+        await db.execute(
+            select(NumberOffer)
+            .where(NumberOffer.id == quote_id, NumberOffer.organization_id == org)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+    ).scalar_one_or_none()
+    if row is None:
+        raise HTTPException(status_code=404, detail="Number quote not found")
+    return row
 
 
 async def acquire_offer(
@@ -192,15 +230,7 @@ async def acquire_offer(
     billed: bool,
 ) -> PhoneNumber:
     await org_lock(db, org)
-    row = (
-        await db.execute(
-            select(NumberOffer)
-            .where(NumberOffer.id == quote_id, NumberOffer.organization_id == org)
-            .with_for_update()
-        )
-    ).scalar_one_or_none()
-    if row is None:
-        raise HTTPException(status_code=404, detail="Number quote not found")
+    row = await load_quote(db, org, quote_id)
     offer = CarrierOffer.model_validate(row.offer)
     if (
         offer.country_code != country
@@ -222,6 +252,9 @@ async def acquire_offer(
             status_code=422,
             detail="Complete this organization's regulatory verification first",
         )
+    # Carrier discovery is slow: release the org lock and the quote row lock
+    # first so other billing and number writes for this organization proceed.
+    await db.commit()
     # Check both carrier price and regulatory readiness again before committing
     # money. The client cannot submit price, bundle ids, or a different number.
     live, _ = await discover_offers(
@@ -240,24 +273,29 @@ async def acquire_offer(
             status_code=409,
             detail="Price, inventory or verification changed; refresh offers",
         )
+    await org_lock(db, org)
+    row = await load_quote(db, org, quote_id)
+    if row.number_id:
+        # A concurrent request consumed this quote while we were checking.
+        return await db.get(PhoneNumber, row.number_id)
     total = offer.monthly_cents + offer.setup_cents
     if billed and await get_balance_cents(db, org) < total:
         raise HTTPException(
             status_code=402,
-            detail="Insufficient credits for setup and the first month; top up at https://hail.so/console/billing#topup",
+            detail=f"insufficient credits; setup and the first month cost ${total / 100:.2f}; top up at {BILLING_URL}",
         )
     existing = (
         await db.execute(
-            select(PhoneNumber).where(
+            select(PhoneNumber.id)
+            .where(
                 PhoneNumber.e164 == offer.e164,
-                PhoneNumber.provisioning_state != "released",
+                PhoneNumber.provisioning_state.not_in(("released", "failed")),
             )
+            .limit(1)
         )
-    ).scalar_one_or_none()
+    ).first()
     if existing:
-        raise HTTPException(
-            status_code=409, detail="This number is already held or has a pending order"
-        )
+        raise HTTPException(status_code=409, detail=NUMBER_TAKEN_DETAIL)
     number = PhoneNumber(
         id=uuid4(),
         organization_id=org,
@@ -266,7 +304,6 @@ async def acquire_offer(
         number_type=kind,
         capabilities=offer.capabilities,
         provider=offer.provider,
-        provider_resource_id="",
         provisioning_state="pending",
         is_pool=False,
         provisioning_metadata={
@@ -287,7 +324,13 @@ async def acquire_offer(
         )
     # Persist BEFORE the non-transactional carrier operation. A retry sees this
     # consumed quote and pending number even if the process dies mid-request.
-    await db.commit()
+    try:
+        await db.commit()
+    except IntegrityError:
+        # The unique index is global; the org lock is not. Another organization
+        # won the same number. Nothing was charged or ordered.
+        await db.rollback()
+        raise HTTPException(status_code=409, detail=NUMBER_TAKEN_DETAIL) from None
     await org_lock(db, org)
     try:
         if offer.provider == "telnyx":
@@ -311,24 +354,11 @@ async def acquire_offer(
             }
             await db.commit()
         else:
-
-            def purchase():
-                api = TwilioClient(
-                    settings.twilio_account_sid,
-                    settings.twilio_auth_token,
-                    http_client=TwilioHttpClient(timeout=10, max_retries=0),
-                )
-                kwargs = {
-                    "phone_number": offer.e164,
-                    "friendly_name": f"hail-order-{number.id}",
-                }
-                if offer.verification_id:
-                    kwargs["bundle_sid"] = offer.verification_id
-                return api.incoming_phone_numbers.create(**kwargs)
-
-            bought = await asyncio.to_thread(purchase)
-            await finish_order(db, number, resource_id=bought.sid)
-    except (httpx.HTTPStatusError, TwilioRestException) as exc:
+            resource_id = await purchase_ordered_number(
+                offer.e164, number.id, offer.verification_id
+            )
+            await finish_order(db, number, resource_id=resource_id)
+    except (httpx.HTTPStatusError, CarrierRequestError) as exc:
         status = (
             exc.response.status_code
             if isinstance(exc, httpx.HTTPStatusError)

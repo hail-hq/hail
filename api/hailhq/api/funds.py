@@ -15,9 +15,10 @@ from hailhq.api.idempotency import IdempotencyContext, cache_failure
 from hailhq.core.billing import has_funds
 from sqlalchemy.ext.asyncio import AsyncSession
 
-__all__ = ["FUNDS_RESPONSES", "require_funds"]
+__all__ = ["BILLING_URL", "FUNDS_RESPONSES", "require_funds"]
 
-_NO_FUNDS_DETAIL = "insufficient credits; top up at https://hail.so/console/billing"
+BILLING_URL = "https://hail.so/console/billing"
+_NO_FUNDS_DETAIL = f"insufficient credits; top up at {BILLING_URL}"
 
 # OpenAPI doc for the 402 `require_funds` can raise. FastAPI does not infer
 # statuses from a plain `raise HTTPException` any more than it does from a

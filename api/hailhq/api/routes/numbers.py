@@ -22,7 +22,7 @@ from fastapi import status as http_status
 from hailhq.api.audit import write_audit_log
 from hailhq.api.deps import Principal, get_current_principal
 from hailhq.api.errors import unprocessable
-from hailhq.api.funds import FUNDS_RESPONSES, require_funds
+from hailhq.api.funds import BILLING_URL, FUNDS_RESPONSES, require_funds
 from hailhq.api.idempotency import (
     IdempotencyContext,
     cache_failure,
@@ -222,7 +222,7 @@ async def acquire_number(
                 HTTPException(
                     status_code=402,
                     detail=f"insufficient credits; this number costs ${price:.2f} per month; "
-                    "top up at https://hail.so/console/billing",
+                    f"top up at {BILLING_URL}",
                 ),
             )
 
@@ -437,7 +437,18 @@ async def get_number(
         number.provisioning_state == "pending"
         and "offer" in number.provisioning_metadata
     ):
-        await reconcile_order(db, number)
+        try:
+            await reconcile_order(db, number)
+        except Exception:
+            # A carrier outage must not turn a status read into a 500. The
+            # sweeper keeps retrying; report the last committed state.
+            await db.rollback()
+            logger.warning(
+                "Carrier order status unavailable: number=%s", number.id, exc_info=True
+            )
+            number = await _get_org_number_or_404(
+                db, number_id, principal.organization_id
+            )
     return PhoneNumberResponse.model_validate(number)
 
 

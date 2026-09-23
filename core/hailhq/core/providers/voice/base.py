@@ -22,12 +22,21 @@ from hailhq.core.schemas import NumberType
 from pydantic import BaseModel
 
 __all__ = [
+    "CarrierRequestError",
     "NumberNotProvisionable",
     "NumberType",
     "ProviderCallStatus",
     "ProviderNumber",
     "VoiceProvider",
 ]
+
+
+class CarrierRequestError(Exception):
+    """A carrier rejected or failed a request. ``status`` is its HTTP status."""
+
+    def __init__(self, status: int) -> None:
+        super().__init__(f"Carrier request failed with HTTP {status}")
+        self.status = status
 
 
 class NumberNotProvisionable(Exception):

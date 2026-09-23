@@ -12,9 +12,12 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from uuid import UUID
 
+from hailhq.core.carrier_offer import CarrierOffer, cents
 from hailhq.core.config import settings
 from hailhq.core.providers.voice.base import (
+    CarrierRequestError,
     NumberNotProvisionable,
     NumberType,
     ProviderCallStatus,
@@ -22,6 +25,7 @@ from hailhq.core.providers.voice.base import (
     VoiceProvider,
 )
 from twilio.base.exceptions import TwilioRestException
+from twilio.http.http_client import TwilioHttpClient
 from twilio.rest import Client as TwilioClient
 
 logger = logging.getLogger(__name__)
@@ -163,3 +167,161 @@ class TwilioVoiceProvider(VoiceProvider):
         await asyncio.to_thread(
             self._client.calls(provider_call_sid).update, status="completed"
         )
+
+
+def _order_client() -> TwilioClient:
+    """Short timeout, no retries: a paid purchase must never be repeated."""
+    return TwilioClient(
+        settings.twilio_account_sid,
+        settings.twilio_auth_token,
+        http_client=TwilioHttpClient(timeout=10, max_retries=0),
+    )
+
+
+def _order_name(order_ref: UUID) -> str:
+    return f"hail-order-{order_ref}"
+
+
+async def purchase_ordered_number(
+    e164: str, order_ref: UUID, bundle_sid: str | None
+) -> str:
+    """Buy one exact number once; returns its SID. The friendly name lets
+    ``find_ordered_number`` recover an outcome the response never delivered."""
+
+    def create() -> str:
+        kwargs = {"phone_number": e164, "friendly_name": _order_name(order_ref)}
+        if bundle_sid:
+            kwargs["bundle_sid"] = bundle_sid
+        return _order_client().incoming_phone_numbers.create(**kwargs).sid
+
+    try:
+        return await asyncio.to_thread(create)
+    except TwilioRestException as exc:
+        raise CarrierRequestError(exc.status) from exc
+
+
+async def find_ordered_number(e164: str, order_ref: UUID) -> str | None:
+    """SID of the number bought for ``order_ref``, or None if none was bought."""
+
+    def lookup() -> str | None:
+        found = _order_client().incoming_phone_numbers.list(phone_number=e164, limit=10)
+        return next(
+            (
+                n.sid
+                for n in found
+                if n.phone_number == e164 and n.friendly_name == _order_name(order_ref)
+            ),
+            None,
+        )
+
+    return await asyncio.to_thread(lookup)
+
+
+async def twilio_offers(
+    org: UUID,
+    country: str,
+    kind: NumberType,
+    capabilities: list[str],
+    e164: str | None = None,
+) -> list[CarrierOffer]:
+    if not settings.twilio_account_sid or not settings.twilio_auth_token:
+        return []
+
+    def discover():
+        api = _order_client()
+        inventory_api = getattr(api.available_phone_numbers(country), kind, None)
+        if inventory_api is None:
+            return []
+        inventory = inventory_api.list(
+            limit=3,
+            **{f"{c}_enabled": True for c in capabilities},
+            **({"contains": e164} if e164 else {}),
+        )
+        if e164:
+            inventory = [n for n in inventory if n.phone_number == e164]
+        if not inventory:
+            return []
+        pricing = api.pricing.v1.phone_numbers.countries(country).fetch()
+        if (pricing.price_unit or "").upper() != "USD":
+            return []
+        prices = [
+            p
+            for p in (pricing.phone_number_prices or [])
+            if p["number_type"].replace("-", "_").replace(" ", "_") == kind
+        ]
+        if not prices:
+            return []
+        compliance = api.numbers.v2.regulatory_compliance
+        # Organizations are business end users. No hardcoded country exemptions.
+        rules = compliance.regulations.list(
+            iso_country=country,
+            number_type=kind.replace("_", "-"),
+            end_user_type="business",
+            limit=100,
+        )
+        # Some countries return a regulation resource with no required fields
+        # (US local is one). Presence of a resource alone is not a bundle gate.
+        if any(not isinstance(r.requirements, dict) for r in rules):
+            raise ValueError("Twilio regulatory requirements unavailable")
+        rules = [r for r in rules if any(r.requirements.values())]
+        bundle = None
+        if rules:
+            bundles = compliance.bundles.list(
+                status="twilio-approved", friendly_name=f"hail-{org}", limit=100
+            )
+            bundle = next(
+                (
+                    b
+                    for b in bundles
+                    if b.friendly_name == f"hail-{org}"
+                    and b.regulation_sid in {r.sid for r in rules}
+                ),
+                None,
+            )
+        result = []
+        for n in inventory:
+            address_required = n.address_requirements not in (None, "none")
+            needs_documents = bool(
+                rules
+                and not bundle
+                and any(r.requirements.get("supporting_document") for r in rules)
+            )
+            labels = (
+                [
+                    (
+                        "Supporting documents and regulatory bundle"
+                        if needs_documents
+                        else "Business information verification"
+                    )
+                ]
+                if rules and not bundle
+                else []
+            )
+            if address_required:
+                labels.append("Verified address for this number")
+            result.append(
+                CarrierOffer(
+                    provider="twilio",
+                    e164=n.phone_number,
+                    country_code=country,
+                    number_type=kind,
+                    capabilities=sorted(
+                        k.lower()
+                        for k, v in n.capabilities.items()
+                        if v and k.lower() in {"voice", "sms"}
+                    ),
+                    monthly_cents=cents(prices[0]["current_price"]),
+                    setup_cents=0,
+                    readiness="verification_required" if labels else "ready",
+                    regulatory_friction=(
+                        "none"
+                        if not labels
+                        else "documents" if needs_documents else "information"
+                    ),
+                    requirements=labels,
+                    verification_id=bundle.sid if bundle else None,
+                )
+            )
+        return result
+
+    return await asyncio.to_thread(discover)

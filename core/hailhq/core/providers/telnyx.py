@@ -10,6 +10,9 @@ import httpx
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 from hailhq.core.config import settings
+from hailhq.core.urls import join_url
+
+TELNYX_API_BASE = "https://api.telnyx.com/v2"
 
 
 class TelnyxClient:
@@ -25,7 +28,7 @@ class TelnyxClient:
         async def send(client):
             response = await client.request(
                 method,
-                f"https://api.telnyx.com/v2{path}",
+                join_url(TELNYX_API_BASE, path),
                 headers={"Authorization": f"Bearer {self.api_key}"},
                 timeout=20,
                 follow_redirects=False,
