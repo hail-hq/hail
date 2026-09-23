@@ -149,13 +149,19 @@ async def acquire_number(
 
     price = telephony_catalog.price_usd_per_month(body.country_code, body.number_type)
     if price is None or not price.is_finite() or price <= 0:
-        raise HTTPException(
-            status_code=503, detail="number price unavailable; try again later"
+        raise await cache_failure(
+            idem,
+            HTTPException(
+                status_code=503, detail="number price unavailable; try again later"
+            ),
         )
     amount_cents = int((price * 100).quantize(1, rounding=ROUND_HALF_UP))
     if amount_cents <= 0:
-        raise HTTPException(
-            status_code=503, detail="number price unavailable; try again later"
+        raise await cache_failure(
+            idem,
+            HTTPException(
+                status_code=503, detail="number price unavailable; try again later"
+            ),
         )
     billed = principal.auth_kind != "shared"
     if billed:
@@ -233,7 +239,7 @@ async def acquire_number(
                 AccountCredit(
                     organization_id=principal.organization_id,
                     kind="debit",
-                    channel="sms",
+                    channel="voice" if "voice" in acquired.capabilities else "sms",
                     amount_cents=-amount_cents,
                     qty=1,
                     ref=f"monthly_fee:{principal.organization_id}:{number.id}:dedicated_number:{acquired_at:%Y-%m}",
