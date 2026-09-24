@@ -72,7 +72,10 @@ export const metadata = {
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html lang="en" suppressHydrationWarning className={fontMono.variable}>
-      <body>{children}</body>
+      <body>
+        <script dangerouslySetInnerHTML={{ __html: `try{var t=localStorage.getItem('hail-theme');if(t==='light'||t==='dark')document.documentElement.dataset.theme=t}catch{}` }} />
+        {children}
+      </body>
     </html>
   );
 }
