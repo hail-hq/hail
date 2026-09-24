@@ -300,6 +300,18 @@ def reset_deps_caches():
     _auth_module.reset_jwks_cache_for_testing()
 
 
+@pytest.fixture(autouse=True)
+def reset_rate_limit_storage():
+    """Clear the general limiter's process-wide in-memory buckets between
+    tests, so one test's requests (notably anonymous ones sharing the
+    remote-IP bucket) can never count against another's."""
+    from hailhq.api.ratelimit import limiter
+
+    limiter.limiter.storage.reset()
+    yield
+    limiter.limiter.storage.reset()
+
+
 @pytest.fixture()
 def add_phone_number():
     """Factory fixture: ``await add_phone_number(session, org_id, e164=...)``.

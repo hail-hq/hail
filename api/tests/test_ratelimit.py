@@ -2,7 +2,7 @@
 
 Distinct from tests/test_agent_gate_api.py (the agent-abuse velocity cap) —
 this limiter applies to every customer-facing route, for every caller, keyed
-on the raw bearer (or remote address when there is none), not on org/channel
+on the bearer token (or remote address when there is none), not on org/channel
 send velocity.
 """
 
@@ -62,7 +62,7 @@ async def test_both_mounts_of_the_same_route_share_one_bucket(
     org_and_key: tuple[uuid.UUID, ApiKey, str],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    # Task 1 dual-mounts every customer router at /v1/<resource> and the
+    # main.py dual-mounts every customer router at /v1/<resource> and the
     # legacy unprefixed path. The limiter is keyed on the raw bearer, not
     # the matched route, so hitting both mounts of the same caller must
     # draw from the same bucket.
@@ -164,11 +164,11 @@ async def test_unsubscribe_is_not_rate_limited(
 def test_create_routes_merge_agent_gate_and_general_429_docs(path: str) -> None:
     # calls.py/sms.py/emails.py's create routes already documented
     # agent_gate.py's RATE_LIMITED_RESPONSES (the agent-abuse velocity-cap
-    # 429) before this task. This task must MERGE its own
+    # 429) before the general limiter existed. The general limiter must MERGE its own
     # GENERAL_RATE_LIMITED_RESPONSES into that 429, not clobber it — both
     # causes are real and independently reachable on these 3 routes. Assert
     # against the live app.openapi() output (not the ratelimit.py helper in
-    # isolation), so a Task 3 edit to these same decorators that
+    # isolation), so an edit to these same decorators that
     # accidentally drops one side's responses= would fail this test.
     schema = app.openapi()
     responses = schema["paths"][path]["post"]["responses"]
@@ -194,3 +194,39 @@ def test_create_routes_merge_agent_gate_and_general_429_docs(path: str) -> None:
         "RateLimit-Remaining",
         "RateLimit-Reset",
     }
+
+
+async def test_cosmetic_variants_of_one_credential_share_one_bucket(
+    client: httpx.AsyncClient,
+    org_and_key: tuple[uuid.UUID, ApiKey, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # deps._parse_bearer accepts the scheme case-insensitively and strips the
+    # token, so these headers all authenticate as one credential. They must
+    # draw from one bucket, not one bucket per spelling.
+    monkeypatch.setattr(settings, "api_rate_limit_per_minute", 2)
+    _, _, plain_key = org_and_key
+    variants = [
+        f"Bearer {plain_key}",
+        f"bearer {plain_key}",
+        f"BEARER {plain_key}",
+        f"Bearer  {plain_key}",
+    ]
+    statuses = [
+        (await client.get("/v1/whoami", headers={"Authorization": v})).status_code
+        for v in variants
+    ]
+    assert statuses == [200, 200, 429, 429]
+
+
+@pytest.mark.parametrize("path", ["/openapi.json", "/docs", "/redoc"])
+async def test_docs_and_spec_paths_are_not_rate_limited(
+    client: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch, path: str
+) -> None:
+    # Anonymous callers share one remote-IP bucket behind the proxy; the
+    # spec agents fetch must not 429 because of unrelated anonymous traffic.
+    monkeypatch.setattr(settings, "api_rate_limit_per_minute", 1)
+    for _ in range(3):
+        resp = await client.get(path)
+        assert resp.status_code == 200
+        assert "ratelimit-limit" not in resp.headers

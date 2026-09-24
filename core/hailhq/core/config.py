@@ -1,4 +1,4 @@
-from pydantic import computed_field
+from pydantic import Field, computed_field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -253,7 +253,9 @@ class Settings(BaseSettings):
     # legitimate agent/automation traffic, still bounds a runaway loop. This
     # is a starting point, not a researched-and-final threshold — tune
     # post-launch same as the velocity caps above.
-    api_rate_limit_per_minute: int = 300
+    # Must be >= 1: 0 would 429 every request and a negative value makes
+    # limits.parse raise on every request, so reject both at startup.
+    api_rate_limit_per_minute: int = Field(default=300, ge=1)
 
     # SMS compliance auto-replies (HELP/STOP/START). OFF by default: Twilio's
     # own opt-out handling already auto-replies to these keywords, so enabling

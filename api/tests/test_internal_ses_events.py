@@ -303,3 +303,32 @@ async def test_inbound_meters_one_usage_event_per_created_row(
         )
     ).scalar_one()
     assert count == 1  # first delivery metered; replay not metered
+
+
+@pytest.mark.asyncio
+async def test_inbound_payload_urls_are_built_on_the_v1_mount(
+    client, async_session, inbound_enabled, override_internal_deps
+):
+    """The email.received webhook's raw_url / attachment url point at the
+    canonical /v1 mount (docs/public/webhooks.md), not the deprecated legacy
+    path. The base passed to ingest_inbound carries the /v1 segment."""
+    from unittest.mock import patch
+
+    from hailhq.api.routes.internal import ses_events
+    from hailhq.core.urls import join_url
+
+    await _insert_inbound_domain(async_session, user="v1url", org="acme")
+    body = json.dumps(
+        _payload(message_id="v1-url-1", recipient="v1url+acme@mail.hail.so")
+    ).encode()
+
+    with patch.object(
+        ses_events, "ingest_inbound", wraps=ses_events.ingest_inbound
+    ) as spy:
+        resp = await client.post(
+            "/internal/ses-events", content=body, headers=_signed(body)
+        )
+    assert resp.status_code == 200, resp.text
+    api_base_url = spy.call_args.kwargs["api_base_url"]
+    assert api_base_url.rstrip("/").endswith("/v1")
+    assert join_url(api_base_url, "emails/x/raw").endswith("/v1/emails/x/raw")

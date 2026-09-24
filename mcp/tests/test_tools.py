@@ -1373,6 +1373,34 @@ async def test_api_error_mapping_5xx(client: HailClient) -> None:
 
 
 @respx.mock
+async def test_api_error_mapping_429_includes_retry_after(client: HailClient) -> None:
+    # The API's 429 detail says "retry after the Retry-After header", which
+    # the agent cannot see — the wait must be in the message itself.
+    respx.get(f"{_BASE_URL}/events").mock(
+        return_value=httpx.Response(
+            429,
+            json={"detail": "Rate limit exceeded."},
+            headers={"Retry-After": "42"},
+        )
+    )
+    result = await tools.get_events(client=client)
+    assert result == {
+        "error": "hail api error 429: Rate limit exceeded. (retry after 42 seconds)"
+    }
+
+
+@respx.mock
+async def test_api_error_mapping_429_without_retry_after_keeps_detail(
+    client: HailClient,
+) -> None:
+    respx.get(f"{_BASE_URL}/events").mock(
+        return_value=httpx.Response(429, json={"detail": "slow down"})
+    )
+    result = await tools.get_events(client=client)
+    assert result == {"error": "hail api error 429: slow down"}
+
+
+@respx.mock
 async def test_api_error_mapping_503_surfaces_detail(client: HailClient) -> None:
     # 503 is reserved for "operator-configurable preconditions failed"
     # (e.g. hail-mail prefixes unset, pool exhausted). The detail tells

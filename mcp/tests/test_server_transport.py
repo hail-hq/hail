@@ -56,7 +56,7 @@ _MCP_ACCEPT = "application/json, text/event-stream"
 def _parse_mcp_body(resp: httpx.Response) -> dict:
     """A success response may be framed as bare JSON or as SSE, depending
     on FastMCP's json_response setting. Empirically confirmed against a
-    locally booted oauth-rs server (see task-5-report.md): with the
+    locally booted oauth-rs server: with the
     default json_response=False, a 200 comes back as
     Content-Type: text/event-stream with the JSON-RPC payload on a
     ``data:`` line — this helper handles either framing."""
@@ -103,11 +103,12 @@ async def test_oauth_rs_unauth_initialize_succeeds(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_oauth_rs_unauth_tools_list_succeeds(monkeypatch):
-    """tools/list is session-oriented: empirically (see task-5-report.md),
-    a bare tools/list with no prior initialize gets 400 "Missing session
-    ID". So this test does the real handshake — initialize (also
-    unauthenticated, via the same safelist) first, captures the returned
-    Mcp-Session-Id, then sends tools/list with that header.
+    """tools/list is session-oriented: a bare tools/list with no
+    Mcp-Session-Id is not safelisted (it 401s, see
+    test_oauth_rs_unauth_session_less_tools_list_creates_no_session). So this
+    test does the real handshake — initialize (also unauthenticated, via the
+    same safelist) first, captures the returned Mcp-Session-Id, then sends
+    tools/list with that header.
     """
     srv = _boot(monkeypatch, oauth=True)
     async with srv.app.router.lifespan_context(srv.app):
@@ -144,7 +145,7 @@ async def test_oauth_rs_unauth_tools_list_succeeds(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_oauth_rs_unauth_tools_call_still_401s(monkeypatch):
-    """The safelist is exactly two methods — tools/call must still require
+    """The safelist is only initialize and tools/list — tools/call must still require
     auth. No lifespan needed here: like the pre-existing ping/401 test,
     auth is rejected before the request ever reaches FastMCP's
     session-manager-dependent streamable handler."""
@@ -312,3 +313,64 @@ async def test_oauth_rs_requires_mcp_resource_url(monkeypatch):
     not a deferred pydantic-validation surprise at FastMCP construction."""
     with pytest.raises(RuntimeError, match="MCP_RESOURCE_URL"):
         _boot(monkeypatch, oauth=True, mcp_resource_url="")
+
+
+@pytest.mark.asyncio
+async def test_oauth_rs_unauth_session_less_tools_list_creates_no_session(monkeypatch):
+    """tools/list only gets the synthetic bearer when it carries an
+    Mcp-Session-Id. Without one, FastMCP's session manager would mint a new
+    permanent session (then answer 400), bypassing the per-IP initialize cap.
+    It must 401 and leave the session table alone.
+    """
+    srv = _boot(monkeypatch, oauth=True)
+    async with srv.app.router.lifespan_context(srv.app):
+        sessions = srv.mcp_app.session_manager._server_instances
+        transport = httpx.ASGITransport(app=srv.app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://t") as c:
+            for i in range(5):
+                resp = await c.post(
+                    "/",
+                    headers={"Accept": _MCP_ACCEPT},
+                    json={"jsonrpc": "2.0", "id": i, "method": "tools/list"},
+                )
+                assert resp.status_code == 401
+                assert "resource_metadata=" in resp.headers.get("www-authenticate", "")
+        assert len(sessions) == 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "body",
+    [
+        b'{"jsonrpc":"2.0","id":1,"method":["initialize"]}',
+        b'{"jsonrpc":"2.0","id":1,"method":{}}',
+        b"[" * 60000,
+        b'{"id":' + b"1" * 5000 + b"}",
+    ],
+    ids=["list-method", "dict-method", "deeply-nested", "huge-int"],
+)
+async def test_oauth_rs_unauth_odd_json_bodies_401_not_500(monkeypatch, body):
+    """The pre-auth body peek must never turn an unauthenticated request into
+    a 500: unhashable "method" values, deeply nested JSON and over-long
+    integer literals all fall through to FastMCP's auth and 401."""
+    srv = _boot(monkeypatch, oauth=True)
+    transport = httpx.ASGITransport(app=srv.app, raise_app_exceptions=False)
+    async with httpx.AsyncClient(transport=transport, base_url="http://t") as c:
+        resp = await c.post(
+            "/",
+            headers={"Accept": _MCP_ACCEPT, "Content-Type": "application/json"},
+            content=body,
+        )
+    assert resp.status_code == 401
+    assert "resource_metadata=" in resp.headers.get("www-authenticate", "")
+
+
+def test_anon_init_counts_are_pruned_when_large(monkeypatch):
+    """Expired per-IP windows are dropped so rotating source addresses do not
+    grow the dict for the life of the process."""
+    monkeypatch.setattr(discovery_auth, "_ANON_INIT_PRUNE_THRESHOLD", 10)
+    discovery_auth._reset_anon_init_rate_state_for_tests()
+    for i in range(50):
+        discovery_auth._anon_init_counts[f"10.0.0.{i}"] = (1, -1_000_000.0)
+    assert discovery_auth._anon_init_cap_exceeded("192.0.2.1") is False
+    assert list(discovery_auth._anon_init_counts) == ["192.0.2.1"]

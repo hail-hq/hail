@@ -21,6 +21,7 @@ dependencies = [
     # bodies Twilio POSTs to the inbound SMS webhook (request.form()).
     "python-multipart>=0.0.9",
     "slowapi>=0.1.10",
+    "limits>=3",
 ]
 
 [project.optional-dependencies]

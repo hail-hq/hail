@@ -453,6 +453,12 @@ async def deliver_email(
             RATE_LIMITED_RESPONSES, GENERAL_RATE_LIMITED_RESPONSES
         ),
         **FUNDS_RESPONSES,
+        502: {
+            "description": (
+                "Email send failed: the provider rejected the send. The email "
+                "is recorded with status 'failed'."
+            )
+        },
     },
 )
 async def create_email(
@@ -466,12 +472,14 @@ async def create_email(
 ) -> EmailResponse:
     """Send an outbound email through SES.
 
-    Sends synchronously — the response reports the final status (sent or
-    failed), not a queued placeholder; no separate poll is needed for the
-    happy path, though a bounce or complaint can still arrive later as a
-    webhook or GET /v1/emails/{email_id}/events entry. Requires
-    recipient_consent=true on the request body; Hail does not verify lawful
-    basis to contact the recipient, the caller warrants it.
+    Sends synchronously. A 201 means SES accepted the message and the
+    response status is 'sent'; no separate poll is needed for the happy path,
+    though a bounce or complaint can still arrive later as a webhook or
+    GET /v1/emails/{email_id}/events entry. If the send fails, the response is
+    502 'email send failed' with no email body; the email is kept with status
+    'failed' (GET /v1/emails?status=failed) and an email.send_failed event is
+    emitted. Requires recipient_consent=true on the request body; Hail does
+    not verify lawful basis to contact the recipient, the caller warrants it.
     """
     # Idempotency replay first — never re-send.
     if idem is not None and idem.is_replay:
