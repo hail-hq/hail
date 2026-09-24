@@ -202,13 +202,9 @@ async def release_org_number(
     if number.provisioning_state == "released":
         return number
     if number.provisioning_state == "failed":
-        # A failed order owns no carrier number and was already refunded.
-        # DELETE only dismisses the row (released_at) so consoles can hide it;
-        # the state stays "failed" and no carrier call is made.
-        if number.released_at is None:
-            number.released_at = datetime.now(timezone.utc)
-            await db.commit()
-        return number
+        raise HTTPException(
+            status_code=409, detail="Failed orders have no active number to release"
+        )
     if number.provisioning_state == "pending":
         raise HTTPException(
             status_code=409,

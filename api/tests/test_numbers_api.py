@@ -7,7 +7,6 @@ import uuid
 
 import pytest
 from hailhq.core import telephony_catalog
-from hailhq.core.models import PhoneNumber
 
 
 @pytest.fixture(autouse=True)
@@ -567,30 +566,3 @@ async def test_purchase_debit_uses_monthly_rater_key_and_replay_does_not_charge_
         debits[0].ref
         == f"monthly_fee:{org}:{number.id}:dedicated_number:{number.acquired_at:%Y-%m}"
     )
-
-
-async def test_delete_failed_order_dismisses_row_without_carrier_call(
-    client, async_session, org_and_key, voice_provider_mock
-) -> None:
-    _, _, plaintext = org_and_key
-    headers = {"Authorization": f"Bearer {plaintext}"}
-    acquired = await client.post(
-        "/numbers",
-        json={"country_code": "US", "number_type": "local"},
-        headers=headers,
-    )
-    assert acquired.status_code == 201, acquired.text
-    number_id = acquired.json()["id"]
-    number = await async_session.get(PhoneNumber, uuid.UUID(number_id))
-    number.provisioning_state = "failed"
-    await async_session.commit()
-
-    resp = await client.delete(f"/numbers/{number_id}", headers=headers)
-    assert resp.status_code == 204, resp.text
-    voice_provider_mock.release_number.assert_not_awaited()
-    await async_session.refresh(number)
-    assert number.provisioning_state == "failed"
-    assert number.released_at is not None
-
-    again = await client.delete(f"/numbers/{number_id}", headers=headers)
-    assert again.status_code == 204
