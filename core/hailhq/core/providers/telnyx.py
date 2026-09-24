@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import time
 from urllib.parse import quote
@@ -14,6 +15,30 @@ from hailhq.core.urls import join_url
 
 TELNYX_API_BASE = "https://api.telnyx.com/v2"
 
+_http: httpx.AsyncClient | None = None
+_http_loop: asyncio.AbstractEventLoop | None = None
+
+
+def get_http_client() -> httpx.AsyncClient:
+    """One connection pool for all Telnyx calls, built on first use.
+
+    An httpx client is bound to the event loop that first used it, so a client
+    made under a different (for example a closed test) loop is replaced.
+    """
+    global _http, _http_loop
+    loop = asyncio.get_running_loop()
+    if _http is None or _http_loop is not loop:
+        _http, _http_loop = httpx.AsyncClient(), loop
+    return _http
+
+
+async def close_http_client() -> None:
+    """Close the shared client. Call on application shutdown."""
+    global _http, _http_loop
+    client, _http, _http_loop = _http, None, None
+    if client is not None:
+        await client.aclose()
+
 
 class TelnyxClient:
     def __init__(
@@ -25,22 +50,16 @@ class TelnyxClient:
         self.client = client
 
     async def request(self, method: str, path: str, **kwargs) -> dict:
-        async def send(client):
-            response = await client.request(
-                method,
-                join_url(TELNYX_API_BASE, path),
-                headers={"Authorization": f"Bearer {self.api_key}"},
-                timeout=20,
-                follow_redirects=False,
-                **kwargs,
-            )
-            response.raise_for_status()
-            return response.json() if response.content else {}
-
-        if self.client is not None:
-            return await send(self.client)
-        async with httpx.AsyncClient() as client:
-            return await send(client)
+        response = await (self.client or get_http_client()).request(
+            method,
+            join_url(TELNYX_API_BASE, path),
+            headers={"Authorization": f"Bearer {self.api_key}"},
+            timeout=20,
+            follow_redirects=False,
+            **kwargs,
+        )
+        response.raise_for_status()
+        return response.json() if response.content else {}
 
     async def release_number(self, resource_id: str) -> None:
         # Only a persisted owned-number id belongs here, never a number-order id.

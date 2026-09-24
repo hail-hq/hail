@@ -17,7 +17,6 @@ from pydantic import BaseModel, Field
 class NumberQuote(BaseModel):
     """Carrier costs, not customer prices or a guarantee of activation."""
 
-    provider: str = "telnyx"
     e164: str
     country_code: str
     number_type: NumberType

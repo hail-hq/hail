@@ -7,7 +7,7 @@ from uuid import uuid4
 import httpx
 import pytest
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
-from hailhq.core.carrier_routing import voice_route
+from hailhq.core.carrier_routing import carrier, sms_route, voice_route
 from hailhq.core.config import settings
 from hailhq.core.number_offers import (
     CarrierOffer,
@@ -15,8 +15,14 @@ from hailhq.core.number_offers import (
     telnyx_offers,
     twilio_offers,
 )
+from hailhq.core.providers.sms.status_map import map_telnyx_message_status
 from hailhq.core.providers.sms.telnyx import TelnyxSmsProvider
-from hailhq.core.providers.telnyx import TelnyxClient, verify_webhook
+from hailhq.core.providers.telnyx import (
+    TelnyxClient,
+    close_http_client,
+    get_http_client,
+    verify_webhook,
+)
 from twilio.base.exceptions import TwilioRestException
 
 
@@ -469,3 +475,42 @@ async def test_only_first_usable_result_becomes_the_offer(monkeypatch):
         result = await telnyx_offers(uuid4(), "PT", "local", ["sms"], http)
     assert limits == ["3"]
     assert [o.e164 for o in result] == ["+351211234560"]
+
+
+def test_unknown_carrier_is_rejected_everywhere():
+    with pytest.raises(ValueError, match="Unsupported number carrier"):
+        carrier("unknown")
+    with pytest.raises(ValueError, match="Unsupported SMS carrier"):
+        sms_route("unknown", MagicMock())
+
+
+def test_carrier_registry_status_paths_and_order_mode():
+    assert carrier("twilio").sms_status_path == "sms/status"
+    assert carrier("telnyx").sms_status_path == "sms/telnyx"
+    assert not carrier("twilio").async_orders
+    assert carrier("telnyx").async_orders
+
+
+@pytest.mark.parametrize(
+    "raw, mapped",
+    [
+        ("delivered", "delivered"),
+        ("delivery_failed", "undelivered"),
+        ("expired", "undelivered"),
+        ("sending_failed", "failed"),
+        ("queued", None),
+        (None, None),
+    ],
+)
+def test_telnyx_message_status_map(raw, mapped):
+    assert map_telnyx_message_status(raw) == mapped
+
+
+async def test_shared_http_client_is_reused_and_closed():
+    first = get_http_client()
+    assert get_http_client() is first
+    await close_http_client()
+    assert first.is_closed
+    second = get_http_client()
+    assert second is not first
+    await close_http_client()

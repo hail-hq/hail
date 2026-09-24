@@ -44,6 +44,7 @@ from hailhq.core.http_post import httpx_post
 from hailhq.core.outbound_worker import OutboundForwardWorker
 from hailhq.core.pool import sweep_pool_reservations
 from hailhq.core.providers.email.ses import SesEmailProvider
+from hailhq.core.providers.telnyx import close_http_client
 from hailhq.core.reconcile import sweep_stale_calls
 from hailhq.core.s3_mail import S3MailClient
 from hailhq.core.secret_cipher import SecretCipher, SecretKeyMissing
@@ -96,7 +97,6 @@ async def _backstop_sweeper_loop() -> None:
                 stale_calls = await sweep_stale_calls(session, grace_seconds=grace)
                 released = await sweep_pool_reservations(session, grace_seconds=grace)
                 await session.commit()
-
             if stale_calls:
                 logger.warning(
                     "call reconciler force-closed %d stale call(s): %s",
@@ -237,6 +237,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
                 await task
             except (asyncio.CancelledError, Exception):
                 pass
+        await close_http_client()
         if webhook_worker is not None and webhook_task is not None:
             await _stop_worker(webhook_worker, webhook_task)
         if forward_worker is not None and forward_task is not None:

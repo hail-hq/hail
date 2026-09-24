@@ -6,8 +6,8 @@ import asyncio
 import logging
 from uuid import UUID
 
-import httpx
 from hailhq.core.carrier_offer import CarrierOffer
+from hailhq.core.providers.telnyx import get_http_client
 from hailhq.core.providers.voice.telnyx import telnyx_offers
 from hailhq.core.providers.voice.twilio import twilio_offers
 from hailhq.core.schemas import NumberType
@@ -57,12 +57,11 @@ async def discover_offers(
     capabilities: list[str],
     e164: str | None = None,
 ) -> tuple[list[CarrierOffer], list[str]]:
-    async with httpx.AsyncClient() as client:
-        results = await asyncio.gather(
-            twilio_offers(org, country, kind, capabilities, e164=e164),
-            telnyx_offers(org, country, kind, capabilities, client, e164=e164),
-            return_exceptions=True,
-        )
+    results = await asyncio.gather(
+        twilio_offers(org, country, kind, capabilities, e164=e164),
+        telnyx_offers(org, country, kind, capabilities, get_http_client(), e164=e164),
+        return_exceptions=True,
+    )
     offers, unavailable = [], []
     for provider, result in zip(("twilio", "telnyx"), results):
         if isinstance(result, asyncio.CancelledError):
