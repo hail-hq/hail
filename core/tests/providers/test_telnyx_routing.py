@@ -351,6 +351,7 @@ async def test_zero_price_number_is_skipped_not_a_carrier_failure(
     def respond(request):
         if request.url.path.endswith("available_phone_numbers"):
             data = [number("+351211234560", "0.004"), number("+351211234567", "2.30")]
+            data = data[: int(request.url.params["filter[limit]"])]
         elif request.url.path.endswith("requirement_groups"):
             data = []
         else:
@@ -425,3 +426,46 @@ async def test_twilio_number_type_not_sold_in_country_is_empty_inventory(monkeyp
     )
     with pytest.raises(TwilioRestException):
         await twilio_offers(uuid4(), "US", "mobile", ["voice"])
+
+
+async def test_only_first_usable_result_becomes_the_offer(monkeypatch):
+    monkeypatch.setattr(settings, "telnyx_api_key", "secret")
+    monkeypatch.setattr(settings, "telnyx_public_key", "public")
+    monkeypatch.setattr(settings, "telnyx_connection_id", "")
+    monkeypatch.setattr(settings, "livekit_telnyx_sip_outbound_trunk_id", "")
+    monkeypatch.setattr(settings, "telnyx_sip_username", "")
+    limits = []
+
+    def respond(request):
+        if request.url.path.endswith("available_phone_numbers"):
+            limits.append(request.url.params["filter[limit]"])
+            data = [
+                {
+                    "phone_number": e164,
+                    "features": [{"name": "sms"}],
+                    "cost_information": {
+                        "currency": "USD",
+                        "monthly_cost": "2.30",
+                        "upfront_cost": "0",
+                    },
+                }
+                for e164 in ("+351211234560", "+351211234561", "+351211234562")
+            ]
+            data = data[: int(request.url.params["filter[limit]"])]
+        elif request.url.path.endswith("requirement_groups"):
+            data = []
+        else:
+            data = [
+                {
+                    "country_code": "PT",
+                    "phone_number_type": "local",
+                    "action": "ordering",
+                    "regulatory_requirements": [],
+                }
+            ]
+        return httpx.Response(200, json={"data": data})
+
+    async with telnyx_json_client(respond) as http:
+        result = await telnyx_offers(uuid4(), "PT", "local", ["sms"], http)
+    assert limits == ["3"]
+    assert [o.e164 for o in result] == ["+351211234560"]

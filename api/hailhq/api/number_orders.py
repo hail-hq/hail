@@ -38,12 +38,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
 
-# Missing inventory/order lookups cannot prove a paid POST was rejected.
-# Escalate old ambiguous orders while retaining the reservation and number claim.
-UNFOUND_ORDER_REVIEW_AFTER = timedelta(hours=1)
-
-# An order the carrier still reports as pending after this long is abnormal:
-# an offer must be "ready" (regulatory requirements met) before it can be bought.
+# An order the carrier still reports as pending, or has no record of, after
+# this long is abnormal: an offer must be "ready" (regulatory requirements met)
+# before it can be bought.
 # The reconciler then marks it failed and refunds the hold, so the number can be
 # released or re-ordered. If the carrier completes it later, an operator must
 # release the number at the carrier (the log line names the order).
@@ -219,7 +216,7 @@ async def reconcile_order(
         }
     unfound = (
         state == "missing"
-        and datetime.now(timezone.utc) - number.created_at > UNFOUND_ORDER_REVIEW_AFTER
+        and datetime.now(timezone.utc) - number.created_at > PENDING_ORDER_TIMEOUT
     )
     if state == "active":
         await finish_order(db, number, resource_id=resource_id)
@@ -259,12 +256,19 @@ async def reconcile_order(
             reason="the carrier did not confirm the order in time",
         )
     elif unfound:
-        number.provisioning_metadata = {
-            **number.provisioning_metadata,
-            "needs_review": True,
-        }
-        logger.warning(
-            "Carrier order remains unconfirmed; review required: number=%s", number.id
+        logger.error(
+            "Carrier has no record of the order after timeout; failing it and "
+            "refunding. Flagged for operator review (release the number at the "
+            "carrier if it was bought): number=%s carrier_order=%s",
+            number.id,
+            number.provisioning_metadata.get("order_id"),
+        )
+        await finish_order(
+            db,
+            number,
+            resource_id=None,
+            failed=True,
+            reason="the carrier has no record of the order",
         )
     await db.commit()
 

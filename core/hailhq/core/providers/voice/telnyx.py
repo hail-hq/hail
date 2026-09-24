@@ -157,7 +157,7 @@ async def telnyx_offers(
         country,
         kind,
         capabilities,
-        limit=1,
+        limit=3,
         outbound="voice" in capabilities,
         e164=e164,
     )
@@ -247,6 +247,7 @@ async def telnyx_offers(
                 verification_id=group["id"] if group else None,
             )
         )
+        break  # One offer per carrier; a skipped result falls to the next.
     return results
 
 
@@ -303,7 +304,9 @@ async def telnyx_order_outcome(
     order_id = order.get("id") or order_id
     if order["status"] == "failure":
         return "failed", None, order_id
-    if order["status"] != "success" or not order.get("requirements_met"):
+    # Only an explicit False keeps the order pending. A missing or null flag
+    # is decided by the owned-number check below.
+    if order["status"] != "success" or order.get("requirements_met") is False:
         return "pending", None, order_id
     owned = (
         await api.request(

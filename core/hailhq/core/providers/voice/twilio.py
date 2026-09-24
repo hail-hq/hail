@@ -335,3 +335,35 @@ async def twilio_offers(
         return result
 
     return await asyncio.to_thread(discover)
+
+
+class LazyTwilioVoiceProvider(VoiceProvider):
+    """Builds the Twilio client on first use, so a deployment without Twilio
+    credentials can still serve numbers that belong to another carrier."""
+
+    def __init__(self) -> None:
+        self._inner: TwilioVoiceProvider | None = None
+
+    def _provider(self) -> TwilioVoiceProvider:
+        if self._inner is None:
+            self._inner = TwilioVoiceProvider()
+        return self._inner
+
+    async def acquire_number(
+        self,
+        country_code: str,
+        number_type: NumberType,
+        capabilities: list[str],
+    ) -> ProviderNumber:
+        return await self._provider().acquire_number(
+            country_code, number_type, capabilities
+        )
+
+    async def release_number(self, provider_resource_id: str) -> None:
+        await self._provider().release_number(provider_resource_id)
+
+    async def get_call_status(self, provider_call_sid: str) -> ProviderCallStatus:
+        return await self._provider().get_call_status(provider_call_sid)
+
+    async def hangup_call(self, provider_call_sid: str) -> None:
+        await self._provider().hangup_call(provider_call_sid)

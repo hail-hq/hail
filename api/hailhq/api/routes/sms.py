@@ -53,7 +53,8 @@ from hailhq.core.models import (
     Suppression,
 )
 from hailhq.core.pricing_tier import classify_pricing_tier
-from hailhq.core.providers.sms import SmsProvider, TwilioSmsProvider
+from hailhq.core.providers.sms import SmsProvider
+from hailhq.core.providers.sms.twilio import LazyTwilioSmsProvider
 from hailhq.core.providers.sms.status_map import map_twilio_message_status
 from hailhq.core.providers.sms.telnyx import TelnyxSmsProvider
 from hailhq.core.providers.telnyx import verify_webhook
@@ -91,11 +92,12 @@ _sms_provider_singleton: SmsProvider | None = None
 
 
 def get_sms_provider() -> SmsProvider:
-    """Return a process-wide ``SmsProvider``. Tests override via
+    """Return a process-wide ``SmsProvider``. The Twilio client is built on
+    first use, so Telnyx-only deployments work. Tests override via
     ``app.dependency_overrides``."""
     global _sms_provider_singleton
     if _sms_provider_singleton is None:
-        _sms_provider_singleton = TwilioSmsProvider()
+        _sms_provider_singleton = LazyTwilioSmsProvider()
     return _sms_provider_singleton
 
 

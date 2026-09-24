@@ -46,10 +46,10 @@ from hailhq.core.number_offers import CarrierOffer, discover_offers, rank_offers
 from hailhq.core.providers.sms import SmsProvider
 from hailhq.core.providers.voice import (
     CarrierNotConfigured,
-    TwilioVoiceProvider,
     VoiceProvider,
 )
 from hailhq.core.providers.voice.telnyx import release_telnyx_number
+from hailhq.core.providers.voice.twilio import LazyTwilioVoiceProvider
 from hailhq.core.schemas import (
     NumberAcquireRequest,
     NumberQuoteRequest,
@@ -79,7 +79,7 @@ _voice_provider_singleton: VoiceProvider | None = None
 def get_voice_provider() -> VoiceProvider:
     global _voice_provider_singleton
     if _voice_provider_singleton is None:
-        _voice_provider_singleton = TwilioVoiceProvider()
+        _voice_provider_singleton = LazyTwilioVoiceProvider()
     return _voice_provider_singleton
 
 

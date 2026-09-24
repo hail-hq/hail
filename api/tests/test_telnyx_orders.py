@@ -8,7 +8,6 @@ from fastapi import HTTPException
 from hailhq.api.number_orders import (
     PENDING_ORDER_TIMEOUT,
     QUOTE_RETENTION,
-    UNFOUND_ORDER_REVIEW_AFTER,
     acquire_offer,
     purge_expired_quotes,
     reconcile_order,
@@ -290,12 +289,12 @@ async def test_status_lookup_rejection_does_not_refund_accepted_order(
 
 
 async def age(db, number):
-    number.created_at = datetime.now(timezone.utc) - UNFOUND_ORDER_REVIEW_AFTER * 2
+    number.created_at = datetime.now(timezone.utc) - PENDING_ORDER_TIMEOUT * 2
     await db.commit()
 
 
-async def test_unfound_telnyx_order_requires_review_without_refund(
-    async_session, org_and_key, monkeypatch
+async def test_unfound_telnyx_order_fails_and_refunds_after_timeout(
+    async_session, org_and_key, monkeypatch, caplog
 ):
     org, _, _ = org_and_key
     row, offer = await seed_quote(async_session, org)
@@ -314,24 +313,22 @@ async def test_unfound_telnyx_order_requires_review_without_refund(
     await reconcile_order(async_session, number, force=True)
     assert number.provisioning_state == "pending"
     assert await get_balance_cents(async_session, org) == 99850
-    await age(async_session, number)
+    number.created_at = datetime.now(timezone.utc) - PENDING_ORDER_TIMEOUT / 2
+    await async_session.commit()
     await reconcile_order(async_session, number, force=True)
     assert number.provisioning_state == "pending"
-    assert number.provisioning_metadata["needs_review"] is True
-    assert await get_balance_cents(async_session, org) == 99850
-    await reconcile_order(async_session, number, force=True)
-    assert await get_balance_cents(async_session, org) == 99850
-
-    # Later authoritative activation is still reconciled and billed once.
-    recovered = AsyncMock(return_value=("active", str(uuid4()), str(uuid4())))
-    monkeypatch.setattr("hailhq.api.number_orders.carrier_outcome", recovered)
-    await reconcile_order(async_session, number, force=True)
-    assert number.provisioning_state == "active"
+    await age(async_session, number)
+    with caplog.at_level("ERROR"):
+        await reconcile_order(async_session, number, force=True)
+    assert number.provisioning_state == "failed"
     assert "needs_review" not in number.provisioning_metadata
-    assert await get_balance_cents(async_session, org) == 99850
+    assert await get_balance_cents(async_session, org) == 100000
+    assert any(r.levelname == "ERROR" for r in caplog.records)
+    await reconcile_order(async_session, number, force=True)
+    assert await get_balance_cents(async_session, org) == 100000
 
 
-async def test_unfound_twilio_order_requires_review_without_refund(
+async def test_unfound_twilio_order_fails_and_refunds_after_timeout(
     async_session, org_and_key, monkeypatch
 ):
     org, _, _ = org_and_key
@@ -353,9 +350,60 @@ async def test_unfound_twilio_order_requires_review_without_refund(
     assert await get_balance_cents(async_session, org) == 99850
     await age(async_session, number)
     await reconcile_order(async_session, number, force=True)
+    assert number.provisioning_state == "failed"
+    assert await get_balance_cents(async_session, org) == 100000
+
+
+@pytest.mark.parametrize("flag", [None, "absent"])
+async def test_success_order_without_requirements_flag_activates_when_owned(
+    async_session, org_and_key, monkeypatch, flag
+):
+    org, _, _ = org_and_key
+    row, offer = await seed_quote(async_session, org)
+    monkeypatch.setattr(
+        "hailhq.api.number_orders.discover_offers",
+        AsyncMock(return_value=([offer], [])),
+    )
+    order_id, resource_id = str(uuid4()), str(uuid4())
+    monkeypatch.setattr("hailhq.core.config.settings.telnyx_api_key", "test")
+    wire = AsyncMock(return_value={"data": {"id": order_id, "status": "pending"}})
+    monkeypatch.setattr("hailhq.core.providers.telnyx.TelnyxClient.request", wire)
+    number = await buy(async_session, org, row)
+    order = {"id": order_id, "status": "success"}
+    if flag is None:
+        order["requirements_met"] = None
+    wire.side_effect = [
+        {"data": order},
+        {
+            "data": [
+                {"id": resource_id, "phone_number": number.e164, "status": "active"}
+            ]
+        },
+    ]
+    await reconcile_order(async_session, number, force=True)
+    assert number.provisioning_state == "active"
+    assert number.provider_resource_id == resource_id
+
+
+async def test_success_order_with_requirements_unmet_stays_pending(
+    async_session, org_and_key, monkeypatch
+):
+    org, _, _ = org_and_key
+    row, offer = await seed_quote(async_session, org)
+    monkeypatch.setattr(
+        "hailhq.api.number_orders.discover_offers",
+        AsyncMock(return_value=([offer], [])),
+    )
+    order_id = str(uuid4())
+    monkeypatch.setattr("hailhq.core.config.settings.telnyx_api_key", "test")
+    wire = AsyncMock(return_value={"data": {"id": order_id, "status": "pending"}})
+    monkeypatch.setattr("hailhq.core.providers.telnyx.TelnyxClient.request", wire)
+    number = await buy(async_session, org, row)
+    wire.side_effect = [
+        {"data": {"id": order_id, "status": "success", "requirements_met": False}}
+    ]
+    await reconcile_order(async_session, number, force=True)
     assert number.provisioning_state == "pending"
-    assert number.provisioning_metadata["needs_review"] is True
-    assert await get_balance_cents(async_session, org) == 99850
 
 
 async def test_twilio_order_found_at_carrier_is_activated(
