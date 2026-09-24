@@ -44,11 +44,12 @@ from hailhq.core.db import get_session
 from hailhq.core.models import NumberOffer, PhoneNumber
 from hailhq.core.number_offers import CarrierOffer, discover_offers, rank_offers
 from hailhq.core.providers.sms import SmsProvider
-from hailhq.core.providers.telnyx import TelnyxClient
 from hailhq.core.providers.voice import (
+    CarrierNotConfigured,
     TwilioVoiceProvider,
     VoiceProvider,
 )
+from hailhq.core.providers.voice.telnyx import release_telnyx_number
 from hailhq.core.schemas import (
     NumberAcquireRequest,
     NumberQuoteRequest,
@@ -106,6 +107,7 @@ async def _get_org_number_or_404(
     response_model=PhoneNumberResponse,
     status_code=http_status.HTTP_201_CREATED,
     responses={
+        404: {"description": "The quote does not exist for this organization."},
         402: {
             "description": (
                 FUNDS_RESPONSES[402]["description"]
@@ -117,7 +119,14 @@ async def _get_org_number_or_404(
             "description": (
                 "The quote expired, the number is taken, the price changed, or the "
                 "carrier rejected or failed the order. In the last case the credit "
-                "hold is refunded and the detail gives the reason."
+                "hold is refunded and the detail gives the reason. Also returned "
+                "when the quote's number was released since it was bought."
+            ),
+        },
+        503: {
+            "description": (
+                "The carrier lookup or number price is unavailable, or no "
+                "inventory matched. Nothing was charged; retry shortly."
             ),
         },
     },
@@ -203,9 +212,12 @@ async def release_org_number(
     if number.provisioning_state == "released":
         return number
     if number.provisioning_state == "failed":
-        raise HTTPException(
-            status_code=409, detail="Failed orders have no active number to release"
-        )
+        # Dismiss: the hold was already refunded and no carrier number exists,
+        # so there is nothing to release. Mark it released; no carrier call.
+        if number.released_at is None:
+            number.released_at = datetime.now(timezone.utc)
+            await db.commit()
+        return number
     if number.provisioning_state == "pending":
         raise HTTPException(
             status_code=409,
@@ -213,11 +225,10 @@ async def release_org_number(
         )
     if number.provider == "telnyx":
         try:
-            telnyx = TelnyxClient()
-        except ValueError as exc:
+            await release_telnyx_number(number.provider_resource_id)
+        except CarrierNotConfigured as exc:
             # Carrier not configured: an operator problem, not a server fault.
             raise HTTPException(status_code=503, detail=str(exc)) from exc
-        await telnyx.release_number(number.provider_resource_id)
     elif number.provider == "twilio":
         await provider.release_number(number.provider_resource_id)
     else:
@@ -242,6 +253,17 @@ async def release_org_number(
 @router.delete(
     "/{number_id}",
     status_code=http_status.HTTP_204_NO_CONTENT,
+    responses={
+        404: {"description": "The number does not exist for this organization."},
+        409: {
+            "description": (
+                "The order is still pending (refresh its status first) or the "
+                "number's carrier is unsupported. A failed order is dismissed "
+                "with 204 and no carrier call."
+            ),
+        },
+        503: {"description": "The number's carrier is not configured on this server."},
+    },
 )
 async def release_number(
     number_id: UUID,
@@ -326,6 +348,12 @@ async def list_numbers(
 @router.post(
     "/{number_id}/enable-sms",
     response_model=PhoneNumberResponse,
+    responses={
+        404: {"description": "The number does not exist for this organization."},
+        503: {
+            "description": "SMS is not configured for this number's carrier on this server."
+        },
+    },
 )
 async def enable_sms(
     number_id: UUID,

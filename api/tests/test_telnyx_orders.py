@@ -69,7 +69,7 @@ async def test_full_purchase_balance_before_carrier(
         AsyncMock(return_value=([offer], [])),
     )
     wire = AsyncMock()
-    monkeypatch.setattr("hailhq.api.number_orders.TelnyxClient.request", wire)
+    monkeypatch.setattr("hailhq.core.providers.telnyx.TelnyxClient.request", wire)
     with pytest.raises(HTTPException) as exc:
         await buy(async_session, org, row)
     assert exc.value.status_code == 402
@@ -93,7 +93,7 @@ async def test_pending_order_reserved_once_and_reconciles_to_owned_id(
         ]
     )
     monkeypatch.setattr("hailhq.core.config.settings.telnyx_api_key", "test")
-    monkeypatch.setattr("hailhq.api.number_orders.TelnyxClient.request", wire)
+    monkeypatch.setattr("hailhq.core.providers.telnyx.TelnyxClient.request", wire)
     number = await buy(async_session, org, row)
     assert number.provisioning_state == "pending"
     assert await get_balance_cents(async_session, org) == 99850
@@ -150,7 +150,7 @@ async def test_order_timeout_is_not_retried_or_refunded_without_evidence(
     )
     monkeypatch.setattr("hailhq.core.config.settings.telnyx_api_key", "test")
     wire = AsyncMock(side_effect=httpx.ReadTimeout("lost response"))
-    monkeypatch.setattr("hailhq.api.number_orders.TelnyxClient.request", wire)
+    monkeypatch.setattr("hailhq.core.providers.telnyx.TelnyxClient.request", wire)
     number = await buy(async_session, org, row)
     assert number.provisioning_state == "pending"
     assert await get_balance_cents(async_session, org) == 99850
@@ -171,7 +171,7 @@ async def test_failed_order_refunds_once(async_session, org_and_key, monkeypatch
     wire = AsyncMock(
         side_effect=[{"data": {"id": order_id}}, {"data": {"status": "failure"}}]
     )
-    monkeypatch.setattr("hailhq.api.number_orders.TelnyxClient.request", wire)
+    monkeypatch.setattr("hailhq.core.providers.telnyx.TelnyxClient.request", wire)
     number = await buy(async_session, org, row)
     assert number.provisioning_state == "failed"
     assert await get_balance_cents(async_session, org) == 100000
@@ -279,7 +279,7 @@ async def test_status_lookup_rejection_does_not_refund_accepted_order(
             ),
         ]
     )
-    monkeypatch.setattr("hailhq.api.number_orders.TelnyxClient.request", wire)
+    monkeypatch.setattr("hailhq.core.providers.telnyx.TelnyxClient.request", wire)
     number = await buy(async_session, org, row)
     assert number.provisioning_state == "pending"
     assert number.provisioning_metadata["order_id"] == order_id
@@ -305,7 +305,7 @@ async def test_unfound_telnyx_order_requires_review_without_refund(
     )
     monkeypatch.setattr("hailhq.core.config.settings.telnyx_api_key", "test")
     wire = AsyncMock(side_effect=httpx.ReadTimeout("lost response"))
-    monkeypatch.setattr("hailhq.api.number_orders.TelnyxClient.request", wire)
+    monkeypatch.setattr("hailhq.core.providers.telnyx.TelnyxClient.request", wire)
     number = await buy(async_session, org, row)
     assert await get_balance_cents(async_session, org) == 99850
     wire.side_effect = None
@@ -394,7 +394,7 @@ async def test_failed_order_frees_the_number_for_a_new_order(
     wire = AsyncMock(
         side_effect=[{"data": {"id": str(uuid4())}}, {"data": {"status": "failure"}}]
     )
-    monkeypatch.setattr("hailhq.api.number_orders.TelnyxClient.request", wire)
+    monkeypatch.setattr("hailhq.core.providers.telnyx.TelnyxClient.request", wire)
     failed = await buy(async_session, org, row)
     assert failed.provisioning_state == "failed"
     assert failed.provider_resource_id is None
@@ -426,7 +426,7 @@ async def test_number_held_by_another_org_is_a_409(
     )
     await async_session.commit()
     wire = AsyncMock()
-    monkeypatch.setattr("hailhq.api.number_orders.TelnyxClient.request", wire)
+    monkeypatch.setattr("hailhq.core.providers.telnyx.TelnyxClient.request", wire)
     with pytest.raises(HTTPException) as exc:
         await buy(async_session, org, row)
     assert exc.value.status_code == 409
@@ -443,7 +443,7 @@ async def test_losing_a_cross_org_insert_race_is_a_409_and_charges_nothing(
         AsyncMock(return_value=([offer], [])),
     )
     wire = AsyncMock()
-    monkeypatch.setattr("hailhq.api.number_orders.TelnyxClient.request", wire)
+    monkeypatch.setattr("hailhq.core.providers.telnyx.TelnyxClient.request", wire)
     real_commit, calls = async_session.commit, []
 
     async def commit():
@@ -472,7 +472,7 @@ async def test_discovery_runs_without_the_org_lock_or_a_transaction(
     row, offer = await seed_quote(async_session, org)
     monkeypatch.setattr("hailhq.core.config.settings.telnyx_api_key", "test")
     monkeypatch.setattr(
-        "hailhq.api.number_orders.TelnyxClient.request",
+        "hailhq.core.providers.telnyx.TelnyxClient.request",
         AsyncMock(return_value={"data": {"id": str(uuid4()), "status": "pending"}}),
     )
     seen = {}
@@ -510,7 +510,7 @@ async def test_get_number_survives_a_carrier_outage_while_pending(
     )
     monkeypatch.setattr("hailhq.core.config.settings.telnyx_api_key", "test")
     wire = AsyncMock(side_effect=httpx.ReadTimeout("lost response"))
-    monkeypatch.setattr("hailhq.api.number_orders.TelnyxClient.request", wire)
+    monkeypatch.setattr("hailhq.core.providers.telnyx.TelnyxClient.request", wire)
     number = await buy(async_session, org, row)
     wire.side_effect = httpx.ConnectError("carrier down")
     response = await client.get(
@@ -531,7 +531,7 @@ async def test_reconciler_polls_share_a_persisted_interval(
     )
     monkeypatch.setattr("hailhq.core.config.settings.telnyx_api_key", "test")
     wire = AsyncMock(side_effect=httpx.ReadTimeout("lost response"))
-    monkeypatch.setattr("hailhq.api.number_orders.TelnyxClient.request", wire)
+    monkeypatch.setattr("hailhq.core.providers.telnyx.TelnyxClient.request", wire)
     number = await buy(async_session, org, row)
     lookup = AsyncMock(return_value=("pending", None, None))
     monkeypatch.setattr("hailhq.api.number_orders.carrier_outcome", lookup)
@@ -561,7 +561,7 @@ async def test_get_number_never_reconciles_or_writes_money_state(
     )
     monkeypatch.setattr("hailhq.core.config.settings.telnyx_api_key", "test")
     wire = AsyncMock(side_effect=httpx.ReadTimeout("lost response"))
-    monkeypatch.setattr("hailhq.api.number_orders.TelnyxClient.request", wire)
+    monkeypatch.setattr("hailhq.core.providers.telnyx.TelnyxClient.request", wire)
     number = await buy(async_session, org, row)
     lookup = AsyncMock(return_value=("active", "resource", None))
     monkeypatch.setattr("hailhq.api.number_orders.carrier_outcome", lookup)
@@ -661,7 +661,7 @@ async def test_recheck_searches_with_the_capabilities_that_were_requested(
     monkeypatch.setattr("hailhq.api.number_orders.discover_offers", discover)
     monkeypatch.setattr("hailhq.core.config.settings.telnyx_api_key", "test")
     monkeypatch.setattr(
-        "hailhq.api.number_orders.TelnyxClient.request",
+        "hailhq.core.providers.telnyx.TelnyxClient.request",
         AsyncMock(return_value={"data": {"id": str(uuid4()), "status": "pending"}}),
     )
     await buy(async_session, org, row)
@@ -695,7 +695,7 @@ async def _stub_order(monkeypatch, offer, *responses):
     )
     monkeypatch.setattr("hailhq.core.config.settings.telnyx_api_key", "test")
     wire = AsyncMock(side_effect=list(responses))
-    monkeypatch.setattr("hailhq.api.number_orders.TelnyxClient.request", wire)
+    monkeypatch.setattr("hailhq.core.providers.telnyx.TelnyxClient.request", wire)
     return wire
 
 
@@ -872,3 +872,49 @@ async def test_quote_route_rejects_unlisted_type_and_accepts_lowercase_country(
     assert {call.args[1] for call in discover.await_args_list} == {"PT"}
     # Only the types the catalog lists for PT are searched.
     assert {call.args[2] for call in discover.await_args_list} == {"local", "mobile"}
+
+
+async def _age_number(async_session, number):
+    await async_session.execute(
+        text("UPDATE phone_numbers SET created_at = :t WHERE id = :id"),
+        {
+            "t": datetime.now(timezone.utc)
+            - PENDING_ORDER_TIMEOUT
+            - timedelta(minutes=1),
+            "id": number.id,
+        },
+    )
+    await async_session.commit()
+    await async_session.refresh(number)
+
+
+async def test_erroring_lookups_fail_and_refund_after_timeout(
+    async_session, org_and_key, monkeypatch, caplog
+):
+    org, _, _ = org_and_key
+    row, offer = await seed_quote(async_session, org)
+    await _stub_order(monkeypatch, offer, {"data": {"id": str(uuid4())}})
+    number = await buy(async_session, org, row)
+    assert number.provisioning_state == "pending"
+    monkeypatch.setattr(
+        "hailhq.api.number_orders.carrier_outcome",
+        AsyncMock(side_effect=KeyError("status")),
+    )
+    # Before the timeout the error propagates and the hold is kept.
+    with pytest.raises(KeyError):
+        await reconcile_order(async_session, number, force=True)
+    await async_session.rollback()
+    await async_session.refresh(number)
+    assert number.provisioning_state == "pending"
+    assert await get_balance_cents(async_session, org) == 100000 - 150
+    await _age_number(async_session, number)
+    with caplog.at_level("ERROR"):
+        await reconcile_order(async_session, number, force=True)
+        await reconcile_order(async_session, number, force=True)
+    assert number.provisioning_state == "failed"
+    assert await get_balance_cents(async_session, org) == 100000
+    records = [r for r in caplog.records if r.levelname == "ERROR"]
+    assert len(records) == 1
+    assert records[0].exc_info is not None
+    assert str(number.id) in records[0].getMessage()
+    assert "operator review" in records[0].getMessage()

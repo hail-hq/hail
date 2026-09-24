@@ -1492,6 +1492,8 @@ paths:
               description: Seconds until the current window resets.
               schema:
                 type: integer
+        "404":
+          description: The quote does not exist for this organization.
         "402":
           description:
             insufficient credits; top up at https://hail.so/console/billing.
@@ -1501,7 +1503,12 @@ paths:
           description:
             The quote expired, the number is taken, the price changed,
             or the carrier rejected or failed the order. In the last case the credit
-            hold is refunded and the detail gives the reason.
+            hold is refunded and the detail gives the reason. Also returned when the
+            quote's number was released since it was bought.
+        "503":
+          description:
+            The carrier lookup or number price is unavailable, or no inventory
+            matched. Nothing was charged; retry shortly.
         "422":
           description: Validation Error
           content:
@@ -1630,6 +1637,15 @@ paths:
               description: Seconds until the current window resets.
               schema:
                 type: integer
+        "404":
+          description: The number does not exist for this organization.
+        "409":
+          description:
+            The order is still pending (refresh its status first) or the
+            number's carrier is unsupported. A failed order is dismissed with 204
+            and no carrier call.
+        "503":
+          description: The number's carrier is not configured on this server.
         "422":
           description: Validation Error
           content:
@@ -1757,6 +1773,10 @@ paths:
               description: Seconds until the current window resets.
               schema:
                 type: integer
+        "404":
+          description: The number does not exist for this organization.
+        "503":
+          description: SMS is not configured for this number's carrier on this server.
         "422":
           description: Validation Error
           content:

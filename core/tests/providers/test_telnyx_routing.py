@@ -367,10 +367,46 @@ async def test_zero_price_number_is_skipped_not_a_carrier_failure(
     async with telnyx_json_client(respond) as http:
         result = await telnyx_offers(uuid4(), "PT", "local", ["voice"], http)
     # The free number is skipped, not an error for the whole carrier. The offer
-    # still reports everything the number supports.
-    assert [(o.e164, o.capabilities) for o in result] == [
-        ("+351211234567", ["sms", "voice"])
-    ]
+    # stores only what was requested, not every feature the number has.
+    assert [(o.e164, o.capabilities) for o in result] == [("+351211234567", ["voice"])]
+
+
+async def test_sms_only_request_does_not_store_voice_capability(monkeypatch):
+    monkeypatch.setattr(settings, "telnyx_api_key", "secret")
+    monkeypatch.setattr(settings, "telnyx_public_key", "public")
+    monkeypatch.setattr(settings, "telnyx_connection_id", "")
+    monkeypatch.setattr(settings, "livekit_telnyx_sip_outbound_trunk_id", "")
+    monkeypatch.setattr(settings, "telnyx_sip_username", "")
+
+    def respond(request):
+        if request.url.path.endswith("available_phone_numbers"):
+            data = [
+                {
+                    "phone_number": "+351211234567",
+                    "features": [{"name": n} for n in ("voice", "sms")],
+                    "cost_information": {
+                        "currency": "USD",
+                        "monthly_cost": "2.30",
+                        "upfront_cost": "0",
+                    },
+                }
+            ]
+        elif request.url.path.endswith("requirement_groups"):
+            data = []
+        else:
+            data = [
+                {
+                    "country_code": "PT",
+                    "phone_number_type": "local",
+                    "action": "ordering",
+                    "regulatory_requirements": [],
+                }
+            ]
+        return httpx.Response(200, json={"data": data})
+
+    async with telnyx_json_client(respond) as http:
+        result = await telnyx_offers(uuid4(), "PT", "local", ["sms"], http)
+    assert [o.capabilities for o in result] == [["sms"]]
 
 
 async def test_twilio_number_type_not_sold_in_country_is_empty_inventory(monkeypatch):

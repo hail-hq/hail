@@ -291,7 +291,7 @@ async def test_finalized_event_for_unrecorded_message_only_retries_when_racing_o
         assert response.status_code == expected, (sender, response.text)
 
 
-async def test_failed_number_cannot_be_released_or_enter_renewal_billing(
+async def test_failed_number_is_dismissed_without_a_carrier_call(
     client,
     async_session,
     org_and_key,
@@ -312,10 +312,10 @@ async def test_failed_number_cannot_be_released_or_enter_renewal_billing(
     response = await client.delete(
         f"/numbers/{number.id}", headers={"Authorization": f"Bearer {key}"}
     )
-    assert response.status_code == 409
+    assert response.status_code == 204
     await async_session.refresh(number)
     assert number.provisioning_state == "failed"
-    assert number.released_at is None
+    assert number.released_at is not None
     release.assert_not_awaited()
     voice_provider_mock.release_number.assert_not_awaited()
 

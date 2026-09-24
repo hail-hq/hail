@@ -15,15 +15,17 @@ from hailhq.api.errors import unprocessable
 from hailhq.api.funds import BILLING_URL, require_funds
 from hailhq.core import telephony_catalog
 from hailhq.core.billing import get_balance_cents, monthly_fee_ref
-from hailhq.core.config import settings
 from hailhq.core.db import session_scope
 from hailhq.core.models import AccountCredit, NumberOffer, PhoneNumber
 from hailhq.core.number_offers import CarrierOffer, discover_offers
-from hailhq.core.providers.telnyx import TelnyxClient
 from hailhq.core.providers.voice import (
     CarrierRequestError,
     NumberNotProvisionable,
     VoiceProvider,
+)
+from hailhq.core.providers.voice.telnyx import (
+    place_number_order,
+    telnyx_order_outcome,
 )
 from hailhq.core.providers.voice.twilio import (
     find_ordered_number,
@@ -160,65 +162,8 @@ async def carrier_outcome(
     submit another paid purchase.
     """
     if number.provider == "telnyx":
-        api = TelnyxClient()
-        order_id = number.provisioning_metadata.get("order_id")
-        if order_id:
-            order = (await api.request("GET", f"/number_orders/{UUID(order_id)}"))[
-                "data"
-            ]
-        else:
-            # A crash/timeout after POST may lose the response. Recover by our
-            # durable reference.
-            result = await api.request(
-                "GET",
-                "/number_orders",
-                params={
-                    "filter[customer_reference]": str(number.id),
-                    "page[size]": 100,
-                },
-            )
-            matches = [
-                o
-                for o in result["data"]
-                if o.get("customer_reference") == str(number.id)
-            ]
-            if not matches:
-                return "missing", None, None
-            if len(matches) > 1:
-                return "pending", None, None
-            order = matches[0]
-        order_id = order.get("id") or order_id
-        if order["status"] == "failure":
-            return "failed", None, order_id
-        if order["status"] != "success" or not order.get("requirements_met"):
-            return "pending", None, order_id
-        owned = (
-            await api.request(
-                "GET",
-                "/phone_numbers",
-                params={
-                    "filter[phone_number]": number.e164.lstrip("+"),
-                    "page[size]": 100,
-                },
-            )
-        )["data"]
-        match = next(
-            (
-                n
-                for n in owned
-                if n["phone_number"] == number.e164 and n.get("status") == "active"
-            ),
-            None,
-        )
-        # Order-phone IDs and owned-phone IDs are distinct Telnyx resources.
-        return (
-            ("active", match["id"], order["id"])
-            if match
-            else (
-                "pending",
-                None,
-                order["id"],
-            )
+        return await telnyx_order_outcome(
+            number.e164, number.id, number.provisioning_metadata.get("order_id")
         )
     sid = await find_ordered_number(number.e164, number.id)
     return ("active", sid, None) if sid else ("missing", None, None)
@@ -250,12 +195,23 @@ async def reconcile_order(
         "last_checked_at": now.isoformat(),
     }
     await db.commit()
-    state, resource_id, order_id = await carrier_outcome(number)
+    lookup_error: Exception | None = None
+    try:
+        state, resource_id, order_id = await carrier_outcome(number)
+    except Exception as exc:
+        # Keep retrying until the timeout; after it, fail the order below.
+        lookup_error = exc
+        state, resource_id, order_id = "pending", None, None
     await org_lock(db, org)
     await db.refresh(number)
     if number.provisioning_state != "pending":
         await db.commit()
         return
+    if lookup_error is not None and (
+        datetime.now(timezone.utc) - number.created_at <= PENDING_ORDER_TIMEOUT
+    ):
+        await db.commit()
+        raise lookup_error
     if order_id and number.provisioning_metadata.get("order_id") != order_id:
         number.provisioning_metadata = {
             **number.provisioning_metadata,
@@ -279,12 +235,22 @@ async def reconcile_order(
         state == "pending"
         and datetime.now(timezone.utc) - number.created_at > PENDING_ORDER_TIMEOUT
     ):
-        logger.warning(
-            "Carrier order still pending after timeout; failing it and refunding: "
-            "number=%s carrier_order=%s",
-            number.id,
-            number.provisioning_metadata.get("order_id"),
-        )
+        if lookup_error is not None:
+            logger.error(
+                "Carrier order lookups keep failing after timeout; failing it and "
+                "refunding. Flagged for operator review (release the number at the "
+                "carrier if the order later completed): number=%s carrier_order=%s",
+                number.id,
+                number.provisioning_metadata.get("order_id"),
+                exc_info=lookup_error,
+            )
+        else:
+            logger.warning(
+                "Carrier order still pending after timeout; failing it and refunding: "
+                "number=%s carrier_order=%s",
+                number.id,
+                number.provisioning_metadata.get("order_id"),
+            )
         await finish_order(
             db,
             number,
@@ -449,21 +415,12 @@ async def acquire_offer(
     await org_lock(db, org)
     try:
         if offer.provider == "telnyx":
-            order_number: dict[str, Any] = {"phone_number": offer.e164}
-            if offer.verification_id:
-                order_number["requirement_group_id"] = offer.verification_id
-            payload: dict[str, Any] = {
-                "phone_numbers": [order_number],
-                "customer_reference": str(number.id),
-            }
-            if "voice" in offer.capabilities and settings.telnyx_connection_id:
-                payload["connection_id"] = settings.telnyx_connection_id
-            order = (
-                await TelnyxClient().request("POST", "/number_orders", json=payload)
-            )["data"]
+            order_id = await place_number_order(
+                number.id, offer.e164, offer.verification_id, offer.capabilities
+            )
             number.provisioning_metadata = {
                 **number.provisioning_metadata,
-                "order_id": order["id"],
+                "order_id": order_id,
                 "order_state": "pending",
             }
             await db.commit()

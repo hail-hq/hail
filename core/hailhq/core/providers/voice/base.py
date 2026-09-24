@@ -22,6 +22,7 @@ from hailhq.core.schemas import NumberType
 from pydantic import BaseModel
 
 __all__ = [
+    "CarrierNotConfigured",
     "CarrierRequestError",
     "NumberNotProvisionable",
     "NumberType",
@@ -37,6 +38,10 @@ class CarrierRequestError(Exception):
     def __init__(self, status: int) -> None:
         super().__init__(f"Carrier request failed with HTTP {status}")
         self.status = status
+
+
+class CarrierNotConfigured(Exception):
+    """The carrier is not configured on this deployment (an operator problem)."""
 
 
 class NumberNotProvisionable(Exception):

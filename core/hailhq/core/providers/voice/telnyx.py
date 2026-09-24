@@ -1,6 +1,7 @@
-"""Read-only Telnyx inventory discovery; purchase integration is staged separately."""
+"""Telnyx number inventory discovery, order placement, order lookup and release."""
 
 from decimal import Decimal
+from typing import Any, Literal
 from uuid import UUID
 
 import httpx
@@ -8,6 +9,7 @@ import phonenumbers
 from hailhq.core.carrier_offer import CarrierOffer, cents
 from hailhq.core.config import settings
 from hailhq.core.providers.telnyx import TelnyxClient
+from hailhq.core.providers.voice.base import CarrierNotConfigured
 from hailhq.core.schemas import NumberType
 from pydantic import BaseModel, Field
 
@@ -28,8 +30,9 @@ class NumberQuote(BaseModel):
 class TelnyxNumberDiscovery:
     """Uses an injected async client; the caller owns its lifetime.
 
-    No ordering methods: inventory presence does not establish regulatory
-    eligibility, outbound calling eligibility, or configured SIP routing.
+    Read-only: inventory presence does not establish regulatory eligibility,
+    outbound calling eligibility, or configured SIP routing. Ordering lives in
+    ``place_number_order``.
     """
 
     def __init__(self, api_key: str, client: httpx.AsyncClient) -> None:
@@ -147,6 +150,9 @@ async def telnyx_offers(
     if "sms" in capabilities and not settings.telnyx_public_key:
         return []
     api = TelnyxClient(client=client)
+    # Store only what was requested and what this deployment can route: voice
+    # needs the SIP trunk (checked above), sms needs the webhook key.
+    routable = {"voice", "sms"}
     quotes = await TelnyxNumberDiscovery(settings.telnyx_api_key, client).search(
         country,
         kind,
@@ -215,7 +221,7 @@ async def telnyx_offers(
                 e164=q.e164,
                 country_code=country,
                 number_type=kind,
-                capabilities=sorted(set(q.capabilities) & {"voice", "sms"}),
+                capabilities=sorted(set(q.capabilities) & set(capabilities) & routable),
                 monthly_cents=monthly_cents,
                 setup_cents=cents(q.upfront_cost),
                 readiness=(
@@ -242,3 +248,87 @@ async def telnyx_offers(
             )
         )
     return results
+
+
+async def place_number_order(
+    number_id: UUID, e164: str, verification_id: str | None, capabilities: list[str]
+) -> str:
+    """Order one exact number once; returns the Telnyx order id. Never retried."""
+    order_number: dict[str, Any] = {"phone_number": e164}
+    if verification_id:
+        order_number["requirement_group_id"] = verification_id
+    payload: dict[str, Any] = {
+        "phone_numbers": [order_number],
+        "customer_reference": str(number_id),
+    }
+    if "voice" in capabilities and settings.telnyx_connection_id:
+        payload["connection_id"] = settings.telnyx_connection_id
+    order = (await TelnyxClient().request("POST", "/number_orders", json=payload))[
+        "data"
+    ]
+    return order["id"]
+
+
+async def telnyx_order_outcome(
+    e164: str, number_id: UUID, order_id: str | None
+) -> tuple[Literal["active", "failed", "pending", "missing"], str | None, str | None]:
+    """Ask Telnyx what happened to an order. Holds no DB lock.
+
+    Returns (state, owned resource id, Telnyx order id). ``missing`` means
+    Telnyx has no record of the order; it is never treated as permission to
+    submit another paid purchase.
+    """
+    api = TelnyxClient()
+    if order_id:
+        order = (await api.request("GET", f"/number_orders/{UUID(order_id)}"))["data"]
+    else:
+        # A crash/timeout after POST may lose the response. Recover by our
+        # durable reference.
+        result = await api.request(
+            "GET",
+            "/number_orders",
+            params={
+                "filter[customer_reference]": str(number_id),
+                "page[size]": 100,
+            },
+        )
+        matches = [
+            o for o in result["data"] if o.get("customer_reference") == str(number_id)
+        ]
+        if not matches:
+            return "missing", None, None
+        if len(matches) > 1:
+            return "pending", None, None
+        order = matches[0]
+    order_id = order.get("id") or order_id
+    if order["status"] == "failure":
+        return "failed", None, order_id
+    if order["status"] != "success" or not order.get("requirements_met"):
+        return "pending", None, order_id
+    owned = (
+        await api.request(
+            "GET",
+            "/phone_numbers",
+            params={"filter[phone_number]": e164.lstrip("+"), "page[size]": 100},
+        )
+    )["data"]
+    match = next(
+        (n for n in owned if n["phone_number"] == e164 and n.get("status") == "active"),
+        None,
+    )
+    # Order-phone IDs and owned-phone IDs are distinct Telnyx resources.
+    return (
+        ("active", match["id"], order["id"])
+        if match
+        else ("pending", None, order["id"])
+    )
+
+
+async def release_telnyx_number(resource_id: str) -> None:
+    """Release an owned Telnyx number. Raises ``CarrierNotConfigured`` if the
+    API key is missing."""
+    try:
+        client = TelnyxClient()
+    except ValueError as exc:
+        raise CarrierNotConfigured(str(exc)) from exc
+    await client.release_number(resource_id)
