@@ -2184,17 +2184,17 @@ type NumberAcquireRequest struct {
 	// NumberType Kind of number to acquire: 'local', 'mobile', 'toll_free', or 'national'.
 	NumberType *NumberAcquireRequestNumberType `json:"number_type,omitempty"`
 
-	// Provider Carrier restriction for a quote from POST /numbers/quotes. Auto or omitted accepts the selected quoted carrier. Omitted without a quote preserves the legacy Twilio purchase contract.
+	// Provider Carrier restriction for the quote. Auto accepts the quoted carrier; twilio or telnyx must match it.
 	Provider *NumberAcquireRequestProvider `json:"provider,omitempty"`
 
-	// QuoteId Unexpired organization-bound quote from POST /numbers/quotes; required for multi-carrier purchases.
-	QuoteId *openapi_types.UUID `json:"quote_id,omitempty"`
+	// QuoteId Unexpired organization-bound quote from POST /numbers/quotes. Required: without it the request is a 422; get a quote first.
+	QuoteId openapi_types.UUID `json:"quote_id"`
 }
 
 // NumberAcquireRequestNumberType Kind of number to acquire: 'local', 'mobile', 'toll_free', or 'national'.
 type NumberAcquireRequestNumberType string
 
-// NumberAcquireRequestProvider Carrier restriction for a quote from POST /numbers/quotes. Auto or omitted accepts the selected quoted carrier. Omitted without a quote preserves the legacy Twilio purchase contract.
+// NumberAcquireRequestProvider Carrier restriction for the quote. Auto accepts the quoted carrier; twilio or telnyx must match it.
 type NumberAcquireRequestProvider string
 
 // NumberQuoteRequest defines model for NumberQuoteRequest.
@@ -8818,7 +8818,6 @@ type AcquireNumberV1NumbersPostResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
 	JSON201      *PhoneNumberResponse
-	JSON422      *HTTPValidationError
 }
 
 // Status returns HTTPResponse.Status
@@ -10969,13 +10968,6 @@ func ParseAcquireNumberV1NumbersPostResponse(rsp *http.Response) (*AcquireNumber
 			return nil, err
 		}
 		response.JSON201 = &dest
-
-	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 422:
-		var dest HTTPValidationError
-		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
-			return nil, err
-		}
-		response.JSON422 = &dest
 
 	}
 
