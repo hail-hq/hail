@@ -327,9 +327,11 @@ async def create_verification(
         documents[slot] = DocumentInput(
             option=str(value.get("option", "")),
             fields={str(k): str(v) for k, v in (value.get("fields") or {}).items()},
-            file=await _read_file(upload)
-            if upload is not None and hasattr(upload, "read")
-            else None,
+            file=(
+                await _read_file(upload)
+                if upload is not None and hasattr(upload, "read")
+                else None
+            ),
         )
 
     try:
