@@ -135,3 +135,21 @@ async def test_only_explicit_no_coverage_is_empty_inventory(no_coverage):
         else:
             with pytest.raises(httpx.HTTPStatusError):
                 await discovery.search("PT", "local", ["voice", "sms"])
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        {"errors": [{"code": "10015", "detail": None}]},
+        {"errors": ["10015"]},
+        {"errors": None},
+        ["not", "an", "object"],
+    ],
+)
+async def test_malformed_error_body_stays_a_carrier_error(body):
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(lambda request: httpx.Response(400, json=body))
+    ) as client:
+        discovery = TelnyxNumberDiscovery("key", client)
+        with pytest.raises(httpx.HTTPStatusError):
+            await discovery.search("PT", "local", ["voice", "sms"])

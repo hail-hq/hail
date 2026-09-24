@@ -732,6 +732,12 @@ async def receive_telnyx_sms(
             raise HTTPException(
                 status_code=400, detail="invalid messaging event"
             ) from None
+        try:
+            reply_provider: SmsProvider | None = TelnyxSmsProvider()
+        except ValueError:
+            # No Telnyx API key. The provider only sends compliance replies, so
+            # still store the message and apply a STOP instead of failing the webhook.
+            reply_provider = None
         await ingest_inbound_sms(
             db,
             from_e164=sender_e164,
@@ -739,7 +745,7 @@ async def receive_telnyx_sms(
             body=payload.get("text") or "",
             provider_message_sid=message_id,
             opt_out_type=None,
-            provider=TelnyxSmsProvider(),
+            provider=reply_provider,
             carrier="telnyx",
         )
         await db.commit()

@@ -123,6 +123,48 @@ async def test_signed_inbound_stop_is_org_scoped_and_deduplicated(
     ).status_code == 403
 
 
+async def test_inbound_stop_is_stored_when_the_telnyx_api_key_is_blank(
+    client, async_session, org_and_key, add_phone_number, monkeypatch
+):
+    # The API key is only needed to send compliance replies. A blank one must not
+    # turn a signed inbound message (and its STOP) into a 500 that Telnyx retries.
+    org, _, _ = org_and_key
+    number = await telnyx_number(async_session, org, add_phone_number)
+    monkeypatch.setattr(settings, "telnyx_api_key", "")
+    raw, headers = signed_event(
+        monkeypatch,
+        {
+            "event_type": "message.received",
+            "payload": {
+                "id": str(uuid4()),
+                "from": {"phone_number": "+14155559999"},
+                "to": [{"phone_number": number.e164}],
+                "text": "STOP",
+            },
+        },
+    )
+    response = await client.post("/sms/telnyx", content=raw, headers=headers)
+    assert response.status_code == 200, response.text
+    assert len((await async_session.execute(select(Sms))).scalars().all()) == 1
+    suppression = (await async_session.execute(select(Suppression))).scalar_one()
+    assert suppression.recipient == "+14155559999"
+
+
+async def test_release_without_a_telnyx_api_key_is_a_503_not_a_500(
+    client, async_session, org_and_key, add_phone_number, monkeypatch
+):
+    org, _, key = org_and_key
+    number = await telnyx_number(async_session, org, add_phone_number)
+    monkeypatch.setattr(settings, "telnyx_api_key", "")
+    response = await client.delete(
+        f"/numbers/{number.id}", headers={"Authorization": f"Bearer {key}"}
+    )
+    assert response.status_code == 503, response.text
+    await async_session.refresh(number)
+    assert number.provisioning_state == "active"
+    assert number.released_at is None
+
+
 async def test_finalized_status_is_absorbing(
     client, async_session, org_and_key, monkeypatch
 ):

@@ -496,7 +496,11 @@ async def acquire_offer(
         # Do not expose provider payloads or retry this order on another carrier.
         await db.rollback()
         await db.refresh(number)
-        logger.warning("Carrier order requires reconciliation: number=%s", number.id)
+        logger.warning(
+            "Carrier order requires reconciliation: number=%s",
+            number.id,
+            exc_info=True,
+        )
     # Status reads can fail after a successful POST. They must never enter the
     # submission rejection/refund handler above.
     if (
@@ -509,7 +513,9 @@ async def acquire_offer(
         except Exception:
             await db.rollback()
             await db.refresh(number)
-            logger.warning("Carrier order status unavailable: number=%s", number.id)
+            logger.warning(
+                "Carrier order status unavailable: number=%s", number.id, exc_info=True
+            )
     return number
 
 
@@ -662,6 +668,12 @@ async def purchase_number(
             status_code=409,
             detail=f"Number order failed and credits were refunded: {reason}",
         )
+    if number.provisioning_state == "released":
+        # A replayed quote whose number was released since. It is not a new purchase.
+        raise HTTPException(
+            status_code=409,
+            detail="The number bought with this quote was released; request a new quote",
+        )
     return number
 
 
@@ -694,7 +706,9 @@ async def reconcile_pending_orders():
                     await db.commit()
         except Exception:
             logger.warning(
-                "Number order reconciliation failed: number=%s; will retry", number_id
+                "Number order reconciliation failed: number=%s; will retry",
+                number_id,
+                exc_info=True,
             )
 
 

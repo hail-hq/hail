@@ -774,6 +774,32 @@ async def test_post_numbers_returns_409_for_a_refunded_failed_order(
     assert third.status_code == 409
 
 
+async def test_replayed_quote_of_a_released_number_is_a_409_not_a_201(
+    client, async_session, org_and_key, monkeypatch
+):
+    org, _, key = org_and_key
+    row, offer = await seed_quote(async_session, org)
+    await _stub_order(monkeypatch, offer, {"data": {"id": str(uuid4())}})
+    body = {"country_code": "PT", "quote_id": str(row.id)}
+    first = await client.post(
+        "/numbers",
+        json=body,
+        headers={"Authorization": f"Bearer {key}", "Idempotency-Key": "first"},
+    )
+    assert first.status_code == 201, first.text
+    number = await async_session.get(PhoneNumber, UUID(first.json()["id"]))
+    number.provisioning_state = "released"
+    number.released_at = datetime.now(timezone.utc)
+    await async_session.commit()
+    replay = await client.post(
+        "/numbers",
+        json=body,
+        headers={"Authorization": f"Bearer {key}", "Idempotency-Key": "second"},
+    )
+    assert replay.status_code == 409, replay.text
+    assert "released" in replay.json()["detail"]
+
+
 async def test_quote_number_type_is_taken_from_the_quote(
     client, async_session, org_and_key, monkeypatch
 ):

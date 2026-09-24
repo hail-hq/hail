@@ -137,6 +137,14 @@ async def ingest_inbound_sms(
         return IngestResult(sms_id=None, dropped_reason="unknown_number")
 
     if number.provider != carrier or "sms" not in number.capabilities:
+        logger.info(
+            "inbound sms to number=%s dropped: carrier=%s number carrier=%s "
+            "capabilities=%s",
+            to_e164,
+            carrier,
+            number.provider,
+            number.capabilities,
+        )
         return IngestResult(sms_id=None, dropped_reason="wrong_carrier_or_capability")
 
     organization_id = number.organization_id

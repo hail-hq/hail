@@ -197,8 +197,9 @@ async def release_org_number(
     # commit below (or at rollback).
     await org_lock(db, number.organization_id)
     # Re-read under the lock: a concurrent release may have already
-    # tombstoned the row after our caller loaded it.
-    await db.refresh(number, ["provisioning_state", "released_at"])
+    # tombstoned the row after our caller loaded it, or the order reconciler
+    # may have just activated a pending order (which sets provider_resource_id).
+    await db.refresh(number)
     if number.provisioning_state == "released":
         return number
     if number.provisioning_state == "failed":
@@ -211,7 +212,12 @@ async def release_org_number(
             detail="Number order is still pending; refresh its status before releasing",
         )
     if number.provider == "telnyx":
-        await TelnyxClient().release_number(number.provider_resource_id)
+        try:
+            telnyx = TelnyxClient()
+        except ValueError as exc:
+            # Carrier not configured: an operator problem, not a server fault.
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+        await telnyx.release_number(number.provider_resource_id)
     elif number.provider == "twilio":
         await provider.release_number(number.provider_resource_id)
     else:

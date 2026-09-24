@@ -83,15 +83,18 @@ class TelnyxNumberDiscovery:
             # HTTPStatusError retains the raw body. Only explicit no-coverage
             # responses become empty inventory; other errors stay errors.
             try:
-                errors = exc.response.json().get("errors", [])
+                body = exc.response.json()
             except ValueError:
-                errors = []
+                body = None
+            errors = body.get("errors") if isinstance(body, dict) else None
             if (
                 exc.response.status_code == 400
+                and isinstance(errors, list)
                 and errors
                 and all(
-                    str(error.get("code")) == "10015"
-                    and error.get("detail", "").startswith(
+                    isinstance(error, dict)
+                    and str(error.get("code")) == "10015"
+                    and str(error.get("detail") or "").startswith(
                         "No coverage found in the specified country"
                     )
                     for error in errors
