@@ -25,8 +25,8 @@ export function Footer({
               hail.so
             </a>
             <p>
-              The communications layer for AI agents. Phone, SMS, and email.
-              Open source or managed cloud.
+              Email, SMS, and agentic phone calls for AI agents and backend
+              applications. Open source or managed cloud.
             </p>
             <div className="hail-footer-social">
               <a href="https://github.com/hail-hq/hail">GitHub ↗</a>
@@ -50,7 +50,9 @@ export function Footer({
         </div>
         <div className="hail-footer-end">
           <span>© {new Date().getFullYear()} hail.so</span>
-          <span>give your ai agent a voice, a real phone number, and an inbox</span>
+          <span>
+            give your ai agent a voice, a real phone number, and an inbox
+          </span>
           <span>MCP · CLI · REST</span>
           {themeControl}
         </div>
