@@ -379,7 +379,7 @@ class TwilioVerificationProvider(VerificationProvider):
 
             bundle = self._rc.bundles.create(
                 friendly_name=f"hail-{organization_id}",
-                email=clean.get("email", ""),
+                email=settings.twilio_bundle_notification_email,
                 iso_country=requirements.country_code,
                 number_type=_twilio_number_type(requirements.number_type),
                 end_user_type=_SUBJECT_TO_TWILIO[requirements.subject_type],

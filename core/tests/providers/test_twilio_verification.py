@@ -277,6 +277,7 @@ async def test_create_draft_happy_path(provider) -> None:
 
     end_user = parse_qs(by_url[f"{NUMBERS}/EndUsers"][0].body)
     assert end_user["Type"] == ["individual"]
+    # the customer's email is a field that describes them, so it stays here
     assert json.loads(end_user["Attributes"][0]) == PERSON_FIELDS
 
     bundle = parse_qs(by_url[f"{NUMBERS}/Bundles"][0].body)
@@ -284,7 +285,9 @@ async def test_create_draft_happy_path(provider) -> None:
     assert bundle["NumberType"] == ["mobile"]
     assert bundle["EndUserType"] == ["individual"]
     assert bundle["FriendlyName"] == [f"hail-{ORG}"]
-    assert bundle["Email"] == ["ada@example.com"]
+    # status emails go to Hail, never to the customer
+    assert bundle["Email"] == ["hi@hail.so"]
+    assert "ada@example.com" not in json.dumps(bundle)
     assignments = by_url[f"{NUMBERS}/Bundles/BU{'1' * 32}/ItemAssignments"]
     assert len(assignments) == 3  # end user + two documents
 

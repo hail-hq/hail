@@ -41,6 +41,10 @@ class Settings(BaseSettings):
     # Carriers
     twilio_account_sid: str = ""
     twilio_auth_token: str = ""
+    # Where carrier status emails for verification bundles go: always Hail's,
+    # never the customer's. The customer's own email is used only in the
+    # fields that describe them.
+    twilio_bundle_notification_email: str = "hi@hail.so"
 
     # AWS — used today for SES (outbound email). boto3 falls back to its
     # default credential chain (env / config file / IAM role) when these
