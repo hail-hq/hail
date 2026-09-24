@@ -223,7 +223,8 @@ class SuppressionListResponse(BaseModel):
 
 
 class NumberOffer(BaseModel):
-    quote_id: UUID
+    """One live carrier offer. Mirrors ``CarrierOffer`` in openapi/openapi.yaml."""
+
     provider: Literal["twilio", "telnyx"]
     e164: str
     country_code: str
@@ -231,12 +232,15 @@ class NumberOffer(BaseModel):
     capabilities: list[str]
     monthly_cents: int
     setup_cents: int
-    currency: str
+    currency: Literal["USD"] = "USD"
     readiness: Literal["ready", "verification_required"]
     regulatory_friction: Literal["none", "information", "documents", "unknown"] = (
         "unknown"
     )
-    requirements: list[str]
+    requirements: list[str] = Field(default_factory=list)
+    verification_id: str | None = None
+    address_id: str | None = None
+    quote_id: UUID | None = None
 
 
 class NumberQuotesResponse(BaseModel):

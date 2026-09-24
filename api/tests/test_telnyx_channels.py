@@ -276,3 +276,75 @@ async def test_failed_number_cannot_be_released_or_enter_renewal_billing(
     assert number.released_at is None
     release.assert_not_awaited()
     voice_provider_mock.release_number.assert_not_awaited()
+
+
+async def test_expired_message_finalizes_as_undelivered(
+    client, async_session, org_and_key, monkeypatch
+):
+    org, _, _ = org_and_key
+    sid = str(uuid4())
+    row = Sms(
+        organization_id=org,
+        provider="telnyx",
+        provider_message_sid=sid,
+        from_e164="+14155551234",
+        to_e164="+14155559999",
+        direction="outbound",
+        status="sent",
+        body="Hello",
+    )
+    async_session.add(row)
+    await async_session.commit()
+    raw, headers = signed_event(
+        monkeypatch,
+        {
+            "event_type": "message.finalized",
+            "payload": {
+                "id": sid,
+                "to": [{"phone_number": row.to_e164, "status": "expired"}],
+                "errors": [{"title": "no code here"}],
+            },
+        },
+    )
+    response = await client.post("/sms/telnyx", content=raw, headers=headers)
+    assert response.status_code == 200, response.text
+    await async_session.refresh(row)
+    assert row.status == "undelivered"
+    assert row.error_code is None
+
+
+async def test_signed_inbound_without_a_sender_is_a_400_not_a_500(client, monkeypatch):
+    raw, headers = signed_event(
+        monkeypatch,
+        {
+            "event_type": "message.received",
+            "payload": {
+                "id": str(uuid4()),
+                "to": [{"phone_number": "+14155551234"}],
+                "text": "Hi",
+            },
+        },
+    )
+    response = await client.post("/sms/telnyx", content=raw, headers=headers)
+    assert response.status_code == 400
+
+
+async def test_absurd_signature_timestamp_is_a_403_not_a_500(client, monkeypatch):
+    raw, headers = signed_event(monkeypatch, {"event_type": "message.sent"})
+    headers["telnyx-timestamp"] = "1" + "0" * 400
+    response = await client.post("/sms/telnyx", content=raw, headers=headers)
+    assert response.status_code == 403
+
+
+async def test_enable_sms_on_unconfigured_telnyx_is_a_503(
+    client, async_session, org_and_key, add_phone_number, monkeypatch
+):
+    org, _, key = org_and_key
+    number = await telnyx_number(async_session, org, add_phone_number)
+    number.messaging_service_sid = None
+    await async_session.commit()
+    monkeypatch.setattr(settings, "telnyx_public_key", "")
+    response = await client.post(
+        f"/numbers/{number.id}/enable-sms", headers={"Authorization": f"Bearer {key}"}
+    )
+    assert response.status_code == 503, response.text

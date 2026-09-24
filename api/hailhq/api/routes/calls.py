@@ -430,6 +430,9 @@ async def create_call(
     dispatch_id: str | None = None
     setup_stage = "room_create"
     try:
+        # Resolve the carrier route first: a misconfigured carrier must fail
+        # before any LiveKit room exists.
+        trunk_id, sip_headers = voice_route(call.provider)
         room_name = await lk.create_room(call.id)
         setup_stage = "agent_dispatch"
 
@@ -466,7 +469,6 @@ async def create_call(
             },
         )
         setup_stage = "sip_participant"
-        trunk_id, sip_headers = voice_route(call.provider)
         participant = await lk.create_sip_participant(
             room_name=room_name,
             to_e164=call.to_e164,

@@ -15,3 +15,11 @@ def test_legacy_twilio_trunk_alias_and_canonical_precedence(monkeypatch, directi
     config = Settings(_env_file=None)
     assert getattr(config, canonical.lower()) == "ST_twilio"
     assert config.livekit_telnyx_sip_outbound_trunk_id == "ST_telnyx"
+
+
+@pytest.mark.parametrize("direction", ["outbound", "inbound"])
+def test_blank_canonical_trunk_does_not_hide_a_legacy_value(monkeypatch, direction):
+    canonical = f"LIVEKIT_TWILIO_SIP_{direction.upper()}_TRUNK_ID"
+    monkeypatch.setenv(canonical, "")
+    monkeypatch.setenv(f"LIVEKIT_SIP_{direction.upper()}_TRUNK_ID", "ST_legacy")
+    assert getattr(Settings(_env_file=None), canonical.lower()) == "ST_legacy"

@@ -545,6 +545,36 @@ class NumberAcquireRequest(BaseModel):
         return v.upper()
 
 
+class NumberQuoteRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    country_code: str = Field(
+        min_length=2,
+        max_length=2,
+        description="ISO alpha-2 country code to search. Case-insensitive.",
+    )
+    number_type: NumberType | None = Field(
+        default=None,
+        description="Restrict number type; omit to compare all supported types.",
+    )
+    capabilities: list[Literal["voice", "sms"]] = Field(
+        min_length=1,
+        max_length=2,
+        description="Required channels; every returned offer must support all requested capabilities.",
+    )
+    provider: Literal["auto", "twilio", "telnyx"] = Field(
+        default="auto",
+        description="Carrier preference; auto compares readiness, remaining verification effort, and rental/setup costs. Twilio wins equivalent ties.",
+    )
+
+    @field_validator("country_code")
+    @classmethod
+    def _uppercase_country_code(cls, v: str) -> str:
+        v = v.upper()
+        if not re.fullmatch(r"[A-Z]{2}", v):
+            raise ValueError("country_code must be two letters")
+        return v
+
+
 class PhoneNumberResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     provider: str = Field(

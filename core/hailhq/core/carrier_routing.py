@@ -1,6 +1,7 @@
 """Route an owned number through its carrier, never a cheapest foreign trunk."""
 
 from hailhq.core.config import settings
+from hailhq.core.providers.sms.base import SmsProvider
 from hailhq.core.providers.sms.telnyx import TelnyxSmsProvider
 
 
@@ -19,11 +20,10 @@ def voice_route(provider: str) -> tuple[str, dict[str, str]]:
     raise ValueError("Unsupported number carrier")
 
 
-def sms_route(provider: str, twilio):
+def sms_route(provider: str, twilio: SmsProvider) -> SmsProvider:
     if provider == "twilio":
         return twilio
     if provider == "telnyx":
-
         if not settings.telnyx_public_key:
             raise ValueError("Telnyx webhooks are not configured")
         return TelnyxSmsProvider()

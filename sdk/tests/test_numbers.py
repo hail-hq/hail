@@ -180,3 +180,69 @@ async def test_quotes_default_to_automatic_comparison(base_url: str, api_key: st
     async with Client(api_key=api_key, base_url=base_url) as c:
         await c.numbers.quotes(country="PT", capabilities=["voice"])
     assert json.loads(route.calls.last.request.content)["provider"] == "auto"
+
+
+# --------------------------------------------------------------------------- #
+# NumberOffer stays in sync with openapi.yaml
+# --------------------------------------------------------------------------- #
+
+
+def test_number_offer_matches_openapi_carrier_offer() -> None:
+    from pathlib import Path
+
+    import pytest
+    from hail import NumberOffer
+
+    yaml = pytest.importorskip("yaml")
+    spec = yaml.safe_load(
+        (Path(__file__).resolve().parents[2] / "openapi" / "openapi.yaml").read_text()
+    )
+    schema = spec["components"]["schemas"]["CarrierOffer"]
+    fields = NumberOffer.model_fields
+    assert set(fields) == set(schema["properties"])
+    assert {n for n, f in fields.items() if f.is_required()} == set(schema["required"])
+
+
+def test_number_offer_accepts_a_minimal_and_a_full_offer() -> None:
+    from hail import NumberOffer
+
+    minimal = {
+        "provider": "telnyx",
+        "e164": "+351211234567",
+        "country_code": "PT",
+        "number_type": "local",
+        "capabilities": ["voice"],
+        "monthly_cents": 100,
+        "setup_cents": 0,
+        "readiness": "ready",
+    }
+    offer = NumberOffer.model_validate(minimal)
+    assert offer.currency == "USD"
+    assert offer.requirements == []
+    assert offer.quote_id is None
+    full = NumberOffer.model_validate(
+        {
+            **minimal,
+            "verification_id": "v1",
+            "address_id": "a1",
+            "quote_id": str(uuid4()),
+        }
+    )
+    assert full.verification_id == "v1"
+    assert full.address_id == "a1"
+
+
+@respx.mock
+async def test_numbers_acquire_with_quote_omits_number_type(
+    base_url: str, api_key: str
+) -> None:
+    route = respx.post(f"{base_url}/numbers").mock(
+        return_value=httpx.Response(201, json=make_phone_number_response())
+    )
+    quote_id = uuid4()
+    async with Client(api_key=api_key, base_url=base_url) as c:
+        await c.numbers.acquire(country="PT", quote_id=quote_id)
+        await c.numbers.acquire(country="PT", quote_id=quote_id, number_type="mobile")
+    first, second = (json.loads(call.request.content) for call in route.calls)
+    assert first == {"country_code": "PT", "quote_id": str(quote_id)}
+    assert second["number_type"] == "mobile"

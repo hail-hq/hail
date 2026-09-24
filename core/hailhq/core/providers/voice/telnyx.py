@@ -181,7 +181,10 @@ async def telnyx_offers(
     )
     results = []
     for q in quotes:
-        if q.currency != "USD":
+        monthly_cents = cents(q.monthly_cost)
+        # Only USD offers with a positive monthly price count; a zero or
+        # sub-cent price must skip this offer, not fail the whole carrier.
+        if q.currency != "USD" or monthly_cents <= 0:
             continue
         params = {"filter[phone_number]": q.e164, "filter[action]": "ordering"}
         if group:
@@ -210,7 +213,7 @@ async def telnyx_offers(
                 country_code=country,
                 number_type=kind,
                 capabilities=sorted(set(q.capabilities) & {"voice", "sms"}),
-                monthly_cents=cents(q.monthly_cost),
+                monthly_cents=monthly_cents,
                 setup_cents=cents(q.upfront_cost),
                 readiness=(
                     "ready" if not requirements or group else "verification_required"

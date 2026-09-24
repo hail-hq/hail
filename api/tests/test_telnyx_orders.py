@@ -6,11 +6,14 @@ import httpx
 import pytest
 from fastapi import HTTPException
 from hailhq.api.number_orders import (
+    PENDING_ORDER_TIMEOUT,
+    QUOTE_RETENTION,
     UNFOUND_ORDER_REVIEW_AFTER,
     acquire_offer,
+    purge_expired_quotes,
     reconcile_order,
 )
-from hailhq.core.billing import get_balance_cents
+from hailhq.core.billing import get_balance_cents, monthly_fee_ref
 from hailhq.core.models import AccountCredit, NumberOffer, PhoneNumber
 from hailhq.core.number_offers import CarrierOffer
 from hailhq.core.providers.voice import CarrierRequestError
@@ -21,13 +24,19 @@ from .conftest import insert_org_and_key
 
 
 async def seed_quote(
-    db, org, monthly=100, setup=50, readiness="ready", provider="telnyx"
+    db,
+    org,
+    monthly=100,
+    setup=50,
+    readiness="ready",
+    provider="telnyx",
+    kind="local",
 ):
     offer = CarrierOffer(
         provider=provider,
         e164="+351211234567",
         country_code="PT",
-        number_type="local",
+        number_type=kind,
         capabilities=["voice"],
         monthly_cents=monthly,
         setup_cents=setup,
@@ -125,6 +134,7 @@ async def test_pending_order_reserved_once_and_reconciles_to_owned_id(
         .all()
     )
     assert len(debits) == 1 and debits[0].amount_cents == -100
+    assert debits[0].ref == monthly_fee_ref(org, number.id, number.acquired_at)
     await reconcile_order(async_session, number, force=True)
     assert wire.await_count == 4
 
@@ -510,10 +520,10 @@ async def test_get_number_survives_a_carrier_outage_while_pending(
     assert response.json()["provisioning_state"] == "pending"
 
 
-async def test_pending_gets_share_a_persisted_poll_interval(
-    client, async_session, org_and_key, monkeypatch
+async def test_reconciler_polls_share_a_persisted_interval(
+    async_session, org_and_key, monkeypatch
 ):
-    org, _, key = org_and_key
+    org, _, _ = org_and_key
     row, offer = await seed_quote(async_session, org)
     monkeypatch.setattr(
         "hailhq.api.number_orders.discover_offers",
@@ -526,11 +536,7 @@ async def test_pending_gets_share_a_persisted_poll_interval(
     lookup = AsyncMock(return_value=("pending", None, None))
     monkeypatch.setattr("hailhq.api.number_orders.carrier_outcome", lookup)
     for _ in range(3):
-        response = await client.get(
-            f"/numbers/{number.id}", headers={"Authorization": f"Bearer {key}"}
-        )
-        assert response.status_code == 200
-        assert response.json()["provisioning_state"] == "pending"
+        await reconcile_order(async_session, number)
     assert lookup.await_count == 1
     await async_session.refresh(number)
     number.provisioning_metadata = {
@@ -540,7 +546,303 @@ async def test_pending_gets_share_a_persisted_poll_interval(
         ).isoformat(),
     }
     await async_session.commit()
-    await client.get(
+    await reconcile_order(async_session, number)
+    assert lookup.await_count == 2
+
+
+async def test_get_number_never_reconciles_or_writes_money_state(
+    client, async_session, org_and_key, monkeypatch
+):
+    org, _, key = org_and_key
+    row, offer = await seed_quote(async_session, org)
+    monkeypatch.setattr(
+        "hailhq.api.number_orders.discover_offers",
+        AsyncMock(return_value=([offer], [])),
+    )
+    monkeypatch.setattr("hailhq.core.config.settings.telnyx_api_key", "test")
+    wire = AsyncMock(side_effect=httpx.ReadTimeout("lost response"))
+    monkeypatch.setattr("hailhq.api.number_orders.TelnyxClient.request", wire)
+    number = await buy(async_session, org, row)
+    lookup = AsyncMock(return_value=("active", "resource", None))
+    monkeypatch.setattr("hailhq.api.number_orders.carrier_outcome", lookup)
+    balance = await get_balance_cents(async_session, org)
+    response = await client.get(
         f"/numbers/{number.id}", headers={"Authorization": f"Bearer {key}"}
     )
-    assert lookup.await_count == 2
+    assert response.status_code == 200
+    assert response.json()["provisioning_state"] == "pending"
+    lookup.assert_not_awaited()
+    assert await get_balance_cents(async_session, org) == balance
+
+
+async def test_carrier_lookup_outage_at_recheck_is_a_retryable_503_not_a_409(
+    async_session, org_and_key, monkeypatch
+):
+    org, _, _ = org_and_key
+    row, _ = await seed_quote(async_session, org)
+    monkeypatch.setattr(
+        "hailhq.api.number_orders.discover_offers",
+        AsyncMock(return_value=([], ["telnyx"])),
+    )
+    with pytest.raises(HTTPException) as exc:
+        await buy(async_session, org, row)
+    assert exc.value.status_code == 503
+    assert await get_balance_cents(async_session, org) == 100000
+    await async_session.refresh(row)
+    assert row.number_id is None
+
+
+async def test_quote_mismatch_is_a_validation_shaped_422(async_session, org_and_key):
+    org, _, _ = org_and_key
+    row, _ = await seed_quote(async_session, org)
+    with pytest.raises(HTTPException) as exc:
+        await acquire_offer(
+            async_session,
+            org,
+            row.id,
+            country="PT",
+            kind="mobile",
+            provider="auto",
+            billed=True,
+        )
+    assert exc.value.status_code == 422
+    assert exc.value.detail[0]["loc"] == ["body", "quote_id"]
+
+
+async def test_only_stale_unused_quotes_are_purged(async_session, org_and_key):
+    org, _, _ = org_and_key
+    now = datetime.now(timezone.utc)
+    stale = now - QUOTE_RETENTION - timedelta(minutes=1)
+    stale_unused, _ = await seed_quote(async_session, org)
+    stale_consumed, _ = await seed_quote(async_session, org)
+    recent_unused, _ = await seed_quote(async_session, org)
+    live, _ = await seed_quote(async_session, org)
+    stale_unused.expires_at = stale
+    stale_consumed.expires_at = stale
+    stale_consumed.number_id = uuid4()
+    recent_unused.expires_at = now - timedelta(minutes=5)
+    await async_session.commit()
+    assert await purge_expired_quotes() == 1
+    kept = set((await async_session.execute(select(NumberOffer.id))).scalars())
+    assert kept == {stale_consumed.id, recent_unused.id, live.id}
+
+
+async def test_transient_recheck_failure_is_not_cached_under_the_idempotency_key(
+    client, async_session, org_and_key, monkeypatch, voice_provider_mock
+):
+    org, _, key = org_and_key
+    row, _ = await seed_quote(async_session, org)
+    discover = AsyncMock(return_value=([], ["telnyx"]))
+    monkeypatch.setattr("hailhq.api.number_orders.discover_offers", discover)
+    for _ in range(2):
+        response = await client.post(
+            "/numbers",
+            headers={"Authorization": f"Bearer {key}", "Idempotency-Key": "retry-1"},
+            json={
+                "country_code": "PT",
+                "number_type": "local",
+                "quote_id": str(row.id),
+            },
+        )
+        assert response.status_code == 503, response.text
+        assert "Idempotency-Replay" not in response.headers
+    assert discover.await_count == 2
+
+
+async def test_recheck_searches_with_the_capabilities_that_were_requested(
+    async_session, org_and_key, monkeypatch
+):
+    org, _, _ = org_and_key
+    row, offer = await seed_quote(async_session, org)
+    offer.capabilities = ["sms", "voice"]
+    row.offer = {**offer.model_dump(mode="json"), "requested_capabilities": ["voice"]}
+    await async_session.commit()
+    discover = AsyncMock(return_value=([offer], []))
+    monkeypatch.setattr("hailhq.api.number_orders.discover_offers", discover)
+    monkeypatch.setattr("hailhq.core.config.settings.telnyx_api_key", "test")
+    monkeypatch.setattr(
+        "hailhq.api.number_orders.TelnyxClient.request",
+        AsyncMock(return_value={"data": {"id": str(uuid4()), "status": "pending"}}),
+    )
+    await buy(async_session, org, row)
+    assert discover.await_args.args[3] == ["voice"]
+
+
+async def test_quote_route_stores_the_requested_capabilities(
+    client, async_session, org_and_key, monkeypatch
+):
+    org, _, key = org_and_key
+    _, offer = await seed_quote(async_session, org)
+    monkeypatch.setattr(
+        "hailhq.api.routes.numbers.discover_offers",
+        AsyncMock(return_value=([offer], [])),
+    )
+    response = await client.post(
+        "/numbers/quotes",
+        headers={"Authorization": f"Bearer {key}"},
+        json={"country_code": "PT", "number_type": "local", "capabilities": ["voice"]},
+    )
+    assert response.status_code == 200, response.text
+    quote_id = response.json()["offers"][0]["quote_id"]
+    row = await async_session.get(NumberOffer, UUID(quote_id))
+    assert row.offer["requested_capabilities"] == ["voice"]
+
+
+async def _stub_order(monkeypatch, offer, *responses):
+    monkeypatch.setattr(
+        "hailhq.api.number_orders.discover_offers",
+        AsyncMock(return_value=([offer], [])),
+    )
+    monkeypatch.setattr("hailhq.core.config.settings.telnyx_api_key", "test")
+    wire = AsyncMock(side_effect=list(responses))
+    monkeypatch.setattr("hailhq.api.number_orders.TelnyxClient.request", wire)
+    return wire
+
+
+async def test_pending_order_past_timeout_is_failed_and_refunded_once(
+    async_session, org_and_key, monkeypatch
+):
+    org, _, _ = org_and_key
+    row, offer = await seed_quote(async_session, org)
+    await _stub_order(monkeypatch, offer, {"data": {"id": str(uuid4())}})
+    number = await buy(async_session, org, row)
+    assert number.provisioning_state == "pending"
+    assert await get_balance_cents(async_session, org) == 100000 - 150
+    monkeypatch.setattr(
+        "hailhq.api.number_orders.carrier_outcome",
+        AsyncMock(return_value=("pending", None, None)),
+    )
+    # Younger than the timeout: stays pending, hold kept.
+    await reconcile_order(async_session, number, force=True)
+    assert number.provisioning_state == "pending"
+    await async_session.execute(
+        text("UPDATE phone_numbers SET created_at = :t WHERE id = :id"),
+        {
+            "t": datetime.now(timezone.utc)
+            - PENDING_ORDER_TIMEOUT
+            - timedelta(minutes=1),
+            "id": number.id,
+        },
+    )
+    await async_session.commit()
+    await async_session.refresh(number)
+    await reconcile_order(async_session, number, force=True)
+    await reconcile_order(async_session, number, force=True)
+    assert number.provisioning_state == "failed"
+    assert "in time" in number.provisioning_metadata["failure_reason"]
+    assert await get_balance_cents(async_session, org) == 100000
+    returns = (
+        (
+            await async_session.execute(
+                select(AccountCredit).where(
+                    AccountCredit.ref == f"number_reservation_return:{number.id}"
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert len(returns) == 1
+
+
+async def test_post_numbers_returns_409_for_a_refunded_failed_order(
+    client, async_session, org_and_key, monkeypatch
+):
+    org, _, key = org_and_key
+    row, offer = await seed_quote(async_session, org)
+    await _stub_order(
+        monkeypatch,
+        offer,
+        {"data": {"id": str(uuid4())}},
+        {"data": {"status": "failure"}},
+    )
+    headers = {"Authorization": f"Bearer {key}", "Idempotency-Key": "failed-order"}
+    body = {"country_code": "PT", "quote_id": str(row.id)}
+    first = await client.post("/numbers", json=body, headers=headers)
+    assert first.status_code == 409, first.text
+    assert "refunded" in first.json()["detail"]
+    assert "carrier reported the order as failed" in first.json()["detail"]
+    assert await get_balance_cents(async_session, org) == 100000
+    second = await client.post("/numbers", json=body, headers=headers)
+    assert second.status_code == 409
+    # A different key replays the consumed quote: still the same 409.
+    third = await client.post(
+        "/numbers",
+        json=body,
+        headers={"Authorization": f"Bearer {key}", "Idempotency-Key": "other"},
+    )
+    assert third.status_code == 409
+
+
+async def test_quote_number_type_is_taken_from_the_quote(
+    client, async_session, org_and_key, monkeypatch
+):
+    org, _, key = org_and_key
+    row, offer = await seed_quote(async_session, org, kind="mobile")
+    await _stub_order(monkeypatch, offer, {"data": {"id": str(uuid4())}})
+    headers = {"Authorization": f"Bearer {key}"}
+    conflict = await client.post(
+        "/numbers",
+        json={"country_code": "PT", "quote_id": str(row.id), "number_type": "local"},
+        headers=headers,
+    )
+    assert conflict.status_code == 422
+    ok = await client.post(
+        "/numbers",
+        json={"country_code": "pt", "quote_id": str(row.id)},
+        headers=headers,
+    )
+    assert ok.status_code == 201, ok.text
+    assert ok.json()["number_type"] == "mobile"
+
+
+async def test_quote_purchase_of_a_type_missing_from_the_catalog_is_422(
+    async_session, org_and_key, monkeypatch
+):
+    org, _, _ = org_and_key
+    row, offer = await seed_quote(async_session, org, kind="toll_free")
+    discover = AsyncMock(return_value=([offer], []))
+    monkeypatch.setattr("hailhq.api.number_orders.discover_offers", discover)
+    with pytest.raises(HTTPException) as exc:
+        await acquire_offer(
+            async_session,
+            org,
+            row.id,
+            country="PT",
+            kind=None,
+            provider="auto",
+            billed=True,
+        )
+    assert exc.value.status_code == 422
+    assert exc.value.detail[0]["loc"] == ["body", "number_type"]
+    discover.assert_not_awaited()
+    assert await get_balance_cents(async_session, org) == 100000
+
+
+async def test_quote_route_rejects_unlisted_type_and_accepts_lowercase_country(
+    client, org_and_key, monkeypatch
+):
+    _, _, key = org_and_key
+    discover = AsyncMock(return_value=([], []))
+    monkeypatch.setattr("hailhq.api.routes.numbers.discover_offers", discover)
+    headers = {"Authorization": f"Bearer {key}"}
+    unlisted = await client.post(
+        "/numbers/quotes",
+        json={
+            "country_code": "PT",
+            "number_type": "toll_free",
+            "capabilities": ["voice"],
+        },
+        headers=headers,
+    )
+    assert unlisted.status_code == 422
+    discover.assert_not_awaited()
+    lower = await client.post(
+        "/numbers/quotes",
+        json={"country_code": "pt", "capabilities": ["voice"]},
+        headers=headers,
+    )
+    assert lower.status_code == 200, lower.text
+    assert {call.args[1] for call in discover.await_args_list} == {"PT"}
+    # Only the types the catalog lists for PT are searched.
+    assert {call.args[2] for call in discover.await_args_list} == {"local", "mobile"}

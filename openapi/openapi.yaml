@@ -1497,6 +1497,11 @@ paths:
             insufficient credits; top up at https://hail.so/console/billing.
             Also returned when the balance doesn't cover this number's full monthly
             price.
+        "409":
+          description:
+            The quote expired, the number is taken, the price changed,
+            or the carrier rejected or failed the order. In the last case the credit
+            hold is refunded and the detail gives the reason.
         "422":
           description: Validation Error
           content:
@@ -1642,7 +1647,9 @@ paths:
 
         Org-scoped: returns 404 for a number belonging to a different
 
-        organization."
+        organization. Read-only: a pending order is advanced by the background
+
+        reconciler, never by this request."
       operationId: get_number_v1_numbers__number_id__get
       parameters:
         - name: number_id
@@ -3971,7 +3978,7 @@ components:
             SMS registration may still be required.
         monthly_cents:
           type: integer
-          exclusiveMinimum: 0.0
+          minimum: 1.0
           title: Monthly Cents
           description:
             Monthly number rental in USD cents, charged from organization
@@ -5837,9 +5844,10 @@ components:
       properties:
         country_code:
           type: string
-          pattern: ^[A-Z]{2}$
+          maxLength: 2
+          minLength: 2
           title: Country Code
-          description: Uppercase ISO alpha-2 country code to search.
+          description: ISO alpha-2 country code to search. Case-insensitive.
         number_type:
           anyOf:
             - type: string

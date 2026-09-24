@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from uuid import UUID
 
 import httpx
@@ -10,6 +11,8 @@ from hailhq.core.carrier_offer import CarrierOffer
 from hailhq.core.providers.voice.telnyx import telnyx_offers
 from hailhq.core.providers.voice.twilio import twilio_offers
 from hailhq.core.schemas import NumberType
+
+logger = logging.getLogger(__name__)
 
 __all__ = [
     "CarrierOffer",
@@ -62,7 +65,12 @@ async def discover_offers(
         )
     offers, unavailable = [], []
     for provider, result in zip(("twilio", "telnyx"), results):
+        if isinstance(result, asyncio.CancelledError):
+            raise result
         if isinstance(result, BaseException):
+            logger.warning(
+                "Carrier discovery failed: provider=%s", provider, exc_info=result
+            )
             unavailable.append(provider)
         else:
             offers.extend(result)

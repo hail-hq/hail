@@ -605,7 +605,7 @@ class _NumbersResource:
         self,
         *,
         country: str,
-        number_type: NumberType = "local",
+        number_type: NumberType | None = None,
         idempotency_key: str | None = None,
         quote_id: str | UUID | None = None,
         provider: Literal["auto", "twilio", "telnyx"] | None = None,
@@ -613,9 +613,13 @@ class _NumbersResource:
         """Provision a new dedicated number from the carrier.
 
         ``country`` is an ISO 3166-1 alpha-2 code (e.g. ``"US"``).
-        ``idempotency_key`` defaults to a fresh UUIDv4.
+        ``idempotency_key`` defaults to a fresh UUIDv4. ``number_type`` defaults
+        to ``"local"`` without a quote; with a ``quote_id`` it is taken from the
+        quote unless you pass one (a different one is a 422).
         """
-        body: dict[str, Any] = {"country_code": country, "number_type": number_type}
+        body: dict[str, Any] = {"country_code": country}
+        if number_type is not None or quote_id is None:
+            body["number_type"] = number_type or "local"
         if quote_id is not None:
             body["quote_id"] = str(quote_id)
         if provider is not None:

@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import logging
 import uuid
+from datetime import datetime
 
 from hailhq.core.models import AccountCredit
 from sqlalchemy import func, select
@@ -30,7 +31,19 @@ logger = logging.getLogger(__name__)
 # pool.CALL_META_FROM_POOL.
 CALL_META_BILLED = "billed"
 
-__all__ = ["CALL_META_BILLED", "get_balance_cents", "has_funds"]
+__all__ = ["CALL_META_BILLED", "get_balance_cents", "has_funds", "monthly_fee_ref"]
+
+
+def monthly_fee_ref(
+    organization_id: uuid.UUID, number_id: uuid.UUID, at: datetime
+) -> str:
+    """Ledger ref of a dedicated number's monthly fee for the month of ``at`` (UTC).
+
+    The website's renewal rater builds the same string and skips a month whose
+    ref already exists, so acquisition and renewal never charge one month twice.
+    Change this format only together with the rater.
+    """
+    return f"monthly_fee:{organization_id}:{number_id}:dedicated_number:{at:%Y-%m}"
 
 
 async def get_balance_cents(db: AsyncSession, organization_id: uuid.UUID) -> int:

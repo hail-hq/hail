@@ -23,7 +23,7 @@ class CarrierOffer(BaseModel):
         description="Voice/SMS capabilities reported by live carrier inventory; SMS registration may still be required."
     )
     monthly_cents: int = Field(
-        gt=0,
+        ge=1,
         description="Monthly number rental in USD cents, charged from organization credits.",
     )
     setup_cents: int = Field(

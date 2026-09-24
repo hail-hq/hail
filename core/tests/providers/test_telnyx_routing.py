@@ -17,6 +17,7 @@ from hailhq.core.number_offers import (
 )
 from hailhq.core.providers.sms.telnyx import TelnyxSmsProvider
 from hailhq.core.providers.telnyx import TelnyxClient, verify_webhook
+from twilio.base.exceptions import TwilioRestException
 
 
 def test_signature_rejects_tampering_and_replay():
@@ -249,3 +250,142 @@ def test_info_only_verification_precedes_cheaper_document_uploads():
         "ready"  # This organization's approved group removes remaining work.
     )
     assert rank_offers([info, docs])[0] == docs
+
+
+def telnyx_json_client(respond):
+    return httpx.AsyncClient(transport=httpx.MockTransport(respond))
+
+
+async def test_owned_telnyx_number_ids_are_numeric_not_uuids():
+    numeric = "1293384261075731499"
+    seen = []
+
+    def respond(request):
+        seen.append((request.method, request.url.path))
+        return httpx.Response(200, json={"data": {}})
+
+    async with telnyx_json_client(respond) as http:
+        client = TelnyxClient("secret", http)
+        await client.release_number(numeric)
+        await TelnyxSmsProvider(client).attach_number("profile-id", numeric)
+    assert seen == [
+        ("DELETE", f"/v2/phone_numbers/{numeric}"),
+        ("PATCH", f"/v2/phone_numbers/{numeric}/messaging"),
+    ]
+    with pytest.raises(ValueError):
+        await TelnyxClient("secret").release_number("  ")
+
+
+async def test_new_messaging_profile_sends_required_destinations():
+    bodies = []
+
+    def respond(request):
+        if request.method == "GET":
+            return httpx.Response(200, json={"data": []})
+        bodies.append(json.loads(request.content))
+        return httpx.Response(200, json={"data": {"id": "profile-id"}})
+
+    async with telnyx_json_client(respond) as http:
+        provider = TelnyxSmsProvider(TelnyxClient("secret", http))
+        assert await provider.ensure_messaging_service(uuid4(), None) == "profile-id"
+    assert bodies[0]["whitelisted_destinations"] == ["*"]
+
+
+@pytest.mark.parametrize(
+    "status,body,expected_code",
+    [
+        (400, {"errors": [{"code": "40008", "title": "Invalid"}]}, "40008"),
+        (422, {}, None),
+    ],
+)
+async def test_message_rejection_is_a_failed_result_but_auth_and_5xx_raise(
+    status, body, expected_code
+):
+    def respond(request):
+        return httpx.Response(status, json=body)
+
+    async with telnyx_json_client(respond) as http:
+        provider = TelnyxSmsProvider(TelnyxClient("secret", http))
+        if expected_code is None:
+            with pytest.raises(httpx.HTTPStatusError):
+                await provider.send_sms("+351211234567", "+46701234567", "hi")
+            return
+        result = await provider.send_sms("+351211234567", "+46701234567", "hi")
+    assert (result.status, result.error_code) == ("failed", expected_code)
+    assert result.provider_message_sid is None
+    for transport_status in (401, 429, 500):
+        async with telnyx_json_client(
+            lambda request, status=transport_status: httpx.Response(
+                status, json={"errors": [{"code": "10009"}]}
+            )
+        ) as http:
+            provider = TelnyxSmsProvider(TelnyxClient("secret", http))
+            with pytest.raises(httpx.HTTPStatusError):
+                await provider.send_sms("+351211234567", "+46701234567", "hi")
+
+
+def test_signature_check_rejects_an_absurd_timestamp_instead_of_raising():
+    assert not verify_webhook(b"{}", "AAAA", "1" + "0" * 400, "AAAA")
+
+
+async def test_zero_price_number_is_skipped_not_a_carrier_failure(
+    monkeypatch,
+):
+    monkeypatch.setattr(settings, "telnyx_api_key", "secret")
+    monkeypatch.setattr(settings, "telnyx_connection_id", "connection")
+    monkeypatch.setattr(settings, "telnyx_sip_username", "sip-user")
+    monkeypatch.setattr(settings, "livekit_telnyx_sip_outbound_trunk_id", "ST_telnyx")
+    monkeypatch.setattr(settings, "telnyx_public_key", "")
+
+    def number(e164, monthly):
+        return {
+            "phone_number": e164,
+            "features": [{"name": n} for n in ("voice", "sms", "emergency")],
+            "cost_information": {
+                "currency": "USD",
+                "monthly_cost": monthly,
+                "upfront_cost": "0",
+            },
+        }
+
+    def respond(request):
+        if request.url.path.endswith("available_phone_numbers"):
+            data = [number("+351211234560", "0.004"), number("+351211234567", "2.30")]
+        elif request.url.path.endswith("requirement_groups"):
+            data = []
+        else:
+            data = [
+                {
+                    "country_code": "PT",
+                    "phone_number_type": "local",
+                    "action": "ordering",
+                    "regulatory_requirements": [],
+                }
+            ]
+        return httpx.Response(200, json={"data": data})
+
+    async with telnyx_json_client(respond) as http:
+        result = await telnyx_offers(uuid4(), "PT", "local", ["voice"], http)
+    # The free number is skipped, not an error for the whole carrier. The offer
+    # still reports everything the number supports.
+    assert [(o.e164, o.capabilities) for o in result] == [
+        ("+351211234567", ["sms", "voice"])
+    ]
+
+
+async def test_twilio_number_type_not_sold_in_country_is_empty_inventory(monkeypatch):
+    api = MagicMock()
+    api.available_phone_numbers.return_value.mobile.list.side_effect = (
+        TwilioRestException(404, "/AvailablePhoneNumbers/US/Mobile.json", "Not found")
+    )
+    monkeypatch.setattr(settings, "twilio_account_sid", "AC_test")
+    monkeypatch.setattr(settings, "twilio_auth_token", "test")
+    monkeypatch.setattr(
+        "hailhq.core.providers.voice.twilio.TwilioClient", lambda *a, **kw: api
+    )
+    assert await twilio_offers(uuid4(), "US", "mobile", ["voice"]) == []
+    api.available_phone_numbers.return_value.mobile.list.side_effect = (
+        TwilioRestException(401, "/AvailablePhoneNumbers/US/Mobile.json", "Auth")
+    )
+    with pytest.raises(TwilioRestException):
+        await twilio_offers(uuid4(), "US", "mobile", ["voice"])

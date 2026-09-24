@@ -1032,6 +1032,7 @@ dependencies = [
 dev = [
     { name = "pytest" },
     { name = "pytest-asyncio" },
+    { name = "pyyaml" },
     { name = "respx" },
 ]
 
@@ -1041,6 +1042,7 @@ requires-dist = [
     { name = "pydantic", specifier = ">=2.9" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8" },
     { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.23" },
+    { name = "pyyaml", marker = "extra == 'dev'", specifier = ">=6" },
     { name = "respx", marker = "extra == 'dev'", specifier = ">=0.21" },
 ]
 provides-extras = ["dev"]

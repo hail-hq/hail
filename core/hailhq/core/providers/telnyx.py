@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import base64
 import time
-from uuid import UUID
+from urllib.parse import quote
 
 import httpx
 from cryptography.exceptions import InvalidSignature
@@ -43,13 +43,24 @@ class TelnyxClient:
             return await send(client)
 
     async def release_number(self, resource_id: str) -> None:
-        # Only persisted carrier UUIDs belong here, never a number-order id.
-        resource_id = str(UUID(resource_id))
+        # Only a persisted owned-number id belongs here, never a number-order id.
+        resource_id = path_id(resource_id)
         try:
             await self.request("DELETE", f"/phone_numbers/{resource_id}")
         except httpx.HTTPStatusError as exc:
             if exc.response.status_code != 404:
                 raise
+
+
+def path_id(resource_id: str) -> str:
+    """One URL path segment for a Telnyx resource id.
+
+    Owned phone-number ids are numeric strings such as ``1293384261075731499``,
+    not UUIDs; only number-order ids are UUIDs.
+    """
+    if not resource_id or not resource_id.strip():
+        raise ValueError("Telnyx resource id is required")
+    return quote(resource_id.strip(), safe="")
 
 
 def verify_webhook(
@@ -73,5 +84,6 @@ def verify_webhook(
             base64.b64decode(signature, validate=True), timestamp.encode() + b"|" + body
         )
         return True
-    except (ValueError, InvalidSignature):
+    except (ValueError, OverflowError, InvalidSignature):
+        # OverflowError: an absurdly long timestamp digit string cannot become a float.
         return False

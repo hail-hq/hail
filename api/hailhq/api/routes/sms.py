@@ -725,10 +725,17 @@ async def receive_telnyx_sms(
     except (KeyError, TypeError, ValueError):
         raise HTTPException(status_code=400, detail="invalid messaging event") from None
     if event_type == "message.received":
+        try:
+            sender_e164 = payload["from"]["phone_number"]
+            recipient_e164 = recipient["phone_number"]
+        except (KeyError, TypeError):
+            raise HTTPException(
+                status_code=400, detail="invalid messaging event"
+            ) from None
         await ingest_inbound_sms(
             db,
-            from_e164=payload["from"]["phone_number"],
-            to_e164=recipient["phone_number"],
+            from_e164=sender_e164,
+            to_e164=recipient_e164,
             body=payload.get("text") or "",
             provider_message_sid=message_id,
             opt_out_type=None,
@@ -742,6 +749,7 @@ async def receive_telnyx_sms(
     new_status = {
         "delivered": "delivered",
         "delivery_failed": "undelivered",
+        "expired": "undelivered",
         "sending_failed": "failed",
     }.get(recipient.get("status"))
     if not new_status:
@@ -786,7 +794,8 @@ async def receive_telnyx_sms(
     prior = sms.status
     sms.status = new_status
     errors = payload.get("errors") or []
-    sms.error_code = str(errors[0]["code"]) if errors else None
+    error_code = errors[0].get("code") if errors else None
+    sms.error_code = str(error_code) if error_code is not None else None
     db.add(
         SmsEvent(
             sms_id=sms.id,

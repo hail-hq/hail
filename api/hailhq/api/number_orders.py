@@ -4,24 +4,33 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timedelta, timezone
-from typing import Literal
+from decimal import ROUND_HALF_UP
+from typing import Any, Literal
 from uuid import UUID, uuid4
 
 import httpx
 from fastapi import HTTPException
-from hailhq.api.funds import BILLING_URL
-from hailhq.core.billing import get_balance_cents
+from hailhq.api.deps import Principal
+from hailhq.api.errors import unprocessable
+from hailhq.api.funds import BILLING_URL, require_funds
+from hailhq.core import telephony_catalog
+from hailhq.core.billing import get_balance_cents, monthly_fee_ref
 from hailhq.core.config import settings
 from hailhq.core.db import session_scope
 from hailhq.core.models import AccountCredit, NumberOffer, PhoneNumber
 from hailhq.core.number_offers import CarrierOffer, discover_offers
 from hailhq.core.providers.telnyx import TelnyxClient
-from hailhq.core.providers.voice import CarrierRequestError
+from hailhq.core.providers.voice import (
+    CarrierRequestError,
+    NumberNotProvisionable,
+    VoiceProvider,
+)
 from hailhq.core.providers.voice.twilio import (
     find_ordered_number,
     purchase_ordered_number,
 )
-from sqlalchemy import select, text
+from hailhq.core.schemas import NumberAcquireRequest
+from sqlalchemy import delete, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -31,19 +40,49 @@ logger = logging.getLogger(__name__)
 # Escalate old ambiguous orders while retaining the reservation and number claim.
 UNFOUND_ORDER_REVIEW_AFTER = timedelta(hours=1)
 
+# An order the carrier still reports as pending after this long is abnormal:
+# an offer must be "ready" (regulatory requirements met) before it can be bought.
+# The reconciler then marks it failed and refunds the hold, so the number can be
+# released or re-ordered. If the carrier completes it later, an operator must
+# release the number at the carrier (the log line names the order).
+PENDING_ORDER_TIMEOUT = timedelta(hours=2)
+
 ORDER_POLL_INTERVAL = timedelta(seconds=15)
+
+# Quotes that expired unused are deleted after this long. Consumed quotes stay:
+# they answer replays of the purchase that used them.
+QUOTE_RETENTION = timedelta(hours=1)
 
 NUMBER_TAKEN_DETAIL = "This number is already held or has a pending order"
 
 
-async def org_lock(db, org):
+class RetryableError(HTTPException):
+    """A 503 raised before any charge. The route does not cache it under the
+    idempotency key, so a same-key retry can succeed."""
+
+    def __init__(self, detail: str) -> None:
+        super().__init__(status_code=503, detail=detail)
+
+
+def catalog_capabilities(country: str, kind: str) -> dict[str, Any]:
+    """422 unless the telephony catalog lists this country and number type."""
+    caps = telephony_catalog.capabilities(country, kind)
+    if caps is None:
+        raise unprocessable(
+            f"we don't offer a {kind} number in {country} yet",
+            loc=["body", "number_type"],
+        )
+    return caps
+
+
+async def org_lock(db: AsyncSession, org: UUID) -> None:
     await db.execute(
         text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))"),
         {"key": str(org)},
     )
 
 
-def credit(number, amount, ref, source):
+def credit(number: PhoneNumber, amount: int, ref: str, source: str) -> AccountCredit:
     return AccountCredit(
         organization_id=number.organization_id,
         kind="credit" if amount > 0 else "debit",
@@ -61,8 +100,12 @@ async def finish_order(
     *,
     resource_id: str | None,
     failed: bool = False,
+    reason: str | None = None,
 ):
-    """Caller holds org lock. Move reservation to month fee, or refund once."""
+    """Caller holds org lock. Move reservation to month fee, or refund once.
+
+    ``reason`` is stored for a failed order and shown to the buyer; it must
+    never contain carrier payloads."""
     if number.provisioning_state != "pending":
         return
     meta = dict(number.provisioning_metadata)
@@ -82,7 +125,7 @@ async def finish_order(
                 credit(
                     number,
                     -offer.monthly_cents,
-                    f"monthly_fee:{number.organization_id}:{number.id}:dedicated_number:{now:%Y-%m}",
+                    monthly_fee_ref(number.organization_id, number.id, now),
                     "monthly_fee",
                 )
             )
@@ -101,6 +144,8 @@ async def finish_order(
         number.acquired_at = now
     meta.pop("needs_review", None)
     meta["order_state"] = "failed" if failed else "complete"
+    if failed:
+        meta["failure_reason"] = reason or "the carrier did not complete the order"
     number.provisioning_metadata = meta
     await db.commit()
 
@@ -223,7 +268,30 @@ async def reconcile_order(
     if state == "active":
         await finish_order(db, number, resource_id=resource_id)
     elif state == "failed":
-        await finish_order(db, number, resource_id=None, failed=True)
+        await finish_order(
+            db,
+            number,
+            resource_id=None,
+            failed=True,
+            reason="the carrier reported the order as failed",
+        )
+    elif (
+        state == "pending"
+        and datetime.now(timezone.utc) - number.created_at > PENDING_ORDER_TIMEOUT
+    ):
+        logger.warning(
+            "Carrier order still pending after timeout; failing it and refunding: "
+            "number=%s carrier_order=%s",
+            number.id,
+            number.provisioning_metadata.get("order_id"),
+        )
+        await finish_order(
+            db,
+            number,
+            resource_id=None,
+            failed=True,
+            reason="the carrier did not confirm the order in time",
+        )
     elif unfound:
         number.provisioning_metadata = {
             **number.provisioning_metadata,
@@ -256,44 +324,56 @@ async def acquire_offer(
     quote_id: UUID,
     *,
     country: str,
-    kind: str,
+    kind: str | None,
     provider: str,
     billed: bool,
 ) -> PhoneNumber:
+    """Buy the quoted number. ``kind`` is the number type the client sent, or
+    None to take it from the quote; a different explicit type is a 422."""
     await org_lock(db, org)
     row = await load_quote(db, org, quote_id)
     offer = CarrierOffer.model_validate(row.offer)
     if (
         offer.country_code != country
-        or offer.number_type != kind
+        or (kind is not None and offer.number_type != kind)
         or provider not in ("auto", offer.provider)
     ):
-        raise HTTPException(
-            status_code=422,
-            detail="Quote does not match the selected country, type or provider",
+        raise unprocessable(
+            "Quote does not match the selected country, type or provider",
+            loc=["body", "quote_id"],
         )
+    kind = offer.number_type
     if row.number_id:
         return await db.get(PhoneNumber, row.number_id)
+    catalog_capabilities(country, kind)
     if row.expires_at <= datetime.now(timezone.utc):
         raise HTTPException(
             status_code=409, detail="Quote expired; refresh number offers"
         )
     if offer.readiness != "ready":
-        raise HTTPException(
-            status_code=422,
-            detail="Complete this organization's regulatory verification first",
+        raise unprocessable(
+            "Complete this organization's regulatory verification first",
+            loc=["body", "quote_id"],
         )
     # Carrier discovery is slow: release the org lock and the quote row lock
     # first so other billing and number writes for this organization proceed.
     await db.commit()
     # Check both carrier price and regulatory readiness again before committing
     # money. The client cannot submit price, bundle ids, or a different number.
-    live, _ = await discover_offers(
-        org, country, kind, offer.capabilities, e164=offer.e164
+    live, unavailable = await discover_offers(
+        org,
+        country,
+        kind,
+        row.offer.get("requested_capabilities") or offer.capabilities,
+        e164=offer.e164,
     )
     fresh = next(
         (o for o in live if o.provider == offer.provider and o.e164 == offer.e164), None
     )
+    if fresh is None and offer.provider in unavailable:
+        # The carrier lookup failed; that says nothing about the quote. The
+        # route does not cache this response, so a retry can succeed.
+        raise RetryableError("Carrier lookup unavailable; try again shortly")
     if (
         fresh is None
         or fresh.readiness != "ready"
@@ -362,19 +442,22 @@ async def acquire_offer(
         # won the same number. Nothing was charged or ordered.
         await db.rollback()
         raise HTTPException(status_code=409, detail=NUMBER_TAKEN_DETAIL) from None
+    # Held through the carrier call on purpose: finish_order and the metadata
+    # write below act on this in-memory row and must not interleave with
+    # reconcile_order. The cost is that same-organization writes wait for the
+    # carrier (timeouts: Telnyx 20s, Twilio 10s).
     await org_lock(db, org)
     try:
         if offer.provider == "telnyx":
-            payload = {
-                "phone_numbers": [{"phone_number": offer.e164}],
+            order_number: dict[str, Any] = {"phone_number": offer.e164}
+            if offer.verification_id:
+                order_number["requirement_group_id"] = offer.verification_id
+            payload: dict[str, Any] = {
+                "phone_numbers": [order_number],
                 "customer_reference": str(number.id),
             }
-            if "voice" in offer.capabilities:
+            if "voice" in offer.capabilities and settings.telnyx_connection_id:
                 payload["connection_id"] = settings.telnyx_connection_id
-            if offer.verification_id:
-                payload["phone_numbers"][0][
-                    "requirement_group_id"
-                ] = offer.verification_id
             order = (
                 await TelnyxClient().request("POST", "/number_orders", json=payload)
             )["data"]
@@ -396,7 +479,13 @@ async def acquire_offer(
             else exc.status
         )
         if 400 <= status < 500 and status not in (408, 409):
-            await finish_order(db, number, resource_id=None, failed=True)
+            await finish_order(
+                db,
+                number,
+                resource_id=None,
+                failed=True,
+                reason=f"the carrier rejected the order (HTTP {status})",
+            )
         else:
             # Unknown outcome: keep the reservation for reconciliation.
             await db.commit()
@@ -421,6 +510,158 @@ async def acquire_offer(
             await db.rollback()
             await db.refresh(number)
             logger.warning("Carrier order status unavailable: number=%s", number.id)
+    return number
+
+
+async def acquire_from_catalog(
+    db: AsyncSession,
+    org: UUID,
+    *,
+    country: str,
+    kind: str,
+    billed: bool,
+    voice_provider: VoiceProvider,
+) -> PhoneNumber:
+    """Legacy Twilio purchase: the carrier picks the number, so its E.164 is
+    unknown until the purchase returns. No hold can be posted first; the
+    monthly fee is debited in the same commit that records the number."""
+    caps = catalog_capabilities(country, kind)
+    requested_caps = [c for c in ("voice", "sms") if caps[c]]
+    if not requested_caps:
+        # A catalog row with neither voice nor sms is schema-invalid, but the
+        # runtime load doesn't schema-validate; an empty filter would let the
+        # provider purchase an arbitrary number.
+        raise unprocessable(
+            f"the {kind} number in {country} has no usable capabilities",
+            loc=["body", "number_type"],
+        )
+    price = telephony_catalog.price_usd_per_month(country, kind)
+    amount_cents = (
+        int((price * 100).quantize(1, rounding=ROUND_HALF_UP))
+        if price is not None and price.is_finite() and price > 0
+        else 0
+    )
+    if amount_cents <= 0:
+        raise HTTPException(
+            status_code=503, detail="number price unavailable; try again later"
+        )
+    if billed:
+        # Serialize purchases and monthly debits for this organization.
+        await org_lock(db, org)
+        if await get_balance_cents(db, org) < amount_cents:
+            raise HTTPException(
+                status_code=402,
+                detail=f"insufficient credits; this number costs ${price:.2f} per month; "
+                f"top up at {BILLING_URL}",
+            )
+    try:
+        acquired = await voice_provider.acquire_number(
+            country_code=country, number_type=kind, capabilities=requested_caps
+        )
+    except LookupError as exc:
+        # The carrier has no matching inventory right now.
+        raise RetryableError(str(exc)) from exc
+    except NumberNotProvisionable as exc:
+        # Deterministic: it needs regulatory setup we don't have, so a retry
+        # fails identically. The raw carrier reason is logged, not returned.
+        logger.warning(
+            "number not provisionable (%s %s): %s", country, kind, exc.detail
+        )
+        raise unprocessable(
+            f"we can't provision a {kind} number in {country} yet — it needs "
+            "regulatory verification we don't support",
+            loc=["body", "number_type"],
+        ) from exc
+
+    number = PhoneNumber(
+        organization_id=org,
+        e164=acquired.e164,
+        country_code=acquired.country_code,
+        number_type=acquired.number_type,
+        capabilities=acquired.capabilities,
+        provider_resource_id=acquired.provider_resource_id,
+        provisioning_state="active",
+        is_pool=False,
+    )
+    number.acquired_at = datetime.now(timezone.utc)
+    db.add(number)
+    try:
+        await db.flush()
+        if billed:
+            db.add(
+                credit(
+                    number,
+                    -amount_cents,
+                    monthly_fee_ref(org, number.id, number.acquired_at),
+                    "monthly_fee",
+                )
+            )
+        await db.commit()
+    except Exception:
+        await db.rollback()
+        try:
+            await voice_provider.release_number(acquired.provider_resource_id)
+        except Exception:
+            logger.exception(
+                "failed to release number after failed purchase commit: %s",
+                acquired.provider_resource_id,
+            )
+        raise
+    return number
+
+
+async def purchase_number(
+    db: AsyncSession,
+    principal: Principal,
+    body: NumberAcquireRequest,
+    voice_provider: VoiceProvider,
+) -> PhoneNumber:
+    """The one purchase entry point for POST /numbers.
+
+    Raises HTTPException for every rejection; the caller caches it under the
+    idempotency key unless it is a RetryableError.
+    """
+    org = principal.organization_id
+    billed = principal.auth_kind != "shared"
+    provider = body.provider or "auto"
+    if body.quote_id is not None:
+        number = await acquire_offer(
+            db,
+            org,
+            body.quote_id,
+            country=body.country_code,
+            # An omitted type comes from the quote; only an explicit one can conflict.
+            kind=body.number_type if "number_type" in body.model_fields_set else None,
+            provider=provider,
+            billed=billed,
+        )
+    elif body.provider in ("auto", "telnyx"):
+        # Omitted provider without a quote is the legacy Twilio contract.
+        raise unprocessable(
+            "Request a live quote from POST /numbers/quotes, then pass its quote_id",
+            loc=["body", "quote_id"],
+        )
+    else:
+        # Same balance gate as the other paid create routes; runs before the
+        # carrier purchase.
+        await require_funds(db, principal)
+        number = await acquire_from_catalog(
+            db,
+            org,
+            country=body.country_code,
+            kind=body.number_type,
+            billed=billed,
+            voice_provider=voice_provider,
+        )
+    if number.provisioning_state == "failed":
+        # The hold was refunded; nothing is owed. Say so instead of a 201.
+        reason = number.provisioning_metadata.get(
+            "failure_reason", "the carrier did not complete the order"
+        )
+        raise HTTPException(
+            status_code=409,
+            detail=f"Number order failed and credits were refunded: {reason}",
+        )
     return number
 
 
@@ -455,3 +696,16 @@ async def reconcile_pending_orders():
             logger.warning(
                 "Number order reconciliation failed: number=%s; will retry", number_id
             )
+
+
+async def purge_expired_quotes() -> int:
+    """Delete quotes that expired without being used. Returns how many."""
+    async with session_scope() as db:
+        result = await db.execute(
+            delete(NumberOffer).where(
+                NumberOffer.number_id.is_(None),
+                NumberOffer.expires_at < datetime.now(timezone.utc) - QUOTE_RETENTION,
+            )
+        )
+        await db.commit()
+        return result.rowcount or 0

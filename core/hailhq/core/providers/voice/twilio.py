@@ -232,11 +232,18 @@ async def twilio_offers(
         inventory_api = getattr(api.available_phone_numbers(country), kind, None)
         if inventory_api is None:
             return []
-        inventory = inventory_api.list(
-            limit=3,
-            **{f"{c}_enabled": True for c in capabilities},
-            **({"contains": e164} if e164 else {}),
-        )
+        try:
+            inventory = inventory_api.list(
+                limit=3,
+                **{f"{c}_enabled": True for c in capabilities},
+                **({"contains": e164} if e164 else {}),
+            )
+        except TwilioRestException as exc:
+            # Twilio answers 404 (20404) for a number type it does not sell in
+            # this country. That is empty inventory, not a carrier outage.
+            if exc.status == 404:
+                return []
+            raise
         if e164:
             inventory = [n for n in inventory if n.phone_number == e164]
         if not inventory:
@@ -250,6 +257,9 @@ async def twilio_offers(
             if p["number_type"].replace("-", "_").replace(" ", "_") == kind
         ]
         if not prices:
+            return []
+        monthly_cents = cents(prices[0]["current_price"])
+        if monthly_cents <= 0:
             return []
         compliance = api.numbers.v2.regulatory_compliance
         # Organizations are business end users. No hardcoded country exemptions.
@@ -310,7 +320,7 @@ async def twilio_offers(
                         for k, v in n.capabilities.items()
                         if v and k.lower() in {"voice", "sms"}
                     ),
-                    monthly_cents=cents(prices[0]["current_price"]),
+                    monthly_cents=monthly_cents,
                     setup_cents=0,
                     readiness="verification_required" if labels else "ready",
                     regulatory_friction=(

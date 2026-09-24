@@ -32,13 +32,13 @@ Schemas: [`openapi/openapi.yaml`](../../openapi/openapi.yaml). Code: [`number_of
 
 ## Purchase
 
-1. `POST /numbers` takes a `quote_id`. Quotes are per organization and expire in 10 minutes.
-2. The server rechecks price and readiness at the carrier. This runs without the org lock or a transaction.
+1. `POST /numbers` takes a `quote_id`. Quotes are per organization and expire in 10 minutes. Unused quotes are deleted 1 hour after expiry.
+2. The server rechecks price and readiness at the carrier. This runs without the org lock or a transaction. If the carrier lookup fails, the answer is 503 (not cached, retry with the same `Idempotency-Key`).
 3. Under the org lock it reserves setup plus first month in credits. It then commits the pending number and consumes the quote.
 4. Only then does it call the carrier. An unclear result is never retried and never moved to another carrier.
-5. Success swaps the reservation for the monthly fee (plus setup). A definite failure refunds it once.
-6. Telnyx orders are asynchronous. The sweeper and `GET /numbers/{id}` check the order, with a persisted 15-second polling interval. A carrier error on `GET` returns the last saved state.
-7. If the carrier has no record after 1 hour, the order is flagged for operator review. Credits remain reserved: absence from a lookup is not proof of failure. A Telnyx order that exists but is not finished stays pending. The carrier decides.
+5. Success swaps the reservation for the monthly fee (plus setup). A definite failure refunds it once, and `POST /numbers` answers 409 with the reason instead of 201.
+6. Telnyx orders are asynchronous. Only the sweeper checks the order, with a persisted 15-second polling interval. `GET /numbers/{id}` is read-only and returns the last saved state.
+7. If the carrier has no record after 1 hour, the order is flagged for operator review. Credits remain reserved: absence from a lookup is not proof of failure. A Telnyx order that exists but is still pending after 2 hours (`PENDING_ORDER_TIMEOUT`) is marked failed and the credits are refunded once. If the carrier finishes it later, release the number at the carrier by hand; the log names the order.
 8. A failed order does not hold its number. It can be quoted and bought again.
 
 ## Deploy

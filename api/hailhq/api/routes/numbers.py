@@ -13,48 +13,50 @@ from __future__ import annotations
 import asyncio
 import logging
 from datetime import datetime, timedelta, timezone
-from decimal import ROUND_HALF_UP
-from typing import Annotated, Literal
-from uuid import UUID
+from typing import Annotated
+from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from fastapi import status as http_status
 from hailhq.api.audit import write_audit_log
 from hailhq.api.deps import Principal, get_current_principal
 from hailhq.api.errors import unprocessable
-from hailhq.api.funds import BILLING_URL, FUNDS_RESPONSES, require_funds
+from hailhq.api.funds import FUNDS_RESPONSES
 from hailhq.api.idempotency import (
     IdempotencyContext,
     cache_failure,
     idempotency_dep,
     replay_cached,
 )
-from hailhq.api.number_orders import acquire_offer, reconcile_order
+from hailhq.api.number_orders import (
+    RetryableError,
+    catalog_capabilities,
+    org_lock,
+    purchase_number,
+)
 from hailhq.api.pagination import fetch_cursor_page
 from hailhq.api.ratelimit import GENERAL_RATE_LIMITED_RESPONSES
 from hailhq.api.route_prefixes import request_mount_prefix
 from hailhq.api.routes.sms import get_sms_provider
 from hailhq.core import telephony_catalog
-from hailhq.core.billing import get_balance_cents
 from hailhq.core.carrier_routing import sms_route
 from hailhq.core.db import get_session
-from hailhq.core.models import AccountCredit, NumberOffer, PhoneNumber
+from hailhq.core.models import NumberOffer, PhoneNumber
 from hailhq.core.number_offers import CarrierOffer, discover_offers, rank_offers
 from hailhq.core.providers.sms import SmsProvider
 from hailhq.core.providers.telnyx import TelnyxClient
 from hailhq.core.providers.voice import (
-    NumberNotProvisionable,
     TwilioVoiceProvider,
     VoiceProvider,
 )
 from hailhq.core.schemas import (
     NumberAcquireRequest,
-    NumberType,
+    NumberQuoteRequest,
     PhoneNumberListResponse,
     PhoneNumberResponse,
 )
-from pydantic import BaseModel, ConfigDict, Field
-from sqlalchemy import select, text
+from pydantic import BaseModel, Field
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
@@ -111,6 +113,13 @@ async def _get_org_number_or_404(
                 "number's full monthly price."
             ),
         },
+        409: {
+            "description": (
+                "The quote expired, the number is taken, the price changed, or the "
+                "carrier rejected or failed the order. In the last case the credit "
+                "hold is refunded and the detail gives the reason."
+            ),
+        },
     },
 )
 async def acquire_number(
@@ -135,177 +144,17 @@ async def acquire_number(
         )
         return PhoneNumberResponse.model_validate(cached)
 
-    # Acquiring buys a real number at the carrier and starts a monthly fee —
-    # same balance gate as the other paid create routes (/calls, /sms,
-    # /emails). Must run before the carrier purchase below.
-    if body.quote_id is None and body.provider in ("auto", "telnyx"):
-        raise await cache_failure(
-            idem,
-            HTTPException(
-                status_code=422,
-                detail="Request a live quote from POST /numbers/quotes, then pass its quote_id",
-            ),
-        )
-    if body.quote_id is not None:
-        try:
-            number = await acquire_offer(
-                db,
-                principal.organization_id,
-                body.quote_id,
-                country=body.country_code,
-                kind=body.number_type,
-                provider=body.provider or "auto",
-                billed=principal.auth_kind != "shared",
-            )
-        except HTTPException as exc:
-            raise await cache_failure(idem, exc)
-        response.headers["Location"] = (
-            f"{request_mount_prefix(request)}/numbers/{number.id}"
-        )
-        result = PhoneNumberResponse.model_validate(number)
-        if idem is not None:
-            await idem.store(status_code=201, body=result.model_dump(mode="json"))
-        return result
-
-    await require_funds(db, principal, idem)
-    caps = telephony_catalog.capabilities(body.country_code, body.number_type)
-    if caps is None:
-        raise await cache_failure(
-            idem,
-            unprocessable(
-                f"we don't offer a {body.number_type} number in "
-                f"{body.country_code} yet",
-                loc=["body", "number_type"],
-            ),
-        )
-
-    requested_caps = [c for c in ("voice", "sms") if caps[c]]
-    if not requested_caps:
-        # A catalog row with neither voice nor sms is schema-invalid, but the
-        # runtime load doesn't schema-validate; an empty filter would let the
-        # provider purchase an arbitrary number.
-        raise await cache_failure(
-            idem,
-            unprocessable(
-                f"the {body.number_type} number in {body.country_code} has no "
-                "usable capabilities",
-                loc=["body", "number_type"],
-            ),
-        )
-
-    price = telephony_catalog.price_usd_per_month(body.country_code, body.number_type)
-    if price is None or not price.is_finite() or price <= 0:
-        raise await cache_failure(
-            idem,
-            HTTPException(
-                status_code=503, detail="number price unavailable; try again later"
-            ),
-        )
-    amount_cents = int((price * 100).quantize(1, rounding=ROUND_HALF_UP))
-    if amount_cents <= 0:
-        raise await cache_failure(
-            idem,
-            HTTPException(
-                status_code=503, detail="number price unavailable; try again later"
-            ),
-        )
-    billed = principal.auth_kind != "shared"
-    if billed:
-        # Serialize purchases and monthly debits for this organization.
-        await db.execute(
-            text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))"),
-            {"key": str(principal.organization_id)},
-        )
-        if await get_balance_cents(db, principal.organization_id) < amount_cents:
-            raise await cache_failure(
-                idem,
-                HTTPException(
-                    status_code=402,
-                    detail=f"insufficient credits; this number costs ${price:.2f} per month; "
-                    f"top up at {BILLING_URL}",
-                ),
-            )
-
     try:
-        acquired = await provider.acquire_number(
-            country_code=body.country_code,
-            number_type=body.number_type,
-            capabilities=requested_caps,
-        )
-    except LookupError as exc:
-        # Transient: the carrier has no matching inventory right now. Release the
-        # in-flight idempotency sentinel (rather than caching the 503) so a
-        # same-key retry can succeed once inventory returns — mirroring the
-        # shared-pool-exhausted path in calls.py. Caching it would freeze the
-        # 503 under this key for the full 24h TTL.
+        number = await purchase_number(db, principal, body, provider)
+    except RetryableError:
+        # Transient (no charge was made): release the in-flight sentinel
+        # instead of caching, so a same-key retry can succeed once the carrier
+        # recovers.
         if idem is not None:
             await idem.release()
-        raise HTTPException(
-            status_code=http_status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=str(exc),
-        ) from exc
-    except NumberNotProvisionable as exc:
-        # Deterministic: this country/number-type can't be provisioned without
-        # regulatory setup (a bundle/address) we don't have — a retry fails
-        # identically, so cache the 422 rather than releasing the key. The raw
-        # carrier reason is logged, not leaked to the caller.
-        logger.warning(
-            "number not provisionable (%s %s): %s",
-            body.country_code,
-            body.number_type,
-            exc.detail,
-        )
-        raise await cache_failure(
-            idem,
-            unprocessable(
-                f"we can't provision a {body.number_type} number in "
-                f"{body.country_code} yet — it needs regulatory verification "
-                "we don't support",
-                loc=["body", "number_type"],
-            ),
-        ) from exc
-
-    number = PhoneNumber(
-        organization_id=principal.organization_id,
-        e164=acquired.e164,
-        country_code=acquired.country_code,
-        number_type=acquired.number_type,
-        capabilities=acquired.capabilities,
-        provider_resource_id=acquired.provider_resource_id,
-        provisioning_state="active",
-        is_pool=False,
-    )
-    acquired_at = datetime.now(timezone.utc)
-    number.acquired_at = acquired_at
-    db.add(number)
-    try:
-        await db.flush()
-        if billed:
-            db.add(
-                AccountCredit(
-                    organization_id=principal.organization_id,
-                    kind="debit",
-                    channel="voice" if "voice" in acquired.capabilities else "sms",
-                    amount_cents=-amount_cents,
-                    qty=1,
-                    ref=f"monthly_fee:{principal.organization_id}:{number.id}:dedicated_number:{acquired_at:%Y-%m}",
-                    source="monthly_fee",
-                )
-            )
-        await db.commit()
-    except Exception:
-        await db.rollback()
-        try:
-            await provider.release_number(acquired.provider_resource_id)
-        except Exception:
-            logger.exception(
-                "failed to release number after failed purchase commit: %s",
-                acquired.provider_resource_id,
-            )
         raise
-    # No refresh: `id` (the PK) is populated via the INSERT's implicit RETURNING
-    # and expire_on_commit=False keeps it live; PhoneNumberResponse reads no
-    # other server-generated column.
+    except HTTPException as exc:
+        raise await cache_failure(idem, exc)
 
     response.headers["Location"] = (
         f"{request_mount_prefix(request)}/numbers/{number.id}"
@@ -346,19 +195,20 @@ async def release_org_number(
     # and attach_number (an opaque Twilio 404 → 500, and a Messaging Service
     # SID committed onto a tombstone). Transaction-scoped: released at the
     # commit below (or at rollback).
-    await db.execute(
-        text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))"),
-        {"key": str(number.organization_id)},
-    )
+    await org_lock(db, number.organization_id)
     # Re-read under the lock: a concurrent release may have already
     # tombstoned the row after our caller loaded it.
     await db.refresh(number, ["provisioning_state", "released_at"])
     if number.provisioning_state == "released":
         return number
     if number.provisioning_state == "failed":
-        raise HTTPException(
-            status_code=409, detail="Failed orders have no active number to release"
-        )
+        # A failed order owns no carrier number and was already refunded.
+        # DELETE only dismisses the row (released_at) so consoles can hide it;
+        # the state stays "failed" and no carrier call is made.
+        if number.released_at is None:
+            number.released_at = datetime.now(timezone.utc)
+            await db.commit()
+        return number
     if number.provisioning_state == "pending":
         raise HTTPException(
             status_code=409,
@@ -403,7 +253,9 @@ async def release_number(
     number = await _get_org_number_or_404(db, number_id, principal.organization_id)
     # Best-effort pre-check so an idempotent re-DELETE doesn't append a
     # second audit entry (audit is a safety net, not a correctness gate).
-    was_released = number.provisioning_state == "released"
+    was_released = (
+        number.provisioning_state == "released" or number.released_at is not None
+    )
     await release_org_number(db, provider, number)
     if not was_released:
         await write_audit_log(
@@ -428,25 +280,10 @@ async def get_number(
     """Fetch one dedicated number by id, including its capabilities and state.
 
     Org-scoped: returns 404 for a number belonging to a different
-    organization.
+    organization. Read-only: a pending order is advanced by the background
+    reconciler, never by this request.
     """
     number = await _get_org_number_or_404(db, number_id, principal.organization_id)
-    if (
-        number.provisioning_state == "pending"
-        and "offer" in number.provisioning_metadata
-    ):
-        try:
-            await reconcile_order(db, number)
-        except Exception:
-            # A carrier outage must not turn a status read into a 500. The
-            # sweeper keeps retrying; report the last committed state.
-            await db.rollback()
-            logger.warning(
-                "Carrier order status unavailable: number=%s", number.id, exc_info=True
-            )
-            number = await _get_org_number_or_404(
-                db, number_id, principal.organization_id
-            )
     return PhoneNumberResponse.model_validate(number)
 
 
@@ -525,12 +362,9 @@ async def enable_sms(
     # (auto-released at commit/rollback) makes any waiter see the first
     # request's committed result. release_org_number takes the same org-keyed
     # lock on purpose — that is what makes the released re-check below
-    # authoritative rather than a race window; no other code path takes
-    # advisory locks.
-    await db.execute(
-        text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))"),
-        {"key": str(principal.organization_id)},
-    )
+    # authoritative rather than a race window. Purchases, order reconciliation
+    # and the monthly-fee rater take the same lock (see ``org_lock``).
+    await org_lock(db, principal.organization_id)
     # Re-read under the lock: a concurrent enable of THIS number may have just
     # attached it (its SID was NULL when the row was first loaded), and a
     # concurrent release may have tombstoned it (its PN is gone at Twilio).
@@ -555,7 +389,11 @@ async def enable_sms(
         )
     ).scalar_one_or_none()
 
-    provider = sms_route(number.provider, provider)
+    try:
+        provider = sms_route(number.provider, provider)
+    except ValueError as exc:
+        # Carrier not configured for SMS: an operator problem, not a server fault.
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
     messaging_service_sid = await provider.ensure_messaging_service(
         organization_id=principal.organization_id, existing_sid=existing_sid
     )
@@ -572,30 +410,6 @@ async def enable_sms(
     number.messaging_service_sid = messaging_service_sid
     await db.commit()
     return PhoneNumberResponse.model_validate(number)
-
-
-__all__ = ["get_voice_provider", "release_org_number", "router"]
-
-
-class NumberQuoteRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    country_code: str = Field(
-        pattern=r"^[A-Z]{2}$",
-        description="Uppercase ISO alpha-2 country code to search.",
-    )
-    number_type: NumberType | None = Field(
-        default=None,
-        description="Restrict number type; omit to compare all supported types.",
-    )
-    capabilities: list[Literal["voice", "sms"]] = Field(
-        min_length=1,
-        max_length=2,
-        description="Required channels; every returned offer must support all requested capabilities.",
-    )
-    provider: Literal["auto", "twilio", "telnyx"] = Field(
-        default="auto",
-        description="Carrier preference; auto compares readiness, remaining verification effort, and rental/setup costs. Twilio wins equivalent ties.",
-    )
 
 
 class NumberQuotesResponse(BaseModel):
@@ -625,16 +439,31 @@ async def quote_numbers(
     cost, preferring Twilio on equivalent ties. Blocked offers sort by verification effort. SMS capability does not waive messaging registration requirements.
     """
 
+    # Only number types the telephony catalog lists can be bought, so only
+    # those are searched.
+    if body.number_type:
+        catalog_capabilities(body.country_code, body.number_type)
+        kinds = [body.number_type]
+    else:
+        kinds = [
+            k
+            for k in ("local", "mobile", "national", "toll_free")
+            if telephony_catalog.capabilities(body.country_code, k) is not None
+        ]
+        if not kinds:
+            raise unprocessable(
+                f"we don't offer numbers in {body.country_code} yet",
+                loc=["body", "country_code"],
+            )
+    # Carrier discovery takes seconds. End the transaction the auth lookup
+    # opened so this request does not hold a pooled connection while it waits.
+    await db.commit()
     batches = await asyncio.gather(
         *(
             discover_offers(
                 principal.organization_id, body.country_code, kind, body.capabilities
             )
-            for kind in (
-                [body.number_type]
-                if body.number_type
-                else ["local", "mobile", "national", "toll_free"]
-            )
+            for kind in kinds
         )
     )
     offers = rank_offers([offer for batch, _ in batches for offer in batch])
@@ -642,12 +471,17 @@ async def quote_numbers(
     expires = datetime.now(timezone.utc) + timedelta(minutes=10)
     for offer in offers:
         row = NumberOffer(
+            id=uuid4(),
             organization_id=principal.organization_id,
-            offer=offer.model_dump(mode="json"),
+            # The purchase re-check must search with what was asked for, not
+            # with every channel the number happens to support.
+            offer={
+                **offer.model_dump(mode="json"),
+                "requested_capabilities": body.capabilities,
+            },
             expires_at=expires,
         )
         db.add(row)
-        await db.flush()
         offer.quote_id = row.id
     await db.commit()
     ranked = rank_offers(offers, body.provider)
@@ -658,3 +492,6 @@ async def quote_numbers(
         "unavailable_providers": unavailable,
         "expires_at": expires,
     }
+
+
+__all__ = ["get_voice_provider", "release_org_number", "router"]
