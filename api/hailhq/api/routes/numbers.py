@@ -196,12 +196,12 @@ async def acquire_number(
             )
 
     # Countries that need carrier verification (see /verifications) buy with
-    # the org's approved one. Twilio is the only voice carrier today.
+    # the org's approved one for this carrier.
     verification_handle = await approved_purchase_handle(
         db,
         verifications,
         principal.organization_id,
-        "twilio",
+        provider.carrier,
         body.country_code,
         body.number_type,
     )

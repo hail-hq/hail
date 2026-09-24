@@ -439,11 +439,22 @@ async def _fund(async_session, org_id) -> None:
 async def test_purchase_uses_the_approved_verification(
     client, org_and_key, carrier, async_session, voice_provider_mock
 ) -> None:
+    from hailhq.core.providers.voice import ProviderNumber
+
     org_id, _, key = org_and_key
     await _fund(async_session, org_id)
-    await _approve_and_pull(client, key, carrier)
-    carrier.remote_status = ProviderStatus(state="approved")
-    # the purchase path talks to the "twilio" plug-in name; register the fake there
+    voice_provider_mock.acquire_number.side_effect = [
+        ProviderNumber(
+            provider_resource_id=f"PN_gb_{i}",
+            e164=f"+44770090000{i}",
+            country_code="GB",
+            capabilities=["voice", "sms"],
+            number_type="mobile",
+        )
+        for i in (1, 2)
+    ]
+    vid = await _approve_and_pull(client, key, carrier)
+    # the purchase route asks the plug-in registered under the voice carrier's name
     app.dependency_overrides[get_verification_registry] = lambda: (
         lambda name: carrier if name in ("fake", "twilio") else None
     )
@@ -451,6 +462,20 @@ async def test_purchase_uses_the_approved_verification(
     row.provider = "twilio"
     await async_session.commit()
 
+    # submitted is not enough: the purchase route never waits on the carrier
+    resp = await client.post(
+        "/numbers",
+        json={"country_code": "GB", "number_type": "mobile"},
+        headers=_auth(key),
+    )
+    assert resp.status_code == 201, resp.text
+    _, kwargs = voice_provider_mock.acquire_number.call_args
+    assert kwargs["verification_handle"] is None
+
+    # the customer reads it after the carrier approves; now it is used
+    carrier.remote_status = ProviderStatus(state="approved")
+    got = await client.get(f"/verifications/{vid}", headers=_auth(key))
+    assert got.json()["state"] == "approved"
     resp = await client.post(
         "/numbers",
         json={"country_code": "GB", "number_type": "mobile"},

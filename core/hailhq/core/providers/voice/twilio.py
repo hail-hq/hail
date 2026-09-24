@@ -49,6 +49,8 @@ def _capabilities_to_list(caps: dict[str, bool] | None) -> list[str]:
 class TwilioVoiceProvider(VoiceProvider):
     """Carrier adapter for Twilio's REST API."""
 
+    carrier = "twilio"
+
     def __init__(
         self,
         account_sid: str | None = None,

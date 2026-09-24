@@ -133,6 +133,8 @@ Superadmin routes (behind `require_superadmin`):
 
 ### 7. Purchase
 
+Only an `approved` verification is used, and the purchase route never calls the carrier to find out: it runs under an advisory lock and must not wait on or commit around a carrier call. A submitted verification becomes approved when the customer (or the periodic poll) reads it.
+
 `POST /numbers`:
 
 1. Find the org's `approved` verification for (provider, country, number_type).
@@ -155,7 +157,7 @@ The existing debit order does not change: no debit before the carrier call succe
 
 ### 9. Privacy
 
-- Files and fields go browser → console server action → API → carrier in memory. They are never written to disk, the database or logs. Request bodies for these routes are excluded from request logging.
+- Files and fields go browser → console server action → API → carrier in memory. They are never written to the database or logs, and hail's own code never saves them to disk. The web framework may spool a large upload to a temporary file while the request runs; that file is deleted when the request ends. Request bodies for these routes are excluded from request logging.
 - Trade-off: files reach the carrier when the customer submits, before superadmin approval. The carrier holds them as a draft. Approval submits the draft for the carrier's review.
 - `discard` runs on cancel and on a failed check so drafts are not left at the carrier.
 - The reviewer sees no documents in hail. If the reviewer needs to look at them, they open the carrier's console.

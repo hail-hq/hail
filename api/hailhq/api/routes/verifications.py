@@ -152,7 +152,11 @@ async def approved_purchase_handle(
     number_type: str,
 ) -> dict | None:
     """The carrier's purchase values for this org's approved verification, or
-    None when there is none (yet)."""
+    None when there is none.
+
+    Approved rows only, and no carrier call: the purchase route holds an
+    advisory lock and must not commit or wait on the carrier here. A submitted
+    verification becomes approved when the customer reads it (GET refreshes)."""
     row = (
         await db.execute(
             select(CarrierVerification).where(
@@ -160,14 +164,11 @@ async def approved_purchase_handle(
                 CarrierVerification.provider == provider_name,
                 CarrierVerification.country_code == country_code,
                 CarrierVerification.number_type == number_type,
-                CarrierVerification.state.in_(("submitted", "approved")),
+                CarrierVerification.state == "approved",
             )
         )
     ).scalar_one_or_none()
     if row is None:
-        return None
-    await _refresh(db, row, registry)
-    if row.state != "approved":
         return None
     provider = registry(provider_name)
     if provider is None:

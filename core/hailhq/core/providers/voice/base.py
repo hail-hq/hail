@@ -73,6 +73,9 @@ class ProviderCallStatus(BaseModel):
 class VoiceProvider(ABC):
     """Abstract carrier-side voice provider."""
 
+    # Registry name shared with this carrier's verification plug-in.
+    carrier: str
+
     @abstractmethod
     async def acquire_number(
         self,

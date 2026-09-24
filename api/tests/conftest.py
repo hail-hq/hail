@@ -242,6 +242,7 @@ def voice_provider_mock() -> AsyncMock:
     from hailhq.core.providers.voice import ProviderNumber, VoiceProvider
 
     mock = AsyncMock(spec=VoiceProvider)
+    mock.carrier = "twilio"
     mock.acquire_number.return_value = ProviderNumber(
         provider_resource_id="PN_test_acquired",
         e164="+14155550001",
