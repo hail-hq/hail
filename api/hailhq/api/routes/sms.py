@@ -54,9 +54,9 @@ from hailhq.core.models import (
 )
 from hailhq.core.pricing_tier import classify_pricing_tier
 from hailhq.core.providers.sms import SmsProvider
-from hailhq.core.providers.sms.twilio import LazyTwilioSmsProvider
 from hailhq.core.providers.sms.status_map import map_twilio_message_status
 from hailhq.core.providers.sms.telnyx import TelnyxSmsProvider
+from hailhq.core.providers.sms.twilio import LazyTwilioSmsProvider
 from hailhq.core.providers.telnyx import verify_webhook
 from hailhq.core.schemas import (
     SenderIdPatch,
