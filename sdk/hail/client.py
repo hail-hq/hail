@@ -31,7 +31,7 @@ from uuid import UUID
 import httpx
 from typing_extensions import Self
 
-from hail._errors import HailConfigError
+from hail._errors import HailConfigError, HailError
 from hail._http import _HailHTTP, generate_idempotency_key
 from hail._resource_id import parse_resource_id
 from hail.models import (
@@ -606,22 +606,42 @@ class _NumbersResource:
         *,
         country: str,
         number_type: NumberType | None = None,
-        idempotency_key: str | None = None,
+        capabilities: list[Literal["voice", "sms"]] | None = None,
         quote_id: str | UUID | None = None,
         provider: Literal["auto", "twilio", "telnyx"] | None = None,
+        idempotency_key: str | None = None,
     ) -> PhoneNumberResponse:
-        """Provision a new dedicated number from the carrier.
+        """Buy a dedicated number from a live quote.
 
-        ``country`` is an ISO 3166-1 alpha-2 code (e.g. ``"US"``).
-        ``idempotency_key`` defaults to a fresh UUIDv4. ``number_type`` defaults
-        to ``"local"`` without a quote; with a ``quote_id`` it is taken from the
-        quote unless you pass one (a different one is a 422).
+        ``country`` is an ISO 3166-1 alpha-2 code (e.g. ``"US"``). With a
+        ``quote_id`` (from :meth:`quotes`) that exact offer is bought; its type
+        comes from the quote unless you pass ``number_type`` (a different one
+        is a 422). Without one, this calls :meth:`quotes` for ``number_type``
+        (default ``"local"``) and ``capabilities`` (default voice and SMS),
+        then buys the cheapest ready offer (monthly plus setup). It raises
+        ``HailError`` if no offer is ready to buy. ``provider`` restricts the
+        carrier. ``idempotency_key`` defaults to a fresh UUIDv4 and covers the
+        purchase only.
         """
-        body: dict[str, Any] = {"country_code": country}
-        if number_type is not None or quote_id is None:
-            body["number_type"] = number_type or "local"
-        if quote_id is not None:
-            body["quote_id"] = str(quote_id)
+        if quote_id is None:
+            offers = await self.quotes(
+                country=country,
+                capabilities=capabilities or ["voice", "sms"],
+                number_type=number_type or "local",
+                provider=provider or "auto",
+            )
+            ready = [o for o in offers.offers if o.readiness == "ready" and o.quote_id]
+            if not ready:
+                raise HailError(
+                    f"no number ready to buy in {country.upper()}; complete "
+                    "regulatory verification or try another number_type or provider"
+                )
+            quote_id = min(
+                ready, key=lambda o: o.monthly_cents + o.setup_cents
+            ).quote_id
+        body: dict[str, Any] = {"country_code": country, "quote_id": str(quote_id)}
+        if number_type is not None:
+            body["number_type"] = number_type
         if provider is not None:
             body["provider"] = provider
         key = idempotency_key or generate_idempotency_key()
@@ -643,7 +663,7 @@ class _NumbersResource:
     ) -> NumberQuotesResponse:
         """Compare live inventory, rental/setup costs and regulatory readiness.
 
-        Pass the selected quote_id to acquire. A quote is organization-scoped
+        Pass the selected quote_id to acquire (or call acquire without one to buy the cheapest ready offer). A quote is organization-scoped
         and expires; acquisition rechecks it before reserving credits.
         """
         data = await self._http.request(

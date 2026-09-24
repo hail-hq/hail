@@ -6,8 +6,9 @@ import json
 from uuid import UUID, uuid4
 
 import httpx
+import pytest
 import respx
-from hail import Client
+from hail import Client, HailError
 
 from tests.conftest import make_phone_number_response
 
@@ -16,8 +17,48 @@ from tests.conftest import make_phone_number_response
 # --------------------------------------------------------------------------- #
 
 
+def _offer(quote_id, monthly=100, setup=0, readiness="ready", provider="twilio"):
+    return {
+        "quote_id": str(quote_id),
+        "provider": provider,
+        "e164": "+14155550000",
+        "country_code": "US",
+        "number_type": "local",
+        "capabilities": ["voice", "sms"],
+        "monthly_cents": monthly,
+        "setup_cents": setup,
+        "currency": "USD",
+        "readiness": readiness,
+        "requirements": [],
+    }
+
+
+def _quotes_response(offers):
+    return httpx.Response(
+        200,
+        json={
+            "offers": offers,
+            "recommended_quote_id": None,
+            "unavailable_providers": [],
+            "expires_at": "2026-09-23T12:00:00Z",
+        },
+    )
+
+
 @respx.mock
-async def test_numbers_acquire_happy_path(base_url: str, api_key: str) -> None:
+async def test_numbers_acquire_buys_the_cheapest_ready_offer(
+    base_url: str, api_key: str
+) -> None:
+    cheap, dear, blocked = uuid4(), uuid4(), uuid4()
+    quotes_route = respx.post(f"{base_url}/numbers/quotes").mock(
+        return_value=_quotes_response(
+            [
+                _offer(blocked, 10, 0, "verification_required"),
+                _offer(dear, 200),
+                _offer(cheap, 100, 50),
+            ]
+        )
+    )
     payload = make_phone_number_response()
     route = respx.post(f"{base_url}/numbers").mock(
         return_value=httpx.Response(201, json=payload)
@@ -28,22 +69,82 @@ async def test_numbers_acquire_happy_path(base_url: str, api_key: str) -> None:
     assert number.is_dedicated is True
     assert number.capabilities == ["voice", "sms"]
 
+    quote_body = json.loads(quotes_route.calls.last.request.content)
+    assert quote_body == {
+        "country_code": "US",
+        "capabilities": ["voice", "sms"],
+        "number_type": "local",
+        "provider": "auto",
+    }
     req = route.calls.last.request
     assert req.headers["Authorization"] == f"Bearer {api_key}"
     assert req.headers["Idempotency-Key"] == "idem-fixed"
-    body = json.loads(req.content)
-    assert body == {"country_code": "US", "number_type": "local"}
+    assert json.loads(req.content) == {"country_code": "US", "quote_id": str(cheap)}
 
 
 @respx.mock
-async def test_numbers_acquire_toll_free(base_url: str, api_key: str) -> None:
+async def test_numbers_acquire_passes_type_capabilities_and_provider_to_quotes(
+    base_url: str, api_key: str
+) -> None:
+    quote_id = uuid4()
+    quotes_route = respx.post(f"{base_url}/numbers/quotes").mock(
+        return_value=_quotes_response([_offer(quote_id, provider="telnyx")])
+    )
     route = respx.post(f"{base_url}/numbers").mock(
         return_value=httpx.Response(201, json=make_phone_number_response())
     )
     async with Client(api_key=api_key, base_url=base_url) as c:
-        await c.numbers.acquire(country="US", number_type="toll_free")
-    body = json.loads(route.calls.last.request.content)
-    assert body["number_type"] == "toll_free"
+        await c.numbers.acquire(
+            country="US",
+            number_type="toll_free",
+            capabilities=["voice"],
+            provider="telnyx",
+        )
+    quote_body = json.loads(quotes_route.calls.last.request.content)
+    assert quote_body["number_type"] == "toll_free"
+    assert quote_body["capabilities"] == ["voice"]
+    assert quote_body["provider"] == "telnyx"
+    assert json.loads(route.calls.last.request.content) == {
+        "country_code": "US",
+        "quote_id": str(quote_id),
+        "number_type": "toll_free",
+        "provider": "telnyx",
+    }
+
+
+@respx.mock
+async def test_numbers_acquire_with_quote_id_skips_quotes(
+    base_url: str, api_key: str
+) -> None:
+    quotes_route = respx.post(f"{base_url}/numbers/quotes")
+    route = respx.post(f"{base_url}/numbers").mock(
+        return_value=httpx.Response(201, json=make_phone_number_response())
+    )
+    quote_id = uuid4()
+    async with Client(api_key=api_key, base_url=base_url) as c:
+        await c.numbers.acquire(country="US", quote_id=quote_id, provider="twilio")
+    assert not quotes_route.called
+    assert json.loads(route.calls.last.request.content) == {
+        "country_code": "US",
+        "quote_id": str(quote_id),
+        "provider": "twilio",
+    }
+
+
+@respx.mock
+async def test_numbers_acquire_without_a_ready_offer_raises_and_does_not_buy(
+    base_url: str, api_key: str
+) -> None:
+    respx.post(f"{base_url}/numbers/quotes").mock(
+        return_value=_quotes_response(
+            [_offer(uuid4(), readiness="verification_required")]
+        )
+    )
+    route = respx.post(f"{base_url}/numbers")
+    async with Client(api_key=api_key, base_url=base_url) as c:
+        with pytest.raises(HailError, match="no number ready to buy"):
+            await c.numbers.acquire(country="US")
+    assert not route.called
 
 
 @respx.mock
@@ -54,7 +155,7 @@ async def test_numbers_acquire_auto_generates_idempotency_key(
         return_value=httpx.Response(201, json=make_phone_number_response())
     )
     async with Client(api_key=api_key, base_url=base_url) as c:
-        await c.numbers.acquire(country="US")
+        await c.numbers.acquire(country="US", quote_id=uuid4())
     UUID(route.calls.last.request.headers["Idempotency-Key"])  # raises if invalid
 
 
@@ -233,7 +334,7 @@ def test_number_offer_accepts_a_minimal_and_a_full_offer() -> None:
 
 
 @respx.mock
-async def test_numbers_acquire_with_quote_omits_number_type(
+async def test_numbers_acquire_with_quote_sends_number_type_only_when_given(
     base_url: str, api_key: str
 ) -> None:
     route = respx.post(f"{base_url}/numbers").mock(
