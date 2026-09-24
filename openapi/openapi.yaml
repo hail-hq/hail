@@ -3555,6 +3555,328 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HTTPValidationError"
+  /v1/verifications/requirements:
+    get:
+      tags:
+        - verifications
+      summary: Get Requirements
+      description:
+        "What the carrier needs from you to buy this kind of number: the
+        fields,
+
+        the documents, and whether an address is needed. Build your form from it."
+      operationId: get_verification_requirements
+      parameters:
+        - name: country_code
+          in: query
+          required: true
+          schema:
+            type: string
+            minLength: 2
+            maxLength: 2
+            title: Country Code
+        - name: number_type
+          in: query
+          required: true
+          schema:
+            type: string
+            title: Number Type
+        - name: subject_type
+          in: query
+          required: false
+          schema:
+            enum:
+              - person
+              - business
+            type: string
+            default: person
+            title: Subject Type
+        - name: provider
+          in: query
+          required: false
+          schema:
+            type: string
+            default: twilio
+            title: Provider
+        - name: authorization
+          in: header
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            title: Authorization
+      responses:
+        "200":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Requirements"
+        "429":
+          description:
+            Rate limited. This caller exceeded the general request-rate
+            ceiling. Retry after the Retry-After header (seconds).
+          headers:
+            Retry-After:
+              description: Seconds to wait before retrying.
+              schema:
+                type: integer
+            RateLimit-Limit:
+              description: The request ceiling for the current window.
+              schema:
+                type: integer
+            RateLimit-Remaining:
+              description: Requests remaining in the current window.
+              schema:
+                type: integer
+            RateLimit-Reset:
+              description: Seconds until the current window resets.
+              schema:
+                type: integer
+        "422":
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
+  /v1/verifications:
+    post:
+      tags:
+        - verifications
+      summary: Create Verification
+      description: 'Submit your details and documents (multipart/form-data).
+
+
+        Parts: `country_code`, `number_type`, `subject_type`, `provider` (optional),
+
+        `fields` (JSON object), `address` (JSON object, when required), `documents`
+
+        (JSON object: slot name to `{"option": ..., "fields": {...}}`), and one file
+
+        part per slot named `file.<slot>`. Get the slot and field names from
+
+        `GET /verifications/requirements`.
+
+
+        The carrier checks the details right away. Problems come back as 422 with
+
+        the field named, and nothing is kept. When it passes, the verification waits
+
+        for review and is then submitted to the carrier.'
+      operationId: create_verification
+      parameters:
+        - name: authorization
+          in: header
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            title: Authorization
+      responses:
+        "201":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VerificationResponse"
+        "429":
+          description:
+            Rate limited. This caller exceeded the general request-rate
+            ceiling. Retry after the Retry-After header (seconds).
+          headers:
+            Retry-After:
+              description: Seconds to wait before retrying.
+              schema:
+                type: integer
+            RateLimit-Limit:
+              description: The request ceiling for the current window.
+              schema:
+                type: integer
+            RateLimit-Remaining:
+              description: Requests remaining in the current window.
+              schema:
+                type: integer
+            RateLimit-Reset:
+              description: Seconds until the current window resets.
+              schema:
+                type: integer
+        "422":
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
+    get:
+      tags:
+        - verifications
+      summary: List Verifications
+      description: Your organization's verifications, newest first.
+      operationId: list_verifications
+      parameters:
+        - name: authorization
+          in: header
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            title: Authorization
+      responses:
+        "200":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/VerificationResponse"
+                title: Response List Verifications
+        "429":
+          description:
+            Rate limited. This caller exceeded the general request-rate
+            ceiling. Retry after the Retry-After header (seconds).
+          headers:
+            Retry-After:
+              description: Seconds to wait before retrying.
+              schema:
+                type: integer
+            RateLimit-Limit:
+              description: The request ceiling for the current window.
+              schema:
+                type: integer
+            RateLimit-Remaining:
+              description: Requests remaining in the current window.
+              schema:
+                type: integer
+            RateLimit-Reset:
+              description: Seconds until the current window resets.
+              schema:
+                type: integer
+        "422":
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
+  /v1/verifications/{verification_id}:
+    get:
+      tags:
+        - verifications
+      summary: Get Verification
+      description:
+        "One verification of your organization. Once submitted, its state
+        is
+
+        updated from the carrier each time you read it."
+      operationId: get_verification
+      parameters:
+        - name: verification_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+            title: Verification Id
+        - name: authorization
+          in: header
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            title: Authorization
+      responses:
+        "200":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VerificationResponse"
+        "429":
+          description:
+            Rate limited. This caller exceeded the general request-rate
+            ceiling. Retry after the Retry-After header (seconds).
+          headers:
+            Retry-After:
+              description: Seconds to wait before retrying.
+              schema:
+                type: integer
+            RateLimit-Limit:
+              description: The request ceiling for the current window.
+              schema:
+                type: integer
+            RateLimit-Remaining:
+              description: Requests remaining in the current window.
+              schema:
+                type: integer
+            RateLimit-Reset:
+              description: Seconds until the current window resets.
+              schema:
+                type: integer
+        "422":
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
+    delete:
+      tags:
+        - verifications
+      summary: Cancel Verification
+      description: Cancel a verification that has not been submitted yet.
+      operationId: cancel_verification
+      parameters:
+        - name: verification_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+            title: Verification Id
+        - name: authorization
+          in: header
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            title: Authorization
+      responses:
+        "200":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VerificationResponse"
+        "429":
+          description:
+            Rate limited. This caller exceeded the general request-rate
+            ceiling. Retry after the Retry-After header (seconds).
+          headers:
+            Retry-After:
+              description: Seconds to wait before retrying.
+              schema:
+                type: integer
+            RateLimit-Limit:
+              description: The request ceiling for the current window.
+              schema:
+                type: integer
+            RateLimit-Remaining:
+              description: Requests remaining in the current window.
+              schema:
+                type: integer
+            RateLimit-Reset:
+              description: Seconds until the current window resets.
+              schema:
+                type: integer
+        "422":
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
   /healthz:
     get:
       summary: Healthz
@@ -4094,6 +4416,88 @@ components:
 
 
         Covers DKIM CNAMEs, MAIL FROM MX, and SPF TXT records."
+    DocumentOption:
+      properties:
+        key:
+          type: string
+          title: Key
+          description: Value to send as `option` for this document type.
+        label:
+          type: string
+          title: Label
+          description: Label to show the customer, e.g. 'Passport'.
+        file_required:
+          type: boolean
+          title: File Required
+          description: True when the customer must upload a file for this option.
+          default: true
+        fields:
+          items:
+            $ref: "#/components/schemas/FieldSpec"
+          type: array
+          title: Fields
+          description: Extra values this document needs. Send them in the slot's `fields`.
+          default: []
+        copies:
+          items:
+            type: string
+          type: array
+          title: Copies
+          description:
+            Names of the customer's own fields copied onto this document
+            automatically.
+          default: []
+        needs_address:
+          type: boolean
+          title: Needs Address
+          description:
+            True when this document refers to the address the customer
+            gave.
+          default: false
+      type: object
+      required:
+        - key
+        - label
+      title: DocumentOption
+      description: One accepted way to fill a document slot (e.g. passport or ID card).
+    DocumentSlot:
+      properties:
+        name:
+          type: string
+          title: Name
+          description: Key for this slot in `documents` and in the `file.<name>` part.
+        label:
+          type: string
+          title: Label
+          description: Label to show the customer, e.g. 'Proof of identity'.
+        help:
+          type: string
+          title: Help
+          description: Help text from the carrier.
+          default: ""
+        options:
+          items:
+            $ref: "#/components/schemas/DocumentOption"
+          type: array
+          title: Options
+          description: The accepted ways to fill this slot. The customer picks one.
+        needs_input:
+          type: boolean
+          title: Needs Input
+          description:
+            "False when there is nothing to ask: one option, no file, no
+            extra
+
+            values. The UI hides such a slot; the plug-in still fills it."
+          readOnly: true
+      type: object
+      required:
+        - name
+        - label
+        - options
+        - needs_input
+      title: DocumentSlot
+      description: A required proof (identity, address, registration) with its options.
     DomainCheckResponse:
       properties:
         domain:
@@ -5551,6 +5955,50 @@ components:
       required:
         - items
       title: EventStreamResponse
+    FieldSpec:
+      properties:
+        name:
+          type: string
+          title: Name
+          description: Key to send this value under in `fields`.
+        label:
+          type: string
+          title: Label
+          description: Label to show the customer.
+        kind:
+          type: string
+          enum:
+            - text
+            - email
+            - phone
+            - url
+          title: Kind
+          description: "Input kind: 'text', 'email', 'phone', or 'url'."
+          default: text
+        help:
+          type: string
+          title: Help
+          description: Help text from the carrier.
+          default: ""
+        pattern:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Pattern
+          description:
+            Regular expression the value must match, when the carrier gives
+            one.
+        required:
+          type: boolean
+          title: Required
+          description: False when the field is optional.
+          default: true
+      type: object
+      required:
+        - name
+        - label
+      title: FieldSpec
+      description: One value the customer types in.
     HTTPValidationError:
       properties:
         detail:
@@ -5936,6 +6384,71 @@ components:
         - message
       title: ProviderValidateResult
       description: Outcome of a live provider-key probe.
+    Requirements:
+      properties:
+        provider:
+          type: string
+          title: Provider
+          description: The carrier these requirements come from.
+        country_code:
+          type: string
+          title: Country Code
+          description: ISO alpha-2 country code.
+        number_type:
+          type: string
+          title: Number Type
+          description: "'local', 'mobile', 'toll_free', or 'national'."
+        subject_type:
+          type: string
+          enum:
+            - person
+            - business
+          title: Subject Type
+          description: "'person' or 'business'."
+        required:
+          type: boolean
+          title: Required
+          description: False when the carrier needs no verification for this combination.
+        fields:
+          items:
+            $ref: "#/components/schemas/FieldSpec"
+          type: array
+          title: Fields
+          description: Values to collect about the person or business.
+          default: []
+        documents:
+          items:
+            $ref: "#/components/schemas/DocumentSlot"
+          type: array
+          title: Documents
+          description: Documents to collect. Skip slots with `needs_input` false.
+          default: []
+        address_required:
+          type: boolean
+          title: Address Required
+          description: True when an address must be collected.
+          default: false
+        subject_types:
+          items:
+            type: string
+            enum:
+              - person
+              - business
+          type: array
+          title: Subject Types
+          description:
+            Subject types the carrier accepts here, so you can offer the
+            choice.
+          default: []
+      type: object
+      required:
+        - provider
+        - country_code
+        - number_type
+        - subject_type
+        - required
+      title: Requirements
+      description: What a carrier needs for one (country, number type, subject type).
     SenderIdPatch:
       properties:
         custom_sender_id:
@@ -6251,6 +6764,76 @@ components:
         - msg
         - type
       title: ValidationError
+    VerificationResponse:
+      properties:
+        id:
+          type: string
+          format: uuid
+          title: Id
+          description: Unique identifier for this verification.
+        provider:
+          type: string
+          title: Provider
+          description: The carrier this verification is with.
+        country_code:
+          type: string
+          title: Country Code
+          description: ISO alpha-2 country code.
+        number_type:
+          type: string
+          title: Number Type
+          description: "Kind of number: 'local', 'mobile', 'toll_free', or 'national'."
+        subject_type:
+          type: string
+          title: Subject Type
+          description: "'person' or 'business'."
+        state:
+          type: string
+          title: State
+          description: "'awaiting_review', 'submitted', 'approved', 'rejected',
+            or 'cancelled'."
+        rejection_reason:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Rejection Reason
+          description: Why it was rejected. Null unless rejected.
+        created_at:
+          type: string
+          format: date-time
+          title: Created At
+          description: When the verification was created.
+        updated_at:
+          type: string
+          format: date-time
+          title: Updated At
+          description: When it last changed.
+        submitted_at:
+          anyOf:
+            - type: string
+              format: date-time
+            - type: "null"
+          title: Submitted At
+          description: When it was submitted to the carrier.
+        approved_at:
+          anyOf:
+            - type: string
+              format: date-time
+            - type: "null"
+          title: Approved At
+          description: When the carrier approved it.
+      type: object
+      required:
+        - id
+        - provider
+        - country_code
+        - number_type
+        - subject_type
+        - state
+        - created_at
+        - updated_at
+      title: VerificationResponse
+      description: A carrier verification. Holds state only; no personal data.
     VoiceConfig:
       properties:
         tts:

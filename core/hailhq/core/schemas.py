@@ -2053,3 +2053,33 @@ class ProviderValidateResult(BaseModel):
     message: str | None = Field(
         description="Human-readable detail about the outcome. 'ok' on success, an error description otherwise."
     )
+
+
+class VerificationResponse(BaseModel):
+    """A carrier verification. Holds state only; no personal data."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID = Field(description="Unique identifier for this verification.")
+    provider: str = Field(description="The carrier this verification is with.")
+    country_code: str = Field(description="ISO alpha-2 country code.")
+    number_type: str = Field(
+        description="Kind of number: 'local', 'mobile', 'toll_free', or 'national'."
+    )
+    subject_type: str = Field(description="'person' or 'business'.")
+    state: str = Field(
+        description=(
+            "'awaiting_review', 'submitted', 'approved', 'rejected', or 'cancelled'."
+        )
+    )
+    rejection_reason: str | None = Field(
+        default=None, description="Why it was rejected. Null unless rejected."
+    )
+    created_at: datetime = Field(description="When the verification was created.")
+    updated_at: datetime = Field(description="When it last changed.")
+    submitted_at: datetime | None = Field(
+        default=None, description="When it was submitted to the carrier."
+    )
+    approved_at: datetime | None = Field(
+        default=None, description="When the carrier approved it."
+    )

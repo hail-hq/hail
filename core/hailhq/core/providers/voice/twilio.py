@@ -73,6 +73,7 @@ class TwilioVoiceProvider(VoiceProvider):
         country_code: str,
         number_type: NumberType,
         capabilities: list[str],
+        verification_handle: dict | None = None,
     ) -> ProviderNumber:
         search_kwargs: dict[str, bool] = {}
         for cap in capabilities:
@@ -91,10 +92,16 @@ class TwilioVoiceProvider(VoiceProvider):
             )
         chosen = available[0]
 
+        purchase_kwargs: dict[str, str] = {}
+        for key in ("bundle_sid", "address_sid"):
+            if verification_handle and verification_handle.get(key):
+                purchase_kwargs[key] = verification_handle[key]
+
         try:
             purchased = await asyncio.to_thread(
                 self._client.incoming_phone_numbers.create,
                 phone_number=chosen.phone_number,
+                **purchase_kwargs,
             )
         except TwilioRestException as exc:
             # A 400 at purchase means the number can't be provisioned as

@@ -79,8 +79,13 @@ class VoiceProvider(ABC):
         country_code: str,
         number_type: NumberType,
         capabilities: list[str],
+        verification_handle: dict | None = None,
     ) -> ProviderNumber:
-        """Search for and purchase a number matching the criteria."""
+        """Search for and purchase a number matching the criteria.
+
+        ``verification_handle`` is what the same carrier's verification plug-in
+        returned from ``purchase_handle`` for the caller's approved
+        verification. None when the caller has none."""
 
     @abstractmethod
     async def release_number(self, provider_resource_id: str) -> None:

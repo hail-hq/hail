@@ -23,6 +23,7 @@ from hailhq.api.routes import numbers as numbers_routes
 from hailhq.api.routes import providers as providers_routes
 from hailhq.api.routes import sms as sms_routes
 from hailhq.api.routes import unsubscribe as unsubscribe_routes
+from hailhq.api.routes import verifications as verifications_routes
 from hailhq.api.routes import webhooks as webhooks_routes
 from hailhq.api.routes import whoami as whoami_routes
 from hailhq.api.routes.internal import agent as internal_agent
@@ -355,6 +356,7 @@ _CUSTOMER_ROUTERS = [
     contacts_routes.router,
     whoami_routes.router,
     providers_routes.router,
+    verifications_routes.router,
 ]
 for _router in _CUSTOMER_ROUTERS:
     app.include_router(_router, prefix="/v1")
@@ -367,6 +369,7 @@ app.include_router(internal_call_settings.router)
 app.include_router(internal_dsar.router)
 app.include_router(internal_agent.router)
 app.include_router(internal_numbers.router)
+app.include_router(verifications_routes.admin_router)
 
 
 @app.get("/healthz")
