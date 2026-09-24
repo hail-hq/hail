@@ -39,7 +39,7 @@ from hailhq.api.ratelimit import GENERAL_RATE_LIMITED_RESPONSES
 from hailhq.api.route_prefixes import request_mount_prefix
 from hailhq.api.routes.sms import get_sms_provider
 from hailhq.core import telephony_catalog
-from hailhq.core.carrier_routing import sms_route
+from hailhq.core.carrier_routing import TELNYX, TWILIO, sms_route
 from hailhq.core.db import get_session
 from hailhq.core.models import NumberOffer, PhoneNumber
 from hailhq.core.number_offers import CarrierOffer, discover_offers, rank_offers
@@ -188,6 +188,21 @@ def _reject_if_released(number: PhoneNumber) -> None:
         )
 
 
+async def _release_telnyx(number: PhoneNumber, provider: VoiceProvider) -> None:
+    try:
+        await release_telnyx_number(number.provider_resource_id)
+    except CarrierNotConfigured as exc:
+        # Carrier not configured: an operator problem, not a server fault.
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
+async def _release_twilio(number: PhoneNumber, provider: VoiceProvider) -> None:
+    await provider.release_number(number.provider_resource_id)
+
+
+_RELEASERS = {TELNYX: _release_telnyx, TWILIO: _release_twilio}
+
+
 async def release_org_number(
     db: AsyncSession, provider: VoiceProvider, number: PhoneNumber
 ) -> PhoneNumber:
@@ -223,16 +238,10 @@ async def release_org_number(
             status_code=409,
             detail="Number order is still pending; refresh its status before releasing",
         )
-    if number.provider == "telnyx":
-        try:
-            await release_telnyx_number(number.provider_resource_id)
-        except CarrierNotConfigured as exc:
-            # Carrier not configured: an operator problem, not a server fault.
-            raise HTTPException(status_code=503, detail=str(exc)) from exc
-    elif number.provider == "twilio":
-        await provider.release_number(number.provider_resource_id)
-    else:
+    releaser = _RELEASERS.get(number.provider)
+    if releaser is None:
         raise HTTPException(status_code=409, detail="Unsupported number carrier")
+    await releaser(number, provider)
     number.provisioning_state = "released"
     number.released_at = datetime.now(timezone.utc)
     try:

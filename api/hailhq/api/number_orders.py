@@ -15,6 +15,7 @@ from hailhq.api.errors import unprocessable
 from hailhq.api.funds import BILLING_URL, require_funds
 from hailhq.core import telephony_catalog
 from hailhq.core.billing import get_balance_cents, monthly_fee_ref
+from hailhq.core.carrier_routing import TELNYX, carrier
 from hailhq.core.db import session_scope
 from hailhq.core.models import AccountCredit, NumberOffer, PhoneNumber
 from hailhq.core.number_offers import CarrierOffer, discover_offers
@@ -158,7 +159,7 @@ async def carrier_outcome(
     carrier has no record of the order; it is never treated as permission to
     submit another paid purchase.
     """
-    if number.provider == "telnyx":
+    if carrier(number.provider).async_orders:
         return await telnyx_order_outcome(
             number.e164, number.id, number.provisioning_metadata.get("order_id")
         )
@@ -418,7 +419,7 @@ async def acquire_offer(
     # carrier (timeouts: Telnyx 20s, Twilio 10s).
     await org_lock(db, org)
     try:
-        if offer.provider == "telnyx":
+        if carrier(offer.provider).async_orders:
             order_id = await place_number_order(
                 number.id, offer.e164, offer.verification_id, offer.capabilities
             )
@@ -465,7 +466,7 @@ async def acquire_offer(
     # Status reads can fail after a successful POST. They must never enter the
     # submission rejection/refund handler above.
     if (
-        number.provider == "telnyx"
+        carrier(number.provider).async_orders
         and number.provisioning_state == "pending"
         and number.provisioning_metadata.get("order_id")
     ):
@@ -602,7 +603,7 @@ async def purchase_number(
             provider=provider,
             billed=billed,
         )
-    elif body.provider in ("auto", "telnyx"):
+    elif body.provider in ("auto", TELNYX):
         # Omitted provider without a quote is the legacy Twilio contract.
         raise unprocessable(
             "Request a live quote from POST /numbers/quotes, then pass its quote_id",

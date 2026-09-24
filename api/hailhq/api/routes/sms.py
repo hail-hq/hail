@@ -41,7 +41,7 @@ from hailhq.api.ratelimit import (
 )
 from hailhq.api.route_prefixes import request_mount_prefix
 from hailhq.api.usage import write_usage_event
-from hailhq.core.carrier_routing import sms_route
+from hailhq.core.carrier_routing import TELNYX, TWILIO, carrier, sms_route
 from hailhq.core.compliance_gate import check_sms_allowed, remove_suppression
 from hailhq.core.config import settings
 from hailhq.core.db import get_session
@@ -54,7 +54,10 @@ from hailhq.core.models import (
 )
 from hailhq.core.pricing_tier import classify_pricing_tier
 from hailhq.core.providers.sms import SmsProvider
-from hailhq.core.providers.sms.status_map import map_twilio_message_status
+from hailhq.core.providers.sms.status_map import (
+    map_telnyx_message_status,
+    map_twilio_message_status,
+)
 from hailhq.core.providers.sms.telnyx import TelnyxSmsProvider
 from hailhq.core.providers.sms.twilio import LazyTwilioSmsProvider
 from hailhq.core.providers.telnyx import verify_webhook
@@ -109,11 +112,10 @@ async def deliver_sms(db: AsyncSession, provider: SmsProvider, sms: Sms) -> str 
     'provider_error' on transport failure, or the carrier error code on
     rejection. Never raises — the caller owns HTTP semantics.
     """
-    callback_url = join_url(
-        settings.hail_api_url,
-        "sms/telnyx" if sms.provider == "telnyx" else "sms/status",
-    )
     try:
+        callback_url = join_url(
+            settings.hail_api_url, carrier(sms.provider).sms_status_path
+        )
         provider = sms_route(sms.provider, provider)
         result = await provider.send_sms(
             from_e164=sms.from_e164,
@@ -329,7 +331,7 @@ async def create_sms(
 
     sms = Sms(
         organization_id=principal.organization_id,
-        provider=from_number.provider if from_number is not None else "twilio",
+        provider=from_number.provider if from_number is not None else TWILIO,
         from_number_id=from_number.id if from_number is not None else None,
         from_e164=from_e164,
         to_e164=body.to,
@@ -420,6 +422,33 @@ async def receive_inbound_sms(
 _TERMINAL_SMS_STATUSES = frozenset({"delivered", "undelivered", "failed"})
 
 
+async def _apply_sms_status(db: AsyncSession, sms: Sms, new_status: str) -> None:
+    """Record a status change and fan out terminal ones. Caller commits."""
+    prior = sms.status
+    sms.status = new_status
+    db.add(
+        SmsEvent(
+            sms_id=sms.id,
+            organization_id=sms.organization_id,
+            kind="state_change",
+            payload={"from": prior, "to": new_status},
+        )
+    )
+    if new_status in _TERMINAL_SMS_STATUSES:
+        await fanout_sms_event(
+            db,
+            organization_id=sms.organization_id,
+            event_type=f"sms.{new_status}",
+            event_id=sms.id,
+            data={
+                "id": str(sms.id),
+                "to": sms.to_e164,
+                "from": sms.from_e164,
+                "status": new_status,
+            },
+        )
+
+
 @router.post("/status", include_in_schema=False)
 async def receive_sms_status(
     request: Request,
@@ -457,7 +486,7 @@ async def receive_sms_status(
     sms = (
         await db.execute(
             select(Sms)
-            .where(Sms.provider_message_sid == sid, Sms.provider == "twilio")
+            .where(Sms.provider_message_sid == sid, Sms.provider == TWILIO)
             .with_for_update()
         )
     ).scalar_one_or_none()
@@ -471,29 +500,7 @@ async def receive_sms_status(
         # new event either way.
         return {"status": "duplicate"}
 
-    prior = sms.status
-    sms.status = new_status
-    db.add(
-        SmsEvent(
-            sms_id=sms.id,
-            organization_id=sms.organization_id,
-            kind="state_change",
-            payload={"from": prior, "to": new_status},
-        )
-    )
-    if new_status in {"delivered", "undelivered", "failed"}:
-        await fanout_sms_event(
-            db,
-            organization_id=sms.organization_id,
-            event_type=f"sms.{new_status}",
-            event_id=sms.id,
-            data={
-                "id": str(sms.id),
-                "to": sms.to_e164,
-                "from": sms.from_e164,
-                "status": new_status,
-            },
-        )
+    await _apply_sms_status(db, sms, new_status)
     await db.commit()
     return {"status": "applied"}
 
@@ -748,25 +755,20 @@ async def receive_telnyx_sms(
             provider_message_sid=message_id,
             opt_out_type=None,
             provider=reply_provider,
-            carrier="telnyx",
+            carrier=TELNYX,
         )
         await db.commit()
         return {"status": "received"}
     if event_type != "message.finalized":
         return {"status": "ignored"}
-    new_status = {
-        "delivered": "delivered",
-        "delivery_failed": "undelivered",
-        "expired": "undelivered",
-        "sending_failed": "failed",
-    }.get(recipient.get("status"))
+    new_status = map_telnyx_message_status(recipient.get("status"))
     if not new_status:
         return {"status": "ignored"}
     sms = (
         await db.execute(
             select(Sms)
             .where(
-                Sms.provider == "telnyx",
+                Sms.provider == TELNYX,
                 Sms.provider_message_sid == message_id,
                 Sms.direction == "outbound",
             )
@@ -785,7 +787,7 @@ async def receive_telnyx_sms(
                 await db.execute(
                     select(PhoneNumber.id)
                     .where(
-                        PhoneNumber.provider == "telnyx",
+                        PhoneNumber.provider == TELNYX,
                         PhoneNumber.e164 == sender,
                         PhoneNumber.provisioning_state == "active",
                     )
@@ -799,30 +801,9 @@ async def receive_telnyx_sms(
         return {"status": "unrecorded"}
     if sms.status in _TERMINAL_SMS_STATUSES:
         return {"status": "duplicate"}
-    prior = sms.status
-    sms.status = new_status
     errors = payload.get("errors") or []
     error_code = errors[0].get("code") if errors else None
     sms.error_code = str(error_code) if error_code is not None else None
-    db.add(
-        SmsEvent(
-            sms_id=sms.id,
-            organization_id=sms.organization_id,
-            kind="state_change",
-            payload={"from": prior, "to": new_status},
-        )
-    )
-    await fanout_sms_event(
-        db,
-        organization_id=sms.organization_id,
-        event_type=f"sms.{new_status}",
-        event_id=sms.id,
-        data={
-            "id": str(sms.id),
-            "to": sms.to_e164,
-            "from": sms.from_e164,
-            "status": new_status,
-        },
-    )
+    await _apply_sms_status(db, sms, new_status)
     await db.commit()
     return {"status": "applied"}
