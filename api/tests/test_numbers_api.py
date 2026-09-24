@@ -45,83 +45,137 @@ def pinned_catalog(tmp_path, monkeypatch):
     telephony_catalog._load.cache_clear()
 
 
+@pytest.fixture()
+def buy_number(client, async_session, org_and_key, monkeypatch, voice_provider_mock):
+    """Buy a Twilio-quoted US/local number through POST /numbers."""
+    from datetime import datetime, timedelta, timezone
+    from unittest.mock import AsyncMock
+
+    from hailhq.core.models import NumberOffer
+    from hailhq.core.number_offers import CarrierOffer
+
+    purchase = AsyncMock(return_value="PN_test_acquired")
+    monkeypatch.setattr("hailhq.api.number_orders.purchase_ordered_number", purchase)
+
+    async def _buy(
+        key=None,
+        org=None,
+        headers=None,
+        e164="+14155550001",
+        monthly=115,
+        carrier_down=False,
+        reuse_quote=False,
+    ):
+        org = org or org_and_key[0]
+        key = key or org_and_key[2]
+        offer = CarrierOffer(
+            provider="twilio",
+            e164=e164,
+            country_code="US",
+            number_type="local",
+            capabilities=["voice", "sms"],
+            monthly_cents=monthly,
+            setup_cents=0,
+            readiness="ready",
+        )
+        monkeypatch.setattr(
+            "hailhq.api.number_orders.discover_offers",
+            AsyncMock(return_value=([], ["twilio"]) if carrier_down else ([offer], [])),
+        )
+        if reuse_quote:
+            quote = _buy.last_quote
+        else:
+            quote = NumberOffer(
+                organization_id=org,
+                offer=offer.model_dump(mode="json"),
+                expires_at=datetime.now(timezone.utc) + timedelta(minutes=10),
+            )
+            async_session.add(quote)
+            await async_session.commit()
+            _buy.last_quote = quote
+        return await client.post(
+            "/numbers",
+            json={"country_code": "US", "quote_id": str(quote.id)},
+            headers={"Authorization": f"Bearer {key}", **(headers or {})},
+        )
+
+    _buy.purchase = purchase
+    return _buy
+
+
 async def test_acquire_number_requires_auth(client) -> None:
     resp = await client.post(
-        "/numbers", json={"country_code": "US", "number_type": "local"}
+        "/numbers", json={"quote_id": str(uuid.uuid4()), "country_code": "US"}
     )
     assert resp.status_code == 401
 
 
+async def test_acquire_without_quote_id_is_422(client, org_and_key) -> None:
+    """The legacy no-quote purchase is gone: the body must carry a quote_id."""
+    _, _, plaintext = org_and_key
+    resp = await client.post(
+        "/numbers",
+        json={"country_code": "US", "number_type": "local"},
+        headers={"Authorization": f"Bearer {plaintext}"},
+    )
+    assert resp.status_code == 422, resp.text
+    assert "quote_id" in resp.text
+
+
+async def test_acquire_unknown_quote_is_404(client, org_and_key) -> None:
+    _, _, plaintext = org_and_key
+    resp = await client.post(
+        "/numbers",
+        json={"country_code": "US", "quote_id": str(uuid.uuid4())},
+        headers={"Authorization": f"Bearer {plaintext}"},
+    )
+    assert resp.status_code == 404, resp.text
+
+
 async def test_acquire_number_402_zero_balance(
-    client, async_session, voice_provider_mock
+    client, async_session, buy_number
 ) -> None:
     """A zero-balance org must not purchase a number: 402 before the carrier
-    is ever reached — same gate as POST /calls, /sms, /emails."""
+    is ever reached."""
     from .conftest import insert_org_and_key
 
-    _, _, plaintext = await insert_org_and_key(
+    org, _, plaintext = await insert_org_and_key(
         async_session, org_slug="broke-numbers", initial_credit_cents=0
     )
-    resp = await client.post(
-        "/numbers",
-        json={"country_code": "US", "number_type": "local"},
-        headers={"Authorization": f"Bearer {plaintext}"},
-    )
+    resp = await buy_number(key=plaintext, org=org)
     assert resp.status_code == 402, resp.text
     assert "credits" in resp.json()["detail"].lower()
-    voice_provider_mock.acquire_number.assert_not_awaited()
+    buy_number.purchase.assert_not_awaited()
 
 
-async def test_acquire_number_happy_path(
-    client, org_and_key, voice_provider_mock
-) -> None:
-    _, _, plaintext = org_and_key
-    resp = await client.post(
-        "/numbers",
-        json={"country_code": "US", "number_type": "local"},
-        headers={"Authorization": f"Bearer {plaintext}"},
-    )
+async def test_acquire_number_happy_path(buy_number) -> None:
+    resp = await buy_number()
     assert resp.status_code == 201, resp.text
     body = resp.json()
-    assert body["e164"]
+    assert body["e164"] == "+14155550001"
     assert body["is_dedicated"] is True
-    assert "sms" in body["capabilities"] or "voice" in body["capabilities"]
+    assert set(body["capabilities"]) == {"voice", "sms"}
 
 
-async def test_acquire_number_idempotent_replay(
-    client, org_and_key, voice_provider_mock
-) -> None:
+async def test_acquire_number_idempotent_replay(buy_number) -> None:
     """Same Idempotency-Key on a retried acquire must NOT purchase a second
-    number — the replay returns the cached number without re-invoking the
-    provider."""
-    _, _, plaintext = org_and_key
-    headers = {
-        "Authorization": f"Bearer {plaintext}",
-        "Idempotency-Key": "acquire-retry-key",
-    }
-    body = {"country_code": "US", "number_type": "local"}
-
-    first = await client.post("/numbers", json=body, headers=headers)
+    number: the replay returns the cached number without calling the carrier."""
+    headers = {"Idempotency-Key": "acquire-retry-key"}
+    first = await buy_number(headers=headers)
     assert first.status_code == 201, first.text
-
-    second = await client.post("/numbers", json=body, headers=headers)
+    second = await buy_number(headers=headers, reuse_quote=True)
     assert second.status_code == 201, second.text
     assert second.headers.get("idempotency-replay") == "true"
-
     assert second.json()["id"] == first.json()["id"]
-    voice_provider_mock.acquire_number.assert_awaited_once()
+    buy_number.purchase.assert_awaited_once()
 
 
 async def test_release_number_204_marks_released(
-    client, org_and_key, voice_provider_mock
+    client, org_and_key, voice_provider_mock, buy_number
 ) -> None:
     _, _, plaintext = org_and_key
     headers = {"Authorization": f"Bearer {plaintext}"}
-    acquired = await client.post(
-        "/numbers",
-        json={"country_code": "US", "number_type": "local"},
-        headers=headers,
-    )
+    acquired = await buy_number()
     assert acquired.status_code == 201, acquired.text
     number_id = acquired.json()["id"]
 
@@ -140,7 +194,7 @@ async def test_release_number_204_marks_released(
 
 
 async def test_reacquire_same_e164_after_release(
-    client, org_and_key, voice_provider_mock
+    client, org_and_key, voice_provider_mock, buy_number
 ) -> None:
     """Twilio recycles released numbers: a released row is a tombstone and
     must not block re-acquiring the same e164 (partial unique index,
@@ -148,32 +202,27 @@ async def test_reacquire_same_e164_after_release(
     carrier purchase — a 500 and an orphaned paid number."""
     _, _, plaintext = org_and_key
     headers = {"Authorization": f"Bearer {plaintext}"}
-    body = {"country_code": "US", "number_type": "local"}
 
-    first = await client.post("/numbers", json=body, headers=headers)
+    first = await buy_number()
     assert first.status_code == 201, first.text
     resp = await client.delete(f"/numbers/{first.json()['id']}", headers=headers)
     assert resp.status_code == 204
 
-    # The mock returns the same e164 (+14155550001) again.
-    second = await client.post("/numbers", json=body, headers=headers)
+    # A fresh quote for the same e164.
+    second = await buy_number()
     assert second.status_code == 201, second.text
     assert second.json()["e164"] == first.json()["e164"]
     assert second.json()["id"] != first.json()["id"]
 
 
 async def test_enable_sms_on_released_number_422(
-    client, org_and_key, voice_provider_mock
+    client, org_and_key, voice_provider_mock, buy_number
 ) -> None:
     """A released number's PN is deleted at Twilio — enable-sms must be a
     clean 422, not a TwilioRestException 500 from attach_number."""
     _, _, plaintext = org_and_key
     headers = {"Authorization": f"Bearer {plaintext}"}
-    acquired = await client.post(
-        "/numbers",
-        json={"country_code": "US", "number_type": "local"},
-        headers=headers,
-    )
+    acquired = await buy_number()
     assert acquired.status_code == 201, acquired.text
     number_id = acquired.json()["id"]
     resp = await client.delete(f"/numbers/{number_id}", headers=headers)
@@ -185,16 +234,11 @@ async def test_enable_sms_on_released_number_422(
 
 
 async def test_release_number_404_other_org(
-    client, async_session, org_and_key, voice_provider_mock
+    client, async_session, org_and_key, voice_provider_mock, buy_number
 ) -> None:
     from .conftest import insert_org_and_key
 
-    _, _, owner_key = org_and_key
-    acquired = await client.post(
-        "/numbers",
-        json={"country_code": "US", "number_type": "local"},
-        headers={"Authorization": f"Bearer {owner_key}"},
-    )
+    acquired = await buy_number()
     assert acquired.status_code == 201, acquired.text
     number_id = acquired.json()["id"]
 
@@ -206,106 +250,6 @@ async def test_release_number_404_other_org(
     )
     assert resp.status_code == 404
     voice_provider_mock.release_number.assert_not_awaited()
-
-
-async def test_acquire_not_provisionable_returns_422_not_500(
-    client, org_and_key, voice_provider_mock
-):
-    """A carrier 'bundle required' rejection (NumberNotProvisionable) surfaces
-    as a clean 422 — not an opaque 500 — and the provider IS reached (unlike
-    the pre-provider allow-list 422). The raw carrier reason is not leaked."""
-    from hailhq.core.providers.voice import NumberNotProvisionable
-
-    voice_provider_mock.acquire_number.side_effect = NumberNotProvisionable(
-        "Bundle required and not provided for country: [GB] and numberType: [MOBILE]"
-    )
-    _, _, plaintext = org_and_key
-    resp = await client.post(
-        "/numbers",
-        json={"country_code": "US", "number_type": "local"},
-        headers={"Authorization": f"Bearer {plaintext}"},
-    )
-    assert resp.status_code == 422, resp.text
-    voice_provider_mock.acquire_number.assert_awaited_once()
-    assert "Bundle" not in resp.text  # raw carrier reason stays server-side
-
-
-async def test_acquire_rejects_unlisted_country_type(
-    client, org_and_key, voice_provider_mock
-):
-    _, _, plaintext = org_and_key
-    resp = await client.post(
-        "/numbers",
-        json={"country_code": "ZZ", "number_type": "local"},
-        headers={"Authorization": f"Bearer {plaintext}"},
-    )
-    assert resp.status_code == 422, resp.text
-    voice_provider_mock.acquire_number.assert_not_awaited()  # guarded before the provider
-
-
-async def test_acquire_allows_listed_country_type(
-    client, org_and_key, voice_provider_mock
-):
-    _, _, plaintext = org_and_key
-    # US/local is in the pinned catalog; the provider mock returns a fake number.
-    resp = await client.post(
-        "/numbers",
-        json={"country_code": "US", "number_type": "local"},
-        headers={"Authorization": f"Bearer {plaintext}"},
-    )
-    assert resp.status_code == 201, resp.text
-    voice_provider_mock.acquire_number.assert_awaited_once()
-
-
-async def test_acquire_lowercase_country_code_is_normalized(
-    client, org_and_key, voice_provider_mock
-):
-    """The catalog keys on uppercase ISO codes; a lowercase request must be
-    normalized, not 422ed as unlisted."""
-    _, _, plaintext = org_and_key
-    resp = await client.post(
-        "/numbers",
-        json={"country_code": "us", "number_type": "local"},
-        headers={"Authorization": f"Bearer {plaintext}"},
-    )
-    assert resp.status_code == 201, resp.text
-    _, kwargs = voice_provider_mock.acquire_number.call_args
-    assert kwargs["country_code"] == "US"
-
-
-async def test_acquire_sms_only_country_requests_sms_capability_only(
-    client, org_and_key, voice_provider_mock
-):
-    """SE/mobile is SMS-only in the pinned catalog (voice=False, sms=True).
-    The route must request only the capabilities the catalog row advertises,
-    not the hardcoded ["voice", "sms"] — otherwise the Twilio adapter's AND
-    filter matches nothing and acquisition 503s."""
-    _, _, plaintext = org_and_key
-    resp = await client.post(
-        "/numbers",
-        json={"country_code": "SE", "number_type": "mobile"},
-        headers={"Authorization": f"Bearer {plaintext}"},
-    )
-    assert resp.status_code == 201, resp.text
-    voice_provider_mock.acquire_number.assert_awaited_once()
-    _, kwargs = voice_provider_mock.acquire_number.call_args
-    assert kwargs["capabilities"] == ["sms"]
-
-
-async def test_acquire_voice_and_sms_country_requests_both_capabilities(
-    client, org_and_key, voice_provider_mock
-):
-    """US/local supports both voice and sms — both must still be requested."""
-    _, _, plaintext = org_and_key
-    resp = await client.post(
-        "/numbers",
-        json={"country_code": "US", "number_type": "local"},
-        headers={"Authorization": f"Bearer {plaintext}"},
-    )
-    assert resp.status_code == 201, resp.text
-    voice_provider_mock.acquire_number.assert_awaited_once()
-    _, kwargs = voice_provider_mock.acquire_number.call_args
-    assert kwargs["capabilities"] == ["voice", "sms"]
 
 
 async def test_get_number_not_found(client, org_and_key) -> None:
@@ -473,87 +417,54 @@ async def test_enable_sms_is_idempotent_when_already_enabled(
 
 @pytest.mark.parametrize("credit, expected", [(114, 402), (115, 201), (1000, 201)])
 async def test_number_purchase_debits_full_price(
-    client, async_session, voice_provider_mock, credit, expected
+    async_session, buy_number, credit, expected
 ):
     from hailhq.core.billing import get_balance_cents
 
     from .conftest import insert_org_and_key
 
     org, _, key = await insert_org_and_key(async_session, initial_credit_cents=credit)
-    response = await client.post(
-        "/numbers",
-        json={"country_code": "US", "number_type": "local"},
-        headers={"Authorization": f"Bearer {key}"},
-    )
+    response = await buy_number(key=key, org=org)
     assert response.status_code == expected, response.text
     assert await get_balance_cents(async_session, org) == credit - (
         115 if expected == 201 else 0
     )
     if expected == 402:
-        voice_provider_mock.acquire_number.assert_not_awaited()
+        buy_number.purchase.assert_not_awaited()
 
 
-async def test_purchase_failure_does_not_charge(
-    client, org_and_key, async_session, voice_provider_mock
-):
+async def test_purchase_failure_does_not_charge(org_and_key, async_session, buy_number):
     from hailhq.core.billing import get_balance_cents
 
-    org, _, key = org_and_key
+    org, _, _ = org_and_key
     before = await get_balance_cents(async_session, org)
-    voice_provider_mock.acquire_number.side_effect = LookupError("No inventory")
-    response = await client.post(
-        "/numbers",
-        json={"country_code": "US", "number_type": "local"},
-        headers={"Authorization": f"Bearer {key}"},
-    )
+    response = await buy_number(carrier_down=True)
     assert response.status_code == 503
     assert await get_balance_cents(async_session, org) == before
-
-
-async def test_ten_dollars_cannot_buy_more_expensive_number(
-    client,
-    async_session,
-    voice_provider_mock,
-    monkeypatch,
-):
-    from decimal import Decimal
-
-    from .conftest import insert_org_and_key
-
-    monkeypatch.setattr(
-        telephony_catalog, "price_usd_per_month", lambda *_: Decimal("10.01")
-    )
-    _, _, key = await insert_org_and_key(async_session, initial_credit_cents=1000)
-    response = await client.post(
-        "/numbers",
-        json={"country_code": "US", "number_type": "local"},
-        headers={"Authorization": f"Bearer {key}"},
-    )
-    assert response.status_code == 402
-    voice_provider_mock.acquire_number.assert_not_awaited()
+    buy_number.purchase.assert_not_awaited()
 
 
 async def test_purchase_debit_uses_monthly_rater_key_and_replay_does_not_charge_twice(
-    client,
     org_and_key,
     async_session,
+    buy_number,
 ):
     from hailhq.core.models import AccountCredit, PhoneNumber
     from sqlalchemy import select
 
-    org, _, key = org_and_key
-    headers = {"Authorization": f"Bearer {key}", "Idempotency-Key": "debit-once"}
-    body = {"country_code": "US", "number_type": "local"}
-    first = await client.post("/numbers", json=body, headers=headers)
+    org, _, _ = org_and_key
+    headers = {"Idempotency-Key": "debit-once"}
+    first = await buy_number(headers=headers)
     assert first.status_code == 201
-    second = await client.post("/numbers", json=body, headers=headers)
+    second = await buy_number(headers=headers, reuse_quote=True)
     assert second.status_code == 201
     number = await async_session.get(PhoneNumber, uuid.UUID(first.json()["id"]))
     debits = (
         (
             await async_session.execute(
                 select(AccountCredit).where(
-                    AccountCredit.organization_id == org, AccountCredit.kind == "debit"
+                    AccountCredit.organization_id == org,
+                    AccountCredit.source == "monthly_fee",
                 )
             )
         )

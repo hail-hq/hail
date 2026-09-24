@@ -24,10 +24,8 @@ from pydantic import BaseModel
 __all__ = [
     "CarrierNotConfigured",
     "CarrierRequestError",
-    "NumberNotProvisionable",
     "NumberType",
     "ProviderCallStatus",
-    "ProviderNumber",
     "VoiceProvider",
 ]
 
@@ -42,30 +40,6 @@ class CarrierRequestError(Exception):
 
 class CarrierNotConfigured(Exception):
     """The carrier is not configured on this deployment (an operator problem)."""
-
-
-class NumberNotProvisionable(Exception):
-    """The carrier refused to provision the requested number for a reason a
-    retry won't fix — most often a country/number-type that needs regulatory
-    verification (a bundle or address) the platform hasn't set up (e.g. GB
-    mobile). Distinct from a transient inventory miss (``LookupError``, a 503)
-    and from transport/auth failures (which propagate). Carries a
-    human-readable ``detail`` for the caller-facing 422.
-    """
-
-    def __init__(self, detail: str) -> None:
-        super().__init__(detail)
-        self.detail = detail
-
-
-class ProviderNumber(BaseModel):
-    """A phone number resource as returned by the carrier."""
-
-    provider_resource_id: str
-    e164: str
-    country_code: str
-    capabilities: list[str]
-    number_type: NumberType
 
 
 class ProviderCallStatus(BaseModel):
@@ -86,15 +60,6 @@ class ProviderCallStatus(BaseModel):
 
 class VoiceProvider(ABC):
     """Abstract carrier-side voice provider."""
-
-    @abstractmethod
-    async def acquire_number(
-        self,
-        country_code: str,
-        number_type: NumberType,
-        capabilities: list[str],
-    ) -> ProviderNumber:
-        """Search for and purchase a number matching the criteria."""
 
     @abstractmethod
     async def release_number(self, provider_resource_id: str) -> None:

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timedelta, timezone
-from decimal import ROUND_HALF_UP
 from typing import Any, Literal
 from uuid import UUID, uuid4
 
@@ -12,17 +11,15 @@ import httpx
 from fastapi import HTTPException
 from hailhq.api.deps import Principal
 from hailhq.api.errors import unprocessable
-from hailhq.api.funds import BILLING_URL, require_funds
+from hailhq.api.funds import BILLING_URL
 from hailhq.core import telephony_catalog
 from hailhq.core.billing import get_balance_cents, monthly_fee_ref
-from hailhq.core.carrier_routing import TELNYX, carrier
+from hailhq.core.carrier_routing import carrier
 from hailhq.core.db import session_scope
 from hailhq.core.models import AccountCredit, NumberOffer, PhoneNumber
 from hailhq.core.number_offers import CarrierOffer, discover_offers
 from hailhq.core.providers.voice import (
     CarrierRequestError,
-    NumberNotProvisionable,
-    VoiceProvider,
 )
 from hailhq.core.providers.voice.telnyx import (
     place_number_order,
@@ -481,146 +478,24 @@ async def acquire_offer(
     return number
 
 
-async def acquire_from_catalog(
-    db: AsyncSession,
-    org: UUID,
-    *,
-    country: str,
-    kind: str,
-    billed: bool,
-    voice_provider: VoiceProvider,
-) -> PhoneNumber:
-    """Legacy Twilio purchase: the carrier picks the number, so its E.164 is
-    unknown until the purchase returns. No hold can be posted first; the
-    monthly fee is debited in the same commit that records the number."""
-    caps = catalog_capabilities(country, kind)
-    requested_caps = [c for c in ("voice", "sms") if caps[c]]
-    if not requested_caps:
-        # A catalog row with neither voice nor sms is schema-invalid, but the
-        # runtime load doesn't schema-validate; an empty filter would let the
-        # provider purchase an arbitrary number.
-        raise unprocessable(
-            f"the {kind} number in {country} has no usable capabilities",
-            loc=["body", "number_type"],
-        )
-    price = telephony_catalog.price_usd_per_month(country, kind)
-    amount_cents = (
-        int((price * 100).quantize(1, rounding=ROUND_HALF_UP))
-        if price is not None and price.is_finite() and price > 0
-        else 0
-    )
-    if amount_cents <= 0:
-        raise HTTPException(
-            status_code=503, detail="number price unavailable; try again later"
-        )
-    if billed:
-        # Serialize purchases and monthly debits for this organization.
-        await org_lock(db, org)
-        if await get_balance_cents(db, org) < amount_cents:
-            raise HTTPException(
-                status_code=402,
-                detail=f"insufficient credits; this number costs ${price:.2f} per month; "
-                f"top up at {BILLING_URL}",
-            )
-    try:
-        acquired = await voice_provider.acquire_number(
-            country_code=country, number_type=kind, capabilities=requested_caps
-        )
-    except LookupError as exc:
-        # The carrier has no matching inventory right now.
-        raise RetryableError(str(exc)) from exc
-    except NumberNotProvisionable as exc:
-        # Deterministic: it needs regulatory setup we don't have, so a retry
-        # fails identically. The raw carrier reason is logged, not returned.
-        logger.warning(
-            "number not provisionable (%s %s): %s", country, kind, exc.detail
-        )
-        raise unprocessable(
-            f"we can't provision a {kind} number in {country} yet — it needs "
-            "regulatory verification we don't support",
-            loc=["body", "number_type"],
-        ) from exc
-
-    number = PhoneNumber(
-        organization_id=org,
-        e164=acquired.e164,
-        country_code=acquired.country_code,
-        number_type=acquired.number_type,
-        capabilities=acquired.capabilities,
-        provider_resource_id=acquired.provider_resource_id,
-        provisioning_state="active",
-        is_pool=False,
-    )
-    number.acquired_at = datetime.now(timezone.utc)
-    db.add(number)
-    try:
-        await db.flush()
-        if billed:
-            db.add(
-                credit(
-                    number,
-                    -amount_cents,
-                    monthly_fee_ref(org, number.id, number.acquired_at),
-                    "monthly_fee",
-                )
-            )
-        await db.commit()
-    except Exception:
-        await db.rollback()
-        try:
-            await voice_provider.release_number(acquired.provider_resource_id)
-        except Exception:
-            logger.exception(
-                "failed to release number after failed purchase commit: %s",
-                acquired.provider_resource_id,
-            )
-        raise
-    return number
-
-
 async def purchase_number(
-    db: AsyncSession,
-    principal: Principal,
-    body: NumberAcquireRequest,
-    voice_provider: VoiceProvider,
+    db: AsyncSession, principal: Principal, body: NumberAcquireRequest
 ) -> PhoneNumber:
-    """The one purchase entry point for POST /numbers.
+    """The one purchase entry point for POST /numbers: it buys a quote.
 
     Raises HTTPException for every rejection; the caller caches it under the
     idempotency key unless it is a RetryableError.
     """
-    org = principal.organization_id
-    billed = principal.auth_kind != "shared"
-    provider = body.provider or "auto"
-    if body.quote_id is not None:
-        number = await acquire_offer(
-            db,
-            org,
-            body.quote_id,
-            country=body.country_code,
-            # An omitted type comes from the quote; only an explicit one can conflict.
-            kind=body.number_type if "number_type" in body.model_fields_set else None,
-            provider=provider,
-            billed=billed,
-        )
-    elif body.provider in ("auto", TELNYX):
-        # Omitted provider without a quote is the legacy Twilio contract.
-        raise unprocessable(
-            "Request a live quote from POST /numbers/quotes, then pass its quote_id",
-            loc=["body", "quote_id"],
-        )
-    else:
-        # Same balance gate as the other paid create routes; runs before the
-        # carrier purchase.
-        await require_funds(db, principal)
-        number = await acquire_from_catalog(
-            db,
-            org,
-            country=body.country_code,
-            kind=body.number_type,
-            billed=billed,
-            voice_provider=voice_provider,
-        )
+    number = await acquire_offer(
+        db,
+        principal.organization_id,
+        body.quote_id,
+        country=body.country_code,
+        # An omitted type comes from the quote; only an explicit one can conflict.
+        kind=body.number_type if "number_type" in body.model_fields_set else None,
+        provider=body.provider,
+        billed=principal.auth_kind != "shared",
+    )
     if number.provisioning_state == "failed":
         # The hold was refunded; nothing is owed. Say so instead of a 201.
         reason = number.provisioning_metadata.get(

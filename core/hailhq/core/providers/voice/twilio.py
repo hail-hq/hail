@@ -18,10 +18,8 @@ from hailhq.core.carrier_offer import CarrierOffer, cents
 from hailhq.core.config import settings
 from hailhq.core.providers.voice.base import (
     CarrierRequestError,
-    NumberNotProvisionable,
     NumberType,
     ProviderCallStatus,
-    ProviderNumber,
     VoiceProvider,
 )
 from twilio.base.exceptions import TwilioRestException
@@ -29,25 +27,6 @@ from twilio.http.http_client import TwilioHttpClient
 from twilio.rest import Client as TwilioClient
 
 logger = logging.getLogger(__name__)
-
-# Maps the Hail-canonical capability strings to Twilio's available-number
-# search kwargs (which take booleans). Anything in `capabilities` that
-# isn't listed here is silently ignored — the search just won't filter on
-# it, and real coverage is reported back from the purchased number's
-# capabilities dict.
-_CAPABILITY_TO_SEARCH_KWARG = {
-    "voice": "voice_enabled",
-    "sms": "sms_enabled",
-    "mms": "mms_enabled",
-    "fax": "fax_enabled",
-}
-
-
-def _capabilities_to_list(caps: dict[str, bool] | None) -> list[str]:
-    """Normalize Twilio's capabilities dict ``{"voice": True, "SMS": True}``
-    into a sorted lowercase string list ``["sms", "voice"]``.
-    """
-    return sorted(k.lower() for k, v in (caps or {}).items() if v)
 
 
 class TwilioVoiceProvider(VoiceProvider):
@@ -71,54 +50,6 @@ class TwilioVoiceProvider(VoiceProvider):
                 )
             client = TwilioClient(self.account_sid, token)
         self._client = client
-
-    async def acquire_number(
-        self,
-        country_code: str,
-        number_type: NumberType,
-        capabilities: list[str],
-    ) -> ProviderNumber:
-        search_kwargs: dict[str, bool] = {}
-        for cap in capabilities:
-            kw = _CAPABILITY_TO_SEARCH_KWARG.get(cap.lower())
-            if kw is not None:
-                search_kwargs[kw] = True
-
-        country_ctx = self._client.available_phone_numbers(country_code)
-        list_ctx = getattr(country_ctx, number_type)
-
-        available = await asyncio.to_thread(list_ctx.list, limit=1, **search_kwargs)
-        if not available:
-            raise LookupError(
-                f"No {number_type} numbers available in {country_code} matching "
-                f"capabilities={capabilities}."
-            )
-        chosen = available[0]
-
-        try:
-            purchased = await asyncio.to_thread(
-                self._client.incoming_phone_numbers.create,
-                phone_number=chosen.phone_number,
-            )
-        except TwilioRestException as exc:
-            # A 400 at purchase means the number can't be provisioned as
-            # requested — most often a country/number-type that needs a
-            # regulatory bundle or address we haven't set up (e.g. GB mobile:
-            # "Bundle required and not provided"). Surface it as a typed,
-            # non-retryable error the route maps to a 422, not an opaque 500.
-            # Auth (401/403), rate-limit (429), and 5xx transport failures
-            # propagate unchanged.
-            if exc.status == 400:
-                raise NumberNotProvisionable(exc.msg) from exc
-            raise
-
-        return ProviderNumber(
-            provider_resource_id=purchased.sid,
-            e164=purchased.phone_number,
-            country_code=country_code,
-            capabilities=_capabilities_to_list(purchased.capabilities),
-            number_type=number_type,
-        )
 
     async def release_number(self, provider_resource_id: str) -> None:
         try:
@@ -348,16 +279,6 @@ class LazyTwilioVoiceProvider(VoiceProvider):
         if self._inner is None:
             self._inner = TwilioVoiceProvider()
         return self._inner
-
-    async def acquire_number(
-        self,
-        country_code: str,
-        number_type: NumberType,
-        capabilities: list[str],
-    ) -> ProviderNumber:
-        return await self._provider().acquire_number(
-            country_code, number_type, capabilities
-        )
 
     async def release_number(self, provider_resource_id: str) -> None:
         await self._provider().release_number(provider_resource_id)

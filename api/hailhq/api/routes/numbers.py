@@ -69,10 +69,8 @@ router = APIRouter(
 _DEFAULT_LIST_LIMIT = 50
 _MAX_LIST_LIMIT = 200
 
-# Reuses the calls.py get_livekit-style lazy-singleton pattern for the
-# voice provider used to acquire a physical number (acquire_number is a
-# carrier-numbers concern, not a call-dialing concern, per
-# providers/voice/base.py's own docstring).
+# Lazy singleton (the calls.py get_livekit pattern) for the voice provider
+# that releases a Twilio number.
 _voice_provider_singleton: VoiceProvider | None = None
 
 
@@ -108,6 +106,12 @@ async def _get_org_number_or_404(
     status_code=http_status.HTTP_201_CREATED,
     responses={
         404: {"description": "The quote does not exist for this organization."},
+        422: {
+            "description": (
+                "quote_id is missing (request one from POST /numbers/quotes) or "
+                "the quote does not match the country, type or provider."
+            ),
+        },
         402: {
             "description": (
                 FUNDS_RESPONSES[402]["description"]
@@ -137,15 +141,14 @@ async def acquire_number(
     request: Request,
     principal: Annotated[Principal, Depends(get_current_principal)],
     db: Annotated[AsyncSession, Depends(get_session)],
-    provider: Annotated[VoiceProvider, Depends(get_voice_provider)],
     idem: Annotated[IdempotencyContext | None, Depends(idempotency_dep)] = None,
 ) -> PhoneNumberResponse:
     """Buy a dedicated phone number for the caller's organization.
 
     This purchases a real number at the carrier and starts a recurring
-    monthly fee immediately — it is not a reservation. The number is usable
-    for voice, SMS, or both depending on the requested capabilities and
-    what the carrier offers for the given country_code/number_type.
+    monthly fee immediately — it is not a reservation. quote_id is required:
+    request live offers from POST /numbers/quotes first, then buy one. The
+    number is usable for voice, SMS, or both, as the quote lists.
     """
     if idem is not None and idem.is_replay:
         _cached_id, cached = replay_cached(
@@ -154,7 +157,7 @@ async def acquire_number(
         return PhoneNumberResponse.model_validate(cached)
 
     try:
-        number = await purchase_number(db, principal, body, provider)
+        number = await purchase_number(db, principal, body)
     except RetryableError:
         # Transient (no charge was made): release the in-flight sentinel
         # instead of caching, so a same-key retry can succeed once the carrier

@@ -238,17 +238,10 @@ def sms_mock() -> AsyncMock:
 
 @pytest.fixture()
 def voice_provider_mock() -> AsyncMock:
-    """Default mock voice provider — happy-path number acquisition."""
-    from hailhq.core.providers.voice import ProviderNumber, VoiceProvider
+    """Default mock voice provider."""
+    from hailhq.core.providers.voice import VoiceProvider
 
     mock = AsyncMock(spec=VoiceProvider)
-    mock.acquire_number.return_value = ProviderNumber(
-        provider_resource_id="PN_test_acquired",
-        e164="+14155550001",
-        country_code="US",
-        capabilities=["voice", "sms"],
-        number_type="local",
-    )
     return mock
 
 

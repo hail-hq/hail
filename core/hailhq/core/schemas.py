@@ -518,13 +518,12 @@ class SenderIdResponse(BaseModel):
 
 class NumberAcquireRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    provider: Literal["auto", "twilio", "telnyx"] | None = Field(
-        default=None,
-        description="Carrier restriction for a quote from POST /numbers/quotes. Auto or omitted accepts the selected quoted carrier. Omitted without a quote preserves the legacy Twilio purchase contract.",
+    quote_id: UUID = Field(
+        description="Unexpired organization-bound quote from POST /numbers/quotes. Required: without it the request is a 422; get a quote first.",
     )
-    quote_id: UUID | None = Field(
-        default=None,
-        description="Unexpired organization-bound quote from POST /numbers/quotes; required for multi-carrier purchases.",
+    provider: Literal["auto", "twilio", "telnyx"] = Field(
+        default="auto",
+        description="Carrier restriction for the quote. Auto accepts the quoted carrier; twilio or telnyx must match it.",
     )
 
     country_code: str = Field(

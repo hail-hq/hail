@@ -1437,9 +1437,9 @@ paths:
       description:
         "Buy a dedicated phone number for the caller's organization.\n\n\
         This purchases a real number at the carrier and starts a recurring\nmonthly\
-        \ fee immediately \u2014 it is not a reservation. The number is usable\nfor\
-        \ voice, SMS, or both depending on the requested capabilities and\nwhat the\
-        \ carrier offers for the given country_code/number_type."
+        \ fee immediately \u2014 it is not a reservation. quote_id is required:\n\
+        request live offers from POST /numbers/quotes first, then buy one. The\nnumber\
+        \ is usable for voice, SMS, or both, as the quote lists."
       operationId: acquire_number_v1_numbers_post
       parameters:
         - name: authorization
@@ -1494,6 +1494,10 @@ paths:
                 type: integer
         "404":
           description: The quote does not exist for this organization.
+        "422":
+          description:
+            quote_id is missing (request one from POST /numbers/quotes)
+            or the quote does not match the country, type or provider.
         "402":
           description:
             insufficient credits; top up at https://hail.so/console/billing.
@@ -1509,12 +1513,6 @@ paths:
           description:
             The carrier lookup or number price is unavailable, or no inventory
             matched. Nothing was charged; retry shortly.
-        "422":
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/HTTPValidationError"
     get:
       tags:
         - numbers
@@ -1522,8 +1520,8 @@ paths:
       description:
         "List dedicated numbers owned by the caller's organization.\n\n\
         Cursor-paginated, newest first. Only org-owned numbers are listed \u2014\n\
-        shared pool numbers used for outbound calls never appear here. Failed\n\
-        orders that were dismissed (DELETE) are not listed."
+        shared pool numbers used for outbound calls never appear here. Failed\norders\
+        \ that were dismissed (DELETE) are not listed."
       operationId: list_numbers_v1_numbers_get
       parameters:
         - name: cursor
@@ -5814,28 +5812,24 @@ components:
       title: MemberPhonePut
     NumberAcquireRequest:
       properties:
-        provider:
-          anyOf:
-            - type: string
-              enum:
-                - auto
-                - twilio
-                - telnyx
-            - type: "null"
-          title: Provider
-          description:
-            Carrier restriction for a quote from POST /numbers/quotes.
-            Auto or omitted accepts the selected quoted carrier. Omitted without a
-            quote preserves the legacy Twilio purchase contract.
         quote_id:
-          anyOf:
-            - type: string
-              format: uuid
-            - type: "null"
+          type: string
+          format: uuid
           title: Quote Id
           description:
-            Unexpired organization-bound quote from POST /numbers/quotes;
-            required for multi-carrier purchases.
+            "Unexpired organization-bound quote from POST /numbers/quotes.
+            Required: without it the request is a 422; get a quote first."
+        provider:
+          type: string
+          enum:
+            - auto
+            - twilio
+            - telnyx
+          title: Provider
+          description:
+            Carrier restriction for the quote. Auto accepts the quoted
+            carrier; twilio or telnyx must match it.
+          default: auto
         country_code:
           type: string
           maxLength: 2
@@ -5859,6 +5853,7 @@ components:
       additionalProperties: false
       type: object
       required:
+        - quote_id
         - country_code
       title: NumberAcquireRequest
     NumberQuoteRequest:
