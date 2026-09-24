@@ -584,3 +584,27 @@ async def test_delete_failed_number_dismisses_without_a_carrier_call(
     # Idempotent, same as a normal release.
     again = await client.delete(f"/numbers/{number.id}", headers=headers)
     assert again.status_code == 204
+
+
+async def test_list_numbers_hides_dismissed_failed_but_keeps_released(
+    client, async_session, org_and_key, add_phone_number, voice_provider_mock
+) -> None:
+    org, _, plaintext = org_and_key
+    headers = {"Authorization": f"Bearer {plaintext}"}
+    failed = await add_phone_number(
+        async_session, org, e164="+14155550001", state="failed"
+    )
+    released = await add_phone_number(
+        async_session, org, e164="+14155550002", state="released"
+    )
+    listed = await client.get("/numbers", headers=headers)
+    assert {i["id"] for i in listed.json()["items"]} == {
+        str(failed.id),
+        str(released.id),
+    }
+    # Dismiss the failed row: it disappears; the released tombstone stays.
+    assert (
+        await client.delete(f"/numbers/{failed.id}", headers=headers)
+    ).status_code == 204
+    listed = await client.get("/numbers", headers=headers)
+    assert [i["id"] for i in listed.json()["items"]] == [str(released.id)]

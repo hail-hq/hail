@@ -57,7 +57,7 @@ from hailhq.core.schemas import (
     PhoneNumberResponse,
 )
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
@@ -324,11 +324,18 @@ async def list_numbers(
     """List dedicated numbers owned by the caller's organization.
 
     Cursor-paginated, newest first. Only org-owned numbers are listed —
-    shared pool numbers used for outbound calls never appear here.
+    shared pool numbers used for outbound calls never appear here. Failed
+    orders that were dismissed (DELETE) are not listed.
     """
     stmt = select(PhoneNumber).where(
         PhoneNumber.organization_id == principal.organization_id,
         PhoneNumber.is_pool.is_(False),
+        # A dismissed failed order is hidden; normally released numbers stay
+        # listed as tombstones.
+        or_(
+            PhoneNumber.provisioning_state != "failed",
+            PhoneNumber.released_at.is_(None),
+        ),
     )
     rows, next_cursor = await fetch_cursor_page(
         db,

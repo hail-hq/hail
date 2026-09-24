@@ -104,3 +104,35 @@ async def test_internal_release_401_without_signature(
     )
     assert resp.status_code == 401
     voice_provider_mock.release_number.assert_not_awaited()
+
+
+async def test_internal_release_failed_row_audits_once(
+    client, async_session, voice_provider_mock, internal_secret_set
+) -> None:
+    from hailhq.core.models import AuditLog
+    from sqlalchemy import select
+
+    org_id = uuid.uuid4()
+    pn = await _seed_number(async_session, org_id, state="failed")
+    body = json.dumps(
+        {"organization_id": str(org_id), "number_id": str(pn.id)}
+    ).encode()
+    for _ in range(2):
+        resp = await client.post(
+            "/internal/numbers/release", content=body, headers=_signed(body)
+        )
+        assert resp.status_code == 200, resp.text
+    voice_provider_mock.release_number.assert_not_awaited()
+    rows = (
+        (
+            await async_session.execute(
+                select(AuditLog).where(
+                    AuditLog.action == "number.release",
+                    AuditLog.resource_id == pn.id,
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert len(rows) == 1

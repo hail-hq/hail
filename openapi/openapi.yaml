@@ -1522,7 +1522,8 @@ paths:
       description:
         "List dedicated numbers owned by the caller's organization.\n\n\
         Cursor-paginated, newest first. Only org-owned numbers are listed \u2014\n\
-        shared pool numbers used for outbound calls never appear here."
+        shared pool numbers used for outbound calls never appear here. Failed\n\
+        orders that were dismissed (DELETE) are not listed."
       operationId: list_numbers_v1_numbers_get
       parameters:
         - name: cursor
