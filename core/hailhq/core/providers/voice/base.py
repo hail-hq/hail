@@ -79,8 +79,12 @@ class VoiceProvider(ABC):
         country_code: str,
         number_type: NumberType,
         capabilities: list[str],
+        organization_id: str | None = None,
     ) -> ProviderNumber:
-        """Search for and purchase a number matching the criteria."""
+        """Search for and purchase a number matching the criteria.
+
+        ``organization_id`` lets a carrier attach that organization's approved
+        regulatory bundle when the country requires one."""
 
     @abstractmethod
     async def release_number(self, provider_resource_id: str) -> None:

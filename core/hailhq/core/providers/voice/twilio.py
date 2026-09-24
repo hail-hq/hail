@@ -73,6 +73,7 @@ class TwilioVoiceProvider(VoiceProvider):
         country_code: str,
         number_type: NumberType,
         capabilities: list[str],
+        organization_id: str | None = None,
     ) -> ProviderNumber:
         search_kwargs: dict[str, bool] = {}
         for cap in capabilities:
@@ -92,21 +93,31 @@ class TwilioVoiceProvider(VoiceProvider):
         chosen = available[0]
 
         try:
-            purchased = await asyncio.to_thread(
-                self._client.incoming_phone_numbers.create,
-                phone_number=chosen.phone_number,
-            )
+            purchased = await self._purchase(chosen.phone_number)
         except TwilioRestException as exc:
             # A 400 at purchase means the number can't be provisioned as
             # requested — most often a country/number-type that needs a
-            # regulatory bundle or address we haven't set up (e.g. GB mobile:
-            # "Bundle required and not provided"). Surface it as a typed,
-            # non-retryable error the route maps to a 422, not an opaque 500.
-            # Auth (401/403), rate-limit (429), and 5xx transport failures
-            # propagate unchanged.
-            if exc.status == 400:
+            # regulatory bundle (e.g. GB mobile: "Bundle required and not
+            # provided"). If the organization has an approved bundle named
+            # ``hail-<organization_id>``, retry once with it. Otherwise surface
+            # a typed, non-retryable error the route maps to a 422, not an
+            # opaque 500. Auth (401/403), rate-limit (429), and 5xx transport
+            # failures propagate unchanged.
+            if exc.status != 400:
+                raise
+            bundle_sid = None
+            if organization_id:
+                bundle_sid = await self._find_approved_bundle(
+                    organization_id, country_code, number_type
+                )
+            if bundle_sid is None:
                 raise NumberNotProvisionable(exc.msg) from exc
-            raise
+            try:
+                purchased = await self._purchase(chosen.phone_number, bundle_sid)
+            except TwilioRestException as retry_exc:
+                if retry_exc.status == 400:
+                    raise NumberNotProvisionable(retry_exc.msg) from retry_exc
+                raise
 
         return ProviderNumber(
             provider_resource_id=purchased.sid,
@@ -115,6 +126,35 @@ class TwilioVoiceProvider(VoiceProvider):
             capabilities=_capabilities_to_list(purchased.capabilities),
             number_type=number_type,
         )
+
+    async def _purchase(self, e164: str, bundle_sid: str | None = None):
+        kwargs = {"bundle_sid": bundle_sid} if bundle_sid else {}
+        return await asyncio.to_thread(
+            self._client.incoming_phone_numbers.create,
+            phone_number=e164,
+            **kwargs,
+        )
+
+    async def _find_approved_bundle(
+        self, organization_id: str, country_code: str, number_type: NumberType
+    ) -> str | None:
+        """SID of the organization's approved regulatory bundle for this
+        country and number type, or None. The bundle is created by hand in the
+        Twilio console with the friendly name ``hail-<organization_id>``."""
+        name = f"hail-{organization_id}"
+        try:
+            bundles = await asyncio.to_thread(
+                self._client.numbers.v2.regulatory_compliance.bundles.list,
+                status="twilio-approved",
+                friendly_name=name,
+                iso_country=country_code,
+                number_type=number_type.replace("_", "-"),
+                limit=20,
+            )
+        except TwilioRestException:
+            logger.exception("twilio bundle lookup failed for %s", name)
+            return None
+        return next((b.sid for b in bundles if b.friendly_name == name), None)
 
     async def release_number(self, provider_resource_id: str) -> None:
         try:

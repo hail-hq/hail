@@ -218,6 +218,121 @@ async def test_acquire_raises_not_provisionable_on_bundle_required(
     assert "Bundle required" in excinfo.value.detail
 
 
+ORG_ID = "11111111-2222-3333-4444-555555555555"
+BUNDLES_URL = "https://numbers.twilio.com/v2/RegulatoryCompliance/Bundles"
+
+
+def _add_gb_mobile_search_and_bundle_400() -> None:
+    responses.add(
+        responses.GET,
+        f"{API_BASE}/AvailablePhoneNumbers/GB/Mobile.json",
+        json={
+            "available_phone_numbers": [
+                {
+                    "phone_number": "+447700900123",
+                    "iso_country": "GB",
+                    "capabilities": {"voice": True, "SMS": True},
+                }
+            ],
+            "uri": "/x",
+        },
+        status=200,
+    )
+    responses.add(
+        responses.POST,
+        f"{API_BASE}/IncomingPhoneNumbers.json",
+        json={
+            "code": 21649,
+            "message": "Bundle required and not provided for country: [GB]",
+            "status": 400,
+        },
+        status=400,
+    )
+
+
+def _bundles_page(*friendly_names: str) -> dict:
+    return {
+        "results": [
+            {"sid": f"BU{i:032d}", "friendly_name": name, "status": "twilio-approved"}
+            for i, name in enumerate(friendly_names)
+        ],
+        "meta": {
+            "page": 0,
+            "page_size": 20,
+            "first_page_url": BUNDLES_URL,
+            "previous_page_url": None,
+            "url": BUNDLES_URL,
+            "next_page_url": None,
+            "key": "results",
+        },
+    }
+
+
+@responses.activate
+async def test_acquire_retries_with_org_bundle_when_bundle_required(
+    provider: TwilioVoiceProvider,
+) -> None:
+    """A 400 'bundle required' + an approved ``hail-<org>`` bundle -> the
+    purchase is retried once with BundleSid and succeeds."""
+    _add_gb_mobile_search_and_bundle_400()
+    responses.add(
+        responses.GET,
+        BUNDLES_URL,
+        json=_bundles_page("someone-else", f"hail-{ORG_ID}"),
+        status=200,
+    )
+    responses.add(
+        responses.POST,
+        f"{API_BASE}/IncomingPhoneNumbers.json",
+        json={
+            "sid": "PNgbmobile000000000000000000000000",
+            "account_sid": ACCOUNT_SID,
+            "phone_number": "+447700900123",
+            "capabilities": {"voice": True, "sms": True, "mms": False},
+            "status": "in-use",
+        },
+        status=201,
+    )
+
+    number = await provider.acquire_number(
+        country_code="GB",
+        number_type="mobile",
+        capabilities=["voice", "sms"],
+        organization_id=ORG_ID,
+    )
+
+    assert number.provider_resource_id == "PNgbmobile000000000000000000000000"
+    bundle_qs = parse_qs(urlsplit(responses.calls[2].request.url).query)
+    assert bundle_qs["Status"] == ["twilio-approved"]
+    assert bundle_qs["FriendlyName"] == [f"hail-{ORG_ID}"]
+    assert bundle_qs["IsoCountry"] == ["GB"]
+    assert bundle_qs["NumberType"] == ["mobile"]
+    retry_body = parse_qs(responses.calls[3].request.body)
+    assert retry_body["BundleSid"] == [f"BU{1:032d}"]
+
+
+@responses.activate
+async def test_acquire_not_provisionable_when_org_has_no_approved_bundle(
+    provider: TwilioVoiceProvider,
+) -> None:
+    """No approved ``hail-<org>`` bundle -> NumberNotProvisionable, and no
+    second purchase attempt."""
+    _add_gb_mobile_search_and_bundle_400()
+    responses.add(
+        responses.GET, BUNDLES_URL, json=_bundles_page("someone-else"), status=200
+    )
+
+    with pytest.raises(NumberNotProvisionable):
+        await provider.acquire_number(
+            country_code="GB",
+            number_type="mobile",
+            capabilities=["voice", "sms"],
+            organization_id=ORG_ID,
+        )
+    purchases = [c for c in responses.calls if c.request.method == "POST"]
+    assert len(purchases) == 1
+
+
 @responses.activate
 async def test_acquire_propagates_non_400_purchase_error(
     provider: TwilioVoiceProvider,

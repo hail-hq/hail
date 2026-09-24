@@ -194,6 +194,7 @@ async def acquire_number(
             country_code=body.country_code,
             number_type=body.number_type,
             capabilities=requested_caps,
+            organization_id=str(principal.organization_id),
         )
     except LookupError as exc:
         # Transient: the carrier has no matching inventory right now. Release the
@@ -221,9 +222,9 @@ async def acquire_number(
         raise await cache_failure(
             idem,
             unprocessable(
-                f"we can't provision a {body.number_type} number in "
-                f"{body.country_code} yet — it needs regulatory verification "
-                "we don't support",
+                f"a {body.number_type} number in {body.country_code} needs "
+                "regulatory verification for your organization first — "
+                "contact support to get verified",
                 loc=["body", "number_type"],
             ),
         ) from exc
