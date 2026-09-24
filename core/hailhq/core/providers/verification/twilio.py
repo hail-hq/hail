@@ -398,7 +398,14 @@ class TwilioVerificationProvider(VerificationProvider):
             self._discard_sync(refs)
             raise
 
-        problems = self._evaluate(refs)
+        try:
+            problems = self._evaluate(refs)
+        except TwilioRestException as exc:
+            self._discard_sync(refs)
+            raise VerificationProviderError("Twilio request failed") from exc
+        except Exception:
+            self._discard_sync(refs)
+            raise
         if problems:
             self._discard_sync(refs)
             return DraftResult(refs={}, problems=problems)
