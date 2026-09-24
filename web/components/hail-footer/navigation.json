@@ -1,0 +1,122 @@
+[
+  {
+    "title": "Product",
+    "links": [
+      {
+        "label": "Channels",
+        "href": "/#products"
+      },
+      {
+        "label": "Integrations",
+        "href": "/integrations"
+      },
+      {
+        "label": "Agent wallet",
+        "href": "/wallet"
+      },
+      {
+        "label": "Compare",
+        "href": "/compare"
+      },
+      {
+        "label": "Pricing",
+        "href": "/pricing"
+      },
+      {
+        "label": "AI model pricing database",
+        "href": "/costs"
+      }
+    ]
+  },
+  {
+    "title": "Free tools",
+    "links": [
+      {
+        "label": "AI Voice Agent Cost Calculator",
+        "href": "/tools/voice-agent-cost-calculator"
+      },
+      {
+        "label": "SMS Length & Segment Calculator",
+        "href": "/tools/sms-length-calculator"
+      },
+      {
+        "label": "Email Deliverability Checker",
+        "href": "/tools/email-deliverability-checker"
+      },
+      {
+        "label": "All tools",
+        "href": "/tools"
+      }
+    ]
+  },
+  {
+    "title": "Resources",
+    "links": [
+      {
+        "label": "Docs",
+        "href": "/docs"
+      },
+      {
+        "label": "MCP",
+        "href": "/mcp"
+      },
+      {
+        "label": "10DLC timeline guide",
+        "href": "/sms"
+      },
+      {
+        "label": "Domain warmup guide",
+        "href": "/email"
+      },
+      {
+        "label": "For agents",
+        "href": "/skill.md"
+      }
+    ]
+  },
+  {
+    "title": "Company",
+    "links": [
+      {
+        "label": "About us",
+        "href": "/about"
+      },
+      {
+        "label": "Contact",
+        "href": "/contact"
+      },
+      {
+        "label": "Terms",
+        "href": "/legal/terms"
+      },
+      {
+        "label": "Acceptable Use",
+        "href": "/legal/aup"
+      },
+      {
+        "label": "SMS",
+        "href": "/legal/sms"
+      },
+      {
+        "label": "Privacy",
+        "href": "/legal/privacy"
+      },
+      {
+        "label": "DPA",
+        "href": "/legal/dpa"
+      },
+      {
+        "label": "Sub-processors",
+        "href": "/legal/subprocessors"
+      },
+      {
+        "label": "Cookies",
+        "href": "/legal/cookies"
+      },
+      {
+        "label": "Sign in",
+        "href": "/signin"
+      }
+    ]
+  }
+]
