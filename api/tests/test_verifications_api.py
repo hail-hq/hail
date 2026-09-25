@@ -386,7 +386,7 @@ async def test_superadmin_approve_submits_to_the_carrier(
     _, _, key = org_and_key
     vid = (await _create(client, key)).json()["id"]
     app.dependency_overrides[require_superadmin] = lambda: SimpleNamespace(
-        user_id=uuid.uuid4()
+        user_id=uuid.uuid4(), api_key_id=None
     )
 
     listed = await client.get("/admin/verifications", headers=_auth(key))
@@ -406,7 +406,7 @@ async def test_superadmin_approve_refuses_a_draft_the_carrier_now_rejects(
     _, _, key = org_and_key
     vid = (await _create(client, key)).json()["id"]
     app.dependency_overrides[require_superadmin] = lambda: SimpleNamespace(
-        user_id=uuid.uuid4()
+        user_id=uuid.uuid4(), api_key_id=None
     )
     carrier.check_problems = [Problem(field="", message="expired")]
     resp = await client.post(f"/admin/verifications/{vid}/approve", headers=_auth(key))
@@ -420,7 +420,7 @@ async def test_superadmin_reject_records_reason_and_discards(
     _, _, key = org_and_key
     vid = (await _create(client, key)).json()["id"]
     app.dependency_overrides[require_superadmin] = lambda: SimpleNamespace(
-        user_id=uuid.uuid4()
+        user_id=uuid.uuid4(), api_key_id=None
     )
     resp = await client.post(
         f"/admin/verifications/{vid}/reject",
@@ -442,7 +442,7 @@ async def test_status_is_pulled_from_the_carrier_after_submit(
     _, _, key = org_and_key
     vid = (await _create(client, key)).json()["id"]
     app.dependency_overrides[require_superadmin] = lambda: SimpleNamespace(
-        user_id=uuid.uuid4()
+        user_id=uuid.uuid4(), api_key_id=None
     )
     await client.post(f"/admin/verifications/{vid}/approve", headers=_auth(key))
 
@@ -460,7 +460,7 @@ async def test_list_polls_the_carrier_at_most_once_a_minute(
     _, _, key = org_and_key
     vid = (await _create(client, key)).json()["id"]
     app.dependency_overrides[require_superadmin] = lambda: SimpleNamespace(
-        user_id=uuid.uuid4()
+        user_id=uuid.uuid4(), api_key_id=None
     )
     await client.post(f"/admin/verifications/{vid}/approve", headers=_auth(key))
     calls = []
@@ -582,7 +582,7 @@ async def test_approve_returns_502_when_the_carrier_fails(
     _, _, key = org_and_key
     vid = (await _create(client, key)).json()["id"]
     app.dependency_overrides[require_superadmin] = lambda: SimpleNamespace(
-        user_id=uuid.uuid4()
+        user_id=uuid.uuid4(), api_key_id=None
     )
 
     async def boom(refs):
@@ -603,7 +603,7 @@ async def test_approve_marks_submitting_before_calling_the_carrier(
     _, _, key = org_and_key
     vid = (await _create(client, key)).json()["id"]
     app.dependency_overrides[require_superadmin] = lambda: SimpleNamespace(
-        user_id=uuid.uuid4()
+        user_id=uuid.uuid4(), api_key_id=None
     )
     seen = {}
 
@@ -627,7 +627,7 @@ async def test_approve_marks_submitting_before_calling_the_carrier(
 async def _approve_and_pull(client, key, carrier) -> str:
     vid = (await _create(client, key)).json()["id"]
     app.dependency_overrides[require_superadmin] = lambda: SimpleNamespace(
-        user_id=uuid.uuid4()
+        user_id=uuid.uuid4(), api_key_id=None
     )
     await client.post(f"/admin/verifications/{vid}/approve", headers=_auth(key))
     app.dependency_overrides.pop(require_superadmin)

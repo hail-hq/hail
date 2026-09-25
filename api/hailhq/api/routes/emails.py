@@ -34,7 +34,7 @@ from hailhq.api.agent_gate import (
     RATE_LIMITED_RESPONSES,
     require_agent_send_allowed,
 )
-from hailhq.api.audit import write_audit_log
+from hailhq.api.audit import actor_of, write_audit_log
 from hailhq.api.consent import enforce_consent, isoformat_or_none
 from hailhq.api.deps import Principal, get_current_principal, get_s3_mail
 from hailhq.api.errors import unprocessable
@@ -495,6 +495,7 @@ async def create_email(
     all_recipients = list(body.to) + list(body.cc or []) + list(body.bcc or [])
     gate = await check_email_allowed(db, principal.organization_id, all_recipients)
     if not gate.allowed:
+        actor_user_id, actor_kind = actor_of(principal)
         await write_audit_log(
             organization_id=principal.organization_id,
             api_key_id=principal.api_key_id,
@@ -508,6 +509,8 @@ async def create_email(
                 "reason": gate.reason,
                 "checks": gate.checks,
             },
+            actor_user_id=actor_user_id,
+            actor_kind=actor_kind,
         )
         raise await cache_failure(
             idem,
@@ -585,6 +588,7 @@ async def create_email(
     await db.commit()
     await db.refresh(email)
 
+    actor_user_id, actor_kind = actor_of(principal)
     await write_audit_log(
         organization_id=principal.organization_id,
         api_key_id=principal.api_key_id,
@@ -607,6 +611,8 @@ async def create_email(
             "compliance": gate.checks,
             "attachment_ids": [str(a) for a in (body.attachment_ids or [])],
         },
+        actor_user_id=actor_user_id,
+        actor_kind=actor_kind,
     )
 
     # Provider send — best-effort with status reconciliation. Synchronous
@@ -614,6 +620,7 @@ async def create_email(
     # background polling needed for the happy path.
     err = await deliver_email(db, email_provider, email, attachment_rows)
     if err is not None:
+        actor_user_id, actor_kind = actor_of(principal)
         await write_audit_log(
             organization_id=principal.organization_id,
             api_key_id=principal.api_key_id,
@@ -621,6 +628,8 @@ async def create_email(
             resource_type="email",
             resource_id=email.id,
             payload={"end_reason": err},
+            actor_user_id=actor_user_id,
+            actor_kind=actor_kind,
         )
         if idem is not None:
             await idem.store(
