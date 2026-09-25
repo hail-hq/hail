@@ -43,7 +43,13 @@ class VerificationProviderError(Exception):
 
 
 class UnsupportedSubjectType(ValueError):
-    """The carrier does not accept this subject type for the country/type."""
+    """The carrier does not accept this subject type for the country/type.
+
+    `allowed` lists the subject types it does accept."""
+
+    def __init__(self, message: str, allowed: tuple[SubjectType, ...] = ()) -> None:
+        super().__init__(message)
+        self.allowed = allowed
 
 
 class FieldSpec(BaseModel):

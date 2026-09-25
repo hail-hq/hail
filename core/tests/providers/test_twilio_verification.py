@@ -15,6 +15,7 @@ import responses
 from hailhq.core.providers.verification import (
     Address,
     DocumentInput,
+    DocumentSlot,
     UnsupportedSubjectType,
     UploadedFile,
     get_verification_provider,
@@ -155,8 +156,9 @@ async def test_requirements_none_needed(provider) -> None:
 @responses.activate
 async def test_requirements_unsupported_subject_type(provider) -> None:
     _regs_response("GB-mobile-business")  # only business is offered
-    with pytest.raises(UnsupportedSubjectType):
+    with pytest.raises(UnsupportedSubjectType) as excinfo:
         await provider.requirements("GB", "mobile", "person")
+    assert excinfo.value.allowed == ("business",)
 
 
 # -- create_draft ---------------------------------------------------------
@@ -220,6 +222,22 @@ async def test_create_draft_reports_missing_input_without_calling_the_carrier(
     } <= fields
     assert result.refs == {}
     assert len(responses.calls) == 0
+
+
+@responses.activate
+async def test_create_draft_tolerates_a_slot_with_no_options(provider) -> None:
+    req = await _person_requirements(provider)
+    empty = DocumentSlot(name="extra", label="Extra", options=())
+    req = req.model_copy(update={"documents": (*req.documents, empty)})
+    result = await provider.create_draft(
+        organization_id=ORG,
+        requirements=req,
+        fields={},
+        address=None,
+        documents={},
+    )
+    assert result.problems
+    assert "extra" not in {p.field for p in result.problems}
 
 
 @responses.activate

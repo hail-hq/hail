@@ -12,6 +12,7 @@ from types import SimpleNamespace
 
 import pytest
 from hailhq.api.main import app
+from hailhq.api.routes import verifications as verifications_routes
 from hailhq.api.routes.verifications import get_verification_registry
 from hailhq.api.superadmin import require_superadmin
 from hailhq.core import telephony_catalog
@@ -24,6 +25,7 @@ from hailhq.core.providers.verification import (
     Problem,
     ProviderStatus,
     Requirements,
+    UnsupportedSubjectType,
     VerificationProvider,
 )
 from sqlalchemy import select
@@ -92,6 +94,7 @@ def carrier():
     app.dependency_overrides[get_verification_registry] = lambda: (
         lambda name: fake if name == "fake" else None
     )
+    verifications_routes._last_polled.clear()
     yield fake
     app.dependency_overrides.pop(get_verification_registry, None)
     app.dependency_overrides.pop(require_superadmin, None)
@@ -404,6 +407,82 @@ async def test_status_is_pulled_from_the_carrier_after_submit(
     carrier.remote_status = ProviderStatus(state="approved")
     got = (await client.get(f"/verifications/{vid}", headers=_auth(key))).json()
     assert got["state"] == "approved" and got["approved_at"]
+
+
+async def test_list_polls_the_carrier_at_most_once_a_minute(
+    client, org_and_key, carrier
+) -> None:
+    _, _, key = org_and_key
+    vid = (await _create(client, key)).json()["id"]
+    app.dependency_overrides[require_superadmin] = lambda: SimpleNamespace(
+        user_id=uuid.uuid4()
+    )
+    await client.post(f"/admin/verifications/{vid}/approve", headers=_auth(key))
+    calls = []
+    original = carrier.status
+
+    async def counted(refs):
+        calls.append(refs)
+        return await original(refs)
+
+    carrier.status = counted
+    await client.get("/verifications", headers=_auth(key))
+    await client.get("/verifications", headers=_auth(key))
+    assert len(calls) == 1
+
+    verifications_routes._last_polled.clear()
+    carrier.remote_status = ProviderStatus(state="approved")
+    listed = (await client.get("/verifications", headers=_auth(key))).json()
+    assert listed[0]["state"] == "approved"
+
+
+async def test_requirements_unsupported_subject_lists_the_allowed_ones(
+    client, org_and_key, carrier
+) -> None:
+    _, _, key = org_and_key
+
+    async def only_business(country_code, number_type, subject_type):
+        raise UnsupportedSubjectType("person is not accepted", allowed=("business",))
+
+    carrier.requirements = only_business
+    resp = await client.get(
+        "/verifications/requirements",
+        params={"provider": "fake", "country_code": "DE", "number_type": "local"},
+        headers=_auth(key),
+    )
+    assert resp.status_code == 422
+    assert resp.json()["detail"][0]["ctx"] == {"subject_types": ["business"]}
+
+
+async def test_create_with_malformed_documents_is_422(
+    client, org_and_key, carrier
+) -> None:
+    _, _, key = org_and_key
+    bad = json.dumps({"proof_of_identity": {"fields": [1]}})
+    resp = await _create(client, key, documents=bad)
+    assert resp.status_code == 422
+    assert carrier.drafts == []
+
+
+async def test_approve_returns_502_when_the_carrier_fails(
+    client, org_and_key, carrier
+) -> None:
+    _, _, key = org_and_key
+    vid = (await _create(client, key)).json()["id"]
+    app.dependency_overrides[require_superadmin] = lambda: SimpleNamespace(
+        user_id=uuid.uuid4()
+    )
+
+    async def boom(refs):
+        raise RuntimeError("twilio down")
+
+    original = carrier.submit
+    carrier.submit = boom
+    resp = await client.post(f"/admin/verifications/{vid}/approve", headers=_auth(key))
+    assert resp.status_code == 502
+    carrier.submit = original
+    retry = await client.post(f"/admin/verifications/{vid}/approve", headers=_auth(key))
+    assert retry.status_code == 200
 
 
 # -- purchase -------------------------------------------------------------

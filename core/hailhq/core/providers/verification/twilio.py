@@ -168,7 +168,7 @@ def _validate_input(
                 problems.append(
                     Problem(field=slot.name, message=f"{slot.label} is required.")
                 )
-            else:
+            elif slot.options:
                 needs_address = needs_address or slot.options[0].needs_address
             continue
         option = next((o for o in slot.options if o.key == doc.option), None)
@@ -277,7 +277,8 @@ class TwilioVerificationProvider(VerificationProvider):
             )
             if match is None:
                 raise UnsupportedSubjectType(
-                    f"{subject_type} is not accepted for {number_type} numbers in {country_code}"
+                    f"{subject_type} is not accepted for {number_type} numbers in {country_code}",
+                    allowed=offered,
                 )
             fields, documents, address_required = _map_requirements(match.requirements)
             return Requirements(
@@ -355,6 +356,8 @@ class TwilioVerificationProvider(VerificationProvider):
 
             for slot in requirements.documents:
                 doc = documents.get(slot.name)
+                if doc is None and not slot.options:
+                    continue
                 option = (
                     next((o for o in slot.options if o.key == doc.option), None)
                     if doc

@@ -7,8 +7,10 @@ identifying is written to the database, disk or logs (see the design spec).
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
+import time
 from collections.abc import Callable
 from datetime import datetime, timezone
 from typing import Annotated
@@ -27,6 +29,7 @@ from hailhq.core.providers.verification import (
     Address,
     DocumentInput,
     Problem,
+    ProviderStatus,
     Requirements,
     SubjectType,
     UnsupportedSubjectType,
@@ -49,6 +52,9 @@ ALLOWED_FILE_TYPES = {"image/jpeg", "image/png", "application/pdf"}
 NUMBER_TYPES = {"local", "mobile", "toll_free", "national"}
 _READ_CHUNK = 1024 * 1024
 _LIVE_STATES = ("draft", "awaiting_review", "submitted", "approved")
+_POLL_INTERVAL_S = 60
+# When this process last asked the carrier about a submitted verification.
+_last_polled: dict[UUID, float] = {}
 
 Registry = Callable[[str], VerificationProvider | None]
 
@@ -110,7 +116,9 @@ async def _requirements(
             country_code.upper(), number_type, subject_type
         )
     except UnsupportedSubjectType as exc:
-        raise unprocessable(str(exc), loc=["query", "subject_type"]) from exc
+        error = unprocessable(str(exc), loc=["query", "subject_type"])
+        error.detail[0]["ctx"] = {"subject_types": list(exc.allowed)}
+        raise error from exc
     except Exception as exc:
         logger.exception("verification requirements lookup failed")
         raise HTTPException(
@@ -119,28 +127,44 @@ async def _requirements(
         ) from exc
 
 
-async def _refresh(
-    db: AsyncSession, row: CarrierVerification, registry: Registry
-) -> None:
-    """Pull a submitted verification's outcome from the carrier."""
+async def _fetch_status(
+    row: CarrierVerification, registry: Registry
+) -> ProviderStatus | None:
+    """Ask the carrier about a submitted verification. None when there is
+    nothing to apply."""
     if row.state != "submitted":
-        return
+        return None
     provider = registry(row.provider)
     if provider is None:
-        return
+        return None
     try:
-        status = await provider.status(row.provider_refs)
+        return await provider.status(row.provider_refs)
     except Exception:
         logger.warning("verification status poll failed", exc_info=True)
-        return
+        return None
+
+
+def _apply_status(row: CarrierVerification, status: ProviderStatus | None) -> bool:
+    """Copy a final carrier outcome onto the row. True when the row changed."""
+    if status is None:
+        return False
     now = datetime.now(timezone.utc)
     if status.state == "approved":
         row.state, row.approved_at, row.updated_at = "approved", now, now
     elif status.state == "rejected":
         row.state, row.rejection_reason, row.updated_at = "rejected", status.reason, now
     else:
-        return
-    await db.commit()
+        return False
+    _last_polled.pop(row.id, None)
+    return True
+
+
+async def _refresh(
+    db: AsyncSession, row: CarrierVerification, registry: Registry
+) -> None:
+    """Pull a submitted verification's outcome from the carrier."""
+    if _apply_status(row, await _fetch_status(row, registry)):
+        await db.commit()
 
 
 async def approved_purchase_handle(
@@ -199,6 +223,11 @@ async def get_requirements(
     )
 
 
+class _DocumentPart(BaseModel):
+    option: str = ""
+    fields: dict[str, str] = Field(default_factory=dict)
+
+
 class _Submission(BaseModel):
     provider: str = "twilio"
     country_code: str = Field(min_length=2, max_length=2)
@@ -206,7 +235,7 @@ class _Submission(BaseModel):
     subject_type: SubjectType = "person"
     fields: dict[str, str] = Field(default_factory=dict)
     address: Address | None = None
-    documents: dict[str, dict] = Field(default_factory=dict)
+    documents: dict[str, _DocumentPart] = Field(default_factory=dict)
 
 
 def _text_part(form, name: str, default: str = "") -> str:
@@ -325,8 +354,8 @@ async def create_verification(
     for slot, value in sub.documents.items():
         upload = form.get(f"file.{slot}")
         documents[slot] = DocumentInput(
-            option=str(value.get("option", "")),
-            fields={str(k): str(v) for k, v in (value.get("fields") or {}).items()},
+            option=value.option,
+            fields=value.fields,
             file=(
                 await _read_file(upload)
                 if upload is not None and hasattr(upload, "read")
@@ -418,8 +447,21 @@ async def list_verifications(
         .scalars()
         .all()
     )
-    for row in rows:
-        await _refresh(db, row, registry)
+    # Ask the carrier about rows not asked in the last minute, all at once.
+    # Only the carrier calls run concurrently; the session is used in order.
+    now = time.monotonic()
+    due = [
+        r
+        for r in rows
+        if r.state == "submitted"
+        and now - _last_polled.get(r.id, -_POLL_INTERVAL_S) >= _POLL_INTERVAL_S
+    ]
+    for r in due:
+        _last_polled[r.id] = now
+    statuses = await asyncio.gather(*(_fetch_status(r, registry) for r in due))
+    changed = [_apply_status(r, s) for r, s in zip(due, statuses)]
+    if any(changed):
+        await db.commit()
     return [VerificationResponse.model_validate(r) for r in rows]
 
 
@@ -499,9 +541,12 @@ async def admin_list(
 
 
 async def _admin_row(db: AsyncSession, verification_id: UUID) -> CarrierVerification:
+    # Locked until the request commits, so two admins cannot both act on it.
     row = (
         await db.execute(
-            select(CarrierVerification).where(CarrierVerification.id == verification_id)
+            select(CarrierVerification)
+            .where(CarrierVerification.id == verification_id)
+            .with_for_update()
         )
     ).scalar_one_or_none()
     if row is None:
@@ -516,6 +561,13 @@ async def _admin_row(db: AsyncSession, verification_id: UUID) -> CarrierVerifica
     return row
 
 
+def _carrier_unavailable() -> HTTPException:
+    return HTTPException(
+        status_code=http_status.HTTP_502_BAD_GATEWAY,
+        detail="the carrier request failed; try again",
+    )
+
+
 @admin_router.post("/{verification_id}/approve", response_model=AdminVerification)
 async def admin_approve(
     verification_id: UUID,
@@ -526,14 +578,22 @@ async def admin_approve(
     """Submit the draft to the carrier for its review."""
     row = await _admin_row(db, verification_id)
     provider = _provider_or_404(registry, row.provider)
-    problems = await provider.check(row.provider_refs)
+    try:
+        problems = await provider.check(row.provider_refs)
+    except Exception as exc:
+        logger.exception("verification check failed")
+        raise _carrier_unavailable() from exc
     if problems:
         raise HTTPException(
             status_code=http_status.HTTP_409_CONFLICT,
             detail="the carrier no longer accepts this draft: "
             + "; ".join(p.message for p in problems),
         )
-    await provider.submit(row.provider_refs)
+    try:
+        await provider.submit(row.provider_refs)
+    except Exception as exc:
+        logger.exception("verification submit failed")
+        raise _carrier_unavailable() from exc
     now = datetime.now(timezone.utc)
     row.state, row.submitted_at, row.updated_at = "submitted", now, now
     row.approved_by = admin.user_id
