@@ -1954,6 +1954,10 @@ class WhoamiResponse(BaseModel):
         default=None,
         description="The authenticated user's display name. Null for 'shared' callers.",
     )
+    superadmin: bool = Field(
+        default=False,
+        description="True for a Hail staff console session acting on this organization.",
+    )
 
 
 # --------------------------------------------------------------------------- #

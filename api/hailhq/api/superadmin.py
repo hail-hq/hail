@@ -1,8 +1,8 @@
 """Superadmin gate for verification approval.
 
-The superadmin role is built separately. Until it exists this dependency
-denies everyone, so the approval routes cannot be used by accident. When the
-role lands, replace the body of ``require_superadmin`` and nothing else.
+Only a console session the website minted with ``superadmin: true`` passes
+``require_superadmin``. API keys and the shared key are never superadmins,
+whatever the claim.
 """
 
 from __future__ import annotations
@@ -17,7 +17,11 @@ from hailhq.api.deps import Principal, get_current_principal
 async def require_superadmin(
     principal: Annotated[Principal, Depends(get_current_principal)],
 ) -> Principal:
+    """Only a console session the website minted with superadmin: true.
+    API keys and the shared key are never superadmins, whatever the claim."""
+    if principal.auth_kind == "jwt" and principal.superadmin:
+        return principal
     raise HTTPException(
         status_code=http_status.HTTP_403_FORBIDDEN,
-        detail="superadmin access is not enabled",
+        detail="superadmin access required",
     )
