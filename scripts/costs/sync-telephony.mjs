@@ -169,6 +169,22 @@ export function mergeRows(existingNumbers, feedRows, today) {
       source_url: CSV_URL,
     };
   });
+  // A hand-verified row the feed does not carry at all (Twilio sells no PT
+  // national numbers; DIDWW does) is a fact too: keep it, in catalog order.
+  const feedKeys = new Set(
+    feedRows.map((n) => `${n.country_code}:${n.number_type}`),
+  );
+  for (const n of existingNumbers) {
+    const key = `${n.country_code}:${n.number_type}`;
+    if (n.verification_method === "manual-confirmed" && !feedKeys.has(key)) {
+      numbers.push(n);
+    }
+  }
+  numbers.sort(
+    (a, b) =>
+      a.country_code.localeCompare(b.country_code) ||
+      a.number_type.localeCompare(b.number_type),
+  );
   return { numbers, kept };
 }
 
@@ -194,6 +210,7 @@ async function main() {
     rows.map((n) => `${n.country_code}:${n.number_type}`),
   );
   const removed = (existing.numbers || [])
+    .filter((n) => n.verification_method !== "manual-confirmed")
     .map((n) => `${n.country_code}:${n.number_type}`)
     .filter((k) => !newKeys.has(k));
   for (const k of removed) {
