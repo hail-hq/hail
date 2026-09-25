@@ -198,6 +198,13 @@ def _apply_status(row: CarrierVerification, status: ProviderStatus | None) -> bo
     if status is None:
         return False
     now = datetime.now(timezone.utc)
+    if row.state == "submitting" and status.state in (
+        "pending",
+        "approved",
+        "rejected",
+    ):
+        # The interrupted approve did submit; record when we learned that.
+        row.submitted_at = now
     if status.state == "approved":
         row.state, row.approved_at, row.updated_at = "approved", now, now
     elif status.state == "rejected":
@@ -218,16 +225,17 @@ async def _refresh(
 ) -> None:
     """Pull a submitted verification's outcome from the carrier.
 
-    A row cut off in 'submitting' that the carrier reports as submitted gets
-    the audit row its interrupted approve never wrote; approved_by was saved
-    before the carrier call, so the trail names the admin."""
+    A row cut off in 'submitting' that the carrier reports as submitted (or
+    already reviewed) gets the audit row its interrupted approve never wrote;
+    approved_by was saved before the carrier call, so the trail names the
+    admin."""
     was_submitting = row.state == "submitting"
     if not _pollable(row):
         return
     if not _apply_status(row, await _fetch_status(row, registry)):
         return
     await db.commit()
-    if was_submitting and row.state == "submitted":
+    if was_submitting and row.state in ("submitted", "approved", "rejected"):
         await write_audit_log(
             row.organization_id,
             None,

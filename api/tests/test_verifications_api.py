@@ -473,7 +473,12 @@ async def _set_state(async_session, vid: str, state: str, age_s: int) -> None:
 
 @pytest.mark.parametrize(
     ("remote", "expected"),
-    [("pending", "submitted"), ("draft", "awaiting_review"), ("approved", "approved")],
+    [
+        ("pending", "submitted"),
+        ("draft", "awaiting_review"),
+        ("approved", "approved"),
+        ("rejected", "rejected"),
+    ],
 )
 async def test_stuck_submitting_row_settles_from_the_carrier(
     client, org_and_key, carrier, async_session, remote, expected
@@ -495,12 +500,13 @@ async def test_stuck_submitting_row_settles_from_the_carrier(
         .scalars()
         .all()
     )
-    if expected == "submitted":
-        assert got["submitted_at"]
-        # The interrupted approve never wrote its audit row; the recovery does.
-        assert len(audits) == 1 and audits[0].payload["recovered"] is True
+    if expected == "awaiting_review":
+        # The submit never went through: nothing to audit.
+        assert audits == [] and got["submitted_at"] is None
     else:
-        assert audits == []
+        # The interrupted approve never wrote its audit row; the recovery does.
+        assert got["submitted_at"]
+        assert len(audits) == 1 and audits[0].payload["recovered"] is True
 
 
 async def test_fresh_submitting_row_is_left_alone(
