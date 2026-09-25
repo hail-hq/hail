@@ -102,7 +102,7 @@ hail sms status <id>
 hail sms suppressions list        # opt-out list
 hail sms sender-id get            # custom sender ID
 
-hail numbers acquire              # dedicated phone number (voice + SMS)
+hail numbers acquire              # dedicated phone number (voice + SMS), cheapest live offer
 hail numbers list
 hail contacts list                # org contact directory
 

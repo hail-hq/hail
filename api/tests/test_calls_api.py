@@ -376,6 +376,32 @@ async def test_post_calls_ai_disclosure_opt_out_reaches_dispatch_and_audit(
     assert audit.payload["ai_disclosure"] is False
 
 
+async def test_post_calls_carrier_route_error_creates_no_room(
+    client: httpx.AsyncClient,
+    async_session: AsyncSession,
+    org_and_key: tuple[str, ApiKey, str],
+    livekit_mock: AsyncMock,
+    add_phone_number,
+    monkeypatch,
+) -> None:
+    org_id, _, plain = org_and_key
+    await add_phone_number(async_session, org_id)
+
+    def broken_route(_provider):
+        raise ValueError("carrier not configured")
+
+    monkeypatch.setattr("hailhq.api.routes.calls.voice_route", broken_route)
+
+    resp = await client.post(
+        "/calls",
+        json={"to": "+14155559999", "system_prompt": "hi", "recipient_consent": True},
+        headers={"Authorization": f"Bearer {plain}"},
+    )
+
+    assert resp.status_code == 502
+    livekit_mock.create_room.assert_not_awaited()
+
+
 async def test_post_calls_livekit_failure_marks_call_failed(
     client: httpx.AsyncClient,
     async_session: AsyncSession,
@@ -1495,7 +1521,7 @@ async def test_post_calls_didww_number_dials_through_didww_trunk(
 ) -> None:
     from hailhq.core.config import settings
 
-    monkeypatch.setattr(settings, "livekit_sip_outbound_trunk_id", "ST_twilio")
+    monkeypatch.setattr(settings, "livekit_twilio_sip_outbound_trunk_id", "ST_twilio")
     monkeypatch.setattr(settings, "livekit_didww_sip_outbound_trunk_id", "ST_didww")
     org_id, _, plain = org_and_key
     await add_phone_number(
@@ -1526,7 +1552,7 @@ async def test_post_calls_twilio_number_keeps_twilio_trunk(
 ) -> None:
     from hailhq.core.config import settings
 
-    monkeypatch.setattr(settings, "livekit_sip_outbound_trunk_id", "ST_twilio")
+    monkeypatch.setattr(settings, "livekit_twilio_sip_outbound_trunk_id", "ST_twilio")
     monkeypatch.setattr(settings, "livekit_didww_sip_outbound_trunk_id", "ST_didww")
     org_id, _, plain = org_and_key
     await add_phone_number(async_session, org_id)
@@ -1587,7 +1613,7 @@ async def test_post_calls_twilio_number_without_trunk_fails_before_room(
 ) -> None:
     from hailhq.core.config import settings
 
-    monkeypatch.setattr(settings, "livekit_sip_outbound_trunk_id", "")
+    monkeypatch.setattr(settings, "livekit_twilio_sip_outbound_trunk_id", "")
     org_id, _, plain = org_and_key
     await add_phone_number(async_session, org_id)
 

@@ -1,5 +1,4 @@
 import json
-from decimal import Decimal
 
 import pytest
 from hailhq.core import telephony_catalog
@@ -43,9 +42,7 @@ def test_is_acquirable(catalog):
     assert catalog.is_acquirable("ZZ", "local") is False
 
 
-def test_price_and_capabilities(catalog):
-    assert catalog.price_usd_per_month("US", "local") == Decimal("1.15")
-    assert catalog.price_usd_per_month("SE", "local") is None
+def test_capabilities(catalog):
     assert catalog.capabilities("SE", "mobile") == {
         "voice": False,
         "sms": True,

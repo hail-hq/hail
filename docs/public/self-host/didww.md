@@ -84,4 +84,4 @@ must not include `sms` unless the DID lists SMS.
 
 A call from a `didww` number with `LIVEKIT_DIDWW_SIP_OUTBOUND_TRUNK_ID` empty
 fails with `end_reason = carrier_route_failed` before any LiveKit room exists.
-The same applies to Twilio numbers when `LIVEKIT_SIP_OUTBOUND_TRUNK_ID` is empty.
+The same applies to Twilio numbers when `LIVEKIT_TWILIO_SIP_OUTBOUND_TRUNK_ID` is empty.

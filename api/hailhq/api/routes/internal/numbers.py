@@ -66,7 +66,9 @@ async def release_number_internal(
         body.organization_id,
         body.source,
     )
-    was_released = number.provisioning_state == "released"
+    was_released = (
+        number.provisioning_state == "released" or number.released_at is not None
+    )
     number = await release_org_number(db, provider, number)
     if not was_released:
         # Same audit action as DELETE /numbers/{id}; api_key_id is None

@@ -27,7 +27,7 @@ Go to **Phone Numbers → Buy a number**. Select a number with the Voice capabil
    termination domain and credentials to create a LiveKit outbound trunk.
 
 Do not add the termination domain to Hail's `.env`: Hail uses the resulting
-LiveKit trunk ID (`LIVEKIT_SIP_OUTBOUND_TRUNK_ID`) at runtime. Twilio calls
+LiveKit trunk ID (`LIVEKIT_TWILIO_SIP_OUTBOUND_TRUNK_ID`) at runtime. Twilio calls
 traffic from LiveKit to the PSTN “termination.” Its “origination” settings are
 for inbound PSTN calls, which Hail does not yet support.
 

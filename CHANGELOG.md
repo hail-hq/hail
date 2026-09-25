@@ -4,6 +4,25 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 
 ## [Unreleased]
 
+### Changed — BREAKING: buying a number needs a quote
+
+- **`POST /v1/numbers` now requires `quote_id`.** A request without one
+  returns 422. The old no-quote purchase (the Twilio catalog path) is removed.
+  Get a quote first with `POST /v1/numbers/quotes`, then pass the `quote_id` of
+  the offer you want. `provider` defaults to `auto`; `number_type` is optional
+  and must match the quote when sent. Twilio offers work the same way as
+  Telnyx offers.
+- **CLI:** `hail numbers acquire` requests a quote and buys the cheapest ready
+  offer (monthly plus setup). New flags: `--quote-id`, `--provider`,
+  `--voice-only`, `--sms-only`.
+- **SDK:** `client.numbers.acquire(...)` without `quote_id` calls `quotes()` and
+  buys the cheapest ready offer. New argument `capabilities` (default voice and
+  SMS). It raises `HailError` when no offer is ready.
+- **Migrate:** any client that sent `{"country_code": "US", "number_type":
+"local"}` alone must first call `POST /v1/numbers/quotes` with
+  `{"country_code": "US", "capabilities": ["voice", "sms"]}`. Older CLI and SDK
+  versions fail with a 422 until upgraded.
+
 ### Added
 
 - Optional tracking domain for email open and click links. Set

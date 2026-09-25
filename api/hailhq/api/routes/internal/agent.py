@@ -285,6 +285,7 @@ async def agent_send_sms(
 
     sms = Sms(
         organization_id=org,
+        provider=from_number.provider,
         from_number_id=from_number.id,
         from_e164=from_number.e164,
         to_e164=call.to_e164,  # counterpart only — never a parameter

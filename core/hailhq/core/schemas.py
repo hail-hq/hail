@@ -518,6 +518,13 @@ class SenderIdResponse(BaseModel):
 
 class NumberAcquireRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
+    quote_id: UUID = Field(
+        description="Unexpired organization-bound quote from POST /numbers/quotes. Required: without it the request is a 422; get a quote first.",
+    )
+    provider: Literal["auto", "twilio", "telnyx"] = Field(
+        default="auto",
+        description="Carrier restriction for the quote. Auto accepts the quoted carrier; twilio or telnyx must match it.",
+    )
 
     country_code: str = Field(
         min_length=2,
@@ -537,8 +544,42 @@ class NumberAcquireRequest(BaseModel):
         return v.upper()
 
 
+class NumberQuoteRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    country_code: str = Field(
+        min_length=2,
+        max_length=2,
+        description="ISO alpha-2 country code to search. Case-insensitive.",
+    )
+    number_type: NumberType | None = Field(
+        default=None,
+        description="Restrict number type; omit to compare all supported types.",
+    )
+    capabilities: list[Literal["voice", "sms"]] = Field(
+        min_length=1,
+        max_length=2,
+        description="Required channels; every returned offer must support all requested capabilities.",
+    )
+    provider: Literal["auto", "twilio", "telnyx"] = Field(
+        default="auto",
+        description="Carrier restriction; twilio or telnyx returns that carrier's offers only. auto compares both by readiness, remaining verification effort, and rental/setup costs; Twilio wins equivalent ties.",
+    )
+
+    @field_validator("country_code")
+    @classmethod
+    def _uppercase_country_code(cls, v: str) -> str:
+        v = v.upper()
+        if not re.fullmatch(r"[A-Z]{2}", v):
+            raise ValueError("country_code must be two letters")
+        return v
+
+
 class PhoneNumberResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
+    provider: str = Field(
+        default="twilio",
+        description="Carrier that owns and routes this number, such as twilio or telnyx.",
+    )
 
     id: UUID = Field(description="Unique identifier for this number.")
     e164: str = Field(description="The phone number, E.164 format.")

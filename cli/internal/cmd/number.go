@@ -45,6 +45,10 @@ existing number doesn't support.`,
 type numberAcquireFlags struct {
 	country    string
 	numberType string
+	provider   string
+	quoteID    string
+	sms        bool
+	voice      bool
 	idemKey    string
 }
 
@@ -53,14 +57,21 @@ func newNumberAcquireCmd(opts *Options) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "acquire",
 		Short: "Acquire a new dedicated phone number",
-		Long: `hail numbers acquire — provision a new dedicated number from the carrier.
+		Long: `hail numbers acquire — buy a dedicated number at the cheapest live offer.
+
+It requests live quotes (POST /numbers/quotes), picks the cheapest offer that
+is ready to buy (monthly rental plus setup), and buys it with its quote id.
+Pass --quote-id to buy a specific offer instead.
 
 Examples:
   # A US local number (voice + SMS capable):
   hail numbers acquire --country US
 
-  # A US toll-free number:
-  hail numbers acquire --country US --type toll_free`,
+  # A US toll-free number from Telnyx:
+  hail numbers acquire --country US --type toll_free --provider telnyx
+
+  # Buy one exact offer from an earlier quote:
+  hail numbers acquire --country US --quote-id 8b1f0c2e-...`,
 		Args:    cobra.NoArgs,
 		PreRunE: requireMarkedFlags,
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -69,6 +80,10 @@ Examples:
 	}
 	cmd.Flags().StringVar(&f.country, "country", "", "ISO 3166-1 alpha-2 country code (e.g. US)")
 	cmd.Flags().StringVar(&f.numberType, "type", "local", "Number type: local, mobile, toll_free, or national")
+	cmd.Flags().StringVar(&f.provider, "provider", "auto", "Carrier: auto, twilio, or telnyx")
+	cmd.Flags().StringVar(&f.quoteID, "quote-id", "", "Buy this quote (from POST /numbers/quotes) instead of the cheapest offer")
+	cmd.Flags().BoolVar(&f.voice, "voice-only", false, "Require voice only (default: voice and SMS)")
+	cmd.Flags().BoolVar(&f.sms, "sms-only", false, "Require SMS only (default: voice and SMS)")
 	cmd.Flags().StringVar(&f.idemKey, "idempotency-key", "", "Defaults to a fresh UUID")
 	cmd.MarkFlagRequired("country")
 	return cmd
@@ -83,11 +98,41 @@ func runNumberAcquire(ctx context.Context, cmd *cobra.Command, opts *Options, f 
 	default:
 		return helpAndFail(cmd, "--type must be 'local', 'mobile', 'toll_free', or 'national'")
 	}
+	switch f.provider {
+	case "auto", "twilio", "telnyx":
+	default:
+		return helpAndFail(cmd, "--provider must be 'auto', 'twilio', or 'telnyx'")
+	}
+	if f.voice && f.sms {
+		return helpAndFail(cmd, "--voice-only and --sms-only cannot be combined")
+	}
 
-	nt := client.NumberAcquireRequestNumberType(f.numberType)
+	var quoteID openapi_types.UUID
+	if f.quoteID != "" {
+		parsed, err := uuid.Parse(f.quoteID)
+		if err != nil {
+			return helpAndFail(cmd, "--quote-id must be a UUID")
+		}
+		quoteID = openapi_types.UUID(parsed)
+	} else {
+		id, err := cheapestQuoteID(ctx, opts, f)
+		if err != nil {
+			return err
+		}
+		quoteID = id
+	}
+
+	provider := client.NumberAcquireRequestProvider(f.provider)
 	body := client.NumberAcquireRequest{
 		CountryCode: f.country,
-		NumberType:  &nt,
+		Provider:    &provider,
+		QuoteId:     quoteID,
+	}
+	// An explicit --type is checked against the quote; without --quote-id the
+	// quote was already requested for this type.
+	if f.quoteID != "" && cmd.Flags().Changed("type") {
+		nt := client.NumberAcquireRequestNumberType(f.numberType)
+		body.NumberType = &nt
 	}
 
 	apiClient, err := opts.newClientWithIdempotency(f.idemKey)
@@ -106,6 +151,57 @@ func runNumberAcquire(ctx context.Context, cmd *cobra.Command, opts *Options, f 
 	}
 
 	return printPhoneNumber(opts, resp.JSON201, true)
+}
+
+// cheapestQuoteID requests live offers and returns the ready offer with the
+// lowest monthly plus setup price. The first such offer wins a tie, which is
+// the API's own ranking.
+func cheapestQuoteID(ctx context.Context, opts *Options, f *numberAcquireFlags) (openapi_types.UUID, error) {
+	caps := []client.NumberQuoteRequestCapabilities{
+		client.NumberQuoteRequestCapabilities("voice"),
+		client.NumberQuoteRequestCapabilities("sms"),
+	}
+	if f.voice {
+		caps = caps[:1]
+	}
+	if f.sms {
+		caps = caps[1:]
+	}
+	nt := client.NumberQuoteRequestNumberType(f.numberType)
+	provider := client.NumberQuoteRequestProvider(f.provider)
+	apiClient, err := opts.newClient()
+	if err != nil {
+		return openapi_types.UUID{}, err
+	}
+	resp, err := apiClient.QuoteNumbersV1NumbersQuotesPostWithResponse(
+		ctx, &client.QuoteNumbersV1NumbersQuotesPostParams{},
+		client.NumberQuoteRequest{
+			CountryCode:  f.country,
+			NumberType:   &nt,
+			Capabilities: caps,
+			Provider:     &provider,
+		},
+	)
+	if err != nil {
+		return openapi_types.UUID{}, fmt.Errorf("numbers API: %w", err)
+	}
+	if resp.HTTPResponse.StatusCode != http.StatusOK || resp.JSON200 == nil {
+		return openapi_types.UUID{}, apiError(resp.HTTPResponse.StatusCode, resp.Body)
+	}
+	var best *client.CarrierOffer
+	for i := range resp.JSON200.Offers {
+		o := &resp.JSON200.Offers[i]
+		if o.QuoteId == nil || o.Readiness != client.CarrierOfferReadiness("ready") {
+			continue
+		}
+		if best == nil || o.MonthlyCents+o.SetupCents < best.MonthlyCents+best.SetupCents {
+			best = o
+		}
+	}
+	if best == nil {
+		return openapi_types.UUID{}, fmt.Errorf("no number ready to buy in %s (%s); complete regulatory verification or try another --type or --provider", f.country, f.numberType)
+	}
+	return *best.QuoteId, nil
 }
 
 // --------------------------------------------------------------------------- //

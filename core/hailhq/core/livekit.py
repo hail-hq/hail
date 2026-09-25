@@ -100,6 +100,7 @@ class LiveKitClient:
         from_e164: str,
         sip_trunk_id: str,
         participant_identity: str,
+        headers: dict[str, str] | None = None,
     ) -> api.SIPParticipantInfo:
         """Place an outbound SIP call into ``room_name`` via LiveKit.
 
@@ -120,5 +121,6 @@ class LiveKitClient:
                 room_name=room_name,
                 participant_identity=participant_identity,
                 participant_name=participant_identity,
+                headers=headers or {},
             )
         )
