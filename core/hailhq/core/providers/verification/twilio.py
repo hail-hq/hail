@@ -20,6 +20,7 @@ from hailhq.core.providers.verification.base import (
     DocumentOption,
     DocumentSlot,
     DraftResult,
+    FieldOption,
     FieldSpec,
     Problem,
     ProviderStatus,
@@ -79,15 +80,54 @@ def _pattern(constraint: str) -> str | None:
     return m.group(1)
 
 
+# Labels for the choice values Twilio's regulations use. Anything else is
+# humanized from its key.
+_OPTION_LABELS = {
+    "YES": "Yes",
+    "NO": "No",
+    "OTHER": "Other",
+    "DIRECT_CUSTOMER": "We use the number ourselves",
+    "INDEPENDENT_SOFTWARE_VENDOR": "The number is part of a product we sell",
+    "UK:CRN": "UK company number (CRN)",
+    "US:EIN": "US employer ID (EIN)",
+    "CA:CBN": "Canada business number (CBN)",
+    "AU:ACN": "Australian company number (ACN)",
+}
+_CHOICE = re.compile(r"^\^\(([^()]+)\)\$$")
+
+
+def _option_label(key: str) -> str:
+    return _OPTION_LABELS.get(key) or key.replace("_", " ").capitalize()
+
+
+def _options(pattern: str | None) -> tuple[FieldOption, ...] | None:
+    """A fixed set of answers out of a pattern like ``^(YES|NO)$``."""
+    if not pattern:
+        return None
+    m = _CHOICE.match(pattern)
+    if not m:
+        return None
+    keys = m.group(1).split("|")
+    if any(re.search(r"[\\.*+?\[\]{}]", k) for k in keys):
+        return None
+    return tuple(FieldOption(key=k, label=_option_label(k)) for k in keys)
+
+
 def _field_spec(f: dict) -> FieldSpec:
     name = f["machine_name"]
     constraint = (f.get("constraint") or "").strip()
+    pattern = _pattern(constraint)
+    options = _options(pattern)
+    # A choice field explains itself through its option labels; the carrier's
+    # description only lists the raw keys again.
+    help_text = "" if options else (f.get("description") or "")
     return FieldSpec(
         name=name,
         label=f.get("friendly_name") or name,
         kind=_field_kind(name),  # type: ignore[arg-type]
-        help=f.get("description") or "",
-        pattern=_pattern(constraint),
+        help=help_text,
+        pattern=pattern,
+        options=options,
         required=bool(constraint),
     )
 
