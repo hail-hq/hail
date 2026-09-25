@@ -47,7 +47,8 @@ Signaling hosts: `fra.eu.out.didww.com` (EU), `nyc.us.out.didww.com` (US),
 In LiveKit Cloud, **Telephony → SIP trunks → Create new trunk → Outbound**:
 
 - Address: `fra.eu.out.didww.com`
-- Numbers: the DIDWW number in E.164 (`+351…`)
+- Numbers: `*` (any DIDWW number; the Twilio trunk uses the same). Hail picks
+  the trunk by the number's `provider`, so no per-number list is needed.
 - Username and password: from step 2
 
 Or with the CLI:
@@ -55,7 +56,7 @@ Or with the CLI:
 ```bash
 cat > didww-trunk.json <<'EOF'
 {"trunk": {"name": "didww", "address": "fra.eu.out.didww.com",
-  "numbers": ["+351300000000"], "auth_username": "<username>", "auth_password": "<password>"}}
+  "numbers": ["*"], "auth_username": "<username>", "auth_password": "<password>"}}
 EOF
 lk sip outbound create didww-trunk.json
 ```
