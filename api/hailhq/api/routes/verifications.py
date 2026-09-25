@@ -23,6 +23,7 @@ from hailhq.api.deps import Principal, get_current_principal
 from hailhq.api.errors import unprocessable
 from hailhq.api.ratelimit import GENERAL_RATE_LIMITED_RESPONSES
 from hailhq.api.superadmin import require_superadmin
+from hailhq.core.config import settings
 from hailhq.core.db import get_session
 from hailhq.core.models import CarrierVerification
 from hailhq.core.providers.verification import (
@@ -36,6 +37,7 @@ from hailhq.core.providers.verification import (
     UploadedFile,
     VerificationProvider,
     VerificationProviderError,
+    default_verification_provider_name,
     get_verification_provider,
 )
 from hailhq.core.schemas import VerificationResponse
@@ -62,6 +64,21 @@ Registry = Callable[[str], VerificationProvider | None]
 def get_verification_registry() -> Registry:
     """Dependency so tests can swap in a fake carrier."""
     return get_verification_provider
+
+
+def get_default_provider_name() -> str | None:
+    """Carrier used when a request names none. Dependency so tests can swap it."""
+    return default_verification_provider_name()
+
+
+def _resolve_provider_name(name: str | None, default: str | None) -> str:
+    resolved = name or default
+    if not resolved:
+        raise HTTPException(
+            status_code=http_status.HTTP_404_NOT_FOUND,
+            detail="no verification provider is configured",
+        )
+    return resolved
 
 
 router = APIRouter(
@@ -213,13 +230,17 @@ async def get_requirements(
     registry: Annotated[Registry, Depends(get_verification_registry)],
     country_code: Annotated[str, Query(min_length=2, max_length=2)],
     number_type: str,
+    default_provider: Annotated[str | None, Depends(get_default_provider_name)],
     subject_type: SubjectType = "person",
-    provider: str = "twilio",
+    provider: str | None = None,
 ) -> Requirements:
     """What the carrier needs from you to buy this kind of number: the fields,
     the documents, and whether an address is needed. Build your form from it."""
     return await _requirements(
-        _provider_or_404(registry, provider), country_code, number_type, subject_type
+        _provider_or_404(registry, _resolve_provider_name(provider, default_provider)),
+        country_code,
+        number_type,
+        subject_type,
     )
 
 
@@ -229,7 +250,7 @@ class _DocumentPart(BaseModel):
 
 
 class _Submission(BaseModel):
-    provider: str = "twilio"
+    provider: str | None = None
     country_code: str = Field(min_length=2, max_length=2)
     number_type: str
     subject_type: SubjectType = "person"
@@ -289,6 +310,7 @@ async def create_verification(
     principal: Annotated[Principal, Depends(get_current_principal)],
     db: Annotated[AsyncSession, Depends(get_session)],
     registry: Annotated[Registry, Depends(get_verification_registry)],
+    default_provider: Annotated[str | None, Depends(get_default_provider_name)],
 ) -> VerificationResponse:
     """Submit your details and documents (multipart/form-data).
 
@@ -309,7 +331,7 @@ async def create_verification(
 
     try:
         sub = _Submission(
-            provider=_text_part(form, "provider", "twilio"),
+            provider=_text_part(form, "provider") or None,
             country_code=_text_part(form, "country_code").upper(),
             number_type=_text_part(form, "number_type"),
             subject_type=_text_part(form, "subject_type", "person"),  # type: ignore[arg-type]
@@ -324,7 +346,8 @@ async def create_verification(
             ),
         ) from exc
 
-    provider = _provider_or_404(registry, sub.provider)
+    provider_name = _resolve_provider_name(sub.provider, default_provider)
+    provider = _provider_or_404(registry, provider_name)
     requirements = await _requirements(
         provider, sub.country_code, sub.number_type, sub.subject_type
     )
@@ -337,7 +360,7 @@ async def create_verification(
         await db.execute(
             select(CarrierVerification).where(
                 CarrierVerification.organization_id == principal.organization_id,
-                CarrierVerification.provider == sub.provider,
+                CarrierVerification.provider == provider_name,
                 CarrierVerification.country_code == sub.country_code,
                 CarrierVerification.number_type == sub.number_type,
                 CarrierVerification.state.in_(_LIVE_STATES),
@@ -366,6 +389,7 @@ async def create_verification(
     try:
         draft = await provider.create_draft(
             organization_id=str(principal.organization_id),
+            contact_email=settings.hail_support_email,
             requirements=requirements,
             fields=sub.fields,
             address=sub.address,
@@ -387,7 +411,7 @@ async def create_verification(
 
     row = CarrierVerification(
         organization_id=principal.organization_id,
-        provider=sub.provider,
+        provider=provider_name,
         country_code=sub.country_code,
         number_type=sub.number_type,
         subject_type=sub.subject_type,

@@ -301,6 +301,7 @@ class TwilioVerificationProvider(VerificationProvider):
         self,
         *,
         organization_id: str,
+        contact_email: str,
         requirements: Requirements,
         fields: dict[str, str],
         address: Address | None,
@@ -312,6 +313,7 @@ class TwilioVerificationProvider(VerificationProvider):
         return await asyncio.to_thread(
             self._create_draft_sync,
             organization_id,
+            contact_email,
             requirements,
             fields,
             address,
@@ -321,6 +323,7 @@ class TwilioVerificationProvider(VerificationProvider):
     def _create_draft_sync(
         self,
         organization_id: str,
+        contact_email: str,
         requirements: Requirements,
         fields: dict[str, str],
         address: Address | None,
@@ -382,7 +385,7 @@ class TwilioVerificationProvider(VerificationProvider):
 
             bundle = self._rc.bundles.create(
                 friendly_name=f"hail-{organization_id}",
-                email=settings.twilio_bundle_notification_email,
+                email=contact_email,
                 iso_country=requirements.country_code,
                 number_type=_twilio_number_type(requirements.number_type),
                 end_user_type=_SUBJECT_TO_TWILIO[requirements.subject_type],

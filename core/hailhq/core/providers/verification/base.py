@@ -229,13 +229,18 @@ class VerificationProvider(ABC):
         self,
         *,
         organization_id: str,
+        contact_email: str,
         requirements: Requirements,
         fields: dict[str, str],
         address: Address | None,
         documents: dict[str, DocumentInput],
     ) -> DraftResult:
         """Create the carrier-side record as a draft and check it. Leaves
-        nothing behind if it raises."""
+        nothing behind if it raises.
+
+        ``contact_email`` is the operator's address for the carrier's notices
+        about this record. It is never the customer's; the customer's own
+        details go only in ``fields``."""
 
     @abstractmethod
     async def check(self, refs: dict) -> list[Problem]:

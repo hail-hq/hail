@@ -24,6 +24,7 @@ from hailhq.core.providers.verification.twilio import TwilioVerificationProvider
 
 ACCOUNT_SID = "ACtest1234567890abcdef1234567890ab"
 ORG = "11111111-2222-3333-4444-555555555555"
+CONTACT = "ops@hail.test"
 NUMBERS = "https://numbers.twilio.com/v2/RegulatoryCompliance"
 UPLOAD = "https://numbers-upload.twilio.com/v2/RegulatoryCompliance/SupportingDocuments"
 ADDRESSES = f"https://api.twilio.com/2010-04-01/Accounts/{ACCOUNT_SID}/Addresses.json"
@@ -207,6 +208,7 @@ async def test_create_draft_reports_missing_input_without_calling_the_carrier(
     req = await _person_requirements(provider)
     result = await provider.create_draft(
         organization_id=ORG,
+        contact_email=CONTACT,
         requirements=req,
         fields={"first_name": "Ada"},
         address=None,
@@ -231,6 +233,7 @@ async def test_create_draft_tolerates_a_slot_with_no_options(provider) -> None:
     req = req.model_copy(update={"documents": (*req.documents, empty)})
     result = await provider.create_draft(
         organization_id=ORG,
+        contact_email=CONTACT,
         requirements=req,
         fields={},
         address=None,
@@ -245,6 +248,7 @@ async def test_create_draft_rejects_invalid_email_and_wrong_file_slot(provider) 
     req = await _person_requirements(provider)
     result = await provider.create_draft(
         organization_id=ORG,
+        contact_email=CONTACT,
         requirements=req,
         fields={**PERSON_FIELDS, "email": "not-an-email"},
         address=ADDRESS,
@@ -264,6 +268,7 @@ async def test_create_draft_happy_path(provider) -> None:
 
     result = await provider.create_draft(
         organization_id=ORG,
+        contact_email=CONTACT,
         requirements=req,
         fields=PERSON_FIELDS,
         address=ADDRESS,
@@ -303,8 +308,8 @@ async def test_create_draft_happy_path(provider) -> None:
     assert bundle["NumberType"] == ["mobile"]
     assert bundle["EndUserType"] == ["individual"]
     assert bundle["FriendlyName"] == [f"hail-{ORG}"]
-    # status emails go to Hail, never to the customer
-    assert bundle["Email"] == ["hi@hail.so"]
+    # notices go to the operator's contact address, never to the customer
+    assert bundle["Email"] == [CONTACT]
     assert "ada@example.com" not in json.dumps(bundle)
     assignments = by_url[f"{NUMBERS}/Bundles/BU{'1' * 32}/ItemAssignments"]
     assert len(assignments) == 3  # end user + two documents
@@ -355,6 +360,7 @@ async def test_create_draft_carrier_problems_are_returned_and_draft_is_deleted(
 
     result = await provider.create_draft(
         organization_id=ORG,
+        contact_email=CONTACT,
         requirements=req,
         fields=PERSON_FIELDS,
         address=ADDRESS,
@@ -386,6 +392,7 @@ async def test_create_draft_carrier_400_becomes_a_problem(provider) -> None:
     )
     result = await provider.create_draft(
         organization_id=ORG,
+        contact_email=CONTACT,
         requirements=req,
         fields=PERSON_FIELDS,
         address=ADDRESS,

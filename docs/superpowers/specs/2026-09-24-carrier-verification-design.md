@@ -74,7 +74,7 @@ Maps the interface to Twilio Regulatory Compliance:
 - `requirements`: reads Regulations for the country, number type and subject type. Converts end-user fields, document types and address requirements to the neutral schema.
 - `create_draft`: creates an Address, an EndUser, SupportingDocuments (file bytes go to Twilio's upload host), a Bundle, and ItemAssignments. Returns their SIDs as `refs`.
 - `check`: runs an Evaluation and converts failures into `Problem(field, message)`.
-- Notification email: the bundle's `email` (where Twilio sends status mail) is always Hail's address (`TWILIO_BUNDLE_NOTIFICATION_EMAIL`, default `hi@hail.so`), never the customer's. The customer's email is used only in the fields that describe them.
+- Contact email: `create_draft` receives `contact_email`, the operator's address from the general `HAIL_SUPPORT_EMAIL` setting (default `hi@hail.so`). The plug-in gives it to the carrier wherever the carrier needs a contact for notices (Twilio: the bundle's `email`). It is never the customer's; the customer's email goes only in the fields that describe them.
 - `submit`: sets the Bundle status to pending review.
 - `status`: reads the Bundle status. `twilio-approved` is approved. `twilio-rejected` is rejected with Twilio's reason.
 - `purchase_handle`: returns the Bundle SID for the purchase call. The lookup by name `hail-<organization_id>` from #110 becomes a fallback in here.

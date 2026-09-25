@@ -13,9 +13,13 @@ from types import SimpleNamespace
 import pytest
 from hailhq.api.main import app
 from hailhq.api.routes import verifications as verifications_routes
-from hailhq.api.routes.verifications import get_verification_registry
+from hailhq.api.routes.verifications import (
+    get_default_provider_name,
+    get_verification_registry,
+)
 from hailhq.api.superadmin import require_superadmin
 from hailhq.core import telephony_catalog
+from hailhq.core.config import settings
 from hailhq.core.models import CarrierVerification
 from hailhq.core.providers.verification import (
     DocumentOption,
@@ -95,8 +99,10 @@ def carrier():
         lambda name: fake if name == "fake" else None
     )
     verifications_routes._last_polled.clear()
+    app.dependency_overrides[get_default_provider_name] = lambda: "fake"
     yield fake
     app.dependency_overrides.pop(get_verification_registry, None)
+    app.dependency_overrides.pop(get_default_provider_name, None)
     app.dependency_overrides.pop(require_superadmin, None)
 
 
@@ -215,6 +221,8 @@ async def test_create_stores_state_and_opaque_refs_only(
 
     draft = carrier.drafts[0]
     assert draft["organization_id"] == str(org_id)
+    # the carrier's notices go to the operator, never to the customer
+    assert draft["contact_email"] == settings.hail_support_email
     assert draft["fields"] == {"first_name": "Ada", "last_name": "Lovelace"}
     file = draft["documents"]["proof_of_identity"].file
     assert file.data == b"\xff\xd8jpeg"
@@ -602,3 +610,34 @@ async def test_purchase_without_verification_passes_none(
     assert resp.status_code == 201, resp.text
     _, kwargs = voice_provider_mock.acquire_number.call_args
     assert kwargs["verification_handle"] is None
+
+
+async def test_requirements_and_create_default_to_the_configured_carrier(
+    client, org_and_key, carrier
+) -> None:
+    _, _, key = org_and_key
+    resp = await client.get(
+        "/verifications/requirements",
+        params={"country_code": "GB", "number_type": "mobile"},
+        headers=_auth(key),
+    )
+    assert resp.status_code == 200 and resp.json()["provider"] == "fake"
+    resp = await client.post(
+        "/verifications",
+        data=_submission(provider=""),
+        files=_passport(),
+        headers=_auth(key),
+    )
+    assert resp.status_code == 201, resp.text
+    assert resp.json()["provider"] == "fake"
+
+
+async def test_no_configured_carrier_is_404(client, org_and_key, carrier) -> None:
+    _, _, key = org_and_key
+    app.dependency_overrides[get_default_provider_name] = lambda: None
+    resp = await client.get(
+        "/verifications/requirements",
+        params={"country_code": "GB", "number_type": "mobile"},
+        headers=_auth(key),
+    )
+    assert resp.status_code == 404

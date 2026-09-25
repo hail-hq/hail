@@ -36,6 +36,7 @@ __all__ = [
     "UploadedFile",
     "VerificationProvider",
     "VerificationProviderError",
+    "default_verification_provider_name",
     "get_verification_provider",
     "register_verification_provider",
 ]
@@ -61,6 +62,12 @@ def get_verification_provider(name: str) -> VerificationProvider | None:
         return factory()
     except ValueError:
         return None
+
+
+def default_verification_provider_name() -> str | None:
+    """The first configured plug-in. Used only when a request names no carrier;
+    once several carriers exist, callers pass the carrier of the number."""
+    return next((n for n in _FACTORIES if get_verification_provider(n)), None)
 
 
 def _register_builtin() -> None:
