@@ -4,6 +4,17 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 
 ## [Unreleased]
 
+## [0.24.0] — 2026-09-25
+
+Numbers now come from a live comparison of carriers: Hail quotes Twilio and
+Telnyx inventory, prices and verification requirements, buys the offer you
+pick, and routes every call and SMS through the carrier that owns the number.
+DIDWW joins as an outbound voice carrier, and countries that need the number
+holder verified get a carrier-neutral verification API.
+
+Component versions cut alongside this release:
+**`sdk-v0.17.0`** (PyPI: `hail-sdk==0.17.0`), **`cli-v0.23.0`** (Homebrew + GitHub Releases).
+
 ### Changed — BREAKING: buying a number needs a quote
 
 - **`POST /v1/numbers` now requires `quote_id`.** A request without one
@@ -25,6 +36,31 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 
 ### Added
 
+- **Telnyx as a second carrier for numbers, calls and SMS.** `POST /v1/numbers/quotes`
+  returns live offers from every configured carrier (Twilio, Telnyx), ranked
+  ready-first, then by verification effort, monthly price and setup price;
+  `provider` restricts the search. Telnyx orders complete asynchronously: the
+  number is returned `pending`, a sweeper polls the order, credits are
+  reserved up front and refunded once on a definite failure. Setup:
+  [docs/public/self-host/telnyx.md](docs/public/self-host/telnyx.md).
+- **DIDWW as an outbound voice carrier.** A number's `provider` picks its
+  LiveKit trunk (`core/hailhq/core/carrier_routing.py`); DIDWW numbers are
+  registered by hand. `POST /calls` fails with `end_reason =
+  carrier_route_failed` before any LiveKit room exists when the number's
+  carrier has no trunk. Setup:
+  [docs/public/self-host/didww.md](docs/public/self-host/didww.md).
+- **Carrier verification API** (`/v1/verifications`): countries such as the UK
+  require the number holder to be verified with the carrier first. Hail
+  collects the fields and documents the carrier asks for (choice fields carry
+  `options`), builds the carrier-side record through a per-carrier plug-in
+  (Twilio first), holds it for approval, and buys with it. Only state and
+  opaque carrier IDs are stored.
+- Per-carrier LiveKit trunk settings: `LIVEKIT_TWILIO_SIP_OUTBOUND_TRUNK_ID`,
+  `LIVEKIT_TWILIO_SIP_INBOUND_TRUNK_ID`, `LIVEKIT_TELNYX_SIP_OUTBOUND_TRUNK_ID`,
+  `LIVEKIT_DIDWW_SIP_OUTBOUND_TRUNK_ID`. The old `LIVEKIT_SIP_OUTBOUND_TRUNK_ID`
+  and `LIVEKIT_SIP_INBOUND_TRUNK_ID` keep working as Twilio aliases.
+- `hail numbers acquire --provider`, `--quote-id`, `--voice-only`, `--sms-only`;
+  SDK `client.numbers.quotes()`.
 - Optional tracking domain for email open and click links. Set
   `HAIL_TRACKING_DOMAIN` and Caddy proxies that host to the SES tracking
   server; set `HAIL_SES_TRACKING_DOMAIN` (creates the SES identity) and then

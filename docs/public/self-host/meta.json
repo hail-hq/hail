@@ -5,6 +5,7 @@
     "vm-deploy",
     "livekit-cloud",
     "twilio",
+    "telnyx",
     "didww",
     "aws-ses",
     "smtp-inbound",
