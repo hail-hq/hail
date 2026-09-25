@@ -483,3 +483,25 @@ def test_registry_none_without_credentials(monkeypatch) -> None:
     monkeypatch.setattr(settings, "twilio_account_sid", "")
     monkeypatch.setattr(settings, "twilio_auth_token", "")
     assert get_verification_provider("twilio") is None
+
+
+@responses.activate
+async def test_choice_fields_become_options(provider) -> None:
+    # GB business: fields whose constraint is a fixed alternation become a
+    # select with our own labels and no carrier help text.
+    _regs_response("GB-mobile-business")
+    req = await provider.requirements("GB", "mobile", "business")
+    by_name = {f.name: f for f in req.fields}
+    identity = by_name["business_identity"]
+    assert [o.key for o in identity.options] == [
+        "DIRECT_CUSTOMER",
+        "INDEPENDENT_SOFTWARE_VENDOR",
+    ]
+    assert identity.options[0].label == "We use the number ourselves"
+    assert identity.help == ""
+    assert [o.key for o in by_name["is_subassigned"].options] == ["YES", "NO"]
+    assert by_name["business_registration_identifier"].options[-1].label == "Other"
+    # A real regex stays a pattern with no options.
+    assert by_name["email"].options is None and by_name["email"].pattern
+    assert by_name["phone_number"].options is None
+    assert by_name["phone_number"].kind == "phone"
