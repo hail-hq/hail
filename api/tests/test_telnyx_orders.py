@@ -13,6 +13,7 @@ from hailhq.api.number_orders import (
     purge_expired_quotes,
     reconcile_order,
 )
+from hailhq.core import telephony_catalog
 from hailhq.core.billing import get_balance_cents, monthly_fee_ref
 from hailhq.core.models import AccountCredit, NumberOffer, PhoneNumber
 from hailhq.core.number_offers import CarrierOffer
@@ -929,8 +930,15 @@ async def test_quote_route_rejects_unlisted_type_and_accepts_lowercase_country(
     )
     assert lower.status_code == 200, lower.text
     assert {call.args[1] for call in discover.await_args_list} == {"PT"}
-    # Only the types the catalog lists for PT are searched.
-    assert {call.args[2] for call in discover.await_args_list} == {"local", "mobile"}
+    # Only the types the catalog lists for PT are searched (the catalog is
+    # live data: PT gained a national row after this test was written).
+    listed = {
+        kind
+        for kind in ("local", "mobile", "national", "toll_free")
+        if telephony_catalog.capabilities("PT", kind) is not None
+    }
+    assert "toll_free" not in listed
+    assert {call.args[2] for call in discover.await_args_list} == listed
 
 
 async def _age_number(async_session, number):
