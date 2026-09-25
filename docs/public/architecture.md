@@ -22,7 +22,6 @@ Hail v1 is three Python services plus a Go CLI, built around LiveKit Cloud.
 - **mcp** (`:8081`, Streamable HTTP; legacy SSE during the transition) — the MCP server that wraps the API. Agent clients (Claude.ai, ChatGPT, Claude Code, Cursor) connect to it. Refer to [MCP setup](./mcp.md).
 - **voicebot** (LiveKit Agents worker) — registers with LiveKit Cloud. Hail dispatches it into a room for each call.
 - **postgres** — call records, phone numbers, API keys.
-- **minio** (dev only) — S3-compatible local object storage. Use real S3 in production.
 
 LiveKit Cloud is external. The `hail` Go CLI is a scriptable tool for humans, not a service.
 

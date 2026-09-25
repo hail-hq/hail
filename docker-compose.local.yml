@@ -1,4 +1,4 @@
-# Local-only override. Adds bundled Postgres and MinIO containers and wires
+# Local-only override. Adds bundled Postgres container and wires
 # api/voicebot to wait for it. Merged on top of docker-compose.yml via:
 #
 #   docker compose -f docker-compose.yml -f docker-compose.local.yml up
@@ -7,22 +7,6 @@
 # DATABASE_URL at the managed connection string.
 
 services:
-  minio:
-    image: quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z
-    command: server /data --console-address ":9001"
-    environment:
-      MINIO_ROOT_USER: minioadmin
-      MINIO_ROOT_PASSWORD: minioadmin
-    ports:
-      - "9000:9000"
-      - "9001:9001"
-    volumes:
-      - minio-data:/data
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
-      interval: 5s
-      retries: 10
-
   postgres:
     image: postgres:16-alpine
     environment:
@@ -49,5 +33,4 @@ services:
         condition: service_healthy
 
 volumes:
-  minio-data:
   postgres-data:

@@ -79,10 +79,9 @@ Component versions cut alongside this release:
 - New dependency in `core`: `tldextract` (BSD-3-Clause), for the Public Suffix
   List. It reads the list snapshot shipped in the package: no network fetch
   and no cache write at runtime.
-- MinIO is no longer in `docker-compose.yml` or `docker-compose.prod.yml`.
-  It is only in `docker-compose.local.yml`. The MinIO image is gone from
+- MinIO is removed from all compose files. The MinIO image is gone from
   Docker Hub and Quay (`quay.io/minio/minio` returns 401), which blocked a
-  deploy. Call recordings are not stored yet, so prod does not use it.
+  deploy. Call recordings are not stored yet, so nothing used it.
 
 ## [0.22.0] — 2026-08-31
 
