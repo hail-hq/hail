@@ -1293,6 +1293,21 @@
       "source_url": "https://www.twilio.com/content/dam/twilio-com/pricing-data/en/csv/PMded94a0dae30eaaec0f115f22859bd38_SiteNumbersPricing.csv"
     },
     {
+      "country_code": "PT",
+      "number_type": "national",
+      "display_name": "Portugal national",
+      "dial_code": "351",
+      "usd_per_month": "3.50",
+      "voice": true,
+      "sms": false,
+      "mms": false,
+      "last_verified": "2026-09-25",
+      "last_changed_at": "2026-09-25",
+      "verification_method": "manual-confirmed",
+      "verified_by": "r13i",
+      "source_url": "https://www.didww.com/phone-numbers/all-phone-numbers/Portugal/National"
+    },
+    {
       "country_code": "RO",
       "number_type": "local",
       "display_name": "Romania local",
