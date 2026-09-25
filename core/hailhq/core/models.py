@@ -1380,3 +1380,61 @@ class PlatformFlag(Base):
     updated_at: Mapped[datetime] = mapped_column(
         TS, nullable=False, server_default=text("now()")
     )
+
+
+class CarrierVerification(Base):
+    """A customer's verification with a carrier, needed before buying numbers
+    in some countries. Holds state and opaque carrier IDs only: no names,
+    addresses or document data are stored here (see the design spec)."""
+
+    __tablename__ = "carrier_verifications"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    organization_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), nullable=False
+    )
+    provider: Mapped[str] = mapped_column(Text, nullable=False)
+    country_code: Mapped[str] = mapped_column(Text, nullable=False)
+    number_type: Mapped[str] = mapped_column(Text, nullable=False)
+    subject_type: Mapped[str] = mapped_column(Text, nullable=False)
+    state: Mapped[str] = mapped_column(Text, nullable=False)
+    provider_refs: Mapped[dict] = mapped_column(
+        JSONB, server_default=text("'{}'::jsonb"), nullable=False
+    )
+    requirements_version: Mapped[str] = mapped_column(Text, nullable=False)
+    rejection_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    approved_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        TS, server_default=text("now()"), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        TS, server_default=text("now()"), nullable=False
+    )
+    submitted_at: Mapped[datetime | None] = mapped_column(TS, nullable=True)
+    approved_at: Mapped[datetime | None] = mapped_column(TS, nullable=True)
+
+    __table_args__ = (
+        CheckConstraint(
+            "state IN ('draft','awaiting_review','submitting','submitted',"
+            "'approved','rejected','cancelled')",
+            name="carrier_verifications_state_check",
+        ),
+        CheckConstraint(
+            "subject_type IN ('person','business')",
+            name="carrier_verifications_subject_type_check",
+        ),
+        Index(
+            "carrier_verifications_live_uniq",
+            "organization_id",
+            "provider",
+            "country_code",
+            "number_type",
+            unique=True,
+            postgresql_where=text("state NOT IN ('cancelled','rejected')"),
+        ),
+        Index("carrier_verifications_org_idx", "organization_id"),
+    )

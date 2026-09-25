@@ -73,14 +73,22 @@ class ProviderCallStatus(BaseModel):
 class VoiceProvider(ABC):
     """Abstract carrier-side voice provider."""
 
+    # Registry name shared with this carrier's verification plug-in.
+    carrier: str
+
     @abstractmethod
     async def acquire_number(
         self,
         country_code: str,
         number_type: NumberType,
         capabilities: list[str],
+        verification_handle: dict | None = None,
     ) -> ProviderNumber:
-        """Search for and purchase a number matching the criteria."""
+        """Search for and purchase a number matching the criteria.
+
+        ``verification_handle`` is what the same carrier's verification plug-in
+        returned from ``purchase_handle`` for the caller's approved
+        verification. None when the caller has none."""
 
     @abstractmethod
     async def release_number(self, provider_resource_id: str) -> None:

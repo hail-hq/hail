@@ -38,6 +38,11 @@ class Settings(BaseSettings):
     elevenlabs_voice_id: str = ""
     elevenlabs_model: str = ""
 
+    # Operator contact address, for anywhere a third party needs a contact for
+    # Hail (carrier verification notices, support links). Always Hail's own,
+    # never a customer's.
+    hail_support_email: str = "hi@hail.so"
+
     # Carriers
     twilio_account_sid: str = ""
     twilio_auth_token: str = ""

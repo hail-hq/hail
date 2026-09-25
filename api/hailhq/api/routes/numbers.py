@@ -32,6 +32,11 @@ from hailhq.api.pagination import fetch_cursor_page
 from hailhq.api.ratelimit import GENERAL_RATE_LIMITED_RESPONSES
 from hailhq.api.route_prefixes import request_mount_prefix
 from hailhq.api.routes.sms import get_sms_provider
+from hailhq.api.routes.verifications import (
+    Registry,
+    approved_purchase_handle,
+    get_verification_registry,
+)
 from hailhq.core import telephony_catalog
 from hailhq.core.billing import get_balance_cents
 from hailhq.core.db import get_session
@@ -111,6 +116,7 @@ async def acquire_number(
     principal: Annotated[Principal, Depends(get_current_principal)],
     db: Annotated[AsyncSession, Depends(get_session)],
     provider: Annotated[VoiceProvider, Depends(get_voice_provider)],
+    verifications: Annotated[Registry, Depends(get_verification_registry)],
     idem: Annotated[IdempotencyContext | None, Depends(idempotency_dep)] = None,
 ) -> PhoneNumberResponse:
     """Buy a dedicated phone number for the caller's organization.
@@ -189,11 +195,23 @@ async def acquire_number(
                 ),
             )
 
+    # Countries that need carrier verification (see /verifications) buy with
+    # the org's approved one for this carrier.
+    verification_handle = await approved_purchase_handle(
+        db,
+        verifications,
+        principal.organization_id,
+        provider.carrier,
+        body.country_code,
+        body.number_type,
+    )
+
     try:
         acquired = await provider.acquire_number(
             country_code=body.country_code,
             number_type=body.number_type,
             capabilities=requested_caps,
+            verification_handle=verification_handle,
         )
     except LookupError as exc:
         # Transient: the carrier has no matching inventory right now. Release the
@@ -221,9 +239,9 @@ async def acquire_number(
         raise await cache_failure(
             idem,
             unprocessable(
-                f"we can't provision a {body.number_type} number in "
-                f"{body.country_code} yet — it needs regulatory verification "
-                "we don't support",
+                f"a {body.number_type} number in {body.country_code} needs "
+                "verification for your organization first — start it in the "
+                "console under Numbers, or see POST /verifications",
                 loc=["body", "number_type"],
             ),
         ) from exc
