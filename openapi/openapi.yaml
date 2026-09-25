@@ -6790,8 +6790,8 @@ components:
         state:
           type: string
           title: State
-          description: "'awaiting_review', 'submitted', 'approved', 'rejected',
-            or 'cancelled'."
+          description: "'awaiting_review', 'submitting', 'submitted', 'approved',
+            'rejected', or 'cancelled'."
         rejection_reason:
           anyOf:
             - type: string

@@ -485,6 +485,30 @@ async def test_approve_returns_502_when_the_carrier_fails(
     assert retry.status_code == 200
 
 
+async def test_approve_marks_submitting_before_calling_the_carrier(
+    client, org_and_key, carrier
+) -> None:
+    _, _, key = org_and_key
+    vid = (await _create(client, key)).json()["id"]
+    app.dependency_overrides[require_superadmin] = lambda: SimpleNamespace(
+        user_id=uuid.uuid4()
+    )
+    seen = {}
+
+    async def submit_and_approve_again(refs):
+        # The state is already saved, so a second approve is refused.
+        seen["again"] = await client.post(
+            f"/admin/verifications/{vid}/approve", headers=_auth(key)
+        )
+
+    carrier.submit = submit_and_approve_again
+    resp = await client.post(f"/admin/verifications/{vid}/approve", headers=_auth(key))
+    assert resp.status_code == 200
+    assert resp.json()["state"] == "submitted"
+    assert seen["again"].status_code == 409
+    assert "submitting" in seen["again"].json()["detail"]
+
+
 # -- purchase -------------------------------------------------------------
 
 

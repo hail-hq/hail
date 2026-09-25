@@ -51,7 +51,7 @@ MAX_REQUEST_BYTES = 30 * 1024 * 1024
 ALLOWED_FILE_TYPES = {"image/jpeg", "image/png", "application/pdf"}
 NUMBER_TYPES = {"local", "mobile", "toll_free", "national"}
 _READ_CHUNK = 1024 * 1024
-_LIVE_STATES = ("draft", "awaiting_review", "submitted", "approved")
+_LIVE_STATES = ("draft", "awaiting_review", "submitting", "submitted", "approved")
 _POLL_INTERVAL_S = 60
 # When this process last asked the carrier about a submitted verification.
 _last_polled: dict[UUID, float] = {}
@@ -589,10 +589,16 @@ async def admin_approve(
             detail="the carrier no longer accepts this draft: "
             + "; ".join(p.message for p in problems),
         )
+    # Saved before the carrier call: if the save after it fails, the row shows
+    # 'submitting' and cannot be approved (and submitted) a second time.
+    row.state, row.updated_at = "submitting", datetime.now(timezone.utc)
+    await db.commit()
     try:
         await provider.submit(row.provider_refs)
     except Exception as exc:
         logger.exception("verification submit failed")
+        row.state, row.updated_at = "awaiting_review", datetime.now(timezone.utc)
+        await db.commit()
         raise _carrier_unavailable() from exc
     now = datetime.now(timezone.utc)
     row.state, row.submitted_at, row.updated_at = "submitted", now, now

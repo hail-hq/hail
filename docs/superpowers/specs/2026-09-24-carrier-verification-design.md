@@ -90,7 +90,7 @@ Maps the interface to Twilio Regulatory Compliance:
 | country_code | text | |
 | number_type | text | |
 | subject_type | text | `person` or `business` |
-| state | text | `draft`, `awaiting_review`, `submitted`, `approved`, `rejected`, `cancelled` |
+| state | text | `draft`, `awaiting_review`, `submitting`, `submitted`, `approved`, `rejected`, `cancelled` |
 | provider_refs | jsonb | opaque carrier IDs. No personal data |
 | requirements_version | text | |
 | rejection_reason | text null | carrier or superadmin text |
@@ -104,7 +104,7 @@ Not stored: names, emails, phone numbers, addresses, document files, document nu
 ### 5. State machine
 
 ```
-draft ──(check passes)──> awaiting_review ──(superadmin approve)──> submitted ──(carrier)──> approved
+draft ──(check passes)──> awaiting_review ──(superadmin approve)──> submitting ──> submitted ──(carrier)──> approved
   │                              │                                        └────────────────> rejected
   │                              └──(superadmin reject)──> rejected
   └──(customer cancel)──> cancelled

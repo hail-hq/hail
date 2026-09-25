@@ -2069,7 +2069,8 @@ class VerificationResponse(BaseModel):
     subject_type: str = Field(description="'person' or 'business'.")
     state: str = Field(
         description=(
-            "'awaiting_review', 'submitted', 'approved', 'rejected', or 'cancelled'."
+            "'awaiting_review', 'submitting', 'submitted', 'approved', 'rejected', "
+            "or 'cancelled'."
         )
     )
     rejection_reason: str | None = Field(

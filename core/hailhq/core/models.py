@@ -1419,8 +1419,8 @@ class CarrierVerification(Base):
 
     __table_args__ = (
         CheckConstraint(
-            "state IN ('draft','awaiting_review','submitted','approved',"
-            "'rejected','cancelled')",
+            "state IN ('draft','awaiting_review','submitting','submitted',"
+            "'approved','rejected','cancelled')",
             name="carrier_verifications_state_check",
         ),
         CheckConstraint(
