@@ -131,6 +131,9 @@ class Settings(BaseSettings):
     # ready and operators only set both up once.
     livekit_sip_outbound_trunk_id: str = ""
     livekit_sip_inbound_trunk_id: str = ""
+    # Second carrier. A number's ``provider`` picks the trunk
+    # (core/hailhq/core/carrier_routing.py). Empty = DIDWW numbers cannot dial.
+    livekit_didww_sip_outbound_trunk_id: str = ""
 
     # Storage
     database_url: str = "postgresql://hail:hail@postgres:5432/hail"
