@@ -518,7 +518,12 @@ async def quote_numbers(
             for kind in kinds
         )
     )
-    offers = rank_offers([offer for batch, _ in batches for offer in batch])
+    # An explicit carrier restricts the offers themselves, not only the
+    # recommendation: a client that buys "the cheapest offer" must never be
+    # handed a quote its own provider setting then rejects with a 422.
+    offers = rank_offers(
+        [offer for batch, _ in batches for offer in batch], body.provider
+    )
     unavailable = sorted({p for _, failures in batches for p in failures})
     expires = datetime.now(timezone.utc) + timedelta(minutes=10)
     for offer in offers:
@@ -536,8 +541,7 @@ async def quote_numbers(
         db.add(row)
         offer.quote_id = row.id
     await db.commit()
-    ranked = rank_offers(offers, body.provider)
-    recommended = next((o for o in ranked if o.readiness == "ready"), None)
+    recommended = next((o for o in offers if o.readiness == "ready"), None)
     return {
         "offers": offers,
         "recommended_quote_id": recommended.quote_id if recommended else None,

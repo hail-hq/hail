@@ -242,6 +242,12 @@ async def test_quote_api_returns_live_recommendation_and_persists_org_scope(
     )
     assert response.status_code == 200, response.text
     result = response.json()
+    # An explicit carrier restricts the offers themselves: a client that buys
+    # the cheapest listed offer must never get one its provider setting rejects.
+    if preference:
+        assert {o["provider"] for o in result["offers"]} == {preference}
+    else:
+        assert {o["provider"] for o in result["offers"]} == {"twilio", "telnyx"}
     if preference == "twilio" and not ready:
         assert result["recommended_quote_id"] is None
         return

@@ -50,20 +50,31 @@ def rank_offers(
     )
 
 
+PROVIDERS = ("twilio", "telnyx")
+
+
 async def discover_offers(
     org: UUID,
     country: str,
     kind: NumberType,
     capabilities: list[str],
     e164: str | None = None,
+    providers: list[str] | tuple[str, ...] = PROVIDERS,
 ) -> tuple[list[CarrierOffer], list[str]]:
+    """Live offers from ``providers`` (every carrier by default) and the
+    carriers whose lookup failed."""
+    searches = {
+        "twilio": lambda: twilio_offers(org, country, kind, capabilities, e164=e164),
+        "telnyx": lambda: telnyx_offers(
+            org, country, kind, capabilities, get_http_client(), e164=e164
+        ),
+    }
+    asked = [p for p in PROVIDERS if p in providers]
     results = await asyncio.gather(
-        twilio_offers(org, country, kind, capabilities, e164=e164),
-        telnyx_offers(org, country, kind, capabilities, get_http_client(), e164=e164),
-        return_exceptions=True,
+        *(searches[p]() for p in asked), return_exceptions=True
     )
     offers, unavailable = [], []
-    for provider, result in zip(("twilio", "telnyx"), results):
+    for provider, result in zip(asked, results):
         if isinstance(result, asyncio.CancelledError):
             raise result
         if isinstance(result, BaseException):

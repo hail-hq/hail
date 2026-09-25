@@ -562,7 +562,7 @@ class NumberQuoteRequest(BaseModel):
     )
     provider: Literal["auto", "twilio", "telnyx"] = Field(
         default="auto",
-        description="Carrier preference; auto compares readiness, remaining verification effort, and rental/setup costs. Twilio wins equivalent ties.",
+        description="Carrier restriction; twilio or telnyx returns that carrier's offers only. auto compares both by readiness, remaining verification effort, and rental/setup costs; Twilio wins equivalent ties.",
     )
 
     @field_validator("country_code")

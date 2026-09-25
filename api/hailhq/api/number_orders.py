@@ -139,7 +139,6 @@ async def finish_order(
     if not failed:
         number.provider_resource_id = resource_id
         number.acquired_at = now
-    meta.pop("needs_review", None)
     meta["order_state"] = "failed" if failed else "complete"
     if failed:
         meta["failure_reason"] = reason or "the carrier did not complete the order"
@@ -323,17 +322,28 @@ async def acquire_offer(
             "Complete this organization's regulatory verification first",
             loc=["body", "quote_id"],
         )
+    total = offer.monthly_cents + offer.setup_cents
+    no_funds = HTTPException(
+        status_code=402,
+        detail=f"insufficient credits; setup and the first month cost ${total / 100:.2f}; top up at {BILLING_URL}",
+    )
+    # Cheap check first so an empty balance never costs a carrier round-trip.
+    # Re-checked under the lock below, after the slow discovery.
+    if billed and await get_balance_cents(db, org) < total:
+        raise no_funds
     # Carrier discovery is slow: release the org lock and the quote row lock
     # first so other billing and number writes for this organization proceed.
     await db.commit()
     # Check both carrier price and regulatory readiness again before committing
     # money. The client cannot submit price, bundle ids, or a different number.
+    # Only the quoted carrier can match, so only it is asked.
     live, unavailable = await discover_offers(
         org,
         country,
         kind,
         row.offer.get("requested_capabilities") or offer.capabilities,
         e164=offer.e164,
+        providers=[offer.provider],
     )
     fresh = next(
         (o for o in live if o.provider == offer.provider and o.e164 == offer.e164), None
@@ -357,12 +367,8 @@ async def acquire_offer(
     if row.number_id:
         # A concurrent request consumed this quote while we were checking.
         return await db.get(PhoneNumber, row.number_id)
-    total = offer.monthly_cents + offer.setup_cents
     if billed and await get_balance_cents(db, org) < total:
-        raise HTTPException(
-            status_code=402,
-            detail=f"insufficient credits; setup and the first month cost ${total / 100:.2f}; top up at {BILLING_URL}",
-        )
+        raise no_funds
     existing = (
         await db.execute(
             select(PhoneNumber.id)

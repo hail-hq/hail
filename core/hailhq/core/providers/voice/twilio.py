@@ -274,6 +274,8 @@ class LazyTwilioVoiceProvider(VoiceProvider):
     """Builds the Twilio client on first use, so a deployment without Twilio
     credentials can still serve numbers that belong to another carrier."""
 
+    carrier = "twilio"
+
     def __init__(self) -> None:
         self._inner: TwilioVoiceProvider | None = None
 
