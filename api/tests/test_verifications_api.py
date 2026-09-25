@@ -283,6 +283,32 @@ async def test_create_rejects_oversize_file(client, org_and_key, carrier) -> Non
     assert carrier.drafts == []
 
 
+async def test_uploads_never_spool_to_disk(
+    client, org_and_key, carrier, monkeypatch
+) -> None:
+    # Starlette spools file parts over 1 MB to a temp file. The parser we use
+    # raises that limit above the request cap, so a scan stays in memory.
+    import tempfile
+
+    rollovers: list[int] = []
+    original = tempfile.SpooledTemporaryFile.rollover
+
+    def spy(self):
+        rollovers.append(1)
+        return original(self)
+
+    monkeypatch.setattr(tempfile.SpooledTemporaryFile, "rollover", spy)
+    _, _, key = org_and_key
+    resp = await client.post(
+        "/verifications",
+        data=_submission(),
+        files=_passport(body=b"0" * (3 * 1024 * 1024), ctype="application/pdf"),
+        headers=_auth(key),
+    )
+    assert resp.status_code == 201, resp.text
+    assert rollovers == []
+
+
 async def test_create_second_live_verification_is_409(
     client, org_and_key, carrier
 ) -> None:
