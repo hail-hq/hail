@@ -6,8 +6,8 @@ import httpx
 import pytest
 from fastapi import HTTPException
 from hailhq.api.number_orders import (
-    PENDING_ORDER_TIMEOUT,
     CONSUMED_QUOTE_RETENTION,
+    PENDING_ORDER_TIMEOUT,
     QUOTE_RETENTION,
     acquire_offer,
     purge_expired_quotes,
