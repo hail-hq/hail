@@ -10,7 +10,7 @@ cd hail
 cp .env.example .env.local
 # fill in keys (see ./setup/)
 pnpm install                      # installs husky + lint-staged + prettier
-docker compose -f docker-compose.yml -f docker-compose.local.yml up postgres minio
+docker compose -f docker-compose.yml -f docker-compose.local.yml up postgres
                                   # just the data services for host-side dev
 ```
 

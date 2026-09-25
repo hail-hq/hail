@@ -79,9 +79,9 @@ Component versions cut alongside this release:
 - New dependency in `core`: `tldextract` (BSD-3-Clause), for the Public Suffix
   List. It reads the list snapshot shipped in the package: no network fetch
   and no cache write at runtime.
-- `docker-compose.yml` pulls MinIO from `quay.io/minio/minio`, pinned to
-  `RELEASE.2025-09-07T16-13-09Z`. The `minio/minio` repository is gone from
-  Docker Hub, which made `docker compose pull` fail and blocked a deploy.
+- MinIO is removed from all compose files. The MinIO image is gone from
+  Docker Hub and Quay (`quay.io/minio/minio` returns 401), which blocked a
+  deploy. Call recordings are not stored yet, so nothing used it.
 
 ## [0.22.0] — 2026-08-31
 

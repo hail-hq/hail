@@ -10,7 +10,7 @@ name: hail
 #   - api/voicebot/mcp pull pre-built images from ghcr.io/hail-hq/hail-*
 #     (built by .github/workflows/deploy.yml). The base's `build:` is reset
 #     so `docker compose up` doesn't try to build on the VM.
-#   - api/mcp/minio host ports rebind to 127.0.0.1. Docker's iptables rules
+#   - api/mcp host ports rebind to 127.0.0.1. Docker's iptables rules
 #     bypass UFW; without the loopback bind, `8080:8080` would be reachable
 #     publicly even with the firewall set to deny.
 #   - Adds Caddy as the TLS edge (auto Let's Encrypt) — the only thing on
@@ -66,12 +66,6 @@ services:
     restart: unless-stopped
     ports: !override
       - "127.0.0.1:8081:8081"
-
-  minio:
-    restart: unless-stopped
-    ports: !override
-      - "127.0.0.1:9000:9000"
-      - "127.0.0.1:9001:9001"
 
 volumes:
   caddy-data:

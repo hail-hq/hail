@@ -26,7 +26,7 @@ cp .env.example .env                                       # then fill in keys
 pnpm install                                               # husky pre-commit hooks
 docker compose \
   -f docker-compose.yml -f docker-compose.local.yml \
-  up -d                                                    # postgres + minio + api + voicebot + mcp
+  up -d                                                    # postgres + api + voicebot + mcp
 docker compose run --rm api alembic upgrade head           # apply schema
 # bind a phone number to the self-host sentinel (see first-run setup below)
 ```

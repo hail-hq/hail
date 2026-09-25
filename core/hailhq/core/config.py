@@ -129,7 +129,7 @@ class Settings(BaseSettings):
 
     # Storage
     database_url: str = "postgresql://hail:hail@postgres:5432/hail"
-    s3_endpoint: str = "http://minio:9000"
+    s3_endpoint: str = ""
     s3_bucket: str = "hail-recordings"
     s3_access_key: str = ""
     s3_secret_key: str = ""

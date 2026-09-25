@@ -48,7 +48,7 @@ Go CLI module path is `github.com/hail-hq/hail/cli`. npm packages are published 
 
 ## Dev commands
 
-- Data services (local Postgres + MinIO): `docker compose -f docker-compose.yml -f docker-compose.local.yml up postgres minio`
+- Data services (local Postgres): `docker compose -f docker-compose.yml -f docker-compose.local.yml up postgres`
 - Migrations: `cd api && uv run alembic upgrade head`
 - API: `cd api && uv run uvicorn hailhq.api.main:app --reload --port 8080`
 - Voicebot: `cd voicebot && uv run python -m hailhq.voicebot.main start`

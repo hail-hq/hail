@@ -1,4 +1,4 @@
-# Local-only override. Adds a bundled Postgres container and wires
+# Local-only override. Adds bundled Postgres container and wires
 # api/voicebot to wait for it. Merged on top of docker-compose.yml via:
 #
 #   docker compose -f docker-compose.yml -f docker-compose.local.yml up
