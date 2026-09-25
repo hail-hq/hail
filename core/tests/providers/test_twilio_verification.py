@@ -428,7 +428,7 @@ async def test_submit_sets_pending_review(provider) -> None:
 @pytest.mark.parametrize(
     ("twilio_status", "state"),
     [
-        ("draft", "pending"),
+        ("draft", "draft"),
         ("pending-review", "pending"),
         ("in-review", "pending"),
         ("provisionally-approved", "pending"),
@@ -464,16 +464,22 @@ async def test_discard_never_raises(provider) -> None:
 
 def test_registry_returns_plugin_when_configured(monkeypatch) -> None:
     from hailhq.core.config import settings
+    from hailhq.core.providers import verification as registry
 
+    monkeypatch.setattr(registry, "_INSTANCES", {})
     monkeypatch.setattr(settings, "twilio_account_sid", ACCOUNT_SID)
     monkeypatch.setattr(settings, "twilio_auth_token", "tok")
-    assert isinstance(get_verification_provider("twilio"), TwilioVerificationProvider)
+    first = get_verification_provider("twilio")
+    assert isinstance(first, TwilioVerificationProvider)
+    assert get_verification_provider("twilio") is first  # built once
     assert get_verification_provider("nope") is None
 
 
 def test_registry_none_without_credentials(monkeypatch) -> None:
     from hailhq.core.config import settings
+    from hailhq.core.providers import verification as registry
 
+    monkeypatch.setattr(registry, "_INSTANCES", {})
     monkeypatch.setattr(settings, "twilio_account_sid", "")
     monkeypatch.setattr(settings, "twilio_auth_token", "")
     assert get_verification_provider("twilio") is None

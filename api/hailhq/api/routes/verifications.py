@@ -3,6 +3,8 @@ the carrier-side record, then let a superadmin approve it.
 
 Files and details pass through this process in memory to the carrier. Nothing
 identifying is written to the database, disk or logs (see the design spec).
+The multipart body is parsed here with an in-memory parser and a hard size cap,
+so no part is ever spooled to a temporary file.
 """
 
 from __future__ import annotations
@@ -11,8 +13,8 @@ import asyncio
 import json
 import logging
 import time
-from collections.abc import Callable
-from datetime import datetime, timezone
+from collections.abc import AsyncIterator, Callable
+from datetime import datetime, timedelta, timezone
 from typing import Annotated
 from uuid import UUID
 
@@ -45,6 +47,7 @@ from pydantic import BaseModel, Field, ValidationError
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
+from starlette.formparsers import MultiPartException, MultiPartParser
 
 logger = logging.getLogger(__name__)
 
@@ -54,7 +57,11 @@ ALLOWED_FILE_TYPES = {"image/jpeg", "image/png", "application/pdf"}
 NUMBER_TYPES = {"local", "mobile", "toll_free", "national"}
 _READ_CHUNK = 1024 * 1024
 _LIVE_STATES = ("draft", "awaiting_review", "submitting", "submitted", "approved")
+_POLLED_STATES = ("submitting", "submitted")
 _POLL_INTERVAL_S = 60
+# A row left in 'submitting' this long was cut off mid-approve (see
+# admin_approve). Reads then ask the carrier what really happened.
+_SUBMITTING_STUCK_AFTER = timedelta(minutes=5)
 # When this process last asked the carrier about a submitted verification.
 _last_polled: dict[UUID, float] = {}
 
@@ -125,15 +132,17 @@ async def _requirements(
     country_code: str,
     number_type: str,
     subject_type: SubjectType,
+    where: str = "query",
 ) -> Requirements:
+    """``where`` names the request part the inputs came from, for error paths."""
     if number_type not in NUMBER_TYPES:
-        raise unprocessable("unknown number_type", loc=["query", "number_type"])
+        raise unprocessable("unknown number_type", loc=[where, "number_type"])
     try:
         return await provider.requirements(
             country_code.upper(), number_type, subject_type
         )
     except UnsupportedSubjectType as exc:
-        error = unprocessable(str(exc), loc=["query", "subject_type"])
+        error = unprocessable(str(exc), loc=[where, "subject_type"])
         error.detail[0]["ctx"] = {"subject_types": list(exc.allowed)}
         raise error from exc
     except Exception as exc:
@@ -144,13 +153,32 @@ async def _requirements(
         ) from exc
 
 
+def _pollable(row: CarrierVerification) -> bool:
+    """True when the carrier has something to say about this row: it is
+    submitted, or was cut off while submitting long enough ago that no approve
+    can still be running."""
+    if row.state not in _POLLED_STATES:
+        return False
+    if row.state == "submitting":
+        return datetime.now(timezone.utc) - row.updated_at >= _SUBMITTING_STUCK_AFTER
+    return True
+
+
+def _poll_due(row: CarrierVerification, now: float) -> bool:
+    """`_pollable` and not asked in the last minute. Marks the row as asked."""
+    if not _pollable(row):
+        return False
+    if now - _last_polled.get(row.id, -_POLL_INTERVAL_S) < _POLL_INTERVAL_S:
+        return False
+    _last_polled[row.id] = now
+    return True
+
+
 async def _fetch_status(
     row: CarrierVerification, registry: Registry
 ) -> ProviderStatus | None:
-    """Ask the carrier about a submitted verification. None when there is
-    nothing to apply."""
-    if row.state != "submitted":
-        return None
+    """Ask the carrier about a verification. None when there is nothing to
+    apply."""
     provider = registry(row.provider)
     if provider is None:
         return None
@@ -162,7 +190,11 @@ async def _fetch_status(
 
 
 def _apply_status(row: CarrierVerification, status: ProviderStatus | None) -> bool:
-    """Copy a final carrier outcome onto the row. True when the row changed."""
+    """Copy the carrier's view onto the row. True when the row changed.
+
+    A row stuck in 'submitting' settles here: the carrier says whether the
+    submit went through ('pending' -> submitted) or not ('draft' ->
+    awaiting_review, so an admin can approve again)."""
     if status is None:
         return False
     now = datetime.now(timezone.utc)
@@ -170,6 +202,11 @@ def _apply_status(row: CarrierVerification, status: ProviderStatus | None) -> bo
         row.state, row.approved_at, row.updated_at = "approved", now, now
     elif status.state == "rejected":
         row.state, row.rejection_reason, row.updated_at = "rejected", status.reason, now
+    elif row.state == "submitting" and status.state == "pending":
+        row.state, row.submitted_at, row.updated_at = "submitted", now, now
+        return True
+    elif row.state == "submitting" and status.state == "draft":
+        row.state, row.updated_at = "awaiting_review", now
     else:
         return False
     _last_polled.pop(row.id, None)
@@ -180,6 +217,8 @@ async def _refresh(
     db: AsyncSession, row: CarrierVerification, registry: Registry
 ) -> None:
     """Pull a submitted verification's outcome from the carrier."""
+    if not _pollable(row):
+        return
     if _apply_status(row, await _fetch_status(row, registry)):
         await db.commit()
 
@@ -278,6 +317,38 @@ def _json_part(form, name: str, default):
         raise unprocessable(f"{name} must be valid JSON", loc=["body", name]) from exc
 
 
+class _InMemoryMultiPartParser(MultiPartParser):
+    """Starlette spools any file part over 1 MB to a temporary file on disk.
+    The body is capped at MAX_REQUEST_BYTES (below), so with this limit no part
+    can reach the spool size and every byte stays in memory."""
+
+    spool_max_size = MAX_REQUEST_BYTES + 1
+
+
+async def _capped_body(request: Request) -> AsyncIterator[bytes]:
+    total = 0
+    async for chunk in request.stream():
+        total += len(chunk)
+        if total > MAX_REQUEST_BYTES:
+            raise unprocessable("request is too large", loc=["body"])
+        yield chunk
+
+
+async def _parse_form(request: Request):
+    length = request.headers.get("content-length")
+    if length and length.isdigit() and int(length) > MAX_REQUEST_BYTES:
+        raise unprocessable("request is too large", loc=["body"])
+    content_type = request.headers.get("content-type", "")
+    if not content_type.lower().startswith("multipart/form-data"):
+        raise unprocessable("send multipart/form-data", loc=["body"])
+    try:
+        return await _InMemoryMultiPartParser(
+            request.headers, _capped_body(request), max_files=20, max_fields=20
+        ).parse()
+    except MultiPartException as exc:
+        raise unprocessable(exc.message, loc=["body"]) from exc
+
+
 async def _read_file(upload) -> UploadedFile:
     if upload.content_type not in ALLOWED_FILE_TYPES:
         raise unprocessable(
@@ -324,10 +395,7 @@ async def create_verification(
     the field named, and nothing is kept. When it passes, the verification waits
     for review and is then submitted to the carrier.
     """
-    length = request.headers.get("content-length")
-    if length and length.isdigit() and int(length) > MAX_REQUEST_BYTES:
-        raise unprocessable("request is too large", loc=["body"])
-    form = await request.form()
+    form = await _parse_form(request)
 
     try:
         sub = _Submission(
@@ -348,13 +416,6 @@ async def create_verification(
 
     provider_name = _resolve_provider_name(sub.provider, default_provider)
     provider = _provider_or_404(registry, provider_name)
-    requirements = await _requirements(
-        provider, sub.country_code, sub.number_type, sub.subject_type
-    )
-    if not requirements.required:
-        raise unprocessable(
-            "this number does not need verification", loc=["body", "number_type"]
-        )
 
     existing = (
         await db.execute(
@@ -371,6 +432,14 @@ async def create_verification(
         raise HTTPException(
             status_code=http_status.HTTP_409_CONFLICT,
             detail=f"a verification already exists ({existing.state}); id {existing.id}",
+        )
+
+    requirements = await _requirements(
+        provider, sub.country_code, sub.number_type, sub.subject_type, where="body"
+    )
+    if not requirements.required:
+        raise unprocessable(
+            "this number does not need verification", loc=["body", "number_type"]
         )
 
     documents: dict[str, DocumentInput] = {}
@@ -422,13 +491,17 @@ async def create_verification(
     db.add(row)
     try:
         await db.commit()
-    except IntegrityError as exc:
+    except Exception as exc:
+        # The carrier record exists but the row does not: remove it, or it
+        # would be left behind with the customer's details.
         await db.rollback()
         await provider.discard(draft.refs)
-        raise HTTPException(
-            status_code=http_status.HTTP_409_CONFLICT,
-            detail="a verification already exists for this number type",
-        ) from exc
+        if isinstance(exc, IntegrityError):
+            raise HTTPException(
+                status_code=http_status.HTTP_409_CONFLICT,
+                detail="a verification already exists for this number type",
+            ) from exc
+        raise
     await db.refresh(row)
     return VerificationResponse.model_validate(row)
 
@@ -474,14 +547,7 @@ async def list_verifications(
     # Ask the carrier about rows not asked in the last minute, all at once.
     # Only the carrier calls run concurrently; the session is used in order.
     now = time.monotonic()
-    due = [
-        r
-        for r in rows
-        if r.state == "submitted"
-        and now - _last_polled.get(r.id, -_POLL_INTERVAL_S) >= _POLL_INTERVAL_S
-    ]
-    for r in due:
-        _last_polled[r.id] = now
+    due = [r for r in rows if _poll_due(r, now)]
     statuses = await asyncio.gather(*(_fetch_status(r, registry) for r in due))
     changed = [_apply_status(r, s) for r, s in zip(due, statuses)]
     if any(changed):

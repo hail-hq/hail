@@ -444,6 +444,54 @@ async def test_list_polls_the_carrier_at_most_once_a_minute(
     assert listed[0]["state"] == "approved"
 
 
+async def _set_state(async_session, vid: str, state: str, age_s: int) -> None:
+    from datetime import datetime, timedelta, timezone
+
+    from sqlalchemy import update
+
+    await async_session.execute(
+        update(CarrierVerification)
+        .where(CarrierVerification.id == uuid.UUID(vid))
+        .values(
+            state=state,
+            updated_at=datetime.now(timezone.utc) - timedelta(seconds=age_s),
+        )
+    )
+    await async_session.commit()
+
+
+@pytest.mark.parametrize(
+    ("remote", "expected"),
+    [("pending", "submitted"), ("draft", "awaiting_review"), ("approved", "approved")],
+)
+async def test_stuck_submitting_row_settles_from_the_carrier(
+    client, org_and_key, carrier, async_session, remote, expected
+) -> None:
+    # An approve cut off after the carrier call leaves 'submitting' behind.
+    # Once it is old enough, a read asks the carrier what really happened.
+    _, _, key = org_and_key
+    vid = (await _create(client, key)).json()["id"]
+    await _set_state(async_session, vid, "submitting", age_s=10 * 60)
+    carrier.remote_status = ProviderStatus(state=remote)
+    got = (await client.get(f"/verifications/{vid}", headers=_auth(key))).json()
+    assert got["state"] == expected
+    if expected == "submitted":
+        assert got["submitted_at"]
+
+
+async def test_fresh_submitting_row_is_left_alone(
+    client, org_and_key, carrier, async_session
+) -> None:
+    _, _, key = org_and_key
+    vid = (await _create(client, key)).json()["id"]
+    await _set_state(async_session, vid, "submitting", age_s=5)
+    carrier.remote_status = ProviderStatus(state="draft")
+    got = (await client.get(f"/verifications/{vid}", headers=_auth(key))).json()
+    assert got["state"] == "submitting"
+    listed = (await client.get("/verifications", headers=_auth(key))).json()
+    assert listed[0]["state"] == "submitting"
+
+
 async def test_requirements_unsupported_subject_lists_the_allowed_ones(
     client, org_and_key, carrier
 ) -> None:

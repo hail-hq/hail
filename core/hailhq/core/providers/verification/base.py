@@ -209,7 +209,10 @@ class DraftResult(BaseModel):
 
 
 class ProviderStatus(BaseModel):
-    state: Literal["pending", "approved", "rejected"]
+    """``draft``: the carrier has the record but it was never submitted.
+    ``pending``: submitted and under review."""
+
+    state: Literal["draft", "pending", "approved", "rejected"]
     reason: str | None = None
 
 

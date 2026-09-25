@@ -42,6 +42,8 @@ __all__ = [
 ]
 
 _FACTORIES: dict[str, Callable[[], VerificationProvider]] = {}
+# One instance per plug-in, built on first use (a plug-in holds an HTTP client).
+_INSTANCES: dict[str, VerificationProvider] = {}
 
 
 def register_verification_provider(
@@ -50,18 +52,24 @@ def register_verification_provider(
     """Make a carrier plug-in available under ``name``. Adding a carrier is one
     plug-in module plus one call to this function."""
     _FACTORIES[name] = factory
+    _INSTANCES.pop(name, None)
 
 
 def get_verification_provider(name: str) -> VerificationProvider | None:
     """The plug-in registered as ``name``, or None when unknown or not
     configured (a plug-in raises ValueError when its credentials are missing)."""
+    instance = _INSTANCES.get(name)
+    if instance is not None:
+        return instance
     factory = _FACTORIES.get(name)
     if factory is None:
         return None
     try:
-        return factory()
+        instance = factory()
     except ValueError:
         return None
+    _INSTANCES[name] = instance
+    return instance
 
 
 def default_verification_provider_name() -> str | None:

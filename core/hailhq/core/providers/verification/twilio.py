@@ -137,6 +137,13 @@ def _map_requirements(
     return tuple(subject_fields), tuple(slots), address_required
 
 
+def _pick_option(slot: DocumentSlot, doc: DocumentInput) -> DocumentOption | None:
+    """The option the customer chose. A slot with one option needs no choice."""
+    if not doc.option and len(slot.options) == 1:
+        return slot.options[0]
+    return next((o for o in slot.options if o.key == doc.option), None)
+
+
 def _validate_input(
     requirements: Requirements,
     fields: dict[str, str],
@@ -171,7 +178,7 @@ def _validate_input(
             elif slot.options:
                 needs_address = needs_address or slot.options[0].needs_address
             continue
-        option = next((o for o in slot.options if o.key == doc.option), None)
+        option = _pick_option(slot, doc)
         if option is None:
             problems.append(
                 Problem(
@@ -361,11 +368,7 @@ class TwilioVerificationProvider(VerificationProvider):
                 doc = documents.get(slot.name)
                 if doc is None and not slot.options:
                     continue
-                option = (
-                    next((o for o in slot.options if o.key == doc.option), None)
-                    if doc
-                    else slot.options[0]
-                )
+                option = _pick_option(slot, doc) if doc else slot.options[0]
                 assert option is not None  # validated in _validate_input
                 attrs: dict = {k: clean[k] for k in option.copies if k in clean}
                 if option.needs_address and refs.get("address_sid"):
@@ -480,6 +483,8 @@ class TwilioVerificationProvider(VerificationProvider):
 
     async def status(self, refs: dict) -> ProviderStatus:
         bundle = await asyncio.to_thread(self._rc.bundles(refs["bundle_sid"]).fetch)
+        if bundle.status == "draft":
+            return ProviderStatus(state="draft")
         if bundle.status == "twilio-approved":
             return ProviderStatus(state="approved")
         if bundle.status == "twilio-rejected":
