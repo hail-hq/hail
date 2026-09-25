@@ -5956,6 +5956,22 @@ components:
       required:
         - items
       title: EventStreamResponse
+    FieldOption:
+      properties:
+        key:
+          type: string
+          title: Key
+          description: Value to send.
+        label:
+          type: string
+          title: Label
+          description: Label to show the customer.
+      type: object
+      required:
+        - key
+        - label
+      title: FieldOption
+      description: One allowed value for a field with a fixed set of answers.
     FieldSpec:
       properties:
         name:
@@ -5989,6 +6005,16 @@ components:
           description:
             Regular expression the value must match, when the carrier gives
             one.
+        options:
+          anyOf:
+            - items:
+                $ref: "#/components/schemas/FieldOption"
+              type: array
+            - type: "null"
+          title: Options
+          description:
+            Allowed values, when the field is a choice. Show a select,
+            not a text box.
         required:
           type: boolean
           title: Required

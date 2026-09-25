@@ -52,6 +52,15 @@ class UnsupportedSubjectType(ValueError):
         self.allowed = allowed
 
 
+class FieldOption(BaseModel):
+    """One allowed value for a field with a fixed set of answers."""
+
+    model_config = ConfigDict(frozen=True)
+
+    key: str = Field(description="Value to send.")
+    label: str = Field(description="Label to show the customer.")
+
+
 class FieldSpec(BaseModel):
     """One value the customer types in."""
 
@@ -67,6 +76,10 @@ class FieldSpec(BaseModel):
     pattern: str | None = Field(
         default=None,
         description="Regular expression the value must match, when the carrier gives one.",
+    )
+    options: tuple[FieldOption, ...] | None = Field(
+        default=None,
+        description="Allowed values, when the field is a choice. Show a select, not a text box.",
     )
     required: bool = Field(
         default=True, description="False when the field is optional."
