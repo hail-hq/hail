@@ -2,8 +2,8 @@
 
 actor_kind: api_key | user | superadmin | system. Existing rows stay NULL.
 
-Revision ID: 0047
-Revises: 0046
+Revision ID: 0049
+Revises: 0048
 """
 
 from __future__ import annotations
@@ -12,8 +12,8 @@ import sqlalchemy as sa
 from alembic import op
 from sqlalchemy.dialects.postgresql import UUID
 
-revision: str = "0047"
-down_revision: str | None = "0046"
+revision: str = "0049"
+down_revision: str | None = "0048"
 branch_labels = None
 depends_on = None
 
