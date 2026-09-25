@@ -42,7 +42,12 @@ from hailhq.core import telephony_catalog
 from hailhq.core.carrier_routing import TELNYX, TWILIO, sms_route
 from hailhq.core.db import get_session
 from hailhq.core.models import NumberOffer, PhoneNumber
-from hailhq.core.number_offers import CarrierOffer, discover_offers, rank_offers
+from hailhq.core.number_offers import (
+    PROVIDERS,
+    CarrierOffer,
+    discover_offers,
+    rank_offers,
+)
 from hailhq.core.providers.sms import SmsProvider
 from hailhq.core.providers.voice import (
     CarrierNotConfigured,
@@ -510,10 +515,15 @@ async def quote_numbers(
     # Carrier discovery takes seconds. End the transaction the auth lookup
     # opened so this request does not hold a pooled connection while it waits.
     await db.commit()
+    providers = PROVIDERS if body.provider == "auto" else [body.provider]
     batches = await asyncio.gather(
         *(
             discover_offers(
-                principal.organization_id, body.country_code, kind, body.capabilities
+                principal.organization_id,
+                body.country_code,
+                kind,
+                body.capabilities,
+                providers=providers,
             )
             for kind in kinds
         )
