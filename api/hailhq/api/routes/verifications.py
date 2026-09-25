@@ -206,7 +206,7 @@ def _apply_status(row: CarrierVerification, status: ProviderStatus | None) -> bo
         row.state, row.submitted_at, row.updated_at = "submitted", now, now
         return True
     elif row.state == "submitting" and status.state == "draft":
-        row.state, row.updated_at = "awaiting_review", now
+        row.state, row.approved_by, row.updated_at = "awaiting_review", None, now
     else:
         return False
     _last_polled.pop(row.id, None)
@@ -216,11 +216,29 @@ def _apply_status(row: CarrierVerification, status: ProviderStatus | None) -> bo
 async def _refresh(
     db: AsyncSession, row: CarrierVerification, registry: Registry
 ) -> None:
-    """Pull a submitted verification's outcome from the carrier."""
+    """Pull a submitted verification's outcome from the carrier.
+
+    A row cut off in 'submitting' that the carrier reports as submitted gets
+    the audit row its interrupted approve never wrote; approved_by was saved
+    before the carrier call, so the trail names the admin."""
+    was_submitting = row.state == "submitting"
     if not _pollable(row):
         return
-    if _apply_status(row, await _fetch_status(row, registry)):
-        await db.commit()
+    if not _apply_status(row, await _fetch_status(row, registry)):
+        return
+    await db.commit()
+    if was_submitting and row.state == "submitted":
+        await write_audit_log(
+            row.organization_id,
+            None,
+            "verification.approve",
+            "carrier_verification",
+            row.id,
+            {
+                "approved_by": str(row.approved_by) if row.approved_by else None,
+                "recovered": True,
+            },
+        )
 
 
 async def approved_purchase_handle(
@@ -584,9 +602,9 @@ async def cancel_verification(
     db: Annotated[AsyncSession, Depends(get_session)],
     registry: Annotated[Registry, Depends(get_verification_registry)],
 ) -> VerificationResponse:
-    """Cancel a verification that has not been submitted yet."""
+    """Cancel an unsubmitted verification or dismiss a rejected one."""
     row = await _org_row_or_404(db, principal, verification_id)
-    if row.state != "awaiting_review":
+    if row.state not in ("awaiting_review", "rejected"):
         raise HTTPException(
             status_code=http_status.HTTP_409_CONFLICT,
             detail=f"cannot cancel a verification that is {row.state}",
@@ -680,19 +698,21 @@ async def admin_approve(
             + "; ".join(p.message for p in problems),
         )
     # Saved before the carrier call: if the save after it fails, the row shows
-    # 'submitting' and cannot be approved (and submitted) a second time.
+    # 'submitting' and cannot be approved (and submitted) a second time, and
+    # approved_by already names the admin for the recovery path in _refresh.
     row.state, row.updated_at = "submitting", datetime.now(timezone.utc)
+    row.approved_by = admin.user_id
     await db.commit()
     try:
         await provider.submit(row.provider_refs)
     except Exception as exc:
         logger.exception("verification submit failed")
         row.state, row.updated_at = "awaiting_review", datetime.now(timezone.utc)
+        row.approved_by = None
         await db.commit()
         raise _carrier_unavailable() from exc
     now = datetime.now(timezone.utc)
     row.state, row.submitted_at, row.updated_at = "submitted", now, now
-    row.approved_by = admin.user_id
     await db.commit()
     await write_audit_log(
         row.organization_id,

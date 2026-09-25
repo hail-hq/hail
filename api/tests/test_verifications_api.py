@@ -20,7 +20,7 @@ from hailhq.api.routes.verifications import (
 from hailhq.api.superadmin import require_superadmin
 from hailhq.core import telephony_catalog
 from hailhq.core.config import settings
-from hailhq.core.models import CarrierVerification
+from hailhq.core.models import AuditLog, CarrierVerification
 from hailhq.core.providers.verification import (
     DocumentOption,
     DocumentSlot,
@@ -328,6 +328,17 @@ async def test_cancel_discards_at_the_carrier(
     assert (await _create(client, key)).status_code == 201
 
 
+async def test_rejected_verification_can_be_dismissed(
+    client, org_and_key, carrier, async_session
+) -> None:
+    _, _, key = org_and_key
+    vid = (await _create(client, key)).json()["id"]
+    await _set_state(async_session, vid, "rejected", age_s=0)
+    resp = await client.delete(f"/verifications/{vid}", headers=_auth(key))
+    assert resp.status_code == 200 and resp.json()["state"] == "cancelled"
+    assert carrier.discarded == [{"bundle_sid": "B1"}]
+
+
 # -- superadmin -----------------------------------------------------------
 
 
@@ -475,8 +486,21 @@ async def test_stuck_submitting_row_settles_from_the_carrier(
     carrier.remote_status = ProviderStatus(state=remote)
     got = (await client.get(f"/verifications/{vid}", headers=_auth(key))).json()
     assert got["state"] == expected
+    audits = (
+        (
+            await async_session.execute(
+                select(AuditLog).where(AuditLog.action == "verification.approve")
+            )
+        )
+        .scalars()
+        .all()
+    )
     if expected == "submitted":
         assert got["submitted_at"]
+        # The interrupted approve never wrote its audit row; the recovery does.
+        assert len(audits) == 1 and audits[0].payload["recovered"] is True
+    else:
+        assert audits == []
 
 
 async def test_fresh_submitting_row_is_left_alone(

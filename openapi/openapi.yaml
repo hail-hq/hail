@@ -3826,7 +3826,7 @@ paths:
       tags:
         - verifications
       summary: Cancel Verification
-      description: Cancel a verification that has not been submitted yet.
+      description: Cancel an unsubmitted verification or dismiss a rejected one.
       operationId: cancel_verification
       parameters:
         - name: verification_id
