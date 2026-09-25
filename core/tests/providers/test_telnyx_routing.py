@@ -23,7 +23,7 @@ from hailhq.core.providers.telnyx import (
     get_http_client,
     verify_webhook,
 )
-from twilio.base.exceptions import TwilioRestException
+from twilio.base.exceptions import TwilioException, TwilioRestException
 
 
 def test_signature_rejects_tampering_and_replay():
@@ -418,8 +418,10 @@ async def test_sms_only_request_does_not_store_voice_capability(monkeypatch):
 
 async def test_twilio_number_type_not_sold_in_country_is_empty_inventory(monkeypatch):
     api = MagicMock()
-    api.available_phone_numbers.return_value.mobile.list.side_effect = (
-        TwilioRestException(404, "/AvailablePhoneNumbers/US/Mobile.json", "Not found")
+    # The SDK's list() raises a bare TwilioException carrying the page response
+    # (this is what Twilio returns for PT/Local, which it does not sell).
+    api.available_phone_numbers.return_value.mobile.list.side_effect = TwilioException(
+        "Unable to fetch page", SimpleNamespace(status_code=404)
     )
     monkeypatch.setattr(settings, "twilio_account_sid", "AC_test")
     monkeypatch.setattr(settings, "twilio_auth_token", "test")
@@ -427,6 +429,15 @@ async def test_twilio_number_type_not_sold_in_country_is_empty_inventory(monkeyp
         "hailhq.core.providers.voice.twilio.TwilioClient", lambda *a, **kw: api
     )
     assert await twilio_offers(uuid4(), "US", "mobile", ["voice"]) == []
+    api.available_phone_numbers.return_value.mobile.list.side_effect = (
+        TwilioRestException(404, "/AvailablePhoneNumbers/US/Mobile.json", "Not found")
+    )
+    assert await twilio_offers(uuid4(), "US", "mobile", ["voice"]) == []
+    api.available_phone_numbers.return_value.mobile.list.side_effect = TwilioException(
+        "Unable to fetch page", SimpleNamespace(status_code=401)
+    )
+    with pytest.raises(TwilioException):
+        await twilio_offers(uuid4(), "US", "mobile", ["voice"])
     api.available_phone_numbers.return_value.mobile.list.side_effect = (
         TwilioRestException(401, "/AvailablePhoneNumbers/US/Mobile.json", "Auth")
     )
