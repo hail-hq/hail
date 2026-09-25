@@ -30,7 +30,7 @@ from hailhq.core.providers.voice.twilio import (
     purchase_ordered_number,
 )
 from hailhq.core.schemas import NumberAcquireRequest
-from sqlalchemy import delete, select, text
+from sqlalchemy import and_, delete, or_, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -46,9 +46,11 @@ PENDING_ORDER_TIMEOUT = timedelta(hours=2)
 
 ORDER_POLL_INTERVAL = timedelta(seconds=15)
 
-# Quotes that expired unused are deleted after this long. Consumed quotes stay:
-# they answer replays of the purchase that used them.
+# Quotes that expired unused are deleted after this long.
 QUOTE_RETENTION = timedelta(hours=1)
+# Consumed quotes answer replays of the purchase that used them (idempotency
+# keys live 24h) and are deleted after this long.
+CONSUMED_QUOTE_RETENTION = timedelta(days=7)
 
 NUMBER_TAKEN_DETAIL = "This number is already held or has a pending order"
 
@@ -556,12 +558,22 @@ async def reconcile_pending_orders():
 
 
 async def purge_expired_quotes() -> int:
-    """Delete quotes that expired without being used. Returns how many."""
+    """Delete stale quotes: unused ones after QUOTE_RETENTION, consumed ones
+    after CONSUMED_QUOTE_RETENTION. Returns how many."""
+    now = datetime.now(timezone.utc)
     async with session_scope() as db:
         result = await db.execute(
             delete(NumberOffer).where(
-                NumberOffer.number_id.is_(None),
-                NumberOffer.expires_at < datetime.now(timezone.utc) - QUOTE_RETENTION,
+                or_(
+                    and_(
+                        NumberOffer.number_id.is_(None),
+                        NumberOffer.expires_at < now - QUOTE_RETENTION,
+                    ),
+                    and_(
+                        NumberOffer.number_id.is_not(None),
+                        NumberOffer.expires_at < now - CONSUMED_QUOTE_RETENTION,
+                    ),
+                )
             )
         )
         await db.commit()

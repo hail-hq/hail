@@ -7,6 +7,7 @@ import pytest
 from fastapi import HTTPException
 from hailhq.api.number_orders import (
     PENDING_ORDER_TIMEOUT,
+    CONSUMED_QUOTE_RETENTION,
     QUOTE_RETENTION,
     acquire_offer,
     purge_expired_quotes,
@@ -663,20 +664,24 @@ async def test_quote_mismatch_is_a_validation_shaped_422(async_session, org_and_
     assert exc.value.detail[0]["loc"] == ["body", "quote_id"]
 
 
-async def test_only_stale_unused_quotes_are_purged(async_session, org_and_key):
+async def test_only_stale_quotes_are_purged(async_session, org_and_key):
     org, _, _ = org_and_key
     now = datetime.now(timezone.utc)
     stale = now - QUOTE_RETENTION - timedelta(minutes=1)
     stale_unused, _ = await seed_quote(async_session, org)
     stale_consumed, _ = await seed_quote(async_session, org)
+    old_consumed, _ = await seed_quote(async_session, org)
     recent_unused, _ = await seed_quote(async_session, org)
     live, _ = await seed_quote(async_session, org)
     stale_unused.expires_at = stale
+    # A consumed quote outlives an unused one: it answers purchase replays.
     stale_consumed.expires_at = stale
     stale_consumed.number_id = uuid4()
+    old_consumed.expires_at = now - CONSUMED_QUOTE_RETENTION - timedelta(minutes=1)
+    old_consumed.number_id = uuid4()
     recent_unused.expires_at = now - timedelta(minutes=5)
     await async_session.commit()
-    assert await purge_expired_quotes() == 1
+    assert await purge_expired_quotes() == 2
     kept = set((await async_session.execute(select(NumberOffer.id))).scalars())
     assert kept == {stale_consumed.id, recent_unused.id, live.id}
 
