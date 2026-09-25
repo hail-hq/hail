@@ -32,9 +32,10 @@ Check the number's feature list before you buy.
 - Allowed SIP IPs and Allowed RTP IPs: LiveKit Cloud's static ranges
   `143.223.88.0/21`, `161.115.160.0/19`, `153.57.128.0/18`
   ([LiveKit static IPs](https://docs.livekit.io/deploy/admin/regions/endpoints/)).
+  If the form rejects a range, ask DIDWW support to add it.
 - CLI settings: add the number to the allowed Caller IDs. On mismatch:
   **Reject call**.
-- Save. DIDWW shows the SIP username and password once. Keep them for step 3.
+- Save. Copy the SIP username and password for step 3.
 
 DIDWW uses SIP digest on INVITE (realm `out.didww.com`), no REGISTER.
 Signaling hosts: `fra.eu.out.didww.com` (EU), `nyc.us.out.didww.com` (US),
