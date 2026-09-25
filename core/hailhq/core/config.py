@@ -235,6 +235,9 @@ class Settings(BaseSettings):
     # Poll cadence (seconds) for the AbuseMonitorWorker's coarse-grained batch
     # check — hourly by default, not a per-send check. Set 0 to disable.
     hail_abuse_monitor_poll_seconds: int = 3600
+    # Background pass over carrier verifications: retry unsent drafts and pull
+    # the carrier's decision for submitted ones. 0 disables the worker.
+    hail_verification_poll_seconds: int = 600
 
     # Agent self-signup velocity caps (spec: 2026-07-14-agent-self-signup-design).
     # Per agent-origin org:

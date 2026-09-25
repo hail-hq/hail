@@ -3826,7 +3826,11 @@ paths:
       tags:
         - verifications
       summary: Cancel Verification
-      description: Cancel an unsubmitted verification or dismiss a rejected one.
+      description:
+        "Withdraw a verification the carrier has not approved, or dismiss
+        a
+
+        rejected one. The carrier draft is discarded either way."
       operationId: cancel_verification
       parameters:
         - name: verification_id
