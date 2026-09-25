@@ -22,7 +22,7 @@ from hailhq.core.providers.voice.base import (
     ProviderCallStatus,
     VoiceProvider,
 )
-from twilio.base.exceptions import TwilioRestException
+from twilio.base.exceptions import TwilioException, TwilioRestException
 from twilio.http.http_client import TwilioHttpClient
 from twilio.rest import Client as TwilioClient
 
@@ -175,6 +175,14 @@ async def twilio_offers(
             # Twilio answers 404 (20404) for a number type it does not sell in
             # this country. That is empty inventory, not a carrier outage.
             if exc.status == 404:
+                return []
+            raise
+        except TwilioException as exc:
+            # ``list()`` pages through ``Page.process_response``, which wraps a
+            # non-200 page in a bare TwilioException with the response as the
+            # second argument (not a TwilioRestException). Same 404 rule.
+            response = exc.args[1] if len(exc.args) > 1 else None
+            if getattr(response, "status_code", None) == 404:
                 return []
             raise
         if e164:
