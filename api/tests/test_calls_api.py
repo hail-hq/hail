@@ -1509,3 +1509,121 @@ async def test_workspace_call_duration_is_snapshotted_and_dispatched(
         ]
         == 720
     )
+
+
+async def test_post_calls_didww_number_dials_through_didww_trunk(
+    client: httpx.AsyncClient,
+    async_session: AsyncSession,
+    org_and_key: tuple[str, ApiKey, str],
+    livekit_mock: AsyncMock,
+    add_phone_number,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from hailhq.core.config import settings
+
+    monkeypatch.setattr(settings, "livekit_twilio_sip_outbound_trunk_id", "ST_twilio")
+    monkeypatch.setattr(settings, "livekit_didww_sip_outbound_trunk_id", "ST_didww")
+    org_id, _, plain = org_and_key
+    await add_phone_number(
+        async_session, org_id, e164="+351300000000", provider="didww"
+    )
+
+    resp = await client.post(
+        "/calls",
+        json={"to": "+14155559999", "system_prompt": "hi", "recipient_consent": True},
+        headers={"Authorization": f"Bearer {plain}"},
+    )
+
+    assert resp.status_code == 201
+    sip_kwargs = livekit_mock.create_sip_participant.await_args.kwargs
+    assert sip_kwargs["sip_trunk_id"] == "ST_didww"
+    assert sip_kwargs["from_e164"] == "+351300000000"
+    call = (await async_session.execute(select(Call))).scalar_one()
+    assert call.provider == "didww"
+
+
+async def test_post_calls_twilio_number_keeps_twilio_trunk(
+    client: httpx.AsyncClient,
+    async_session: AsyncSession,
+    org_and_key: tuple[str, ApiKey, str],
+    livekit_mock: AsyncMock,
+    add_phone_number,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from hailhq.core.config import settings
+
+    monkeypatch.setattr(settings, "livekit_twilio_sip_outbound_trunk_id", "ST_twilio")
+    monkeypatch.setattr(settings, "livekit_didww_sip_outbound_trunk_id", "ST_didww")
+    org_id, _, plain = org_and_key
+    await add_phone_number(async_session, org_id)
+
+    resp = await client.post(
+        "/calls",
+        json={"to": "+14155559999", "system_prompt": "hi", "recipient_consent": True},
+        headers={"Authorization": f"Bearer {plain}"},
+    )
+
+    assert resp.status_code == 201
+    assert livekit_mock.create_sip_participant.await_args.kwargs["sip_trunk_id"] == (
+        "ST_twilio"
+    )
+    call = (await async_session.execute(select(Call))).scalar_one()
+    assert call.provider == "twilio"
+
+
+async def test_post_calls_didww_number_without_trunk_fails_before_room(
+    client: httpx.AsyncClient,
+    async_session: AsyncSession,
+    org_and_key: tuple[str, ApiKey, str],
+    livekit_mock: AsyncMock,
+    add_phone_number,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from hailhq.core.config import settings
+
+    monkeypatch.setattr(settings, "livekit_didww_sip_outbound_trunk_id", "")
+    org_id, _, plain = org_and_key
+    await add_phone_number(
+        async_session, org_id, e164="+351300000000", provider="didww"
+    )
+
+    resp = await client.post(
+        "/calls",
+        json={"to": "+14155559999", "system_prompt": "hi", "recipient_consent": True},
+        headers={"Authorization": f"Bearer {plain}"},
+    )
+
+    assert resp.status_code == 502
+    livekit_mock.create_room.assert_not_awaited()
+    livekit_mock.create_sip_participant.assert_not_awaited()
+    call = (await async_session.execute(select(Call))).scalar_one()
+    assert call.status == "failed"
+    assert call.end_reason == "carrier_route_failed"
+    events = (await async_session.execute(select(CallEvent))).scalars().all()
+    assert [e.payload["reason"] for e in events] == ["carrier_route_failed"]
+
+
+async def test_post_calls_twilio_number_without_trunk_fails_before_room(
+    client: httpx.AsyncClient,
+    async_session: AsyncSession,
+    org_and_key: tuple[str, ApiKey, str],
+    livekit_mock: AsyncMock,
+    add_phone_number,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from hailhq.core.config import settings
+
+    monkeypatch.setattr(settings, "livekit_twilio_sip_outbound_trunk_id", "")
+    org_id, _, plain = org_and_key
+    await add_phone_number(async_session, org_id)
+
+    resp = await client.post(
+        "/calls",
+        json={"to": "+14155559999", "system_prompt": "hi", "recipient_consent": True},
+        headers={"Authorization": f"Bearer {plain}"},
+    )
+
+    assert resp.status_code == 502
+    livekit_mock.create_room.assert_not_awaited()
+    call = (await async_session.execute(select(Call))).scalar_one()
+    assert call.end_reason == "carrier_route_failed"

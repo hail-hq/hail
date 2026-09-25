@@ -32,6 +32,8 @@ logger = logging.getLogger(__name__)
 class TwilioVoiceProvider(VoiceProvider):
     """Carrier adapter for Twilio's REST API."""
 
+    carrier = "twilio"
+
     def __init__(
         self,
         account_sid: str | None = None,

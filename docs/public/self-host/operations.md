@@ -26,7 +26,7 @@ cp .env.example .env                                       # then fill in keys
 pnpm install                                               # husky pre-commit hooks
 docker compose \
   -f docker-compose.yml -f docker-compose.local.yml \
-  up -d                                                    # postgres + minio + api + voicebot + mcp
+  up -d                                                    # postgres + api + voicebot + mcp
 docker compose run --rm api alembic upgrade head           # apply schema
 # bind a phone number to the self-host sentinel (see first-run setup below)
 ```
@@ -98,7 +98,7 @@ Put new adapters under `core/hailhq/core/providers/<channel>/<name>.py`. Each ad
 ### Required external accounts
 
 - **Twilio**: account SID + auth token + a phone number with voice capability + an Elastic SIP Trunk (Origination URI → LiveKit's inbound, Termination → Twilio's PSTN).
-- **LiveKit Cloud**: project + URL + API key + secret + an outbound SIP trunk (`LIVEKIT_TWILIO_SIP_OUTBOUND_TRUNK_ID`) + an inbound trunk (`LIVEKIT_TWILIO_SIP_INBOUND_TRUNK_ID`, reserved for v1.1).
+- **LiveKit Cloud**: project + URL + API key + secret + an outbound SIP trunk (`LIVEKIT_TWILIO_SIP_OUTBOUND_TRUNK_ID`) + an inbound trunk (`LIVEKIT_TWILIO_SIP_INBOUND_TRUNK_ID`, reserved for v1.1). Optional per-carrier trunks: `LIVEKIT_TELNYX_SIP_OUTBOUND_TRUNK_ID`, `LIVEKIT_DIDWW_SIP_OUTBOUND_TRUNK_ID` ([DIDWW](./didww.md)).
 - **Deepgram** (STT): API key. Required; used for semantic turn detection and as the fallback when Speechmatics is unavailable.
 - **Speechmatics** (STT, optional): API key. Enables language-specific STT routing and end-of-utterance detection for 22 languages. Deepgram-only self-hosts keep working; if absent, calls fall back to Deepgram with VAD turn detection.
 - **Cartesia** (primary TTS): API key + a voice ID from the Cartesia voice library.
@@ -163,7 +163,7 @@ Add a Twilio number to the pool with `organization_id` NULL and `is_pool=TRUE` (
 psql "$DATABASE_URL" -c "INSERT INTO phone_numbers (organization_id, e164, country_code, number_type, capabilities, provider, provider_resource_id, provisioning_state, is_pool, acquired_at) VALUES (NULL, '+1XXXXXXXXXX', 'US', 'local', ARRAY['voice','sms'], 'twilio', 'PNxxxxxxxxxxxxxxxx', 'active', TRUE, now());"
 ```
 
-Attach the number to the same Twilio SIP trunk that you wired in [Twilio setup](./twilio.md). There is no per-number trunk routing. To grow the pool, repeat the INSERT with a different `e164` / `PN_SID`. To quarantine a bad pool number without deletion, run `UPDATE phone_numbers SET provisioning_state='failed' WHERE e164=...`. The claim query skips non-`active` rows.
+Attach the number to the same Twilio SIP trunk that you wired in [Twilio setup](./twilio.md). The trunk is chosen per carrier (`provider` column: `twilio` or `didww`, see [DIDWW](./didww.md)), not per number. To grow the pool, repeat the INSERT with a different `e164` / `PN_SID`. To quarantine a bad pool number without deletion, run `UPDATE phone_numbers SET provisioning_state='failed' WHERE e164=...`. The claim query skips non-`active` rows.
 
 Callers cannot address a pool number explicitly with the `from` field of `POST /calls`. The number is shared, so a caller that names one would cross tenants. The fallback fires only when an org has zero active numbers of its own.
 

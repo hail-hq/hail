@@ -1,8 +1,17 @@
+import { SiteFooter } from "@/components/site-footer";
 import { RootProvider } from "fumadocs-ui/provider/next";
 import type { Metadata } from "next";
+import { JetBrains_Mono } from "next/font/google";
 import type { ReactNode } from "react";
 import { DOCS_SITE_COPY } from "@/lib/site-copy";
 import "./global.css";
+
+const fontMono = JetBrains_Mono({
+  subsets: ["latin"],
+  weight: ["400", "500", "700"],
+  variable: "--font-mono",
+  display: "swap",
+});
 
 export const metadata: Metadata = {
   metadataBase: new URL("https://hail.so"),
@@ -35,9 +44,9 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
-    <html lang="en" suppressHydrationWarning>
+    <html lang="en" suppressHydrationWarning className={fontMono.variable}>
       <body className="hail-docs flex min-h-screen flex-col">
-        <RootProvider>{children}</RootProvider>
+        <RootProvider theme={{ storageKey: "hail-theme" }}>{children}<SiteFooter /></RootProvider>
       </body>
     </html>
   );

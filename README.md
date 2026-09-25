@@ -20,8 +20,8 @@ Prerequisites: Git, Docker Engine, and Docker Compose v2. For a public
 production deployment you also need a domain, HTTPS, and a managed Postgres;
 start with the [VM deployment guide](docs/public/self-host/vm-deploy.md).
 
-The commands below run a local evaluation stack with bundled Postgres and
-MinIO. Voice calls additionally require LiveKit Cloud, Twilio, Deepgram,
+The commands below run a local evaluation stack with bundled Postgres.
+Voice calls additionally require LiveKit Cloud, Twilio, Deepgram,
 Cartesia, and at least one LLM provider. Email is optional and requires AWS SES.
 
 ```bash
@@ -177,7 +177,7 @@ Any OpenAI chat-completions-compatible endpoint works. A complete runnable examp
 2. **Simple code.** Boring is best. No abstraction before it has two uses.
 3. **Brief docs.** Each page fits on one screen. Setup takes 10 minutes from a fresh clone.
 4. **Self-hostable.** Docker Compose runs Hail's API, voicebot, MCP server,
-   Postgres, and MinIO; LiveKit Cloud and channel providers remain external.
+   and Postgres; LiveKit Cloud and channel providers remain external.
 5. **Pluggable brain.** [BYO LLM endpoint](docs/public/byo-llm.md), or Hail's bundled fallback. The voice pipeline and transport are always Hail's.
 6. **Agent-first docs.** AI agents are first-class readers. Runnable examples first; links to canonical sources, not paraphrase.
 

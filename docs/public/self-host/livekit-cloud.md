@@ -24,10 +24,12 @@ Then, in LiveKit Cloud:
 4. Create the trunk and copy its ID into `.env` as
    `LIVEKIT_TWILIO_SIP_OUTBOUND_TRUNK_ID`.
 
-Hail passes this ID to LiveKit for outbound calls using Twilio numbers.
+Hail passes this ID to LiveKit for every outbound call from a Twilio number.
 The older `LIVEKIT_SIP_OUTBOUND_TRUNK_ID` name remains supported as a
-compatibility alias; the explicit Twilio name takes precedence. It does not read a
-Twilio trunk-domain environment variable. See LiveKit's
+compatibility alias; the explicit Twilio name takes precedence. Numbers from
+another carrier use their own trunk: see [DIDWW](./didww.md) and
+`LIVEKIT_TELNYX_SIP_OUTBOUND_TRUNK_ID`. Hail does not read a Twilio
+trunk-domain environment variable. See LiveKit's
 [outbound trunk reference](https://docs.livekit.io/telephony/making-calls/outbound-trunk/)
 for the current UI and JSON forms.
 

@@ -41,7 +41,7 @@ from hailhq.api.ratelimit import (
 )
 from hailhq.api.route_prefixes import request_mount_prefix
 from hailhq.api.usage import write_usage_event
-from hailhq.core.carrier_routing import TELNYX, TWILIO, carrier, sms_route
+from hailhq.core.carrier_routing import TELNYX, TWILIO, sms_route, sms_status_path
 from hailhq.core.compliance_gate import check_sms_allowed, remove_suppression
 from hailhq.core.config import settings
 from hailhq.core.db import get_session
@@ -113,10 +113,8 @@ async def deliver_sms(db: AsyncSession, provider: SmsProvider, sms: Sms) -> str 
     rejection. Never raises — the caller owns HTTP semantics.
     """
     try:
-        callback_url = join_url(
-            settings.hail_api_url, carrier(sms.provider).sms_status_path
-        )
         provider = sms_route(sms.provider, provider)
+        callback_url = join_url(settings.hail_api_url, sms_status_path(sms.provider))
         result = await provider.send_sms(
             from_e164=sms.from_e164,
             to_e164=sms.to_e164,

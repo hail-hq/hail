@@ -38,6 +38,11 @@ class Settings(BaseSettings):
     elevenlabs_voice_id: str = ""
     elevenlabs_model: str = ""
 
+    # Operator contact address, for anywhere a third party needs a contact for
+    # Hail (carrier verification notices, support links). Always Hail's own,
+    # never a customer's.
+    hail_support_email: str = "hi@hail.so"
+
     # Carriers
     twilio_account_sid: str = ""
     twilio_auth_token: str = ""
@@ -135,10 +140,13 @@ class Settings(BaseSettings):
     livekit_sip_outbound_trunk_id: str = ""
     livekit_sip_inbound_trunk_id: str = ""
     livekit_telnyx_sip_outbound_trunk_id: str = ""
+    # Second carrier. A number's ``provider`` picks the trunk
+    # (core/hailhq/core/carrier_routing.py). Empty = DIDWW numbers cannot dial.
+    livekit_didww_sip_outbound_trunk_id: str = ""
 
     # Storage
     database_url: str = "postgresql://hail:hail@postgres:5432/hail"
-    s3_endpoint: str = "http://minio:9000"
+    s3_endpoint: str = ""
     s3_bucket: str = "hail-recordings"
     s3_access_key: str = ""
     s3_secret_key: str = ""

@@ -1,13 +1,13 @@
 """Persist org-bound carrier quotes and purchase replay references.
 
-Revision ID: 0044
-Revises: 0043
+Revision ID: 0047
+Revises: 0046
 """
 
 from alembic import op
 
-revision = "0044"
-down_revision = "0043"
+revision = "0047"
+down_revision = "0046"
 branch_labels = None
 depends_on = None
 

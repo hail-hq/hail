@@ -7,13 +7,13 @@ from sqlalchemy import text
 
 spec = importlib.util.spec_from_file_location(
     "number_order_migration",
-    Path(__file__).parents[1] / "migrations/versions/0045_number_order_state.py",
+    Path(__file__).parents[1] / "migrations/versions/0048_number_order_state.py",
 )
 migration = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(migration)
 
 
-async def test_additive_migration_upgrades_original_and_revised_0044(db, monkeypatch):
+async def test_additive_migration_upgrades_original_and_revised_0047(db, monkeypatch):
     async with db.begin() as connection:
         await connection.execute(
             text(
@@ -34,7 +34,7 @@ async def test_additive_migration_upgrades_original_and_revised_0044(db, monkeyp
             migration.upgrade()
 
         await connection.run_sync(upgrade)
-        # An environment that already ran the edited 0044 is safe too.
+        # An environment that already ran the edited 0047 is safe too.
         await connection.run_sync(upgrade)
         nullable = (
             await connection.execute(

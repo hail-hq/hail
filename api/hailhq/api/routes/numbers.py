@@ -243,7 +243,10 @@ async def release_org_number(
         )
     releaser = _RELEASERS.get(number.provider)
     if releaser is None:
-        raise HTTPException(status_code=409, detail="Unsupported number carrier")
+        raise HTTPException(
+            status_code=409,
+            detail=f"{number.provider} numbers cannot be released through the API yet",
+        )
     await releaser(number, provider)
     number.provisioning_state = "released"
     number.released_at = datetime.now(timezone.utc)

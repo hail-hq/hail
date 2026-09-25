@@ -1,14 +1,14 @@
 """Allow pending carrier IDs and reuse numbers after definite order failure.
 
-Revision ID: 0045
-Revises: 0044
+Revision ID: 0048
+Revises: 0047
 """
 
 import sqlalchemy as sa
 from alembic import op
 
-revision = "0045"
-down_revision = "0044"
+revision = "0048"
+down_revision = "0047"
 branch_labels = None
 depends_on = None
 
@@ -39,7 +39,7 @@ def downgrade():
     ).first()
     if blocked is not None:
         raise RuntimeError(
-            "cannot downgrade 0045: phone_numbers has rows with a NULL "
+            "cannot downgrade 0048: phone_numbers has rows with a NULL "
             "provider_resource_id, or a failed order sharing an e164 with a "
             "live row. Delete those rows first, then re-run the downgrade."
         )
