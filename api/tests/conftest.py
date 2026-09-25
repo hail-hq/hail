@@ -316,12 +316,14 @@ def add_phone_number():
         state: str = "active",
         provider_resource_id: str = "PN_test",
         is_pool: bool = False,
+        provider: str = "twilio",
     ) -> PhoneNumber:
         pn = PhoneNumber(
             organization_id=organization_id,
             e164=e164,
             country_code="US",
             number_type="local",
+            provider=provider,
             provider_resource_id=provider_resource_id,
             provisioning_state=state,
             is_pool=is_pool,
