@@ -14,10 +14,19 @@ def test_didww_uses_didww_trunk(monkeypatch: pytest.MonkeyPatch) -> None:
     assert carrier_routing.voice_route("didww") == "ST_didww"
 
 
-def test_didww_without_trunk_is_an_error(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(settings, "livekit_didww_sip_outbound_trunk_id", "")
-    with pytest.raises(ValueError, match="DIDWW"):
-        carrier_routing.voice_route("didww")
+@pytest.mark.parametrize(
+    ("provider", "setting"),
+    [
+        ("twilio", "livekit_sip_outbound_trunk_id"),
+        ("didww", "livekit_didww_sip_outbound_trunk_id"),
+    ],
+)
+def test_missing_trunk_is_an_error(
+    monkeypatch: pytest.MonkeyPatch, provider: str, setting: str
+) -> None:
+    monkeypatch.setattr(settings, setting, "")
+    with pytest.raises(ValueError, match=setting.upper()):
+        carrier_routing.voice_route(provider)
 
 
 def test_unknown_carrier_is_an_error() -> None:

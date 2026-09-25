@@ -290,6 +290,15 @@ async def org_and_key(
 
 
 @pytest.fixture(autouse=True)
+def twilio_trunk_configured(monkeypatch: pytest.MonkeyPatch):
+    """POST /calls refuses to dial a carrier with no LiveKit trunk. Tests
+    never set .env, so give the default (Twilio) carrier a trunk id."""
+    from hailhq.core.config import settings
+
+    monkeypatch.setattr(settings, "livekit_sip_outbound_trunk_id", "ST_twilio_test")
+
+
+@pytest.fixture(autouse=True)
 def reset_deps_caches():
     """Clear deps.py process-wide caches between tests."""
     from hailhq.api import deps

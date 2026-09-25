@@ -429,11 +429,12 @@ async def create_call(
     # 4. External calls — best-effort with status reconciliation.
     room_name: str | None = None
     dispatch_id: str | None = None
-    setup_stage = "room_create"
+    setup_stage = "carrier_route"
     try:
         # Resolve the carrier trunk first: a carrier with no trunk configured
         # must fail before any LiveKit room exists.
         trunk_id = voice_route(call.provider)
+        setup_stage = "room_create"
         room_name = await lk.create_room(call.id)
         setup_stage = "agent_dispatch"
 

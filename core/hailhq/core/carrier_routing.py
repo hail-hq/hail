@@ -7,16 +7,24 @@ would reject or rewrite the caller ID) and vice versa.
 
 from hailhq.core.config import settings
 
+_TRUNK_SETTING = {
+    "twilio": "livekit_sip_outbound_trunk_id",
+    "didww": "livekit_didww_sip_outbound_trunk_id",
+}
+
 
 def voice_route(provider: str) -> str:
-    """LiveKit outbound SIP trunk id for ``provider`` (``PhoneNumber.provider``)."""
-    if provider == "twilio":
-        return settings.livekit_sip_outbound_trunk_id
-    if provider == "didww":
-        if not settings.livekit_didww_sip_outbound_trunk_id:
-            raise ValueError(
-                "DIDWW SIP routing is not configured "
-                "(LIVEKIT_DIDWW_SIP_OUTBOUND_TRUNK_ID)"
-            )
-        return settings.livekit_didww_sip_outbound_trunk_id
-    raise ValueError(f"Unsupported number carrier: {provider!r}")
+    """LiveKit outbound SIP trunk id for ``provider`` (``PhoneNumber.provider``).
+
+    Raises ``ValueError`` for an unknown carrier or one whose trunk setting is
+    empty, so the caller fails before creating any LiveKit resources.
+    """
+    setting = _TRUNK_SETTING.get(provider)
+    if setting is None:
+        raise ValueError(f"Unsupported number carrier: {provider!r}")
+    trunk_id = getattr(settings, setting)
+    if not trunk_id:
+        raise ValueError(
+            f"{provider} SIP routing is not configured ({setting.upper()})"
+        )
+    return trunk_id

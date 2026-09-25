@@ -38,6 +38,10 @@ class CallEndReason(StrEnum):
     MEDIA_FAILURE = "media_failure"
 
     # API-side dispatch failures
+    # The from-number's carrier has no LiveKit trunk configured (operator
+    # config error, e.g. LIVEKIT_DIDWW_SIP_OUTBOUND_TRUNK_ID unset). Raised
+    # before any LiveKit room exists.
+    CARRIER_ROUTE_FAILED = "carrier_route_failed"
     ROOM_CREATE_FAILED = "room_create_failed"
     AGENT_DISPATCH_FAILED = "agent_dispatch_failed"
     SIP_PARTICIPANT_FAILED = "sip_participant_failed"
