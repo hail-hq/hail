@@ -362,7 +362,7 @@ async def test_cancel_discards_at_the_carrier(
     client, org_and_key, carrier, async_session
 ) -> None:
     _, _, key = org_and_key
-    vid = (await _create(client, key)).json()["id"]
+    vid = await _unsent(client, key, carrier, async_session)
     resp = await client.delete(f"/verifications/{vid}", headers=_auth(key))
     assert resp.status_code == 200 and resp.json()["state"] == "cancelled"
     assert carrier.discarded == [{"bundle_sid": "B1"}]
@@ -371,6 +371,22 @@ async def test_cancel_discards_at_the_carrier(
     ).status_code == 409
     # a cancelled verification does not block a new one
     assert (await _create(client, key)).status_code == 201
+
+
+async def test_cancel_is_refused_while_under_review(
+    client, org_and_key, carrier, async_session
+) -> None:
+    """The carrier keeps a draft it is reviewing, so cancelling now would
+    leave the customer's documents there with nothing pointing at them."""
+    _, _, key = org_and_key
+    vid = (await _create(client, key)).json()["id"]
+    got = (await client.get(f"/verifications/{vid}", headers=_auth(key))).json()
+    assert got["state"] == "submitted"
+    resp = await client.delete(f"/verifications/{vid}", headers=_auth(key))
+    assert resp.status_code == 409 and "under review" in resp.json()["detail"]
+    assert carrier.discarded == []
+    row = await async_session.get(CarrierVerification, uuid.UUID(vid))
+    assert row.state == "submitted" and row.provider_refs == {"bundle_sid": "B1"}
 
 
 async def test_rejected_verification_can_be_dismissed(
@@ -848,3 +864,37 @@ async def test_sweeper_submits_waiting_drafts_and_pulls_decisions(
     )
     # One row from creation's own submit, one from the sweeper's retry.
     assert len(audits) == 2 and all(a.payload["approved_by"] is None for a in audits)
+
+
+async def test_sweeper_rejects_a_draft_the_carrier_refuses(
+    client, org_and_key, carrier, async_session
+) -> None:
+    from hailhq.api.routes.verifications import sweep_verifications
+
+    _, _, key = org_and_key
+    vid = await _unsent(client, key, carrier, async_session)
+    await _set_state(async_session, vid, "awaiting_review", age_s=3 * 60)
+    carrier.check_problems = [Problem(field="", message="document unreadable")]
+    counts = await sweep_verifications(
+        async_session, lambda name: carrier if name == "fake" else None
+    )
+    assert counts["submitted"] == 0 and carrier.submitted == []
+    got = (await client.get(f"/verifications/{vid}", headers=_auth(key))).json()
+    assert got["state"] == "rejected"
+    assert got["rejection_reason"] == "document unreadable"
+    assert carrier.discarded == [{"bundle_sid": "B1"}]
+    audit = (
+        await async_session.execute(
+            select(AuditLog).where(AuditLog.action == "verification.reject")
+        )
+    ).scalar_one()
+    assert audit.actor_kind == "system" and audit.actor_user_id is None
+    # Not retried: a second pass leaves it alone.
+    carrier.check_problems = []
+    counts = await sweep_verifications(
+        async_session, lambda name: carrier if name == "fake" else None
+    )
+    assert counts["submitted"] == 0 and carrier.submitted == []
+    # A rejected verification does not block a new one.
+    assert (await _create(client, key)).status_code == 201
+

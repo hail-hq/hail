@@ -590,8 +590,8 @@ async def _submit_row(
     return True
 
 
-# An 'awaiting_review' row this old was not submitted at creation (carrier
-# refused or was down); the sweeper retries it.
+# An 'awaiting_review' row this old was not submitted at creation (the
+# carrier was down); the sweeper retries it.
 _RETRY_SUBMIT_AFTER = timedelta(minutes=2)
 
 
@@ -616,7 +616,8 @@ async def _retry_submit(
     db: AsyncSession, verification_id: UUID, registry: Registry
 ) -> bool:
     """One sweeper retry of an unsent draft. The carrier evaluates it first:
-    a draft it refuses stays 'awaiting_review' and is logged, not submitted."""
+    a draft it refuses becomes 'rejected' with the carrier's reason, so the
+    customer sees why and can start over; it is not retried again."""
     row = await _lock_waiting(db, verification_id)
     if row is None:
         return False
@@ -631,15 +632,35 @@ async def _retry_submit(
         await db.rollback()
         return False
     if problems:
-        logger.warning(
-            "carrier refuses draft %s: %s",
-            row.id,
-            "; ".join(p.message for p in problems),
-        )
-        await db.rollback()
+        await _reject_row(db, row, provider, "; ".join(p.message for p in problems))
         return False
     return await _submit_row(
         db, row, provider, actor=(None, "system"), action="verification.submit"
+    )
+
+
+async def _reject_row(
+    db: AsyncSession,
+    row: CarrierVerification,
+    provider: VerificationProvider,
+    reason: str,
+) -> None:
+    """The carrier refused the draft before submission: record why, discard
+    the draft so nothing of the customer's is left at the carrier, and audit
+    it as a system action (no person rejected it)."""
+    await provider.discard(row.provider_refs)
+    row.state, row.rejection_reason, row.provider_refs = "rejected", reason, {}
+    row.updated_at = datetime.now(timezone.utc)
+    await db.commit()
+    await write_audit_log(
+        row.organization_id,
+        None,
+        "verification.reject",
+        "carrier_verification",
+        row.id,
+        {"rejected_by": None, "reason": reason},
+        actor_user_id=None,
+        actor_kind="system",
     )
 
 
@@ -760,10 +781,16 @@ async def cancel_verification(
     db: Annotated[AsyncSession, Depends(get_session)],
     registry: Annotated[Registry, Depends(get_verification_registry)],
 ) -> VerificationResponse:
-    """Withdraw a verification the carrier has not approved, or dismiss a
-    rejected one. The carrier draft is discarded either way."""
+    """Withdraw a verification that has not been sent for review, or dismiss
+    a rejected one. The draft is discarded either way. One that is under
+    review cannot be cancelled: wait for the result, then cancel or dismiss."""
     row = await _org_row_or_404(db, principal, verification_id)
-    if row.state not in ("awaiting_review", "submitted", "rejected"):
+    if row.state in ("submitting", "submitted"):
+        raise HTTPException(
+            status_code=http_status.HTTP_409_CONFLICT,
+            detail="this verification is under review; wait for the result",
+        )
+    if row.state not in ("awaiting_review", "rejected"):
         raise HTTPException(
             status_code=http_status.HTTP_409_CONFLICT,
             detail=f"cannot cancel a verification that is {row.state}",
