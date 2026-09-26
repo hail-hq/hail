@@ -14,6 +14,7 @@ from functools import lru_cache
 from typing import Literal
 from uuid import UUID
 
+import requests
 from didww.client import DidwwClient
 from didww.configuration import Environment
 from didww.exceptions import DidwwApiError
@@ -32,6 +33,21 @@ _ENVIRONMENTS = {
 }
 
 
+# Seconds before a DIDWW call gives up. The SDK sets no timeout of its own.
+DIDWW_TIMEOUT_SECONDS = 20
+
+
+class _TimeoutAdapter(requests.adapters.HTTPAdapter):
+    """Adds ``DIDWW_TIMEOUT_SECONDS`` to every request that has none.
+    ``requests`` passes ``timeout=None`` explicitly, so ``setdefault`` alone
+    would never apply it."""
+
+    def send(self, request, **kwargs):
+        if kwargs.get("timeout") is None:
+            kwargs["timeout"] = DIDWW_TIMEOUT_SECONDS
+        return super().send(request, **kwargs)
+
+
 def didww_client() -> DidwwClient:
     """A client for the configured environment. ``CarrierNotConfigured``
     when the key is missing or the environment name is unknown."""
@@ -42,7 +58,10 @@ def didww_client() -> DidwwClient:
         raise CarrierNotConfigured(
             "DIDWW_ENVIRONMENT must be 'production' or 'sandbox'"
         )
-    return DidwwClient(api_key=settings.didww_api_key, environment=env)
+    client = DidwwClient(api_key=settings.didww_api_key, environment=env)
+    # The SDK copies any Session passed in, so mount on its own session.
+    client._session.mount("https://", _TimeoutAdapter())
+    return client
 
 
 def carrier_status(exc: DidwwApiError) -> int:
