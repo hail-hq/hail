@@ -7,6 +7,18 @@
         "href": "/#products"
       },
       {
+        "label": "Voice API",
+        "href": "/voice"
+      },
+      {
+        "label": "SMS API",
+        "href": "/sms"
+      },
+      {
+        "label": "Email API",
+        "href": "/email"
+      },
+      {
         "label": "Integrations",
         "href": "/integrations"
       },
@@ -57,16 +69,20 @@
         "href": "/docs"
       },
       {
+        "label": "Engineering blog",
+        "href": "/blog"
+      },
+      {
         "label": "MCP",
         "href": "/mcp"
       },
       {
         "label": "10DLC timeline guide",
-        "href": "/sms"
+        "href": "/sms#10dlc-registration"
       },
       {
         "label": "Domain warmup guide",
-        "href": "/email"
+        "href": "/email#domain-warmup"
       },
       {
         "label": "For agents",
