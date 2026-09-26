@@ -405,10 +405,13 @@ class SmsCreate(ConsentAttestationMixin):
         default=None,
         alias="from",
         description=(
-            "Sender phone number, E.164 format. Must be a number owned by "
-            "the organization with the SMS capability. Omitted: an active "
-            "org-owned number is used if one exists, else a number is "
-            "claimed from the shared pool."
+            "Sender phone number, E.164 format. Must be an active number "
+            "owned by the organization with the SMS capability. Omitted: "
+            "for destinations that allow an alphanumeric sender ID, the "
+            "organization's sender ID (or the platform default) is used. "
+            "Otherwise the organization's oldest active SMS-capable number "
+            "is used; if none exists the request fails with 422. SMS never "
+            "uses the shared pool."
         ),
     )
     body: str = Field(
@@ -626,7 +629,7 @@ class SuppressionResponse(BaseModel):
         description="Why the recipient was suppressed (e.g. an unsubscribe or a bounce)."
     )
     source: str = Field(
-        description="How this entry was created: 'unsubscribe_link', 'manual' (an operator action), or 'bounce'."
+        description="How this entry was created: 'unsubscribe_link' (email unsubscribe link), 'stop_keyword' (recipient replied STOP by SMS; the only value the SMS list returns), 'manual' (an operator action), or 'bounce'."
     )
     created_at: datetime = Field(
         description="When this entry was created, ISO 8601 timestamp."
