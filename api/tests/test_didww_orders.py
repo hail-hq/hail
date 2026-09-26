@@ -9,7 +9,7 @@ from hailhq.api.number_orders import acquire_offer, reconcile_order
 from hailhq.core import telephony_catalog
 from hailhq.core.billing import get_balance_cents
 from hailhq.core.config import settings
-from hailhq.core.models import AccountCredit, NumberOffer
+from hailhq.core.models import AccountCredit, CarrierVerification, NumberOffer
 from hailhq.core.number_offers import CarrierOffer
 from hailhq.core.providers.voice import CarrierRequestError
 from sqlalchemy import select, text
@@ -145,6 +145,9 @@ async def test_didww_registration_rejected_refunds_monthly_only(
     monkeypatch.setattr("hailhq.api.number_orders.didww_order_outcome", outcome)
     terminate = AsyncMock()
     monkeypatch.setattr("hailhq.api.number_orders.terminate_did", terminate)
+    monkeypatch.setattr(
+        "hailhq.api.number_orders.revoke_registration", AsyncMock(return_value=None)
+    )
     number = await buy(async_session, org, row, monkeypatch, offer)
     outcome.return_value = ("rejected_registration", DID, ORDER)
     await reconcile_order(async_session, number, force=True)
@@ -162,6 +165,79 @@ async def test_didww_registration_rejected_refunds_monthly_only(
     assert setup.amount_cents == -350
     # A second pass changes nothing.
     await reconcile_order(async_session, number, force=True)
+    assert await get_balance_cents(async_session, org) == 100000 - 350
+
+
+async def _seed_approved_verification(db, org, *, number_type="national"):
+    row = CarrierVerification(
+        organization_id=org,
+        provider="didww",
+        country_code="PT",
+        number_type=number_type,
+        subject_type="person",
+        state="approved",
+        provider_refs={"address_id": "addr-1"},
+        requirements_version="v1",
+    )
+    db.add(row)
+    await db.commit()
+    return row
+
+
+async def test_didww_registration_rejected_revokes_approval(
+    async_session, org_and_key, monkeypatch
+):
+    org, _, _ = org_and_key
+    verification = await _seed_approved_verification(async_session, org)
+    other = await _seed_approved_verification(async_session, org, number_type="local")
+    row, offer = await seed_quote(async_session, org)
+    monkeypatch.setattr(
+        "hailhq.api.number_orders.place_didww_order", AsyncMock(return_value=ORDER)
+    )
+    outcome = AsyncMock(return_value=("pending", None, ORDER))
+    monkeypatch.setattr("hailhq.api.number_orders.didww_order_outcome", outcome)
+    monkeypatch.setattr("hailhq.api.number_orders.terminate_did", AsyncMock())
+    revoke = AsyncMock(return_value="Document is blurry")
+    monkeypatch.setattr("hailhq.api.number_orders.revoke_registration", revoke)
+    number = await buy(async_session, org, row, monkeypatch, offer)
+    outcome.return_value = ("rejected_registration", DID, ORDER)
+    await reconcile_order(async_session, number, force=True)
+    revoke.assert_awaited_once_with("addr-1", org, "PT", "national")
+    assert number.provisioning_metadata["failure_reason"] == "Document is blurry"
+    await async_session.refresh(verification)
+    assert verification.state == "rejected"
+    assert verification.rejection_reason == "Document is blurry"
+    await async_session.refresh(other)
+    assert other.state == "approved"
+    assert await get_balance_cents(async_session, org) == 100000 - 350
+
+
+async def test_didww_registration_rejected_refunds_even_if_revoke_fails(
+    async_session, org_and_key, monkeypatch
+):
+    org, _, _ = org_and_key
+    verification = await _seed_approved_verification(async_session, org)
+    row, offer = await seed_quote(async_session, org)
+    monkeypatch.setattr(
+        "hailhq.api.number_orders.place_didww_order", AsyncMock(return_value=ORDER)
+    )
+    outcome = AsyncMock(return_value=("pending", None, ORDER))
+    monkeypatch.setattr("hailhq.api.number_orders.didww_order_outcome", outcome)
+    monkeypatch.setattr("hailhq.api.number_orders.terminate_did", AsyncMock())
+    monkeypatch.setattr(
+        "hailhq.api.number_orders.revoke_registration",
+        AsyncMock(side_effect=RuntimeError("500")),
+    )
+    number = await buy(async_session, org, row, monkeypatch, offer)
+    outcome.return_value = ("rejected_registration", DID, ORDER)
+    await reconcile_order(async_session, number, force=True)
+    assert number.provisioning_state == "failed"
+    assert (
+        number.provisioning_metadata["failure_reason"]
+        == "the carrier rejected the end-user registration"
+    )
+    await async_session.refresh(verification)
+    assert verification.state == "rejected"
     assert await get_balance_cents(async_session, org) == 100000 - 350
 
 

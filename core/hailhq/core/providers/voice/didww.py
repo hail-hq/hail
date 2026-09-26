@@ -358,6 +358,51 @@ async def terminate_did(did_id: str) -> None:
     await asyncio.to_thread(_terminate_sync, did_id)
 
 
+def rejected_address_ref(org: UUID, country: str, kind: str) -> str:
+    """``external_reference_id`` of an address whose registration DIDWW
+    rejected. Discovery only matches ``hail:``, so the org must register
+    again before it can buy."""
+    return f"hail-rejected:{org}:{country}:{kind}"
+
+
+def _revoke_sync(address_id: str, org: UUID, country: str, kind: str) -> str | None:
+    client = didww_client()
+    client.patch(
+        f"addresses/{address_id}",
+        {
+            "data": {
+                "id": address_id,
+                "type": "addresses",
+                "attributes": {
+                    "external_reference_id": rejected_address_ref(org, country, kind)
+                },
+            }
+        },
+    )
+    found = client.get(
+        "address_verifications", params={"filter[address.id]": address_id}
+    )["data"]
+    rejected = [v for v in found if v["attributes"].get("status") == "rejected"]
+    if not rejected:
+        return None
+    newest = max(rejected, key=lambda v: v["attributes"].get("created_at") or "")
+    attrs = newest["attributes"]
+    parts = [
+        "; ".join(r for r in attrs.get("reject_reasons") or [] if r),
+        attrs.get("reject_comment") or "",
+    ]
+    return " - ".join(p.strip() for p in parts if p.strip()) or None
+
+
+async def revoke_registration(
+    address_id: str, org: UUID, country: str, kind: str
+) -> str | None:
+    """Take back an approved registration DIDWW rejected, so the next quote
+    asks for new papers. Returns DIDWW's rejection reason, or None. Errors
+    propagate."""
+    return await asyncio.to_thread(_revoke_sync, address_id, org, country, kind)
+
+
 async def release_didww_number(resource_id: str) -> None:
     """Release an owned DIDWW number. ``CarrierNotConfigured`` when the key
     is missing; a 404 means it is already gone and is tolerated."""

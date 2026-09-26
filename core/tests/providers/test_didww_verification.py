@@ -651,6 +651,7 @@ async def test_submit_stamps_approved_reference(provider):
     [
         (f"hail:{ORG}:PT:national", "approved"),
         (f"hail-draft:{ORG}:PT:national", "draft"),
+        (f"hail-rejected:{ORG}:PT:national", "rejected"),
     ],
 )
 async def test_status_reads_reference(provider, ref, state):

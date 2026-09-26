@@ -16,7 +16,12 @@ from hailhq.core import telephony_catalog
 from hailhq.core.billing import get_balance_cents, monthly_fee_ref
 from hailhq.core.carrier_routing import DIDWW, carrier
 from hailhq.core.db import session_scope
-from hailhq.core.models import AccountCredit, NumberOffer, PhoneNumber
+from hailhq.core.models import (
+    AccountCredit,
+    CarrierVerification,
+    NumberOffer,
+    PhoneNumber,
+)
 from hailhq.core.number_offers import CarrierOffer, discover_offers
 from hailhq.core.providers.voice import (
     CarrierRequestError,
@@ -24,6 +29,7 @@ from hailhq.core.providers.voice import (
 from hailhq.core.providers.voice.didww import (
     didww_order_outcome,
     place_didww_order,
+    revoke_registration,
     terminate_did,
 )
 from hailhq.core.providers.voice.telnyx import (
@@ -35,7 +41,7 @@ from hailhq.core.providers.voice.twilio import (
     purchase_ordered_number,
 )
 from hailhq.core.schemas import NumberAcquireRequest
-from sqlalchemy import and_, delete, or_, select, text
+from sqlalchemy import and_, delete, or_, select, text, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -111,7 +117,8 @@ async def finish_order(
     """Caller holds org lock. Move reservation to month fee, or refund once.
 
     ``reason`` is stored for a failed order and shown to the buyer; it must
-    never contain carrier payloads. ``keep_setup`` charges the setup fee even
+    never contain carrier payloads beyond the carrier's own human-readable
+    rejection wording (DIDWW's reject reasons). ``keep_setup`` charges the setup fee even
     on failure: the carrier already billed it and does not refund (DIDWW
     rejected registration)."""
     if number.provisioning_state != "pending":
@@ -265,13 +272,45 @@ async def reconcile_order(
                     number.id,
                     resource_id,
                 )
+        # Take the approval back, so the next quote asks for new papers
+        # instead of filing the same rejected ones again.
+        reason = None
+        address_id = number.provisioning_metadata.get("offer", {}).get("address_id")
+        if address_id:
+            try:
+                reason = await revoke_registration(
+                    address_id, org, number.country_code, number.number_type
+                )
+            except Exception:
+                logger.exception(
+                    "Could not revoke rejected DIDWW registration; re-stamp the "
+                    "address by hand: number=%s address=%s",
+                    number.id,
+                    address_id,
+                )
+        reason = reason or "the carrier rejected the end-user registration"
+        await db.execute(
+            update(CarrierVerification)
+            .where(
+                CarrierVerification.organization_id == org,
+                CarrierVerification.provider == DIDWW,
+                CarrierVerification.country_code == number.country_code,
+                CarrierVerification.number_type == number.number_type,
+                CarrierVerification.state == "approved",
+            )
+            .values(
+                state="rejected",
+                rejection_reason=reason,
+                updated_at=datetime.now(timezone.utc),
+            )
+        )
         await finish_order(
             db,
             number,
             resource_id=None,
             failed=True,
             keep_setup=True,
-            reason="the carrier rejected the end-user registration",
+            reason=reason,
         )
     elif (
         state == "pending" and datetime.now(timezone.utc) - number.created_at > timeout

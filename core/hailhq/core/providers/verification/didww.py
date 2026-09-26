@@ -486,6 +486,8 @@ class DidwwVerificationProvider(VerificationProvider):
         def run() -> ProviderStatus:
             addr = self._client.get(f"addresses/{refs['address_id']}")["data"]
             ref = addr["attributes"].get("external_reference_id") or ""
+            if ref.startswith("hail-rejected:"):
+                return ProviderStatus(state="rejected")
             return ProviderStatus(
                 state="approved" if ref.startswith("hail:") else "draft"
             )

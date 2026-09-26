@@ -11,6 +11,7 @@ from hailhq.core.providers.voice.didww import (
     didww_order_outcome,
     place_didww_order,
     release_didww_number,
+    revoke_registration,
     terminate_did,
 )
 
@@ -382,3 +383,89 @@ async def test_release_tolerates_404():
         json={"errors": [{"title": "not found"}]},
     )
     await release_didww_number(DID)  # already gone at the carrier
+
+
+def _revoke_endpoints(verifications):
+    responses.add(
+        responses.PATCH,
+        f"{BASE}/addresses/{ADDR}",
+        json={"data": {"id": ADDR, "type": "addresses"}},
+    )
+    responses.add(
+        responses.GET, f"{BASE}/address_verifications", json={"data": verifications}
+    )
+
+
+@responses.activate
+async def test_revoke_registration_restamps_address_and_returns_reason():
+    org = uuid4()
+    _revoke_endpoints(
+        [
+            {
+                "id": "v-old",
+                "type": "address_verifications",
+                "attributes": {
+                    "status": "rejected",
+                    "created_at": "2026-01-01T00:00:00Z",
+                    "reject_reasons": ["Old reason"],
+                    "reject_comment": None,
+                },
+            },
+            {
+                "id": "v-new",
+                "type": "address_verifications",
+                "attributes": {
+                    "status": "rejected",
+                    "created_at": "2026-02-01T00:00:00Z",
+                    "reject_reasons": ["Document is blurry", "Address mismatch"],
+                    "reject_comment": "Upload a clear utility bill",
+                },
+            },
+            {
+                "id": "v-ok",
+                "type": "address_verifications",
+                "attributes": {
+                    "status": "approved",
+                    "created_at": "2026-03-01T00:00:00Z",
+                },
+            },
+        ]
+    )
+    reason = await revoke_registration(ADDR, org, "PT", "national")
+    assert reason == (
+        "Document is blurry; Address mismatch - Upload a clear utility bill"
+    )
+    sent = json.loads(responses.calls[0].request.body)["data"]
+    assert sent == {
+        "id": ADDR,
+        "type": "addresses",
+        "attributes": {"external_reference_id": f"hail-rejected:{org}:PT:national"},
+    }
+    assert f"filter%5Baddress.id%5D={ADDR}" in responses.calls[1].request.url
+
+
+@responses.activate
+async def test_revoke_registration_without_rejected_verification_returns_none():
+    _revoke_endpoints(
+        [
+            {
+                "id": "v-ok",
+                "type": "address_verifications",
+                "attributes": {"status": "pending"},
+            }
+        ]
+    )
+    assert await revoke_registration(ADDR, uuid4(), "PT", "national") is None
+    assert responses.calls[0].request.method == "PATCH"
+
+
+@responses.activate
+async def test_revoke_registration_errors_propagate():
+    responses.add(
+        responses.PATCH,
+        f"{BASE}/addresses/{ADDR}",
+        status=500,
+        json={"errors": [{"title": "x"}]},
+    )
+    with pytest.raises(Exception):
+        await revoke_registration(ADDR, uuid4(), "PT", "national")
