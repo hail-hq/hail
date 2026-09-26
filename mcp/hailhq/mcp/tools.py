@@ -76,12 +76,14 @@ def _format_api_error(exc: HailAPIError) -> dict[str, Any]:
         return {"error": "auth failed: token rejected by Hail API"}
     if status == 404:
         return {"error": "resource not found"}
-    if status == 429 and exc.retry_after:
+    if status == 429 and exc.retry_after and exc.retry_after.strip().isdigit():
         # The API's 429 detail points at the Retry-After header, which the
-        # agent cannot see, so put the wait in the message itself.
+        # agent cannot see, so put the wait in the message itself. Only the
+        # delta-seconds form is echoed: a proxy in front of the API may send
+        # the HTTP-date form, which would read "retry after <date> seconds".
         return {
             "error": f"hail api error 429: {exc.detail} "
-            f"(retry after {exc.retry_after} seconds)"
+            f"(retry after {exc.retry_after.strip()} seconds)"
         }
     if status in (409, 422, 503):
         return {"error": exc.detail}

@@ -1390,6 +1390,23 @@ async def test_api_error_mapping_429_includes_retry_after(client: HailClient) ->
 
 
 @respx.mock
+async def test_api_error_mapping_429_http_date_retry_after_is_not_echoed(
+    client: HailClient,
+) -> None:
+    # Retry-After may be an HTTP-date (a proxy or CDN in front of the API);
+    # echoing it as "<date> seconds" would mislead the agent.
+    respx.get(f"{_BASE_URL}/events").mock(
+        return_value=httpx.Response(
+            429,
+            json={"detail": "Rate limit exceeded."},
+            headers={"Retry-After": "Wed, 21 Oct 2026 07:28:00 GMT"},
+        )
+    )
+    result = await tools.get_events(client=client)
+    assert result == {"error": "hail api error 429: Rate limit exceeded."}
+
+
+@respx.mock
 async def test_api_error_mapping_429_without_retry_after_keeps_detail(
     client: HailClient,
 ) -> None:
