@@ -47,7 +47,6 @@ class TelnyxNumberDiscovery:
         capabilities: list[str],
         limit: int = 20,
         *,
-        outbound: bool = False,
         e164: str | None = None,
     ) -> list[NumberQuote]:
         country_code = country_code.upper()
@@ -62,10 +61,6 @@ class TelnyxNumberDiscovery:
         requested = set(capabilities)
         if not requested or not requested <= {"voice", "sms", "mms", "fax"}:
             raise ValueError("Unsupported or empty capability selection")
-        # Telnyx documents the emergency feature filter for outbound-capable
-        # inventory. Voice alone establishes inbound voice, not origination.
-        if outbound:
-            requested.add("emergency")
         params = {
             "filter[country_code]": country_code,
             "filter[phone_number_type]": number_type,
@@ -157,7 +152,6 @@ async def telnyx_offers(
         kind,
         capabilities,
         limit=3,
-        outbound="voice" in capabilities,
         e164=e164,
     )
     if not quotes:
@@ -200,7 +194,10 @@ async def telnyx_offers(
         rules = (await api.request("GET", "/regulatory_requirements", params=params))[
             "data"
         ]
-        # Missing country/type coverage is unknown, not an exemption.
+        # An empty answer is Telnyx saying this number has no ordering rules
+        # (US and CA local, for example): the offer is ready. A non-empty
+        # answer that names another country or type is unknown coverage, not
+        # an exemption.
         matched = [
             r
             for r in rules
@@ -208,7 +205,7 @@ async def telnyx_offers(
             and r.get("phone_number_type") == kind
             and r.get("action") == "ordering"
         ]
-        if not matched:
+        if rules and not matched:
             continue
         requirements = [r for rule in matched for r in rule["regulatory_requirements"]]
         labels = [

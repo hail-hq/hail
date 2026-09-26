@@ -4,6 +4,15 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 
 ## [Unreleased]
 
+### Fixed
+
+- Telnyx numbers with no ordering rules (US and CA local) were skipped as
+  "unknown coverage" because Telnyx answers an empty list for them. They are
+  now offered as ready.
+- Telnyx voice searches no longer require the `emergency` feature. It is a
+  US/CA emergency-address capability, not an outbound-calling requirement,
+  and most numbers outside North America lack it.
+
 ## [0.24.0] — 2026-09-25
 
 Numbers now come from a live comparison of carriers: Hail quotes Twilio and
