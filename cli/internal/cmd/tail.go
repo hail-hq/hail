@@ -256,6 +256,7 @@ func runTail(ctx context.Context, opts *Options, f *tailFlags) error {
 		}
 	}
 	fetch := func(cur string) (*client.EventStreamResponse, error) {
+		rateLimited := 0
 		for {
 			resp, err := apiClient.ListEventsV1EventsGetWithResponse(tailCtx, buildParams(cur))
 			if err != nil {
@@ -266,6 +267,13 @@ func runTail(ctx context.Context, opts *Options, f *tailFlags) error {
 			}
 			if resp.HTTPResponse.StatusCode == http.StatusTooManyRequests {
 				// Rate limited: wait Retry-After, then retry the same cursor.
+				// --no-follow is documented as "print one page and exit", so
+				// it gets one wait and then surfaces the 429 instead of
+				// blocking for as long as the limiter holds.
+				if f.noFollow && rateLimited > 0 {
+					return nil, apiError(resp.HTTPResponse.StatusCode, resp.Body)
+				}
+				rateLimited++
 				select {
 				case <-tailCtx.Done():
 					return nil, errInterrupted

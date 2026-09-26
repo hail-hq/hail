@@ -876,6 +876,41 @@ func TestTail_RetriesOn429(t *testing.T) {
 	}
 }
 
+// TestTail_NoFollowBoundsThe429Retry: --no-follow is a one-shot, so a
+// limiter that never lets up must surface the 429 after one wait instead of
+// blocking until Ctrl-C.
+func TestTail_NoFollowBoundsThe429Retry(t *testing.T) {
+	var hits int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&hits, 1)
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Retry-After", "1")
+		w.WriteHeader(http.StatusTooManyRequests)
+		_ = json.NewEncoder(w).Encode(map[string]string{"detail": "Rate limit exceeded."})
+	}))
+	t.Cleanup(srv.Close)
+
+	done := make(chan error, 1)
+	go func() {
+		_, _, err := runRoot(t,
+			map[string]string{"HAIL_API_KEY": "sk_test", "HAIL_API_URL": srv.URL, "NO_COLOR": "1"},
+			"tail", "--no-follow",
+		)
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		if err == nil || !strings.Contains(err.Error(), "API error 429") {
+			t.Fatalf("want API error 429, got %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("tail --no-follow blocked on a persistent 429 instead of exiting")
+	}
+	if got := atomic.LoadInt32(&hits); got != 2 {
+		t.Errorf("expected 2 requests (429, wait, 429, give up), got %d", got)
+	}
+}
+
 // TestTail_NonRateLimitErrorStillAborts: other non-200 statuses keep failing
 // fast.
 func TestTail_NonRateLimitErrorStillAborts(t *testing.T) {
