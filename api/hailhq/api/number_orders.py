@@ -331,13 +331,35 @@ async def reconcile_order(
                 number.id,
                 number.provisioning_metadata.get("order_id"),
             )
-        await finish_order(
-            db,
-            number,
-            resource_id=None,
-            failed=True,
-            reason="the carrier did not confirm the order in time",
-        )
+        if number.provider == DIDWW and resource_id:
+            # The DID exists but its registration never cleared. Stop its
+            # renewal; the setup fee stays (DIDWW billed it and does not
+            # refund).
+            try:
+                await terminate_did(resource_id)
+            except Exception:
+                logger.exception(
+                    "Could not terminate timed-out DIDWW number; release it by "
+                    "hand: number=%s did=%s",
+                    number.id,
+                    resource_id,
+                )
+            await finish_order(
+                db,
+                number,
+                resource_id=None,
+                failed=True,
+                keep_setup=True,
+                reason="the carrier did not approve the registration in time",
+            )
+        else:
+            await finish_order(
+                db,
+                number,
+                resource_id=None,
+                failed=True,
+                reason="the carrier did not confirm the order in time",
+            )
     elif unfound:
         logger.error(
             "Carrier has no record of the order after timeout; failing it and "

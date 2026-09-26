@@ -344,16 +344,18 @@ def _outcome_sync(
         return "pending", None, order_id
     if not did["attributes"].get("awaiting_registration"):
         return "active", did["id"], order_id
+    # From here the DID exists: a pending result carries its id so a timeout
+    # can stop its renewal. The id is stored only on active/rejected.
     if not address_id:
         # Bought without an approved registration: nothing to file.
-        return "pending", None, order_id
+        return "pending", did["id"], order_id
     verification = _ensure_verification(client, did, address_id)
     vstatus = verification["attributes"]["status"]
     if vstatus == "approved":
         return "active", did["id"], order_id
     if vstatus == "rejected":
         return "rejected_registration", did["id"], order_id
-    return "pending", None, order_id
+    return "pending", did["id"], order_id
 
 
 async def didww_order_outcome(

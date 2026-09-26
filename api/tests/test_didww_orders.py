@@ -244,6 +244,39 @@ async def test_didww_registration_rejected_refunds_even_if_revoke_fails(
 async def test_didww_pending_survives_three_days(
     async_session, org_and_key, monkeypatch
 ):
+    """The DID exists but its registration never clears: after 7 days the
+    DID is terminated and the setup fee stays."""
+    org, _, _ = org_and_key
+    row, offer = await seed_quote(async_session, org)
+    monkeypatch.setattr(
+        "hailhq.api.number_orders.place_didww_order", AsyncMock(return_value=ORDER)
+    )
+    monkeypatch.setattr(
+        "hailhq.api.number_orders.didww_order_outcome",
+        AsyncMock(return_value=("pending", DID, ORDER)),
+    )
+    terminate = AsyncMock()
+    monkeypatch.setattr("hailhq.api.number_orders.terminate_did", terminate)
+    number = await buy(async_session, org, row, monkeypatch, offer)
+    await _age(async_session, number, timedelta(days=3))
+    await reconcile_order(async_session, number, force=True)
+    assert number.provisioning_state == "pending"
+    terminate.assert_not_awaited()
+    await _age(async_session, number, timedelta(days=7, minutes=1))
+    await reconcile_order(async_session, number, force=True)
+    assert number.provisioning_state == "failed"
+    assert (
+        number.provisioning_metadata["failure_reason"]
+        == "the carrier did not approve the registration in time"
+    )
+    terminate.assert_awaited_once_with(DID)
+    assert number.provider_resource_id is None
+    assert await get_balance_cents(async_session, org) == 100000 - 350
+
+
+async def test_didww_timeout_without_did_refunds_all(
+    async_session, org_and_key, monkeypatch
+):
     org, _, _ = org_and_key
     row, offer = await seed_quote(async_session, org)
     monkeypatch.setattr(
@@ -253,14 +286,41 @@ async def test_didww_pending_survives_three_days(
         "hailhq.api.number_orders.didww_order_outcome",
         AsyncMock(return_value=("pending", None, ORDER)),
     )
+    terminate = AsyncMock()
+    monkeypatch.setattr("hailhq.api.number_orders.terminate_did", terminate)
     number = await buy(async_session, org, row, monkeypatch, offer)
-    await _age(async_session, number, timedelta(days=3))
-    await reconcile_order(async_session, number, force=True)
-    assert number.provisioning_state == "pending"
     await _age(async_session, number, timedelta(days=7, minutes=1))
     await reconcile_order(async_session, number, force=True)
     assert number.provisioning_state == "failed"
+    assert (
+        number.provisioning_metadata["failure_reason"]
+        == "the carrier did not confirm the order in time"
+    )
+    terminate.assert_not_awaited()
     assert await get_balance_cents(async_session, org) == 100000
+
+
+async def test_didww_timeout_terminate_failure_still_finishes(
+    async_session, org_and_key, monkeypatch
+):
+    org, _, _ = org_and_key
+    row, offer = await seed_quote(async_session, org)
+    monkeypatch.setattr(
+        "hailhq.api.number_orders.place_didww_order", AsyncMock(return_value=ORDER)
+    )
+    monkeypatch.setattr(
+        "hailhq.api.number_orders.didww_order_outcome",
+        AsyncMock(return_value=("pending", DID, ORDER)),
+    )
+    monkeypatch.setattr(
+        "hailhq.api.number_orders.terminate_did",
+        AsyncMock(side_effect=RuntimeError("500")),
+    )
+    number = await buy(async_session, org, row, monkeypatch, offer)
+    await _age(async_session, number, timedelta(days=7, minutes=1))
+    await reconcile_order(async_session, number, force=True)
+    assert number.provisioning_state == "failed"
+    assert await get_balance_cents(async_session, org) == 100000 - 350
 
 
 async def test_lookup_error_keeps_pending_before_timeout(

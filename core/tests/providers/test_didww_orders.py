@@ -212,7 +212,7 @@ async def test_outcome_creates_verification_once_when_awaiting():
     )
     assert await didww_order_outcome(E164, NUMBER, ORDER, ADDR) == (
         "pending",
-        None,
+        DID,
         ORDER,
     )
     sent = json.loads(responses.calls[3].request.body)
@@ -243,7 +243,7 @@ async def test_outcome_reuses_existing_verification():
     )
     assert await didww_order_outcome(E164, NUMBER, ORDER, ADDR) == (
         "pending",
-        None,
+        DID,
         ORDER,
     )
     assert not any(c.request.method == "POST" for c in responses.calls)
@@ -299,7 +299,7 @@ async def test_outcome_awaiting_without_address_stays_pending():
     _did(awaiting=True, verification=None)
     assert await didww_order_outcome(E164, NUMBER, ORDER, None) == (
         "pending",
-        None,
+        DID,
         ORDER,
     )
     assert len(responses.calls) == 2
