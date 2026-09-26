@@ -390,18 +390,18 @@ async def test_create_draft_validation_failure_discards_everything(provider):
     )
     assert result.refs == {}
     assert [p.message for p in result.problems] == ["Address in Portugal required"]
-    deleted = sorted(
+    deleted = [
         c.request.url.split("/v3/")[1]
         for c in responses.calls
         if c.request.method == "DELETE"
-    )
+    ]
     assert deleted == [
-        "addresses/addr-1",
-        "encrypted_files/file-1",
-        "encrypted_files/file-2",
-        "identities/id-1",
         "proofs/proof-1",
         "proofs/proof-2",
+        "encrypted_files/file-1",
+        "encrypted_files/file-2",
+        "addresses/addr-1",
+        "identities/id-1",
     ]
 
 
@@ -421,6 +421,10 @@ async def test_create_draft_reuses_existing_identity(provider):
                     "attributes": {
                         "external_reference_id": f"hail-{ORG}",
                         "identity_type": "personal",
+                        "first_name": "Ana",
+                        "last_name": "Silva",
+                        "birth_date": "1990-01-02",
+                        "id_number": "12345678",
                     },
                     "relationships": {
                         "country": {"data": {"id": COUNTRY_ID, "type": "countries"}}
@@ -492,6 +496,130 @@ async def test_create_draft_reuses_existing_identity(provider):
         c.request.method == "POST" and c.request.url.endswith("/identities")
         for c in responses.calls
     )
+
+
+@responses.activate
+async def test_create_draft_creates_new_identity_when_details_differ(provider):
+    _static()
+    _requirement()
+    req = await provider.requirements("PT", "national", "person")
+    responses.add(
+        responses.GET,
+        f"{BASE}/identities",
+        json={
+            "data": [
+                {
+                    "id": "id-old",
+                    "type": "identities",
+                    "attributes": {
+                        "external_reference_id": f"hail-{ORG}",
+                        "identity_type": "personal",
+                        "first_name": "Bruno",
+                        "last_name": "Silva",
+                        "birth_date": "1990-01-02",
+                        "id_number": "12345678",
+                    },
+                    "relationships": {
+                        "country": {"data": {"id": COUNTRY_ID, "type": "countries"}}
+                    },
+                }
+            ]
+        },
+    )
+    responses.add(
+        responses.POST,
+        f"{BASE}/identities",
+        status=201,
+        json={"data": {"id": "id-new", "type": "identities"}},
+    )
+    responses.add(
+        responses.POST,
+        f"{BASE}/addresses",
+        status=201,
+        json={"data": {"id": "addr-1", "type": "addresses"}},
+    )
+    responses.add(
+        responses.GET,
+        f"{BASE}/public_keys",
+        json={
+            "data": [
+                {"id": "k1", "type": "public_keys", "attributes": {"key": PEM}},
+                {"id": "k2", "type": "public_keys", "attributes": {"key": PEM}},
+            ]
+        },
+    )
+    responses.add(
+        responses.POST,
+        f"{BASE}/encrypted_files",
+        status=201,
+        json={"data": {"id": "file-1", "type": "encrypted_files"}},
+    )
+    responses.add(
+        responses.POST,
+        f"{BASE}/encrypted_files",
+        status=201,
+        json={"data": {"id": "file-2", "type": "encrypted_files"}},
+    )
+    responses.add(
+        responses.POST,
+        f"{BASE}/proofs",
+        status=201,
+        json={"data": {"id": "proof-1", "type": "proofs"}},
+    )
+    responses.add(
+        responses.POST,
+        f"{BASE}/proofs",
+        status=201,
+        json={"data": {"id": "proof-2", "type": "proofs"}},
+    )
+    responses.add(
+        responses.POST,
+        f"{BASE}/address_requirement_validations",
+        status=201,
+        json={"data": {"id": "val-1", "type": "address_requirement_validations"}},
+    )
+    fields, address, documents = _inputs()  # first_name: "Ana", not "Bruno"
+    result = await provider.create_draft(
+        organization_id=ORG,
+        contact_email="ops@hail.test",
+        requirements=req,
+        fields=fields,
+        address=address,
+        documents=documents,
+    )
+    assert (
+        result.refs["identity_id"] == "id-new"
+        and result.refs["identity_created"] is True
+    )
+    assert any(
+        c.request.method == "POST" and c.request.url.endswith("/identities")
+        for c in responses.calls
+    )
+
+
+@responses.activate
+async def test_create_draft_rejects_unknown_document_option_before_any_write(provider):
+    _static()
+    _requirement()
+    req = await provider.requirements("PT", "national", "person")
+    fields, address, documents = _inputs()
+    documents["identity_proof_1"] = DocumentInput(
+        option="not-a-real-option", file=documents["identity_proof_1"].file
+    )
+    calls_before = len(responses.calls)
+    result = await provider.create_draft(
+        organization_id=ORG,
+        contact_email="ops@hail.test",
+        requirements=req,
+        fields=fields,
+        address=address,
+        documents=documents,
+    )
+    assert result.refs == {}
+    assert [p.message for p in result.problems] == [
+        "Pick one of the offered document types."
+    ]
+    assert len(responses.calls) == calls_before
 
 
 @responses.activate
@@ -580,9 +708,12 @@ async def test_discard_keeps_reused_identity(provider):
             "file_ids": ["file-1"],
         }
     )
-    assert not any(
-        c.request.url.endswith("/identities/id-old") for c in responses.calls
-    )
+    deleted = [
+        c.request.url.split("/v3/")[1]
+        for c in responses.calls
+        if c.request.method == "DELETE"
+    ]
+    assert deleted == ["proofs/proof-1", "encrypted_files/file-1", "addresses/addr-1"]
 
 
 def test_registered_when_configured():
@@ -593,5 +724,14 @@ def test_not_registered_without_key(monkeypatch):
     from hailhq.core.providers.verification import _INSTANCES
 
     monkeypatch.setattr(settings, "didww_api_key", "")
+    _INSTANCES.pop("didww", None)
+    assert get_verification_provider("didww") is None
+
+
+def test_not_registered_with_bad_environment(monkeypatch):
+    from hailhq.core.providers.verification import _INSTANCES
+
+    monkeypatch.setattr(settings, "didww_api_key", "test-key")
+    monkeypatch.setattr(settings, "didww_environment", "staging")
     _INSTANCES.pop("didww", None)
     assert get_verification_provider("didww") is None

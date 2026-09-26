@@ -30,6 +30,7 @@ from hailhq.core.providers.verification.base import (
     VerificationProvider,
     VerificationProviderError,
 )
+from hailhq.core.providers.voice.base import CarrierNotConfigured
 from hailhq.core.providers.voice.didww import (
     approved_address_ref,
     carrier_status,
@@ -109,7 +110,10 @@ class DidwwVerificationProvider(VerificationProvider):
     def __init__(self) -> None:
         if not settings.didww_api_key:
             raise ValueError("DIDWW_API_KEY is not set")
-        self._client = didww_client()
+        try:
+            self._client = didww_client()
+        except CarrierNotConfigured as exc:
+            raise ValueError(str(exc)) from exc
 
     # -- requirements ----------------------------------------------------
 
@@ -227,8 +231,16 @@ class DidwwVerificationProvider(VerificationProvider):
         )
 
     def _find_identity(
-        self, organization_id: str, country_id: str, identity_type: str
+        self,
+        organization_id: str,
+        country_id: str,
+        identity_type: str,
+        identity_attrs: dict[str, str],
     ) -> str | None:
+        """An existing identity for this org, matching country, identity
+        type, and every identity attribute the customer typed. A different
+        person in the same org/country gets their own identity, never one
+        that already carries someone else's documents."""
         found = self._client.get(
             "identities",
             params={
@@ -241,7 +253,11 @@ class DidwwVerificationProvider(VerificationProvider):
                 i.get("relationships", {}).get("country", {}).get("data", {}).get("id")
                 == country_id
             )
-            if same_country and i["attributes"].get("identity_type") == identity_type:
+            same_type = i["attributes"].get("identity_type") == identity_type
+            same_details = all(
+                i["attributes"].get(k) == v for k, v in identity_attrs.items()
+            )
+            if same_country and same_type and same_details:
                 return i["id"]
         return None
 
@@ -259,6 +275,20 @@ class DidwwVerificationProvider(VerificationProvider):
                 refs={},
                 problems=[Problem(field="address", message="An address is required.")],
             )
+        for slot in requirements.documents:
+            doc = documents.get(slot.name)
+            if doc is None or doc.file is None:
+                continue
+            if not any(o.key == doc.option for o in slot.options):
+                return DraftResult(
+                    refs={},
+                    problems=[
+                        Problem(
+                            field=slot.name,
+                            message="Pick one of the offered document types.",
+                        )
+                    ],
+                )
         row, _ = self._requirement_row(
             requirements.country_code, requirements.number_type
         )
@@ -267,6 +297,7 @@ class DidwwVerificationProvider(VerificationProvider):
         country_id, _ = lookup_ids(requirements.country_code)
         clean = {k: v.strip() for k, v in fields.items() if v and v.strip()}
         identity_type = _SUBJECT_TO_DIDWW[requirements.subject_type]
+        identity_attrs = {k: v for k, v in clean.items() if k in _IDENTITY_ATTRS}
         refs: dict = {
             "organization_id": organization_id,
             "country_code": requirements.country_code,
@@ -276,7 +307,9 @@ class DidwwVerificationProvider(VerificationProvider):
             "file_ids": [],
         }
         try:
-            existing = self._find_identity(organization_id, country_id, identity_type)
+            existing = self._find_identity(
+                organization_id, country_id, identity_type, identity_attrs
+            )
             if existing:
                 refs["identity_id"], refs["identity_created"] = existing, False
             else:
@@ -286,11 +319,7 @@ class DidwwVerificationProvider(VerificationProvider):
                         "data": {
                             "type": "identities",
                             "attributes": {
-                                **{
-                                    k: v
-                                    for k, v in clean.items()
-                                    if k in _IDENTITY_ATTRS
-                                },
+                                **identity_attrs,
                                 "identity_type": identity_type,
                                 "external_reference_id": f"hail-{organization_id}",
                                 "contact_email": contact_email,
@@ -343,18 +372,7 @@ class DidwwVerificationProvider(VerificationProvider):
                 doc = documents.get(slot.name)
                 if doc is None or doc.file is None:
                     continue
-                option = next((o for o in slot.options if o.key == doc.option), None)
-                if option is None:
-                    self._discard_sync(refs)
-                    return DraftResult(
-                        refs={},
-                        problems=[
-                            Problem(
-                                field=slot.name,
-                                message="Pick one of the offered document types.",
-                            )
-                        ],
-                    )
+                option = next(o for o in slot.options if o.key == doc.option)
                 ext = _EXTENSIONS.get(doc.file.content_type, "bin")
                 file_id = self._client.upload_encrypted_file(
                     fingerprint,
