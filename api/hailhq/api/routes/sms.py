@@ -394,7 +394,11 @@ async def receive_inbound_sms(
     form = await request.form()
     params = {k: str(v) for k, v in form.items()}
     signature = request.headers.get("X-Twilio-Signature")
-    url = join_url(settings.hail_api_url, "sms/inbound")
+    # Twilio signs the URL it was configured with, so verify against the mount
+    # (/v1 or legacy) this request actually arrived on.
+    url = join_url(
+        settings.hail_api_url, f"{request_mount_prefix(request)}/sms/inbound"
+    )
 
     if not verify_twilio_signature(url, params, signature, settings.twilio_auth_token):
         raise HTTPException(
@@ -468,7 +472,9 @@ async def receive_sms_status(
     form = await request.form()
     params = {k: str(v) for k, v in form.items()}
     signature = request.headers.get("X-Twilio-Signature")
-    url = join_url(settings.hail_api_url, "sms/status")
+    # Twilio signs the URL it was configured with, so verify against the mount
+    # (/v1 or legacy) this request actually arrived on.
+    url = join_url(settings.hail_api_url, f"{request_mount_prefix(request)}/sms/status")
     if not verify_twilio_signature(url, params, signature, settings.twilio_auth_token):
         raise HTTPException(
             status_code=http_status.HTTP_403_FORBIDDEN, detail="invalid signature"

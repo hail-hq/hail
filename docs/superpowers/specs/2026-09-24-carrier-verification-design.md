@@ -82,20 +82,20 @@ Maps the interface to Twilio Regulatory Compliance:
 
 ### 4. Data: table `carrier_verifications` (migration `0044`)
 
-| column | type | note |
-|---|---|---|
-| id | uuid pk | |
-| organization_id | uuid fk | |
-| provider | text | registry key |
-| country_code | text | |
-| number_type | text | |
-| subject_type | text | `person` or `business` |
-| state | text | `draft`, `awaiting_review`, `submitting`, `submitted`, `approved`, `rejected`, `cancelled` |
-| provider_refs | jsonb | opaque carrier IDs. No personal data |
-| requirements_version | text | |
-| rejection_reason | text null | carrier or superadmin text |
-| approved_by | uuid null | superadmin user id |
-| created_at, updated_at, submitted_at, approved_at | timestamptz | |
+| column                                            | type        | note                                                                                       |
+| ------------------------------------------------- | ----------- | ------------------------------------------------------------------------------------------ |
+| id                                                | uuid pk     |                                                                                            |
+| organization_id                                   | uuid fk     |                                                                                            |
+| provider                                          | text        | registry key                                                                               |
+| country_code                                      | text        |                                                                                            |
+| number_type                                       | text        |                                                                                            |
+| subject_type                                      | text        | `person` or `business`                                                                     |
+| state                                             | text        | `draft`, `awaiting_review`, `submitting`, `submitted`, `approved`, `rejected`, `cancelled` |
+| provider_refs                                     | jsonb       | opaque carrier IDs. No personal data                                                       |
+| requirements_version                              | text        |                                                                                            |
+| rejection_reason                                  | text null   | carrier or superadmin text                                                                 |
+| approved_by                                       | uuid null   | superadmin user id                                                                         |
+| created_at, updated_at, submitted_at, approved_at | timestamptz |                                                                                            |
 
 Partial unique index: one live verification (not `cancelled`, not `rejected`) per (organization, provider, country, number_type).
 

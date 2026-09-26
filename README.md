@@ -154,7 +154,7 @@ asyncio.run(main())
 **HTTP** ([OpenAPI spec](openapi/openapi.yaml), [API reference](https://hail.so/docs/api)):
 
 ```bash
-curl -X POST http://localhost:8080/calls \
+curl -X POST http://localhost:8080/v1/calls \
   -H "Authorization: Bearer $HAIL_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{"to":"+15551234567","recipient_consent":true,"system_prompt":"..."}'

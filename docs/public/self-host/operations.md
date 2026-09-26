@@ -680,7 +680,7 @@ After stage 5, in order:
    the delivery row reaches `status=succeeded`:
 
    ```bash
-   curl "$HAIL_API_URL/webhooks/<subscription-id>/deliveries" \
+   curl "$HAIL_API_URL/v1/webhooks/<subscription-id>/deliveries" \
      -H "Authorization: Bearer $HAIL_API_KEY"
    ```
 

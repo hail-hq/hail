@@ -46,7 +46,7 @@ Component versions cut alongside this release:
 - **DIDWW as an outbound voice carrier.** A number's `provider` picks its
   LiveKit trunk (`core/hailhq/core/carrier_routing.py`); DIDWW numbers are
   registered by hand. `POST /calls` fails with `end_reason =
-  carrier_route_failed` before any LiveKit room exists when the number's
+carrier_route_failed` before any LiveKit room exists when the number's
   carrier has no trunk. Setup:
   [docs/public/self-host/didww.md](docs/public/self-host/didww.md).
 - **Carrier verification API** (`/v1/verifications`): countries such as the UK
