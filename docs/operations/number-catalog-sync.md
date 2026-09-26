@@ -23,7 +23,7 @@ Who reads them:
 
 [`.github/workflows/costs-sync-numbers.yml`](../../.github/workflows/costs-sync-numbers.yml) runs every Monday 08:00 UTC (and on **Actions → costs-sync-numbers → Run workflow**). It runs the sync for all three carriers, validates the files against the schema, and opens a pull request on branch `costs/numbers-sync` labelled `costs-sync`. The PR body is the sync summary. No change → no PR.
 
-It needs four repository secrets on `hail-hq/hail` (**Settings → Secrets and variables → Actions**). Set on 2026-09-26. A missing secret skips that carrier with a line in the summary, not an error.
+It needs four repository secrets on `hail-hq/hail` (**Settings → Secrets and variables → Actions**). Set on 2026-09-26. A missing secret skips that carrier with a line in the summary, not an error. It also needs **Settings → Actions → General → Workflow permissions → "Allow GitHub Actions to create and approve pull requests"** ticked; without it the sync step succeeds and the "Open PR on change" step fails with `GitHub Actions is not permitted to create or approve pull requests`.
 
 | Secret                                    | Carrier | Where the value comes from                                                                 |
 | ----------------------------------------- | ------- | ------------------------------------------------------------------------------------------ |
@@ -55,10 +55,10 @@ Flags: `--provider {didww,telnyx,twilio,all}`, `--env-file` (reads the keys from
 
 [`scripts/costs/sync_numbers.py`](../../scripts/costs/sync_numbers.py), function `merge()`, applies these in order:
 
-1. A row a person verified by hand (`verification_method: "manual-confirmed"`) is never overwritten. Differences are listed under **kept** in the summary.
+1. A row a person verified by hand (`verification_method: "manual-confirmed"`) is never overwritten and never marked unavailable. Differences, and a carrier that no longer lists it, are reported under **kept** in the summary for a person to decide.
 2. A row the carrier no longer lists is kept with `available: false` and a dated note (`not offered by the carrier as of YYYY-MM-DD; kept so held numbers stay billable`). A hand-written `notes` value is kept in front of that note. Listed under **vanished**.
 3. A row the carrier lists again gets `available: true` and the dated note removed. Hand-written notes stay.
-4. A row the sync could not observe this run (the account was offered no numbers, no price, no dial code) is left exactly as it was. Listed under **unobserved**. Not seeing stock is not the same as the carrier dropping the type.
+4. A row the sync could not observe this run is left exactly as it was and listed under **unobserved**: the account was offered no numbers, no price, no dial code, or (Twilio) the country is missing from the account's own listing. Twilio's `AvailablePhoneNumbers` list only has countries the account is enabled for, so a missing country says nothing about what Twilio sells. Not seeing stock is not the same as the carrier dropping the type.
 5. A run that returns fewer than 40 countries for a carrier that already has a catalog does not write that file (`CatalogShrunk`). The summary says so; the other carriers still run.
 6. Every synced row gets `last_verified` = today, `verification_method: "carrier-sync"`, `verified_by: "<carrier>-api-sync"`. `last_changed_at` moves only when a watched field changed (`usd_per_month`, `voice`, `sms`, `mms`, `verification_required`, `setup_usd`, `available`).
 
@@ -66,7 +66,7 @@ Flags: `--provider {didww,telnyx,twilio,all}`, `--env-file` (reads the keys from
 
 1. Read the summary sections per carrier: **added**, **changed**, **vanished**, **kept**, **unobserved**, **Skipped by the sync**.
 2. **changed** prices: spot-check one against the carrier's pricing page (`source_url` on the row).
-3. **vanished** rows: confirm on the carrier's site. If the carrier still sells it, the sync account simply had no stock; leave the row and it will come back when observed. If it is truly gone, merge; held numbers keep billing.
+3. **vanished** rows: confirm on the carrier's site. A vanished row means the listing enumerated that country and type and it was gone. If the carrier's site still sells it, hand-verify the row (below) so the sync leaves it alone. If it is truly gone, merge; held numbers keep billing.
 4. **kept** rows: the carrier now disagrees with a hand-verified value. Decide which is right. To hand over to the sync, delete the row's `verification_method: "manual-confirmed"` line; the next run rewrites the row.
 5. Merge. hail-website picks up `twilio.json` within 24 hours (its fetch cache); the API image picks it up on the next deploy.
 
