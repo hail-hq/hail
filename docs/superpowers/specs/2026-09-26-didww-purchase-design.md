@@ -69,7 +69,7 @@ reconciler ──> didww_order_outcome ──> GET /dids?filter[order.id] ──
   - else an approved Hail verification for (org, `didww`, country, type) exists → `ready`, `verification_id` = identity id, `address_id` = address id.
   - else `verification_required`; friction `documents` when `personal_proof_qty`, `business_proof_qty` or `address_proof_qty` > 0, else `information`. `requirements` labels list the proof types and mandatory fields.
 - The catalog gate `is_acquirable(country, type)` applies to Twilio and Telnyx only. DIDWW offers carry their own live price, and the renewal rater bills the price stored on the number, so DIDWW countries need no `costs/telephony.json` row.
-- The approved-verification lookup (`approved_purchase_handle`) moves from `api/routes/verifications.py` to `core` so `discover_offers` can call it. Same query, new module.
+- The approved registration is found at DIDWW, like the other carriers find theirs: `GET /addresses?filter[external_reference_id]=hail:<org>:<country>:<number_type>`. Nothing moves out of `api/routes/verifications.py`.
 
 ## Verification plug-in: `providers/verification/didww.py`
 
@@ -84,7 +84,7 @@ reconciler ──> didww_order_outcome ──> GET /dids?filter[order.id] ──
   - `restriction_message` → `help` on the requirements.
   - No requirement row → `required=False`.
 - `create_draft`: identity (`external_reference_id=hail-<org>`, `contact_email` = `HAIL_SUPPORT_EMAIL`), address (country id, city name, postal code, address line), one encrypted file per document (public keys from `GET /public_keys`, SDK `Encrypt.calculate_fingerprint` + `encrypt_with_keys`, fixed file name), one proof per slot linking the file to the identity or the address, then `POST /address_requirement_validations`. 422 → `Problem`s, everything created is deleted. `refs = {identity_id, address_id, proof_ids, file_ids, requirement_id, service_description}`.
-- `check(refs)`: re-run the validation. `submit(refs)`: no-op. `status(refs)`: `approved` once validation passed. `purchase_handle(refs)`: `{identity_id, address_id}`. `discard(refs)`: delete proofs, files, address, identity, best effort.
+- `check(refs)`: re-run the validation. `submit(refs)`: `PATCH /addresses/{address_id}` setting `external_reference_id` to `hail:<org>:<country>:<number_type>` (the draft carries `hail-draft:…`). `status(refs)`: `approved` when the address carries the `hail:` reference, else `draft`. `purchase_handle(refs)`: `{identity_id, address_id}`. `discard(refs)`: delete proofs, files, address, and the identity when this draft created it; best effort.
 - One identity per organization at DIDWW. A second verification for another country reuses the identity when its country matches, otherwise creates a new one.
 - Hail stores only ids. Documents go straight to DIDWW encrypted with DIDWW's keys.
 
@@ -97,7 +97,6 @@ reconciler ──> didww_order_outcome ──> GET /dids?filter[order.id] ──
 - `core/hailhq/core/number_offers.py`: `PROVIDERS`, `searches["didww"]`; per-carrier catalog gate.
 - `api/hailhq/api/number_orders.py`: `carrier_outcome` dispatches on carrier name; new outcome `rejected_registration` and its partial refund; timeouts read `carrier(...).pending_timeout`.
 - `api/hailhq/api/routes/numbers.py`: `_RELEASERS[DIDWW] = release_didww_number`.
-- `api/hailhq/api/routes/verifications.py`: lookup moved to core; nothing else.
 - `core/hailhq/core/config.py`: `didww_api_key`, `didww_environment` (`production` | `sandbox`, default `production`).
 - `.env.example` and the local `.env`: `DIDWW_API_KEY=`, `DIDWW_ENVIRONMENT=production`.
 - `core/pyproject.toml`: dependency `didww` (MIT).
