@@ -45,16 +45,6 @@ def catalog(tmp_path, monkeypatch):
     return telephony_catalog
 
 
-def test_is_acquirable(catalog):
-    assert catalog.is_acquirable("SE", "mobile") is True
-    assert (
-        catalog.is_acquirable("PT", "local") is False
-    )  # kept for billing, not offered
-    assert catalog.capabilities("PT", "local") is not None  # still priced/known
-    assert catalog.is_acquirable("SE", "local") is False  # not listed
-    assert catalog.is_acquirable("ZZ", "local") is False
-
-
 def test_capabilities(catalog):
     assert catalog.capabilities("SE", "mobile") == {
         "voice": False,
@@ -67,4 +57,4 @@ def test_missing_file_raises_not_silently_allows(tmp_path, monkeypatch):
     monkeypatch.setenv("HAIL_TELEPHONY_CATALOG_PATH", str(tmp_path / "nope.json"))
     telephony_catalog._load.cache_clear()
     with pytest.raises(FileNotFoundError):
-        telephony_catalog.is_acquirable("US", "local")
+        telephony_catalog.capabilities("US", "local")

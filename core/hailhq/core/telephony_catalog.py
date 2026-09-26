@@ -1,11 +1,9 @@
 """Read-only view of costs/twilio.json — the number price + capability
-catalog and the acquire allow-list. The same file the rater (hail-website) and
-the /costs page read, so the three can never disagree about what's acquirable.
+catalog. The same file the rater (hail-website) and the /costs page read, so
+the three can never disagree about a number's capabilities.
 
-A missing file raises rather than silently allowing/denying: an acquire guard
-that fails open would let unpriced numbers through and break "price every
-number"; one that fails closed would block all acquisition. Surfacing the error
-forces the deploy to be fixed (the file must be bundled — see api/Dockerfile).
+A missing file raises rather than silently returning nothing: the error forces
+the deploy to be fixed (the file must be bundled — see api/Dockerfile).
 """
 
 from __future__ import annotations
@@ -15,7 +13,7 @@ import os
 from functools import lru_cache
 from pathlib import Path
 
-__all__ = ["capabilities", "is_acquirable"]
+__all__ = ["capabilities"]
 
 # In the API image costs/ is copied to /app/costs (see api/Dockerfile); in dev
 # the module sits at core/hailhq/core/ so parents[3] is the repo root. An env
@@ -31,13 +29,6 @@ def _path() -> Path:
 def _load() -> dict[tuple[str, str], dict]:
     raw = json.loads(_path().read_text())
     return {(n["country_code"], n["number_type"]): n for n in raw["numbers"]}
-
-
-def is_acquirable(country_code: str, number_type: str) -> bool:
-    """Priced AND offered by the carrier today. A row kept with
-    available=false still prices held numbers but cannot be bought."""
-    row = _load().get((country_code, number_type))
-    return row is not None and row.get("available", True)
 
 
 def capabilities(country_code: str, number_type: str) -> dict | None:
