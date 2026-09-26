@@ -2611,7 +2611,7 @@ type SmsCreate struct {
 	// ConsentSource Where/how consent was obtained (e.g. 'signup form', 'prior customer relationship'). Required (non-empty) when message_type is 'marketing'.
 	ConsentSource *string `json:"consent_source,omitempty"`
 
-	// From Sender phone number, E.164 format. Must be an active number owned by the organization with the SMS capability. Omitted: for destinations that allow an alphanumeric sender ID, the organization's sender ID (or the platform default) is used. Otherwise the organization's oldest active SMS-capable number is used; if none exists the request fails with 422. SMS never uses the shared pool.
+	// From Sender phone number, E.164 format. Must be an active number owned by the organization with the SMS capability. Omitted: UK (+44) and Germany (+49) destinations use the organization's sender ID, or the platform default 'HAIL' when none is set; Australia (+61) always uses 'HAIL'. Every other destination uses the organization's oldest active SMS-capable number; if none exists the request fails with 422. SMS never uses the shared pool.
 	From *string `json:"from,omitempty"`
 
 	// MessageType 'marketing' additionally requires a non-empty consent_source. Use 'informational' for transactional/service communications.
@@ -2710,7 +2710,7 @@ type SuppressionResponse struct {
 	// Recipient The suppressed recipient — E.164 phone number for voice/sms, lowercased email address for email.
 	Recipient string `json:"recipient"`
 
-	// Source How this entry was created: 'unsubscribe_link' (email unsubscribe link), 'stop_keyword' (recipient replied STOP by SMS; the only value the SMS list returns), 'manual' (an operator action), or 'bounce'.
+	// Source How this entry was created: 'unsubscribe_link' (email unsubscribe link) or 'stop_keyword' (recipient replied STOP by SMS). 'manual' (operator action) and 'bounce' (bounce handler) are reserved; nothing writes them yet.
 	Source string `json:"source"`
 }
 

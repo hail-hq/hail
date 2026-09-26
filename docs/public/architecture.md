@@ -63,7 +63,7 @@ Precedence is B, then C, then A. See [Bring your own LLM](./byo-llm.md) for the 
 
 The `SmsProvider` adapter in [`core/hailhq/core/providers/sms/`](https://github.com/hail-hq/hail/blob/main/core/hailhq/core/providers/sms) sends SMS through the carrier that owns the sending number (Twilio or Telnyx).
 
-**Outbound.** `POST /sms` sends from the org's dedicated SMS-capable number. There is no pool fallback — refer to `hail numbers` for number acquisition. Twilio posts delivery-status callbacks. These callbacks move `Sms.status` and fan out the `sms.delivered` / `sms.undelivered` / `sms.failed` webhook events.
+**Outbound.** `POST /sms` with no `from` sends from the org's sender ID (or the platform default `HAIL`) to UK (+44) and Germany (+49); Australia (+61) always gets `HAIL`; every other destination uses the org's oldest active SMS-capable number and 422s when there is none (see [`core/hailhq/core/sender_id.py`](https://github.com/hail-hq/hail/blob/main/core/hailhq/core/sender_id.py)). There is no pool fallback — refer to `hail numbers` for number acquisition. Twilio posts delivery-status callbacks. These callbacks move `Sms.status` and fan out the `sms.delivered` / `sms.undelivered` / `sms.failed` webhook events.
 
 **Inbound.** Twilio posts each incoming message to `POST /sms/inbound` (Hail verifies the `X-Twilio-Signature` header); Telnyx posts to `POST /sms/telnyx` (Ed25519 signature). It matches the destination number to an org, stores the message, and fires the `sms.received` webhook event. Messages to unknown or pool numbers are dropped. An opt-out reply (`STOP`) adds the sender to the org's suppression list; `START` removes it.
 
