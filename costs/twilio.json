@@ -149,12 +149,13 @@
       "sms": false,
       "mms": false,
       "verification_required": true,
-      "available": true,
+      "available": false,
       "last_verified": "2026-07-17",
       "last_changed_at": "2026-07-17",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-sync",
-      "source_url": "https://www.twilio.com/content/dam/twilio-com/pricing-data/en/csv/PMded94a0dae30eaaec0f115f22859bd38_SiteNumbersPricing.csv"
+      "source_url": "https://www.twilio.com/content/dam/twilio-com/pricing-data/en/csv/PMded94a0dae30eaaec0f115f22859bd38_SiteNumbersPricing.csv",
+      "notes": "not offered by the carrier as of 2026-09-26; kept so held numbers stay billable"
     },
     {
       "country_code": "BB",
@@ -217,12 +218,13 @@
       "sms": false,
       "mms": false,
       "verification_required": true,
-      "available": true,
+      "available": false,
       "last_verified": "2026-07-17",
       "last_changed_at": "2026-07-17",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-sync",
-      "source_url": "https://www.twilio.com/content/dam/twilio-com/pricing-data/en/csv/PMded94a0dae30eaaec0f115f22859bd38_SiteNumbersPricing.csv"
+      "source_url": "https://www.twilio.com/content/dam/twilio-com/pricing-data/en/csv/PMded94a0dae30eaaec0f115f22859bd38_SiteNumbersPricing.csv",
+      "notes": "not offered by the carrier as of 2026-09-26; kept so held numbers stay billable"
     },
     {
       "country_code": "BG",
@@ -234,12 +236,13 @@
       "sms": false,
       "mms": false,
       "verification_required": true,
-      "available": true,
+      "available": false,
       "last_verified": "2026-07-17",
       "last_changed_at": "2026-07-17",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-sync",
-      "source_url": "https://www.twilio.com/content/dam/twilio-com/pricing-data/en/csv/PMded94a0dae30eaaec0f115f22859bd38_SiteNumbersPricing.csv"
+      "source_url": "https://www.twilio.com/content/dam/twilio-com/pricing-data/en/csv/PMded94a0dae30eaaec0f115f22859bd38_SiteNumbersPricing.csv",
+      "notes": "not offered by the carrier as of 2026-09-26; kept so held numbers stay billable"
     },
     {
       "country_code": "BJ",
@@ -285,12 +288,13 @@
       "sms": false,
       "mms": false,
       "verification_required": true,
-      "available": true,
+      "available": false,
       "last_verified": "2026-07-17",
       "last_changed_at": "2026-07-17",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-sync",
-      "source_url": "https://www.twilio.com/content/dam/twilio-com/pricing-data/en/csv/PMded94a0dae30eaaec0f115f22859bd38_SiteNumbersPricing.csv"
+      "source_url": "https://www.twilio.com/content/dam/twilio-com/pricing-data/en/csv/PMded94a0dae30eaaec0f115f22859bd38_SiteNumbersPricing.csv",
+      "notes": "not offered by the carrier as of 2026-09-26; kept so held numbers stay billable"
     },
     {
       "country_code": "BR",
@@ -302,12 +306,13 @@
       "sms": false,
       "mms": false,
       "verification_required": true,
-      "available": true,
+      "available": false,
       "last_verified": "2026-07-17",
       "last_changed_at": "2026-07-17",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-sync",
-      "source_url": "https://www.twilio.com/content/dam/twilio-com/pricing-data/en/csv/PMded94a0dae30eaaec0f115f22859bd38_SiteNumbersPricing.csv"
+      "source_url": "https://www.twilio.com/content/dam/twilio-com/pricing-data/en/csv/PMded94a0dae30eaaec0f115f22859bd38_SiteNumbersPricing.csv",
+      "notes": "not offered by the carrier as of 2026-09-26; kept so held numbers stay billable"
     },
     {
       "country_code": "BW",
@@ -319,12 +324,13 @@
       "sms": false,
       "mms": false,
       "verification_required": false,
-      "available": true,
+      "available": false,
       "last_verified": "2026-07-17",
       "last_changed_at": "2026-07-17",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-sync",
-      "source_url": "https://www.twilio.com/content/dam/twilio-com/pricing-data/en/csv/PMded94a0dae30eaaec0f115f22859bd38_SiteNumbersPricing.csv"
+      "source_url": "https://www.twilio.com/content/dam/twilio-com/pricing-data/en/csv/PMded94a0dae30eaaec0f115f22859bd38_SiteNumbersPricing.csv",
+      "notes": "not offered by the carrier as of 2026-09-26; kept so held numbers stay billable"
     },
     {
       "country_code": "CA",
@@ -421,12 +427,13 @@
       "sms": true,
       "mms": false,
       "verification_required": true,
-      "available": true,
+      "available": false,
       "last_verified": "2026-07-17",
       "last_changed_at": "2026-07-17",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-sync",
-      "source_url": "https://www.twilio.com/content/dam/twilio-com/pricing-data/en/csv/PMded94a0dae30eaaec0f115f22859bd38_SiteNumbersPricing.csv"
+      "source_url": "https://www.twilio.com/content/dam/twilio-com/pricing-data/en/csv/PMded94a0dae30eaaec0f115f22859bd38_SiteNumbersPricing.csv",
+      "notes": "not offered by the carrier as of 2026-09-26; kept so held numbers stay billable"
     },
     {
       "country_code": "CO",
@@ -506,12 +513,13 @@
       "sms": false,
       "mms": false,
       "verification_required": true,
-      "available": true,
+      "available": false,
       "last_verified": "2026-07-17",
       "last_changed_at": "2026-07-17",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-sync",
-      "source_url": "https://www.twilio.com/content/dam/twilio-com/pricing-data/en/csv/PMded94a0dae30eaaec0f115f22859bd38_SiteNumbersPricing.csv"
+      "source_url": "https://www.twilio.com/content/dam/twilio-com/pricing-data/en/csv/PMded94a0dae30eaaec0f115f22859bd38_SiteNumbersPricing.csv",
+      "notes": "not offered by the carrier as of 2026-09-26; kept so held numbers stay billable"
     },
     {
       "country_code": "CZ",
@@ -591,12 +599,13 @@
       "sms": false,
       "mms": false,
       "verification_required": true,
-      "available": true,
+      "available": false,
       "last_verified": "2026-07-17",
       "last_changed_at": "2026-07-17",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-sync",
-      "source_url": "https://www.twilio.com/content/dam/twilio-com/pricing-data/en/csv/PMded94a0dae30eaaec0f115f22859bd38_SiteNumbersPricing.csv"
+      "source_url": "https://www.twilio.com/content/dam/twilio-com/pricing-data/en/csv/PMded94a0dae30eaaec0f115f22859bd38_SiteNumbersPricing.csv",
+      "notes": "not offered by the carrier as of 2026-09-26; kept so held numbers stay billable"
     },
     {
       "country_code": "DZ",
@@ -812,12 +821,13 @@
       "sms": false,
       "mms": false,
       "verification_required": true,
-      "available": true,
+      "available": false,
       "last_verified": "2026-07-17",
       "last_changed_at": "2026-07-17",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-sync",
-      "source_url": "https://www.twilio.com/content/dam/twilio-com/pricing-data/en/csv/PMded94a0dae30eaaec0f115f22859bd38_SiteNumbersPricing.csv"
+      "source_url": "https://www.twilio.com/content/dam/twilio-com/pricing-data/en/csv/PMded94a0dae30eaaec0f115f22859bd38_SiteNumbersPricing.csv",
+      "notes": "not offered by the carrier as of 2026-09-26; kept so held numbers stay billable"
     },
     {
       "country_code": "GN",
@@ -897,12 +907,13 @@
       "sms": false,
       "mms": false,
       "verification_required": true,
-      "available": true,
+      "available": false,
       "last_verified": "2026-07-17",
       "last_changed_at": "2026-07-17",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-sync",
-      "source_url": "https://www.twilio.com/content/dam/twilio-com/pricing-data/en/csv/PMded94a0dae30eaaec0f115f22859bd38_SiteNumbersPricing.csv"
+      "source_url": "https://www.twilio.com/content/dam/twilio-com/pricing-data/en/csv/PMded94a0dae30eaaec0f115f22859bd38_SiteNumbersPricing.csv",
+      "notes": "not offered by the carrier as of 2026-09-26; kept so held numbers stay billable"
     },
     {
       "country_code": "HR",
@@ -931,12 +942,13 @@
       "sms": false,
       "mms": false,
       "verification_required": true,
-      "available": true,
+      "available": false,
       "last_verified": "2026-07-17",
       "last_changed_at": "2026-07-17",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-sync",
-      "source_url": "https://www.twilio.com/content/dam/twilio-com/pricing-data/en/csv/PMded94a0dae30eaaec0f115f22859bd38_SiteNumbersPricing.csv"
+      "source_url": "https://www.twilio.com/content/dam/twilio-com/pricing-data/en/csv/PMded94a0dae30eaaec0f115f22859bd38_SiteNumbersPricing.csv",
+      "notes": "not offered by the carrier as of 2026-09-26; kept so held numbers stay billable"
     },
     {
       "country_code": "HU",
@@ -965,12 +977,13 @@
       "sms": false,
       "mms": false,
       "verification_required": true,
-      "available": true,
+      "available": false,
       "last_verified": "2026-07-17",
       "last_changed_at": "2026-07-17",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-sync",
-      "source_url": "https://www.twilio.com/content/dam/twilio-com/pricing-data/en/csv/PMded94a0dae30eaaec0f115f22859bd38_SiteNumbersPricing.csv"
+      "source_url": "https://www.twilio.com/content/dam/twilio-com/pricing-data/en/csv/PMded94a0dae30eaaec0f115f22859bd38_SiteNumbersPricing.csv",
+      "notes": "not offered by the carrier as of 2026-09-26; kept so held numbers stay billable"
     },
     {
       "country_code": "ID",
@@ -1016,12 +1029,13 @@
       "sms": true,
       "mms": false,
       "verification_required": true,
-      "available": true,
+      "available": false,
       "last_verified": "2026-07-17",
       "last_changed_at": "2026-07-17",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-sync",
-      "source_url": "https://www.twilio.com/content/dam/twilio-com/pricing-data/en/csv/PMded94a0dae30eaaec0f115f22859bd38_SiteNumbersPricing.csv"
+      "source_url": "https://www.twilio.com/content/dam/twilio-com/pricing-data/en/csv/PMded94a0dae30eaaec0f115f22859bd38_SiteNumbersPricing.csv",
+      "notes": "not offered by the carrier as of 2026-09-26; kept so held numbers stay billable"
     },
     {
       "country_code": "IL",
@@ -1101,12 +1115,13 @@
       "sms": false,
       "mms": false,
       "verification_required": true,
-      "available": true,
+      "available": false,
       "last_verified": "2026-07-17",
       "last_changed_at": "2026-07-17",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-sync",
-      "source_url": "https://www.twilio.com/content/dam/twilio-com/pricing-data/en/csv/PMded94a0dae30eaaec0f115f22859bd38_SiteNumbersPricing.csv"
+      "source_url": "https://www.twilio.com/content/dam/twilio-com/pricing-data/en/csv/PMded94a0dae30eaaec0f115f22859bd38_SiteNumbersPricing.csv",
+      "notes": "not offered by the carrier as of 2026-09-26; kept so held numbers stay billable"
     },
     {
       "country_code": "JP",
@@ -1135,12 +1150,13 @@
       "sms": false,
       "mms": false,
       "verification_required": true,
-      "available": true,
+      "available": false,
       "last_verified": "2026-07-17",
       "last_changed_at": "2026-07-17",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-sync",
-      "source_url": "https://www.twilio.com/content/dam/twilio-com/pricing-data/en/csv/PMded94a0dae30eaaec0f115f22859bd38_SiteNumbersPricing.csv"
+      "source_url": "https://www.twilio.com/content/dam/twilio-com/pricing-data/en/csv/PMded94a0dae30eaaec0f115f22859bd38_SiteNumbersPricing.csv",
+      "notes": "not offered by the carrier as of 2026-09-26; kept so held numbers stay billable"
     },
     {
       "country_code": "JP",
@@ -1169,12 +1185,13 @@
       "sms": false,
       "mms": false,
       "verification_required": true,
-      "available": true,
+      "available": false,
       "last_verified": "2026-07-17",
       "last_changed_at": "2026-07-17",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-sync",
-      "source_url": "https://www.twilio.com/content/dam/twilio-com/pricing-data/en/csv/PMded94a0dae30eaaec0f115f22859bd38_SiteNumbersPricing.csv"
+      "source_url": "https://www.twilio.com/content/dam/twilio-com/pricing-data/en/csv/PMded94a0dae30eaaec0f115f22859bd38_SiteNumbersPricing.csv",
+      "notes": "not offered by the carrier as of 2026-09-26; kept so held numbers stay billable"
     },
     {
       "country_code": "LT",
@@ -1237,12 +1254,13 @@
       "sms": false,
       "mms": false,
       "verification_required": true,
-      "available": true,
+      "available": false,
       "last_verified": "2026-07-17",
       "last_changed_at": "2026-07-17",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-sync",
-      "source_url": "https://www.twilio.com/content/dam/twilio-com/pricing-data/en/csv/PMded94a0dae30eaaec0f115f22859bd38_SiteNumbersPricing.csv"
+      "source_url": "https://www.twilio.com/content/dam/twilio-com/pricing-data/en/csv/PMded94a0dae30eaaec0f115f22859bd38_SiteNumbersPricing.csv",
+      "notes": "not offered by the carrier as of 2026-09-26; kept so held numbers stay billable"
     },
     {
       "country_code": "MO",
@@ -1254,12 +1272,13 @@
       "sms": false,
       "mms": false,
       "verification_required": true,
-      "available": true,
+      "available": false,
       "last_verified": "2026-07-17",
       "last_changed_at": "2026-07-17",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-sync",
-      "source_url": "https://www.twilio.com/content/dam/twilio-com/pricing-data/en/csv/PMded94a0dae30eaaec0f115f22859bd38_SiteNumbersPricing.csv"
+      "source_url": "https://www.twilio.com/content/dam/twilio-com/pricing-data/en/csv/PMded94a0dae30eaaec0f115f22859bd38_SiteNumbersPricing.csv",
+      "notes": "not offered by the carrier as of 2026-09-26; kept so held numbers stay billable"
     },
     {
       "country_code": "MU",
@@ -1271,12 +1290,13 @@
       "sms": false,
       "mms": false,
       "verification_required": true,
-      "available": true,
+      "available": false,
       "last_verified": "2026-07-17",
       "last_changed_at": "2026-07-17",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-sync",
-      "source_url": "https://www.twilio.com/content/dam/twilio-com/pricing-data/en/csv/PMded94a0dae30eaaec0f115f22859bd38_SiteNumbersPricing.csv"
+      "source_url": "https://www.twilio.com/content/dam/twilio-com/pricing-data/en/csv/PMded94a0dae30eaaec0f115f22859bd38_SiteNumbersPricing.csv",
+      "notes": "not offered by the carrier as of 2026-09-26; kept so held numbers stay billable"
     },
     {
       "country_code": "MX",
@@ -1526,12 +1546,13 @@
       "sms": true,
       "mms": false,
       "verification_required": true,
-      "available": true,
+      "available": false,
       "last_verified": "2026-07-17",
       "last_changed_at": "2026-07-17",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-sync",
-      "source_url": "https://www.twilio.com/content/dam/twilio-com/pricing-data/en/csv/PMded94a0dae30eaaec0f115f22859bd38_SiteNumbersPricing.csv"
+      "source_url": "https://www.twilio.com/content/dam/twilio-com/pricing-data/en/csv/PMded94a0dae30eaaec0f115f22859bd38_SiteNumbersPricing.csv",
+      "notes": "not offered by the carrier as of 2026-09-26; kept so held numbers stay billable"
     },
     {
       "country_code": "PL",
@@ -1558,11 +1579,11 @@
       "usd_per_month": "3.25",
       "voice": true,
       "sms": true,
-      "mms": false,
+      "mms": true,
       "verification_required": false,
       "available": true,
       "last_verified": "2026-09-26",
-      "last_changed_at": "2026-07-17",
+      "last_changed_at": "2026-09-26",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-api-sync",
       "source_url": "https://www.twilio.com/docs/phone-numbers/pricing"
@@ -1577,12 +1598,13 @@
       "sms": false,
       "mms": false,
       "verification_required": true,
-      "available": true,
+      "available": false,
       "last_verified": "2026-07-17",
       "last_changed_at": "2026-07-17",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-sync",
-      "source_url": "https://www.twilio.com/content/dam/twilio-com/pricing-data/en/csv/PMded94a0dae30eaaec0f115f22859bd38_SiteNumbersPricing.csv"
+      "source_url": "https://www.twilio.com/content/dam/twilio-com/pricing-data/en/csv/PMded94a0dae30eaaec0f115f22859bd38_SiteNumbersPricing.csv",
+      "notes": "not offered by the carrier as of 2026-09-26; kept so held numbers stay billable"
     },
     {
       "country_code": "PT",
@@ -1594,12 +1616,13 @@
       "sms": true,
       "mms": false,
       "verification_required": true,
-      "available": true,
+      "available": false,
       "last_verified": "2026-07-17",
       "last_changed_at": "2026-07-17",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-sync",
-      "source_url": "https://www.twilio.com/content/dam/twilio-com/pricing-data/en/csv/PMded94a0dae30eaaec0f115f22859bd38_SiteNumbersPricing.csv"
+      "source_url": "https://www.twilio.com/content/dam/twilio-com/pricing-data/en/csv/PMded94a0dae30eaaec0f115f22859bd38_SiteNumbersPricing.csv",
+      "notes": "not offered by the carrier as of 2026-09-26; kept so held numbers stay billable"
     },
     {
       "country_code": "PT",
@@ -1611,13 +1634,13 @@
       "sms": false,
       "mms": false,
       "verification_required": true,
-      "available": true,
+      "available": false,
       "last_verified": "2026-09-25",
       "last_changed_at": "2026-09-25",
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",
       "source_url": "https://www.didww.com/phone-numbers/all-phone-numbers/Portugal/National",
-      "notes": "hand-added (#119): billed for held numbers; Twilio does not offer this type to the Hail account"
+      "notes": "hand-added (#119): billed for held numbers; Twilio does not offer this type to the Hail account; not offered by the carrier as of 2026-09-26; kept so held numbers stay billable"
     },
     {
       "country_code": "RO",
@@ -1646,12 +1669,13 @@
       "sms": false,
       "mms": false,
       "verification_required": true,
-      "available": true,
+      "available": false,
       "last_verified": "2026-07-17",
       "last_changed_at": "2026-07-17",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-sync",
-      "source_url": "https://www.twilio.com/content/dam/twilio-com/pricing-data/en/csv/PMded94a0dae30eaaec0f115f22859bd38_SiteNumbersPricing.csv"
+      "source_url": "https://www.twilio.com/content/dam/twilio-com/pricing-data/en/csv/PMded94a0dae30eaaec0f115f22859bd38_SiteNumbersPricing.csv",
+      "notes": "not offered by the carrier as of 2026-09-26; kept so held numbers stay billable"
     },
     {
       "country_code": "RO",
@@ -1680,12 +1704,13 @@
       "sms": false,
       "mms": false,
       "verification_required": false,
-      "available": true,
+      "available": false,
       "last_verified": "2026-07-17",
       "last_changed_at": "2026-07-17",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-sync",
-      "source_url": "https://www.twilio.com/content/dam/twilio-com/pricing-data/en/csv/PMded94a0dae30eaaec0f115f22859bd38_SiteNumbersPricing.csv"
+      "source_url": "https://www.twilio.com/content/dam/twilio-com/pricing-data/en/csv/PMded94a0dae30eaaec0f115f22859bd38_SiteNumbersPricing.csv",
+      "notes": "not offered by the carrier as of 2026-09-26; kept so held numbers stay billable"
     },
     {
       "country_code": "SE",
@@ -1714,12 +1739,13 @@
       "sms": false,
       "mms": false,
       "verification_required": true,
-      "available": true,
+      "available": false,
       "last_verified": "2026-07-17",
       "last_changed_at": "2026-07-17",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-sync",
-      "source_url": "https://www.twilio.com/content/dam/twilio-com/pricing-data/en/csv/PMded94a0dae30eaaec0f115f22859bd38_SiteNumbersPricing.csv"
+      "source_url": "https://www.twilio.com/content/dam/twilio-com/pricing-data/en/csv/PMded94a0dae30eaaec0f115f22859bd38_SiteNumbersPricing.csv",
+      "notes": "not offered by the carrier as of 2026-09-26; kept so held numbers stay billable"
     },
     {
       "country_code": "SK",
@@ -1748,12 +1774,13 @@
       "sms": false,
       "mms": false,
       "verification_required": true,
-      "available": true,
+      "available": false,
       "last_verified": "2026-07-17",
       "last_changed_at": "2026-07-17",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-sync",
-      "source_url": "https://www.twilio.com/content/dam/twilio-com/pricing-data/en/csv/PMded94a0dae30eaaec0f115f22859bd38_SiteNumbersPricing.csv"
+      "source_url": "https://www.twilio.com/content/dam/twilio-com/pricing-data/en/csv/PMded94a0dae30eaaec0f115f22859bd38_SiteNumbersPricing.csv",
+      "notes": "not offered by the carrier as of 2026-09-26; kept so held numbers stay billable"
     },
     {
       "country_code": "TH",
@@ -1833,12 +1860,13 @@
       "sms": false,
       "mms": false,
       "verification_required": true,
-      "available": true,
+      "available": false,
       "last_verified": "2026-07-17",
       "last_changed_at": "2026-07-17",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-sync",
-      "source_url": "https://www.twilio.com/content/dam/twilio-com/pricing-data/en/csv/PMded94a0dae30eaaec0f115f22859bd38_SiteNumbersPricing.csv"
+      "source_url": "https://www.twilio.com/content/dam/twilio-com/pricing-data/en/csv/PMded94a0dae30eaaec0f115f22859bd38_SiteNumbersPricing.csv",
+      "notes": "not offered by the carrier as of 2026-09-26; kept so held numbers stay billable"
     },
     {
       "country_code": "UG",
@@ -1850,12 +1878,13 @@
       "sms": false,
       "mms": false,
       "verification_required": true,
-      "available": true,
+      "available": false,
       "last_verified": "2026-07-17",
       "last_changed_at": "2026-07-17",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-sync",
-      "source_url": "https://www.twilio.com/content/dam/twilio-com/pricing-data/en/csv/PMded94a0dae30eaaec0f115f22859bd38_SiteNumbersPricing.csv"
+      "source_url": "https://www.twilio.com/content/dam/twilio-com/pricing-data/en/csv/PMded94a0dae30eaaec0f115f22859bd38_SiteNumbersPricing.csv",
+      "notes": "not offered by the carrier as of 2026-09-26; kept so held numbers stay billable"
     },
     {
       "country_code": "US",
@@ -1901,12 +1930,13 @@
       "sms": false,
       "mms": false,
       "verification_required": true,
-      "available": true,
+      "available": false,
       "last_verified": "2026-07-17",
       "last_changed_at": "2026-07-17",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-sync",
-      "source_url": "https://www.twilio.com/content/dam/twilio-com/pricing-data/en/csv/PMded94a0dae30eaaec0f115f22859bd38_SiteNumbersPricing.csv"
+      "source_url": "https://www.twilio.com/content/dam/twilio-com/pricing-data/en/csv/PMded94a0dae30eaaec0f115f22859bd38_SiteNumbersPricing.csv",
+      "notes": "not offered by the carrier as of 2026-09-26; kept so held numbers stay billable"
     },
     {
       "country_code": "VI",
@@ -2106,6 +2136,7 @@
       "PL:toll_free",
       "PT:local",
       "PT:mobile",
+      "PT:national",
       "RO:local",
       "RO:national",
       "RO:toll_free",
