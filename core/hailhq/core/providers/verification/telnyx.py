@@ -135,9 +135,8 @@ def _address_payload(address: Address, subject_type: SubjectType) -> dict:
         payload["business_name"] = name
     else:
         first, _, last = name.rpartition(" ")
-        if not first:
-            first, last = last, last
-        payload["first_name"] = first
+        # A single word is both names: Telnyx requires the pair.
+        payload["first_name"] = first or last
         payload["last_name"] = last
     return payload
 
@@ -172,13 +171,13 @@ class TelnyxVerificationProvider(VerificationProvider):
         rules = _rules_for(payload, country_code, number_type)
         # Telnyx does not distinguish a person from a business here; the same
         # form applies to both, so no subject type is ever refused.
-        base = dict(
-            provider=self.name,
-            country_code=country_code,
-            number_type=number_type,
-            subject_type=subject_type,
-            subject_types=_SUBJECT_TYPES,
-        )
+        base = {
+            "provider": self.name,
+            "country_code": country_code,
+            "number_type": number_type,
+            "subject_type": subject_type,
+            "subject_types": _SUBJECT_TYPES,
+        }
         if not rules:
             return Requirements(required=False, **base)
         return Requirements(
