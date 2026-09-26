@@ -1152,6 +1152,11 @@ class AuditLog(Base):
     api_key_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), nullable=True
     )
+    actor_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), nullable=True
+    )
+    # api_key | user | superadmin | system — who acted, beyond which key was used.
+    actor_kind: Mapped[str | None] = mapped_column(Text, nullable=True)
     action: Mapped[str] = mapped_column(Text, nullable=False)
     resource_type: Mapped[str | None] = mapped_column(Text, nullable=True)
     resource_id: Mapped[uuid.UUID | None] = mapped_column(

@@ -7640,6 +7640,11 @@ components:
             - type: "null"
           title: Name
           description: The authenticated user's display name. Null for 'shared' callers.
+        superadmin:
+          type: boolean
+          title: Superadmin
+          description: True for a Hail staff console session acting on this organization.
+          default: false
       type: object
       required:
         - auth_kind

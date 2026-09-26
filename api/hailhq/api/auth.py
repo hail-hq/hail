@@ -6,9 +6,10 @@ and Better Auth OAuth JWTs. hail/api is a read-only consumer:
 * API-key path: bearer is hashed with the same scheme as the backend and
   looked up in the shared ``api_keys`` table (see ``hash_key`` below).
 * JWT path: bearer is verified against Better Auth's public JWKS using
-  PyJWT; signature + issuer + audience + expiry are all checked here, and
-  the JWT's ``sub`` claim (= user_id) feeds the same ``members`` join the
-  API-key path uses to resolve ``organization_id``.
+  PyJWT; signature + issuer + audience + expiry are all checked here. The
+  JWT's ``sub`` claim (= user_id) usually feeds the same ``members`` join
+  the API-key path uses to resolve ``organization_id`` — except the
+  superadmin branch, which returns a ``Principal`` before that join.
 
 The JWKS cache is process-local and lazy: only created when
 ``settings.hail_auth_url`` is set (self-host leaves it empty, disabling

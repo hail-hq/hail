@@ -20,7 +20,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi import status as http_status
-from hailhq.api.audit import write_audit_log
+from hailhq.api.audit import actor_of, write_audit_log
 from hailhq.api.deps import Principal, get_current_principal
 from hailhq.api.errors import unprocessable
 from hailhq.api.ratelimit import GENERAL_RATE_LIMITED_RESPONSES
@@ -246,6 +246,8 @@ async def _refresh(
                 "approved_by": str(row.approved_by) if row.approved_by else None,
                 "recovered": True,
             },
+            actor_user_id=row.approved_by,
+            actor_kind="superadmin",
         )
 
 
@@ -722,6 +724,7 @@ async def admin_approve(
     now = datetime.now(timezone.utc)
     row.state, row.submitted_at, row.updated_at = "submitted", now, now
     await db.commit()
+    actor_user_id, actor_kind = actor_of(admin)
     await write_audit_log(
         row.organization_id,
         None,
@@ -729,6 +732,8 @@ async def admin_approve(
         "carrier_verification",
         row.id,
         {"approved_by": str(admin.user_id) if admin.user_id else None},
+        actor_user_id=actor_user_id,
+        actor_kind=actor_kind,
     )
     return AdminVerification.model_validate(row)
 
@@ -748,6 +753,7 @@ async def admin_reject(
     row.state, row.rejection_reason, row.provider_refs = "rejected", body.reason, {}
     row.updated_at = datetime.now(timezone.utc)
     await db.commit()
+    actor_user_id, actor_kind = actor_of(admin)
     await write_audit_log(
         row.organization_id,
         None,
@@ -755,5 +761,7 @@ async def admin_reject(
         "carrier_verification",
         row.id,
         {"rejected_by": str(admin.user_id) if admin.user_id else None},
+        actor_user_id=actor_user_id,
+        actor_kind=actor_kind,
     )
     return AdminVerification.model_validate(row)

@@ -45,6 +45,7 @@ async def get_whoami(
         return WhoamiResponse(
             auth_kind=principal.auth_kind,
             organization_id=principal.organization_id,
+            superadmin=principal.superadmin,
         )
 
     row = (
@@ -62,6 +63,7 @@ async def get_whoami(
         # than 404 — the caller asked who it is, not for a user record.
         email=row.email if row is not None else None,
         name=row.name if row is not None else None,
+        superadmin=principal.superadmin,
     )
 
 
