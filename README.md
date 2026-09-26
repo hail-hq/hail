@@ -208,7 +208,7 @@ A checked box is a released feature. Per-artifact changelogs (GitHub Releases fo
 ### Numbers
 
 - [x] Live quotes across carriers (inventory, price, verification effort)
-- [x] Carrier verification for regulated countries (Twilio)
+- [x] Carrier verification for regulated countries (Twilio, Telnyx)
 
 ### Email
 

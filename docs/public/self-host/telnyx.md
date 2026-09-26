@@ -90,12 +90,16 @@ can reach.
 
 ## 5. Countries that need verification
 
-Telnyx will not sell some numbers until a requirement group is approved. Hail
-looks for an approved group with `customer_reference` = `hail-<organization
-UUID>` for the country and number type; without one the offer is
-`verification_required` and cannot be bought. Create the group in Mission
-Control (**Numbers → Regulatory requirements**) with that reference, or through
-`POST /v2/requirement_groups`.
+Telnyx will not sell some numbers (Sweden, Portugal, Italy, and others)
+until a requirement group is approved. Hail files it: `GET
+/v1/verifications/requirements?provider=telnyx&country_code=SE&number_type=mobile`
+lists the fields and documents Telnyx asks for, `POST /v1/verifications`
+(with `provider=telnyx`) creates the requirement group under
+`customer_reference = hail-<organization UUID>`, uploads the files, and a
+superadmin approval submits it to Telnyx. Once Telnyx approves, quotes for
+that country and type turn `ready` and the order carries the group. The
+console does all of this from the number picker. Plug-in:
+[`core/hailhq/core/providers/verification/telnyx.py`](../../../core/hailhq/core/providers/verification/telnyx.py).
 
 ## Orders
 
