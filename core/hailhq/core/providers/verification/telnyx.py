@@ -38,6 +38,7 @@ from hailhq.core.providers.verification.forms import pick_option, validate_input
 logger = logging.getLogger(__name__)
 
 _EXTENSIONS = {"image/jpeg": "jpg", "image/png": "png", "application/pdf": "pdf"}
+_UPLOAD_TIMEOUT_SECONDS = 60
 _SUBJECT_TYPES: tuple[SubjectType, ...] = ("person", "business")
 
 
@@ -242,8 +243,10 @@ class TelnyxVerificationProvider(VerificationProvider):
                 )
             )["data"]
             refs["group_id"] = group["id"]
-            # The group lists every requirement with its id and type, including
-            # the address ones the form only reported as address_required.
+            # Read the group back: it lists every requirement with its id and
+            # type, including the address ones the form only reported as
+            # address_required. The create response is not relied on for that.
+            group = await self._group(refs)
             values: list[dict] = []
             address_id: str | None = None
             for req in group.get("regulatory_requirements") or []:
@@ -297,10 +300,18 @@ class TelnyxVerificationProvider(VerificationProvider):
                     problems=[Problem(field="", message=_rejection(exc.response))],
                 )
             raise VerificationProviderError("Telnyx request failed") from exc
+        except httpx.HTTPError as exc:
+            # Timeouts and transport failures: the carrier, not the customer.
+            await self.discard(refs)
+            raise VerificationProviderError("Telnyx request failed") from exc
         except Exception:
             await self.discard(refs)
             raise
-        problems = await self._problems(refs)
+        try:
+            problems = await self._problems(refs)
+        except httpx.HTTPError as exc:
+            await self.discard(refs)
+            raise VerificationProviderError("Telnyx request failed") from exc
         if problems:
             await self.discard(refs)
             return DraftResult(refs={}, problems=problems)
@@ -320,6 +331,8 @@ class TelnyxVerificationProvider(VerificationProvider):
                     "filename": f"document.{ext}",
                     "customer_reference": reference,
                 },
+                # A 4 MB file is a 5 MB body; the default 20 s is too tight.
+                timeout=_UPLOAD_TIMEOUT_SECONDS,
             )
         )["data"]
         return created["id"]

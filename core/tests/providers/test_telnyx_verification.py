@@ -194,7 +194,9 @@ async def test_create_draft_happy_path() -> None:
         if path.endswith("/regulatory_requirements"):
             return httpx.Response(200, json=_rules("mobile"))
         if request.method == "POST" and path.endswith("/requirement_groups"):
-            return httpx.Response(200, json={"data": _group("mobile")})
+            # The create answer carries no requirement list; the draft must
+            # read the group back before it fills anything in.
+            return httpx.Response(200, json={"data": {"id": GROUP}})
         if request.method == "POST" and path.endswith("/addresses"):
             return httpx.Response(200, json={"data": {"id": "addr-1"}})
         if request.method == "POST" and path.endswith("/documents"):
@@ -259,6 +261,12 @@ async def test_create_draft_business_address_uses_business_name() -> None:
         if path.endswith("/regulatory_requirements"):
             return httpx.Response(200, json=_rules("local"))
         if request.method == "POST" and path.endswith("/requirement_groups"):
+            return httpx.Response(200, json={"data": {"id": GROUP}})
+        if (
+            request.method == "GET"
+            and GROUP in path
+            and not fake.bodies("PATCH", GROUP)
+        ):
             return httpx.Response(200, json={"data": _group("local")})
         if request.method == "POST" and path.endswith("/addresses"):
             return httpx.Response(200, json={"data": {"id": "addr-b"}})
@@ -297,6 +305,8 @@ async def test_create_draft_carrier_400_becomes_a_problem_and_deletes_the_draft(
         if path.endswith("/regulatory_requirements"):
             return httpx.Response(200, json=_rules("mobile"))
         if request.method == "POST" and path.endswith("/requirement_groups"):
+            return httpx.Response(200, json={"data": {"id": GROUP}})
+        if request.method == "GET" and GROUP in path:
             return httpx.Response(200, json={"data": _group("mobile")})
         if request.method == "POST" and path.endswith("/addresses"):
             return httpx.Response(200, json={"data": {"id": "addr-1"}})
@@ -336,6 +346,8 @@ async def test_create_draft_carrier_outage_raises_and_deletes_the_draft() -> Non
         if path.endswith("/regulatory_requirements"):
             return httpx.Response(200, json=_rules("mobile"))
         if request.method == "POST" and path.endswith("/requirement_groups"):
+            return httpx.Response(200, json={"data": {"id": GROUP}})
+        if request.method == "GET" and GROUP in path:
             return httpx.Response(200, json={"data": _group("mobile")})
         if request.method == "DELETE":
             return httpx.Response(204)
@@ -356,6 +368,40 @@ async def test_create_draft_carrier_outage_raises_and_deletes_the_draft() -> Non
     assert [c.url.path for c in fake.calls if c.method == "DELETE"] == [
         f"/v2/requirement_groups/{GROUP}"
     ]
+
+
+async def test_create_draft_timeout_is_a_provider_error() -> None:
+    fields, address, docs = _inputs("mobile")
+
+    def answers(request):
+        path = request.url.path
+        if path.endswith("/regulatory_requirements"):
+            return httpx.Response(200, json=_rules("mobile"))
+        if request.method == "POST" and path.endswith("/requirement_groups"):
+            return httpx.Response(200, json={"data": {"id": GROUP}})
+        if request.method == "GET" and GROUP in path:
+            return httpx.Response(200, json={"data": _group("mobile")})
+        if request.method == "DELETE":
+            return httpx.Response(204)
+        raise httpx.ReadTimeout("slow upload", request=request)
+
+    fake = Telnyx(answers)
+    p = provider(fake)
+    req = await p.requirements("SE", "mobile", "person")
+    with pytest.raises(VerificationProviderError):
+        await p.create_draft(
+            organization_id=ORG,
+            contact_email="ops@hail.test",
+            requirements=req,
+            fields=fields,
+            address=address,
+            documents=docs,
+        )
+    assert [c.url.path for c in fake.calls if c.method == "DELETE"] == [
+        f"/v2/requirement_groups/{GROUP}"
+    ]
+    upload = next(c for c in fake.calls if c.url.path.endswith("/documents"))
+    assert upload.extensions["timeout"]["read"] == 60
 
 
 async def test_check_reports_missing_and_declined_values() -> None:
