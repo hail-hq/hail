@@ -9,12 +9,13 @@ requests, no purchases, no account changes.
 
 Rules the merge follows, in this order:
 - A row someone verified by hand (verification_method "manual-confirmed") is
-  never overwritten. Disagreements are printed.
+  never overwritten and never marked unavailable. Disagreements are printed.
 - A row that vanished from the carrier is kept with available=false, a note
   and the date. A held number must stay billable; the picker hides it.
 - A row the sync could not observe this run (no numbers offered to this
-  account, no price, no dial code) is left exactly as it was: not seeing
-  stock is not the same as the carrier dropping the type.
+  account, no price, no dial code, or a country the account's listing does
+  not enumerate at all) is left exactly as it was: not seeing stock is not
+  the same as the carrier dropping the type.
 - A carrier without credentials is skipped with a printed reason, not an error.
 
 Credentials (env or --env-file): TWILIO_ACCOUNT_SID + TWILIO_AUTH_TOKEN,
@@ -26,7 +27,6 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import re
 import sys
 import time
 from collections import defaultdict
@@ -217,9 +217,25 @@ def map_twilio(
     return rows, skipped
 
 
+def twilio_observed_keys(
+    countries: list[dict], types_by_country: dict[str, list[str]]
+) -> set[str]:
+    """The "ISO:type" pairs the account's listing enumerated. Twilio's
+    AvailablePhoneNumbers list is scoped to the account's geographic
+    permissions: a country it is not enabled for is simply absent, which
+    says nothing about what Twilio sells. Only these keys were observed."""
+    return {
+        f"{c['country_code']}:{t}"
+        for c in countries
+        for t in types_by_country.get(c["country_code"], [])
+        if t in NUMBER_TYPES
+    }
+
+
 def fetch_twilio(
     http: Http, account_sid: str, dial_codes: dict[str, str]
-) -> tuple[list[dict], list[str]]:
+) -> tuple[list[dict], list[str], set[str]]:
+    """Rows, skipped lines, and the keys the account could see at all."""
     base = f"https://api.twilio.com/2010-04-01/Accounts/{account_sid}/AvailablePhoneNumbers"
     countries = http.get(f"{base}.json")["countries"]
     types_by_country: dict[str, list[str]] = {}
@@ -246,7 +262,7 @@ def fetch_twilio(
         page = http.get(url)
         regulations.extend(page["results"])
         url = page.get("meta", {}).get("next_page_url")
-    return map_twilio(
+    rows, skipped = map_twilio(
         countries,
         types_by_country,
         pricing,
@@ -254,6 +270,7 @@ def fetch_twilio(
         twilio_regulated(regulations),
         dial_codes,
     )
+    return rows, skipped, twilio_observed_keys(countries, types_by_country)
 
 
 # -- Telnyx -------------------------------------------------------------------
@@ -488,6 +505,22 @@ def fetch_didww(http: Http) -> tuple[list[dict], list[str], dict[str, str]]:
 # -- merge + write -------------------------------------------------------------
 
 
+def unobserved_keys(
+    existing: list[dict], skipped: list[str], observed: set[str] | None
+) -> set[str]:
+    """Keys the sync must leave alone: the ones it skipped with a reason, and,
+    when the fetch reports what it could see, every existing key outside that
+    view. A key never enumerated was not observed to be gone."""
+    keys = skipped_keys(skipped)
+    if observed is not None:
+        keys |= {
+            f"{n['country_code']}:{n['number_type']}"
+            for n in existing
+            if f"{n['country_code']}:{n['number_type']}" not in observed
+        }
+    return keys
+
+
 def skipped_keys(skipped: list[str]) -> set[str]:
     """The "ISO:type" keys in a mapper's skipped lines (each is
     "ISO:type: reason"; DIDWW's per-group lines carry no type and are ignored)."""
@@ -539,13 +572,12 @@ def merge(
         if not n.get("dial_code") and prev:
             n["dial_code"] = prev["dial_code"]
         if prev and prev.get("verification_method") == "manual-confirmed":
-            kept = _reappeared(prev) if not prev.get("available", True) else prev
-            diff = [f"{k}={n.get(k)}" for k in watched if kept.get(k) != n.get(k)]
+            diff = [f"{k}={n.get(k)}" for k in watched if prev.get(k) != n.get(k)]
             if diff:
                 report["kept"].append(
-                    f"{key}: carrier says {', '.join(diff)}; kept {kept['verified_by']} {kept['last_verified']}"
+                    f"{key}: carrier says {', '.join(diff)}; kept {prev['verified_by']} {prev['last_verified']}"
                 )
-            numbers.append(kept)
+            numbers.append(prev)
             continue
         changed = [k for k in watched if (prev or {}).get(k) != n.get(k)]
         if prev is None:
@@ -576,6 +608,13 @@ def merge(
             report["unobserved"].append(key)
             numbers.append(prev)
             continue
+        if prev.get("verification_method") == "manual-confirmed":
+            # A person vouched for this row; only a person takes it off sale.
+            report["kept"].append(
+                f"{key}: carrier no longer lists it; kept {prev['verified_by']} {prev['last_verified']}"
+            )
+            numbers.append(prev)
+            continue
         kept = dict(prev)
         if kept.get("available", True):
             kept["available"] = False
@@ -593,21 +632,6 @@ def merge(
 _VANISHED_NOTE = (
     "not offered by the carrier as of {today}; kept so held numbers stay billable"
 )
-_VANISHED_RE = re.compile(
-    re.escape(_VANISHED_NOTE).replace(r"\{today\}", r"\d{4}-\d{2}-\d{2}")
-)
-
-
-def _reappeared(prev: dict) -> dict:
-    """A row marked vanished that the carrier lists again: on sale again,
-    and the vanished note goes; anything a person wrote stays."""
-    row = {**prev, "available": True}
-    notes = _VANISHED_RE.sub("", row.get("notes") or "").strip("; ")
-    if notes:
-        row["notes"] = notes
-    else:
-        row.pop("notes", None)
-    return row
 
 
 def regulatory_block(existing: dict, numbers: list[dict], provider: str) -> dict:
@@ -680,6 +704,7 @@ def run_provider(
     for iso, prefix in shared_dial_codes.items():
         dial_codes.setdefault(iso, prefix)
     session = requests.Session()
+    observed: set[str] | None = None
     if provider == "twilio":
         sid, tok = config.get("TWILIO_ACCOUNT_SID"), config.get("TWILIO_AUTH_TOKEN")
         if not sid or not tok:
@@ -688,7 +713,7 @@ def run_provider(
             )
             return False
         session.auth = (sid, tok)
-        rows, skipped = fetch_twilio(http_factory(session), sid, dial_codes)
+        rows, skipped, observed = fetch_twilio(http_factory(session), sid, dial_codes)
     elif provider == "telnyx":
         key = config.get("TELNYX_API_KEY")
         if not key:
@@ -721,7 +746,7 @@ def run_provider(
         today,
         SOURCE_URLS[provider],
         f"{provider}-api-sync",
-        unobserved=skipped_keys(skipped),
+        unobserved=unobserved_keys(existing, skipped, observed),
     )
     write_catalog(path, provider, numbers)
     summary.append(f"## {provider}: {len(numbers)} rows, {len(countries)} countries")

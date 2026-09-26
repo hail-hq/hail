@@ -316,8 +316,8 @@ def test_regulatory_block_is_derived_from_rows(tmp_path):
     assert json.loads(path.read_text())["provider"] == "twilio"
 
 
-def test_merge_keeps_hand_notes_across_vanish_and_return():
-    hand = {
+def test_merge_keeps_notes_on_a_vanished_row_and_rebuilds_it_on_return():
+    prev = {
         "country_code": "GB",
         "number_type": "mobile",
         "display_name": "United Kingdom mobile",
@@ -329,10 +329,10 @@ def test_merge_keeps_hand_notes_across_vanish_and_return():
         "verification_required": True,
         "last_verified": "2026-09-24",
         "last_changed_at": "2026-09-24",
-        "verification_method": "manual-confirmed",
-        "verified_by": "r13i",
+        "verification_method": "carrier-sync",
+        "verified_by": "telnyx-api-sync",
         "source_url": "https://x",
-        "notes": "price confirmed on the console; the API quotes the old rate",
+        "notes": "price range 1.00 to 3.50; cheapest shown",
     }
     fetched_gb = {
         "country_code": "GB",
@@ -345,21 +345,62 @@ def test_merge_keeps_hand_notes_across_vanish_and_return():
         "mms": False,
         "verification_required": True,
     }
-    # Vanishes: the hand note stays, the vanished note is added after it.
-    gone, report = sync.merge([hand], [], "2026-09-28", "https://src", "sync")
+    # Vanishes: the existing note stays, the vanished note is added after it.
+    gone, report = sync.merge([prev], [], "2026-09-28", "https://src", "sync")
     assert report["vanished"] == ["GB:mobile"] and gone[0]["available"] is False
-    assert gone[0]["notes"].startswith(hand["notes"] + "; not offered")
+    assert gone[0]["notes"].startswith(prev["notes"] + "; not offered")
     # Vanishes again: no second copy of the vanished note.
     gone2, _ = sync.merge(gone, [], "2026-09-29", "https://src", "sync")
     assert gone2[0]["notes"] == gone[0]["notes"]
-    # Returns: on sale again, hand note intact, vanished note dropped.
+    # Returns: rebuilt from the carrier, on sale again, vanished note gone.
     back, report = sync.merge(gone2, [fetched_gb], "2026-09-30", "https://src", "sync")
-    assert back[0]["available"] is True and back[0]["notes"] == hand["notes"]
-    assert back[0]["usd_per_month"] == "2.50"  # still the hand-verified price
-    assert report["kept"] and report["vanished"] == []
-    # A vanished row with no hand note comes back with no notes at all.
-    plain = {**hand, "verification_method": "carrier-sync"}
-    plain.pop("notes")
-    gone3, _ = sync.merge([plain], [], "2026-09-28", "https://src", "sync")
-    back3, _ = sync.merge(gone3, [fetched_gb], "2026-09-30", "https://src", "sync")
-    assert back3[0]["available"] is True and "notes" not in back3[0]
+    assert back[0]["available"] is True and "notes" not in back[0]
+    assert back[0]["usd_per_month"] == "1.15" and report["vanished"] == []
+
+
+def test_twilio_keys_outside_the_account_listing_are_unobserved():
+    """The account is not enabled for PT, so PT is absent from Twilio's
+    country list. That is not evidence Twilio stopped selling PT numbers."""
+    countries = [{"country_code": "GB", "country": "United Kingdom"}]
+    types = {"GB": ["local", "mobile", "fax"]}
+    assert sync.twilio_observed_keys(countries, types) == {"GB:local", "GB:mobile"}
+    existing = [
+        {"country_code": "GB", "number_type": "local"},
+        {"country_code": "GB", "number_type": "toll_free"},
+        {"country_code": "PT", "number_type": "local"},
+        {"country_code": "PT", "number_type": "national"},
+    ]
+    skipped = ["GB:mobile: no numbers offered to this account"]
+    observed = sync.twilio_observed_keys(countries, types)
+    assert sync.unobserved_keys(existing, skipped, observed) == {
+        "GB:mobile",
+        "GB:toll_free",
+        "PT:local",
+        "PT:national",
+    }
+    # A fetch that reports no view (other carriers) only trusts the skips.
+    assert sync.unobserved_keys(existing, skipped, None) == {"GB:mobile"}
+
+
+def test_merge_never_marks_a_hand_verified_row_unavailable():
+    hand = {
+        "country_code": "PT",
+        "number_type": "national",
+        "display_name": "Portugal national",
+        "dial_code": "351",
+        "usd_per_month": "1.00",
+        "voice": True,
+        "sms": False,
+        "mms": False,
+        "verification_required": True,
+        "last_verified": "2026-09-25",
+        "last_changed_at": "2026-09-25",
+        "verification_method": "manual-confirmed",
+        "verified_by": "r13i",
+        "source_url": "https://x",
+    }
+    numbers, report = sync.merge([hand], [], "2026-09-28", "https://src", "sync")
+    assert numbers == [hand] and report["vanished"] == []
+    assert report["kept"] == [
+        "PT:national: carrier no longer lists it; kept r13i 2026-09-25"
+    ]
