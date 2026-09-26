@@ -4306,6 +4306,7 @@ components:
           enum:
             - twilio
             - telnyx
+            - didww
           title: Provider
           description: Carrier supplying this exact number.
         e164:
@@ -6315,10 +6316,11 @@ components:
             - auto
             - twilio
             - telnyx
+            - didww
           title: Provider
           description:
             Carrier restriction for the quote. Auto accepts the quoted
-            carrier; twilio or telnyx must match it.
+            carrier; twilio, telnyx, or didww must match it.
           default: auto
         country_code:
           type: string
@@ -6384,11 +6386,12 @@ components:
             - auto
             - twilio
             - telnyx
+            - didww
           title: Provider
           description:
-            Carrier restriction; twilio or telnyx returns that carrier's
-            offers only. auto compares both by readiness, remaining verification effort,
-            and rental/setup costs; Twilio wins equivalent ties.
+            Carrier restriction; twilio, telnyx, or didww returns that
+            carrier's offers only. auto compares all by readiness, remaining verification
+            effort, and rental/setup costs; Twilio wins equivalent ties.
           default: auto
       additionalProperties: false
       type: object

@@ -119,6 +119,7 @@ func (e CarrierOfferNumberType) Valid() bool {
 
 // Defines values for CarrierOfferProvider.
 const (
+	CarrierOfferProviderDidww  CarrierOfferProvider = "didww"
 	CarrierOfferProviderTelnyx CarrierOfferProvider = "telnyx"
 	CarrierOfferProviderTwilio CarrierOfferProvider = "twilio"
 )
@@ -126,6 +127,8 @@ const (
 // Valid indicates whether the value is a known member of the CarrierOfferProvider enum.
 func (e CarrierOfferProvider) Valid() bool {
 	switch e {
+	case CarrierOfferProviderDidww:
+		return true
 	case CarrierOfferProviderTelnyx:
 		return true
 	case CarrierOfferProviderTwilio:
@@ -576,6 +579,7 @@ func (e NumberAcquireRequestNumberType) Valid() bool {
 // Defines values for NumberAcquireRequestProvider.
 const (
 	NumberAcquireRequestProviderAuto   NumberAcquireRequestProvider = "auto"
+	NumberAcquireRequestProviderDidww  NumberAcquireRequestProvider = "didww"
 	NumberAcquireRequestProviderTelnyx NumberAcquireRequestProvider = "telnyx"
 	NumberAcquireRequestProviderTwilio NumberAcquireRequestProvider = "twilio"
 )
@@ -584,6 +588,8 @@ const (
 func (e NumberAcquireRequestProvider) Valid() bool {
 	switch e {
 	case NumberAcquireRequestProviderAuto:
+		return true
+	case NumberAcquireRequestProviderDidww:
 		return true
 	case NumberAcquireRequestProviderTelnyx:
 		return true
@@ -639,6 +645,7 @@ func (e NumberQuoteRequestNumberType) Valid() bool {
 // Defines values for NumberQuoteRequestProvider.
 const (
 	Auto   NumberQuoteRequestProvider = "auto"
+	Didww  NumberQuoteRequestProvider = "didww"
 	Telnyx NumberQuoteRequestProvider = "telnyx"
 	Twilio NumberQuoteRequestProvider = "twilio"
 )
@@ -647,6 +654,8 @@ const (
 func (e NumberQuoteRequestProvider) Valid() bool {
 	switch e {
 	case Auto:
+		return true
+	case Didww:
 		return true
 	case Telnyx:
 		return true
@@ -2338,7 +2347,7 @@ type NumberAcquireRequest struct {
 	// NumberType Kind of number to acquire: 'local', 'mobile', 'toll_free', or 'national'.
 	NumberType *NumberAcquireRequestNumberType `json:"number_type,omitempty"`
 
-	// Provider Carrier restriction for the quote. Auto accepts the quoted carrier; twilio or telnyx must match it.
+	// Provider Carrier restriction for the quote. Auto accepts the quoted carrier; twilio, telnyx, or didww must match it.
 	Provider *NumberAcquireRequestProvider `json:"provider,omitempty"`
 
 	// QuoteId Unexpired organization-bound quote from POST /numbers/quotes. Required: without it the request is a 422; get a quote first.
@@ -2348,7 +2357,7 @@ type NumberAcquireRequest struct {
 // NumberAcquireRequestNumberType Kind of number to acquire: 'local', 'mobile', 'toll_free', or 'national'.
 type NumberAcquireRequestNumberType string
 
-// NumberAcquireRequestProvider Carrier restriction for the quote. Auto accepts the quoted carrier; twilio or telnyx must match it.
+// NumberAcquireRequestProvider Carrier restriction for the quote. Auto accepts the quoted carrier; twilio, telnyx, or didww must match it.
 type NumberAcquireRequestProvider string
 
 // NumberQuoteRequest defines model for NumberQuoteRequest.
@@ -2362,7 +2371,7 @@ type NumberQuoteRequest struct {
 	// NumberType Restrict number type; omit to compare all supported types.
 	NumberType *NumberQuoteRequestNumberType `json:"number_type,omitempty"`
 
-	// Provider Carrier restriction; twilio or telnyx returns that carrier's offers only. auto compares both by readiness, remaining verification effort, and rental/setup costs; Twilio wins equivalent ties.
+	// Provider Carrier restriction; twilio, telnyx, or didww returns that carrier's offers only. auto compares all by readiness, remaining verification effort, and rental/setup costs; Twilio wins equivalent ties.
 	Provider *NumberQuoteRequestProvider `json:"provider,omitempty"`
 }
 
@@ -2372,7 +2381,7 @@ type NumberQuoteRequestCapabilities string
 // NumberQuoteRequestNumberType Restrict number type; omit to compare all supported types.
 type NumberQuoteRequestNumberType string
 
-// NumberQuoteRequestProvider Carrier restriction; twilio or telnyx returns that carrier's offers only. auto compares both by readiness, remaining verification effort, and rental/setup costs; Twilio wins equivalent ties.
+// NumberQuoteRequestProvider Carrier restriction; twilio, telnyx, or didww returns that carrier's offers only. auto compares all by readiness, remaining verification effort, and rental/setup costs; Twilio wins equivalent ties.
 type NumberQuoteRequestProvider string
 
 // NumberQuotesResponse defines model for NumberQuotesResponse.

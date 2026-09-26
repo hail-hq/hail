@@ -50,6 +50,11 @@ class Settings(BaseSettings):
     telnyx_connection_id: str = ""
     telnyx_sip_username: str = ""
     telnyx_public_key: str = ""
+    # DIDWW: numbers, orders and end-user registration through API v3.
+    # Empty key = DIDWW offers are hidden and its verification plug-in is off.
+    didww_api_key: str = ""
+    # "production" or "sandbox" (https://sandbox-api.didww.com/v3).
+    didww_environment: str = "production"
 
     # AWS — used today for SES (outbound email). boto3 falls back to its
     # default credential chain (env / config file / IAM role) when these

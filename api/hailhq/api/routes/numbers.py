@@ -39,7 +39,8 @@ from hailhq.api.ratelimit import GENERAL_RATE_LIMITED_RESPONSES
 from hailhq.api.route_prefixes import request_mount_prefix
 from hailhq.api.routes.sms import get_sms_provider
 from hailhq.core import telephony_catalog
-from hailhq.core.carrier_routing import TELNYX, TWILIO, sms_route
+from hailhq.core.carrier_routing import DIDWW, TELNYX, TWILIO, sms_route
+from hailhq.core.config import settings
 from hailhq.core.db import get_session
 from hailhq.core.models import NumberOffer, PhoneNumber
 from hailhq.core.number_offers import (
@@ -53,6 +54,7 @@ from hailhq.core.providers.voice import (
     CarrierNotConfigured,
     VoiceProvider,
 )
+from hailhq.core.providers.voice.didww import release_didww_number
 from hailhq.core.providers.voice.telnyx import release_telnyx_number
 from hailhq.core.providers.voice.twilio import LazyTwilioVoiceProvider
 from hailhq.core.schemas import (
@@ -208,7 +210,14 @@ async def _release_twilio(number: PhoneNumber, provider: VoiceProvider) -> None:
     await provider.release_number(number.provider_resource_id)
 
 
-_RELEASERS = {TELNYX: _release_telnyx, TWILIO: _release_twilio}
+async def _release_didww(number: PhoneNumber, provider: VoiceProvider) -> None:
+    try:
+        await release_didww_number(number.provider_resource_id)
+    except CarrierNotConfigured as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
+_RELEASERS = {TELNYX: _release_telnyx, TWILIO: _release_twilio, DIDWW: _release_didww}
 
 
 async def release_org_number(
@@ -496,17 +505,31 @@ async def quote_numbers(
     cost, preferring Twilio on equivalent ties. Blocked offers sort by verification effort. SMS capability does not waive messaging registration requirements.
     """
 
-    # Only number types the telephony catalog lists can be bought, so only
-    # those are searched.
+    # The catalog decides the kinds Twilio/Telnyx can be searched for; DIDWW
+    # is searched for every kind when it is configured. A kind the catalog
+    # does not list is never quoted for Twilio/Telnyx (the purchase would
+    # 422), so it is only searched at DIDWW.
+    providers = PROVIDERS if body.provider == "auto" else [body.provider]
+    didww_on = DIDWW in providers and bool(settings.didww_api_key)
+    catalog_kinds = [
+        k
+        for k in ("local", "mobile", "national", "toll_free")
+        if telephony_catalog.capabilities(body.country_code, k) is not None
+    ]
     if body.number_type:
-        catalog_capabilities(body.country_code, body.number_type)
+        if body.number_type not in catalog_kinds and not didww_on:
+            catalog_capabilities(body.country_code, body.number_type)
         kinds = [body.number_type]
     else:
-        kinds = [
-            k
-            for k in ("local", "mobile", "national", "toll_free")
-            if telephony_catalog.capabilities(body.country_code, k) is not None
-        ]
+        kinds = catalog_kinds + (
+            [
+                k
+                for k in ("local", "mobile", "national", "toll_free")
+                if k not in catalog_kinds
+            ]
+            if didww_on
+            else []
+        )
         if not kinds:
             raise unprocessable(
                 f"we don't offer numbers in {body.country_code} yet",
@@ -515,7 +538,6 @@ async def quote_numbers(
     # Carrier discovery takes seconds. End the transaction the auth lookup
     # opened so this request does not hold a pooled connection while it waits.
     await db.commit()
-    providers = PROVIDERS if body.provider == "auto" else [body.provider]
     batches = await asyncio.gather(
         *(
             discover_offers(
@@ -523,7 +545,7 @@ async def quote_numbers(
                 body.country_code,
                 kind,
                 body.capabilities,
-                providers=providers,
+                providers=providers if kind in catalog_kinds else [DIDWW],
             )
             for kind in kinds
         )

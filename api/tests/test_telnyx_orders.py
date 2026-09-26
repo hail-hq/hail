@@ -7,7 +7,6 @@ import pytest
 from fastapi import HTTPException
 from hailhq.api.number_orders import (
     CONSUMED_QUOTE_RETENTION,
-    PENDING_ORDER_TIMEOUT,
     QUOTE_RETENTION,
     acquire_offer,
     purge_expired_quotes,
@@ -15,6 +14,7 @@ from hailhq.api.number_orders import (
 )
 from hailhq.core import telephony_catalog
 from hailhq.core.billing import get_balance_cents, monthly_fee_ref
+from hailhq.core.carrier_routing import carrier
 from hailhq.core.models import AccountCredit, NumberOffer, PhoneNumber
 from hailhq.core.number_offers import CarrierOffer
 from hailhq.core.providers.voice import CarrierRequestError
@@ -297,7 +297,9 @@ async def test_status_lookup_rejection_does_not_refund_accepted_order(
 
 
 async def age(db, number):
-    number.created_at = datetime.now(timezone.utc) - PENDING_ORDER_TIMEOUT * 2
+    number.created_at = (
+        datetime.now(timezone.utc) - carrier("telnyx").pending_timeout * 2
+    )
     await db.commit()
 
 
@@ -321,7 +323,9 @@ async def test_unfound_telnyx_order_fails_and_refunds_after_timeout(
     await reconcile_order(async_session, number, force=True)
     assert number.provisioning_state == "pending"
     assert await get_balance_cents(async_session, org) == 99850
-    number.created_at = datetime.now(timezone.utc) - PENDING_ORDER_TIMEOUT / 2
+    number.created_at = (
+        datetime.now(timezone.utc) - carrier("telnyx").pending_timeout / 2
+    )
     await async_session.commit()
     await reconcile_order(async_session, number, force=True)
     assert number.provisioning_state == "pending"
@@ -779,7 +783,7 @@ async def test_pending_order_past_timeout_is_failed_and_refunded_once(
         text("UPDATE phone_numbers SET created_at = :t WHERE id = :id"),
         {
             "t": datetime.now(timezone.utc)
-            - PENDING_ORDER_TIMEOUT
+            - carrier("telnyx").pending_timeout
             - timedelta(minutes=1),
             "id": number.id,
         },
@@ -946,7 +950,7 @@ async def _age_number(async_session, number):
         text("UPDATE phone_numbers SET created_at = :t WHERE id = :id"),
         {
             "t": datetime.now(timezone.utc)
-            - PENDING_ORDER_TIMEOUT
+            - carrier("telnyx").pending_timeout
             - timedelta(minutes=1),
             "id": number.id,
         },
@@ -985,3 +989,25 @@ async def test_erroring_lookups_fail_and_refund_after_timeout(
     assert records[0].exc_info is not None
     assert str(number.id) in records[0].getMessage()
     assert "operator review" in records[0].getMessage()
+
+
+async def test_non_didww_timeout_unchanged(async_session, org_and_key, monkeypatch):
+    org, _, _ = org_and_key
+    row, offer = await seed_quote(async_session, org)
+    await _stub_order(monkeypatch, offer, {"data": {"id": str(uuid4())}})
+    number = await buy(async_session, org, row)
+    monkeypatch.setattr(
+        "hailhq.api.number_orders.carrier_outcome",
+        AsyncMock(return_value=("pending", None, None)),
+    )
+    await async_session.execute(
+        text("UPDATE phone_numbers SET created_at = :t WHERE id = :id"),
+        {
+            "t": datetime.now(timezone.utc) - timedelta(hours=2, minutes=1),
+            "id": number.id,
+        },
+    )
+    await async_session.commit()
+    await async_session.refresh(number)
+    await reconcile_order(async_session, number, force=True)
+    assert number.provisioning_state == "failed"

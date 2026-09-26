@@ -4,6 +4,10 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 
 ## [Unreleased]
 
+- DIDWW numbers can be quoted and bought through `POST /numbers/quotes` and
+  `POST /numbers`; end-user registration runs through `/verifications`
+  (`provider=didww`). New settings `DIDWW_API_KEY`, `DIDWW_ENVIRONMENT`.
+
 ## [0.24.0] — 2026-09-25
 
 Numbers now come from a live comparison of carriers: Hail quotes Twilio and
