@@ -12,11 +12,10 @@ from __future__ import annotations
 
 import json
 import os
-from decimal import Decimal
 from functools import lru_cache
 from pathlib import Path
 
-__all__ = ["capabilities", "is_acquirable", "price_usd_per_month"]
+__all__ = ["capabilities", "is_acquirable"]
 
 # In the API image costs/ is copied to /app/costs (see api/Dockerfile); in dev
 # the module sits at core/hailhq/core/ so parents[3] is the repo root. An env
@@ -36,11 +35,6 @@ def _load() -> dict[tuple[str, str], dict]:
 
 def is_acquirable(country_code: str, number_type: str) -> bool:
     return (country_code, number_type) in _load()
-
-
-def price_usd_per_month(country_code: str, number_type: str) -> Decimal | None:
-    row = _load().get((country_code, number_type))
-    return Decimal(row["usd_per_month"]) if row else None
 
 
 def capabilities(country_code: str, number_type: str) -> dict | None:

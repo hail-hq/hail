@@ -104,3 +104,41 @@ class TwilioSmsProvider(SmsProvider):
             ).phone_numbers.create,
             phone_number_sid=provider_resource_id,
         )
+
+
+class LazyTwilioSmsProvider(SmsProvider):
+    """Builds the Twilio client on first use, so a deployment without Twilio
+    credentials can still serve numbers that belong to another carrier."""
+
+    def __init__(self) -> None:
+        self._inner: TwilioSmsProvider | None = None
+
+    def _provider(self) -> TwilioSmsProvider:
+        if self._inner is None:
+            self._inner = TwilioSmsProvider()
+        return self._inner
+
+    async def send_sms(
+        self,
+        from_e164: str,
+        to_e164: str,
+        body: str,
+        status_callback_url: str | None = None,
+    ) -> ProviderSmsResult:
+        return await self._provider().send_sms(
+            from_e164, to_e164, body, status_callback_url
+        )
+
+    async def ensure_messaging_service(
+        self, organization_id: UUID, existing_sid: str | None
+    ) -> str:
+        return await self._provider().ensure_messaging_service(
+            organization_id, existing_sid
+        )
+
+    async def attach_number(
+        self, messaging_service_sid: str, provider_resource_id: str
+    ) -> None:
+        await self._provider().attach_number(
+            messaging_service_sid, provider_resource_id
+        )

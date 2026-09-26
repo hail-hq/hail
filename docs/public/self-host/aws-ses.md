@@ -113,7 +113,7 @@ Precedence at send time (highest wins):
 Tenants can register their own DNS-controlled domain:
 
 ```bash
-curl -X POST $HAIL_API_URL/email-domains \
+curl -X POST $HAIL_API_URL/v1/email-domains \
   -H "Authorization: Bearer $HAIL_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{"kind":"custom","domain":"acme.com"}'
@@ -148,7 +148,7 @@ hail email send --to alice@example.com --subject "hi" --body "hello"
 Or via HTTP:
 
 ```bash
-curl -X POST $HAIL_API_URL/emails \
+curl -X POST $HAIL_API_URL/v1/emails \
   -H "Authorization: Bearer $HAIL_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
@@ -177,7 +177,7 @@ Upload a file once and attach it to as many sends as you want. The limit is 25MB
 ### Upload a file
 
 ```bash
-curl -s -X POST $HAIL_API_URL/email-attachments \
+curl -s -X POST $HAIL_API_URL/v1/email-attachments \
   -H "Authorization: Bearer $HAIL_API_KEY" \
   -F "file=@invoice.pdf" | jq -r .id
 # → "3fa85f64-5717-4562-b3fc-2c963f66afa6"
@@ -190,7 +190,7 @@ The response is a JSON object with an `id` field (UUID). Store this id to refere
 Pass `attachment_ids` (a list of UUIDs) in the `POST /emails` payload:
 
 ```bash
-curl -X POST $HAIL_API_URL/emails \
+curl -X POST $HAIL_API_URL/v1/emails \
   -H "Authorization: Bearer $HAIL_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
@@ -295,7 +295,7 @@ HAIL_INBOUND_HMAC_SECRET=<same as Terraform var>
 Restart `api`. Send a test mail to a hail-mail address and confirm:
 
 ```bash
-curl "$HAIL_API_URL/emails?direction=inbound" \
+curl "$HAIL_API_URL/v1/emails?direction=inbound" \
   -H "Authorization: Bearer $HAIL_API_KEY"
 ```
 
@@ -394,13 +394,13 @@ Tenants configure routing per `email_domains` row:
 
 ```bash
 # Forward every inbound on the org's hail-mail address to a real inbox
-curl -X PATCH $HAIL_API_URL/email-domains/$DOMAIN_ID \
+curl -X PATCH $HAIL_API_URL/v1/email-domains/$DOMAIN_ID \
   -H "Authorization: Bearer $HAIL_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{"inbound_enabled":true,"forward_to":["team@acme.com"]}'
 
 # Or POST inbound events to a webhook URL — the response carries the secret once
-curl -X PATCH $HAIL_API_URL/email-domains/$DOMAIN_ID \
+curl -X PATCH $HAIL_API_URL/v1/email-domains/$DOMAIN_ID \
   -H "Authorization: Bearer $HAIL_API_KEY" \
   -d '{"inbound_enabled":true,"webhook_url":"https://hooks.acme.com/hail"}'
 ```
@@ -408,7 +408,7 @@ curl -X PATCH $HAIL_API_URL/email-domains/$DOMAIN_ID \
 For org-wide multi-event delivery (firehose pattern):
 
 ```bash
-curl -X POST $HAIL_API_URL/webhooks \
+curl -X POST $HAIL_API_URL/v1/webhooks \
   -H "Authorization: Bearer $HAIL_API_KEY" \
   -d '{"target_url":"https://hooks.acme.com/all","event_types":["email.received","email.bounced","email.complained"]}'
 ```

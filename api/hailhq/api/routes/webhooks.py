@@ -24,7 +24,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from fastapi import status as http_status
-from hailhq.api.audit import write_audit_log
+from hailhq.api.audit import actor_of, write_audit_log
 from hailhq.api.deps import Principal, get_current_principal
 from hailhq.api.errors import unprocessable
 from hailhq.api.pagination import fetch_cursor_page
@@ -117,6 +117,7 @@ async def create_subscription(
     db.add(sub)
     await db.commit()
     await db.refresh(sub)
+    actor_user_id, actor_kind = actor_of(principal)
     await write_audit_log(
         organization_id=principal.organization_id,
         api_key_id=principal.api_key_id,
@@ -124,6 +125,8 @@ async def create_subscription(
         resource_type="webhook_subscription",
         resource_id=sub.id,
         payload={"target_url": sub.target_url},
+        actor_user_id=actor_user_id,
+        actor_kind=actor_kind,
     )
     return _to_response(sub, secret=secret)
 
@@ -219,6 +222,7 @@ async def patch_subscription(
         )
         await db.commit()
         await db.refresh(sub)
+        actor_user_id, actor_kind = actor_of(principal)
         await write_audit_log(
             organization_id=principal.organization_id,
             api_key_id=principal.api_key_id,
@@ -226,6 +230,8 @@ async def patch_subscription(
             resource_type="webhook_subscription",
             resource_id=sub.id,
             payload={"target_url": sub.target_url, "status": sub.status},
+            actor_user_id=actor_user_id,
+            actor_kind=actor_kind,
         )
     return _to_response(sub)
 
@@ -247,6 +253,7 @@ async def delete_subscription(
     sub = await _load_owned(db, sub_id, principal.organization_id)
     await db.delete(sub)
     await db.commit()
+    actor_user_id, actor_kind = actor_of(principal)
     await write_audit_log(
         organization_id=principal.organization_id,
         api_key_id=principal.api_key_id,
@@ -254,6 +261,8 @@ async def delete_subscription(
         resource_type="webhook_subscription",
         resource_id=sub_id,
         payload={},
+        actor_user_id=actor_user_id,
+        actor_kind=actor_kind,
     )
     return Response(status_code=http_status.HTTP_204_NO_CONTENT)
 
@@ -287,6 +296,7 @@ async def rotate_secret(
     await db.commit()
     await db.refresh(sub)
     # Log the rotation only — NEVER the secret itself.
+    actor_user_id, actor_kind = actor_of(principal)
     await write_audit_log(
         organization_id=principal.organization_id,
         api_key_id=principal.api_key_id,
@@ -294,6 +304,8 @@ async def rotate_secret(
         resource_type="webhook_subscription",
         resource_id=sub.id,
         payload={},
+        actor_user_id=actor_user_id,
+        actor_kind=actor_kind,
     )
     return _to_response(sub, secret=secret)
 
@@ -374,6 +386,7 @@ async def redeliver(
     )
     await db.commit()
     await db.refresh(row)
+    actor_user_id, actor_kind = actor_of(principal)
     await write_audit_log(
         organization_id=principal.organization_id,
         api_key_id=principal.api_key_id,
@@ -381,5 +394,7 @@ async def redeliver(
         resource_type="webhook_subscription",
         resource_id=sub_id,
         payload={"delivery_id": str(delivery_id)},
+        actor_user_id=actor_user_id,
+        actor_kind=actor_kind,
     )
     return WebhookDeliveryResponse.model_validate(row)

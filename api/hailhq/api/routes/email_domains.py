@@ -35,7 +35,7 @@ from uuid import UUID
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from fastapi import status as http_status
-from hailhq.api.audit import write_audit_log
+from hailhq.api.audit import actor_of, write_audit_log
 from hailhq.api.deps import Principal, get_current_principal
 from hailhq.api.errors import unprocessable
 from hailhq.api.pagination import fetch_cursor_page
@@ -368,6 +368,7 @@ async def create_email_domain(
                 detail=f"hail-mail address {address!r} is already registered",
             ) from exc
         await db.refresh(sd)
+        actor_user_id, actor_kind = actor_of(principal)
         await write_audit_log(
             organization_id=principal.organization_id,
             api_key_id=principal.api_key_id,
@@ -375,6 +376,8 @@ async def create_email_domain(
             resource_type="email_domain",
             resource_id=sd.id,
             payload={"kind": "hail_mail", "domain": sd.domain},
+            actor_user_id=actor_user_id,
+            actor_kind=actor_kind,
         )
         response.headers["Location"] = (
             f"{request_mount_prefix(request)}/email-domains/{sd.id}"
@@ -421,6 +424,7 @@ async def create_email_domain(
             detail=f"sender domain {domain!r} is already registered",
         ) from exc
     await db.refresh(sd)
+    actor_user_id, actor_kind = actor_of(principal)
     await write_audit_log(
         organization_id=principal.organization_id,
         api_key_id=principal.api_key_id,
@@ -428,6 +432,8 @@ async def create_email_domain(
         resource_type="email_domain",
         resource_id=sd.id,
         payload={"kind": "custom", "domain": sd.domain},
+        actor_user_id=actor_user_id,
+        actor_kind=actor_kind,
     )
     response.headers["Location"] = (
         f"{request_mount_prefix(request)}/email-domains/{sd.id}"
@@ -780,6 +786,7 @@ async def patch_email_domain(
         raise unprocessable("patch violates a domain check constraint") from exc
 
     await db.refresh(sd)
+    actor_user_id, actor_kind = actor_of(principal)
     await write_audit_log(
         organization_id=principal.organization_id,
         api_key_id=principal.api_key_id,
@@ -787,6 +794,8 @@ async def patch_email_domain(
         resource_type="email_domain",
         resource_id=sd.id,
         payload={"domain": sd.domain},
+        actor_user_id=actor_user_id,
+        actor_kind=actor_kind,
     )
 
     return EmailDomainResponse.model_validate(sd)
@@ -827,6 +836,7 @@ async def verify_email_domain(
     if sd.kind == "hail_mail":
         # Nothing to refresh — the parent identity is pre-verified. Still
         # audit-log the call so org admins can see who touched what.
+        actor_user_id, actor_kind = actor_of(principal)
         await write_audit_log(
             organization_id=principal.organization_id,
             api_key_id=principal.api_key_id,
@@ -834,6 +844,8 @@ async def verify_email_domain(
             resource_type="email_domain",
             resource_id=sd.id,
             payload={"domain": sd.domain, "status": sd.verification_status},
+            actor_user_id=actor_user_id,
+            actor_kind=actor_kind,
         )
         return EmailDomainResponse.model_validate(sd)
 
@@ -886,6 +898,7 @@ async def verify_email_domain(
     )
     await db.commit()
     await db.refresh(sd)
+    actor_user_id, actor_kind = actor_of(principal)
     await write_audit_log(
         organization_id=principal.organization_id,
         api_key_id=principal.api_key_id,
@@ -893,6 +906,8 @@ async def verify_email_domain(
         resource_type="email_domain",
         resource_id=sd.id,
         payload={"domain": sd.domain, "status": sd.verification_status},
+        actor_user_id=actor_user_id,
+        actor_kind=actor_kind,
     )
     # Check whether the receive MX is live.  Placed after commit so a DNS
     # error can't roll back the verified status we just persisted.
@@ -994,6 +1009,7 @@ async def delete_email_domain(
                 exc_info=True,
             )
 
+    actor_user_id, actor_kind = actor_of(principal)
     await write_audit_log(
         organization_id=principal.organization_id,
         api_key_id=principal.api_key_id,
@@ -1001,6 +1017,8 @@ async def delete_email_domain(
         resource_type="email_domain",
         resource_id=deleted_id,
         payload={"kind": deleted_kind, "domain": deleted_domain},
+        actor_user_id=actor_user_id,
+        actor_kind=actor_kind,
     )
     return Response(status_code=http_status.HTTP_204_NO_CONTENT)
 

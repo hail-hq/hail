@@ -12,7 +12,7 @@ number-to-org routing, which a shared pool number can't provide.
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Annotated, Any
 from uuid import UUID
 
@@ -22,7 +22,7 @@ from hailhq.api.agent_gate import (
     RATE_LIMITED_RESPONSES,
     require_agent_send_allowed,
 )
-from hailhq.api.audit import write_audit_log
+from hailhq.api.audit import actor_of, write_audit_log
 from hailhq.api.consent import enforce_consent, isoformat_or_none
 from hailhq.api.deps import Principal, get_current_principal
 from hailhq.api.errors import unprocessable
@@ -41,13 +41,26 @@ from hailhq.api.ratelimit import (
 )
 from hailhq.api.route_prefixes import request_mount_prefix
 from hailhq.api.usage import write_usage_event
+from hailhq.core.carrier_routing import TELNYX, TWILIO, sms_route, sms_status_path
 from hailhq.core.compliance_gate import check_sms_allowed, remove_suppression
 from hailhq.core.config import settings
 from hailhq.core.db import get_session
-from hailhq.core.models import Sms, SmsEvent, SmsSenderIdentity, Suppression
+from hailhq.core.models import (
+    PhoneNumber,
+    Sms,
+    SmsEvent,
+    SmsSenderIdentity,
+    Suppression,
+)
 from hailhq.core.pricing_tier import classify_pricing_tier
-from hailhq.core.providers.sms import SmsProvider, TwilioSmsProvider
-from hailhq.core.providers.sms.status_map import map_twilio_message_status
+from hailhq.core.providers.sms import SmsProvider
+from hailhq.core.providers.sms.status_map import (
+    map_telnyx_message_status,
+    map_twilio_message_status,
+)
+from hailhq.core.providers.sms.telnyx import TelnyxSmsProvider
+from hailhq.core.providers.sms.twilio import LazyTwilioSmsProvider
+from hailhq.core.providers.telnyx import verify_webhook
 from hailhq.core.schemas import (
     SenderIdPatch,
     SenderIdResponse,
@@ -82,11 +95,12 @@ _sms_provider_singleton: SmsProvider | None = None
 
 
 def get_sms_provider() -> SmsProvider:
-    """Return a process-wide ``SmsProvider``. Tests override via
+    """Return a process-wide ``SmsProvider``. The Twilio client is built on
+    first use, so Telnyx-only deployments work. Tests override via
     ``app.dependency_overrides``."""
     global _sms_provider_singleton
     if _sms_provider_singleton is None:
-        _sms_provider_singleton = TwilioSmsProvider()
+        _sms_provider_singleton = LazyTwilioSmsProvider()
     return _sms_provider_singleton
 
 
@@ -98,8 +112,9 @@ async def deliver_sms(db: AsyncSession, provider: SmsProvider, sms: Sms) -> str 
     'provider_error' on transport failure, or the carrier error code on
     rejection. Never raises — the caller owns HTTP semantics.
     """
-    callback_url = join_url(settings.hail_api_url, "sms/status")
     try:
+        provider = sms_route(sms.provider, provider)
+        callback_url = join_url(settings.hail_api_url, sms_status_path(sms.provider))
         result = await provider.send_sms(
             from_e164=sms.from_e164,
             to_e164=sms.to_e164,
@@ -226,6 +241,7 @@ async def create_sms(
         cached_id, cached = replay_cached(
             idem, response, request, resource_prefix="/sms"
         )
+        actor_user_id, actor_kind = actor_of(principal)
         await write_audit_log(
             organization_id=principal.organization_id,
             api_key_id=principal.api_key_id,
@@ -233,6 +249,8 @@ async def create_sms(
             resource_type="sms",
             resource_id=cached_id,
             payload={"to": cached.get("to_e164"), "from": cached.get("from_e164")},
+            actor_user_id=actor_user_id,
+            actor_kind=actor_kind,
         )
         return SmsResponse.model_validate(cached)
 
@@ -247,6 +265,7 @@ async def create_sms(
 
     gate = await check_sms_allowed(db, principal.organization_id, body.to)
     if not gate.allowed:
+        actor_user_id, actor_kind = actor_of(principal)
         await write_audit_log(
             organization_id=principal.organization_id,
             api_key_id=principal.api_key_id,
@@ -254,6 +273,8 @@ async def create_sms(
             resource_type="sms",
             resource_id=None,
             payload={"to": body.to, "reason": gate.reason, "checks": gate.checks},
+            actor_user_id=actor_user_id,
+            actor_kind=actor_kind,
         )
         raise await cache_failure(
             idem,
@@ -314,6 +335,7 @@ async def create_sms(
 
     sms = Sms(
         organization_id=principal.organization_id,
+        provider=from_number.provider if from_number is not None else TWILIO,
         from_number_id=from_number.id if from_number is not None else None,
         from_e164=from_e164,
         to_e164=body.to,
@@ -327,6 +349,7 @@ async def create_sms(
     db.add(sms)
     await db.commit()
 
+    actor_user_id, actor_kind = actor_of(principal)
     await write_audit_log(
         organization_id=principal.organization_id,
         api_key_id=principal.api_key_id,
@@ -342,6 +365,8 @@ async def create_sms(
             "message_type": body.message_type,
             "compliance": gate.checks,
         },
+        actor_user_id=actor_user_id,
+        actor_kind=actor_kind,
     )
 
     # Provider send — best-effort with status reconciliation.
@@ -378,7 +403,11 @@ async def receive_inbound_sms(
     form = await request.form()
     params = {k: str(v) for k, v in form.items()}
     signature = request.headers.get("X-Twilio-Signature")
-    url = join_url(settings.hail_api_url, "sms/inbound")
+    # Twilio signs the URL it was configured with, so verify against the mount
+    # (/v1 or legacy) this request actually arrived on.
+    url = join_url(
+        settings.hail_api_url, f"{request_mount_prefix(request)}/sms/inbound"
+    )
 
     if not verify_twilio_signature(url, params, signature, settings.twilio_auth_token):
         raise HTTPException(
@@ -404,6 +433,33 @@ async def receive_inbound_sms(
 _TERMINAL_SMS_STATUSES = frozenset({"delivered", "undelivered", "failed"})
 
 
+async def _apply_sms_status(db: AsyncSession, sms: Sms, new_status: str) -> None:
+    """Record a status change and fan out terminal ones. Caller commits."""
+    prior = sms.status
+    sms.status = new_status
+    db.add(
+        SmsEvent(
+            sms_id=sms.id,
+            organization_id=sms.organization_id,
+            kind="state_change",
+            payload={"from": prior, "to": new_status},
+        )
+    )
+    if new_status in _TERMINAL_SMS_STATUSES:
+        await fanout_sms_event(
+            db,
+            organization_id=sms.organization_id,
+            event_type=f"sms.{new_status}",
+            event_id=sms.id,
+            data={
+                "id": str(sms.id),
+                "to": sms.to_e164,
+                "from": sms.from_e164,
+                "status": new_status,
+            },
+        )
+
+
 @router.post("/status", include_in_schema=False)
 async def receive_sms_status(
     request: Request,
@@ -425,7 +481,9 @@ async def receive_sms_status(
     form = await request.form()
     params = {k: str(v) for k, v in form.items()}
     signature = request.headers.get("X-Twilio-Signature")
-    url = join_url(settings.hail_api_url, "sms/status")
+    # Twilio signs the URL it was configured with, so verify against the mount
+    # (/v1 or legacy) this request actually arrived on.
+    url = join_url(settings.hail_api_url, f"{request_mount_prefix(request)}/sms/status")
     if not verify_twilio_signature(url, params, signature, settings.twilio_auth_token):
         raise HTTPException(
             status_code=http_status.HTTP_403_FORBIDDEN, detail="invalid signature"
@@ -440,7 +498,9 @@ async def receive_sms_status(
         return {"status": "unmatched"}
     sms = (
         await db.execute(
-            select(Sms).where(Sms.provider_message_sid == sid).with_for_update()
+            select(Sms)
+            .where(Sms.provider_message_sid == sid, Sms.provider == TWILIO)
+            .with_for_update()
         )
     ).scalar_one_or_none()
     if sms is None:
@@ -453,29 +513,7 @@ async def receive_sms_status(
         # new event either way.
         return {"status": "duplicate"}
 
-    prior = sms.status
-    sms.status = new_status
-    db.add(
-        SmsEvent(
-            sms_id=sms.id,
-            organization_id=sms.organization_id,
-            kind="state_change",
-            payload={"from": prior, "to": new_status},
-        )
-    )
-    if new_status in {"delivered", "undelivered", "failed"}:
-        await fanout_sms_event(
-            db,
-            organization_id=sms.organization_id,
-            event_type=f"sms.{new_status}",
-            event_id=sms.id,
-            data={
-                "id": str(sms.id),
-                "to": sms.to_e164,
-                "from": sms.from_e164,
-                "status": new_status,
-            },
-        )
+    await _apply_sms_status(db, sms, new_status)
     await db.commit()
     return {"status": "applied"}
 
@@ -670,3 +708,115 @@ async def list_sms(
 
 
 __all__ = ["deliver_sms", "get_sms_provider", "router"]
+
+
+def _finalized_within(occurred_at: object, window: timedelta) -> bool:
+    """True when the event time is unknown or newer than ``window``."""
+    try:
+        when = datetime.fromisoformat(str(occurred_at).replace("Z", "+00:00"))
+    except ValueError:
+        return True
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=timezone.utc)
+    return datetime.now(timezone.utc) - when < window
+
+
+@router.post("/telnyx", include_in_schema=False)
+async def receive_telnyx_sms(
+    request: Request, db: Annotated[AsyncSession, Depends(get_session)]
+) -> dict[str, str]:
+    """One signed Telnyx endpoint for inbound messages and delivery receipts."""
+
+    raw = await request.body()
+    if not verify_webhook(
+        raw,
+        request.headers.get("telnyx-signature-ed25519"),
+        request.headers.get("telnyx-timestamp"),
+        settings.telnyx_public_key,
+    ):
+        raise HTTPException(status_code=403, detail="invalid signature")
+    try:
+        event = (await request.json())["data"]
+        payload = event["payload"]
+        message_id = payload["id"]
+        event_type = event["event_type"]
+        recipients = payload["to"]
+        if not message_id or len(recipients) != 1:
+            raise ValueError("Expected one SMS recipient")
+        recipient = recipients[0]
+    except (KeyError, TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="invalid messaging event") from None
+    if event_type == "message.received":
+        try:
+            sender_e164 = payload["from"]["phone_number"]
+            recipient_e164 = recipient["phone_number"]
+        except (KeyError, TypeError):
+            raise HTTPException(
+                status_code=400, detail="invalid messaging event"
+            ) from None
+        try:
+            reply_provider: SmsProvider | None = TelnyxSmsProvider()
+        except ValueError:
+            # No Telnyx API key. The provider only sends compliance replies, so
+            # still store the message and apply a STOP instead of failing the webhook.
+            reply_provider = None
+        await ingest_inbound_sms(
+            db,
+            from_e164=sender_e164,
+            to_e164=recipient_e164,
+            body=payload.get("text") or "",
+            provider_message_sid=message_id,
+            opt_out_type=None,
+            provider=reply_provider,
+            carrier=TELNYX,
+        )
+        await db.commit()
+        return {"status": "received"}
+    if event_type != "message.finalized":
+        return {"status": "ignored"}
+    new_status = map_telnyx_message_status(recipient.get("status"))
+    if not new_status:
+        return {"status": "ignored"}
+    sms = (
+        await db.execute(
+            select(Sms)
+            .where(
+                Sms.provider == TELNYX,
+                Sms.provider_message_sid == message_id,
+                Sms.direction == "outbound",
+            )
+            .with_for_update()
+        )
+    ).scalar_one_or_none()
+    if sms is None:
+        # The profile-level webhook reports every message on the profile,
+        # including ones Hail never recorded (sent from the Telnyx portal).
+        # Only a message from one of our numbers, reported moments ago, can be
+        # racing POST /messages' DB commit. Ask for a retry only then.
+        sender = (payload.get("from") or {}).get("phone_number")
+        ours = (
+            sender is not None
+            and (
+                await db.execute(
+                    select(PhoneNumber.id)
+                    .where(
+                        PhoneNumber.provider == TELNYX,
+                        PhoneNumber.e164 == sender,
+                        PhoneNumber.provisioning_state == "active",
+                    )
+                    .limit(1)
+                )
+            ).first()
+            is not None
+        )
+        if ours and _finalized_within(event.get("occurred_at"), timedelta(minutes=5)):
+            raise HTTPException(status_code=503, detail="message not yet recorded")
+        return {"status": "unrecorded"}
+    if sms.status in _TERMINAL_SMS_STATUSES:
+        return {"status": "duplicate"}
+    errors = payload.get("errors") or []
+    error_code = errors[0].get("code") if errors else None
+    sms.error_code = str(error_code) if error_code is not None else None
+    await _apply_sms_status(db, sms, new_status)
+    await db.commit()
+    return {"status": "applied"}

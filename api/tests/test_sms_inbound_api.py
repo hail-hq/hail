@@ -135,3 +135,40 @@ async def test_inbound_unknown_number_still_returns_200(client, monkeypatch) -> 
     resp = await client.post("/sms/inbound", data=form, headers=headers)
     # Twilio expects 200 regardless, to avoid retry storms on numbers we don't own.
     assert resp.status_code == 200
+
+
+async def test_webhooks_verify_the_signature_against_the_mount_they_arrived_on(
+    client, async_session, monkeypatch
+) -> None:
+    """The SMS webhooks are dual-mounted at /v1 and the legacy path. Twilio
+    signs the URL it was configured with, so a /v1 request signed over the /v1
+    URL must verify, and one signed over the legacy URL must not (the URL
+    verified is the one requested, not a hard-coded legacy path)."""
+    from hailhq.core.config import settings
+
+    monkeypatch.setattr(settings, "twilio_auth_token", AUTH_TOKEN)
+    monkeypatch.setattr(settings, "hail_api_url", "http://t")
+    await _seed_number(async_session, uuid.uuid4())
+    validator = RequestValidator(AUTH_TOKEN)
+
+    inbound = {
+        "From": "+14155551234",
+        "To": "+14155559999",
+        "Body": "hi",
+        "MessageSid": "SM_v1",
+    }
+    status = {"MessageSid": "SM_unknown", "MessageStatus": "delivered"}
+    for path, params in (("/sms/inbound", inbound), ("/sms/status", status)):
+        for mount in ("", "/v1"):
+            good = validator.compute_signature(f"http://t{mount}{path}", params)
+            resp = await client.post(
+                f"{mount}{path}", data=params, headers={"X-Twilio-Signature": good}
+            )
+            assert resp.status_code == 200, (mount, path)
+
+        # Signed for the legacy URL but delivered on /v1: fail closed.
+        wrong = validator.compute_signature(f"http://t{path}", params)
+        resp = await client.post(
+            f"/v1{path}", data=params, headers={"X-Twilio-Signature": wrong}
+        )
+        assert resp.status_code == 403, path

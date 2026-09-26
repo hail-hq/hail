@@ -245,9 +245,10 @@ class Suppression(Base):
 
     A voice row IS an internal DNC entry; there is no separate DNC table.
     Populated by the unsubscribe link (``GET /unsubscribe``,
-    ``source='unsubscribe_link'``), manual ops action
-    (``source='manual'``), or a future bounce/complaint handler
-    (``source='bounce'``).
+    ``source='unsubscribe_link'``) and an SMS STOP reply
+    (``hailhq.core.sms_ingest``, ``source='stop_keyword'``). ``'manual'``
+    (ops action) and ``'bounce'`` (bounce/complaint handler) are reserved;
+    nothing writes them yet.
     """
 
     __tablename__ = "suppressions"
@@ -403,8 +404,8 @@ class PhoneNumber(Base):
     organization_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), nullable=True
     )
-    # Uniqueness is partial (see __table_args__): released rows are tombstones
-    # and must not block re-acquiring a number Twilio later recycles — with a
+    # Uniqueness is partial (see __table_args__): released and failed rows are
+    # tombstones (a failed order never owned the number) and must not block re-acquiring a number Twilio later recycles — with a
     # full UNIQUE, that re-acquire would buy the number at the carrier and
     # then 500 on the INSERT, orphaning a paid number (migration 0041).
     e164: Mapped[str] = mapped_column(Text, nullable=False)
@@ -414,7 +415,8 @@ class PhoneNumber(Base):
         ARRAY(Text), server_default=text("ARRAY['voice','sms']"), nullable=False
     )
     provider: Mapped[str] = mapped_column(Text, server_default="twilio", nullable=False)
-    provider_resource_id: Mapped[str] = mapped_column(Text, nullable=False)
+    # NULL until the carrier confirms the order (pending / failed rows).
+    provider_resource_id: Mapped[str | None] = mapped_column(Text, nullable=True)
     provisioning_state: Mapped[str] = mapped_column(
         Text, server_default="pending", nullable=False
     )
@@ -469,7 +471,7 @@ class PhoneNumber(Base):
             "phone_numbers_e164_live_uniq",
             "e164",
             unique=True,
-            postgresql_where=text("provisioning_state <> 'released'"),
+            postgresql_where=text("provisioning_state NOT IN ('released', 'failed')"),
         ),
     )
 
@@ -1150,6 +1152,11 @@ class AuditLog(Base):
     api_key_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), nullable=True
     )
+    actor_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), nullable=True
+    )
+    # api_key | user | superadmin | system — who acted, beyond which key was used.
+    actor_kind: Mapped[str | None] = mapped_column(Text, nullable=True)
     action: Mapped[str] = mapped_column(Text, nullable=False)
     resource_type: Mapped[str | None] = mapped_column(Text, nullable=True)
     resource_id: Mapped[uuid.UUID | None] = mapped_column(
@@ -1379,6 +1386,23 @@ class PlatformFlag(Base):
     value: Mapped[str] = mapped_column(Text, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
         TS, nullable=False, server_default=text("now()")
+    )
+
+
+class NumberOffer(Base):
+    """Short-lived, server-priced offer; consuming it is serialized by row lock."""
+
+    __tablename__ = "number_offers"
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    organization_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), nullable=False, index=True
+    )
+    offer: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(TS, nullable=False)
+    number_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), nullable=True
     )
 
 

@@ -405,10 +405,14 @@ class SmsCreate(ConsentAttestationMixin):
         default=None,
         alias="from",
         description=(
-            "Sender phone number, E.164 format. Must be a number owned by "
-            "the organization with the SMS capability. Omitted: an active "
-            "org-owned number is used if one exists, else a number is "
-            "claimed from the shared pool."
+            "Sender phone number, E.164 format. Must be an active number "
+            "owned by the organization with the SMS capability. Omitted: "
+            "UK (+44) and Germany (+49) destinations use the organization's "
+            "sender ID, or the platform default 'HAIL' when none is set; "
+            "Australia (+61) always uses 'HAIL'. Every other destination "
+            "uses the organization's oldest active SMS-capable number; if "
+            "none exists the request fails with 422. SMS never uses the "
+            "shared pool."
         ),
     )
     body: str = Field(
@@ -518,6 +522,13 @@ class SenderIdResponse(BaseModel):
 
 class NumberAcquireRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
+    quote_id: UUID = Field(
+        description="Unexpired organization-bound quote from POST /numbers/quotes. Required: without it the request is a 422; get a quote first.",
+    )
+    provider: Literal["auto", "twilio", "telnyx"] = Field(
+        default="auto",
+        description="Carrier restriction for the quote. Auto accepts the quoted carrier; twilio or telnyx must match it.",
+    )
 
     country_code: str = Field(
         min_length=2,
@@ -537,8 +548,42 @@ class NumberAcquireRequest(BaseModel):
         return v.upper()
 
 
+class NumberQuoteRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    country_code: str = Field(
+        min_length=2,
+        max_length=2,
+        description="ISO alpha-2 country code to search. Case-insensitive.",
+    )
+    number_type: NumberType | None = Field(
+        default=None,
+        description="Restrict number type; omit to compare all supported types.",
+    )
+    capabilities: list[Literal["voice", "sms"]] = Field(
+        min_length=1,
+        max_length=2,
+        description="Required channels; every returned offer must support all requested capabilities.",
+    )
+    provider: Literal["auto", "twilio", "telnyx"] = Field(
+        default="auto",
+        description="Carrier restriction; twilio or telnyx returns that carrier's offers only. auto compares both by readiness, remaining verification effort, and rental/setup costs; Twilio wins equivalent ties.",
+    )
+
+    @field_validator("country_code")
+    @classmethod
+    def _uppercase_country_code(cls, v: str) -> str:
+        v = v.upper()
+        if not re.fullmatch(r"[A-Z]{2}", v):
+            raise ValueError("country_code must be two letters")
+        return v
+
+
 class PhoneNumberResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
+    provider: str = Field(
+        default="twilio",
+        description="Carrier that owns and routes this number, such as twilio or telnyx.",
+    )
 
     id: UUID = Field(description="Unique identifier for this number.")
     e164: str = Field(description="The phone number, E.164 format.")
@@ -585,7 +630,7 @@ class SuppressionResponse(BaseModel):
         description="Why the recipient was suppressed (e.g. an unsubscribe or a bounce)."
     )
     source: str = Field(
-        description="How this entry was created: 'unsubscribe_link', 'manual' (an operator action), or 'bounce'."
+        description="How this entry was created: 'unsubscribe_link' (email unsubscribe link) or 'stop_keyword' (recipient replied STOP by SMS). 'manual' (operator action) and 'bounce' (bounce handler) are reserved; nothing writes them yet."
     )
     created_at: datetime = Field(
         description="When this entry was created, ISO 8601 timestamp."
@@ -1912,6 +1957,10 @@ class WhoamiResponse(BaseModel):
     name: str | None = Field(
         default=None,
         description="The authenticated user's display name. Null for 'shared' callers.",
+    )
+    superadmin: bool = Field(
+        default=False,
+        description="True for a Hail staff console session acting on this organization.",
     )
 
 

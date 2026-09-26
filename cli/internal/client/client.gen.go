@@ -93,6 +93,90 @@ func (e CallResponseStatus) Valid() bool {
 	}
 }
 
+// Defines values for CarrierOfferNumberType.
+const (
+	CarrierOfferNumberTypeLocal    CarrierOfferNumberType = "local"
+	CarrierOfferNumberTypeMobile   CarrierOfferNumberType = "mobile"
+	CarrierOfferNumberTypeNational CarrierOfferNumberType = "national"
+	CarrierOfferNumberTypeTollFree CarrierOfferNumberType = "toll_free"
+)
+
+// Valid indicates whether the value is a known member of the CarrierOfferNumberType enum.
+func (e CarrierOfferNumberType) Valid() bool {
+	switch e {
+	case CarrierOfferNumberTypeLocal:
+		return true
+	case CarrierOfferNumberTypeMobile:
+		return true
+	case CarrierOfferNumberTypeNational:
+		return true
+	case CarrierOfferNumberTypeTollFree:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for CarrierOfferProvider.
+const (
+	CarrierOfferProviderTelnyx CarrierOfferProvider = "telnyx"
+	CarrierOfferProviderTwilio CarrierOfferProvider = "twilio"
+)
+
+// Valid indicates whether the value is a known member of the CarrierOfferProvider enum.
+func (e CarrierOfferProvider) Valid() bool {
+	switch e {
+	case CarrierOfferProviderTelnyx:
+		return true
+	case CarrierOfferProviderTwilio:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for CarrierOfferReadiness.
+const (
+	Ready                CarrierOfferReadiness = "ready"
+	VerificationRequired CarrierOfferReadiness = "verification_required"
+)
+
+// Valid indicates whether the value is a known member of the CarrierOfferReadiness enum.
+func (e CarrierOfferReadiness) Valid() bool {
+	switch e {
+	case Ready:
+		return true
+	case VerificationRequired:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for CarrierOfferRegulatoryFriction.
+const (
+	Documents   CarrierOfferRegulatoryFriction = "documents"
+	Information CarrierOfferRegulatoryFriction = "information"
+	None        CarrierOfferRegulatoryFriction = "none"
+	Unknown     CarrierOfferRegulatoryFriction = "unknown"
+)
+
+// Valid indicates whether the value is a known member of the CarrierOfferRegulatoryFriction enum.
+func (e CarrierOfferRegulatoryFriction) Valid() bool {
+	switch e {
+	case Documents:
+		return true
+	case Information:
+		return true
+	case None:
+		return true
+	case Unknown:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for ContactEntryKind.
 const (
 	Manual ContactEntryKind = "manual"
@@ -383,19 +467,19 @@ func (e EmailSummaryStatus) Valid() bool {
 
 // Defines values for EventResponseSource.
 const (
-	Call  EventResponseSource = "call"
-	Email EventResponseSource = "email"
-	Sms   EventResponseSource = "sms"
+	EventResponseSourceCall  EventResponseSource = "call"
+	EventResponseSourceEmail EventResponseSource = "email"
+	EventResponseSourceSms   EventResponseSource = "sms"
 )
 
 // Valid indicates whether the value is a known member of the EventResponseSource enum.
 func (e EventResponseSource) Valid() bool {
 	switch e {
-	case Call:
+	case EventResponseSourceCall:
 		return true
-	case Email:
+	case EventResponseSourceEmail:
 		return true
-	case Sms:
+	case EventResponseSourceSms:
 		return true
 	default:
 		return false
@@ -441,16 +525,103 @@ func (e EventStreamResponseCallStatus) Valid() bool {
 	}
 }
 
+// Defines values for FieldSpecKind.
+const (
+	FieldSpecKindEmail FieldSpecKind = "email"
+	FieldSpecKindPhone FieldSpecKind = "phone"
+	FieldSpecKindText  FieldSpecKind = "text"
+	FieldSpecKindUrl   FieldSpecKind = "url"
+)
+
+// Valid indicates whether the value is a known member of the FieldSpecKind enum.
+func (e FieldSpecKind) Valid() bool {
+	switch e {
+	case FieldSpecKindEmail:
+		return true
+	case FieldSpecKindPhone:
+		return true
+	case FieldSpecKindText:
+		return true
+	case FieldSpecKindUrl:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for NumberAcquireRequestNumberType.
 const (
-	Local    NumberAcquireRequestNumberType = "local"
-	Mobile   NumberAcquireRequestNumberType = "mobile"
-	National NumberAcquireRequestNumberType = "national"
-	TollFree NumberAcquireRequestNumberType = "toll_free"
+	NumberAcquireRequestNumberTypeLocal    NumberAcquireRequestNumberType = "local"
+	NumberAcquireRequestNumberTypeMobile   NumberAcquireRequestNumberType = "mobile"
+	NumberAcquireRequestNumberTypeNational NumberAcquireRequestNumberType = "national"
+	NumberAcquireRequestNumberTypeTollFree NumberAcquireRequestNumberType = "toll_free"
 )
 
 // Valid indicates whether the value is a known member of the NumberAcquireRequestNumberType enum.
 func (e NumberAcquireRequestNumberType) Valid() bool {
+	switch e {
+	case NumberAcquireRequestNumberTypeLocal:
+		return true
+	case NumberAcquireRequestNumberTypeMobile:
+		return true
+	case NumberAcquireRequestNumberTypeNational:
+		return true
+	case NumberAcquireRequestNumberTypeTollFree:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for NumberAcquireRequestProvider.
+const (
+	NumberAcquireRequestProviderAuto   NumberAcquireRequestProvider = "auto"
+	NumberAcquireRequestProviderTelnyx NumberAcquireRequestProvider = "telnyx"
+	NumberAcquireRequestProviderTwilio NumberAcquireRequestProvider = "twilio"
+)
+
+// Valid indicates whether the value is a known member of the NumberAcquireRequestProvider enum.
+func (e NumberAcquireRequestProvider) Valid() bool {
+	switch e {
+	case NumberAcquireRequestProviderAuto:
+		return true
+	case NumberAcquireRequestProviderTelnyx:
+		return true
+	case NumberAcquireRequestProviderTwilio:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for NumberQuoteRequestCapabilities.
+const (
+	Sms   NumberQuoteRequestCapabilities = "sms"
+	Voice NumberQuoteRequestCapabilities = "voice"
+)
+
+// Valid indicates whether the value is a known member of the NumberQuoteRequestCapabilities enum.
+func (e NumberQuoteRequestCapabilities) Valid() bool {
+	switch e {
+	case Sms:
+		return true
+	case Voice:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for NumberQuoteRequestNumberType.
+const (
+	Local    NumberQuoteRequestNumberType = "local"
+	Mobile   NumberQuoteRequestNumberType = "mobile"
+	National NumberQuoteRequestNumberType = "national"
+	TollFree NumberQuoteRequestNumberType = "toll_free"
+)
+
+// Valid indicates whether the value is a known member of the NumberQuoteRequestNumberType enum.
+func (e NumberQuoteRequestNumberType) Valid() bool {
 	switch e {
 	case Local:
 		return true
@@ -459,6 +630,27 @@ func (e NumberAcquireRequestNumberType) Valid() bool {
 	case National:
 		return true
 	case TollFree:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for NumberQuoteRequestProvider.
+const (
+	Auto   NumberQuoteRequestProvider = "auto"
+	Telnyx NumberQuoteRequestProvider = "telnyx"
+	Twilio NumberQuoteRequestProvider = "twilio"
+)
+
+// Valid indicates whether the value is a known member of the NumberQuoteRequestProvider enum.
+func (e NumberQuoteRequestProvider) Valid() bool {
+	switch e {
+	case Auto:
+		return true
+	case Telnyx:
+		return true
+	case Twilio:
 		return true
 	default:
 		return false
@@ -501,6 +693,42 @@ func (e ProviderConfigEntryLayer) Valid() bool {
 	case Stt:
 		return true
 	case Tts:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for RequirementsSubjectType.
+const (
+	RequirementsSubjectTypeBusiness RequirementsSubjectType = "business"
+	RequirementsSubjectTypePerson   RequirementsSubjectType = "person"
+)
+
+// Valid indicates whether the value is a known member of the RequirementsSubjectType enum.
+func (e RequirementsSubjectType) Valid() bool {
+	switch e {
+	case RequirementsSubjectTypeBusiness:
+		return true
+	case RequirementsSubjectTypePerson:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for RequirementsSubjectTypes.
+const (
+	RequirementsSubjectTypesBusiness RequirementsSubjectTypes = "business"
+	RequirementsSubjectTypesPerson   RequirementsSubjectTypes = "person"
+)
+
+// Valid indicates whether the value is a known member of the RequirementsSubjectTypes enum.
+func (e RequirementsSubjectTypes) Valid() bool {
+	switch e {
+	case RequirementsSubjectTypesBusiness:
+		return true
+	case RequirementsSubjectTypesPerson:
 		return true
 	default:
 		return false
@@ -1053,6 +1281,24 @@ func (e ListSmsV1SmsGetParamsStatus) Valid() bool {
 	}
 }
 
+// Defines values for GetVerificationRequirementsParamsSubjectType.
+const (
+	Business GetVerificationRequirementsParamsSubjectType = "business"
+	Person   GetVerificationRequirementsParamsSubjectType = "person"
+)
+
+// Valid indicates whether the value is a known member of the GetVerificationRequirementsParamsSubjectType enum.
+func (e GetVerificationRequirementsParamsSubjectType) Valid() bool {
+	switch e {
+	case Business:
+		return true
+	case Person:
+		return true
+	default:
+		return false
+	}
+}
+
 // BodyUploadEmailAttachment defines model for Body_upload_email_attachment.
 type BodyUploadEmailAttachment struct {
 	// File The file to upload, as multipart/form-data. Size-limited; an oversize upload is rejected with 422.
@@ -1171,6 +1417,63 @@ type CallResponseDirection string
 // CallResponseStatus Current call-progress state: 'queued', 'dialing', 'ringing', 'in_progress', or one of the terminal states 'completed', 'failed', 'busy', 'no_answer', 'canceled'.
 type CallResponseStatus string
 
+// CarrierOffer defines model for CarrierOffer.
+type CarrierOffer struct {
+	// AddressId Server-selected verified address identifier, when supported; null otherwise.
+	AddressId *string `json:"address_id,omitempty"`
+
+	// Capabilities Voice/SMS capabilities reported by live carrier inventory; SMS registration may still be required.
+	Capabilities []string `json:"capabilities"`
+
+	// CountryCode ISO alpha-2 country code of the number.
+	CountryCode string `json:"country_code"`
+
+	// Currency Currency of the quoted rental and setup amounts.
+	Currency *string `json:"currency,omitempty"`
+
+	// E164 Available phone number in E.164 format.
+	E164 string `json:"e164"`
+
+	// MonthlyCents Monthly number rental in USD cents, charged from organization credits.
+	MonthlyCents int `json:"monthly_cents"`
+
+	// NumberType Local, mobile, national, or toll-free number type.
+	NumberType CarrierOfferNumberType `json:"number_type"`
+
+	// Provider Carrier supplying this exact number.
+	Provider CarrierOfferProvider `json:"provider"`
+
+	// QuoteId Organization-bound quote identifier to pass to POST /numbers before expiry.
+	QuoteId *openapi_types.UUID `json:"quote_id,omitempty"`
+
+	// Readiness Whether regulatory preflight permits purchase for this organization; rechecked at purchase.
+	Readiness CarrierOfferReadiness `json:"readiness"`
+
+	// RegulatoryFriction Remaining verification effort derived from live requirements: none, information/address entry, document uploads, or unknown. This does not establish legal eligibility.
+	RegulatoryFriction *CarrierOfferRegulatoryFriction `json:"regulatory_friction,omitempty"`
+
+	// Requirements Carrier regulatory requirement labels associated with this offer.
+	Requirements *[]string `json:"requirements,omitempty"`
+
+	// SetupCents One-time setup charge in USD cents, payable with the first month.
+	SetupCents int `json:"setup_cents"`
+
+	// VerificationId Server-selected organization-bound approved bundle or requirement-group identifier, if any.
+	VerificationId *string `json:"verification_id,omitempty"`
+}
+
+// CarrierOfferNumberType Local, mobile, national, or toll-free number type.
+type CarrierOfferNumberType string
+
+// CarrierOfferProvider Carrier supplying this exact number.
+type CarrierOfferProvider string
+
+// CarrierOfferReadiness Whether regulatory preflight permits purchase for this organization; rechecked at purchase.
+type CarrierOfferReadiness string
+
+// CarrierOfferRegulatoryFriction Remaining verification effort derived from live requirements: none, information/address entry, document uploads, or unknown. This does not establish legal eligibility.
+type CarrierOfferRegulatoryFriction string
+
 // ContactCreate defines model for ContactCreate.
 type ContactCreate struct {
 	// Email Email address, stored lowercased. At least one of phone_e164 or email is required.
@@ -1274,6 +1577,46 @@ type DnsRecordSchema struct {
 
 // DnsRecordSchemaType DNS record type: 'CNAME' (DKIM), 'MX' (MAIL FROM), or 'TXT' (SPF).
 type DnsRecordSchemaType string
+
+// DocumentOption One accepted way to fill a document slot (e.g. passport or ID card).
+type DocumentOption struct {
+	// Copies Names of the customer's own fields copied onto this document automatically.
+	Copies *[]string `json:"copies,omitempty"`
+
+	// Fields Extra values this document needs. Send them in the slot's `fields`.
+	Fields *[]FieldSpec `json:"fields,omitempty"`
+
+	// FileRequired True when the customer must upload a file for this option.
+	FileRequired *bool `json:"file_required,omitempty"`
+
+	// Key Value to send as `option` for this document type.
+	Key string `json:"key"`
+
+	// Label Label to show the customer, e.g. 'Passport'.
+	Label string `json:"label"`
+
+	// NeedsAddress True when this document refers to the address the customer gave.
+	NeedsAddress *bool `json:"needs_address,omitempty"`
+}
+
+// DocumentSlot A required proof (identity, address, registration) with its options.
+type DocumentSlot struct {
+	// Help Help text from the carrier.
+	Help *string `json:"help,omitempty"`
+
+	// Label Label to show the customer, e.g. 'Proof of identity'.
+	Label string `json:"label"`
+
+	// Name Key for this slot in `documents` and in the `file.<name>` part.
+	Name string `json:"name"`
+
+	// NeedsInput False when there is nothing to ask: one option, no file, no extra
+	// values. The UI hides such a slot; the plug-in still fills it.
+	NeedsInput *bool `json:"needs_input,omitempty"`
+
+	// Options The accepted ways to fill this slot. The customer picks one.
+	Options []DocumentOption `json:"options"`
+}
 
 // DomainCheckResponse defines model for DomainCheckResponse.
 type DomainCheckResponse struct {
@@ -1927,6 +2270,42 @@ type EventStreamResponse struct {
 // EventStreamResponseCallStatus Current status of the call named by the id filter (e.g. id=call:<uuid>). Null for org-wide tails and non-call filters, since there is no single call to report a status for.
 type EventStreamResponseCallStatus string
 
+// FieldOption One allowed value for a field with a fixed set of answers.
+type FieldOption struct {
+	// Key Value to send.
+	Key string `json:"key"`
+
+	// Label Label to show the customer.
+	Label string `json:"label"`
+}
+
+// FieldSpec One value the customer types in.
+type FieldSpec struct {
+	// Help Help text from the carrier.
+	Help *string `json:"help,omitempty"`
+
+	// Kind Input kind: 'text', 'email', 'phone', or 'url'.
+	Kind *FieldSpecKind `json:"kind,omitempty"`
+
+	// Label Label to show the customer.
+	Label string `json:"label"`
+
+	// Name Key to send this value under in `fields`.
+	Name string `json:"name"`
+
+	// Options Allowed values, when the field is a choice. Show a select, not a text box.
+	Options *[]FieldOption `json:"options,omitempty"`
+
+	// Pattern Regular expression the value must match, when the carrier gives one.
+	Pattern *string `json:"pattern,omitempty"`
+
+	// Required False when the field is optional.
+	Required *bool `json:"required,omitempty"`
+}
+
+// FieldSpecKind Input kind: 'text', 'email', 'phone', or 'url'.
+type FieldSpecKind string
+
 // HTTPValidationError defines model for HTTPValidationError.
 type HTTPValidationError struct {
 	// Detail List of validation errors: each entry gives the field location (loc), the problem (msg), and the error type (type).
@@ -1958,10 +2337,58 @@ type NumberAcquireRequest struct {
 
 	// NumberType Kind of number to acquire: 'local', 'mobile', 'toll_free', or 'national'.
 	NumberType *NumberAcquireRequestNumberType `json:"number_type,omitempty"`
+
+	// Provider Carrier restriction for the quote. Auto accepts the quoted carrier; twilio or telnyx must match it.
+	Provider *NumberAcquireRequestProvider `json:"provider,omitempty"`
+
+	// QuoteId Unexpired organization-bound quote from POST /numbers/quotes. Required: without it the request is a 422; get a quote first.
+	QuoteId openapi_types.UUID `json:"quote_id"`
 }
 
 // NumberAcquireRequestNumberType Kind of number to acquire: 'local', 'mobile', 'toll_free', or 'national'.
 type NumberAcquireRequestNumberType string
+
+// NumberAcquireRequestProvider Carrier restriction for the quote. Auto accepts the quoted carrier; twilio or telnyx must match it.
+type NumberAcquireRequestProvider string
+
+// NumberQuoteRequest defines model for NumberQuoteRequest.
+type NumberQuoteRequest struct {
+	// Capabilities Required channels; every returned offer must support all requested capabilities.
+	Capabilities []NumberQuoteRequestCapabilities `json:"capabilities"`
+
+	// CountryCode ISO alpha-2 country code to search. Case-insensitive.
+	CountryCode string `json:"country_code"`
+
+	// NumberType Restrict number type; omit to compare all supported types.
+	NumberType *NumberQuoteRequestNumberType `json:"number_type,omitempty"`
+
+	// Provider Carrier restriction; twilio or telnyx returns that carrier's offers only. auto compares both by readiness, remaining verification effort, and rental/setup costs; Twilio wins equivalent ties.
+	Provider *NumberQuoteRequestProvider `json:"provider,omitempty"`
+}
+
+// NumberQuoteRequestCapabilities defines model for NumberQuoteRequest.Capabilities.
+type NumberQuoteRequestCapabilities string
+
+// NumberQuoteRequestNumberType Restrict number type; omit to compare all supported types.
+type NumberQuoteRequestNumberType string
+
+// NumberQuoteRequestProvider Carrier restriction; twilio or telnyx returns that carrier's offers only. auto compares both by readiness, remaining verification effort, and rental/setup costs; Twilio wins equivalent ties.
+type NumberQuoteRequestProvider string
+
+// NumberQuotesResponse defines model for NumberQuotesResponse.
+type NumberQuotesResponse struct {
+	// ExpiresAt UTC expiry of these persisted quotes; request fresh offers afterward.
+	ExpiresAt time.Time `json:"expires_at"`
+
+	// Offers Live carrier offers ordered by readiness, remaining verification effort, monthly price, setup price, and Twilio tie-break.
+	Offers []CarrierOffer `json:"offers"`
+
+	// RecommendedQuoteId Recommended ready offer matching the requested carrier preference, or null if none qualifies.
+	RecommendedQuoteId *openapi_types.UUID `json:"recommended_quote_id"`
+
+	// UnavailableProviders Carriers whose inventory, price, or regulatory lookup failed; comparison may be incomplete.
+	UnavailableProviders []string `json:"unavailable_providers"`
+}
 
 // ObservedDnsRecord One record from EmailDomainResponse.dns_records, with a live DNS observation.
 type ObservedDnsRecord struct {
@@ -2016,6 +2443,9 @@ type PhoneNumberResponse struct {
 
 	// NumberType Kind of number: 'local', 'mobile', 'toll_free', or 'national'.
 	NumberType string `json:"number_type"`
+
+	// Provider Carrier that owns and routes this number, such as twilio or telnyx.
+	Provider *string `json:"provider,omitempty"`
 
 	// ProvisioningState 'pending', 'active', 'failed', or 'released'.
 	ProvisioningState string `json:"provisioning_state"`
@@ -2119,6 +2549,42 @@ type ProviderValidateResult struct {
 	Status string `json:"status"`
 }
 
+// Requirements What a carrier needs for one (country, number type, subject type).
+type Requirements struct {
+	// AddressRequired True when an address must be collected.
+	AddressRequired *bool `json:"address_required,omitempty"`
+
+	// CountryCode ISO alpha-2 country code.
+	CountryCode string `json:"country_code"`
+
+	// Documents Documents to collect. Skip slots with `needs_input` false.
+	Documents *[]DocumentSlot `json:"documents,omitempty"`
+
+	// Fields Values to collect about the person or business.
+	Fields *[]FieldSpec `json:"fields,omitempty"`
+
+	// NumberType 'local', 'mobile', 'toll_free', or 'national'.
+	NumberType string `json:"number_type"`
+
+	// Provider The carrier these requirements come from.
+	Provider string `json:"provider"`
+
+	// Required False when the carrier needs no verification for this combination.
+	Required bool `json:"required"`
+
+	// SubjectType 'person' or 'business'.
+	SubjectType RequirementsSubjectType `json:"subject_type"`
+
+	// SubjectTypes Subject types the carrier accepts here, so you can offer the choice.
+	SubjectTypes *[]RequirementsSubjectTypes `json:"subject_types,omitempty"`
+}
+
+// RequirementsSubjectType 'person' or 'business'.
+type RequirementsSubjectType string
+
+// RequirementsSubjectTypes defines model for Requirements.SubjectTypes.
+type RequirementsSubjectTypes string
+
 // SenderIdPatch defines model for SenderIdPatch.
 type SenderIdPatch struct {
 	// CustomSenderId Alphanumeric sender id (2-11 characters, letters/digits only) to use on alphanumeric-eligible corridors instead of a phone number. Explicit null clears it, reverting to the platform default.
@@ -2145,7 +2611,7 @@ type SmsCreate struct {
 	// ConsentSource Where/how consent was obtained (e.g. 'signup form', 'prior customer relationship'). Required (non-empty) when message_type is 'marketing'.
 	ConsentSource *string `json:"consent_source,omitempty"`
 
-	// From Sender phone number, E.164 format. Must be a number owned by the organization with the SMS capability. Omitted: an active org-owned number is used if one exists, else a number is claimed from the shared pool.
+	// From Sender phone number, E.164 format. Must be an active number owned by the organization with the SMS capability. Omitted: UK (+44) and Germany (+49) destinations use the organization's sender ID, or the platform default 'HAIL' when none is set; Australia (+61) always uses 'HAIL'. Every other destination uses the organization's oldest active SMS-capable number; if none exists the request fails with 422. SMS never uses the shared pool.
 	From *string `json:"from,omitempty"`
 
 	// MessageType 'marketing' additionally requires a non-empty consent_source. Use 'informational' for transactional/service communications.
@@ -2244,7 +2710,7 @@ type SuppressionResponse struct {
 	// Recipient The suppressed recipient — E.164 phone number for voice/sms, lowercased email address for email.
 	Recipient string `json:"recipient"`
 
-	// Source How this entry was created: 'unsubscribe_link', 'manual' (an operator action), or 'bounce'.
+	// Source How this entry was created: 'unsubscribe_link' (email unsubscribe link) or 'stop_keyword' (recipient replied STOP by SMS). 'manual' (operator action) and 'bounce' (bounce handler) are reserved; nothing writes them yet.
 	Source string `json:"source"`
 }
 
@@ -2275,6 +2741,42 @@ type ValidationErrorLoc1 = int
 // ValidationError_Loc_Item defines model for ValidationError.loc.Item.
 type ValidationError_Loc_Item struct {
 	union json.RawMessage
+}
+
+// VerificationResponse A carrier verification. Holds state only; no personal data.
+type VerificationResponse struct {
+	// ApprovedAt When the carrier approved it.
+	ApprovedAt *time.Time `json:"approved_at,omitempty"`
+
+	// CountryCode ISO alpha-2 country code.
+	CountryCode string `json:"country_code"`
+
+	// CreatedAt When the verification was created.
+	CreatedAt time.Time `json:"created_at"`
+
+	// Id Unique identifier for this verification.
+	Id openapi_types.UUID `json:"id"`
+
+	// NumberType Kind of number: 'local', 'mobile', 'toll_free', or 'national'.
+	NumberType string `json:"number_type"`
+
+	// Provider The carrier this verification is with.
+	Provider string `json:"provider"`
+
+	// RejectionReason Why it was rejected. Null unless rejected.
+	RejectionReason *string `json:"rejection_reason,omitempty"`
+
+	// State 'awaiting_review', 'submitting', 'submitted', 'approved', 'rejected', or 'cancelled'.
+	State string `json:"state"`
+
+	// SubjectType 'person' or 'business'.
+	SubjectType string `json:"subject_type"`
+
+	// SubmittedAt When it was submitted to the carrier.
+	SubmittedAt *time.Time `json:"submitted_at,omitempty"`
+
+	// UpdatedAt When it last changed.
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 // VoiceConfig defines model for VoiceConfig.
@@ -2448,6 +2950,9 @@ type WhoamiResponse struct {
 
 	// OrganizationId Organization the caller belongs to.
 	OrganizationId openapi_types.UUID `json:"organization_id"`
+
+	// Superadmin True for a Hail staff console session acting on this organization.
+	Superadmin *bool `json:"superadmin,omitempty"`
 
 	// UserId The authenticated user's id. Null for 'shared' callers.
 	UserId *openapi_types.UUID `json:"user_id,omitempty"`
@@ -2636,6 +3141,11 @@ type AcquireNumberV1NumbersPostParams struct {
 	IdempotencyKey *string `json:"Idempotency-Key,omitempty"`
 }
 
+// QuoteNumbersV1NumbersQuotesPostParams defines parameters for QuoteNumbersV1NumbersQuotesPost.
+type QuoteNumbersV1NumbersQuotesPostParams struct {
+	Authorization *string `json:"authorization,omitempty"`
+}
+
 // ReleaseNumberV1NumbersNumberIdDeleteParams defines parameters for ReleaseNumberV1NumbersNumberIdDelete.
 type ReleaseNumberV1NumbersNumberIdDeleteParams struct {
 	Authorization *string `json:"authorization,omitempty"`
@@ -2726,6 +3236,38 @@ type UnsubscribeV1UnsubscribeGetParams struct {
 	Token string `form:"token" json:"token"`
 }
 
+// ListVerificationsParams defines parameters for ListVerifications.
+type ListVerificationsParams struct {
+	Authorization *string `json:"authorization,omitempty"`
+}
+
+// CreateVerificationParams defines parameters for CreateVerification.
+type CreateVerificationParams struct {
+	Authorization *string `json:"authorization,omitempty"`
+}
+
+// GetVerificationRequirementsParams defines parameters for GetVerificationRequirements.
+type GetVerificationRequirementsParams struct {
+	CountryCode   string                                        `form:"country_code" json:"country_code"`
+	NumberType    string                                        `form:"number_type" json:"number_type"`
+	SubjectType   *GetVerificationRequirementsParamsSubjectType `form:"subject_type,omitempty" json:"subject_type,omitempty"`
+	Provider      *string                                       `form:"provider,omitempty" json:"provider,omitempty"`
+	Authorization *string                                       `json:"authorization,omitempty"`
+}
+
+// GetVerificationRequirementsParamsSubjectType defines parameters for GetVerificationRequirements.
+type GetVerificationRequirementsParamsSubjectType string
+
+// CancelVerificationParams defines parameters for CancelVerification.
+type CancelVerificationParams struct {
+	Authorization *string `json:"authorization,omitempty"`
+}
+
+// GetVerificationParams defines parameters for GetVerification.
+type GetVerificationParams struct {
+	Authorization *string `json:"authorization,omitempty"`
+}
+
 // ListSubscriptionsV1WebhooksGetParams defines parameters for ListSubscriptionsV1WebhooksGet.
 type ListSubscriptionsV1WebhooksGetParams struct {
 	Cursor        *string `form:"cursor,omitempty" json:"cursor,omitempty"`
@@ -2801,6 +3343,9 @@ type PutMemberPhoneV1MembersUserIdPhonePutJSONRequestBody = MemberPhonePut
 
 // AcquireNumberV1NumbersPostJSONRequestBody defines body for AcquireNumberV1NumbersPost for application/json ContentType.
 type AcquireNumberV1NumbersPostJSONRequestBody = NumberAcquireRequest
+
+// QuoteNumbersV1NumbersQuotesPostJSONRequestBody defines body for QuoteNumbersV1NumbersQuotesPost for application/json ContentType.
+type QuoteNumbersV1NumbersQuotesPostJSONRequestBody = NumberQuoteRequest
 
 // UpsertProviderJSONRequestBody defines body for UpsertProvider for application/json ContentType.
 type UpsertProviderJSONRequestBody = ProviderConfigUpsert
@@ -3292,6 +3837,11 @@ type ClientInterface interface {
 
 	AcquireNumberV1NumbersPost(ctx context.Context, params *AcquireNumberV1NumbersPostParams, body AcquireNumberV1NumbersPostJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
+	// QuoteNumbersV1NumbersQuotesPostWithBody request with any body
+	QuoteNumbersV1NumbersQuotesPostWithBody(ctx context.Context, params *QuoteNumbersV1NumbersQuotesPostParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	QuoteNumbersV1NumbersQuotesPost(ctx context.Context, params *QuoteNumbersV1NumbersQuotesPostParams, body QuoteNumbersV1NumbersQuotesPostJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
 	// ReleaseNumberV1NumbersNumberIdDelete request
 	ReleaseNumberV1NumbersNumberIdDelete(ctx context.Context, numberId openapi_types.UUID, params *ReleaseNumberV1NumbersNumberIdDeleteParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
@@ -3349,6 +3899,21 @@ type ClientInterface interface {
 
 	// UnsubscribeV1UnsubscribeGet request
 	UnsubscribeV1UnsubscribeGet(ctx context.Context, params *UnsubscribeV1UnsubscribeGetParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// ListVerifications request
+	ListVerifications(ctx context.Context, params *ListVerificationsParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// CreateVerification request
+	CreateVerification(ctx context.Context, params *CreateVerificationParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// GetVerificationRequirements request
+	GetVerificationRequirements(ctx context.Context, params *GetVerificationRequirementsParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// CancelVerification request
+	CancelVerification(ctx context.Context, verificationId openapi_types.UUID, params *CancelVerificationParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// GetVerification request
+	GetVerification(ctx context.Context, verificationId openapi_types.UUID, params *GetVerificationParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// ListSubscriptionsV1WebhooksGet request
 	ListSubscriptionsV1WebhooksGet(ctx context.Context, params *ListSubscriptionsV1WebhooksGetParams, reqEditors ...RequestEditorFn) (*http.Response, error)
@@ -3826,6 +4391,30 @@ func (c *Client) AcquireNumberV1NumbersPost(ctx context.Context, params *Acquire
 	return c.Client.Do(req)
 }
 
+func (c *Client) QuoteNumbersV1NumbersQuotesPostWithBody(ctx context.Context, params *QuoteNumbersV1NumbersQuotesPostParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewQuoteNumbersV1NumbersQuotesPostRequestWithBody(c.Server, params, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) QuoteNumbersV1NumbersQuotesPost(ctx context.Context, params *QuoteNumbersV1NumbersQuotesPostParams, body QuoteNumbersV1NumbersQuotesPostJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewQuoteNumbersV1NumbersQuotesPostRequest(c.Server, params, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
 func (c *Client) ReleaseNumberV1NumbersNumberIdDelete(ctx context.Context, numberId openapi_types.UUID, params *ReleaseNumberV1NumbersNumberIdDeleteParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewReleaseNumberV1NumbersNumberIdDeleteRequest(c.Server, numberId, params)
 	if err != nil {
@@ -4068,6 +4657,66 @@ func (c *Client) GetSmsV1SmsSmsIdGet(ctx context.Context, smsId openapi_types.UU
 
 func (c *Client) UnsubscribeV1UnsubscribeGet(ctx context.Context, params *UnsubscribeV1UnsubscribeGetParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewUnsubscribeV1UnsubscribeGetRequest(c.Server, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) ListVerifications(ctx context.Context, params *ListVerificationsParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewListVerificationsRequest(c.Server, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) CreateVerification(ctx context.Context, params *CreateVerificationParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewCreateVerificationRequest(c.Server, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) GetVerificationRequirements(ctx context.Context, params *GetVerificationRequirementsParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetVerificationRequirementsRequest(c.Server, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) CancelVerification(ctx context.Context, verificationId openapi_types.UUID, params *CancelVerificationParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewCancelVerificationRequest(c.Server, verificationId, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) GetVerification(ctx context.Context, verificationId openapi_types.UUID, params *GetVerificationParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetVerificationRequest(c.Server, verificationId, params)
 	if err != nil {
 		return nil, err
 	}
@@ -6107,6 +6756,61 @@ func NewAcquireNumberV1NumbersPostRequestWithBody(server string, params *Acquire
 	return req, nil
 }
 
+// NewQuoteNumbersV1NumbersQuotesPostRequest calls the generic QuoteNumbersV1NumbersQuotesPost builder with application/json body
+func NewQuoteNumbersV1NumbersQuotesPostRequest(server string, params *QuoteNumbersV1NumbersQuotesPostParams, body QuoteNumbersV1NumbersQuotesPostJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewQuoteNumbersV1NumbersQuotesPostRequestWithBody(server, params, "application/json", bodyReader)
+}
+
+// NewQuoteNumbersV1NumbersQuotesPostRequestWithBody generates requests for QuoteNumbersV1NumbersQuotesPost with any type of body
+func NewQuoteNumbersV1NumbersQuotesPostRequestWithBody(server string, params *QuoteNumbersV1NumbersQuotesPostParams, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v1/numbers/quotes")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("POST", queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	if params != nil {
+
+		if params.Authorization != nil {
+			var headerParam0 string
+
+			headerParam0, err = runtime.StyleParamWithOptions("simple", false, "authorization", *params.Authorization, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationHeader, Type: "string", Format: ""})
+			if err != nil {
+				return nil, err
+			}
+
+			req.Header.Set("authorization", headerParam0)
+		}
+
+	}
+
+	return req, nil
+}
+
 // NewReleaseNumberV1NumbersNumberIdDeleteRequest generates requests for ReleaseNumberV1NumbersNumberIdDelete
 func NewReleaseNumberV1NumbersNumberIdDeleteRequest(server string, numberId openapi_types.UUID, params *ReleaseNumberV1NumbersNumberIdDeleteParams) (*http.Request, error) {
 	var err error
@@ -7036,6 +7740,292 @@ func NewUnsubscribeV1UnsubscribeGetRequest(server string, params *UnsubscribeV1U
 	return req, nil
 }
 
+// NewListVerificationsRequest generates requests for ListVerifications
+func NewListVerificationsRequest(server string, params *ListVerificationsParams) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v1/verifications")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("GET", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+
+		if params.Authorization != nil {
+			var headerParam0 string
+
+			headerParam0, err = runtime.StyleParamWithOptions("simple", false, "authorization", *params.Authorization, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationHeader, Type: "string", Format: ""})
+			if err != nil {
+				return nil, err
+			}
+
+			req.Header.Set("authorization", headerParam0)
+		}
+
+	}
+
+	return req, nil
+}
+
+// NewCreateVerificationRequest generates requests for CreateVerification
+func NewCreateVerificationRequest(server string, params *CreateVerificationParams) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v1/verifications")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("POST", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+
+		if params.Authorization != nil {
+			var headerParam0 string
+
+			headerParam0, err = runtime.StyleParamWithOptions("simple", false, "authorization", *params.Authorization, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationHeader, Type: "string", Format: ""})
+			if err != nil {
+				return nil, err
+			}
+
+			req.Header.Set("authorization", headerParam0)
+		}
+
+	}
+
+	return req, nil
+}
+
+// NewGetVerificationRequirementsRequest generates requests for GetVerificationRequirements
+func NewGetVerificationRequirementsRequest(server string, params *GetVerificationRequirementsParams) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v1/verifications/requirements")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+		queryValues := queryURL.Query()
+
+		if queryFrag, err := runtime.StyleParamWithOptions("form", true, "country_code", params.CountryCode, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+			return nil, err
+		} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+			return nil, err
+		} else {
+			for k, v := range parsed {
+				for _, v2 := range v {
+					queryValues.Add(k, v2)
+				}
+			}
+		}
+
+		if queryFrag, err := runtime.StyleParamWithOptions("form", true, "number_type", params.NumberType, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+			return nil, err
+		} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+			return nil, err
+		} else {
+			for k, v := range parsed {
+				for _, v2 := range v {
+					queryValues.Add(k, v2)
+				}
+			}
+		}
+
+		if params.SubjectType != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "subject_type", *params.SubjectType, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+				return nil, err
+			} else {
+				for k, v := range parsed {
+					for _, v2 := range v {
+						queryValues.Add(k, v2)
+					}
+				}
+			}
+
+		}
+
+		if params.Provider != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "provider", *params.Provider, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+				return nil, err
+			} else {
+				for k, v := range parsed {
+					for _, v2 := range v {
+						queryValues.Add(k, v2)
+					}
+				}
+			}
+
+		}
+
+		queryURL.RawQuery = queryValues.Encode()
+	}
+
+	req, err := http.NewRequest("GET", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+
+		if params.Authorization != nil {
+			var headerParam0 string
+
+			headerParam0, err = runtime.StyleParamWithOptions("simple", false, "authorization", *params.Authorization, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationHeader, Type: "string", Format: ""})
+			if err != nil {
+				return nil, err
+			}
+
+			req.Header.Set("authorization", headerParam0)
+		}
+
+	}
+
+	return req, nil
+}
+
+// NewCancelVerificationRequest generates requests for CancelVerification
+func NewCancelVerificationRequest(server string, verificationId openapi_types.UUID, params *CancelVerificationParams) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "verification_id", verificationId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v1/verifications/%s", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("DELETE", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+
+		if params.Authorization != nil {
+			var headerParam0 string
+
+			headerParam0, err = runtime.StyleParamWithOptions("simple", false, "authorization", *params.Authorization, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationHeader, Type: "string", Format: ""})
+			if err != nil {
+				return nil, err
+			}
+
+			req.Header.Set("authorization", headerParam0)
+		}
+
+	}
+
+	return req, nil
+}
+
+// NewGetVerificationRequest generates requests for GetVerification
+func NewGetVerificationRequest(server string, verificationId openapi_types.UUID, params *GetVerificationParams) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "verification_id", verificationId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v1/verifications/%s", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("GET", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+
+		if params.Authorization != nil {
+			var headerParam0 string
+
+			headerParam0, err = runtime.StyleParamWithOptions("simple", false, "authorization", *params.Authorization, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationHeader, Type: "string", Format: ""})
+			if err != nil {
+				return nil, err
+			}
+
+			req.Header.Set("authorization", headerParam0)
+		}
+
+	}
+
+	return req, nil
+}
+
 // NewListSubscriptionsV1WebhooksGetRequest generates requests for ListSubscriptionsV1WebhooksGet
 func NewListSubscriptionsV1WebhooksGetRequest(server string, params *ListSubscriptionsV1WebhooksGetParams) (*http.Request, error) {
 	var err error
@@ -7711,6 +8701,11 @@ type ClientWithResponsesInterface interface {
 
 	AcquireNumberV1NumbersPostWithResponse(ctx context.Context, params *AcquireNumberV1NumbersPostParams, body AcquireNumberV1NumbersPostJSONRequestBody, reqEditors ...RequestEditorFn) (*AcquireNumberV1NumbersPostResponse, error)
 
+	// QuoteNumbersV1NumbersQuotesPostWithBodyWithResponse request with any body
+	QuoteNumbersV1NumbersQuotesPostWithBodyWithResponse(ctx context.Context, params *QuoteNumbersV1NumbersQuotesPostParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*QuoteNumbersV1NumbersQuotesPostResponse, error)
+
+	QuoteNumbersV1NumbersQuotesPostWithResponse(ctx context.Context, params *QuoteNumbersV1NumbersQuotesPostParams, body QuoteNumbersV1NumbersQuotesPostJSONRequestBody, reqEditors ...RequestEditorFn) (*QuoteNumbersV1NumbersQuotesPostResponse, error)
+
 	// ReleaseNumberV1NumbersNumberIdDeleteWithResponse request
 	ReleaseNumberV1NumbersNumberIdDeleteWithResponse(ctx context.Context, numberId openapi_types.UUID, params *ReleaseNumberV1NumbersNumberIdDeleteParams, reqEditors ...RequestEditorFn) (*ReleaseNumberV1NumbersNumberIdDeleteResponse, error)
 
@@ -7768,6 +8763,21 @@ type ClientWithResponsesInterface interface {
 
 	// UnsubscribeV1UnsubscribeGetWithResponse request
 	UnsubscribeV1UnsubscribeGetWithResponse(ctx context.Context, params *UnsubscribeV1UnsubscribeGetParams, reqEditors ...RequestEditorFn) (*UnsubscribeV1UnsubscribeGetResponse, error)
+
+	// ListVerificationsWithResponse request
+	ListVerificationsWithResponse(ctx context.Context, params *ListVerificationsParams, reqEditors ...RequestEditorFn) (*ListVerificationsResponse, error)
+
+	// CreateVerificationWithResponse request
+	CreateVerificationWithResponse(ctx context.Context, params *CreateVerificationParams, reqEditors ...RequestEditorFn) (*CreateVerificationResponse, error)
+
+	// GetVerificationRequirementsWithResponse request
+	GetVerificationRequirementsWithResponse(ctx context.Context, params *GetVerificationRequirementsParams, reqEditors ...RequestEditorFn) (*GetVerificationRequirementsResponse, error)
+
+	// CancelVerificationWithResponse request
+	CancelVerificationWithResponse(ctx context.Context, verificationId openapi_types.UUID, params *CancelVerificationParams, reqEditors ...RequestEditorFn) (*CancelVerificationResponse, error)
+
+	// GetVerificationWithResponse request
+	GetVerificationWithResponse(ctx context.Context, verificationId openapi_types.UUID, params *GetVerificationParams, reqEditors ...RequestEditorFn) (*GetVerificationResponse, error)
 
 	// ListSubscriptionsV1WebhooksGetWithResponse request
 	ListSubscriptionsV1WebhooksGetWithResponse(ctx context.Context, params *ListSubscriptionsV1WebhooksGetParams, reqEditors ...RequestEditorFn) (*ListSubscriptionsV1WebhooksGetResponse, error)
@@ -8445,7 +9455,6 @@ type AcquireNumberV1NumbersPostResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
 	JSON201      *PhoneNumberResponse
-	JSON422      *HTTPValidationError
 }
 
 // Status returns HTTPResponse.Status
@@ -8458,6 +9467,29 @@ func (r AcquireNumberV1NumbersPostResponse) Status() string {
 
 // StatusCode returns HTTPResponse.StatusCode
 func (r AcquireNumberV1NumbersPostResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type QuoteNumbersV1NumbersQuotesPostResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *NumberQuotesResponse
+	JSON422      *HTTPValidationError
+}
+
+// Status returns HTTPResponse.Status
+func (r QuoteNumbersV1NumbersQuotesPostResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r QuoteNumbersV1NumbersQuotesPostResponse) StatusCode() int {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.StatusCode
 	}
@@ -8822,6 +9854,121 @@ func (r UnsubscribeV1UnsubscribeGetResponse) Status() string {
 
 // StatusCode returns HTTPResponse.StatusCode
 func (r UnsubscribeV1UnsubscribeGetResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type ListVerificationsResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *[]VerificationResponse
+	JSON422      *HTTPValidationError
+}
+
+// Status returns HTTPResponse.Status
+func (r ListVerificationsResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ListVerificationsResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type CreateVerificationResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON201      *VerificationResponse
+	JSON422      *HTTPValidationError
+}
+
+// Status returns HTTPResponse.Status
+func (r CreateVerificationResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r CreateVerificationResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type GetVerificationRequirementsResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *Requirements
+	JSON422      *HTTPValidationError
+}
+
+// Status returns HTTPResponse.Status
+func (r GetVerificationRequirementsResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetVerificationRequirementsResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type CancelVerificationResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *VerificationResponse
+	JSON422      *HTTPValidationError
+}
+
+// Status returns HTTPResponse.Status
+func (r CancelVerificationResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r CancelVerificationResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type GetVerificationResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *VerificationResponse
+	JSON422      *HTTPValidationError
+}
+
+// Status returns HTTPResponse.Status
+func (r GetVerificationResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetVerificationResponse) StatusCode() int {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.StatusCode
 	}
@@ -9359,6 +10506,23 @@ func (c *ClientWithResponses) AcquireNumberV1NumbersPostWithResponse(ctx context
 	return ParseAcquireNumberV1NumbersPostResponse(rsp)
 }
 
+// QuoteNumbersV1NumbersQuotesPostWithBodyWithResponse request with arbitrary body returning *QuoteNumbersV1NumbersQuotesPostResponse
+func (c *ClientWithResponses) QuoteNumbersV1NumbersQuotesPostWithBodyWithResponse(ctx context.Context, params *QuoteNumbersV1NumbersQuotesPostParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*QuoteNumbersV1NumbersQuotesPostResponse, error) {
+	rsp, err := c.QuoteNumbersV1NumbersQuotesPostWithBody(ctx, params, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseQuoteNumbersV1NumbersQuotesPostResponse(rsp)
+}
+
+func (c *ClientWithResponses) QuoteNumbersV1NumbersQuotesPostWithResponse(ctx context.Context, params *QuoteNumbersV1NumbersQuotesPostParams, body QuoteNumbersV1NumbersQuotesPostJSONRequestBody, reqEditors ...RequestEditorFn) (*QuoteNumbersV1NumbersQuotesPostResponse, error) {
+	rsp, err := c.QuoteNumbersV1NumbersQuotesPost(ctx, params, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseQuoteNumbersV1NumbersQuotesPostResponse(rsp)
+}
+
 // ReleaseNumberV1NumbersNumberIdDeleteWithResponse request returning *ReleaseNumberV1NumbersNumberIdDeleteResponse
 func (c *ClientWithResponses) ReleaseNumberV1NumbersNumberIdDeleteWithResponse(ctx context.Context, numberId openapi_types.UUID, params *ReleaseNumberV1NumbersNumberIdDeleteParams, reqEditors ...RequestEditorFn) (*ReleaseNumberV1NumbersNumberIdDeleteResponse, error) {
 	rsp, err := c.ReleaseNumberV1NumbersNumberIdDelete(ctx, numberId, params, reqEditors...)
@@ -9541,6 +10705,51 @@ func (c *ClientWithResponses) UnsubscribeV1UnsubscribeGetWithResponse(ctx contex
 		return nil, err
 	}
 	return ParseUnsubscribeV1UnsubscribeGetResponse(rsp)
+}
+
+// ListVerificationsWithResponse request returning *ListVerificationsResponse
+func (c *ClientWithResponses) ListVerificationsWithResponse(ctx context.Context, params *ListVerificationsParams, reqEditors ...RequestEditorFn) (*ListVerificationsResponse, error) {
+	rsp, err := c.ListVerifications(ctx, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseListVerificationsResponse(rsp)
+}
+
+// CreateVerificationWithResponse request returning *CreateVerificationResponse
+func (c *ClientWithResponses) CreateVerificationWithResponse(ctx context.Context, params *CreateVerificationParams, reqEditors ...RequestEditorFn) (*CreateVerificationResponse, error) {
+	rsp, err := c.CreateVerification(ctx, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseCreateVerificationResponse(rsp)
+}
+
+// GetVerificationRequirementsWithResponse request returning *GetVerificationRequirementsResponse
+func (c *ClientWithResponses) GetVerificationRequirementsWithResponse(ctx context.Context, params *GetVerificationRequirementsParams, reqEditors ...RequestEditorFn) (*GetVerificationRequirementsResponse, error) {
+	rsp, err := c.GetVerificationRequirements(ctx, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetVerificationRequirementsResponse(rsp)
+}
+
+// CancelVerificationWithResponse request returning *CancelVerificationResponse
+func (c *ClientWithResponses) CancelVerificationWithResponse(ctx context.Context, verificationId openapi_types.UUID, params *CancelVerificationParams, reqEditors ...RequestEditorFn) (*CancelVerificationResponse, error) {
+	rsp, err := c.CancelVerification(ctx, verificationId, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseCancelVerificationResponse(rsp)
+}
+
+// GetVerificationWithResponse request returning *GetVerificationResponse
+func (c *ClientWithResponses) GetVerificationWithResponse(ctx context.Context, verificationId openapi_types.UUID, params *GetVerificationParams, reqEditors ...RequestEditorFn) (*GetVerificationResponse, error) {
+	rsp, err := c.GetVerification(ctx, verificationId, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetVerificationResponse(rsp)
 }
 
 // ListSubscriptionsV1WebhooksGetWithResponse request returning *ListSubscriptionsV1WebhooksGetResponse
@@ -10557,6 +11766,32 @@ func ParseAcquireNumberV1NumbersPostResponse(rsp *http.Response) (*AcquireNumber
 		}
 		response.JSON201 = &dest
 
+	}
+
+	return response, nil
+}
+
+// ParseQuoteNumbersV1NumbersQuotesPostResponse parses an HTTP response from a QuoteNumbersV1NumbersQuotesPostWithResponse call
+func ParseQuoteNumbersV1NumbersQuotesPostResponse(rsp *http.Response) (*QuoteNumbersV1NumbersQuotesPostResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &QuoteNumbersV1NumbersQuotesPostResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest NumberQuotesResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 422:
 		var dest HTTPValidationError
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
@@ -11057,6 +12292,171 @@ func ParseUnsubscribeV1UnsubscribeGetResponse(rsp *http.Response) (*UnsubscribeV
 	}
 
 	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 422:
+		var dest HTTPValidationError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON422 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseListVerificationsResponse parses an HTTP response from a ListVerificationsWithResponse call
+func ParseListVerificationsResponse(rsp *http.Response) (*ListVerificationsResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ListVerificationsResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest []VerificationResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 422:
+		var dest HTTPValidationError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON422 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseCreateVerificationResponse parses an HTTP response from a CreateVerificationWithResponse call
+func ParseCreateVerificationResponse(rsp *http.Response) (*CreateVerificationResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &CreateVerificationResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 201:
+		var dest VerificationResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON201 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 422:
+		var dest HTTPValidationError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON422 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseGetVerificationRequirementsResponse parses an HTTP response from a GetVerificationRequirementsWithResponse call
+func ParseGetVerificationRequirementsResponse(rsp *http.Response) (*GetVerificationRequirementsResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetVerificationRequirementsResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest Requirements
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 422:
+		var dest HTTPValidationError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON422 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseCancelVerificationResponse parses an HTTP response from a CancelVerificationWithResponse call
+func ParseCancelVerificationResponse(rsp *http.Response) (*CancelVerificationResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &CancelVerificationResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest VerificationResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 422:
+		var dest HTTPValidationError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON422 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseGetVerificationResponse parses an HTTP response from a GetVerificationWithResponse call
+func ParseGetVerificationResponse(rsp *http.Response) (*GetVerificationResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetVerificationResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest VerificationResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 422:
 		var dest HTTPValidationError
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {

@@ -66,7 +66,9 @@ async def release_number_internal(
         body.organization_id,
         body.source,
     )
-    was_released = number.provisioning_state == "released"
+    was_released = (
+        number.provisioning_state == "released" or number.released_at is not None
+    )
     number = await release_org_number(db, provider, number)
     if not was_released:
         # Same audit action as DELETE /numbers/{id}; api_key_id is None
@@ -78,6 +80,7 @@ async def release_number_internal(
             resource_type="phone_number",
             resource_id=number.id,
             payload={"e164": number.e164, "source": body.source},
+            actor_kind="system",
         )
     return {
         "number_id": str(number.id),

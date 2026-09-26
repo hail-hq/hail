@@ -21,8 +21,8 @@ production deployment you also need a domain, HTTPS, and a managed Postgres;
 start with the [VM deployment guide](docs/public/self-host/vm-deploy.md).
 
 The commands below run a local evaluation stack with bundled Postgres.
-Voice calls additionally require LiveKit Cloud, Twilio, Deepgram,
-Cartesia, and at least one LLM provider. Email is optional and requires AWS SES.
+Voice calls additionally require LiveKit Cloud, a carrier (Twilio, Telnyx or
+DIDWW), Deepgram, Cartesia, and at least one LLM provider. Email is optional and requires AWS SES.
 
 ```bash
 git clone https://github.com/hail-hq/hail
@@ -50,7 +50,9 @@ export HAIL_API_KEY='<same value as .env>'
 ```
 
 Next, follow [LiveKit Cloud](docs/public/self-host/livekit-cloud.md) and
-[Twilio](docs/public/self-host/twilio.md), then bind a phone number to the
+[Twilio](docs/public/self-host/twilio.md) (optionally
+[Telnyx](docs/public/self-host/telnyx.md) and [DIDWW](docs/public/self-host/didww.md)),
+then bind a phone number to the
 self-host organization using the
 [first-run setup](docs/public/self-host/operations.md#self-host-first-run-setup).
 To enable email, follow [AWS SES](docs/public/self-host/aws-ses.md).
@@ -102,7 +104,7 @@ hail sms status <id>
 hail sms suppressions list        # opt-out list
 hail sms sender-id get            # custom sender ID
 
-hail numbers acquire              # dedicated phone number (voice + SMS)
+hail numbers acquire              # dedicated phone number (voice + SMS), cheapest live offer
 hail numbers list
 hail contacts list                # org contact directory
 
@@ -152,7 +154,7 @@ asyncio.run(main())
 **HTTP** ([OpenAPI spec](openapi/openapi.yaml), [API reference](https://hail.so/docs/api)):
 
 ```bash
-curl -X POST http://localhost:8080/calls \
+curl -X POST http://localhost:8080/v1/calls \
   -H "Authorization: Bearer $HAIL_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{"to":"+15551234567","recipient_consent":true,"system_prompt":"..."}'
@@ -189,7 +191,8 @@ A checked box is a released feature. Per-artifact changelogs (GitHub Releases fo
 
 - Outbound
   - [x] Twilio
-  - [ ] Telnyx
+  - [x] Telnyx
+  - [x] DIDWW
 - Inbound
   - [ ] Twilio
 
@@ -197,8 +200,15 @@ A checked box is a released feature. Per-artifact changelogs (GitHub Releases fo
 
 - Outbound
   - [x] Twilio
+  - [x] Telnyx
 - Inbound
   - [x] Twilio
+  - [x] Telnyx
+
+### Numbers
+
+- [x] Live quotes across carriers (inventory, price, verification effort)
+- [x] Carrier verification for regulated countries (Twilio)
 
 ### Email
 
@@ -257,7 +267,7 @@ A checked box is a released feature. Per-artifact changelogs (GitHub Releases fo
 The path of an outbound call:
 
 ```
-AI agent ──► Hail API ──dispatch──► Voicebot ──► LiveKit Cloud ──SIP──► Twilio ──► 📞
+AI agent ──► Hail API ──dispatch──► Voicebot ──► LiveKit Cloud ──SIP──► carrier (Twilio · Telnyx · DIDWW) ──► 📞
 ```
 
 Full diagram and service breakdown: [docs/public/architecture.md](docs/public/architecture.md). All docs are published at [hail.so/docs](https://hail.so/docs) and live as plain markdown in [docs/public/](docs/public/).

@@ -4,7 +4,7 @@ Hail v1 is three Python services plus a Go CLI, built around LiveKit Cloud.
 
 ```
  AI agent                                     Hail                                LiveKit Cloud         PSTN
-(caller)  ─────MCP URL──►  Hail MCP ─HTTP─►  Hail API  ◄────►  SIP+WebRTC  ◄────► Twilio ◄────► 📞
+(caller)  ─────MCP URL──►  Hail MCP ─HTTP─►  Hail API  ◄────►  SIP+WebRTC  ◄────► carrier ◄────► 📞
                           (HTTP :8081)     (FastAPI :8080)
                                                  │
                                                  └─dispatch──►  Hail voicebot  (LiveKit Agents worker)
@@ -29,7 +29,7 @@ LiveKit Cloud is external. The `hail` Go CLI is a scriptable tool for humans, no
 
 1. The caller (an agent via MCP, the CLI, or direct HTTP) sends `POST /calls` with `{to, from, first_message?, …llm}`.
 2. The Hail API creates a LiveKit room and dispatches the voicebot into it.
-3. The voicebot joins the room. LiveKit places an outbound SIP call through the Twilio trunk to `to`.
+3. The voicebot joins the room. LiveKit places an outbound SIP call to `to` through the trunk of the carrier that owns `from` (Twilio, Telnyx or DIDWW; [`carrier_routing.py`](https://github.com/hail-hq/hail/blob/main/core/hailhq/core/carrier_routing.py)).
 4. On pickup, the voicebot classifies who answered before it speaks (refer to the section below). Then it speaks the AI disclosure and the `first_message` (if set), and runs the STT → LLM → TTS loop. If the call set `ai_disclosure: false`, the voicebot skips the disclosure; Hail audit-logs the opt-out, and the opt-out is the caller's responsibility.
 5. On hangup, the voicebot writes the call record to Postgres and uploads the recording to S3.
 
@@ -61,11 +61,11 @@ Precedence is B, then C, then A. See [Bring your own LLM](./byo-llm.md) for the 
 
 ## SMS
 
-The `SmsProvider` adapter in [`core/hailhq/core/providers/sms/`](https://github.com/hail-hq/hail/blob/main/core/hailhq/core/providers/sms) sends SMS through Twilio.
+The `SmsProvider` adapter in [`core/hailhq/core/providers/sms/`](https://github.com/hail-hq/hail/blob/main/core/hailhq/core/providers/sms) sends SMS through the carrier that owns the sending number (Twilio or Telnyx).
 
-**Outbound.** `POST /sms` sends from the org's dedicated SMS-capable number. There is no pool fallback — refer to `hail numbers` for number acquisition. Twilio posts delivery-status callbacks. These callbacks move `Sms.status` and fan out the `sms.delivered` / `sms.undelivered` / `sms.failed` webhook events.
+**Outbound.** `POST /sms` with no `from` sends from the org's sender ID (or the platform default `HAIL`) to UK (+44) and Germany (+49); Australia (+61) always gets `HAIL`; every other destination uses the org's oldest active SMS-capable number and 422s when there is none (see [`core/hailhq/core/sender_id.py`](https://github.com/hail-hq/hail/blob/main/core/hailhq/core/sender_id.py)). There is no pool fallback — refer to `hail numbers` for number acquisition. Twilio posts delivery-status callbacks. These callbacks move `Sms.status` and fan out the `sms.delivered` / `sms.undelivered` / `sms.failed` webhook events.
 
-**Inbound.** Twilio posts each incoming message to `POST /sms/inbound`. Hail verifies the `X-Twilio-Signature` header. It matches the destination number to an org, stores the message, and fires the `sms.received` webhook event. Messages to unknown or pool numbers are dropped. An opt-out reply (`STOP`) adds the sender to the org's suppression list; `START` removes it.
+**Inbound.** Twilio posts each incoming message to `POST /sms/inbound` (Hail verifies the `X-Twilio-Signature` header); Telnyx posts to `POST /sms/telnyx` (Ed25519 signature). It matches the destination number to an org, stores the message, and fires the `sms.received` webhook event. Messages to unknown or pool numbers are dropped. An opt-out reply (`STOP`) adds the sender to the org's suppression list; `START` removes it.
 
 ## Outbound email
 

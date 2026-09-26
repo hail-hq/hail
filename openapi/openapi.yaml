@@ -318,13 +318,24 @@ paths:
       tags:
         - emails
       summary: Create Email
-      description:
-        "Send an outbound email through SES.\n\nSends synchronously \u2014\
-        \ the response reports the final status (sent or\nfailed), not a queued placeholder;\
-        \ no separate poll is needed for the\nhappy path, though a bounce or complaint\
-        \ can still arrive later as a\nwebhook or GET /v1/emails/{email_id}/events\
-        \ entry. Requires\nrecipient_consent=true on the request body; Hail does not\
-        \ verify lawful\nbasis to contact the recipient, the caller warrants it."
+      description: "Send an outbound email through SES.
+
+
+        Sends synchronously. A 201 means SES accepted the message and the
+
+        response status is 'sent'; no separate poll is needed for the happy path,
+
+        though a bounce or complaint can still arrive later as a webhook or
+
+        GET /v1/emails/{email_id}/events entry. If the send fails, the response is
+
+        502 'email send failed' with no email body; the email is kept with status
+
+        'failed' (GET /v1/emails?status=failed) and an email.send_failed event is
+
+        emitted. Requires recipient_consent=true on the request body; Hail does
+
+        not verify lawful basis to contact the recipient, the caller warrants it."
       operationId: create_email_v1_emails_post
       parameters:
         - name: authorization
@@ -381,6 +392,10 @@ paths:
                 type: integer
         "402":
           description: insufficient credits; top up at https://hail.so/console/billing
+        "502":
+          description:
+            "Email send failed: the provider rejected the send. The email
+            is recorded with status 'failed'."
         "422":
           description: Validation Error
           content:
@@ -1437,9 +1452,9 @@ paths:
       description:
         "Buy a dedicated phone number for the caller's organization.\n\n\
         This purchases a real number at the carrier and starts a recurring\nmonthly\
-        \ fee immediately \u2014 it is not a reservation. The number is usable\nfor\
-        \ voice, SMS, or both depending on the requested capabilities and\nwhat the\
-        \ carrier offers for the given country_code/number_type."
+        \ fee immediately \u2014 it is not a reservation. quote_id is required:\n\
+        request live offers from POST /numbers/quotes first, then buy one. The\nnumber\
+        \ is usable for voice, SMS, or both, as the quote lists."
       operationId: acquire_number_v1_numbers_post
       parameters:
         - name: authorization
@@ -1492,17 +1507,27 @@ paths:
               description: Seconds until the current window resets.
               schema:
                 type: integer
+        "404":
+          description: The quote does not exist for this organization.
+        "422":
+          description:
+            quote_id is missing (request one from POST /numbers/quotes)
+            or the quote does not match the country, type or provider.
         "402":
           description:
             insufficient credits; top up at https://hail.so/console/billing.
             Also returned when the balance doesn't cover this number's full monthly
             price.
-        "422":
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/HTTPValidationError"
+        "409":
+          description:
+            The quote expired, the number is taken, the price changed,
+            or the carrier rejected or failed the order. In the last case the credit
+            hold is refunded and the detail gives the reason. Also returned when the
+            quote's number was released since it was bought.
+        "503":
+          description:
+            The carrier lookup or number price is unavailable, or no inventory
+            matched. Nothing was charged; retry shortly.
     get:
       tags:
         - numbers
@@ -1510,7 +1535,8 @@ paths:
       description:
         "List dedicated numbers owned by the caller's organization.\n\n\
         Cursor-paginated, newest first. Only org-owned numbers are listed \u2014\n\
-        shared pool numbers used for outbound calls never appear here."
+        shared pool numbers used for outbound calls never appear here. Failed\norders\
+        \ that were dismissed (DELETE) are not listed."
       operationId: list_numbers_v1_numbers_get
       parameters:
         - name: cursor
@@ -1625,6 +1651,15 @@ paths:
               description: Seconds until the current window resets.
               schema:
                 type: integer
+        "404":
+          description: The number does not exist for this organization.
+        "409":
+          description:
+            The order is still pending (refresh its status first) or the
+            number's carrier is unsupported. A failed order is dismissed with 204
+            and no carrier call.
+        "503":
+          description: The number's carrier is not configured on this server.
         "422":
           description: Validation Error
           content:
@@ -1642,7 +1677,9 @@ paths:
 
         Org-scoped: returns 404 for a number belonging to a different
 
-        organization."
+        organization. Read-only: a pending order is advanced by the background
+
+        reconciler, never by this request."
       operationId: get_number_v1_numbers__number_id__get
       parameters:
         - name: number_id
@@ -1729,6 +1766,74 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/PhoneNumberResponse"
+        "429":
+          description:
+            Rate limited. This caller exceeded the general request-rate
+            ceiling. Retry after the Retry-After header (seconds).
+          headers:
+            Retry-After:
+              description: Seconds to wait before retrying.
+              schema:
+                type: integer
+            RateLimit-Limit:
+              description: The request ceiling for the current window.
+              schema:
+                type: integer
+            RateLimit-Remaining:
+              description: Requests remaining in the current window.
+              schema:
+                type: integer
+            RateLimit-Reset:
+              description: Seconds until the current window resets.
+              schema:
+                type: integer
+        "404":
+          description: The number does not exist for this organization.
+        "503":
+          description: SMS is not configured for this number's carrier on this server.
+        "422":
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
+  /v1/numbers/quotes:
+    post:
+      tags:
+        - numbers
+      summary: Quote Numbers
+      description:
+        "Compare live, org-specific offers. Prices include setup + monthly
+        rent.
+
+
+        Auto recommends a ready offer with the lowest monthly rent, then setup
+
+        cost, preferring Twilio on equivalent ties. Blocked offers sort by verification
+        effort. SMS capability does not waive messaging registration requirements."
+      operationId: quote_numbers_v1_numbers_quotes_post
+      parameters:
+        - name: authorization
+          in: header
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            title: Authorization
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/NumberQuoteRequest"
+      responses:
+        "200":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NumberQuotesResponse"
         "429":
           description:
             Rate limited. This caller exceeded the general request-rate
@@ -3662,9 +3767,9 @@ paths:
 
         The carrier checks the details right away. Problems come back as 422 with
 
-        the field named, and nothing is kept. When it passes, the verification waits
+        the field named, and nothing is kept. When it passes, the verification is
 
-        for review and is then submitted to the carrier.'
+        submitted to the carrier for its review; read it back to follow the state.'
       operationId: create_verification
       parameters:
         - name: authorization
@@ -4198,6 +4303,126 @@ components:
         - answered_at
         - ended_at
       title: CallResponse
+    CarrierOffer:
+      properties:
+        provider:
+          type: string
+          enum:
+            - twilio
+            - telnyx
+          title: Provider
+          description: Carrier supplying this exact number.
+        e164:
+          type: string
+          title: E164
+          description: Available phone number in E.164 format.
+        country_code:
+          type: string
+          title: Country Code
+          description: ISO alpha-2 country code of the number.
+        number_type:
+          type: string
+          enum:
+            - local
+            - mobile
+            - toll_free
+            - national
+          title: Number Type
+          description: Local, mobile, national, or toll-free number type.
+        capabilities:
+          items:
+            type: string
+          type: array
+          title: Capabilities
+          description:
+            Voice/SMS capabilities reported by live carrier inventory;
+            SMS registration may still be required.
+        monthly_cents:
+          type: integer
+          minimum: 1.0
+          title: Monthly Cents
+          description:
+            Monthly number rental in USD cents, charged from organization
+            credits.
+        setup_cents:
+          type: integer
+          minimum: 0.0
+          title: Setup Cents
+          description:
+            One-time setup charge in USD cents, payable with the first
+            month.
+        currency:
+          type: string
+          const: USD
+          title: Currency
+          description: Currency of the quoted rental and setup amounts.
+          default: USD
+        readiness:
+          type: string
+          enum:
+            - ready
+            - verification_required
+          title: Readiness
+          description:
+            Whether regulatory preflight permits purchase for this organization;
+            rechecked at purchase.
+        regulatory_friction:
+          type: string
+          enum:
+            - none
+            - information
+            - documents
+            - unknown
+          title: Regulatory Friction
+          description:
+            "Remaining verification effort derived from live requirements:
+            none, information/address entry, document uploads, or unknown. This does
+            not establish legal eligibility."
+          default: unknown
+        requirements:
+          items:
+            type: string
+          type: array
+          title: Requirements
+          description:
+            Carrier regulatory requirement labels associated with this
+            offer.
+        verification_id:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Verification Id
+          description:
+            Server-selected organization-bound approved bundle or requirement-group
+            identifier, if any.
+        address_id:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Address Id
+          description:
+            Server-selected verified address identifier, when supported;
+            null otherwise.
+        quote_id:
+          anyOf:
+            - type: string
+              format: uuid
+            - type: "null"
+          title: Quote Id
+          description:
+            Organization-bound quote identifier to pass to POST /numbers
+            before expiry.
+      type: object
+      required:
+        - provider
+        - e164
+        - country_code
+        - number_type
+        - capabilities
+        - monthly_cents
+        - setup_cents
+        - readiness
+      title: CarrierOffer
     ContactCreate:
       properties:
         name:
@@ -6081,6 +6306,24 @@ components:
       title: MemberPhonePut
     NumberAcquireRequest:
       properties:
+        quote_id:
+          type: string
+          format: uuid
+          title: Quote Id
+          description:
+            "Unexpired organization-bound quote from POST /numbers/quotes.
+            Required: without it the request is a 422; get a quote first."
+        provider:
+          type: string
+          enum:
+            - auto
+            - twilio
+            - telnyx
+          title: Provider
+          description:
+            Carrier restriction for the quote. Auto accepts the quoted
+            carrier; twilio or telnyx must match it.
+          default: auto
         country_code:
           type: string
           maxLength: 2
@@ -6104,8 +6347,100 @@ components:
       additionalProperties: false
       type: object
       required:
+        - quote_id
         - country_code
       title: NumberAcquireRequest
+    NumberQuoteRequest:
+      properties:
+        country_code:
+          type: string
+          maxLength: 2
+          minLength: 2
+          title: Country Code
+          description: ISO alpha-2 country code to search. Case-insensitive.
+        number_type:
+          anyOf:
+            - type: string
+              enum:
+                - local
+                - mobile
+                - toll_free
+                - national
+            - type: "null"
+          title: Number Type
+          description: Restrict number type; omit to compare all supported types.
+        capabilities:
+          items:
+            type: string
+            enum:
+              - voice
+              - sms
+          type: array
+          maxItems: 2
+          minItems: 1
+          title: Capabilities
+          description:
+            Required channels; every returned offer must support all requested
+            capabilities.
+        provider:
+          type: string
+          enum:
+            - auto
+            - twilio
+            - telnyx
+          title: Provider
+          description:
+            Carrier restriction; twilio or telnyx returns that carrier's
+            offers only. auto compares both by readiness, remaining verification effort,
+            and rental/setup costs; Twilio wins equivalent ties.
+          default: auto
+      additionalProperties: false
+      type: object
+      required:
+        - country_code
+        - capabilities
+      title: NumberQuoteRequest
+    NumberQuotesResponse:
+      properties:
+        offers:
+          items:
+            $ref: "#/components/schemas/CarrierOffer"
+          type: array
+          title: Offers
+          description:
+            Live carrier offers ordered by readiness, remaining verification
+            effort, monthly price, setup price, and Twilio tie-break.
+        recommended_quote_id:
+          anyOf:
+            - type: string
+              format: uuid
+            - type: "null"
+          title: Recommended Quote Id
+          description:
+            Recommended ready offer matching the requested carrier preference,
+            or null if none qualifies.
+        unavailable_providers:
+          items:
+            type: string
+          type: array
+          title: Unavailable Providers
+          description:
+            Carriers whose inventory, price, or regulatory lookup failed;
+            comparison may be incomplete.
+        expires_at:
+          type: string
+          format: date-time
+          title: Expires At
+          description:
+            UTC expiry of these persisted quotes; request fresh offers
+            afterward.
+      type: object
+      required:
+        - offers
+        - recommended_quote_id
+        - unavailable_providers
+        - expires_at
+      title: NumberQuotesResponse
     ObservedDnsRecord:
       properties:
         name:
@@ -6175,6 +6510,13 @@ components:
       title: PhoneNumberListResponse
     PhoneNumberResponse:
       properties:
+        provider:
+          type: string
+          title: Provider
+          description:
+            Carrier that owns and routes this number, such as twilio or
+            telnyx.
+          default: twilio
         id:
           type: string
           format: uuid
@@ -6560,10 +6902,13 @@ components:
             - type: "null"
           title: From
           description:
-            "Sender phone number, E.164 format. Must be a number owned
-            by the organization with the SMS capability. Omitted: an active org-owned
-            number is used if one exists, else a number is claimed from the shared
-            pool."
+            "Sender phone number, E.164 format. Must be an active number
+            owned by the organization with the SMS capability. Omitted: UK (+44) and
+            Germany (+49) destinations use the organization's sender ID, or the platform
+            default 'HAIL' when none is set; Australia (+61) always uses 'HAIL'.
+            Every other destination uses the organization's oldest active SMS-capable
+            number; if none exists the request fails with 422. SMS never uses the
+            shared pool."
         body:
           type: string
           maxLength: 1600
@@ -6744,8 +7089,11 @@ components:
         source:
           type: string
           title: Source
-          description: "How this entry was created: 'unsubscribe_link', 'manual'
-            (an operator action), or 'bounce'."
+          description:
+            "How this entry was created: 'unsubscribe_link' (email unsubscribe
+            link) or 'stop_keyword' (recipient replied STOP by SMS). 'manual'
+            (operator action) and 'bounce' (bounce handler) are reserved; nothing
+            writes them yet."
         created_at:
           type: string
           format: date-time
@@ -7296,6 +7644,11 @@ components:
             - type: "null"
           title: Name
           description: The authenticated user's display name. Null for 'shared' callers.
+        superadmin:
+          type: boolean
+          title: Superadmin
+          description: True for a Hail staff console session acting on this organization.
+          default: false
       type: object
       required:
         - auth_kind

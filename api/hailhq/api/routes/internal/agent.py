@@ -191,6 +191,7 @@ async def _deny(
         resource_type=resource_type,
         resource_id=None,
         payload=payload,
+        actor_kind="system",
     )
     return AgentSendResponse(ok=False, spoken=spoken)
 
@@ -285,6 +286,7 @@ async def agent_send_sms(
 
     sms = Sms(
         organization_id=org,
+        provider=from_number.provider,
         from_number_id=from_number.id,
         from_e164=from_number.e164,
         to_e164=call.to_e164,  # counterpart only — never a parameter
@@ -309,6 +311,7 @@ async def agent_send_sms(
             "message_type": "transactional",
             "compliance": gate.checks,
         },
+        actor_kind="system",
     )
 
     err = await deliver_sms(db, provider, sms)
@@ -320,6 +323,7 @@ async def agent_send_sms(
             resource_type="sms",
             resource_id=sms.id,
             payload={**_meta(body), "end_reason": err},
+            actor_kind="system",
         )
         return AgentSendResponse(ok=False, spoken=_SPOKEN_SMS_FAILED)
     return AgentSendResponse(ok=True, spoken=_SPOKEN_SMS_SENT)
@@ -452,6 +456,7 @@ async def agent_send_email(
             "message_type": "transactional",
             "compliance": gate.checks,
         },
+        actor_kind="system",
     )
 
     err = await deliver_email(db, email_provider, email)
@@ -463,6 +468,7 @@ async def agent_send_email(
             resource_type="email",
             resource_id=email.id,
             payload={**_meta(body), "end_reason": err},
+            actor_kind="system",
         )
         return AgentSendResponse(ok=False, spoken=_SPOKEN_EMAIL_FAILED)
     return AgentSendResponse(ok=True, spoken=_SPOKEN_EMAIL_SENT)

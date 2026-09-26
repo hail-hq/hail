@@ -78,13 +78,14 @@ hail sms sender-id get         # the org's custom sender ID
 Dedicated phone numbers for voice and SMS.
 
 ```bash
-hail numbers acquire --country US --type local
+hail numbers acquire --country US --type local          # buys the cheapest ready live offer
+hail numbers acquire --country US --quote-id <quote-id>  # buys one exact offer from POST /numbers/quotes
 hail numbers list
 hail numbers get <id>
 hail numbers enable-sms <id>   # attach a Messaging Service so the number can send SMS
 ```
 
-`acquire` flags: `--country`, `--type` (`local|mobile|toll_free|national`), `--idempotency-key`.
+`acquire` requests live quotes ([`POST /numbers/quotes`](../../openapi/openapi.yaml)), then buys the cheapest ready offer (monthly plus setup) with its `quote_id`. Flags: `--country` (required), `--type` (`local|mobile|toll_free|national`), `--provider` (`auto|twilio|telnyx`), `--quote-id` (skip the quote and buy that offer), `--voice-only`, `--sms-only` (default: voice and SMS), `--idempotency-key`.
 
 ## Email
 
@@ -204,18 +205,18 @@ The CLI has no `webhooks` command group. Manage subscriptions through the HTTP A
 
 ```bash
 # Register a subscription (the response shows the signing secret ONCE — store it)
-curl -X POST "$HAIL_API_URL/webhooks" \
+curl -X POST "$HAIL_API_URL/v1/webhooks" \
   -H "Authorization: Bearer $HAIL_API_KEY" \
   -d '{"target_url":"https://example.com/hooks/hail","event_types":["email.received","sms.received"]}'
 
 # List subscriptions
-curl "$HAIL_API_URL/webhooks" -H "Authorization: Bearer $HAIL_API_KEY"
+curl "$HAIL_API_URL/v1/webhooks" -H "Authorization: Bearer $HAIL_API_KEY"
 
 # Delivery attempts for one subscription
-curl "$HAIL_API_URL/webhooks/<sub-id>/deliveries" -H "Authorization: Bearer $HAIL_API_KEY"
+curl "$HAIL_API_URL/v1/webhooks/<sub-id>/deliveries" -H "Authorization: Bearer $HAIL_API_KEY"
 
 # Replay one delivery
-curl -X POST "$HAIL_API_URL/webhooks/<sub-id>/deliveries/<delivery-id>/redeliver" \
+curl -X POST "$HAIL_API_URL/v1/webhooks/<sub-id>/deliveries/<delivery-id>/redeliver" \
   -H "Authorization: Bearer $HAIL_API_KEY"
 ```
 

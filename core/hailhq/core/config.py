@@ -1,4 +1,4 @@
-from pydantic import computed_field
+from pydantic import Field, computed_field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -46,6 +46,10 @@ class Settings(BaseSettings):
     # Carriers
     twilio_account_sid: str = ""
     twilio_auth_token: str = ""
+    telnyx_api_key: str = ""
+    telnyx_connection_id: str = ""
+    telnyx_sip_username: str = ""
+    telnyx_public_key: str = ""
 
     # AWS — used today for SES (outbound email). boto3 falls back to its
     # default credential chain (env / config file / IAM role) when these
@@ -129,8 +133,13 @@ class Settings(BaseSettings):
     # POST /calls (CreateSIPParticipantRequest.sip_trunk_id). Inbound is for
     # the v1.1 inbound-calls milestone — kept here so the config schema is
     # ready and operators only set both up once.
+    # Canonical carrier-specific names. The legacy names below stay supported as
+    # fallbacks for existing deployments (see the validator at the end).
+    livekit_twilio_sip_outbound_trunk_id: str = ""
+    livekit_twilio_sip_inbound_trunk_id: str = ""
     livekit_sip_outbound_trunk_id: str = ""
     livekit_sip_inbound_trunk_id: str = ""
+    livekit_telnyx_sip_outbound_trunk_id: str = ""
     # Second carrier. A number's ``provider`` picks the trunk
     # (core/hailhq/core/carrier_routing.py). Empty = DIDWW numbers cannot dial.
     livekit_didww_sip_outbound_trunk_id: str = ""
@@ -264,7 +273,9 @@ class Settings(BaseSettings):
     # legitimate agent/automation traffic, still bounds a runaway loop. This
     # is a starting point, not a researched-and-final threshold — tune
     # post-launch same as the velocity caps above.
-    api_rate_limit_per_minute: int = 300
+    # Must be >= 1: 0 would 429 every request and a negative value makes
+    # limits.parse raise on every request, so reject both at startup.
+    api_rate_limit_per_minute: int = Field(default=300, ge=1)
 
     # SMS compliance auto-replies (HELP/STOP/START). OFF by default: Twilio's
     # own opt-out handling already auto-replies to these keywords, so enabling
@@ -284,6 +295,20 @@ class Settings(BaseSettings):
         "You are resubscribed to Hail messages. Reply STOP to unsubscribe, "
         "HELP for help."
     )
+
+    @model_validator(mode="after")
+    def _legacy_twilio_trunk_fallback(self) -> "Settings":
+        """The explicit Twilio name wins. A blank canonical value, such as the
+        empty line in .env.example, must not hide a populated legacy value."""
+        self.livekit_twilio_sip_outbound_trunk_id = (
+            self.livekit_twilio_sip_outbound_trunk_id
+            or self.livekit_sip_outbound_trunk_id
+        )
+        self.livekit_twilio_sip_inbound_trunk_id = (
+            self.livekit_twilio_sip_inbound_trunk_id
+            or self.livekit_sip_inbound_trunk_id
+        )
+        return self
 
     @computed_field  # type: ignore[prop-decorator]
     @property

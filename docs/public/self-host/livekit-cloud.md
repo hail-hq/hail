@@ -22,15 +22,18 @@ Then, in LiveKit Cloud:
 3. Add the Twilio number in E.164 format and enter the same username/password
    configured on the Twilio trunk.
 4. Create the trunk and copy its ID into `.env` as
-   `LIVEKIT_SIP_OUTBOUND_TRUNK_ID`.
+   `LIVEKIT_TWILIO_SIP_OUTBOUND_TRUNK_ID`.
 
 Hail passes this ID to LiveKit for every outbound call from a Twilio number.
-Numbers from a second carrier use their own trunk: see [DIDWW](./didww.md).
-Hail does not read a Twilio trunk-domain environment variable. See LiveKit's
+The older `LIVEKIT_SIP_OUTBOUND_TRUNK_ID` name remains supported as a
+compatibility alias; the explicit Twilio name takes precedence. Numbers from
+another carrier use their own trunk: see [DIDWW](./didww.md) and
+`LIVEKIT_TELNYX_SIP_OUTBOUND_TRUNK_ID`. Hail does not read a Twilio
+trunk-domain environment variable. See LiveKit's
 [outbound trunk reference](https://docs.livekit.io/telephony/making-calls/outbound-trunk/)
 for the current UI and JSON forms.
 
-`LIVEKIT_SIP_INBOUND_TRUNK_ID` is reserved for a future inbound-calling
+`LIVEKIT_TWILIO_SIP_INBOUND_TRUNK_ID` is reserved for a future inbound-calling
 release and can remain empty today.
 
 ## 3. Voicebot worker

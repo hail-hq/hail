@@ -98,7 +98,8 @@ Put new adapters under `core/hailhq/core/providers/<channel>/<name>.py`. Each ad
 ### Required external accounts
 
 - **Twilio**: account SID + auth token + a phone number with voice capability + an Elastic SIP Trunk (Origination URI → LiveKit's inbound, Termination → Twilio's PSTN).
-- **LiveKit Cloud**: project + URL + API key + secret + an outbound SIP trunk (`LIVEKIT_SIP_OUTBOUND_TRUNK_ID`) + an inbound trunk (`LIVEKIT_SIP_INBOUND_TRUNK_ID`, reserved for v1.1). Optional second carrier trunk: `LIVEKIT_DIDWW_SIP_OUTBOUND_TRUNK_ID` ([DIDWW](./didww.md)).
+- **Telnyx** (optional second carrier): API key + outbound voice profile + SIP connection + LiveKit trunk + webhook public key ([Telnyx](./telnyx.md)). Quotes compare it with Twilio.
+- **LiveKit Cloud**: project + URL + API key + secret + an outbound SIP trunk (`LIVEKIT_TWILIO_SIP_OUTBOUND_TRUNK_ID`) + an inbound trunk (`LIVEKIT_TWILIO_SIP_INBOUND_TRUNK_ID`, reserved for v1.1). Optional per-carrier trunks: `LIVEKIT_TELNYX_SIP_OUTBOUND_TRUNK_ID`, `LIVEKIT_DIDWW_SIP_OUTBOUND_TRUNK_ID` ([DIDWW](./didww.md)).
 - **Deepgram** (STT): API key. Required; used for semantic turn detection and as the fallback when Speechmatics is unavailable.
 - **Speechmatics** (STT, optional): API key. Enables language-specific STT routing and end-of-utterance detection for 22 languages. Deepgram-only self-hosts keep working; if absent, calls fall back to Deepgram with VAD turn detection.
 - **Cartesia** (primary TTS): API key + a voice ID from the Cartesia voice library.
@@ -679,7 +680,7 @@ After stage 5, in order:
    the delivery row reaches `status=succeeded`:
 
    ```bash
-   curl "$HAIL_API_URL/webhooks/<subscription-id>/deliveries" \
+   curl "$HAIL_API_URL/v1/webhooks/<subscription-id>/deliveries" \
      -H "Authorization: Bearer $HAIL_API_KEY"
    ```
 
@@ -751,7 +752,7 @@ positives, tune `HAIL_SMS_ABUSE_MAX_OPT_OUT_RATE` up.
 
 - LiveKit Egress recording → S3 (currently `recording.py` returns `None`)
 - `idempotency_keys` GC sweeper
-- Inbound calls (`LIVEKIT_SIP_INBOUND_TRUNK_ID` reserved)
+- Inbound calls (`LIVEKIT_TWILIO_SIP_INBOUND_TRUNK_ID` reserved)
 - SMTP-listener inbound email provider (`SmtpInboundProvider` is a stub)
 - `hail bootstrap` admin CLI (closes the manual DB-seed step above)
 - CallEvent dedupe across voicebot redispatch

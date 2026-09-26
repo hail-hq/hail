@@ -406,8 +406,9 @@ async def test_superadmin_approve_submits_to_the_carrier(
 ) -> None:
     _, _, key = org_and_key
     vid = await _unsent(client, key, carrier, async_session)
+    admin_user_id = uuid.uuid4()
     app.dependency_overrides[require_superadmin] = lambda: SimpleNamespace(
-        user_id=uuid.uuid4()
+        user_id=admin_user_id, api_key_id=None, superadmin=True
     )
 
     listed = await client.get("/admin/verifications", headers=_auth(key))
@@ -420,6 +421,18 @@ async def test_superadmin_approve_submits_to_the_carrier(
     again = await client.post(f"/admin/verifications/{vid}/approve", headers=_auth(key))
     assert again.status_code == 409
 
+    audits = (
+        (
+            await async_session.execute(
+                select(AuditLog).where(AuditLog.action == "verification.approve")
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert audits[0].actor_kind == "superadmin"
+    assert audits[0].actor_user_id == admin_user_id
+
 
 async def test_superadmin_approve_refuses_a_draft_the_carrier_now_rejects(
     client, org_and_key, carrier, async_session
@@ -427,7 +440,7 @@ async def test_superadmin_approve_refuses_a_draft_the_carrier_now_rejects(
     _, _, key = org_and_key
     vid = await _unsent(client, key, carrier, async_session)
     app.dependency_overrides[require_superadmin] = lambda: SimpleNamespace(
-        user_id=uuid.uuid4()
+        user_id=uuid.uuid4(), api_key_id=None, superadmin=True
     )
     carrier.check_problems = [Problem(field="", message="expired")]
     resp = await client.post(f"/admin/verifications/{vid}/approve", headers=_auth(key))
@@ -441,7 +454,7 @@ async def test_superadmin_reject_records_reason_and_discards(
     _, _, key = org_and_key
     vid = await _unsent(client, key, carrier, async_session)
     app.dependency_overrides[require_superadmin] = lambda: SimpleNamespace(
-        user_id=uuid.uuid4()
+        user_id=uuid.uuid4(), api_key_id=None, superadmin=True
     )
     resp = await client.post(
         f"/admin/verifications/{vid}/reject",
@@ -463,7 +476,7 @@ async def test_status_is_pulled_from_the_carrier_after_submit(
     _, _, key = org_and_key
     vid = (await _create(client, key)).json()["id"]
     app.dependency_overrides[require_superadmin] = lambda: SimpleNamespace(
-        user_id=uuid.uuid4()
+        user_id=uuid.uuid4(), api_key_id=None, superadmin=True
     )
     await client.post(f"/admin/verifications/{vid}/approve", headers=_auth(key))
 
@@ -481,7 +494,7 @@ async def test_list_polls_the_carrier_at_most_once_a_minute(
     _, _, key = org_and_key
     vid = (await _create(client, key)).json()["id"]
     app.dependency_overrides[require_superadmin] = lambda: SimpleNamespace(
-        user_id=uuid.uuid4()
+        user_id=uuid.uuid4(), api_key_id=None, superadmin=True
     )
     await client.post(f"/admin/verifications/{vid}/approve", headers=_auth(key))
     calls = []
@@ -541,19 +554,27 @@ async def test_stuck_submitting_row_settles_from_the_carrier(
     audits = (
         (
             await async_session.execute(
-                select(AuditLog).where(AuditLog.action == "verification.approve")
+                select(AuditLog).where(
+                    AuditLog.action.in_(("verification.submit", "verification.approve"))
+                )
             )
         )
         .scalars()
         .all()
     )
+    # Creation's own submit wrote one row before _unsent reset the state.
+    recovered = [a for a in audits if a.payload.get("recovered")]
     if expected == "awaiting_review":
         # The submit never went through: nothing to audit.
-        assert audits == [] and got["submitted_at"] is None
+        assert recovered == [] and got["submitted_at"] is None
     else:
-        # The interrupted approve never wrote its audit row; the recovery does.
+        # The interrupted submit never wrote its audit row; the recovery does.
+        # Nobody approved this one (approved_by is empty), so it is an
+        # automatic submit by the system, not a superadmin approve.
         assert got["submitted_at"]
-        assert len(audits) == 1 and audits[0].payload["recovered"] is True
+        assert len(recovered) == 1 and recovered[0].action == "verification.submit"
+        assert recovered[0].actor_kind == "system"
+        assert recovered[0].actor_user_id is None
 
 
 async def test_fresh_submitting_row_is_left_alone(
@@ -603,7 +624,7 @@ async def test_approve_returns_502_when_the_carrier_fails(
     _, _, key = org_and_key
     vid = await _unsent(client, key, carrier, async_session)
     app.dependency_overrides[require_superadmin] = lambda: SimpleNamespace(
-        user_id=uuid.uuid4()
+        user_id=uuid.uuid4(), api_key_id=None, superadmin=True
     )
 
     async def boom(refs):
@@ -624,7 +645,7 @@ async def test_approve_marks_submitting_before_calling_the_carrier(
     _, _, key = org_and_key
     vid = await _unsent(client, key, carrier, async_session)
     app.dependency_overrides[require_superadmin] = lambda: SimpleNamespace(
-        user_id=uuid.uuid4()
+        user_id=uuid.uuid4(), api_key_id=None, superadmin=True
     )
     seen = {}
 
@@ -648,7 +669,7 @@ async def test_approve_marks_submitting_before_calling_the_carrier(
 async def _approve_and_pull(client, key, carrier) -> str:
     vid = (await _create(client, key)).json()["id"]
     app.dependency_overrides[require_superadmin] = lambda: SimpleNamespace(
-        user_id=uuid.uuid4()
+        user_id=uuid.uuid4(), api_key_id=None, superadmin=True
     )
     await client.post(f"/admin/verifications/{vid}/approve", headers=_auth(key))
     app.dependency_overrides.pop(require_superadmin)
@@ -672,69 +693,81 @@ async def _fund(async_session, org_id) -> None:
     await async_session.commit()
 
 
-async def test_purchase_uses_the_approved_verification(
-    client, org_and_key, carrier, async_session, voice_provider_mock
+async def _quote(async_session, org_id, verification_id):
+    from datetime import datetime, timedelta, timezone
+
+    from hailhq.core.models import NumberOffer
+    from hailhq.core.number_offers import CarrierOffer
+
+    offer = CarrierOffer(
+        provider="twilio",
+        e164="+447700900001",
+        country_code="GB",
+        number_type="mobile",
+        capabilities=["voice", "sms"],
+        monthly_cents=250,
+        setup_cents=0,
+        readiness="ready",
+        verification_id=verification_id,
+    )
+    quote = NumberOffer(
+        organization_id=org_id,
+        offer=offer.model_dump(mode="json"),
+        expires_at=datetime.now(timezone.utc) + timedelta(minutes=10),
+    )
+    async_session.add(quote)
+    await async_session.commit()
+    return quote, offer
+
+
+async def test_purchase_passes_the_quoted_verification_to_the_carrier(
+    client, org_and_key, async_session, monkeypatch
 ) -> None:
-    from hailhq.core.providers.voice import ProviderNumber
+    """Readiness comes from live carrier discovery: ``twilio_offers`` looks up
+    the org's approved bundle (``hail-<org>``, the name the verification
+    plug-in gives it) and the quote carries its id into the purchase."""
+    from unittest.mock import AsyncMock
 
     org_id, _, key = org_and_key
     await _fund(async_session, org_id)
-    voice_provider_mock.acquire_number.side_effect = [
-        ProviderNumber(
-            provider_resource_id=f"PN_gb_{i}",
-            e164=f"+44770090000{i}",
-            country_code="GB",
-            capabilities=["voice", "sms"],
-            number_type="mobile",
-        )
-        for i in (1, 2)
-    ]
-    vid = await _approve_and_pull(client, key, carrier)
-    # the purchase route asks the plug-in registered under the voice carrier's name
-    app.dependency_overrides[get_verification_registry] = lambda: (
-        lambda name: carrier if name in ("fake", "twilio") else None
+    purchase = AsyncMock(return_value="PN_gb_1")
+    monkeypatch.setattr("hailhq.api.number_orders.purchase_ordered_number", purchase)
+    quote, offer = await _quote(async_session, org_id, "BU_approved")
+    monkeypatch.setattr(
+        "hailhq.api.number_orders.discover_offers",
+        AsyncMock(return_value=([offer], [])),
     )
-    row = (await async_session.execute(select(CarrierVerification))).scalar_one()
-    row.provider = "twilio"
-    await async_session.commit()
-
-    # submitted is not enough: the purchase route never waits on the carrier
     resp = await client.post(
         "/numbers",
-        json={"country_code": "GB", "number_type": "mobile"},
+        json={"country_code": "GB", "quote_id": str(quote.id)},
         headers=_auth(key),
     )
     assert resp.status_code == 201, resp.text
-    _, kwargs = voice_provider_mock.acquire_number.call_args
-    assert kwargs["verification_handle"] is None
-
-    # the customer reads it after the carrier approves; now it is used
-    carrier.remote_status = ProviderStatus(state="approved")
-    got = await client.get(f"/verifications/{vid}", headers=_auth(key))
-    assert got.json()["state"] == "approved"
-    resp = await client.post(
-        "/numbers",
-        json={"country_code": "GB", "number_type": "mobile"},
-        headers=_auth(key),
-    )
-    assert resp.status_code == 201, resp.text
-    _, kwargs = voice_provider_mock.acquire_number.call_args
-    assert kwargs["verification_handle"] == {"bundle_sid": "B1"}
+    purchase.assert_awaited_once()
+    assert purchase.await_args.args[2] == "BU_approved"
 
 
 async def test_purchase_without_verification_passes_none(
-    client, org_and_key, carrier, async_session, voice_provider_mock
+    client, org_and_key, async_session, monkeypatch
 ) -> None:
+    from unittest.mock import AsyncMock
+
     org_id, _, key = org_and_key
     await _fund(async_session, org_id)
+    purchase = AsyncMock(return_value="PN_gb_1")
+    monkeypatch.setattr("hailhq.api.number_orders.purchase_ordered_number", purchase)
+    quote, offer = await _quote(async_session, org_id, None)
+    monkeypatch.setattr(
+        "hailhq.api.number_orders.discover_offers",
+        AsyncMock(return_value=([offer], [])),
+    )
     resp = await client.post(
         "/numbers",
-        json={"country_code": "GB", "number_type": "mobile"},
+        json={"country_code": "GB", "quote_id": str(quote.id)},
         headers=_auth(key),
     )
     assert resp.status_code == 201, resp.text
-    _, kwargs = voice_provider_mock.acquire_number.call_args
-    assert kwargs["verification_handle"] is None
+    assert purchase.await_args.args[2] is None
 
 
 async def test_requirements_and_create_default_to_the_configured_carrier(

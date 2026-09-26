@@ -53,13 +53,19 @@ class HailAPIError(Exception):
 
     ``status`` is the HTTP status code; ``detail`` is the parsed ``detail``
     field from the JSON body when present, otherwise the raw response text.
+    ``retry_after`` is the raw ``Retry-After`` header (delta-seconds) when the
+    response carried one — set on 429s so the tool layer can tell the agent
+    how long to wait; the agent cannot read response headers itself.
     The MCP tool layer converts this to an agent-facing error dict.
     """
 
-    def __init__(self, status: int, detail: str) -> None:
+    def __init__(
+        self, status: int, detail: str, retry_after: str | None = None
+    ) -> None:
         super().__init__(f"hail api error {status}: {detail}")
         self.status = status
         self.detail = detail
+        self.retry_after = retry_after
 
 
 class HailClient:
@@ -546,7 +552,11 @@ def _decode(resp: httpx.Response) -> Any:
     """Return the JSON body on 2xx, raise :class:`HailAPIError` otherwise."""
     if 200 <= resp.status_code < 300:
         return resp.json()
-    raise HailAPIError(status=resp.status_code, detail=_error_detail(resp))
+    raise HailAPIError(
+        status=resp.status_code,
+        detail=_error_detail(resp),
+        retry_after=resp.headers.get("retry-after"),
+    )
 
 
 def _location(resp: httpx.Response) -> str:

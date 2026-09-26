@@ -6,14 +6,27 @@ export type FooterGroup = {
   links: { label: string; href: string }[];
 };
 
+export type FooterBadge = {
+  id: string;
+  href: string;
+  alt: string;
+  /** Rendered size in px. Both are set so the row does not shift on load. */
+  width: number;
+  height: number;
+  /** One image per footer theme. */
+  src: { light: string; dark: string };
+};
+
 /** Framework-independent, server-rendered footer. Native anchors cross Next zones safely. */
 export function Footer({
   groups,
   themeControl,
+  badges = [],
   homeHref = "/",
 }: {
   groups: FooterGroup[];
   themeControl: ReactNode;
+  badges?: FooterBadge[];
   homeHref?: string;
 }) {
   return (
@@ -48,6 +61,28 @@ export function Footer({
             </nav>
           ))}
         </div>
+        {badges.length > 0 && (
+          <ul className="hail-footer-badges" aria-label="Featured on">
+            {badges.map((badge) => (
+              <li key={badge.id}>
+                <a href={badge.href} target="_blank" rel="noopener">
+                  {(["light", "dark"] as const).map((theme) => (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      key={theme}
+                      className={`hail-footer-badge-${theme}`}
+                      src={badge.src[theme]}
+                      alt={badge.alt}
+                      width={badge.width}
+                      height={badge.height}
+                      loading="lazy"
+                    />
+                  ))}
+                </a>
+              </li>
+            ))}
+          </ul>
+        )}
         <div className="hail-footer-end">
           <span>© {new Date().getFullYear()} hail.so</span>
           <span>

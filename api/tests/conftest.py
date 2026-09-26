@@ -238,18 +238,11 @@ def sms_mock() -> AsyncMock:
 
 @pytest.fixture()
 def voice_provider_mock() -> AsyncMock:
-    """Default mock voice provider — happy-path number acquisition."""
-    from hailhq.core.providers.voice import ProviderNumber, VoiceProvider
+    """Default mock voice provider."""
+    from hailhq.core.providers.voice import VoiceProvider
 
     mock = AsyncMock(spec=VoiceProvider)
     mock.carrier = "twilio"
-    mock.acquire_number.return_value = ProviderNumber(
-        provider_resource_id="PN_test_acquired",
-        e164="+14155550001",
-        country_code="US",
-        capabilities=["voice", "sms"],
-        number_type="local",
-    )
     return mock
 
 
@@ -295,7 +288,9 @@ def twilio_trunk_configured(monkeypatch: pytest.MonkeyPatch):
     never set .env, so give the default (Twilio) carrier a trunk id."""
     from hailhq.core.config import settings
 
-    monkeypatch.setattr(settings, "livekit_sip_outbound_trunk_id", "ST_twilio_test")
+    monkeypatch.setattr(
+        settings, "livekit_twilio_sip_outbound_trunk_id", "ST_twilio_test"
+    )
 
 
 @pytest.fixture(autouse=True)
@@ -308,6 +303,18 @@ def reset_deps_caches():
     yield
     deps.reset_caches()
     _auth_module.reset_jwks_cache_for_testing()
+
+
+@pytest.fixture(autouse=True)
+def reset_rate_limit_storage():
+    """Clear the general limiter's process-wide in-memory buckets between
+    tests, so one test's requests (notably anonymous ones sharing the
+    remote-IP bucket) can never count against another's."""
+    from hailhq.api.ratelimit import limiter
+
+    limiter.limiter.storage.reset()
+    yield
+    limiter.limiter.storage.reset()
 
 
 @pytest.fixture()
