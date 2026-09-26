@@ -70,8 +70,10 @@ async def _get_manual_or_404(
 
 async def _member_role(db: AsyncSession, org_id: UUID, user_id: UUID) -> str | None:
     """Org role for ``user_id``, or ``None`` if they aren't a member of
-    ``org_id``. Shared by the phone-target self-or-admin check below —
-    both the target's and the caller's role are the same lookup."""
+    ``org_id``. Shared by the phone-target self-or-admin check below — used
+    for the target's role lookup always, and for the caller's role lookup
+    when the caller isn't a superadmin (who counts as owner without a row
+    here)."""
     return (
         await db.execute(
             select(OrganizationMember.role).where(
@@ -244,8 +246,10 @@ async def _resolve_phone_target(
         )
 
     if target != principal.user_id:
-        caller_role = await _member_role(
-            db, principal.organization_id, principal.user_id
+        caller_role = (
+            "owner"
+            if principal.superadmin
+            else await _member_role(db, principal.organization_id, principal.user_id)
         )
         if caller_role not in ("owner", "admin"):
             raise HTTPException(

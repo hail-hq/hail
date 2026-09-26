@@ -1,4 +1,4 @@
-from pydantic import computed_field, model_validator
+from pydantic import Field, computed_field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -244,6 +244,9 @@ class Settings(BaseSettings):
     # Poll cadence (seconds) for the AbuseMonitorWorker's coarse-grained batch
     # check — hourly by default, not a per-send check. Set 0 to disable.
     hail_abuse_monitor_poll_seconds: int = 3600
+    # Background pass over carrier verifications: retry unsent drafts and pull
+    # the carrier's decision for submitted ones. 0 disables the worker.
+    hail_verification_poll_seconds: int = 600
 
     # Agent self-signup velocity caps (spec: 2026-07-14-agent-self-signup-design).
     # Per agent-origin org:
@@ -270,7 +273,9 @@ class Settings(BaseSettings):
     # legitimate agent/automation traffic, still bounds a runaway loop. This
     # is a starting point, not a researched-and-final threshold — tune
     # post-launch same as the velocity caps above.
-    api_rate_limit_per_minute: int = 300
+    # Must be >= 1: 0 would 429 every request and a negative value makes
+    # limits.parse raise on every request, so reject both at startup.
+    api_rate_limit_per_minute: int = Field(default=300, ge=1)
 
     # SMS compliance auto-replies (HELP/STOP/START). OFF by default: Twilio's
     # own opt-out handling already auto-replies to these keywords, so enabling

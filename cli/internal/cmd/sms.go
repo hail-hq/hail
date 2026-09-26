@@ -34,8 +34,11 @@ func newSmsCmd(opts *Options) *cobra.Command {
 		Short: "Send an outbound SMS (or use a subcommand)",
 		Long: `hail sms — send an outbound text message.
 
-Requires a dedicated phone number on your organization — SMS does not
-use the shared voice pool.
+Without --from: UK (+44) and Germany (+49) destinations use your
+organization's sender ID (or HAIL, the platform default); Australia (+61)
+always uses HAIL; every other destination uses your organization's oldest
+active SMS-capable number (422 when there is none). SMS never uses the
+shared voice pool.
 
 Example (minimal):
   hail sms +15551234567 --body "Hello!" --recipient-consent`,
@@ -47,7 +50,7 @@ Example (minimal):
 	}
 
 	cmd.Flags().StringVar(&f.body, "body", "", "Message text (required)")
-	cmd.Flags().StringVar(&f.from, "from", "", "Override the from-number (default: the org's dedicated number)")
+	cmd.Flags().StringVar(&f.from, "from", "", "Sender number (default: sender ID for UK/DE/AU, else the org's oldest active SMS-capable number)")
 	cmd.Flags().StringVar(&f.idempotencyKey, "idempotency-key", "", "Defaults to a fresh UUID")
 	f.registerConsentFlags(cmd, "text")
 	cmd.MarkFlagRequired("body")

@@ -35,6 +35,7 @@ from hailhq.api.routes.internal import org_closures as internal_org_closures
 from hailhq.api.routes.internal import provider_config as internal_provider_config
 from hailhq.api.routes.internal import ses_events as internal_ses_events
 from hailhq.api.usage import write_usage_event
+from hailhq.api.verification_worker import VerificationWorker
 from hailhq.core import internal_webhook
 from hailhq.core.abuse_monitor import AbuseMonitorWorker
 from hailhq.core.config import settings
@@ -228,6 +229,17 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
             abuse_worker.run_forever(), name="abuse-monitor"
         )
 
+    verification_worker: VerificationWorker | None = None
+    verification_task: asyncio.Task | None = None
+    if settings.hail_verification_poll_seconds > 0:
+        verification_worker = VerificationWorker(
+            session_factory=session_scope,
+            poll_interval=settings.hail_verification_poll_seconds,
+        )
+        verification_task = asyncio.create_task(
+            verification_worker.run_forever(), name="verification-worker"
+        )
+
     try:
         yield
     finally:
@@ -249,6 +261,8 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
             await _stop_worker(verify_worker, verify_task)
         if abuse_worker is not None and abuse_task is not None:
             await _stop_worker(abuse_worker, abuse_task)
+        if verification_worker is not None and verification_task is not None:
+            await _stop_worker(verification_worker, verification_task)
         await internal_webhook.aclose()
         await calls_routes.close_livekit_singleton()
         await dispose_engine()

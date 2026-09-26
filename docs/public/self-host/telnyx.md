@@ -26,13 +26,13 @@ Or `hail numbers acquire --country PT --provider telnyx`. Schemas:
 Telnyx stays off until all five values below are set. With only
 `TELNYX_API_KEY` set, quotes list Twilio offers only.
 
-| `.env` | Where it comes from |
-| --- | --- |
-| `TELNYX_API_KEY` | Mission Control → **Account → Keys & Credentials → API Keys** |
-| `TELNYX_CONNECTION_ID` | The SIP connection from step 2 (numbers Hail buys are attached to it) |
-| `TELNYX_SIP_USERNAME` | The SIP connection's username (sent as `X-Telnyx-Username` on every INVITE) |
-| `LIVEKIT_TELNYX_SIP_OUTBOUND_TRUNK_ID` | The LiveKit trunk from step 3 |
-| `TELNYX_PUBLIC_KEY` | `GET https://api.telnyx.com/v2/public_key` → `data.public` (also under **Keys & Credentials → Public Key**). Verifies SMS webhooks. |
+| `.env`                                 | Where it comes from                                                                                                                 |
+| -------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `TELNYX_API_KEY`                       | Mission Control → **Account → Keys & Credentials → API Keys**                                                                       |
+| `TELNYX_CONNECTION_ID`                 | The SIP connection from step 2 (numbers Hail buys are attached to it)                                                               |
+| `TELNYX_SIP_USERNAME`                  | The SIP connection's username (sent as `X-Telnyx-Username` on every INVITE)                                                         |
+| `LIVEKIT_TELNYX_SIP_OUTBOUND_TRUNK_ID` | The LiveKit trunk from step 3                                                                                                       |
+| `TELNYX_PUBLIC_KEY`                    | `GET https://api.telnyx.com/v2/public_key` → `data.public` (also under **Keys & Credentials → Public Key**). Verifies SMS webhooks. |
 
 ## 1. Outbound voice profile
 

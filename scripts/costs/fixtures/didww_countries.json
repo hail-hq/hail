@@ -1,0 +1,41 @@
+{
+  "data": [
+    {
+      "id": "dc826e8a-6dc2-418f-84c0-375730eca6f7",
+      "type": "countries",
+      "attributes": {
+        "name": "Portugal",
+        "prefix": "351",
+        "iso": "PT"
+      },
+      "relationships": {
+        "regions": {
+          "links": {
+            "self": "https://api.didww.com/v3/countries/dc826e8a-6dc2-418f-84c0-375730eca6f7/relationships/regions",
+            "related": "https://api.didww.com/v3/countries/dc826e8a-6dc2-418f-84c0-375730eca6f7/regions"
+          }
+        }
+      }
+    },
+    {
+      "id": "c8647639-fc9c-47b2-acec-7c9e14465c25",
+      "type": "countries",
+      "attributes": {
+        "name": "United Kingdom",
+        "prefix": "44",
+        "iso": "GB"
+      },
+      "relationships": {
+        "regions": {
+          "links": {
+            "self": "https://api.didww.com/v3/countries/c8647639-fc9c-47b2-acec-7c9e14465c25/relationships/regions",
+            "related": "https://api.didww.com/v3/countries/c8647639-fc9c-47b2-acec-7c9e14465c25/regions"
+          }
+        }
+      }
+    }
+  ],
+  "meta": {
+    "api_version": "2026-04-16"
+  }
+}

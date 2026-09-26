@@ -5,14 +5,18 @@ velocity cap for agent-origin orgs only). This is a general HTTP
 request-rate limiter across every customer-facing route, for every
 caller. In-memory storage — safe because this API runs single-instance
 (one VM, docker-compose, no replica orchestration; see deploy.yml). If a
-second instance is ever added, swap the limiter's storage_uri to Redis
-(``Limiter(..., storage_uri="redis://...")``); no call-site changes
-needed.
+second instance is ever added, swap the storage to Redis (add
+``limits[redis]``). The storage calls in ``dispatch`` are synchronous and
+would block the event loop on network I/O, so move them to an async storage
+(or a thread) first.
 
-Keyed on the raw Authorization header value (hashed) rather than the
-resolved Principal, so the limiter runs before any DB round-trip —
-distinct callers with distinct keys/tokens get distinct buckets even
-before auth resolves whether the token is valid. One bucket per caller
+Keyed on the bearer token (hashed) rather than the resolved Principal, so
+the limiter runs before any DB round-trip — distinct callers with distinct
+keys/tokens get distinct buckets even before auth resolves whether the token
+is valid. The token is parsed the same way ``deps._parse_bearer`` does
+(case-insensitive scheme, token stripped), so cosmetic variants of one
+credential ("bearer K", "Bearer  K") share one bucket. A request with no
+usable bearer falls back to the remote address. One bucket per caller
 across *all* customer routes combined (not one bucket per route) — this
 is a blanket abuse guard on total request volume, not a per-endpoint
 budget.
@@ -21,11 +25,12 @@ Wired as ``GeneralRateLimitMiddleware`` in main.py rather than slowapi's
 own ``SlowAPIMiddleware`` + ``default_limits`` pattern: that pattern
 matches every app route by handler identity and needs each exempt route
 individually registered via ``limiter.exempt(...)``, which would mean
-reaching into the internal/* route modules this task must not touch.
-Path-prefix exemption (``/internal/*``, ``/healthz``) is equivalent here
-and self-contained — same convention as ``deprecation.py``'s
-``DeprecationHeaderMiddleware``, which already matches on path shape for
-the identical prefix set.
+editing every internal/* route module. Path-based exemption
+(``/internal/*``, exact ``/healthz``, the docs/spec paths and
+``_EXEMPT_PATHS`` below) is equivalent here and self-contained — it matches
+on path shape like ``deprecation.py``'s ``DeprecationHeaderMiddleware``,
+though that middleware exempts a different set (only ``/v1/`` and
+``/internal/``).
 
 Emits the IETF ``draft-ietf-httpapi-ratelimit-headers`` header names
 directly (``RateLimit-Limit`` / ``RateLimit-Remaining`` / ``RateLimit-
@@ -61,13 +66,22 @@ __all__ = [
 
 
 def _rate_limit_key(request: Request) -> str:
+    # Mirrors deps._parse_bearer without raising (importing deps would pull
+    # the DB layer into this module): the scheme is matched case-insensitively
+    # and the token is stripped, so every spelling that authenticates as one
+    # credential lands in one bucket.
     auth = request.headers.get("authorization")
-    if not auth:
-        return get_remote_address(request)
-    return hashlib.sha256(auth.encode()).hexdigest()
+    if auth:
+        scheme, _, rest = auth.partition(" ")
+        token = rest.strip()
+        if scheme.lower() == "bearer" and token:
+            return hashlib.sha256(token.encode()).hexdigest()
+    return get_remote_address(request)
 
 
-# Used for its key_func, in-memory storage, and fixed-window strategy — see
+# Used only for its in-memory storage (``limiter.limiter.storage``).
+# ``key_func`` is a required Limiter() argument but slowapi never calls it
+# here: dispatch() calls _rate_limit_key and storage.incr() directly. See the
 # module docstring for why wiring is a custom middleware rather than
 # slowapi's own SlowAPIMiddleware.
 limiter = Limiter(key_func=_rate_limit_key)
@@ -79,10 +93,15 @@ def rate_limit_string() -> str:
 
 # Paths the general limiter never applies to: internal service-to-service
 # routes (HMAC-authenticated, not customer traffic — see routes/internal/),
-# the health check, and the 3 legitimate self-credentialed public routes
-# below. Matches on path shape, same convention as deprecation.py's
+# the health check, the docs/spec paths, and the self-credentialed public
+# routes below. Matches on path shape, same convention as deprecation.py's
 # DeprecationHeaderMiddleware.
 _HEALTHZ_PATH = "/healthz"
+
+# Unauthenticated, static docs/spec endpoints (never dual-mounted under /v1).
+# Anonymous callers share one remote-IP bucket behind the proxy, so without
+# this exemption an anonymous flood would 429 the spec agents fetch.
+_DOCS_PATHS = frozenset({"/openapi.json", "/docs", "/docs/oauth2-redirect", "/redoc"})
 
 # Self-credentialed public routes with no Authorization header by design
 # (Twilio signature auth for the SMS webhooks; an HMAC token query param for
@@ -98,7 +117,11 @@ _EXEMPT_PATHS = frozenset(
 
 
 def _is_exempt(path: str) -> bool:
-    if path == _HEALTHZ_PATH or path.startswith(_INTERNAL_PREFIX):
+    if (
+        path == _HEALTHZ_PATH
+        or path in _DOCS_PATHS
+        or path.startswith(_INTERNAL_PREFIX)
+    ):
         return True
     unprefixed = path[len(_V1_PREFIX) - 1 :] if path.startswith(_V1_PREFIX) else path
     return unprefixed in _EXEMPT_PATHS
@@ -198,7 +221,7 @@ def merge_rate_limited_responses(
     """Merge several ``responses=`` 429 docs into one, without either
     clobbering the other's description/headers.
 
-    Used on the 3 routes (calls/sms/emails create) that already document a
+    Used on the calls/sms/emails create routes, which already document a
     distinct 429 cause (the agent-abuse velocity cap, ``agent_gate.py``'s
     ``RATE_LIMITED_RESPONSES``) — both 429 reasons are real and independently
     reachable on those routes, so both need documenting on the same status
