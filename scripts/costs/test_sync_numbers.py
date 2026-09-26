@@ -314,3 +314,52 @@ def test_regulatory_block_is_derived_from_rows(tmp_path):
     assert out["regulatory"]["sms_registration_required"] == ["US"]
     assert out["a2p_10dlc"] == [{"carrier": "AT&T"}]
     assert json.loads(path.read_text())["provider"] == "twilio"
+
+
+def test_merge_keeps_hand_notes_across_vanish_and_return():
+    hand = {
+        "country_code": "GB",
+        "number_type": "mobile",
+        "display_name": "United Kingdom mobile",
+        "dial_code": "44",
+        "usd_per_month": "2.50",
+        "voice": True,
+        "sms": True,
+        "mms": False,
+        "verification_required": True,
+        "last_verified": "2026-09-24",
+        "last_changed_at": "2026-09-24",
+        "verification_method": "manual-confirmed",
+        "verified_by": "r13i",
+        "source_url": "https://x",
+        "notes": "price confirmed on the console; the API quotes the old rate",
+    }
+    fetched_gb = {
+        "country_code": "GB",
+        "number_type": "mobile",
+        "display_name": "United Kingdom mobile",
+        "dial_code": "44",
+        "usd_per_month": "1.15",
+        "voice": True,
+        "sms": True,
+        "mms": False,
+        "verification_required": True,
+    }
+    # Vanishes: the hand note stays, the vanished note is added after it.
+    gone, report = sync.merge([hand], [], "2026-09-28", "https://src", "sync")
+    assert report["vanished"] == ["GB:mobile"] and gone[0]["available"] is False
+    assert gone[0]["notes"].startswith(hand["notes"] + "; not offered")
+    # Vanishes again: no second copy of the vanished note.
+    gone2, _ = sync.merge(gone, [], "2026-09-29", "https://src", "sync")
+    assert gone2[0]["notes"] == gone[0]["notes"]
+    # Returns: on sale again, hand note intact, vanished note dropped.
+    back, report = sync.merge(gone2, [fetched_gb], "2026-09-30", "https://src", "sync")
+    assert back[0]["available"] is True and back[0]["notes"] == hand["notes"]
+    assert back[0]["usd_per_month"] == "2.50"  # still the hand-verified price
+    assert report["kept"] and report["vanished"] == []
+    # A vanished row with no hand note comes back with no notes at all.
+    plain = {**hand, "verification_method": "carrier-sync"}
+    plain.pop("notes")
+    gone3, _ = sync.merge([plain], [], "2026-09-28", "https://src", "sync")
+    back3, _ = sync.merge(gone3, [fetched_gb], "2026-09-30", "https://src", "sync")
+    assert back3[0]["available"] is True and "notes" not in back3[0]

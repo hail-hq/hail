@@ -123,9 +123,9 @@ def pinned_catalog(tmp_path, monkeypatch):
         ],
         "a2p_10dlc": [],
     }
-    path = tmp_path / "telephony.json"
-    path.write_text(json.dumps(data))
-    monkeypatch.setenv("HAIL_TELEPHONY_CATALOG_PATH", str(path))
+    (tmp_path / "twilio.json").write_text(json.dumps(data))
+    (tmp_path / "telnyx.json").write_text(json.dumps({**data, "numbers": []}))
+    monkeypatch.setenv("HAIL_TELEPHONY_CATALOG_DIR", str(tmp_path))
     telephony_catalog._load.cache_clear()
     yield
     telephony_catalog._load.cache_clear()

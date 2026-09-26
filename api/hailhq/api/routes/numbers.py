@@ -496,16 +496,17 @@ async def quote_numbers(
     cost, preferring Twilio on equivalent ties. Blocked offers sort by verification effort. SMS capability does not waive messaging registration requirements.
     """
 
-    # Only number types the telephony catalog lists can be bought, so only
-    # those are searched.
+    # Only number types the requested carrier's catalog lists (any carrier
+    # for 'auto') can be bought, so only those are searched.
     if body.number_type:
-        catalog_capabilities(body.country_code, body.number_type)
+        catalog_capabilities(body.country_code, body.number_type, body.provider)
         kinds = [body.number_type]
     else:
         kinds = [
             k
             for k in ("local", "mobile", "national", "toll_free")
-            if telephony_catalog.capabilities(body.country_code, k) is not None
+            if telephony_catalog.capabilities(body.country_code, k, body.provider)
+            is not None
         ]
         if not kinds:
             raise unprocessable(

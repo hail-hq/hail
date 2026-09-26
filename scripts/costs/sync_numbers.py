@@ -26,6 +26,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sys
 import time
 from collections import defaultdict
@@ -538,12 +539,13 @@ def merge(
         if not n.get("dial_code") and prev:
             n["dial_code"] = prev["dial_code"]
         if prev and prev.get("verification_method") == "manual-confirmed":
-            diff = [f"{k}={n.get(k)}" for k in watched if prev.get(k) != n.get(k)]
+            kept = _reappeared(prev) if not prev.get("available", True) else prev
+            diff = [f"{k}={n.get(k)}" for k in watched if kept.get(k) != n.get(k)]
             if diff:
                 report["kept"].append(
-                    f"{key}: carrier says {', '.join(diff)}; kept {prev['verified_by']} {prev['last_verified']}"
+                    f"{key}: carrier says {', '.join(diff)}; kept {kept['verified_by']} {kept['last_verified']}"
                 )
-            numbers.append(prev)
+            numbers.append(kept)
             continue
         changed = [k for k in watched if (prev or {}).get(k) != n.get(k)]
         if prev is None:
@@ -577,13 +579,35 @@ def merge(
         kept = dict(prev)
         if kept.get("available", True):
             kept["available"] = False
-            kept["notes"] = (
-                f"not offered by the carrier as of {today}; kept so held numbers stay billable"
+            # Appended, not written over: a hand-verified row's notes say why
+            # a human confirmed it and must outlive the carrier's feed.
+            kept["notes"] = "; ".join(
+                filter(None, [kept.get("notes"), _VANISHED_NOTE.format(today=today)])
             )
         report["vanished"].append(key)
         numbers.append(kept)
     numbers.sort(key=lambda r: (r["country_code"], r["number_type"]))
     return numbers, report
+
+
+_VANISHED_NOTE = (
+    "not offered by the carrier as of {today}; kept so held numbers stay billable"
+)
+_VANISHED_RE = re.compile(
+    re.escape(_VANISHED_NOTE).replace(r"\{today\}", r"\d{4}-\d{2}-\d{2}")
+)
+
+
+def _reappeared(prev: dict) -> dict:
+    """A row marked vanished that the carrier lists again: on sale again,
+    and the vanished note goes; anything a person wrote stays."""
+    row = {**prev, "available": True}
+    notes = _VANISHED_RE.sub("", row.get("notes") or "").strip("; ")
+    if notes:
+        row["notes"] = notes
+    else:
+        row.pop("notes", None)
+    return row
 
 
 def regulatory_block(existing: dict, numbers: list[dict], provider: str) -> dict:
