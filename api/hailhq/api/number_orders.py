@@ -36,6 +36,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
 
+# Default pending order timeout; each carrier may override via Carrier.pending_timeout.
 # An order the carrier still reports as pending, or has no record of, after
 # this long is abnormal: an offer must be "ready" (regulatory requirements met)
 # before it can be bought.
@@ -171,6 +172,7 @@ async def reconcile_order(
     if number.provisioning_state != "pending":
         return
     org = number.organization_id
+    timeout = carrier(number.provider).pending_timeout
     # Claim a poll under the org lock, then release it before carrier I/O.
     await org_lock(db, org)
     await db.refresh(number)
@@ -204,7 +206,7 @@ async def reconcile_order(
         await db.commit()
         return
     if lookup_error is not None and (
-        datetime.now(timezone.utc) - number.created_at <= PENDING_ORDER_TIMEOUT
+        datetime.now(timezone.utc) - number.created_at <= timeout
     ):
         await db.commit()
         raise lookup_error
@@ -214,8 +216,7 @@ async def reconcile_order(
             "order_id": order_id,
         }
     unfound = (
-        state == "missing"
-        and datetime.now(timezone.utc) - number.created_at > PENDING_ORDER_TIMEOUT
+        state == "missing" and datetime.now(timezone.utc) - number.created_at > timeout
     )
     if state == "active":
         await finish_order(db, number, resource_id=resource_id)
@@ -228,8 +229,7 @@ async def reconcile_order(
             reason="the carrier reported the order as failed",
         )
     elif (
-        state == "pending"
-        and datetime.now(timezone.utc) - number.created_at > PENDING_ORDER_TIMEOUT
+        state == "pending" and datetime.now(timezone.utc) - number.created_at > timeout
     ):
         if lookup_error is not None:
             logger.error(

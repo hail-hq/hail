@@ -8,6 +8,7 @@ would reject or rewrite the caller ID) and vice versa. Adding a carrier is one
 
 from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import timedelta
 
 from hailhq.core.config import settings
 from hailhq.core.providers.sms.base import SmsProvider
@@ -68,14 +69,20 @@ class Carrier:
     sms_status_path: str | None
     # True when a purchase is accepted first and completes later.
     async_orders: bool
+    # How long a pending order may wait for the carrier before Hail fails
+    # it and refunds the hold. DIDWW registers the end user after the
+    # purchase, which takes days; the others answer within minutes.
+    pending_timeout: timedelta = timedelta(hours=2)
 
 
 CARRIERS: dict[str, Carrier] = {
     TWILIO: Carrier(_twilio_voice, _twilio_sms, "sms/status", async_orders=False),
     TELNYX: Carrier(_telnyx_voice, _telnyx_sms, "sms/telnyx", async_orders=True),
-    # Outbound voice only. Numbers are registered by hand:
-    # docs/public/self-host/didww.md.
-    DIDWW: Carrier(_didww_voice, None, None, async_orders=False),
+    # Outbound voice only. Orders complete after DIDWW approves the
+    # end-user registration: docs/public/self-host/didww.md.
+    DIDWW: Carrier(
+        _didww_voice, None, None, async_orders=True, pending_timeout=timedelta(days=7)
+    ),
 }
 
 

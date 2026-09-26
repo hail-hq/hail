@@ -985,3 +985,25 @@ async def test_erroring_lookups_fail_and_refund_after_timeout(
     assert records[0].exc_info is not None
     assert str(number.id) in records[0].getMessage()
     assert "operator review" in records[0].getMessage()
+
+
+async def test_non_didww_timeout_unchanged(async_session, org_and_key, monkeypatch):
+    org, _, _ = org_and_key
+    row, offer = await seed_quote(async_session, org)
+    await _stub_order(monkeypatch, offer, {"data": {"id": str(uuid4())}})
+    number = await buy(async_session, org, row)
+    monkeypatch.setattr(
+        "hailhq.api.number_orders.carrier_outcome",
+        AsyncMock(return_value=("pending", None, None)),
+    )
+    await async_session.execute(
+        text("UPDATE phone_numbers SET created_at = :t WHERE id = :id"),
+        {
+            "t": datetime.now(timezone.utc) - timedelta(hours=2, minutes=1),
+            "id": number.id,
+        },
+    )
+    await async_session.commit()
+    await async_session.refresh(number)
+    await reconcile_order(async_session, number, force=True)
+    assert number.provisioning_state == "failed"

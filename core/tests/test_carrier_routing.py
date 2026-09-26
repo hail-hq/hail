@@ -1,5 +1,8 @@
+from datetime import timedelta
+
 import pytest
 from hailhq.core import carrier_routing
+from hailhq.core.carrier_routing import DIDWW, TELNYX, TWILIO, carrier
 from hailhq.core.config import settings
 
 
@@ -49,3 +52,13 @@ def test_didww_sells_no_sms_through_hail() -> None:
         carrier_routing.sms_status_path("didww")
     assert carrier_routing.sms_status_path("twilio") == "sms/status"
     assert carrier_routing.sms_status_path("telnyx") == "sms/telnyx"
+
+
+def test_pending_timeout_per_carrier() -> None:
+    assert carrier(TWILIO).pending_timeout == timedelta(hours=2)
+    assert carrier(TELNYX).pending_timeout == timedelta(hours=2)
+    assert carrier(DIDWW).pending_timeout == timedelta(days=7)
+
+
+def test_didww_orders_complete_later() -> None:
+    assert carrier(DIDWW).async_orders is True
