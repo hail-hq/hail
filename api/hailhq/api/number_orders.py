@@ -63,9 +63,12 @@ class RetryableError(HTTPException):
         super().__init__(status_code=503, detail=detail)
 
 
-def catalog_capabilities(country: str, kind: str) -> dict[str, Any]:
-    """422 unless the telephony catalog lists this country and number type."""
-    caps = telephony_catalog.capabilities(country, kind)
+def catalog_capabilities(
+    country: str, kind: str, provider: str = "auto"
+) -> dict[str, Any]:
+    """422 unless the carrier's catalog (any carrier for 'auto') lists this
+    country and number type."""
+    caps = telephony_catalog.capabilities(country, kind, provider)
     if caps is None:
         raise unprocessable(
             f"we don't offer a {kind} number in {country} yet",
@@ -314,7 +317,7 @@ async def acquire_offer(
     kind = offer.number_type
     if row.number_id:
         return await db.get(PhoneNumber, row.number_id)
-    catalog_capabilities(country, kind)
+    catalog_capabilities(country, kind, offer.provider)
     if row.expires_at <= datetime.now(timezone.utc):
         raise HTTPException(
             status_code=409, detail="Quote expired; refresh number offers"

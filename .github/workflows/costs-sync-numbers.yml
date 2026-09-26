@@ -1,0 +1,44 @@
+name: costs-sync-numbers
+
+# Weekly pull of each carrier's number catalog (price, calls/texts/MMS,
+# verification needed) into costs/twilio.json, costs/telnyx.json and
+# costs/didww.json. A carrier whose secret is missing is skipped. The same
+# script runs by hand: uv run python scripts/costs/sync_numbers.py --env-file .env
+on:
+  schedule:
+    - cron: "0 8 * * 1" # Mondays 08:00 UTC, before the stale check
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v3
+      - name: Sync number catalogs from the carriers
+        env:
+          TWILIO_ACCOUNT_SID: ${{ secrets.TWILIO_ACCOUNT_SID }}
+          TWILIO_AUTH_TOKEN: ${{ secrets.TWILIO_AUTH_TOKEN }}
+          TELNYX_API_KEY: ${{ secrets.TELNYX_API_KEY }}
+          DIDWW_API_KEY: ${{ secrets.DIDWW_API_KEY }}
+        run: |
+          uv sync --all-packages --all-extras
+          uv run python scripts/costs/sync_numbers.py --provider all --summary-file /tmp/sync-summary.md
+      - name: Validate
+        run: |
+          pipx run check-jsonschema==0.29.4 --schemafile costs/schema/numbers.schema.json costs/twilio.json
+          for f in costs/telnyx.json costs/didww.json; do
+            [ -f "$f" ] && pipx run check-jsonschema==0.29.4 --schemafile costs/schema/numbers.schema.json "$f"
+          done
+      - name: Open PR on change
+        uses: peter-evans/create-pull-request@v6
+        with:
+          branch: costs/numbers-sync
+          title: "chore(costs): number catalog sync"
+          commit-message: "chore(costs): number catalog sync"
+          body-path: /tmp/sync-summary.md
+          labels: costs-sync
