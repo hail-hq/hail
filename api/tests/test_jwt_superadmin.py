@@ -56,6 +56,7 @@ async def test_superadmin_claim_without_active_org_uses_own_membership(
     _patch_jwt(monkeypatch, {"sub": str(user), "superadmin": True})
     p = await deps._principal_from_jwt("a.b.c", async_session)
     assert p.organization_id == own
+    assert p.superadmin is True
 
 
 async def test_superadmin_claim_unknown_org_is_403(async_session, monkeypatch):
@@ -73,17 +74,56 @@ async def test_superadmin_claim_unknown_org_is_403(async_session, monkeypatch):
     assert exc.value.status_code == 403
 
 
-async def test_non_boolean_superadmin_claim_is_ignored(async_session, monkeypatch):
+@pytest.mark.parametrize("value", ["true", 1])
+async def test_non_boolean_superadmin_claim_is_ignored(
+    async_session, monkeypatch, value
+):
     user, own, foreign = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
     await _member(async_session, user, own)
     await _org(async_session, foreign)
     _patch_jwt(
         monkeypatch,
-        {"sub": str(user), "activeOrganizationId": str(foreign), "superadmin": "true"},
+        {"sub": str(user), "activeOrganizationId": str(foreign), "superadmin": value},
     )
     with pytest.raises(HTTPException) as exc:
         await deps._principal_from_jwt("a.b.c", async_session)
     assert exc.value.status_code == 403
+    assert exc.value.detail == "user is not a member of the requested organization"
+
+
+async def test_azp_present_ignores_superadmin_claim(async_session, monkeypatch):
+    """An OAuth-provider access token (carries ``azp``) never grants
+    superadmin, even with ``superadmin: True`` set — the staff role is only
+    for first-party console session tokens, which never carry ``azp``."""
+    user, own, foreign = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+    await _member(async_session, user, own)
+    await _org(async_session, foreign)
+
+    _patch_jwt(
+        monkeypatch,
+        {
+            "sub": str(user),
+            "activeOrganizationId": str(foreign),
+            "superadmin": True,
+            "azp": "client-x",
+        },
+    )
+    with pytest.raises(HTTPException) as exc:
+        await deps._principal_from_jwt("a.b.c", async_session)
+    assert exc.value.status_code == 403
+    assert exc.value.detail == "user is not a member of the requested organization"
+
+    _patch_jwt(
+        monkeypatch,
+        {
+            "sub": str(user),
+            "activeOrganizationId": str(own),
+            "superadmin": True,
+            "azp": "client-x",
+        },
+    )
+    p = await deps._principal_from_jwt("a.b.c", async_session)
+    assert p.superadmin is False
 
 
 async def test_api_key_principal_is_never_superadmin():

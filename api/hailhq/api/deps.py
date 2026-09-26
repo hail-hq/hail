@@ -307,17 +307,23 @@ async def _principal_from_jwt(token: str, db: AsyncSession) -> Principal:
     # The website mints ``superadmin: true`` only for staff sessions. Only the
     # JSON boolean ``True`` counts — a truthy-looking string or int is ignored
     # so a claims payload from an untrusted source can't smuggle it in.
-    is_superadmin = claims.get("superadmin") is True
+    # OAuth-provider access tokens (MCP clients) always carry azp; the staff
+    # role is only for first-party console session tokens.
+    is_superadmin = claims.get("superadmin") is True and "azp" not in claims
+
     active_org_claim = claims.get("activeOrganizationId")
-    if is_superadmin and active_org_claim:
-        # A superadmin may open any org, including ones they aren't a member
-        # of — skip the membership join and just confirm the org exists.
+    active_org_uuid: uuid.UUID | None = None
+    if active_org_claim:
         try:
             active_org_uuid = uuid.UUID(str(active_org_claim))
         except ValueError as exc:
             raise _unauthorized(
                 "jwt activeOrganizationId is not a valid org id"
             ) from exc
+
+    if is_superadmin and active_org_uuid is not None:
+        # A superadmin may open any org, including ones they aren't a member
+        # of — skip the membership join and just confirm the org exists.
         exists = (
             await db.execute(
                 select(Organization.id).where(Organization.id == active_org_uuid)
@@ -341,17 +347,13 @@ async def _principal_from_jwt(token: str, db: AsyncSession) -> Principal:
     # several orgs would otherwise resolve to an arbitrary one — and a request
     # could land in the wrong tenant. Fall back to the user's membership only
     # when the claim is absent (e.g. a token minted without an active org).
+    # The superadmin branch above already returned for a staff claim naming an
+    # active org, so this join is what resolves ``organization_id`` for
+    # everyone else.
     stmt = select(OrganizationMember.organization_id).where(
         OrganizationMember.user_id == user_uuid
     )
-    active_org_claim = claims.get("activeOrganizationId")
-    if active_org_claim:
-        try:
-            active_org_uuid = uuid.UUID(str(active_org_claim))
-        except ValueError as exc:
-            raise _unauthorized(
-                "jwt activeOrganizationId is not a valid org id"
-            ) from exc
+    if active_org_uuid is not None:
         stmt = stmt.where(OrganizationMember.organization_id == active_org_uuid)
         not_member_detail = "user is not a member of the requested organization"
     else:
