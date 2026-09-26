@@ -47,15 +47,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
 
-# Default pending order timeout; each carrier may override via Carrier.pending_timeout.
-# An order the carrier still reports as pending, or has no record of, after
-# this long is abnormal: an offer must be "ready" (regulatory requirements met)
-# before it can be bought.
-# The reconciler then marks it failed and refunds the hold, so the number can be
-# released or re-ordered. If the carrier completes it later, an operator must
-# release the number at the carrier (the log line names the order).
-PENDING_ORDER_TIMEOUT = timedelta(hours=2)
-
 ORDER_POLL_INTERVAL = timedelta(seconds=15)
 
 # Quotes that expired unused are deleted after this long.

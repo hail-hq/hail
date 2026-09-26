@@ -7,7 +7,6 @@ import pytest
 from fastapi import HTTPException
 from hailhq.api.number_orders import (
     CONSUMED_QUOTE_RETENTION,
-    PENDING_ORDER_TIMEOUT,
     QUOTE_RETENTION,
     acquire_offer,
     purge_expired_quotes,
@@ -15,6 +14,7 @@ from hailhq.api.number_orders import (
 )
 from hailhq.core import telephony_catalog
 from hailhq.core.billing import get_balance_cents, monthly_fee_ref
+from hailhq.core.carrier_routing import carrier
 from hailhq.core.models import AccountCredit, NumberOffer, PhoneNumber
 from hailhq.core.number_offers import CarrierOffer
 from hailhq.core.providers.voice import CarrierRequestError
@@ -297,7 +297,9 @@ async def test_status_lookup_rejection_does_not_refund_accepted_order(
 
 
 async def age(db, number):
-    number.created_at = datetime.now(timezone.utc) - PENDING_ORDER_TIMEOUT * 2
+    number.created_at = (
+        datetime.now(timezone.utc) - carrier("telnyx").pending_timeout * 2
+    )
     await db.commit()
 
 
@@ -321,7 +323,9 @@ async def test_unfound_telnyx_order_fails_and_refunds_after_timeout(
     await reconcile_order(async_session, number, force=True)
     assert number.provisioning_state == "pending"
     assert await get_balance_cents(async_session, org) == 99850
-    number.created_at = datetime.now(timezone.utc) - PENDING_ORDER_TIMEOUT / 2
+    number.created_at = (
+        datetime.now(timezone.utc) - carrier("telnyx").pending_timeout / 2
+    )
     await async_session.commit()
     await reconcile_order(async_session, number, force=True)
     assert number.provisioning_state == "pending"
@@ -779,7 +783,7 @@ async def test_pending_order_past_timeout_is_failed_and_refunded_once(
         text("UPDATE phone_numbers SET created_at = :t WHERE id = :id"),
         {
             "t": datetime.now(timezone.utc)
-            - PENDING_ORDER_TIMEOUT
+            - carrier("telnyx").pending_timeout
             - timedelta(minutes=1),
             "id": number.id,
         },
@@ -946,7 +950,7 @@ async def _age_number(async_session, number):
         text("UPDATE phone_numbers SET created_at = :t WHERE id = :id"),
         {
             "t": datetime.now(timezone.utc)
-            - PENDING_ORDER_TIMEOUT
+            - carrier("telnyx").pending_timeout
             - timedelta(minutes=1),
             "id": number.id,
         },
