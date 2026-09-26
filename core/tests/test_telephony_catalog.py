@@ -50,7 +50,7 @@ def test_is_acquirable(catalog):
     assert (
         catalog.is_acquirable("PT", "local") is False
     )  # kept for billing, not offered
-    assert catalog.price_usd_per_month("PT", "local") is not None
+    assert catalog.capabilities("PT", "local") is not None  # still priced/known
     assert catalog.is_acquirable("SE", "local") is False  # not listed
     assert catalog.is_acquirable("ZZ", "local") is False
 

@@ -1641,11 +1641,14 @@
       "voice": true,
       "sms": false,
       "mms": false,
+      "verification_required": true,
+      "available": true,
       "last_verified": "2026-09-25",
       "last_changed_at": "2026-09-25",
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",
-      "source_url": "https://www.didww.com/phone-numbers/all-phone-numbers/Portugal/National"
+      "source_url": "https://www.didww.com/phone-numbers/all-phone-numbers/Portugal/National",
+      "notes": "hand-added (#119): billed for held numbers; Twilio does not offer this type to the Hail account"
     },
     {
       "country_code": "RO",
