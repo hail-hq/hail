@@ -295,6 +295,30 @@ class DidwwVerificationProvider(VerificationProvider):
         if row is None:
             raise VerificationProviderError("DIDWW requirement not found")
         country_id, _ = lookup_ids(requirements.country_code)
+        addr_country_id, _ = lookup_ids(address.country_code)
+        if addr_country_id is None:
+            return DraftResult(
+                refs={},
+                problems=[
+                    Problem(
+                        field="address",
+                        message="This country is not known to the carrier.",
+                    )
+                ],
+            )
+        if (
+            row["attributes"].get("address_area_level") != "world_wide"
+            and address.country_code != requirements.country_code
+        ):
+            return DraftResult(
+                refs={},
+                problems=[
+                    Problem(
+                        field="address",
+                        message=f"The address must be in {requirements.country_code}.",
+                    )
+                ],
+            )
         clean = {k: v.strip() for k, v in fields.items() if v and v.strip()}
         identity_type = _SUBJECT_TO_DIDWW[requirements.subject_type]
         identity_attrs = {k: v for k, v in clean.items() if k in _IDENTITY_ATTRS}
@@ -351,7 +375,7 @@ class DidwwVerificationProvider(VerificationProvider):
                         },
                         "relationships": {
                             "country": {
-                                "data": {"id": country_id, "type": "countries"}
+                                "data": {"id": addr_country_id, "type": "countries"}
                             },
                             "identity": {
                                 "data": {

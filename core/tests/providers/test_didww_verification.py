@@ -16,6 +16,7 @@ from hailhq.core.providers.verification import (
 )
 from hailhq.core.providers.verification.didww import DidwwVerificationProvider
 from hailhq.core.providers.voice import didww as voice_mod
+from responses import matchers
 
 BASE = "https://sandbox-api.didww.com/v3"
 ORG = "11111111-2222-3333-4444-555555555555"
@@ -736,3 +737,116 @@ def test_not_registered_with_bad_environment(monkeypatch):
     monkeypatch.setattr(settings, "didww_environment", "staging")
     _INSTANCES.pop("didww", None)
     assert get_verification_provider("didww") is None
+
+
+ES_ID = "c0000000-0000-0000-0000-000000000009"
+
+
+def _countries_by_iso():
+    """``responses`` ignores query strings by default; match on ``filter[iso]``
+    so each country gets its own id."""
+    for iso, cid in (("PT", COUNTRY_ID), ("ES", ES_ID)):
+        responses.add(
+            responses.GET,
+            f"{BASE}/countries",
+            match=[matchers.query_param_matcher({"filter[iso]": iso})],
+            json={"data": [{"id": cid, "type": "countries", "attributes": {}}]},
+        )
+    responses.add(
+        responses.GET,
+        f"{BASE}/countries",
+        match=[matchers.query_param_matcher({"filter[iso]": "ZZ"})],
+        json={"data": []},
+    )
+    responses.add(
+        responses.GET,
+        f"{BASE}/did_group_types",
+        json={
+            "data": [
+                {
+                    "id": NATIONAL_ID,
+                    "type": "did_group_types",
+                    "attributes": {"name": "National"},
+                }
+            ]
+        },
+    )
+
+
+def _foreign_inputs(country: str):
+    fields, address, documents = _inputs()
+    return fields, address.model_copy(update={"country_code": country}), documents
+
+
+@responses.activate
+async def test_create_draft_world_wide_accepts_foreign_address(provider):
+    _countries_by_iso()
+    _requirement(area="world_wide")
+    req = await provider.requirements("PT", "national", "person")
+    _draft_endpoints()
+    fields, address, documents = _foreign_inputs("ES")
+    result = await provider.create_draft(
+        organization_id=ORG,
+        contact_email="ops@hail.test",
+        requirements=req,
+        fields=fields,
+        address=address,
+        documents=documents,
+    )
+    assert result.problems == []
+    posted = {
+        c.request.url.split("/v3/")[1]: json.loads(c.request.body)["data"]
+        for c in responses.calls
+        if c.request.method == "POST"
+        and c.request.url.split("/v3/")[1] in ("addresses", "identities")
+    }
+    assert posted["addresses"]["relationships"]["country"]["data"] == {
+        "id": ES_ID,
+        "type": "countries",
+    }
+    # The identity stays in the number's country.
+    assert posted["identities"]["relationships"]["country"]["data"]["id"] == (
+        COUNTRY_ID
+    )
+
+
+@responses.activate
+async def test_create_draft_country_level_rejects_foreign_address(provider):
+    _countries_by_iso()
+    _requirement(area="country")
+    req = await provider.requirements("PT", "national", "person")
+    fields, address, documents = _foreign_inputs("ES")
+    result = await provider.create_draft(
+        organization_id=ORG,
+        contact_email="ops@hail.test",
+        requirements=req,
+        fields=fields,
+        address=address,
+        documents=documents,
+    )
+    assert result.refs == {}
+    assert [(p.field, p.message) for p in result.problems] == [
+        ("address", "The address must be in PT.")
+    ]
+    assert all(c.request.method == "GET" for c in responses.calls)
+    assert not any("/identities" in c.request.url for c in responses.calls)
+
+
+@responses.activate
+async def test_create_draft_unknown_address_country(provider):
+    _countries_by_iso()
+    _requirement(area="world_wide")
+    req = await provider.requirements("PT", "national", "person")
+    fields, address, documents = _foreign_inputs("ZZ")
+    result = await provider.create_draft(
+        organization_id=ORG,
+        contact_email="ops@hail.test",
+        requirements=req,
+        fields=fields,
+        address=address,
+        documents=documents,
+    )
+    assert [(p.field, p.message) for p in result.problems] == [
+        ("address", "This country is not known to the carrier.")
+    ]
+    assert all(c.request.method == "GET" for c in responses.calls)
