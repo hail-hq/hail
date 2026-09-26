@@ -30,6 +30,9 @@ jobs:
         run: |
           for f in costs/*.json; do
             name=$(basename "$f" .json)
+            case "$name" in
+              twilio|telnyx|didww) name=numbers ;;
+            esac
             schema="costs/schema/$name.schema.json"
             if [ ! -f "$schema" ]; then
               echo "::error file=$f::missing schema $schema"
@@ -38,8 +41,8 @@ jobs:
             check-jsonschema --schemafile "$schema" "$f"
           done
       # Cross-field checks below are model-shaped (aliases, replaced_by_model_id)
-      # and apply only to llm/stt/tts. telephony.json has no models[] and is
-      # covered by its own schema validation step above.
+      # and apply only to llm/stt/tts. The number catalogs have no models[] and are
+      # covered by the schema validation step above.
       - name: Cross-field validity checks (aliases unique, replaced_by_model_id resolves)
         run: |
           for f in costs/llm.json costs/stt.json costs/tts.json; do

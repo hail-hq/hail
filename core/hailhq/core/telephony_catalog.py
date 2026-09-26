@@ -1,4 +1,4 @@
-"""Read-only view of costs/telephony.json — the number price + capability
+"""Read-only view of costs/twilio.json — the number price + capability
 catalog and the acquire allow-list. The same file the rater (hail-website) and
 the /costs page read, so the three can never disagree about what's acquirable.
 
@@ -20,7 +20,7 @@ __all__ = ["capabilities", "is_acquirable"]
 # In the API image costs/ is copied to /app/costs (see api/Dockerfile); in dev
 # the module sits at core/hailhq/core/ so parents[3] is the repo root. An env
 # var overrides both (tests, alternate layouts).
-_DEFAULT_PATH = Path(__file__).resolve().parents[3] / "costs" / "telephony.json"
+_DEFAULT_PATH = Path(__file__).resolve().parents[3] / "costs" / "twilio.json"
 
 
 def _path() -> Path:
@@ -34,7 +34,10 @@ def _load() -> dict[tuple[str, str], dict]:
 
 
 def is_acquirable(country_code: str, number_type: str) -> bool:
-    return (country_code, number_type) in _load()
+    """Priced AND offered by the carrier today. A row kept with
+    available=false still prices held numbers but cannot be bought."""
+    row = _load().get((country_code, number_type))
+    return row is not None and row.get("available", True)
 
 
 def capabilities(country_code: str, number_type: str) -> dict | None:

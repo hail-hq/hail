@@ -14,6 +14,20 @@ The pass is a sequence of WebFetch dispatches, one for each provider family. Eac
 - You can also run the pass manually at any time, for example after a high-profile model launch.
 - You can also run the pass as part of a release-tag cut (`costs-v0.2.<N>` or higher).
 
+## Phone numbers (twilio.json, telnyx.json, didww.json)
+
+The number catalogs are not part of the WebFetch pass. They come from each carrier's API, read-only:
+
+```bash
+uv run python scripts/costs/sync_numbers.py --provider all --env-file .env
+```
+
+- Keys: `TWILIO_ACCOUNT_SID` + `TWILIO_AUTH_TOKEN`, `TELNYX_API_KEY`, `DIDWW_API_KEY`. A missing key skips that carrier.
+- Each row is one (country, number type): `usd_per_month`, `setup_usd` (when charged), `voice`/`sms`/`mms`, and `verification_required` (the buyer must be verified before purchase).
+- A row with `verification_method: "manual-confirmed"` is never overwritten; the run prints the disagreement. A row the carrier no longer offers is kept with a note so held numbers stay billable.
+- The same script runs every Monday in `costs-sync-numbers.yml` and opens a PR with the printed summary as its body.
+- Sources: Twilio `AvailablePhoneNumbers` (capabilities, address requirement), Pricing API, Regulations API; Telnyx `country_coverage`, `available_phone_numbers` (5-number price sample), `requirements?action=ordering`; DIDWW `did_groups` with `stock_keeping_units` (cheapest 0-channel SKU) and `address_requirement`.
+
 ## Pre-flight
 
 Before you start, confirm these items:

@@ -1,4 +1,4 @@
-import { llm, sms, stt, tts, telephony } from "@/lib/costs";
+import { a2p10dlc, llm, numbers, sms, stt, tts } from "@/lib/costs";
 import { LLMSection } from "@/components/categories/llm-section";
 import { STTSection } from "@/components/categories/stt-section";
 import { TTSSection } from "@/components/categories/tts-section";
@@ -60,8 +60,8 @@ export default function CostsPage() {
     llm.models,
     stt.models,
     tts.models,
-    telephony.numbers,
-    telephony.a2p_10dlc,
+    numbers,
+    a2p10dlc,
     sms.providers,
   );
 
@@ -176,10 +176,10 @@ export default function CostsPage() {
             </div>
             <div className="stat">
               <div className="k">Numbers</div>
-              <div className="v">{telephony.numbers.length}</div>
+              <div className="v">{numbers.length}</div>
               <div className="n">
                 {priceRange(
-                  telephony.numbers.map((r) => r.usd_per_month),
+                  numbers.map((r) => r.usd_per_month),
                   2,
                   2,
                   "mo",
@@ -204,7 +204,7 @@ export default function CostsPage() {
       <LLMSection data={llm.models} />
       <STTSection data={stt.models} />
       <TTSSection data={tts.models} />
-      <TelephonySection data={telephony.numbers} />
+      <TelephonySection data={numbers} />
       <SmsSection data={sms.providers} />
 
       <section
@@ -273,10 +273,11 @@ export default function CostsPage() {
               </a>
             </li>
             <li>
-              Telephony (number COGS + 10DLC fees):{" "}
+              Phone numbers, one file per carrier (Twilio&apos;s also holds the 10DLC fees):{" "}
               <code>
-                https://raw.githubusercontent.com/hail-hq/hail/main/costs/telephony.json
+                https://raw.githubusercontent.com/hail-hq/hail/main/costs/twilio.json
               </code>
+              , <code>telnyx.json</code>, <code>didww.json</code>
             </li>
             <li>
               SMS provider base rates:{" "}

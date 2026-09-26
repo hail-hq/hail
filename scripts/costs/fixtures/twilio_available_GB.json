@@ -1,0 +1,11 @@
+{
+  "beta": false,
+  "country": "United Kingdom",
+  "country_code": "GB",
+  "subresource_uris": {
+    "local": "/2010-04-01/Accounts/ACXXXX/AvailablePhoneNumbers/GB/Local.json",
+    "mobile": "/2010-04-01/Accounts/ACXXXX/AvailablePhoneNumbers/GB/Mobile.json",
+    "toll_free": "/2010-04-01/Accounts/ACXXXX/AvailablePhoneNumbers/GB/TollFree.json"
+  },
+  "uri": "/2010-04-01/Accounts/ACXXXX/AvailablePhoneNumbers/GB.json"
+}

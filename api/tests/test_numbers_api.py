@@ -12,7 +12,7 @@ from hailhq.core import telephony_catalog
 @pytest.fixture(autouse=True)
 def pinned_catalog(tmp_path, monkeypatch):
     """Pin the telephony catalog to a fixed fixture so these tests exercise
-    route logic, not whatever the committed costs/telephony.json currently
+    route logic, not whatever the committed costs/twilio.json currently
     says — a routine carrier-sync data PR must not break API CI."""
     data = {
         "version": 2,

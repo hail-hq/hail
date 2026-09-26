@@ -1,0 +1,39 @@
+{
+  "data": [
+    {
+      "id": "926fa2dc-e3b8-419b-9453-38c0fb316e1a",
+      "type": "did_group_types",
+      "attributes": { "name": "Global" }
+    },
+    {
+      "id": "a57de664-789f-4306-a397-ab9100c9304b",
+      "type": "did_group_types",
+      "attributes": { "name": "Local" }
+    },
+    {
+      "id": "0d51924c-e863-44ff-be59-10547c138955",
+      "type": "did_group_types",
+      "attributes": { "name": "Mobile" }
+    },
+    {
+      "id": "355701bc-34d5-4e3f-8352-6b1ec4e3c9d4",
+      "type": "did_group_types",
+      "attributes": { "name": "National" }
+    },
+    {
+      "id": "f2ff69ed-0d6b-4d66-b4bb-9ae2aa1d6b1e",
+      "type": "did_group_types",
+      "attributes": { "name": "Shared Cost" }
+    },
+    {
+      "id": "1b8076db-df6c-42ee-bdc0-392367b7e070",
+      "type": "did_group_types",
+      "attributes": { "name": "Toll-free" }
+    }
+  ],
+  "meta": { "total_records": 6, "api_version": "2026-04-16" },
+  "links": {
+    "first": "https://api.didww.com/v3/did_group_types?page%5Bnumber%5D=1&page%5Bsize%5D=50",
+    "last": "https://api.didww.com/v3/did_group_types?page%5Bnumber%5D=1&page%5Bsize%5D=50"
+  }
+}

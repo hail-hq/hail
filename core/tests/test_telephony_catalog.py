@@ -26,6 +26,15 @@ def catalog(tmp_path, monkeypatch):
                 "sms": True,
                 "mms": True,
             },
+            {
+                "country_code": "PT",
+                "number_type": "local",
+                "usd_per_month": "1.00",
+                "voice": True,
+                "sms": False,
+                "mms": False,
+                "available": False,
+            },
         ],
         "a2p_10dlc": [],
     }
@@ -38,6 +47,10 @@ def catalog(tmp_path, monkeypatch):
 
 def test_is_acquirable(catalog):
     assert catalog.is_acquirable("SE", "mobile") is True
+    assert (
+        catalog.is_acquirable("PT", "local") is False
+    )  # kept for billing, not offered
+    assert catalog.price_usd_per_month("PT", "local") is not None
     assert catalog.is_acquirable("SE", "local") is False  # not listed
     assert catalog.is_acquirable("ZZ", "local") is False
 
