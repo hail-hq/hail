@@ -8,26 +8,28 @@ tools exist, matching the "properly scoped, upgrade to public tool
 listing" gap an external audit flagged.
 
 This middleware runs BEFORE FastMCP's own auth middleware (see server.py's
-middleware ordering) and, for exactly two JSON-RPC methods —
-"initialize" and "tools/list" — injects a synthetic, non-functional
-bearer token if the request has none. auth.PassThroughVerifier accepts
-any non-empty token string as "valid" (real validation is the downstream
-API's job, and these two methods never call the downstream API), so
+middleware ordering) and, for exactly three JSON-RPC methods —
+"initialize", "tools/list" and "notifications/initialized" — injects a
+synthetic, non-functional bearer token if the request has none.
+auth.PassThroughVerifier accepts any non-empty token string as "valid" (real validation is the downstream
+API's job, and these methods never call the downstream API), so
 FastMCP's auth layer then lets the request through.
 
-Every other method (tools/call, resources/*, notifications/*, ping, ...)
+Every other method (tools/call, resources/*, other notifications/*, ping, ...)
 is untouched: no header is injected, so a request with no real bearer
 401s exactly as it did before this file existed. This is a safelist, not
 a bypass — widening it later needs the same scrutiny as the original
-two entries, not a one-line addition.
+entries, not a one-line addition.
 
 "initialize" additionally carries a per-remote-IP rate cap (see
 _ANON_INIT_MAX_PER_WINDOW below) — unlike tools/list, a real initialize
 call creates a permanent, stateful MCP session, so unrestricted anonymous
 initialize is a resource-exhaustion vector, not just an information leak.
-"tools/list" is only safelisted when it carries an Mcp-Session-Id header (see
-_SESSION_REQUIRED_METHODS): a session-less POST makes the SDK create a session
-before it answers 400.
+"tools/list" and "notifications/initialized" are only safelisted when they carry
+an Mcp-Session-Id header (see _SESSION_REQUIRED_METHODS): a session-less POST
+makes the SDK create a session before it answers 400. Every MCP client sends
+notifications/initialized right after initialize, so it must pass anonymously
+or the SDK client fails in connect().
 """
 
 from __future__ import annotations
@@ -38,15 +40,18 @@ import time
 
 from starlette.types import ASGIApp, Receive, Scope, Send
 
-_DISCOVERY_METHODS = frozenset({"initialize", "tools/list"})
+_DISCOVERY_METHODS = frozenset(
+    {"initialize", "tools/list", "notifications/initialized"}
+)
 
 # Safelisted methods that only make sense inside an existing session. The SDK's
 # session manager mints (and never reaps) a new transport for ANY POST that
 # lacks an Mcp-Session-Id header, before it answers 400 — so a session-less
-# tools/list would create a permanent session while bypassing the initialize
-# cap below. Without the header it falls through to FastMCP's auth middleware
-# and 401s, exactly as before this file existed.
-_SESSION_REQUIRED_METHODS = frozenset({"tools/list"})
+# tools/list or notifications/initialized would create a permanent session
+# while bypassing the initialize cap below. Without the header it falls
+# through to FastMCP's auth middleware and 401s, exactly as before this file
+# existed.
+_SESSION_REQUIRED_METHODS = frozenset({"tools/list", "notifications/initialized"})
 
 # 64 KiB — comfortably above any real initialize/tools/list payload (both are
 # small JSON-RPC envelopes; neither carries bulk data), and small enough to
@@ -74,9 +79,10 @@ _MAX_PEEK_SECONDS = 5.0
 # real, permanent, stateful session. Without a cap, an unauthenticated
 # caller can loop "initialize" and accumulate unbounded sessions/tasks — a
 # resource-exhaustion vector distinct from _MAX_PEEK_BYTES above (that
-# bounds per-request memory, not session count). Not applied to "tools/list":
-# it is only safelisted when it carries an Mcp-Session-Id header
-# (_SESSION_REQUIRED_METHODS), so it cannot create a session. The cap only
+# bounds per-request memory, not session count). Not applied to "tools/list" or
+# "notifications/initialized": they are only safelisted when they carry an
+# Mcp-Session-Id header (_SESSION_REQUIRED_METHODS), so they cannot create a
+# session. The cap only
 # bounds requests with no Authorization header — PassThroughVerifier accepts
 # any non-empty bearer, so it guards against accidental floods, not against
 # a client that adds a junk Authorization header.

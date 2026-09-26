@@ -374,3 +374,107 @@ def test_anon_init_counts_are_pruned_when_large(monkeypatch):
         discovery_auth._anon_init_counts[f"10.0.0.{i}"] = (1, -1_000_000.0)
     assert discovery_auth._anon_init_cap_exceeded("192.0.2.1") is False
     assert list(discovery_auth._anon_init_counts) == ["192.0.2.1"]
+
+
+_INIT_BODY = {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "initialize",
+    "params": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {},
+        "clientInfo": {"name": "test", "version": "0.0.0"},
+    },
+}
+_INITIALIZED_BODY = {"jsonrpc": "2.0", "method": "notifications/initialized"}
+
+
+@pytest.mark.asyncio
+async def test_oauth_rs_unauth_initialized_notification_with_session_succeeds(
+    monkeypatch,
+):
+    """Every MCP client sends notifications/initialized after initialize.
+    With the session id from the anonymous initialize it must be accepted
+    (SDK answers 202), not 401."""
+    srv = _boot(monkeypatch, oauth=True)
+    async with srv.app.router.lifespan_context(srv.app):
+        transport = httpx.ASGITransport(app=srv.app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://t") as c:
+            init_resp = await c.post(
+                "/", headers={"Accept": _MCP_ACCEPT}, json=_INIT_BODY
+            )
+            assert init_resp.status_code == 200
+            session_id = init_resp.headers["mcp-session-id"]
+            resp = await c.post(
+                "/",
+                headers={"Accept": _MCP_ACCEPT, "Mcp-Session-Id": session_id},
+                json=_INITIALIZED_BODY,
+            )
+    assert resp.status_code == 202
+
+
+@pytest.mark.asyncio
+async def test_oauth_rs_unauth_session_less_initialized_notification_401s(monkeypatch):
+    """Without Mcp-Session-Id, notifications/initialized stays 401 and must
+    not make the SDK mint a session."""
+    srv = _boot(monkeypatch, oauth=True)
+    async with srv.app.router.lifespan_context(srv.app):
+        sessions = srv.mcp_app.session_manager._server_instances
+        transport = httpx.ASGITransport(app=srv.app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://t") as c:
+            for _ in range(5):
+                resp = await c.post(
+                    "/", headers={"Accept": _MCP_ACCEPT}, json=_INITIALIZED_BODY
+                )
+                assert resp.status_code == 401
+                assert "resource_metadata=" in resp.headers.get("www-authenticate", "")
+        assert len(sessions) == 0
+
+
+@pytest.mark.asyncio
+async def test_oauth_rs_unauth_initialized_notification_unknown_session_no_session(
+    monkeypatch,
+):
+    """A garbage Mcp-Session-Id passes the safelist but the SDK answers 404
+    and must not create a session."""
+    srv = _boot(monkeypatch, oauth=True)
+    async with srv.app.router.lifespan_context(srv.app):
+        sessions = srv.mcp_app.session_manager._server_instances
+        transport = httpx.ASGITransport(app=srv.app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://t") as c:
+            for sid in ("garbage", "0" * 32, ""):
+                resp = await c.post(
+                    "/",
+                    headers={"Accept": _MCP_ACCEPT, "Mcp-Session-Id": sid},
+                    json=_INITIALIZED_BODY,
+                )
+                assert resp.status_code in (400, 401, 404)
+        assert len(sessions) == 0
+
+
+@pytest.mark.asyncio
+async def test_oauth_rs_sdk_client_connects_anonymously_and_lists_tools(monkeypatch):
+    """The real mcp SDK client (initialize + notifications/initialized +
+    tools/list) works with no bearer token."""
+    from mcp.client.streamable_http import streamablehttp_client
+
+    from mcp import ClientSession
+
+    srv = _boot(monkeypatch, oauth=True)
+
+    def factory(headers=None, timeout=None, auth=None):
+        return httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=srv.app),
+            headers=headers,
+            timeout=timeout,
+            auth=auth,
+        )
+
+    async with srv.app.router.lifespan_context(srv.app), streamablehttp_client(
+        "http://t/", httpx_client_factory=factory
+    ) as (read, write, _), ClientSession(read, write) as session:
+        await session.initialize()
+        tools = await session.list_tools()
+    names = {t.name for t in tools.tools}
+    assert "place_call" in names
+    assert "whoami" in names
