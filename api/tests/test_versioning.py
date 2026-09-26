@@ -79,6 +79,22 @@ async def test_non_latin1_legacy_path_is_404_not_500(client: httpx.AsyncClient) 
     assert resp.status_code == 404
 
 
+async def test_matched_legacy_route_with_non_latin1_segment_gets_encoded_link(
+    client: httpx.AsyncClient, org_and_key: tuple[uuid.UUID, ApiKey, str]
+) -> None:
+    # /calls/{call_id} matches, so the Deprecation middleware runs on this
+    # response (unlike an unmatched path, which the APIRoute guard skips).
+    # The decoded path holds "€"; the Link must carry it percent-encoded
+    # instead of failing the latin-1 header encode with a 500.
+    _, _, plain_key = org_and_key
+    resp = await client.get(
+        "/calls/%E2%82%AC", headers={"Authorization": f"Bearer {plain_key}"}
+    )
+    assert resp.status_code != 500
+    assert resp.headers["deprecation"] == "true"
+    assert resp.headers["link"] == '</v1/calls/%E2%82%AC>; rel="successor-version"'
+
+
 async def test_successor_link_is_percent_encoded_and_keeps_the_query(
     client: httpx.AsyncClient, org_and_key: tuple[uuid.UUID, ApiKey, str]
 ) -> None:
