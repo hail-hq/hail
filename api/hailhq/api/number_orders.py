@@ -253,6 +253,10 @@ async def reconcile_order(
         # fee stays (the carrier billed it and does not refund).
         if resource_id:
             try:
+                # Unlike carrier_outcome above, this carrier call runs under
+                # the org lock on purpose: two concurrent reconciles must
+                # never both see "pending" and both submit a terminate for
+                # the same DID.
                 await terminate_did(resource_id)
             except Exception:
                 logger.exception(

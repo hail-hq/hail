@@ -18,12 +18,14 @@ ORDER = "o0000000-0000-0000-0000-000000000001"
 DID = "d0000000-0000-0000-0000-000000000002"
 
 
-async def seed_quote(db, org, *, address_id="addr-1", monthly=350, setup=350):
+async def seed_quote(
+    db, org, *, address_id="addr-1", monthly=350, setup=350, kind="national"
+):
     offer = CarrierOffer(
         provider="didww",
         e164="+351300000001",
         country_code="PT",
-        number_type="national",
+        number_type=kind,
         capabilities=["voice"],
         monthly_cents=monthly,
         setup_cents=setup,
@@ -41,14 +43,25 @@ async def seed_quote(db, org, *, address_id="addr-1", monthly=350, setup=350):
     return row, offer
 
 
-async def buy(db, org, quote, monkeypatch, offer):
+async def buy(db, org, quote, monkeypatch, offer, *, kind="national"):
     monkeypatch.setattr(
         "hailhq.api.number_orders.discover_offers",
         AsyncMock(return_value=([offer], [])),
     )
     return await acquire_offer(
-        db, org, quote.id, country="PT", kind="national", provider="auto", billed=True
+        db, org, quote.id, country="PT", kind=kind, provider="auto", billed=True
     )
+
+
+def _non_catalog_kind(country="PT"):
+    """A number type the live telephony catalog does not list for
+    ``country``: proves ``acquire_offer``'s catalog gate is actually skipped
+    for DIDWW, not merely inert because the catalog happens to cover
+    everything asked for."""
+    for kind in ("local", "mobile", "national", "toll_free"):
+        if telephony_catalog.capabilities(country, kind) is None:
+            return kind
+    raise AssertionError(f"{country} lists every kind; pick another test country")
 
 
 async def _age(db, number, delta):
@@ -82,18 +95,23 @@ async def test_didww_purchase_places_order_and_waits(
 async def test_didww_purchase_is_not_catalog_gated(
     async_session, org_and_key, monkeypatch
 ):
-    """PT/national is not in the test catalog; DIDWW carries its own price."""
+    """A DIDWW purchase for a kind the live catalog does not list for PT must
+    still go through: DIDWW carries its own live price, so acquire_offer must
+    not run catalog_capabilities() for it. Uses a kind the catalog actually
+    lacks (not just one this test assumes is absent) so the assertion below
+    fails if the ``offer.provider != DIDWW`` skip is ever removed."""
+    kind = _non_catalog_kind()
     org, _, _ = org_and_key
-    row, offer = await seed_quote(async_session, org)
-    monkeypatch.setattr(
-        "hailhq.api.number_orders.place_didww_order", AsyncMock(return_value=ORDER)
-    )
+    row, offer = await seed_quote(async_session, org, kind=kind)
+    place = AsyncMock(return_value=ORDER)
+    monkeypatch.setattr("hailhq.api.number_orders.place_didww_order", place)
     monkeypatch.setattr(
         "hailhq.api.number_orders.didww_order_outcome",
         AsyncMock(return_value=("pending", None, ORDER)),
     )
-    number = await buy(async_session, org, row, monkeypatch, offer)
+    number = await buy(async_session, org, row, monkeypatch, offer, kind=kind)
     assert number.provisioning_state == "pending"
+    place.assert_awaited_once_with(number.id, offer.e164, "addr-1")
 
 
 async def test_didww_registration_approved_activates(
