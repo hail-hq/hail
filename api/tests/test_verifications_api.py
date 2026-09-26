@@ -163,6 +163,23 @@ async def _create(client, key, **overrides):
     )
 
 
+async def _unsent(client, key, carrier, async_session) -> str:
+    """A verification still 'awaiting_review': creation submits at once, so
+    tests of the retry/approve paths put the row back to the waiting state."""
+    vid = (await _create(client, key)).json()["id"]
+    await _set_state(async_session, vid, "awaiting_review", age_s=0)
+    from sqlalchemy import update
+
+    await async_session.execute(
+        update(CarrierVerification)
+        .where(CarrierVerification.id == uuid.UUID(vid))
+        .values(submitted_at=None)
+    )
+    await async_session.commit()
+    carrier.submitted.clear()
+    return vid
+
+
 # -- requirements ---------------------------------------------------------
 
 
@@ -216,7 +233,9 @@ async def test_create_stores_state_and_opaque_refs_only(
     resp = await _create(client, key)
     assert resp.status_code == 201, resp.text
     body = resp.json()
-    assert body["state"] == "awaiting_review"
+    # No human gate: the draft went to the carrier during the request.
+    assert body["state"] == "submitted" and body["submitted_at"]
+    assert carrier.submitted == [{"bundle_sid": "B1"}]
     assert body["country_code"] == "GB" and body["number_type"] == "mobile"
 
     draft = carrier.drafts[0]
@@ -343,7 +362,7 @@ async def test_cancel_discards_at_the_carrier(
     client, org_and_key, carrier, async_session
 ) -> None:
     _, _, key = org_and_key
-    vid = (await _create(client, key)).json()["id"]
+    vid = await _unsent(client, key, carrier, async_session)
     resp = await client.delete(f"/verifications/{vid}", headers=_auth(key))
     assert resp.status_code == 200 and resp.json()["state"] == "cancelled"
     assert carrier.discarded == [{"bundle_sid": "B1"}]
@@ -352,6 +371,22 @@ async def test_cancel_discards_at_the_carrier(
     ).status_code == 409
     # a cancelled verification does not block a new one
     assert (await _create(client, key)).status_code == 201
+
+
+async def test_cancel_is_refused_while_under_review(
+    client, org_and_key, carrier, async_session
+) -> None:
+    """The carrier keeps a draft it is reviewing, so cancelling now would
+    leave the customer's documents there with nothing pointing at them."""
+    _, _, key = org_and_key
+    vid = (await _create(client, key)).json()["id"]
+    got = (await client.get(f"/verifications/{vid}", headers=_auth(key))).json()
+    assert got["state"] == "submitted"
+    resp = await client.delete(f"/verifications/{vid}", headers=_auth(key))
+    assert resp.status_code == 409 and "under review" in resp.json()["detail"]
+    assert carrier.discarded == []
+    row = await async_session.get(CarrierVerification, uuid.UUID(vid))
+    assert row.state == "submitted" and row.provider_refs == {"bundle_sid": "B1"}
 
 
 async def test_rejected_verification_can_be_dismissed(
@@ -368,9 +403,11 @@ async def test_rejected_verification_can_be_dismissed(
 # -- superadmin -----------------------------------------------------------
 
 
-async def test_admin_routes_are_denied_by_default(client, org_and_key, carrier) -> None:
+async def test_admin_routes_are_denied_by_default(
+    client, org_and_key, carrier, async_session
+) -> None:
     _, _, key = org_and_key
-    vid = (await _create(client, key)).json()["id"]
+    vid = await _unsent(client, key, carrier, async_session)
     for method, path in (
         ("GET", "/admin/verifications"),
         ("POST", f"/admin/verifications/{vid}/approve"),
@@ -384,7 +421,7 @@ async def test_superadmin_approve_submits_to_the_carrier(
     client, org_and_key, carrier, async_session
 ) -> None:
     _, _, key = org_and_key
-    vid = (await _create(client, key)).json()["id"]
+    vid = await _unsent(client, key, carrier, async_session)
     admin_user_id = uuid.uuid4()
     app.dependency_overrides[require_superadmin] = lambda: SimpleNamespace(
         user_id=admin_user_id, api_key_id=None, superadmin=True
@@ -414,10 +451,10 @@ async def test_superadmin_approve_submits_to_the_carrier(
 
 
 async def test_superadmin_approve_refuses_a_draft_the_carrier_now_rejects(
-    client, org_and_key, carrier
+    client, org_and_key, carrier, async_session
 ) -> None:
     _, _, key = org_and_key
-    vid = (await _create(client, key)).json()["id"]
+    vid = await _unsent(client, key, carrier, async_session)
     app.dependency_overrides[require_superadmin] = lambda: SimpleNamespace(
         user_id=uuid.uuid4(), api_key_id=None, superadmin=True
     )
@@ -428,10 +465,10 @@ async def test_superadmin_approve_refuses_a_draft_the_carrier_now_rejects(
 
 
 async def test_superadmin_reject_records_reason_and_discards(
-    client, org_and_key, carrier
+    client, org_and_key, carrier, async_session
 ) -> None:
     _, _, key = org_and_key
-    vid = (await _create(client, key)).json()["id"]
+    vid = await _unsent(client, key, carrier, async_session)
     app.dependency_overrides[require_superadmin] = lambda: SimpleNamespace(
         user_id=uuid.uuid4(), api_key_id=None, superadmin=True
     )
@@ -525,7 +562,7 @@ async def test_stuck_submitting_row_settles_from_the_carrier(
     # An approve cut off after the carrier call leaves 'submitting' behind.
     # Once it is old enough, a read asks the carrier what really happened.
     _, _, key = org_and_key
-    vid = (await _create(client, key)).json()["id"]
+    vid = await _unsent(client, key, carrier, async_session)
     await _set_state(async_session, vid, "submitting", age_s=10 * 60)
     carrier.remote_status = ProviderStatus(state=remote)
     got = (await client.get(f"/verifications/{vid}", headers=_auth(key))).json()
@@ -533,26 +570,34 @@ async def test_stuck_submitting_row_settles_from_the_carrier(
     audits = (
         (
             await async_session.execute(
-                select(AuditLog).where(AuditLog.action == "verification.approve")
+                select(AuditLog).where(
+                    AuditLog.action.in_(("verification.submit", "verification.approve"))
+                )
             )
         )
         .scalars()
         .all()
     )
+    # Creation's own submit wrote one row before _unsent reset the state.
+    recovered = [a for a in audits if a.payload.get("recovered")]
     if expected == "awaiting_review":
         # The submit never went through: nothing to audit.
-        assert audits == [] and got["submitted_at"] is None
+        assert recovered == [] and got["submitted_at"] is None
     else:
-        # The interrupted approve never wrote its audit row; the recovery does.
+        # The interrupted submit never wrote its audit row; the recovery does.
+        # Nobody approved this one (approved_by is empty), so it is an
+        # automatic submit by the system, not a superadmin approve.
         assert got["submitted_at"]
-        assert len(audits) == 1 and audits[0].payload["recovered"] is True
+        assert len(recovered) == 1 and recovered[0].action == "verification.submit"
+        assert recovered[0].actor_kind == "system"
+        assert recovered[0].actor_user_id is None
 
 
 async def test_fresh_submitting_row_is_left_alone(
     client, org_and_key, carrier, async_session
 ) -> None:
     _, _, key = org_and_key
-    vid = (await _create(client, key)).json()["id"]
+    vid = await _unsent(client, key, carrier, async_session)
     await _set_state(async_session, vid, "submitting", age_s=5)
     carrier.remote_status = ProviderStatus(state="draft")
     got = (await client.get(f"/verifications/{vid}", headers=_auth(key))).json()
@@ -590,10 +635,10 @@ async def test_create_with_malformed_documents_is_422(
 
 
 async def test_approve_returns_502_when_the_carrier_fails(
-    client, org_and_key, carrier
+    client, org_and_key, carrier, async_session
 ) -> None:
     _, _, key = org_and_key
-    vid = (await _create(client, key)).json()["id"]
+    vid = await _unsent(client, key, carrier, async_session)
     app.dependency_overrides[require_superadmin] = lambda: SimpleNamespace(
         user_id=uuid.uuid4(), api_key_id=None, superadmin=True
     )
@@ -611,10 +656,10 @@ async def test_approve_returns_502_when_the_carrier_fails(
 
 
 async def test_approve_marks_submitting_before_calling_the_carrier(
-    client, org_and_key, carrier
+    client, org_and_key, carrier, async_session
 ) -> None:
     _, _, key = org_and_key
-    vid = (await _create(client, key)).json()["id"]
+    vid = await _unsent(client, key, carrier, async_session)
     app.dependency_overrides[require_superadmin] = lambda: SimpleNamespace(
         user_id=uuid.uuid4(), api_key_id=None, superadmin=True
     )
@@ -770,3 +815,113 @@ async def test_no_configured_carrier_is_404(client, org_and_key, carrier) -> Non
         headers=_auth(key),
     )
     assert resp.status_code == 404
+
+
+async def test_create_keeps_waiting_when_the_carrier_refuses_the_submit(
+    client, org_and_key, carrier
+) -> None:
+    _, _, key = org_and_key
+
+    async def boom(refs):
+        raise RuntimeError("twilio down")
+
+    carrier.submit = boom
+    resp = await _create(client, key)
+    assert resp.status_code == 201, resp.text
+    assert resp.json()["state"] == "awaiting_review"
+    assert resp.json()["submitted_at"] is None
+
+
+async def test_sweeper_submits_waiting_drafts_and_pulls_decisions(
+    client, org_and_key, carrier, async_session
+) -> None:
+    from hailhq.api.routes.verifications import sweep_verifications
+
+    _, _, key = org_and_key
+    waiting = await _unsent(client, key, carrier, async_session)
+    # Too fresh: creation may still be running; the sweeper leaves it alone.
+    counts = await sweep_verifications(
+        async_session, lambda name: carrier if name == "fake" else None
+    )
+    assert counts == {"submitted": 0, "refreshed": 0} and carrier.submitted == []
+    await _set_state(async_session, waiting, "awaiting_review", age_s=3 * 60)
+    carrier.remote_status = ProviderStatus(state="approved")
+    counts = await sweep_verifications(
+        async_session, lambda name: carrier if name == "fake" else None
+    )
+    # Submitted this pass, then polled: the carrier already approved it.
+    assert counts["submitted"] == 1 and carrier.submitted == [{"bundle_sid": "B1"}]
+    got = (await client.get(f"/verifications/{waiting}", headers=_auth(key))).json()
+    assert got["state"] == "approved"
+    audits = (
+        (
+            await async_session.execute(
+                select(AuditLog).where(AuditLog.action == "verification.submit")
+            )
+        )
+        .scalars()
+        .all()
+    )
+    # One row from creation's own submit, one from the sweeper's retry.
+    assert len(audits) == 2 and all(a.payload["approved_by"] is None for a in audits)
+
+
+async def test_sweeper_rejects_a_draft_the_carrier_refuses(
+    client, org_and_key, carrier, async_session
+) -> None:
+    from hailhq.api.routes.verifications import sweep_verifications
+
+    _, _, key = org_and_key
+    vid = await _unsent(client, key, carrier, async_session)
+    await _set_state(async_session, vid, "awaiting_review", age_s=3 * 60)
+    carrier.check_problems = [Problem(field="", message="document unreadable")]
+    counts = await sweep_verifications(
+        async_session, lambda name: carrier if name == "fake" else None
+    )
+    assert counts["submitted"] == 0 and carrier.submitted == []
+    got = (await client.get(f"/verifications/{vid}", headers=_auth(key))).json()
+    assert got["state"] == "rejected"
+    assert got["rejection_reason"] == "document unreadable"
+    assert carrier.discarded == [{"bundle_sid": "B1"}]
+    audit = (
+        await async_session.execute(
+            select(AuditLog).where(AuditLog.action == "verification.reject")
+        )
+    ).scalar_one()
+    assert audit.actor_kind == "system" and audit.actor_user_id is None
+    # Not retried: a second pass leaves it alone.
+    carrier.check_problems = []
+    counts = await sweep_verifications(
+        async_session, lambda name: carrier if name == "fake" else None
+    )
+    assert counts["submitted"] == 0 and carrier.submitted == []
+    # A rejected verification does not block a new one.
+    assert (await _create(client, key)).status_code == 201
+
+
+async def test_sweeper_keeps_a_refused_draft_when_the_discard_fails(
+    client, org_and_key, carrier, async_session
+) -> None:
+    from hailhq.api.routes.verifications import sweep_verifications
+
+    _, _, key = org_and_key
+    vid = await _unsent(client, key, carrier, async_session)
+    await _set_state(async_session, vid, "awaiting_review", age_s=3 * 60)
+    carrier.check_problems = [Problem(field="", message="document unreadable")]
+
+    async def boom(refs):
+        raise RuntimeError("carrier down")
+
+    carrier.discard = boom
+    counts = await sweep_verifications(
+        async_session, lambda name: carrier if name == "fake" else None
+    )
+    assert counts == {"submitted": 0, "refreshed": 0}
+    row = await async_session.get(CarrierVerification, uuid.UUID(vid))
+    await async_session.refresh(row)
+    assert row.state == "awaiting_review" and row.provider_refs == {"bundle_sid": "B1"}
+    assert (
+        await async_session.execute(
+            select(AuditLog).where(AuditLog.action == "verification.reject")
+        )
+    ).scalar_one_or_none() is None

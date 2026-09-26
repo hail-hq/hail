@@ -3767,9 +3767,9 @@ paths:
 
         The carrier checks the details right away. Problems come back as 422 with
 
-        the field named, and nothing is kept. When it passes, the verification waits
+        the field named, and nothing is kept. When it passes, the verification is
 
-        for review and is then submitted to the carrier.'
+        submitted to the carrier for its review; read it back to follow the state.'
       operationId: create_verification
       parameters:
         - name: authorization
@@ -3931,7 +3931,15 @@ paths:
       tags:
         - verifications
       summary: Cancel Verification
-      description: Cancel an unsubmitted verification or dismiss a rejected one.
+      description:
+        "Withdraw a verification that has not been sent for review, or
+        dismiss
+
+        a rejected one. The draft is discarded either way. One that is under
+
+        review cannot be cancelled: wait for the result; if it is rejected,
+
+        dismiss it."
       operationId: cancel_verification
       parameters:
         - name: verification_id
