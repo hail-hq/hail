@@ -596,6 +596,20 @@ wheels = [
 ]
 
 [[package]]
+name = "didww"
+version = "3.1.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "cryptography" },
+    { name = "jsonapi-requests" },
+    { name = "requests" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/07/0d/02e0689717ede81d6f7c2135ce9efbee40c77bc9cf5be6f5a258fdb3b309/didww-3.1.0.tar.gz", hash = "sha256:6d55dfba2e580847d76ae2f87c6629548771642411445ae9e1b32faa9396190a", size = 49169, upload-time = "2026-05-05T10:18:18.307Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/f9/d8/7d7f0ddd90ad549a26bcf60242c2d99ed5a866695119323a66a1aeabf7bf/didww-3.1.0-py3-none-any.whl", hash = "sha256:d919353c24e4c7a6ccc373b4a4f4bf81397970b459d872836172c6f9d1e4cb94", size = 50550, upload-time = "2026-05-05T10:18:16.55Z" },
+]
+
+[[package]]
 name = "distro"
 version = "1.9.0"
 source = { registry = "https://pypi.org/simple" }
@@ -1108,6 +1122,7 @@ source = { editable = "core" }
 dependencies = [
     { name = "boto3" },
     { name = "cryptography" },
+    { name = "didww" },
     { name = "httpx" },
     { name = "livekit-api" },
     { name = "phonenumbers" },
@@ -1134,6 +1149,7 @@ dev = [
 requires-dist = [
     { name = "boto3", specifier = ">=1.34" },
     { name = "cryptography", specifier = ">=42" },
+    { name = "didww", specifier = ">=3.1" },
     { name = "httpx", specifier = ">=0.27" },
     { name = "livekit-api", specifier = ">=1.1" },
     { name = "mypy", marker = "extra == 'dev'" },
@@ -1519,6 +1535,19 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/5e/a6/d69888cb4ffde30e80db1e6c32caaadd2f984a80067d5ea72c2cb3f61c3f/json_repair-0.60.1.tar.gz", hash = "sha256:841661cdd2df507c9a4e189097f38ca6bc372e06d4b4e36d72e590f68176c290", size = 49451, upload-time = "2026-06-03T17:28:44.451Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/32/1f/2a2b5eea8ef5762a86ad3f8fddddaaba2c0d76dd44e644b9158900868bec/json_repair-0.60.1-py3-none-any.whl", hash = "sha256:ba6ff974f2a8bef2f7768144a7f03f870a816443f03da27a49cdd0ec31a78049", size = 48045, upload-time = "2026-06-03T17:28:43.038Z" },
+]
+
+[[package]]
+name = "jsonapi-requests"
+version = "0.8.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "requests" },
+    { name = "tenacity" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/7c/9c/100fb1d24aeb4a86b6fffdf7cab5d393080440dc5c203648ee34d981937c/jsonapi_requests-0.8.0.tar.gz", hash = "sha256:baacf281d831debeb7233e9cd88936f3bf8b681d6c1948e7c508ad2f403e55ba", size = 12649, upload-time = "2024-07-12T10:25:51.802Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/fa/90/33e7d7ddf150144af3b99b5a9aba265e1079bd13be7b55605bfb09483a8a/jsonapi_requests-0.8.0-py2.py3-none-any.whl", hash = "sha256:7ab04516cc1f5eb7a30293fd5b3ea00ca6d8c14701994da773ca00d7425aabe4", size = 12971, upload-time = "2024-07-12T10:25:50.113Z" },
 ]
 
 [[package]]
