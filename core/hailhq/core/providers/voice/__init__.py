@@ -1,17 +1,17 @@
 from hailhq.core.providers.voice.base import (
-    NumberNotProvisionable,
+    CarrierNotConfigured,
+    CarrierRequestError,
     NumberType,
     ProviderCallStatus,
-    ProviderNumber,
     VoiceProvider,
 )
 from hailhq.core.providers.voice.twilio import TwilioVoiceProvider
 
 __all__ = [
-    "NumberNotProvisionable",
+    "CarrierNotConfigured",
+    "CarrierRequestError",
     "NumberType",
     "ProviderCallStatus",
-    "ProviderNumber",
     "TwilioVoiceProvider",
     "VoiceProvider",
 ]

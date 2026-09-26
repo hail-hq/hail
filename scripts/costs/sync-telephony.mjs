@@ -123,6 +123,71 @@ export function mapCsvToNumbers(csvText) {
   return { rows, countryCount: countries.size, dropped };
 }
 
+// Overlay the feed onto the current catalog. A row someone verified by hand
+// (verification_method "manual-confirmed") is kept as it is: the public CSV
+// has been wrong where the carrier's own API was right (GB, 2026-09-24), and
+// a sync must never undo a checked fact. Such rows are reported so the PR
+// shows the disagreement; to let the feed win again, set the row back to
+// "carrier-sync".
+export function mergeRows(existingNumbers, feedRows, today) {
+  const prevByKey = new Map(
+    existingNumbers.map((n) => [`${n.country_code}:${n.number_type}`, n]),
+  );
+  const kept = [];
+  const numbers = feedRows.map((n) => {
+    const key = `${n.country_code}:${n.number_type}`;
+    const prev = prevByKey.get(key);
+    if (prev && prev.verification_method === "manual-confirmed") {
+      const differs =
+        prev.usd_per_month !== n.usd_per_month ||
+        prev.voice !== n.voice ||
+        prev.sms !== n.sms ||
+        prev.mms !== n.mms;
+      if (differs) {
+        kept.push({
+          key,
+          feed: `${n.usd_per_month} voice=${n.voice} sms=${n.sms} mms=${n.mms}`,
+          kept: `${prev.usd_per_month} voice=${prev.voice} sms=${prev.sms} mms=${prev.mms}`,
+          verified_by: prev.verified_by,
+          last_verified: prev.last_verified,
+        });
+      }
+      return prev;
+    }
+    const changed =
+      !prev ||
+      prev.usd_per_month !== n.usd_per_month ||
+      prev.voice !== n.voice ||
+      prev.sms !== n.sms ||
+      prev.mms !== n.mms;
+    return {
+      ...n,
+      last_verified: today,
+      last_changed_at: changed ? today : prev.last_changed_at || today,
+      verification_method: "carrier-sync",
+      verified_by: "twilio-sync",
+      source_url: CSV_URL,
+    };
+  });
+  // A hand-verified row the feed does not carry at all (Twilio sells no PT
+  // national numbers; DIDWW does) is a fact too: keep it, in catalog order.
+  const feedKeys = new Set(
+    feedRows.map((n) => `${n.country_code}:${n.number_type}`),
+  );
+  for (const n of existingNumbers) {
+    const key = `${n.country_code}:${n.number_type}`;
+    if (n.verification_method === "manual-confirmed" && !feedKeys.has(key)) {
+      numbers.push(n);
+    }
+  }
+  numbers.sort(
+    (a, b) =>
+      a.country_code.localeCompare(b.country_code) ||
+      a.number_type.localeCompare(b.number_type),
+  );
+  return { numbers, kept };
+}
+
 async function main() {
   const res = await fetch(CSV_URL);
   if (!res.ok)
@@ -145,6 +210,7 @@ async function main() {
     rows.map((n) => `${n.country_code}:${n.number_type}`),
   );
   const removed = (existing.numbers || [])
+    .filter((n) => n.verification_method !== "manual-confirmed")
     .map((n) => `${n.country_code}:${n.number_type}`)
     .filter((k) => !newKeys.has(k));
   for (const k of removed) {
@@ -153,29 +219,12 @@ async function main() {
     );
   }
   const today = new Date().toISOString().slice(0, 10);
-  const prevByKey = new Map(
-    (existing.numbers || []).map((n) => [
-      `${n.country_code}:${n.number_type}`,
-      n,
-    ]),
-  );
-  const numbers = rows.map((n) => {
-    const prev = prevByKey.get(`${n.country_code}:${n.number_type}`);
-    const changed =
-      !prev ||
-      prev.usd_per_month !== n.usd_per_month ||
-      prev.voice !== n.voice ||
-      prev.sms !== n.sms ||
-      prev.mms !== n.mms;
-    return {
-      ...n,
-      last_verified: today,
-      last_changed_at: changed ? today : prev.last_changed_at || today,
-      verification_method: "carrier-sync",
-      verified_by: "twilio-sync",
-      source_url: CSV_URL,
-    };
-  });
+  const { numbers, kept } = mergeRows(existing.numbers || [], rows, today);
+  for (const k of kept) {
+    console.warn(
+      `KEPT hand-verified row ${k.key}: feed says ${k.feed}, kept ${k.kept} (${k.verified_by}, ${k.last_verified})`,
+    );
+  }
   const out = { ...existing, numbers };
   await writeFile(TELEPHONY_JSON, JSON.stringify(out, null, 2) + "\n");
   console.log(`wrote ${numbers.length} rows across ${countryCount} countries`);

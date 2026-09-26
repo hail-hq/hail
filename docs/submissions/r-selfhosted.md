@@ -70,9 +70,9 @@ cp .env.example .env
 docker compose up
 ```
 
-That base `docker-compose.yml` brings up four services: `api` (FastAPI), `voicebot` (the LiveKit Agents worker that runs the voice pipeline), `mcp` (the Streamable HTTP MCP server, port 8081), and `minio` (S3-compatible storage). Two overlays on top, pick the one that fits:
+That base `docker-compose.yml` brings up three services: `api` (FastAPI), `voicebot` (the LiveKit Agents worker that runs the voice pipeline), and `mcp` (the Streamable HTTP MCP server, port 8081). Two overlays on top, pick the one that fits:
 
-- `docker-compose.local.yml` — adds a bundled Postgres container, builds all four services from source, for a fully self-contained dev/homelab box. This is the one that works with a straight `git clone` + `up`, no forking required.
+- `docker-compose.local.yml` — adds a bundled Postgres container, builds all three services from source, for a fully self-contained dev/homelab box. This is the one that works with a straight `git clone` + `up`, no forking required.
 - `docker-compose.prod.yml` — points at `ghcr.io/hail-hq/hail-*` image tags instead of building from source, rebinds ports to `127.0.0.1`, and adds Caddy as the TLS edge with auto Let's Encrypt — the config I run for my own single-VM deploy (walkthrough: [docs/setup/vm-deploy.md](https://github.com/hail-hq/hail/blob/main/docs/setup/vm-deploy.md)). Heads up: my `ghcr.io/hail-hq/hail-*` packages are private right now, so this overlay isn't a drop-in pull from my repo — fork it and point your own GitHub Actions/registry login at your fork's images (vm-deploy.md covers this), or just build from source with `docker compose -f docker-compose.yml -f docker-compose.prod.yml build`.
 
 ```bash
@@ -93,7 +93,7 @@ Stack: Go CLI; Python (`uv` workspace — API, core, MCP server, voicebot, SDK) 
 Feedback I actually want from this crowd specifically:
 
 - Is `docker compose up` + one `.env` an honest "self-hosted" bar for you, given the external carrier/SFU accounts above are unavoidable for a working phone line — or does that disqualify it from how you'd describe "self-hosted" here?
-- Resource footprint on a small VM/homebox — anyone want a docker-stats readout for the full stack (api + voicebot + mcp + minio + postgres)?
+- Resource footprint on a small VM/homebox — anyone want a docker-stats readout for the full stack (api + voicebot + mcp + postgres)?
 - AGPLv3 specifically for something with a hosted-cloud sibling offering (hail.so) — does that combination read as genuinely open to you, or as open-core-with-extra-steps?
 
 Disclosure: I'm the developer, this is my project.

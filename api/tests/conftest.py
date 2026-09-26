@@ -238,17 +238,11 @@ def sms_mock() -> AsyncMock:
 
 @pytest.fixture()
 def voice_provider_mock() -> AsyncMock:
-    """Default mock voice provider — happy-path number acquisition."""
-    from hailhq.core.providers.voice import ProviderNumber, VoiceProvider
+    """Default mock voice provider."""
+    from hailhq.core.providers.voice import VoiceProvider
 
     mock = AsyncMock(spec=VoiceProvider)
-    mock.acquire_number.return_value = ProviderNumber(
-        provider_resource_id="PN_test_acquired",
-        e164="+14155550001",
-        country_code="US",
-        capabilities=["voice", "sms"],
-        number_type="local",
-    )
+    mock.carrier = "twilio"
     return mock
 
 
@@ -286,6 +280,17 @@ async def org_and_key(
     async_session: AsyncSession,  # noqa: F811 (re-used as a fixture parameter name)
 ) -> tuple[uuid.UUID, ApiKey, str]:
     return await insert_org_and_key(async_session)
+
+
+@pytest.fixture(autouse=True)
+def twilio_trunk_configured(monkeypatch: pytest.MonkeyPatch):
+    """POST /calls refuses to dial a carrier with no LiveKit trunk. Tests
+    never set .env, so give the default (Twilio) carrier a trunk id."""
+    from hailhq.core.config import settings
+
+    monkeypatch.setattr(
+        settings, "livekit_twilio_sip_outbound_trunk_id", "ST_twilio_test"
+    )
 
 
 @pytest.fixture(autouse=True)
@@ -327,12 +332,14 @@ def add_phone_number():
         state: str = "active",
         provider_resource_id: str = "PN_test",
         is_pool: bool = False,
+        provider: str = "twilio",
     ) -> PhoneNumber:
         pn = PhoneNumber(
             organization_id=organization_id,
             e164=e164,
             country_code="US",
             number_type="local",
+            provider=provider,
             provider_resource_id=provider_resource_id,
             provisioning_state=state,
             is_pool=is_pool,

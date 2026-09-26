@@ -172,3 +172,16 @@ def test_constructor_accepts_explicit_overrides() -> None:
             "override_key",
             "override_secret",
         )
+
+
+async def test_telnyx_header_is_sent_on_sip_invite(client: LiveKitClient) -> None:
+    await client.create_sip_participant(
+        room_name="test",
+        to_e164="+14155559999",
+        from_e164="+14155551234",
+        sip_trunk_id="ST_telnyx",
+        participant_identity="caller",
+        headers={"X-Telnyx-Username": "hail-sip"},
+    )
+    (req,), _ = client._lkapi.sip.create_sip_participant.call_args
+    assert dict(req.headers) == {"X-Telnyx-Username": "hail-sip"}

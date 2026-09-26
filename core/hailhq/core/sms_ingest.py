@@ -129,11 +129,23 @@ async def ingest_inbound_sms(
     provider_message_sid: str | None,
     opt_out_type: str | None,
     provider: SmsProvider | None = None,
+    carrier: str = "twilio",
 ) -> IngestResult:
     number = await _resolve_org_for_number(db, to_e164)
     if number is None or number.organization_id is None:
         logger.info("inbound sms to unrecognized/pool number=%s dropped", to_e164)
         return IngestResult(sms_id=None, dropped_reason="unknown_number")
+
+    if number.provider != carrier or "sms" not in number.capabilities:
+        logger.info(
+            "inbound sms to number=%s dropped: carrier=%s number carrier=%s "
+            "capabilities=%s",
+            to_e164,
+            carrier,
+            number.provider,
+            number.capabilities,
+        )
+        return IngestResult(sms_id=None, dropped_reason="wrong_carrier_or_capability")
 
     organization_id = number.organization_id
 
@@ -163,6 +175,7 @@ async def ingest_inbound_sms(
         direction="inbound",
         status="received",
         body=body,
+        provider=carrier,
         provider_message_sid=sid,
     )
     try:

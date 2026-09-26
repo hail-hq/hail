@@ -45,6 +45,8 @@ from hail.models import (
     EmailSummary,
     EventStreamResponse,
     LLMConfig,
+    NumberOffer,
+    NumberQuotesResponse,
     NumberType,
     ObservedDnsRecord,
     PhoneNumberListResponse,
@@ -62,7 +64,7 @@ from hail.models import (
     WhoamiResponse,
 )
 
-__version__ = "0.16.0"
+__version__ = "0.17.0"
 
 __all__ = [
     # helpers
@@ -105,6 +107,8 @@ __all__ = [
     "HailServerError",
     "HailValidationError",
     "LLMConfig",
+    "NumberOffer",
+    "NumberQuotesResponse",
     "NumberType",
     "ObservedDnsRecord",
     "PhoneNumberListResponse",

@@ -1,6 +1,6 @@
 [project]
 name = "hail-sdk"
-version = "0.16.0"
+version = "0.17.0"
 description = "Python SDK for Hail — give your AI agent a voice, a real phone number, and an inbox."
 readme = "README.md"
 license = { text = "AGPL-3.0-or-later" }
@@ -26,6 +26,7 @@ dependencies = [
 dev = [
     "pytest>=8",
     "pytest-asyncio>=0.23",
+    "pyyaml>=6",
     "respx>=0.21",
 ]
 

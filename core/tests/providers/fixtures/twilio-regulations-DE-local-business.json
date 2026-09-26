@@ -1,0 +1,233 @@
+{
+  "meta": {
+    "first_page_url": "https://numbers.twilio.com/v2/RegulatoryCompliance/Regulations?IsoCountry=DE&NumberType=local&PageSize=50&EndUserType=business&IncludeConstraints=true&Page=0",
+    "key": "results",
+    "next_page_url": null,
+    "page": 0,
+    "page_size": 50,
+    "previous_page_url": null,
+    "url": "https://numbers.twilio.com/v2/RegulatoryCompliance/Regulations?IsoCountry=DE&NumberType=local&PageSize=50&EndUserType=business&IncludeConstraints=true&Page=0"
+  },
+  "results": [
+    {
+      "end_user_type": "business",
+      "friendly_name": "Germany: Local - Business",
+      "iso_country": "DE",
+      "number_type": "local",
+      "requirements": {
+        "end_user": [
+          {
+            "constraint": "business != null",
+            "detailed_fields": [
+              {
+                "constraint": "business['business_name'] != null",
+                "description": "",
+                "friendly_name": "Business Name",
+                "machine_name": "business_name"
+              },
+              {
+                "constraint": "business['business_registration_number']!=null",
+                "description": "Provide the registration number (Nummer der Firma; ex: HRB 000000) appearing on the excerpt from the commercial register (Handelsregisterauszug), if available. Otherwise, provide a VAT ID or tax number (Steuernummer).",
+                "friendly_name": "Business Registration Number",
+                "machine_name": "business_registration_number"
+              },
+              {
+                "constraint": "business['business_website'] != null",
+                "description": "The website or social media url for the business/entity, if available.",
+                "friendly_name": "Business Website",
+                "machine_name": "business_website"
+              },
+              {
+                "constraint": "business['first_name'] != null",
+                "description": "",
+                "friendly_name": "Authorized Representative's First Name",
+                "machine_name": "first_name"
+              },
+              {
+                "constraint": "business['last_name'] != null",
+                "description": "",
+                "friendly_name": "Authorized Representative's Last Name",
+                "machine_name": "last_name"
+              },
+              {
+                "constraint": "business['email'] =~ '^\\S+@\\S+\\.\\S+$'",
+                "description": "Domain should match business name or website",
+                "friendly_name": "Authorized Representative's Work Email",
+                "machine_name": "email"
+              },
+              {
+                "constraint": "",
+                "description": "This is an optional field which you can use to specify any additional information that might be useful for vetting your RC Bundle.",
+                "friendly_name": "Comments (Optional)",
+                "machine_name": "comments"
+              }
+            ],
+            "fields": [
+              "business_name",
+              "business_registration_number",
+              "business_website",
+              "first_name",
+              "last_name",
+              "email",
+              "comments"
+            ],
+            "name": "Business",
+            "requirement_name": "business_info",
+            "type": "business",
+            "url": "https://numbers.twilio.com/v2/RegulatoryCompliance/EndUserTypes/business"
+          }
+        ],
+        "supporting_document": [
+          [
+            {
+              "accepted_documents": [
+                {
+                  "constraint": "business != null && commercial_registrar_excerpt != null",
+                  "detailed_fields": [
+                    {
+                      "constraint": "commercial_registrar_excerpt['business_registration_number'] != null && commercial_registrar_excerpt['business_registration_number'] == business['business_registration_number']",
+                      "description": "",
+                      "friendly_name": "Business Registration Number",
+                      "machine_name": "business_registration_number"
+                    }
+                  ],
+                  "fields": ["business_registration_number"],
+                  "name": "Excerpt from the commercial register (Handelsregisterauszug) showing business registration number",
+                  "type": "commercial_registrar_excerpt",
+                  "url": "https://numbers.twilio.com/v2/RegulatoryCompliance/SupportingDocumentTypes/commercial_registrar_excerpt"
+                },
+                {
+                  "constraint": "business != null && tax_document != null",
+                  "detailed_fields": [
+                    {
+                      "constraint": "tax_document['business_registration_number'] != null && tax_document['business_registration_number'] == business['business_registration_number']",
+                      "description": "",
+                      "friendly_name": "Business Registration Number",
+                      "machine_name": "business_registration_number"
+                    }
+                  ],
+                  "fields": ["business_registration_number"],
+                  "name": "Tax ID Number Notification Letter ('Best\u00e4tigung Freier Beruf Finanzamt')",
+                  "type": "tax_document",
+                  "url": "https://numbers.twilio.com/v2/RegulatoryCompliance/SupportingDocumentTypes/tax_document"
+                }
+              ],
+              "description": "Document must match the supplied Business Registration Number (Nummer der Firma [ex. HRB 000000], VAT ID, or tax number [Steuernummer])",
+              "name": "Proof of Registration",
+              "requirement_name": "business_registration_number_info",
+              "type": "document"
+            },
+            {
+              "accepted_documents": [
+                {
+                  "constraint": "business != null && commercial_registrar_excerpt != null",
+                  "detailed_fields": [
+                    {
+                      "constraint": "commercial_registrar_excerpt['business_name'] != null && commercial_registrar_excerpt['business_name'] == business['business_name']",
+                      "description": "",
+                      "friendly_name": "Business Name",
+                      "machine_name": "business_name"
+                    }
+                  ],
+                  "fields": ["business_name"],
+                  "name": "Excerpt from the commercial register (Handelsregisterauszug)",
+                  "type": "commercial_registrar_excerpt",
+                  "url": "https://numbers.twilio.com/v2/RegulatoryCompliance/SupportingDocumentTypes/commercial_registrar_excerpt"
+                },
+                {
+                  "constraint": "business != null && trade_license != null",
+                  "detailed_fields": [
+                    {
+                      "constraint": "trade_license['business_name'] != null && trade_license['business_name'] == business['business_name']",
+                      "description": "",
+                      "friendly_name": "Business Name",
+                      "machine_name": "business_name"
+                    }
+                  ],
+                  "fields": ["business_name"],
+                  "name": "Trade license ('Gewerbeanmeldung', 'GewerbeUmmeldung', or 'Empfangsbescheinigung f\u00fcr Gewerbeanmeldung')",
+                  "type": "trade_license",
+                  "url": "https://numbers.twilio.com/v2/RegulatoryCompliance/SupportingDocumentTypes/trade_license"
+                },
+                {
+                  "constraint": "business != null && tax_document != null",
+                  "detailed_fields": [
+                    {
+                      "constraint": "tax_document['business_name'] != null && tax_document['business_name'] == business['business_name']",
+                      "description": "",
+                      "friendly_name": "Business Name",
+                      "machine_name": "business_name"
+                    }
+                  ],
+                  "fields": ["business_name"],
+                  "name": "Tax ID Number Notification Letter ('Best\u00e4tigung Freier Beruf Finanzamt')",
+                  "type": "tax_document",
+                  "url": "https://numbers.twilio.com/v2/RegulatoryCompliance/SupportingDocumentTypes/tax_document"
+                }
+              ],
+              "description": "",
+              "name": "Proof of Business Identity",
+              "requirement_name": "business_name_info",
+              "type": "document"
+            },
+            {
+              "accepted_documents": [
+                {
+                  "constraint": "commercial_registrar_excerpt != null",
+                  "detailed_fields": [
+                    {
+                      "constraint": "commercial_registrar_excerpt['address_sids'] != null",
+                      "description": "",
+                      "friendly_name": "Address sid(s)",
+                      "machine_name": "address_sids"
+                    }
+                  ],
+                  "fields": ["address_sids"],
+                  "name": "Excerpt from the commercial register (Handelsregisterauszug) showing matching address",
+                  "type": "commercial_registrar_excerpt",
+                  "url": "https://numbers.twilio.com/v2/RegulatoryCompliance/SupportingDocumentTypes/commercial_registrar_excerpt"
+                },
+                {
+                  "constraint": "trade_license != null",
+                  "detailed_fields": [
+                    {
+                      "constraint": "trade_license['address_sids'] != null",
+                      "description": "",
+                      "friendly_name": "Address sid(s)",
+                      "machine_name": "address_sids"
+                    }
+                  ],
+                  "fields": ["address_sids"],
+                  "name": "Trade license ('Gewerbeanmeldung', 'GewerbeUmmeldung', or 'Empfangsbescheinigung f\u00fcr Gewerbeanmeldung')",
+                  "type": "trade_license",
+                  "url": "https://numbers.twilio.com/v2/RegulatoryCompliance/SupportingDocumentTypes/trade_license"
+                },
+                {
+                  "constraint": "tax_document != null",
+                  "detailed_fields": [
+                    {
+                      "constraint": "tax_document['address_sids'] != null",
+                      "description": "",
+                      "friendly_name": "Address sid(s)",
+                      "machine_name": "address_sids"
+                    }
+                  ],
+                  "fields": ["address_sids"],
+                  "name": "Tax ID Number Notification Letter ('Best\u00e4tigung Freier Beruf Finanzamt')",
+                  "type": "tax_document",
+                  "url": "https://numbers.twilio.com/v2/RegulatoryCompliance/SupportingDocumentTypes/tax_document"
+                }
+              ],
+              "description": "Must be within locality or region covered by the phone number's prefix; a PO Box is not acceptable. Must match the address appearing on the official registration document.",
+              "name": "Proof of Address",
+              "requirement_name": "business_address_proof_info",
+              "type": "document"
+            }
+          ]
+        ]
+      },
+      "sid": "RNfd11dde5d4b7252abf96139766f68034",
+      "url": "https://numbers.twilio.com/v2/RegulatoryCompliance/Regulations/RNfd11dde5d4b7252abf96139766f68034"
+    }
+  ]
+}

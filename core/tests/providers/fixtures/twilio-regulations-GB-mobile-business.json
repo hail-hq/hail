@@ -1,0 +1,140 @@
+{
+  "meta": {
+    "first_page_url": "https://numbers.twilio.com/v2/RegulatoryCompliance/Regulations?IsoCountry=GB&NumberType=mobile&PageSize=50&EndUserType=business&IncludeConstraints=true&Page=0",
+    "key": "results",
+    "next_page_url": null,
+    "page": 0,
+    "page_size": 50,
+    "previous_page_url": null,
+    "url": "https://numbers.twilio.com/v2/RegulatoryCompliance/Regulations?IsoCountry=GB&NumberType=mobile&PageSize=50&EndUserType=business&IncludeConstraints=true&Page=0"
+  },
+  "results": [
+    {
+      "end_user_type": "business",
+      "friendly_name": "United Kingdom: Mobile - Business",
+      "iso_country": "GB",
+      "number_type": "mobile",
+      "requirements": {
+        "end_user": [
+          {
+            "constraint": "business != null",
+            "detailed_fields": [
+              {
+                "constraint": "business['business_name'] != null",
+                "description": "",
+                "friendly_name": "Business Name",
+                "machine_name": "business_name"
+              },
+              {
+                "constraint": "business['business_registration_identifier'] =~ '^(UK:CRN|US:EIN|CA:CBN|AU:ACN|OTHER)$'",
+                "description": "Choose one of the following values: UK:CRN, US:EIN, CA:CBN, AU:ACN, OTHER ",
+                "friendly_name": "Registration Authority",
+                "machine_name": "business_registration_identifier"
+              },
+              {
+                "constraint": "business['business_registration_number'] != null",
+                "description": "Business registration number provided by the\u00a0Registration\u00a0Authority",
+                "friendly_name": "Business Registration Number",
+                "machine_name": "business_registration_number"
+              },
+              {
+                "constraint": "business['business_website'] != null",
+                "description": "Public facing website or verified social media account",
+                "friendly_name": "Business Website",
+                "machine_name": "business_website"
+              },
+              {
+                "constraint": "business['first_name'] != null",
+                "description": "",
+                "friendly_name": "Authorized Representative's First Name",
+                "machine_name": "first_name"
+              },
+              {
+                "constraint": "business['last_name'] != null",
+                "description": "",
+                "friendly_name": "Authorized Representative's Last Name",
+                "machine_name": "last_name"
+              },
+              {
+                "constraint": "business['phone_number'] =~ '^\\+[1-9]\\d{1,14}$'",
+                "description": "This must be a valid mobile number only where the customer can be reached. This cannot be a number which you've acquired from a CPaaS provider.",
+                "friendly_name": "Authorized Representative's Phone Number",
+                "machine_name": "phone_number"
+              },
+              {
+                "constraint": "business['email'] =~ '^\\S+@\\S+\\.\\S+$'",
+                "description": "Domain should match business name or website",
+                "friendly_name": "Authorized Representative's Work Email",
+                "machine_name": "email"
+              },
+              {
+                "constraint": "business['business_identity'] =~ '^(DIRECT_CUSTOMER|INDEPENDENT_SOFTWARE_VENDOR)$'",
+                "description": "Choose any one of the following values: [DIRECT_CUSTOMER, INDEPENDENT_SOFTWARE_VENDOR]. Use 'DIRECT_CUSTOMER' if your business uses this phone number to communicate internally or with your customers. Use 'INDEPENDENT_SOFTWARE_VENDOR' if your business uses this phone number in a product that you sell to your customers.",
+                "friendly_name": "Business Classification",
+                "machine_name": "business_identity"
+              },
+              {
+                "constraint": "business['is_subassigned'] =~ '^(YES|NO)$'",
+                "description": "Choose any one of the following values : [YES, NO]. A sub assigned phone number is where Independent Software Vendor (ISV) assigns the phone number to their end customer. If you are a direct customer, answer NO.",
+                "friendly_name": "Is this number being assigned to the end customer ?",
+                "machine_name": "is_subassigned"
+              },
+              {
+                "constraint": "",
+                "description": "This is an optional field which you can use to specify any additional information that might be useful for vetting your RC Bundle.",
+                "friendly_name": "Comments (Optional)",
+                "machine_name": "comments"
+              }
+            ],
+            "fields": [
+              "business_name",
+              "business_registration_identifier",
+              "business_registration_number",
+              "business_website",
+              "first_name",
+              "last_name",
+              "phone_number",
+              "email",
+              "business_identity",
+              "is_subassigned",
+              "comments"
+            ],
+            "name": "Business",
+            "requirement_name": "business_info",
+            "type": "business",
+            "url": "https://numbers.twilio.com/v2/RegulatoryCompliance/EndUserTypes/business"
+          }
+        ],
+        "supporting_document": [
+          [
+            {
+              "accepted_documents": [
+                {
+                  "constraint": "business_address != null",
+                  "detailed_fields": [
+                    {
+                      "constraint": "business_address['address_sids'] != null",
+                      "description": "May be anywhere in the world;  a PO Box is not acceptable.",
+                      "friendly_name": "Business Address sid",
+                      "machine_name": "address_sids"
+                    }
+                  ],
+                  "fields": ["address_sids"],
+                  "name": "Business address",
+                  "type": "business_address",
+                  "url": "https://numbers.twilio.com/v2/RegulatoryCompliance/SupportingDocumentTypes/business_address"
+                }
+              ],
+              "description": "May be anywhere in the world;  a PO Box is not acceptable.",
+              "name": "Proof of Address",
+              "requirement_name": "business_address",
+              "type": "document"
+            }
+          ]
+        ]
+      },
+      "sid": "RNb257214105d3b9526d5f80359b863452",
+      "url": "https://numbers.twilio.com/v2/RegulatoryCompliance/Regulations/RNb257214105d3b9526d5f80359b863452"
+    }
+  ]
+}

@@ -1,0 +1,148 @@
+{
+  "meta": {
+    "first_page_url": "https://numbers.twilio.com/v2/RegulatoryCompliance/Regulations?IsoCountry=GB&NumberType=mobile&PageSize=50&EndUserType=individual&IncludeConstraints=true&Page=0",
+    "key": "results",
+    "next_page_url": null,
+    "page": 0,
+    "page_size": 50,
+    "previous_page_url": null,
+    "url": "https://numbers.twilio.com/v2/RegulatoryCompliance/Regulations?IsoCountry=GB&NumberType=mobile&PageSize=50&EndUserType=individual&IncludeConstraints=true&Page=0"
+  },
+  "results": [
+    {
+      "end_user_type": "individual",
+      "friendly_name": "United Kingdom: Mobile - Individual",
+      "iso_country": "GB",
+      "number_type": "mobile",
+      "requirements": {
+        "end_user": [
+          {
+            "constraint": "individual != null",
+            "detailed_fields": [
+              {
+                "constraint": "individual['first_name'] != null",
+                "description": "",
+                "friendly_name": "First Name",
+                "machine_name": "first_name"
+              },
+              {
+                "constraint": "individual['last_name'] != null",
+                "description": "",
+                "friendly_name": "Last Name",
+                "machine_name": "last_name"
+              },
+              {
+                "constraint": "individual['email'] =~ '^\\S+@\\S+\\.\\S+$'",
+                "description": "",
+                "friendly_name": "Contact Email",
+                "machine_name": "email"
+              },
+              {
+                "constraint": "individual['phone_number'] =~ '^\\+[1-9]\\d{1,14}$'",
+                "description": "This must be a valid mobile number only where the customer can be reached. This cannot be a number which you've acquired from a CPaaS provider.",
+                "friendly_name": "Phone Number",
+                "machine_name": "phone_number"
+              },
+              {
+                "constraint": "",
+                "description": "This is an optional field which you can use to specify any additional information that might be useful for vetting your RC Bundle.",
+                "friendly_name": "Comments (Optional)",
+                "machine_name": "comments"
+              }
+            ],
+            "fields": [
+              "first_name",
+              "last_name",
+              "email",
+              "phone_number",
+              "comments"
+            ],
+            "name": "Individual",
+            "requirement_name": "individual_info",
+            "type": "individual",
+            "url": "https://numbers.twilio.com/v2/RegulatoryCompliance/EndUserTypes/individual"
+          }
+        ],
+        "supporting_document": [
+          [
+            {
+              "accepted_documents": [
+                {
+                  "constraint": "individual != null && government_issued_document != null",
+                  "detailed_fields": [
+                    {
+                      "constraint": "government_issued_document['first_name'] != null && government_issued_document['first_name'] == individual['first_name']",
+                      "description": "The first name as seen in your government issued document. This must match the first name of the individual.",
+                      "friendly_name": "First Name",
+                      "machine_name": "first_name"
+                    },
+                    {
+                      "constraint": "government_issued_document['last_name'] != null && government_issued_document['last_name'] == individual['last_name']",
+                      "description": "The last name as seen in your government issued document. This must match the last name of the individual.",
+                      "friendly_name": "Last Name",
+                      "machine_name": "last_name"
+                    }
+                  ],
+                  "fields": ["first_name", "last_name"],
+                  "name": "Government-issued ID",
+                  "type": "government_issued_document",
+                  "url": "https://numbers.twilio.com/v2/RegulatoryCompliance/SupportingDocumentTypes/government_issued_document"
+                },
+                {
+                  "constraint": "individual != null && passport != null",
+                  "detailed_fields": [
+                    {
+                      "constraint": "passport['first_name'] != null && passport['first_name'] == individual['first_name']",
+                      "description": "The first name as seen in your passport. This must match the first name of the individual.",
+                      "friendly_name": "First Name",
+                      "machine_name": "first_name"
+                    },
+                    {
+                      "constraint": "passport['last_name'] != null && passport['last_name'] == individual['last_name']",
+                      "description": "The last name as seen in your government issued document. This must match the last name of the individual.",
+                      "friendly_name": "Last Name",
+                      "machine_name": "last_name"
+                    }
+                  ],
+                  "fields": ["first_name", "last_name"],
+                  "name": "Passport",
+                  "type": "passport",
+                  "url": "https://numbers.twilio.com/v2/RegulatoryCompliance/SupportingDocumentTypes/passport"
+                }
+              ],
+              "description": "Document must match the first and last name provided",
+              "name": "Proof of Identity",
+              "requirement_name": "proof_of_identity",
+              "type": "document"
+            },
+            {
+              "accepted_documents": [
+                {
+                  "constraint": "individual_address != null",
+                  "detailed_fields": [
+                    {
+                      "constraint": "individual_address['address_sids'] != null",
+                      "description": "Must be a valid address. May be anywhere in the world.",
+                      "friendly_name": "Individual Address Sid",
+                      "machine_name": "address_sids"
+                    }
+                  ],
+                  "fields": ["address_sids"],
+                  "name": "Individual Address",
+                  "type": "individual_address",
+                  "url": "https://numbers.twilio.com/v2/RegulatoryCompliance/SupportingDocumentTypes/individual_address"
+                }
+              ],
+              "description": "May be anywhere in the world;  a PO Box is not acceptable.",
+              "name": "Proof of Address",
+              "requirement_name": "individual_address_info",
+              "type": "document"
+            }
+          ]
+        ]
+      },
+      "sid": "RNbda16e54b024fc1d8a0213f5477dc624",
+      "url": "https://numbers.twilio.com/v2/RegulatoryCompliance/Regulations/RNbda16e54b024fc1d8a0213f5477dc624"
+    }
+  ]
+}

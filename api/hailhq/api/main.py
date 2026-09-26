@@ -12,6 +12,7 @@ from fastapi.exception_handlers import request_validation_exception_handler
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, Response
 from hailhq.api.deprecation import DeprecationHeaderMiddleware
+from hailhq.api.number_orders import purge_expired_quotes, reconcile_pending_orders
 from hailhq.api.ratelimit import GeneralRateLimitMiddleware
 from hailhq.api.routes import calls as calls_routes
 from hailhq.api.routes import contacts as contacts_routes
@@ -23,6 +24,7 @@ from hailhq.api.routes import numbers as numbers_routes
 from hailhq.api.routes import providers as providers_routes
 from hailhq.api.routes import sms as sms_routes
 from hailhq.api.routes import unsubscribe as unsubscribe_routes
+from hailhq.api.routes import verifications as verifications_routes
 from hailhq.api.routes import webhooks as webhooks_routes
 from hailhq.api.routes import whoami as whoami_routes
 from hailhq.api.routes.internal import agent as internal_agent
@@ -43,6 +45,7 @@ from hailhq.core.http_post import httpx_post
 from hailhq.core.outbound_worker import OutboundForwardWorker
 from hailhq.core.pool import sweep_pool_reservations
 from hailhq.core.providers.email.ses import SesEmailProvider
+from hailhq.core.providers.telnyx import close_http_client
 from hailhq.core.reconcile import sweep_stale_calls
 from hailhq.core.s3_mail import S3MailClient
 from hailhq.core.secret_cipher import SecretCipher, SecretKeyMissing
@@ -114,6 +117,23 @@ async def _backstop_sweeper_loop() -> None:
         await asyncio.sleep(SWEEP_INTERVAL_SECONDS)
 
 
+async def _order_reconciler_loop() -> None:
+    """Poll pending carrier number orders and drop expired quotes.
+
+    Runs apart from the backstop sweeper: carrier calls can take 20s each and
+    must not delay the stale-call and pool-reservation sweeps.
+    """
+    while True:
+        try:
+            await reconcile_pending_orders()
+            await purge_expired_quotes()
+        except asyncio.CancelledError:
+            raise
+        except Exception:  # pragma: no cover — defensive; logged + retried
+            logger.exception("number order reconciler iteration failed; will retry")
+        await asyncio.sleep(SWEEP_INTERVAL_SECONDS)
+
+
 async def _stop_worker(worker, task: asyncio.Task) -> None:
     """Graceful-stop a polling worker task, hard-cancelling after 5s."""
     await worker.stop()
@@ -129,6 +149,9 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     """Start backstop sweepers + webhook worker on boot; tear them down on shutdown."""
     sweeper_task = asyncio.create_task(
         _backstop_sweeper_loop(), name="backstop-sweeper"
+    )
+    order_reconciler_task = asyncio.create_task(
+        _order_reconciler_loop(), name="number-order-reconciler"
     )
 
     webhook_worker: WebhookWorker | None = None
@@ -209,10 +232,13 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         yield
     finally:
         sweeper_task.cancel()
-        try:
-            await sweeper_task
-        except (asyncio.CancelledError, Exception):
-            pass
+        order_reconciler_task.cancel()
+        for task in (sweeper_task, order_reconciler_task):
+            try:
+                await task
+            except (asyncio.CancelledError, Exception):
+                pass
+        await close_http_client()
         if webhook_worker is not None and webhook_task is not None:
             await _stop_worker(webhook_worker, webhook_task)
         if forward_worker is not None and forward_task is not None:
@@ -355,6 +381,7 @@ _CUSTOMER_ROUTERS = [
     contacts_routes.router,
     whoami_routes.router,
     providers_routes.router,
+    verifications_routes.router,
 ]
 for _router in _CUSTOMER_ROUTERS:
     app.include_router(_router, prefix="/v1")
@@ -367,6 +394,7 @@ app.include_router(internal_call_settings.router)
 app.include_router(internal_dsar.router)
 app.include_router(internal_agent.router)
 app.include_router(internal_numbers.router)
+app.include_router(verifications_routes.admin_router)
 
 
 @app.get("/healthz")

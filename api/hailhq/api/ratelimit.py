@@ -111,7 +111,9 @@ _DOCS_PATHS = frozenset({"/openapi.json", "/docs", "/docs/oauth2-redirect", "/re
 # traffic would share one bucket with these legitimate routes. Listed
 # unprefixed; dual-mounted at both /v1/... and the legacy path (main.py), so
 # matching strips a leading /v1 before comparing.
-_EXEMPT_PATHS = frozenset({"/sms/inbound", "/sms/status", "/unsubscribe"})
+_EXEMPT_PATHS = frozenset(
+    {"/sms/inbound", "/sms/status", "/sms/telnyx", "/unsubscribe"}
+)
 
 
 def _is_exempt(path: str) -> bool:

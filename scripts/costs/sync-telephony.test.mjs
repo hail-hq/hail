@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mapCsvToNumbers } from './sync-telephony.mjs';
+import { mapCsvToNumbers, mergeRows } from './sync-telephony.mjs';
 
 const CSV =
   'ISO,Country,Country Code,Phone Number Type,Voice Enabled,Trunking Enabled,SMS Enabled,MMS Enabled,Domestic Voice Only,Domestic SMS Only,Phone Number Price / month\n' +
@@ -48,4 +48,66 @@ test('parses quoted CSV fields with commas', () => {
   assert.equal(vi.voice, true);
   assert.equal(vi.sms, true);
   assert.equal(vi.mms, false);
+});
+
+test('a hand-verified row is kept when the feed disagrees, and reported', () => {
+  const existing = [
+    {
+      country_code: 'GB', number_type: 'mobile', display_name: 'United Kingdom mobile', dial_code: '44',
+      usd_per_month: '2.50', voice: true, sms: true, mms: false,
+      last_verified: '2026-09-24', last_changed_at: '2026-09-24',
+      verification_method: 'manual-confirmed', verified_by: 'twilio-api',
+      source_url: 'https://www.twilio.com/docs/phone-numbers/pricing',
+    },
+    {
+      country_code: 'US', number_type: 'local', display_name: 'United States local', dial_code: '1',
+      usd_per_month: '1.15', voice: true, sms: true, mms: true,
+      last_verified: '2026-07-17', last_changed_at: '2026-07-17',
+      verification_method: 'carrier-sync', verified_by: 'twilio-sync', source_url: 'https://example.test/csv',
+    },
+  ];
+  const feed = [
+    { country_code: 'GB', number_type: 'mobile', display_name: 'United Kingdom mobile', dial_code: '44', usd_per_month: '1.15', voice: true, sms: true, mms: false },
+    { country_code: 'US', number_type: 'local', display_name: 'United States local', dial_code: '1', usd_per_month: '1.20', voice: true, sms: true, mms: true },
+  ];
+  const { numbers, kept } = mergeRows(existing, feed, '2026-09-28');
+  const gb = numbers.find((r) => r.country_code === 'GB');
+  assert.equal(gb.usd_per_month, '2.50');
+  assert.equal(gb.verification_method, 'manual-confirmed');
+  assert.equal(gb.last_verified, '2026-09-24');
+  const us = numbers.find((r) => r.country_code === 'US');
+  assert.equal(us.usd_per_month, '1.20');
+  assert.equal(us.last_changed_at, '2026-09-28');
+  assert.equal(us.verification_method, 'carrier-sync');
+  assert.equal(kept.length, 1);
+  assert.equal(kept[0].key, 'GB:mobile');
+});
+
+test('a hand-verified row that agrees with the feed is kept silently', () => {
+  const existing = [{
+    country_code: 'GB', number_type: 'local', display_name: 'United Kingdom local', dial_code: '44',
+    usd_per_month: '1.15', voice: true, sms: false, mms: false,
+    last_verified: '2026-09-24', last_changed_at: '2026-09-24',
+    verification_method: 'manual-confirmed', verified_by: 'twilio-api', source_url: 'https://example.test',
+  }];
+  const feed = [{ country_code: 'GB', number_type: 'local', display_name: 'United Kingdom local', dial_code: '44', usd_per_month: '1.15', voice: true, sms: false, mms: false }];
+  const { kept } = mergeRows(existing, feed, '2026-09-28');
+  assert.equal(kept.length, 0);
+});
+
+test('a hand-verified row the feed does not carry is kept, in catalog order', () => {
+  const pt = {
+    country_code: 'PT', number_type: 'national', display_name: 'Portugal national', dial_code: '351',
+    usd_per_month: '3.50', voice: true, sms: false, mms: false, verification_method: 'manual-confirmed',
+    verified_by: 'r13i', last_verified: '2026-09-25', last_changed_at: '2026-09-25', source_url: 'https://www.didww.com/x',
+  };
+  const stale = { ...pt, country_code: 'ZZ', number_type: 'local', verification_method: 'carrier-sync' };
+  const feed = [
+    { country_code: 'US', number_type: 'local', display_name: 'United States local', dial_code: '1', usd_per_month: '1.15', voice: true, sms: true, mms: true },
+    { country_code: 'PT', number_type: 'local', display_name: 'Portugal local', dial_code: '351', usd_per_month: '1.00', voice: true, sms: false, mms: false },
+  ];
+  const { numbers, kept } = mergeRows([pt, stale], feed, '2026-09-28');
+  assert.deepEqual(numbers.map((n) => `${n.country_code}:${n.number_type}`), ['PT:local', 'PT:national', 'US:local']);
+  assert.deepEqual(numbers[1], pt); // untouched, not re-stamped
+  assert.equal(kept.length, 0); // nothing to report: the feed did not disagree
 });

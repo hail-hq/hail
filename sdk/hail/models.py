@@ -222,6 +222,34 @@ class SuppressionListResponse(BaseModel):
 # --------------------------------------------------------------------------- #
 
 
+class NumberOffer(BaseModel):
+    """One live carrier offer. Mirrors ``CarrierOffer`` in openapi/openapi.yaml."""
+
+    provider: Literal["twilio", "telnyx"]
+    e164: str
+    country_code: str
+    number_type: NumberType
+    capabilities: list[str]
+    monthly_cents: int
+    setup_cents: int
+    currency: Literal["USD"] = "USD"
+    readiness: Literal["ready", "verification_required"]
+    regulatory_friction: Literal["none", "information", "documents", "unknown"] = (
+        "unknown"
+    )
+    requirements: list[str] = Field(default_factory=list)
+    verification_id: str | None = None
+    address_id: str | None = None
+    quote_id: UUID | None = None
+
+
+class NumberQuotesResponse(BaseModel):
+    offers: list[NumberOffer]
+    recommended_quote_id: UUID | None
+    unavailable_providers: list[str]
+    expires_at: datetime
+
+
 class PhoneNumberResponse(BaseModel):
     """Shape returned by the ``/numbers`` endpoints.
 
@@ -240,6 +268,7 @@ class PhoneNumberResponse(BaseModel):
     provisioning_state: str
     is_dedicated: bool
     messaging_service_sid: str | None = None
+    provider: str = "twilio"
 
 
 class PhoneNumberListResponse(BaseModel):
@@ -780,6 +809,8 @@ __all__ = [
     "EmailSummary",
     "EventStreamResponse",
     "LLMConfig",
+    "NumberOffer",
+    "NumberQuotesResponse",
     "NumberType",
     "ObservedDnsRecord",
     "PhoneNumberListResponse",

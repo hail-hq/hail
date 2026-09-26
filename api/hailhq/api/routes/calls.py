@@ -41,6 +41,7 @@ from hailhq.api.route_prefixes import request_mount_prefix
 from hailhq.core.agent_tools.registry import all_tools
 from hailhq.core.billing import CALL_META_BILLED
 from hailhq.core.call_end_reasons import CallEndReason
+from hailhq.core.carrier_routing import voice_route
 from hailhq.core.compliance_gate import check_call_allowed
 from hailhq.core.config import settings
 from hailhq.core.db import get_session
@@ -375,6 +376,8 @@ async def create_call(
         conversation_id=body.conversation_id,
         from_number_id=from_number.id,
         from_e164=from_number.e164,
+        # The number's carrier decides the SIP trunk (voice_route below).
+        provider=from_number.provider,
         to_e164=body.to,
         direction="outbound",
         status="queued",
@@ -426,8 +429,12 @@ async def create_call(
     # 4. External calls — best-effort with status reconciliation.
     room_name: str | None = None
     dispatch_id: str | None = None
-    setup_stage = "room_create"
+    setup_stage = "carrier_route"
     try:
+        # Resolve the carrier route first: a carrier with no trunk configured
+        # must fail before any LiveKit room exists.
+        trunk_id, sip_headers = voice_route(call.provider)
+        setup_stage = "room_create"
         room_name = await lk.create_room(call.id)
         setup_stage = "agent_dispatch"
 
@@ -468,8 +475,9 @@ async def create_call(
             room_name=room_name,
             to_e164=call.to_e164,
             from_e164=call.from_e164,
-            sip_trunk_id=settings.livekit_sip_outbound_trunk_id,
+            sip_trunk_id=trunk_id,
             participant_identity=f"caller-{call.id}",
+            **({"headers": sip_headers} if sip_headers else {}),
         )
     except Exception as exc:
         logger.warning(
