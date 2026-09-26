@@ -26,7 +26,7 @@ Schemas are served at their `$id` URLs:
 
 ## How AI agents should use this
 
-Model files (llm/stt/tts) share a common envelope: `{ version, license, models[] }`. Every model row has `provider`, `model_id`, `display_name`, primary price fields (as decimal strings, e.g. `"5.0"`), `last_verified`, `last_changed_at`, `verification_method`, `verified_by`, and `source_url`. The number catalogs (`twilio.json`, `telnyx.json`, `didww.json`) instead carry `provider` and `numbers[]` (Twilio's also `a2p_10dlc[]`), since a phone number is not a model. Each number row has `verification_required`: the buyer must be verified (ID, address or regulatory bundle) before purchase. Refresh: `uv run python scripts/costs/sync_numbers.py --env-file .env`. See the JSON Schemas above for the exact shape per category.
+Model files (llm/stt/tts) share a common envelope: `{ version, license, models[] }`. Every model row has `provider`, `model_id`, `display_name`, primary price fields (as decimal strings, e.g. `"5.0"`), `last_verified`, `last_changed_at`, `verification_method`, `verified_by`, and `source_url`. The number catalogs (`twilio.json`, `telnyx.json`, `didww.json`) instead carry `provider` and `numbers[]` (Twilio's also `a2p_10dlc[]`), since a phone number is not a model. Each number row has `verification_required`: the buyer must be verified (ID, address or regulatory bundle) before purchase. Refresh: `uv run python scripts/costs/sync_numbers.py --env-file .env`; the weekly workflow, secrets, merge rules and PR review steps are in [docs/operations/number-catalog-sync.md](../docs/operations/number-catalog-sync.md). See the JSON Schemas above for the exact shape per category.
 
 Canonical fetch pattern:
 

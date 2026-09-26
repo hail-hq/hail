@@ -63,6 +63,11 @@ For the comprehensive operations runbook (releases, deployment, DB switching,
 known footguns), see [docs/public/self-host/operations.md](docs/public/self-host/operations.md). **AI agents
 picking up this codebase: read it before making any infra-shaped change.**
 
+Internal runbooks (not published) live in `docs/operations/`:
+[carrier-verification.md](docs/operations/carrier-verification.md) (verification states, background pass, cancel rules),
+[number-catalog-sync.md](docs/operations/number-catalog-sync.md) (the `costs/<carrier>.json` files, weekly sync, secrets, purchase gate),
+[refresh-costs.md](docs/operations/refresh-costs.md) (weekly LLM/STT/TTS price refresh).
+
 ## Style
 
 - **Python**: ruff (lint, `--fix`) + black (format); mypy + pytest run in CI. FastAPI async handlers. Type-hinted. Pydantic v2 models.
