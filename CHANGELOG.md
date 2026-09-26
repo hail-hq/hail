@@ -10,6 +10,9 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
   list (`costs/telephony.json`), so numbers only another carrier sells never
   appeared (Sweden: Telnyx local and mobile). Every type is now asked for at
   every carrier and the live answer decides; the catalog stays a price list.
+- Telnyx numbers with no ordering rules (US and CA local) were skipped as
+  "unknown coverage" because Telnyx answers an empty list for them. They are
+  now offered as ready.
 - Telnyx voice searches no longer require the `emergency` feature. It is a
   US/CA emergency-address capability, not an outbound-calling requirement,
   and most numbers outside North America lack it.

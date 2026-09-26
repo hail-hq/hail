@@ -194,7 +194,10 @@ async def telnyx_offers(
         rules = (await api.request("GET", "/regulatory_requirements", params=params))[
             "data"
         ]
-        # Missing country/type coverage is unknown, not an exemption.
+        # An empty answer is Telnyx saying this number has no ordering rules
+        # (US and CA local, for example): the offer is ready. A non-empty
+        # answer that names another country or type is unknown coverage, not
+        # an exemption.
         matched = [
             r
             for r in rules
@@ -202,7 +205,7 @@ async def telnyx_offers(
             and r.get("phone_number_type") == kind
             and r.get("action") == "ordering"
         ]
-        if not matched:
+        if rules and not matched:
             continue
         requirements = [r for rule in matched for r in rule["regulatory_requirements"]]
         labels = [
