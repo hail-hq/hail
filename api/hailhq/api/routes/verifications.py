@@ -647,8 +647,15 @@ async def _reject_row(
 ) -> None:
     """The carrier refused the draft before submission: record why, discard
     the draft so nothing of the customer's is left at the carrier, and audit
-    it as a system action (no person rejected it)."""
-    await provider.discard(row.provider_refs)
+    it as a system action (no person rejected it). If the discard fails the
+    row is left as it was and tried again next tick; the sweeper never dies
+    on carrier trouble."""
+    try:
+        await provider.discard(row.provider_refs)
+    except Exception:
+        logger.exception("verification discard failed for %s", row.id)
+        await db.rollback()
+        return
     row.state, row.rejection_reason, row.provider_refs = "rejected", reason, {}
     row.updated_at = datetime.now(timezone.utc)
     await db.commit()
@@ -783,7 +790,8 @@ async def cancel_verification(
 ) -> VerificationResponse:
     """Withdraw a verification that has not been sent for review, or dismiss
     a rejected one. The draft is discarded either way. One that is under
-    review cannot be cancelled: wait for the result, then cancel or dismiss."""
+    review cannot be cancelled: wait for the result; if it is rejected,
+    dismiss it."""
     row = await _org_row_or_404(db, principal, verification_id)
     if row.state in ("submitting", "submitted"):
         raise HTTPException(

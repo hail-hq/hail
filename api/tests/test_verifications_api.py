@@ -898,3 +898,30 @@ async def test_sweeper_rejects_a_draft_the_carrier_refuses(
     # A rejected verification does not block a new one.
     assert (await _create(client, key)).status_code == 201
 
+
+async def test_sweeper_keeps_a_refused_draft_when_the_discard_fails(
+    client, org_and_key, carrier, async_session
+) -> None:
+    from hailhq.api.routes.verifications import sweep_verifications
+
+    _, _, key = org_and_key
+    vid = await _unsent(client, key, carrier, async_session)
+    await _set_state(async_session, vid, "awaiting_review", age_s=3 * 60)
+    carrier.check_problems = [Problem(field="", message="document unreadable")]
+
+    async def boom(refs):
+        raise RuntimeError("carrier down")
+
+    carrier.discard = boom
+    counts = await sweep_verifications(
+        async_session, lambda name: carrier if name == "fake" else None
+    )
+    assert counts == {"submitted": 0, "refreshed": 0}
+    row = await async_session.get(CarrierVerification, uuid.UUID(vid))
+    await async_session.refresh(row)
+    assert row.state == "awaiting_review" and row.provider_refs == {"bundle_sid": "B1"}
+    assert (
+        await async_session.execute(
+            select(AuditLog).where(AuditLog.action == "verification.reject")
+        )
+    ).scalar_one_or_none() is None

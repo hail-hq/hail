@@ -3937,7 +3937,9 @@ paths:
 
         a rejected one. The draft is discarded either way. One that is under
 
-        review cannot be cancelled: wait for the result, then cancel or dismiss."
+        review cannot be cancelled: wait for the result; if it is rejected,
+
+        dismiss it."
       operationId: cancel_verification
       parameters:
         - name: verification_id
