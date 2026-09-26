@@ -505,21 +505,31 @@ async def quote_numbers(
     cost, preferring Twilio on equivalent ties. Blocked offers sort by verification effort. SMS capability does not waive messaging registration requirements.
     """
 
-    # The catalog decides the kinds to search for Twilio and Telnyx; DIDWW is
-    # searched for every kind when it is configured.
+    # The catalog decides the kinds Twilio/Telnyx can be searched for; DIDWW
+    # is searched for every kind when it is configured. A kind the catalog
+    # does not list is never quoted for Twilio/Telnyx (the purchase would
+    # 422), so it is only searched at DIDWW.
     providers = PROVIDERS if body.provider == "auto" else [body.provider]
     didww_on = DIDWW in providers and bool(settings.didww_api_key)
+    catalog_kinds = [
+        k
+        for k in ("local", "mobile", "national", "toll_free")
+        if telephony_catalog.capabilities(body.country_code, k) is not None
+    ]
     if body.number_type:
-        if not didww_on:
+        if body.number_type not in catalog_kinds and not didww_on:
             catalog_capabilities(body.country_code, body.number_type)
         kinds = [body.number_type]
     else:
-        kinds = [
-            k
-            for k in ("local", "mobile", "national", "toll_free")
+        kinds = catalog_kinds + (
+            [
+                k
+                for k in ("local", "mobile", "national", "toll_free")
+                if k not in catalog_kinds
+            ]
             if didww_on
-            or telephony_catalog.capabilities(body.country_code, k) is not None
-        ]
+            else []
+        )
         if not kinds:
             raise unprocessable(
                 f"we don't offer numbers in {body.country_code} yet",
@@ -535,7 +545,7 @@ async def quote_numbers(
                 body.country_code,
                 kind,
                 body.capabilities,
-                providers=providers,
+                providers=providers if kind in catalog_kinds else [DIDWW],
             )
             for kind in kinds
         )
