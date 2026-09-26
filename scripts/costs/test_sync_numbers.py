@@ -253,6 +253,42 @@ def test_merge_keeps_hand_verified_and_vanished_rows():
     assert [n["country_code"] for n in numbers] == ["AR", "GB", "PT", "US"]
 
 
+def test_merge_leaves_unobserved_rows_alone():
+    prev = {
+        "country_code": "PT",
+        "number_type": "mobile",
+        "display_name": "Portugal mobile",
+        "dial_code": "351",
+        "usd_per_month": "5.00",
+        "voice": True,
+        "sms": True,
+        "mms": False,
+        "verification_required": True,
+        "available": True,
+        "last_verified": "2026-07-17",
+        "last_changed_at": "2026-07-17",
+        "verification_method": "carrier-sync",
+        "verified_by": "twilio-sync",
+        "source_url": "https://x",
+    }
+    skipped = [
+        "PT:mobile: no numbers offered to this account",
+        "PT: group 1 has no resolvable type",
+    ]
+    assert sync.skipped_keys(skipped) == {"PT:mobile"}
+    numbers, report = sync.merge(
+        [prev],
+        [],
+        "2026-09-28",
+        "https://src",
+        "twilio-api-sync",
+        unobserved=sync.skipped_keys(skipped),
+    )
+    # Not seeing stock is not the carrier dropping the type: nothing changes.
+    assert numbers == [prev] and "notes" not in numbers[0]
+    assert report["unobserved"] == ["PT:mobile"] and report["vanished"] == []
+
+
 def test_regulatory_block_is_derived_from_rows(tmp_path):
     path = tmp_path / "twilio.json"
     path.write_text(

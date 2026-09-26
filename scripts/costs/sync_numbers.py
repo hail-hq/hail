@@ -12,6 +12,9 @@ Rules the merge follows, in this order:
   never overwritten. Disagreements are printed.
 - A row that vanished from the carrier is kept with available=false, a note
   and the date. A held number must stay billable; the picker hides it.
+- A row the sync could not observe this run (no numbers offered to this
+  account, no price, no dial code) is left exactly as it was: not seeing
+  stock is not the same as the carrier dropping the type.
 - A carrier without credentials is skipped with a printed reason, not an error.
 
 Credentials (env or --env-file): TWILIO_ACCOUNT_SID + TWILIO_AUTH_TOKEN,
@@ -46,6 +49,11 @@ TYPE_LABEL = {
     "national": "national",
 }
 COUNTRY_FLOOR = 40  # never shrink a catalog below this many countries
+
+
+class CatalogShrunk(Exception):
+    """A fetch returned too few countries; the catalog is left unchanged."""
+
 
 # -- helpers ------------------------------------------------------------------
 
@@ -395,7 +403,6 @@ def map_didww(
                     .get("address_requirement", {})
                     .get("data")
                     is not None,
-                    "areas": 1,
                 }
             )
         for number_type, groups in by_type.items():
@@ -480,20 +487,37 @@ def fetch_didww(http: Http) -> tuple[list[dict], list[str], dict[str, str]]:
 # -- merge + write -------------------------------------------------------------
 
 
+def skipped_keys(skipped: list[str]) -> set[str]:
+    """The "ISO:type" keys in a mapper's skipped lines (each is
+    "ISO:type: reason"; DIDWW's per-group lines carry no type and are ignored)."""
+    keys = set()
+    for line in skipped:
+        key = line.split(": ", 1)[0]
+        iso, _, number_type = key.partition(":")
+        if len(iso) == 2 and number_type in NUMBER_TYPES:
+            keys.add(key)
+    return keys
+
+
 def merge(
     existing: list[dict],
     fetched: list[dict],
     today: str,
     source_url: str,
     verified_by: str,
+    unobserved: set[str] | frozenset[str] = frozenset(),
 ) -> tuple[list[dict], dict]:
-    """Overlay fetched rows on the current catalog. Returns (numbers, report)."""
+    """Overlay fetched rows on the current catalog. Returns (numbers, report).
+
+    ``unobserved`` names the keys the sync skipped this run; their rows are
+    kept as they are instead of being marked vanished."""
     prev_by_key = {f"{n['country_code']}:{n['number_type']}": n for n in existing}
     report: dict[str, list[str]] = {
         "kept": [],
         "changed": [],
         "added": [],
         "vanished": [],
+        "unobserved": [],
     }
     watched = (
         "usd_per_month",
@@ -545,6 +569,10 @@ def merge(
         )
     for key, prev in prev_by_key.items():
         if key in seen:
+            continue
+        if key in unobserved:
+            report["unobserved"].append(key)
+            numbers.append(prev)
             continue
         kept = dict(prev)
         if kept.get("available", True):
@@ -611,16 +639,22 @@ def run_provider(
     costs_dir: Path,
     today: str,
     summary: list[str],
+    shared_dial_codes: dict[str, str] | None = None,
     http_factory: Callable[[requests.Session], Http] = Http,
 ) -> bool:
+    """``shared_dial_codes`` is one dict for the whole run: DIDWW's country
+    list fills it (every country, not only the ones it sells), and the
+    carriers after it borrow prefixes for rows no catalog has seen yet."""
+    if shared_dial_codes is None:
+        shared_dial_codes = {}
     path = costs_dir / f"{provider}.json"
     existing = load_existing(path)
     dial_codes = {n["country_code"]: n["dial_code"] for n in existing}
-    # DIDWW's country list carries dial prefixes; borrow them for rows the
-    # other catalogs see for the first time.
     for other in PROVIDERS:
         for n in load_existing(costs_dir / f"{other}.json"):
             dial_codes.setdefault(n["country_code"], n["dial_code"])
+    for iso, prefix in shared_dial_codes.items():
+        dial_codes.setdefault(iso, prefix)
     session = requests.Session()
     if provider == "twilio":
         sid, tok = config.get("TWILIO_ACCOUNT_SID"), config.get("TWILIO_AUTH_TOKEN")
@@ -644,7 +678,8 @@ def run_provider(
             summary.append("- didww: skipped, DIDWW_API_KEY not set")
             return False
         session.headers.update({"Api-Key": key, "Accept": "application/vnd.api+json"})
-        rows, skipped, _ = fetch_didww(http_factory(session))
+        rows, skipped, didww_dial_codes = fetch_didww(http_factory(session))
+        shared_dial_codes.update(didww_dial_codes)
     missing_dial = [r for r in rows if not r["dial_code"]]
     for r in missing_dial:
         skipped.append(
@@ -653,11 +688,16 @@ def run_provider(
     rows = [r for r in rows if r["dial_code"]]
     countries = {r["country_code"] for r in rows}
     if len(countries) < COUNTRY_FLOOR and existing:
-        raise SystemExit(
-            f"{provider}: only {len(countries)} countries fetched (< {COUNTRY_FLOOR}); refusing to shrink the catalog"
+        raise CatalogShrunk(
+            f"only {len(countries)} countries fetched (< {COUNTRY_FLOOR}); refusing to shrink the catalog"
         )
     numbers, report = merge(
-        existing, rows, today, SOURCE_URLS[provider], f"{provider}-api-sync"
+        existing,
+        rows,
+        today,
+        SOURCE_URLS[provider],
+        f"{provider}-api-sync",
+        unobserved=skipped_keys(skipped),
     )
     write_catalog(path, provider, numbers)
     summary.append(f"## {provider}: {len(numbers)} rows, {len(countries)} countries")
@@ -666,6 +706,7 @@ def run_provider(
         ("Changed", "changed"),
         ("Added", "added"),
         ("No longer offered (kept, noted)", "vanished"),
+        ("Not observed this run (kept as is)", "unobserved"),
     ):
         if report[key]:
             summary.append(f"### {label} ({len(report[key])})")
@@ -699,13 +740,18 @@ def main(argv: list[str] | None = None) -> int:
     summary: list[str] = [f"# Number catalog sync {today}", ""]
     providers = PROVIDERS if args.provider == "all" else (args.provider,)
     ran = 0
+    shared_dial_codes: dict[str, str] = {}
     for provider in providers:
         try:
-            ran += run_provider(provider, config, args.costs_dir, today, summary)
+            ran += run_provider(
+                provider, config, args.costs_dir, today, summary, shared_dial_codes
+            )
         except requests.RequestException as exc:
             summary.append(
                 f"- {provider}: failed, {exc.__class__.__name__} {getattr(exc.response, 'status_code', '')} (catalog left unchanged)"
             )
+        except CatalogShrunk as exc:
+            summary.append(f"- {provider}: failed, {exc} (catalog left unchanged)")
     text = "\n".join(summary) + "\n"
     print(text)
     if args.summary_file:
