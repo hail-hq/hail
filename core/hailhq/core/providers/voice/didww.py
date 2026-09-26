@@ -9,6 +9,7 @@ function here is ``async`` and runs its call in ``asyncio.to_thread``.
 from __future__ import annotations
 
 import asyncio
+import logging
 from functools import lru_cache
 from typing import Literal
 from uuid import UUID
@@ -18,8 +19,10 @@ from didww.configuration import Environment
 from didww.exceptions import DidwwApiError
 from hailhq.core.carrier_offer import CarrierOffer, cents
 from hailhq.core.config import settings
-from hailhq.core.providers.voice.base import CarrierNotConfigured
+from hailhq.core.providers.voice.base import CarrierNotConfigured, CarrierRequestError
 from hailhq.core.schemas import NumberType
+
+logger = logging.getLogger(__name__)
 
 PROVIDER = "didww"
 
@@ -188,3 +191,183 @@ async def didww_offers(
     if not settings.didww_api_key or "sms" in capabilities:
         return []
     return await asyncio.to_thread(_offers_sync, org, country, kind, e164)
+
+
+OrderState = Literal["active", "failed", "pending", "missing", "rejected_registration"]
+
+
+def _find_available(client: DidwwClient, e164: str) -> tuple[str, str]:
+    """(available_did id, metered sku id) for one exact number, or
+    ``CarrierRequestError(409)`` when it is gone."""
+    body = client.get(
+        "available_dids",
+        params={
+            "filter[number_contains]": e164.lstrip("+"),
+            "include": "did_group,did_group.stock_keeping_units",
+            "page[size]": 10,
+        },
+    )
+    index = _by_id(body.get("included", []))
+    for did in body["data"]:
+        if "+" + did["attributes"]["number"] != e164:
+            continue
+        group = index.get(
+            ("did_groups", did["relationships"]["did_group"]["data"]["id"])
+        )
+        sku = _metered_sku(group, index) if group else None
+        if sku is not None:
+            return did["id"], sku["id"]
+    raise CarrierRequestError(409)
+
+
+def _place_order_sync(number_id: UUID, e164: str) -> str:
+    client = didww_client()
+    try:
+        available_id, sku_id = _find_available(client, e164)
+        order = client.post(
+            "orders",
+            {
+                "data": {
+                    "type": "orders",
+                    "attributes": {
+                        "allow_back_ordering": False,
+                        "external_reference_id": str(number_id),
+                        "items": [
+                            {
+                                "type": "did_order_items",
+                                "attributes": {
+                                    "available_did_id": available_id,
+                                    "sku_id": sku_id,
+                                },
+                            }
+                        ],
+                    },
+                }
+            },
+        )
+    except DidwwApiError as exc:
+        raise CarrierRequestError(carrier_status(exc)) from exc
+    return order["data"]["id"]
+
+
+async def place_didww_order(number_id: UUID, e164: str, address_id: str | None) -> str:
+    """Order one exact number once; returns the DIDWW order id. Never
+    retried. ``address_id`` is not sent: DIDWW links the registration to
+    the DID after the order (see ``didww_order_outcome``)."""
+    return await asyncio.to_thread(_place_order_sync, number_id, e164)
+
+
+def _load_order(
+    client: DidwwClient, number_id: UUID, order_id: str | None
+) -> dict | None:
+    if order_id:
+        return client.get(f"orders/{order_id}")["data"]
+    # A crash after POST may lose the response. Recover by our reference.
+    found = client.get(
+        "orders",
+        params={"filter[external_reference_id]": str(number_id), "page[size]": 10},
+    )["data"]
+    matches = [
+        o
+        for o in found
+        if o["attributes"].get("external_reference_id") == str(number_id)
+    ]
+    return matches[0] if len(matches) == 1 else None
+
+
+def _ensure_verification(client: DidwwClient, did: dict, address_id: str) -> dict:
+    """The DID's address verification, created once when missing."""
+    rel = did["relationships"].get("address_verification", {}).get("data")
+    if rel:
+        return client.get(f"address_verifications/{rel['id']}")["data"]
+    address = client.get(f"addresses/{address_id}")["data"]
+    return client.post(
+        "address_verifications",
+        {
+            "data": {
+                "type": "address_verifications",
+                "attributes": {
+                    "service_description": address["attributes"].get("description")
+                    or ""
+                },
+                "relationships": {
+                    "address": {"data": {"id": address_id, "type": "addresses"}},
+                    "dids": {"data": [{"id": did["id"], "type": "dids"}]},
+                },
+            }
+        },
+    )["data"]
+
+
+def _outcome_sync(
+    e164: str, number_id: UUID, order_id: str | None, address_id: str | None
+) -> tuple[OrderState, str | None, str | None]:
+    client = didww_client()
+    order = _load_order(client, number_id, order_id)
+    if order is None:
+        return "missing", None, None
+    order_id = order["id"]
+    status = order["attributes"]["status"]
+    if status == "canceled":
+        return "failed", None, order_id
+    if status != "completed":
+        return "pending", None, order_id
+    dids = client.get(
+        "dids",
+        params={
+            "filter[order.id]": order_id,
+            "include": "address_verification",
+            "page[size]": 10,
+        },
+    )["data"]
+    did = next((d for d in dids if "+" + d["attributes"]["number"] == e164), None)
+    if did is None:
+        return "pending", None, order_id
+    if not did["attributes"].get("awaiting_registration"):
+        return "active", did["id"], order_id
+    if not address_id:
+        # Bought without an approved registration: nothing to file.
+        return "pending", None, order_id
+    verification = _ensure_verification(client, did, address_id)
+    vstatus = verification["attributes"]["status"]
+    if vstatus == "approved":
+        return "active", did["id"], order_id
+    if vstatus == "rejected":
+        return "rejected_registration", did["id"], order_id
+    return "pending", None, order_id
+
+
+async def didww_order_outcome(
+    e164: str, number_id: UUID, order_id: str | None, address_id: str | None
+) -> tuple[OrderState, str | None, str | None]:
+    """Ask DIDWW what happened to an order. Holds no DB lock. Files the
+    end-user registration once the DID exists. Errors propagate so the
+    reconciler retries until the carrier's ``pending_timeout``."""
+    return await asyncio.to_thread(_outcome_sync, e164, number_id, order_id, address_id)
+
+
+def _terminate_sync(did_id: str) -> None:
+    didww_client().patch(
+        f"dids/{did_id}",
+        {"data": {"id": did_id, "type": "dids", "attributes": {"terminated": True}}},
+    )
+
+
+async def terminate_did(did_id: str) -> None:
+    """Stop renewal at the end of the billing cycle. DIDWW does not refund."""
+    await asyncio.to_thread(_terminate_sync, did_id)
+
+
+async def release_didww_number(resource_id: str) -> None:
+    """Release an owned DIDWW number. ``CarrierNotConfigured`` when the key
+    is missing; a 404 means it is already gone and is tolerated."""
+    try:
+        await terminate_did(resource_id)
+    except DidwwApiError as exc:
+        if carrier_status(exc) == 404:
+            logger.warning(
+                "didww terminate of %s returned 404; treating as already released",
+                resource_id,
+            )
+            return
+        raise
