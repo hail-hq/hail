@@ -525,9 +525,9 @@ class NumberAcquireRequest(BaseModel):
     quote_id: UUID = Field(
         description="Unexpired organization-bound quote from POST /numbers/quotes. Required: without it the request is a 422; get a quote first.",
     )
-    provider: Literal["auto", "twilio", "telnyx"] = Field(
+    provider: Literal["auto", "twilio", "telnyx", "didww"] = Field(
         default="auto",
-        description="Carrier restriction for the quote. Auto accepts the quoted carrier; twilio or telnyx must match it.",
+        description="Carrier restriction for the quote. Auto accepts the quoted carrier; twilio, telnyx, or didww must match it.",
     )
 
     country_code: str = Field(
@@ -564,9 +564,9 @@ class NumberQuoteRequest(BaseModel):
         max_length=2,
         description="Required channels; every returned offer must support all requested capabilities.",
     )
-    provider: Literal["auto", "twilio", "telnyx"] = Field(
+    provider: Literal["auto", "twilio", "telnyx", "didww"] = Field(
         default="auto",
-        description="Carrier restriction; twilio or telnyx returns that carrier's offers only. auto compares both by readiness, remaining verification effort, and rental/setup costs; Twilio wins equivalent ties.",
+        description="Carrier restriction; twilio, telnyx, or didww returns that carrier's offers only. auto compares all by readiness, remaining verification effort, and rental/setup costs; Twilio wins equivalent ties.",
     )
 
     @field_validator("country_code")

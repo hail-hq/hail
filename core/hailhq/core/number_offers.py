@@ -8,6 +8,7 @@ from uuid import UUID
 
 from hailhq.core.carrier_offer import CarrierOffer
 from hailhq.core.providers.telnyx import get_http_client
+from hailhq.core.providers.voice.didww import didww_offers
 from hailhq.core.providers.voice.telnyx import telnyx_offers
 from hailhq.core.providers.voice.twilio import twilio_offers
 from hailhq.core.schemas import NumberType
@@ -16,6 +17,7 @@ logger = logging.getLogger(__name__)
 
 __all__ = [
     "CarrierOffer",
+    "didww_offers",
     "discover_offers",
     "rank_offers",
     "telnyx_offers",
@@ -50,7 +52,7 @@ def rank_offers(
     )
 
 
-PROVIDERS = ("twilio", "telnyx")
+PROVIDERS = ("twilio", "telnyx", "didww")
 
 
 async def discover_offers(
@@ -68,6 +70,7 @@ async def discover_offers(
         "telnyx": lambda: telnyx_offers(
             org, country, kind, capabilities, get_http_client(), e164=e164
         ),
+        "didww": lambda: didww_offers(org, country, kind, capabilities, e164=e164),
     }
     asked = [p for p in PROVIDERS if p in providers]
     results = await asyncio.gather(

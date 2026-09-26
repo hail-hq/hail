@@ -14,12 +14,17 @@ from hailhq.api.errors import unprocessable
 from hailhq.api.funds import BILLING_URL
 from hailhq.core import telephony_catalog
 from hailhq.core.billing import get_balance_cents, monthly_fee_ref
-from hailhq.core.carrier_routing import carrier
+from hailhq.core.carrier_routing import DIDWW, carrier
 from hailhq.core.db import session_scope
 from hailhq.core.models import AccountCredit, NumberOffer, PhoneNumber
 from hailhq.core.number_offers import CarrierOffer, discover_offers
 from hailhq.core.providers.voice import (
     CarrierRequestError,
+)
+from hailhq.core.providers.voice.didww import (
+    didww_order_outcome,
+    place_didww_order,
+    terminate_did,
 )
 from hailhq.core.providers.voice.telnyx import (
     place_number_order,
@@ -100,12 +105,15 @@ async def finish_order(
     *,
     resource_id: str | None,
     failed: bool = False,
+    keep_setup: bool = False,
     reason: str | None = None,
 ):
     """Caller holds org lock. Move reservation to month fee, or refund once.
 
     ``reason`` is stored for a failed order and shown to the buyer; it must
-    never contain carrier payloads."""
+    never contain carrier payloads. ``keep_setup`` charges the setup fee even
+    on failure: the carrier already billed it and does not refund (DIDWW
+    rejected registration)."""
     if number.provisioning_state != "pending":
         return
     meta = dict(number.provisioning_metadata)
@@ -129,15 +137,15 @@ async def finish_order(
                     "monthly_fee",
                 )
             )
-            if offer.setup_cents:
-                db.add(
-                    credit(
-                        number,
-                        -offer.setup_cents,
-                        f"number_setup:{number.id}",
-                        "number_setup",
-                    )
+        if offer.setup_cents and (not failed or keep_setup):
+            db.add(
+                credit(
+                    number,
+                    -offer.setup_cents,
+                    f"number_setup:{number.id}",
+                    "number_setup",
                 )
+            )
     number.provisioning_state = "failed" if failed else "active"
     if not failed:
         number.provider_resource_id = resource_id
@@ -151,17 +159,28 @@ async def finish_order(
 
 async def carrier_outcome(
     number: PhoneNumber,
-) -> tuple[Literal["active", "failed", "pending", "missing"], str | None, str | None]:
+) -> tuple[
+    Literal["active", "failed", "pending", "missing", "rejected_registration"],
+    str | None,
+    str | None,
+]:
     """Ask the carrier what happened to this order. Holds no DB lock.
 
-    Returns (state, owned resource id, Telnyx order id). ``missing`` means the
-    carrier has no record of the order; it is never treated as permission to
-    submit another paid purchase.
+    Returns (state, owned resource id, carrier order id). ``missing`` means
+    the carrier has no record of the order; it is never treated as
+    permission to submit another paid purchase. ``rejected_registration``
+    (DIDWW) means the number exists but the end-user registration failed.
     """
-    if carrier(number.provider).async_orders:
-        return await telnyx_order_outcome(
-            number.e164, number.id, number.provisioning_metadata.get("order_id")
+    meta = number.provisioning_metadata
+    if number.provider == DIDWW:
+        return await didww_order_outcome(
+            number.e164,
+            number.id,
+            meta.get("order_id"),
+            meta.get("offer", {}).get("address_id"),
         )
+    if carrier(number.provider).async_orders:
+        return await telnyx_order_outcome(number.e164, number.id, meta.get("order_id"))
     sid = await find_ordered_number(number.e164, number.id)
     return ("active", sid, None) if sid else ("missing", None, None)
 
@@ -227,6 +246,28 @@ async def reconcile_order(
             resource_id=None,
             failed=True,
             reason="the carrier reported the order as failed",
+        )
+    elif state == "rejected_registration":
+        # The number exists at the carrier but the end-user registration was
+        # refused. Stop its renewal and give the monthly fee back; the setup
+        # fee stays (the carrier billed it and does not refund).
+        if resource_id:
+            try:
+                await terminate_did(resource_id)
+            except Exception:
+                logger.exception(
+                    "Could not terminate rejected DIDWW number; release it by hand: "
+                    "number=%s did=%s",
+                    number.id,
+                    resource_id,
+                )
+        await finish_order(
+            db,
+            number,
+            resource_id=None,
+            failed=True,
+            keep_setup=True,
+            reason="the carrier rejected the end-user registration",
         )
     elif (
         state == "pending" and datetime.now(timezone.utc) - number.created_at > timeout
@@ -314,7 +355,9 @@ async def acquire_offer(
     kind = offer.number_type
     if row.number_id:
         return await db.get(PhoneNumber, row.number_id)
-    catalog_capabilities(country, kind)
+    if offer.provider != DIDWW:
+        # DIDWW offers carry their own live price; the catalog lists Twilio's.
+        catalog_capabilities(country, kind)
     if row.expires_at <= datetime.now(timezone.utc):
         raise HTTPException(
             status_code=409, detail="Quote expired; refresh number offers"
@@ -425,9 +468,14 @@ async def acquire_offer(
     await org_lock(db, org)
     try:
         if carrier(offer.provider).async_orders:
-            order_id = await place_number_order(
-                number.id, offer.e164, offer.verification_id, offer.capabilities
-            )
+            if offer.provider == DIDWW:
+                order_id = await place_didww_order(
+                    number.id, offer.e164, offer.address_id
+                )
+            else:
+                order_id = await place_number_order(
+                    number.id, offer.e164, offer.verification_id, offer.capabilities
+                )
             number.provisioning_metadata = {
                 **number.provisioning_metadata,
                 "order_id": order_id,
