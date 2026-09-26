@@ -4,6 +4,16 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 
 ## [Unreleased]
 
+### Fixed
+
+- `POST /v1/numbers/quotes` asked only for the number types in Twilio's price
+  list (`costs/telephony.json`), so numbers only another carrier sells never
+  appeared (Sweden: Telnyx local and mobile). Every type is now asked for at
+  every carrier and the live answer decides; the catalog stays a price list.
+- Telnyx voice searches no longer require the `emergency` feature. It is a
+  US/CA emergency-address capability, not an outbound-calling requirement,
+  and most numbers outside North America lack it.
+
 ## [0.24.0] — 2026-09-25
 
 Numbers now come from a live comparison of carriers: Hail quotes Twilio and

@@ -30,7 +30,6 @@ from hailhq.api.idempotency import (
 )
 from hailhq.api.number_orders import (
     RetryableError,
-    catalog_capabilities,
     org_lock,
     purchase_number,
 )
@@ -38,7 +37,6 @@ from hailhq.api.pagination import fetch_cursor_page
 from hailhq.api.ratelimit import GENERAL_RATE_LIMITED_RESPONSES
 from hailhq.api.route_prefixes import request_mount_prefix
 from hailhq.api.routes.sms import get_sms_provider
-from hailhq.core import telephony_catalog
 from hailhq.core.carrier_routing import TELNYX, TWILIO, sms_route
 from hailhq.core.db import get_session
 from hailhq.core.models import NumberOffer, PhoneNumber
@@ -71,6 +69,7 @@ router = APIRouter(
     prefix="/numbers", tags=["numbers"], responses=GENERAL_RATE_LIMITED_RESPONSES
 )
 
+NUMBER_TYPES = ("local", "mobile", "national", "toll_free")
 _DEFAULT_LIST_LIMIT = 50
 _MAX_LIST_LIMIT = 200
 
@@ -496,22 +495,11 @@ async def quote_numbers(
     cost, preferring Twilio on equivalent ties. Blocked offers sort by verification effort. SMS capability does not waive messaging registration requirements.
     """
 
-    # Only number types the telephony catalog lists can be bought, so only
-    # those are searched.
-    if body.number_type:
-        catalog_capabilities(body.country_code, body.number_type)
-        kinds = [body.number_type]
-    else:
-        kinds = [
-            k
-            for k in ("local", "mobile", "national", "toll_free")
-            if telephony_catalog.capabilities(body.country_code, k) is not None
-        ]
-        if not kinds:
-            raise unprocessable(
-                f"we don't offer numbers in {body.country_code} yet",
-                loc=["body", "country_code"],
-            )
+    # Every type is asked for at every carrier; live inventory decides what
+    # exists. The telephony catalog is a price list for the /costs page and
+    # legacy renewals, not an allow-list (Twilio's list alone would hide
+    # numbers only another carrier sells).
+    kinds = [body.number_type] if body.number_type else list(NUMBER_TYPES)
     # Carrier discovery takes seconds. End the transaction the auth lookup
     # opened so this request does not hold a pooled connection while it waits.
     await db.commit()

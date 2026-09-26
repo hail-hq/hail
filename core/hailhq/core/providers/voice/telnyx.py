@@ -47,7 +47,6 @@ class TelnyxNumberDiscovery:
         capabilities: list[str],
         limit: int = 20,
         *,
-        outbound: bool = False,
         e164: str | None = None,
     ) -> list[NumberQuote]:
         country_code = country_code.upper()
@@ -62,10 +61,6 @@ class TelnyxNumberDiscovery:
         requested = set(capabilities)
         if not requested or not requested <= {"voice", "sms", "mms", "fax"}:
             raise ValueError("Unsupported or empty capability selection")
-        # Telnyx documents the emergency feature filter for outbound-capable
-        # inventory. Voice alone establishes inbound voice, not origination.
-        if outbound:
-            requested.add("emergency")
         params = {
             "filter[country_code]": country_code,
             "filter[phone_number_type]": number_type,
@@ -157,7 +152,6 @@ async def telnyx_offers(
         kind,
         capabilities,
         limit=3,
-        outbound="voice" in capabilities,
         e164=e164,
     )
     if not quotes:

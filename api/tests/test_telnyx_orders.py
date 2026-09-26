@@ -13,7 +13,6 @@ from hailhq.api.number_orders import (
     purge_expired_quotes,
     reconcile_order,
 )
-from hailhq.core import telephony_catalog
 from hailhq.core.billing import get_balance_cents, monthly_fee_ref
 from hailhq.core.models import AccountCredit, NumberOffer, PhoneNumber
 from hailhq.core.number_offers import CarrierOffer
@@ -882,37 +881,16 @@ async def test_quote_number_type_is_taken_from_the_quote(
     assert ok.json()["number_type"] == "mobile"
 
 
-async def test_quote_purchase_of_a_type_missing_from_the_catalog_is_422(
-    async_session, org_and_key, monkeypatch
-):
-    org, _, _ = org_and_key
-    row, offer = await seed_quote(async_session, org, kind="toll_free")
-    discover = AsyncMock(return_value=([offer], []))
-    monkeypatch.setattr("hailhq.api.number_orders.discover_offers", discover)
-    with pytest.raises(HTTPException) as exc:
-        await acquire_offer(
-            async_session,
-            org,
-            row.id,
-            country="PT",
-            kind=None,
-            provider="auto",
-            billed=True,
-        )
-    assert exc.value.status_code == 422
-    assert exc.value.detail[0]["loc"] == ["body", "number_type"]
-    discover.assert_not_awaited()
-    assert await get_balance_cents(async_session, org) == 100000
-
-
-async def test_quote_route_rejects_unlisted_type_and_accepts_lowercase_country(
+async def test_quote_route_searches_every_type_and_accepts_lowercase_country(
     client, org_and_key, monkeypatch
 ):
     _, _, key = org_and_key
     discover = AsyncMock(return_value=([], []))
     monkeypatch.setattr("hailhq.api.routes.numbers.discover_offers", discover)
     headers = {"Authorization": f"Bearer {key}"}
-    unlisted = await client.post(
+    # A type the Twilio price list lacks is still asked for: another carrier
+    # may sell it (Telnyx sells PT toll-free and SE local; Twilio does not).
+    one = await client.post(
         "/numbers/quotes",
         json={
             "country_code": "PT",
@@ -921,8 +899,12 @@ async def test_quote_route_rejects_unlisted_type_and_accepts_lowercase_country(
         },
         headers=headers,
     )
-    assert unlisted.status_code == 422
-    discover.assert_not_awaited()
+    assert one.status_code == 200, one.text
+    assert one.json()["offers"] == []
+    assert [call.args[1:3] for call in discover.await_args_list] == [
+        ("PT", "toll_free")
+    ]
+    discover.reset_mock()
     lower = await client.post(
         "/numbers/quotes",
         json={"country_code": "pt", "capabilities": ["voice"]},
@@ -930,15 +912,12 @@ async def test_quote_route_rejects_unlisted_type_and_accepts_lowercase_country(
     )
     assert lower.status_code == 200, lower.text
     assert {call.args[1] for call in discover.await_args_list} == {"PT"}
-    # Only the types the catalog lists for PT are searched (the catalog is
-    # live data: PT gained a national row after this test was written).
-    listed = {
-        kind
-        for kind in ("local", "mobile", "national", "toll_free")
-        if telephony_catalog.capabilities("PT", kind) is not None
+    assert {call.args[2] for call in discover.await_args_list} == {
+        "local",
+        "mobile",
+        "national",
+        "toll_free",
     }
-    assert "toll_free" not in listed
-    assert {call.args[2] for call in discover.await_args_list} == listed
 
 
 async def _age_number(async_session, number):
