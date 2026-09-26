@@ -19,9 +19,8 @@ supported on DIDWW: SMS (offers are voice only) and inbound calls.
 1. Sign up at [my.didww.com](https://my.didww.com).
 2. Outbound trunks are off by default. Ask `support@didww.com` to enable
    "Outbound Trunks" on the account.
-3. Buy the number: **Buy DIDs**. Some countries hold the number in
-   `awaiting_registration` until DIDWW approves the end-user identity and
-   address ([end-user verification](https://doc.didww.com/phone-numbers/end-user-verification/index.html)).
+3. Numbers are bought through Hail ([§5](#5-buying-a-number)); the DIDWW
+   panel is only needed for the trunk and the API key.
 
 ## 2. DIDWW outbound trunk
 
