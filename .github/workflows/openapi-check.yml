@@ -4,6 +4,7 @@ on:
   pull_request:
     paths:
       - "api/**"
+      - "core/**"
       - "openapi/openapi.yaml"
       - ".github/workflows/openapi-check.yml"
 

@@ -245,9 +245,10 @@ class Suppression(Base):
 
     A voice row IS an internal DNC entry; there is no separate DNC table.
     Populated by the unsubscribe link (``GET /unsubscribe``,
-    ``source='unsubscribe_link'``), manual ops action
-    (``source='manual'``), or a future bounce/complaint handler
-    (``source='bounce'``).
+    ``source='unsubscribe_link'``) and an SMS STOP reply
+    (``hailhq.core.sms_ingest``, ``source='stop_keyword'``). ``'manual'``
+    (ops action) and ``'bounce'`` (bounce/complaint handler) are reserved;
+    nothing writes them yet.
     """
 
     __tablename__ = "suppressions"
@@ -1151,6 +1152,11 @@ class AuditLog(Base):
     api_key_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), nullable=True
     )
+    actor_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), nullable=True
+    )
+    # api_key | user | superadmin | system — who acted, beyond which key was used.
+    actor_kind: Mapped[str | None] = mapped_column(Text, nullable=True)
     action: Mapped[str] = mapped_column(Text, nullable=False)
     resource_type: Mapped[str | None] = mapped_column(Text, nullable=True)
     resource_id: Mapped[uuid.UUID | None] = mapped_column(

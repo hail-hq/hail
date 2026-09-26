@@ -220,7 +220,13 @@ class _SmsResource:
         message_type: Literal["marketing", "informational"] | None = None,
         idempotency_key: str | None = None,
     ) -> SmsResponse:
-        """Send an outbound SMS from the org's dedicated number.
+        """Send an outbound SMS.
+
+        With no ``from_``: UK (+44) and Germany (+49) destinations use the
+        org's sender ID (or ``HAIL``, the platform default); Australia (+61)
+        always uses ``HAIL``; every other destination uses the org's oldest
+        active SMS-capable number and the server 422s when there is none.
+        SMS never uses the shared pool.
 
         ``recipient_consent`` is required — the server 422s without it.
         ``idempotency_key`` defaults to a fresh UUIDv4.

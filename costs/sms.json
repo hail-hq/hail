@@ -12,7 +12,7 @@
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",
       "source_url": "https://www.twilio.com/en-us/sms/pricing/us",
-      "notes": "Base rate per message segment on US long code (10DLC). Carrier pass-through fees (see telephony.json a2p_10dlc) are added per segment."
+      "notes": "Base rate per message segment on US long code (10DLC). Carrier pass-through fees (see twilio.json a2p_10dlc) are added per segment."
     },
     {
       "provider": "Vonage",

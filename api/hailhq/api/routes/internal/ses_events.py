@@ -36,7 +36,7 @@ from hailhq.core.email_ingest import ingest_inbound
 from hailhq.core.providers.email.inbound.ses import SesInboundProvider
 from hailhq.core.providers.email.inbound.ses_delivery import parse_delivery_event
 from hailhq.core.s3_mail import S3MailClient
-from hailhq.core.urls import canonical_url
+from hailhq.core.urls import join_url
 from hailhq.core.webhook_fanout import fanout_email_event
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -140,7 +140,13 @@ async def receive_ses_event(
         forward_max_hops=settings.hail_forward_max_hops,
         forward_default_per_hour=settings.hail_forward_rate_per_hour,
         fanout=fanout_email_event,
-        api_base_url=canonical_url(str(request.base_url)),
+        # /v1 is the canonical mount (docs/public/webhooks.md); the raw_url and
+        # attachment url in the email.received payload are built from this base.
+        # Built from the public API URL, not request.base_url: SES/SNS reaches
+        # the API by whatever host the relay was given (http://api:8080 in
+        # Compose, a private LB name), and a URL on that host is useless to
+        # the webhook consumer. Same rule as GET /v1/emails/{id} (emails.py).
+        api_base_url=join_url(settings.hail_api_url, "v1"),
         org_rate_per_hour=settings.hail_inbound_org_rate_per_hour,
         funds_check=has_funds,
     )

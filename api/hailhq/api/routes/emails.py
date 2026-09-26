@@ -34,7 +34,7 @@ from hailhq.api.agent_gate import (
     RATE_LIMITED_RESPONSES,
     require_agent_send_allowed,
 )
-from hailhq.api.audit import write_audit_log
+from hailhq.api.audit import actor_of, write_audit_log
 from hailhq.api.consent import enforce_consent, isoformat_or_none
 from hailhq.api.deps import Principal, get_current_principal, get_s3_mail
 from hailhq.api.errors import unprocessable
@@ -453,6 +453,12 @@ async def deliver_email(
             RATE_LIMITED_RESPONSES, GENERAL_RATE_LIMITED_RESPONSES
         ),
         **FUNDS_RESPONSES,
+        502: {
+            "description": (
+                "Email send failed: the provider rejected the send. The email "
+                "is recorded with status 'failed'."
+            )
+        },
     },
 )
 async def create_email(
@@ -466,12 +472,14 @@ async def create_email(
 ) -> EmailResponse:
     """Send an outbound email through SES.
 
-    Sends synchronously — the response reports the final status (sent or
-    failed), not a queued placeholder; no separate poll is needed for the
-    happy path, though a bounce or complaint can still arrive later as a
-    webhook or GET /v1/emails/{email_id}/events entry. Requires
-    recipient_consent=true on the request body; Hail does not verify lawful
-    basis to contact the recipient, the caller warrants it.
+    Sends synchronously. A 201 means SES accepted the message and the
+    response status is 'sent'; no separate poll is needed for the happy path,
+    though a bounce or complaint can still arrive later as a webhook or
+    GET /v1/emails/{email_id}/events entry. If the send fails, the response is
+    502 'email send failed' with no email body; the email is kept with status
+    'failed' (GET /v1/emails?status=failed) and an email.send_failed event is
+    emitted. Requires recipient_consent=true on the request body; Hail does
+    not verify lawful basis to contact the recipient, the caller warrants it.
     """
     # Idempotency replay first — never re-send.
     if idem is not None and idem.is_replay:
@@ -495,6 +503,7 @@ async def create_email(
     all_recipients = list(body.to) + list(body.cc or []) + list(body.bcc or [])
     gate = await check_email_allowed(db, principal.organization_id, all_recipients)
     if not gate.allowed:
+        actor_user_id, actor_kind = actor_of(principal)
         await write_audit_log(
             organization_id=principal.organization_id,
             api_key_id=principal.api_key_id,
@@ -508,6 +517,8 @@ async def create_email(
                 "reason": gate.reason,
                 "checks": gate.checks,
             },
+            actor_user_id=actor_user_id,
+            actor_kind=actor_kind,
         )
         raise await cache_failure(
             idem,
@@ -585,6 +596,7 @@ async def create_email(
     await db.commit()
     await db.refresh(email)
 
+    actor_user_id, actor_kind = actor_of(principal)
     await write_audit_log(
         organization_id=principal.organization_id,
         api_key_id=principal.api_key_id,
@@ -607,6 +619,8 @@ async def create_email(
             "compliance": gate.checks,
             "attachment_ids": [str(a) for a in (body.attachment_ids or [])],
         },
+        actor_user_id=actor_user_id,
+        actor_kind=actor_kind,
     )
 
     # Provider send — best-effort with status reconciliation. Synchronous
@@ -614,6 +628,7 @@ async def create_email(
     # background polling needed for the happy path.
     err = await deliver_email(db, email_provider, email, attachment_rows)
     if err is not None:
+        actor_user_id, actor_kind = actor_of(principal)
         await write_audit_log(
             organization_id=principal.organization_id,
             api_key_id=principal.api_key_id,
@@ -621,6 +636,8 @@ async def create_email(
             resource_type="email",
             resource_id=email.id,
             payload={"end_reason": err},
+            actor_user_id=actor_user_id,
+            actor_kind=actor_kind,
         )
         if idem is not None:
             await idem.store(

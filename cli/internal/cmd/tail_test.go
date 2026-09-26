@@ -826,3 +826,131 @@ func TestTail_ToolCallArgsRendered(t *testing.T) {
 		t.Errorf("legacy tools list not rendered:\n%s", stdout)
 	}
 }
+
+// TestTail_RetriesOn429: a 429 with Retry-After makes the poll loop wait and
+// retry the same cursor instead of aborting.
+func TestTail_RetriesOn429(t *testing.T) {
+	t0 := time.Now().Add(-time.Minute)
+	var hits int32
+	var cursors []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		n := atomic.AddInt32(&hits, 1)
+		cursors = append(cursors, r.URL.Query().Get("cursor"))
+		w.Header().Set("Content-Type", "application/json")
+		if n == 1 {
+			w.Header().Set("Retry-After", "1")
+			w.WriteHeader(http.StatusTooManyRequests)
+			_ = json.NewEncoder(w).Encode(map[string]string{"detail": "Rate limit exceeded."})
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		_ = json.NewEncoder(w).Encode(client.EventStreamResponse{
+			Items: []client.EventResponse{
+				sampleEventInCall("11111111-1111-1111-1111-111111111111", callA, "agent_turn",
+					map[string]interface{}{"text": "after the limit"}, t0),
+			},
+			CallStatus: completedStatus(),
+		})
+	}))
+	t.Cleanup(srv.Close)
+
+	start := time.Now()
+	stdout, _, err := runRoot(t,
+		map[string]string{"HAIL_API_KEY": "sk_test", "HAIL_API_URL": srv.URL, "NO_COLOR": "1"},
+		"tail", "--id", "call:"+uuid.UUID(callA).String(), "--from-start",
+	)
+	if err != nil {
+		t.Fatalf("429 must not abort the tail, got: %v", err)
+	}
+	if got := atomic.LoadInt32(&hits); got != 2 {
+		t.Errorf("expected 2 requests (429 then 200), got %d", got)
+	}
+	if elapsed := time.Since(start); elapsed < 900*time.Millisecond {
+		t.Errorf("expected to wait Retry-After (1s) before retrying, waited %s", elapsed)
+	}
+	if len(cursors) == 2 && cursors[0] != cursors[1] {
+		t.Errorf("retry must reuse the same cursor: %q vs %q", cursors[0], cursors[1])
+	}
+	if !strings.Contains(stdout, "after the limit") {
+		t.Errorf("event after the 429 missing:\n%s", stdout)
+	}
+}
+
+// TestTail_NoFollowBoundsThe429Retry: --no-follow is a one-shot, so a
+// limiter that never lets up must surface the 429 after one wait instead of
+// blocking until Ctrl-C.
+func TestTail_NoFollowBoundsThe429Retry(t *testing.T) {
+	var hits int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&hits, 1)
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Retry-After", "1")
+		w.WriteHeader(http.StatusTooManyRequests)
+		_ = json.NewEncoder(w).Encode(map[string]string{"detail": "Rate limit exceeded."})
+	}))
+	t.Cleanup(srv.Close)
+
+	done := make(chan error, 1)
+	go func() {
+		_, _, err := runRoot(t,
+			map[string]string{"HAIL_API_KEY": "sk_test", "HAIL_API_URL": srv.URL, "NO_COLOR": "1"},
+			"tail", "--no-follow",
+		)
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		if err == nil || !strings.Contains(err.Error(), "API error 429") {
+			t.Fatalf("want API error 429, got %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("tail --no-follow blocked on a persistent 429 instead of exiting")
+	}
+	if got := atomic.LoadInt32(&hits); got != 2 {
+		t.Errorf("expected 2 requests (429, wait, 429, give up), got %d", got)
+	}
+}
+
+// TestTail_NonRateLimitErrorStillAborts: other non-200 statuses keep failing
+// fast.
+func TestTail_NonRateLimitErrorStillAborts(t *testing.T) {
+	srv := newSequenceServer(t, []sequenceResponse{
+		{http.StatusInternalServerError, map[string]string{"detail": "boom"}},
+	})
+	_, _, err := runRoot(t,
+		map[string]string{"HAIL_API_KEY": "sk_test", "HAIL_API_URL": srv.URL, "NO_COLOR": "1"},
+		"tail", "--interval", "100",
+	)
+	if err == nil || !strings.Contains(err.Error(), "API error 500") {
+		t.Fatalf("want API error 500, got %v", err)
+	}
+	if got := atomic.LoadInt32(&srv.hits); got != 1 {
+		t.Errorf("expected exactly 1 request, got %d", got)
+	}
+}
+
+func TestRetryAfter(t *testing.T) {
+	cases := []struct {
+		header string
+		want   time.Duration
+	}{
+		{"", 2 * time.Second},
+		{"abc", 2 * time.Second},
+		{"0", 2 * time.Second},
+		{"-5", 2 * time.Second},
+		{"7", 7 * time.Second},
+		{" 3 ", 3 * time.Second},
+		{"60", 60 * time.Second},
+		{"3600", 60 * time.Second},
+		{"Wed, 21 Oct 2026 07:28:00 GMT", 2 * time.Second}, // HTTP-date form: default
+	}
+	for _, tc := range cases {
+		h := http.Header{}
+		if tc.header != "" {
+			h.Set("Retry-After", tc.header)
+		}
+		if got := retryAfter(h); got != tc.want {
+			t.Errorf("retryAfter(%q) = %s, want %s", tc.header, got, tc.want)
+		}
+	}
+}

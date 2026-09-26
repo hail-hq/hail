@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timedelta, timezone
-from typing import Literal
+from typing import Any, Literal
 from uuid import UUID, uuid4
 
 import httpx
@@ -12,6 +12,7 @@ from fastapi import HTTPException
 from hailhq.api.deps import Principal
 from hailhq.api.errors import unprocessable
 from hailhq.api.funds import BILLING_URL
+from hailhq.core import telephony_catalog
 from hailhq.core.billing import get_balance_cents, monthly_fee_ref
 from hailhq.core.carrier_routing import carrier
 from hailhq.core.db import session_scope
@@ -60,6 +61,20 @@ class RetryableError(HTTPException):
 
     def __init__(self, detail: str) -> None:
         super().__init__(status_code=503, detail=detail)
+
+
+def catalog_capabilities(
+    country: str, kind: str, provider: str = "auto"
+) -> dict[str, Any]:
+    """422 unless the carrier's catalog (any carrier for 'auto') lists this
+    country and number type."""
+    caps = telephony_catalog.capabilities(country, kind, provider)
+    if caps is None:
+        raise unprocessable(
+            f"we don't offer a {kind} number in {country} yet",
+            loc=["body", "number_type"],
+        )
+    return caps
 
 
 async def org_lock(db: AsyncSession, org: UUID) -> None:
@@ -302,6 +317,7 @@ async def acquire_offer(
     kind = offer.number_type
     if row.number_id:
         return await db.get(PhoneNumber, row.number_id)
+    catalog_capabilities(country, kind, offer.provider)
     if row.expires_at <= datetime.now(timezone.utc):
         raise HTTPException(
             status_code=409, detail="Quote expired; refresh number offers"

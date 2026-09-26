@@ -76,6 +76,15 @@ def _format_api_error(exc: HailAPIError) -> dict[str, Any]:
         return {"error": "auth failed: token rejected by Hail API"}
     if status == 404:
         return {"error": "resource not found"}
+    if status == 429 and exc.retry_after and exc.retry_after.strip().isdigit():
+        # The API's 429 detail points at the Retry-After header, which the
+        # agent cannot see, so put the wait in the message itself. Only the
+        # delta-seconds form is echoed: a proxy in front of the API may send
+        # the HTTP-date form, which would read "retry after <date> seconds".
+        return {
+            "error": f"hail api error 429: {exc.detail} "
+            f"(retry after {exc.retry_after.strip()} seconds)"
+        }
     if status in (409, 422, 503):
         return {"error": exc.detail}
     if 500 <= status < 600:
@@ -838,11 +847,15 @@ def register_tools(
         consent_obtained_at: str | None = None,
         message_type: str = "informational",
     ) -> dict[str, Any]:
-        """Send an outbound SMS from your organization's dedicated number.
+        """Send an outbound SMS.
 
         ``to`` must be E.164 (e.g. ``+14155551234``). ``body`` is the
-        message text. SMS requires a dedicated phone number on your
-        organization — it does not use the shared voice-call pool.
+        message text. With no ``from_``: UK (+44) and Germany (+49)
+        destinations use your organization's sender ID (or ``HAIL``, the
+        platform default); Australia (+61) always uses ``HAIL``; every
+        other destination uses your organization's oldest active
+        SMS-capable number and the API returns 422 when there is none.
+        SMS never uses the shared voice-call pool.
 
         ``recipient_consent`` is required: attest that you (the caller
         triggering this request) have obtained the lawful consent needed

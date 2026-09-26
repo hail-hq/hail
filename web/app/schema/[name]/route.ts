@@ -1,10 +1,10 @@
-import { llmSchema, smsSchema, sttSchema, ttsSchema, telephonySchema } from '@/lib/costs';
+import { llmSchema, smsSchema, sttSchema, ttsSchema, numbersSchema } from '@/lib/costs';
 
 const SCHEMAS = {
   'llm.json': llmSchema,
   'stt.json': sttSchema,
   'tts.json': ttsSchema,
-  'telephony.json': telephonySchema,
+  'numbers.json': numbersSchema,
   'sms.json': smsSchema,
 } as const satisfies Record<string, object>;
 

@@ -8,23 +8,28 @@ tools exist, matching the "properly scoped, upgrade to public tool
 listing" gap an external audit flagged.
 
 This middleware runs BEFORE FastMCP's own auth middleware (see server.py's
-middleware ordering) and, for exactly two JSON-RPC methods —
-"initialize" and "tools/list" — injects a synthetic, non-functional
-bearer token if the request has none. auth.PassThroughVerifier accepts
-any non-empty token string as "valid" (real validation is the downstream
-API's job, and these two methods never call the downstream API), so
+middleware ordering) and, for exactly three JSON-RPC methods —
+"initialize", "tools/list" and "notifications/initialized" — injects a
+synthetic, non-functional bearer token if the request has none.
+auth.PassThroughVerifier accepts any non-empty token string as "valid" (real validation is the downstream
+API's job, and these methods never call the downstream API), so
 FastMCP's auth layer then lets the request through.
 
-Every other method (tools/call, resources/*, notifications/*, ping, ...)
+Every other method (tools/call, resources/*, other notifications/*, ping, ...)
 is untouched: no header is injected, so a request with no real bearer
 401s exactly as it did before this file existed. This is a safelist, not
 a bypass — widening it later needs the same scrutiny as the original
-two entries, not a one-line addition.
+entries, not a one-line addition.
 
 "initialize" additionally carries a per-remote-IP rate cap (see
 _ANON_INIT_MAX_PER_WINDOW below) — unlike tools/list, a real initialize
 call creates a permanent, stateful MCP session, so unrestricted anonymous
 initialize is a resource-exhaustion vector, not just an information leak.
+"tools/list" and "notifications/initialized" are only safelisted when they carry
+an Mcp-Session-Id header (see _SESSION_REQUIRED_METHODS): a session-less POST
+makes the SDK create a session before it answers 400. Every MCP client sends
+notifications/initialized right after initialize, so it must pass anonymously
+or the SDK client fails in connect().
 """
 
 from __future__ import annotations
@@ -35,7 +40,18 @@ import time
 
 from starlette.types import ASGIApp, Receive, Scope, Send
 
-_DISCOVERY_METHODS = frozenset({"initialize", "tools/list"})
+_DISCOVERY_METHODS = frozenset(
+    {"initialize", "tools/list", "notifications/initialized"}
+)
+
+# Safelisted methods that only make sense inside an existing session. The SDK's
+# session manager mints (and never reaps) a new transport for ANY POST that
+# lacks an Mcp-Session-Id header, before it answers 400 — so a session-less
+# tools/list or notifications/initialized would create a permanent session
+# while bypassing the initialize cap below. Without the header it falls
+# through to FastMCP's auth middleware and 401s, exactly as before this file
+# existed.
+_SESSION_REQUIRED_METHODS = frozenset({"tools/list", "notifications/initialized"})
 
 # 64 KiB — comfortably above any real initialize/tools/list payload (both are
 # small JSON-RPC envelopes; neither carries bulk data), and small enough to
@@ -63,9 +79,13 @@ _MAX_PEEK_SECONDS = 5.0
 # real, permanent, stateful session. Without a cap, an unauthenticated
 # caller can loop "initialize" and accumulate unbounded sessions/tasks — a
 # resource-exhaustion vector distinct from _MAX_PEEK_BYTES above (that
-# bounds per-request memory, not session count). Deliberately NOT applied
-# to "tools/list" — that method doesn't create a session, it only reads
-# one that already exists.
+# bounds per-request memory, not session count). Not applied to "tools/list" or
+# "notifications/initialized": they are only safelisted when they carry an
+# Mcp-Session-Id header (_SESSION_REQUIRED_METHODS), so they cannot create a
+# session. The cap only
+# bounds requests with no Authorization header — PassThroughVerifier accepts
+# any non-empty bearer, so it guards against accidental floods, not against
+# a client that adds a junk Authorization header.
 #
 # Self-contained in-memory fixed-window counter keyed by remote IP —
 # approximate is fine, this only needs to bound the worst case, not be
@@ -74,6 +94,7 @@ _MAX_PEEK_SECONDS = 5.0
 # dict is simpler than adding one for a single counter).
 _ANON_INIT_WINDOW_SECONDS = 60.0
 _ANON_INIT_MAX_PER_WINDOW = 20
+_ANON_INIT_PRUNE_THRESHOLD = 1024
 
 _anon_init_counts: dict[str, tuple[int, float]] = {}
 
@@ -85,6 +106,15 @@ def _remote_ip(scope: Scope) -> str:
 
 def _anon_init_cap_exceeded(remote_ip: str) -> bool:
     now = time.monotonic()
+    if len(_anon_init_counts) > _ANON_INIT_PRUNE_THRESHOLD:
+        # Drop windows that already expired so distinct source addresses do
+        # not accumulate for the life of the process.
+        for ip in [
+            ip
+            for ip, (_, start) in _anon_init_counts.items()
+            if now - start >= _ANON_INIT_WINDOW_SECONDS
+        ]:
+            del _anon_init_counts[ip]
     count, window_start = _anon_init_counts.get(remote_ip, (0, now))
     if now - window_start >= _ANON_INIT_WINDOW_SECONDS:
         count, window_start = 0, now
@@ -121,7 +151,7 @@ class DiscoveryAuthMiddleware:
             await self.app(scope, receive, send)
             return
 
-        body = b""
+        body = bytearray()
         more_body = True
         messages = []
         oversized = False
@@ -172,10 +202,22 @@ class DiscoveryAuthMiddleware:
         if not oversized:
             try:
                 payload = json.loads(body) if body else {}
-            except (json.JSONDecodeError, UnicodeDecodeError):
+            except (ValueError, RecursionError):
+                # JSONDecodeError and UnicodeDecodeError are ValueErrors; an
+                # over-long integer literal raises a plain ValueError and a
+                # deeply nested body raises RecursionError. None of these may
+                # turn an unauthenticated request into a 500 — fall through
+                # to FastMCP's auth so it 401s as before.
                 payload = {}
-            method = payload.get("method") if isinstance(payload, dict) else None
+            raw_method = payload.get("method") if isinstance(payload, dict) else None
+            # A list/dict "method" is unhashable and would raise TypeError in
+            # the frozenset membership test below.
+            method = raw_method if isinstance(raw_method, str) else None
 
+        if method in _SESSION_REQUIRED_METHODS and not any(
+            k.lower() == b"mcp-session-id" for k, _ in scope.get("headers", [])
+        ):
+            method = None
         cap_exceeded = method == "initialize" and _anon_init_cap_exceeded(
             _remote_ip(scope)
         )

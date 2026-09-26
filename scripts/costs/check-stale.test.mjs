@@ -40,7 +40,7 @@ test('rowsForFile flattens a model-shaped file', () => {
 });
 
 test('rowsForFile flattens telephony across both arrays', () => {
-  const rows = rowsForFile('telephony.json', {
+  const rows = rowsForFile('twilio.json', {
     numbers: [{ display_name: 'US local', last_verified: '2026-01-01' }],
     a2p_10dlc: [{ carrier: 'AT&T', last_verified: '2026-01-02' }],
   });

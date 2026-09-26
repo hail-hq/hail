@@ -18,7 +18,7 @@ from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from fastapi import status as http_status
-from hailhq.api.audit import write_audit_log
+from hailhq.api.audit import actor_of, write_audit_log
 from hailhq.api.deps import Principal, get_current_principal
 from hailhq.api.errors import unprocessable
 from hailhq.api.funds import FUNDS_RESPONSES
@@ -30,6 +30,7 @@ from hailhq.api.idempotency import (
 )
 from hailhq.api.number_orders import (
     RetryableError,
+    catalog_capabilities,
     org_lock,
     purchase_number,
 )
@@ -37,6 +38,7 @@ from hailhq.api.pagination import fetch_cursor_page
 from hailhq.api.ratelimit import GENERAL_RATE_LIMITED_RESPONSES
 from hailhq.api.route_prefixes import request_mount_prefix
 from hailhq.api.routes.sms import get_sms_provider
+from hailhq.core import telephony_catalog
 from hailhq.core.carrier_routing import TELNYX, TWILIO, sms_route
 from hailhq.core.db import get_session
 from hailhq.core.models import NumberOffer, PhoneNumber
@@ -69,7 +71,6 @@ router = APIRouter(
     prefix="/numbers", tags=["numbers"], responses=GENERAL_RATE_LIMITED_RESPONSES
 )
 
-NUMBER_TYPES = ("local", "mobile", "national", "toll_free")
 _DEFAULT_LIST_LIMIT = 50
 _MAX_LIST_LIMIT = 200
 
@@ -301,6 +302,7 @@ async def release_number(
     )
     await release_org_number(db, provider, number)
     if not was_released:
+        actor_user_id, actor_kind = actor_of(principal)
         await write_audit_log(
             organization_id=principal.organization_id,
             api_key_id=principal.api_key_id,
@@ -308,6 +310,8 @@ async def release_number(
             resource_type="phone_number",
             resource_id=number.id,
             payload={"e164": number.e164},
+            actor_user_id=actor_user_id,
+            actor_kind=actor_kind,
         )
 
 
@@ -495,11 +499,23 @@ async def quote_numbers(
     cost, preferring Twilio on equivalent ties. Blocked offers sort by verification effort. SMS capability does not waive messaging registration requirements.
     """
 
-    # Every type is asked for at every carrier; live inventory decides what
-    # exists. The telephony catalog is a price list for the /costs page and
-    # legacy renewals, not an allow-list (Twilio's list alone would hide
-    # numbers only another carrier sells).
-    kinds = [body.number_type] if body.number_type else list(NUMBER_TYPES)
+    # Only number types the requested carrier's catalog lists (any carrier
+    # for 'auto') can be bought, so only those are searched.
+    if body.number_type:
+        catalog_capabilities(body.country_code, body.number_type, body.provider)
+        kinds = [body.number_type]
+    else:
+        kinds = [
+            k
+            for k in ("local", "mobile", "national", "toll_free")
+            if telephony_catalog.capabilities(body.country_code, k, body.provider)
+            is not None
+        ]
+        if not kinds:
+            raise unprocessable(
+                f"we don't offer numbers in {body.country_code} yet",
+                loc=["body", "country_code"],
+            )
     # Carrier discovery takes seconds. End the transaction the auth lookup
     # opened so this request does not hold a pooled connection while it waits.
     await db.commit()

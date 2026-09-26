@@ -70,6 +70,29 @@
   letter-spacing: 0.06em;
   margin: 0 0 8px;
 }
+.hail-footer-badges {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 16px;
+  list-style: none;
+  margin: 0;
+  padding: 0 0 32px;
+}
+.hail-footer-badges a {
+  display: block;
+  line-height: 0;
+}
+.hail-footer-badges a:hover {
+  text-decoration: none;
+}
+.hail-footer-badges img {
+  width: auto;
+  max-width: 100%;
+}
+.hail-footer-badge-dark {
+  display: none;
+}
 .hail-footer-end {
   border-top: 1px solid var(--hf-ink);
   padding-block: 22px;
@@ -127,6 +150,12 @@
     --hf-line: #2c2c2c;
     --hf-ac: #4b82ff;
   }
+  html:not([data-theme="light"]):not(.light) .hail-footer-badge-light {
+    display: none;
+  }
+  html:not([data-theme="light"]):not(.light) .hail-footer-badge-dark {
+    display: inline;
+  }
 }
 html[data-theme="dark"] .hail-footer,
 html.dark .hail-footer {
@@ -135,4 +164,12 @@ html.dark .hail-footer {
   --hf-muted: #aaa69d;
   --hf-line: #2c2c2c;
   --hf-ac: #4b82ff;
+}
+html[data-theme="dark"] .hail-footer-badge-light,
+html.dark .hail-footer-badge-light {
+  display: none;
+}
+html[data-theme="dark"] .hail-footer-badge-dark,
+html.dark .hail-footer-badge-dark {
+  display: inline;
 }

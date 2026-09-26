@@ -205,18 +205,18 @@ The CLI has no `webhooks` command group. Manage subscriptions through the HTTP A
 
 ```bash
 # Register a subscription (the response shows the signing secret ONCE — store it)
-curl -X POST "$HAIL_API_URL/webhooks" \
+curl -X POST "$HAIL_API_URL/v1/webhooks" \
   -H "Authorization: Bearer $HAIL_API_KEY" \
   -d '{"target_url":"https://example.com/hooks/hail","event_types":["email.received","sms.received"]}'
 
 # List subscriptions
-curl "$HAIL_API_URL/webhooks" -H "Authorization: Bearer $HAIL_API_KEY"
+curl "$HAIL_API_URL/v1/webhooks" -H "Authorization: Bearer $HAIL_API_KEY"
 
 # Delivery attempts for one subscription
-curl "$HAIL_API_URL/webhooks/<sub-id>/deliveries" -H "Authorization: Bearer $HAIL_API_KEY"
+curl "$HAIL_API_URL/v1/webhooks/<sub-id>/deliveries" -H "Authorization: Bearer $HAIL_API_KEY"
 
 # Replay one delivery
-curl -X POST "$HAIL_API_URL/webhooks/<sub-id>/deliveries/<delivery-id>/redeliver" \
+curl -X POST "$HAIL_API_URL/v1/webhooks/<sub-id>/deliveries/<delivery-id>/redeliver" \
   -H "Authorization: Bearer $HAIL_API_KEY"
 ```
 

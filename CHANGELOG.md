@@ -6,10 +6,6 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 
 ### Fixed
 
-- `POST /v1/numbers/quotes` asked only for the number types in Twilio's price
-  list (`costs/telephony.json`), so numbers only another carrier sells never
-  appeared (Sweden: Telnyx local and mobile). Every type is now asked for at
-  every carrier and the live answer decides; the catalog stays a price list.
 - Telnyx numbers with no ordering rules (US and CA local) were skipped as
   "unknown coverage" because Telnyx answers an empty list for them. They are
   now offered as ready.
@@ -59,7 +55,7 @@ Component versions cut alongside this release:
 - **DIDWW as an outbound voice carrier.** A number's `provider` picks its
   LiveKit trunk (`core/hailhq/core/carrier_routing.py`); DIDWW numbers are
   registered by hand. `POST /calls` fails with `end_reason =
-  carrier_route_failed` before any LiveKit room exists when the number's
+carrier_route_failed` before any LiveKit room exists when the number's
   carrier has no trunk. Setup:
   [docs/public/self-host/didww.md](docs/public/self-host/didww.md).
 - **Carrier verification API** (`/v1/verifications`): countries such as the UK

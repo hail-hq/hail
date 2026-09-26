@@ -596,16 +596,16 @@ func (e NumberAcquireRequestProvider) Valid() bool {
 
 // Defines values for NumberQuoteRequestCapabilities.
 const (
-	NumberQuoteRequestCapabilitiesSms   NumberQuoteRequestCapabilities = "sms"
-	NumberQuoteRequestCapabilitiesVoice NumberQuoteRequestCapabilities = "voice"
+	Sms   NumberQuoteRequestCapabilities = "sms"
+	Voice NumberQuoteRequestCapabilities = "voice"
 )
 
 // Valid indicates whether the value is a known member of the NumberQuoteRequestCapabilities enum.
 func (e NumberQuoteRequestCapabilities) Valid() bool {
 	switch e {
-	case NumberQuoteRequestCapabilitiesSms:
+	case Sms:
 		return true
-	case NumberQuoteRequestCapabilitiesVoice:
+	case Voice:
 		return true
 	default:
 		return false
@@ -2362,7 +2362,7 @@ type NumberQuoteRequest struct {
 	// NumberType Restrict number type; omit to compare all supported types.
 	NumberType *NumberQuoteRequestNumberType `json:"number_type,omitempty"`
 
-	// Provider Carrier preference; auto compares readiness, remaining verification effort, and rental/setup costs. Twilio wins equivalent ties.
+	// Provider Carrier restriction; twilio or telnyx returns that carrier's offers only. auto compares both by readiness, remaining verification effort, and rental/setup costs; Twilio wins equivalent ties.
 	Provider *NumberQuoteRequestProvider `json:"provider,omitempty"`
 }
 
@@ -2372,7 +2372,7 @@ type NumberQuoteRequestCapabilities string
 // NumberQuoteRequestNumberType Restrict number type; omit to compare all supported types.
 type NumberQuoteRequestNumberType string
 
-// NumberQuoteRequestProvider Carrier preference; auto compares readiness, remaining verification effort, and rental/setup costs. Twilio wins equivalent ties.
+// NumberQuoteRequestProvider Carrier restriction; twilio or telnyx returns that carrier's offers only. auto compares both by readiness, remaining verification effort, and rental/setup costs; Twilio wins equivalent ties.
 type NumberQuoteRequestProvider string
 
 // NumberQuotesResponse defines model for NumberQuotesResponse.
@@ -2611,7 +2611,7 @@ type SmsCreate struct {
 	// ConsentSource Where/how consent was obtained (e.g. 'signup form', 'prior customer relationship'). Required (non-empty) when message_type is 'marketing'.
 	ConsentSource *string `json:"consent_source,omitempty"`
 
-	// From Sender phone number, E.164 format. Must be a number owned by the organization with the SMS capability. Omitted: an active org-owned number is used if one exists, else a number is claimed from the shared pool.
+	// From Sender phone number, E.164 format. Must be an active number owned by the organization with the SMS capability. Omitted: UK (+44) and Germany (+49) destinations use the organization's sender ID, or the platform default 'HAIL' when none is set; Australia (+61) always uses 'HAIL'. Every other destination uses the organization's oldest active SMS-capable number; if none exists the request fails with 422. SMS never uses the shared pool.
 	From *string `json:"from,omitempty"`
 
 	// MessageType 'marketing' additionally requires a non-empty consent_source. Use 'informational' for transactional/service communications.
@@ -2710,7 +2710,7 @@ type SuppressionResponse struct {
 	// Recipient The suppressed recipient — E.164 phone number for voice/sms, lowercased email address for email.
 	Recipient string `json:"recipient"`
 
-	// Source How this entry was created: 'unsubscribe_link', 'manual' (an operator action), or 'bounce'.
+	// Source How this entry was created: 'unsubscribe_link' (email unsubscribe link) or 'stop_keyword' (recipient replied STOP by SMS). 'manual' (operator action) and 'bounce' (bounce handler) are reserved; nothing writes them yet.
 	Source string `json:"source"`
 }
 
@@ -2950,6 +2950,9 @@ type WhoamiResponse struct {
 
 	// OrganizationId Organization the caller belongs to.
 	OrganizationId openapi_types.UUID `json:"organization_id"`
+
+	// Superadmin True for a Hail staff console session acting on this organization.
+	Superadmin *bool `json:"superadmin,omitempty"`
 
 	// UserId The authenticated user's id. Null for 'shared' callers.
 	UserId *openapi_types.UUID `json:"user_id,omitempty"`

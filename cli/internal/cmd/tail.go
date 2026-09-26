@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/signal"
 	"sort"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -255,20 +256,39 @@ func runTail(ctx context.Context, opts *Options, f *tailFlags) error {
 		}
 	}
 	fetch := func(cur string) (*client.EventStreamResponse, error) {
-		resp, err := apiClient.ListEventsV1EventsGetWithResponse(tailCtx, buildParams(cur))
-		if err != nil {
-			if tailCtx.Err() != nil {
-				return nil, errInterrupted
+		rateLimited := 0
+		for {
+			resp, err := apiClient.ListEventsV1EventsGetWithResponse(tailCtx, buildParams(cur))
+			if err != nil {
+				if tailCtx.Err() != nil {
+					return nil, errInterrupted
+				}
+				return nil, fmt.Errorf("poll events: %w", err)
 			}
-			return nil, fmt.Errorf("poll events: %w", err)
+			if resp.HTTPResponse.StatusCode == http.StatusTooManyRequests {
+				// Rate limited: wait Retry-After, then retry the same cursor.
+				// --no-follow is documented as "print one page and exit", so
+				// it gets one wait and then surfaces the 429 instead of
+				// blocking for as long as the limiter holds.
+				if f.noFollow && rateLimited > 0 {
+					return nil, apiError(resp.HTTPResponse.StatusCode, resp.Body)
+				}
+				rateLimited++
+				select {
+				case <-tailCtx.Done():
+					return nil, errInterrupted
+				case <-time.After(retryAfter(resp.HTTPResponse.Header)):
+				}
+				continue
+			}
+			if idWire != "" && resp.HTTPResponse.StatusCode == http.StatusNotFound {
+				return nil, fmt.Errorf("%s %s not found (or not in your org)", resourceType, f.id)
+			}
+			if resp.HTTPResponse.StatusCode != http.StatusOK || resp.JSON200 == nil {
+				return nil, apiError(resp.HTTPResponse.StatusCode, resp.Body)
+			}
+			return resp.JSON200, nil
 		}
-		if idWire != "" && resp.HTTPResponse.StatusCode == http.StatusNotFound {
-			return nil, fmt.Errorf("%s %s not found (or not in your org)", resourceType, f.id)
-		}
-		if resp.HTTPResponse.StatusCode != http.StatusOK || resp.JSON200 == nil {
-			return nil, apiError(resp.HTTPResponse.StatusCode, resp.Body)
-		}
-		return resp.JSON200, nil
 	}
 
 	renderer := newTailRenderer(opts, resourceType != "", colorize, f.kind != "")
@@ -334,6 +354,23 @@ func runTail(ctx context.Context, opts *Options, f *tailFlags) error {
 		case <-time.After(interval):
 		}
 	}
+}
+
+// retryAfter reads a Retry-After header in delta-seconds (what the API sends
+// on 429). Missing, non-numeric or < 1 falls back to 2s; capped at 60s.
+func retryAfter(h http.Header) time.Duration {
+	const (
+		fallback = 2 * time.Second
+		ceiling  = 60 * time.Second
+	)
+	secs, err := strconv.Atoi(strings.TrimSpace(h.Get("Retry-After")))
+	if err != nil || secs < 1 {
+		return fallback
+	}
+	if d := time.Duration(secs) * time.Second; d < ceiling {
+		return d
+	}
+	return ceiling
 }
 
 // tailRenderer owns cross-event display state: AMD-aware labeling of
