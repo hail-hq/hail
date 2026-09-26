@@ -11,9 +11,8 @@ curl -X POST "$HAIL_API_URL/calls" -H "Authorization: Bearer $HAIL_API_KEY" \
   -d '{"from":"+351300000000","to":"+14155550100","system_prompt":"Be brief.","recipient_consent":true}'
 ```
 
-Not supported on DIDWW yet: buying numbers through `POST /numbers`, SMS, inbound
-calls. DIDWW sells no SMS on many countries (Portugal national numbers: none).
-Check the number's feature list before you buy.
+Buying goes through the normal quote flow once `DIDWW_API_KEY` is set. Not
+supported on DIDWW: SMS (offers are voice only) and inbound calls.
 
 ## 1. DIDWW account
 
@@ -64,23 +63,46 @@ lk sip outbound create didww-trunk.json
 Copy the trunk ID (`ST_…`) into `.env` as `LIVEKIT_DIDWW_SIP_OUTBOUND_TRUNK_ID`
 and restart `api`.
 
-## 4. Register the number in Hail
+## 4. API key
 
-`POST /numbers` cannot buy from DIDWW yet. Insert the row by hand, same as a
-[pool number](./operations.md#phone-number-pool):
+my.didww.com → **API** → create a key. Put it in `.env`:
 
-```sql
-INSERT INTO phone_numbers
-  (organization_id, e164, country_code, number_type, capabilities,
-   provider, provider_resource_id, provisioning_state, acquired_at)
-VALUES
-  ('<org uuid>', '+351300000000', 'PT', 'national', ARRAY['voice'],
-   'didww', '<DIDWW DID id>', 'active', now());
+```
+DIDWW_API_KEY=<key>
+DIDWW_ENVIRONMENT=production
 ```
 
-`provider_resource_id` is the DID's `id` from `GET /v3/dids` at DIDWW
-([API](https://doc.didww.com/api3/2026-04-16/index.html)). `capabilities`
-must not include `sms` unless the DID lists SMS.
+`DIDWW_ENVIRONMENT=sandbox` points every call at `sandbox-api.didww.com`
+(sandbox key from the Sandbox User Panel → API → DIDWW API 3). Restart `api`.
+
+## 5. Buying a number
+
+```bash
+curl -X POST "$HAIL_API_URL/numbers/quotes" -H "Authorization: Bearer $HAIL_API_KEY" \
+  -H 'Content-Type: application/json' \
+  -d '{"country_code":"PT","number_type":"national","capabilities":["voice"]}'
+# → offers[].provider == "didww", readiness "ready" or "verification_required"
+curl -X POST "$HAIL_API_URL/numbers" -H "Authorization: Bearer $HAIL_API_KEY" \
+  -H 'Content-Type: application/json' \
+  -d '{"country_code":"PT","number_type":"national","quote_id":"<quote_id>"}'
+```
+
+Order of events for a country that needs end-user registration:
+
+1. `readiness: verification_required` → the customer fills `/verifications`
+   (console wizard). Hail creates the identity, address and proofs at DIDWW and
+   validates them (`address_requirement_validations`). A superadmin approves.
+2. `POST /numbers` reserves setup + first month, orders the DID
+   (`provisioning_state: pending`).
+3. The reconciler files the registration (`address_verifications`) once the
+   DID exists and polls it. DIDWW approves in 1–3 days → `active`.
+4. Rejected → `failed`, the DID is terminated, the monthly fee is refunded,
+   the setup fee stays. A pending order is failed and refunded after 7 days.
+
+Schemas: [`openapi/openapi.yaml`](../../../openapi/openapi.yaml). Code:
+[`providers/voice/didww.py`](../../../core/hailhq/core/providers/voice/didww.py),
+[`providers/verification/didww.py`](../../../core/hailhq/core/providers/verification/didww.py),
+[`number_orders.py`](../../../api/hailhq/api/number_orders.py).
 
 A call from a `didww` number with `LIVEKIT_DIDWW_SIP_OUTBOUND_TRUNK_ID` empty
 fails with `end_reason = carrier_route_failed` before any LiveKit room exists.
