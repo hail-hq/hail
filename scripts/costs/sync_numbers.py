@@ -93,7 +93,9 @@ class Http:
                 continue
             resp.raise_for_status()
             return resp.json()
-        raise RuntimeError(f"gave up after retries: {url}")
+        # A RequestException so main() reports "catalog left unchanged" and
+        # moves on to the next carrier instead of aborting the whole run.
+        raise requests.exceptions.RetryError(f"gave up after retries: {url}")
 
 
 def _row(
