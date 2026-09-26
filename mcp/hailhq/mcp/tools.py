@@ -847,11 +847,15 @@ def register_tools(
         consent_obtained_at: str | None = None,
         message_type: str = "informational",
     ) -> dict[str, Any]:
-        """Send an outbound SMS from your organization's dedicated number.
+        """Send an outbound SMS.
 
         ``to`` must be E.164 (e.g. ``+14155551234``). ``body`` is the
-        message text. SMS requires a dedicated phone number on your
-        organization — it does not use the shared voice-call pool.
+        message text. With no ``from_``: UK (+44) and Germany (+49)
+        destinations use your organization's sender ID (or ``HAIL``, the
+        platform default); Australia (+61) always uses ``HAIL``; every
+        other destination uses your organization's oldest active
+        SMS-capable number and the API returns 422 when there is none.
+        SMS never uses the shared voice-call pool.
 
         ``recipient_consent`` is required: attest that you (the caller
         triggering this request) have obtained the lawful consent needed
