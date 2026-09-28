@@ -68,3 +68,19 @@ def test_client_sends_with_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
     assert didww_client().get("countries") == {"data": []}
     assert DIDWW_TIMEOUT_SECONDS == 20
     assert seen["timeout"] == 20
+
+
+def test_client_is_reused(monkeypatch: pytest.MonkeyPatch) -> None:
+    """One client, so one connection pool, for every DIDWW call."""
+    monkeypatch.setattr(settings, "didww_api_key", "k")
+    monkeypatch.setattr(settings, "didww_environment", "sandbox")
+    assert didww_client() is didww_client()
+
+
+def test_client_follows_a_changed_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(settings, "didww_environment", "sandbox")
+    monkeypatch.setattr(settings, "didww_api_key", "k1")
+    first = didww_client()
+    monkeypatch.setattr(settings, "didww_api_key", "k2")
+    assert didww_client() is not first
+    assert didww_client().api_key == "k2"

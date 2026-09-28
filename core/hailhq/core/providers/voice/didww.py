@@ -52,9 +52,18 @@ class _TimeoutAdapter(requests.adapters.HTTPAdapter):
         return super().send(request, **kwargs)
 
 
+@lru_cache(maxsize=2)
+def _client_for(api_key: str, env: Environment) -> DidwwClient:
+    client = DidwwClient(api_key=api_key, environment=env)
+    # The SDK copies any Session passed in, so mount on its own session.
+    client._session.mount("https://", _TimeoutAdapter())
+    return client
+
+
 def didww_client() -> DidwwClient:
-    """A client for the configured environment. ``CarrierNotConfigured``
-    when the key is missing or the environment name is unknown."""
+    """The client for the configured environment, one per process so every
+    call shares its connections. ``CarrierNotConfigured`` when the key is
+    missing or the environment name is unknown."""
     if not settings.didww_api_key:
         raise CarrierNotConfigured("DIDWW is not configured (DIDWW_API_KEY)")
     env = _ENVIRONMENTS.get(settings.didww_environment)
@@ -62,10 +71,7 @@ def didww_client() -> DidwwClient:
         raise CarrierNotConfigured(
             "DIDWW_ENVIRONMENT must be 'production' or 'sandbox'"
         )
-    client = DidwwClient(api_key=settings.didww_api_key, environment=env)
-    # The SDK copies any Session passed in, so mount on its own session.
-    client._session.mount("https://", _TimeoutAdapter())
-    return client
+    return _client_for(settings.didww_api_key, env)
 
 
 def carrier_status(exc: DidwwApiError) -> int:
