@@ -202,7 +202,11 @@ async def _release_telnyx(number: PhoneNumber, provider: VoiceProvider) -> None:
         await release_telnyx_number(number.provider_resource_id)
     except CarrierNotConfigured as exc:
         # Carrier not configured: an operator problem, not a server fault.
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
+        # The customer reads this: never the carrier's name or an env var.
+        logger.error("Telnyx release failed: %s", exc)
+        raise HTTPException(
+            status_code=503, detail="the carrier is not configured"
+        ) from exc
 
 
 async def _release_twilio(number: PhoneNumber, provider: VoiceProvider) -> None:

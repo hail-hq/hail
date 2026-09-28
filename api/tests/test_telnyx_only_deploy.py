@@ -10,6 +10,7 @@ from hailhq.core.config import settings
 from hailhq.core.models import PhoneNumber
 from hailhq.core.providers.sms import ProviderSmsResult
 from hailhq.core.providers.sms.telnyx import TelnyxSmsProvider
+from hailhq.core.providers.voice import CarrierNotConfigured
 
 
 @pytest.fixture()
@@ -60,6 +61,23 @@ async def test_delete_telnyx_number_without_twilio(
     )
     assert resp.status_code == 204, resp.text
     release.assert_awaited_once_with("telnyx-owned-id")
+
+
+async def test_delete_telnyx_number_unconfigured_does_not_name_the_carrier(
+    telnyx_only, async_session, org_and_key, monkeypatch
+):
+    org_id, _, plaintext = org_and_key
+    number = await seed_telnyx_number(async_session, org_id)
+    monkeypatch.setattr(
+        numbers_routes,
+        "release_telnyx_number",
+        AsyncMock(side_effect=CarrierNotConfigured("TELNYX_API_KEY is not set")),
+    )
+    resp = await telnyx_only.delete(
+        f"/numbers/{number.id}", headers={"Authorization": f"Bearer {plaintext}"}
+    )
+    assert resp.status_code == 503, resp.text
+    assert resp.json()["detail"] == "the carrier is not configured"
 
 
 async def test_enable_sms_telnyx_number_without_twilio(
