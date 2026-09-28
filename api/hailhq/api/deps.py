@@ -31,7 +31,7 @@ from hailhq.api.auth import (
 )
 from hailhq.core.config import settings
 from hailhq.core.db import get_session, session_scope
-from hailhq.core.models import ApiKey, OrganizationMember
+from hailhq.core.models import ApiKey, Organization, OrganizationMember
 from hailhq.core.s3_mail import S3MailClient
 from hailhq.core.urls import url_variants
 from pydantic import BaseModel
@@ -82,6 +82,9 @@ class Principal(BaseModel):
     ``user_id`` is the caller's user id: the api-key owner's user uuid on the
     api-key path, the JWT ``sub`` on the JWT path, and ``None`` on the
     shared-key (``HAIL_API_KEY``) path, which carries no caller identity.
+
+    ``superadmin`` is True only on the JWT path when the website minted
+    ``superadmin: true``; never for API keys.
     """
 
     auth_kind: Literal["apikey", "jwt", "shared"]
@@ -89,6 +92,7 @@ class Principal(BaseModel):
     user_id: uuid.UUID | None
     organization_id: uuid.UUID
     scopes: list[str]
+    superadmin: bool = False
 
 
 def _unauthorized(detail: str) -> HTTPException:
@@ -300,15 +304,15 @@ async def _principal_from_jwt(token: str, db: AsyncSession) -> Principal:
     except ValueError as exc:
         raise _unauthorized("jwt sub is not a valid user id") from exc
 
-    # Prefer the session's *selected* org (the ``activeOrganizationId`` claim the
-    # console mints into its token), validated against membership. A user in
-    # several orgs would otherwise resolve to an arbitrary one — and a request
-    # could land in the wrong tenant. Fall back to the user's membership only
-    # when the claim is absent (e.g. a token minted without an active org).
-    stmt = select(OrganizationMember.organization_id).where(
-        OrganizationMember.user_id == user_uuid
-    )
+    # The website mints ``superadmin: true`` only for staff sessions. Only the
+    # JSON boolean ``True`` counts — a truthy-looking string or int is ignored
+    # so a claims payload from an untrusted source can't smuggle it in.
+    # OAuth-provider access tokens (MCP clients) always carry azp; the staff
+    # role is only for first-party console session tokens.
+    is_superadmin = claims.get("superadmin") is True and "azp" not in claims
+
     active_org_claim = claims.get("activeOrganizationId")
+    active_org_uuid: uuid.UUID | None = None
     if active_org_claim:
         try:
             active_org_uuid = uuid.UUID(str(active_org_claim))
@@ -316,6 +320,40 @@ async def _principal_from_jwt(token: str, db: AsyncSession) -> Principal:
             raise _unauthorized(
                 "jwt activeOrganizationId is not a valid org id"
             ) from exc
+
+    if is_superadmin and active_org_uuid is not None:
+        # A superadmin may open any org, including ones they aren't a member
+        # of — skip the membership join and just confirm the org exists.
+        exists = (
+            await db.execute(
+                select(Organization.id).where(Organization.id == active_org_uuid)
+            )
+        ).scalar_one_or_none()
+        if exists is None:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN, detail="organization not found"
+            )
+        return Principal(
+            auth_kind="jwt",
+            api_key_id=None,
+            user_id=user_uuid,
+            organization_id=active_org_uuid,
+            scopes=_scopes_from_jwt(claims),
+            superadmin=True,
+        )
+
+    # Prefer the session's *selected* org (the ``activeOrganizationId`` claim the
+    # console mints into its token), validated against membership. A user in
+    # several orgs would otherwise resolve to an arbitrary one — and a request
+    # could land in the wrong tenant. Fall back to the user's membership only
+    # when the claim is absent (e.g. a token minted without an active org).
+    # The superadmin branch above already returned for a staff claim naming an
+    # active org, so this join is what resolves ``organization_id`` for
+    # everyone else.
+    stmt = select(OrganizationMember.organization_id).where(
+        OrganizationMember.user_id == user_uuid
+    )
+    if active_org_uuid is not None:
         stmt = stmt.where(OrganizationMember.organization_id == active_org_uuid)
         not_member_detail = "user is not a member of the requested organization"
     else:
@@ -338,6 +376,7 @@ async def _principal_from_jwt(token: str, db: AsyncSession) -> Principal:
         user_id=user_uuid,
         organization_id=organization_id,
         scopes=_scopes_from_jwt(claims),
+        superadmin=is_superadmin,
     )
 
 

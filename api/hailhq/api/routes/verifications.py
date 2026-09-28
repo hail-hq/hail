@@ -1,5 +1,6 @@
-"""Carrier verification: collect a customer's details and documents and build
-the carrier-side record, then let a superadmin approve it.
+"""Carrier verification: collect a customer's details and documents, build the
+carrier-side record and submit it. A superadmin can still approve a draft the
+carrier did not take at creation.
 
 Files and details pass through this process in memory to the carrier. Nothing
 identifying is written to the database, disk or logs (see the design spec).
@@ -20,7 +21,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi import status as http_status
-from hailhq.api.audit import write_audit_log
+from hailhq.api.audit import actor_of, write_audit_log
 from hailhq.api.deps import Principal, get_current_principal
 from hailhq.api.errors import unprocessable
 from hailhq.api.ratelimit import GENERAL_RATE_LIMITED_RESPONSES
@@ -59,8 +60,8 @@ _READ_CHUNK = 1024 * 1024
 _LIVE_STATES = ("draft", "awaiting_review", "submitting", "submitted", "approved")
 _POLLED_STATES = ("submitting", "submitted")
 _POLL_INTERVAL_S = 60
-# A row left in 'submitting' this long was cut off mid-approve (see
-# admin_approve). Reads then ask the carrier what really happened.
+# A row left in 'submitting' this long was cut off mid-submit (see
+# _submit_row). Reads then ask the carrier what really happened.
 _SUBMITTING_STUCK_AFTER = timedelta(minutes=5)
 # When this process last asked the carrier about a submitted verification.
 _last_polled: dict[UUID, float] = {}
@@ -226,9 +227,9 @@ async def _refresh(
     """Pull a submitted verification's outcome from the carrier.
 
     A row cut off in 'submitting' that the carrier reports as submitted (or
-    already reviewed) gets the audit row its interrupted approve never wrote;
+    already reviewed) gets the audit row its interrupted submit never wrote;
     approved_by was saved before the carrier call, so the trail names the
-    admin."""
+    admin when one approved it."""
     was_submitting = row.state == "submitting"
     if not _pollable(row):
         return
@@ -236,16 +237,21 @@ async def _refresh(
         return
     await db.commit()
     if was_submitting and row.state in ("submitted", "approved", "rejected"):
+        # approved_by is set only by a superadmin's approve; an automatic
+        # submit (creation or the sweeper) that was cut off has none.
+        approved = row.approved_by is not None
         await write_audit_log(
             row.organization_id,
             None,
-            "verification.approve",
+            "verification.approve" if approved else "verification.submit",
             "carrier_verification",
             row.id,
             {
                 "approved_by": str(row.approved_by) if row.approved_by else None,
                 "recovered": True,
             },
+            actor_user_id=row.approved_by,
+            actor_kind="superadmin" if approved else "system",
         )
 
 
@@ -418,8 +424,8 @@ async def create_verification(
     `GET /verifications/requirements`.
 
     The carrier checks the details right away. Problems come back as 422 with
-    the field named, and nothing is kept. When it passes, the verification waits
-    for review and is then submitted to the carrier.
+    the field named, and nothing is kept. When it passes, the verification is
+    submitted to the carrier for its review; read it back to follow the state.
     """
     form = await _parse_form(request)
 
@@ -529,7 +535,179 @@ async def create_verification(
             ) from exc
         raise
     await db.refresh(row)
+    # No human gate: the draft goes to the carrier now. If the carrier is
+    # down, the row stays 'awaiting_review' and the sweeper retries it.
+    await _submit_row(
+        db, row, provider, actor=actor_of(principal), action="verification.submit"
+    )
     return VerificationResponse.model_validate(row)
+
+
+async def _submit_row(
+    db: AsyncSession,
+    row: CarrierVerification,
+    provider: VerificationProvider,
+    *,
+    actor: tuple[UUID | None, str],
+    action: str,
+) -> bool:
+    """Send an 'awaiting_review' draft the carrier has already evaluated
+    (create_draft or check). True when it is now 'submitted'; False when the
+    carrier was unreachable (the row stays 'awaiting_review' for the next try).
+    Never raises for carrier trouble: creation must still answer 201 and the
+    sweeper must keep going.
+
+    The row is saved as 'submitting' before the carrier call so a crash in
+    between cannot submit twice; _refresh settles a stuck 'submitting' row.
+    approved_by names the superadmin who approved, or nobody for the
+    automatic submits."""
+    actor_user_id, actor_kind = actor
+    approved_by = actor_user_id if actor_kind == "superadmin" else None
+    row.state, row.updated_at = "submitting", datetime.now(timezone.utc)
+    row.approved_by = approved_by
+    await db.commit()
+    try:
+        await provider.submit(row.provider_refs)
+    except Exception:
+        logger.exception("verification submit failed for %s", row.id)
+        row.state, row.updated_at = "awaiting_review", datetime.now(timezone.utc)
+        row.approved_by = None
+        await db.commit()
+        return False
+    now = datetime.now(timezone.utc)
+    row.state, row.submitted_at, row.updated_at = "submitted", now, now
+    await db.commit()
+    await write_audit_log(
+        row.organization_id,
+        None,
+        action,
+        "carrier_verification",
+        row.id,
+        {"approved_by": str(approved_by) if approved_by else None},
+        actor_user_id=actor_user_id,
+        actor_kind=actor_kind,
+    )
+    return True
+
+
+# An 'awaiting_review' row this old was not submitted at creation (the
+# carrier was down); the sweeper retries it.
+_RETRY_SUBMIT_AFTER = timedelta(minutes=2)
+
+
+async def _lock_waiting(
+    db: AsyncSession, verification_id: UUID
+) -> CarrierVerification | None:
+    """The row, locked, if it is still 'awaiting_review'. None when an admin
+    holds it (admin_approve locks the same way) or it moved on."""
+    return (
+        await db.execute(
+            select(CarrierVerification)
+            .where(
+                CarrierVerification.id == verification_id,
+                CarrierVerification.state == "awaiting_review",
+            )
+            .with_for_update(skip_locked=True)
+        )
+    ).scalar_one_or_none()
+
+
+async def _retry_submit(
+    db: AsyncSession, verification_id: UUID, registry: Registry
+) -> bool:
+    """One sweeper retry of an unsent draft. The carrier evaluates it first:
+    a draft it refuses becomes 'rejected' with the carrier's reason, so the
+    customer sees why and can start over; it is not retried again."""
+    row = await _lock_waiting(db, verification_id)
+    if row is None:
+        return False
+    provider = registry(row.provider)
+    if provider is None:
+        await db.rollback()
+        return False
+    try:
+        problems = await provider.check(row.provider_refs)
+    except Exception:
+        logger.exception("verification check failed for %s", row.id)
+        await db.rollback()
+        return False
+    if problems:
+        await _reject_row(db, row, provider, "; ".join(p.message for p in problems))
+        return False
+    return await _submit_row(
+        db, row, provider, actor=(None, "system"), action="verification.submit"
+    )
+
+
+async def _reject_row(
+    db: AsyncSession,
+    row: CarrierVerification,
+    provider: VerificationProvider,
+    reason: str,
+) -> None:
+    """The carrier refused the draft before submission: record why, discard
+    the draft so nothing of the customer's is left at the carrier, and audit
+    it as a system action (no person rejected it). If the discard fails the
+    row is left as it was and tried again next tick; the sweeper never dies
+    on carrier trouble."""
+    try:
+        await provider.discard(row.provider_refs)
+    except Exception:
+        logger.exception("verification discard failed for %s", row.id)
+        await db.rollback()
+        return
+    row.state, row.rejection_reason, row.provider_refs = "rejected", reason, {}
+    row.updated_at = datetime.now(timezone.utc)
+    await db.commit()
+    await write_audit_log(
+        row.organization_id,
+        None,
+        "verification.reject",
+        "carrier_verification",
+        row.id,
+        {"rejected_by": None, "reason": reason},
+        actor_user_id=None,
+        actor_kind="system",
+    )
+
+
+async def sweep_verifications(db: AsyncSession, registry: Registry) -> dict[str, int]:
+    """Background pass: submit drafts that are still waiting, and pull the
+    carrier's answer for submitted ones. Returns counts for the log."""
+    now = datetime.now(timezone.utc)
+    submitted = refreshed = 0
+    waiting = (
+        (
+            await db.execute(
+                select(CarrierVerification.id).where(
+                    CarrierVerification.state == "awaiting_review",
+                    CarrierVerification.updated_at <= now - _RETRY_SUBMIT_AFTER,
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    for verification_id in waiting:
+        if await _retry_submit(db, verification_id, registry):
+            submitted += 1
+    polled = (
+        (
+            await db.execute(
+                select(CarrierVerification).where(
+                    CarrierVerification.state.in_(_POLLED_STATES)
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    for row in polled:
+        before = row.state
+        await _refresh(db, row, registry)
+        if row.state != before:
+            refreshed += 1
+    return {"submitted": submitted, "refreshed": refreshed}
 
 
 async def _org_row_or_404(
@@ -610,8 +788,16 @@ async def cancel_verification(
     db: Annotated[AsyncSession, Depends(get_session)],
     registry: Annotated[Registry, Depends(get_verification_registry)],
 ) -> VerificationResponse:
-    """Cancel an unsubmitted verification or dismiss a rejected one."""
+    """Withdraw a verification that has not been sent for review, or dismiss
+    a rejected one. The draft is discarded either way. One that is under
+    review cannot be cancelled: wait for the result; if it is rejected,
+    dismiss it."""
     row = await _org_row_or_404(db, principal, verification_id)
+    if row.state in ("submitting", "submitted"):
+        raise HTTPException(
+            status_code=http_status.HTTP_409_CONFLICT,
+            detail="this verification is under review; wait for the result",
+        )
     if row.state not in ("awaiting_review", "rejected"):
         raise HTTPException(
             status_code=http_status.HTTP_409_CONFLICT,
@@ -705,31 +891,10 @@ async def admin_approve(
             detail="the carrier no longer accepts this draft: "
             + "; ".join(p.message for p in problems),
         )
-    # Saved before the carrier call: if the save after it fails, the row shows
-    # 'submitting' and cannot be approved (and submitted) a second time, and
-    # approved_by already names the admin for the recovery path in _refresh.
-    row.state, row.updated_at = "submitting", datetime.now(timezone.utc)
-    row.approved_by = admin.user_id
-    await db.commit()
-    try:
-        await provider.submit(row.provider_refs)
-    except Exception as exc:
-        logger.exception("verification submit failed")
-        row.state, row.updated_at = "awaiting_review", datetime.now(timezone.utc)
-        row.approved_by = None
-        await db.commit()
-        raise _carrier_unavailable() from exc
-    now = datetime.now(timezone.utc)
-    row.state, row.submitted_at, row.updated_at = "submitted", now, now
-    await db.commit()
-    await write_audit_log(
-        row.organization_id,
-        None,
-        "verification.approve",
-        "carrier_verification",
-        row.id,
-        {"approved_by": str(admin.user_id) if admin.user_id else None},
-    )
+    if not await _submit_row(
+        db, row, provider, actor=actor_of(admin), action="verification.approve"
+    ):
+        raise _carrier_unavailable()
     return AdminVerification.model_validate(row)
 
 
@@ -748,6 +913,7 @@ async def admin_reject(
     row.state, row.rejection_reason, row.provider_refs = "rejected", body.reason, {}
     row.updated_at = datetime.now(timezone.utc)
     await db.commit()
+    actor_user_id, actor_kind = actor_of(admin)
     await write_audit_log(
         row.organization_id,
         None,
@@ -755,5 +921,7 @@ async def admin_reject(
         "carrier_verification",
         row.id,
         {"rejected_by": str(admin.user_id) if admin.user_id else None},
+        actor_user_id=actor_user_id,
+        actor_kind=actor_kind,
     )
     return AdminVerification.model_validate(row)

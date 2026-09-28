@@ -1,0 +1,260 @@
+{
+  "data": [
+    {
+      "id": "b1b9f5b0-8a89-4561-b465-0134e28d055e",
+      "type": "did_groups",
+      "attributes": {
+        "prefix": "1224",
+        "features": ["voice_in", "voice_out", "t38", "emergency"],
+        "is_metered": false,
+        "area_name": "Aberdeen",
+        "allow_additional_channels": true,
+        "service_restrictions": "I acknowledge that emergency calls are available only when the number is used with DIDWW\u2019s SIP Trunk service and registered for emergency services."
+      },
+      "relationships": {
+        "country": {
+          "links": {
+            "self": "https://api.didww.com/v3/did_groups/b1b9f5b0-8a89-4561-b465-0134e28d055e/relationships/country",
+            "related": "https://api.didww.com/v3/did_groups/b1b9f5b0-8a89-4561-b465-0134e28d055e/country"
+          }
+        },
+        "city": {
+          "links": {
+            "self": "https://api.didww.com/v3/did_groups/b1b9f5b0-8a89-4561-b465-0134e28d055e/relationships/city",
+            "related": "https://api.didww.com/v3/did_groups/b1b9f5b0-8a89-4561-b465-0134e28d055e/city"
+          }
+        },
+        "did_group_type": {
+          "links": {
+            "self": "https://api.didww.com/v3/did_groups/b1b9f5b0-8a89-4561-b465-0134e28d055e/relationships/did_group_type",
+            "related": "https://api.didww.com/v3/did_groups/b1b9f5b0-8a89-4561-b465-0134e28d055e/did_group_type"
+          },
+          "data": {
+            "type": "did_group_types",
+            "id": "a57de664-789f-4306-a397-ab9100c9304b"
+          }
+        },
+        "region": {
+          "links": {
+            "self": "https://api.didww.com/v3/did_groups/b1b9f5b0-8a89-4561-b465-0134e28d055e/relationships/region",
+            "related": "https://api.didww.com/v3/did_groups/b1b9f5b0-8a89-4561-b465-0134e28d055e/region"
+          }
+        },
+        "stock_keeping_units": {
+          "links": {
+            "self": "https://api.didww.com/v3/did_groups/b1b9f5b0-8a89-4561-b465-0134e28d055e/relationships/stock_keeping_units",
+            "related": "https://api.didww.com/v3/did_groups/b1b9f5b0-8a89-4561-b465-0134e28d055e/stock_keeping_units"
+          },
+          "data": [
+            {
+              "type": "stock_keeping_units",
+              "id": "2734bb7b-315e-4f85-a332-aa0cdb7a4bd2"
+            },
+            {
+              "type": "stock_keeping_units",
+              "id": "2397f092-8586-4ef2-ba3e-afb6aa51ef74"
+            }
+          ]
+        },
+        "address_requirement": {
+          "links": {
+            "self": "https://api.didww.com/v3/did_groups/b1b9f5b0-8a89-4561-b465-0134e28d055e/relationships/address_requirement",
+            "related": "https://api.didww.com/v3/did_groups/b1b9f5b0-8a89-4561-b465-0134e28d055e/address_requirement"
+          },
+          "data": null
+        }
+      },
+      "meta": {
+        "available_dids_enabled": false,
+        "needs_registration": false,
+        "is_available": true,
+        "total_count": 708
+      }
+    },
+    {
+      "id": "80b1e24c-ac16-49f7-b9e9-720940c81b00",
+      "type": "did_groups",
+      "attributes": {
+        "prefix": "1887",
+        "features": ["voice_in", "voice_out", "t38", "emergency"],
+        "is_metered": false,
+        "area_name": "Aberfeldy",
+        "allow_additional_channels": true,
+        "service_restrictions": "I acknowledge that emergency calls are available only when the number is used with DIDWW\u2019s SIP Trunk service and registered for emergency services."
+      },
+      "relationships": {
+        "country": {
+          "links": {
+            "self": "https://api.didww.com/v3/did_groups/80b1e24c-ac16-49f7-b9e9-720940c81b00/relationships/country",
+            "related": "https://api.didww.com/v3/did_groups/80b1e24c-ac16-49f7-b9e9-720940c81b00/country"
+          }
+        },
+        "city": {
+          "links": {
+            "self": "https://api.didww.com/v3/did_groups/80b1e24c-ac16-49f7-b9e9-720940c81b00/relationships/city",
+            "related": "https://api.didww.com/v3/did_groups/80b1e24c-ac16-49f7-b9e9-720940c81b00/city"
+          }
+        },
+        "did_group_type": {
+          "links": {
+            "self": "https://api.didww.com/v3/did_groups/80b1e24c-ac16-49f7-b9e9-720940c81b00/relationships/did_group_type",
+            "related": "https://api.didww.com/v3/did_groups/80b1e24c-ac16-49f7-b9e9-720940c81b00/did_group_type"
+          },
+          "data": {
+            "type": "did_group_types",
+            "id": "a57de664-789f-4306-a397-ab9100c9304b"
+          }
+        },
+        "region": {
+          "links": {
+            "self": "https://api.didww.com/v3/did_groups/80b1e24c-ac16-49f7-b9e9-720940c81b00/relationships/region",
+            "related": "https://api.didww.com/v3/did_groups/80b1e24c-ac16-49f7-b9e9-720940c81b00/region"
+          }
+        },
+        "stock_keeping_units": {
+          "links": {
+            "self": "https://api.didww.com/v3/did_groups/80b1e24c-ac16-49f7-b9e9-720940c81b00/relationships/stock_keeping_units",
+            "related": "https://api.didww.com/v3/did_groups/80b1e24c-ac16-49f7-b9e9-720940c81b00/stock_keeping_units"
+          },
+          "data": [
+            {
+              "type": "stock_keeping_units",
+              "id": "1d6304b8-408b-4380-a835-c3c6ed5c8e17"
+            },
+            {
+              "type": "stock_keeping_units",
+              "id": "12561aab-10e7-42b4-bc95-6fe2533eb6df"
+            }
+          ]
+        },
+        "address_requirement": {
+          "links": {
+            "self": "https://api.didww.com/v3/did_groups/80b1e24c-ac16-49f7-b9e9-720940c81b00/relationships/address_requirement",
+            "related": "https://api.didww.com/v3/did_groups/80b1e24c-ac16-49f7-b9e9-720940c81b00/address_requirement"
+          },
+          "data": null
+        }
+      },
+      "meta": {
+        "available_dids_enabled": false,
+        "needs_registration": false,
+        "is_available": true,
+        "total_count": 152
+      }
+    },
+    {
+      "id": "1d5aad75-b853-4125-9a1a-da3fedfc5674",
+      "type": "did_groups",
+      "attributes": {
+        "prefix": "7",
+        "features": ["voice_in", "voice_out", "sms_in", "p2p"],
+        "is_metered": false,
+        "area_name": "Mobile",
+        "allow_additional_channels": true,
+        "service_restrictions": null
+      },
+      "relationships": {
+        "did_group_type": {
+          "data": {
+            "type": "did_group_types",
+            "id": "0d51924c-e863-44ff-be59-10547c138955"
+          }
+        },
+        "stock_keeping_units": {
+          "data": [
+            {
+              "type": "stock_keeping_units",
+              "id": "sku-mob-0"
+            },
+            {
+              "type": "stock_keeping_units",
+              "id": "sku-mob-2"
+            }
+          ]
+        },
+        "address_requirement": {
+          "data": null
+        }
+      },
+      "meta": {
+        "available_dids_enabled": false,
+        "needs_registration": false,
+        "is_available": true,
+        "total_count": 3165
+      }
+    }
+  ],
+  "included": [
+    {
+      "id": "a57de664-789f-4306-a397-ab9100c9304b",
+      "type": "did_group_types",
+      "attributes": {
+        "name": "Local"
+      }
+    },
+    {
+      "id": "2734bb7b-315e-4f85-a332-aa0cdb7a4bd2",
+      "type": "stock_keeping_units",
+      "attributes": {
+        "setup_price": "0.0",
+        "monthly_price": "1.2",
+        "channels_included_count": 0
+      }
+    },
+    {
+      "id": "2397f092-8586-4ef2-ba3e-afb6aa51ef74",
+      "type": "stock_keeping_units",
+      "attributes": {
+        "setup_price": "0.0",
+        "monthly_price": "5.0",
+        "channels_included_count": 2
+      }
+    },
+    {
+      "id": "1d6304b8-408b-4380-a835-c3c6ed5c8e17",
+      "type": "stock_keeping_units",
+      "attributes": {
+        "setup_price": "0.0",
+        "monthly_price": "1.2",
+        "channels_included_count": 0
+      }
+    },
+    {
+      "id": "12561aab-10e7-42b4-bc95-6fe2533eb6df",
+      "type": "stock_keeping_units",
+      "attributes": {
+        "setup_price": "0.0",
+        "monthly_price": "5.0",
+        "channels_included_count": 2
+      }
+    },
+    {
+      "id": "sku-mob-0",
+      "type": "stock_keeping_units",
+      "attributes": {
+        "setup_price": "0.0",
+        "monthly_price": "2.5",
+        "channels_included_count": 0
+      }
+    },
+    {
+      "id": "sku-mob-2",
+      "type": "stock_keeping_units",
+      "attributes": {
+        "setup_price": "0.0",
+        "monthly_price": "5.0",
+        "channels_included_count": 2
+      }
+    },
+    {
+      "id": "0d51924c-e863-44ff-be59-10547c138955",
+      "type": "did_group_types",
+      "attributes": {
+        "name": "Mobile"
+      }
+    }
+  ],
+  "meta": {
+    "total_records": 3
+  }
+}

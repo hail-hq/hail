@@ -94,7 +94,9 @@ async def test_invalid_prices_fail_closed(amount):
 async def test_exact_number_preflight_uses_national_digits_and_checks_e164():
     def handler(request):
         assert request.url.params["filter[phone_number][ends_with]"] == "300000001"
-        assert request.url.params["filter[features]"] == "emergency,voice"
+        # No "emergency" filter: that is a US/CA emergency-address feature, not
+        # an outbound-calling requirement, and most non-US numbers lack it.
+        assert request.url.params["filter[features]"] == "voice"
         return httpx.Response(
             200,
             json={
@@ -110,7 +112,7 @@ async def test_exact_number_preflight_uses_national_digits_and_checks_e164():
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
         quotes = await TelnyxNumberDiscovery("key", client).search(
-            "PT", "local", ["voice"], outbound=True, e164="+351300000001"
+            "PT", "local", ["voice"], e164="+351300000001"
         )
     assert [q.e164 for q in quotes] == ["+351300000001"]
 

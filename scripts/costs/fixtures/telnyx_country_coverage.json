@@ -1,0 +1,120 @@
+{
+  "data": {
+    "Afghanistan": {
+      "code": "AF",
+      "numbers": false,
+      "features": [],
+      "phone_number_type": [],
+      "reservable": false,
+      "quickship": false,
+      "international_sms": false,
+      "p2p": false,
+      "local": {},
+      "toll_free": {},
+      "mobile": {},
+      "national": {},
+      "region": null,
+      "inventory_coverage": false
+    },
+    "United Kingdom": {
+      "code": "GB",
+      "numbers": true,
+      "features": ["sms", "voice", "local_calling", "fax", "emergency"],
+      "phone_number_type": [
+        "national",
+        "mobile",
+        "local",
+        "local",
+        "toll_free"
+      ],
+      "reservable": true,
+      "quickship": false,
+      "international_sms": false,
+      "p2p": false,
+      "local": {
+        "features": ["local_calling", "voice", "emergency", "fax"],
+        "reservable": true,
+        "full_pstn_replacement": true,
+        "quickship": false,
+        "international_sms": false,
+        "p2p": false
+      },
+      "toll_free": {
+        "features": ["voice", "fax"],
+        "reservable": true,
+        "full_pstn_replacement": false,
+        "quickship": false,
+        "international_sms": false,
+        "p2p": false
+      },
+      "mobile": {
+        "features": ["sms", "voice", "local_calling", "fax"],
+        "reservable": true,
+        "full_pstn_replacement": false,
+        "quickship": false,
+        "international_sms": false,
+        "p2p": false
+      },
+      "national": {
+        "features": ["local_calling", "voice", "emergency", "fax"],
+        "reservable": true,
+        "full_pstn_replacement": true,
+        "quickship": false,
+        "international_sms": false,
+        "p2p": false
+      },
+      "region": "EMEA",
+      "inventory_coverage": true,
+      "shared_cost": {}
+    },
+    "United States of America": {
+      "code": "US",
+      "numbers": true,
+      "features": [
+        "mms",
+        "international_sms",
+        "hd_voice",
+        "sms",
+        "voice",
+        "local_calling",
+        "fax",
+        "emergency"
+      ],
+      "phone_number_type": ["local", "local", "local", "toll_free", "local"],
+      "reservable": true,
+      "quickship": true,
+      "international_sms": true,
+      "p2p": true,
+      "local": {
+        "features": [
+          "mms",
+          "international_sms",
+          "hd_voice",
+          "sms",
+          "voice",
+          "local_calling",
+          "fax",
+          "emergency"
+        ],
+        "reservable": true,
+        "full_pstn_replacement": true,
+        "quickship": false,
+        "international_sms": true,
+        "p2p": true
+      },
+      "toll_free": {
+        "features": ["mms", "sms", "voice", "fax", "emergency"],
+        "reservable": true,
+        "full_pstn_replacement": false,
+        "quickship": true,
+        "international_sms": false,
+        "p2p": false
+      },
+      "mobile": {},
+      "national": {},
+      "region": "AMER",
+      "inventory_coverage": true,
+      "shared_cost": {}
+    }
+  }
+}

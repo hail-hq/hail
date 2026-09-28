@@ -120,7 +120,7 @@ def main() -> None:
         if has_requirements(r)
     ]
     catalog = json.loads(
-        (Path(__file__).resolve().parents[2] / "costs/telephony.json").read_text()
+        (Path(__file__).resolve().parents[2] / "costs/twilio.json").read_text()
     )
     matrix = build_matrix(catalog["numbers"], regulations)
     report = {

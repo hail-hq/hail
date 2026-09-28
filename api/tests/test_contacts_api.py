@@ -508,3 +508,42 @@ async def test_delete_phone_clears(
 
     row = (await async_session.execute(select(User).where(User.id == uid))).scalar_one()
     assert row.phone_number is None
+
+
+async def test_superadmin_sets_other_phone_with_no_membership_row(
+    client: httpx.AsyncClient,
+    org_and_key: tuple,
+    async_session: AsyncSession,
+) -> None:
+    """A JWT superadmin principal counts as owner even with no members
+    row for this org — the console-staff path, not an org member."""
+    from hailhq.api.main import app
+
+    org_id, _, _ = org_and_key
+    other_uid = await _seed_member(
+        async_session, org_id, name="Bob", email="bob@acme.com", role="member"
+    )
+    superadmin_principal = deps.Principal(
+        auth_kind="jwt",
+        api_key_id=None,
+        user_id=uuid.uuid4(),
+        organization_id=org_id,
+        scopes=["*"],
+        superadmin=True,
+    )
+    app.dependency_overrides[deps.get_current_principal] = lambda: superadmin_principal
+    try:
+        resp = await client.put(
+            f"/members/{other_uid}/phone",
+            json={"phone_e164": "+14155550210"},
+        )
+    finally:
+        app.dependency_overrides.pop(deps.get_current_principal, None)
+
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["phone_e164"] == "+14155550210"
+
+    row = (
+        await async_session.execute(select(User).where(User.id == other_uid))
+    ).scalar_one()
+    assert row.phone_number == "+14155550210"

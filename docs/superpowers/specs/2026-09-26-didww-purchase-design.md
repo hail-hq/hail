@@ -69,7 +69,7 @@ reconciler ──> didww_order_outcome ──> GET /dids?filter[order.id] ──
   - else an approved Hail verification for (org, `didww`, country, type) exists → `ready`, `verification_id` = identity id, `address_id` = address id.
   - else `verification_required`; friction `documents` when `personal_proof_qty`, `business_proof_qty` or `address_proof_qty` > 0, else `information`. `requirements` labels list the proof types and mandatory fields.
 - Offers return one DIDWW number per request (like Telnyx). `restriction_message` is not shown (the neutral model has no help field). `verification_id` and `address_id` both carry the approved address id.
-- The catalog gate `is_acquirable(country, type)` applies to Twilio and Telnyx only. DIDWW offers carry their own live price, and the renewal rater bills the price stored on the number, so DIDWW countries need no `costs/telephony.json` row.
+- The catalog gate is per carrier: a DIDWW offer is checked against `costs/didww.json` (`telephony_catalog.capabilities(country, type, "didww")`), like Twilio and Telnyx against theirs. Quotes ask each carrier only for the number types its own catalog lists, so a quote never shows an offer the purchase would refuse. `scripts/costs/sync_numbers.py` keeps `costs/didww.json` current.
 - The approved registration is found at DIDWW, like the other carriers find theirs: `GET /addresses?filter[external_reference_id]=hail:<org>:<country>:<number_type>`. Nothing moves out of `api/routes/verifications.py`.
 
 ## Verification plug-in: `providers/verification/didww.py`
@@ -95,7 +95,8 @@ reconciler ──> didww_order_outcome ──> GET /dids?filter[order.id] ──
 - `core/hailhq/core/providers/verification/didww.py` (new).
 - `core/hailhq/core/carrier_routing.py`: `CARRIERS[DIDWW]` gets `async_orders=True`; new `Carrier.pending_timeout: timedelta`.
 - `core/hailhq/core/carrier_offer.py`, `core/hailhq/core/schemas.py`: `provider` Literals gain `"didww"`.
-- `core/hailhq/core/number_offers.py`: `PROVIDERS`, `searches["didww"]`; per-carrier catalog gate.
+- `core/hailhq/core/number_offers.py`: `PROVIDERS`, `searches["didww"]`.
+- `api/hailhq/api/routes/numbers.py`: quotes search each number type only at the carriers whose catalog lists it.
 - `api/hailhq/api/number_orders.py`: `carrier_outcome` dispatches on carrier name; new outcome `rejected_registration` and its partial refund; timeouts read `carrier(...).pending_timeout`.
 - `api/hailhq/api/routes/numbers.py`: `_RELEASERS[DIDWW] = release_didww_number`.
 - `core/hailhq/core/config.py`: `didww_api_key`, `didww_environment` (`production` | `sandbox`, default `production`).

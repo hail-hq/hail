@@ -144,6 +144,17 @@ export interface TelephonyNumberRow extends TelephonyProvenance {
   voice: boolean;
   sms: boolean;
   mms: boolean;
+  verification_required: boolean;
+  available: boolean;
+  setup_usd?: string;
+  notes?: string;
+}
+
+export type NumberProvider = 'twilio' | 'telnyx' | 'didww';
+
+/** A catalog row plus the carrier it came from (the file's `provider`). */
+export interface NumberRow extends TelephonyNumberRow {
+  provider: NumberProvider;
 }
 
 export interface TelephonyFeeRow extends TelephonyProvenance {
@@ -168,11 +179,12 @@ export interface SmsFile {
   providers: SmsRateRow[];
 }
 
-export interface TelephonyFile {
-  version: 2;
+export interface NumberCatalogFile {
+  version: 3;
   license: 'CC-BY-4.0';
+  provider: NumberProvider;
   numbers: TelephonyNumberRow[];
-  a2p_10dlc: TelephonyFeeRow[];
+  a2p_10dlc?: TelephonyFeeRow[];
 }
 
 export type CostsFile<T> = {

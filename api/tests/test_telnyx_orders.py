@@ -868,12 +868,14 @@ async def test_quote_number_type_is_taken_from_the_quote(
     client, async_session, org_and_key, monkeypatch
 ):
     org, _, key = org_and_key
-    row, offer = await seed_quote(async_session, org, kind="mobile")
+    # PT local is the one type the committed telnyx.json lists (live data);
+    # the purchase gate reads the quoted carrier's own catalog.
+    row, offer = await seed_quote(async_session, org, kind="local")
     await _stub_order(monkeypatch, offer, {"data": {"id": str(uuid4())}})
     headers = {"Authorization": f"Bearer {key}"}
     conflict = await client.post(
         "/numbers",
-        json={"country_code": "PT", "quote_id": str(row.id), "number_type": "local"},
+        json={"country_code": "PT", "quote_id": str(row.id), "number_type": "mobile"},
         headers=headers,
     )
     assert conflict.status_code == 422
@@ -883,7 +885,7 @@ async def test_quote_number_type_is_taken_from_the_quote(
         headers=headers,
     )
     assert ok.status_code == 201, ok.text
-    assert ok.json()["number_type"] == "mobile"
+    assert ok.json()["number_type"] == "local"
 
 
 async def test_quote_purchase_of_a_type_missing_from_the_catalog_is_422(
@@ -909,6 +911,20 @@ async def test_quote_purchase_of_a_type_missing_from_the_catalog_is_422(
     assert await get_balance_cents(async_session, org) == 100000
 
 
+def _unlisted_pair():
+    """A (country, number type) no buyable carrier's catalog lists, with at
+    least one other type listed for that country. The catalogs are live
+    data, so the pair is looked up, not assumed."""
+    kinds = ("local", "mobile", "national", "toll_free")
+    for country in ("PT", "SE", "IE", "NL", "DK", "FI", "NO", "CH", "AT", "BE"):
+        listed = {
+            k for k in kinds if telephony_catalog.capabilities(country, k) is not None
+        }
+        if listed and listed != set(kinds):
+            return country, next(k for k in kinds if k not in listed), listed
+    raise AssertionError("every probed country lists every number type")
+
+
 async def test_quote_route_rejects_unlisted_type_and_accepts_lowercase_country(
     client, org_and_key, monkeypatch
 ):
@@ -916,11 +932,12 @@ async def test_quote_route_rejects_unlisted_type_and_accepts_lowercase_country(
     discover = AsyncMock(return_value=([], []))
     monkeypatch.setattr("hailhq.api.routes.numbers.discover_offers", discover)
     headers = {"Authorization": f"Bearer {key}"}
+    country, unlisted_kind, listed = _unlisted_pair()
     unlisted = await client.post(
         "/numbers/quotes",
         json={
-            "country_code": "PT",
-            "number_type": "toll_free",
+            "country_code": country,
+            "number_type": unlisted_kind,
             "capabilities": ["voice"],
         },
         headers=headers,
@@ -929,19 +946,12 @@ async def test_quote_route_rejects_unlisted_type_and_accepts_lowercase_country(
     discover.assert_not_awaited()
     lower = await client.post(
         "/numbers/quotes",
-        json={"country_code": "pt", "capabilities": ["voice"]},
+        json={"country_code": country.lower(), "capabilities": ["voice"]},
         headers=headers,
     )
     assert lower.status_code == 200, lower.text
-    assert {call.args[1] for call in discover.await_args_list} == {"PT"}
-    # Only the types the catalog lists for PT are searched (the catalog is
-    # live data: PT gained a national row after this test was written).
-    listed = {
-        kind
-        for kind in ("local", "mobile", "national", "toll_free")
-        if telephony_catalog.capabilities("PT", kind) is not None
-    }
-    assert "toll_free" not in listed
+    assert {call.args[1] for call in discover.await_args_list} == {country}
+    # Only the types a buyable carrier's catalog lists are searched.
     assert {call.args[2] for call in discover.await_args_list} == listed
 
 

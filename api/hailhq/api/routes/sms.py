@@ -22,7 +22,7 @@ from hailhq.api.agent_gate import (
     RATE_LIMITED_RESPONSES,
     require_agent_send_allowed,
 )
-from hailhq.api.audit import write_audit_log
+from hailhq.api.audit import actor_of, write_audit_log
 from hailhq.api.consent import enforce_consent, isoformat_or_none
 from hailhq.api.deps import Principal, get_current_principal
 from hailhq.api.errors import unprocessable
@@ -241,6 +241,7 @@ async def create_sms(
         cached_id, cached = replay_cached(
             idem, response, request, resource_prefix="/sms"
         )
+        actor_user_id, actor_kind = actor_of(principal)
         await write_audit_log(
             organization_id=principal.organization_id,
             api_key_id=principal.api_key_id,
@@ -248,6 +249,8 @@ async def create_sms(
             resource_type="sms",
             resource_id=cached_id,
             payload={"to": cached.get("to_e164"), "from": cached.get("from_e164")},
+            actor_user_id=actor_user_id,
+            actor_kind=actor_kind,
         )
         return SmsResponse.model_validate(cached)
 
@@ -262,6 +265,7 @@ async def create_sms(
 
     gate = await check_sms_allowed(db, principal.organization_id, body.to)
     if not gate.allowed:
+        actor_user_id, actor_kind = actor_of(principal)
         await write_audit_log(
             organization_id=principal.organization_id,
             api_key_id=principal.api_key_id,
@@ -269,6 +273,8 @@ async def create_sms(
             resource_type="sms",
             resource_id=None,
             payload={"to": body.to, "reason": gate.reason, "checks": gate.checks},
+            actor_user_id=actor_user_id,
+            actor_kind=actor_kind,
         )
         raise await cache_failure(
             idem,
@@ -343,6 +349,7 @@ async def create_sms(
     db.add(sms)
     await db.commit()
 
+    actor_user_id, actor_kind = actor_of(principal)
     await write_audit_log(
         organization_id=principal.organization_id,
         api_key_id=principal.api_key_id,
@@ -358,6 +365,8 @@ async def create_sms(
             "message_type": body.message_type,
             "compliance": gate.checks,
         },
+        actor_user_id=actor_user_id,
+        actor_kind=actor_kind,
     )
 
     # Provider send — best-effort with status reconciliation.

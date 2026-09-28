@@ -378,6 +378,41 @@ async def test_zero_price_number_is_skipped_not_a_carrier_failure(
     assert [(o.e164, o.capabilities) for o in result] == [("+351211234567", ["voice"])]
 
 
+async def test_number_without_ordering_rules_is_ready(monkeypatch):
+    """Telnyx answers ``[]`` from /regulatory_requirements for a number that
+    needs no paperwork (US local). That is a ready offer, not unknown coverage."""
+    monkeypatch.setattr(settings, "telnyx_api_key", "secret")
+    monkeypatch.setattr(settings, "telnyx_connection_id", "connection")
+    monkeypatch.setattr(settings, "telnyx_sip_username", "sip-user")
+    monkeypatch.setattr(settings, "livekit_telnyx_sip_outbound_trunk_id", "ST_telnyx")
+    monkeypatch.setattr(settings, "telnyx_public_key", "")
+
+    def respond(request):
+        if request.url.path.endswith("available_phone_numbers"):
+            data = [
+                {
+                    "phone_number": "+15808002066",
+                    "features": [{"name": n} for n in ("voice", "sms", "emergency")],
+                    "cost_information": {
+                        "currency": "USD",
+                        "monthly_cost": "1.00000",
+                        "upfront_cost": "1.00000",
+                    },
+                }
+            ]
+        elif request.url.path.endswith("requirement_groups"):
+            data = []
+        else:
+            data = []
+        return httpx.Response(200, json={"data": data})
+
+    async with telnyx_json_client(respond) as http:
+        result = await telnyx_offers(uuid4(), "US", "local", ["voice"], http)
+    assert [
+        (o.e164, o.readiness, o.regulatory_friction, o.requirements) for o in result
+    ] == [("+15808002066", "ready", "none", [])]
+
+
 async def test_sms_only_request_does_not_store_voice_capability(monkeypatch):
     monkeypatch.setattr(settings, "telnyx_api_key", "secret")
     monkeypatch.setattr(settings, "telnyx_public_key", "public")

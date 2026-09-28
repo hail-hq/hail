@@ -1,14 +1,15 @@
 """DIDWW purchases through ``acquire_offer`` and ``reconcile_order``. The
 carrier functions are mocked; their HTTP is covered in core tests."""
 
+import json
 from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock
 
 import pytest
+from fastapi import HTTPException
 from hailhq.api.number_orders import acquire_offer, reconcile_order
 from hailhq.core import telephony_catalog
 from hailhq.core.billing import get_balance_cents
-from hailhq.core.config import settings
 from hailhq.core.models import AccountCredit, CarrierVerification, NumberOffer
 from hailhq.core.number_offers import CarrierOffer
 from hailhq.core.providers.voice import CarrierRequestError
@@ -53,15 +54,30 @@ async def buy(db, org, quote, monkeypatch, offer, *, kind="national"):
     )
 
 
-def _non_catalog_kind(country="PT"):
-    """A number type the live telephony catalog does not list for
-    ``country``: proves ``acquire_offer``'s catalog gate is actually skipped
-    for DIDWW, not merely inert because the catalog happens to cover
-    everything asked for."""
-    for kind in ("local", "mobile", "national", "toll_free"):
-        if telephony_catalog.capabilities(country, kind) is None:
-            return kind
-    raise AssertionError(f"{country} lists every kind; pick another test country")
+@pytest.fixture(autouse=True)
+def catalogs(tmp_path, monkeypatch):
+    """One catalog per carrier: Twilio lists PT local, DIDWW lists PT national,
+    Telnyx lists nothing for PT."""
+
+    def row(kind):
+        return {
+            "country_code": "PT",
+            "number_type": kind,
+            "usd_per_month": "3.50",
+            "voice": True,
+            "sms": False,
+            "mms": False,
+        }
+
+    (tmp_path / "twilio.json").write_text(
+        json.dumps({"numbers": [row("local")], "a2p_10dlc": []})
+    )
+    (tmp_path / "telnyx.json").write_text(json.dumps({"numbers": []}))
+    (tmp_path / "didww.json").write_text(json.dumps({"numbers": [row("national")]}))
+    monkeypatch.setenv("HAIL_TELEPHONY_CATALOG_DIR", str(tmp_path))
+    telephony_catalog._load.cache_clear()
+    yield
+    telephony_catalog._load.cache_clear()
 
 
 async def _age(db, number, delta):
@@ -92,26 +108,36 @@ async def test_didww_purchase_places_order_and_waits(
     assert await get_balance_cents(async_session, org) == 100000 - 700
 
 
-async def test_didww_purchase_is_not_catalog_gated(
+async def test_didww_purchase_checks_the_didww_catalog(
     async_session, org_and_key, monkeypatch
 ):
-    """A DIDWW purchase for a kind the live catalog does not list for PT must
-    still go through: DIDWW carries its own live price, so acquire_offer must
-    not run catalog_capabilities() for it. Uses a kind the catalog actually
-    lacks (not just one this test assumes is absent) so the assertion below
-    fails if the ``offer.provider != DIDWW`` skip is ever removed."""
-    kind = _non_catalog_kind()
+    """PT national is in the DIDWW catalog and in no other: the purchase must
+    check the quoted carrier's own catalog."""
     org, _, _ = org_and_key
-    row, offer = await seed_quote(async_session, org, kind=kind)
+    row, offer = await seed_quote(async_session, org)
     place = AsyncMock(return_value=ORDER)
     monkeypatch.setattr("hailhq.api.number_orders.place_didww_order", place)
     monkeypatch.setattr(
         "hailhq.api.number_orders.didww_order_outcome",
         AsyncMock(return_value=("pending", None, ORDER)),
     )
-    number = await buy(async_session, org, row, monkeypatch, offer, kind=kind)
+    number = await buy(async_session, org, row, monkeypatch, offer)
     assert number.provisioning_state == "pending"
     place.assert_awaited_once_with(number.id, offer.e164, "addr-1")
+
+
+async def test_didww_purchase_outside_its_catalog_is_a_422(
+    async_session, org_and_key, monkeypatch
+):
+    org, _, _ = org_and_key
+    row, offer = await seed_quote(async_session, org, kind="toll_free")
+    place = AsyncMock(return_value=ORDER)
+    monkeypatch.setattr("hailhq.api.number_orders.place_didww_order", place)
+    with pytest.raises(HTTPException) as exc:
+        await buy(async_session, org, row, monkeypatch, offer, kind="toll_free")
+    assert exc.value.status_code == 422
+    place.assert_not_awaited()
+    assert await get_balance_cents(async_session, org) == 100000
 
 
 async def test_didww_registration_approved_activates(
@@ -355,22 +381,14 @@ async def test_didww_order_rejected_at_carrier_refunds_all(
     assert await get_balance_cents(async_session, org) == 100000
 
 
-async def test_quotes_search_non_catalog_kinds_at_didww_only(
+async def test_quotes_ask_each_kind_only_at_carriers_that_list_it(
     client, org_and_key, monkeypatch
 ):
-    """A quote must never offer a Twilio/Telnyx number for a kind the
-    catalog does not list (acquire_offer's catalog gate would 422 it)."""
+    """A quote must never show an offer the purchase would refuse: the
+    purchase checks the quoted carrier's own catalog."""
     _, _, key = org_and_key
-    monkeypatch.setattr(settings, "didww_api_key", "k")
     discover = AsyncMock(return_value=([], []))
     monkeypatch.setattr("hailhq.api.routes.numbers.discover_offers", discover)
-    catalog_kinds = {
-        kind
-        for kind in ("local", "mobile", "national", "toll_free")
-        if telephony_catalog.capabilities("PT", kind) is not None
-    }
-    non_catalog_kinds = {"local", "mobile", "national", "toll_free"} - catalog_kinds
-    assert catalog_kinds and non_catalog_kinds, "PT must list some but not all kinds"
 
     resp = await client.post(
         "/numbers/quotes",
@@ -378,36 +396,26 @@ async def test_quotes_search_non_catalog_kinds_at_didww_only(
         headers={"Authorization": f"Bearer {key}"},
     )
     assert resp.status_code == 200, resp.text
-
-    assert discover.await_count == len(catalog_kinds | non_catalog_kinds)
     searched = {
         call.args[2]: call.kwargs["providers"] for call in discover.await_args_list
     }
-    assert set(searched) == catalog_kinds | non_catalog_kinds
-    for kind in catalog_kinds:
-        assert set(searched[kind]) == {"twilio", "telnyx", "didww"}
-    for kind in non_catalog_kinds:
-        assert searched[kind] == ["didww"]
+    assert searched == {"local": ["twilio"], "national": ["didww"]}
 
 
-async def test_quotes_skip_non_catalog_kinds_when_didww_unconfigured(
+async def test_quotes_for_one_carrier_search_only_its_kinds(
     client, org_and_key, monkeypatch
 ):
     _, _, key = org_and_key
-    monkeypatch.setattr(settings, "didww_api_key", "")
     discover = AsyncMock(return_value=([], []))
     monkeypatch.setattr("hailhq.api.routes.numbers.discover_offers", discover)
-    catalog_kinds = {
-        kind
-        for kind in ("local", "mobile", "national", "toll_free")
-        if telephony_catalog.capabilities("PT", kind) is not None
-    }
 
     resp = await client.post(
         "/numbers/quotes",
-        json={"country_code": "PT", "capabilities": ["voice"]},
+        json={"country_code": "PT", "capabilities": ["voice"], "provider": "didww"},
         headers={"Authorization": f"Bearer {key}"},
     )
     assert resp.status_code == 200, resp.text
-    searched = {call.args[2] for call in discover.await_args_list}
-    assert searched == catalog_kinds
+    searched = {
+        call.args[2]: call.kwargs["providers"] for call in discover.await_args_list
+    }
+    assert searched == {"national": ["didww"]}

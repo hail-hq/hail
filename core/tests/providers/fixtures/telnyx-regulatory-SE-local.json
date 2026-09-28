@@ -1,0 +1,147 @@
+{
+  "data": [
+    {
+      "action": "ordering",
+      "country_code": "SE",
+      "regulatory_requirements": [
+        {
+          "field_type": "textual",
+          "acceptance_criteria": {
+            "max_length": null,
+            "regex": null,
+            "case_sensitive": true,
+            "acceptable_characters": null,
+            "acceptable_values": null,
+            "locality_limit": null,
+            "min_length": null,
+            "time_limit": null
+          },
+          "name": "Company Registration Number (Multi-Format)",
+          "description": "The company registration number issued by the relevant national company registry. Multiple formats are accepted depending on the registering country, including but not limited to: a 21-character Indian CIN (Corporate Identification Number, where the first character is 'L' for listed or 'U' for unlisted, followed by a 5-digit industry code and additional structure); an 8-digit Danish CVR number; or other national company registration formats. The submitted value must match the format issued by the company's country of registration and must correspond to the legal entity named on the order.",
+          "example": "Indian CIN: L17110MH1973PLC019786 (21 characters). Danish CVR: 12345678 (8 digits). UK Companies House number: 12345678 (8 digits). The format must match the issuing country's standard.",
+          "id": "0b42b42a-d827-4b53-a2bb-8eeef919f798"
+        },
+        {
+          "field_type": "textual",
+          "acceptance_criteria": {
+            "max_length": null,
+            "regex": null,
+            "case_sensitive": true,
+            "acceptable_characters": null,
+            "acceptable_values": null,
+            "locality_limit": null,
+            "min_length": null,
+            "time_limit": null
+          },
+          "name": "Contact Information (Name, Business Name, Phone Number)",
+          "description": "Contact information for the business or end user, including: (1) the name of the contact person (full given name and family name), (2) the business name when the end user is a business (registered   legal name where applicable; may be omitted or stated as 'N/A' for individual end users), and (3) one or more contact phone numbers where the business or end user can be reached. Contact person name and at least one phone number are mandatory; business name is required only when the end user is a business entity. Phone numbers should be in international E.164 format where possible.",
+          "example": "Contact: Maria Garc\u00eda L\u00f3pez | Business: Bloom & Petal Florist Ltd. | Phone: +34 612 345 678. For individual end users: Contact: John Smith | Business: N/A | Phone: +1 (555) 123-4567.",
+          "id": "2708e569-696a-4fc7-9305-5fdb3eb9c7dd"
+        },
+        {
+          "field_type": "document",
+          "acceptance_criteria": {
+            "max_length": null,
+            "regex": null,
+            "case_sensitive": true,
+            "acceptable_characters": null,
+            "acceptable_values": null,
+            "locality_limit": null,
+            "min_length": null,
+            "time_limit": null
+          },
+          "name": "Proof of Address (Local), with Local Activity Evidence",
+          "description": "Provide a document dated within the past 3 months that shows the supplied local service address in the country of the phone number. Accepted documents include bank statements, government letters, tax letters, invoices, bills, utility bills, or other official documents that verify the end user\u2019s local address.  The document must show the individual\u2019s name for personal end users, or the business name for business end users. Bank statements are an acceptable form of address verification when they show the required name, local service address, issuer, and date within the past 3 months.  Leases, rental agreements, or other documents with occupancy or contract terms are not accepted.",
+          "example": "A recent bank statement, government letter, tax notice, invoice, bill, or utility bill showing the individual\u2019s name or business name and the supplied local service address, dated within the past 90 days.",
+          "id": "6d3e2643-efaa-4bd3-8c31-77b6cda1d6a2"
+        },
+        {
+          "field_type": "address",
+          "acceptance_criteria": {
+            "max_length": null,
+            "regex": null,
+            "case_sensitive": true,
+            "acceptable_characters": null,
+            "acceptable_values": [],
+            "locality_limit": null,
+            "min_length": null,
+            "time_limit": null
+          },
+          "name": "Address Matching the DID Area Code (Geographic Match)",
+          "description": "A physical address that matches the geographic area covered by the phone number's area code. The address must include street name and number, postal/ZIP code, city, and country, and the city/region of the address must fall within the geographic area assigned to the DID's area code. Addresses outside the area code's geographic region are not acceptable for this requirement; a different (broader, national-level) address requirement must be selected if the customer cannot provide a matching local address.",
+          "example": "311 W Superior St, Chicago, IL 60654 (matches Chicago area code 312). For a +44 20 (Greater London) DID: an address within Greater London such as '60 Holborn Viaduct, London EC1A 2FD'. The address must lie within the area code's geographic boundaries.",
+          "id": "a7d9a3a3-70ed-4cb4-821b-b94e8ea6dc9b"
+        },
+        {
+          "field_type": "textual",
+          "acceptance_criteria": {
+            "max_length": 150,
+            "regex": null,
+            "case_sensitive": true,
+            "acceptable_characters": null,
+            "acceptable_values": [],
+            "locality_limit": null,
+            "min_length": 1,
+            "time_limit": null
+          },
+          "name": "Contact Email Address of End Client",
+          "description": "A valid email address for the end client (the natural person or business that will use the phone number), used for compliance follow-up. The submitted value must be a syntactically valid email address (max 150 characters) and should reach the end client directly. Generic or shared role-based addresses (e.g., info@, contact@) are acceptable but a personal address tied to the named end client is preferred.",
+          "example": "maria.garcia@bloomandpetal.com or contact@acme-coffee.de. The address must be syntactically valid (matching the standard email format) and should be a working address.",
+          "id": "bf1cb27c-3693-41af-bbf6-ff4de8d41006"
+        },
+        {
+          "field_type": "document",
+          "acceptance_criteria": {
+            "max_length": null,
+            "regex": null,
+            "case_sensitive": true,
+            "acceptable_characters": null,
+            "acceptable_values": [],
+            "locality_limit": null,
+            "min_length": null,
+            "time_limit": null
+          },
+          "name": "Passport or ID Copy in PDF Format",
+          "description": "A clear color PDF copy of a valid, unexpired government-issued passport or national identity card belonging to the end user (for personal accounts) or the authorized representative (for business accounts). For ID cards, both front and back must be included in the PDF. The PDF must clearly show the holder's full legal name, photograph, date of birth, document number, issuing authority, and expiration date. The document must not be expired as of the submission date. Image formats other than PDF (such as JPG or PNG) and black-and-white copies are not acceptable for this requirement.",
+          "example": "A color PDF of the biographical data page of a passport, or a color PDF combining both sides of a national ID card. All details must be legible and the document must be a valid (unexpired) PDF, not a photograph or low-resolution scan.",
+          "id": "c6ef8336-b094-4b04-8073-0f6fc4dd42b9"
+        },
+        {
+          "field_type": "textual",
+          "acceptance_criteria": {
+            "max_length": 150,
+            "regex": null,
+            "case_sensitive": true,
+            "acceptable_characters": null,
+            "acceptable_values": [],
+            "locality_limit": null,
+            "min_length": 1,
+            "time_limit": null
+          },
+          "name": "Company Name (Full Legal Name)",
+          "description": "The full legal name of the company associated with the phone number, exactly as registered with the relevant national company registry. The name must include any legal suffix such as 'LLC', 'Ltd.', 'GmbH', 'S.A.', 'S.r.l.', or equivalent. Maximum 150 characters, minimum 1 character. Trade names and informal abbreviations without legal status are not acceptable; the registered legal name is required.",
+          "example": "Telnyx LLC, Acme Florist Limited, Bloom & Petal GmbH, or Empresa Ejemplo S.A. The submitted name must match the company's official registration certificate; informal trading names ('Acme', 'Bloom') without the legal suffix are not acceptable.",
+          "id": "d3641c72-734e-4421-8bca-510b4137c0c5"
+        },
+        {
+          "field_type": "document",
+          "acceptance_criteria": {
+            "max_length": null,
+            "regex": null,
+            "case_sensitive": false,
+            "acceptable_characters": null,
+            "acceptable_values": null,
+            "locality_limit": null,
+            "min_length": null,
+            "time_limit": null
+          },
+          "name": "Business Registration Certificate",
+          "description": "An official document issued by the relevant government authority or commercial registry confirming that a company is legally registered and authorized to conduct business within its jurisdiction. The certificate must evidence the entity's legal existence and must clearly display the registered legal company name (matching the order), the unique registration or incorporation number, the date of registration or incorporation, the registered business address, and the issuing authority. Submitted as a clear color scan or original PDF in the local language or English. Should be dated within the past 3 months for jurisdictions where currency of the document is required. Photographs, screenshots, and unsigned drafts are not acceptable.",
+          "example": "A Certificate of Incorporation issued by a U.S. Secretary of State, a Certificate of Incorporation from Companies House in the United Kingdom, a Handelsregisterauszug (commercial register extract) in Germany, an Extrait Kbis in France, or a Business Registration Certificate issued by the Inland Revenue Department in Hong Kong. The document should display the company's legal name, registration or incorporation number, date of registration, registered address, business activity, and the issuing registry's seal or letterhead.",
+          "id": "d3c53fbc-6fe6-42ef-af5d-a5811503a7a1"
+        }
+      ],
+      "phone_number_type": "local"
+    }
+  ]
+}

@@ -18,7 +18,7 @@ from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from fastapi import status as http_status
-from hailhq.api.audit import write_audit_log
+from hailhq.api.audit import actor_of, write_audit_log
 from hailhq.api.deps import Principal, get_current_principal
 from hailhq.api.errors import unprocessable
 from hailhq.api.funds import FUNDS_RESPONSES
@@ -40,7 +40,6 @@ from hailhq.api.route_prefixes import request_mount_prefix
 from hailhq.api.routes.sms import get_sms_provider
 from hailhq.core import telephony_catalog
 from hailhq.core.carrier_routing import DIDWW, TELNYX, TWILIO, sms_route
-from hailhq.core.config import settings
 from hailhq.core.db import get_session
 from hailhq.core.models import NumberOffer, PhoneNumber
 from hailhq.core.number_offers import (
@@ -311,6 +310,7 @@ async def release_number(
     )
     await release_org_number(db, provider, number)
     if not was_released:
+        actor_user_id, actor_kind = actor_of(principal)
         await write_audit_log(
             organization_id=principal.organization_id,
             api_key_id=principal.api_key_id,
@@ -318,6 +318,8 @@ async def release_number(
             resource_type="phone_number",
             resource_id=number.id,
             payload={"e164": number.e164},
+            actor_user_id=actor_user_id,
+            actor_kind=actor_kind,
         )
 
 
@@ -505,31 +507,18 @@ async def quote_numbers(
     cost, preferring Twilio on equivalent ties. Blocked offers sort by verification effort. SMS capability does not waive messaging registration requirements.
     """
 
-    # The catalog decides the kinds Twilio/Telnyx can be searched for; DIDWW
-    # is searched for every kind when it is configured. A kind the catalog
-    # does not list is never quoted for Twilio/Telnyx (the purchase would
-    # 422), so it is only searched at DIDWW.
-    providers = PROVIDERS if body.provider == "auto" else [body.provider]
-    didww_on = DIDWW in providers and bool(settings.didww_api_key)
-    catalog_kinds = [
-        k
-        for k in ("local", "mobile", "national", "toll_free")
-        if telephony_catalog.capabilities(body.country_code, k) is not None
-    ]
+    # Only number types the requested carrier's catalog lists (any carrier
+    # for 'auto') can be bought, so only those are searched.
     if body.number_type:
-        if body.number_type not in catalog_kinds and not didww_on:
-            catalog_capabilities(body.country_code, body.number_type)
+        catalog_capabilities(body.country_code, body.number_type, body.provider)
         kinds = [body.number_type]
     else:
-        kinds = catalog_kinds + (
-            [
-                k
-                for k in ("local", "mobile", "national", "toll_free")
-                if k not in catalog_kinds
-            ]
-            if didww_on
-            else []
-        )
+        kinds = [
+            k
+            for k in ("local", "mobile", "national", "toll_free")
+            if telephony_catalog.capabilities(body.country_code, k, body.provider)
+            is not None
+        ]
         if not kinds:
             raise unprocessable(
                 f"we don't offer numbers in {body.country_code} yet",
@@ -538,6 +527,7 @@ async def quote_numbers(
     # Carrier discovery takes seconds. End the transaction the auth lookup
     # opened so this request does not hold a pooled connection while it waits.
     await db.commit()
+    providers = PROVIDERS if body.provider == "auto" else [body.provider]
     batches = await asyncio.gather(
         *(
             discover_offers(
@@ -545,7 +535,15 @@ async def quote_numbers(
                 body.country_code,
                 kind,
                 body.capabilities,
-                providers=providers if kind in catalog_kinds else [DIDWW],
+                # Ask only the carriers whose own catalog lists this kind:
+                # the purchase checks the quoted carrier's catalog, and a
+                # quote must never show an offer the purchase would refuse.
+                providers=[
+                    p
+                    for p in providers
+                    if telephony_catalog.capabilities(body.country_code, kind, p)
+                    is not None
+                ],
             )
             for kind in kinds
         )
