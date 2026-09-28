@@ -623,13 +623,12 @@
       "sms": false,
       "mms": false,
       "verification_required": false,
-      "available": false,
+      "available": true,
       "last_verified": "2026-09-28",
       "last_changed_at": "2026-09-26",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
-      "source_url": "https://doc.didww.com/api3/2026-04-16/coverage-resources/did-group/get-did-groups.html",
-      "notes": "not offered by the carrier as of 2026-09-28; kept so held numbers stay billable"
+      "source_url": "https://doc.didww.com/api3/2026-04-16/coverage-resources/did-group/get-did-groups.html"
     },
     {
       "country_code": "CO",
