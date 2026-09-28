@@ -89,7 +89,7 @@ _TYPE_NAMES = {
 
 def approved_address_ref(org: UUID, country: str, kind: str) -> str:
     """``external_reference_id`` the verification plug-in stamps on an
-    address whose papers passed validation and a superadmin approved."""
+    address whose papers passed DIDWW's validation. No person reviews them."""
     return f"hail:{org}:{country}:{kind}"
 
 

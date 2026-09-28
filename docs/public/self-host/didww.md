@@ -11,8 +11,10 @@ curl -X POST "$HAIL_API_URL/calls" -H "Authorization: Bearer $HAIL_API_KEY" \
   -d '{"from":"+351300000000","to":"+14155550100","system_prompt":"Be brief.","recipient_consent":true}'
 ```
 
-Buying goes through the normal quote flow once `DIDWW_API_KEY` is set. Not
-supported on DIDWW: SMS (offers are voice only) and inbound calls.
+Buying goes through the normal quote flow once `DIDWW_API_KEY` and
+`LIVEKIT_DIDWW_SIP_OUTBOUND_TRUNK_ID` are both set; with either one empty no
+DIDWW number is quoted. Not supported on DIDWW: SMS (offers are voice only)
+and inbound calls.
 
 ## 1. DIDWW account
 
@@ -92,13 +94,21 @@ Order of events for a country that needs end-user registration:
 
 1. `readiness: verification_required` → the customer fills `/verifications`
    (console wizard). Hail creates the identity, address and proofs at DIDWW and
-   validates them (`address_requirement_validations`). A superadmin approves.
+   validates them (`address_requirement_validations`). Papers that pass are
+   approved at once. No person reviews them
+   ([`create_verification`](../../../api/hailhq/api/routes/verifications.py)).
 2. `POST /numbers` reserves setup + first month, orders the DID
    (`provisioning_state: pending`).
 3. The reconciler files the registration (`address_verifications`) once the
    DID exists and polls it. DIDWW approves in 1–3 days → `active`.
 4. Rejected → `failed`, the DID is terminated, the monthly fee is refunded,
-   the setup fee stays. A pending order is failed and refunded after 7 days.
+   the setup fee is charged (DIDWW billed it and does not refund).
+5. Still pending after 7 days → `failed`. DID exists: terminated, monthly fee
+   refunded, setup fee charged. No DID: setup and monthly fee refunded.
+
+If the terminate call fails, the DID id is kept in
+`provisioning_metadata.unterminated_did_id` and logged; release it in the
+DIDWW panel.
 
 Schemas: [`openapi/openapi.yaml`](../../../openapi/openapi.yaml). Code:
 [`providers/voice/didww.py`](../../../core/hailhq/core/providers/voice/didww.py),

@@ -42,7 +42,7 @@ reconciler ──> didww_order_outcome ──> GET /dids?filter[order.id] ──
 ## Flow and states
 
 1. **Quote.** `didww_offers()` runs next to `twilio_offers` and `telnyx_offers` inside `discover_offers`. Offers carry the live price and `readiness`.
-2. **Papers.** When the offer says `verification_required`, the customer fills the wizard. The DIDWW plug-in creates identity, address and proofs at DIDWW and runs `POST /address_requirement_validations`. A 422 becomes field problems and the draft is discarded. Success makes the Hail verification row `approved`, meaning "papers valid, ready to buy". A superadmin still approves the row as today.
+2. **Papers.** When the offer says `verification_required`, the customer fills the wizard. The DIDWW plug-in creates identity, address and proofs at DIDWW and runs `POST /address_requirement_validations`. A 422 becomes field problems and the draft is discarded. Success makes the Hail verification row `approved`, meaning "papers valid, ready to buy". No person reviews the papers: the row is submitted in the same request (`docs/operations/carrier-verification.md`).
 3. **Order.** `acquire_offer` reserves setup + first month, inserts the number as `pending`, and calls `place_didww_order`: `POST /orders` with one `did_order_items` entry (`available_did_id`, `sku_id`, `allow_back_ordering=false`). No DID reservation step: a number that vanished between quote and order is a 409, like Twilio. The order id is stored in `provisioning_metadata.order_id`.
 4. **Outcome.** `Carrier.async_orders=True` for DIDWW, so the reconciler polls `didww_order_outcome` every `ORDER_POLL_INTERVAL`:
    - order `canceled` → `failed`.
@@ -108,7 +108,7 @@ reconciler ──> didww_order_outcome ──> GET /dids?filter[order.id] ──
 ## Error handling
 
 - DIDWW unreachable during quotes → carrier listed in `unavailable_providers`, no offer. Never a zero price.
-- DIDWW 4xx on order (other than 408/409) → `failed`, full refund, like Twilio. 5xx or timeout → stays `pending` for the reconciler.
+- DIDWW 4xx on order (other than 408/409) → `failed`, full refund, like Twilio. 5xx or timeout on `POST /orders` → stays `pending` for the reconciler. A failed inventory search before the order (`CarrierPreOrderError`) → `failed`, full refund, at once.
 - Reconciler lookup errors → retried until `pending_timeout`, then failed with refund and an operator log line naming the order.
 - Rate limit 429 → treated as a transient lookup error.
 - Validation 422 → field problems shown in the wizard; nothing is left behind at DIDWW.
