@@ -23,6 +23,7 @@ REQ_ID = "r0000000-0000-0000-0000-000000000005"
 def _configured(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(settings, "didww_api_key", "test-key")
     monkeypatch.setattr(settings, "didww_environment", "sandbox")
+    monkeypatch.setattr(settings, "livekit_didww_sip_outbound_trunk_id", "ST_didww")
     mod.lookup_ids.cache_clear()
 
 
@@ -222,6 +223,14 @@ async def test_unknown_country_yields_nothing():
 async def test_unconfigured_yields_nothing(monkeypatch):
     monkeypatch.setattr(settings, "didww_api_key", "")
     assert await didww_offers(ORG, "PT", "national", ["voice"]) == []
+
+
+@responses.activate
+async def test_no_trunk_yields_nothing(monkeypatch):
+    """A number that cannot dial is never quoted, so it is never sold."""
+    monkeypatch.setattr(settings, "livekit_didww_sip_outbound_trunk_id", "")
+    assert await didww_offers(ORG, "PT", "national", ["voice"]) == []
+    assert len(responses.calls) == 0
 
 
 @responses.activate

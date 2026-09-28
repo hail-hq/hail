@@ -206,8 +206,13 @@ async def didww_offers(
     e164: str | None = None,
 ) -> list[CarrierOffer]:
     """Live DIDWW inventory for one country and number type. Voice only:
-    an ``sms`` request never gets a DIDWW offer."""
-    if not settings.didww_api_key or "sms" in capabilities:
+    an ``sms`` request never gets a DIDWW offer. No offer without the
+    outbound trunk either: a number that cannot dial is never sold."""
+    if (
+        not settings.didww_api_key
+        or not settings.livekit_didww_sip_outbound_trunk_id
+        or "sms" in capabilities
+    ):
         return []
     return await asyncio.to_thread(_offers_sync, org, country, kind, e164)
 

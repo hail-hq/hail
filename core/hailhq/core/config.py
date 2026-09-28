@@ -146,7 +146,8 @@ class Settings(BaseSettings):
     livekit_sip_inbound_trunk_id: str = ""
     livekit_telnyx_sip_outbound_trunk_id: str = ""
     # Second carrier. A number's ``provider`` picks the trunk
-    # (core/hailhq/core/carrier_routing.py). Empty = DIDWW numbers cannot dial.
+    # (core/hailhq/core/carrier_routing.py). Empty = DIDWW numbers cannot dial
+    # and DIDWW offers are hidden.
     livekit_didww_sip_outbound_trunk_id: str = ""
 
     # Storage
