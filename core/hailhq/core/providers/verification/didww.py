@@ -60,7 +60,8 @@ _LABELS = {
     "service_description": "What the number is used for",
 }
 _KINDS = {"phone_number": "phone"}
-# Identity attributes DIDWW accepts; everything else stays in Hail's form only.
+# Identity attributes DIDWW accepts, next to the mandatory fields the
+# requirement itself names; everything else stays in Hail's form only.
 _IDENTITY_ATTRS = frozenset(_LABELS) - {"service_description"}
 
 
@@ -321,7 +322,12 @@ class DidwwVerificationProvider(VerificationProvider):
             )
         clean = {k: v.strip() for k, v in fields.items() if v and v.strip()}
         identity_type = _SUBJECT_TO_DIDWW[requirements.subject_type]
-        identity_attrs = {k: v for k, v in clean.items() if k in _IDENTITY_ATTRS}
+        # The requirement's own field names came from DIDWW, so they go to
+        # DIDWW even when Hail has no label for them.
+        asked = {f.name for f in requirements.fields} - {"service_description"}
+        identity_attrs = {
+            k: v for k, v in clean.items() if k in _IDENTITY_ATTRS | asked
+        }
         refs: dict = {
             "organization_id": organization_id,
             "country_code": requirements.country_code,

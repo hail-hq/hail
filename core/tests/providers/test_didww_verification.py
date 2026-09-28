@@ -80,6 +80,7 @@ def _requirement(
     address_qty=1,
     service_description=False,
     area="country",
+    personal_fields=("birth_date", "id_number"),
 ):
     responses.add(
         responses.GET,
@@ -97,7 +98,7 @@ def _requirement(
                         "personal_proof_qty": personal_qty,
                         "business_proof_qty": 1,
                         "address_proof_qty": address_qty,
-                        "personal_mandatory_fields": ["birth_date", "id_number"],
+                        "personal_mandatory_fields": list(personal_fields),
                         "business_mandatory_fields": ["company_reg_number"],
                         "service_description_required": service_description,
                         "restriction_message": "Local presence required.",
@@ -352,6 +353,36 @@ async def test_create_draft_happy_path(provider):
         "relationships"
     ]
     assert validation["address_requirement"]["data"]["id"] == REQ_ID
+
+
+@responses.activate
+async def test_create_draft_sends_mandatory_field_hail_has_no_label_for(provider):
+    """DIDWW names a mandatory field Hail does not list. The form shows it,
+    so the identity must carry it. A field DIDWW did not ask for is dropped."""
+    _static()
+    _requirement(personal_fields=("birth_date", "description"))
+    req = await provider.requirements("PT", "national", "person")
+    assert "description" in [f.name for f in req.fields]
+    _draft_endpoints()
+    fields, address, documents = _inputs()
+    fields = {**fields, "description": "Freelancer", "not_asked": "x"}
+    result = await provider.create_draft(
+        organization_id=ORG,
+        contact_email="ops@hail.test",
+        requirements=req,
+        fields=fields,
+        address=address,
+        documents=documents,
+    )
+    assert result.problems == []
+    sent = next(
+        json.loads(c.request.body)["data"]["attributes"]
+        for c in responses.calls
+        if c.request.method == "POST" and c.request.url.endswith("/identities")
+    )
+    assert sent["description"] == "Freelancer"
+    assert "not_asked" not in sent
+    assert "service_description" not in sent
 
 
 @responses.activate
