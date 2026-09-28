@@ -15,7 +15,7 @@ from hailhq.core.providers.verification.base import (
     Requirements,
 )
 
-__all__ = ["pick_option", "validate_input"]
+__all__ = ["address_complete", "pick_option", "validate_input"]
 
 
 def pick_option(slot: DocumentSlot, doc: DocumentInput) -> DocumentOption | None:
@@ -23,6 +23,21 @@ def pick_option(slot: DocumentSlot, doc: DocumentInput) -> DocumentOption | None
     if not doc.option and len(slot.options) == 1:
         return slot.options[0]
     return next((o for o in slot.options if o.key == doc.option), None)
+
+
+def address_complete(address: Address | None) -> bool:
+    """True when every part of the address is filled in."""
+    return address is not None and all(
+        v.strip()
+        for v in (
+            address.customer_name,
+            address.street,
+            address.city,
+            address.region,
+            address.postal_code,
+            address.country_code,
+        )
+    )
 
 
 def validate_input(
@@ -75,19 +90,6 @@ def validate_input(
         for spec in option.fields:
             check_field(spec, doc.fields.get(spec.name), f"{slot.name}.{spec.name}")
 
-    if needs_address and (
-        address is None
-        or not all(
-            v.strip()
-            for v in (
-                address.customer_name,
-                address.street,
-                address.city,
-                address.region,
-                address.postal_code,
-                address.country_code,
-            )
-        )
-    ):
+    if needs_address and not address_complete(address):
         problems.append(Problem(field="address", message="A full address is required."))
     return problems

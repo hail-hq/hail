@@ -33,7 +33,11 @@ from hailhq.core.providers.verification.base import (
     VerificationProvider,
     VerificationProviderError,
 )
-from hailhq.core.providers.verification.forms import pick_option, validate_input
+from hailhq.core.providers.verification.forms import (
+    address_complete,
+    pick_option,
+    validate_input,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -207,20 +211,7 @@ class TelnyxVerificationProvider(VerificationProvider):
         problems = validate_input(requirements, fields, address, documents)
         # Telnyx lists the address as its own requirement, not as part of a
         # document, so the shared check above never asks for it.
-        if requirements.address_required and (
-            address is None
-            or not all(
-                v.strip()
-                for v in (
-                    address.customer_name,
-                    address.street,
-                    address.city,
-                    address.region,
-                    address.postal_code,
-                    address.country_code,
-                )
-            )
-        ):
+        if requirements.address_required and not address_complete(address):
             problems.append(
                 Problem(field="address", message="A full address is required.")
             )
