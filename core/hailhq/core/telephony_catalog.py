@@ -14,12 +14,19 @@ import os
 from functools import lru_cache
 from pathlib import Path
 
-__all__ = ["capabilities"]
+__all__ = ["CALLS_ONLY", "capabilities"]
 
 # In the API image costs/ is copied to /app/costs (see api/Dockerfile); in dev
 # the module sits at core/hailhq/core/ so parents[3] is the repo root. An env
 # var overrides both (tests, alternate layouts).
 _DEFAULT_DIR = Path(__file__).resolve().parents[3] / "costs"
+
+
+# Carriers Hail routes no SMS through (``carrier_routing.CARRIERS[...].sms_route``
+# is None). Their catalog rows may list SMS, because the carrier sells it;
+# Hail cannot deliver it, so it is never promised. A test keeps this set in
+# step with ``CARRIERS``.
+CALLS_ONLY = frozenset({"didww"})
 
 
 def _path(provider: str) -> Path:
@@ -49,6 +56,11 @@ def capabilities(
         providers = (provider,)
     for name in providers:
         row = _load(name).get((country_code, number_type))
-        if row:
-            return {"voice": row["voice"], "sms": row["sms"], "mms": row["mms"]}
+        if not row:
+            continue
+        if name in CALLS_ONLY:
+            if not row["voice"]:
+                continue  # an SMS-only number Hail cannot use at this carrier
+            return {"voice": True, "sms": False, "mms": False}
+        return {"voice": row["voice"], "sms": row["sms"], "mms": row["mms"]}
     return None
