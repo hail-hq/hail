@@ -42,3 +42,6 @@ jobs:
           commit-message: "chore(costs): number catalog sync"
           body-path: /tmp/sync-summary.md
           labels: costs-sync
+          # The review request is what sends the email: GitHub does not
+          # notify anyone about a bot's new pull request on its own.
+          reviewers: r13i
