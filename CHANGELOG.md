@@ -4,8 +4,52 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 
 ## [Unreleased]
 
+## [0.25.0] — 2026-09-28
+
+Hardening after the `/v1` move: rate-limit buckets key on the parsed token,
+deprecation headers only go on real legacy routes, MCP discovery no longer
+500s on odd bodies, and every SMS surface states the same sender rule.
+Verifications are sent to the carrier when created, and each carrier has its
+own number catalog.
+
+Component versions cut alongside this release:
+**`cli-v0.24.0`** (Homebrew + GitHub Releases). The SDK stays at `sdk-v0.17.0`
+(docstring change only).
+
+### Changed
+
+- **`email.received` webhook URLs.** `raw_url` and each attachment `url` are
+  built from `HAIL_API_URL` and start with `/v1`, matching
+  [docs/public/webhooks.md](docs/public/webhooks.md) and `GET /v1/emails/{id}`.
+  Before, they carried the host SES posted to and the legacy path. Consumers
+  that match the old prefix must update.
+- **`API_RATE_LIMIT_PER_MINUTE` must be ≥ 1.** `0` or a negative value fails
+  at startup instead of returning 429 or 500 on every request.
+- **`hail tail` waits on 429.** It sleeps for `Retry-After` and retries the
+  same cursor. `--no-follow` waits once, then returns the API error.
+- `/healthz`, `/openapi.json`, `/docs`, `/redoc` and unmatched paths no longer
+  carry `Deprecation` and `Link` headers. Only matched legacy customer routes
+  do.
+- Anonymous MCP `tools/list` needs an `Mcp-Session-Id`; `notifications/initialized`
+  is accepted with one before auth. Anonymous `initialize` counts are pruned.
+- **Number catalog files.** `costs/telephony.json` is now `costs/twilio.json`
+  and `costs/schema/telephony.schema.json` is now
+  `costs/schema/numbers.schema.json` (v3). Rows gain `provider`,
+  `verification_required`, `available` and optional `setup_usd`.
+
 ### Added
 
+- **Verifications go to the carrier at creation.** `POST /v1/verifications`
+  submits the draft to the carrier. If the carrier refuses or is down, the
+  row stays `awaiting_review` and a background worker retries it once it is
+  2 minutes old. The same worker pulls the carrier's decision for submitted
+  rows. Interval: `HAIL_VERIFICATION_POLL_SECONDS` (default 600).
+  `DELETE /v1/verifications/{id}` returns 409 while one is under review.
+- **One number catalog per carrier.** `costs/telnyx.json` and
+  `costs/didww.json` join `costs/twilio.json`. `POST /v1/numbers` checks the
+  quoted carrier's own catalog. `scripts/costs/sync_numbers.py` fills the
+  catalogs from the carriers' APIs; rows marked hand-verified are never
+  overwritten. New `.env.example` key: `DIDWW_API_KEY`.
 - **Telnyx verification plug-in.** Countries where Telnyx needs the number
   holder verified (Sweden, Portugal, Italy, ...) now go through the same
   `/v1/verifications` flow as Twilio: the form comes from Telnyx's own
@@ -15,6 +59,29 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 
 ### Fixed
 
+- Rate-limit buckets key on the parsed bearer token, so `Bearer K`,
+  `bearer K` and `Bearer  K` share one bucket.
+- The deprecation `Link` header is percent-encoded and keeps the query string.
+  A non-latin-1 path returned 500. An existing `Link` is appended to, not
+  replaced.
+- MCP discovery returned 500 on `[]`, `{}`, deeply nested or huge-integer
+  bodies before auth. It returns 401.
+- `/v1/sms/inbound` and `/v1/sms/status` verify the Twilio signature against
+  the mounted URL.
+- MCP tool errors on 429 carry the retry delay when `Retry-After` is
+  delta-seconds.
+- OpenAPI text: the email send description and its 502 response match the
+  code. `SmsCreate.from` and `SuppressionResponse.source` describe what the
+  code does: without `from`, UK and Germany use the org sender ID or `HAIL`,
+  Australia always `HAIL`, everywhere else the org's oldest active SMS-capable
+  number (422 with none). The same rule is stated in the MCP `send_sms`
+  docstring, SDK `sms.create`, `hail sms --help` and
+  [docs/public/architecture.md](docs/public/architecture.md).
+- docs-site: 92 redirects from the old operationId slugs.
+- CI: `openapi-check.yml` also runs on `core/**`.
+- Number quotes listed Twilio under `unavailable_providers` for countries
+  where Twilio sells no numbers of that type (for example PT local). An empty
+  Twilio inventory is now an empty offer list.
 - Telnyx numbers with no ordering rules (US and CA local) were skipped as
   "unknown coverage" because Telnyx answers an empty list for them. They are
   now offered as ready.
