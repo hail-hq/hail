@@ -38,12 +38,13 @@ export function Footer({
               hail.so
             </a>
             <p>
-              Email, SMS, and agentic phone calls for AI agents and backend
-              applications. Open source or managed cloud.
+              Hail sends and receives email, SMS, and phone calls for AI agents
+              and backend applications. Use the open source version or the
+              managed service.
             </p>
             <div className="hail-footer-social">
-              <a href="https://github.com/hail-hq/hail">GitHub ↗</a>
-              <a href="https://x.com/redouaneoachour">X ↗</a>
+              <a href="https://github.com/hail-hq/hail">GitHub</a>
+              <a href="https://x.com/redouaneoachour">X</a>
             </div>
           </div>
           {groups.map((group) => (
@@ -85,10 +86,6 @@ export function Footer({
         )}
         <div className="hail-footer-end">
           <span>© {new Date().getFullYear()} hail.so</span>
-          <span>
-            give your ai agent a voice, a real phone number, and an inbox
-          </span>
-          <span>MCP · CLI · REST</span>
           {themeControl}
         </div>
       </div>

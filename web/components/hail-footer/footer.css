@@ -67,7 +67,7 @@
   color: var(--hf-muted);
   font-size: 12px;
   font-weight: 500;
-  letter-spacing: 0.06em;
+  letter-spacing: 0;
   margin: 0 0 8px;
 }
 .hail-footer-badges {
@@ -106,7 +106,7 @@
 }
 .hail-footer .theme-toggle {
   display: flex;
-  gap: 6px;
+  gap: 14px;
 }
 .hail-footer .theme-toggle button {
   border: 0;
