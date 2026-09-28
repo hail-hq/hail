@@ -16,7 +16,9 @@ supported on DIDWW: SMS (offers are voice only) and inbound calls.
 
 ## 1. DIDWW account
 
-1. Sign up at [my.didww.com](https://my.didww.com).
+1. Sign up at [my.didww.com](https://my.didww.com), billed in **USD**. Hail
+   reads DIDWW's SKU prices as USD cents with no currency conversion or
+   check; a non-USD account will silently mis-price every DIDWW number.
 2. Outbound trunks are off by default. Ask `support@didww.com` to enable
    "Outbound Trunks" on the account.
 3. Numbers are bought through Hail ([§5](#5-buying-a-number)); the DIDWW
