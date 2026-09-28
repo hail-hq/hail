@@ -472,7 +472,8 @@
     border-bottom: 2px solid var(--color-ink);
     background: var(--color-bg);
     position: sticky;
-    top: var(--head-h);
+    /* The shared site header scrolls away; filters stick to the viewport. */
+    top: 0;
     z-index: 20;
   }
   .toolbar .row {

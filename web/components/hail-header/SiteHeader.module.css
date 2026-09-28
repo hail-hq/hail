@@ -1,0 +1,255 @@
+/* Self-contained website chrome for costs and docs, independent of each app's theme variables. */
+.header {
+  --a: #1665ff;
+  --bg: #f5f3ed;
+  --fg: #111;
+  --muted: #686868;
+  --hairline: color-mix(in srgb, var(--fg) 18%, transparent);
+  /* Match the website: navigation scrolls away with the page. */
+  position: relative;
+  z-index: 40;
+  background: var(--bg);
+  border-bottom: 1px solid var(--hairline);
+  font-family: var(--font-mono), monospace;
+  font-size: 14px;
+  text-transform: lowercase;
+  color: var(--fg);
+}
+@media (prefers-color-scheme: dark) {
+  :global(html:not([data-theme="light"]):not(.light)) .header {
+    --bg: #0a0a0a;
+    --fg: #eeeae2;
+    --muted: #99968f;
+    --a: #4b82ff;
+  }
+}
+:global(html[data-theme="dark"]) .header,
+:global(html.dark) .header {
+  --bg: #0a0a0a;
+  --fg: #eeeae2;
+  --muted: #99968f;
+  --a: #4b82ff;
+}
+:global(html[data-theme="light"]) .header,
+:global(html.light) .header {
+  --bg: #f5f3ed;
+  --fg: #111;
+  --muted: #686868;
+  --a: #1665ff;
+}
+.header * {
+  border-radius: 0;
+}
+.header a {
+  color: inherit;
+}
+
+.shell {
+  width: min(1100px, calc(100% - 40px));
+  margin-inline: auto;
+  min-height: 72px;
+  display: flex;
+  align-items: center;
+  gap: 36px;
+  flex-wrap: wrap;
+  padding-block: 10px;
+}
+.logo {
+  font-weight: 700;
+  font-size: 20px;
+  letter-spacing: -0.045em;
+  margin-right: auto;
+}
+
+.nav {
+  display: flex;
+  align-items: center;
+  gap: 22px;
+  flex-wrap: wrap;
+}
+.navLink {
+  color: inherit;
+  border: 0;
+  background: none;
+  font: inherit;
+  text-transform: inherit;
+  cursor: pointer;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+}
+.navLink:hover {
+  color: var(--a);
+}
+.navLink.active {
+  color: var(--a);
+}
+
+.dropdown {
+  position: relative;
+}
+.panel {
+  position: absolute;
+  top: calc(100% + 14px);
+  left: 0;
+  min-width: 200px;
+  background: var(--bg);
+  border: 1px solid var(--hairline);
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.panel a {
+  display: block;
+  padding: 3px 0;
+}
+.panel a:hover {
+  color: var(--a);
+}
+.panelGroup {
+  color: var(--muted);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  margin-bottom: 6px;
+}
+
+.navActions {
+  display: flex;
+  align-items: center;
+  gap: 22px;
+}
+.primary {
+  display: inline-block;
+  background: var(--fg);
+  color: var(--bg) !important;
+  border: 1px solid var(--fg);
+  padding: 9px 15px;
+  font-weight: 700;
+  text-transform: inherit;
+}
+.primary:hover {
+  background: var(--a);
+  border-color: var(--a);
+}
+
+.themeControl button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border: 1px solid var(--hairline);
+  background: transparent;
+  color: var(--fg);
+  cursor: pointer;
+}
+.themeControl button:hover {
+  border-color: var(--fg);
+}
+.menuToggle {
+  display: none;
+}
+.header :is(a, button):focus-visible {
+  outline: 2px solid var(--a);
+  outline-offset: 4px;
+}
+.primary {
+  white-space: nowrap;
+}
+@media (max-width: 1100px) {
+  .shell {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 0 16px;
+    min-height: 72px;
+  }
+  .logo {
+    margin-right: 0;
+    justify-self: start;
+  }
+  .navActions {
+    gap: 10px;
+    grid-column: 2;
+    grid-row: 1;
+  }
+  .themeControl button {
+    width: 44px;
+    height: 44px;
+  }
+  .menuToggle {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 44px;
+    height: 44px;
+    border: 1px solid var(--hairline);
+    background: transparent;
+    color: var(--fg);
+    cursor: pointer;
+  }
+  .nav {
+    display: none;
+    grid-column: 1 / -1;
+    grid-row: 2;
+    padding-top: 16px;
+    margin-top: 10px;
+    border-top: 1px solid var(--hairline);
+  }
+  .navOpen {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0;
+  }
+  .navLink {
+    display: flex;
+    min-height: 44px;
+    padding: 10px 0;
+    width: 100%;
+  }
+  .panel {
+    position: static;
+    min-width: 0;
+    margin-bottom: 12px;
+    padding: 12px 16px;
+  }
+  .panel a {
+    display: flex;
+    align-items: center;
+    min-height: 44px;
+    padding: 8px 0;
+  }
+}
+@media (max-width: 600px) {
+  .shell {
+    width: calc(100% - 28px);
+    gap: 0 10px;
+    min-height: 64px;
+  }
+  .navActions {
+    gap: 8px;
+  }
+  .primary {
+    padding: 11px 10px;
+    font-size: 12px;
+    min-height: 44px;
+    display: flex;
+    align-items: center;
+  }
+}
+
+.header a {
+  text-decoration: none;
+}
+.header {
+  line-height: 1.65;
+}
+.header *,
+.header *::before,
+.header *::after {
+  box-sizing: border-box;
+}

@@ -44,6 +44,14 @@
     "title": "Free tools",
     "links": [
       {
+        "label": "DMARC Report Analyzer",
+        "href": "/tools/dmarc-report-analyzer"
+      },
+      {
+        "label": "AI Voice Agent Prompt Builder",
+        "href": "/tools/voice-agent-prompt-builder"
+      },
+      {
         "label": "AI Voice Agent Cost Calculator",
         "href": "/tools/voice-agent-cost-calculator"
       },
