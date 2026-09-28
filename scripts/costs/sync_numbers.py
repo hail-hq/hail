@@ -12,10 +12,9 @@ Rules the merge follows, in this order:
   never overwritten and never marked unavailable. Disagreements are printed.
 - A row that vanished from the carrier is kept with available=false, a note
   and the date. A held number must stay billable; the picker hides it.
-- A row the sync could not observe this run (no numbers offered to this
-  account, no price, no dial code, out of stock at DIDWW, or a country the
-  account's listing does not enumerate at all) is left exactly as it was: not seeing stock is not
-  the same as the carrier dropping the type.
+- A row the sync could not observe this run (no numbers in stock, no price,
+  no dial code, or a country the sync account cannot see) is left exactly as
+  it was: not seeing stock is not the same as the carrier dropping the type.
 - A carrier without credentials is skipped with a printed reason, not an error.
 
 Calls, texts and MMS flags: a feature a sampled number has is a yes. For a
