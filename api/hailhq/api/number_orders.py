@@ -160,6 +160,26 @@ async def finish_order(
     await db.commit()
 
 
+async def stop_renewal(number: PhoneNumber, did_id: str) -> None:
+    """Terminate a DIDWW number the order will not keep. Never raises. When
+    the carrier call fails, the DID id is kept on the row as
+    ``unterminated_did_id``: a failed order stores no resource id, and the
+    DID renews at the carrier until someone releases it by hand. Saved by
+    the caller's ``finish_order``."""
+    try:
+        await terminate_did(did_id)
+    except Exception:
+        logger.exception(
+            "Could not terminate DIDWW number; release it by hand: number=%s did=%s",
+            number.id,
+            did_id,
+        )
+        number.provisioning_metadata = {
+            **number.provisioning_metadata,
+            "unterminated_did_id": did_id,
+        }
+
+
 async def carrier_outcome(
     number: PhoneNumber,
 ) -> tuple[
@@ -255,19 +275,11 @@ async def reconcile_order(
         # refused. Stop its renewal and give the monthly fee back; the setup
         # fee stays (the carrier billed it and does not refund).
         if resource_id:
-            try:
-                # Unlike carrier_outcome above, this carrier call runs under
-                # the org lock on purpose: two concurrent reconciles must
-                # never both see "pending" and both submit a terminate for
-                # the same DID.
-                await terminate_did(resource_id)
-            except Exception:
-                logger.exception(
-                    "Could not terminate rejected DIDWW number; release it by hand: "
-                    "number=%s did=%s",
-                    number.id,
-                    resource_id,
-                )
+            # Unlike carrier_outcome above, this carrier call runs under
+            # the org lock on purpose: two concurrent reconciles must
+            # never both see "pending" and both submit a terminate for
+            # the same DID.
+            await stop_renewal(number, resource_id)
         # Take the approval back, so the next quote asks for new papers
         # instead of filing the same rejected ones again.
         reason = None
@@ -343,15 +355,7 @@ async def reconcile_order(
             # The DID exists but its registration never cleared. Stop its
             # renewal; the setup fee stays (DIDWW billed it and does not
             # refund).
-            try:
-                await terminate_did(resource_id)
-            except Exception:
-                logger.exception(
-                    "Could not terminate timed-out DIDWW number; release it by "
-                    "hand: number=%s did=%s",
-                    number.id,
-                    resource_id,
-                )
+            await stop_renewal(number, resource_id)
             await finish_order(
                 db,
                 number,

@@ -180,6 +180,7 @@ async def test_didww_registration_rejected_refunds_monthly_only(
     assert number.provisioning_state == "failed"
     assert "registration" in number.provisioning_metadata["failure_reason"]
     terminate.assert_awaited_once_with(DID)
+    assert "unterminated_did_id" not in number.provisioning_metadata
     assert await get_balance_cents(async_session, org) == 100000 - 350
     setup = (
         await async_session.execute(
@@ -356,6 +357,35 @@ async def test_didww_timeout_terminate_failure_still_finishes(
     await _age(async_session, number, timedelta(days=7, minutes=1))
     await reconcile_order(async_session, number, force=True)
     assert number.provisioning_state == "failed"
+    assert await get_balance_cents(async_session, org) == 100000 - 350
+    # The DID still renews at the carrier: its id is kept on the row.
+    await async_session.refresh(number)
+    assert number.provisioning_metadata["unterminated_did_id"] == DID
+
+
+async def test_didww_rejected_terminate_failure_keeps_the_did_id(
+    async_session, org_and_key, monkeypatch
+):
+    org, _, _ = org_and_key
+    row, offer = await seed_quote(async_session, org)
+    monkeypatch.setattr(
+        "hailhq.api.number_orders.place_didww_order", AsyncMock(return_value=ORDER)
+    )
+    outcome = AsyncMock(return_value=("pending", None, ORDER))
+    monkeypatch.setattr("hailhq.api.number_orders.didww_order_outcome", outcome)
+    monkeypatch.setattr(
+        "hailhq.api.number_orders.terminate_did",
+        AsyncMock(side_effect=RuntimeError("500")),
+    )
+    monkeypatch.setattr(
+        "hailhq.api.number_orders.revoke_registration", AsyncMock(return_value=None)
+    )
+    number = await buy(async_session, org, row, monkeypatch, offer)
+    outcome.return_value = ("rejected_registration", DID, ORDER)
+    await reconcile_order(async_session, number, force=True)
+    await async_session.refresh(number)
+    assert number.provisioning_state == "failed"
+    assert number.provisioning_metadata["unterminated_did_id"] == DID
     assert await get_balance_cents(async_session, org) == 100000 - 350
 
 
