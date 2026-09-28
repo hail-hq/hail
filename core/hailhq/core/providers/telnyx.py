@@ -49,12 +49,14 @@ class TelnyxClient:
             raise ValueError("Telnyx API key is not configured")
         self.client = client
 
-    async def request(self, method: str, path: str, **kwargs) -> dict:
+    async def request(
+        self, method: str, path: str, *, timeout: float = 20, **kwargs
+    ) -> dict:
         response = await (self.client or get_http_client()).request(
             method,
             join_url(TELNYX_API_BASE, path),
             headers={"Authorization": f"Bearer {self.api_key}"},
-            timeout=20,
+            timeout=timeout,
             follow_redirects=False,
             **kwargs,
         )

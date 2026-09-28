@@ -1,0 +1,79 @@
+{
+  "data": [
+    {
+      "phone_number_type": "mobile",
+      "action": "ordering",
+      "country_code": "SE",
+      "regulatory_requirements": [
+        {
+          "example": "A PDF of an Iberdrola electricity bill dated within the last 90 days, addressed to the customer at a Spanish residential address, for a Spain phone number order. The bill must show the customer's name, full service address, and the issuer's logo and billing date.",
+          "id": "0ba49bfa-8a0b-4e38-95ba-f1291507fad4",
+          "name": "Proof of Address (National), Recent Utility Bill or Invoice",
+          "description": "A document evidencing the customer's physical address within the same country as the phone number being purchased, dated within the past 3 months. Acceptable documents include utility bills (electricity, water, gas, internet, landline telephone), bank statements, tax notices, or government-issued correspondence. The document must clearly show (1) the full name of the individual or registered business name, (2) the complete physical address (street, postal code, city, country), and (3) the document issue date. The document must be submitted as a PDF or clear color scan. Screenshots, handwritten documents, mobile phone bills (when not the proof of residence), and bills older than 3 months are not acceptable.",
+          "field_type": "document",
+          "acceptance_criteria": {
+            "max_length": null,
+            "regex": null,
+            "case_sensitive": true,
+            "acceptable_characters": null,
+            "acceptable_values": [],
+            "locality_limit": null,
+            "min_length": null,
+            "time_limit": null
+          }
+        },
+        {
+          "example": "For a Spanish phone number: Calle de Alcal\u00e1 42, 28014 Madrid, Spain. For a German phone number: Friedrichstra\u00dfe 123, 10117 Berlin, Germany. The address must be a deliverable physical location, not a P.O. box or virtual mailbox.",
+          "id": "0e84f7f9-d195-4d02-9873-9ac4b99c276d",
+          "name": "Address (National)",
+          "description": "A valid, real-world physical address located in the same country as the phone number being purchased. The address must include street name and number, postal or ZIP code, city, region or province (where applicable), and country. The address does not need to match the specific city or area code of the number; any address within the national borders is acceptable. P.O. boxes, virtual office addresses, mailbox-only services, and addresses outside the country of the phone number are not acceptable. The address should match the address shown on supporting identity or business registration documents where those are also required.",
+          "field_type": "address",
+          "acceptance_criteria": {
+            "max_length": null,
+            "regex": null,
+            "case_sensitive": true,
+            "acceptable_characters": null,
+            "acceptable_values": null,
+            "locality_limit": null,
+            "min_length": null,
+            "time_limit": null
+          }
+        },
+        {
+          "example": "Contact: Maria Garc\u00eda L\u00f3pez | Business: Bloom & Petal Florist Ltd. | Phone: +34 612 345 678. For individual end users: Contact: John Smith | Business: N/A | Phone: +1 (555) 123-4567.",
+          "id": "2708e569-696a-4fc7-9305-5fdb3eb9c7dd",
+          "name": "Contact Information (Name, Business Name, Phone Number)",
+          "description": "Contact information for the business or end user, including: (1) the name of the contact person (full given name and family name), (2) the business name when the end user is a business (registered   legal name where applicable; may be omitted or stated as 'N/A' for individual end users), and (3) one or more contact phone numbers where the business or end user can be reached. Contact person name and at least one phone number are mandatory; business name is required only when the end user is a business entity. Phone numbers should be in international E.164 format where possible.",
+          "field_type": "textual",
+          "acceptance_criteria": {
+            "max_length": null,
+            "regex": null,
+            "case_sensitive": true,
+            "acceptable_characters": null,
+            "acceptable_values": null,
+            "locality_limit": null,
+            "min_length": null,
+            "time_limit": null
+          }
+        },
+        {
+          "example": "For an individual end user with a Spanish phone number: a color scan of both sides of a Spanish DNI. For a business end user with a Spanish phone number: a copy of the company's registration certificate from the Spanish Registro Mercantil.",
+          "id": "6f9a47f5-da93-4e7b-91ab-02e38b596d70",
+          "name": "Local Government-Issued ID/Passport Copy or Local Company Registration Certificate",
+          "description": "Either (a) a clear color copy of a valid, unexpired government-issued ID or passport for the individual end user (issued by the same country as the phone number); OR (b) a copy of the company registration or incorporation certificate issued by the local government registry of that same country. The choice depends on whether the end user is an individual (option a) or a business (option b). Documents from countries other than the phone number's country are not acceptable. ID/passports must show full name, photograph, date of birth, document number, and expiration date and must not be expired. Business certificates must show legal name, registration number, registration date, and registered address.",
+          "field_type": "document",
+          "acceptance_criteria": {
+            "max_length": null,
+            "regex": null,
+            "case_sensitive": true,
+            "acceptable_characters": null,
+            "acceptable_values": [],
+            "locality_limit": null,
+            "min_length": null,
+            "time_limit": null
+          }
+        }
+      ]
+    }
+  ]
+}

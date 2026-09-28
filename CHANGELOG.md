@@ -50,6 +50,12 @@ Component versions cut alongside this release:
   quoted carrier's own catalog. `scripts/costs/sync_numbers.py` fills the
   catalogs from the carriers' APIs; rows marked hand-verified are never
   overwritten. New `.env.example` key: `DIDWW_API_KEY`.
+- **Telnyx verification plug-in.** Countries where Telnyx needs the number
+  holder verified (Sweden, Portugal, Italy, ...) now go through the same
+  `/v1/verifications` flow as Twilio: the form comes from Telnyx's own
+  requirements, files go to Telnyx, and approval submits the requirement
+  group. Pass `provider=telnyx` on `GET /v1/verifications/requirements` and
+  `POST /v1/verifications`; the default provider stays Twilio.
 
 ### Fixed
 
