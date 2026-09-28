@@ -395,7 +395,7 @@
       "mms": false,
       "verification_required": false,
       "available": true,
-      "notes": "monthly price varies by area: 3.50 to 6.00 USD across 88 areas",
+      "notes": "monthly price varies by area: 3.50 to 6.00 USD across 87 areas",
       "last_verified": "2026-09-28",
       "last_changed_at": "2026-09-26",
       "verification_method": "carrier-sync",
@@ -623,12 +623,13 @@
       "sms": false,
       "mms": false,
       "verification_required": false,
-      "available": true,
+      "available": false,
       "last_verified": "2026-09-28",
       "last_changed_at": "2026-09-26",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
-      "source_url": "https://doc.didww.com/api3/2026-04-16/coverage-resources/did-group/get-did-groups.html"
+      "source_url": "https://doc.didww.com/api3/2026-04-16/coverage-resources/did-group/get-did-groups.html",
+      "notes": "not offered by the carrier as of 2026-09-28; kept so held numbers stay billable"
     },
     {
       "country_code": "CO",
@@ -3003,7 +3004,7 @@
       "mms": false,
       "verification_required": false,
       "available": true,
-      "notes": "monthly price varies by area: 1.20 to 20.00 USD across 2187 areas",
+      "notes": "monthly price varies by area: 1.20 to 20.00 USD across 2185 areas",
       "last_verified": "2026-09-28",
       "last_changed_at": "2026-09-26",
       "verification_method": "carrier-sync",
