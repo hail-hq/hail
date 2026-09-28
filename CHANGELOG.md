@@ -4,7 +4,7 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 
 ## [Unreleased]
 
-## [0.25.0] — 2026-09-26
+## [0.25.0] — 2026-09-28
 
 Hardening after the `/v1` move: rate-limit buckets key on the parsed token,
 deprecation headers only go on real legacy routes, MCP discovery no longer
