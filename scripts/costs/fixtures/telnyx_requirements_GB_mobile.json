@@ -1,0 +1,16 @@
+{
+  "data": [
+    {
+      "id": "ca91adb3-9ac4-4185-8b61-3e767efa3eef",
+      "country_code": "GB",
+      "phone_number_type": "mobile",
+      "action": "ordering"
+    }
+  ],
+  "meta": {
+    "page_number": 1,
+    "page_size": 20,
+    "total_pages": 1,
+    "total_results": 1
+  }
+}

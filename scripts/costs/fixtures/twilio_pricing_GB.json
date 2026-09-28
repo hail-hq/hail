@@ -1,0 +1,20 @@
+{
+  "country": "United Kingdom",
+  "iso_country": "GB",
+  "phone_number_prices": [
+    { "base_price": "1.15", "current_price": "1.15", "number_type": "local" },
+    { "base_price": "2.50", "current_price": "2.50", "number_type": "mobile" },
+    {
+      "base_price": "1.15",
+      "current_price": "1.15",
+      "number_type": "national"
+    },
+    {
+      "base_price": "2.70",
+      "current_price": "2.70",
+      "number_type": "toll free"
+    }
+  ],
+  "price_unit": "USD",
+  "url": "https://pricing.twilio.com/v1/PhoneNumbers/Countries/GB"
+}

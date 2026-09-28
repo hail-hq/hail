@@ -34,6 +34,17 @@ from hailhq.core.models import AuditLog
 logger = logging.getLogger(__name__)
 
 
+def actor_of(principal: Any) -> tuple[UUID | None, str]:
+    """(actor_user_id, actor_kind) for an authenticated principal."""
+    if getattr(principal, "superadmin", False):
+        return principal.user_id, "superadmin"
+    if principal.api_key_id is not None:
+        return principal.user_id, "api_key"
+    if principal.user_id is not None:
+        return principal.user_id, "user"
+    return None, "system"
+
+
 async def write_audit_log(
     organization_id: UUID,
     api_key_id: UUID | None,
@@ -41,6 +52,9 @@ async def write_audit_log(
     resource_type: str,
     resource_id: UUID | None,
     payload: dict[str, Any],
+    *,
+    actor_user_id: UUID | None = None,
+    actor_kind: str | None = None,
 ) -> None:
     """Append an ``audit_log`` row in a fresh session. Never re-raises."""
     try:
@@ -53,6 +67,8 @@ async def write_audit_log(
                     resource_type=resource_type,
                     resource_id=resource_id,
                     payload=payload,
+                    actor_user_id=actor_user_id,
+                    actor_kind=actor_kind,
                 )
             )
             await session.commit()
@@ -65,4 +81,4 @@ async def write_audit_log(
         )
 
 
-__all__ = ["write_audit_log"]
+__all__ = ["actor_of", "write_audit_log"]

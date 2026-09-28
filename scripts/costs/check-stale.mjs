@@ -15,7 +15,9 @@ const ROW_ARRAYS = {
   llm: ['models'],
   stt: ['models'],
   tts: ['models'],
-  telephony: ['numbers', 'a2p_10dlc'],
+  twilio: ['numbers', 'a2p_10dlc'],
+  telnyx: ['numbers'],
+  didww: ['numbers'],
   sms: ['providers'],
 };
 

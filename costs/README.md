@@ -11,7 +11,7 @@ Programmatic consumers (agents, scripts, dashboards) should fetch directly:
 - LLMs: <https://raw.githubusercontent.com/hail-hq/hail/main/costs/llm.json>
 - STT: <https://raw.githubusercontent.com/hail-hq/hail/main/costs/stt.json>
 - TTS: <https://raw.githubusercontent.com/hail-hq/hail/main/costs/tts.json>
-- Telephony: <https://raw.githubusercontent.com/hail-hq/hail/main/costs/telephony.json>
+- Phone numbers, one file per carrier: <https://raw.githubusercontent.com/hail-hq/hail/main/costs/twilio.json>, <https://raw.githubusercontent.com/hail-hq/hail/main/costs/telnyx.json>, <https://raw.githubusercontent.com/hail-hq/hail/main/costs/didww.json>
 - SMS base rates: <https://raw.githubusercontent.com/hail-hq/hail/main/costs/sms.json>
 
 Schemas are served at their `$id` URLs:
@@ -20,13 +20,13 @@ Schemas are served at their `$id` URLs:
 - <https://hail.so/costs/schema/stt.json>
 - <https://hail.so/costs/schema/tts.json>
 - <https://hail.so/costs/schema/sms.json>
-- <https://hail.so/costs/schema/telephony.json>
+- <https://hail.so/costs/schema/numbers.json> (shared by the three number catalogs)
 
 **Note:** The interactive `web/` compare view and `costs.md` markdown export do not yet include telephony or SMS data (out of scope; a later PR).
 
 ## How AI agents should use this
 
-Model files (llm/stt/tts) share a common envelope: `{ version, license, models[] }`. Every model row has `provider`, `model_id`, `display_name`, primary price fields (as decimal strings, e.g. `"5.0"`), `last_verified`, `last_changed_at`, `verification_method`, `verified_by`, and `source_url`. The `telephony.json` file instead carries `numbers[]` and `a2p_10dlc[]`, since a phone number is not a model. See the JSON Schemas above for the exact shape per category.
+Model files (llm/stt/tts) share a common envelope: `{ version, license, models[] }`. Every model row has `provider`, `model_id`, `display_name`, primary price fields (as decimal strings, e.g. `"5.0"`), `last_verified`, `last_changed_at`, `verification_method`, `verified_by`, and `source_url`. The number catalogs (`twilio.json`, `telnyx.json`, `didww.json`) instead carry `provider` and `numbers[]` (Twilio's also `a2p_10dlc[]`), since a phone number is not a model. Each number row has `verification_required`: the buyer must be verified (ID, address or regulatory bundle) before purchase. Refresh: `uv run python scripts/costs/sync_numbers.py --env-file .env`. See the JSON Schemas above for the exact shape per category.
 
 Canonical fetch pattern:
 

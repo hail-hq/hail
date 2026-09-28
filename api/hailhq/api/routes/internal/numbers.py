@@ -80,6 +80,7 @@ async def release_number_internal(
             resource_type="phone_number",
             resource_id=number.id,
             payload={"e164": number.e164, "source": body.source},
+            actor_kind="system",
         )
     return {
         "number_id": str(number.id),

@@ -2951,6 +2951,9 @@ type WhoamiResponse struct {
 	// OrganizationId Organization the caller belongs to.
 	OrganizationId openapi_types.UUID `json:"organization_id"`
 
+	// Superadmin True for a Hail staff console session acting on this organization.
+	Superadmin *bool `json:"superadmin,omitempty"`
+
 	// UserId The authenticated user's id. Null for 'shared' callers.
 	UserId *openapi_types.UUID `json:"user_id,omitempty"`
 }

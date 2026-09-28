@@ -18,7 +18,7 @@ from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from fastapi import status as http_status
-from hailhq.api.audit import write_audit_log
+from hailhq.api.audit import actor_of, write_audit_log
 from hailhq.api.deps import Principal, get_current_principal
 from hailhq.api.errors import unprocessable
 from hailhq.api.funds import FUNDS_RESPONSES
@@ -302,6 +302,7 @@ async def release_number(
     )
     await release_org_number(db, provider, number)
     if not was_released:
+        actor_user_id, actor_kind = actor_of(principal)
         await write_audit_log(
             organization_id=principal.organization_id,
             api_key_id=principal.api_key_id,
@@ -309,6 +310,8 @@ async def release_number(
             resource_type="phone_number",
             resource_id=number.id,
             payload={"e164": number.e164},
+            actor_user_id=actor_user_id,
+            actor_kind=actor_kind,
         )
 
 
@@ -496,16 +499,17 @@ async def quote_numbers(
     cost, preferring Twilio on equivalent ties. Blocked offers sort by verification effort. SMS capability does not waive messaging registration requirements.
     """
 
-    # Only number types the telephony catalog lists can be bought, so only
-    # those are searched.
+    # Only number types the requested carrier's catalog lists (any carrier
+    # for 'auto') can be bought, so only those are searched.
     if body.number_type:
-        catalog_capabilities(body.country_code, body.number_type)
+        catalog_capabilities(body.country_code, body.number_type, body.provider)
         kinds = [body.number_type]
     else:
         kinds = [
             k
             for k in ("local", "mobile", "national", "toll_free")
-            if telephony_catalog.capabilities(body.country_code, k) is not None
+            if telephony_catalog.capabilities(body.country_code, k, body.provider)
+            is not None
         ]
         if not kinds:
             raise unprocessable(

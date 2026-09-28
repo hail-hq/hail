@@ -1,12 +1,14 @@
 "use client";
 
 import type { ColumnDef } from "@tanstack/react-table";
-import type { TelephonyNumberRow } from "@/lib/types";
+import type { NumberRow } from "@/lib/types";
 import { CategorySection } from "../category-section";
 import { VerifiedCell } from "../verified-cell";
 import { priceRange, usd } from "@/lib/format";
 
-const columns: ColumnDef<TelephonyNumberRow>[] = [
+const PROVIDER_LABEL: Record<NumberRow["provider"], string> = { twilio: "Twilio", telnyx: "Telnyx", didww: "DIDWW" };
+
+const columns: ColumnDef<NumberRow>[] = [
   {
     id: "number",
     accessorKey: "display_name",
@@ -19,6 +21,12 @@ const columns: ColumnDef<TelephonyNumberRow>[] = [
         </div>
       </div>
     ),
+  },
+  {
+    id: "provider",
+    accessorKey: "provider",
+    header: "Carrier",
+    cell: ({ row }) => PROVIDER_LABEL[row.original.provider] ?? row.original.provider,
   },
   {
     id: "price",
@@ -50,6 +58,13 @@ const columns: ColumnDef<TelephonyNumberRow>[] = [
     meta: { num: true },
   },
   {
+    id: "verify",
+    header: "Verify first",
+    accessorKey: "verification_required",
+    cell: ({ row }) => (row.original.verification_required ? "yes" : "—"),
+    meta: { num: true },
+  },
+  {
     id: "verified",
     accessorKey: "last_verified",
     header: "Verified",
@@ -59,9 +74,9 @@ const columns: ColumnDef<TelephonyNumberRow>[] = [
   },
 ];
 
-export function TelephonySection({ data }: { data: TelephonyNumberRow[] }) {
+export function TelephonySection({ data }: { data: NumberRow[] }) {
   return (
-    <CategorySection<TelephonyNumberRow>
+    <CategorySection<NumberRow>
       id="telephony"
       num="04"
       title="Phone numbers"

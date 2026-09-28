@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://hail.so/costs/schema/sms.json",
   "title": "SMS Costs",
-  "description": "Provider base rates for outbound SMS per message segment (US long code / 10DLC). Base rates only — A2P carrier pass-through fees live in telephony.json's a2p_10dlc section and are additional for every provider.",
+  "description": "Provider base rates for outbound SMS per message segment (US long code / 10DLC). Base rates only — A2P carrier pass-through fees live in twilio.json's a2p_10dlc section and are additional for every provider.",
   "type": "object",
   "required": ["version", "license", "providers"],
   "additionalProperties": false,

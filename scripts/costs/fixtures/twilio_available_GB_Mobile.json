@@ -1,0 +1,24 @@
+{
+  "available_phone_numbers": [
+    {
+      "address_requirements": "none",
+      "beta": false,
+      "capabilities": {
+        "MMS": false,
+        "SMS": true,
+        "voice": true
+      },
+      "friendly_name": "+447414105536",
+      "iso_country": "GB",
+      "lata": null,
+      "latitude": "0.000000",
+      "locality": null,
+      "longitude": "0.000000",
+      "phone_number": "+447414105536",
+      "postal_code": null,
+      "rate_center": null,
+      "region": null
+    }
+  ],
+  "uri": "/2010-04-01/Accounts/ACXXXX/AvailablePhoneNumbers/GB/Mobile.json?PageSize=2"
+}

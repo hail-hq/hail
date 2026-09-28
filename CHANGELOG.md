@@ -53,6 +53,12 @@ Component versions cut alongside this release:
   [docs/public/architecture.md](docs/public/architecture.md).
 - docs-site: 92 redirects from the old operationId slugs.
 - CI: `openapi-check.yml` also runs on `core/**`.
+- Telnyx numbers with no ordering rules (US and CA local) were skipped as
+  "unknown coverage" because Telnyx answers an empty list for them. They are
+  now offered as ready.
+- Telnyx voice searches no longer require the `emergency` feature. It is a
+  US/CA emergency-address capability, not an outbound-calling requirement,
+  and most numbers outside North America lack it.
 
 ## [0.24.0] — 2026-09-25
 

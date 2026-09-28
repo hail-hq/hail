@@ -864,12 +864,14 @@ async def test_quote_number_type_is_taken_from_the_quote(
     client, async_session, org_and_key, monkeypatch
 ):
     org, _, key = org_and_key
-    row, offer = await seed_quote(async_session, org, kind="mobile")
+    # PT local is the one type the committed telnyx.json lists (live data);
+    # the purchase gate reads the quoted carrier's own catalog.
+    row, offer = await seed_quote(async_session, org, kind="local")
     await _stub_order(monkeypatch, offer, {"data": {"id": str(uuid4())}})
     headers = {"Authorization": f"Bearer {key}"}
     conflict = await client.post(
         "/numbers",
-        json={"country_code": "PT", "quote_id": str(row.id), "number_type": "local"},
+        json={"country_code": "PT", "quote_id": str(row.id), "number_type": "mobile"},
         headers=headers,
     )
     assert conflict.status_code == 422
@@ -879,7 +881,7 @@ async def test_quote_number_type_is_taken_from_the_quote(
         headers=headers,
     )
     assert ok.status_code == 201, ok.text
-    assert ok.json()["number_type"] == "mobile"
+    assert ok.json()["number_type"] == "local"
 
 
 async def test_quote_purchase_of_a_type_missing_from_the_catalog_is_422(

@@ -42,6 +42,7 @@ async def test_whoami_resolves_the_api_key_owner(
         "user_id": str(user_id),
         "email": "sarah@acme.test",
         "name": "Sarah Chen",
+        "superadmin": False,
     }
 
 
@@ -80,6 +81,7 @@ async def test_whoami_on_the_shared_key_has_no_human(
         "user_id": None,
         "email": None,
         "name": None,
+        "superadmin": False,
     }
 
 
