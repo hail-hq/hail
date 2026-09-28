@@ -1558,7 +1558,7 @@
       "usd_per_month": "3.25",
       "voice": true,
       "sms": true,
-      "mms": true,
+      "mms": false,
       "verification_required": false,
       "available": true,
       "last_verified": "2026-09-28",
