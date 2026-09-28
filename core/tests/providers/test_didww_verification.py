@@ -411,6 +411,7 @@ async def test_create_draft_validation_failure_discards_everything(provider):
         "identities/id-1",
     ):
         responses.add(responses.DELETE, f"{BASE}/{path}", status=204)
+    responses.add(responses.GET, f"{BASE}/addresses", json={"data": []})
     fields, address, documents = _inputs()
     result = await provider.create_draft(
         organization_id=ORG,
@@ -747,6 +748,73 @@ async def test_discard_keeps_reused_identity(provider):
         if c.request.method == "DELETE"
     ]
     assert deleted == ["proofs/proof-1", "encrypted_files/file-1", "addresses/addr-1"]
+
+
+def _created_refs():
+    return {
+        "identity_id": "id-1",
+        "identity_created": True,
+        "address_id": "addr-1",
+        "proof_ids": ["proof-1"],
+        "file_ids": ["file-1"],
+    }
+
+
+def _deleted():
+    return [
+        c.request.url.split("/v3/")[1]
+        for c in responses.calls
+        if c.request.method == "DELETE"
+    ]
+
+
+@responses.activate
+async def test_discard_keeps_created_identity_another_address_uses(provider):
+    """A later registration reused this identity. Dismissing the older draft
+    must not delete it."""
+    for path in ("proofs/proof-1", "encrypted_files/file-1", "addresses/addr-1"):
+        responses.add(responses.DELETE, f"{BASE}/{path}", status=204)
+    responses.add(
+        responses.GET,
+        f"{BASE}/addresses",
+        json={"data": [{"id": "addr-2", "type": "addresses", "attributes": {}}]},
+    )
+    await provider.discard(_created_refs())
+    assert _deleted() == [
+        "proofs/proof-1",
+        "encrypted_files/file-1",
+        "addresses/addr-1",
+    ]
+    lookup = next(c.request.url for c in responses.calls if c.request.method == "GET")
+    assert "filter%5Bidentity.id%5D=id-1" in lookup
+
+
+@responses.activate
+async def test_discard_deletes_created_identity_nothing_else_uses(provider):
+    for path in (
+        "proofs/proof-1",
+        "encrypted_files/file-1",
+        "addresses/addr-1",
+        "identities/id-1",
+    ):
+        responses.add(responses.DELETE, f"{BASE}/{path}", status=204)
+    responses.add(responses.GET, f"{BASE}/addresses", json={"data": []})
+    await provider.discard(_created_refs())
+    assert _deleted()[-1] == "identities/id-1"
+
+
+@responses.activate
+async def test_discard_keeps_identity_when_the_lookup_fails(provider):
+    for path in ("proofs/proof-1", "encrypted_files/file-1", "addresses/addr-1"):
+        responses.add(responses.DELETE, f"{BASE}/{path}", status=204)
+    responses.add(
+        responses.GET,
+        f"{BASE}/addresses",
+        status=500,
+        json={"errors": [{"title": "x"}]},
+    )
+    await provider.discard(_created_refs())
+    assert "identities/id-1" not in _deleted()
 
 
 def test_registered_when_configured():

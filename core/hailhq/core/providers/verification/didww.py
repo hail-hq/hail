@@ -538,10 +538,31 @@ class DidwwVerificationProvider(VerificationProvider):
         paths += [f"encrypted_files/{f}" for f in refs.get("file_ids", [])]
         if refs.get("address_id"):
             paths.append(f"addresses/{refs['address_id']}")
-        if refs.get("identity_id") and refs.get("identity_created"):
-            paths.append(f"identities/{refs['identity_id']}")
         for path in paths:
+            self._delete(path)
+        if refs.get("identity_id") and refs.get("identity_created"):
+            # A later registration may have reused the identity this draft
+            # created. Delete it only when no address is left on it.
             try:
-                self._client.delete(path)
+                in_use = self._client.get(
+                    "addresses",
+                    params={
+                        "filter[identity.id]": refs["identity_id"],
+                        "page[size]": 1,
+                    },
+                )["data"]
             except Exception:
-                logger.warning("didww discard of %s failed", path, exc_info=True)
+                logger.warning(
+                    "didww identity %s kept: address lookup failed",
+                    refs["identity_id"],
+                    exc_info=True,
+                )
+                return
+            if not in_use:
+                self._delete(f"identities/{refs['identity_id']}")
+
+    def _delete(self, path: str) -> None:
+        try:
+            self._client.delete(path)
+        except Exception:
+            logger.warning("didww discard of %s failed", path, exc_info=True)
