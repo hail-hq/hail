@@ -213,7 +213,11 @@ async def _release_didww(number: PhoneNumber, provider: VoiceProvider) -> None:
     try:
         await release_didww_number(number.provider_resource_id)
     except CarrierNotConfigured as exc:
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
+        # The customer reads this: never the carrier's name or an env var.
+        logger.error("DIDWW release failed: %s", exc)
+        raise HTTPException(
+            status_code=503, detail="the carrier is not configured"
+        ) from exc
 
 
 _RELEASERS = {TELNYX: _release_telnyx, TWILIO: _release_twilio, DIDWW: _release_didww}

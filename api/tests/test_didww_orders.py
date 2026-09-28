@@ -8,11 +8,22 @@ from unittest.mock import AsyncMock
 import pytest
 from fastapi import HTTPException
 from hailhq.api.number_orders import acquire_offer, reconcile_order
+from hailhq.api.routes import numbers as numbers_routes
 from hailhq.core import telephony_catalog
 from hailhq.core.billing import get_balance_cents
-from hailhq.core.models import AccountCredit, AuditLog, CarrierVerification, NumberOffer
+from hailhq.core.models import (
+    AccountCredit,
+    AuditLog,
+    CarrierVerification,
+    NumberOffer,
+    PhoneNumber,
+)
 from hailhq.core.number_offers import CarrierOffer
-from hailhq.core.providers.voice import CarrierPreOrderError, CarrierRequestError
+from hailhq.core.providers.voice import (
+    CarrierNotConfigured,
+    CarrierPreOrderError,
+    CarrierRequestError,
+)
 from sqlalchemy import select, text
 
 ORDER = "o0000000-0000-0000-0000-000000000001"
@@ -587,3 +598,18 @@ async def test_quotes_for_one_carrier_search_only_its_kinds(
         call.args[2]: call.kwargs["providers"] for call in discover.await_args_list
     }
     assert searched == {"national": ["didww"]}
+
+
+async def test_release_without_carrier_key_does_not_name_the_carrier(monkeypatch):
+    monkeypatch.setattr(
+        numbers_routes,
+        "release_didww_number",
+        AsyncMock(
+            side_effect=CarrierNotConfigured("DIDWW is not configured (DIDWW_API_KEY)")
+        ),
+    )
+    number = PhoneNumber(provider="didww", provider_resource_id=DID)
+    with pytest.raises(HTTPException) as exc:
+        await numbers_routes._release_didww(number, None)
+    assert exc.value.status_code == 503
+    assert exc.value.detail == "the carrier is not configured"
