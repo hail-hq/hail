@@ -9,6 +9,8 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 Hardening after the `/v1` move: rate-limit buckets key on the parsed token,
 deprecation headers only go on real legacy routes, MCP discovery no longer
 500s on odd bodies, and every SMS surface states the same sender rule.
+Verifications are sent to the carrier when created, and each carrier has its
+own number catalog.
 
 Component versions cut alongside this release:
 **`cli-v0.24.0`** (Homebrew + GitHub Releases). The SDK stays at `sdk-v0.17.0`
@@ -30,6 +32,24 @@ Component versions cut alongside this release:
   do.
 - Anonymous MCP `tools/list` needs an `Mcp-Session-Id`; `notifications/initialized`
   is accepted with one before auth. Anonymous `initialize` counts are pruned.
+- **Number catalog files.** `costs/telephony.json` is now `costs/twilio.json`
+  and `costs/schema/telephony.schema.json` is now
+  `costs/schema/numbers.schema.json` (v3). Rows gain `provider`,
+  `verification_required`, `available` and optional `setup_usd`.
+
+### Added
+
+- **Verifications go to the carrier at creation.** `POST /v1/verifications`
+  submits the draft to the carrier. If the carrier refuses or is down, the
+  row stays `awaiting_review` and a background worker retries it once it is
+  2 minutes old. The same worker pulls the carrier's decision for submitted
+  rows. Interval: `HAIL_VERIFICATION_POLL_SECONDS` (default 600).
+  `DELETE /v1/verifications/{id}` returns 409 while one is under review.
+- **One number catalog per carrier.** `costs/telnyx.json` and
+  `costs/didww.json` join `costs/twilio.json`. `POST /v1/numbers` checks the
+  quoted carrier's own catalog. `scripts/costs/sync_numbers.py` fills the
+  catalogs from the carriers' APIs; rows marked hand-verified are never
+  overwritten. New `.env.example` key: `DIDWW_API_KEY`.
 
 ### Fixed
 
@@ -53,6 +73,9 @@ Component versions cut alongside this release:
   [docs/public/architecture.md](docs/public/architecture.md).
 - docs-site: 92 redirects from the old operationId slugs.
 - CI: `openapi-check.yml` also runs on `core/**`.
+- Number quotes listed Twilio under `unavailable_providers` for countries
+  where Twilio sells no numbers of that type (for example PT local). An empty
+  Twilio inventory is now an empty offer list.
 - Telnyx numbers with no ordering rules (US and CA local) were skipped as
   "unknown coverage" because Telnyx answers an empty list for them. They are
   now offered as ready.
