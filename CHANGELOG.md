@@ -4,6 +4,15 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 
 ## [Unreleased]
 
+### Added
+
+- **Telnyx verification plug-in.** Countries where Telnyx needs the number
+  holder verified (Sweden, Portugal, Italy, ...) now go through the same
+  `/v1/verifications` flow as Twilio: the form comes from Telnyx's own
+  requirements, files go to Telnyx, and approval submits the requirement
+  group. Pass `provider=telnyx` on `GET /v1/verifications/requirements` and
+  `POST /v1/verifications`; the default provider stays Twilio.
+
 ### Fixed
 
 - Telnyx numbers with no ordering rules (US and CA local) were skipped as

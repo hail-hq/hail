@@ -84,6 +84,12 @@ def _register_builtin() -> None:
     )
 
     register_verification_provider("twilio", TwilioVerificationProvider)
+    # After Twilio on purpose: the default (first configured) stays Twilio.
+    from hailhq.core.providers.verification.telnyx import (
+        TelnyxVerificationProvider,
+    )
+
+    register_verification_provider("telnyx", TelnyxVerificationProvider)
 
 
 _register_builtin()
