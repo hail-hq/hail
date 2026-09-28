@@ -1,3 +1,5 @@
+import { SiteHeader } from "@/components/hail-header/SiteHeader";
+import { HeaderTheme } from "@/components/header-theme";
 import { SiteFooter } from "@/components/site-footer";
 import { RootProvider } from "fumadocs-ui/provider/next";
 import type { Metadata } from "next";
@@ -46,7 +48,11 @@ export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html lang="en" suppressHydrationWarning className={fontMono.variable}>
       <body className="hail-docs flex min-h-screen flex-col">
-        <RootProvider theme={{ storageKey: "hail-theme" }}>{children}<SiteFooter /></RootProvider>
+        <RootProvider theme={{ storageKey: "hail-theme" }}>
+          <SiteHeader active="docs" themeControl={<HeaderTheme />} />
+          {children}
+          <SiteFooter />
+        </RootProvider>
       </body>
     </html>
   );

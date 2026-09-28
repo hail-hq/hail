@@ -13,11 +13,12 @@ export function FooterTheme() {
   return (
     <div>
       <b>theme</b>
-      <div className="theme-toggle">
+      <div className="theme-toggle" role="group" aria-label="Color theme">
         {(["system", "light", "dark"] as const).map((value, i) => (
           <span key={value}>
             {i > 0 ? "· " : ""}
             <button
+              type="button"
               aria-pressed={(mounted ? theme : "system") === value}
               onClick={() => setTheme(value)}
             >
