@@ -46,8 +46,12 @@ def test_twilio_gb_rows():
         ("GB", "toll_free"): [],
     }
     regulated = sync.twilio_regulated(load("twilio_regulations_GB.json")["results"])
+    caps = {
+        ("GB", "mobile"): {"voice": True, "sms": True, "mms": False},
+        ("GB", "local"): {"voice": True, "sms": False, "mms": False},
+    }
     rows, skipped = sync.map_twilio(
-        countries, types, pricing, samples, regulated, {"GB": "44"}
+        countries, types, pricing, samples, regulated, {"GB": "44"}, caps
     )
     by = {r["number_type"]: r for r in rows}
     assert by["mobile"]["usd_per_month"] == "2.50"
@@ -64,7 +68,11 @@ def test_telnyx_gb_mobile_row():
     sample = load("telnyx_available_GB_mobile.json")["data"]
     reqs = {("GB", "mobile"): load("telnyx_requirements_GB_mobile.json")["data"]}
     rows, skipped = sync.map_telnyx(
-        coverage, {("GB", "mobile"): sample}, reqs, {"GB": "44", "US": "1"}
+        coverage,
+        {("GB", "mobile"): sample},
+        reqs,
+        {"GB": "44", "US": "1"},
+        {("GB", "mobile"): {"voice": True, "sms": True, "mms": False}},
     )
     gb = next(
         r for r in rows if r["country_code"] == "GB" and r["number_type"] == "mobile"
@@ -96,6 +104,7 @@ def test_telnyx_no_requirements_means_no_verification():
         {("US", "local"): sample},
         {("US", "local"): load("telnyx_requirements_US_local.json")["data"]},
         {"US": "1"},
+        {("US", "local"): {"voice": True, "sms": True, "mms": True}},
     )
     assert rows[0]["verification_required"] is False and rows[0]["mms"] is True
 
@@ -120,7 +129,13 @@ def test_telnyx_price_range_is_noted():
             "features": [{"name": "voice"}],
         },
     ]
-    rows, _ = sync.map_telnyx(coverage, {("XX", "local"): sample}, {}, {"XX": "99"})
+    rows, _ = sync.map_telnyx(
+        coverage,
+        {("XX", "local"): sample},
+        {},
+        {"XX": "99"},
+        {("XX", "local"): {"voice": True, "sms": False, "mms": False}},
+    )
     assert rows[0]["usd_per_month"] == "1.00"
     assert "1.00 to 3.50" in rows[0]["notes"]
     assert "setup_usd" not in rows[0]
@@ -404,3 +419,79 @@ def test_merge_never_marks_a_hand_verified_row_unavailable():
     assert report["kept"] == [
         "PT:national: carrier no longer lists it; kept r13i 2026-09-25"
     ]
+
+
+def test_twilio_flags_come_from_the_filtered_search_not_the_sample():
+    """Puerto Rico local: the five sampled numbers had no MMS, the search
+    filtered on MMS found one. The catalog must say MMS yes, every run."""
+    countries = [{"country_code": "PR", "country": "Puerto Rico"}]
+    pricing = {
+        "PR": {
+            "phone_number_prices": [{"number_type": "local", "current_price": "3.25"}]
+        }
+    }
+    sample = [
+        {"capabilities": {"voice": True, "SMS": True, "MMS": False}} for _ in range(5)
+    ]
+    args = (countries, {"PR": ["local"]}, pricing, {("PR", "local"): sample}, set())
+    rows, skipped = sync.map_twilio(
+        *args, {"PR": "1"}, {("PR", "local"): {"voice": True, "sms": True, "mms": True}}
+    )
+    assert rows[0]["mms"] is True and rows[0]["sms"] is True and not skipped
+    # No answer for the pair: the row is skipped (left as it was), not guessed.
+    rows, skipped = sync.map_twilio(*args, {"PR": "1"}, {})
+    assert rows == [] and skipped == ["PR:local: capabilities not checked"]
+
+
+def test_telnyx_flags_come_from_coverage_plus_what_is_on_sale():
+    lt = {"code": "LT", "mobile": {"features": ["sms", "voice", "fax"]}}
+    voice_only = [{"features": [{"name": "voice"}]}]
+    # Coverage declares SMS; this week's sample happened to show none.
+    assert sync.telnyx_capabilities(lt, "mobile", voice_only) == {
+        "voice": True,
+        "sms": True,
+        "mms": False,
+    }
+    # Coverage declares nothing for the type; numbers on sale have SMS and MMS.
+    bm = {"code": "BM", "toll_free": {}}
+    us_pool = [{"features": [{"name": "voice"}, {"name": "sms"}, {"name": "mms"}]}]
+    assert sync.telnyx_capabilities(bm, "toll_free", us_pool) == {
+        "voice": True,
+        "sms": True,
+        "mms": True,
+    }
+
+
+def test_fetch_telnyx_makes_no_extra_searches():
+    number = {
+        "cost_information": {
+            "monthly_cost": "1.00000",
+            "upfront_cost": "0",
+            "currency": "USD",
+        },
+        "features": [{"name": "voice"}],
+    }
+    calls = []
+
+    class FakeHttp:
+        def get(self, url, params=None, **kw):
+            calls.append(url.rsplit("/", 1)[1])
+            if url.endswith("/country_coverage"):
+                return {
+                    "data": {
+                        "Lithuania": {
+                            "code": "LT",
+                            "numbers": True,
+                            "phone_number_type": ["mobile"],
+                            "mobile": {"features": ["sms", "voice"]},
+                        }
+                    }
+                }
+            if url.endswith("/requirements"):
+                return {"data": []}
+            return {"data": [number]}
+
+    rows, skipped = sync.fetch_telnyx(FakeHttp(), {"LT": "370"})
+    assert calls == ["country_coverage", "available_phone_numbers", "requirements"]
+    assert rows[0]["voice"] and rows[0]["sms"] and rows[0]["mms"] is False
+    assert not skipped
