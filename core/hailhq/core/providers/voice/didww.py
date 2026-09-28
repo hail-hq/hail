@@ -217,7 +217,10 @@ OrderState = Literal["active", "failed", "pending", "missing", "rejected_registr
 
 def _find_available(client: DidwwClient, e164: str) -> tuple[str, str]:
     """(available_did id, metered sku id) for one exact number, or
-    ``CarrierRequestError(409)`` when it is gone."""
+    ``CarrierRequestError(410)`` when it is gone. This is a local inventory
+    search that runs before any order is placed, so unlike a real carrier
+    conflict (409) the outcome is never ambiguous: no order exists yet and
+    the caller can fail and refund immediately."""
     body = client.get(
         "available_dids",
         params={
@@ -236,7 +239,7 @@ def _find_available(client: DidwwClient, e164: str) -> tuple[str, str]:
         sku = _metered_sku(group, index) if group else None
         if sku is not None:
             return did["id"], sku["id"]
-    raise CarrierRequestError(409)
+    raise CarrierRequestError(410)
 
 
 def _place_order_sync(number_id: UUID, e164: str) -> str:

@@ -10,7 +10,7 @@ from fastapi import HTTPException
 from hailhq.api.number_orders import acquire_offer, reconcile_order
 from hailhq.core import telephony_catalog
 from hailhq.core.billing import get_balance_cents
-from hailhq.core.models import AccountCredit, CarrierVerification, NumberOffer
+from hailhq.core.models import AccountCredit, AuditLog, CarrierVerification, NumberOffer
 from hailhq.core.number_offers import CarrierOffer
 from hailhq.core.providers.voice import CarrierRequestError
 from sqlalchemy import select, text
@@ -236,6 +236,16 @@ async def test_didww_registration_rejected_revokes_approval(
     await async_session.refresh(other)
     assert other.state == "approved"
     assert await get_balance_cents(async_session, org) == 100000 - 350
+    audit = (
+        await async_session.execute(
+            select(AuditLog).where(
+                AuditLog.action == "verification.reject",
+                AuditLog.resource_id == verification.id,
+            )
+        )
+    ).scalar_one()
+    assert audit.actor_kind == "system"
+    assert audit.payload["reason"] == "Document is blurry"
 
 
 async def test_didww_registration_rejected_refunds_even_if_revoke_fails(
@@ -375,6 +385,25 @@ async def test_didww_order_rejected_at_carrier_refunds_all(
     monkeypatch.setattr(
         "hailhq.api.number_orders.place_didww_order",
         AsyncMock(side_effect=CarrierRequestError(422)),
+    )
+    number = await buy(async_session, org, row, monkeypatch, offer)
+    assert number.provisioning_state == "failed"
+    assert await get_balance_cents(async_session, org) == 100000
+
+
+async def test_didww_number_gone_before_order_fails_immediately(
+    async_session, org_and_key, monkeypatch
+):
+    """place_didww_order's local inventory search (_find_available) raises a
+    410 when the number vanished before any order was POSTed. No order was
+    ever placed at the carrier, so this must fail and refund immediately
+    instead of sitting 'pending' for up to DIDWW's 7-day reconciliation
+    timeout (unlike Telnyx's ambiguous 408/409 post-POST timeouts)."""
+    org, _, _ = org_and_key
+    row, offer = await seed_quote(async_session, org)
+    monkeypatch.setattr(
+        "hailhq.api.number_orders.place_didww_order",
+        AsyncMock(side_effect=CarrierRequestError(410)),
     )
     number = await buy(async_session, org, row, monkeypatch, offer)
     assert number.provisioning_state == "failed"

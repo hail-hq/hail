@@ -128,13 +128,15 @@ async def test_place_order_uses_exact_number_and_metered_sku():
 
 
 @responses.activate
-async def test_place_order_number_gone_is_a_409():
+async def test_place_order_number_gone_is_a_410():
     responses.add(
         responses.GET, f"{BASE}/available_dids", json={"data": [], "included": []}
     )
     with pytest.raises(CarrierRequestError) as exc:
         await place_didww_order(NUMBER, E164, ADDR)
-    assert exc.value.status == 409
+    # 410 (not 409): no order was ever placed, so the caller can fail and
+    # refund immediately instead of treating it as an ambiguous outcome.
+    assert exc.value.status == 410
 
 
 @responses.activate

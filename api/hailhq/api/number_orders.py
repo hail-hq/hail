@@ -9,6 +9,7 @@ from uuid import UUID, uuid4
 
 import httpx
 from fastapi import HTTPException
+from hailhq.api.audit import write_audit_log
 from hailhq.api.deps import Principal
 from hailhq.api.errors import unprocessable
 from hailhq.api.funds import BILLING_URL
@@ -41,7 +42,7 @@ from hailhq.core.providers.voice.twilio import (
     purchase_ordered_number,
 )
 from hailhq.core.schemas import NumberAcquireRequest
-from sqlalchemy import and_, delete, or_, select, text, update
+from sqlalchemy import and_, delete, or_, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -283,21 +284,33 @@ async def reconcile_order(
                     address_id,
                 )
         reason = reason or "the carrier rejected the end-user registration"
-        await db.execute(
-            update(CarrierVerification)
-            .where(
-                CarrierVerification.organization_id == org,
-                CarrierVerification.provider == DIDWW,
-                CarrierVerification.country_code == number.country_code,
-                CarrierVerification.number_type == number.number_type,
-                CarrierVerification.state == "approved",
+        verification = (
+            await db.execute(
+                select(CarrierVerification).where(
+                    CarrierVerification.organization_id == org,
+                    CarrierVerification.provider == DIDWW,
+                    CarrierVerification.country_code == number.country_code,
+                    CarrierVerification.number_type == number.number_type,
+                    CarrierVerification.state == "approved",
+                )
             )
-            .values(
-                state="rejected",
-                rejection_reason=reason,
-                updated_at=datetime.now(timezone.utc),
+        ).scalar_one_or_none()
+        if verification is not None:
+            verification.state = "rejected"
+            verification.rejection_reason = reason
+            verification.updated_at = datetime.now(timezone.utc)
+            # Same audit trail as every other system-driven rejection
+            # (see _reject_row in routes/verifications.py).
+            await write_audit_log(
+                org,
+                None,
+                "verification.reject",
+                "carrier_verification",
+                verification.id,
+                {"rejected_by": None, "reason": reason},
+                actor_user_id=None,
+                actor_kind="system",
             )
-        )
         await finish_order(
             db,
             number,
