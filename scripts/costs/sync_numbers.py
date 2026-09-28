@@ -12,10 +12,9 @@ Rules the merge follows, in this order:
   never overwritten and never marked unavailable. Disagreements are printed.
 - A row that vanished from the carrier is kept with available=false, a note
   and the date. A held number must stay billable; the picker hides it.
-- A row the sync could not observe this run (no numbers offered to this
-  account, no price, no dial code, or a country the account's listing does
-  not enumerate at all) is left exactly as it was: not seeing stock is not
-  the same as the carrier dropping the type.
+- A row the sync could not observe this run (no numbers in stock, no price,
+  no dial code, or a country the sync account cannot see) is left exactly as
+  it was: not seeing stock is not the same as the carrier dropping the type.
 - A carrier without credentials is skipped with a printed reason, not an error.
 
 Calls, texts and MMS flags: a feature a sampled number has is a yes. For a
@@ -455,14 +454,16 @@ def map_didww(
             continue
         included = {(i["type"], i["id"]): i for i in payload.get("included", [])}
         by_type: dict[str, list[dict]] = defaultdict(list)
+        listed: set[str] = set()
         for g in payload.get("data", []):
-            if not g.get("meta", {}).get("is_available", True):
-                continue
             gt = g["relationships"].get("did_group_type", {}).get("data") or {}
             number_type = DIDWW_TYPE.get(group_types.get(gt.get("id"), ""))
             if not number_type:
                 if not gt.get("id"):
                     skipped.append(f"{iso}: group {g.get('id')} has no resolvable type")
+                continue
+            listed.add(number_type)
+            if not g.get("meta", {}).get("is_available", True):
                 continue
             skus = [
                 included[("stock_keeping_units", s["id"])]["attributes"]
@@ -489,6 +490,11 @@ def map_didww(
                     is not None,
                 }
             )
+        # DIDWW still lists the type but has nothing to sell right now (no
+        # stock, or no price on any group). Out of stock is not dropped: the
+        # line below keeps the row as it was instead of marking it gone.
+        for number_type in sorted(listed - set(by_type)):
+            skipped.append(f"{iso}:{number_type}: listed, no numbers in stock")
         for number_type, groups in by_type.items():
             prices = sorted(g["monthly"] for g in groups)
             cheapest = min(groups, key=lambda g: g["monthly"])

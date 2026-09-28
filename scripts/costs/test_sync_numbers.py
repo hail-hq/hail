@@ -495,3 +495,70 @@ def test_fetch_telnyx_makes_no_extra_searches():
     assert calls == ["country_coverage", "available_phone_numbers", "requirements"]
     assert rows[0]["voice"] and rows[0]["sms"] and rows[0]["mms"] is False
     assert not skipped
+
+
+def test_didww_out_of_stock_is_not_gone():
+    """Colombia mobile: DIDWW lists the group with a price but has no numbers
+    today (is_available false). The row must be left as it was."""
+    countries = [
+        {"id": "c1", "attributes": {"iso": "CO", "name": "Colombia", "prefix": "57"}}
+    ]
+    types = {"t-mobile": "Mobile", "t-local": "Local"}
+
+    def group(gid, tid, available):
+        return {
+            "id": gid,
+            "attributes": {"features": ["voice_in", "voice_out"]},
+            "meta": {"is_available": available, "needs_registration": False},
+            "relationships": {
+                "did_group_type": {"data": {"type": "did_group_types", "id": tid}},
+                "stock_keeping_units": {
+                    "data": [{"type": "stock_keeping_units", "id": f"sku-{gid}"}]
+                },
+            },
+        }
+
+    def sku(gid, price):
+        return {
+            "type": "stock_keeping_units",
+            "id": f"sku-{gid}",
+            "attributes": {
+                "monthly_price": price,
+                "setup_price": "0.0",
+                "channels_included_count": 0,
+            },
+        }
+
+    payload = {
+        "data": [group("g1", "t-mobile", False), group("g2", "t-local", True)],
+        "included": [sku("g1", "15.0"), sku("g2", "15.0")],
+    }
+    rows, skipped = sync.map_didww(countries, types, {"CO": payload})
+    assert [r["number_type"] for r in rows] == ["local"]
+    assert skipped == ["CO:mobile: listed, no numbers in stock"]
+    assert sync.skipped_keys(skipped) == {"CO:mobile"}
+    previous = {
+        "country_code": "CO",
+        "number_type": "mobile",
+        "dial_code": "57",
+        "usd_per_month": "15.00",
+        "voice": True,
+        "sms": False,
+        "mms": False,
+        "verification_required": False,
+        "available": True,
+        "last_verified": "2026-09-26",
+        "verification_method": "carrier-sync",
+        "verified_by": "didww-api-sync",
+    }
+    numbers, report = sync.merge(
+        [previous],
+        rows,
+        "2026-09-28",
+        "https://src",
+        "didww-api-sync",
+        unobserved=sync.skipped_keys(skipped),
+    )
+    by = {n["number_type"]: n for n in numbers}
+    assert by["mobile"] == previous and report["vanished"] == []
+    assert report["unobserved"] == ["CO:mobile"]
