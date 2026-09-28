@@ -18,6 +18,12 @@ Rules the merge follows, in this order:
   the same as the carrier dropping the type.
 - A carrier without credentials is skipped with a printed reason, not an error.
 
+Calls, texts and MMS flags: a feature a sampled number has is a yes. For a
+feature no sampled number has, the carrier is asked directly: Twilio with a
+filtered search (VoiceEnabled/SmsEnabled/MmsEnabled), Telnyx through the
+features its coverage list declares for the number type. "No" is never read
+off the sample: the sample changes from run to run.
+
 Credentials (env or --env-file): TWILIO_ACCOUNT_SID + TWILIO_AUTH_TOKEN,
 TELNYX_API_KEY, DIDWW_API_KEY.
 """
@@ -148,6 +154,12 @@ TWILIO_TYPE_PATH = {
     "toll_free": "TollFree",
     "national": "National",
 }
+TWILIO_FEATURE_FILTER = {
+    "voice": "VoiceEnabled",
+    "sms": "SmsEnabled",
+    "mms": "MmsEnabled",
+}
+TWILIO_CAPABILITY_KEY = {"voice": "voice", "sms": "SMS", "mms": "MMS"}
 TWILIO_PRICING_TYPE = {
     "local": "local",
     "mobile": "mobile",
@@ -173,7 +185,12 @@ def map_twilio(
     samples: dict[tuple[str, str], list[dict]],
     regulated: set[tuple[str, str]],
     dial_codes: dict[str, str],
+    capabilities: dict[tuple[str, str], dict[str, bool]],
 ) -> tuple[list[dict], list[str]]:
+    """``capabilities`` holds the carrier's answer to "is any number with
+    this feature on sale" per (country, type). The sample only proves stock
+    exists and carries the address rule: five numbers without MMS do not
+    show that no number has MMS."""
     rows, skipped = [], []
     for c in countries:
         iso, name = c["country_code"], c["country"]
@@ -197,7 +214,10 @@ def map_twilio(
             if price is None:
                 skipped.append(f"{iso}:{number_type}: no price from the Pricing API")
                 continue
-            caps = [n["capabilities"] for n in sample]
+            caps = capabilities.get((iso, number_type))
+            if caps is None:
+                skipped.append(f"{iso}:{number_type}: capabilities not checked")
+                continue
             address = any(
                 n.get("address_requirements", "none") != "none" for n in sample
             )
@@ -208,9 +228,9 @@ def map_twilio(
                     country_name=name,
                     dial_code=dial_codes.get(iso, ""),
                     usd_per_month=money(price),
-                    voice=any(x.get("voice") for x in caps),
-                    sms=any(x.get("SMS") for x in caps),
-                    mms=any(x.get("MMS") for x in caps),
+                    voice=caps["voice"],
+                    sms=caps["sms"],
+                    mms=caps["mms"],
                     verification_required=address or (iso, number_type) in regulated,
                 )
             )
@@ -240,6 +260,7 @@ def fetch_twilio(
     countries = http.get(f"{base}.json")["countries"]
     types_by_country: dict[str, list[str]] = {}
     samples: dict[tuple[str, str], list[dict]] = {}
+    capabilities: dict[tuple[str, str], dict[str, bool]] = {}
     pricing: dict[str, dict] = {}
     for c in countries:
         iso = c["country_code"]
@@ -256,6 +277,27 @@ def fetch_twilio(
                 params={"PageSize": 5},
             )
             samples[(iso, number_type)] = page.get("available_phone_numbers", [])
+            if not samples[(iso, number_type)]:
+                continue
+            # A feature the sample shows is on sale. One it does not show is
+            # asked for with a filtered search: a fixed answer, where reading
+            # "no" off a random sample flipped from run to run.
+            seen = {
+                name
+                for n in samples[(iso, number_type)]
+                for name, key in TWILIO_CAPABILITY_KEY.items()
+                if n.get("capabilities", {}).get(key)
+            }
+            capabilities[(iso, number_type)] = {
+                name: name in seen
+                or bool(
+                    http.get(
+                        f"{base}/{iso}/{TWILIO_TYPE_PATH[number_type]}.json",
+                        params={param: "true", "PageSize": 1},
+                    ).get("available_phone_numbers")
+                )
+                for name, param in TWILIO_FEATURE_FILTER.items()
+            }
     regulations: list[dict] = []
     url = "https://numbers.twilio.com/v2/RegulatoryCompliance/Regulations?PageSize=1000"
     while url:
@@ -269,6 +311,7 @@ def fetch_twilio(
         samples,
         twilio_regulated(regulations),
         dial_codes,
+        capabilities,
     )
     return rows, skipped, twilio_observed_keys(countries, types_by_country)
 
@@ -276,12 +319,27 @@ def fetch_twilio(
 # -- Telnyx -------------------------------------------------------------------
 
 
+def telnyx_capabilities(
+    country: dict, number_type: str, sample: list[dict]
+) -> dict[str, bool]:
+    """What this number type can do: what Telnyx's coverage list declares
+    for it, plus anything a number on sale has. Coverage is the carrier's
+    own statement and does not change with which numbers a search returns;
+    the sample adds what coverage leaves out (Caribbean toll-free numbers
+    come from the US pool and carry SMS and MMS)."""
+    declared = set((country.get(number_type) or {}).get("features", []))
+    seen = {f["name"] for n in sample for f in n.get("features", [])}
+    return {name: name in declared | seen for name in ("voice", "sms", "mms")}
+
+
 def map_telnyx(
     coverage: dict[str, dict],
     samples: dict[tuple[str, str], list[dict]],
     requirements: dict[tuple[str, str], list[dict]],
     dial_codes: dict[str, str],
+    capabilities: dict[tuple[str, str], dict[str, bool]],
 ) -> tuple[list[dict], list[str]]:
+    """``capabilities``: see map_twilio. The sample gives price and stock."""
     rows, skipped = [], []
     for name, c in coverage.items():
         if not c.get("numbers"):
@@ -304,7 +362,10 @@ def map_telnyx(
             if currency != {"USD"}:
                 skipped.append(f"{iso}:{number_type}: non-USD price {currency}")
                 continue
-            features = {f["name"] for n in sample for f in n.get("features", [])}
+            caps = capabilities.get((iso, number_type))
+            if caps is None:
+                skipped.append(f"{iso}:{number_type}: capabilities not checked")
+                continue
             notes = None
             if monthly[0] != monthly[-1]:
                 notes = f"monthly price varies by number: {money(monthly[0])} to {money(monthly[-1])} USD in a sample of {len(sample)}"
@@ -316,9 +377,9 @@ def map_telnyx(
                     dial_code=dial_codes.get(iso, ""),
                     usd_per_month=money(monthly[0]),
                     setup_usd=money(setup),
-                    voice="voice" in features,
-                    sms="sms" in features,
-                    mms="mms" in features,
+                    voice=caps["voice"],
+                    sms=caps["sms"],
+                    mms=caps["mms"],
                     verification_required=bool(requirements.get((iso, number_type))),
                     notes=notes,
                 )
@@ -331,6 +392,7 @@ def fetch_telnyx(
 ) -> tuple[list[dict], list[str]]:
     coverage = http.get("https://api.telnyx.com/v2/country_coverage")["data"]
     samples: dict[tuple[str, str], list[dict]] = {}
+    capabilities: dict[tuple[str, str], dict[str, bool]] = {}
     requirements: dict[tuple[str, str], list[dict]] = {}
     for c in coverage.values():
         if not c.get("numbers"):
@@ -349,6 +411,10 @@ def fetch_telnyx(
                 },
             )
             samples[(iso, number_type)] = page.get("data", [])
+            if samples[(iso, number_type)]:
+                capabilities[(iso, number_type)] = telnyx_capabilities(
+                    c, number_type, samples[(iso, number_type)]
+                )
             req = http.get(
                 "https://api.telnyx.com/v2/requirements",
                 params={
@@ -358,7 +424,7 @@ def fetch_telnyx(
                 },
             )
             requirements[(iso, number_type)] = req.get("data", [])
-    return map_telnyx(coverage, samples, requirements, dial_codes)
+    return map_telnyx(coverage, samples, requirements, dial_codes, capabilities)
 
 
 # -- DIDWW --------------------------------------------------------------------
