@@ -389,6 +389,75 @@ async def test_didww_rejected_terminate_failure_keeps_the_did_id(
     assert await get_balance_cents(async_session, org) == 100000 - 350
 
 
+async def _mark_check(db, number, *, started: timedelta):
+    """As if another run claimed a check ``started`` ago and has not answered."""
+    then = (datetime.now(timezone.utc) - started).isoformat()
+    number.provisioning_metadata = {
+        **number.provisioning_metadata,
+        "last_checked_at": then,
+        "check_started_at": then,
+    }
+    await db.commit()
+
+
+async def test_reconcile_skips_while_another_check_is_running(
+    async_session, org_and_key, monkeypatch
+):
+    """One DIDWW check can take longer than the poll interval. A second run
+    must not start meanwhile: both would file a registration for the DID."""
+    org, _, _ = org_and_key
+    row, offer = await seed_quote(async_session, org)
+    monkeypatch.setattr(
+        "hailhq.api.number_orders.place_didww_order", AsyncMock(return_value=ORDER)
+    )
+    outcome = AsyncMock(return_value=("pending", DID, ORDER))
+    monkeypatch.setattr("hailhq.api.number_orders.didww_order_outcome", outcome)
+    number = await buy(async_session, org, row, monkeypatch, offer)
+    outcome.reset_mock()
+    await _mark_check(async_session, number, started=timedelta(seconds=30))
+    await reconcile_order(async_session, number)
+    outcome.assert_not_awaited()
+
+
+async def test_reconcile_takes_over_a_check_that_never_answered(
+    async_session, org_and_key, monkeypatch
+):
+    org, _, _ = org_and_key
+    row, offer = await seed_quote(async_session, org)
+    monkeypatch.setattr(
+        "hailhq.api.number_orders.place_didww_order", AsyncMock(return_value=ORDER)
+    )
+    outcome = AsyncMock(return_value=("pending", DID, ORDER))
+    monkeypatch.setattr("hailhq.api.number_orders.didww_order_outcome", outcome)
+    number = await buy(async_session, org, row, monkeypatch, offer)
+    outcome.reset_mock()
+    await _mark_check(async_session, number, started=timedelta(minutes=6))
+    await reconcile_order(async_session, number)
+    outcome.assert_awaited_once()
+    await async_session.refresh(number)
+    assert "check_started_at" not in number.provisioning_metadata
+
+
+async def test_reconcile_clears_its_claim_when_the_lookup_fails(
+    async_session, org_and_key, monkeypatch
+):
+    org, _, _ = org_and_key
+    row, offer = await seed_quote(async_session, org)
+    monkeypatch.setattr(
+        "hailhq.api.number_orders.place_didww_order", AsyncMock(return_value=ORDER)
+    )
+    outcome = AsyncMock(return_value=("pending", None, ORDER))
+    monkeypatch.setattr("hailhq.api.number_orders.didww_order_outcome", outcome)
+    number = await buy(async_session, org, row, monkeypatch, offer)
+    await async_session.refresh(number)
+    assert "check_started_at" not in number.provisioning_metadata
+    outcome.side_effect = RuntimeError("500")
+    with pytest.raises(RuntimeError):
+        await reconcile_order(async_session, number, force=True)
+    await async_session.refresh(number)
+    assert "check_started_at" not in number.provisioning_metadata
+
+
 async def test_lookup_error_keeps_pending_before_timeout(
     async_session, org_and_key, monkeypatch
 ):

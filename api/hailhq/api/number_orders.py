@@ -50,6 +50,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 logger = logging.getLogger(__name__)
 
 ORDER_POLL_INTERVAL = timedelta(seconds=15)
+# A running carrier check blocks other checks of the same order for this
+# long. Longer than the slowest check (DIDWW: 4 calls of up to 40 s each),
+# so two runs never both file a registration for one number.
+ORDER_CHECK_LEASE = timedelta(minutes=5)
 
 # Quotes that expired unused are deleted after this long.
 QUOTE_RETENTION = timedelta(hours=1)
@@ -223,16 +227,17 @@ async def reconcile_order(
         return
     now = datetime.now(timezone.utc)
     last_check = number.provisioning_metadata.get("last_checked_at")
-    if (
-        not force
-        and last_check
-        and now - datetime.fromisoformat(last_check) < ORDER_POLL_INTERVAL
+    running = number.provisioning_metadata.get("check_started_at")
+    if not force and (
+        (last_check and now - datetime.fromisoformat(last_check) < ORDER_POLL_INTERVAL)
+        or (running and now - datetime.fromisoformat(running) < ORDER_CHECK_LEASE)
     ):
         await db.commit()
         return
     number.provisioning_metadata = {
         **number.provisioning_metadata,
         "last_checked_at": now.isoformat(),
+        "check_started_at": now.isoformat(),
     }
     await db.commit()
     lookup_error: Exception | None = None
@@ -247,6 +252,10 @@ async def reconcile_order(
     if number.provisioning_state != "pending":
         await db.commit()
         return
+    # The check answered: the next run may start.
+    number.provisioning_metadata = {
+        k: v for k, v in number.provisioning_metadata.items() if k != "check_started_at"
+    }
     if lookup_error is not None and (
         datetime.now(timezone.utc) - number.created_at <= timeout
     ):
