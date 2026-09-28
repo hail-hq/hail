@@ -20,7 +20,11 @@ from didww.configuration import Environment
 from didww.exceptions import DidwwApiError
 from hailhq.core.carrier_offer import CarrierOffer, cents
 from hailhq.core.config import settings
-from hailhq.core.providers.voice.base import CarrierNotConfigured, CarrierRequestError
+from hailhq.core.providers.voice.base import (
+    CarrierNotConfigured,
+    CarrierPreOrderError,
+    CarrierRequestError,
+)
 from hailhq.core.schemas import NumberType
 
 logger = logging.getLogger(__name__)
@@ -221,19 +225,24 @@ OrderState = Literal["active", "failed", "pending", "missing", "rejected_registr
 
 
 def _find_available(client: DidwwClient, e164: str) -> tuple[str, str]:
-    """(available_did id, metered sku id) for one exact number, or
-    ``CarrierRequestError(410)`` when it is gone. This is a local inventory
-    search that runs before any order is placed, so unlike a real carrier
-    conflict (409) the outcome is never ambiguous: no order exists yet and
-    the caller can fail and refund immediately."""
-    body = client.get(
-        "available_dids",
-        params={
-            "filter[number_contains]": e164.lstrip("+"),
-            "include": "did_group,did_group.stock_keeping_units",
-            "page[size]": 10,
-        },
-    )
+    """(available_did id, metered sku id) for one exact number. Raises
+    ``CarrierPreOrderError``: 410 when the number is gone, the carrier's
+    status when the search itself failed. This inventory search runs
+    before any order is placed, so the outcome is never ambiguous: no
+    order exists yet and the caller can fail and refund immediately."""
+    try:
+        body = client.get(
+            "available_dids",
+            params={
+                "filter[number_contains]": e164.lstrip("+"),
+                "include": "did_group,did_group.stock_keeping_units",
+                "page[size]": 10,
+            },
+        )
+    except DidwwApiError as exc:
+        raise CarrierPreOrderError(carrier_status(exc)) from exc
+    except requests.RequestException as exc:
+        raise CarrierPreOrderError(502) from exc
     index = _by_id(body.get("included", []))
     for did in body["data"]:
         if "+" + did["attributes"]["number"] != e164:
@@ -244,13 +253,13 @@ def _find_available(client: DidwwClient, e164: str) -> tuple[str, str]:
         sku = _metered_sku(group, index) if group else None
         if sku is not None:
             return did["id"], sku["id"]
-    raise CarrierRequestError(410)
+    raise CarrierPreOrderError(410)
 
 
 def _place_order_sync(number_id: UUID, e164: str) -> str:
     client = didww_client()
+    available_id, sku_id = _find_available(client, e164)
     try:
-        available_id, sku_id = _find_available(client, e164)
         order = client.post(
             "orders",
             {
@@ -284,6 +293,10 @@ async def place_didww_order(number_id: UUID, e164: str, address_id: str | None) 
     return await asyncio.to_thread(_place_order_sync, number_id, e164)
 
 
+class _AmbiguousOrder(Exception):
+    """More than one DIDWW order carries our reference."""
+
+
 def _load_order(
     client: DidwwClient, number_id: UUID, order_id: str | None
 ) -> dict | None:
@@ -299,7 +312,9 @@ def _load_order(
         for o in found
         if o["attributes"].get("external_reference_id") == str(number_id)
     ]
-    return matches[0] if len(matches) == 1 else None
+    if len(matches) > 1:
+        raise _AmbiguousOrder
+    return matches[0] if matches else None
 
 
 def _ensure_verification(client: DidwwClient, did: dict, address_id: str) -> dict:
@@ -330,7 +345,12 @@ def _outcome_sync(
     e164: str, number_id: UUID, order_id: str | None, address_id: str | None
 ) -> tuple[OrderState, str | None, str | None]:
     client = didww_client()
-    order = _load_order(client, number_id, order_id)
+    try:
+        order = _load_order(client, number_id, order_id)
+    except _AmbiguousOrder:
+        # DIDWW knows the order; which one is ours is not known. Never
+        # 'missing' (same as Telnyx).
+        return "pending", None, None
     if order is None:
         return "missing", None, None
     order_id = order["id"]

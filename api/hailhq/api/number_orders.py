@@ -25,6 +25,7 @@ from hailhq.core.models import (
 )
 from hailhq.core.number_offers import CarrierOffer, discover_offers
 from hailhq.core.providers.voice import (
+    CarrierPreOrderError,
     CarrierRequestError,
 )
 from hailhq.core.providers.voice.didww import (
@@ -557,6 +558,19 @@ async def acquire_offer(
                 offer.e164, number.id, offer.verification_id
             )
             await finish_order(db, number, resource_id=resource_id)
+    except CarrierPreOrderError as exc:
+        # No order was sent to the carrier: nothing to reconcile.
+        await finish_order(
+            db,
+            number,
+            resource_id=None,
+            failed=True,
+            reason=(
+                "the number is no longer available"
+                if exc.status == 410
+                else "the carrier could not be reached; nothing was ordered"
+            ),
+        )
     except (httpx.HTTPStatusError, CarrierRequestError) as exc:
         status = (
             exc.response.status_code

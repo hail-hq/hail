@@ -4,9 +4,14 @@ import json
 from uuid import uuid4
 
 import pytest
+import requests
 import responses
 from hailhq.core.config import settings
-from hailhq.core.providers.voice import CarrierNotConfigured, CarrierRequestError
+from hailhq.core.providers.voice import (
+    CarrierNotConfigured,
+    CarrierPreOrderError,
+    CarrierRequestError,
+)
 from hailhq.core.providers.voice.didww import (
     didww_order_outcome,
     place_didww_order,
@@ -132,7 +137,7 @@ async def test_place_order_number_gone_is_a_410():
     responses.add(
         responses.GET, f"{BASE}/available_dids", json={"data": [], "included": []}
     )
-    with pytest.raises(CarrierRequestError) as exc:
+    with pytest.raises(CarrierPreOrderError) as exc:
         await place_didww_order(NUMBER, E164, ADDR)
     # 410 (not 409): no order was ever placed, so the caller can fail and
     # refund immediately instead of treating it as an ambiguous outcome.
@@ -333,6 +338,71 @@ async def test_outcome_recovers_lost_order_id_by_reference():
     assert (
         f"filter%5Bexternal_reference_id%5D={NUMBER}" in responses.calls[0].request.url
     )
+
+
+@responses.activate
+async def test_outcome_two_orders_by_reference_stays_pending():
+    """Two orders carry our reference: DIDWW knows the order, so it is not
+    'missing'. Same answer as Telnyx gives for this case."""
+    order = {
+        "type": "orders",
+        "attributes": {"status": "completed", "external_reference_id": str(NUMBER)},
+    }
+    responses.add(
+        responses.GET,
+        f"{BASE}/orders",
+        json={"data": [{"id": ORDER, **order}, {"id": "o-2", **order}]},
+    )
+    assert await didww_order_outcome(E164, NUMBER, None, ADDR) == (
+        "pending",
+        None,
+        None,
+    )
+    assert len(responses.calls) == 1
+
+
+@responses.activate
+async def test_place_order_inventory_failure_is_before_the_order():
+    """The inventory search failed: no order was sent, so the caller can
+    refund at once."""
+    responses.add(
+        responses.GET,
+        f"{BASE}/available_dids",
+        status=500,
+        json={"errors": [{"title": "x"}]},
+    )
+    with pytest.raises(CarrierPreOrderError) as exc:
+        await place_didww_order(NUMBER, E164, ADDR)
+    assert exc.value.status == 500
+    assert len(responses.calls) == 1
+
+
+@responses.activate
+async def test_place_order_inventory_timeout_is_before_the_order():
+    responses.add(
+        responses.GET,
+        f"{BASE}/available_dids",
+        body=requests.exceptions.ConnectTimeout("slow"),
+    )
+    with pytest.raises(CarrierPreOrderError) as exc:
+        await place_didww_order(NUMBER, E164, ADDR)
+    assert exc.value.status == 502
+
+
+@responses.activate
+async def test_place_order_post_failure_is_not_before_the_order():
+    """POST /orders answered 500: the order may exist. Not a pre-order error."""
+    _inventory()
+    responses.add(
+        responses.POST,
+        f"{BASE}/orders",
+        status=500,
+        json={"errors": [{"title": "x"}]},
+    )
+    with pytest.raises(CarrierRequestError) as exc:
+        await place_didww_order(NUMBER, E164, ADDR)
+    assert not isinstance(exc.value, CarrierPreOrderError)
+    assert exc.value.status == 500
 
 
 @responses.activate

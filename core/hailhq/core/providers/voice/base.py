@@ -23,6 +23,7 @@ from pydantic import BaseModel
 
 __all__ = [
     "CarrierNotConfigured",
+    "CarrierPreOrderError",
     "CarrierRequestError",
     "NumberType",
     "ProviderCallStatus",
@@ -36,6 +37,11 @@ class CarrierRequestError(Exception):
     def __init__(self, status: int) -> None:
         super().__init__(f"Carrier request failed with HTTP {status}")
         self.status = status
+
+
+class CarrierPreOrderError(CarrierRequestError):
+    """The request failed before any order was sent to the carrier. Nothing
+    was bought, so the caller can fail the purchase and refund at once."""
 
 
 class CarrierNotConfigured(Exception):

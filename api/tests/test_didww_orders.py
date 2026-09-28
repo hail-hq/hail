@@ -12,7 +12,7 @@ from hailhq.core import telephony_catalog
 from hailhq.core.billing import get_balance_cents
 from hailhq.core.models import AccountCredit, AuditLog, CarrierVerification, NumberOffer
 from hailhq.core.number_offers import CarrierOffer
-from hailhq.core.providers.voice import CarrierRequestError
+from hailhq.core.providers.voice import CarrierPreOrderError, CarrierRequestError
 from sqlalchemy import select, text
 
 ORDER = "o0000000-0000-0000-0000-000000000001"
@@ -403,11 +403,51 @@ async def test_didww_number_gone_before_order_fails_immediately(
     row, offer = await seed_quote(async_session, org)
     monkeypatch.setattr(
         "hailhq.api.number_orders.place_didww_order",
-        AsyncMock(side_effect=CarrierRequestError(410)),
+        AsyncMock(side_effect=CarrierPreOrderError(410)),
     )
     number = await buy(async_session, org, row, monkeypatch, offer)
     assert number.provisioning_state == "failed"
+    assert (
+        number.provisioning_metadata["failure_reason"]
+        == "the number is no longer available"
+    )
     assert await get_balance_cents(async_session, org) == 100000
+
+
+@pytest.mark.parametrize("status", [409, 500, 502])
+async def test_didww_inventory_failure_before_order_refunds_at_once(
+    async_session, org_and_key, monkeypatch, status
+):
+    """The inventory search failed and no order was sent. The hold must not
+    wait 7 days for a reconciliation that can never find an order."""
+    org, _, _ = org_and_key
+    row, offer = await seed_quote(async_session, org)
+    monkeypatch.setattr(
+        "hailhq.api.number_orders.place_didww_order",
+        AsyncMock(side_effect=CarrierPreOrderError(status)),
+    )
+    number = await buy(async_session, org, row, monkeypatch, offer)
+    assert number.provisioning_state == "failed"
+    assert (
+        number.provisioning_metadata["failure_reason"]
+        == "the carrier could not be reached; nothing was ordered"
+    )
+    assert await get_balance_cents(async_session, org) == 100000
+
+
+async def test_didww_order_post_failure_keeps_the_hold(
+    async_session, org_and_key, monkeypatch
+):
+    """POST /orders answered 500: the order may exist, so the hold stays."""
+    org, _, _ = org_and_key
+    row, offer = await seed_quote(async_session, org)
+    monkeypatch.setattr(
+        "hailhq.api.number_orders.place_didww_order",
+        AsyncMock(side_effect=CarrierRequestError(500)),
+    )
+    number = await buy(async_session, org, row, monkeypatch, offer)
+    assert number.provisioning_state == "pending"
+    assert await get_balance_cents(async_session, org) == 100000 - 700
 
 
 async def test_quotes_ask_each_kind_only_at_carriers_that_list_it(
