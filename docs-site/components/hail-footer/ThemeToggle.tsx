@@ -34,7 +34,7 @@ export function ThemeToggle() {
 
   const select = selectTheme;
 
-  return <div><b>theme</b><div className={styles} role="group" aria-label="Color theme"><button type="button" aria-pressed={theme === "system"} onClick={() => select("system")}>system</button><span>·</span><button type="button" aria-pressed={theme === "light"} onClick={() => select("light")}>light</button><span>·</span><button type="button" aria-pressed={theme === "dark"} onClick={() => select("dark")}>dark</button></div></div>;
+  return <div><b>theme</b><div className={styles} role="group" aria-label="Color theme"><button type="button" aria-pressed={theme === "system"} onClick={() => select("system")}>system</button><button type="button" aria-pressed={theme === "light"} onClick={() => select("light")}>light</button><button type="button" aria-pressed={theme === "dark"} onClick={() => select("dark")}>dark</button></div></div>;
 }
 
 /**

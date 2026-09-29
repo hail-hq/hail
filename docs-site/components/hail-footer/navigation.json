@@ -35,7 +35,7 @@
         "href": "/pricing"
       },
       {
-        "label": "AI model pricing database",
+        "label": "AI model pricing",
         "href": "/costs"
       }
     ]
@@ -93,7 +93,7 @@
         "href": "/email#domain-warmup"
       },
       {
-        "label": "For agents",
+        "label": "Agent skill file",
         "href": "/skill.md"
       }
     ]
