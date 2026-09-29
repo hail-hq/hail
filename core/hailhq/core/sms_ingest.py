@@ -128,8 +128,8 @@ async def ingest_inbound_sms(
     body: str,
     provider_message_sid: str | None,
     opt_out_type: str | None,
+    carrier: str,
     provider: SmsProvider | None = None,
-    carrier: str = "twilio",
 ) -> IngestResult:
     number = await _resolve_org_for_number(db, to_e164)
     if number is None or number.organization_id is None:

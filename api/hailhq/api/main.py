@@ -27,6 +27,7 @@ from hailhq.api.routes import events as events_routes
 from hailhq.api.routes import numbers as numbers_routes
 from hailhq.api.routes import providers as providers_routes
 from hailhq.api.routes import sms as sms_routes
+from hailhq.api.routes import sms_webhooks
 from hailhq.api.routes import unsubscribe as unsubscribe_routes
 from hailhq.api.routes import verifications as verifications_routes
 from hailhq.api.routes import webhooks as webhooks_routes
@@ -398,6 +399,7 @@ _CUSTOMER_ROUTERS = [
     webhooks_routes.router,
     unsubscribe_routes.router,
     sms_routes.router,
+    *sms_webhooks.routers,
     contacts_routes.router,
     whoami_routes.router,
     providers_routes.router,

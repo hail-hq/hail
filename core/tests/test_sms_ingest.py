@@ -34,6 +34,7 @@ async def _seed_number(session, organization_id) -> PhoneNumber:
 async def test_ingest_unknown_number_is_dropped_not_error(async_session) -> None:
     result = await ingest_inbound_sms(
         async_session,
+        carrier="twilio",
         from_e164="+14155551234",
         to_e164="+19999999999",  # not registered to anyone
         body="hi",
@@ -60,6 +61,7 @@ async def test_ingest_creates_inbound_row_and_fans_out(async_session) -> None:
 
     result = await ingest_inbound_sms(
         async_session,
+        carrier="twilio",
         from_e164="+14155551234",
         to_e164="+14155559999",
         body="hello back",
@@ -97,6 +99,7 @@ async def test_ingest_duplicate_message_sid_is_idempotent(async_session) -> None
 
     first = await ingest_inbound_sms(
         async_session,
+        carrier="twilio",
         from_e164="+14155551234",
         to_e164="+14155559999",
         body="hi",
@@ -107,6 +110,7 @@ async def test_ingest_duplicate_message_sid_is_idempotent(async_session) -> None
 
     second = await ingest_inbound_sms(
         async_session,
+        carrier="twilio",
         from_e164="+14155551234",
         to_e164="+14155559999",
         body="hi",
@@ -135,6 +139,7 @@ async def test_ingest_stop_keyword_adds_suppression(async_session) -> None:
 
     await ingest_inbound_sms(
         async_session,
+        carrier="twilio",
         from_e164="+14155551234",
         to_e164="+14155559999",
         body="STOP",
@@ -171,6 +176,7 @@ async def test_ingest_start_removes_suppression(async_session) -> None:
 
     await ingest_inbound_sms(
         async_session,
+        carrier="twilio",
         from_e164="+14155551234",
         to_e164="+14155559999",
         body="START",
@@ -196,6 +202,7 @@ async def test_ingest_sets_to_number_id_and_null_from_number_id(async_session) -
 
     result = await ingest_inbound_sms(
         async_session,
+        carrier="twilio",
         from_e164="+14155551234",
         to_e164="+14155559999",
         body="hi",
@@ -231,6 +238,7 @@ async def test_help_keyword_sends_reply_when_enabled(
 
     await ingest_inbound_sms(
         async_session,
+        carrier="twilio",
         from_e164="+14155551234",
         to_e164="+14155559999",
         body="HELP",
@@ -271,6 +279,7 @@ async def test_stop_reply_nonterminal_status_persists_and_keeps_suppression(
 
     result = await ingest_inbound_sms(
         async_session,
+        carrier="twilio",
         from_e164="+14155551234",
         to_e164="+14155559999",
         body="STOP",
@@ -317,6 +326,7 @@ async def test_help_keyword_no_reply_when_disabled(async_session, monkeypatch) -
 
     await ingest_inbound_sms(
         async_session,
+        carrier="twilio",
         from_e164="+14155551234",
         to_e164="+14155559999",
         body="HELP",
@@ -340,6 +350,7 @@ async def test_stop_writes_suppression_regardless_of_reply_flag(
 
     await ingest_inbound_sms(
         async_session,
+        carrier="twilio",
         from_e164="+14155551234",
         to_e164="+14155559999",
         body="STOP",
