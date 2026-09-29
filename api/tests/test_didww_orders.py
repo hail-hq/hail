@@ -524,6 +524,28 @@ async def test_retry_keeps_the_did_id_when_the_carrier_fails_again(
     assert number.provisioning_metadata["unterminated_did_id"] == DID
 
 
+async def test_retry_moves_a_failed_row_to_the_back(
+    async_session, org_and_key, monkeypatch
+):
+    """Rows are picked oldest first, 100 per run. A row that failed again
+    must not stay in front, or rows beyond the first 100 never get a turn."""
+    org, _, _ = org_and_key
+    number = await _rejected_with_failed_terminate(async_session, org, monkeypatch)
+    await async_session.execute(
+        text("UPDATE phone_numbers SET updated_at = :t WHERE id = :id"),
+        {"t": datetime.now(timezone.utc) - timedelta(days=1), "id": number.id},
+    )
+    await async_session.commit()
+    monkeypatch.setattr(
+        "hailhq.api.didww_orders.release_didww_number",
+        AsyncMock(side_effect=RuntimeError("500")),
+    )
+    await retry_unterminated_dids()
+    await async_session.refresh(number)
+    assert datetime.now(timezone.utc) - number.updated_at < timedelta(minutes=1)
+    assert number.provisioning_metadata["unterminated_did_id"] == DID
+
+
 async def test_retry_skips_failed_orders_with_nothing_left_behind(
     async_session, org_and_key, monkeypatch
 ):

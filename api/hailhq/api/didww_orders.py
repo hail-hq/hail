@@ -17,7 +17,7 @@ from hailhq.core.providers.voice.didww import (
     revoke_registration,
     terminate_did,
 )
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
@@ -123,7 +123,8 @@ async def retry_terminate(db: AsyncSession, number: PhoneNumber) -> None:
 
 
 async def retry_unterminated_dids():
-    """Fresh session per number, like ``reconcile_pending_orders``."""
+    """Fresh session per number, like ``reconcile_pending_orders``. Oldest
+    ``updated_at`` first; a row that failed again goes to the back."""
     async with session_scope() as db:
         ids = (
             (
@@ -154,3 +155,11 @@ async def retry_unterminated_dids():
                 number_id,
                 exc_info=True,
             )
+            # Move the row to the back, so rows beyond the limit get a turn.
+            async with session_scope() as db:
+                await db.execute(
+                    update(PhoneNumber)
+                    .where(PhoneNumber.id == number_id)
+                    .values(updated_at=datetime.now(timezone.utc))
+                )
+                await db.commit()
