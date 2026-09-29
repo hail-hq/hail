@@ -31,6 +31,7 @@ from hailhq.core.providers.voice import (
 from hailhq.core.providers.voice.didww import (
     didww_order_outcome,
     place_didww_order,
+    release_didww_number,
     revoke_registration,
     terminate_did,
 )
@@ -168,13 +169,13 @@ async def stop_renewal(number: PhoneNumber, did_id: str) -> None:
     """Terminate a DIDWW number the order will not keep. Never raises. When
     the carrier call fails, the DID id is kept on the row as
     ``unterminated_did_id``: a failed order stores no resource id, and the
-    DID renews at the carrier until someone releases it by hand. Saved by
-    the caller's ``finish_order``."""
+    DID renews at the carrier until ``retry_unterminated_dids`` gets it
+    terminated. Saved by the caller's ``finish_order``."""
     try:
         await terminate_did(did_id)
     except Exception:
         logger.exception(
-            "Could not terminate DIDWW number; release it by hand: number=%s did=%s",
+            "Could not terminate DIDWW number; will retry: number=%s did=%s",
             number.id,
             did_id,
         )
@@ -697,6 +698,59 @@ async def reconcile_pending_orders():
         except Exception:
             logger.warning(
                 "Number order reconciliation failed: number=%s; will retry",
+                number_id,
+                exc_info=True,
+            )
+
+
+async def retry_terminate(db: AsyncSession, number: PhoneNumber) -> None:
+    """Terminate a DID whose terminate failed when its order was failed.
+    Carrier errors propagate and the id stays for the next try. The carrier
+    call runs under the org lock, like the first terminate, so two runs
+    never act on the same row."""
+    await org_lock(db, number.organization_id)
+    await db.refresh(number)
+    did_id = number.provisioning_metadata.get("unterminated_did_id")
+    if did_id:
+        # Tolerates a DID that is already gone at the carrier.
+        await release_didww_number(did_id)
+        number.provisioning_metadata = {
+            k: v
+            for k, v in number.provisioning_metadata.items()
+            if k != "unterminated_did_id"
+        }
+    await db.commit()
+
+
+async def retry_unterminated_dids():
+    """Fresh session per number, like ``reconcile_pending_orders``."""
+    async with session_scope() as db:
+        ids = (
+            (
+                await db.execute(
+                    select(PhoneNumber.id)
+                    .where(
+                        PhoneNumber.provider == DIDWW,
+                        PhoneNumber.provisioning_metadata.has_key(
+                            "unterminated_did_id"
+                        ),
+                    )
+                    .order_by(PhoneNumber.updated_at)
+                    .limit(100)
+                )
+            )
+            .scalars()
+            .all()
+        )
+    for number_id in ids:
+        try:
+            async with session_scope() as db:
+                number = await db.get(PhoneNumber, number_id)
+                if number:
+                    await retry_terminate(db, number)
+        except Exception:
+            logger.warning(
+                "DIDWW terminate retry failed: number=%s; will retry",
                 number_id,
                 exc_info=True,
             )

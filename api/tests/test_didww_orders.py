@@ -7,7 +7,11 @@ from unittest.mock import AsyncMock
 
 import pytest
 from fastapi import HTTPException
-from hailhq.api.number_orders import acquire_offer, reconcile_order
+from hailhq.api.number_orders import (
+    acquire_offer,
+    reconcile_order,
+    retry_unterminated_dids,
+)
 from hailhq.api.routes import numbers as numbers_routes
 from hailhq.core import telephony_catalog
 from hailhq.core.billing import get_balance_cents
@@ -467,6 +471,77 @@ async def test_reconcile_clears_its_claim_when_the_lookup_fails(
         await reconcile_order(async_session, number, force=True)
     await async_session.refresh(number)
     assert "check_started_at" not in number.provisioning_metadata
+
+
+async def _rejected_with_failed_terminate(db, org, monkeypatch):
+    """A failed DIDWW order whose DID could not be terminated."""
+    row, offer = await seed_quote(db, org)
+    monkeypatch.setattr(
+        "hailhq.api.number_orders.place_didww_order", AsyncMock(return_value=ORDER)
+    )
+    outcome = AsyncMock(return_value=("pending", None, ORDER))
+    monkeypatch.setattr("hailhq.api.number_orders.didww_order_outcome", outcome)
+    monkeypatch.setattr(
+        "hailhq.api.number_orders.terminate_did",
+        AsyncMock(side_effect=RuntimeError("500")),
+    )
+    monkeypatch.setattr(
+        "hailhq.api.number_orders.revoke_registration", AsyncMock(return_value=None)
+    )
+    number = await buy(db, org, row, monkeypatch, offer)
+    outcome.return_value = ("rejected_registration", DID, ORDER)
+    await reconcile_order(db, number, force=True)
+    await db.refresh(number)
+    assert number.provisioning_metadata["unterminated_did_id"] == DID
+    return number
+
+
+async def test_retry_terminates_a_did_left_behind(
+    async_session, org_and_key, monkeypatch
+):
+    org, _, _ = org_and_key
+    number = await _rejected_with_failed_terminate(async_session, org, monkeypatch)
+    release = AsyncMock()
+    monkeypatch.setattr("hailhq.api.number_orders.release_didww_number", release)
+    await retry_unterminated_dids()
+    release.assert_awaited_once_with(DID)
+    await async_session.refresh(number)
+    assert "unterminated_did_id" not in number.provisioning_metadata
+    assert number.provisioning_state == "failed"
+    assert await get_balance_cents(async_session, org) == 100000 - 350
+    # Nothing is left to retry.
+    await retry_unterminated_dids()
+    release.assert_awaited_once()
+
+
+async def test_retry_keeps_the_did_id_when_the_carrier_fails_again(
+    async_session, org_and_key, monkeypatch
+):
+    org, _, _ = org_and_key
+    number = await _rejected_with_failed_terminate(async_session, org, monkeypatch)
+    release = AsyncMock(side_effect=RuntimeError("500"))
+    monkeypatch.setattr("hailhq.api.number_orders.release_didww_number", release)
+    await retry_unterminated_dids()  # never raises
+    release.assert_awaited_once_with(DID)
+    await async_session.refresh(number)
+    assert number.provisioning_metadata["unterminated_did_id"] == DID
+
+
+async def test_retry_skips_failed_orders_with_nothing_left_behind(
+    async_session, org_and_key, monkeypatch
+):
+    org, _, _ = org_and_key
+    row, offer = await seed_quote(async_session, org)
+    monkeypatch.setattr(
+        "hailhq.api.number_orders.place_didww_order",
+        AsyncMock(side_effect=CarrierRequestError(422)),
+    )
+    number = await buy(async_session, org, row, monkeypatch, offer)
+    assert number.provisioning_state == "failed"
+    release = AsyncMock()
+    monkeypatch.setattr("hailhq.api.number_orders.release_didww_number", release)
+    await retry_unterminated_dids()
+    release.assert_not_awaited()
 
 
 async def test_lookup_error_keeps_pending_before_timeout(

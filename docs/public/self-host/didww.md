@@ -107,8 +107,8 @@ Order of events for a country that needs end-user registration:
    refunded, setup fee charged. No DID: setup and monthly fee refunded.
 
 If the terminate call fails, the DID id is kept in
-`provisioning_metadata.unterminated_did_id` and logged; release it in the
-DIDWW panel.
+`provisioning_metadata.unterminated_did_id` and the reconciler retries every
+minute until DIDWW accepts it.
 
 Schemas: [`openapi/openapi.yaml`](../../../openapi/openapi.yaml). Code:
 [`providers/voice/didww.py`](../../../core/hailhq/core/providers/voice/didww.py),
