@@ -299,28 +299,48 @@ async def place_didww_order(number_id: UUID, e164: str, address_id: str | None) 
     return await asyncio.to_thread(_place_order_sync, number_id, e164)
 
 
-class _AmbiguousOrder(Exception):
-    """More than one DIDWW order carries our reference."""
-
-
-def _load_order(
+def _load_orders(
     client: DidwwClient, number_id: UUID, order_id: str | None
-) -> dict | None:
+) -> list[dict]:
+    """The stored order, or every order that carries our reference."""
     if order_id:
-        return client.get(f"orders/{order_id}")["data"]
+        return [client.get(f"orders/{order_id}")["data"]]
     # A crash after POST may lose the response. Recover by our reference.
     found = client.get(
         "orders",
         params={"filter[external_reference_id]": str(number_id), "page[size]": 10},
     )["data"]
-    matches = [
+    return [
         o
         for o in found
         if o["attributes"].get("external_reference_id") == str(number_id)
     ]
-    if len(matches) > 1:
-        raise _AmbiguousOrder
-    return matches[0] if matches else None
+
+
+def _order_dids(client: DidwwClient, order_id: str) -> list[dict]:
+    return client.get(
+        "dids",
+        params={
+            "filter[order.id]": order_id,
+            "include": "address_verification",
+            "page[size]": 10,
+        },
+    )["data"]
+
+
+def _holds(dids: list[dict], e164: str) -> dict | None:
+    return next((d for d in dids if "+" + d["attributes"]["number"] == e164), None)
+
+
+def _owner(client: DidwwClient, e164: str, orders: list[dict]) -> dict | None:
+    """Of several orders with our reference, the one that bought ``e164``.
+    None while no completed order holds the number."""
+    for order in orders:
+        if order["attributes"]["status"] == "completed" and _holds(
+            _order_dids(client, order["id"]), e164
+        ):
+            return order
+    return None
 
 
 def _ensure_verification(client: DidwwClient, did: dict, address_id: str) -> dict:
@@ -351,29 +371,27 @@ def _outcome_sync(
     e164: str, number_id: UUID, order_id: str | None, address_id: str | None
 ) -> tuple[OrderState, str | None, str | None]:
     client = didww_client()
-    try:
-        order = _load_order(client, number_id, order_id)
-    except _AmbiguousOrder:
-        # DIDWW knows the order; which one is ours is not known. Never
-        # 'missing' (same as Telnyx).
-        return "pending", None, None
-    if order is None:
+    orders = _load_orders(client, number_id, order_id)
+    if not orders:
         return "missing", None, None
+    if len(orders) > 1:
+        # The order id was lost and several orders carry our reference.
+        if all(o["attributes"]["status"] == "canceled" for o in orders):
+            return "failed", None, None
+        owner = _owner(client, e164, orders)
+        if owner is None:
+            # DIDWW knows the order; which one is ours is not known yet.
+            # Never 'missing' (same as Telnyx).
+            return "pending", None, None
+        orders = [owner]
+    order = orders[0]
     order_id = order["id"]
     status = order["attributes"]["status"]
     if status == "canceled":
         return "failed", None, order_id
     if status != "completed":
         return "pending", None, order_id
-    dids = client.get(
-        "dids",
-        params={
-            "filter[order.id]": order_id,
-            "include": "address_verification",
-            "page[size]": 10,
-        },
-    )["data"]
-    did = next((d for d in dids if "+" + d["attributes"]["number"] == e164), None)
+    did = _holds(_order_dids(client, order_id), e164)
     if did is None:
         return "pending", None, order_id
     if not did["attributes"].get("awaiting_registration"):

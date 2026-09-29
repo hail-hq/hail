@@ -19,6 +19,7 @@ from hailhq.core.providers.voice.didww import (
     revoke_registration,
     terminate_did,
 )
+from responses import matchers
 
 BASE = "https://sandbox-api.didww.com/v3"
 NUMBER = uuid4()
@@ -340,21 +341,82 @@ async def test_outcome_recovers_lost_order_id_by_reference():
     )
 
 
-@responses.activate
-async def test_outcome_two_orders_by_reference_stays_pending():
-    """Two orders carry our reference: DIDWW knows the order, so it is not
-    'missing'. Same answer as Telnyx gives for this case."""
-    order = {
-        "type": "orders",
-        "attributes": {"status": "completed", "external_reference_id": str(NUMBER)},
-    }
+def _two_orders(first: str, second: str):
+    """Two DIDWW orders carry our reference; the order id was lost."""
     responses.add(
         responses.GET,
         f"{BASE}/orders",
-        json={"data": [{"id": ORDER, **order}, {"id": "o-2", **order}]},
+        json={
+            "data": [
+                {
+                    "id": order_id,
+                    "type": "orders",
+                    "attributes": {
+                        "status": status,
+                        "external_reference_id": str(NUMBER),
+                    },
+                }
+                for order_id, status in (("o-1", first), (ORDER, second))
+            ]
+        },
     )
+
+
+def _dids_of(order_id: str, numbers: list[str]):
+    responses.add(
+        responses.GET,
+        f"{BASE}/dids",
+        match=[
+            matchers.query_param_matcher(
+                {"filter[order.id]": order_id}, strict_match=False
+            )
+        ],
+        json={
+            "data": [
+                {
+                    "id": DID,
+                    "type": "dids",
+                    "attributes": {"number": n, "awaiting_registration": False},
+                    "relationships": {"address_verification": {"data": None}},
+                }
+                for n in numbers
+            ]
+        },
+    )
+
+
+@responses.activate
+async def test_outcome_two_orders_picks_the_one_that_holds_the_number():
+    """The order that bought our number is ours: its id is returned, so
+    the caller stores it and a timeout can terminate the DID."""
+    _two_orders("completed", "completed")
+    _dids_of("o-1", [])
+    _dids_of(ORDER, ["351300000001"])
+    assert await didww_order_outcome(E164, NUMBER, None, ADDR) == (
+        "active",
+        DID,
+        ORDER,
+    )
+
+
+@responses.activate
+async def test_outcome_two_orders_without_the_number_stay_pending():
+    """DIDWW knows the order, so it is never 'missing'. Which one is ours
+    is not known yet. Same answer as Telnyx gives for this case."""
+    _two_orders("pending", "completed")
+    _dids_of(ORDER, [])
     assert await didww_order_outcome(E164, NUMBER, None, ADDR) == (
         "pending",
+        None,
+        None,
+    )
+
+
+@responses.activate
+async def test_outcome_two_canceled_orders_is_failed():
+    _two_orders("canceled", "canceled")
+    assert await didww_order_outcome(E164, NUMBER, None, ADDR) == (
+        "failed",
         None,
         None,
     )
