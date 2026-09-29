@@ -43,6 +43,7 @@ from hailhq.api.usage import write_usage_event
 from hailhq.api.verification_worker import VerificationWorker
 from hailhq.core import internal_webhook
 from hailhq.core.abuse_monitor import AbuseMonitorWorker
+from hailhq.core.carrier_routing import CARRIERS
 from hailhq.core.config import settings
 from hailhq.core.db import dispose_engine, session_scope
 from hailhq.core.domain_verification_worker import DomainVerificationWorker
@@ -152,9 +153,21 @@ async def _stop_worker(worker, task: asyncio.Task) -> None:
     await asyncio.gather(task, return_exceptions=True)
 
 
+def _check_sender_id_sms_carrier() -> None:
+    """Refuse to start on a carrier that cannot send SMS: every sender-ID
+    SMS would fail at send time."""
+    allowed = [name for name, entry in CARRIERS.items() if entry.sms_route is not None]
+    if settings.sender_id_sms_carrier not in allowed:
+        raise RuntimeError(
+            f"SENDER_ID_SMS_CARRIER must be one of: {', '.join(allowed)}; "
+            f"got {settings.sender_id_sms_carrier!r}"
+        )
+
+
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     """Start backstop sweepers + webhook worker on boot; tear them down on shutdown."""
+    _check_sender_id_sms_carrier()
     sweeper_task = asyncio.create_task(
         _backstop_sweeper_loop(), name="backstop-sweeper"
     )
