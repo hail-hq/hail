@@ -43,8 +43,8 @@ export function Footer({
               managed service.
             </p>
             <div className="hail-footer-social">
-              <a href="https://github.com/hail-hq/hail">GitHub</a>
-              <a href="https://x.com/redouaneoachour">X</a>
+              <a href="https://github.com/hail-hq/hail">GitHub ↗</a>
+              <a href="https://x.com/redouaneoachour">X ↗</a>
             </div>
           </div>
           {groups.map((group) => (
