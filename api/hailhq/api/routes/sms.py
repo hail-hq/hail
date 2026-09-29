@@ -41,11 +41,7 @@ from hailhq.api.ratelimit import (
 )
 from hailhq.api.route_prefixes import request_mount_prefix
 from hailhq.api.usage import write_usage_event
-from hailhq.core.carrier_routing import (
-    SENDER_ID_CARRIER,
-    sms_route,
-    sms_status_path,
-)
+from hailhq.core.carrier_routing import sms_route, sms_status_path
 from hailhq.core.compliance_gate import check_sms_allowed, remove_suppression
 from hailhq.core.config import settings
 from hailhq.core.db import get_session
@@ -331,7 +327,9 @@ async def create_sms(
     sms = Sms(
         organization_id=principal.organization_id,
         provider=(
-            from_number.provider if from_number is not None else SENDER_ID_CARRIER
+            from_number.provider
+            if from_number is not None
+            else settings.sender_id_sms_carrier
         ),
         from_number_id=from_number.id if from_number is not None else None,
         from_e164=from_e164,

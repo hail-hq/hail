@@ -28,9 +28,6 @@ TWILIO = "twilio"
 TELNYX = "telnyx"
 DIDWW = "didww"
 
-# Carrier of an SMS sent from an alphanumeric sender ID, which has no number.
-SENDER_ID_CARRIER = TWILIO
-
 # LiveKit outbound SIP trunk id plus the SIP headers that trunk needs.
 VoiceRoute = tuple[str, dict[str, str]]
 

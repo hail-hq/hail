@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import uuid
 
+import pytest
+from sqlalchemy import select
 from twilio.request_validator import RequestValidator
 
 from .conftest import insert_org_and_key  # noqa: F401
@@ -448,6 +450,29 @@ async def test_create_sms_to_germany_uses_platform_default_without_dedicated_num
     )
     assert resp.status_code == 201, resp.text
     assert resp.json()["from_e164"] == "HAIL"
+
+
+@pytest.mark.parametrize("name", ["twilio", "telnyx"])
+async def test_sender_id_sms_goes_through_the_configured_carrier(
+    client, async_session, org_and_key, sms_mock, monkeypatch, name
+) -> None:
+    from hailhq.core.config import settings
+    from hailhq.core.models import Sms
+    from hailhq.core.providers.sms.telnyx import TelnyxSmsProvider
+
+    monkeypatch.setattr(settings, "sender_id_sms_carrier", name)
+    monkeypatch.setattr(settings, "telnyx_api_key", "key")
+    monkeypatch.setattr(settings, "telnyx_public_key", "public")
+    monkeypatch.setattr(TelnyxSmsProvider, "send_sms", sms_mock.send_sms)
+    _, _, plaintext = org_and_key
+    resp = await client.post(
+        "/sms",
+        json={"to": "+491701234567", "body": "hallo", "recipient_consent": True},
+        headers={"Authorization": f"Bearer {plaintext}"},
+    )
+    assert resp.status_code == 201, resp.text
+    sms = (await async_session.execute(select(Sms))).scalar_one()
+    assert sms.provider == name
 
 
 async def test_create_sms_to_india_still_requires_dedicated_number(
