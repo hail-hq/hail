@@ -446,7 +446,7 @@ async def enable_sms(
 
 class NumberQuotesResponse(BaseModel):
     offers: list[CarrierOffer] = Field(
-        description="Live carrier offers ordered by readiness, remaining verification effort, monthly price, setup price, and Twilio tie-break."
+        description="Live carrier offers ordered by readiness, remaining verification effort, monthly price and setup price. On a tie the first carrier listed wins."
     )
     recommended_quote_id: UUID | None = Field(
         description="Recommended ready offer matching the requested carrier preference, or null if none qualifies."
@@ -468,7 +468,7 @@ async def quote_numbers(
     """Compare live, org-specific offers. Prices include setup + monthly rent.
 
     Auto recommends a ready offer with the lowest monthly rent, then setup
-    cost, preferring Twilio on equivalent ties. Blocked offers sort by verification effort. SMS capability does not waive messaging registration requirements.
+    cost. On a tie the first carrier listed wins. Blocked offers sort by verification effort. SMS capability does not waive messaging registration requirements.
     """
 
     # Only number types the requested carrier's catalog lists (any carrier
