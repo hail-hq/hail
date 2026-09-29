@@ -230,3 +230,28 @@ async def test_docs_and_spec_paths_are_not_rate_limited(
         resp = await client.get(path)
         assert resp.status_code == 200
         assert "ratelimit-limit" not in resp.headers
+
+
+def test_every_sms_webhook_route_is_exempt() -> None:
+    """A webhook carries no API key. Each route of a carrier webhook module
+    is exempt by itself, so a new carrier cannot be forgotten."""
+    from hailhq.api import ratelimit
+    from hailhq.api.routes import sms_webhooks
+
+    paths = [route.path for router in sms_webhooks.routers for route in router.routes]
+    assert sorted(paths) == ["/sms/inbound", "/sms/status", "/sms/telnyx"]
+    for path in paths:
+        assert ratelimit._is_exempt(path)
+        assert ratelimit._is_exempt(f"/v1{path}")
+
+
+def test_a_registered_path_is_exempt() -> None:
+    from hailhq.api import ratelimit
+
+    assert not ratelimit._is_exempt("/sms/newcarrier")
+    ratelimit.exempt_path("/sms/newcarrier")
+    try:
+        assert ratelimit._is_exempt("/sms/newcarrier")
+        assert ratelimit._is_exempt("/v1/sms/newcarrier")
+    finally:
+        ratelimit._EXEMPT_PATHS.discard("/sms/newcarrier")
