@@ -107,14 +107,15 @@ Order of events for a country that needs end-user registration:
    refunded, setup fee charged. No DID: setup and monthly fee refunded.
 
 If the terminate call fails, the DID id is kept in
-`provisioning_metadata.unterminated_did_id` and the reconciler retries every
+`provisioning_metadata.unreleased_resource_id` and the reconciler retries every
 minute until DIDWW accepts it.
 
 Schemas: [`openapi/openapi.yaml`](../../../openapi/openapi.yaml). Code:
 [`providers/voice/didww.py`](../../../core/hailhq/core/providers/voice/didww.py),
 [`providers/verification/didww.py`](../../../core/hailhq/core/providers/verification/didww.py),
-[`number_orders.py`](../../../api/hailhq/api/number_orders.py),
-[`didww_orders.py`](../../../api/hailhq/api/didww_orders.py).
+[`number_orders.py`](../../../api/hailhq/api/number_orders.py), the `didww`
+entry of `CARRIERS` in
+[`carrier_routing.py`](../../../core/hailhq/core/carrier_routing.py).
 
 A call from a `didww` number with `LIVEKIT_DIDWW_SIP_OUTBOUND_TRUNK_ID` empty
 fails with `end_reason = carrier_route_failed` before any LiveKit room exists.

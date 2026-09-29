@@ -7,9 +7,11 @@ from unittest.mock import AsyncMock
 
 import pytest
 from fastapi import HTTPException
-from hailhq.api.didww_orders import retry_unterminated_dids
-from hailhq.api.number_orders import acquire_offer, reconcile_order
-from hailhq.api.routes import numbers as numbers_routes
+from hailhq.api.number_orders import (
+    acquire_offer,
+    reconcile_order,
+    retry_unreleased_numbers,
+)
 from hailhq.core import telephony_catalog
 from hailhq.core.billing import get_balance_cents
 from hailhq.core.models import (
@@ -17,11 +19,9 @@ from hailhq.core.models import (
     AuditLog,
     CarrierVerification,
     NumberOffer,
-    PhoneNumber,
 )
 from hailhq.core.number_offers import CarrierOffer
 from hailhq.core.providers.voice import (
-    CarrierNotConfigured,
     CarrierPreOrderError,
     CarrierRequestError,
 )
@@ -107,9 +107,9 @@ async def test_didww_purchase_places_order_and_waits(
     org, _, _ = org_and_key
     row, offer = await seed_quote(async_session, org)
     place = AsyncMock(return_value=ORDER)
-    monkeypatch.setattr("hailhq.api.number_orders.place_didww_order", place)
+    monkeypatch.setattr("hailhq.core.providers.voice.didww.place_didww_order", place)
     monkeypatch.setattr(
-        "hailhq.api.number_orders.didww_order_outcome",
+        "hailhq.core.providers.voice.didww.didww_order_outcome",
         AsyncMock(return_value=("pending", None, ORDER)),
     )
     number = await buy(async_session, org, row, monkeypatch, offer)
@@ -128,9 +128,9 @@ async def test_didww_purchase_checks_the_didww_catalog(
     org, _, _ = org_and_key
     row, offer = await seed_quote(async_session, org)
     place = AsyncMock(return_value=ORDER)
-    monkeypatch.setattr("hailhq.api.number_orders.place_didww_order", place)
+    monkeypatch.setattr("hailhq.core.providers.voice.didww.place_didww_order", place)
     monkeypatch.setattr(
-        "hailhq.api.number_orders.didww_order_outcome",
+        "hailhq.core.providers.voice.didww.didww_order_outcome",
         AsyncMock(return_value=("pending", None, ORDER)),
     )
     number = await buy(async_session, org, row, monkeypatch, offer)
@@ -144,7 +144,7 @@ async def test_didww_purchase_outside_its_catalog_is_a_422(
     org, _, _ = org_and_key
     row, offer = await seed_quote(async_session, org, kind="toll_free")
     place = AsyncMock(return_value=ORDER)
-    monkeypatch.setattr("hailhq.api.number_orders.place_didww_order", place)
+    monkeypatch.setattr("hailhq.core.providers.voice.didww.place_didww_order", place)
     with pytest.raises(HTTPException) as exc:
         await buy(async_session, org, row, monkeypatch, offer, kind="toll_free")
     assert exc.value.status_code == 422
@@ -158,10 +158,13 @@ async def test_didww_registration_approved_activates(
     org, _, _ = org_and_key
     row, offer = await seed_quote(async_session, org)
     monkeypatch.setattr(
-        "hailhq.api.number_orders.place_didww_order", AsyncMock(return_value=ORDER)
+        "hailhq.core.providers.voice.didww.place_didww_order",
+        AsyncMock(return_value=ORDER),
     )
     outcome = AsyncMock(return_value=("pending", None, ORDER))
-    monkeypatch.setattr("hailhq.api.number_orders.didww_order_outcome", outcome)
+    monkeypatch.setattr(
+        "hailhq.core.providers.voice.didww.didww_order_outcome", outcome
+    )
     number = await buy(async_session, org, row, monkeypatch, offer)
     outcome.return_value = ("active", DID, ORDER)
     await reconcile_order(async_session, number, force=True)
@@ -177,14 +180,20 @@ async def test_didww_registration_rejected_refunds_monthly_only(
     org, _, _ = org_and_key
     row, offer = await seed_quote(async_session, org)
     monkeypatch.setattr(
-        "hailhq.api.number_orders.place_didww_order", AsyncMock(return_value=ORDER)
+        "hailhq.core.providers.voice.didww.place_didww_order",
+        AsyncMock(return_value=ORDER),
     )
     outcome = AsyncMock(return_value=("pending", None, ORDER))
-    monkeypatch.setattr("hailhq.api.number_orders.didww_order_outcome", outcome)
-    terminate = AsyncMock()
-    monkeypatch.setattr("hailhq.api.didww_orders.terminate_did", terminate)
     monkeypatch.setattr(
-        "hailhq.api.didww_orders.revoke_registration", AsyncMock(return_value=None)
+        "hailhq.core.providers.voice.didww.didww_order_outcome", outcome
+    )
+    terminate = AsyncMock()
+    monkeypatch.setattr(
+        "hailhq.core.providers.voice.didww.release_didww_number", terminate
+    )
+    monkeypatch.setattr(
+        "hailhq.core.providers.voice.didww.revoke_registration",
+        AsyncMock(return_value=None),
     )
     number = await buy(async_session, org, row, monkeypatch, offer)
     outcome.return_value = ("rejected_registration", DID, ORDER)
@@ -192,7 +201,7 @@ async def test_didww_registration_rejected_refunds_monthly_only(
     assert number.provisioning_state == "failed"
     assert "registration" in number.provisioning_metadata["failure_reason"]
     terminate.assert_awaited_once_with(DID)
-    assert "unterminated_did_id" not in number.provisioning_metadata
+    assert "unreleased_resource_id" not in number.provisioning_metadata
     assert await get_balance_cents(async_session, org) == 100000 - 350
     setup = (
         await async_session.execute(
@@ -231,13 +240,18 @@ async def test_didww_registration_rejected_revokes_approval(
     other = await _seed_approved_verification(async_session, org, number_type="local")
     row, offer = await seed_quote(async_session, org)
     monkeypatch.setattr(
-        "hailhq.api.number_orders.place_didww_order", AsyncMock(return_value=ORDER)
+        "hailhq.core.providers.voice.didww.place_didww_order",
+        AsyncMock(return_value=ORDER),
     )
     outcome = AsyncMock(return_value=("pending", None, ORDER))
-    monkeypatch.setattr("hailhq.api.number_orders.didww_order_outcome", outcome)
-    monkeypatch.setattr("hailhq.api.didww_orders.terminate_did", AsyncMock())
+    monkeypatch.setattr(
+        "hailhq.core.providers.voice.didww.didww_order_outcome", outcome
+    )
+    monkeypatch.setattr(
+        "hailhq.core.providers.voice.didww.release_didww_number", AsyncMock()
+    )
     revoke = AsyncMock(return_value="Document is blurry")
-    monkeypatch.setattr("hailhq.api.didww_orders.revoke_registration", revoke)
+    monkeypatch.setattr("hailhq.core.providers.voice.didww.revoke_registration", revoke)
     number = await buy(async_session, org, row, monkeypatch, offer)
     outcome.return_value = ("rejected_registration", DID, ORDER)
     await reconcile_order(async_session, number, force=True)
@@ -268,13 +282,18 @@ async def test_didww_registration_rejected_refunds_even_if_revoke_fails(
     verification = await _seed_approved_verification(async_session, org)
     row, offer = await seed_quote(async_session, org)
     monkeypatch.setattr(
-        "hailhq.api.number_orders.place_didww_order", AsyncMock(return_value=ORDER)
+        "hailhq.core.providers.voice.didww.place_didww_order",
+        AsyncMock(return_value=ORDER),
     )
     outcome = AsyncMock(return_value=("pending", None, ORDER))
-    monkeypatch.setattr("hailhq.api.number_orders.didww_order_outcome", outcome)
-    monkeypatch.setattr("hailhq.api.didww_orders.terminate_did", AsyncMock())
     monkeypatch.setattr(
-        "hailhq.api.didww_orders.revoke_registration",
+        "hailhq.core.providers.voice.didww.didww_order_outcome", outcome
+    )
+    monkeypatch.setattr(
+        "hailhq.core.providers.voice.didww.release_didww_number", AsyncMock()
+    )
+    monkeypatch.setattr(
+        "hailhq.core.providers.voice.didww.revoke_registration",
         AsyncMock(side_effect=RuntimeError("500")),
     )
     number = await buy(async_session, org, row, monkeypatch, offer)
@@ -298,14 +317,17 @@ async def test_didww_pending_survives_three_days(
     org, _, _ = org_and_key
     row, offer = await seed_quote(async_session, org)
     monkeypatch.setattr(
-        "hailhq.api.number_orders.place_didww_order", AsyncMock(return_value=ORDER)
+        "hailhq.core.providers.voice.didww.place_didww_order",
+        AsyncMock(return_value=ORDER),
     )
     monkeypatch.setattr(
-        "hailhq.api.number_orders.didww_order_outcome",
+        "hailhq.core.providers.voice.didww.didww_order_outcome",
         AsyncMock(return_value=("pending", DID, ORDER)),
     )
     terminate = AsyncMock()
-    monkeypatch.setattr("hailhq.api.didww_orders.terminate_did", terminate)
+    monkeypatch.setattr(
+        "hailhq.core.providers.voice.didww.release_didww_number", terminate
+    )
     number = await buy(async_session, org, row, monkeypatch, offer)
     await _age(async_session, number, timedelta(days=3))
     await reconcile_order(async_session, number, force=True)
@@ -329,14 +351,17 @@ async def test_didww_timeout_without_did_refunds_all(
     org, _, _ = org_and_key
     row, offer = await seed_quote(async_session, org)
     monkeypatch.setattr(
-        "hailhq.api.number_orders.place_didww_order", AsyncMock(return_value=ORDER)
+        "hailhq.core.providers.voice.didww.place_didww_order",
+        AsyncMock(return_value=ORDER),
     )
     monkeypatch.setattr(
-        "hailhq.api.number_orders.didww_order_outcome",
+        "hailhq.core.providers.voice.didww.didww_order_outcome",
         AsyncMock(return_value=("pending", None, ORDER)),
     )
     terminate = AsyncMock()
-    monkeypatch.setattr("hailhq.api.didww_orders.terminate_did", terminate)
+    monkeypatch.setattr(
+        "hailhq.core.providers.voice.didww.release_didww_number", terminate
+    )
     number = await buy(async_session, org, row, monkeypatch, offer)
     await _age(async_session, number, timedelta(days=7, minutes=1))
     await reconcile_order(async_session, number, force=True)
@@ -355,14 +380,15 @@ async def test_didww_timeout_terminate_failure_still_finishes(
     org, _, _ = org_and_key
     row, offer = await seed_quote(async_session, org)
     monkeypatch.setattr(
-        "hailhq.api.number_orders.place_didww_order", AsyncMock(return_value=ORDER)
+        "hailhq.core.providers.voice.didww.place_didww_order",
+        AsyncMock(return_value=ORDER),
     )
     monkeypatch.setattr(
-        "hailhq.api.number_orders.didww_order_outcome",
+        "hailhq.core.providers.voice.didww.didww_order_outcome",
         AsyncMock(return_value=("pending", DID, ORDER)),
     )
     monkeypatch.setattr(
-        "hailhq.api.didww_orders.terminate_did",
+        "hailhq.core.providers.voice.didww.release_didww_number",
         AsyncMock(side_effect=RuntimeError("500")),
     )
     number = await buy(async_session, org, row, monkeypatch, offer)
@@ -372,7 +398,7 @@ async def test_didww_timeout_terminate_failure_still_finishes(
     assert await get_balance_cents(async_session, org) == 100000 - 350
     # The DID still renews at the carrier: its id is kept on the row.
     await async_session.refresh(number)
-    assert number.provisioning_metadata["unterminated_did_id"] == DID
+    assert number.provisioning_metadata["unreleased_resource_id"] == DID
 
 
 async def test_didww_rejected_terminate_failure_keeps_the_did_id(
@@ -381,23 +407,27 @@ async def test_didww_rejected_terminate_failure_keeps_the_did_id(
     org, _, _ = org_and_key
     row, offer = await seed_quote(async_session, org)
     monkeypatch.setattr(
-        "hailhq.api.number_orders.place_didww_order", AsyncMock(return_value=ORDER)
+        "hailhq.core.providers.voice.didww.place_didww_order",
+        AsyncMock(return_value=ORDER),
     )
     outcome = AsyncMock(return_value=("pending", None, ORDER))
-    monkeypatch.setattr("hailhq.api.number_orders.didww_order_outcome", outcome)
     monkeypatch.setattr(
-        "hailhq.api.didww_orders.terminate_did",
+        "hailhq.core.providers.voice.didww.didww_order_outcome", outcome
+    )
+    monkeypatch.setattr(
+        "hailhq.core.providers.voice.didww.release_didww_number",
         AsyncMock(side_effect=RuntimeError("500")),
     )
     monkeypatch.setattr(
-        "hailhq.api.didww_orders.revoke_registration", AsyncMock(return_value=None)
+        "hailhq.core.providers.voice.didww.revoke_registration",
+        AsyncMock(return_value=None),
     )
     number = await buy(async_session, org, row, monkeypatch, offer)
     outcome.return_value = ("rejected_registration", DID, ORDER)
     await reconcile_order(async_session, number, force=True)
     await async_session.refresh(number)
     assert number.provisioning_state == "failed"
-    assert number.provisioning_metadata["unterminated_did_id"] == DID
+    assert number.provisioning_metadata["unreleased_resource_id"] == DID
     assert await get_balance_cents(async_session, org) == 100000 - 350
 
 
@@ -420,10 +450,13 @@ async def test_reconcile_skips_while_another_check_is_running(
     org, _, _ = org_and_key
     row, offer = await seed_quote(async_session, org)
     monkeypatch.setattr(
-        "hailhq.api.number_orders.place_didww_order", AsyncMock(return_value=ORDER)
+        "hailhq.core.providers.voice.didww.place_didww_order",
+        AsyncMock(return_value=ORDER),
     )
     outcome = AsyncMock(return_value=("pending", DID, ORDER))
-    monkeypatch.setattr("hailhq.api.number_orders.didww_order_outcome", outcome)
+    monkeypatch.setattr(
+        "hailhq.core.providers.voice.didww.didww_order_outcome", outcome
+    )
     number = await buy(async_session, org, row, monkeypatch, offer)
     outcome.reset_mock()
     await _mark_check(async_session, number, started=timedelta(seconds=30))
@@ -437,10 +470,13 @@ async def test_reconcile_takes_over_a_check_that_never_answered(
     org, _, _ = org_and_key
     row, offer = await seed_quote(async_session, org)
     monkeypatch.setattr(
-        "hailhq.api.number_orders.place_didww_order", AsyncMock(return_value=ORDER)
+        "hailhq.core.providers.voice.didww.place_didww_order",
+        AsyncMock(return_value=ORDER),
     )
     outcome = AsyncMock(return_value=("pending", DID, ORDER))
-    monkeypatch.setattr("hailhq.api.number_orders.didww_order_outcome", outcome)
+    monkeypatch.setattr(
+        "hailhq.core.providers.voice.didww.didww_order_outcome", outcome
+    )
     number = await buy(async_session, org, row, monkeypatch, offer)
     outcome.reset_mock()
     await _mark_check(async_session, number, started=timedelta(minutes=6))
@@ -456,10 +492,13 @@ async def test_reconcile_clears_its_claim_when_the_lookup_fails(
     org, _, _ = org_and_key
     row, offer = await seed_quote(async_session, org)
     monkeypatch.setattr(
-        "hailhq.api.number_orders.place_didww_order", AsyncMock(return_value=ORDER)
+        "hailhq.core.providers.voice.didww.place_didww_order",
+        AsyncMock(return_value=ORDER),
     )
     outcome = AsyncMock(return_value=("pending", None, ORDER))
-    monkeypatch.setattr("hailhq.api.number_orders.didww_order_outcome", outcome)
+    monkeypatch.setattr(
+        "hailhq.core.providers.voice.didww.didww_order_outcome", outcome
+    )
     number = await buy(async_session, org, row, monkeypatch, offer)
     await async_session.refresh(number)
     assert "check_started_at" not in number.provisioning_metadata
@@ -474,22 +513,26 @@ async def _rejected_with_failed_terminate(db, org, monkeypatch):
     """A failed DIDWW order whose DID could not be terminated."""
     row, offer = await seed_quote(db, org)
     monkeypatch.setattr(
-        "hailhq.api.number_orders.place_didww_order", AsyncMock(return_value=ORDER)
+        "hailhq.core.providers.voice.didww.place_didww_order",
+        AsyncMock(return_value=ORDER),
     )
     outcome = AsyncMock(return_value=("pending", None, ORDER))
-    monkeypatch.setattr("hailhq.api.number_orders.didww_order_outcome", outcome)
     monkeypatch.setattr(
-        "hailhq.api.didww_orders.terminate_did",
+        "hailhq.core.providers.voice.didww.didww_order_outcome", outcome
+    )
+    monkeypatch.setattr(
+        "hailhq.core.providers.voice.didww.release_didww_number",
         AsyncMock(side_effect=RuntimeError("500")),
     )
     monkeypatch.setattr(
-        "hailhq.api.didww_orders.revoke_registration", AsyncMock(return_value=None)
+        "hailhq.core.providers.voice.didww.revoke_registration",
+        AsyncMock(return_value=None),
     )
     number = await buy(db, org, row, monkeypatch, offer)
     outcome.return_value = ("rejected_registration", DID, ORDER)
     await reconcile_order(db, number, force=True)
     await db.refresh(number)
-    assert number.provisioning_metadata["unterminated_did_id"] == DID
+    assert number.provisioning_metadata["unreleased_resource_id"] == DID
     return number
 
 
@@ -499,15 +542,17 @@ async def test_retry_terminates_a_did_left_behind(
     org, _, _ = org_and_key
     number = await _rejected_with_failed_terminate(async_session, org, monkeypatch)
     release = AsyncMock()
-    monkeypatch.setattr("hailhq.api.didww_orders.release_didww_number", release)
-    await retry_unterminated_dids()
+    monkeypatch.setattr(
+        "hailhq.core.providers.voice.didww.release_didww_number", release
+    )
+    await retry_unreleased_numbers()
     release.assert_awaited_once_with(DID)
     await async_session.refresh(number)
-    assert "unterminated_did_id" not in number.provisioning_metadata
+    assert "unreleased_resource_id" not in number.provisioning_metadata
     assert number.provisioning_state == "failed"
     assert await get_balance_cents(async_session, org) == 100000 - 350
     # Nothing is left to retry.
-    await retry_unterminated_dids()
+    await retry_unreleased_numbers()
     release.assert_awaited_once()
 
 
@@ -517,11 +562,13 @@ async def test_retry_keeps_the_did_id_when_the_carrier_fails_again(
     org, _, _ = org_and_key
     number = await _rejected_with_failed_terminate(async_session, org, monkeypatch)
     release = AsyncMock(side_effect=RuntimeError("500"))
-    monkeypatch.setattr("hailhq.api.didww_orders.release_didww_number", release)
-    await retry_unterminated_dids()  # never raises
+    monkeypatch.setattr(
+        "hailhq.core.providers.voice.didww.release_didww_number", release
+    )
+    await retry_unreleased_numbers()  # never raises
     release.assert_awaited_once_with(DID)
     await async_session.refresh(number)
-    assert number.provisioning_metadata["unterminated_did_id"] == DID
+    assert number.provisioning_metadata["unreleased_resource_id"] == DID
 
 
 async def test_retry_moves_a_failed_row_to_the_back(
@@ -537,13 +584,13 @@ async def test_retry_moves_a_failed_row_to_the_back(
     )
     await async_session.commit()
     monkeypatch.setattr(
-        "hailhq.api.didww_orders.release_didww_number",
+        "hailhq.core.providers.voice.didww.release_didww_number",
         AsyncMock(side_effect=RuntimeError("500")),
     )
-    await retry_unterminated_dids()
+    await retry_unreleased_numbers()
     await async_session.refresh(number)
     assert datetime.now(timezone.utc) - number.updated_at < timedelta(minutes=1)
-    assert number.provisioning_metadata["unterminated_did_id"] == DID
+    assert number.provisioning_metadata["unreleased_resource_id"] == DID
 
 
 async def test_retry_skips_failed_orders_with_nothing_left_behind(
@@ -552,14 +599,16 @@ async def test_retry_skips_failed_orders_with_nothing_left_behind(
     org, _, _ = org_and_key
     row, offer = await seed_quote(async_session, org)
     monkeypatch.setattr(
-        "hailhq.api.number_orders.place_didww_order",
+        "hailhq.core.providers.voice.didww.place_didww_order",
         AsyncMock(side_effect=CarrierRequestError(422)),
     )
     number = await buy(async_session, org, row, monkeypatch, offer)
     assert number.provisioning_state == "failed"
     release = AsyncMock()
-    monkeypatch.setattr("hailhq.api.didww_orders.release_didww_number", release)
-    await retry_unterminated_dids()
+    monkeypatch.setattr(
+        "hailhq.core.providers.voice.didww.release_didww_number", release
+    )
+    await retry_unreleased_numbers()
     release.assert_not_awaited()
 
 
@@ -569,10 +618,13 @@ async def test_lookup_error_keeps_pending_before_timeout(
     org, _, _ = org_and_key
     row, offer = await seed_quote(async_session, org)
     monkeypatch.setattr(
-        "hailhq.api.number_orders.place_didww_order", AsyncMock(return_value=ORDER)
+        "hailhq.core.providers.voice.didww.place_didww_order",
+        AsyncMock(return_value=ORDER),
     )
     outcome = AsyncMock(return_value=("pending", None, ORDER))
-    monkeypatch.setattr("hailhq.api.number_orders.didww_order_outcome", outcome)
+    monkeypatch.setattr(
+        "hailhq.core.providers.voice.didww.didww_order_outcome", outcome
+    )
     number = await buy(async_session, org, row, monkeypatch, offer)
     outcome.side_effect = RuntimeError("429")
     with pytest.raises(RuntimeError):
@@ -587,7 +639,7 @@ async def test_didww_order_rejected_at_carrier_refunds_all(
     org, _, _ = org_and_key
     row, offer = await seed_quote(async_session, org)
     monkeypatch.setattr(
-        "hailhq.api.number_orders.place_didww_order",
+        "hailhq.core.providers.voice.didww.place_didww_order",
         AsyncMock(side_effect=CarrierRequestError(422)),
     )
     number = await buy(async_session, org, row, monkeypatch, offer)
@@ -606,7 +658,7 @@ async def test_didww_number_gone_before_order_fails_immediately(
     org, _, _ = org_and_key
     row, offer = await seed_quote(async_session, org)
     monkeypatch.setattr(
-        "hailhq.api.number_orders.place_didww_order",
+        "hailhq.core.providers.voice.didww.place_didww_order",
         AsyncMock(side_effect=CarrierPreOrderError(410)),
     )
     number = await buy(async_session, org, row, monkeypatch, offer)
@@ -627,7 +679,7 @@ async def test_didww_inventory_failure_before_order_refunds_at_once(
     org, _, _ = org_and_key
     row, offer = await seed_quote(async_session, org)
     monkeypatch.setattr(
-        "hailhq.api.number_orders.place_didww_order",
+        "hailhq.core.providers.voice.didww.place_didww_order",
         AsyncMock(side_effect=CarrierPreOrderError(status)),
     )
     number = await buy(async_session, org, row, monkeypatch, offer)
@@ -646,7 +698,7 @@ async def test_didww_order_post_failure_keeps_the_hold(
     org, _, _ = org_and_key
     row, offer = await seed_quote(async_session, org)
     monkeypatch.setattr(
-        "hailhq.api.number_orders.place_didww_order",
+        "hailhq.core.providers.voice.didww.place_didww_order",
         AsyncMock(side_effect=CarrierRequestError(500)),
     )
     number = await buy(async_session, org, row, monkeypatch, offer)
@@ -692,18 +744,3 @@ async def test_quotes_for_one_carrier_search_only_its_kinds(
         call.args[2]: call.kwargs["providers"] for call in discover.await_args_list
     }
     assert searched == {"national": ["didww"]}
-
-
-async def test_release_without_carrier_key_does_not_name_the_carrier(monkeypatch):
-    monkeypatch.setattr(
-        numbers_routes,
-        "release_didww_number",
-        AsyncMock(
-            side_effect=CarrierNotConfigured("DIDWW is not configured (DIDWW_API_KEY)")
-        ),
-    )
-    number = PhoneNumber(provider="didww", provider_resource_id=DID)
-    with pytest.raises(HTTPException) as exc:
-        await numbers_routes._release_didww(number, None)
-    assert exc.value.status_code == 503
-    assert exc.value.detail == "the carrier is not configured"

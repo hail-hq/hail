@@ -97,8 +97,8 @@ reconciler ──> didww_order_outcome ──> GET /dids?filter[order.id] ──
 - `core/hailhq/core/carrier_offer.py`, `core/hailhq/core/schemas.py`: `provider` Literals gain `"didww"`.
 - `core/hailhq/core/number_offers.py`: `PROVIDERS`, `searches["didww"]`.
 - `api/hailhq/api/routes/numbers.py`: quotes search each number type only at the carriers whose catalog lists it.
-- `api/hailhq/api/didww_orders.py`: the DIDWW-only steps (`stop_renewal`, `rejected_registration`, `retry_unterminated_dids`).
-- `api/hailhq/api/number_orders.py`: `carrier_outcome` dispatches on carrier name; new outcome `rejected_registration` and its partial refund; timeouts read `carrier(...).pending_timeout`.
+- `core/hailhq/core/carrier_routing.py`: every `Carrier` entry carries `offers`, `place_order`, `order_outcome`, `release` and an optional `revoke_registration`. No other module names a carrier.
+- `api/hailhq/api/number_orders.py`: `carrier_outcome` asks the number's `Carrier` entry; new outcome `rejected_registration` and its partial refund; timeouts read `carrier(...).pending_timeout`.
 - `api/hailhq/api/routes/numbers.py`: `_RELEASERS[DIDWW] = release_didww_number`.
 - `core/hailhq/core/config.py`: `didww_api_key`, `didww_environment` (`production` | `sandbox`, default `production`).
 - `.env.example` and the local `.env`: `DIDWW_API_KEY=`, `DIDWW_ENVIRONMENT=production`.

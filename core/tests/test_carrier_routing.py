@@ -65,7 +65,7 @@ def test_pending_timeout_per_carrier() -> None:
     assert carrier(DIDWW).pending_timeout == timedelta(days=7)
 
 
-def test_didww_orders_complete_later() -> None:
+def test_didww_purchase_completes_later() -> None:
     assert carrier(DIDWW).async_orders is True
 
 

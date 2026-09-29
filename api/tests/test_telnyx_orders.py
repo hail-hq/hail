@@ -350,11 +350,11 @@ async def test_unfound_twilio_order_fails_and_refunds_after_timeout(
         AsyncMock(return_value=([offer], [])),
     )
     monkeypatch.setattr(
-        "hailhq.api.number_orders.purchase_ordered_number",
+        "hailhq.core.providers.voice.twilio.purchase_ordered_number",
         AsyncMock(side_effect=CarrierRequestError(503)),
     )
     find = AsyncMock(return_value=None)
-    monkeypatch.setattr("hailhq.api.number_orders.find_ordered_number", find)
+    monkeypatch.setattr("hailhq.core.providers.voice.twilio.find_ordered_number", find)
     number = await buy(async_session, org, row)
     assert number.provisioning_state == "pending"
     await reconcile_order(async_session, number, force=True)
@@ -428,11 +428,11 @@ async def test_twilio_order_found_at_carrier_is_activated(
         AsyncMock(return_value=([offer], [])),
     )
     monkeypatch.setattr(
-        "hailhq.api.number_orders.purchase_ordered_number",
+        "hailhq.core.providers.voice.twilio.purchase_ordered_number",
         AsyncMock(side_effect=CarrierRequestError(503)),
     )
     monkeypatch.setattr(
-        "hailhq.api.number_orders.find_ordered_number",
+        "hailhq.core.providers.voice.twilio.find_ordered_number",
         AsyncMock(return_value="PN_found"),
     )
     number = await buy(async_session, org, row)

@@ -38,7 +38,7 @@ from hailhq.api.ratelimit import GENERAL_RATE_LIMITED_RESPONSES
 from hailhq.api.route_prefixes import request_mount_prefix
 from hailhq.api.routes.sms import get_sms_provider
 from hailhq.core import telephony_catalog
-from hailhq.core.carrier_routing import DIDWW, TELNYX, TWILIO, sms_route
+from hailhq.core.carrier_routing import CARRIERS, carrier, sms_route
 from hailhq.core.db import get_session, org_lock
 from hailhq.core.models import NumberOffer, PhoneNumber
 from hailhq.core.number_offers import (
@@ -48,13 +48,7 @@ from hailhq.core.number_offers import (
     rank_offers,
 )
 from hailhq.core.providers.sms import SmsProvider
-from hailhq.core.providers.voice import (
-    CarrierNotConfigured,
-    VoiceProvider,
-)
-from hailhq.core.providers.voice.didww import release_didww_number
-from hailhq.core.providers.voice.telnyx import release_telnyx_number
-from hailhq.core.providers.voice.twilio import LazyTwilioVoiceProvider
+from hailhq.core.providers.voice import CarrierNotConfigured
 from hailhq.core.schemas import (
     NumberAcquireRequest,
     NumberQuoteRequest,
@@ -73,17 +67,6 @@ router = APIRouter(
 
 _DEFAULT_LIST_LIMIT = 50
 _MAX_LIST_LIMIT = 200
-
-# Lazy singleton (the calls.py get_livekit pattern) for the voice provider
-# that releases a Twilio number.
-_voice_provider_singleton: VoiceProvider | None = None
-
-
-def get_voice_provider() -> VoiceProvider:
-    global _voice_provider_singleton
-    if _voice_provider_singleton is None:
-        _voice_provider_singleton = LazyTwilioVoiceProvider()
-    return _voice_provider_singleton
 
 
 async def _get_org_number_or_404(
@@ -196,39 +179,7 @@ def _reject_if_released(number: PhoneNumber) -> None:
         )
 
 
-async def _release_telnyx(number: PhoneNumber, provider: VoiceProvider) -> None:
-    try:
-        await release_telnyx_number(number.provider_resource_id)
-    except CarrierNotConfigured as exc:
-        # Carrier not configured: an operator problem, not a server fault.
-        # The customer reads this: never the carrier's name or an env var.
-        logger.error("Telnyx release failed: %s", exc)
-        raise HTTPException(
-            status_code=503, detail="the carrier is not configured"
-        ) from exc
-
-
-async def _release_twilio(number: PhoneNumber, provider: VoiceProvider) -> None:
-    await provider.release_number(number.provider_resource_id)
-
-
-async def _release_didww(number: PhoneNumber, provider: VoiceProvider) -> None:
-    try:
-        await release_didww_number(number.provider_resource_id)
-    except CarrierNotConfigured as exc:
-        # The customer reads this: never the carrier's name or an env var.
-        logger.error("DIDWW release failed: %s", exc)
-        raise HTTPException(
-            status_code=503, detail="the carrier is not configured"
-        ) from exc
-
-
-_RELEASERS = {TELNYX: _release_telnyx, TWILIO: _release_twilio, DIDWW: _release_didww}
-
-
-async def release_org_number(
-    db: AsyncSession, provider: VoiceProvider, number: PhoneNumber
-) -> PhoneNumber:
+async def release_org_number(db: AsyncSession, number: PhoneNumber) -> PhoneNumber:
     """Release a dedicated number at the carrier and mark the row released.
 
     Idempotent: an already-released row is returned unchanged, and the
@@ -261,13 +212,20 @@ async def release_org_number(
             status_code=409,
             detail="Number order is still pending; refresh its status before releasing",
         )
-    releaser = _RELEASERS.get(number.provider)
-    if releaser is None:
+    if number.provider not in CARRIERS:
         raise HTTPException(
             status_code=409,
             detail=f"{number.provider} numbers cannot be released through the API yet",
         )
-    await releaser(number, provider)
+    try:
+        await carrier(number.provider).release(number.provider_resource_id)
+    except CarrierNotConfigured as exc:
+        # Carrier not configured: an operator problem, not a server fault.
+        # The customer reads this: never the carrier's name or an env var.
+        logger.error("%s release failed: %s", number.provider, exc)
+        raise HTTPException(
+            status_code=503, detail="the carrier is not configured"
+        ) from exc
     number.provisioning_state = "released"
     number.released_at = datetime.now(timezone.utc)
     try:
@@ -304,7 +262,6 @@ async def release_number(
     number_id: UUID,
     principal: Annotated[Principal, Depends(get_current_principal)],
     db: Annotated[AsyncSession, Depends(get_session)],
-    provider: Annotated[VoiceProvider, Depends(get_voice_provider)],
 ) -> None:
     """Release a dedicated number. The monthly fee stops accruing after the
     release month; months already accrued stay owed (the rater bills late,
@@ -315,7 +272,7 @@ async def release_number(
     was_released = (
         number.provisioning_state == "released" or number.released_at is not None
     )
-    await release_org_number(db, provider, number)
+    await release_org_number(db, number)
     if not was_released:
         actor_user_id, actor_kind = actor_of(principal)
         await write_audit_log(
@@ -587,4 +544,4 @@ async def quote_numbers(
     }
 
 
-__all__ = ["get_voice_provider", "release_org_number", "router"]
+__all__ = ["release_org_number", "router"]

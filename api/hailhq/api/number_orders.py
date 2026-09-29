@@ -4,36 +4,32 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timedelta, timezone
-from typing import Any, Literal
+from typing import Any
 from uuid import UUID, uuid4
 
 import httpx
 from fastapi import HTTPException
+from hailhq.api.audit import write_audit_log
 from hailhq.api.deps import Principal
-from hailhq.api.didww_orders import rejected_registration, stop_renewal
 from hailhq.api.errors import unprocessable
 from hailhq.api.funds import BILLING_URL
 from hailhq.core import telephony_catalog
 from hailhq.core.billing import get_balance_cents, monthly_fee_ref
-from hailhq.core.carrier_routing import DIDWW, carrier
+from hailhq.core.carrier_routing import Outcome, carrier
 from hailhq.core.db import org_lock, session_scope
-from hailhq.core.models import AccountCredit, NumberOffer, PhoneNumber
+from hailhq.core.models import (
+    AccountCredit,
+    CarrierVerification,
+    NumberOffer,
+    PhoneNumber,
+)
 from hailhq.core.number_offers import CarrierOffer, discover_offers
 from hailhq.core.providers.voice import (
     CarrierPreOrderError,
     CarrierRequestError,
 )
-from hailhq.core.providers.voice.didww import didww_order_outcome, place_didww_order
-from hailhq.core.providers.voice.telnyx import (
-    place_number_order,
-    telnyx_order_outcome,
-)
-from hailhq.core.providers.voice.twilio import (
-    find_ordered_number,
-    purchase_ordered_number,
-)
 from hailhq.core.schemas import NumberAcquireRequest
-from sqlalchemy import and_, delete, or_, select
+from sqlalchemy import and_, delete, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -41,7 +37,7 @@ logger = logging.getLogger(__name__)
 
 ORDER_POLL_INTERVAL = timedelta(seconds=15)
 # A running carrier check blocks other checks of the same order for this
-# long. Longer than the slowest check (DIDWW: 4 calls of up to 40 s each),
+# long. Longer than the slowest carrier check (4 calls of up to 40 s each),
 # so two runs never both file a registration for one number.
 ORDER_CHECK_LEASE = timedelta(minutes=5)
 
@@ -101,9 +97,9 @@ async def finish_order(
 
     ``reason`` is stored for a failed order and shown to the buyer; it must
     never contain carrier payloads beyond the carrier's own human-readable
-    rejection wording (DIDWW's reject reasons). ``keep_setup`` charges the setup fee even
-    on failure: the carrier already billed it and does not refund (DIDWW
-    rejected registration)."""
+    rejection wording. ``keep_setup`` charges the setup fee even on failure:
+    the carrier already billed it and does not refund (the number was
+    bought, then its registration was rejected or never cleared)."""
     if number.provisioning_state != "pending":
         return
     meta = dict(number.provisioning_metadata)
@@ -147,32 +143,100 @@ async def finish_order(
     await db.commit()
 
 
-async def carrier_outcome(
-    number: PhoneNumber,
-) -> tuple[
-    Literal["active", "failed", "pending", "missing", "rejected_registration"],
-    str | None,
-    str | None,
-]:
+async def give_back(number: PhoneNumber, resource_id: str) -> None:
+    """Release a bought number the order will not keep. Never raises. When
+    the carrier call fails, the resource id is kept on the row as
+    ``unreleased_resource_id``: a failed order stores no resource id, and
+    the number renews at the carrier until ``retry_unreleased_numbers`` gets
+    it released. Saved by the caller's ``finish_order``."""
+    try:
+        await carrier(number.provider).release(resource_id)
+    except Exception:
+        logger.exception(
+            "Could not release carrier number; will retry: number=%s resource=%s",
+            number.id,
+            resource_id,
+        )
+        number.provisioning_metadata = {
+            **number.provisioning_metadata,
+            "unreleased_resource_id": resource_id,
+        }
+
+
+async def rejected_registration(
+    db: AsyncSession, number: PhoneNumber, resource_id: str | None
+) -> str:
+    """The carrier refused the end-user registration of a bought number.
+    Releases the number, takes the approval back and marks the Hail
+    verification rejected. Returns the reason shown to the buyer.
+
+    Caller holds the org lock and fails the order. The carrier calls run
+    under that lock on purpose: two concurrent reconciles must never both
+    see "pending" and both release the same number."""
+    org = number.organization_id
+    if resource_id:
+        await give_back(number, resource_id)
+    # Take the approval back, so the next quote asks for new papers
+    # instead of filing the same rejected ones again.
+    reason = None
+    revoke = carrier(number.provider).revoke_registration
+    if revoke is not None:
+        try:
+            reason = await revoke(
+                CarrierOffer.model_validate(number.provisioning_metadata["offer"]), org
+            )
+        except Exception:
+            logger.exception(
+                "Could not revoke rejected carrier registration; take the "
+                "approval back by hand: number=%s",
+                number.id,
+            )
+    reason = reason or "the carrier rejected the end-user registration"
+    verification = (
+        await db.execute(
+            select(CarrierVerification).where(
+                CarrierVerification.organization_id == org,
+                CarrierVerification.provider == number.provider,
+                CarrierVerification.country_code == number.country_code,
+                CarrierVerification.number_type == number.number_type,
+                CarrierVerification.state == "approved",
+            )
+        )
+    ).scalar_one_or_none()
+    if verification is not None:
+        verification.state = "rejected"
+        verification.rejection_reason = reason
+        verification.updated_at = datetime.now(timezone.utc)
+        # Same audit trail as every other system-driven rejection
+        # (see _reject_row in routes/verifications.py).
+        await write_audit_log(
+            org,
+            None,
+            "verification.reject",
+            "carrier_verification",
+            verification.id,
+            {"rejected_by": None, "reason": reason},
+            actor_user_id=None,
+            actor_kind="system",
+        )
+    return reason
+
+
+async def carrier_outcome(number: PhoneNumber) -> Outcome:
     """Ask the carrier what happened to this order. Holds no DB lock.
 
     Returns (state, owned resource id, carrier order id). ``missing`` means
     the carrier has no record of the order; it is never treated as
     permission to submit another paid purchase. ``rejected_registration``
-    (DIDWW) means the number exists but the end-user registration failed.
+    means the number exists but the end-user registration failed.
     """
     meta = number.provisioning_metadata
-    if number.provider == DIDWW:
-        return await didww_order_outcome(
-            number.e164,
-            number.id,
-            meta.get("order_id"),
-            meta.get("offer", {}).get("address_id"),
-        )
-    if carrier(number.provider).async_orders:
-        return await telnyx_order_outcome(number.e164, number.id, meta.get("order_id"))
-    sid = await find_ordered_number(number.e164, number.id)
-    return ("active", sid, None) if sid else ("missing", None, None)
+    return await carrier(number.provider).order_outcome(
+        number.e164,
+        number.id,
+        meta.get("order_id"),
+        CarrierOffer.model_validate(meta["offer"]),
+    )
 
 
 async def reconcile_order(
@@ -276,11 +340,11 @@ async def reconcile_order(
                 number.id,
                 number.provisioning_metadata.get("order_id"),
             )
-        if number.provider == DIDWW and resource_id:
-            # The DID exists but its registration never cleared. Stop its
-            # renewal; the setup fee stays (DIDWW billed it and does not
-            # refund).
-            await stop_renewal(number, resource_id)
+        if resource_id:
+            # The number was bought but its registration never cleared.
+            # Release it; the setup fee stays (the carrier billed it and
+            # does not refund).
+            await give_back(number, resource_id)
             await finish_order(
                 db,
                 number,
@@ -464,29 +528,19 @@ async def acquire_offer(
     # Held through the carrier call on purpose: finish_order and the metadata
     # write below act on this in-memory row and must not interleave with
     # reconcile_order. The cost is that same-organization writes wait for the
-    # carrier (timeouts: Telnyx 20s, Twilio 10s).
+    # carrier (its HTTP timeout, 10 to 20 s).
     await org_lock(db, org)
     try:
+        placed = await carrier(offer.provider).place_order(number.id, offer)
         if carrier(offer.provider).async_orders:
-            if offer.provider == DIDWW:
-                order_id = await place_didww_order(
-                    number.id, offer.e164, offer.address_id
-                )
-            else:
-                order_id = await place_number_order(
-                    number.id, offer.e164, offer.verification_id, offer.capabilities
-                )
             number.provisioning_metadata = {
                 **number.provisioning_metadata,
-                "order_id": order_id,
+                "order_id": placed,
                 "order_state": "pending",
             }
             await db.commit()
         else:
-            resource_id = await purchase_ordered_number(
-                offer.e164, number.id, offer.verification_id
-            )
-            await finish_order(db, number, resource_id=resource_id)
+            await finish_order(db, number, resource_id=placed)
     except CarrierPreOrderError as exc:
         # No order was sent to the carrier: nothing to reconcile.
         await finish_order(
@@ -616,6 +670,66 @@ async def reconcile_pending_orders():
                 number_id,
                 exc_info=True,
             )
+
+
+async def retry_release(db: AsyncSession, number: PhoneNumber) -> None:
+    """Release a number whose release failed when its order was failed.
+    Carrier errors propagate and the id stays for the next try. The carrier
+    call runs under the org lock, like the first release, so two runs
+    never act on the same row."""
+    await org_lock(db, number.organization_id)
+    await db.refresh(number)
+    resource_id = number.provisioning_metadata.get("unreleased_resource_id")
+    if resource_id:
+        await carrier(number.provider).release(resource_id)
+        number.provisioning_metadata = {
+            k: v
+            for k, v in number.provisioning_metadata.items()
+            if k != "unreleased_resource_id"
+        }
+    await db.commit()
+
+
+async def retry_unreleased_numbers():
+    """Fresh session per number, like ``reconcile_pending_orders``. Oldest
+    ``updated_at`` first; a row that failed again goes to the back."""
+    async with session_scope() as db:
+        ids = (
+            (
+                await db.execute(
+                    select(PhoneNumber.id)
+                    .where(
+                        PhoneNumber.provisioning_metadata.has_key(
+                            "unreleased_resource_id"
+                        )
+                    )
+                    .order_by(PhoneNumber.updated_at)
+                    .limit(100)
+                )
+            )
+            .scalars()
+            .all()
+        )
+    for number_id in ids:
+        try:
+            async with session_scope() as db:
+                number = await db.get(PhoneNumber, number_id)
+                if number:
+                    await retry_release(db, number)
+        except Exception:
+            logger.warning(
+                "Carrier release retry failed: number=%s; will retry",
+                number_id,
+                exc_info=True,
+            )
+            # Move the row to the back, so rows beyond the limit get a turn.
+            async with session_scope() as db:
+                await db.execute(
+                    update(PhoneNumber)
+                    .where(PhoneNumber.id == number_id)
+                    .values(updated_at=datetime.now(timezone.utc))
+                )
+                await db.commit()
 
 
 async def purge_expired_quotes() -> int:
