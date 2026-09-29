@@ -113,7 +113,8 @@ minute until DIDWW accepts it.
 Schemas: [`openapi/openapi.yaml`](../../../openapi/openapi.yaml). Code:
 [`providers/voice/didww.py`](../../../core/hailhq/core/providers/voice/didww.py),
 [`providers/verification/didww.py`](../../../core/hailhq/core/providers/verification/didww.py),
-[`number_orders.py`](../../../api/hailhq/api/number_orders.py).
+[`number_orders.py`](../../../api/hailhq/api/number_orders.py),
+[`didww_orders.py`](../../../api/hailhq/api/didww_orders.py).
 
 A call from a `didww` number with `LIVEKIT_DIDWW_SIP_OUTBOUND_TRUNK_ID` empty
 fails with `end_reason = carrier_route_failed` before any LiveKit room exists.

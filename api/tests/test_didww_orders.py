@@ -7,11 +7,8 @@ from unittest.mock import AsyncMock
 
 import pytest
 from fastapi import HTTPException
-from hailhq.api.number_orders import (
-    acquire_offer,
-    reconcile_order,
-    retry_unterminated_dids,
-)
+from hailhq.api.didww_orders import retry_unterminated_dids
+from hailhq.api.number_orders import acquire_offer, reconcile_order
 from hailhq.api.routes import numbers as numbers_routes
 from hailhq.core import telephony_catalog
 from hailhq.core.billing import get_balance_cents
@@ -185,9 +182,9 @@ async def test_didww_registration_rejected_refunds_monthly_only(
     outcome = AsyncMock(return_value=("pending", None, ORDER))
     monkeypatch.setattr("hailhq.api.number_orders.didww_order_outcome", outcome)
     terminate = AsyncMock()
-    monkeypatch.setattr("hailhq.api.number_orders.terminate_did", terminate)
+    monkeypatch.setattr("hailhq.api.didww_orders.terminate_did", terminate)
     monkeypatch.setattr(
-        "hailhq.api.number_orders.revoke_registration", AsyncMock(return_value=None)
+        "hailhq.api.didww_orders.revoke_registration", AsyncMock(return_value=None)
     )
     number = await buy(async_session, org, row, monkeypatch, offer)
     outcome.return_value = ("rejected_registration", DID, ORDER)
@@ -238,9 +235,9 @@ async def test_didww_registration_rejected_revokes_approval(
     )
     outcome = AsyncMock(return_value=("pending", None, ORDER))
     monkeypatch.setattr("hailhq.api.number_orders.didww_order_outcome", outcome)
-    monkeypatch.setattr("hailhq.api.number_orders.terminate_did", AsyncMock())
+    monkeypatch.setattr("hailhq.api.didww_orders.terminate_did", AsyncMock())
     revoke = AsyncMock(return_value="Document is blurry")
-    monkeypatch.setattr("hailhq.api.number_orders.revoke_registration", revoke)
+    monkeypatch.setattr("hailhq.api.didww_orders.revoke_registration", revoke)
     number = await buy(async_session, org, row, monkeypatch, offer)
     outcome.return_value = ("rejected_registration", DID, ORDER)
     await reconcile_order(async_session, number, force=True)
@@ -275,9 +272,9 @@ async def test_didww_registration_rejected_refunds_even_if_revoke_fails(
     )
     outcome = AsyncMock(return_value=("pending", None, ORDER))
     monkeypatch.setattr("hailhq.api.number_orders.didww_order_outcome", outcome)
-    monkeypatch.setattr("hailhq.api.number_orders.terminate_did", AsyncMock())
+    monkeypatch.setattr("hailhq.api.didww_orders.terminate_did", AsyncMock())
     monkeypatch.setattr(
-        "hailhq.api.number_orders.revoke_registration",
+        "hailhq.api.didww_orders.revoke_registration",
         AsyncMock(side_effect=RuntimeError("500")),
     )
     number = await buy(async_session, org, row, monkeypatch, offer)
@@ -308,7 +305,7 @@ async def test_didww_pending_survives_three_days(
         AsyncMock(return_value=("pending", DID, ORDER)),
     )
     terminate = AsyncMock()
-    monkeypatch.setattr("hailhq.api.number_orders.terminate_did", terminate)
+    monkeypatch.setattr("hailhq.api.didww_orders.terminate_did", terminate)
     number = await buy(async_session, org, row, monkeypatch, offer)
     await _age(async_session, number, timedelta(days=3))
     await reconcile_order(async_session, number, force=True)
@@ -339,7 +336,7 @@ async def test_didww_timeout_without_did_refunds_all(
         AsyncMock(return_value=("pending", None, ORDER)),
     )
     terminate = AsyncMock()
-    monkeypatch.setattr("hailhq.api.number_orders.terminate_did", terminate)
+    monkeypatch.setattr("hailhq.api.didww_orders.terminate_did", terminate)
     number = await buy(async_session, org, row, monkeypatch, offer)
     await _age(async_session, number, timedelta(days=7, minutes=1))
     await reconcile_order(async_session, number, force=True)
@@ -365,7 +362,7 @@ async def test_didww_timeout_terminate_failure_still_finishes(
         AsyncMock(return_value=("pending", DID, ORDER)),
     )
     monkeypatch.setattr(
-        "hailhq.api.number_orders.terminate_did",
+        "hailhq.api.didww_orders.terminate_did",
         AsyncMock(side_effect=RuntimeError("500")),
     )
     number = await buy(async_session, org, row, monkeypatch, offer)
@@ -389,11 +386,11 @@ async def test_didww_rejected_terminate_failure_keeps_the_did_id(
     outcome = AsyncMock(return_value=("pending", None, ORDER))
     monkeypatch.setattr("hailhq.api.number_orders.didww_order_outcome", outcome)
     monkeypatch.setattr(
-        "hailhq.api.number_orders.terminate_did",
+        "hailhq.api.didww_orders.terminate_did",
         AsyncMock(side_effect=RuntimeError("500")),
     )
     monkeypatch.setattr(
-        "hailhq.api.number_orders.revoke_registration", AsyncMock(return_value=None)
+        "hailhq.api.didww_orders.revoke_registration", AsyncMock(return_value=None)
     )
     number = await buy(async_session, org, row, monkeypatch, offer)
     outcome.return_value = ("rejected_registration", DID, ORDER)
@@ -482,11 +479,11 @@ async def _rejected_with_failed_terminate(db, org, monkeypatch):
     outcome = AsyncMock(return_value=("pending", None, ORDER))
     monkeypatch.setattr("hailhq.api.number_orders.didww_order_outcome", outcome)
     monkeypatch.setattr(
-        "hailhq.api.number_orders.terminate_did",
+        "hailhq.api.didww_orders.terminate_did",
         AsyncMock(side_effect=RuntimeError("500")),
     )
     monkeypatch.setattr(
-        "hailhq.api.number_orders.revoke_registration", AsyncMock(return_value=None)
+        "hailhq.api.didww_orders.revoke_registration", AsyncMock(return_value=None)
     )
     number = await buy(db, org, row, monkeypatch, offer)
     outcome.return_value = ("rejected_registration", DID, ORDER)
@@ -502,7 +499,7 @@ async def test_retry_terminates_a_did_left_behind(
     org, _, _ = org_and_key
     number = await _rejected_with_failed_terminate(async_session, org, monkeypatch)
     release = AsyncMock()
-    monkeypatch.setattr("hailhq.api.number_orders.release_didww_number", release)
+    monkeypatch.setattr("hailhq.api.didww_orders.release_didww_number", release)
     await retry_unterminated_dids()
     release.assert_awaited_once_with(DID)
     await async_session.refresh(number)
@@ -520,7 +517,7 @@ async def test_retry_keeps_the_did_id_when_the_carrier_fails_again(
     org, _, _ = org_and_key
     number = await _rejected_with_failed_terminate(async_session, org, monkeypatch)
     release = AsyncMock(side_effect=RuntimeError("500"))
-    monkeypatch.setattr("hailhq.api.number_orders.release_didww_number", release)
+    monkeypatch.setattr("hailhq.api.didww_orders.release_didww_number", release)
     await retry_unterminated_dids()  # never raises
     release.assert_awaited_once_with(DID)
     await async_session.refresh(number)
@@ -539,7 +536,7 @@ async def test_retry_skips_failed_orders_with_nothing_left_behind(
     number = await buy(async_session, org, row, monkeypatch, offer)
     assert number.provisioning_state == "failed"
     release = AsyncMock()
-    monkeypatch.setattr("hailhq.api.number_orders.release_didww_number", release)
+    monkeypatch.setattr("hailhq.api.didww_orders.release_didww_number", release)
     await retry_unterminated_dids()
     release.assert_not_awaited()
 

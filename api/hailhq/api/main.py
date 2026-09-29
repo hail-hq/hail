@@ -12,11 +12,8 @@ from fastapi.exception_handlers import request_validation_exception_handler
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, Response
 from hailhq.api.deprecation import DeprecationHeaderMiddleware
-from hailhq.api.number_orders import (
-    purge_expired_quotes,
-    reconcile_pending_orders,
-    retry_unterminated_dids,
-)
+from hailhq.api.didww_orders import retry_unterminated_dids
+from hailhq.api.number_orders import purge_expired_quotes, reconcile_pending_orders
 from hailhq.api.ratelimit import GeneralRateLimitMiddleware
 from hailhq.api.routes import calls as calls_routes
 from hailhq.api.routes import contacts as contacts_routes

@@ -31,7 +31,6 @@ from hailhq.api.idempotency import (
 from hailhq.api.number_orders import (
     RetryableError,
     catalog_capabilities,
-    org_lock,
     purchase_number,
 )
 from hailhq.api.pagination import fetch_cursor_page
@@ -40,7 +39,7 @@ from hailhq.api.route_prefixes import request_mount_prefix
 from hailhq.api.routes.sms import get_sms_provider
 from hailhq.core import telephony_catalog
 from hailhq.core.carrier_routing import DIDWW, TELNYX, TWILIO, sms_route
-from hailhq.core.db import get_session
+from hailhq.core.db import get_session, org_lock
 from hailhq.core.models import NumberOffer, PhoneNumber
 from hailhq.core.number_offers import (
     PROVIDERS,
