@@ -17,6 +17,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from datetime import datetime
+from typing import Literal
 
 from hailhq.core.schemas import NumberType
 from pydantic import BaseModel
@@ -26,9 +27,16 @@ __all__ = [
     "CarrierPreOrderError",
     "CarrierRequestError",
     "NumberType",
+    "OrderState",
     "ProviderCallStatus",
     "VoiceProvider",
 ]
+
+
+# What a carrier says about a number order. ``missing``: the carrier has no
+# record of it. ``rejected_registration``: the number was bought but the
+# carrier refused the end-user registration.
+OrderState = Literal["active", "failed", "pending", "missing", "rejected_registration"]
 
 
 class CarrierRequestError(Exception):

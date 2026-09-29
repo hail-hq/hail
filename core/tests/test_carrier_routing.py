@@ -1,9 +1,14 @@
+import inspect
 from datetime import timedelta
+from unittest.mock import AsyncMock
+from uuid import uuid4
 
 import pytest
-from hailhq.core import carrier_routing
-from hailhq.core.carrier_routing import DIDWW, TELNYX, TWILIO, carrier
+from hailhq.core import carrier_routing, number_offers
+from hailhq.core.carrier_offer import CarrierOffer
+from hailhq.core.carrier_routing import CARRIERS, DIDWW, TELNYX, TWILIO, carrier
 from hailhq.core.config import settings
+from hailhq.core.providers.voice import CarrierNotConfigured
 
 
 @pytest.fixture(autouse=True)
@@ -62,3 +67,141 @@ def test_pending_timeout_per_carrier() -> None:
 
 def test_didww_orders_complete_later() -> None:
     assert carrier(DIDWW).async_orders is True
+
+
+# -- one interface for every carrier ---------------------------------------
+
+VOICE = "hailhq.core.providers.voice"
+
+
+def _offer(provider: str) -> CarrierOffer:
+    return CarrierOffer(
+        provider=provider,
+        e164="+351300000001",
+        country_code="PT",
+        number_type="national",
+        capabilities=["voice"],
+        monthly_cents=350,
+        setup_cents=350,
+        readiness="ready",
+        verification_id="ver-1",
+        address_id="addr-1",
+    )
+
+
+@pytest.mark.parametrize("name", list(CARRIERS))
+def test_every_carrier_has_the_whole_interface(name: str) -> None:
+    entry = carrier(name)
+    for fn in (entry.offers, entry.place_order, entry.order_outcome, entry.release):
+        assert inspect.iscoroutinefunction(fn)
+
+
+def test_every_listed_carrier_is_asked_for_offers() -> None:
+    assert number_offers.PROVIDERS == tuple(CARRIERS)
+    assert tuple(CARRIERS) == ("twilio", "telnyx", "didww")
+
+
+@pytest.mark.parametrize(
+    ("name", "inner", "args"),
+    [
+        (TWILIO, "twilio.twilio_offers", {}),
+        (TELNYX, "telnyx.telnyx_offers", {}),
+        (DIDWW, "didww.didww_offers", {}),
+    ],
+)
+async def test_offers_reach_the_carrier(monkeypatch, name, inner, args) -> None:
+    found = AsyncMock(return_value=[_offer(name)])
+    monkeypatch.setattr(f"{VOICE}.{inner}", found)
+    org = uuid4()
+    offers = await carrier(name).offers(
+        org, "PT", "national", ["voice"], "+351300000001"
+    )
+    assert offers == [_offer(name)]
+    assert found.await_args.args[:4] == (org, "PT", "national", ["voice"])
+    assert found.await_args.kwargs["e164"] == "+351300000001"
+
+
+async def test_place_order_reaches_each_carrier(monkeypatch) -> None:
+    number_id = uuid4()
+    twilio = AsyncMock(return_value="PN1")
+    telnyx = AsyncMock(return_value="order-t")
+    didww = AsyncMock(return_value="order-d")
+    monkeypatch.setattr(f"{VOICE}.twilio.purchase_ordered_number", twilio)
+    monkeypatch.setattr(f"{VOICE}.telnyx.place_number_order", telnyx)
+    monkeypatch.setattr(f"{VOICE}.didww.place_didww_order", didww)
+    assert await carrier(TWILIO).place_order(number_id, _offer(TWILIO)) == "PN1"
+    assert await carrier(TELNYX).place_order(number_id, _offer(TELNYX)) == "order-t"
+    assert await carrier(DIDWW).place_order(number_id, _offer(DIDWW)) == "order-d"
+    twilio.assert_awaited_once_with("+351300000001", number_id, "ver-1")
+    telnyx.assert_awaited_once_with(number_id, "+351300000001", "ver-1", ["voice"])
+    didww.assert_awaited_once_with(number_id, "+351300000001", "addr-1")
+
+
+async def test_order_outcome_reaches_each_carrier(monkeypatch) -> None:
+    number_id = uuid4()
+    telnyx = AsyncMock(return_value=("pending", None, "order-t"))
+    didww = AsyncMock(return_value=("pending", "did-1", "order-d"))
+    monkeypatch.setattr(f"{VOICE}.telnyx.telnyx_order_outcome", telnyx)
+    monkeypatch.setattr(f"{VOICE}.didww.didww_order_outcome", didww)
+    e164 = "+351300000001"
+    assert await carrier(TELNYX).order_outcome(
+        e164, number_id, "order-t", _offer(TELNYX)
+    ) == ("pending", None, "order-t")
+    assert await carrier(DIDWW).order_outcome(
+        e164, number_id, "order-d", _offer(DIDWW)
+    ) == ("pending", "did-1", "order-d")
+    telnyx.assert_awaited_once_with(e164, number_id, "order-t")
+    didww.assert_awaited_once_with(e164, number_id, "order-d", "addr-1")
+
+
+@pytest.mark.parametrize(
+    ("sid", "outcome"),
+    [("PN1", ("active", "PN1", None)), (None, ("missing", None, None))],
+)
+async def test_twilio_order_outcome(monkeypatch, sid, outcome) -> None:
+    number_id = uuid4()
+    find = AsyncMock(return_value=sid)
+    monkeypatch.setattr(f"{VOICE}.twilio.find_ordered_number", find)
+    assert (
+        await carrier(TWILIO).order_outcome(
+            "+351300000001", number_id, None, _offer(TWILIO)
+        )
+        == outcome
+    )
+    find.assert_awaited_once_with("+351300000001", number_id)
+
+
+async def test_release_reaches_each_carrier(monkeypatch) -> None:
+    for name, inner in (
+        (TWILIO, "twilio.release_twilio_number"),
+        (TELNYX, "telnyx.release_telnyx_number"),
+        (DIDWW, "didww.release_didww_number"),
+    ):
+        release = AsyncMock()
+        monkeypatch.setattr(f"{VOICE}.{inner}", release)
+        await carrier(name).release("res-1")
+        release.assert_awaited_once_with("res-1")
+
+
+async def test_twilio_release_without_credentials(monkeypatch) -> None:
+    monkeypatch.setattr(settings, "twilio_account_sid", "")
+    monkeypatch.setattr(settings, "twilio_auth_token", "")
+    with pytest.raises(CarrierNotConfigured):
+        await carrier(TWILIO).release("PN1")
+
+
+async def test_only_didww_takes_a_registration_back(monkeypatch) -> None:
+    assert carrier(TWILIO).revoke_registration is None
+    assert carrier(TELNYX).revoke_registration is None
+    revoke = AsyncMock(return_value="Document is blurry")
+    monkeypatch.setattr(f"{VOICE}.didww.revoke_registration", revoke)
+    org = uuid4()
+    assert await carrier(DIDWW).revoke_registration(_offer(DIDWW), org) == (
+        "Document is blurry"
+    )
+    revoke.assert_awaited_once_with("addr-1", org, "PT", "national")
+
+
+def test_first_listed_carrier_wins_a_tie() -> None:
+    ranked = number_offers.rank_offers([_offer(DIDWW), _offer(TELNYX), _offer(TWILIO)])
+    assert ranked[0].provider == "twilio"

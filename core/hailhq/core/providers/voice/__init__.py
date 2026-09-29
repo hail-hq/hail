@@ -3,6 +3,7 @@ from hailhq.core.providers.voice.base import (
     CarrierPreOrderError,
     CarrierRequestError,
     NumberType,
+    OrderState,
     ProviderCallStatus,
     VoiceProvider,
 )
@@ -13,6 +14,7 @@ __all__ = [
     "CarrierPreOrderError",
     "CarrierRequestError",
     "NumberType",
+    "OrderState",
     "ProviderCallStatus",
     "TwilioVoiceProvider",
     "VoiceProvider",

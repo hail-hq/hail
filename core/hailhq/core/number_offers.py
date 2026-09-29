@@ -7,22 +7,15 @@ import logging
 from uuid import UUID
 
 from hailhq.core.carrier_offer import CarrierOffer
-from hailhq.core.providers.telnyx import get_http_client
-from hailhq.core.providers.voice.didww import didww_offers
-from hailhq.core.providers.voice.telnyx import telnyx_offers
-from hailhq.core.providers.voice.twilio import twilio_offers
+from hailhq.core.carrier_routing import CARRIERS, carrier
 from hailhq.core.schemas import NumberType
 
 logger = logging.getLogger(__name__)
 
-__all__ = [
-    "CarrierOffer",
-    "didww_offers",
-    "discover_offers",
-    "rank_offers",
-    "telnyx_offers",
-    "twilio_offers",
-]
+__all__ = ["PROVIDERS", "CarrierOffer", "discover_offers", "rank_offers"]
+
+# Every carrier, in the order ``CARRIERS`` lists them.
+PROVIDERS = tuple(CARRIERS)
 
 
 def rank_offers(
@@ -46,13 +39,10 @@ def rank_offers(
             ),
             o.monthly_cents,
             o.setup_cents,
-            o.provider != "twilio",
+            o.provider != PROVIDERS[0],
             o.e164,
         ),
     )
-
-
-PROVIDERS = ("twilio", "telnyx", "didww")
 
 
 async def discover_offers(
@@ -65,16 +55,10 @@ async def discover_offers(
 ) -> tuple[list[CarrierOffer], list[str]]:
     """Live offers from ``providers`` (every carrier by default) and the
     carriers whose lookup failed."""
-    searches = {
-        "twilio": lambda: twilio_offers(org, country, kind, capabilities, e164=e164),
-        "telnyx": lambda: telnyx_offers(
-            org, country, kind, capabilities, get_http_client(), e164=e164
-        ),
-        "didww": lambda: didww_offers(org, country, kind, capabilities, e164=e164),
-    }
     asked = [p for p in PROVIDERS if p in providers]
     results = await asyncio.gather(
-        *(searches[p]() for p in asked), return_exceptions=True
+        *(carrier(p).offers(org, country, kind, capabilities, e164) for p in asked),
+        return_exceptions=True,
     )
     offers, unavailable = [], []
     for provider, result in zip(asked, results):

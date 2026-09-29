@@ -17,8 +17,10 @@ from uuid import UUID
 from hailhq.core.carrier_offer import CarrierOffer, cents
 from hailhq.core.config import settings
 from hailhq.core.providers.voice.base import (
+    CarrierNotConfigured,
     CarrierRequestError,
     NumberType,
+    OrderState,
     ProviderCallStatus,
     VoiceProvider,
 )
@@ -300,3 +302,42 @@ class LazyTwilioVoiceProvider(VoiceProvider):
 
     async def hangup_call(self, provider_call_sid: str) -> None:
         await self._provider().hangup_call(provider_call_sid)
+
+
+async def release_twilio_number(resource_id: str) -> None:
+    """Release an owned Twilio number. Raises ``CarrierNotConfigured`` if the
+    credentials are missing."""
+    try:
+        provider = TwilioVoiceProvider()
+    except ValueError as exc:
+        raise CarrierNotConfigured(str(exc)) from exc
+    await provider.release_number(resource_id)
+
+
+# -- carrier interface (core/hailhq/core/carrier_routing.py) ---------------
+
+
+async def offers(
+    org: UUID,
+    country: str,
+    kind: NumberType,
+    capabilities: list[str],
+    e164: str | None = None,
+) -> list[CarrierOffer]:
+    return await twilio_offers(org, country, kind, capabilities, e164=e164)
+
+
+async def place_order(number_id: UUID, offer: CarrierOffer) -> str:
+    """Twilio buys at once: the result is the owned number's SID."""
+    return await purchase_ordered_number(offer.e164, number_id, offer.verification_id)
+
+
+async def order_outcome(
+    e164: str, number_id: UUID, order_id: str | None, offer: CarrierOffer
+) -> tuple[OrderState, str | None, str | None]:
+    sid = await find_ordered_number(e164, number_id)
+    return ("active", sid, None) if sid else ("missing", None, None)
+
+
+async def release(resource_id: str) -> None:
+    await release_twilio_number(resource_id)

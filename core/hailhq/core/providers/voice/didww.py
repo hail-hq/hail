@@ -24,6 +24,7 @@ from hailhq.core.providers.voice.base import (
     CarrierNotConfigured,
     CarrierPreOrderError,
     CarrierRequestError,
+    OrderState,
 )
 from hailhq.core.schemas import NumberType
 
@@ -225,9 +226,6 @@ async def didww_offers(
     ):
         return []
     return await asyncio.to_thread(_offers_sync, org, country, kind, e164)
-
-
-OrderState = Literal["active", "failed", "pending", "missing", "rejected_registration"]
 
 
 def _find_available(client: DidwwClient, e164: str) -> tuple[str, str]:
@@ -489,3 +487,38 @@ async def release_didww_number(resource_id: str) -> None:
             )
             return
         raise
+
+
+# -- carrier interface (core/hailhq/core/carrier_routing.py) ---------------
+
+
+async def offers(
+    org: UUID,
+    country: str,
+    kind: NumberType,
+    capabilities: list[str],
+    e164: str | None = None,
+) -> list[CarrierOffer]:
+    return await didww_offers(org, country, kind, capabilities, e164=e164)
+
+
+async def place_order(number_id: UUID, offer: CarrierOffer) -> str:
+    return await place_didww_order(number_id, offer.e164, offer.address_id)
+
+
+async def order_outcome(
+    e164: str, number_id: UUID, order_id: str | None, offer: CarrierOffer
+) -> tuple[OrderState, str | None, str | None]:
+    return await didww_order_outcome(e164, number_id, order_id, offer.address_id)
+
+
+async def release(resource_id: str) -> None:
+    await release_didww_number(resource_id)
+
+
+async def revoke(offer: CarrierOffer, org: UUID) -> str | None:
+    if not offer.address_id:
+        return None
+    return await revoke_registration(
+        offer.address_id, org, offer.country_code, offer.number_type
+    )

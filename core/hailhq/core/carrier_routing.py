@@ -2,17 +2,27 @@
 
 Each carrier has its own LiveKit outbound SIP trunk. A number never leaves
 its carrier: a DIDWW number must not dial through the Twilio trunk (Twilio
-would reject or rewrite the caller ID) and vice versa. Adding a carrier is one
-``Carrier`` entry in ``CARRIERS`` plus its provider adapters.
+would reject or rewrite the caller ID) and vice versa.
+
+``CARRIERS`` is the one place that names the carriers. Quotes, orders and
+release reach a carrier only through its ``Carrier`` entry. Adding a carrier
+is one adapter module in ``providers/voice/`` with the five interface
+functions (``offers``, ``place_order``, ``order_outcome``, ``release`` and,
+when it registers end users after the purchase, ``revoke``) plus one entry
+here.
 """
 
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import timedelta
+from uuid import UUID
 
+from hailhq.core.carrier_offer import CarrierOffer
 from hailhq.core.config import settings
 from hailhq.core.providers.sms.base import SmsProvider
 from hailhq.core.providers.sms.telnyx import TelnyxSmsProvider
+from hailhq.core.providers.voice import OrderState, didww, telnyx, twilio
+from hailhq.core.schemas import NumberType
 
 TWILIO = "twilio"
 TELNYX = "telnyx"
@@ -60,6 +70,10 @@ def _telnyx_sms(twilio: SmsProvider) -> SmsProvider:
     return TelnyxSmsProvider()
 
 
+# (state, owned resource id, carrier order id).
+Outcome = tuple[OrderState, str | None, str | None]
+
+
 @dataclass(frozen=True)
 class Carrier:
     voice_route: Callable[[], VoiceRoute]
@@ -69,19 +83,65 @@ class Carrier:
     sms_status_path: str | None
     # True when a purchase is accepted first and completes later.
     async_orders: bool
+    # Live inventory: (org, country, number type, capabilities, exact e164).
+    offers: Callable[
+        [UUID, str, NumberType, list[str], str | None], Awaitable[list[CarrierOffer]]
+    ]
+    # Buy one quoted number once, never retried: (number id, offer). Returns
+    # the carrier order id when ``async_orders``, else the owned resource id.
+    place_order: Callable[[UUID, CarrierOffer], Awaitable[str]]
+    # What happened to an order: (e164, number id, order id if known, offer).
+    order_outcome: Callable[[str, UUID, str | None, CarrierOffer], Awaitable[Outcome]]
+    # Give an owned number back: (resource id). ``CarrierNotConfigured`` when
+    # the carrier's credentials are missing.
+    release: Callable[[str], Awaitable[None]]
     # How long a pending order may wait for the carrier before Hail fails
     # it and refunds the hold. DIDWW registers the end user after the
     # purchase, which takes days; the others answer within minutes.
     pending_timeout: timedelta = timedelta(hours=2)
+    # Take back an approved end-user registration the carrier rejected after
+    # the purchase: (offer, org). Returns the carrier's reason, if any. None
+    # for a carrier that never rejects after the purchase.
+    revoke_registration: (
+        Callable[[CarrierOffer, UUID], Awaitable[str | None]] | None
+    ) = None
 
 
+# Listed in offer order: the first carrier wins a tie on price.
 CARRIERS: dict[str, Carrier] = {
-    TWILIO: Carrier(_twilio_voice, _twilio_sms, "sms/status", async_orders=False),
-    TELNYX: Carrier(_telnyx_voice, _telnyx_sms, "sms/telnyx", async_orders=True),
+    TWILIO: Carrier(
+        _twilio_voice,
+        _twilio_sms,
+        "sms/status",
+        async_orders=False,
+        offers=twilio.offers,
+        place_order=twilio.place_order,
+        order_outcome=twilio.order_outcome,
+        release=twilio.release,
+    ),
+    TELNYX: Carrier(
+        _telnyx_voice,
+        _telnyx_sms,
+        "sms/telnyx",
+        async_orders=True,
+        offers=telnyx.offers,
+        place_order=telnyx.place_order,
+        order_outcome=telnyx.order_outcome,
+        release=telnyx.release,
+    ),
     # Outbound voice only. Orders complete after DIDWW approves the
     # end-user registration: docs/public/self-host/didww.md.
     DIDWW: Carrier(
-        _didww_voice, None, None, async_orders=True, pending_timeout=timedelta(days=7)
+        _didww_voice,
+        None,
+        None,
+        async_orders=True,
+        offers=didww.offers,
+        place_order=didww.place_order,
+        order_outcome=didww.order_outcome,
+        release=didww.release,
+        pending_timeout=timedelta(days=7),
+        revoke_registration=didww.revoke,
     ),
 }
 
