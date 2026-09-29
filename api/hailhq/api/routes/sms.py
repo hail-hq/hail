@@ -52,8 +52,6 @@ from hailhq.core.models import (
     Suppression,
 )
 from hailhq.core.pricing_tier import classify_pricing_tier
-from hailhq.core.providers.sms import SmsProvider
-from hailhq.core.providers.sms.twilio import LazyTwilioSmsProvider
 from hailhq.core.schemas import (
     SenderIdPatch,
     SenderIdResponse,
@@ -82,20 +80,7 @@ _MAX_LIST_LIMIT = 200
 _SMS_SEND_FAILED_DETAIL = "sms send failed"
 
 
-_sms_provider_singleton: SmsProvider | None = None
-
-
-def get_sms_provider() -> SmsProvider:
-    """Return a process-wide ``SmsProvider``. The Twilio client is built on
-    first use, so Telnyx-only deployments work. Tests override via
-    ``app.dependency_overrides``."""
-    global _sms_provider_singleton
-    if _sms_provider_singleton is None:
-        _sms_provider_singleton = LazyTwilioSmsProvider()
-    return _sms_provider_singleton
-
-
-async def deliver_sms(db: AsyncSession, provider: SmsProvider, sms: Sms) -> str | None:
+async def deliver_sms(db: AsyncSession, sms: Sms) -> str | None:
     """Wire-send one queued Sms row and reconcile its status.
 
     Shared by POST /sms and the internal agent-send route. Returns None
@@ -104,7 +89,7 @@ async def deliver_sms(db: AsyncSession, provider: SmsProvider, sms: Sms) -> str 
     rejection. Never raises — the caller owns HTTP semantics.
     """
     try:
-        provider = sms_route(sms.provider, provider)
+        provider = sms_route(sms.provider)
         callback_url = join_url(settings.hail_api_url, sms_status_path(sms.provider))
         result = await provider.send_sms(
             from_e164=sms.from_e164,
@@ -214,7 +199,6 @@ async def create_sms(
     request: Request,
     principal: Annotated[Principal, Depends(get_current_principal)],
     db: Annotated[AsyncSession, Depends(get_session)],
-    provider: Annotated[SmsProvider, Depends(get_sms_provider)],
     idem: Annotated[IdempotencyContext | None, Depends(idempotency_dep)] = None,
 ) -> SmsResponse:
     """Send an outbound SMS.
@@ -365,7 +349,7 @@ async def create_sms(
     )
 
     # Provider send — best-effort with status reconciliation.
-    err = await deliver_sms(db, provider, sms)
+    err = await deliver_sms(db, sms)
     if err == "provider_error":
         raise await cache_failure(
             idem,
@@ -615,6 +599,5 @@ __all__ = [
     "TERMINAL_SMS_STATUSES",
     "apply_sms_status",
     "deliver_sms",
-    "get_sms_provider",
     "router",
 ]

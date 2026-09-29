@@ -3,13 +3,15 @@
 from unittest.mock import AsyncMock
 
 import pytest
-from hailhq.api.main import app
-from hailhq.api.routes import sms as sms_routes
+from hailhq.core.carrier_routing import sms_route
 from hailhq.core.config import settings
 from hailhq.core.models import PhoneNumber
 from hailhq.core.providers.sms import ProviderSmsResult
+from hailhq.core.providers.sms import twilio as twilio_sms
 from hailhq.core.providers.sms.telnyx import TelnyxSmsProvider
 from hailhq.core.providers.voice import CarrierNotConfigured
+
+_REAL_TWILIO_SMS = twilio_sms.twilio_sms_provider
 
 
 @pytest.fixture()
@@ -18,9 +20,9 @@ def telnyx_only(client, monkeypatch):
     monkeypatch.setattr(settings, "twilio_auth_token", "")
     monkeypatch.setattr(settings, "telnyx_api_key", "key")
     monkeypatch.setattr(settings, "telnyx_public_key", "public")
-    monkeypatch.setattr(sms_routes, "_sms_provider_singleton", None)
-    # Use the real dependency instead of the conftest mock.
-    app.dependency_overrides.pop(sms_routes.get_sms_provider, None)
+    # Use the real Twilio SMS client instead of the conftest mock.
+    monkeypatch.setattr(twilio_sms, "twilio_sms_provider", _REAL_TWILIO_SMS)
+    monkeypatch.setattr(twilio_sms, "_default", None)
     return client
 
 
@@ -42,7 +44,7 @@ async def seed_telnyx_number(async_session, org_id, **kwargs):
 
 
 def test_default_providers_build_without_twilio_credentials(telnyx_only):
-    assert sms_routes.get_sms_provider() is not None
+    assert sms_route("twilio") is not None
 
 
 async def test_delete_telnyx_number_without_twilio(

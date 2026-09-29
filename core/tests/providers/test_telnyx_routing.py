@@ -524,7 +524,7 @@ def test_unknown_carrier_is_rejected_everywhere():
     with pytest.raises(ValueError, match="Unsupported number carrier"):
         carrier("unknown")
     with pytest.raises(ValueError, match="Unsupported SMS carrier"):
-        sms_route("unknown", MagicMock())
+        sms_route("unknown")
 
 
 def test_carrier_registry_status_paths_and_order_mode():

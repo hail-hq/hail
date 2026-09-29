@@ -22,7 +22,6 @@ from hailhq.api.auth import hash_key
 from hailhq.api.main import app
 from hailhq.api.routes.calls import get_livekit
 from hailhq.api.routes.email_domains import get_email_provider
-from hailhq.api.routes.sms import get_sms_provider
 from hailhq.core.db import get_session
 from hailhq.core.livekit import LiveKitClient
 from hailhq.core.models import (
@@ -216,9 +215,13 @@ def email_mock() -> AsyncMock:
 
 
 @pytest.fixture()
-def sms_mock() -> AsyncMock:
-    """Default mock SMS provider — happy-path send for every call."""
+def sms_mock(monkeypatch: pytest.MonkeyPatch) -> AsyncMock:
+    """Default mock SMS provider — happy-path send for every call. It stands
+    in for the Twilio SMS client."""
     mock = AsyncMock(spec=SmsProvider)
+    monkeypatch.setattr(
+        "hailhq.core.providers.sms.twilio.twilio_sms_provider", lambda: mock
+    )
 
     counter = {"n": 0}
 
@@ -264,7 +267,6 @@ async def client(
     app.dependency_overrides[get_session] = override_get_session
     app.dependency_overrides[get_livekit] = lambda: livekit_mock
     app.dependency_overrides[get_email_provider] = lambda: email_mock
-    app.dependency_overrides[get_sms_provider] = lambda: sms_mock
 
     transport = httpx.ASGITransport(app=app)
     try:
@@ -274,7 +276,6 @@ async def client(
         app.dependency_overrides.pop(get_session, None)
         app.dependency_overrides.pop(get_livekit, None)
         app.dependency_overrides.pop(get_email_provider, None)
-        app.dependency_overrides.pop(get_sms_provider, None)
 
 
 @pytest.fixture()

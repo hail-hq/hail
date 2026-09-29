@@ -52,7 +52,7 @@ def test_unknown_carrier_is_an_error() -> None:
 
 def test_didww_sells_no_sms_through_hail() -> None:
     with pytest.raises(ValueError, match="cannot send SMS"):
-        carrier_routing.sms_route("didww", object())  # type: ignore[arg-type]
+        carrier_routing.sms_route("didww")
     with pytest.raises(ValueError, match="cannot send SMS"):
         carrier_routing.sms_status_path("didww")
     assert carrier_routing.sms_status_path("twilio") == "sms/status"
@@ -205,3 +205,16 @@ async def test_only_didww_takes_a_registration_back(monkeypatch) -> None:
 def test_first_listed_carrier_wins_a_tie() -> None:
     ranked = number_offers.rank_offers([_offer(DIDWW), _offer(TELNYX), _offer(TWILIO)])
     assert ranked[0].provider == "twilio"
+
+
+def test_each_sms_carrier_builds_its_own_client(monkeypatch) -> None:
+    from hailhq.core.providers.sms.telnyx import TelnyxSmsProvider
+    from hailhq.core.providers.sms.twilio import LazyTwilioSmsProvider
+
+    monkeypatch.setattr(settings, "telnyx_api_key", "key")
+    monkeypatch.setattr(settings, "telnyx_public_key", "public")
+    twilio_sms = carrier_routing.sms_route(TWILIO)
+    assert isinstance(twilio_sms, LazyTwilioSmsProvider)
+    # One Twilio client per process.
+    assert carrier_routing.sms_route(TWILIO) is twilio_sms
+    assert isinstance(carrier_routing.sms_route(TELNYX), TelnyxSmsProvider)

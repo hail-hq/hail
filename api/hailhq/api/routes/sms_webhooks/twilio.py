@@ -9,16 +9,11 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi import status as http_status
 from hailhq.api.ratelimit import GENERAL_RATE_LIMITED_RESPONSES
 from hailhq.api.route_prefixes import request_mount_prefix
-from hailhq.api.routes.sms import (
-    TERMINAL_SMS_STATUSES,
-    apply_sms_status,
-    get_sms_provider,
-)
-from hailhq.core.carrier_routing import TWILIO
+from hailhq.api.routes.sms import TERMINAL_SMS_STATUSES, apply_sms_status
+from hailhq.core.carrier_routing import TWILIO, sms_route
 from hailhq.core.config import settings
 from hailhq.core.db import get_session
 from hailhq.core.models import Sms
-from hailhq.core.providers.sms import SmsProvider
 from hailhq.core.providers.sms.status_map import map_twilio_message_status
 from hailhq.core.sms_ingest import ingest_inbound_sms
 from hailhq.core.twilio_signature import verify_twilio_signature
@@ -35,7 +30,6 @@ router = APIRouter(
 async def receive_inbound_sms(
     request: Request,
     db: Annotated[AsyncSession, Depends(get_session)],
-    provider: Annotated[SmsProvider, Depends(get_sms_provider)],
 ) -> Response:
     form = await request.form()
     params = {k: str(v) for k, v in form.items()}
@@ -58,7 +52,7 @@ async def receive_inbound_sms(
         body=params.get("Body", ""),
         provider_message_sid=params.get("MessageSid") or None,
         opt_out_type=params.get("OptOutType"),
-        provider=provider,
+        provider=sms_route(TWILIO),
         carrier=TWILIO,
     )
     await db.commit()

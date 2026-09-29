@@ -19,6 +19,7 @@ from uuid import UUID
 
 from hailhq.core.carrier_offer import CarrierOffer
 from hailhq.core.config import settings
+from hailhq.core.providers.sms import twilio as twilio_sms
 from hailhq.core.providers.sms.base import SmsProvider
 from hailhq.core.providers.sms.telnyx import TelnyxSmsProvider
 from hailhq.core.providers.voice import OrderState, didww, telnyx, twilio
@@ -60,11 +61,11 @@ def _didww_voice() -> VoiceRoute:
     return _trunk(DIDWW, "livekit_didww_sip_outbound_trunk_id"), {}
 
 
-def _twilio_sms(twilio: SmsProvider) -> SmsProvider:
-    return twilio
+def _twilio_sms() -> SmsProvider:
+    return twilio_sms.twilio_sms_provider()
 
 
-def _telnyx_sms(twilio: SmsProvider) -> SmsProvider:
+def _telnyx_sms() -> SmsProvider:
     if not settings.telnyx_public_key:
         raise ValueError("Telnyx webhooks are not configured")
     return TelnyxSmsProvider()
@@ -77,8 +78,8 @@ Outcome = tuple[OrderState, str | None, str | None]
 @dataclass(frozen=True)
 class Carrier:
     voice_route: Callable[[], VoiceRoute]
-    # None when Hail sends no SMS through this carrier.
-    sms_route: Callable[[SmsProvider], SmsProvider] | None
+    # This carrier's SMS client. None when Hail sends no SMS through it.
+    sms_route: Callable[[], SmsProvider] | None
     # Path under the API URL that receives this carrier's message status.
     sms_status_path: str | None
     # True when a purchase is accepted first and completes later.
@@ -157,13 +158,13 @@ def voice_route(provider: str) -> VoiceRoute:
     return carrier(provider).voice_route()
 
 
-def sms_route(provider: str, twilio: SmsProvider) -> SmsProvider:
+def sms_route(provider: str) -> SmsProvider:
     if provider not in CARRIERS:
         raise ValueError("Unsupported SMS carrier")
     route = CARRIERS[provider].sms_route
     if route is None:
         raise ValueError(f"{provider} numbers cannot send SMS through Hail")
-    return route(twilio)
+    return route()
 
 
 def sms_status_path(provider: str) -> str:

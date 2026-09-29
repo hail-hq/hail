@@ -27,7 +27,7 @@ from hailhq.api.numbers import resolve_org_number
 from hailhq.api.routes.email_domains import get_email_provider
 from hailhq.api.routes.emails import deliver_email, resolve_sender
 from hailhq.api.routes.internal.auth import verify_internal_request
-from hailhq.api.routes.sms import deliver_sms, get_sms_provider
+from hailhq.api.routes.sms import deliver_sms
 from hailhq.core.agent_caps import check_agent_send_allowed
 from hailhq.core.agent_tools.send_email import (
     MAX_BODY_CHARS as EMAIL_MAX_BODY_CHARS,
@@ -48,7 +48,6 @@ from hailhq.core.directory import resolve_member_emails
 from hailhq.core.email_sender import from_address_for
 from hailhq.core.models import Call, Email, Sms
 from hailhq.core.providers.email import EmailProvider
-from hailhq.core.providers.sms import SmsProvider
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -216,7 +215,6 @@ async def _shared_denial(db: AsyncSession, call: Call) -> tuple[str, str] | None
 async def agent_send_sms(
     body: AgentSendSmsRequest,
     db: Annotated[AsyncSession, Depends(get_session)],
-    provider: Annotated[SmsProvider, Depends(get_sms_provider)],
 ) -> AgentSendResponse:
     call = await _load_call_for_update(db, body.call_id)
     if call is None:
@@ -314,7 +312,7 @@ async def agent_send_sms(
         actor_kind="system",
     )
 
-    err = await deliver_sms(db, provider, sms)
+    err = await deliver_sms(db, sms)
     if err is not None:
         await write_audit_log(
             organization_id=org,

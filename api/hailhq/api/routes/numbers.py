@@ -36,7 +36,6 @@ from hailhq.api.number_orders import (
 from hailhq.api.pagination import fetch_cursor_page
 from hailhq.api.ratelimit import GENERAL_RATE_LIMITED_RESPONSES
 from hailhq.api.route_prefixes import request_mount_prefix
-from hailhq.api.routes.sms import get_sms_provider
 from hailhq.core import telephony_catalog
 from hailhq.core.carrier_routing import CARRIERS, carrier, sms_route
 from hailhq.core.db import get_session, org_lock
@@ -47,7 +46,6 @@ from hailhq.core.number_offers import (
     discover_offers,
     rank_offers,
 )
-from hailhq.core.providers.sms import SmsProvider
 from hailhq.core.providers.voice import CarrierNotConfigured
 from hailhq.core.schemas import (
     NumberAcquireRequest,
@@ -361,7 +359,6 @@ async def enable_sms(
     number_id: UUID,
     principal: Annotated[Principal, Depends(get_current_principal)],
     db: Annotated[AsyncSession, Depends(get_session)],
-    provider: Annotated[SmsProvider, Depends(get_sms_provider)],
 ) -> PhoneNumberResponse:
     """Attach a dedicated number to the org's shared SMS Messaging Service.
 
@@ -422,7 +419,7 @@ async def enable_sms(
     ).scalar_one_or_none()
 
     try:
-        provider = sms_route(number.provider, provider)
+        provider = sms_route(number.provider)
     except ValueError as exc:
         # Carrier not configured for SMS: an operator problem, not a server fault.
         raise HTTPException(status_code=503, detail=str(exc)) from exc
