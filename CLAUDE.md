@@ -70,7 +70,7 @@ Internal runbooks (not published) live in `docs/operations/`:
 
 ## Style
 
-- **Python**: ruff (lint, `--fix`) + black (format); mypy + pytest run in CI. FastAPI async handlers. Type-hinted. Pydantic v2 models.
+- **Python**: ruff (lint, `--fix`) + black (format); ruff, black and pytest run in CI. FastAPI async handlers. Type-hinted. Pydantic v2 models.
 - **Go**: `gofmt`, stdlib first. Cobra for subcommands if/when the CLI grows them.
 - **Docker**: multi-stage (builder → runtime), runs as non-root `hail` user, runtime image carries no build tools. Deps installed into `/opt/venv`; only that is copied to the runtime stage. Tighten to a pinned `uv.lock`-based cache flow once a lockfile lands.
 - **Pre-commit**: husky + lint-staged run `ruff`/`black`/`gofmt`/`prettier` on staged files. Install with `pnpm install` at repo root; hooks activate automatically via the `prepare` script. pnpm is the Node package manager for this repo (pinned via `packageManager` in `package.json`).
