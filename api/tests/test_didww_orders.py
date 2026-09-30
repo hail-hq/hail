@@ -442,6 +442,40 @@ async def _mark_check(db, number, *, started: timedelta):
     await db.commit()
 
 
+async def _mark_checked(db, number, *, ago: timedelta):
+    """As if a finished check answered ``ago``."""
+    number.provisioning_metadata = {
+        **number.provisioning_metadata,
+        "last_checked_at": (datetime.now(timezone.utc) - ago).isoformat(),
+    }
+    await db.commit()
+
+
+async def test_reconcile_asks_didww_every_fifteen_minutes(
+    async_session, org_and_key, monkeypatch
+):
+    """A registration waits days at DIDWW. Every 15 s would be thousands of
+    calls per number that all answer "pending"."""
+    org, _, _ = org_and_key
+    row, offer = await seed_quote(async_session, org)
+    monkeypatch.setattr(
+        "hailhq.core.providers.voice.didww.place_didww_order",
+        AsyncMock(return_value=ORDER),
+    )
+    outcome = AsyncMock(return_value=("pending", DID, ORDER))
+    monkeypatch.setattr(
+        "hailhq.core.providers.voice.didww.didww_order_outcome", outcome
+    )
+    number = await buy(async_session, org, row, monkeypatch, offer)
+    outcome.reset_mock()
+    await _mark_checked(async_session, number, ago=timedelta(minutes=14))
+    await reconcile_order(async_session, number)
+    outcome.assert_not_awaited()
+    await _mark_checked(async_session, number, ago=timedelta(minutes=16))
+    await reconcile_order(async_session, number)
+    outcome.assert_awaited_once()
+
+
 async def test_reconcile_skips_while_another_check_is_running(
     async_session, org_and_key, monkeypatch
 ):
@@ -479,7 +513,8 @@ async def test_reconcile_takes_over_a_check_that_never_answered(
     )
     number = await buy(async_session, org, row, monkeypatch, offer)
     outcome.reset_mock()
-    await _mark_check(async_session, number, started=timedelta(minutes=6))
+    # Past the check lease and past DIDWW's 15-minute poll interval.
+    await _mark_check(async_session, number, started=timedelta(minutes=16))
     await reconcile_order(async_session, number)
     outcome.assert_awaited_once()
     await async_session.refresh(number)

@@ -100,6 +100,10 @@ class Carrier:
     # it and refunds the hold. DIDWW registers the end user after the
     # purchase, which takes days; the others answer within minutes.
     pending_timeout: timedelta = timedelta(hours=2)
+    # How long the reconciler waits between two checks of one pending
+    # order. DIDWW answers "pending" for days while a person reviews the
+    # registration, so it is asked far less often.
+    poll_interval: timedelta = timedelta(seconds=15)
     # Take back an approved end-user registration the carrier rejected after
     # the purchase: (offer, org). Returns the carrier's reason, if any. None
     # for a carrier that never rejects after the purchase.
@@ -142,6 +146,7 @@ CARRIERS: dict[str, Carrier] = {
         order_outcome=didww.order_outcome,
         release=didww.release,
         pending_timeout=timedelta(days=7),
+        poll_interval=timedelta(minutes=15),
         revoke_registration=didww.revoke,
     ),
 }

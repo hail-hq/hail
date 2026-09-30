@@ -44,7 +44,7 @@ reconciler ──> didww_order_outcome ──> GET /dids?filter[order.id] ──
 1. **Quote.** `didww_offers()` runs next to `twilio_offers` and `telnyx_offers` inside `discover_offers`. Offers carry the live price and `readiness`.
 2. **Papers.** When the offer says `verification_required`, the customer fills the wizard. The DIDWW plug-in creates identity, address and proofs at DIDWW and runs `POST /address_requirement_validations`. A 422 becomes field problems and the draft is discarded. Success makes the Hail verification row `approved`, meaning "papers valid, ready to buy". No person reviews the papers: the row is submitted in the same request (`docs/operations/carrier-verification.md`).
 3. **Order.** `acquire_offer` reserves setup + first month, inserts the number as `pending`, and calls `place_didww_order`: `POST /orders` with one `did_order_items` entry (`available_did_id`, `sku_id`, `allow_back_ordering=false`). No DID reservation step: a number that vanished between quote and order is a 409, like Twilio. The order id is stored in `provisioning_metadata.order_id`.
-4. **Outcome.** `Carrier.async_orders=True` for DIDWW, so the reconciler polls `didww_order_outcome` every `ORDER_POLL_INTERVAL`:
+4. **Outcome.** `Carrier.async_orders=True` for DIDWW, so the reconciler polls `didww_order_outcome` every `Carrier.poll_interval` (15 minutes for DIDWW):
    - order `canceled` → `failed`.
    - order `pending` → `pending`.
    - order `completed`: find the DID with `GET /dids?filter[order.id]=<order>` (include `address_verification`).

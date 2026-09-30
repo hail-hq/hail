@@ -100,7 +100,8 @@ Order of events for a country that needs end-user registration:
 2. `POST /numbers` reserves setup + first month, orders the DID
    (`provisioning_state: pending`).
 3. The reconciler files the registration (`address_verifications`) once the
-   DID exists and polls it. DIDWW approves in 1–3 days → `active`.
+   DID exists and polls it every 15 minutes. DIDWW approves in 1–3 days →
+   `active`.
 4. Rejected → `failed`, the DID is terminated, the monthly fee is refunded,
    the setup fee is charged (DIDWW billed it and does not refund).
 5. Still pending after 7 days → `failed`. DID exists: terminated, monthly fee

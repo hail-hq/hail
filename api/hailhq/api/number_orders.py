@@ -35,7 +35,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
 
-ORDER_POLL_INTERVAL = timedelta(seconds=15)
 # A running carrier check blocks other checks of the same order for this
 # long. Longer than the slowest carrier check (4 calls of up to 40 s each),
 # so two runs never both file a registration for one number.
@@ -246,6 +245,7 @@ async def reconcile_order(
         return
     org = number.organization_id
     timeout = carrier(number.provider).pending_timeout
+    poll_interval = carrier(number.provider).poll_interval
     # Claim a poll under the org lock, then release it before carrier I/O.
     await org_lock(db, org)
     await db.refresh(number)
@@ -256,7 +256,7 @@ async def reconcile_order(
     last_check = number.provisioning_metadata.get("last_checked_at")
     running = number.provisioning_metadata.get("check_started_at")
     if not force and (
-        (last_check and now - datetime.fromisoformat(last_check) < ORDER_POLL_INTERVAL)
+        (last_check and now - datetime.fromisoformat(last_check) < poll_interval)
         or (running and now - datetime.fromisoformat(running) < ORDER_CHECK_LEASE)
     ):
         await db.commit()

@@ -65,6 +65,12 @@ def test_pending_timeout_per_carrier() -> None:
     assert carrier(DIDWW).pending_timeout == timedelta(days=7)
 
 
+def test_poll_interval_per_carrier() -> None:
+    assert carrier(TWILIO).poll_interval == timedelta(seconds=15)
+    assert carrier(TELNYX).poll_interval == timedelta(seconds=15)
+    assert carrier(DIDWW).poll_interval == timedelta(minutes=15)
+
+
 def test_didww_purchase_completes_later() -> None:
     assert carrier(DIDWW).async_orders is True
 
