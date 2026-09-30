@@ -32,10 +32,12 @@ from hailhq.core.providers.verification.base import (
 )
 from hailhq.core.providers.voice.base import CarrierNotConfigured
 from hailhq.core.providers.voice.didww import (
+    _by_id,
     approved_address_ref,
     carrier_status,
     didww_client,
     lookup_ids,
+    set_address_ref,
 )
 
 logger = logging.getLogger(__name__)
@@ -127,11 +129,13 @@ class DidwwVerificationProvider(VerificationProvider):
 
     def _requirement_row(
         self, country_code: str, number_type: str
-    ) -> tuple[dict | None, dict]:
+    ) -> tuple[dict | None, dict, str | None]:
+        """(requirement row, included resources by (type, id), DIDWW country
+        id). The row is None when DIDWW has no requirement for this kind."""
         country_id, types = lookup_ids(country_code)
         type_id = types.get(number_type)
         if not country_id or not type_id:
-            return None, {}
+            return None, {}, country_id
         body = self._client.get(
             "address_requirements",
             params={
@@ -141,13 +145,12 @@ class DidwwVerificationProvider(VerificationProvider):
             },
         )
         rows = body.get("data", [])
-        index = {(r["type"], r["id"]): r for r in body.get("included", [])}
-        return (rows[0] if rows else None), index
+        return (rows[0] if rows else None), _by_id(body.get("included", [])), country_id
 
     def _requirements_sync(
         self, country_code: str, number_type: str, subject_type: SubjectType
     ) -> Requirements:
-        row, index = self._requirement_row(country_code, number_type)
+        row, index, _ = self._requirement_row(country_code, number_type)
         if row is None:
             return Requirements(
                 provider=self.name,
@@ -290,12 +293,11 @@ class DidwwVerificationProvider(VerificationProvider):
                         )
                     ],
                 )
-        row, _ = self._requirement_row(
+        row, _, country_id = self._requirement_row(
             requirements.country_code, requirements.number_type
         )
         if row is None:
             raise VerificationProviderError("DIDWW requirement not found")
-        country_id, _ = lookup_ids(requirements.country_code)
         addr_country_id, _ = lookup_ids(address.country_code)
         if addr_country_id is None:
             return DraftResult(
@@ -495,20 +497,10 @@ class DidwwVerificationProvider(VerificationProvider):
             refs["organization_id"], refs["country_code"], refs["number_type"]
         )
 
-        def run() -> None:
-            self._client.patch(
-                f"addresses/{refs['address_id']}",
-                {
-                    "data": {
-                        "id": refs["address_id"],
-                        "type": "addresses",
-                        "attributes": {"external_reference_id": ref},
-                    }
-                },
-            )
-
         try:
-            await asyncio.to_thread(run)
+            await asyncio.to_thread(
+                set_address_ref, self._client, refs["address_id"], ref
+            )
         except DidwwApiError as exc:
             raise VerificationProviderError("DIDWW request failed") from exc
 

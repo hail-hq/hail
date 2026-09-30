@@ -14,19 +14,12 @@ import os
 from functools import lru_cache
 from pathlib import Path
 
-__all__ = ["CALLS_ONLY", "capabilities"]
+__all__ = ["capabilities"]
 
 # In the API image costs/ is copied to /app/costs (see api/Dockerfile); in dev
 # the module sits at core/hailhq/core/ so parents[3] is the repo root. An env
 # var overrides both (tests, alternate layouts).
 _DEFAULT_DIR = Path(__file__).resolve().parents[3] / "costs"
-
-
-# Carriers Hail routes no SMS through (``carrier_routing.CARRIERS[...].sms_route``
-# is None). Their catalog rows may list SMS, because the carrier sells it;
-# Hail cannot deliver it, so it is never promised. A test keeps this set in
-# step with ``CARRIERS``.
-CALLS_ONLY = frozenset({"didww"})
 
 
 def _path(provider: str) -> Path:
@@ -47,18 +40,21 @@ def capabilities(
     """What a number of this kind can do at ``provider``, or None when that
     carrier does not sell it. 'auto' answers from the first carrier the API
     can buy from that lists it."""
-    if provider == "auto":
-        # Only carriers the API can buy from.
-        from hailhq.core.number_offers import PROVIDERS
+    # Imported here: carrier_routing imports the carrier adapters, and
+    # number_offers imports carrier_routing.
+    from hailhq.core.carrier_routing import CARRIERS
+    from hailhq.core.number_offers import PROVIDERS
 
-        providers = PROVIDERS
-    else:
-        providers = (provider,)
+    # Only carriers the API can buy from.
+    providers = PROVIDERS if provider == "auto" else (provider,)
     for name in providers:
         row = _load(name).get((country_code, number_type))
         if not row:
             continue
-        if name in CALLS_ONLY:
+        # Hail routes no SMS through this carrier. Its catalog row may list
+        # SMS, because the carrier sells it; Hail cannot deliver it, so it
+        # is never promised.
+        if name in CARRIERS and CARRIERS[name].sms_route is None:
             if not row["voice"]:
                 continue  # an SMS-only number Hail cannot use at this carrier
             return {"voice": True, "sms": False, "mms": False}

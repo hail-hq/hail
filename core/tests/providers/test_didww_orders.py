@@ -302,6 +302,30 @@ async def test_outcome_rejected_verification():
 
 
 @responses.activate
+async def test_outcome_filing_failure_stays_pending_with_the_did():
+    """A DID that exists is never reported as an error: the reconciler needs
+    its id to stop the renewal when the registration never clears."""
+    _order("completed")
+    _did(awaiting=True, verification=None)
+    responses.add(
+        responses.GET,
+        f"{BASE}/addresses/{ADDR}",
+        json={"data": {"id": ADDR, "type": "addresses", "attributes": {}}},
+    )
+    responses.add(
+        responses.POST,
+        f"{BASE}/address_verifications",
+        status=422,
+        json={"errors": [{"detail": "address is not verified"}]},
+    )
+    assert await didww_order_outcome(E164, NUMBER, ORDER, ADDR) == (
+        "pending",
+        DID,
+        ORDER,
+    )
+
+
+@responses.activate
 async def test_outcome_awaiting_without_address_stays_pending():
     _order("completed")
     _did(awaiting=True, verification=None)

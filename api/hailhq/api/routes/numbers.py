@@ -422,7 +422,11 @@ async def enable_sms(
         provider = sms_route(number.provider)
     except ValueError as exc:
         # Carrier not configured for SMS: an operator problem, not a server fault.
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
+        # The customer reads this: never the carrier's name or an env var.
+        logger.error("%s SMS route unavailable: %s", number.provider, exc)
+        raise HTTPException(
+            status_code=503, detail="SMS is not available on this number's carrier"
+        ) from exc
     messaging_service_sid = await provider.ensure_messaging_service(
         organization_id=principal.organization_id, existing_sid=existing_sid
     )

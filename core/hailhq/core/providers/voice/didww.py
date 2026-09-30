@@ -399,7 +399,19 @@ def _outcome_sync(
     if not address_id:
         # Bought without an approved registration: nothing to file.
         return "pending", did["id"], order_id
-    verification = _ensure_verification(client, did, address_id)
+    try:
+        verification = _ensure_verification(client, did, address_id)
+    except (DidwwApiError, requests.RequestException):
+        # The DID exists, so the answer is 'pending' with its id, never an
+        # error: a raised error reaches the reconciler without the id, and
+        # its timeout would then refund the setup fee and leave the DID
+        # renewing at DIDWW. Next poll tries again.
+        logger.warning(
+            "didww registration of %s could not be filed or read; will retry",
+            did["id"],
+            exc_info=True,
+        )
+        return "pending", did["id"], order_id
     vstatus = verification["attributes"]["status"]
     if vstatus == "approved":
         return "active", did["id"], order_id
@@ -412,8 +424,10 @@ async def didww_order_outcome(
     e164: str, number_id: UUID, order_id: str | None, address_id: str | None
 ) -> tuple[OrderState, str | None, str | None]:
     """Ask DIDWW what happened to an order. Holds no DB lock. Files the
-    end-user registration once the DID exists. Errors propagate so the
-    reconciler retries until the carrier's ``pending_timeout``."""
+    end-user registration once the DID exists. Errors before the DID is
+    known propagate so the reconciler retries until the carrier's
+    ``pending_timeout``; once the DID is known the answer is 'pending' with
+    its id, so a timeout can stop its renewal."""
     return await asyncio.to_thread(_outcome_sync, e164, number_id, order_id, address_id)
 
 
@@ -436,20 +450,23 @@ def rejected_address_ref(org: UUID, country: str, kind: str) -> str:
     return f"hail-rejected:{org}:{country}:{kind}"
 
 
-def _revoke_sync(address_id: str, org: UUID, country: str, kind: str) -> str | None:
-    client = didww_client()
+def set_address_ref(client: DidwwClient, address_id: str, ref: str) -> None:
+    """Stamp ``external_reference_id`` on an address (approval or rejection)."""
     client.patch(
         f"addresses/{address_id}",
         {
             "data": {
                 "id": address_id,
                 "type": "addresses",
-                "attributes": {
-                    "external_reference_id": rejected_address_ref(org, country, kind)
-                },
+                "attributes": {"external_reference_id": ref},
             }
         },
     )
+
+
+def _revoke_sync(address_id: str, org: UUID, country: str, kind: str) -> str | None:
+    client = didww_client()
+    set_address_ref(client, address_id, rejected_address_ref(org, country, kind))
     found = client.get(
         "address_verifications", params={"filter[address.id]": address_id}
     )["data"]

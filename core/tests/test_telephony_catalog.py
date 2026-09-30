@@ -108,11 +108,3 @@ def test_calls_only_carrier_never_promises_sms(tmp_path, monkeypatch):
         assert telephony_catalog.capabilities("CA", "mobile", "didww") is None
     finally:
         telephony_catalog._load.cache_clear()
-
-
-def test_calls_only_set_matches_the_carrier_registry():
-    from hailhq.core.carrier_routing import CARRIERS
-
-    assert telephony_catalog.CALLS_ONLY == {
-        name for name, carrier in CARRIERS.items() if carrier.sms_route is None
-    }
