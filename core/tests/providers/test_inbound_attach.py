@@ -106,3 +106,23 @@ async def test_didww_requires_trunk(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(settings, "didww_voice_in_trunk_id", "")
     with pytest.raises(CarrierNotConfigured, match="DIDWW_VOICE_IN_TRUNK_ID"):
         await didww.attach_inbound_number("did-1", "+351300509184")
+
+
+async def test_didww_detach_does_not_swallow_a_missing_key(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings, "didww_api_key", "")
+    with pytest.raises(CarrierNotConfigured, match="DIDWW_API_KEY"):
+        await didww.detach_inbound_number(None, "+351300509184")
+
+
+async def test_didww_detach_tolerates_a_released_did(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings, "didww_api_key", "key")
+
+    async def fake_request(method, path, **kwargs):
+        return {"data": []}
+
+    monkeypatch.setattr(didww, "_request", fake_request)
+    await didww.detach_inbound_number(None, "+351300509184")  # no raise

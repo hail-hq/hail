@@ -102,14 +102,26 @@ async def lookup_recipient(session: AsyncSession, identifier: str) -> DSARRecord
     contacts, suppressions, and audit_log."""
     norm = normalize_recipient(identifier)
 
+    # Either side: the person is the callee on outbound rows and the caller
+    # on inbound rows (calls answered by an agent, texts received).
     calls = list(
-        (await session.execute(select(Call).where(Call.to_e164 == norm)))
+        (
+            await session.execute(
+                select(Call).where(or_(Call.to_e164 == norm, Call.from_e164 == norm))
+            )
+        )
         .scalars()
         .all()
     )
 
     sms = list(
-        (await session.execute(select(Sms).where(Sms.to_e164 == norm))).scalars().all()
+        (
+            await session.execute(
+                select(Sms).where(or_(Sms.to_e164 == norm, Sms.from_e164 == norm))
+            )
+        )
+        .scalars()
+        .all()
     )
 
     # Case-insensitive match against stored addresses: to_addresses/cc/bcc

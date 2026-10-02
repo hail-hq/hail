@@ -402,7 +402,12 @@ async def route_number(
     calls ring out again. ``sms_agent_id`` only needs the sms capability;
     inbound texts already reach Hail. A field left out keeps its value.
     """
+    # Same org lock release_org_number takes: a PATCH racing a release (or
+    # another PATCH) must not commit an agent onto a released row or leave a
+    # registered number with no agent.
+    await org_lock(db, principal.organization_id)
     number = await _get_org_number_or_404(db, number_id, principal.organization_id)
+    await db.refresh(number)
     _reject_if_released(number)
     fields = body.model_fields_set
     if "voice_agent_id" in fields and body.voice_agent_id is not None:

@@ -1356,6 +1356,24 @@ async def entrypoint(ctx: JobContext) -> None:
     for _participant in ctx.room.remote_participants.values():
         _maybe_mark_answered(_participant)
 
+    if inbound and not any(
+        p.kind == rtc.ParticipantKind.PARTICIPANT_KIND_SIP
+        for p in ctx.room.remote_participants.values()
+    ):
+        # The caller hung up while the Call row was being opened (DB plus
+        # the org-name lookup), before the disconnect handler existed. Close
+        # the row now instead of starting a session in an empty room that
+        # would bill until the soft cap.
+        logger.info("call_id=%s caller left before the agent joined", call_id)
+        await on_call_end(
+            call_id,
+            ctx.room.name,
+            status_override="canceled",
+            end_reason_override=CallEndReason.NORMAL_HANGUP.value,
+        )
+        ctx.shutdown(reason="caller_left")
+        return
+
     vad = ctx.proc.userdata["vad"]
     voice_cfg = metadata.get("voice_config") or {}
     voice_id_override = voice_cfg.get("voice_id")

@@ -242,6 +242,8 @@ async def delete_agent(
             try:
                 await inbound_routing.unregister(db, lk, number)
             except inbound_routing.InboundRoutingError as exc:
+                # Numbers handled before this one are already committed as
+                # unregistered, so a retry does not redo (or misreport) them.
                 await db.rollback()
                 raise HTTPException(
                     status_code=http_status.HTTP_502_BAD_GATEWAY,
@@ -250,6 +252,8 @@ async def delete_agent(
             number.voice_agent_id = None
         if number.sms_agent_id == agent.id:
             number.sms_agent_id = None
+        # Commit per number: the carrier and LiveKit work is already done.
+        await db.commit()
     await db.delete(agent)
     await db.commit()
     actor_user_id, actor_kind = actor_of(principal)

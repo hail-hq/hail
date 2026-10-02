@@ -40,6 +40,10 @@ async def _request(method: str, path: str, **kwargs) -> dict:
     return response.json() if response.content else {}
 
 
+class _NoSuchDid(CarrierNotConfigured):
+    """The number is not on this DIDWW account (released, or never there)."""
+
+
 async def _did_id(resource_id: str | None, e164: str) -> str:
     """The DID's id: the stored resource id, else a lookup by number (rows
     registered by hand before Hail stored DID ids)."""
@@ -49,7 +53,7 @@ async def _did_id(resource_id: str | None, e164: str) -> str:
     for did in found.get("data", []):
         if did.get("attributes", {}).get("number") == e164.lstrip("+"):
             return did["id"]
-    raise CarrierNotConfigured(f"{e164} is not a DID on this DIDWW account")
+    raise _NoSuchDid(f"{e164} is not a DID on this DIDWW account")
 
 
 async def _set_voice_in_trunk(did_id: str, trunk_id: str | None) -> None:
@@ -77,8 +81,8 @@ async def attach_inbound_number(resource_id: str | None, e164: str) -> None:
 async def detach_inbound_number(resource_id: str | None, e164: str) -> None:
     try:
         did_id = await _did_id(resource_id, e164)
-    except CarrierNotConfigured:
-        return  # already gone from the account
+    except _NoSuchDid:
+        return  # already gone from the account; a missing API key still raises
     try:
         await _set_voice_in_trunk(did_id, None)
     except CarrierRequestError as exc:

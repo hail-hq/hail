@@ -393,3 +393,48 @@ async def test_delete_recipient_data_removes_contact(async_session):
         await async_session.execute(select(Contact).where(Contact.id == contact_id))
     ).scalar_one_or_none()
     assert remaining is None
+
+
+async def test_lookup_finds_inbound_calls_and_texts_by_caller(async_session) -> None:
+    import uuid as _uuid
+
+    from hailhq.core.dsar import lookup_recipient
+    from hailhq.core.models import Call, PhoneNumber, Sms
+
+    org = _uuid.uuid4()
+    pn = PhoneNumber(
+        organization_id=org,
+        e164="+14155550100",
+        country_code="US",
+        number_type="local",
+        provisioning_state="active",
+    )
+    async_session.add(pn)
+    await async_session.flush()
+    async_session.add(
+        Call(
+            organization_id=org,
+            to_number_id=pn.id,
+            from_e164="+33612345678",
+            to_e164=pn.e164,
+            direction="inbound",
+            status="completed",
+            end_reason="normal_hangup",
+            voice_config={},
+        )
+    )
+    async_session.add(
+        Sms(
+            organization_id=org,
+            to_number_id=pn.id,
+            from_e164="+33612345678",
+            to_e164=pn.e164,
+            direction="inbound",
+            status="received",
+            body="hi",
+        )
+    )
+    await async_session.commit()
+    record = await lookup_recipient(async_session, "+33612345678")
+    assert len(record.calls) == 1
+    assert len(record.sms) == 1

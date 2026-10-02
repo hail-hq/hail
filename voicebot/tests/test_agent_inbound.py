@@ -233,3 +233,72 @@ async def test_numbers_without_plus_are_normalised(
     await agent_mod.open_inbound_from_room(_Ctx(_SipParticipant(attrs)))  # type: ignore[arg-type]
     assert seen[0].dialed == "+351300509184"
     assert seen[0].caller == "+33612345678"
+
+
+async def test_caller_who_left_before_the_agent_joined_closes_the_row(
+    async_session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Inbound: the room is empty once the Call row exists → the row is
+    closed as canceled and no session starts."""
+    from hailhq.core.models import Call, PhoneNumber
+
+    org = uuid.uuid4()
+    pn = PhoneNumber(
+        organization_id=org,
+        e164="+14155550100",
+        country_code="US",
+        number_type="local",
+        provisioning_state="active",
+    )
+    async_session.add(pn)
+    await async_session.flush()
+    call = Call(
+        organization_id=org,
+        to_number_id=pn.id,
+        from_e164="+33612345678",
+        to_e164=pn.e164,
+        direction="inbound",
+        status="ringing",
+        voice_config={},
+    )
+    async_session.add(call)
+    await async_session.commit()
+    call_id = call.id
+
+    monkeypatch.setattr(
+        agent_mod,
+        "open_inbound_from_room",
+        AsyncMock(
+            return_value={
+                "call_id": call_id,
+                "direction": "inbound",
+                "organization_id": str(org),
+            }
+        ),
+    )
+    started = AsyncMock()
+    monkeypatch.setattr(agent_mod, "resolve_org_configs", started)
+
+    class _Room:
+        name = "hail-in-x"
+        remote_participants: dict = {}
+
+        def on(self, _event):
+            return lambda fn: fn
+
+    shutdowns: list[str] = []
+    ctx = SimpleNamespace(
+        job=SimpleNamespace(metadata=json.dumps({"direction": "inbound"})),
+        connect=AsyncMock(),
+        room=_Room(),
+        shutdown=lambda reason="": shutdowns.append(reason),
+        proc=SimpleNamespace(userdata={"vad": object()}),
+    )
+    await agent_mod.entrypoint(ctx)  # type: ignore[arg-type]
+
+    assert shutdowns == ["caller_left"]
+    started.assert_not_awaited()
+    async_session.expire_all()
+    row = await async_session.get(Call, call_id)
+    assert row.status == "canceled"
+    assert row.end_reason == "normal_hangup"

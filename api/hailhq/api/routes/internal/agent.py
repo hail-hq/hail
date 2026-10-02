@@ -243,6 +243,9 @@ async def agent_send_sms(
     if call.status != "in_progress":
         return AgentSendResponse(ok=False, spoken=_SPOKEN_CALL_UNAVAILABLE)
 
+    # The person on the line: the callee on outbound, the caller on inbound.
+    counterpart = call.from_e164 if call.direction == "inbound" else call.to_e164
+
     denial = await _shared_denial(db, call)
     if denial is not None:
         spoken, reason = denial
@@ -254,7 +257,7 @@ async def agent_send_sms(
             payload={**_meta(body), "reason": reason},
         )
 
-    gate = await check_sms_allowed(db, org, call.to_e164)
+    gate = await check_sms_allowed(db, org, counterpart)
     if not gate.allowed:
         return await _deny(
             org,
@@ -267,7 +270,7 @@ async def agent_send_sms(
     # Platform agent-caps gate (velocity + kill switch): voicebot sends must
     # count toward the same per-recipient caps the public routes enforce —
     # no-op for human-origin orgs. Same recipient set as the gate above.
-    cap_denial = await check_agent_send_allowed(db, org, "sms", [call.to_e164])
+    cap_denial = await check_agent_send_allowed(db, org, "sms", [counterpart])
     if cap_denial is not None:
         return await _deny(
             org,
@@ -281,7 +284,19 @@ async def agent_send_sms(
             },
         )
 
-    from_number = await resolve_org_number(db, org, None, capability="sms")
+    # Inbound: text back from the number the caller dialed, when it can
+    # text; otherwise (and on outbound) the org's default SMS number.
+    from_number = None
+    if call.direction == "inbound" and call.to_number_id is not None:
+        dialed = await db.get(PhoneNumber, call.to_number_id)
+        if (
+            dialed is not None
+            and dialed.provisioning_state == "active"
+            and "sms" in dialed.capabilities
+        ):
+            from_number = dialed
+    if from_number is None:
+        from_number = await resolve_org_number(db, org, None, capability="sms")
     if from_number is None:
         return AgentSendResponse(ok=False, spoken=_SPOKEN_SMS_UNCONFIGURED)
 
@@ -290,7 +305,7 @@ async def agent_send_sms(
         provider=from_number.provider,
         from_number_id=from_number.id,
         from_e164=from_number.e164,
-        to_e164=call.to_e164,  # counterpart only — never a parameter
+        to_e164=counterpart,  # the person on the line — never a parameter
         direction="outbound",
         status="queued",
         body=body.body,
@@ -379,7 +394,10 @@ async def agent_reply_sms(
     prior = (
         await db.execute(
             select(Sms).where(
+                Sms.organization_id == org,
                 Sms.direction == "outbound",
+                Sms.agent_id.is_not(None),
+                Sms.to_e164 == inbound.from_e164,
                 Sms.metadata_["reply_to_sms_id"].astext == str(inbound.id),
             )
         )
