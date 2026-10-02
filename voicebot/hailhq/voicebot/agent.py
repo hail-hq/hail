@@ -35,6 +35,7 @@ from hailhq.core.agent_tools.client import AgentApiClient
 from hailhq.core.agent_tools.send_dtmf import DTMF_CODES
 from hailhq.core.call_end_reasons import CallEndReason
 from hailhq.core.config import settings
+from hailhq.core.disclosure import disclosure_text
 from hailhq.core.db import session_scope
 from hailhq.core.internal_webhook import notify_usage_event_recorded
 from hailhq.core.models import Call, CallEvent, UsageEvent
@@ -276,24 +277,25 @@ def build_instructions(system_prompt: str | None) -> str:
 # resolved the requesting organization's display name, the line names it —
 # 47 CFR 64.1200(b)(1) requires identifying the initiating business at the
 # start of an artificial-voice call — otherwise it falls back to generic
-# wording. Only the name is interpolated; the template is hardcoded and
-# not reachable/overridable via the public API: org_name arrives in the
-# server-built dispatch metadata (resolved from the org record), never
-# from body.system_prompt, body.first_message, or body.metadata. Callers
-# can opt out per call via ``ai_disclosure: false`` (the API records the
-# opt-out in the audit log; the responsibility for it is theirs) — but the
-# line itself stays non-customizable, and the preamble still makes the
-# agent identify as an AI when asked.
-_DISCLOSURE_PREFIX = "Hi, this is an AI assistant calling on behalf of "
-
-AI_DISCLOSURE_LINE = _DISCLOSURE_PREFIX + "whoever requested this call."
+# wording. The template (``hailhq.core.disclosure``) is set by workspace
+# admins on the agent or in call settings and arrives in the server-built
+# dispatch metadata as ``ai_disclosure_line``, never from
+# body.system_prompt, body.first_message, or body.metadata. Callers can opt
+# out per call or per agent via ``ai_disclosure: false`` (the API records
+# the opt-out in the audit log; the responsibility for it is theirs), and
+# the preamble still makes the agent identify as an AI when asked.
+AI_DISCLOSURE_LINE = disclosure_text("outbound", None)
 
 
-def disclosure_line(org_name: str | None) -> str:
+def disclosure_line(
+    org_name: str | None,
+    direction: str | None = None,
+    template: str | None = None,
+) -> str:
     """The exact disclosure to speak — named when the org name resolved."""
-    if org_name and org_name.strip():
-        return f"{_DISCLOSURE_PREFIX}{org_name.strip()}."
-    return AI_DISCLOSURE_LINE
+    return disclosure_text(
+        "inbound" if direction == "inbound" else "outbound", org_name, template
+    )
 
 
 def make_agent_hangup(
@@ -442,7 +444,11 @@ async def speak_greeting(
     premise would be false.
     """
     disclosure = (
-        disclosure_line(metadata.get("org_name"))
+        disclosure_line(
+            metadata.get("org_name"),
+            metadata.get("direction"),
+            metadata.get("ai_disclosure_line"),
+        )
         if metadata.get("ai_disclosure", True)
         else None
     )
