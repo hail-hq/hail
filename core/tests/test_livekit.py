@@ -185,3 +185,18 @@ async def test_telnyx_header_is_sent_on_sip_invite(client: LiveKitClient) -> Non
     )
     (req,), _ = client._lkapi.sip.create_sip_participant.call_args
     assert dict(req.headers) == {"X-Telnyx-Username": "hail-sip"}
+
+
+async def test_add_and_remove_inbound_number(client: LiveKitClient) -> None:
+    from livekit.protocol.models import ListUpdate
+
+    client._lkapi.sip.update_inbound_trunk_fields = AsyncMock()
+    await client.add_inbound_number("ST_in", "+14155550100")
+    args, kwargs = client._lkapi.sip.update_inbound_trunk_fields.await_args
+    assert args == ("ST_in",)
+    assert isinstance(kwargs["numbers"], ListUpdate)
+    assert list(kwargs["numbers"].add) == ["+14155550100"]
+
+    await client.remove_inbound_number("ST_in", "+14155550100")
+    _, kwargs = client._lkapi.sip.update_inbound_trunk_fields.await_args
+    assert list(kwargs["numbers"].remove) == ["+14155550100"]

@@ -755,16 +755,41 @@ class AgentUpdate(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    name: str | None = Field(default=None, min_length=1, max_length=80)
-    system_prompt: str | None = Field(default=None, min_length=1)
-    first_message: str | None = Field(default=None, max_length=1000)
-    ai_disclosure: bool | None = None
-    ai_disclosure_line: str | None = Field(default=None, max_length=_AGENT_LINE_MAX)
-    voice_config: VoiceConfig | None = None
-    tools: list[str] | None = None
-    max_duration_seconds: int | None = Field(default=None, ge=60, le=3600)
-    sms_enabled: bool | None = None
-    status: AgentStatus | None = None
+    name: str | None = Field(
+        default=None, min_length=1, max_length=80, description="New display name."
+    )
+    system_prompt: str | None = Field(
+        default=None, min_length=1, description="New task instructions."
+    )
+    first_message: str | None = Field(
+        default=None,
+        max_length=1000,
+        description="New opening line; null makes the agent wait for the other side.",
+    )
+    ai_disclosure: bool | None = Field(
+        default=None, description="Whether the AI line is spoken first."
+    )
+    ai_disclosure_line: str | None = Field(
+        default=None,
+        max_length=_AGENT_LINE_MAX,
+        description="New AI line template ('{org}' = organization name); null returns to the workspace line.",
+    )
+    voice_config: VoiceConfig | None = Field(
+        default=None, description="New TTS voice and language settings."
+    )
+    tools: list[str] | None = Field(
+        default=None, description="New allowed tools; null allows every tool."
+    )
+    max_duration_seconds: int | None = Field(
+        default=None,
+        ge=60,
+        le=3600,
+        description="New soft cap per call; null returns to the workspace limit.",
+    )
+    sms_enabled: bool | None = Field(
+        default=None, description="Whether the agent answers texts."
+    )
+    status: AgentStatus | None = Field(default=None, description="'live' or 'paused'.")
 
     @field_validator("name")
     @classmethod

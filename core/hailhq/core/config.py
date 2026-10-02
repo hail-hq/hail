@@ -54,6 +54,10 @@ class Settings(BaseSettings):
     telnyx_connection_id: str = ""
     telnyx_sip_username: str = ""
     telnyx_public_key: str = ""
+    # DIDWW API v3 (my.didww.com -> API). DIDWW_ENVIRONMENT=sandbox points
+    # every call at sandbox-api.didww.com.
+    didww_api_key: str = ""
+    didww_environment: str = "production"
     # DIDWW voice IN trunk (SIP, pointed at LiveKit) DIDs are assigned to when
     # they route calls to an agent. Empty = DIDWW numbers cannot take calls.
     didww_voice_in_trunk_id: str = ""

@@ -14,6 +14,7 @@ from fastapi.responses import JSONResponse, Response
 from hailhq.api.deprecation import DeprecationHeaderMiddleware
 from hailhq.api.number_orders import purge_expired_quotes, reconcile_pending_orders
 from hailhq.api.ratelimit import GeneralRateLimitMiddleware
+from hailhq.api.routes import agents as agents_routes
 from hailhq.api.routes import calls as calls_routes
 from hailhq.api.routes import contacts as contacts_routes
 from hailhq.api.routes import email_attachments as email_attachments_routes
@@ -383,6 +384,7 @@ async def _cache_422_for_idempotent_retry(
 # Deprecation: true instead (see deprecation.py). No route handler is
 # duplicated, both mounts point at the same router object.
 _CUSTOMER_ROUTERS = [
+    agents_routes.router,
     calls_routes.router,
     email_attachments_routes.router,
     emails_routes.router,
