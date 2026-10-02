@@ -60,6 +60,10 @@ class CallEndReason(StrEnum):
     # minutes until the wall-clock soft cap.
     LLM_ENDPOINT_FAILED = "llm_endpoint_failed"
 
+    # inbound calls Hail refused before answering
+    INSUFFICIENT_FUNDS = "insufficient_funds"  # org balance is zero
+    NO_AGENT = "no_agent"  # number has no live voice agent
+
     # backstop (sweeper force-released the call after max_duration + grace)
     SWEEPER_TIMEOUT = "sweeper_timeout"
 

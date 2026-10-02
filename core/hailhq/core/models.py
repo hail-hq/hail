@@ -40,8 +40,16 @@ class OrganizationCallSettings(Base):
     organization_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), primary_key=True
     )
-    max_duration_seconds: Mapped[int] = mapped_column(Integer, nullable=False)
-    __table_args__ = (CheckConstraint("max_duration_seconds BETWEEN 60 AND 3600"),)
+    # NULL = the service default (HAIL_VOICE_MAX_DURATION_SECONDS).
+    max_duration_seconds: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Workspace AI line template; ``{org}`` is the workspace name. NULL = the
+    # built-in line for the call's direction (hailhq.core.disclosure).
+    ai_disclosure_line: Mapped[str | None] = mapped_column(Text, nullable=True)
+    __table_args__ = (
+        CheckConstraint(
+            "max_duration_seconds IS NULL OR max_duration_seconds BETWEEN 60 AND 3600"
+        ),
+    )
 
 
 class OrganizationMember(Base):
@@ -394,6 +402,57 @@ class ApiKey(Base):
     permissions: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
+class Agent(Base):
+    """A saved brain: what a number answers with, and what POST /calls can
+    place calls with (``agent_id``). Numbers point at an agent for calls
+    (``voice_agent_id``) and for texts (``sms_agent_id``)."""
+
+    __tablename__ = "agents"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    organization_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), nullable=False
+    )
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    system_prompt: Mapped[str] = mapped_column(Text, nullable=False)
+    # NULL = the agent waits for the other side to speak first.
+    first_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    ai_disclosure: Mapped[bool] = mapped_column(
+        Boolean, server_default=text("TRUE"), nullable=False
+    )
+    # NULL = the workspace line (organization_call_settings) or the built-in.
+    ai_disclosure_line: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Same shape as schemas.VoiceConfig.
+    voice_config: Mapped[dict] = mapped_column(
+        JSONB, server_default=text("'{}'::jsonb"), nullable=False
+    )
+    # NULL = every tool the workspace supports; [] = none.
+    tools: Mapped[list[str] | None] = mapped_column(ARRAY(Text), nullable=True)
+    # NULL = the workspace limit.
+    max_duration_seconds: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    sms_enabled: Mapped[bool] = mapped_column(
+        Boolean, server_default=text("TRUE"), nullable=False
+    )
+    status: Mapped[str] = mapped_column(Text, server_default="live", nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        TS, server_default=text("now()"), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        TS, server_default=text("now()"), nullable=False
+    )
+
+    __table_args__ = (
+        UniqueConstraint("organization_id", "name", name="agents_org_name_uq"),
+        CheckConstraint("status IN ('live','paused')", name="agents_status_check"),
+        CheckConstraint(
+            "max_duration_seconds IS NULL OR max_duration_seconds BETWEEN 60 AND 3600",
+            name="agents_max_duration_check",
+        ),
+    )
+
+
 class PhoneNumber(Base):
     __tablename__ = "phone_numbers"
 
@@ -452,6 +511,20 @@ class PhoneNumber(Base):
         ),
         nullable=True,
     )
+    # Who answers. NULL = calls ring out / texts only reach webhooks.
+    voice_agent_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("agents.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    sms_agent_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("agents.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    # Set while the number is on its carrier's LiveKit inbound trunk and
+    # attached for inbound at the carrier (hailhq.core.inbound_routing).
+    inbound_registered_at: Mapped[datetime | None] = mapped_column(TS, nullable=True)
 
     __table_args__ = (
         CheckConstraint(
@@ -521,8 +594,20 @@ class Call(Base):
         ForeignKey("conversations.id", ondelete="SET NULL"),
         nullable=True,
     )
-    from_number_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("phone_numbers.id"), nullable=False
+    # Outbound: the org (or pool) number Hail dialed from. NULL on inbound
+    # rows, where the caller has no PhoneNumber row.
+    from_number_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("phone_numbers.id"), nullable=True
+    )
+    # Inbound: the org number that was dialed. NULL on outbound rows.
+    to_number_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("phone_numbers.id"), nullable=True
+    )
+    # The agent that answered (inbound) or was placed with (outbound).
+    agent_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("agents.id", ondelete="SET NULL"),
+        nullable=True,
     )
     from_e164: Mapped[str] = mapped_column(Text, nullable=False)
     to_e164: Mapped[str] = mapped_column(Text, nullable=False)
@@ -576,6 +661,11 @@ class Call(Base):
             + ",".join(f"'{s}'" for s in sorted(TERMINAL_CALL_STATUSES))
             + ") OR end_reason IS NOT NULL",
             name="calls_end_reason_when_terminal",
+        ),
+        CheckConstraint(
+            "(direction = 'outbound' AND from_number_id IS NOT NULL)"
+            " OR (direction = 'inbound' AND to_number_id IS NOT NULL)",
+            name="calls_number_for_direction",
         ),
     )
 
@@ -637,10 +727,24 @@ class Sms(Base):
         TS, server_default=text("now()"), nullable=False
     )
 
+    # Outbound: the agent that wrote this reply. Inbound: NULL.
+    agent_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("agents.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    # Inbound rows routed to a text agent: pending | done | skipped | failed.
+    agent_reply_state: Mapped[str | None] = mapped_column(Text, nullable=True)
+
     __table_args__ = (
         CheckConstraint(
             "direction IN ('outbound','inbound')",
             name="sms_direction_check",
+        ),
+        CheckConstraint(
+            "agent_reply_state IS NULL OR agent_reply_state IN "
+            "('pending','done','skipped','failed')",
+            name="sms_agent_reply_state_check",
         ),
         CheckConstraint(
             "status IN ('queued','sent','delivered','failed','undelivered','received')",
