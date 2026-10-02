@@ -64,7 +64,7 @@ from hailhq.core.schemas import (
 )
 from hailhq.core.secret_cipher import SecretKeyMissing
 from hailhq.core.url_guard import UnsafeUrlError, assert_public_https_url
-from hailhq.core.webhook_fanout import fanout_call_event
+from hailhq.core.webhook_fanout import call_event_data, fanout_call_event
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -531,7 +531,7 @@ async def create_call(
                 organization_id=call.organization_id,
                 event_type="call.failed",
                 event_id=call.id,
-                data={"id": str(call.id), "status": "failed"},
+                data=call_event_data(call, status="failed", end_reason=failure_code),
             )
         # No-op when this call didn't hold a pool reservation.
         await release_pool_reservation(db, call_id=call.id)

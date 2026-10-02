@@ -905,11 +905,18 @@ async def mark_call_answered(call_id: UUID) -> bool:
                 Call.answered_at.is_(None),
             )
             .values(status="in_progress", answered_at=now)
-            .returning(Call.organization_id)
+            .returning(
+                Call.organization_id,
+                Call.direction,
+                Call.from_e164,
+                Call.to_e164,
+                Call.agent_id,
+            )
         )
-        organization_id = result.scalar_one_or_none()
-        transitioned = organization_id is not None
+        row = result.one_or_none()
+        transitioned = row is not None
         if transitioned:
+            organization_id, direction, from_e164, to_e164, agent_id = row
             # `from` is always `dialing` in practice — we never write `ringing`
             # for outbound (LiveKit only exposes `ringing` inbound) — but the
             # guard tolerates it so a future inbound path stays correct.
@@ -925,7 +932,14 @@ async def mark_call_answered(call_id: UUID) -> bool:
                 organization_id=organization_id,
                 event_type=_STATUS_TO_CALL_EVENT["in_progress"],
                 event_id=call_id,
-                data={"id": str(call_id), "status": "in_progress"},
+                data={
+                    "id": str(call_id),
+                    "status": "in_progress",
+                    "direction": direction,
+                    "from": from_e164,
+                    "to": to_e164,
+                    "agent_id": str(agent_id) if agent_id else None,
+                },
             )
         await session.commit()
     return transitioned
@@ -979,6 +993,10 @@ async def on_call_end(
             Call.answered_at,
             Call.organization_id,
             Call.recording_duration_ms,
+            Call.direction,
+            Call.from_e164,
+            Call.to_e164,
+            Call.agent_id,
         ).where(Call.id == call_id)
         row = (await session.execute(stmt)).one_or_none()
         if row is None:
@@ -990,6 +1008,10 @@ async def on_call_end(
             answered_at,
             organization_id,
             recording_duration_ms,
+            direction,
+            from_e164,
+            to_e164,
+            agent_id,
         ) = row
 
         # Bill from pickup (answered_at) when we have it — ring time before the
@@ -1057,6 +1079,10 @@ async def on_call_end(
                     data={
                         "id": str(call_id),
                         "status": final_status,
+                        "direction": direction,
+                        "from": from_e164,
+                        "to": to_e164,
+                        "agent_id": str(agent_id) if agent_id else None,
                         "end_reason": final_end_reason,
                     },
                 )

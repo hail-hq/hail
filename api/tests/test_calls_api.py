@@ -114,7 +114,7 @@ async def test_post_calls_rejects_neither_prompt_nor_llm(
         headers={"Authorization": f"Bearer {plain}"},
     )
     assert resp.status_code == 422
-    assert "either system_prompt or llm" in resp.text
+    assert "either system_prompt, llm or agent_id" in resp.text
 
 
 # --------------------------------------------------------------------------- #
