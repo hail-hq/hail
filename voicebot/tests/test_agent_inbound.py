@@ -213,3 +213,23 @@ async def test_ringing_inbound_call_is_answered_once(async_session) -> None:
     assert len(deliveries) == 1
     assert deliveries[0].payload["data"]["direction"] == "inbound"
     assert deliveries[0].payload["data"]["from"] == "+33612345678"
+
+
+async def test_numbers_without_plus_are_normalised(
+    monkeypatch: pytest.MonkeyPatch, no_db
+) -> None:
+    seen: list[SipAttributes] = []
+
+    async def fake_open(_db, attrs):
+        seen.append(attrs)
+        return Rejected("unknown_number")
+
+    monkeypatch.setattr(agent_mod, "open_inbound_call", fake_open)
+    attrs = {
+        **_ATTRS,
+        "sip.trunkPhoneNumber": "351300509184",
+        "sip.phoneNumber": "33612345678",
+    }
+    await agent_mod.open_inbound_from_room(_Ctx(_SipParticipant(attrs)))  # type: ignore[arg-type]
+    assert seen[0].dialed == "+351300509184"
+    assert seen[0].caller == "+33612345678"

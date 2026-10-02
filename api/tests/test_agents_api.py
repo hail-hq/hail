@@ -270,3 +270,27 @@ async def test_release_unregisters_first(
     livekit_mock.remove_inbound_number.assert_awaited_once()
     inbound_hooks["detach"].assert_awaited_once()
     voice_provider_mock.release_number.assert_awaited_once_with("PN_test")
+
+
+async def test_unknown_tools_are_rejected_on_create_and_update(client, org) -> None:
+    _org_id, headers = org
+    r = await client.post(
+        "/agents",
+        json={
+            "name": "x",
+            "system_prompt": "y",
+            "tools": ["end_call", "launch_rockets"],
+        },
+        headers=headers,
+    )
+    assert r.status_code == 422
+    assert "launch_rockets" in r.text
+    created = await _create_agent(client, headers)
+    r = await client.patch(
+        f"/agents/{created['id']}", json={"tools": ["nope"]}, headers=headers
+    )
+    assert r.status_code == 422
+    r = await client.patch(
+        f"/agents/{created['id']}", json={"tools": ["end_call"]}, headers=headers
+    )
+    assert r.status_code == 200

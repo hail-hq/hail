@@ -124,3 +124,14 @@ async def test_missing_trunk_is_a_config_error(
         await inbound_routing.register(async_session, AsyncMock(), number)
     assert exc_info.value.config is True
     hooks["attach"].assert_not_awaited()
+
+
+async def test_livekit_failure_undoes_the_carrier_attach(async_session, hooks) -> None:
+    lk = AsyncMock()
+    lk.add_inbound_number.side_effect = RuntimeError("twirp 500")
+    number = _number()
+    async_session.add(number)
+    await async_session.flush()
+    with pytest.raises(inbound_routing.InboundRoutingError):
+        await inbound_routing.register(async_session, lk, number)
+    hooks["detach"].assert_awaited_once_with("PN1", "+14155550100")

@@ -710,6 +710,16 @@ def parse_metadata(raw: str | None) -> dict[str, Any]:
 INBOUND_PARTICIPANT_TIMEOUT_SECONDS = 15.0
 
 
+def _e164(number: str) -> str:
+    """``351300509184`` → ``+351300509184``. Carriers differ on the leading
+    ``+`` (Telnyx and Twilio send it, DIDWW may not); ``phone_numbers.e164``
+    always has it."""
+    number = (number or "").strip()
+    if number and number[0] != "+" and number.isdigit():
+        return "+" + number
+    return number
+
+
 async def open_inbound_from_room(ctx: JobContext) -> dict[str, Any] | None:
     """Turn an inbound room into a ``Call`` row and dispatch-shaped metadata.
 
@@ -730,8 +740,8 @@ async def open_inbound_from_room(ctx: JobContext) -> dict[str, Any] | None:
         return None
     attrs = participant.attributes
     sip = SipAttributes(
-        dialed=attrs.get("sip.trunkPhoneNumber", ""),
-        caller=attrs.get("sip.phoneNumber", ""),
+        dialed=_e164(attrs.get("sip.trunkPhoneNumber", "")),
+        caller=_e164(attrs.get("sip.phoneNumber", "")),
         trunk_id=attrs.get("sip.trunkID", ""),
         room_name=ctx.room.name,
         provider_call_sid=attrs.get("sip.callIDFull")

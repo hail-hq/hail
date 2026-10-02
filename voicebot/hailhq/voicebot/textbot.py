@@ -6,6 +6,11 @@ keys as calls: ``build_llm(None, org_llm)`` (org BYO with optional fallback,
 else the house chain). The DB side lives in ``hailhq.core.text_agent``; the
 send goes through ``POST /internal/agent/reply-sms`` where the thread cap,
 funds, suppression, billing and delivery live.
+
+Process model: this thread is the only DB user in the worker's main process
+(call jobs run in child processes that LiveKit starts with ``spawn`` or a
+``forkserver``, never a fork of this process), so the shared engine in
+``hailhq.core.db`` is created on this thread's loop and used only here.
 """
 
 from __future__ import annotations
@@ -55,11 +60,15 @@ async def generate_reply(claimed: ClaimedReply, messages: list[dict[str, Any]]) 
     org_cfgs = await resolve_org_configs(claimed.agent.organization_id)
     llm = build_llm(None, org_cfgs.get("llm"))
     parts: list[str] = []
-    async with llm.chat(chat_ctx=_chat_context(messages)) as stream:
-        async for chunk in stream:
-            delta = getattr(chunk, "delta", None)
-            if delta is not None and delta.content:
-                parts.append(delta.content)
+    try:
+        async with llm.chat(chat_ctx=_chat_context(messages)) as stream:
+            async for chunk in stream:
+                delta = getattr(chunk, "delta", None)
+                if delta is not None and delta.content:
+                    parts.append(delta.content)
+    finally:
+        # Plugin LLMs own an HTTP client each; one is built per reply.
+        await llm.aclose()
     text = "".join(parts).strip()
     return text[:MAX_REPLY_CHARS]
 

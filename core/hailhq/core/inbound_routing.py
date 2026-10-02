@@ -52,6 +52,16 @@ async def register(db: AsyncSession, lk: LiveKitClient, number: PhoneNumber) -> 
     try:
         await lk.add_inbound_number(trunk_id, number.e164)
     except Exception as exc:
+        # Do not leave the carrier pointing at a LiveKit trunk that refuses
+        # the number: callers would hear a failure tone until someone retries.
+        try:
+            await entry.detach_inbound(number.provider_resource_id, number.e164)
+        except Exception:
+            logger.warning(
+                "number %s: carrier detach after LiveKit failure also failed",
+                number.e164,
+                exc_info=True,
+            )
         raise InboundRoutingError("livekit_add", exc) from exc
     number.inbound_registered_at = datetime.now(timezone.utc)
     await db.flush()

@@ -21,9 +21,11 @@ from fastapi import APIRouter, Depends, HTTPException, Response
 from fastapi import status as http_status
 from hailhq.api.audit import actor_of, write_audit_log
 from hailhq.api.deps import Principal, get_current_principal
+from hailhq.api.errors import unprocessable
 from hailhq.api.ratelimit import GENERAL_RATE_LIMITED_RESPONSES
 from hailhq.api.routes.calls import get_livekit
 from hailhq.core import inbound_routing
+from hailhq.core.agent_tools.registry import all_tools
 from hailhq.core.db import get_session
 from hailhq.core.livekit import LiveKitClient
 from hailhq.core.models import Agent, PhoneNumber
@@ -59,6 +61,18 @@ async def _load_owned(db: AsyncSession, agent_id: UUID, org_id: UUID) -> Agent:
     return agent
 
 
+def _check_tools(tools: list[str] | None) -> None:
+    """Unknown tool names fail here, not on the first call that uses the agent."""
+    if tools is None:
+        return
+    known = {t.name for t in all_tools()}
+    unknown = sorted(set(tools) - known)
+    if unknown:
+        raise unprocessable(
+            f"unknown tools: {', '.join(unknown)}", loc=["body", "tools"]
+        )
+
+
 def _name_conflict() -> HTTPException:
     return HTTPException(
         status_code=http_status.HTTP_409_CONFLICT,
@@ -79,6 +93,7 @@ async def create_agent(
 ) -> AgentResponse:
     """Create an agent. Route numbers to it with PATCH /numbers/{id}, or
     place calls with it via ``agent_id`` on POST /calls."""
+    _check_tools(body.tools)
     agent = Agent(
         organization_id=principal.organization_id,
         name=body.name,
@@ -157,6 +172,8 @@ async def update_agent(
     calls keep the settings they started with."""
     agent = await _load_owned(db, agent_id, principal.organization_id)
     changes = body.model_dump(exclude_unset=True)
+    if "tools" in changes:
+        _check_tools(changes["tools"])
     if "voice_config" in changes and body.voice_config is not None:
         changes["voice_config"] = body.voice_config.model_dump(mode="json")
     for field in ("name", "system_prompt", "ai_disclosure", "sms_enabled", "status"):
