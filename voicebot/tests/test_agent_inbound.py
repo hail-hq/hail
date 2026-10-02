@@ -281,7 +281,9 @@ async def test_caller_who_left_before_the_agent_joined_closes_the_row(
 
     class _Room:
         name = "hail-in-x"
-        remote_participants: dict = {}
+
+        def __init__(self) -> None:
+            self.remote_participants: dict = {}
 
         def on(self, _event):
             return lambda fn: fn
