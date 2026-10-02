@@ -558,6 +558,12 @@ class PhoneNumber(Base):
         """
         return not self.is_pool
 
+    @property
+    def inbound_registered(self) -> bool:
+        """Read by ``PhoneNumberResponse``: on the LiveKit inbound trunk and
+        attached at the carrier (``inbound_routing.register``)."""
+        return self.inbound_registered_at is not None
+
 
 class Conversation(Base):
     __tablename__ = "conversations"

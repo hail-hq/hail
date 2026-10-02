@@ -46,10 +46,17 @@ class Settings(BaseSettings):
     # Carriers
     twilio_account_sid: str = ""
     twilio_auth_token: str = ""
+    # Elastic SIP trunk (TK...) whose origination URI is LiveKit. Numbers are
+    # attached to it when they route calls to an agent. Empty = Twilio
+    # numbers cannot take calls.
+    twilio_sip_trunk_sid: str = ""
     telnyx_api_key: str = ""
     telnyx_connection_id: str = ""
     telnyx_sip_username: str = ""
     telnyx_public_key: str = ""
+    # DIDWW voice IN trunk (SIP, pointed at LiveKit) DIDs are assigned to when
+    # they route calls to an agent. Empty = DIDWW numbers cannot take calls.
+    didww_voice_in_trunk_id: str = ""
 
     # AWS — used today for SES (outbound email). boto3 falls back to its
     # default credential chain (env / config file / IAM role) when these
@@ -129,20 +136,22 @@ class Settings(BaseSettings):
     livekit_url: str = ""
     livekit_api_key: str = ""
     livekit_api_secret: str = ""
-    # LiveKit SIP trunks are direction-specific. Outbound is used today by
-    # POST /calls (CreateSIPParticipantRequest.sip_trunk_id). Inbound is for
-    # the v1.1 inbound-calls milestone — kept here so the config schema is
-    # ready and operators only set both up once.
-    # Canonical carrier-specific names. The legacy names below stay supported as
-    # fallbacks for existing deployments (see the validator at the end).
+    # LiveKit SIP trunks are direction-specific and per carrier. Outbound is
+    # used by POST /calls (CreateSIPParticipantRequest.sip_trunk_id). Inbound
+    # trunks hold the numbers Hail registered for inbound calls
+    # (core/hailhq/core/inbound_routing.py); empty = that carrier's numbers
+    # cannot take calls. Canonical carrier-specific names; the legacy names
+    # stay supported as Twilio fallbacks (see the validator at the end).
     livekit_twilio_sip_outbound_trunk_id: str = ""
     livekit_twilio_sip_inbound_trunk_id: str = ""
     livekit_sip_outbound_trunk_id: str = ""
     livekit_sip_inbound_trunk_id: str = ""
     livekit_telnyx_sip_outbound_trunk_id: str = ""
+    livekit_telnyx_sip_inbound_trunk_id: str = ""
     # Second carrier. A number's ``provider`` picks the trunk
     # (core/hailhq/core/carrier_routing.py). Empty = DIDWW numbers cannot dial.
     livekit_didww_sip_outbound_trunk_id: str = ""
+    livekit_didww_sip_inbound_trunk_id: str = ""
 
     # Storage
     database_url: str = "postgresql://hail:hail@postgres:5432/hail"
