@@ -28,8 +28,8 @@ Go to **Phone Numbers → Buy a number**. Select a number with the Voice capabil
 
 Do not add the termination domain to Hail's `.env`: Hail uses the resulting
 LiveKit trunk ID (`LIVEKIT_TWILIO_SIP_OUTBOUND_TRUNK_ID`) at runtime. Twilio calls
-traffic from LiveKit to the PSTN “termination.” Its “origination” settings are
-for inbound PSTN calls, which Hail does not yet support.
+traffic from LiveKit to the PSTN “termination.” Its “origination” settings
+carry inbound calls to LiveKit: see [§6](#6-inbound-calls).
 
 Twilio requires outbound destinations and caller IDs in E.164 format. Trial
 accounts can call only verified destination numbers. See Twilio's
@@ -92,3 +92,23 @@ do the two steps that follow. **Caution: if you disable Twilio's default
 opt-out handling, the change is account-wide and requires a Twilio Support
 request; there is no API for it.** First, disable Twilio's default opt-out
 handling. Then set `HAIL_SMS_COMPLIANCE_REPLIES_ENABLED=true`.
+
+## 6. Inbound calls
+
+Twilio sends a call to LiveKit when the number sits on an Elastic SIP trunk
+whose origination URI is LiveKit. Hail attaches the number when it routes
+calls to an agent; you set up the trunk once.
+
+1. On the trunk from step 3, open **Origination** and add the origination
+   URI `sip:<project>.sip.livekit.cloud;transport=tcp` (your LiveKit SIP
+   endpoint is on the project's settings page).
+2. Copy the trunk SID (`TK...`) into `.env` as `TWILIO_SIP_TRUNK_SID`.
+3. Create the LiveKit inbound trunk and dispatch rule
+   ([LiveKit Cloud §4](./livekit-cloud.md#4-inbound-calls)) and set
+   `LIVEKIT_TWILIO_SIP_INBOUND_TRUNK_ID`.
+
+Twilio Elastic SIP Trunking has no inbound username/password, so the LiveKit
+trunk lists the numbers instead: `PATCH /v1/numbers/{id}` with
+`voice_agent_id` adds the number to the Twilio trunk
+(`trunking.v1.trunks(TK...).phone_numbers`) and to the LiveKit trunk; `null`
+removes it from both ([Agents](../agents.md)).

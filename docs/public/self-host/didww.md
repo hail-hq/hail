@@ -1,6 +1,6 @@
 # DIDWW
 
-Second voice carrier, next to [Twilio](./twilio.md). Outbound calls only.
+Second voice carrier, next to [Twilio](./twilio.md). Calls in and out.
 A number's `provider` column picks its trunk
 ([`core/hailhq/core/carrier_routing.py`](../../../core/hailhq/core/carrier_routing.py)).
 
@@ -11,9 +11,10 @@ curl -X POST "$HAIL_API_URL/calls" -H "Authorization: Bearer $HAIL_API_KEY" \
   -d '{"from":"+351300000000","to":"+14155550100","system_prompt":"Be brief.","recipient_consent":true}'
 ```
 
-Not supported on DIDWW yet: buying numbers through `POST /numbers`, SMS, inbound
-calls. DIDWW sells no SMS on many countries (Portugal national numbers: none).
-Check the number's feature list before you buy.
+Not supported on DIDWW yet: buying numbers through `POST /numbers`, SMS.
+DIDWW sells no SMS on many countries (Portugal national numbers: none).
+Check the number's feature list before you buy. Inbound calls: see
+[below](#inbound-calls).
 
 ## 1. DIDWW account
 
@@ -85,3 +86,22 @@ must not include `sms` unless the DID lists SMS.
 A call from a `didww` number with `LIVEKIT_DIDWW_SIP_OUTBOUND_TRUNK_ID` empty
 fails with `end_reason = carrier_route_failed` before any LiveKit room exists.
 The same applies to Twilio numbers when `LIVEKIT_TWILIO_SIP_OUTBOUND_TRUNK_ID` is empty.
+
+## Inbound calls
+
+A DID takes calls through the voice IN trunk it is assigned to. Hail assigns
+the DID when it routes calls to an agent; you create the trunk once.
+
+1. **Voice → Inbound Trunks → Create**: type SIP, host
+   `<project>.sip.livekit.cloud`, port 5060, transport TCP. Copy the trunk
+   id into `.env` as `DIDWW_VOICE_IN_TRUNK_ID`. Set `DIDWW_API_KEY`
+   (**my.didww.com → API**).
+2. Create the LiveKit inbound trunk and dispatch rule
+   ([LiveKit Cloud §4](./livekit-cloud.md#4-inbound-calls)) and set
+   `LIVEKIT_DIDWW_SIP_INBOUND_TRUNK_ID`.
+
+`PATCH /v1/numbers/{id}` with `voice_agent_id` then assigns the DID to the
+trunk (`PATCH /v3/dids/{id}`, relationship `voice_in_trunk`) and lists the
+number on the LiveKit trunk; `null` clears both ([Agents](../agents.md)).
+A DID added by hand without a stored DID id is looked up by number.
+Reference: DIDWW [voice IN trunks](https://doc.didww.com/voice/inbound-trunks/index.html).
