@@ -19,6 +19,7 @@ from hailhq.core.compliance_gate import add_suppression, remove_suppression
 from hailhq.core.config import settings
 from hailhq.core.models import PhoneNumber, Sms, SmsEvent
 from hailhq.core.providers.sms import ProviderSmsResult, SmsProvider
+from hailhq.core.text_agent import should_queue_reply
 from hailhq.core.webhook_fanout import fanout_sms_event
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
@@ -221,6 +222,11 @@ async def ingest_inbound_sms(
         await _send_compliance_reply(
             db, provider, org_number=number, sender_e164=from_e164, body=reply_body
         )
+
+    # Hand a plain message to the number's text agent. Keyword traffic
+    # (STOP/START/HELP) is Hail's to answer, never the agent's.
+    if action is None and await should_queue_reply(db, number):
+        sms.agent_reply_state = "pending"
 
     # Record a lifecycle event so the inbound message surfaces on the
     # org-wide GET /events stream (which is built solely from SmsEvent rows),
