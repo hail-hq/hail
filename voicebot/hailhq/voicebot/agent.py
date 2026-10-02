@@ -36,6 +36,7 @@ from hailhq.core.agent_tools.send_dtmf import DTMF_CODES
 from hailhq.core.call_end_reasons import CallEndReason
 from hailhq.core.config import settings
 from hailhq.core.disclosure import disclosure_text
+from hailhq.core.inbound_calls import Rejected, SipAttributes, open_inbound_call
 from hailhq.core.db import session_scope
 from hailhq.core.internal_webhook import notify_usage_event_recorded
 from hailhq.core.models import Call, CallEvent, UsageEvent
@@ -691,12 +692,66 @@ def parse_metadata(raw: str | None) -> dict[str, Any]:
     """
     payload = json.loads(raw) if raw else {}
     if "call_id" not in payload:
+        if payload.get("direction") == "inbound":
+            # The dispatch rule's static metadata: the Call row does not
+            # exist yet, `open_inbound_from_room` creates it.
+            return payload
         raise ValueError(
             "dispatch metadata missing required field 'call_id'; check the API "
             "service's CreateAgentDispatchRequest payload"
         )
     payload["call_id"] = UUID(str(payload["call_id"]))
     return payload
+
+
+# How long to wait for the SIP participant on an inbound room. LiveKit adds
+# the caller before dispatching the agent, so this is a backstop for a room
+# the caller already left.
+INBOUND_PARTICIPANT_TIMEOUT_SECONDS = 15.0
+
+
+async def open_inbound_from_room(ctx: JobContext) -> dict[str, Any] | None:
+    """Turn an inbound room into a ``Call`` row and dispatch-shaped metadata.
+
+    Reads the SIP participant's attributes (``sip.trunkPhoneNumber`` is the
+    org number, ``sip.phoneNumber`` the caller, ``sip.trunkID`` the LiveKit
+    inbound trunk) and asks core who answers. On a refusal the room is
+    deleted, which hangs up on the caller, and ``None`` is returned so the
+    entrypoint exits without starting a session.
+    """
+    try:
+        participant = await asyncio.wait_for(
+            ctx.wait_for_participant(kind=rtc.ParticipantKind.PARTICIPANT_KIND_SIP),
+            timeout=INBOUND_PARTICIPANT_TIMEOUT_SECONDS,
+        )
+    except asyncio.TimeoutError:
+        logger.warning("inbound room %s: no SIP participant; leaving", ctx.room.name)
+        ctx.shutdown(reason="no_sip_participant")
+        return None
+    attrs = participant.attributes
+    sip = SipAttributes(
+        dialed=attrs.get("sip.trunkPhoneNumber", ""),
+        caller=attrs.get("sip.phoneNumber", ""),
+        trunk_id=attrs.get("sip.trunkID", ""),
+        room_name=ctx.room.name,
+        provider_call_sid=attrs.get("sip.callIDFull")
+        or attrs.get("sip.callID")
+        or None,
+    )
+    try:
+        async with session_scope() as db:
+            outcome = await open_inbound_call(db, sip)
+    except Exception:
+        logger.exception("inbound room %s: could not open the call", ctx.room.name)
+        outcome = Rejected("error")
+    if isinstance(outcome, Rejected):
+        try:
+            await ctx.delete_room()
+        except Exception:
+            logger.exception("delete_room failed after refusing an inbound call")
+        ctx.shutdown(reason=outcome.reason)
+        return None
+    return outcome.metadata
 
 
 async def write_call_event(call_id: UUID, kind: str, payload: dict[str, Any]) -> None:
@@ -1202,9 +1257,16 @@ def attach_event_handlers(
 async def entrypoint(ctx: JobContext) -> None:
     """The function ``WorkerOptions.entrypoint_fnc`` points at."""
     metadata = parse_metadata(ctx.job.metadata)
-    call_id: UUID = metadata["call_id"]
 
     await ctx.connect()
+
+    inbound = metadata.get("direction") == "inbound"
+    if inbound and "call_id" not in metadata:
+        opened = await open_inbound_from_room(ctx)
+        if opened is None:
+            return
+        metadata = opened
+    call_id: UUID = metadata["call_id"]
 
     # Captured terminal status / end_reason set by the SIP-participant
     # disconnect handler below. Read by `_shutdown` to override the default
@@ -1473,7 +1535,10 @@ async def entrypoint(ctx: JobContext) -> None:
     # no audio track to classify, and AMD would sit on its 30s backstop
     # before giving up (observed: a leg rejected at :20.475 still held the
     # job until :50.700, then "entrypoint did not exit in time").
-    if captured["status"] is not None:
+    if inbound:
+        # The caller dialed us: a person is on the line, no machine to detect.
+        amd_result = None
+    elif captured["status"] is not None:
         logger.info(
             "call_id=%s sip leg already gone (%s) — skipping AMD",
             call_id,
@@ -1482,17 +1547,20 @@ async def entrypoint(ctx: JobContext) -> None:
         amd_result = None
     else:
         amd_result = await run_amd(session, call_id)
-    await write_call_event(
-        call_id,
-        "amd_result",
-        {
-            "category": amd_result.category.value if amd_result else None,
-            # Truncated like the `error` payload above: an IVR menu or a
-            # rambling voicemail greeting can run to multiple KB, and this
-            # row is written on every single call.
-            "transcript": (amd_result.transcript or "")[:500] if amd_result else None,
-        },
-    )
+    if not inbound:
+        await write_call_event(
+            call_id,
+            "amd_result",
+            {
+                "category": amd_result.category.value if amd_result else None,
+                # Truncated like the `error` payload above: an IVR menu or a
+                # rambling voicemail greeting can run to multiple KB, and this
+                # row is written on every single call.
+                "transcript": (
+                    (amd_result.transcript or "")[:500] if amd_result else None
+                ),
+            },
+        )
     if amd_result is not None and amd_result.category in MACHINE_HANGUP_CATEGORIES:
         # Voicemail or a dead mailbox — hang up without speaking. We never
         # leave a message: a partial line on someone's voicemail is worse
@@ -1565,6 +1633,7 @@ __all__ = [
     "disclosure_line",
     "disconnect_reason_to_status",
     "entrypoint",
+    "open_inbound_from_room",
     "is_sip_answer_signal",
     "make_agent_hangup",
     "make_agent_send_dtmf",
