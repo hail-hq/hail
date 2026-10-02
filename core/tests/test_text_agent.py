@@ -129,7 +129,7 @@ async def test_claim_history_and_chat_shape(async_session) -> None:
     assert len(history) == text_agent.THREAD_LIMIT
     assert history[-1].body == "Tuesday then?"
     assert history[-2].body == "Sure."
-    assert [h.body for h in history][0] == "msg 4"  # oldest kept, in order
+    assert next(h.body for h in history) == "msg 4"  # oldest kept, in order
 
     messages = text_agent.build_chat_messages(agent, history)
     assert messages[0]["role"] == "system"

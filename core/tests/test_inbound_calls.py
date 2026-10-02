@@ -64,15 +64,15 @@ async def _seed(session, *, credits=10_000, agent=True, **number_kwargs):
         )
         session.add(agent_row)
         await session.flush()
-    kwargs = dict(
-        organization_id=org,
-        e164=DIALED,
-        country_code="US",
-        number_type="local",
-        provider="twilio",
-        provisioning_state="active",
-        voice_agent_id=agent_row.id if agent_row else None,
-    )
+    kwargs = {
+        "organization_id": org,
+        "e164": DIALED,
+        "country_code": "US",
+        "number_type": "local",
+        "provider": "twilio",
+        "provisioning_state": "active",
+        "voice_agent_id": agent_row.id if agent_row else None,
+    }
     kwargs.update(number_kwargs)
     number = PhoneNumber(**kwargs)
     session.add(number)
@@ -90,13 +90,13 @@ async def _seed(session, *, credits=10_000, agent=True, **number_kwargs):
 
 
 def _attrs(**over) -> inbound_calls.SipAttributes:
-    base = dict(
-        dialed=DIALED,
-        caller=CALLER,
-        trunk_id="ST_in_tw",
-        room_name="hail-in-abc",
-        provider_call_sid="sip-call-1",
-    )
+    base = {
+        "dialed": DIALED,
+        "caller": CALLER,
+        "trunk_id": "ST_in_tw",
+        "room_name": "hail-in-abc",
+        "provider_call_sid": "sip-call-1",
+    }
     base.update(over)
     return inbound_calls.SipAttributes(**base)
 

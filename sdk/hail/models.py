@@ -818,14 +818,14 @@ class ProviderValidateResult(BaseModel):
 
 __all__ = [
     "DOMAIN_NAME",
-    "AgentListResponse",
-    "AgentResponse",
-    "AgentStatus",
     "E164",
     "EMAIL_ADDR",
     "LOCAL_PREFIX",
     "TERMINAL_CALL_STATUSES",
     "TERMINAL_EMAIL_STATUSES",
+    "AgentListResponse",
+    "AgentResponse",
+    "AgentStatus",
     "CallCreate",
     "CallEventResponse",
     "CallListResponse",

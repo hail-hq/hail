@@ -35,9 +35,9 @@ from hail._errors import HailConfigError, HailError
 from hail._http import _HailHTTP, generate_idempotency_key
 from hail._resource_id import parse_resource_id
 from hail.models import (
+    TERMINAL_CALL_STATUSES,
     AgentListResponse,
     AgentResponse,
-    TERMINAL_CALL_STATUSES,
     CallEventResponse,
     CallListResponse,
     CallResponse,

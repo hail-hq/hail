@@ -77,7 +77,7 @@ def _payload(sms_id, body="Yes, Tuesday at 10 works.") -> bytes:
 async def test_reply_goes_out_from_the_dialed_number(
     client, async_session, sms_mock
 ) -> None:
-    org, agent, number, sms_id = await _seed(async_session)
+    _org, agent, _number, sms_id = await _seed(async_session)
     body = _payload(sms_id)
     resp = await client.post(
         "/internal/agent/reply-sms", content=body, headers=_signed(body)

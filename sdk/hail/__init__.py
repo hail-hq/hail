@@ -20,10 +20,10 @@ from hail._errors import (
 from hail._resource_id import SUPPORTED_RESOURCE_TYPES, parse_resource_id
 from hail.client import Client
 from hail.models import (
-    AgentListResponse,
-    AgentResponse,
     TERMINAL_CALL_STATUSES,
     TERMINAL_EMAIL_STATUSES,
+    AgentListResponse,
+    AgentResponse,
     CallCreate,
     CallEventResponse,
     CallListResponse,
@@ -69,12 +69,12 @@ from hail.models import (
 __version__ = "0.17.0"
 
 __all__ = [
-    "AgentListResponse",
-    "AgentResponse",
     # helpers
     "SUPPORTED_RESOURCE_TYPES",
     "TERMINAL_CALL_STATUSES",
     "TERMINAL_EMAIL_STATUSES",
+    "AgentListResponse",
+    "AgentResponse",
     # models
     "CallCreate",
     "CallEventResponse",

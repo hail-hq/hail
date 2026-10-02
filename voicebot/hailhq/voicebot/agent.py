@@ -35,9 +35,9 @@ from hailhq.core.agent_tools.client import AgentApiClient
 from hailhq.core.agent_tools.send_dtmf import DTMF_CODES
 from hailhq.core.call_end_reasons import CallEndReason
 from hailhq.core.config import settings
+from hailhq.core.db import session_scope
 from hailhq.core.disclosure import disclosure_text
 from hailhq.core.inbound_calls import Rejected, SipAttributes, open_inbound_call
-from hailhq.core.db import session_scope
 from hailhq.core.internal_webhook import notify_usage_event_recorded
 from hailhq.core.models import Call, CallEvent, UsageEvent
 from hailhq.core.pool import release_pool_reservation
@@ -1643,12 +1643,12 @@ __all__ = [
     "disclosure_line",
     "disconnect_reason_to_status",
     "entrypoint",
-    "open_inbound_from_room",
     "is_sip_answer_signal",
     "make_agent_hangup",
     "make_agent_send_dtmf",
     "mark_call_answered",
     "on_call_end",
+    "open_inbound_from_room",
     "opening_instructions",
     "parse_metadata",
     "prewarm",

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import uuid
+from typing import get_args
 
 import pytest
 from hailhq.core.schemas import (
@@ -14,7 +15,6 @@ from hailhq.core.schemas import (
     WebhookEventType,
 )
 from pydantic import ValidationError
-from typing import get_args
 
 
 def test_agent_create_defaults():
