@@ -35,6 +35,7 @@ existing number doesn't support.`,
 	cmd.AddCommand(newNumberListCmd(opts))
 	cmd.AddCommand(newNumberGetCmd(opts))
 	cmd.AddCommand(newNumberEnableSmsCmd(opts))
+	cmd.AddCommand(newNumberRouteCmd(opts))
 	return cmd
 }
 
@@ -354,6 +355,12 @@ func printPhoneNumber(opts *Options, n *client.PhoneNumberResponse, banner bool)
 	fmt.Fprintf(opts.Stdout, "  State:        %s\n", n.ProvisioningState)
 	if n.MessagingServiceSid != nil && *n.MessagingServiceSid != "" {
 		fmt.Fprintf(opts.Stdout, "  Messaging:    %s\n", *n.MessagingServiceSid)
+	}
+	if n.VoiceAgentId != nil {
+		fmt.Fprintf(opts.Stdout, "  Calls:        agent %s\n", n.VoiceAgentId.String())
+	}
+	if n.SmsAgentId != nil {
+		fmt.Fprintf(opts.Stdout, "  Texts:        agent %s\n", n.SmsAgentId.String())
 	}
 	return nil
 }
