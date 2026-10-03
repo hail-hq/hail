@@ -26,7 +26,7 @@ from hailhq.api.ratelimit import GENERAL_RATE_LIMITED_RESPONSES
 from hailhq.api.routes.calls import get_livekit
 from hailhq.core import inbound_routing
 from hailhq.core.agent_tools.registry import all_tools
-from hailhq.core.db import get_session
+from hailhq.core.db import get_session, org_lock
 from hailhq.core.livekit import LiveKitClient
 from hailhq.core.models import Agent, PhoneNumber
 from hailhq.core.schemas import (
@@ -174,11 +174,21 @@ async def update_agent(
     changes = body.model_dump(exclude_unset=True)
     if "tools" in changes:
         _check_tools(changes["tools"])
-    if "voice_config" in changes and body.voice_config is not None:
-        changes["voice_config"] = body.voice_config.model_dump(mode="json")
-    for field in ("name", "system_prompt", "ai_disclosure", "sms_enabled", "status"):
+    for field in (
+        "name",
+        "system_prompt",
+        "ai_disclosure",
+        "voice_config",
+        "sms_enabled",
+        "status",
+    ):
         if field in changes and changes[field] is None:
-            changes.pop(field)  # not nullable; a null here means "leave it"
+            # Not nullable; a null here means "leave it". Storing None in the
+            # JSONB voice_config column would write JSON null and break every
+            # read of the agent and every call it answers.
+            changes.pop(field)
+    if "voice_config" in changes:
+        changes["voice_config"] = body.voice_config.model_dump(mode="json")
     for field, value in changes.items():
         setattr(agent, field, value)
     if changes:
@@ -222,22 +232,28 @@ async def delete_agent(
     for inbound and ring out again; numbers that routed texts to it go back
     to webhooks only."""
     agent = await _load_owned(db, agent_id, principal.organization_id)
-    numbers = (
-        (
+    detached = 0
+    while True:
+        # The org lock is the one PATCH /numbers/{id} takes. Each pass holds
+        # it from the lookup to its commit, and the final pass holds it from
+        # "no numbers left" to the delete, so a number cannot be pointed at
+        # this agent in between and be left registered with no agent.
+        await org_lock(db, principal.organization_id)
+        number = (
             await db.execute(
-                select(PhoneNumber).where(
+                select(PhoneNumber)
+                .where(
                     PhoneNumber.organization_id == principal.organization_id,
                     or_(
                         PhoneNumber.voice_agent_id == agent.id,
                         PhoneNumber.sms_agent_id == agent.id,
                     ),
                 )
+                .limit(1)
             )
-        )
-        .scalars()
-        .all()
-    )
-    for number in numbers:
+        ).scalar_one_or_none()
+        if number is None:
+            break
         if number.voice_agent_id == agent.id:
             try:
                 await inbound_routing.unregister(db, lk, number)
@@ -254,6 +270,7 @@ async def delete_agent(
             number.sms_agent_id = None
         # Commit per number: the carrier and LiveKit work is already done.
         await db.commit()
+        detached += 1
     await db.delete(agent)
     await db.commit()
     actor_user_id, actor_kind = actor_of(principal)
@@ -263,7 +280,7 @@ async def delete_agent(
         action="agent.delete",
         resource_type="agent",
         resource_id=agent_id,
-        payload={"numbers_detached": len(numbers)},
+        payload={"numbers_detached": detached},
         actor_user_id=actor_user_id,
         actor_kind=actor_kind,
     )

@@ -21,7 +21,8 @@ import (
 //
 // An agent is the saved brain a number answers with: instructions, greeting,
 // AI line, voice, tools, limits. Numbers pick their agent with
-// `hail numbers route`; `hail call` can place calls with `--agent`.
+// `hail numbers route`. Outbound calls with an agent go through the API,
+// SDK or MCP (`agent_id`); `hail call` has no `--agent` flag yet.
 func newAgentsCmd(opts *Options) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "agents",
@@ -160,7 +161,11 @@ func readAllStdin() ([]byte, error) {
 
 // body returns the JSON object for create (all set fields) or update (only
 // flags the user changed). Built as a map so update can send explicit nulls.
-func (f *agentFlags) body(cmd *cobra.Command, create bool) (map[string]any, error) {
+//
+// The API replaces voice_config as a whole, so on update the voice argument is the
+// agent's current voice_config: --voice or --language alone must not drop the
+// other setting (or the TTS provider and the rest of the stored config).
+func (f *agentFlags) body(cmd *cobra.Command, create bool, voice map[string]any) (map[string]any, error) {
 	// Both verbs send only what the user asked for: the API's defaults apply
 	// on create, and untouched fields keep their value on update.
 	b := map[string]any{}
@@ -201,25 +206,47 @@ func (f *agentFlags) body(cmd *cobra.Command, create bool) (map[string]any, erro
 		}
 	}
 	if changed("tools") {
-		if len(f.tools) == 1 && f.tools[0] == "" {
-			b["tools"] = []string{}
-		} else if f.tools == nil {
-			b["tools"] = nil
-		} else {
-			b["tools"] = f.tools
-		}
+		// pflag hands `--tools ''` over as an empty, non-nil slice: no tools.
+		b["tools"] = f.tools
 	}
-	if cmd.Flags().Changed("voice") || cmd.Flags().Changed("language") {
+	if changed("voice") || changed("language") {
 		vc := map[string]any{}
-		if f.voiceID != "" {
-			vc["voice_id"] = f.voiceID
+		for k, v := range voice {
+			vc[k] = v
 		}
-		if f.language != "" {
-			vc["language"] = f.language
+		setOrClear := func(key, value string) {
+			if value == "" {
+				delete(vc, key)
+			} else {
+				vc[key] = value
+			}
+		}
+		if changed("voice") {
+			setOrClear("voice_id", f.voiceID)
+		}
+		if changed("language") {
+			setOrClear("language", f.language)
 		}
 		b["voice_config"] = vc
 	}
 	return b, nil
+}
+
+// currentVoiceConfig is the agent's stored voice_config, the base an update
+// of --voice or --language is merged into.
+func currentVoiceConfig(ctx context.Context, apiClient *client.ClientWithResponses, id uuid.UUID) (map[string]any, error) {
+	resp, err := apiClient.GetAgentV1AgentsAgentIdGetWithResponse(
+		ctx, openapi_types.UUID(id), &client.GetAgentV1AgentsAgentIdGetParams{})
+	if err != nil {
+		return nil, fmt.Errorf("agents API: %w", err)
+	}
+	if resp.HTTPResponse.StatusCode == http.StatusNotFound {
+		return nil, fmt.Errorf("agent %s not found (or not in your org)", id)
+	}
+	if resp.HTTPResponse.StatusCode != http.StatusOK || resp.JSON200 == nil {
+		return nil, apiError(resp.HTTPResponse.StatusCode, resp.Body)
+	}
+	return resp.JSON200.VoiceConfig, nil
 }
 
 func nullIfEmpty(s string) any {
@@ -242,7 +269,7 @@ Example:
 		Args: argsOrHelp(1, "<name>"),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			f.name = args[0]
-			body, err := f.body(cmd, true)
+			body, err := f.body(cmd, true, nil)
 			if err != nil {
 				return err
 			}
@@ -277,16 +304,22 @@ func newAgentsUpdateCmd(opts *Options) *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("agent id must be a UUID: %w", err)
 			}
-			body, err := f.body(cmd, false)
+			apiClient, err := opts.newClient()
+			if err != nil {
+				return err
+			}
+			var voice map[string]any
+			if cmd.Flags().Changed("voice") || cmd.Flags().Changed("language") {
+				if voice, err = currentVoiceConfig(cmd.Context(), apiClient, id); err != nil {
+					return err
+				}
+			}
+			body, err := f.body(cmd, false, voice)
 			if err != nil {
 				return err
 			}
 			if len(body) == 0 {
 				return fmt.Errorf("nothing to change: pass at least one flag")
-			}
-			apiClient, err := opts.newClient()
-			if err != nil {
-				return err
 			}
 			raw, _ := json.Marshal(body)
 			resp, err := apiClient.UpdateAgentV1AgentsAgentIdPatchWithBodyWithResponse(

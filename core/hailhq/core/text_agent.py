@@ -13,7 +13,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any, Literal
-from uuid import UUID
 
 from hailhq.core.models import Agent, PhoneNumber, Sms
 from sqlalchemy import and_, func, or_, select, update
@@ -26,6 +25,7 @@ __all__ = [
     "THREAD_LIMIT",
     "THREAD_WINDOW",
     "ClaimedReply",
+    "answers_texts",
     "build_chat_messages",
     "claim_pending_reply",
     "finish_reply",
@@ -47,8 +47,9 @@ TEXT_PREAMBLE = (
 MAX_REPLY_CHARS = 480  # same cap as the voice send_sms tool (about 3 segments)
 THREAD_LIMIT = 20  # messages of history given to the model
 THREAD_WINDOW = timedelta(hours=24)
-# After this many agent replies in one thread within THREAD_WINDOW the agent
-# goes quiet until a person on the org side writes (a loop breaker).
+# At most this many agent replies in one thread per THREAD_WINDOW (a rolling
+# 24 hours, no reset when a person writes): past it the agent stays quiet until
+# older replies leave the window. A loop breaker.
 MAX_REPLIES_PER_THREAD = 20
 
 ReplyState = Literal["done", "skipped", "failed"]
@@ -61,16 +62,22 @@ class ClaimedReply:
     number: PhoneNumber
 
 
+def answers_texts(agent: Agent | None) -> bool:
+    """True for a live agent with ``sms_enabled``: the one test for queueing,
+    claiming and sending a text reply."""
+    return agent is not None and agent.status == "live" and agent.sms_enabled
+
+
 async def should_queue_reply(db: AsyncSession, number: PhoneNumber) -> bool:
     """True when this number's text agent exists, is live and answers texts."""
     if number.sms_agent_id is None:
         return False
-    agent = await db.get(Agent, number.sms_agent_id)
-    return agent is not None and agent.status == "live" and agent.sms_enabled
+    return answers_texts(await db.get(Agent, number.sms_agent_id))
 
 
 async def claim_pending_reply(db: AsyncSession) -> ClaimedReply | None:
-    """Lock and return the oldest pending inbound text, or None.
+    """Lock and return the oldest pending inbound text that still has an agent
+    to answer it, or None.
 
     ``FOR UPDATE SKIP LOCKED`` lets several workers poll the same table. The
     caller holds the row until ``finish_reply``; a crash releases the lock and
@@ -83,25 +90,23 @@ async def claim_pending_reply(db: AsyncSession) -> ClaimedReply | None:
         .limit(1)
         .with_for_update(skip_locked=True)
     )
-    sms = (await db.execute(stmt)).scalar_one_or_none()
-    if sms is None:
-        return None
-    number = await db.get(PhoneNumber, sms.to_number_id) if sms.to_number_id else None
-    agent = (
-        await db.get(Agent, number.sms_agent_id)
-        if number is not None and number.sms_agent_id
-        else None
-    )
-    if (
-        number is None
-        or agent is None
-        or agent.status != "live"
-        or not agent.sms_enabled
-    ):
-        # Routing changed between ingest and now: drop it quietly.
+    while True:
+        sms = (await db.execute(stmt)).scalar_one_or_none()
+        if sms is None:
+            return None
+        number = (
+            await db.get(PhoneNumber, sms.to_number_id) if sms.to_number_id else None
+        )
+        agent = (
+            await db.get(Agent, number.sms_agent_id)
+            if number is not None and number.sms_agent_id
+            else None
+        )
+        if number is not None and agent is not None and answers_texts(agent):
+            return ClaimedReply(sms=sms, agent=agent, number=number)
+        # Routing changed between ingest and now: drop it quietly and take the
+        # next row, so a backlog of dropped texts does not cost a poll each.
         await finish_reply(db, sms, "skipped")
-        return None
-    return ClaimedReply(sms=sms, agent=agent, number=number)
 
 
 def _thread_filter(a: str, b: str):
@@ -166,9 +171,3 @@ async def finish_reply(db: AsyncSession, sms: Sms, state: ReplyState) -> None:
         update(Sms).where(Sms.id == sms.id).values(agent_reply_state=state)
     )
     await db.commit()
-
-
-async def mark_pending(db: AsyncSession, sms_id: UUID) -> None:
-    await db.execute(
-        update(Sms).where(Sms.id == sms_id).values(agent_reply_state="pending")
-    )

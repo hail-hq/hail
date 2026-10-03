@@ -12,7 +12,8 @@ data, not HTTP errors, and stay deliberately vague: never reveal
 suppression-list membership or a member's address to the callee.
 
 The agent never supplies addresses: SMS always targets the call's
-counterpart (``calls.to_e164``); email targets a directory name resolved
+counterpart (``calls.to_e164`` on outbound, ``calls.from_e164`` on inbound);
+email targets a directory name resolved
 here, scoped to the call's org.
 """
 
@@ -48,7 +49,11 @@ from hailhq.core.directory import resolve_member_emails
 from hailhq.core.email_sender import from_address_for
 from hailhq.core.models import Agent, Call, Email, PhoneNumber, Sms
 from hailhq.core.providers.email import EmailProvider
-from hailhq.core.text_agent import MAX_REPLIES_PER_THREAD, replies_in_thread
+from hailhq.core.text_agent import (
+    MAX_REPLIES_PER_THREAD,
+    answers_texts,
+    replies_in_thread,
+)
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -384,21 +389,35 @@ async def agent_reply_sms(
         if number is not None and number.sms_agent_id
         else None
     )
-    if number is None or agent is None or number.provisioning_state != "active":
+    # The agent may have been paused or muted while the worker wrote the reply.
+    if (
+        number is None
+        or agent is None
+        or not answers_texts(agent)
+        or number.provisioning_state != "active"
+    ):
         return AgentReplySmsResponse(ok=False, state="skipped", reason="no_agent")
 
     # Idempotent: the worker retries a timed-out POST with the same sms_id.
+    # ``first()``, not ``scalar_one_or_none()``: two racing requests can each
+    # have written a reply, and a retry must still answer ``done``.
     prior = (
-        await db.execute(
-            select(Sms).where(
-                Sms.organization_id == org,
-                Sms.direction == "outbound",
-                Sms.agent_id.is_not(None),
-                Sms.to_e164 == inbound.from_e164,
-                Sms.metadata_["reply_to_sms_id"].astext == str(inbound.id),
+        (
+            await db.execute(
+                select(Sms)
+                .where(
+                    Sms.organization_id == org,
+                    Sms.direction == "outbound",
+                    Sms.agent_id.is_not(None),
+                    Sms.to_e164 == inbound.from_e164,
+                    Sms.metadata_["reply_to_sms_id"].astext == str(inbound.id),
+                )
+                .order_by(Sms.requested_at)
             )
         )
-    ).scalar_one_or_none()
+        .scalars()
+        .first()
+    )
     if prior is not None:
         return AgentReplySmsResponse(ok=True, state="done", reply_id=prior.id)
 

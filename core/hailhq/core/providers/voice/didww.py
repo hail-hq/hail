@@ -547,8 +547,10 @@ async def revoke(offer: CarrierOffer, org: UUID) -> str | None:
 # agent and clears it when the agent is removed.
 
 
-class _NoSuchDid(CarrierNotConfigured):
-    """The number is not on this DIDWW account (released, or never there)."""
+class _NoSuchDid(Exception):
+    """The number is not on this DIDWW account (released, or never there).
+    Not a ``CarrierNotConfigured``: that one tells the customer the server is
+    not set up for inbound calls, which is not what a missing DID means."""
 
 
 def _did_id_sync(resource_id: str | None, e164: str) -> str:
@@ -589,6 +591,8 @@ async def attach_inbound_number(resource_id: str | None, e164: str) -> None:
         await asyncio.to_thread(attach)
     except DidwwApiError as exc:
         raise CarrierRequestError(carrier_status(exc)) from exc
+    except _NoSuchDid as exc:
+        raise CarrierRequestError(404) from exc
 
 
 async def detach_inbound_number(resource_id: str | None, e164: str) -> None:

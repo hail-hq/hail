@@ -25,9 +25,11 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 - **AI line templates.** Inbound default `Hi, this is an AI assistant
   answering on behalf of {org}.`; workspace default in
   `organization_call_settings.ai_disclosure_line`, per-agent override.
+- DIDWW numbers can be quoted and bought through `POST /numbers/quotes` and
+  `POST /numbers`; end-user registration runs through `/verifications`
+  (`provider=didww`). New settings `DIDWW_API_KEY`, `DIDWW_ENVIRONMENT`.
 - Env: `LIVEKIT_TELNYX_SIP_INBOUND_TRUNK_ID`, `LIVEKIT_DIDWW_SIP_INBOUND_TRUNK_ID`,
-  `TWILIO_SIP_TRUNK_SID`, `DIDWW_API_KEY`, `DIDWW_ENVIRONMENT`,
-  `DIDWW_VOICE_IN_TRUNK_ID`. Migration `0050`.
+  `TWILIO_SIP_TRUNK_SID`, `DIDWW_VOICE_IN_TRUNK_ID`. Migration `0050`.
 
 ### Changed
 
@@ -35,9 +37,6 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
   `voice_agent_id`, `sms_agent_id`, `inbound_registered`.
 - `organization_call_settings.max_duration_seconds` is nullable (null = service default).
 - `POST /v1/calls` 422 text: "either system_prompt, llm or agent_id must be provided".
-- DIDWW numbers can be quoted and bought through `POST /numbers/quotes` and
-  `POST /numbers`; end-user registration runs through `/verifications`
-  (`provider=didww`). New settings `DIDWW_API_KEY`, `DIDWW_ENVIRONMENT`.
 
 ## [0.25.0] — 2026-09-28
 

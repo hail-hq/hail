@@ -290,3 +290,65 @@ async def test_unknown_tools_are_rejected_on_create_and_update(client, org) -> N
         f"/agents/{created['id']}", json={"tools": ["end_call"]}, headers=headers
     )
     assert r.status_code == 200
+
+
+async def test_patch_null_voice_config_is_ignored(
+    client: httpx.AsyncClient, org
+) -> None:
+    """voice_config is not nullable: a null leaves it alone, never stores JSON
+    null (which would break every read of the agent and every inbound call)."""
+    _org_id, headers = org
+    created = await _create_agent(client, headers)
+    r = await client.patch(
+        f"/agents/{created['id']}",
+        json={"voice_config": None, "status": "paused"},
+        headers=headers,
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["voice_config"] == created["voice_config"]
+    assert r.json()["status"] == "paused"
+    listed = await client.get("/agents", headers=headers)
+    assert listed.status_code == 200
+
+
+async def test_release_works_without_livekit_settings(
+    client: httpx.AsyncClient,
+    org,
+    async_session: AsyncSession,
+    voice_provider_mock,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A server with no LiveKit settings still releases numbers: LiveKit is
+    only touched for a number that was registered for inbound calls."""
+    from hailhq.api.main import app
+    from hailhq.api.routes import calls as calls_routes
+
+    app.dependency_overrides.pop(calls_routes.get_livekit_optional, None)
+    monkeypatch.setattr(calls_routes, "_livekit_singleton", None)
+    for name in ("livekit_url", "livekit_api_key", "livekit_api_secret"):
+        monkeypatch.setattr(settings, name, "")
+    for name in ("LIVEKIT_URL", "LIVEKIT_API_KEY", "LIVEKIT_API_SECRET"):
+        monkeypatch.delenv(name, raising=False)
+
+    org_id, headers = org
+    number = await _seed_number(async_session, org_id)
+    r = await client.delete(f"/numbers/{number.id}", headers=headers)
+    assert r.status_code == 204, r.text
+    voice_provider_mock.release_number.assert_awaited_once_with("PN_test")
+
+
+async def test_routing_503_does_not_name_the_carrier_or_an_env_var(
+    client: httpx.AsyncClient, org, async_session: AsyncSession, monkeypatch
+) -> None:
+    org_id, headers = org
+    agent = await _create_agent(client, headers)
+    number = await _seed_number(async_session, org_id)
+    monkeypatch.setattr(settings, "livekit_twilio_sip_inbound_trunk_id", "")
+    monkeypatch.setattr(settings, "livekit_sip_inbound_trunk_id", "")
+    r = await client.patch(
+        f"/numbers/{number.id}", json={"voice_agent_id": agent["id"]}, headers=headers
+    )
+    assert r.status_code == 503
+    detail = r.json()["detail"].lower()
+    assert "twilio" not in detail
+    assert "livekit_" not in detail

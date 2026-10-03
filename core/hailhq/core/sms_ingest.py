@@ -27,7 +27,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["IngestResult", "ingest_inbound_sms"]
+__all__ = ["IngestResult", "active_dedicated_number", "ingest_inbound_sms"]
 
 # Unique-constraint name whose violation is a benign duplicate delivery
 # (Twilio at-least-once retry) to absorb; every other IntegrityError
@@ -112,7 +112,9 @@ async def _send_compliance_reply(
     await db.flush()
 
 
-async def _resolve_org_for_number(db: AsyncSession, to_e164: str) -> PhoneNumber | None:
+async def active_dedicated_number(db: AsyncSession, to_e164: str) -> PhoneNumber | None:
+    """The active, org-owned (non-pool) number ``to_e164``, or None. Shared by
+    inbound texts and inbound calls (``hailhq.core.inbound_calls``)."""
     stmt = select(PhoneNumber).where(
         PhoneNumber.e164 == to_e164,
         PhoneNumber.is_pool.is_(False),
@@ -132,7 +134,7 @@ async def ingest_inbound_sms(
     carrier: str,
     provider: SmsProvider | None = None,
 ) -> IngestResult:
-    number = await _resolve_org_for_number(db, to_e164)
+    number = await active_dedicated_number(db, to_e164)
     if number is None or number.organization_id is None:
         logger.info("inbound sms to unrecognized/pool number=%s dropped", to_e164)
         return IngestResult(sms_id=None, dropped_reason="unknown_number")

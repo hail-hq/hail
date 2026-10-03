@@ -136,6 +136,19 @@ async def get_livekit() -> LiveKitClient:
     return _livekit_singleton
 
 
+async def get_livekit_optional() -> LiveKitClient | None:
+    """``get_livekit``, or None when LiveKit is not configured here.
+
+    For routes that touch LiveKit only when a number is registered for
+    inbound calls (number release): a server without LiveKit settings must
+    still release numbers. Tests override this beside ``get_livekit``.
+    """
+    try:
+        return await get_livekit()
+    except ValueError:  # LiveKitAPI: "url must be set" / credentials missing
+        return None
+
+
 async def close_livekit_singleton() -> None:
     """Close the process-wide ``LiveKitClient`` if one was constructed.
 

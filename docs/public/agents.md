@@ -66,9 +66,9 @@ agent skips it; the responsibility for that is yours.
 3. Any other text to a number with `sms_agent_id` set (agent `live`,
    `sms_enabled: true`) is answered by the agent: one reply, written from
    `system_prompt` and the last 20 messages of the thread (24 hours), sent
-   from the same number through its carrier. After 20 agent replies in one
-   thread within 24 hours the agent stops until a person on your side writes.
-   Replies bill as outbound SMS. Inbound rows carry `agent_reply_state`
+   from the same number through its carrier. The agent sends at most 20
+   replies per thread in any 24 hours; past that it stays quiet until older
+   replies leave the window. Replies bill as outbound SMS. Inbound rows carry `agent_reply_state`
    (`pending`, `done`, `skipped`, `failed`) in the database; replies carry
    `agent_id`.
 

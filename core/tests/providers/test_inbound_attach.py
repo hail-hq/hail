@@ -128,3 +128,20 @@ async def test_didww_detach_tolerates_a_released_did(
     monkeypatch.setattr(didww, "didww_client", lambda: client)
     await didww.detach_inbound_number(None, "+351300509184")  # no raise
     client.patch.assert_not_called()
+
+
+async def test_didww_attach_to_a_missing_did_is_a_request_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A DID that is not on the account is a failed request (a 502 for the
+    customer), not "the server is not configured for inbound calls"."""
+    monkeypatch.setattr(settings, "didww_api_key", "key")
+    monkeypatch.setattr(settings, "didww_voice_in_trunk_id", "trunk-1")
+    client = MagicMock()
+    client.get.return_value = {"data": []}
+    monkeypatch.setattr(didww, "didww_client", lambda: client)
+    with pytest.raises(CarrierRequestError) as exc:
+        await didww.attach_inbound_number(None, "+351300509184")
+    assert not isinstance(exc.value, CarrierNotConfigured)
+    assert exc.value.status == 404
+    client.patch.assert_not_called()

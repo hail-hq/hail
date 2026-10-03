@@ -18,7 +18,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends
 from hailhq.api.audit import write_audit_log
-from hailhq.api.routes.calls import get_livekit
+from hailhq.api.routes.calls import get_livekit_optional
 from hailhq.api.routes.internal.auth import verify_internal_request
 from hailhq.api.routes.numbers import _get_org_number_or_404, release_org_number
 from hailhq.core.db import get_session
@@ -48,7 +48,7 @@ class NumberReleaseIn(BaseModel):
 async def release_number_internal(
     body: NumberReleaseIn,
     db: Annotated[AsyncSession, Depends(get_session)],
-    lk: Annotated[LiveKitClient, Depends(get_livekit)],
+    lk: Annotated[LiveKitClient | None, Depends(get_livekit_optional)],
 ) -> dict:
     # Same lookup as the public routes (no is_pool filter needed: the
     # phone_numbers_pool_owner_xor CHECK guarantees a row matching a non-null

@@ -36,7 +36,7 @@ from hailhq.api.number_orders import (
 from hailhq.api.pagination import fetch_cursor_page
 from hailhq.api.ratelimit import GENERAL_RATE_LIMITED_RESPONSES
 from hailhq.api.route_prefixes import request_mount_prefix
-from hailhq.api.routes.calls import get_livekit
+from hailhq.api.routes.calls import get_livekit, get_livekit_optional
 from hailhq.core import inbound_routing, telephony_catalog
 from hailhq.core.carrier_routing import CARRIERS, carrier, sms_route
 from hailhq.core.db import get_session, org_lock
@@ -282,7 +282,7 @@ async def release_number(
     number_id: UUID,
     principal: Annotated[Principal, Depends(get_current_principal)],
     db: Annotated[AsyncSession, Depends(get_session)],
-    lk: Annotated[LiveKitClient, Depends(get_livekit)],
+    lk: Annotated[LiveKitClient | None, Depends(get_livekit_optional)],
 ) -> None:
     """Release a dedicated number. The monthly fee stops accruing after the
     release month; months already accrued stay owed (the rater bills late,
@@ -341,10 +341,12 @@ async def _load_org_agent_or_404(
 
 
 def _routing_http_error(exc: inbound_routing.InboundRoutingError) -> HTTPException:
+    # The customer reads this: never the carrier's name or an env var. ``exc``
+    # names both (it is logged by the caller).
     if exc.config:
         return HTTPException(
             status_code=http_status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=f"inbound calls are not configured for this carrier ({exc})",
+            detail="inbound calls are not configured for this carrier",
         )
     return HTTPException(
         status_code=http_status.HTTP_502_BAD_GATEWAY,

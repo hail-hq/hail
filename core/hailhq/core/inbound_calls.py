@@ -18,6 +18,7 @@ Mirrors ``sms_ingest.ingest_inbound_sms`` for the resolution rules and
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -37,8 +38,8 @@ from hailhq.core.models import (
     OrganizationCallSettings,
     PhoneNumber,
 )
+from hailhq.core.sms_ingest import active_dedicated_number
 from hailhq.core.webhook_fanout import call_event_data, fanout_call_event
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
@@ -72,21 +73,6 @@ class Rejected:
 
     reason: str
     call_id: UUID | None = None
-
-
-async def _resolve_number(db: AsyncSession, dialed: str) -> PhoneNumber | None:
-    stmt = select(PhoneNumber).where(
-        PhoneNumber.e164 == dialed,
-        PhoneNumber.is_pool.is_(False),
-        PhoneNumber.provisioning_state == "active",
-    )
-    return (await db.execute(stmt)).scalar_one_or_none()
-
-
-async def _workspace_settings(
-    db: AsyncSession, organization_id: UUID
-) -> OrganizationCallSettings | None:
-    return await db.get(OrganizationCallSettings, organization_id)
 
 
 async def _refuse(
@@ -145,7 +131,7 @@ async def open_inbound_call(
     db: AsyncSession, attrs: SipAttributes
 ) -> Accepted | Rejected:
     """Decide who answers and write the ``Call`` row. Commits."""
-    number = await _resolve_number(db, attrs.dialed)
+    number = await active_dedicated_number(db, attrs.dialed)
     if number is None or number.organization_id is None:
         logger.info("inbound call to unknown/pool number %s dropped", attrs.dialed)
         return Rejected("unknown_number")
@@ -164,18 +150,34 @@ async def open_inbound_call(
         )
         return Rejected("wrong_carrier")
 
+    # The caller is already connected and hearing silence: look the name up
+    # while the checks and the Call row are written, as POST /calls does.
+    org_id = number.organization_id
+    org_name = asyncio.create_task(fetch_organization_name(str(org_id)))
+    try:
+        return await _answer_or_refuse(db, number, org_id, attrs, org_name)
+    finally:
+        org_name.cancel()  # no-op once it has finished (refusals never await it)
+
+
+async def _answer_or_refuse(
+    db: AsyncSession,
+    number: PhoneNumber,
+    org_id: UUID,
+    attrs: SipAttributes,
+    org_name: asyncio.Task[str | None],
+) -> Accepted | Rejected:
     agent = (
         await db.get(Agent, number.voice_agent_id) if number.voice_agent_id else None
     )
     if agent is None or agent.status != "live":
         return await _refuse(db, number, attrs, agent, CallEndReason.NO_AGENT)
-    org_id = number.organization_id
     if await check_channel_suspended(db, org_id, "voice"):
         return await _refuse(db, number, attrs, agent, CallEndReason.USER_REJECTED)
     if not await has_funds(db, org_id):
         return await _refuse(db, number, attrs, agent, CallEndReason.INSUFFICIENT_FUNDS)
 
-    workspace = await _workspace_settings(db, org_id)
+    workspace = await db.get(OrganizationCallSettings, org_id)
     max_duration = (
         agent.max_duration_seconds
         or (workspace.max_duration_seconds if workspace else None)
@@ -240,6 +242,6 @@ async def open_inbound_call(
             "ai_disclosure": agent.ai_disclosure,
             "ai_disclosure_line": disclosure_line,
             "tools": agent.tools,
-            "org_name": await fetch_organization_name(str(org_id)),
+            "org_name": await org_name,
         }
     )

@@ -154,3 +154,33 @@ async def test_claim_skips_when_routing_changed(async_session) -> None:
     row = await async_session.get(Sms, result.sms_id)
     await async_session.refresh(row)
     assert row.agent_reply_state == "skipped"
+
+
+async def test_claim_moves_past_dropped_texts_to_the_next_row(async_session) -> None:
+    """A text whose agent went away is skipped and the same call takes the next
+    pending row, so a backlog of dropped texts does not cost a poll each."""
+    org, agent, number = await _seed(async_session)
+    first = await _ingest(async_session, "one", "SM10")
+    second = await _ingest(async_session, "two", "SM11")
+    # The first row now points at a number with no text agent; the second at
+    # the live one.
+    other = PhoneNumber(
+        organization_id=org,
+        e164="+14155550199",
+        country_code="US",
+        number_type="local",
+        provisioning_state="active",
+        provider_resource_id="PN2",
+    )
+    async_session.add(other)
+    await async_session.flush()
+    row1 = await async_session.get(Sms, first.sms_id)
+    row1.to_number_id = other.id
+    row1.requested_at = datetime.now(timezone.utc) - timedelta(minutes=5)
+    await async_session.commit()
+
+    claimed = await text_agent.claim_pending_reply(async_session)
+    assert claimed is not None
+    assert claimed.sms.id == second.sms_id
+    await async_session.refresh(row1)
+    assert row1.agent_reply_state == "skipped"

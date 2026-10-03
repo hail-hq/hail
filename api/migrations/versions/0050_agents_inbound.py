@@ -80,7 +80,7 @@ def upgrade() -> None:
             name="agents_max_duration_check",
         ),
     )
-    op.create_index("agents_org_idx", "agents", ["organization_id"])
+    # No separate organization_id index: agents_org_name_uq leads with it.
 
     op.add_column(
         "phone_numbers",
@@ -189,6 +189,5 @@ def downgrade() -> None:
     op.drop_column("phone_numbers", "inbound_registered_at")
     op.drop_column("phone_numbers", "sms_agent_id")
     op.drop_column("phone_numbers", "voice_agent_id")
-    op.drop_index("agents_org_idx", table_name="agents")
     op.drop_table("agents")
     # Postgres cannot drop a single ENUM value; leaving them is harmless.

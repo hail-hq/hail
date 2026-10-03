@@ -209,6 +209,7 @@ async def test_ringing_inbound_call_is_answered_once(async_session) -> None:
         .all()
     )
     assert len(events) == 1
+    assert events[0].payload == {"from": "ringing", "to": "in_progress"}
     deliveries = (await async_session.execute(select(WebhookDelivery))).scalars().all()
     assert len(deliveries) == 1
     assert deliveries[0].payload["data"]["direction"] == "inbound"
@@ -304,3 +305,43 @@ async def test_caller_who_left_before_the_agent_joined_closes_the_row(
     row = await async_session.get(Call, call_id)
     assert row.status == "canceled"
     assert row.end_reason == "normal_hangup"
+
+
+def test_inbound_instructions_say_the_agent_answers_the_call() -> None:
+    """The outbound preamble tells the model it placed the call and must say it
+    is "calling on someone's behalf"; an inbound caller must not hear that."""
+    from hailhq.voicebot.agent import (
+        VOICE_PREAMBLE,
+        VOICE_PREAMBLE_INBOUND,
+        build_instructions,
+    )
+
+    assert "placing the call" in VOICE_PREAMBLE
+    assert "placing the call" not in VOICE_PREAMBLE_INBOUND
+    assert "calling on someone's behalf" not in VOICE_PREAMBLE_INBOUND
+    assert "answering the call" in VOICE_PREAMBLE_INBOUND
+    assert "answering on someone's behalf" in VOICE_PREAMBLE_INBOUND
+    assert build_instructions("Book it.", "inbound").startswith(VOICE_PREAMBLE_INBOUND)
+    assert build_instructions("Book it.", "outbound").startswith(VOICE_PREAMBLE)
+    assert build_instructions("Book it.").startswith(VOICE_PREAMBLE)
+    assert build_instructions(None, "inbound") == VOICE_PREAMBLE_INBOUND
+
+
+async def test_inbound_without_first_message_waits_for_the_caller() -> None:
+    """No generated "say why you are calling" opening on a call the person
+    placed: the AI line, then the agent waits (``first_message: null``)."""
+    from hailhq.voicebot.agent import speak_greeting
+
+    from ._fakes import FakeAnnouncingSession
+
+    session = FakeAnnouncingSession()
+    await speak_greeting(session, {"direction": "inbound", "org_name": "Acme"})
+    assert session.say_calls == [
+        ("Hi, this is an AI assistant answering on behalf of Acme.", True)
+    ]
+    assert session.generate_reply_calls == []
+
+    session = FakeAnnouncingSession()
+    await speak_greeting(session, {"direction": "inbound", "ai_disclosure": False})
+    assert session.say_calls == []
+    assert session.generate_reply_calls == []
