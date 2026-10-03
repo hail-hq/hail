@@ -18,6 +18,60 @@ import (
 	openapi_types "github.com/oapi-codegen/runtime/types"
 )
 
+// Defines values for AgentCreateStatus.
+const (
+	AgentCreateStatusLive   AgentCreateStatus = "live"
+	AgentCreateStatusPaused AgentCreateStatus = "paused"
+)
+
+// Valid indicates whether the value is a known member of the AgentCreateStatus enum.
+func (e AgentCreateStatus) Valid() bool {
+	switch e {
+	case AgentCreateStatusLive:
+		return true
+	case AgentCreateStatusPaused:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for AgentResponseStatus.
+const (
+	AgentResponseStatusLive   AgentResponseStatus = "live"
+	AgentResponseStatusPaused AgentResponseStatus = "paused"
+)
+
+// Valid indicates whether the value is a known member of the AgentResponseStatus enum.
+func (e AgentResponseStatus) Valid() bool {
+	switch e {
+	case AgentResponseStatusLive:
+		return true
+	case AgentResponseStatusPaused:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for AgentUpdateStatus.
+const (
+	Live   AgentUpdateStatus = "live"
+	Paused AgentUpdateStatus = "paused"
+)
+
+// Valid indicates whether the value is a known member of the AgentUpdateStatus enum.
+func (e AgentUpdateStatus) Valid() bool {
+	switch e {
+	case Live:
+		return true
+	case Paused:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for CallCreateMessageType.
 const (
 	CallCreateMessageTypeInformational CallCreateMessageType = "informational"
@@ -970,6 +1024,7 @@ const (
 	WebhookSubscriptionCreateEventTypesCallCompleted           WebhookSubscriptionCreateEventTypes = "call.completed"
 	WebhookSubscriptionCreateEventTypesCallFailed              WebhookSubscriptionCreateEventTypes = "call.failed"
 	WebhookSubscriptionCreateEventTypesCallNoAnswer            WebhookSubscriptionCreateEventTypes = "call.no_answer"
+	WebhookSubscriptionCreateEventTypesCallReceived            WebhookSubscriptionCreateEventTypes = "call.received"
 	WebhookSubscriptionCreateEventTypesEmailBounced            WebhookSubscriptionCreateEventTypes = "email.bounced"
 	WebhookSubscriptionCreateEventTypesEmailClicked            WebhookSubscriptionCreateEventTypes = "email.clicked"
 	WebhookSubscriptionCreateEventTypesEmailComplained         WebhookSubscriptionCreateEventTypes = "email.complained"
@@ -997,6 +1052,8 @@ func (e WebhookSubscriptionCreateEventTypes) Valid() bool {
 	case WebhookSubscriptionCreateEventTypesCallFailed:
 		return true
 	case WebhookSubscriptionCreateEventTypesCallNoAnswer:
+		return true
+	case WebhookSubscriptionCreateEventTypesCallReceived:
 		return true
 	case WebhookSubscriptionCreateEventTypesEmailBounced:
 		return true
@@ -1036,6 +1093,7 @@ const (
 	WebhookSubscriptionPatchEventTypesCallCompleted           WebhookSubscriptionPatchEventTypes = "call.completed"
 	WebhookSubscriptionPatchEventTypesCallFailed              WebhookSubscriptionPatchEventTypes = "call.failed"
 	WebhookSubscriptionPatchEventTypesCallNoAnswer            WebhookSubscriptionPatchEventTypes = "call.no_answer"
+	WebhookSubscriptionPatchEventTypesCallReceived            WebhookSubscriptionPatchEventTypes = "call.received"
 	WebhookSubscriptionPatchEventTypesEmailBounced            WebhookSubscriptionPatchEventTypes = "email.bounced"
 	WebhookSubscriptionPatchEventTypesEmailClicked            WebhookSubscriptionPatchEventTypes = "email.clicked"
 	WebhookSubscriptionPatchEventTypesEmailComplained         WebhookSubscriptionPatchEventTypes = "email.complained"
@@ -1063,6 +1121,8 @@ func (e WebhookSubscriptionPatchEventTypes) Valid() bool {
 	case WebhookSubscriptionPatchEventTypesCallFailed:
 		return true
 	case WebhookSubscriptionPatchEventTypesCallNoAnswer:
+		return true
+	case WebhookSubscriptionPatchEventTypesCallReceived:
 		return true
 	case WebhookSubscriptionPatchEventTypesEmailBounced:
 		return true
@@ -1308,6 +1368,133 @@ func (e GetVerificationRequirementsParamsSubjectType) Valid() bool {
 	}
 }
 
+// AgentCreate A saved agent: what a number answers with, and what POST /calls can
+// place calls with via “agent_id“.
+type AgentCreate struct {
+	// AiDisclosure Speak the AI line first on every call. Enabled by default. Disable only if you have verified the disclosure is not required (47 CFR 64.1200(b)(1) and several AI bot-disclosure laws). Hail does not verify this for you.
+	AiDisclosure *bool `json:"ai_disclosure,omitempty"`
+
+	// AiDisclosureLine The AI line this agent speaks. '{org}' is replaced by the organization's name. Omitted: the workspace line, else Hail's built-in line for the call's direction.
+	AiDisclosureLine *string `json:"ai_disclosure_line,omitempty"`
+
+	// FirstMessage Opening line spoken after the AI line. Omitted: the agent waits for the other side to speak first.
+	FirstMessage *string `json:"first_message,omitempty"`
+
+	// MaxDurationSeconds Soft cap per call in seconds (60..3600). Omitted: the workspace limit.
+	MaxDurationSeconds *int `json:"max_duration_seconds,omitempty"`
+
+	// Name Display name, unique per organization.
+	Name string `json:"name"`
+
+	// SmsEnabled Answer texts on numbers that route texts to this agent.
+	SmsEnabled *bool `json:"sms_enabled,omitempty"`
+
+	// Status 'paused' agents do not answer; calls to their numbers fail with end_reason 'no_agent'.
+	Status *AgentCreateStatus `json:"status,omitempty"`
+
+	// SystemPrompt Task instructions, sent as the agent's leading system message.
+	SystemPrompt string `json:"system_prompt"`
+
+	// Tools Agent tools to allow. Omitted: every tool the organization's channels support. Empty list: none.
+	Tools       *[]string    `json:"tools,omitempty"`
+	VoiceConfig *VoiceConfig `json:"voice_config,omitempty"`
+}
+
+// AgentCreateStatus 'paused' agents do not answer; calls to their numbers fail with end_reason 'no_agent'.
+type AgentCreateStatus string
+
+// AgentListResponse defines model for AgentListResponse.
+type AgentListResponse struct {
+	// Items Agents, newest first.
+	Items []AgentResponse `json:"items"`
+}
+
+// AgentResponse defines model for AgentResponse.
+type AgentResponse struct {
+	// AiDisclosure Whether the AI line is spoken first.
+	AiDisclosure bool `json:"ai_disclosure"`
+
+	// AiDisclosureLine This agent's AI line template, or null for the workspace line.
+	AiDisclosureLine *string `json:"ai_disclosure_line"`
+
+	// CreatedAt ISO 8601 timestamp.
+	CreatedAt time.Time `json:"created_at"`
+
+	// FirstMessage Opening line, or null to wait.
+	FirstMessage *string `json:"first_message"`
+
+	// Id Unique identifier for this agent.
+	Id openapi_types.UUID `json:"id"`
+
+	// MaxDurationSeconds Soft cap per call; null means the workspace limit.
+	MaxDurationSeconds *int `json:"max_duration_seconds"`
+
+	// Name Display name, unique per organization.
+	Name string `json:"name"`
+
+	// OrganizationId Organization that owns this agent.
+	OrganizationId openapi_types.UUID `json:"organization_id"`
+
+	// SmsEnabled Whether the agent answers texts.
+	SmsEnabled bool `json:"sms_enabled"`
+
+	// Status 'live' or 'paused'.
+	Status AgentResponseStatus `json:"status"`
+
+	// SystemPrompt Task instructions.
+	SystemPrompt string `json:"system_prompt"`
+
+	// Tools Allowed tools; null means all.
+	Tools *[]string `json:"tools"`
+
+	// UpdatedAt ISO 8601 timestamp.
+	UpdatedAt time.Time `json:"updated_at"`
+
+	// VoiceConfig TTS voice and language settings.
+	VoiceConfig map[string]interface{} `json:"voice_config"`
+}
+
+// AgentResponseStatus 'live' or 'paused'.
+type AgentResponseStatus string
+
+// AgentUpdate PATCH /agents/{id}. Fields left out keep their value; “null“ clears
+// the nullable ones (first_message, ai_disclosure_line, tools,
+// max_duration_seconds).
+type AgentUpdate struct {
+	// AiDisclosure Whether the AI line is spoken first.
+	AiDisclosure *bool `json:"ai_disclosure,omitempty"`
+
+	// AiDisclosureLine New AI line template ('{org}' = organization name); null returns to the workspace line.
+	AiDisclosureLine *string `json:"ai_disclosure_line,omitempty"`
+
+	// FirstMessage New opening line; null makes the agent wait for the other side.
+	FirstMessage *string `json:"first_message,omitempty"`
+
+	// MaxDurationSeconds New soft cap per call; null returns to the workspace limit.
+	MaxDurationSeconds *int `json:"max_duration_seconds,omitempty"`
+
+	// Name New display name.
+	Name *string `json:"name,omitempty"`
+
+	// SmsEnabled Whether the agent answers texts.
+	SmsEnabled *bool `json:"sms_enabled,omitempty"`
+
+	// Status 'live' or 'paused'.
+	Status *AgentUpdateStatus `json:"status,omitempty"`
+
+	// SystemPrompt New task instructions.
+	SystemPrompt *string `json:"system_prompt,omitempty"`
+
+	// Tools New allowed tools; null allows every tool.
+	Tools *[]string `json:"tools,omitempty"`
+
+	// VoiceConfig New TTS voice and language settings.
+	VoiceConfig *VoiceConfig `json:"voice_config,omitempty"`
+}
+
+// AgentUpdateStatus 'live' or 'paused'.
+type AgentUpdateStatus string
+
 // BodyUploadEmailAttachment defines model for Body_upload_email_attachment.
 type BodyUploadEmailAttachment struct {
 	// File The file to upload, as multipart/form-data. Size-limited; an oversize upload is rejected with 422.
@@ -1316,6 +1503,9 @@ type BodyUploadEmailAttachment struct {
 
 // CallCreate defines model for CallCreate.
 type CallCreate struct {
+	// AgentId Place the call with a saved agent (POST /agents). The agent supplies system_prompt, first_message, ai_disclosure, voice_config, tools and max duration; any of those given explicitly on this request wins. Satisfies the system_prompt or llm requirement on its own.
+	AgentId *openapi_types.UUID `json:"agent_id,omitempty"`
+
 	// AiDisclosure Speak the AI self-disclosure line ('Hi, this is an AI assistant calling on behalf of ...') as the first thing on the call. Enabled by default. Disable only if you have verified the disclosure is not required for this call — 47 CFR 64.1200(b)(1) requires identifying the initiating business at the start of artificial-voice calls in the US, and several jurisdictions have AI bot-disclosure laws. Hail does not verify this for you. The agent still identifies itself as an AI if asked.
 	AiDisclosure *bool `json:"ai_disclosure,omitempty"`
 
@@ -1371,6 +1561,9 @@ type CallListResponse struct {
 
 // CallResponse defines model for CallResponse.
 type CallResponse struct {
+	// AgentId Agent that answered (inbound) or placed (outbound) this call. Null when the call was placed with an inline system_prompt.
+	AgentId *openapi_types.UUID `json:"agent_id,omitempty"`
+
 	// AnsweredAt When the callee answered, ISO 8601 timestamp. Null if never answered.
 	AnsweredAt *time.Time `json:"answered_at"`
 
@@ -2444,6 +2637,9 @@ type PhoneNumberResponse struct {
 	// Id Unique identifier for this number.
 	Id openapi_types.UUID `json:"id"`
 
+	// InboundRegistered True while the number is attached for inbound calls at the carrier and on Hail's LiveKit inbound trunk. Set when voice_agent_id is set.
+	InboundRegistered *bool `json:"inbound_registered,omitempty"`
+
 	// IsDedicated True if this number is owned by the organization. False for shared-pool numbers.
 	IsDedicated bool `json:"is_dedicated"`
 
@@ -2458,6 +2654,22 @@ type PhoneNumberResponse struct {
 
 	// ProvisioningState 'pending', 'active', 'failed', or 'released'.
 	ProvisioningState string `json:"provisioning_state"`
+
+	// SmsAgentId Agent that answers texts to this number. Null: texts only reach your webhooks.
+	SmsAgentId *openapi_types.UUID `json:"sms_agent_id,omitempty"`
+
+	// VoiceAgentId Agent that answers calls to this number. Null: calls ring out.
+	VoiceAgentId *openapi_types.UUID `json:"voice_agent_id,omitempty"`
+}
+
+// PhoneNumberRoutingUpdate PATCH /numbers/{id}: which agent answers. A field left out keeps its
+// value; “null“ detaches.
+type PhoneNumberRoutingUpdate struct {
+	// SmsAgentId Agent that answers texts to this number. The number needs the sms capability. Null: texts only reach your webhooks.
+	SmsAgentId *openapi_types.UUID `json:"sms_agent_id,omitempty"`
+
+	// VoiceAgentId Agent that answers calls to this number. Setting it registers the number for inbound calls at the carrier and at LiveKit; null unregisters it. The number needs the voice capability.
+	VoiceAgentId *openapi_types.UUID `json:"voice_agent_id,omitempty"`
 }
 
 // ProviderActivateRequest Body of “POST /providers/{layer}/activate“.
@@ -2650,6 +2862,9 @@ type SmsListResponse struct {
 
 // SmsResponse defines model for SmsResponse.
 type SmsResponse struct {
+	// AgentId Agent that wrote this message. Null unless an agent replied to a text.
+	AgentId *openapi_types.UUID `json:"agent_id,omitempty"`
+
 	// Body Message text.
 	Body string `json:"body"`
 
@@ -2970,6 +3185,31 @@ type WhoamiResponse struct {
 // WhoamiResponseAuthKind How the caller authenticated: 'apikey' (org API key), 'jwt' (logged-in user session), or 'shared' (the shared HAIL_API_KEY, which carries no human identity).
 type WhoamiResponseAuthKind string
 
+// ListAgentsV1AgentsGetParams defines parameters for ListAgentsV1AgentsGet.
+type ListAgentsV1AgentsGetParams struct {
+	Authorization *string `json:"authorization,omitempty"`
+}
+
+// CreateAgentV1AgentsPostParams defines parameters for CreateAgentV1AgentsPost.
+type CreateAgentV1AgentsPostParams struct {
+	Authorization *string `json:"authorization,omitempty"`
+}
+
+// DeleteAgentV1AgentsAgentIdDeleteParams defines parameters for DeleteAgentV1AgentsAgentIdDelete.
+type DeleteAgentV1AgentsAgentIdDeleteParams struct {
+	Authorization *string `json:"authorization,omitempty"`
+}
+
+// GetAgentV1AgentsAgentIdGetParams defines parameters for GetAgentV1AgentsAgentIdGet.
+type GetAgentV1AgentsAgentIdGetParams struct {
+	Authorization *string `json:"authorization,omitempty"`
+}
+
+// UpdateAgentV1AgentsAgentIdPatchParams defines parameters for UpdateAgentV1AgentsAgentIdPatch.
+type UpdateAgentV1AgentsAgentIdPatchParams struct {
+	Authorization *string `json:"authorization,omitempty"`
+}
+
 // ListCallsV1CallsGetParams defines parameters for ListCallsV1CallsGet.
 type ListCallsV1CallsGetParams struct {
 	Cursor        *string                          `form:"cursor,omitempty" json:"cursor,omitempty"`
@@ -3165,6 +3405,11 @@ type GetNumberV1NumbersNumberIdGetParams struct {
 	Authorization *string `json:"authorization,omitempty"`
 }
 
+// RouteNumberV1NumbersNumberIdPatchParams defines parameters for RouteNumberV1NumbersNumberIdPatch.
+type RouteNumberV1NumbersNumberIdPatchParams struct {
+	Authorization *string `json:"authorization,omitempty"`
+}
+
 // EnableSmsV1NumbersNumberIdEnableSmsPostParams defines parameters for EnableSmsV1NumbersNumberIdEnableSmsPost.
 type EnableSmsV1NumbersNumberIdEnableSmsPostParams struct {
 	Authorization *string `json:"authorization,omitempty"`
@@ -3326,6 +3571,12 @@ type GetWhoamiV1WhoamiGetParams struct {
 	Authorization *string `json:"authorization,omitempty"`
 }
 
+// CreateAgentV1AgentsPostJSONRequestBody defines body for CreateAgentV1AgentsPost for application/json ContentType.
+type CreateAgentV1AgentsPostJSONRequestBody = AgentCreate
+
+// UpdateAgentV1AgentsAgentIdPatchJSONRequestBody defines body for UpdateAgentV1AgentsAgentIdPatch for application/json ContentType.
+type UpdateAgentV1AgentsAgentIdPatchJSONRequestBody = AgentUpdate
+
 // CreateCallV1CallsPostJSONRequestBody defines body for CreateCallV1CallsPost for application/json ContentType.
 type CreateCallV1CallsPostJSONRequestBody = CallCreate
 
@@ -3355,6 +3606,9 @@ type AcquireNumberV1NumbersPostJSONRequestBody = NumberAcquireRequest
 
 // QuoteNumbersV1NumbersQuotesPostJSONRequestBody defines body for QuoteNumbersV1NumbersQuotesPost for application/json ContentType.
 type QuoteNumbersV1NumbersQuotesPostJSONRequestBody = NumberQuoteRequest
+
+// RouteNumberV1NumbersNumberIdPatchJSONRequestBody defines body for RouteNumberV1NumbersNumberIdPatch for application/json ContentType.
+type RouteNumberV1NumbersNumberIdPatchJSONRequestBody = PhoneNumberRoutingUpdate
 
 // UpsertProviderJSONRequestBody defines body for UpsertProvider for application/json ContentType.
 type UpsertProviderJSONRequestBody = ProviderConfigUpsert
@@ -3746,6 +4000,25 @@ type ClientInterface interface {
 	// HealthzHealthzGet request
 	HealthzHealthzGet(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
 
+	// ListAgentsV1AgentsGet request
+	ListAgentsV1AgentsGet(ctx context.Context, params *ListAgentsV1AgentsGetParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// CreateAgentV1AgentsPostWithBody request with any body
+	CreateAgentV1AgentsPostWithBody(ctx context.Context, params *CreateAgentV1AgentsPostParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	CreateAgentV1AgentsPost(ctx context.Context, params *CreateAgentV1AgentsPostParams, body CreateAgentV1AgentsPostJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// DeleteAgentV1AgentsAgentIdDelete request
+	DeleteAgentV1AgentsAgentIdDelete(ctx context.Context, agentId openapi_types.UUID, params *DeleteAgentV1AgentsAgentIdDeleteParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// GetAgentV1AgentsAgentIdGet request
+	GetAgentV1AgentsAgentIdGet(ctx context.Context, agentId openapi_types.UUID, params *GetAgentV1AgentsAgentIdGetParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// UpdateAgentV1AgentsAgentIdPatchWithBody request with any body
+	UpdateAgentV1AgentsAgentIdPatchWithBody(ctx context.Context, agentId openapi_types.UUID, params *UpdateAgentV1AgentsAgentIdPatchParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	UpdateAgentV1AgentsAgentIdPatch(ctx context.Context, agentId openapi_types.UUID, params *UpdateAgentV1AgentsAgentIdPatchParams, body UpdateAgentV1AgentsAgentIdPatchJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
 	// ListCallsV1CallsGet request
 	ListCallsV1CallsGet(ctx context.Context, params *ListCallsV1CallsGetParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
@@ -3857,6 +4130,11 @@ type ClientInterface interface {
 	// GetNumberV1NumbersNumberIdGet request
 	GetNumberV1NumbersNumberIdGet(ctx context.Context, numberId openapi_types.UUID, params *GetNumberV1NumbersNumberIdGetParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
+	// RouteNumberV1NumbersNumberIdPatchWithBody request with any body
+	RouteNumberV1NumbersNumberIdPatchWithBody(ctx context.Context, numberId openapi_types.UUID, params *RouteNumberV1NumbersNumberIdPatchParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	RouteNumberV1NumbersNumberIdPatch(ctx context.Context, numberId openapi_types.UUID, params *RouteNumberV1NumbersNumberIdPatchParams, body RouteNumberV1NumbersNumberIdPatchJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
 	// EnableSmsV1NumbersNumberIdEnableSmsPost request
 	EnableSmsV1NumbersNumberIdEnableSmsPost(ctx context.Context, numberId openapi_types.UUID, params *EnableSmsV1NumbersNumberIdEnableSmsPostParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
@@ -3958,6 +4236,90 @@ type ClientInterface interface {
 
 func (c *Client) HealthzHealthzGet(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewHealthzHealthzGetRequest(c.Server)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) ListAgentsV1AgentsGet(ctx context.Context, params *ListAgentsV1AgentsGetParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewListAgentsV1AgentsGetRequest(c.Server, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) CreateAgentV1AgentsPostWithBody(ctx context.Context, params *CreateAgentV1AgentsPostParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewCreateAgentV1AgentsPostRequestWithBody(c.Server, params, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) CreateAgentV1AgentsPost(ctx context.Context, params *CreateAgentV1AgentsPostParams, body CreateAgentV1AgentsPostJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewCreateAgentV1AgentsPostRequest(c.Server, params, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) DeleteAgentV1AgentsAgentIdDelete(ctx context.Context, agentId openapi_types.UUID, params *DeleteAgentV1AgentsAgentIdDeleteParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewDeleteAgentV1AgentsAgentIdDeleteRequest(c.Server, agentId, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) GetAgentV1AgentsAgentIdGet(ctx context.Context, agentId openapi_types.UUID, params *GetAgentV1AgentsAgentIdGetParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetAgentV1AgentsAgentIdGetRequest(c.Server, agentId, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) UpdateAgentV1AgentsAgentIdPatchWithBody(ctx context.Context, agentId openapi_types.UUID, params *UpdateAgentV1AgentsAgentIdPatchParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewUpdateAgentV1AgentsAgentIdPatchRequestWithBody(c.Server, agentId, params, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) UpdateAgentV1AgentsAgentIdPatch(ctx context.Context, agentId openapi_types.UUID, params *UpdateAgentV1AgentsAgentIdPatchParams, body UpdateAgentV1AgentsAgentIdPatchJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewUpdateAgentV1AgentsAgentIdPatchRequest(c.Server, agentId, params, body)
 	if err != nil {
 		return nil, err
 	}
@@ -4448,6 +4810,30 @@ func (c *Client) GetNumberV1NumbersNumberIdGet(ctx context.Context, numberId ope
 	return c.Client.Do(req)
 }
 
+func (c *Client) RouteNumberV1NumbersNumberIdPatchWithBody(ctx context.Context, numberId openapi_types.UUID, params *RouteNumberV1NumbersNumberIdPatchParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewRouteNumberV1NumbersNumberIdPatchRequestWithBody(c.Server, numberId, params, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) RouteNumberV1NumbersNumberIdPatch(ctx context.Context, numberId openapi_types.UUID, params *RouteNumberV1NumbersNumberIdPatchParams, body RouteNumberV1NumbersNumberIdPatchJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewRouteNumberV1NumbersNumberIdPatchRequest(c.Server, numberId, params, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
 func (c *Client) EnableSmsV1NumbersNumberIdEnableSmsPost(ctx context.Context, numberId openapi_types.UUID, params *EnableSmsV1NumbersNumberIdEnableSmsPostParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewEnableSmsV1NumbersNumberIdEnableSmsPostRequest(c.Server, numberId, params)
 	if err != nil {
@@ -4890,6 +5276,263 @@ func NewHealthzHealthzGetRequest(server string) (*http.Request, error) {
 	req, err := http.NewRequest("GET", queryURL.String(), nil)
 	if err != nil {
 		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewListAgentsV1AgentsGetRequest generates requests for ListAgentsV1AgentsGet
+func NewListAgentsV1AgentsGetRequest(server string, params *ListAgentsV1AgentsGetParams) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v1/agents")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("GET", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+
+		if params.Authorization != nil {
+			var headerParam0 string
+
+			headerParam0, err = runtime.StyleParamWithOptions("simple", false, "authorization", *params.Authorization, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationHeader, Type: "string", Format: ""})
+			if err != nil {
+				return nil, err
+			}
+
+			req.Header.Set("authorization", headerParam0)
+		}
+
+	}
+
+	return req, nil
+}
+
+// NewCreateAgentV1AgentsPostRequest calls the generic CreateAgentV1AgentsPost builder with application/json body
+func NewCreateAgentV1AgentsPostRequest(server string, params *CreateAgentV1AgentsPostParams, body CreateAgentV1AgentsPostJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewCreateAgentV1AgentsPostRequestWithBody(server, params, "application/json", bodyReader)
+}
+
+// NewCreateAgentV1AgentsPostRequestWithBody generates requests for CreateAgentV1AgentsPost with any type of body
+func NewCreateAgentV1AgentsPostRequestWithBody(server string, params *CreateAgentV1AgentsPostParams, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v1/agents")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("POST", queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	if params != nil {
+
+		if params.Authorization != nil {
+			var headerParam0 string
+
+			headerParam0, err = runtime.StyleParamWithOptions("simple", false, "authorization", *params.Authorization, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationHeader, Type: "string", Format: ""})
+			if err != nil {
+				return nil, err
+			}
+
+			req.Header.Set("authorization", headerParam0)
+		}
+
+	}
+
+	return req, nil
+}
+
+// NewDeleteAgentV1AgentsAgentIdDeleteRequest generates requests for DeleteAgentV1AgentsAgentIdDelete
+func NewDeleteAgentV1AgentsAgentIdDeleteRequest(server string, agentId openapi_types.UUID, params *DeleteAgentV1AgentsAgentIdDeleteParams) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "agent_id", agentId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v1/agents/%s", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("DELETE", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+
+		if params.Authorization != nil {
+			var headerParam0 string
+
+			headerParam0, err = runtime.StyleParamWithOptions("simple", false, "authorization", *params.Authorization, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationHeader, Type: "string", Format: ""})
+			if err != nil {
+				return nil, err
+			}
+
+			req.Header.Set("authorization", headerParam0)
+		}
+
+	}
+
+	return req, nil
+}
+
+// NewGetAgentV1AgentsAgentIdGetRequest generates requests for GetAgentV1AgentsAgentIdGet
+func NewGetAgentV1AgentsAgentIdGetRequest(server string, agentId openapi_types.UUID, params *GetAgentV1AgentsAgentIdGetParams) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "agent_id", agentId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v1/agents/%s", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("GET", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+
+		if params.Authorization != nil {
+			var headerParam0 string
+
+			headerParam0, err = runtime.StyleParamWithOptions("simple", false, "authorization", *params.Authorization, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationHeader, Type: "string", Format: ""})
+			if err != nil {
+				return nil, err
+			}
+
+			req.Header.Set("authorization", headerParam0)
+		}
+
+	}
+
+	return req, nil
+}
+
+// NewUpdateAgentV1AgentsAgentIdPatchRequest calls the generic UpdateAgentV1AgentsAgentIdPatch builder with application/json body
+func NewUpdateAgentV1AgentsAgentIdPatchRequest(server string, agentId openapi_types.UUID, params *UpdateAgentV1AgentsAgentIdPatchParams, body UpdateAgentV1AgentsAgentIdPatchJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewUpdateAgentV1AgentsAgentIdPatchRequestWithBody(server, agentId, params, "application/json", bodyReader)
+}
+
+// NewUpdateAgentV1AgentsAgentIdPatchRequestWithBody generates requests for UpdateAgentV1AgentsAgentIdPatch with any type of body
+func NewUpdateAgentV1AgentsAgentIdPatchRequestWithBody(server string, agentId openapi_types.UUID, params *UpdateAgentV1AgentsAgentIdPatchParams, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "agent_id", agentId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v1/agents/%s", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("PATCH", queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	if params != nil {
+
+		if params.Authorization != nil {
+			var headerParam0 string
+
+			headerParam0, err = runtime.StyleParamWithOptions("simple", false, "authorization", *params.Authorization, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationHeader, Type: "string", Format: ""})
+			if err != nil {
+				return nil, err
+			}
+
+			req.Header.Set("authorization", headerParam0)
+		}
+
 	}
 
 	return req, nil
@@ -6918,6 +7561,68 @@ func NewGetNumberV1NumbersNumberIdGetRequest(server string, numberId openapi_typ
 	return req, nil
 }
 
+// NewRouteNumberV1NumbersNumberIdPatchRequest calls the generic RouteNumberV1NumbersNumberIdPatch builder with application/json body
+func NewRouteNumberV1NumbersNumberIdPatchRequest(server string, numberId openapi_types.UUID, params *RouteNumberV1NumbersNumberIdPatchParams, body RouteNumberV1NumbersNumberIdPatchJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewRouteNumberV1NumbersNumberIdPatchRequestWithBody(server, numberId, params, "application/json", bodyReader)
+}
+
+// NewRouteNumberV1NumbersNumberIdPatchRequestWithBody generates requests for RouteNumberV1NumbersNumberIdPatch with any type of body
+func NewRouteNumberV1NumbersNumberIdPatchRequestWithBody(server string, numberId openapi_types.UUID, params *RouteNumberV1NumbersNumberIdPatchParams, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "number_id", numberId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v1/numbers/%s", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("PATCH", queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	if params != nil {
+
+		if params.Authorization != nil {
+			var headerParam0 string
+
+			headerParam0, err = runtime.StyleParamWithOptions("simple", false, "authorization", *params.Authorization, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationHeader, Type: "string", Format: ""})
+			if err != nil {
+				return nil, err
+			}
+
+			req.Header.Set("authorization", headerParam0)
+		}
+
+	}
+
+	return req, nil
+}
+
 // NewEnableSmsV1NumbersNumberIdEnableSmsPostRequest generates requests for EnableSmsV1NumbersNumberIdEnableSmsPost
 func NewEnableSmsV1NumbersNumberIdEnableSmsPostRequest(server string, numberId openapi_types.UUID, params *EnableSmsV1NumbersNumberIdEnableSmsPostParams) (*http.Request, error) {
 	var err error
@@ -8610,6 +9315,25 @@ type ClientWithResponsesInterface interface {
 	// HealthzHealthzGetWithResponse request
 	HealthzHealthzGetWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*HealthzHealthzGetResponse, error)
 
+	// ListAgentsV1AgentsGetWithResponse request
+	ListAgentsV1AgentsGetWithResponse(ctx context.Context, params *ListAgentsV1AgentsGetParams, reqEditors ...RequestEditorFn) (*ListAgentsV1AgentsGetResponse, error)
+
+	// CreateAgentV1AgentsPostWithBodyWithResponse request with any body
+	CreateAgentV1AgentsPostWithBodyWithResponse(ctx context.Context, params *CreateAgentV1AgentsPostParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CreateAgentV1AgentsPostResponse, error)
+
+	CreateAgentV1AgentsPostWithResponse(ctx context.Context, params *CreateAgentV1AgentsPostParams, body CreateAgentV1AgentsPostJSONRequestBody, reqEditors ...RequestEditorFn) (*CreateAgentV1AgentsPostResponse, error)
+
+	// DeleteAgentV1AgentsAgentIdDeleteWithResponse request
+	DeleteAgentV1AgentsAgentIdDeleteWithResponse(ctx context.Context, agentId openapi_types.UUID, params *DeleteAgentV1AgentsAgentIdDeleteParams, reqEditors ...RequestEditorFn) (*DeleteAgentV1AgentsAgentIdDeleteResponse, error)
+
+	// GetAgentV1AgentsAgentIdGetWithResponse request
+	GetAgentV1AgentsAgentIdGetWithResponse(ctx context.Context, agentId openapi_types.UUID, params *GetAgentV1AgentsAgentIdGetParams, reqEditors ...RequestEditorFn) (*GetAgentV1AgentsAgentIdGetResponse, error)
+
+	// UpdateAgentV1AgentsAgentIdPatchWithBodyWithResponse request with any body
+	UpdateAgentV1AgentsAgentIdPatchWithBodyWithResponse(ctx context.Context, agentId openapi_types.UUID, params *UpdateAgentV1AgentsAgentIdPatchParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*UpdateAgentV1AgentsAgentIdPatchResponse, error)
+
+	UpdateAgentV1AgentsAgentIdPatchWithResponse(ctx context.Context, agentId openapi_types.UUID, params *UpdateAgentV1AgentsAgentIdPatchParams, body UpdateAgentV1AgentsAgentIdPatchJSONRequestBody, reqEditors ...RequestEditorFn) (*UpdateAgentV1AgentsAgentIdPatchResponse, error)
+
 	// ListCallsV1CallsGetWithResponse request
 	ListCallsV1CallsGetWithResponse(ctx context.Context, params *ListCallsV1CallsGetParams, reqEditors ...RequestEditorFn) (*ListCallsV1CallsGetResponse, error)
 
@@ -8720,6 +9444,11 @@ type ClientWithResponsesInterface interface {
 
 	// GetNumberV1NumbersNumberIdGetWithResponse request
 	GetNumberV1NumbersNumberIdGetWithResponse(ctx context.Context, numberId openapi_types.UUID, params *GetNumberV1NumbersNumberIdGetParams, reqEditors ...RequestEditorFn) (*GetNumberV1NumbersNumberIdGetResponse, error)
+
+	// RouteNumberV1NumbersNumberIdPatchWithBodyWithResponse request with any body
+	RouteNumberV1NumbersNumberIdPatchWithBodyWithResponse(ctx context.Context, numberId openapi_types.UUID, params *RouteNumberV1NumbersNumberIdPatchParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*RouteNumberV1NumbersNumberIdPatchResponse, error)
+
+	RouteNumberV1NumbersNumberIdPatchWithResponse(ctx context.Context, numberId openapi_types.UUID, params *RouteNumberV1NumbersNumberIdPatchParams, body RouteNumberV1NumbersNumberIdPatchJSONRequestBody, reqEditors ...RequestEditorFn) (*RouteNumberV1NumbersNumberIdPatchResponse, error)
 
 	// EnableSmsV1NumbersNumberIdEnableSmsPostWithResponse request
 	EnableSmsV1NumbersNumberIdEnableSmsPostWithResponse(ctx context.Context, numberId openapi_types.UUID, params *EnableSmsV1NumbersNumberIdEnableSmsPostParams, reqEditors ...RequestEditorFn) (*EnableSmsV1NumbersNumberIdEnableSmsPostResponse, error)
@@ -8836,6 +9565,120 @@ func (r HealthzHealthzGetResponse) Status() string {
 
 // StatusCode returns HTTPResponse.StatusCode
 func (r HealthzHealthzGetResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type ListAgentsV1AgentsGetResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *AgentListResponse
+	JSON422      *HTTPValidationError
+}
+
+// Status returns HTTPResponse.Status
+func (r ListAgentsV1AgentsGetResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ListAgentsV1AgentsGetResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type CreateAgentV1AgentsPostResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON201      *AgentResponse
+	JSON422      *HTTPValidationError
+}
+
+// Status returns HTTPResponse.Status
+func (r CreateAgentV1AgentsPostResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r CreateAgentV1AgentsPostResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type DeleteAgentV1AgentsAgentIdDeleteResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON422      *HTTPValidationError
+}
+
+// Status returns HTTPResponse.Status
+func (r DeleteAgentV1AgentsAgentIdDeleteResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r DeleteAgentV1AgentsAgentIdDeleteResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type GetAgentV1AgentsAgentIdGetResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *AgentResponse
+	JSON422      *HTTPValidationError
+}
+
+// Status returns HTTPResponse.Status
+func (r GetAgentV1AgentsAgentIdGetResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetAgentV1AgentsAgentIdGetResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type UpdateAgentV1AgentsAgentIdPatchResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *AgentResponse
+	JSON422      *HTTPValidationError
+}
+
+// Status returns HTTPResponse.Status
+func (r UpdateAgentV1AgentsAgentIdPatchResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r UpdateAgentV1AgentsAgentIdPatchResponse) StatusCode() int {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.StatusCode
 	}
@@ -9550,6 +10393,28 @@ func (r GetNumberV1NumbersNumberIdGetResponse) StatusCode() int {
 	return 0
 }
 
+type RouteNumberV1NumbersNumberIdPatchResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *PhoneNumberResponse
+}
+
+// Status returns HTTPResponse.Status
+func (r RouteNumberV1NumbersNumberIdPatchResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r RouteNumberV1NumbersNumberIdPatchResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
 type EnableSmsV1NumbersNumberIdEnableSmsPostResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
@@ -10199,6 +11064,67 @@ func (c *ClientWithResponses) HealthzHealthzGetWithResponse(ctx context.Context,
 	return ParseHealthzHealthzGetResponse(rsp)
 }
 
+// ListAgentsV1AgentsGetWithResponse request returning *ListAgentsV1AgentsGetResponse
+func (c *ClientWithResponses) ListAgentsV1AgentsGetWithResponse(ctx context.Context, params *ListAgentsV1AgentsGetParams, reqEditors ...RequestEditorFn) (*ListAgentsV1AgentsGetResponse, error) {
+	rsp, err := c.ListAgentsV1AgentsGet(ctx, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseListAgentsV1AgentsGetResponse(rsp)
+}
+
+// CreateAgentV1AgentsPostWithBodyWithResponse request with arbitrary body returning *CreateAgentV1AgentsPostResponse
+func (c *ClientWithResponses) CreateAgentV1AgentsPostWithBodyWithResponse(ctx context.Context, params *CreateAgentV1AgentsPostParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CreateAgentV1AgentsPostResponse, error) {
+	rsp, err := c.CreateAgentV1AgentsPostWithBody(ctx, params, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseCreateAgentV1AgentsPostResponse(rsp)
+}
+
+func (c *ClientWithResponses) CreateAgentV1AgentsPostWithResponse(ctx context.Context, params *CreateAgentV1AgentsPostParams, body CreateAgentV1AgentsPostJSONRequestBody, reqEditors ...RequestEditorFn) (*CreateAgentV1AgentsPostResponse, error) {
+	rsp, err := c.CreateAgentV1AgentsPost(ctx, params, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseCreateAgentV1AgentsPostResponse(rsp)
+}
+
+// DeleteAgentV1AgentsAgentIdDeleteWithResponse request returning *DeleteAgentV1AgentsAgentIdDeleteResponse
+func (c *ClientWithResponses) DeleteAgentV1AgentsAgentIdDeleteWithResponse(ctx context.Context, agentId openapi_types.UUID, params *DeleteAgentV1AgentsAgentIdDeleteParams, reqEditors ...RequestEditorFn) (*DeleteAgentV1AgentsAgentIdDeleteResponse, error) {
+	rsp, err := c.DeleteAgentV1AgentsAgentIdDelete(ctx, agentId, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseDeleteAgentV1AgentsAgentIdDeleteResponse(rsp)
+}
+
+// GetAgentV1AgentsAgentIdGetWithResponse request returning *GetAgentV1AgentsAgentIdGetResponse
+func (c *ClientWithResponses) GetAgentV1AgentsAgentIdGetWithResponse(ctx context.Context, agentId openapi_types.UUID, params *GetAgentV1AgentsAgentIdGetParams, reqEditors ...RequestEditorFn) (*GetAgentV1AgentsAgentIdGetResponse, error) {
+	rsp, err := c.GetAgentV1AgentsAgentIdGet(ctx, agentId, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetAgentV1AgentsAgentIdGetResponse(rsp)
+}
+
+// UpdateAgentV1AgentsAgentIdPatchWithBodyWithResponse request with arbitrary body returning *UpdateAgentV1AgentsAgentIdPatchResponse
+func (c *ClientWithResponses) UpdateAgentV1AgentsAgentIdPatchWithBodyWithResponse(ctx context.Context, agentId openapi_types.UUID, params *UpdateAgentV1AgentsAgentIdPatchParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*UpdateAgentV1AgentsAgentIdPatchResponse, error) {
+	rsp, err := c.UpdateAgentV1AgentsAgentIdPatchWithBody(ctx, agentId, params, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseUpdateAgentV1AgentsAgentIdPatchResponse(rsp)
+}
+
+func (c *ClientWithResponses) UpdateAgentV1AgentsAgentIdPatchWithResponse(ctx context.Context, agentId openapi_types.UUID, params *UpdateAgentV1AgentsAgentIdPatchParams, body UpdateAgentV1AgentsAgentIdPatchJSONRequestBody, reqEditors ...RequestEditorFn) (*UpdateAgentV1AgentsAgentIdPatchResponse, error) {
+	rsp, err := c.UpdateAgentV1AgentsAgentIdPatch(ctx, agentId, params, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseUpdateAgentV1AgentsAgentIdPatchResponse(rsp)
+}
+
 // ListCallsV1CallsGetWithResponse request returning *ListCallsV1CallsGetResponse
 func (c *ClientWithResponses) ListCallsV1CallsGetWithResponse(ctx context.Context, params *ListCallsV1CallsGetParams, reqEditors ...RequestEditorFn) (*ListCallsV1CallsGetResponse, error) {
 	rsp, err := c.ListCallsV1CallsGet(ctx, params, reqEditors...)
@@ -10550,6 +11476,23 @@ func (c *ClientWithResponses) GetNumberV1NumbersNumberIdGetWithResponse(ctx cont
 	return ParseGetNumberV1NumbersNumberIdGetResponse(rsp)
 }
 
+// RouteNumberV1NumbersNumberIdPatchWithBodyWithResponse request with arbitrary body returning *RouteNumberV1NumbersNumberIdPatchResponse
+func (c *ClientWithResponses) RouteNumberV1NumbersNumberIdPatchWithBodyWithResponse(ctx context.Context, numberId openapi_types.UUID, params *RouteNumberV1NumbersNumberIdPatchParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*RouteNumberV1NumbersNumberIdPatchResponse, error) {
+	rsp, err := c.RouteNumberV1NumbersNumberIdPatchWithBody(ctx, numberId, params, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseRouteNumberV1NumbersNumberIdPatchResponse(rsp)
+}
+
+func (c *ClientWithResponses) RouteNumberV1NumbersNumberIdPatchWithResponse(ctx context.Context, numberId openapi_types.UUID, params *RouteNumberV1NumbersNumberIdPatchParams, body RouteNumberV1NumbersNumberIdPatchJSONRequestBody, reqEditors ...RequestEditorFn) (*RouteNumberV1NumbersNumberIdPatchResponse, error) {
+	rsp, err := c.RouteNumberV1NumbersNumberIdPatch(ctx, numberId, params, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseRouteNumberV1NumbersNumberIdPatchResponse(rsp)
+}
+
 // EnableSmsV1NumbersNumberIdEnableSmsPostWithResponse request returning *EnableSmsV1NumbersNumberIdEnableSmsPostResponse
 func (c *ClientWithResponses) EnableSmsV1NumbersNumberIdEnableSmsPostWithResponse(ctx context.Context, numberId openapi_types.UUID, params *EnableSmsV1NumbersNumberIdEnableSmsPostParams, reqEditors ...RequestEditorFn) (*EnableSmsV1NumbersNumberIdEnableSmsPostResponse, error) {
 	rsp, err := c.EnableSmsV1NumbersNumberIdEnableSmsPost(ctx, numberId, params, reqEditors...)
@@ -10878,6 +11821,164 @@ func ParseHealthzHealthzGetResponse(rsp *http.Response) (*HealthzHealthzGetRespo
 			return nil, err
 		}
 		response.JSON200 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseListAgentsV1AgentsGetResponse parses an HTTP response from a ListAgentsV1AgentsGetWithResponse call
+func ParseListAgentsV1AgentsGetResponse(rsp *http.Response) (*ListAgentsV1AgentsGetResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ListAgentsV1AgentsGetResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest AgentListResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 422:
+		var dest HTTPValidationError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON422 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseCreateAgentV1AgentsPostResponse parses an HTTP response from a CreateAgentV1AgentsPostWithResponse call
+func ParseCreateAgentV1AgentsPostResponse(rsp *http.Response) (*CreateAgentV1AgentsPostResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &CreateAgentV1AgentsPostResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 201:
+		var dest AgentResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON201 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 422:
+		var dest HTTPValidationError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON422 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseDeleteAgentV1AgentsAgentIdDeleteResponse parses an HTTP response from a DeleteAgentV1AgentsAgentIdDeleteWithResponse call
+func ParseDeleteAgentV1AgentsAgentIdDeleteResponse(rsp *http.Response) (*DeleteAgentV1AgentsAgentIdDeleteResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &DeleteAgentV1AgentsAgentIdDeleteResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 422:
+		var dest HTTPValidationError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON422 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseGetAgentV1AgentsAgentIdGetResponse parses an HTTP response from a GetAgentV1AgentsAgentIdGetWithResponse call
+func ParseGetAgentV1AgentsAgentIdGetResponse(rsp *http.Response) (*GetAgentV1AgentsAgentIdGetResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetAgentV1AgentsAgentIdGetResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest AgentResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 422:
+		var dest HTTPValidationError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON422 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseUpdateAgentV1AgentsAgentIdPatchResponse parses an HTTP response from a UpdateAgentV1AgentsAgentIdPatchWithResponse call
+func ParseUpdateAgentV1AgentsAgentIdPatchResponse(rsp *http.Response) (*UpdateAgentV1AgentsAgentIdPatchResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &UpdateAgentV1AgentsAgentIdPatchResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest AgentResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 422:
+		var dest HTTPValidationError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON422 = &dest
 
 	}
 
@@ -11866,6 +12967,32 @@ func ParseGetNumberV1NumbersNumberIdGetResponse(rsp *http.Response) (*GetNumberV
 			return nil, err
 		}
 		response.JSON422 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseRouteNumberV1NumbersNumberIdPatchResponse parses an HTTP response from a RouteNumberV1NumbersNumberIdPatchWithResponse call
+func ParseRouteNumberV1NumbersNumberIdPatchResponse(rsp *http.Response) (*RouteNumberV1NumbersNumberIdPatchResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &RouteNumberV1NumbersNumberIdPatchResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest PhoneNumberResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
 
 	}
 

@@ -12,7 +12,8 @@ data, not HTTP errors, and stay deliberately vague: never reveal
 suppression-list membership or a member's address to the callee.
 
 The agent never supplies addresses: SMS always targets the call's
-counterpart (``calls.to_e164``); email targets a directory name resolved
+counterpart (``calls.to_e164`` on outbound, ``calls.from_e164`` on inbound);
+email targets a directory name resolved
 here, scoped to the call's org.
 """
 
@@ -46,8 +47,13 @@ from hailhq.core.compliance_gate import (
 from hailhq.core.db import get_session
 from hailhq.core.directory import resolve_member_emails
 from hailhq.core.email_sender import from_address_for
-from hailhq.core.models import Call, Email, Sms
+from hailhq.core.models import Agent, Call, Email, PhoneNumber, Sms
 from hailhq.core.providers.email import EmailProvider
+from hailhq.core.text_agent import (
+    MAX_REPLIES_PER_THREAD,
+    answers_texts,
+    replies_in_thread,
+)
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -240,6 +246,9 @@ async def agent_send_sms(
     if call.status != "in_progress":
         return AgentSendResponse(ok=False, spoken=_SPOKEN_CALL_UNAVAILABLE)
 
+    # The person on the line: the callee on outbound, the caller on inbound.
+    counterpart = call.from_e164 if call.direction == "inbound" else call.to_e164
+
     denial = await _shared_denial(db, call)
     if denial is not None:
         spoken, reason = denial
@@ -251,7 +260,7 @@ async def agent_send_sms(
             payload={**_meta(body), "reason": reason},
         )
 
-    gate = await check_sms_allowed(db, org, call.to_e164)
+    gate = await check_sms_allowed(db, org, counterpart)
     if not gate.allowed:
         return await _deny(
             org,
@@ -264,7 +273,7 @@ async def agent_send_sms(
     # Platform agent-caps gate (velocity + kill switch): voicebot sends must
     # count toward the same per-recipient caps the public routes enforce —
     # no-op for human-origin orgs. Same recipient set as the gate above.
-    cap_denial = await check_agent_send_allowed(db, org, "sms", [call.to_e164])
+    cap_denial = await check_agent_send_allowed(db, org, "sms", [counterpart])
     if cap_denial is not None:
         return await _deny(
             org,
@@ -278,7 +287,19 @@ async def agent_send_sms(
             },
         )
 
-    from_number = await resolve_org_number(db, org, None, capability="sms")
+    # Inbound: text back from the number the caller dialed, when it can
+    # text; otherwise (and on outbound) the org's default SMS number.
+    from_number = None
+    if call.direction == "inbound" and call.to_number_id is not None:
+        dialed = await db.get(PhoneNumber, call.to_number_id)
+        if (
+            dialed is not None
+            and dialed.provisioning_state == "active"
+            and "sms" in dialed.capabilities
+        ):
+            from_number = dialed
+    if from_number is None:
+        from_number = await resolve_org_number(db, org, None, capability="sms")
     if from_number is None:
         return AgentSendResponse(ok=False, spoken=_SPOKEN_SMS_UNCONFIGURED)
 
@@ -287,7 +308,7 @@ async def agent_send_sms(
         provider=from_number.provider,
         from_number_id=from_number.id,
         from_e164=from_number.e164,
-        to_e164=call.to_e164,  # counterpart only — never a parameter
+        to_e164=counterpart,  # the person on the line — never a parameter
         direction="outbound",
         status="queued",
         body=body.body,
@@ -325,6 +346,130 @@ async def agent_send_sms(
         )
         return AgentSendResponse(ok=False, spoken=_SPOKEN_SMS_FAILED)
     return AgentSendResponse(ok=True, spoken=_SPOKEN_SMS_SENT)
+
+
+class AgentReplySmsRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    sms_id: UUID  # the inbound row being answered
+    body: str = Field(min_length=1, max_length=SMS_MAX_BODY_CHARS)
+
+
+class AgentReplySmsResponse(BaseModel):
+    ok: bool
+    # done | skipped | failed: what the worker writes to agent_reply_state.
+    state: str
+    reason: str | None = None
+    reply_id: UUID | None = None
+
+
+@router.post("/reply-sms", response_model=AgentReplySmsResponse)
+async def agent_reply_sms(
+    body: AgentReplySmsRequest,
+    db: Annotated[AsyncSession, Depends(get_session)],
+) -> AgentReplySmsResponse:
+    """Send a text agent's reply to an inbound SMS.
+
+    The text worker (``hailhq.voicebot.textbot``) wrote the body; this route
+    owns everything that must stay server-side: the thread cap, funds,
+    suppression and velocity gates, billing, audit, delivery. Replies go out
+    from the number the person wrote to, through its own carrier.
+    """
+    inbound = await db.get(Sms, body.sms_id)
+    if inbound is None or inbound.direction != "inbound":
+        return AgentReplySmsResponse(ok=False, state="failed", reason="unknown_sms")
+    org = inbound.organization_id
+    number = (
+        await db.get(PhoneNumber, inbound.to_number_id)
+        if inbound.to_number_id
+        else None
+    )
+    agent = (
+        await db.get(Agent, number.sms_agent_id)
+        if number is not None and number.sms_agent_id
+        else None
+    )
+    # The agent may have been paused or muted while the worker wrote the reply.
+    if (
+        number is None
+        or agent is None
+        or not answers_texts(agent)
+        or number.provisioning_state != "active"
+    ):
+        return AgentReplySmsResponse(ok=False, state="skipped", reason="no_agent")
+
+    # Idempotent: the worker retries a timed-out POST with the same sms_id.
+    # ``first()``, not ``scalar_one_or_none()``: two racing requests can each
+    # have written a reply, and a retry must still answer ``done``.
+    prior = (
+        (
+            await db.execute(
+                select(Sms)
+                .where(
+                    Sms.organization_id == org,
+                    Sms.direction == "outbound",
+                    Sms.agent_id.is_not(None),
+                    Sms.to_e164 == inbound.from_e164,
+                    Sms.metadata_["reply_to_sms_id"].astext == str(inbound.id),
+                )
+                .order_by(Sms.requested_at)
+            )
+        )
+        .scalars()
+        .first()
+    )
+    if prior is not None:
+        return AgentReplySmsResponse(ok=True, state="done", reply_id=prior.id)
+
+    if await replies_in_thread(db, inbound) >= MAX_REPLIES_PER_THREAD:
+        return AgentReplySmsResponse(ok=False, state="skipped", reason="thread_cap")
+    if not await has_funds(db, org):
+        return AgentReplySmsResponse(
+            ok=False, state="skipped", reason="insufficient_funds"
+        )
+    gate = await check_sms_allowed(db, org, inbound.from_e164)
+    if not gate.allowed:
+        return AgentReplySmsResponse(ok=False, state="skipped", reason=gate.reason)
+    cap_denial = await check_agent_send_allowed(db, org, "sms", [inbound.from_e164])
+    if cap_denial is not None:
+        return AgentReplySmsResponse(ok=False, state="skipped", reason="agent_caps")
+
+    reply = Sms(
+        organization_id=org,
+        provider=number.provider,
+        from_number_id=number.id,
+        agent_id=agent.id,
+        from_e164=number.e164,
+        to_e164=inbound.from_e164,
+        direction="outbound",
+        status="queued",
+        body=body.body[:SMS_MAX_BODY_CHARS],
+        metadata_={"reply_to_sms_id": str(inbound.id), "agent_id": str(agent.id)},
+    )
+    db.add(reply)
+    await db.commit()
+    await write_audit_log(
+        organization_id=org,
+        api_key_id=None,
+        action="agent.sms.reply",
+        resource_type="sms",
+        resource_id=reply.id,
+        payload={
+            "reply_to": str(inbound.id),
+            "agent_id": str(agent.id),
+            "to": reply.to_e164,
+            "consent_source": "inbound_sms",
+            "message_type": "transactional",
+            "compliance": gate.checks,
+        },
+        actor_kind="system",
+    )
+    err = await deliver_sms(db, reply)
+    if err is not None:
+        return AgentReplySmsResponse(
+            ok=False, state="failed", reason=err, reply_id=reply.id
+        )
+    return AgentReplySmsResponse(ok=True, state="done", reply_id=reply.id)
 
 
 @router.post("/send-email", response_model=AgentSendResponse)

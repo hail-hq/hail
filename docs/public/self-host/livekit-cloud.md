@@ -33,9 +33,6 @@ trunk-domain environment variable. See LiveKit's
 [outbound trunk reference](https://docs.livekit.io/telephony/making-calls/outbound-trunk/)
 for the current UI and JSON forms.
 
-`LIVEKIT_TWILIO_SIP_INBOUND_TRUNK_ID` is reserved for a future inbound-calling
-release and can remain empty today.
-
 ## 3. Voicebot worker
 
 With the local Compose overlay, run:
@@ -48,3 +45,57 @@ At startup, the worker registers with LiveKit as a dispatchable agent. The
 Hail API dispatches it into a room for each call.
 
 For the full flow, refer to [Architecture](../architecture.md).
+
+## 4. Inbound calls
+
+Hail answers calls on a number once the number routes calls to an agent
+([Agents](../agents.md)). LiveKit needs one **inbound trunk per carrier**
+and **one dispatch rule**. Hail adds and removes numbers on the trunks
+itself; create them empty.
+
+1. Inbound trunks. One per carrier you use, with an empty `numbers` list.
+   Without `numbers`, LiveKit needs either `auth_username`/`auth_password`
+   or `allowed_addresses`; the carrier pages say which:
+   [Twilio](./twilio.md#6-inbound-calls), [Telnyx](./telnyx.md#inbound-calls),
+   [DIDWW](./didww.md#inbound-calls).
+
+   ```bash
+   cat > inbound-twilio.json <<'JSON'
+   {"trunk": {"name": "hail-twilio-in", "numbers": []}}
+   JSON
+   lk sip inbound create inbound-twilio.json
+   # → ST_...  → LIVEKIT_TWILIO_SIP_INBOUND_TRUNK_ID
+   # Repeat for Telnyx (LIVEKIT_TELNYX_SIP_INBOUND_TRUNK_ID) and
+   # DIDWW (LIVEKIT_DIDWW_SIP_INBOUND_TRUNK_ID).
+   ```
+
+2. Dispatch rule. One rule, bound to every inbound trunk, that puts each
+   caller in its own room and dispatches the voicebot with the static
+   metadata it expects:
+
+   ```bash
+   cat > dispatch-rule.json <<'JSON'
+   {
+     "dispatch_rule": {
+       "name": "hail-inbound",
+       "trunk_ids": ["<twilio-trunk-id>", "<telnyx-trunk-id>", "<didww-trunk-id>"],
+       "rule": {"dispatchRuleIndividual": {"roomPrefix": "hail-in-"}},
+       "roomConfig": {
+         "agents": [{"agentName": "hail-voicebot", "metadata": "{\"direction\":\"inbound\"}"}]
+       }
+     }
+   }
+   JSON
+   lk sip dispatch create dispatch-rule.json
+   ```
+
+   Room names include the caller's number (LiveKit's individual rule);
+   `calls.from_e164` records it anyway.
+
+3. Set the trunk ids in `.env` and recreate `api` and `voicebot`. Then
+   `PATCH /v1/numbers/{id}` with `voice_agent_id` registers a number
+   ([Agents](../agents.md#routing-rules)).
+
+Reference: LiveKit [accepting calls](https://docs.livekit.io/telephony/accepting-calls/),
+[inbound trunk](https://docs.livekit.io/telephony/accepting-calls/inbound-trunk/),
+[dispatch rule](https://docs.livekit.io/telephony/accepting-calls/dispatch-rule/).

@@ -1536,3 +1536,35 @@ async def test_build_tools_safely_passes_through_on_success(
 
     assert tools is sentinel_tools
     assert api is sentinel_api
+
+
+async def test_speak_greeting_uses_inbound_line_and_agent_template():
+    from hailhq.voicebot.agent import speak_greeting
+
+    session = FakeAnnouncingSession()
+    await speak_greeting(
+        session,
+        {
+            "direction": "inbound",
+            "org_name": "Acme",
+            "first_message": "How can I help?",
+        },
+    )
+    assert session.say_calls == [
+        (
+            "Hi, this is an AI assistant answering on behalf of Acme. How can I help?",
+            True,
+        )
+    ]
+
+    session = FakeAnnouncingSession()
+    await speak_greeting(
+        session,
+        {
+            "direction": "inbound",
+            "org_name": "Acme",
+            "ai_disclosure_line": "You reached {org}. I am an AI.",
+            "first_message": "Hello.",
+        },
+    )
+    assert session.say_calls == [("You reached Acme. I am an AI. Hello.", True)]

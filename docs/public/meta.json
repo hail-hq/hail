@@ -2,6 +2,7 @@
   "pages": [
     "README",
     "mcp",
+    "agents",
     "webhooks",
     "react-email",
     "versioning",

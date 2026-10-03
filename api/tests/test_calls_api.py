@@ -114,7 +114,7 @@ async def test_post_calls_rejects_neither_prompt_nor_llm(
         headers={"Authorization": f"Bearer {plain}"},
     )
     assert resp.status_code == 422
-    assert "either system_prompt or llm" in resp.text
+    assert "either system_prompt, llm or agent_id" in resp.text
 
 
 # --------------------------------------------------------------------------- #
@@ -1627,3 +1627,82 @@ async def test_post_calls_twilio_number_without_trunk_fails_before_room(
     livekit_mock.create_room.assert_not_awaited()
     call = (await async_session.execute(select(Call))).scalar_one()
     assert call.end_reason == "carrier_route_failed"
+
+
+async def test_post_calls_with_agent_id_fills_defaults(
+    client: httpx.AsyncClient,
+    async_session: AsyncSession,
+    org_and_key: tuple[str, ApiKey, str],
+    livekit_mock: AsyncMock,
+    add_phone_number,
+) -> None:
+    from hailhq.core.models import Agent
+
+    org_id, _, plain = org_and_key
+    await add_phone_number(async_session, org_id)
+    agent = Agent(
+        organization_id=org_id,
+        name="Recruiter",
+        system_prompt="Screen the candidate.",
+        first_message="Hi, is now a good time?",
+        ai_disclosure=False,
+        ai_disclosure_line="AI for {org}.",
+        voice_config={"voice_id": "v9"},
+        tools=["end_call"],
+        max_duration_seconds=900,
+    )
+    async_session.add(agent)
+    await async_session.commit()
+    agent_id = str(agent.id)
+    headers = {"Authorization": f"Bearer {plain}"}
+
+    resp = await client.post(
+        "/calls",
+        json={"to": "+14155559999", "recipient_consent": True, "agent_id": agent_id},
+        headers=headers,
+    )
+    assert resp.status_code == 201, resp.text
+    body = resp.json()
+    assert body["agent_id"] == agent_id
+    assert body["initial_prompt"] == "Screen the candidate."
+    md = livekit_mock.dispatch_agent.await_args.kwargs["metadata"]
+    assert md["direction"] == "outbound"
+    assert md["agent_id"] == agent_id
+    assert md["system_prompt"] == "Screen the candidate."
+    assert md["first_message"] == "Hi, is now a good time?"
+    assert md["ai_disclosure"] is False
+    assert md["ai_disclosure_line"] == "AI for {org}."
+    assert md["tools"] == ["end_call"]
+    assert md["voice_config"]["voice_id"] == "v9"
+    assert md["max_duration_seconds"] == 900
+
+    # Explicit fields win over the agent.
+    resp = await client.post(
+        "/calls",
+        json={
+            "to": "+14155559999",
+            "recipient_consent": True,
+            "agent_id": agent_id,
+            "first_message": "Different opener.",
+            "ai_disclosure": True,
+        },
+        headers=headers,
+    )
+    assert resp.status_code == 201, resp.text
+    md = livekit_mock.dispatch_agent.await_args.kwargs["metadata"]
+    assert md["first_message"] == "Different opener."
+    assert md["ai_disclosure"] is True
+    assert md["system_prompt"] == "Screen the candidate."
+
+    # Another org's agent (or a random id) is not found.
+    resp = await client.post(
+        "/calls",
+        json={
+            "to": "+14155559999",
+            "recipient_consent": True,
+            "agent_id": str(uuid.uuid4()),
+        },
+        headers=headers,
+    )
+    assert resp.status_code == 404
+    assert livekit_mock.create_room.await_count == 2

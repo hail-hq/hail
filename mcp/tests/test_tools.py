@@ -223,7 +223,7 @@ async def test_place_call_rejects_neither_mode(client: HailClient) -> None:
         client=client, recipient_consent=True, to="+14155559999"
     )
     assert "error" in result
-    assert "either system_prompt or llm" in result["error"]
+    assert "either system_prompt, llm or agent_id" in result["error"]
     assert not route.called
 
 

@@ -288,6 +288,16 @@ class CallCreate(ConsentAttestationMixin):
             "against the server's registry."
         ),
     )
+    agent_id: UUID | None = Field(
+        default=None,
+        description=(
+            "Place the call with a saved agent (POST /agents). The agent "
+            "supplies system_prompt, first_message, ai_disclosure, "
+            "voice_config, tools and max duration; any of those given "
+            "explicitly on this request wins. Satisfies the system_prompt "
+            "or llm requirement on its own."
+        ),
+    )
 
     _validate_e164 = field_validator("to", "from_")(_e164_or_error)
 
@@ -304,8 +314,8 @@ class CallCreate(ConsentAttestationMixin):
         """
         has_prompt = self.system_prompt is not None and self.system_prompt != ""
         has_llm = self.llm is not None
-        if not has_prompt and not has_llm:
-            raise ValueError("either system_prompt or llm must be provided")
+        if not has_prompt and not has_llm and self.agent_id is None:
+            raise ValueError("either system_prompt, llm or agent_id must be provided")
         return self
 
 
@@ -346,6 +356,13 @@ class CallResponse(BaseModel):
     to_e164: str = Field(description="Recipient phone number, E.164 format.")
     direction: Literal["outbound", "inbound"] = Field(
         description="'outbound' for calls Hail placed, 'inbound' for calls received."
+    )
+    agent_id: UUID | None = Field(
+        default=None,
+        description=(
+            "Agent that answered (inbound) or placed (outbound) this call. "
+            "Null when the call was placed with an inline system_prompt."
+        ),
     )
     status: CallStatus = Field(
         description=(
@@ -445,6 +462,10 @@ class SmsResponse(BaseModel):
     to_e164: str = Field(description="Recipient phone number, E.164 format.")
     direction: Literal["outbound", "inbound"] = Field(
         description="'outbound' for messages Hail sent, 'inbound' for messages received."
+    )
+    agent_id: UUID | None = Field(
+        default=None,
+        description="Agent that wrote this message. Null unless an agent replied to a text.",
     )
     status: SmsStatus = Field(
         description=(
@@ -606,6 +627,206 @@ class PhoneNumberResponse(BaseModel):
         default=None,
         description="Provider messaging-service identifier once SMS has been enabled on this number. Null until then.",
     )
+    voice_agent_id: UUID | None = Field(
+        default=None,
+        description="Agent that answers calls to this number. Null: calls ring out.",
+    )
+    sms_agent_id: UUID | None = Field(
+        default=None,
+        description="Agent that answers texts to this number. Null: texts only reach your webhooks.",
+    )
+    inbound_registered: bool = Field(
+        default=False,
+        description=(
+            "True while the number is attached for inbound calls at the carrier "
+            "and on Hail's LiveKit inbound trunk. Set when voice_agent_id is set."
+        ),
+    )
+
+
+class PhoneNumberRoutingUpdate(BaseModel):
+    """PATCH /numbers/{id}: which agent answers. A field left out keeps its
+    value; ``null`` detaches."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    voice_agent_id: UUID | None = Field(
+        default=None,
+        description=(
+            "Agent that answers calls to this number. Setting it registers the "
+            "number for inbound calls at the carrier and at LiveKit; null "
+            "unregisters it. The number needs the voice capability."
+        ),
+    )
+    sms_agent_id: UUID | None = Field(
+        default=None,
+        description=(
+            "Agent that answers texts to this number. The number needs the sms "
+            "capability. Null: texts only reach your webhooks."
+        ),
+    )
+
+    @model_validator(mode="after")
+    def _at_least_one(self):
+        if not self.model_fields_set:
+            raise ValueError("send voice_agent_id and/or sms_agent_id")
+        return self
+
+
+AgentStatus = Literal["live", "paused"]
+
+_AGENT_LINE_MAX = 300
+
+
+class AgentCreate(BaseModel):
+    """A saved agent: what a number answers with, and what POST /calls can
+    place calls with via ``agent_id``."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(
+        min_length=1,
+        max_length=80,
+        description="Display name, unique per organization.",
+    )
+    system_prompt: str = Field(
+        min_length=1,
+        description="Task instructions, sent as the agent's leading system message.",
+    )
+    first_message: str | None = Field(
+        default=None,
+        max_length=1000,
+        description="Opening line spoken after the AI line. Omitted: the agent waits for the other side to speak first.",
+    )
+    ai_disclosure: bool = Field(
+        default=True,
+        description=(
+            "Speak the AI line first on every call. Enabled by default. "
+            "Disable only if you have verified the disclosure is not required "
+            "(47 CFR 64.1200(b)(1) and several AI bot-disclosure laws). Hail "
+            "does not verify this for you."
+        ),
+    )
+    ai_disclosure_line: str | None = Field(
+        default=None,
+        max_length=_AGENT_LINE_MAX,
+        description=(
+            "The AI line this agent speaks. '{org}' is replaced by the "
+            "organization's name. Omitted: the workspace line, else Hail's "
+            "built-in line for the call's direction."
+        ),
+    )
+    voice_config: VoiceConfig = Field(
+        default_factory=VoiceConfig,
+        description="TTS voice and spoken language, same shape as on POST /calls.",
+    )
+    tools: list[str] | None = Field(
+        default=None,
+        description="Agent tools to allow. Omitted: every tool the organization's channels support. Empty list: none.",
+    )
+    max_duration_seconds: int | None = Field(
+        default=None,
+        ge=60,
+        le=3600,
+        description="Soft cap per call in seconds (60..3600). Omitted: the workspace limit.",
+    )
+    sms_enabled: bool = Field(
+        default=True,
+        description="Answer texts on numbers that route texts to this agent.",
+    )
+    status: AgentStatus = Field(
+        default="live",
+        description="'paused' agents do not answer; calls to their numbers fail with end_reason 'no_agent'.",
+    )
+
+    @field_validator("name")
+    @classmethod
+    def _name_not_blank(cls, v: str) -> str:
+        v = v.strip()
+        if not v:
+            raise ValueError("name must not be blank")
+        return v
+
+
+class AgentUpdate(BaseModel):
+    """PATCH /agents/{id}. Fields left out keep their value; ``null`` clears
+    the nullable ones (first_message, ai_disclosure_line, tools,
+    max_duration_seconds)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str | None = Field(
+        default=None, min_length=1, max_length=80, description="New display name."
+    )
+    system_prompt: str | None = Field(
+        default=None, min_length=1, description="New task instructions."
+    )
+    first_message: str | None = Field(
+        default=None,
+        max_length=1000,
+        description="New opening line; null makes the agent wait for the other side.",
+    )
+    ai_disclosure: bool | None = Field(
+        default=None, description="Whether the AI line is spoken first."
+    )
+    ai_disclosure_line: str | None = Field(
+        default=None,
+        max_length=_AGENT_LINE_MAX,
+        description="New AI line template ('{org}' = organization name); null returns to the workspace line.",
+    )
+    voice_config: VoiceConfig | None = Field(
+        default=None, description="New TTS voice and language settings."
+    )
+    tools: list[str] | None = Field(
+        default=None, description="New allowed tools; null allows every tool."
+    )
+    max_duration_seconds: int | None = Field(
+        default=None,
+        ge=60,
+        le=3600,
+        description="New soft cap per call; null returns to the workspace limit.",
+    )
+    sms_enabled: bool | None = Field(
+        default=None, description="Whether the agent answers texts."
+    )
+    status: AgentStatus | None = Field(default=None, description="'live' or 'paused'.")
+
+    @field_validator("name")
+    @classmethod
+    def _name_not_blank(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        v = v.strip()
+        if not v:
+            raise ValueError("name must not be blank")
+        return v
+
+
+class AgentResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID = Field(description="Unique identifier for this agent.")
+    organization_id: UUID = Field(description="Organization that owns this agent.")
+    name: str = Field(description="Display name, unique per organization.")
+    system_prompt: str = Field(description="Task instructions.")
+    first_message: str | None = Field(description="Opening line, or null to wait.")
+    ai_disclosure: bool = Field(description="Whether the AI line is spoken first.")
+    ai_disclosure_line: str | None = Field(
+        description="This agent's AI line template, or null for the workspace line."
+    )
+    voice_config: dict = Field(description="TTS voice and language settings.")
+    tools: list[str] | None = Field(description="Allowed tools; null means all.")
+    max_duration_seconds: int | None = Field(
+        description="Soft cap per call; null means the workspace limit."
+    )
+    sms_enabled: bool = Field(description="Whether the agent answers texts.")
+    status: AgentStatus = Field(description="'live' or 'paused'.")
+    created_at: datetime = Field(description="ISO 8601 timestamp.")
+    updated_at: datetime = Field(description="ISO 8601 timestamp.")
+
+
+class AgentListResponse(BaseModel):
+    items: list[AgentResponse] = Field(description="Agents, newest first.")
 
 
 class PhoneNumberListResponse(BaseModel):
@@ -1641,6 +1862,7 @@ WebhookEventType = Literal[
     "sms.delivered",
     "sms.undelivered",
     "sms.failed",
+    "call.received",
     "call.answered",
     "call.completed",
     "call.failed",

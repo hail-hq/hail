@@ -193,8 +193,10 @@ A checked box is a released feature. Per-artifact changelogs (GitHub Releases fo
   - [x] Twilio
   - [x] Telnyx
   - [x] DIDWW
-- Inbound
-  - [ ] Twilio
+- Inbound (answered by an [agent](docs/public/agents.md))
+  - [x] Twilio
+  - [x] Telnyx
+  - [x] DIDWW
 
 ### SMS
 
@@ -204,6 +206,7 @@ A checked box is a released feature. Per-artifact changelogs (GitHub Releases fo
 - Inbound
   - [x] Twilio
   - [x] Telnyx
+  - [x] Answered by an [agent](docs/public/agents.md)
 
 ### Numbers
 

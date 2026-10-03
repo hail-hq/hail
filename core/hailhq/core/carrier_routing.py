@@ -61,6 +61,18 @@ def _didww_voice() -> VoiceRoute:
     return _trunk(DIDWW, "livekit_didww_sip_outbound_trunk_id"), {}
 
 
+def _twilio_inbound() -> str:
+    return _trunk(TWILIO, "livekit_twilio_sip_inbound_trunk_id")
+
+
+def _telnyx_inbound() -> str:
+    return _trunk(TELNYX, "livekit_telnyx_sip_inbound_trunk_id")
+
+
+def _didww_inbound() -> str:
+    return _trunk(DIDWW, "livekit_didww_sip_inbound_trunk_id")
+
+
 def _twilio_sms() -> SmsProvider:
     return twilio_sms.twilio_sms_provider()
 
@@ -70,6 +82,9 @@ def _telnyx_sms() -> SmsProvider:
         raise ValueError("Telnyx webhooks are not configured")
     return TelnyxSmsProvider()
 
+
+# Carrier-side inbound work for one owned number: (provider_resource_id, e164).
+InboundHook = Callable[[str | None, str], Awaitable[None]]
 
 # (state, owned resource id, carrier order id).
 Outcome = tuple[OrderState, str | None, str | None]
@@ -96,6 +111,12 @@ class Carrier:
     # Give an owned number back: (resource id). ``CarrierNotConfigured`` when
     # the carrier's credentials are missing.
     release: Callable[[str], Awaitable[None]]
+    # LiveKit inbound trunk this carrier's numbers are registered on.
+    inbound_trunk: Callable[[], str]
+    # Point the number at LiveKit at the carrier, and undo it:
+    # (provider_resource_id, e164).
+    attach_inbound: InboundHook
+    detach_inbound: InboundHook
     # How long a pending order may wait for the carrier before Hail fails
     # it and refunds the hold. DIDWW registers the end user after the
     # purchase, which takes days; the others answer within minutes.
@@ -123,6 +144,9 @@ CARRIERS: dict[str, Carrier] = {
         place_order=twilio.place_order,
         order_outcome=twilio.order_outcome,
         release=twilio.release,
+        inbound_trunk=_twilio_inbound,
+        attach_inbound=twilio.attach_inbound_number,
+        detach_inbound=twilio.detach_inbound_number,
     ),
     TELNYX: Carrier(
         _telnyx_voice,
@@ -133,8 +157,11 @@ CARRIERS: dict[str, Carrier] = {
         place_order=telnyx.place_order,
         order_outcome=telnyx.order_outcome,
         release=telnyx.release,
+        inbound_trunk=_telnyx_inbound,
+        attach_inbound=telnyx.attach_inbound_number,
+        detach_inbound=telnyx.detach_inbound_number,
     ),
-    # Outbound voice only. Orders complete after DIDWW approves the
+    # Voice only (no SMS). Orders complete after DIDWW approves the
     # end-user registration: docs/public/self-host/didww.md.
     DIDWW: Carrier(
         _didww_voice,
@@ -145,6 +172,9 @@ CARRIERS: dict[str, Carrier] = {
         place_order=didww.place_order,
         order_outcome=didww.order_outcome,
         release=didww.release,
+        inbound_trunk=_didww_inbound,
+        attach_inbound=didww.attach_inbound_number,
+        detach_inbound=didww.detach_inbound_number,
         pending_timeout=timedelta(days=7),
         poll_interval=timedelta(minutes=15),
         revoke_registration=didww.revoke,
@@ -177,3 +207,24 @@ def sms_status_path(provider: str) -> str:
     if path is None:
         raise ValueError(f"{provider} numbers cannot send SMS through Hail")
     return path
+
+
+def inbound_trunk(provider: str) -> str:
+    return carrier(provider).inbound_trunk()
+
+
+def carrier_for_inbound_trunk(trunk_id: str) -> str:
+    """The carrier whose LiveKit inbound trunk is ``trunk_id``.
+
+    An INVITE that arrives on the Telnyx trunk for a Twilio number is a
+    misroute (or a spoof); the caller drops it.
+    """
+    if trunk_id:
+        for name, entry in CARRIERS.items():
+            try:
+                configured = entry.inbound_trunk()
+            except ValueError:
+                continue
+            if configured == trunk_id:
+                return name
+    raise ValueError(f"No carrier owns LiveKit inbound trunk {trunk_id!r}")

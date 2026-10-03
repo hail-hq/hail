@@ -52,7 +52,7 @@ def test_call_create_accepts_both_modes() -> None:
 def test_call_create_rejects_neither_mode() -> None:
     with pytest.raises(ValidationError) as exc:
         CallCreate(to="+14155551234", recipient_consent=True)
-    assert "either system_prompt or" in str(exc.value)
+    assert "either system_prompt" in str(exc.value)
 
 
 def test_call_create_rejects_non_e164() -> None:

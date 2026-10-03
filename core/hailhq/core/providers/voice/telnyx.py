@@ -8,7 +8,7 @@ import httpx
 import phonenumbers
 from hailhq.core.carrier_offer import CarrierOffer, cents
 from hailhq.core.config import settings
-from hailhq.core.providers.telnyx import TelnyxClient, get_http_client
+from hailhq.core.providers.telnyx import TelnyxClient, get_http_client, path_id
 from hailhq.core.providers.voice.base import CarrierNotConfigured, OrderState
 from hailhq.core.schemas import NumberType
 from pydantic import BaseModel, Field
@@ -362,3 +362,40 @@ async def order_outcome(
 
 async def release(resource_id: str) -> None:
     await release_telnyx_number(resource_id)
+
+
+# --- inbound: a Telnyx number takes calls through the FQDN connection whose
+# FQDN is LiveKit's SIP endpoint (docs/public/self-host/telnyx.md). Orders
+# already set connection_id; this covers numbers bought before that and the
+# detach on release.
+
+
+def _connection_client() -> TelnyxClient:
+    try:
+        client = TelnyxClient()
+    except ValueError as exc:
+        raise CarrierNotConfigured(str(exc)) from exc
+    if not settings.telnyx_connection_id:
+        raise CarrierNotConfigured("TELNYX_CONNECTION_ID is not set")
+    return client
+
+
+async def _set_connection(resource_id: str | None, e164: str, connection: str) -> None:
+    if not resource_id:
+        raise CarrierNotConfigured(f"{e164} has no Telnyx phone number id")
+    client = _connection_client()
+    await client.request(
+        "PATCH",
+        f"/phone_numbers/{path_id(resource_id)}/voice",
+        json={"connection_id": connection},
+    )
+
+
+async def attach_inbound_number(resource_id: str | None, e164: str) -> None:
+    await _set_connection(resource_id, e164, settings.telnyx_connection_id)
+
+
+async def detach_inbound_number(resource_id: str | None, e164: str) -> None:
+    # The same connection carries outbound calls (set at purchase), so it stays.
+    # The LiveKit inbound trunk number list is what gates inbound calls.
+    return None
