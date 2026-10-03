@@ -7,7 +7,6 @@ import pytest
 from fastapi import HTTPException
 from hailhq.api.number_orders import (
     CONSUMED_QUOTE_RETENTION,
-    PENDING_ORDER_TIMEOUT,
     QUOTE_RETENTION,
     acquire_offer,
     purge_expired_quotes,
@@ -15,6 +14,7 @@ from hailhq.api.number_orders import (
 )
 from hailhq.core import telephony_catalog
 from hailhq.core.billing import get_balance_cents, monthly_fee_ref
+from hailhq.core.carrier_routing import carrier
 from hailhq.core.models import AccountCredit, NumberOffer, PhoneNumber
 from hailhq.core.number_offers import CarrierOffer
 from hailhq.core.providers.voice import CarrierRequestError
@@ -297,7 +297,9 @@ async def test_status_lookup_rejection_does_not_refund_accepted_order(
 
 
 async def age(db, number):
-    number.created_at = datetime.now(timezone.utc) - PENDING_ORDER_TIMEOUT * 2
+    number.created_at = (
+        datetime.now(timezone.utc) - carrier("telnyx").pending_timeout * 2
+    )
     await db.commit()
 
 
@@ -321,7 +323,9 @@ async def test_unfound_telnyx_order_fails_and_refunds_after_timeout(
     await reconcile_order(async_session, number, force=True)
     assert number.provisioning_state == "pending"
     assert await get_balance_cents(async_session, org) == 99850
-    number.created_at = datetime.now(timezone.utc) - PENDING_ORDER_TIMEOUT / 2
+    number.created_at = (
+        datetime.now(timezone.utc) - carrier("telnyx").pending_timeout / 2
+    )
     await async_session.commit()
     await reconcile_order(async_session, number, force=True)
     assert number.provisioning_state == "pending"
@@ -346,11 +350,11 @@ async def test_unfound_twilio_order_fails_and_refunds_after_timeout(
         AsyncMock(return_value=([offer], [])),
     )
     monkeypatch.setattr(
-        "hailhq.api.number_orders.purchase_ordered_number",
+        "hailhq.core.providers.voice.twilio.purchase_ordered_number",
         AsyncMock(side_effect=CarrierRequestError(503)),
     )
     find = AsyncMock(return_value=None)
-    monkeypatch.setattr("hailhq.api.number_orders.find_ordered_number", find)
+    monkeypatch.setattr("hailhq.core.providers.voice.twilio.find_ordered_number", find)
     number = await buy(async_session, org, row)
     assert number.provisioning_state == "pending"
     await reconcile_order(async_session, number, force=True)
@@ -424,11 +428,11 @@ async def test_twilio_order_found_at_carrier_is_activated(
         AsyncMock(return_value=([offer], [])),
     )
     monkeypatch.setattr(
-        "hailhq.api.number_orders.purchase_ordered_number",
+        "hailhq.core.providers.voice.twilio.purchase_ordered_number",
         AsyncMock(side_effect=CarrierRequestError(503)),
     )
     monkeypatch.setattr(
-        "hailhq.api.number_orders.find_ordered_number",
+        "hailhq.core.providers.voice.twilio.find_ordered_number",
         AsyncMock(return_value="PN_found"),
     )
     number = await buy(async_session, org, row)
@@ -779,7 +783,7 @@ async def test_pending_order_past_timeout_is_failed_and_refunded_once(
         text("UPDATE phone_numbers SET created_at = :t WHERE id = :id"),
         {
             "t": datetime.now(timezone.utc)
-            - PENDING_ORDER_TIMEOUT
+            - carrier("telnyx").pending_timeout
             - timedelta(minutes=1),
             "id": number.id,
         },
@@ -907,6 +911,20 @@ async def test_quote_purchase_of_a_type_missing_from_the_catalog_is_422(
     assert await get_balance_cents(async_session, org) == 100000
 
 
+def _unlisted_pair():
+    """A (country, number type) no buyable carrier's catalog lists, with at
+    least one other type listed for that country. The catalogs are live
+    data, so the pair is looked up, not assumed."""
+    kinds = ("local", "mobile", "national", "toll_free")
+    for country in ("PT", "SE", "IE", "NL", "DK", "FI", "NO", "CH", "AT", "BE"):
+        listed = {
+            k for k in kinds if telephony_catalog.capabilities(country, k) is not None
+        }
+        if listed and listed != set(kinds):
+            return country, next(k for k in kinds if k not in listed), listed
+    raise AssertionError("every probed country lists every number type")
+
+
 async def test_quote_route_rejects_unlisted_type_and_accepts_lowercase_country(
     client, org_and_key, monkeypatch
 ):
@@ -914,11 +932,12 @@ async def test_quote_route_rejects_unlisted_type_and_accepts_lowercase_country(
     discover = AsyncMock(return_value=([], []))
     monkeypatch.setattr("hailhq.api.routes.numbers.discover_offers", discover)
     headers = {"Authorization": f"Bearer {key}"}
+    country, unlisted_kind, listed = _unlisted_pair()
     unlisted = await client.post(
         "/numbers/quotes",
         json={
-            "country_code": "PT",
-            "number_type": "toll_free",
+            "country_code": country,
+            "number_type": unlisted_kind,
             "capabilities": ["voice"],
         },
         headers=headers,
@@ -927,19 +946,12 @@ async def test_quote_route_rejects_unlisted_type_and_accepts_lowercase_country(
     discover.assert_not_awaited()
     lower = await client.post(
         "/numbers/quotes",
-        json={"country_code": "pt", "capabilities": ["voice"]},
+        json={"country_code": country.lower(), "capabilities": ["voice"]},
         headers=headers,
     )
     assert lower.status_code == 200, lower.text
-    assert {call.args[1] for call in discover.await_args_list} == {"PT"}
-    # Only the types the catalog lists for PT are searched (the catalog is
-    # live data: PT gained a national row after this test was written).
-    listed = {
-        kind
-        for kind in ("local", "mobile", "national", "toll_free")
-        if telephony_catalog.capabilities("PT", kind) is not None
-    }
-    assert "toll_free" not in listed
+    assert {call.args[1] for call in discover.await_args_list} == {country}
+    # Only the types a buyable carrier's catalog lists are searched.
     assert {call.args[2] for call in discover.await_args_list} == listed
 
 
@@ -948,7 +960,7 @@ async def _age_number(async_session, number):
         text("UPDATE phone_numbers SET created_at = :t WHERE id = :id"),
         {
             "t": datetime.now(timezone.utc)
-            - PENDING_ORDER_TIMEOUT
+            - carrier("telnyx").pending_timeout
             - timedelta(minutes=1),
             "id": number.id,
         },
@@ -987,3 +999,25 @@ async def test_erroring_lookups_fail_and_refund_after_timeout(
     assert records[0].exc_info is not None
     assert str(number.id) in records[0].getMessage()
     assert "operator review" in records[0].getMessage()
+
+
+async def test_non_didww_timeout_unchanged(async_session, org_and_key, monkeypatch):
+    org, _, _ = org_and_key
+    row, offer = await seed_quote(async_session, org)
+    await _stub_order(monkeypatch, offer, {"data": {"id": str(uuid4())}})
+    number = await buy(async_session, org, row)
+    monkeypatch.setattr(
+        "hailhq.api.number_orders.carrier_outcome",
+        AsyncMock(return_value=("pending", None, None)),
+    )
+    await async_session.execute(
+        text("UPDATE phone_numbers SET created_at = :t WHERE id = :id"),
+        {
+            "t": datetime.now(timezone.utc) - timedelta(hours=2, minutes=1),
+            "id": number.id,
+        },
+    )
+    await async_session.commit()
+    await async_session.refresh(number)
+    await reconcile_order(async_session, number, force=True)
+    assert number.provisioning_state == "failed"

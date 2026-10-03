@@ -50,6 +50,15 @@ class Settings(BaseSettings):
     telnyx_connection_id: str = ""
     telnyx_sip_username: str = ""
     telnyx_public_key: str = ""
+    # Carrier of an SMS sent from an alphanumeric sender ID, which has no
+    # number: a name listed in core/hailhq/core/carrier_routing.py CARRIERS
+    # that sends SMS.
+    sender_id_sms_carrier: str = "twilio"
+    # DIDWW: numbers, orders and end-user registration through API v3.
+    # Empty key = DIDWW offers are hidden and its verification plug-in is off.
+    didww_api_key: str = ""
+    # "production" or "sandbox" (https://sandbox-api.didww.com/v3).
+    didww_environment: str = "production"
 
     # AWS — used today for SES (outbound email). boto3 falls back to its
     # default credential chain (env / config file / IAM role) when these
@@ -141,7 +150,8 @@ class Settings(BaseSettings):
     livekit_sip_inbound_trunk_id: str = ""
     livekit_telnyx_sip_outbound_trunk_id: str = ""
     # Second carrier. A number's ``provider`` picks the trunk
-    # (core/hailhq/core/carrier_routing.py). Empty = DIDWW numbers cannot dial.
+    # (core/hailhq/core/carrier_routing.py). Empty = DIDWW numbers cannot dial
+    # and DIDWW offers are hidden.
     livekit_didww_sip_outbound_trunk_id: str = ""
 
     # Storage

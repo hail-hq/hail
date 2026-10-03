@@ -55,7 +55,9 @@ def buy_number(client, async_session, org_and_key, monkeypatch, voice_provider_m
     from hailhq.core.number_offers import CarrierOffer
 
     purchase = AsyncMock(return_value="PN_test_acquired")
-    monkeypatch.setattr("hailhq.api.number_orders.purchase_ordered_number", purchase)
+    monkeypatch.setattr(
+        "hailhq.core.providers.voice.twilio.purchase_ordered_number", purchase
+    )
 
     async def _buy(
         key=None,

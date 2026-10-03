@@ -78,3 +78,33 @@ def test_missing_file_raises_not_silently_allows(tmp_path, monkeypatch):
     telephony_catalog._load.cache_clear()
     with pytest.raises(FileNotFoundError):
         telephony_catalog.capabilities("US", "local")
+
+
+def test_calls_only_carrier_never_promises_sms(tmp_path, monkeypatch):
+    def row(kind, **over):
+        return {
+            "country_code": "CA",
+            "number_type": kind,
+            "usd_per_month": "1.20",
+            "voice": True,
+            "sms": True,
+            "mms": True,
+            **over,
+        }
+
+    empty = {"numbers": [], "a2p_10dlc": []}
+    (tmp_path / "twilio.json").write_text(json.dumps(empty))
+    (tmp_path / "telnyx.json").write_text(json.dumps(empty))
+    (tmp_path / "didww.json").write_text(
+        json.dumps({"numbers": [row("local"), row("mobile", voice=False)]})
+    )
+    monkeypatch.setenv("HAIL_TELEPHONY_CATALOG_DIR", str(tmp_path))
+    telephony_catalog._load.cache_clear()
+    try:
+        calls_only = {"voice": True, "sms": False, "mms": False}
+        assert telephony_catalog.capabilities("CA", "local", "didww") == calls_only
+        assert telephony_catalog.capabilities("CA", "local") == calls_only
+        # An SMS-only number at a calls-only carrier is not sold at all.
+        assert telephony_catalog.capabilities("CA", "mobile", "didww") is None
+    finally:
+        telephony_catalog._load.cache_clear()

@@ -9,12 +9,7 @@ import pytest
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from hailhq.core.carrier_routing import carrier, sms_route, voice_route
 from hailhq.core.config import settings
-from hailhq.core.number_offers import (
-    CarrierOffer,
-    rank_offers,
-    telnyx_offers,
-    twilio_offers,
-)
+from hailhq.core.number_offers import CarrierOffer, rank_offers
 from hailhq.core.providers.sms.status_map import map_telnyx_message_status
 from hailhq.core.providers.sms.telnyx import TelnyxSmsProvider
 from hailhq.core.providers.telnyx import (
@@ -23,6 +18,8 @@ from hailhq.core.providers.telnyx import (
     get_http_client,
     verify_webhook,
 )
+from hailhq.core.providers.voice.telnyx import telnyx_offers
+from hailhq.core.providers.voice.twilio import twilio_offers
 from twilio.base.exceptions import TwilioException, TwilioRestException
 
 
@@ -527,7 +524,7 @@ def test_unknown_carrier_is_rejected_everywhere():
     with pytest.raises(ValueError, match="Unsupported number carrier"):
         carrier("unknown")
     with pytest.raises(ValueError, match="Unsupported SMS carrier"):
-        sms_route("unknown", MagicMock())
+        sms_route("unknown")
 
 
 def test_carrier_registry_status_paths_and_order_mode():

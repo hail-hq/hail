@@ -4,47 +4,41 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timedelta, timezone
-from typing import Any, Literal
+from typing import Any
 from uuid import UUID, uuid4
 
 import httpx
 from fastapi import HTTPException
+from hailhq.api.audit import write_audit_log
 from hailhq.api.deps import Principal
 from hailhq.api.errors import unprocessable
 from hailhq.api.funds import BILLING_URL
 from hailhq.core import telephony_catalog
 from hailhq.core.billing import get_balance_cents, monthly_fee_ref
-from hailhq.core.carrier_routing import carrier
-from hailhq.core.db import session_scope
-from hailhq.core.models import AccountCredit, NumberOffer, PhoneNumber
+from hailhq.core.carrier_routing import Outcome, carrier
+from hailhq.core.db import org_lock, session_scope
+from hailhq.core.models import (
+    AccountCredit,
+    CarrierVerification,
+    NumberOffer,
+    PhoneNumber,
+)
 from hailhq.core.number_offers import CarrierOffer, discover_offers
 from hailhq.core.providers.voice import (
+    CarrierPreOrderError,
     CarrierRequestError,
 )
-from hailhq.core.providers.voice.telnyx import (
-    place_number_order,
-    telnyx_order_outcome,
-)
-from hailhq.core.providers.voice.twilio import (
-    find_ordered_number,
-    purchase_ordered_number,
-)
 from hailhq.core.schemas import NumberAcquireRequest
-from sqlalchemy import and_, delete, or_, select, text
+from sqlalchemy import and_, delete, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
 
-# An order the carrier still reports as pending, or has no record of, after
-# this long is abnormal: an offer must be "ready" (regulatory requirements met)
-# before it can be bought.
-# The reconciler then marks it failed and refunds the hold, so the number can be
-# released or re-ordered. If the carrier completes it later, an operator must
-# release the number at the carrier (the log line names the order).
-PENDING_ORDER_TIMEOUT = timedelta(hours=2)
-
-ORDER_POLL_INTERVAL = timedelta(seconds=15)
+# A running carrier check blocks other checks of the same order for this
+# long. Longer than the slowest carrier check (4 calls of up to 40 s each),
+# so two runs never both file a registration for one number.
+ORDER_CHECK_LEASE = timedelta(minutes=5)
 
 # Quotes that expired unused are deleted after this long.
 QUOTE_RETENTION = timedelta(hours=1)
@@ -77,13 +71,6 @@ def catalog_capabilities(
     return caps
 
 
-async def org_lock(db: AsyncSession, org: UUID) -> None:
-    await db.execute(
-        text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))"),
-        {"key": str(org)},
-    )
-
-
 def credit(number: PhoneNumber, amount: int, ref: str, source: str) -> AccountCredit:
     return AccountCredit(
         organization_id=number.organization_id,
@@ -102,12 +89,16 @@ async def finish_order(
     *,
     resource_id: str | None,
     failed: bool = False,
+    keep_setup: bool = False,
     reason: str | None = None,
 ):
     """Caller holds org lock. Move reservation to month fee, or refund once.
 
     ``reason`` is stored for a failed order and shown to the buyer; it must
-    never contain carrier payloads."""
+    never contain carrier payloads beyond the carrier's own human-readable
+    rejection wording. ``keep_setup`` charges the setup fee even on failure:
+    the carrier already billed it and does not refund (the number was
+    bought, then its registration was rejected or never cleared)."""
     if number.provisioning_state != "pending":
         return
     meta = dict(number.provisioning_metadata)
@@ -131,15 +122,15 @@ async def finish_order(
                     "monthly_fee",
                 )
             )
-            if offer.setup_cents:
-                db.add(
-                    credit(
-                        number,
-                        -offer.setup_cents,
-                        f"number_setup:{number.id}",
-                        "number_setup",
-                    )
+        if offer.setup_cents and (not failed or keep_setup):
+            db.add(
+                credit(
+                    number,
+                    -offer.setup_cents,
+                    f"number_setup:{number.id}",
+                    "number_setup",
                 )
+            )
     number.provisioning_state = "failed" if failed else "active"
     if not failed:
         number.provider_resource_id = resource_id
@@ -151,21 +142,100 @@ async def finish_order(
     await db.commit()
 
 
-async def carrier_outcome(
-    number: PhoneNumber,
-) -> tuple[Literal["active", "failed", "pending", "missing"], str | None, str | None]:
+async def give_back(number: PhoneNumber, resource_id: str) -> None:
+    """Release a bought number the order will not keep. Never raises. When
+    the carrier call fails, the resource id is kept on the row as
+    ``unreleased_resource_id``: a failed order stores no resource id, and
+    the number renews at the carrier until ``retry_unreleased_numbers`` gets
+    it released. Saved by the caller's ``finish_order``."""
+    try:
+        await carrier(number.provider).release(resource_id)
+    except Exception:
+        logger.exception(
+            "Could not release carrier number; will retry: number=%s resource=%s",
+            number.id,
+            resource_id,
+        )
+        number.provisioning_metadata = {
+            **number.provisioning_metadata,
+            "unreleased_resource_id": resource_id,
+        }
+
+
+async def rejected_registration(
+    db: AsyncSession, number: PhoneNumber, resource_id: str | None
+) -> str:
+    """The carrier refused the end-user registration of a bought number.
+    Releases the number, takes the approval back and marks the Hail
+    verification rejected. Returns the reason shown to the buyer.
+
+    Caller holds the org lock and fails the order. The carrier calls run
+    under that lock on purpose: two concurrent reconciles must never both
+    see "pending" and both release the same number."""
+    org = number.organization_id
+    if resource_id:
+        await give_back(number, resource_id)
+    # Take the approval back, so the next quote asks for new papers
+    # instead of filing the same rejected ones again.
+    reason = None
+    revoke = carrier(number.provider).revoke_registration
+    if revoke is not None:
+        try:
+            reason = await revoke(
+                CarrierOffer.model_validate(number.provisioning_metadata["offer"]), org
+            )
+        except Exception:
+            logger.exception(
+                "Could not revoke rejected carrier registration; take the "
+                "approval back by hand: number=%s",
+                number.id,
+            )
+    reason = reason or "the carrier rejected the end-user registration"
+    verification = (
+        await db.execute(
+            select(CarrierVerification).where(
+                CarrierVerification.organization_id == org,
+                CarrierVerification.provider == number.provider,
+                CarrierVerification.country_code == number.country_code,
+                CarrierVerification.number_type == number.number_type,
+                CarrierVerification.state == "approved",
+            )
+        )
+    ).scalar_one_or_none()
+    if verification is not None:
+        verification.state = "rejected"
+        verification.rejection_reason = reason
+        verification.updated_at = datetime.now(timezone.utc)
+        # Same audit trail as every other system-driven rejection
+        # (see _reject_row in routes/verifications.py).
+        await write_audit_log(
+            org,
+            None,
+            "verification.reject",
+            "carrier_verification",
+            verification.id,
+            {"rejected_by": None, "reason": reason},
+            actor_user_id=None,
+            actor_kind="system",
+        )
+    return reason
+
+
+async def carrier_outcome(number: PhoneNumber) -> Outcome:
     """Ask the carrier what happened to this order. Holds no DB lock.
 
-    Returns (state, owned resource id, Telnyx order id). ``missing`` means the
-    carrier has no record of the order; it is never treated as permission to
-    submit another paid purchase.
+    Returns (state, owned resource id, carrier order id). ``missing`` means
+    the carrier has no record of the order; it is never treated as
+    permission to submit another paid purchase. ``rejected_registration``
+    means the number exists but the end-user registration failed.
     """
-    if carrier(number.provider).async_orders:
-        return await telnyx_order_outcome(
-            number.e164, number.id, number.provisioning_metadata.get("order_id")
-        )
-    sid = await find_ordered_number(number.e164, number.id)
-    return ("active", sid, None) if sid else ("missing", None, None)
+    meta = number.provisioning_metadata
+    return await carrier(number.provider).order_outcome(
+        number.e164,
+        number.id,
+        meta.get("order_id"),
+        CarrierOffer.model_validate(meta["offer"]),
+    )
 
 
 async def reconcile_order(
@@ -174,6 +244,8 @@ async def reconcile_order(
     if number.provisioning_state != "pending":
         return
     org = number.organization_id
+    timeout = carrier(number.provider).pending_timeout
+    poll_interval = carrier(number.provider).poll_interval
     # Claim a poll under the org lock, then release it before carrier I/O.
     await org_lock(db, org)
     await db.refresh(number)
@@ -182,16 +254,17 @@ async def reconcile_order(
         return
     now = datetime.now(timezone.utc)
     last_check = number.provisioning_metadata.get("last_checked_at")
-    if (
-        not force
-        and last_check
-        and now - datetime.fromisoformat(last_check) < ORDER_POLL_INTERVAL
+    running = number.provisioning_metadata.get("check_started_at")
+    if not force and (
+        (last_check and now - datetime.fromisoformat(last_check) < poll_interval)
+        or (running and now - datetime.fromisoformat(running) < ORDER_CHECK_LEASE)
     ):
         await db.commit()
         return
     number.provisioning_metadata = {
         **number.provisioning_metadata,
         "last_checked_at": now.isoformat(),
+        "check_started_at": now.isoformat(),
     }
     await db.commit()
     lookup_error: Exception | None = None
@@ -206,8 +279,12 @@ async def reconcile_order(
     if number.provisioning_state != "pending":
         await db.commit()
         return
+    # The check answered: the next run may start.
+    number.provisioning_metadata = {
+        k: v for k, v in number.provisioning_metadata.items() if k != "check_started_at"
+    }
     if lookup_error is not None and (
-        datetime.now(timezone.utc) - number.created_at <= PENDING_ORDER_TIMEOUT
+        datetime.now(timezone.utc) - number.created_at <= timeout
     ):
         await db.commit()
         raise lookup_error
@@ -217,8 +294,7 @@ async def reconcile_order(
             "order_id": order_id,
         }
     unfound = (
-        state == "missing"
-        and datetime.now(timezone.utc) - number.created_at > PENDING_ORDER_TIMEOUT
+        state == "missing" and datetime.now(timezone.utc) - number.created_at > timeout
     )
     if state == "active":
         await finish_order(db, number, resource_id=resource_id)
@@ -230,9 +306,23 @@ async def reconcile_order(
             failed=True,
             reason="the carrier reported the order as failed",
         )
+    elif state == "rejected_registration":
+        # The number exists at the carrier but the end-user registration was
+        # refused. Stop its renewal and give the monthly fee back; the setup
+        # fee stays (the carrier billed it and does not refund).
+        # The carrier calls in here run under the org lock on purpose (see
+        # rejected_registration).
+        reason = await rejected_registration(db, number, resource_id)
+        await finish_order(
+            db,
+            number,
+            resource_id=None,
+            failed=True,
+            keep_setup=True,
+            reason=reason,
+        )
     elif (
-        state == "pending"
-        and datetime.now(timezone.utc) - number.created_at > PENDING_ORDER_TIMEOUT
+        state == "pending" and datetime.now(timezone.utc) - number.created_at > timeout
     ):
         if lookup_error is not None:
             logger.error(
@@ -250,13 +340,27 @@ async def reconcile_order(
                 number.id,
                 number.provisioning_metadata.get("order_id"),
             )
-        await finish_order(
-            db,
-            number,
-            resource_id=None,
-            failed=True,
-            reason="the carrier did not confirm the order in time",
-        )
+        if resource_id:
+            # The number was bought but its registration never cleared.
+            # Release it; the setup fee stays (the carrier billed it and
+            # does not refund).
+            await give_back(number, resource_id)
+            await finish_order(
+                db,
+                number,
+                resource_id=None,
+                failed=True,
+                keep_setup=True,
+                reason="the carrier did not approve the registration in time",
+            )
+        else:
+            await finish_order(
+                db,
+                number,
+                resource_id=None,
+                failed=True,
+                reason="the carrier did not confirm the order in time",
+            )
     elif unfound:
         logger.error(
             "Carrier has no record of the order after timeout; failing it and "
@@ -424,24 +528,32 @@ async def acquire_offer(
     # Held through the carrier call on purpose: finish_order and the metadata
     # write below act on this in-memory row and must not interleave with
     # reconcile_order. The cost is that same-organization writes wait for the
-    # carrier (timeouts: Telnyx 20s, Twilio 10s).
+    # carrier (its HTTP timeout, 10 to 20 s).
     await org_lock(db, org)
     try:
+        placed = await carrier(offer.provider).place_order(number.id, offer)
         if carrier(offer.provider).async_orders:
-            order_id = await place_number_order(
-                number.id, offer.e164, offer.verification_id, offer.capabilities
-            )
             number.provisioning_metadata = {
                 **number.provisioning_metadata,
-                "order_id": order_id,
+                "order_id": placed,
                 "order_state": "pending",
             }
             await db.commit()
         else:
-            resource_id = await purchase_ordered_number(
-                offer.e164, number.id, offer.verification_id
-            )
-            await finish_order(db, number, resource_id=resource_id)
+            await finish_order(db, number, resource_id=placed)
+    except CarrierPreOrderError as exc:
+        # No order was sent to the carrier: nothing to reconcile.
+        await finish_order(
+            db,
+            number,
+            resource_id=None,
+            failed=True,
+            reason=(
+                "the number is no longer available"
+                if exc.status == 410
+                else "the carrier could not be reached; nothing was ordered"
+            ),
+        )
     except (httpx.HTTPStatusError, CarrierRequestError) as exc:
         status = (
             exc.response.status_code
@@ -558,6 +670,66 @@ async def reconcile_pending_orders():
                 number_id,
                 exc_info=True,
             )
+
+
+async def retry_release(db: AsyncSession, number: PhoneNumber) -> None:
+    """Release a number whose release failed when its order was failed.
+    Carrier errors propagate and the id stays for the next try. The carrier
+    call runs under the org lock, like the first release, so two runs
+    never act on the same row."""
+    await org_lock(db, number.organization_id)
+    await db.refresh(number)
+    resource_id = number.provisioning_metadata.get("unreleased_resource_id")
+    if resource_id:
+        await carrier(number.provider).release(resource_id)
+        number.provisioning_metadata = {
+            k: v
+            for k, v in number.provisioning_metadata.items()
+            if k != "unreleased_resource_id"
+        }
+    await db.commit()
+
+
+async def retry_unreleased_numbers():
+    """Fresh session per number, like ``reconcile_pending_orders``. Oldest
+    ``updated_at`` first; a row that failed again goes to the back."""
+    async with session_scope() as db:
+        ids = (
+            (
+                await db.execute(
+                    select(PhoneNumber.id)
+                    .where(
+                        PhoneNumber.provisioning_metadata.has_key(
+                            "unreleased_resource_id"
+                        )
+                    )
+                    .order_by(PhoneNumber.updated_at)
+                    .limit(100)
+                )
+            )
+            .scalars()
+            .all()
+        )
+    for number_id in ids:
+        try:
+            async with session_scope() as db:
+                number = await db.get(PhoneNumber, number_id)
+                if number:
+                    await retry_release(db, number)
+        except Exception:
+            logger.warning(
+                "Carrier release retry failed: number=%s; will retry",
+                number_id,
+                exc_info=True,
+            )
+            # Move the row to the back, so rows beyond the limit get a turn.
+            async with session_scope() as db:
+                await db.execute(
+                    update(PhoneNumber)
+                    .where(PhoneNumber.id == number_id)
+                    .values(updated_at=datetime.now(timezone.utc))
+                )
+                await db.commit()
 
 
 async def purge_expired_quotes() -> int:

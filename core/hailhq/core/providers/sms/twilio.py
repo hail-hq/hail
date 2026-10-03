@@ -142,3 +142,15 @@ class LazyTwilioSmsProvider(SmsProvider):
         await self._provider().attach_number(
             messaging_service_sid, provider_resource_id
         )
+
+
+_default: LazyTwilioSmsProvider | None = None
+
+
+def twilio_sms_provider() -> SmsProvider:
+    """The process-wide Twilio SMS provider. Its client is built on first
+    use, so a deployment without Twilio credentials still starts."""
+    global _default
+    if _default is None:
+        _default = LazyTwilioSmsProvider()
+    return _default

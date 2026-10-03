@@ -40,16 +40,23 @@ def capabilities(
     """What a number of this kind can do at ``provider``, or None when that
     carrier does not sell it. 'auto' answers from the first carrier the API
     can buy from that lists it."""
-    if provider == "auto":
-        # Only carriers the API can buy from: didww.json exists too, but
-        # DIDWW purchase is not wired yet.
-        from hailhq.core.number_offers import PROVIDERS
+    # Imported here: carrier_routing imports the carrier adapters, and
+    # number_offers imports carrier_routing.
+    from hailhq.core.carrier_routing import CARRIERS
+    from hailhq.core.number_offers import PROVIDERS
 
-        providers = PROVIDERS
-    else:
-        providers = (provider,)
+    # Only carriers the API can buy from.
+    providers = PROVIDERS if provider == "auto" else (provider,)
     for name in providers:
         row = _load(name).get((country_code, number_type))
-        if row:
-            return {"voice": row["voice"], "sms": row["sms"], "mms": row["mms"]}
+        if not row:
+            continue
+        # Hail routes no SMS through this carrier. Its catalog row may list
+        # SMS, because the carrier sells it; Hail cannot deliver it, so it
+        # is never promised.
+        if name in CARRIERS and CARRIERS[name].sms_route is None:
+            if not row["voice"]:
+                continue  # an SMS-only number Hail cannot use at this carrier
+            return {"voice": True, "sms": False, "mms": False}
+        return {"voice": row["voice"], "sms": row["sms"], "mms": row["mms"]}
     return None

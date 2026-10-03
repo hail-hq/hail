@@ -79,6 +79,7 @@ def default_verification_provider_name() -> str | None:
 
 
 def _register_builtin() -> None:
+    from hailhq.core.providers.verification.didww import DidwwVerificationProvider
     from hailhq.core.providers.verification.twilio import (
         TwilioVerificationProvider,
     )
@@ -90,6 +91,7 @@ def _register_builtin() -> None:
     )
 
     register_verification_provider("telnyx", TelnyxVerificationProvider)
+    register_verification_provider("didww", DidwwVerificationProvider)
 
 
 _register_builtin()
