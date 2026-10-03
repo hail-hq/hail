@@ -78,28 +78,31 @@ async def test_didww_attach_sets_voice_in_trunk(
     monkeypatch.setattr(settings, "didww_api_key", "key")
     monkeypatch.setattr(settings, "didww_voice_in_trunk_id", "trunk-1")
     calls: list[tuple] = []
+    client = MagicMock()
 
-    async def fake_request(method, path, **kwargs):
-        calls.append((method, path, kwargs))
-        if method == "GET":
-            return {"data": [{"id": "did-9", "attributes": {"number": "351300509184"}}]}
+    def fake_get(path, params=None, **kwargs):
+        calls.append(("GET", path, params))
+        return {"data": [{"id": "did-9", "attributes": {"number": "351300509184"}}]}
+
+    def fake_patch(path, body, **kwargs):
+        calls.append(("PATCH", path, body))
         return {}
 
-    monkeypatch.setattr(didww, "_request", fake_request)
+    client.get.side_effect = fake_get
+    client.patch.side_effect = fake_patch
+    monkeypatch.setattr(didww, "didww_client", lambda: client)
     # No stored id: looked up by number.
     await didww.attach_inbound_number(None, "+351300509184")
-    assert calls[0][:2] == ("GET", "/dids")
-    method, path, kwargs = calls[1]
-    assert (method, path) == ("PATCH", "/dids/did-9")
-    assert kwargs["json"]["data"]["relationships"]["voice_in_trunk"]["data"] == {
+    assert calls[0][:2] == ("GET", "dids")
+    method, path, body = calls[1]
+    assert (method, path) == ("PATCH", "dids/did-9")
+    assert body["data"]["relationships"]["voice_in_trunk"]["data"] == {
         "type": "voice_in_trunks",
         "id": "trunk-1",
     }
     # Detach nulls the relationship.
     await didww.detach_inbound_number("did-9", "+351300509184")
-    assert (
-        calls[-1][2]["json"]["data"]["relationships"]["voice_in_trunk"]["data"] is None
-    )
+    assert calls[-1][2]["data"]["relationships"]["voice_in_trunk"]["data"] is None
 
 
 async def test_didww_requires_trunk(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -120,9 +123,8 @@ async def test_didww_detach_tolerates_a_released_did(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(settings, "didww_api_key", "key")
-
-    async def fake_request(method, path, **kwargs):
-        return {"data": []}
-
-    monkeypatch.setattr(didww, "_request", fake_request)
+    client = MagicMock()
+    client.get.return_value = {"data": []}
+    monkeypatch.setattr(didww, "didww_client", lambda: client)
     await didww.detach_inbound_number(None, "+351300509184")  # no raise
+    client.patch.assert_not_called()

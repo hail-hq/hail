@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 import uuid
 from unittest.mock import AsyncMock
 
@@ -16,16 +17,11 @@ from hailhq.core.providers.voice.base import CarrierNotConfigured
 def hooks(monkeypatch: pytest.MonkeyPatch) -> dict[str, AsyncMock]:
     monkeypatch.setattr(settings, "livekit_twilio_sip_inbound_trunk_id", "ST_in_tw")
     attach, detach = AsyncMock(), AsyncMock()
-    twilio = carrier_routing.CARRIERS["twilio"]
     monkeypatch.setitem(
         carrier_routing.CARRIERS,
         "twilio",
-        carrier_routing.Carrier(
-            twilio.voice_route,
-            twilio.sms_route,
-            twilio.sms_status_path,
-            async_orders=False,
-            inbound_trunk=twilio.inbound_trunk,
+        dataclasses.replace(
+            carrier_routing.CARRIERS["twilio"],
             attach_inbound=attach,
             detach_inbound=detach,
         ),

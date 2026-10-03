@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 import uuid
 from unittest.mock import AsyncMock
 
@@ -26,16 +27,11 @@ def inbound_hooks(monkeypatch: pytest.MonkeyPatch) -> dict[str, AsyncMock]:
     """Twilio inbound configured, carrier hooks mocked."""
     monkeypatch.setattr(settings, "livekit_twilio_sip_inbound_trunk_id", "ST_in_tw")
     attach, detach = AsyncMock(), AsyncMock()
-    tw = carrier_routing.CARRIERS["twilio"]
     monkeypatch.setitem(
         carrier_routing.CARRIERS,
         "twilio",
-        carrier_routing.Carrier(
-            tw.voice_route,
-            tw.sms_route,
-            tw.sms_status_path,
-            async_orders=False,
-            inbound_trunk=tw.inbound_trunk,
+        dataclasses.replace(
+            carrier_routing.CARRIERS["twilio"],
             attach_inbound=attach,
             detach_inbound=detach,
         ),

@@ -12,7 +12,11 @@ from fastapi.exception_handlers import request_validation_exception_handler
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, Response
 from hailhq.api.deprecation import DeprecationHeaderMiddleware
-from hailhq.api.number_orders import purge_expired_quotes, reconcile_pending_orders
+from hailhq.api.number_orders import (
+    purge_expired_quotes,
+    reconcile_pending_orders,
+    retry_unreleased_numbers,
+)
 from hailhq.api.ratelimit import GeneralRateLimitMiddleware
 from hailhq.api.routes import agents as agents_routes
 from hailhq.api.routes import calls as calls_routes
@@ -24,6 +28,7 @@ from hailhq.api.routes import events as events_routes
 from hailhq.api.routes import numbers as numbers_routes
 from hailhq.api.routes import providers as providers_routes
 from hailhq.api.routes import sms as sms_routes
+from hailhq.api.routes import sms_webhooks
 from hailhq.api.routes import unsubscribe as unsubscribe_routes
 from hailhq.api.routes import verifications as verifications_routes
 from hailhq.api.routes import webhooks as webhooks_routes
@@ -39,6 +44,7 @@ from hailhq.api.usage import write_usage_event
 from hailhq.api.verification_worker import VerificationWorker
 from hailhq.core import internal_webhook
 from hailhq.core.abuse_monitor import AbuseMonitorWorker
+from hailhq.core.carrier_routing import CARRIERS
 from hailhq.core.config import settings
 from hailhq.core.db import dispose_engine, session_scope
 from hailhq.core.domain_verification_worker import DomainVerificationWorker
@@ -120,7 +126,8 @@ async def _backstop_sweeper_loop() -> None:
 
 
 async def _order_reconciler_loop() -> None:
-    """Poll pending carrier number orders and drop expired quotes.
+    """Poll pending carrier number orders, retry failed carrier releases and
+    drop expired quotes.
 
     Runs apart from the backstop sweeper: carrier calls can take 20s each and
     must not delay the stale-call and pool-reservation sweeps.
@@ -128,6 +135,7 @@ async def _order_reconciler_loop() -> None:
     while True:
         try:
             await reconcile_pending_orders()
+            await retry_unreleased_numbers()
             await purge_expired_quotes()
         except asyncio.CancelledError:
             raise
@@ -146,9 +154,21 @@ async def _stop_worker(worker, task: asyncio.Task) -> None:
     await asyncio.gather(task, return_exceptions=True)
 
 
+def _check_sender_id_sms_carrier() -> None:
+    """Refuse to start on a carrier that cannot send SMS: every sender-ID
+    SMS would fail at send time."""
+    allowed = [name for name, entry in CARRIERS.items() if entry.sms_route is not None]
+    if settings.sender_id_sms_carrier not in allowed:
+        raise RuntimeError(
+            f"SENDER_ID_SMS_CARRIER must be one of: {', '.join(allowed)}; "
+            f"got {settings.sender_id_sms_carrier!r}"
+        )
+
+
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     """Start backstop sweepers + webhook worker on boot; tear them down on shutdown."""
+    _check_sender_id_sms_carrier()
     sweeper_task = asyncio.create_task(
         _backstop_sweeper_loop(), name="backstop-sweeper"
     )
@@ -394,6 +414,7 @@ _CUSTOMER_ROUTERS = [
     webhooks_routes.router,
     unsubscribe_routes.router,
     sms_routes.router,
+    *sms_webhooks.routers,
     contacts_routes.router,
     whoami_routes.router,
     providers_routes.router,

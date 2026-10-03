@@ -38,3 +38,24 @@ async def test_webhook_routes_503_without_secret_key(
         headers={"Authorization": f"Bearer {plain}"},
     )
     assert resp.status_code == 503
+
+
+@pytest.mark.parametrize("value", ["twillio", "didww", ""])
+async def test_lifespan_refuses_a_wrong_sender_id_sms_carrier(
+    monkeypatch: pytest.MonkeyPatch, async_session: AsyncSession, value: str
+):
+    """``didww`` is a carrier but sends no SMS; the others are not carriers."""
+    monkeypatch.setattr(settings, "sender_id_sms_carrier", value)
+    with pytest.raises(RuntimeError, match="SENDER_ID_SMS_CARRIER") as exc:
+        async with lifespan(app):
+            pass
+    assert "twilio, telnyx" in str(exc.value)
+
+
+@pytest.mark.parametrize("value", ["twilio", "telnyx"])
+async def test_lifespan_starts_with_an_sms_carrier(
+    monkeypatch: pytest.MonkeyPatch, async_session: AsyncSession, value: str
+):
+    monkeypatch.setattr(settings, "sender_id_sms_carrier", value)
+    async with lifespan(app):
+        pass

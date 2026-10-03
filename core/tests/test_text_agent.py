@@ -47,6 +47,7 @@ async def _ingest(session, body: str, sid: str, opt_out_type=None):
         body=body,
         provider_message_sid=sid,
         opt_out_type=opt_out_type,
+        carrier="twilio",
     )
 
 

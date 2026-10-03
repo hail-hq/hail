@@ -17,17 +17,26 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from datetime import datetime
+from typing import Literal
 
 from hailhq.core.schemas import NumberType
 from pydantic import BaseModel
 
 __all__ = [
     "CarrierNotConfigured",
+    "CarrierPreOrderError",
     "CarrierRequestError",
     "NumberType",
+    "OrderState",
     "ProviderCallStatus",
     "VoiceProvider",
 ]
+
+
+# What a carrier says about a number order. ``missing``: the carrier has no
+# record of it. ``rejected_registration``: the number was bought but the
+# carrier refused the end-user registration.
+OrderState = Literal["active", "failed", "pending", "missing", "rejected_registration"]
 
 
 class CarrierRequestError(Exception):
@@ -36,6 +45,11 @@ class CarrierRequestError(Exception):
     def __init__(self, status: int) -> None:
         super().__init__(f"Carrier request failed with HTTP {status}")
         self.status = status
+
+
+class CarrierPreOrderError(CarrierRequestError):
+    """The request failed before any order was sent to the carrier. Nothing
+    was bought, so the caller can fail the purchase and refund at once."""
 
 
 class CarrierNotConfigured(Exception):

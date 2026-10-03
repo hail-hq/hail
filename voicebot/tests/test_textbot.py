@@ -44,6 +44,7 @@ async def _seed(session):
         body="Can I book for Tuesday?",
         provider_message_sid="SM1",
         opt_out_type=None,
+        carrier="twilio",
     )
     await session.commit()
     return result.sms_id

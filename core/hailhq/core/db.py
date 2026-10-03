@@ -11,8 +11,10 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+from uuid import UUID
 
 from hailhq.core.config import settings
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
@@ -117,3 +119,12 @@ async def session_scope() -> AsyncIterator[AsyncSession]:
     """Open a fresh ``AsyncSession`` outside any FastAPI request scope."""
     async with _ensure_initialized()() as session:
         yield session
+
+
+async def org_lock(db: AsyncSession, org: UUID) -> None:
+    """Hold this organization's lock until the transaction ends. Billing
+    and number writes of one organization take it, so they run in order."""
+    await db.execute(
+        text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))"),
+        {"key": str(org)},
+    )

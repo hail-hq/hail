@@ -104,16 +104,20 @@ _HEALTHZ_PATH = "/healthz"
 _DOCS_PATHS = frozenset({"/openapi.json", "/docs", "/docs/oauth2-redirect", "/redoc"})
 
 # Self-credentialed public routes with no Authorization header by design
-# (Twilio signature auth for the SMS webhooks; an HMAC token query param for
-# unsubscribe, RFC 8058). Without this exemption they fall back to the
+# (carrier signature auth for the SMS webhooks, added by ``exempt_path`` from
+# routes/sms_webhooks/; an HMAC token query param for unsubscribe, RFC 8058).
+# Without this exemption they fall back to the
 # remote-IP rate-limit key (_rate_limit_key below) — and in production every
 # anonymous caller resolves to the same upstream-proxy IP, so all anonymous
 # traffic would share one bucket with these legitimate routes. Listed
 # unprefixed; dual-mounted at both /v1/... and the legacy path (main.py), so
 # matching strips a leading /v1 before comparing.
-_EXEMPT_PATHS = frozenset(
-    {"/sms/inbound", "/sms/status", "/sms/telnyx", "/unsubscribe"}
-)
+_EXEMPT_PATHS = {"/unsubscribe"}
+
+
+def exempt_path(path: str) -> None:
+    """Exempt one unprefixed path, at both mounts, from the rate limit."""
+    _EXEMPT_PATHS.add(path)
 
 
 def _is_exempt(path: str) -> bool:

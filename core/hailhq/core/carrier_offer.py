@@ -11,7 +11,7 @@ from pydantic import BaseModel, Field
 
 
 class CarrierOffer(BaseModel):
-    provider: Literal["twilio", "telnyx"] = Field(
+    provider: Literal["twilio", "telnyx", "didww"] = Field(
         description="Carrier supplying this exact number."
     )
     e164: str = Field(description="Available phone number in E.164 format.")

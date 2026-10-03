@@ -8,8 +8,8 @@ import httpx
 import phonenumbers
 from hailhq.core.carrier_offer import CarrierOffer, cents
 from hailhq.core.config import settings
-from hailhq.core.providers.telnyx import TelnyxClient, path_id
-from hailhq.core.providers.voice.base import CarrierNotConfigured
+from hailhq.core.providers.telnyx import TelnyxClient, get_http_client, path_id
+from hailhq.core.providers.voice.base import CarrierNotConfigured, OrderState
 from hailhq.core.schemas import NumberType
 from pydantic import BaseModel, Field
 
@@ -331,6 +331,37 @@ async def release_telnyx_number(resource_id: str) -> None:
     except ValueError as exc:
         raise CarrierNotConfigured(str(exc)) from exc
     await client.release_number(resource_id)
+
+
+# -- carrier interface (core/hailhq/core/carrier_routing.py) ---------------
+
+
+async def offers(
+    org: UUID,
+    country: str,
+    kind: NumberType,
+    capabilities: list[str],
+    e164: str | None = None,
+) -> list[CarrierOffer]:
+    return await telnyx_offers(
+        org, country, kind, capabilities, get_http_client(), e164=e164
+    )
+
+
+async def place_order(number_id: UUID, offer: CarrierOffer) -> str:
+    return await place_number_order(
+        number_id, offer.e164, offer.verification_id, offer.capabilities
+    )
+
+
+async def order_outcome(
+    e164: str, number_id: UUID, order_id: str | None, offer: CarrierOffer
+) -> tuple[OrderState, str | None, str | None]:
+    return await telnyx_order_outcome(e164, number_id, order_id)
+
+
+async def release(resource_id: str) -> None:
+    await release_telnyx_number(resource_id)
 
 
 # --- inbound: a Telnyx number takes calls through the FQDN connection whose

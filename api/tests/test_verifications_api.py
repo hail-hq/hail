@@ -747,7 +747,9 @@ async def test_purchase_passes_the_quoted_verification_to_the_carrier(
     org_id, _, key = org_and_key
     await _fund(async_session, org_id)
     purchase = AsyncMock(return_value="PN_gb_1")
-    monkeypatch.setattr("hailhq.api.number_orders.purchase_ordered_number", purchase)
+    monkeypatch.setattr(
+        "hailhq.core.providers.voice.twilio.purchase_ordered_number", purchase
+    )
     quote, offer = await _quote(async_session, org_id, "BU_approved")
     monkeypatch.setattr(
         "hailhq.api.number_orders.discover_offers",
@@ -771,7 +773,9 @@ async def test_purchase_without_verification_passes_none(
     org_id, _, key = org_and_key
     await _fund(async_session, org_id)
     purchase = AsyncMock(return_value="PN_gb_1")
-    monkeypatch.setattr("hailhq.api.number_orders.purchase_ordered_number", purchase)
+    monkeypatch.setattr(
+        "hailhq.core.providers.voice.twilio.purchase_ordered_number", purchase
+    )
     quote, offer = await _quote(async_session, org_id, None)
     monkeypatch.setattr(
         "hailhq.api.number_orders.discover_offers",

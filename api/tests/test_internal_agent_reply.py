@@ -65,6 +65,7 @@ async def _seed(session: AsyncSession, *, credits=10_000):
         body="Can I book?",
         provider_message_sid="SM-in-1",
         opt_out_type=None,
+        carrier="twilio",
     )
     await session.commit()
     return org, agent, number, result.sms_id

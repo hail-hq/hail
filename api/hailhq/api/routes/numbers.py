@@ -31,17 +31,15 @@ from hailhq.api.idempotency import (
 from hailhq.api.number_orders import (
     RetryableError,
     catalog_capabilities,
-    org_lock,
     purchase_number,
 )
 from hailhq.api.pagination import fetch_cursor_page
 from hailhq.api.ratelimit import GENERAL_RATE_LIMITED_RESPONSES
 from hailhq.api.route_prefixes import request_mount_prefix
 from hailhq.api.routes.calls import get_livekit
-from hailhq.api.routes.sms import get_sms_provider
 from hailhq.core import inbound_routing, telephony_catalog
-from hailhq.core.carrier_routing import TELNYX, TWILIO, sms_route
-from hailhq.core.db import get_session
+from hailhq.core.carrier_routing import CARRIERS, carrier, sms_route
+from hailhq.core.db import get_session, org_lock
 from hailhq.core.livekit import LiveKitClient
 from hailhq.core.models import Agent, NumberOffer, PhoneNumber
 from hailhq.core.number_offers import (
@@ -50,13 +48,7 @@ from hailhq.core.number_offers import (
     discover_offers,
     rank_offers,
 )
-from hailhq.core.providers.sms import SmsProvider
-from hailhq.core.providers.voice import (
-    CarrierNotConfigured,
-    VoiceProvider,
-)
-from hailhq.core.providers.voice.telnyx import release_telnyx_number
-from hailhq.core.providers.voice.twilio import LazyTwilioVoiceProvider
+from hailhq.core.providers.voice import CarrierNotConfigured
 from hailhq.core.schemas import (
     NumberAcquireRequest,
     NumberQuoteRequest,
@@ -76,17 +68,6 @@ router = APIRouter(
 
 _DEFAULT_LIST_LIMIT = 50
 _MAX_LIST_LIMIT = 200
-
-# Lazy singleton (the calls.py get_livekit pattern) for the voice provider
-# that releases a Twilio number.
-_voice_provider_singleton: VoiceProvider | None = None
-
-
-def get_voice_provider() -> VoiceProvider:
-    global _voice_provider_singleton
-    if _voice_provider_singleton is None:
-        _voice_provider_singleton = LazyTwilioVoiceProvider()
-    return _voice_provider_singleton
 
 
 async def _get_org_number_or_404(
@@ -199,26 +180,8 @@ def _reject_if_released(number: PhoneNumber) -> None:
         )
 
 
-async def _release_telnyx(number: PhoneNumber, provider: VoiceProvider) -> None:
-    try:
-        await release_telnyx_number(number.provider_resource_id)
-    except CarrierNotConfigured as exc:
-        # Carrier not configured: an operator problem, not a server fault.
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
-
-
-async def _release_twilio(number: PhoneNumber, provider: VoiceProvider) -> None:
-    await provider.release_number(number.provider_resource_id)
-
-
-_RELEASERS = {TELNYX: _release_telnyx, TWILIO: _release_twilio}
-
-
 async def release_org_number(
-    db: AsyncSession,
-    provider: VoiceProvider,
-    number: PhoneNumber,
-    lk: LiveKitClient | None = None,
+    db: AsyncSession, number: PhoneNumber, lk: LiveKitClient | None = None
 ) -> PhoneNumber:
     """Release a dedicated number at the carrier and mark the row released.
 
@@ -256,8 +219,7 @@ async def release_org_number(
             status_code=409,
             detail="Number order is still pending; refresh its status before releasing",
         )
-    releaser = _RELEASERS.get(number.provider)
-    if releaser is None:
+    if number.provider not in CARRIERS:
         raise HTTPException(
             status_code=409,
             detail=f"{number.provider} numbers cannot be released through the API yet",
@@ -275,7 +237,15 @@ async def release_org_number(
             number.inbound_registered_at = None
     number.voice_agent_id = None
     number.sms_agent_id = None
-    await releaser(number, provider)
+    try:
+        await carrier(number.provider).release(number.provider_resource_id)
+    except CarrierNotConfigured as exc:
+        # Carrier not configured: an operator problem, not a server fault.
+        # The customer reads this: never the carrier's name or an env var.
+        logger.error("%s release failed: %s", number.provider, exc)
+        raise HTTPException(
+            status_code=503, detail="the carrier is not configured"
+        ) from exc
     number.provisioning_state = "released"
     number.released_at = datetime.now(timezone.utc)
     try:
@@ -312,7 +282,6 @@ async def release_number(
     number_id: UUID,
     principal: Annotated[Principal, Depends(get_current_principal)],
     db: Annotated[AsyncSession, Depends(get_session)],
-    provider: Annotated[VoiceProvider, Depends(get_voice_provider)],
     lk: Annotated[LiveKitClient, Depends(get_livekit)],
 ) -> None:
     """Release a dedicated number. The monthly fee stops accruing after the
@@ -325,7 +294,7 @@ async def release_number(
     was_released = (
         number.provisioning_state == "released" or number.released_at is not None
     )
-    await release_org_number(db, provider, number, lk)
+    await release_org_number(db, number, lk)
     if not was_released:
         actor_user_id, actor_kind = actor_of(principal)
         await write_audit_log(
@@ -539,7 +508,6 @@ async def enable_sms(
     number_id: UUID,
     principal: Annotated[Principal, Depends(get_current_principal)],
     db: Annotated[AsyncSession, Depends(get_session)],
-    provider: Annotated[SmsProvider, Depends(get_sms_provider)],
 ) -> PhoneNumberResponse:
     """Attach a dedicated number to the org's shared SMS Messaging Service.
 
@@ -600,10 +568,14 @@ async def enable_sms(
     ).scalar_one_or_none()
 
     try:
-        provider = sms_route(number.provider, provider)
+        provider = sms_route(number.provider)
     except ValueError as exc:
         # Carrier not configured for SMS: an operator problem, not a server fault.
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
+        # The customer reads this: never the carrier's name or an env var.
+        logger.error("%s SMS route unavailable: %s", number.provider, exc)
+        raise HTTPException(
+            status_code=503, detail="SMS is not available on this number's carrier"
+        ) from exc
     messaging_service_sid = await provider.ensure_messaging_service(
         organization_id=principal.organization_id, existing_sid=existing_sid
     )
@@ -624,7 +596,7 @@ async def enable_sms(
 
 class NumberQuotesResponse(BaseModel):
     offers: list[CarrierOffer] = Field(
-        description="Live carrier offers ordered by readiness, remaining verification effort, monthly price, setup price, and Twilio tie-break."
+        description="Live carrier offers ordered by readiness, remaining verification effort, monthly price and setup price. On a tie the first carrier listed wins."
     )
     recommended_quote_id: UUID | None = Field(
         description="Recommended ready offer matching the requested carrier preference, or null if none qualifies."
@@ -646,7 +618,7 @@ async def quote_numbers(
     """Compare live, org-specific offers. Prices include setup + monthly rent.
 
     Auto recommends a ready offer with the lowest monthly rent, then setup
-    cost, preferring Twilio on equivalent ties. Blocked offers sort by verification effort. SMS capability does not waive messaging registration requirements.
+    cost. On a tie the first carrier listed wins. Blocked offers sort by verification effort. SMS capability does not waive messaging registration requirements.
     """
 
     # Only number types the requested carrier's catalog lists (any carrier
@@ -677,7 +649,15 @@ async def quote_numbers(
                 body.country_code,
                 kind,
                 body.capabilities,
-                providers=providers,
+                # Ask only the carriers whose own catalog lists this kind:
+                # the purchase checks the quoted carrier's catalog, and a
+                # quote must never show an offer the purchase would refuse.
+                providers=[
+                    p
+                    for p in providers
+                    if telephony_catalog.capabilities(body.country_code, kind, p)
+                    is not None
+                ],
             )
             for kind in kinds
         )
@@ -714,4 +694,4 @@ async def quote_numbers(
     }
 
 
-__all__ = ["get_voice_provider", "release_org_number", "router"]
+__all__ = ["release_org_number", "router"]
