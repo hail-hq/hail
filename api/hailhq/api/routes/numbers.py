@@ -237,6 +237,9 @@ async def release_org_number(
             number.inbound_registered_at = None
     number.voice_agent_id = None
     number.sms_agent_id = None
+    # Commit the unregister now. If the carrier release fails below, the row
+    # must not still say the number is registered.
+    await db.commit()
     try:
         await carrier(number.provider).release(number.provider_resource_id)
     except CarrierNotConfigured as exc:

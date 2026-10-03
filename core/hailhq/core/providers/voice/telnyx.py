@@ -396,10 +396,6 @@ async def attach_inbound_number(resource_id: str | None, e164: str) -> None:
 
 
 async def detach_inbound_number(resource_id: str | None, e164: str) -> None:
-    if not resource_id:
-        return
-    try:
-        await _set_connection(resource_id, e164, "")
-    except httpx.HTTPStatusError as exc:
-        if exc.response.status_code != 404:
-            raise
+    # The same connection carries outbound calls (set at purchase), so it stays.
+    # The LiveKit inbound trunk number list is what gates inbound calls.
+    return None

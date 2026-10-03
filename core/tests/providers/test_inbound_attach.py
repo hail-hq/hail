@@ -61,8 +61,9 @@ async def test_telnyx_attach_patches_voice_connection(
         "/phone_numbers/1293384261075731499/voice",
         json={"connection_id": "conn-1"},
     )
+    fake.request.reset_mock()
     await telnyx.detach_inbound_number("1293384261075731499", "+14155550100")
-    assert fake.request.await_args.kwargs == {"json": {"connection_id": ""}}
+    fake.request.assert_not_awaited()
 
 
 async def test_telnyx_requires_connection(monkeypatch: pytest.MonkeyPatch) -> None:
