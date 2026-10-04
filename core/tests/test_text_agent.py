@@ -195,7 +195,7 @@ async def test_claim_skips_when_routing_changed(async_session) -> None:
 async def test_claim_moves_past_dropped_texts_to_the_next_row(async_session) -> None:
     """A text whose agent went away is skipped and the same call takes the next
     pending row, so a backlog of dropped texts does not cost a poll each."""
-    org, agent, number = await _seed(async_session)
+    org, _agent, _number = await _seed(async_session)
     first = await _ingest(async_session, "one", "SM10")
     second = await _ingest(async_session, "two", "SM11")
     # The first row now points at a number with no text agent; the second at
