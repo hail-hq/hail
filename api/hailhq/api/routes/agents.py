@@ -260,10 +260,13 @@ async def delete_agent(
             except inbound_routing.InboundRoutingError as exc:
                 # Numbers handled before this one are already committed as
                 # unregistered, so a retry does not redo (or misreport) them.
+                # Read e164 first: rollback expires the row, and reading an
+                # expired attribute on an async session raises.
+                e164 = number.e164
                 await db.rollback()
                 raise HTTPException(
                     status_code=http_status.HTTP_502_BAD_GATEWAY,
-                    detail=f"could not unregister {number.e164} (stage: {exc.stage})",
+                    detail=f"could not unregister {e164} (stage: {exc.stage})",
                 ) from exc
             number.voice_agent_id = None
         if number.sms_agent_id == agent.id:

@@ -237,12 +237,17 @@ async def release_org_number(
             number.inbound_registered_at = None
     number.voice_agent_id = None
     number.sms_agent_id = None
-    # Commit the unregister now. If the carrier release fails below, the row
-    # must not still say the number is registered.
-    await db.commit()
     try:
         await carrier(number.provider).release(number.provider_resource_id)
-    except CarrierNotConfigured as exc:
+    except Exception as exc:
+        # Keep the unregister: the row must not still say the number is
+        # registered. Committed here, not before the carrier call, so the org
+        # lock is held until the release is done (a commit drops the lock and
+        # lets enable_sms or PATCH /numbers/{id} run against a number that is
+        # being deleted at the carrier).
+        await db.commit()
+        if not isinstance(exc, CarrierNotConfigured):
+            raise
         # Carrier not configured: an operator problem, not a server fault.
         # The customer reads this: never the carrier's name or an env var.
         logger.error("%s release failed: %s", number.provider, exc)
