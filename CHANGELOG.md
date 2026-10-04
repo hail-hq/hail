@@ -21,7 +21,8 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
   and the carrier pages.
 - **Inbound texts answered by an agent.** A text worker in the voicebot
   service replies from the agent's instructions and the thread, through the
-  same LLM chain as calls; STOP/START/HELP stay Hail's.
+  same LLM chain as calls; STOP/HELP stay Hail's. YES/START/UNSTOP are an
+  opt-in only from a person who opted out; from anyone else the agent gets them.
 - **AI line templates.** Inbound default `Hi, this is an AI assistant
   answering on behalf of {org}.`; workspace default in
   `organization_call_settings.ai_disclosure_line`, per-agent override.

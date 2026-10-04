@@ -62,7 +62,9 @@ agent skips it; the responsibility for that is yours.
 ## What happens on an inbound text
 
 1. Hail stores the text and sends `sms.received` as before.
-2. `STOP`, `START` and `HELP` are answered by Hail and never reach the agent.
+2. `STOP`, `CANCEL`, `END`, `QUIT`, `UNSUBSCRIBE` and `HELP`/`INFO` are answered by Hail and never reach
+   the agent. `YES`, `START` and `UNSTOP` are an opt-in only from a person who opted out; Hail
+   turns texts back on and replies. From anyone else they are an answer, and the agent gets them.
 3. Any other text to a number with `sms_agent_id` set (agent `live`,
    `sms_enabled: true`) is answered by the agent: one reply, written from
    `system_prompt` and the last 20 messages of the thread (24 hours), sent

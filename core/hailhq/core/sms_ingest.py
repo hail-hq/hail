@@ -15,7 +15,11 @@ import logging
 from dataclasses import dataclass
 from uuid import UUID
 
-from hailhq.core.compliance_gate import add_suppression, remove_suppression
+from hailhq.core.compliance_gate import (
+    add_suppression,
+    is_suppressed,
+    remove_suppression,
+)
 from hailhq.core.config import settings
 from hailhq.core.models import PhoneNumber, Sms, SmsEvent
 from hailhq.core.providers.sms import ProviderSmsResult, SmsProvider
@@ -197,6 +201,13 @@ async def ingest_inbound_sms(
         return IngestResult(sms_id=existing.id if existing else None)
 
     action = _opt_out_action(body, opt_out_type)
+    # YES/START from someone who never opted out is an answer to the agent,
+    # not an opt-in: leave it to the text agent. Hail only handles it as an
+    # opt-in when the sender is currently opted out.
+    if action == "START" and not await is_suppressed(
+        db, organization_id, from_e164, "sms"
+    ):
+        action = None
     reply_body: str | None = None
     if action == "STOP":
         await add_suppression(
@@ -225,8 +236,8 @@ async def ingest_inbound_sms(
             db, provider, org_number=number, sender_e164=from_e164, body=reply_body
         )
 
-    # Hand a plain message to the number's text agent. Keyword traffic
-    # (STOP/START/HELP) is Hail's to answer, never the agent's.
+    # Hand a plain message to the number's text agent. STOP, HELP and an
+    # opt-in from an opted-out sender are Hail's to answer, never the agent's.
     if action is None and await should_queue_reply(db, number):
         sms.agent_reply_state = "pending"
 

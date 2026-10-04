@@ -65,6 +65,42 @@ async def test_stop_is_never_handed_to_the_agent(async_session) -> None:
     assert row.agent_reply_state is None
 
 
+async def test_yes_from_a_person_not_opted_out_goes_to_the_agent(
+    async_session,
+) -> None:
+    await _seed(async_session)
+    for sid, word, kind in (("SM_y1", "YES", None), ("SM_y2", "start", "START")):
+        result = await _ingest(async_session, word, sid, opt_out_type=kind)
+        row = await async_session.get(Sms, result.sms_id)
+        assert row.agent_reply_state == "pending", word
+
+
+async def test_yes_from_an_opted_out_person_opts_them_back_in(async_session) -> None:
+    from hailhq.core.compliance_gate import add_suppression, is_suppressed
+
+    org, _agent, _number = await _seed(async_session)
+    await add_suppression(
+        async_session,
+        organization_id=org,
+        recipient=PERSON,
+        channel="sms",
+        reason="prior stop",
+        source="stop_keyword",
+    )
+    await async_session.commit()
+    result = await _ingest(async_session, "YES", "SM_y3")
+    row = await async_session.get(Sms, result.sms_id)
+    assert row.agent_reply_state is None
+    assert not await is_suppressed(async_session, org, PERSON, "sms")
+
+
+async def test_help_is_never_handed_to_the_agent(async_session) -> None:
+    await _seed(async_session)
+    result = await _ingest(async_session, "HELP", "SM_h1")
+    row = await async_session.get(Sms, result.sms_id)
+    assert row.agent_reply_state is None
+
+
 async def test_unrouted_paused_or_sms_disabled_agent_is_not_queued(
     async_session,
 ) -> None:
