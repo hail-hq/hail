@@ -303,6 +303,10 @@ paths:
           description:
             A number could not be taken off the inbound trunk; nothing
             was deleted.
+        "503":
+          description:
+            A number is registered for inbound calls and this server is
+            not configured for them; nothing was deleted.
         "422":
           description: Validation Error
           content:
@@ -2040,8 +2044,8 @@ paths:
           description: The carrier or LiveKit refused to register the number for inbound.
         "503":
           description:
-            This server is not configured for inbound calls on the number's
-            carrier.
+            This server is not configured for inbound calls, or not on
+            the number's carrier.
     get:
       tags:
         - numbers

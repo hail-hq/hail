@@ -23,7 +23,7 @@ from hailhq.api.audit import actor_of, write_audit_log
 from hailhq.api.deps import Principal, get_current_principal
 from hailhq.api.errors import unprocessable
 from hailhq.api.ratelimit import GENERAL_RATE_LIMITED_RESPONSES
-from hailhq.api.routes.calls import get_livekit
+from hailhq.api.routes.calls import get_livekit_optional
 from hailhq.core import inbound_routing
 from hailhq.core.agent_tools.registry import all_tools
 from hailhq.core.db import get_session, org_lock
@@ -219,14 +219,17 @@ async def update_agent(
     responses={
         502: {
             "description": "A number could not be taken off the inbound trunk; nothing was deleted."
-        }
+        },
+        503: {
+            "description": "A number is registered for inbound calls and this server is not configured for them; nothing was deleted."
+        },
     },
 )
 async def delete_agent(
     agent_id: UUID,
     principal: Annotated[Principal, Depends(get_current_principal)],
     db: Annotated[AsyncSession, Depends(get_session)],
-    lk: Annotated[LiveKitClient, Depends(get_livekit)],
+    lk: Annotated[LiveKitClient | None, Depends(get_livekit_optional)],
 ) -> Response:
     """Delete an agent. Numbers that routed calls to it are unregistered
     for inbound and ring out again; numbers that routed texts to it go back
@@ -255,19 +258,27 @@ async def delete_agent(
         if number is None:
             break
         if number.voice_agent_id == agent.id:
-            try:
-                await inbound_routing.unregister(db, lk, number)
-            except inbound_routing.InboundRoutingError as exc:
-                # Numbers handled before this one are already committed as
-                # unregistered, so a retry does not redo (or misreport) them.
-                # Read e164 first: rollback expires the row, and reading an
-                # expired attribute on an async session raises.
-                e164 = number.e164
-                await db.rollback()
-                raise HTTPException(
-                    status_code=http_status.HTTP_502_BAD_GATEWAY,
-                    detail=f"could not unregister {e164} (stage: {exc.stage})",
-                ) from exc
+            # LiveKit is only touched for a number registered for inbound
+            # calls: a server without LiveKit settings still deletes agents.
+            if number.inbound_registered_at is not None:
+                if lk is None:
+                    raise HTTPException(
+                        status_code=http_status.HTTP_503_SERVICE_UNAVAILABLE,
+                        detail="inbound calls are not configured on this server",
+                    )
+                try:
+                    await inbound_routing.unregister(db, lk, number)
+                except inbound_routing.InboundRoutingError as exc:
+                    # Numbers handled before this one are already committed as
+                    # unregistered, so a retry does not redo (or misreport) them.
+                    # Read e164 first: rollback expires the row, and reading an
+                    # expired attribute on an async session raises.
+                    e164 = number.e164
+                    await db.rollback()
+                    raise HTTPException(
+                        status_code=http_status.HTTP_502_BAD_GATEWAY,
+                        detail=f"could not unregister {e164} (stage: {exc.stage})",
+                    ) from exc
             number.voice_agent_id = None
         if number.sms_agent_id == agent.id:
             number.sms_agent_id = None

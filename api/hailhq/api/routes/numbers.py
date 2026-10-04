@@ -36,7 +36,7 @@ from hailhq.api.number_orders import (
 from hailhq.api.pagination import fetch_cursor_page
 from hailhq.api.ratelimit import GENERAL_RATE_LIMITED_RESPONSES
 from hailhq.api.route_prefixes import request_mount_prefix
-from hailhq.api.routes.calls import get_livekit, get_livekit_optional
+from hailhq.api.routes.calls import get_livekit_optional
 from hailhq.core import inbound_routing, telephony_catalog
 from hailhq.core.carrier_routing import CARRIERS, carrier, sms_route
 from hailhq.core.db import get_session, org_lock
@@ -326,7 +326,7 @@ _ROUTING_RESPONSES: dict = {
         "description": "The carrier or LiveKit refused to register the number for inbound."
     },
     503: {
-        "description": "This server is not configured for inbound calls on the number's carrier."
+        "description": "This server is not configured for inbound calls, or not on the number's carrier."
     },
 }
 
@@ -372,7 +372,7 @@ async def route_number(
     body: PhoneNumberRoutingUpdate,
     principal: Annotated[Principal, Depends(get_current_principal)],
     db: Annotated[AsyncSession, Depends(get_session)],
-    lk: Annotated[LiveKitClient, Depends(get_livekit)],
+    lk: Annotated[LiveKitClient | None, Depends(get_livekit_optional)],
 ) -> PhoneNumberResponse:
     """Choose which agent answers this number.
 
@@ -404,10 +404,22 @@ async def route_number(
 
     try:
         if "voice_agent_id" in fields:
-            if body.voice_agent_id is None:
-                await inbound_routing.unregister(db, lk, number)
-            else:
-                await inbound_routing.register(db, lk, number)
+            # LiveKit is only touched to register a number or to unregister a
+            # registered one: a server without LiveKit settings still routes
+            # texts and clears the agent off an unregistered number.
+            if (
+                body.voice_agent_id is not None
+                or number.inbound_registered_at is not None
+            ):
+                if lk is None:
+                    raise HTTPException(
+                        status_code=http_status.HTTP_503_SERVICE_UNAVAILABLE,
+                        detail="inbound calls are not configured on this server",
+                    )
+                if body.voice_agent_id is None:
+                    await inbound_routing.unregister(db, lk, number)
+                else:
+                    await inbound_routing.register(db, lk, number)
             number.voice_agent_id = body.voice_agent_id
         if "sms_agent_id" in fields:
             number.sms_agent_id = body.sms_agent_id

@@ -58,6 +58,20 @@ async def _seed_number(
     return pn
 
 
+def _remove_livekit_settings(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Make ``get_livekit_optional`` return None, as on a server with no
+    LiveKit settings."""
+    from hailhq.api.main import app
+    from hailhq.api.routes import calls as calls_routes
+
+    app.dependency_overrides.pop(calls_routes.get_livekit_optional, None)
+    monkeypatch.setattr(calls_routes, "_livekit_singleton", None)
+    for name in ("livekit_url", "livekit_api_key", "livekit_api_secret"):
+        monkeypatch.setattr(settings, name, "")
+    for name in ("LIVEKIT_URL", "LIVEKIT_API_KEY", "LIVEKIT_API_SECRET"):
+        monkeypatch.delenv(name, raising=False)
+
+
 async def _create_agent(client: httpx.AsyncClient, headers, name="Front desk") -> dict:
     r = await client.post(
         "/agents",
@@ -320,21 +334,63 @@ async def test_release_works_without_livekit_settings(
 ) -> None:
     """A server with no LiveKit settings still releases numbers: LiveKit is
     only touched for a number that was registered for inbound calls."""
-    from hailhq.api.main import app
-    from hailhq.api.routes import calls as calls_routes
-
-    app.dependency_overrides.pop(calls_routes.get_livekit_optional, None)
-    monkeypatch.setattr(calls_routes, "_livekit_singleton", None)
-    for name in ("livekit_url", "livekit_api_key", "livekit_api_secret"):
-        monkeypatch.setattr(settings, name, "")
-    for name in ("LIVEKIT_URL", "LIVEKIT_API_KEY", "LIVEKIT_API_SECRET"):
-        monkeypatch.delenv(name, raising=False)
+    _remove_livekit_settings(monkeypatch)
 
     org_id, headers = org
     number = await _seed_number(async_session, org_id)
     r = await client.delete(f"/numbers/{number.id}", headers=headers)
     assert r.status_code == 204, r.text
     voice_provider_mock.release_number.assert_awaited_once_with("PN_test")
+
+
+async def test_text_routing_and_agent_delete_work_without_livekit_settings(
+    client: httpx.AsyncClient,
+    org,
+    async_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A server with no LiveKit settings still routes texts and deletes an
+    agent: LiveKit is only touched to change call routing."""
+    _remove_livekit_settings(monkeypatch)
+
+    org_id, headers = org
+    agent = await _create_agent(client, headers)
+    number = await _seed_number(async_session, org_id)
+    number_id = number.id
+    r = await client.patch(
+        f"/numbers/{number_id}", json={"sms_agent_id": agent["id"]}, headers=headers
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["sms_agent_id"] == agent["id"]
+    # Clearing the call agent off a number that is not registered is a no-op.
+    r = await client.patch(
+        f"/numbers/{number_id}", json={"voice_agent_id": None}, headers=headers
+    )
+    assert r.status_code == 200, r.text
+
+    r = await client.delete(f"/agents/{agent['id']}", headers=headers)
+    assert r.status_code == 204, r.text
+    async_session.expire_all()
+    row = await async_session.get(PhoneNumber, number_id)
+    assert row.sms_agent_id is None
+
+
+async def test_call_routing_without_livekit_settings_is_503(
+    client: httpx.AsyncClient,
+    org,
+    async_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _remove_livekit_settings(monkeypatch)
+
+    org_id, headers = org
+    agent = await _create_agent(client, headers)
+    number = await _seed_number(async_session, org_id)
+    r = await client.patch(
+        f"/numbers/{number.id}", json={"voice_agent_id": agent["id"]}, headers=headers
+    )
+    assert r.status_code == 503, r.text
+    assert r.json()["detail"] == "inbound calls are not configured on this server"
 
 
 async def test_routing_503_does_not_name_the_carrier_or_an_env_var(
