@@ -115,6 +115,7 @@ type agentFlags struct {
 	maxMinutes   int
 	tools        []string
 	noSms        bool
+	noCalls      bool
 	status       string
 	name         string
 }
@@ -130,6 +131,7 @@ func (f *agentFlags) bind(cmd *cobra.Command) {
 	cmd.Flags().IntVar(&f.maxMinutes, "max-minutes", 0, "Soft cap per call, 1..60 minutes (0 = workspace limit)")
 	cmd.Flags().StringSliceVar(&f.tools, "tools", nil, "Allowed tools, comma-separated ('' = none; omitted = all; on update, --all-tools resets to all)")
 	cmd.Flags().BoolVar(&f.noSms, "no-sms", false, "Do not answer texts")
+	cmd.Flags().BoolVar(&f.noCalls, "no-calls", false, "Do not answer calls")
 	cmd.Flags().StringVar(&f.status, "status", "", "live or paused")
 }
 
@@ -194,6 +196,9 @@ func (f *agentFlags) body(cmd *cobra.Command, create bool, voice map[string]any)
 	}
 	if changed("no-sms") {
 		b["sms_enabled"] = !f.noSms
+	}
+	if changed("no-calls") {
+		b["voice_enabled"] = !f.noCalls
 	}
 	if changed("status") && f.status != "" {
 		b["status"] = f.status
@@ -479,6 +484,7 @@ func printAgent(opts *Options, a *client.AgentResponse, banner bool) error {
 	} else {
 		fmt.Fprintf(opts.Stdout, "  First message: (waits for the other side)\n")
 	}
+	fmt.Fprintf(opts.Stdout, "  Calls:         %s\n", yesNo(a.VoiceEnabled))
 	fmt.Fprintf(opts.Stdout, "  Texts:         %s\n", yesNo(a.SmsEnabled))
 	if a.MaxDurationSeconds != nil {
 		fmt.Fprintf(opts.Stdout, "  Max length:    %d min\n", *a.MaxDurationSeconds/60)

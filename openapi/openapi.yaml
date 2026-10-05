@@ -4452,6 +4452,11 @@ components:
           description:
             "Soft cap per call in seconds (60..3600). Omitted: the workspace
             limit."
+        voice_enabled:
+          type: boolean
+          title: Voice Enabled
+          description: Answer calls on numbers that route calls to this agent.
+          default: true
         sms_enabled:
           type: boolean
           title: Sms Enabled
@@ -4545,6 +4550,10 @@ components:
             - type: "null"
           title: Max Duration Seconds
           description: Soft cap per call; null means the workspace limit.
+        voice_enabled:
+          type: boolean
+          title: Voice Enabled
+          description: Whether the agent answers calls.
         sms_enabled:
           type: boolean
           title: Sms Enabled
@@ -4578,6 +4587,7 @@ components:
         - voice_config
         - tools
         - max_duration_seconds
+        - voice_enabled
         - sms_enabled
         - status
         - created_at
@@ -4643,6 +4653,12 @@ components:
             - type: "null"
           title: Max Duration Seconds
           description: New soft cap per call; null returns to the workspace limit.
+        voice_enabled:
+          anyOf:
+            - type: boolean
+            - type: "null"
+          title: Voice Enabled
+          description: Whether the agent answers calls.
         sms_enabled:
           anyOf:
             - type: boolean

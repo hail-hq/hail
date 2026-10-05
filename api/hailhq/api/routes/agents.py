@@ -104,6 +104,7 @@ async def create_agent(
         voice_config=body.voice_config.model_dump(mode="json"),
         tools=body.tools,
         max_duration_seconds=body.max_duration_seconds,
+        voice_enabled=body.voice_enabled,
         sms_enabled=body.sms_enabled,
         status=body.status,
     )
@@ -179,6 +180,7 @@ async def update_agent(
         "system_prompt",
         "ai_disclosure",
         "voice_config",
+        "voice_enabled",
         "sms_enabled",
         "status",
     ):

@@ -1398,6 +1398,9 @@ type AgentCreate struct {
 	// Tools Agent tools to allow. Omitted: every tool the organization's channels support. Empty list: none.
 	Tools       *[]string    `json:"tools,omitempty"`
 	VoiceConfig *VoiceConfig `json:"voice_config,omitempty"`
+
+	// VoiceEnabled Answer calls on numbers that route calls to this agent.
+	VoiceEnabled *bool `json:"voice_enabled,omitempty"`
 }
 
 // AgentCreateStatus 'paused' agents do not answer; calls to their numbers fail with end_reason 'no_agent'.
@@ -1452,6 +1455,9 @@ type AgentResponse struct {
 
 	// VoiceConfig TTS voice and language settings.
 	VoiceConfig map[string]interface{} `json:"voice_config"`
+
+	// VoiceEnabled Whether the agent answers calls.
+	VoiceEnabled bool `json:"voice_enabled"`
 }
 
 // AgentResponseStatus 'live' or 'paused'.
@@ -1490,6 +1496,9 @@ type AgentUpdate struct {
 
 	// VoiceConfig New TTS voice and language settings.
 	VoiceConfig *VoiceConfig `json:"voice_config,omitempty"`
+
+	// VoiceEnabled Whether the agent answers calls.
+	VoiceEnabled *bool `json:"voice_enabled,omitempty"`
 }
 
 // AgentUpdateStatus 'live' or 'paused'.

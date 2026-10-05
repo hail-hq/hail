@@ -408,3 +408,27 @@ async def test_routing_503_does_not_name_the_carrier_or_an_env_var(
     detail = r.json()["detail"].lower()
     assert "twilio" not in detail
     assert "livekit_" not in detail
+
+
+async def test_route_requires_an_agent_that_answers_that_channel(
+    client, org, async_session, inbound_hooks
+) -> None:
+    org_id, headers = org
+    r = await client.post(
+        "/agents",
+        json={"name": "Texts only", "system_prompt": "x", "voice_enabled": False},
+        headers=headers,
+    )
+    assert r.status_code == 201, r.text
+    agent = r.json()
+    assert agent["voice_enabled"] is False
+    number = await _seed_number(async_session, org_id)
+    r = await client.patch(
+        f"/numbers/{number.id}", json={"voice_agent_id": agent["id"]}, headers=headers
+    )
+    assert r.status_code == 422
+    assert "does not answer calls" in r.text
+    r = await client.patch(
+        f"/numbers/{number.id}", json={"sms_agent_id": agent["id"]}, headers=headers
+    )
+    assert r.status_code == 200, r.text
