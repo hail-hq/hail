@@ -30,12 +30,14 @@ export async function generateMetadata({
   const [a, b] = entry.models;
   const names = `${a.display_name} vs ${b.display_name}`;
   // Long names can include a provider suffix already shown in the comparison.
-  const titleNames =
+  const shortNames =
     names.length <= 50
       ? names
       : [a, b]
           .map((model) => model.display_name.replace(/\s+\([^)]*\)$/, ""))
           .join(" vs ");
+  const titleNames =
+    shortNames.length <= 50 ? shortNames : `${shortNames.slice(0, 49)}…`;
   return pageMetadata({
     title: `${titleNames} | hail.so`,
     description: `Compare pricing and capabilities for ${a.display_name} and ${b.display_name}. View current model costs side by side.`,

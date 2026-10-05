@@ -4,7 +4,7 @@ export function pageMetadata({
   description,
   path,
   image,
-  origin = "https://hail.so",
+  origin = process.env.NEXT_PUBLIC_SITE_ORIGIN || "https://hail.so",
 }: {
   title: string;
   description: string;
