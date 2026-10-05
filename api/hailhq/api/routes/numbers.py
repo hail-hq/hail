@@ -544,7 +544,7 @@ async def list_numbers(
     responses={
         404: {"description": "The number does not exist for this organization."},
         502: {
-            "description": "The carrier refused to enable SMS on this number; the detail gives its reason."
+            "description": "SMS could not be enabled on this number; the reason is in the server log."
         },
         503: {
             "description": "SMS is not configured for this number's carrier on this server."
@@ -639,9 +639,12 @@ async def enable_sms(
             number.provider_resource_id,
             exc.detail,
         )
+        # The customer reads this: never the carrier's name or its reason
+        # (those are in the log above for the operator).
         raise HTTPException(
             status_code=http_status.HTTP_502_BAD_GATEWAY,
-            detail=f"The carrier could not enable SMS on this number: {exc.detail}",
+            detail="SMS could not be enabled on this number right now. "
+            "Try again later or contact support.",
         ) from exc
 
     # Stored for future send routing: this provisions and records the org's

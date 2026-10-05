@@ -2171,8 +2171,8 @@ paths:
           description: The number does not exist for this organization.
         "502":
           description:
-            The carrier refused to enable SMS on this number; the detail
-            gives its reason.
+            SMS could not be enabled on this number; the reason is in the
+            server log.
         "503":
           description: SMS is not configured for this number's carrier on this server.
         "422":
