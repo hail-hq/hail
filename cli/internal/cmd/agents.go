@@ -128,7 +128,7 @@ func (f *agentFlags) bind(cmd *cobra.Command) {
 	cmd.Flags().StringVar(&f.voiceID, "voice", "", "TTS voice id")
 	cmd.Flags().StringVar(&f.language, "language", "", "Spoken language, ISO 639-1 (e.g. fr)")
 	cmd.Flags().IntVar(&f.maxMinutes, "max-minutes", 0, "Soft cap per call, 1..60 minutes (0 = workspace limit)")
-	cmd.Flags().StringSliceVar(&f.tools, "tools", nil, "Allowed tools, comma-separated ('' = none; omitted = all)")
+	cmd.Flags().StringSliceVar(&f.tools, "tools", nil, "Allowed tools, comma-separated ('' = none; omitted = all; on update, --all-tools resets to all)")
 	cmd.Flags().BoolVar(&f.noSms, "no-sms", false, "Do not answer texts")
 	cmd.Flags().StringVar(&f.status, "status", "", "live or paused")
 }
@@ -295,6 +295,7 @@ Example:
 
 func newAgentsUpdateCmd(opts *Options) *cobra.Command {
 	f := &agentFlags{}
+	var allTools bool
 	cmd := &cobra.Command{
 		Use:   "update <id>",
 		Short: "Change an agent (only the flags you pass change)",
@@ -318,6 +319,9 @@ func newAgentsUpdateCmd(opts *Options) *cobra.Command {
 			if err != nil {
 				return err
 			}
+			if allTools {
+				body["tools"] = nil // null: every tool the channels support
+			}
 			if len(body) == 0 {
 				return fmt.Errorf("nothing to change: pass at least one flag")
 			}
@@ -336,6 +340,8 @@ func newAgentsUpdateCmd(opts *Options) *cobra.Command {
 	}
 	f.bind(cmd)
 	cmd.Flags().StringVar(&f.name, "name", "", "New display name")
+	cmd.Flags().BoolVar(&allTools, "all-tools", false, "Allow every tool again (clears --tools)")
+	cmd.MarkFlagsMutuallyExclusive("tools", "all-tools")
 	return cmd
 }
 

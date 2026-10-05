@@ -166,3 +166,31 @@ func TestAgentsUpdate_EmptyToolsMeansNone(t *testing.T) {
 		t.Errorf("tools must be an empty list, not null: %s", srv.lastBody)
 	}
 }
+
+func TestAgentsUpdate_AllToolsSendsNull(t *testing.T) {
+	srv := newFakeServer(t, http.StatusOK, sampleAgent())
+	_, _, err := runRoot(t,
+		map[string]string{"HAIL_API_KEY": "sk_test", "HAIL_API_URL": srv.URL},
+		"agents", "update", "33333333-3333-3333-3333-333333333333", "--all-tools",
+	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	var body map[string]any
+	_ = json.Unmarshal(srv.lastBody, &body)
+	v, present := body["tools"]
+	if !present || v != nil {
+		t.Errorf("tools must be sent as null: %s", srv.lastBody)
+	}
+}
+
+func TestAgentsUpdate_AllToolsConflictsWithTools(t *testing.T) {
+	srv := newFakeServer(t, http.StatusOK, sampleAgent())
+	_, _, err := runRoot(t,
+		map[string]string{"HAIL_API_KEY": "sk_test", "HAIL_API_URL": srv.URL},
+		"agents", "update", "33333333-3333-3333-3333-333333333333", "--all-tools", "--tools", "end_call",
+	)
+	if err == nil {
+		t.Fatal("--all-tools with --tools must fail")
+	}
+}
