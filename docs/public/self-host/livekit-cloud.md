@@ -49,27 +49,32 @@ For the full flow, refer to [Architecture](../architecture.md).
 ## 4. Inbound calls
 
 Hail answers calls on a number once the number routes calls to an agent
-([Agents](../agents.md)). LiveKit needs one **inbound trunk per carrier**
-and **one dispatch rule**. Hail adds and removes numbers on the trunks
-itself; create them empty.
+([Agents](../agents.md)). LiveKit needs **one inbound trunk** and **one
+dispatch rule**. Hail adds and removes numbers on the trunk itself.
 
-1. Inbound trunks. One per carrier you use, with an empty `numbers` list.
-   Without `numbers`, LiveKit needs either `auth_username`/`auth_password`
-   or `allowed_addresses`; the carrier pages say which:
-   [Twilio](./twilio.md#6-inbound-calls), [Telnyx](./telnyx.md#inbound-calls),
-   [DIDWW](./didww.md#inbound-calls).
+1. Inbound trunk. One trunk for every carrier: LiveKit allows a single
+   wildcard (empty `numbers`) inbound trunk per project. Without `numbers`,
+   LiveKit needs `allowed_addresses` (or `auth_username`/`auth_password`,
+   which Twilio Elastic SIP does not send). The carrier pages say what each
+   carrier sends: [Twilio](./twilio.md#6-inbound-calls),
+   [Telnyx](./telnyx.md#inbound-calls), [DIDWW](./didww.md#inbound-calls).
 
    ```bash
-   cat > inbound-twilio.json <<'JSON'
-   {"trunk": {"name": "hail-twilio-in", "numbers": []}}
+   cat > inbound.json <<'JSON'
+   {"trunk": {"name": "hail-inbound", "numbers": [], "allowed_addresses": ["0.0.0.0/0"]}}
    JSON
-   lk sip inbound create inbound-twilio.json
-   # → ST_...  → LIVEKIT_TWILIO_SIP_INBOUND_TRUNK_ID
-   # Repeat for Telnyx (LIVEKIT_TELNYX_SIP_INBOUND_TRUNK_ID) and
-   # DIDWW (LIVEKIT_DIDWW_SIP_INBOUND_TRUNK_ID).
+   lk sip inbound create inbound.json
+   # → ST_...  Put the same id in LIVEKIT_TWILIO_SIP_INBOUND_TRUNK_ID,
+   # LIVEKIT_TELNYX_SIP_INBOUND_TRUNK_ID and LIVEKIT_DIDWW_SIP_INBOUND_TRUNK_ID.
    ```
 
-2. Dispatch rule. One rule, bound to every inbound trunk, that puts each
+   Hail reads the dialed number from the call and finds its carrier in
+   `phone_numbers`; the trunk does not need to know it. To lock each carrier
+   to its own trunk instead, create one trunk per carrier with that
+   carrier's signaling IPs in `allowed_addresses` and set each variable to
+   its own id. Narrow `0.0.0.0/0` to the carriers' IP ranges when you can.
+
+2. Dispatch rule. One rule, bound to the inbound trunk, that puts each
    caller in its own room and dispatches the voicebot with the static
    metadata it expects:
 
@@ -78,7 +83,7 @@ itself; create them empty.
    {
      "dispatch_rule": {
        "name": "hail-inbound",
-       "trunk_ids": ["<twilio-trunk-id>", "<telnyx-trunk-id>", "<didww-trunk-id>"],
+       "trunk_ids": ["<inbound-trunk-id>"],
        "rule": {"dispatchRuleIndividual": {"roomPrefix": "hail-in-"}},
        "roomConfig": {
          "agents": [{"agentName": "hail-voicebot", "metadata": "{\"direction\":\"inbound\"}"}]
@@ -92,7 +97,7 @@ itself; create them empty.
    Room names include the caller's number (LiveKit's individual rule);
    `calls.from_e164` records it anyway.
 
-3. Set the trunk ids in `.env` and recreate `api` and `voicebot`. Then
+3. Set the trunk id in `.env` and recreate `api` and `voicebot`. Then
    `PATCH /v1/numbers/{id}` with `voice_agent_id` registers a number
    ([Agents](../agents.md#routing-rules)).
 

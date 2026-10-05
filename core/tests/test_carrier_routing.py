@@ -79,21 +79,6 @@ def test_missing_inbound_trunk_is_an_error(monkeypatch: pytest.MonkeyPatch) -> N
         carrier_routing.inbound_trunk("twilio")
 
 
-def test_carrier_for_inbound_trunk(
-    inbound_trunks: None, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    assert carrier_routing.carrier_for_inbound_trunk("ST_in_tw") == "twilio"
-    assert carrier_routing.carrier_for_inbound_trunk("ST_in_tx") == "telnyx"
-    assert carrier_routing.carrier_for_inbound_trunk("ST_in_dw") == "didww"
-    with pytest.raises(ValueError, match="No carrier"):
-        carrier_routing.carrier_for_inbound_trunk("ST_other")
-    with pytest.raises(ValueError, match="No carrier"):
-        carrier_routing.carrier_for_inbound_trunk("")
-    # An unconfigured carrier is skipped, not a crash.
-    monkeypatch.setattr(settings, "livekit_didww_sip_inbound_trunk_id", "")
-    assert carrier_routing.carrier_for_inbound_trunk("ST_in_tx") == "telnyx"
-
-
 def test_every_carrier_has_inbound_hooks() -> None:
     for entry in carrier_routing.CARRIERS.values():
         assert callable(entry.inbound_trunk)

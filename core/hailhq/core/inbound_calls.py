@@ -27,7 +27,7 @@ from uuid import UUID
 
 from hailhq.core.billing import CALL_META_BILLED, has_funds
 from hailhq.core.call_end_reasons import CallEndReason
-from hailhq.core.carrier_routing import carrier_for_inbound_trunk
+from hailhq.core.carrier_routing import inbound_trunk
 from hailhq.core.compliance_gate import check_channel_suspended
 from hailhq.core.config import settings
 from hailhq.core.internal_webhook import fetch_organization_name
@@ -135,16 +135,24 @@ async def open_inbound_call(
     if number is None or number.organization_id is None:
         logger.info("inbound call to unknown/pool number %s dropped", attrs.dialed)
         return Rejected("unknown_number")
+    # The INVITE must arrive on the LiveKit inbound trunk configured for the
+    # number's carrier. Carriers may share one trunk (one wildcard inbound
+    # trunk is all LiveKit allows) or have one each; both pass this check.
     try:
-        trunk_carrier = carrier_for_inbound_trunk(attrs.trunk_id)
+        expected_trunk = inbound_trunk(number.provider)
     except ValueError:
-        trunk_carrier = None
-    if trunk_carrier != number.provider or "voice" not in number.capabilities:
+        expected_trunk = None
+    if (
+        not attrs.trunk_id
+        or attrs.trunk_id != expected_trunk
+        or "voice" not in number.capabilities
+    ):
         logger.info(
-            "inbound call to %s dropped: trunk carrier=%s number carrier=%s "
+            "inbound call to %s dropped: trunk=%s expected=%s carrier=%s "
             "capabilities=%s",
             attrs.dialed,
-            trunk_carrier,
+            attrs.trunk_id,
+            expected_trunk,
             number.provider,
             number.capabilities,
         )

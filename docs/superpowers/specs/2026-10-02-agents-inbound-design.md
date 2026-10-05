@@ -124,8 +124,10 @@ stamps `inbound_registered_at`. `unregister` does the reverse. A failure
 leaves the number unregistered and returns 502 to the caller with the stage
 name, like call setup.
 
-`carrier_for_inbound_trunk(trunk_id)` maps a LiveKit trunk id back to the
-carrier so an INVITE on the Telnyx trunk for a Twilio number is dropped.
+A call is accepted only when its `sip.trunkID` equals the inbound trunk
+configured for the number's carrier. LiveKit allows one wildcard inbound
+trunk per project, so the three settings normally hold the same trunk id;
+separate trunks (with per-carrier `allowed_addresses`) also work.
 
 ## API
 

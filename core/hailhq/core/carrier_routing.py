@@ -211,20 +211,3 @@ def sms_status_path(provider: str) -> str:
 
 def inbound_trunk(provider: str) -> str:
     return carrier(provider).inbound_trunk()
-
-
-def carrier_for_inbound_trunk(trunk_id: str) -> str:
-    """The carrier whose LiveKit inbound trunk is ``trunk_id``.
-
-    An INVITE that arrives on the Telnyx trunk for a Twilio number is a
-    misroute (or a spoof); the caller drops it.
-    """
-    if trunk_id:
-        for name, entry in CARRIERS.items():
-            try:
-                configured = entry.inbound_trunk()
-            except ValueError:
-                continue
-            if configured == trunk_id:
-                return name
-    raise ValueError(f"No carrier owns LiveKit inbound trunk {trunk_id!r}")

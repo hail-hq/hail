@@ -148,6 +148,25 @@ async def test_wrong_trunk_for_the_carrier_is_dropped(async_session) -> None:
     assert (await async_session.execute(select(Call))).first() is None
 
 
+async def test_shared_trunk_serves_every_carrier(async_session, monkeypatch) -> None:
+    """One LiveKit inbound trunk for all carriers (what LiveKit allows for a
+    wildcard trunk): a DIDWW number on the shared trunk is answered."""
+    monkeypatch.setattr(settings, "livekit_twilio_sip_inbound_trunk_id", "ST_shared")
+    monkeypatch.setattr(settings, "livekit_didww_sip_inbound_trunk_id", "ST_shared")
+    await _seed(async_session, provider="didww", e164="+351300509184")
+    outcome = await inbound_calls.open_inbound_call(
+        async_session, _attrs(dialed="+351300509184", trunk_id="ST_shared")
+    )
+    assert isinstance(outcome, inbound_calls.Accepted)
+
+
+async def test_missing_trunk_id_is_dropped(async_session) -> None:
+    await _seed(async_session)
+    outcome = await inbound_calls.open_inbound_call(async_session, _attrs(trunk_id=""))
+    assert isinstance(outcome, inbound_calls.Rejected)
+    assert outcome.reason == "wrong_carrier"
+
+
 async def test_no_agent_writes_a_failed_call(async_session) -> None:
     _org, _agent, _number = await _seed(async_session, agent=False)
     outcome = await inbound_calls.open_inbound_call(async_session, _attrs())
