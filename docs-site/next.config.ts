@@ -1,3 +1,4 @@
+import { resolve } from "node:path";
 import { createMDX } from "fumadocs-mdx/next";
 import type { NextConfig } from "next";
 
@@ -80,6 +81,10 @@ const RENAMED_OPERATION_IDS: Record<string, string> = {
 };
 
 const nextConfig: NextConfig = {
+  // Keep both the app and shared metadata inside the monorepo build root.
+  // Nested worktrees must not inherit another repository's middleware.
+  turbopack: { root: resolve(__dirname, "..") },
+  outputFileTracingRoot: resolve(__dirname, ".."),
   reactStrictMode: true,
   // Served at hail.so/docs via a cross-zone rewrite from the marketing app.
   // basePath keeps this app's /_next/* assets namespaced so they can't collide

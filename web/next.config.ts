@@ -1,3 +1,4 @@
+import { resolve } from "node:path";
 import type { NextConfig } from "next";
 
 // No canonical-host redirect here. hail-website rewrites /costs/* to this
@@ -11,6 +12,10 @@ import type { NextConfig } from "next";
 // the generated default did not.
 
 const nextConfig: NextConfig = {
+  // Keep both the app and shared metadata inside the monorepo build root.
+  // Nested worktrees must not inherit another repository's middleware.
+  turbopack: { root: resolve(__dirname, "..") },
+  outputFileTracingRoot: resolve(__dirname, ".."),
   reactStrictMode: true,
   typedRoutes: true,
   basePath: "/costs",

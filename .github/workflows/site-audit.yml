@@ -1,0 +1,53 @@
+name: site-audit
+
+on:
+  pull_request:
+    paths:
+      - "docs-site/**"
+      - "docs/public/**"
+      - "web/**"
+      - "costs/**"
+      - "shared/**"
+      - "scripts/site-audit.test.mjs"
+      - "openapi/openapi.yaml"
+      - "package.json"
+      - "pnpm-lock.yaml"
+      - ".github/workflows/site-audit.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  rendered-metadata:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22.18.0"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm docs:check-urls
+      - run: pnpm test:site-audit
+      - run: pnpm docs:build
+      - run: pnpm site:build
+      - name: Check rendered sitemap pages
+        env:
+          DOCS_TEST_ORIGIN: http://localhost:4196
+          COSTS_TEST_ORIGIN: http://localhost:4197
+        run: |
+          pnpm --dir docs-site exec next start --port 4196 > /tmp/docs-server.log 2>&1 &
+          pnpm --dir web exec next start --port 4197 > /tmp/costs-server.log 2>&1 &
+          for port in 4196 4197; do
+            ready=0
+            for attempt in $(seq 1 30); do
+              if curl --silent --output /dev/null "http://localhost:$port"; then
+                ready=1
+                break
+              fi
+              sleep 1
+            done
+            test "$ready" = 1
+          done
+          pnpm test:site-audit
