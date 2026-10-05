@@ -123,7 +123,7 @@ it routes calls to an agent; you set up the connection once.
 2. Add an FQDN: `<project>.sip.livekit.cloud` (port 5060, no username).
 3. Create the LiveKit inbound trunk and dispatch rule
    ([LiveKit Cloud §4](./livekit-cloud.md#4-inbound-calls)) and set
-   `LIVEKIT_TELNYX_SIP_INBOUND_TRUNK_ID`.
+   `LIVEKIT_SIP_INBOUND_TRUNK_ID`.
 
 `PATCH /v1/numbers/{id}` with `voice_agent_id` then sets
 `connection_id` on the number (`PATCH /v2/phone_numbers/{id}/voice`) and

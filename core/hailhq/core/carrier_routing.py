@@ -61,16 +61,27 @@ def _didww_voice() -> VoiceRoute:
     return _trunk(DIDWW, "livekit_didww_sip_outbound_trunk_id"), {}
 
 
+def _inbound(provider: str, setting: str) -> str:
+    """The inbound trunk for ``provider``: its override, else the shared
+    ``LIVEKIT_SIP_INBOUND_TRUNK_ID`` (config.py folds the two together)."""
+    trunk_id = getattr(settings, setting)
+    if not trunk_id:
+        raise ValueError(
+            f"{provider} inbound is not configured (LIVEKIT_SIP_INBOUND_TRUNK_ID)"
+        )
+    return trunk_id
+
+
 def _twilio_inbound() -> str:
-    return _trunk(TWILIO, "livekit_twilio_sip_inbound_trunk_id")
+    return _inbound(TWILIO, "livekit_twilio_sip_inbound_trunk_id")
 
 
 def _telnyx_inbound() -> str:
-    return _trunk(TELNYX, "livekit_telnyx_sip_inbound_trunk_id")
+    return _inbound(TELNYX, "livekit_telnyx_sip_inbound_trunk_id")
 
 
 def _didww_inbound() -> str:
-    return _trunk(DIDWW, "livekit_didww_sip_inbound_trunk_id")
+    return _inbound(DIDWW, "livekit_didww_sip_inbound_trunk_id")
 
 
 def _twilio_sms() -> SmsProvider:

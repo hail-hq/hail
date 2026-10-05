@@ -133,7 +133,7 @@ the DID when it routes calls to an agent; you create the trunk once.
    (**my.didww.com → API**).
 2. Create the LiveKit inbound trunk and dispatch rule
    ([LiveKit Cloud §4](./livekit-cloud.md#4-inbound-calls)) and set
-   `LIVEKIT_DIDWW_SIP_INBOUND_TRUNK_ID`.
+   `LIVEKIT_SIP_INBOUND_TRUNK_ID`.
 
 `PATCH /v1/numbers/{id}` with `voice_agent_id` then assigns the DID to the
 trunk (`PATCH /v3/dids/{id}`, relationship `voice_in_trunk`) and lists the

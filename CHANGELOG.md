@@ -24,13 +24,15 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
   same LLM chain as calls; STOP/HELP stay Hail's. YES/START/UNSTOP are an
   opt-in only from a person who opted out; from anyone else the agent gets them.
 - **AI line templates.** Inbound default `Hi, this is an AI assistant
-  answering on behalf of {org}.`; workspace default in
+answering on behalf of {org}.`; workspace default in
   `organization_call_settings.ai_disclosure_line`, per-agent override.
 - DIDWW numbers can be quoted and bought through `POST /numbers/quotes` and
   `POST /numbers`; end-user registration runs through `/verifications`
   (`provider=didww`). New settings `DIDWW_API_KEY`, `DIDWW_ENVIRONMENT`.
-- Env: `LIVEKIT_TELNYX_SIP_INBOUND_TRUNK_ID`, `LIVEKIT_DIDWW_SIP_INBOUND_TRUNK_ID`,
-  `TWILIO_SIP_TRUNK_SID`, `DIDWW_VOICE_IN_TRUNK_ID`. Migration `0050`.
+- Env: `LIVEKIT_SIP_INBOUND_TRUNK_ID` (one inbound trunk for every carrier;
+  `LIVEKIT_TWILIO_SIP_INBOUND_TRUNK_ID` and friends stay as optional
+  per-carrier overrides), `TWILIO_SIP_TRUNK_SID`, `DIDWW_VOICE_IN_TRUNK_ID`.
+  Migration `0050`.
 
 ### Changed
 

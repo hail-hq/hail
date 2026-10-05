@@ -145,22 +145,25 @@ class Settings(BaseSettings):
     livekit_url: str = ""
     livekit_api_key: str = ""
     livekit_api_secret: str = ""
-    # LiveKit SIP trunks are direction-specific and per carrier. Outbound is
-    # used by POST /calls (CreateSIPParticipantRequest.sip_trunk_id). Inbound
-    # trunks hold the numbers Hail registered for inbound calls
-    # (core/hailhq/core/inbound_routing.py); empty = that carrier's numbers
-    # cannot take calls. Canonical carrier-specific names; the legacy names
-    # stay supported as Twilio fallbacks (see the validator at the end).
+    # LiveKit outbound SIP trunks, one per carrier: POST /calls dials through
+    # the trunk of the number's carrier (core/hailhq/core/carrier_routing.py).
+    # The legacy LIVEKIT_SIP_OUTBOUND_TRUNK_ID stays a Twilio alias (see the
+    # validator at the end).
     livekit_twilio_sip_outbound_trunk_id: str = ""
-    livekit_twilio_sip_inbound_trunk_id: str = ""
     livekit_sip_outbound_trunk_id: str = ""
-    livekit_sip_inbound_trunk_id: str = ""
     livekit_telnyx_sip_outbound_trunk_id: str = ""
-    livekit_telnyx_sip_inbound_trunk_id: str = ""
-    # Second carrier. A number's ``provider`` picks the trunk
-    # (core/hailhq/core/carrier_routing.py). Empty = DIDWW numbers cannot dial
-    # and DIDWW offers are hidden.
+    # Empty = DIDWW numbers cannot dial and DIDWW offers are hidden.
     livekit_didww_sip_outbound_trunk_id: str = ""
+    # LiveKit inbound SIP trunk, ONE for every carrier: LiveKit allows a single
+    # wildcard inbound trunk per project, and Hail finds a call's carrier from
+    # the dialed number, not from the trunk. It holds the numbers Hail registers
+    # when a number routes calls to an agent (core/hailhq/core/inbound_routing.py).
+    # Empty = no number can take calls. The per-carrier names below are
+    # optional overrides for a project that runs one inbound trunk per carrier
+    # (each locked to that carrier's IPs); they are not in .env.example.
+    livekit_sip_inbound_trunk_id: str = ""
+    livekit_twilio_sip_inbound_trunk_id: str = ""
+    livekit_telnyx_sip_inbound_trunk_id: str = ""
     livekit_didww_sip_inbound_trunk_id: str = ""
 
     # Storage
@@ -321,16 +324,24 @@ class Settings(BaseSettings):
     )
 
     @model_validator(mode="after")
-    def _legacy_twilio_trunk_fallback(self) -> "Settings":
-        """The explicit Twilio name wins. A blank canonical value, such as the
-        empty line in .env.example, must not hide a populated legacy value."""
+    def _trunk_fallbacks(self) -> "Settings":
+        """Outbound: the explicit Twilio name wins over the legacy alias; a
+        blank explicit value must not hide a populated legacy one. Inbound:
+        a per-carrier override wins over the shared trunk; blank falls back
+        to the shared one."""
         self.livekit_twilio_sip_outbound_trunk_id = (
             self.livekit_twilio_sip_outbound_trunk_id
             or self.livekit_sip_outbound_trunk_id
         )
+        shared = self.livekit_sip_inbound_trunk_id
         self.livekit_twilio_sip_inbound_trunk_id = (
-            self.livekit_twilio_sip_inbound_trunk_id
-            or self.livekit_sip_inbound_trunk_id
+            self.livekit_twilio_sip_inbound_trunk_id or shared
+        )
+        self.livekit_telnyx_sip_inbound_trunk_id = (
+            self.livekit_telnyx_sip_inbound_trunk_id or shared
+        )
+        self.livekit_didww_sip_inbound_trunk_id = (
+            self.livekit_didww_sip_inbound_trunk_id or shared
         )
         return self
 

@@ -59,23 +59,21 @@ def test_didww_sells_no_sms_through_hail() -> None:
     assert carrier_routing.sms_status_path("telnyx") == "sms/telnyx"
 
 
-@pytest.fixture()
-def inbound_trunks(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(settings, "livekit_twilio_sip_inbound_trunk_id", "ST_in_tw")
-    monkeypatch.setattr(settings, "livekit_telnyx_sip_inbound_trunk_id", "ST_in_tx")
+def test_inbound_trunk_is_shared_unless_overridden(monkeypatch) -> None:
+    # config.py folds LIVEKIT_SIP_INBOUND_TRUNK_ID into the per-carrier
+    # attributes at load time; the registry reads the folded values.
+    for name in ("twilio", "telnyx", "didww"):
+        monkeypatch.setattr(settings, f"livekit_{name}_sip_inbound_trunk_id", "ST_in")
+    assert carrier_routing.inbound_trunk("twilio") == "ST_in"
+    assert carrier_routing.inbound_trunk("telnyx") == "ST_in"
+    assert carrier_routing.inbound_trunk("didww") == "ST_in"
     monkeypatch.setattr(settings, "livekit_didww_sip_inbound_trunk_id", "ST_in_dw")
-
-
-def test_inbound_trunk_per_carrier(inbound_trunks: None) -> None:
-    assert carrier_routing.inbound_trunk("twilio") == "ST_in_tw"
-    assert carrier_routing.inbound_trunk("telnyx") == "ST_in_tx"
     assert carrier_routing.inbound_trunk("didww") == "ST_in_dw"
 
 
-def test_missing_inbound_trunk_is_an_error(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_missing_inbound_trunk_names_the_shared_key(monkeypatch) -> None:
     monkeypatch.setattr(settings, "livekit_twilio_sip_inbound_trunk_id", "")
-    monkeypatch.setattr(settings, "livekit_sip_inbound_trunk_id", "")
-    with pytest.raises(ValueError, match="LIVEKIT_TWILIO_SIP_INBOUND_TRUNK_ID"):
+    with pytest.raises(ValueError, match="LIVEKIT_SIP_INBOUND_TRUNK_ID"):
         carrier_routing.inbound_trunk("twilio")
 
 

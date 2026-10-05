@@ -64,15 +64,15 @@ dispatch rule**. Hail adds and removes numbers on the trunk itself.
    {"trunk": {"name": "hail-inbound", "numbers": [], "allowed_addresses": ["0.0.0.0/0"]}}
    JSON
    lk sip inbound create inbound.json
-   # → ST_...  Put the same id in LIVEKIT_TWILIO_SIP_INBOUND_TRUNK_ID,
-   # LIVEKIT_TELNYX_SIP_INBOUND_TRUNK_ID and LIVEKIT_DIDWW_SIP_INBOUND_TRUNK_ID.
+   # → ST_...  → LIVEKIT_SIP_INBOUND_TRUNK_ID
    ```
 
    Hail reads the dialed number from the call and finds its carrier in
    `phone_numbers`; the trunk does not need to know it. To lock each carrier
    to its own trunk instead, create one trunk per carrier with that
-   carrier's signaling IPs in `allowed_addresses` and set each variable to
-   its own id. Narrow `0.0.0.0/0` to the carriers' IP ranges when you can.
+   carrier's signaling IPs in `allowed_addresses` and set
+   `LIVEKIT_<CARRIER>_SIP_INBOUND_TRUNK_ID` (an override not listed in
+   `.env.example`) to that trunk's id. Narrow `0.0.0.0/0` to the carriers' IP ranges when you can.
 
 2. Dispatch rule. One rule, bound to the inbound trunk, that puts each
    caller in its own room and dispatches the voicebot with the static

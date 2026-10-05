@@ -105,7 +105,7 @@ calls to an agent; you set up the trunk once.
 2. Copy the trunk SID (`TK...`) into `.env` as `TWILIO_SIP_TRUNK_SID`.
 3. Create the LiveKit inbound trunk and dispatch rule
    ([LiveKit Cloud §4](./livekit-cloud.md#4-inbound-calls)) and set
-   `LIVEKIT_TWILIO_SIP_INBOUND_TRUNK_ID`.
+   `LIVEKIT_SIP_INBOUND_TRUNK_ID`.
 
 Twilio Elastic SIP Trunking has no inbound username/password, so the LiveKit
 trunk lists the numbers instead: `PATCH /v1/numbers/{id}` with

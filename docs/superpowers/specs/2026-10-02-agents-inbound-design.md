@@ -45,7 +45,7 @@ number is released.
   `sip.callStatus`.
 - One dispatch rule, `dispatchRuleIndividual`, `roomPrefix: "hail-in-"`,
   `trunk_ids` = the carrier inbound trunks, `room_config.agents =
-  [{agent_name: "hail-voicebot", metadata: "{\"direction\":\"inbound\"}"}]`.
+[{agent_name: "hail-voicebot", metadata: "{\"direction\":\"inbound\"}"}]`.
   Room names contain the caller number; `calls.from_e164` holds it anyway.
 - Provider side: Twilio trunk origination URI `sip:<project>.sip.livekit.cloud;transport=tcp`
   and the number attached to the trunk; Telnyx FQDN connection with inbound
@@ -56,6 +56,7 @@ number is released.
 ## Data model (migration 0050)
 
 `agents`
+
 - `id`, `organization_id`, `name` (text, 1..80)
 - `system_prompt` (text, required), `first_message` (text, null = wait)
 - `ai_disclosure` (bool, default true), `ai_disclosure_line` (text, null =
@@ -68,24 +69,28 @@ number is released.
 - unique `(organization_id, name)`
 
 `phone_numbers`
+
 - `voice_agent_id` FK agents ON DELETE SET NULL
 - `sms_agent_id` FK agents ON DELETE SET NULL
 - `inbound_registered_at` (timestamptz null): set when the number is on the
   LiveKit inbound trunk and attached at the carrier
 
 `calls`
+
 - `from_number_id` becomes nullable; new `to_number_id` FK phone_numbers
 - CHECK: `direction = 'outbound' AND from_number_id IS NOT NULL OR
-  direction = 'inbound' AND to_number_id IS NOT NULL`
+direction = 'inbound' AND to_number_id IS NOT NULL`
 - `agent_id` FK agents ON DELETE SET NULL
 - `call_end_reason` enum gains `insufficient_funds`, `no_agent`
 
 `sms`
+
 - `agent_id` FK agents ON DELETE SET NULL (set on replies the agent wrote)
 - `agent_reply_state` (text null): `pending` | `done` | `skipped` | `failed`,
   on inbound rows routed to an agent
 
 `organization_call_settings`
+
 - `max_duration_seconds` becomes nullable (null = service default)
 - `ai_disclosure_line` (text null = built-in default). `{org}` is replaced by
   the workspace name.
@@ -95,8 +100,7 @@ number is released.
 New in `.env.example` (same commit as `config.py`):
 
 ```
-LIVEKIT_TELNYX_SIP_INBOUND_TRUNK_ID=
-LIVEKIT_DIDWW_SIP_INBOUND_TRUNK_ID=
+LIVEKIT_SIP_INBOUND_TRUNK_ID=     # one inbound trunk for every carrier
 TWILIO_SIP_TRUNK_SID=          # the Elastic SIP trunk numbers are attached to
 DIDWW_VOICE_IN_TRUNK_ID=       # the DIDWW voice IN trunk pointing at LiveKit
 ```
@@ -126,8 +130,9 @@ name, like call setup.
 
 A call is accepted only when its `sip.trunkID` equals the inbound trunk
 configured for the number's carrier. LiveKit allows one wildcard inbound
-trunk per project, so the three settings normally hold the same trunk id;
-separate trunks (with per-carrier `allowed_addresses`) also work.
+trunk per project, so one setting, `LIVEKIT_SIP_INBOUND_TRUNK_ID`, serves
+every carrier; `LIVEKIT_<CARRIER>_SIP_INBOUND_TRUNK_ID` overrides allow
+separate trunks (with per-carrier `allowed_addresses`).
 
 ## API
 
@@ -167,9 +172,9 @@ Internal (HMAC):
      `end_reason = insufficient_funds` (or the existing suspension reason);
      `call.failed`; delete room.
    - else insert `Call(direction='inbound', status='ringing', to_number_id,
-     from_e164=caller, to_e164=dialed, agent_id, voice_config,
-     max_duration_seconds, provider, provider_call_sid=sip.callIDFull,
-     livekit_room=room, started_at=now, metadata={"billed": true})`, a
+from_e164=caller, to_e164=dialed, agent_id, voice_config,
+max_duration_seconds, provider, provider_call_sid=sip.callIDFull,
+livekit_room=room, started_at=now, metadata={"billed": true})`, a
      `state_change` event `queued -> ringing`, and `call.received`.
    - returns the dispatch-shaped metadata dict (`call_id`, `organization_id`,
      `voice_config`, `system_prompt`, `first_message`, `ai_disclosure`,
