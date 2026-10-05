@@ -45,8 +45,8 @@ in [`openapi/openapi.yaml`](../../openapi/openapi.yaml).
    who answers:
    - number not yours, a pool number, or a number on the wrong trunk: the call
      is dropped, no record;
-   - no live voice agent: the call is recorded as `failed`, `end_reason`
-     `no_agent`, and `call.failed` is sent;
+   - no live voice agent (paused, or `voice_enabled: false`): the call is
+     recorded as `failed`, `end_reason` `no_agent`, and `call.failed` is sent;
    - no credits, or voice suspended: `failed` with `insufficient_funds`
      (or `user_rejected`), and `call.failed`;
    - otherwise a `ringing` call, `call.received`, then the agent speaks.
@@ -85,12 +85,15 @@ retried up to 3 times with backoff; a text still unanswered after
 
 ## Routing rules
 
-- `voice_agent_id` needs the `voice` capability. Setting it attaches the
+- `voice_agent_id` needs the `voice` capability and an agent with
+  `voice_enabled: true`; otherwise the request returns 422. Setting it attaches the
   number for inbound at the carrier and lists it on Hail's LiveKit inbound
   trunk for that carrier ([`hailhq.core.inbound_routing`](../../core/hailhq/core/inbound_routing.py));
   `null` undoes both. `PhoneNumberResponse.inbound_registered` says where it stands.
-- `sms_agent_id` needs the `sms` capability. No carrier work: inbound texts
+- `sms_agent_id` needs the `sms` capability and an agent with
+  `sms_enabled: true`; otherwise the request returns 422. No carrier work: inbound texts
   already reach Hail.
 - Releasing a number, or deleting its agent, unregisters it first.
 - A paused agent (`status: paused`) answers nothing; calls to its numbers
-  fail with `no_agent`, and `POST /calls` with its `agent_id` returns 409.
+  fail with `no_agent`, and `POST /calls` with its `agent_id` returns 409. `POST /calls` with an agent
+  that has `voice_enabled: false` also returns 409.

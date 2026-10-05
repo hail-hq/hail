@@ -270,6 +270,14 @@ async def create_call(
                     detail="agent is paused",
                 ),
             )
+        if not agent.voice_enabled:
+            raise await cache_failure(
+                idem,
+                HTTPException(
+                    status_code=http_status.HTTP_409_CONFLICT,
+                    detail="agent does not answer calls",
+                ),
+            )
         body = apply_agent_defaults(body, agent)
 
     # SSRF guard for a per-call BYO llm.base_url — the full resolving check
