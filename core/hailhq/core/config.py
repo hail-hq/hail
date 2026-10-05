@@ -267,6 +267,11 @@ class Settings(BaseSettings):
     # the carrier's decision for submitted ones. 0 disables the worker.
     hail_verification_poll_seconds: int = 600
 
+    # Text worker (voicebot): an inbound text pending longer than this is
+    # skipped, not answered; how many texts are answered at once per worker.
+    hail_text_reply_max_age_seconds: int = Field(default=3600, ge=1)
+    hail_text_reply_concurrency: int = Field(default=4, ge=1)
+
     # Agent self-signup velocity caps (spec: 2026-07-14-agent-self-signup-design).
     # Per agent-origin org:
     agent_email_per_hour: int = 20

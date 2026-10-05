@@ -28,6 +28,8 @@ curl -X POST "$HAIL_API_URL/v1/calls" -H "Authorization: Bearer $HAIL_API_KEY" \
 
 CLI: `hail agents create "Front desk" --prompt-file ./front-desk.md`, then
 `hail numbers route <number-id> --calls <agent-id> --texts <agent-id>`.
+Restrict tools with `hail agents update <id> --tools end_call,send_sms`; allow
+all again with `hail agents update <id> --all-tools`.
 MCP: `list_agents`, `create_agent`, `route_number`, and `place_call(agent_id=...)`.
 SDK: `client.agents.create(...)`, `client.numbers.route(...)`.
 
@@ -71,12 +73,15 @@ agent skips it; the responsibility for that is yours.
    from the same number through its carrier. The agent sends at most 20
    replies per thread in any 24 hours; past that it stays quiet until older
    replies leave the window. Replies bill as outbound SMS. Inbound rows carry `agent_reply_state`
-   (`pending`, `done`, `skipped`, `failed`) in the database; replies carry
-   `agent_id`.
+   (`pending`, `processing`, `done`, `skipped`, `failed`) in the database;
+   replies carry `agent_id`.
 
 The text worker runs inside the voicebot service
 ([`hailhq.voicebot.textbot`](../../voicebot/hailhq/voicebot/textbot.py)) and
-needs `HAIL_INTERNAL_SECRET` and `HAIL_API_URL`.
+needs `HAIL_INTERNAL_SECRET` and `HAIL_API_URL`. It answers
+`HAIL_TEXT_REPLY_CONCURRENCY` texts at once. A failed model or API call is
+retried up to 3 times with backoff; a text still unanswered after
+`HAIL_TEXT_REPLY_MAX_AGE_SECONDS` is skipped.
 
 ## Routing rules
 
@@ -88,4 +93,4 @@ needs `HAIL_INTERNAL_SECRET` and `HAIL_API_URL`.
   already reach Hail.
 - Releasing a number, or deleting its agent, unregisters it first.
 - A paused agent (`status: paused`) answers nothing; calls to its numbers
-  fail with `no_agent`.
+  fail with `no_agent`, and `POST /calls` with its `agent_id` returns 409.

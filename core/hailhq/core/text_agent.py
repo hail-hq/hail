@@ -14,22 +14,28 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any, Literal
 
+from hailhq.core.config import settings
 from hailhq.core.models import Agent, PhoneNumber, Sms
 from sqlalchemy import and_, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 __all__ = [
+    "CLAIM_LEASE",
+    "MAX_ATTEMPTS",
     "MAX_REPLIES_PER_THREAD",
     "MAX_REPLY_CHARS",
+    "RETRY_BACKOFF",
     "TEXT_PREAMBLE",
     "THREAD_LIMIT",
     "THREAD_WINDOW",
     "ClaimedReply",
+    "ReplyState",
     "answers_texts",
     "build_chat_messages",
     "claim_pending_reply",
     "finish_reply",
     "replies_in_thread",
+    "retry_reply",
     "should_queue_reply",
     "thread_messages",
 ]
@@ -52,6 +58,12 @@ THREAD_WINDOW = timedelta(hours=24)
 # older replies leave the window. A loop breaker.
 MAX_REPLIES_PER_THREAD = 20
 
+# A worker that has not finished within this long is presumed dead.
+CLAIM_LEASE = timedelta(minutes=2)
+# Claims per text (the first try included) before it is marked failed.
+MAX_ATTEMPTS = 3
+RETRY_BACKOFF = timedelta(seconds=30)  # doubled after each failed attempt
+
 ReplyState = Literal["done", "skipped", "failed"]
 
 
@@ -60,6 +72,7 @@ class ClaimedReply:
     sms: Sms
     agent: Agent
     number: PhoneNumber
+    attempt: int  # which claim this is, 1-based
 
 
 def answers_texts(agent: Agent | None) -> bool:
@@ -75,17 +88,63 @@ async def should_queue_reply(db: AsyncSession, number: PhoneNumber) -> bool:
     return answers_texts(await db.get(Agent, number.sms_agent_id))
 
 
-async def claim_pending_reply(db: AsyncSession) -> ClaimedReply | None:
-    """Lock and return the oldest pending inbound text that still has an agent
-    to answer it, or None.
+def _claimable(now: datetime):
+    """Rows no worker is handling: pending, or processing with a dead lease."""
+    return or_(
+        Sms.agent_reply_state == "pending",
+        and_(
+            Sms.agent_reply_state == "processing",
+            Sms.agent_reply_available_at <= now,
+        ),
+    )
 
-    ``FOR UPDATE SKIP LOCKED`` lets several workers poll the same table. The
-    caller holds the row until ``finish_reply``; a crash releases the lock and
-    the row stays pending for the next poll.
+
+async def _expire_unclaimable(db: AsyncSession, now: datetime) -> None:
+    """Close rows that must not be answered: too old, or out of attempts."""
+    base = (Sms.direction == "inbound", _claimable(now))
+    cutoff = now - timedelta(seconds=settings.hail_text_reply_max_age_seconds)
+    await db.execute(
+        update(Sms)
+        .where(*base, Sms.requested_at < cutoff)
+        .values(agent_reply_state="skipped")
+    )
+    await db.execute(
+        update(Sms)
+        .where(*base, Sms.agent_reply_attempts >= MAX_ATTEMPTS)
+        .values(agent_reply_state="failed")
+    )
+
+
+async def claim_pending_reply(db: AsyncSession) -> ClaimedReply | None:
+    """Claim the oldest answerable inbound text that still has an agent, or None.
+
+    ``FOR UPDATE SKIP LOCKED`` lets several workers (and replicas) poll the
+    same table. The claim sets ``processing`` with a lease and commits, so the
+    row lock and the connection are free before the slow LLM and API calls. A
+    crashed worker's lease runs out and the row is claimed again, up to
+    ``MAX_ATTEMPTS`` claims. Texts older than
+    ``HAIL_TEXT_REPLY_MAX_AGE_SECONDS`` are skipped, not answered late.
     """
+    now = datetime.now(timezone.utc)
+    await _expire_unclaimable(db, now)
     stmt = (
         select(Sms)
-        .where(Sms.direction == "inbound", Sms.agent_reply_state == "pending")
+        .where(
+            Sms.direction == "inbound",
+            or_(
+                and_(
+                    Sms.agent_reply_state == "pending",
+                    or_(
+                        Sms.agent_reply_available_at.is_(None),
+                        Sms.agent_reply_available_at <= now,
+                    ),
+                ),
+                and_(
+                    Sms.agent_reply_state == "processing",
+                    Sms.agent_reply_available_at <= now,
+                ),
+            ),
+        )
         .order_by(Sms.requested_at)
         .limit(1)
         .with_for_update(skip_locked=True)
@@ -93,6 +152,7 @@ async def claim_pending_reply(db: AsyncSession) -> ClaimedReply | None:
     while True:
         sms = (await db.execute(stmt)).scalar_one_or_none()
         if sms is None:
+            await db.commit()  # keep the expiry updates
             return None
         number = (
             await db.get(PhoneNumber, sms.to_number_id) if sms.to_number_id else None
@@ -103,7 +163,12 @@ async def claim_pending_reply(db: AsyncSession) -> ClaimedReply | None:
             else None
         )
         if number is not None and agent is not None and answers_texts(agent):
-            return ClaimedReply(sms=sms, agent=agent, number=number)
+            sms.agent_reply_state = "processing"
+            sms.agent_reply_attempts += 1
+            sms.agent_reply_available_at = now + CLAIM_LEASE
+            attempt = sms.agent_reply_attempts
+            await db.commit()
+            return ClaimedReply(sms=sms, agent=agent, number=number, attempt=attempt)
         # Routing changed between ingest and now: drop it quietly and take the
         # next row, so a backlog of dropped texts does not cost a poll each.
         await finish_reply(db, sms, "skipped")
@@ -166,8 +231,38 @@ def build_chat_messages(agent: Agent, history: list[Sms]) -> list[dict[str, Any]
     return messages
 
 
-async def finish_reply(db: AsyncSession, sms: Sms, state: ReplyState) -> None:
-    await db.execute(
-        update(Sms).where(Sms.id == sms.id).values(agent_reply_state=state)
+async def finish_reply(
+    db: AsyncSession, sms: Sms, state: ReplyState, *, attempt: int | None = None
+) -> None:
+    """Record the final state. With ``attempt`` it only applies while that
+    claim still owns the row (a reclaimed row is not overwritten by a worker
+    that was presumed dead)."""
+    stmt = update(Sms).where(Sms.id == sms.id)
+    if attempt is not None:
+        stmt = stmt.where(
+            Sms.agent_reply_state == "processing",
+            Sms.agent_reply_attempts == attempt,
+        )
+    await db.execute(stmt.values(agent_reply_state=state))
+    await db.commit()
+
+
+async def retry_reply(db: AsyncSession, claimed: ClaimedReply) -> str | None:
+    """A transient error: put the text back to ``pending`` after a backoff, or
+    mark it ``failed`` once ``MAX_ATTEMPTS`` claims are used. Returns the state
+    written, or None when the claim no longer owns the row."""
+    if claimed.attempt >= MAX_ATTEMPTS:
+        await finish_reply(db, claimed.sms, "failed", attempt=claimed.attempt)
+        return "failed"
+    retry_at = datetime.now(timezone.utc) + RETRY_BACKOFF * 2 ** (claimed.attempt - 1)
+    result = await db.execute(
+        update(Sms)
+        .where(
+            Sms.id == claimed.sms.id,
+            Sms.agent_reply_state == "processing",
+            Sms.agent_reply_attempts == claimed.attempt,
+        )
+        .values(agent_reply_state="pending", agent_reply_available_at=retry_at)
     )
     await db.commit()
+    return "pending" if result.rowcount else None  # type: ignore[attr-defined]

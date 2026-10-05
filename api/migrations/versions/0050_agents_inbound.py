@@ -9,7 +9,9 @@
   row), ``to_number_id`` (the dialed org number), ``agent_id``, and a CHECK
   that each direction carries its number.
 - ``sms``: ``agent_id`` (the agent that wrote an outbound reply) and
-  ``agent_reply_state`` on inbound rows routed to a text agent.
+  ``agent_reply_state`` (with ``agent_reply_attempts`` and
+  ``agent_reply_available_at``: retry count, backoff time and claim lease) on
+  inbound rows routed to a text agent.
 - ``organization_call_settings``: ``max_duration_seconds`` becomes nullable
   (NULL = service default) and gains ``ai_disclosure_line``.
 - ``call_end_reason``: ``insufficient_funds``, ``no_agent`` (inbound calls
@@ -141,18 +143,31 @@ def upgrade() -> None:
         ),
     )
     op.add_column("sms", sa.Column("agent_reply_state", sa.Text(), nullable=True))
+    op.add_column(
+        "sms",
+        sa.Column(
+            "agent_reply_attempts",
+            sa.Integer(),
+            server_default=sa.text("0"),
+            nullable=False,
+        ),
+    )
+    op.add_column(
+        "sms",
+        sa.Column("agent_reply_available_at", sa.TIMESTAMP(timezone=True)),
+    )
     op.create_check_constraint(
         "sms_agent_reply_state_check",
         "sms",
         "agent_reply_state IS NULL OR agent_reply_state IN "
-        "('pending','done','skipped','failed')",
+        "('pending','processing','done','skipped','failed')",
     )
-    # The text worker claims pending rows; keep that scan cheap.
+    # The text worker claims pending and expired-lease rows; keep that scan cheap.
     op.create_index(
         "sms_agent_reply_pending_idx",
         "sms",
         ["requested_at"],
-        postgresql_where=sa.text("agent_reply_state = 'pending'"),
+        postgresql_where=sa.text("agent_reply_state IN ('pending','processing')"),
     )
 
     op.alter_column("organization_call_settings", "max_duration_seconds", nullable=True)
@@ -169,6 +184,17 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    # Inbound calls have no from_number_id. Never delete call history here.
+    orphans = (
+        op.get_bind()
+        .execute(sa.text("SELECT count(*) FROM calls WHERE from_number_id IS NULL"))
+        .scalar_one()
+    )
+    if orphans:
+        raise RuntimeError(
+            f"Cannot downgrade 0050: {orphans} call(s) have from_number_id IS NULL "
+            "(inbound calls). Export or remove them by hand, then rerun."
+        )
     op.drop_column("organization_call_settings", "ai_disclosure_line")
     op.execute(
         "UPDATE organization_call_settings SET max_duration_seconds = 300"
@@ -179,12 +205,13 @@ def downgrade() -> None:
     )
     op.drop_index("sms_agent_reply_pending_idx", table_name="sms")
     op.drop_constraint("sms_agent_reply_state_check", "sms", type_="check")
+    op.drop_column("sms", "agent_reply_available_at")
+    op.drop_column("sms", "agent_reply_attempts")
     op.drop_column("sms", "agent_reply_state")
     op.drop_column("sms", "agent_id")
     op.drop_constraint("calls_number_for_direction", "calls", type_="check")
     op.drop_column("calls", "agent_id")
     op.drop_column("calls", "to_number_id")
-    op.execute("DELETE FROM calls WHERE from_number_id IS NULL")
     op.alter_column("calls", "from_number_id", nullable=False)
     op.drop_column("phone_numbers", "inbound_registered_at")
     op.drop_column("phone_numbers", "sms_agent_id")

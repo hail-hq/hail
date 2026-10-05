@@ -26,9 +26,11 @@ from hailhq.core.db import session_scope
 from hailhq.core.text_agent import (
     MAX_REPLY_CHARS,
     ClaimedReply,
+    ReplyState,
     build_chat_messages,
     claim_pending_reply,
     finish_reply,
+    retry_reply,
     thread_messages,
 )
 from hailhq.voicebot.pipeline import ProviderKeyError, build_llm, resolve_org_configs
@@ -73,61 +75,94 @@ async def generate_reply(claimed: ClaimedReply, messages: list[dict[str, Any]]) 
     return text[:MAX_REPLY_CHARS]
 
 
+async def _prepare(claimed: ClaimedReply) -> list[dict[str, Any]]:
+    """Load the thread on a short session; nothing stays open afterwards."""
+    async with session_scope() as db:
+        history = await thread_messages(db, claimed.sms)
+    return build_chat_messages(claimed.agent, history)
+
+
+async def _settle(
+    claimed: ClaimedReply, state: ReplyState | None, *, retry: bool = False
+) -> None:
+    async with session_scope() as db:
+        if retry:
+            await retry_reply(db, claimed)
+        elif state is not None:
+            await finish_reply(db, claimed.sms, state, attempt=claimed.attempt)
+
+
 async def reply_once(api: AgentApiClient) -> bool:
-    """Claim one pending text and answer it. Returns False when none waited."""
+    """Claim one pending text and answer it. Returns False when none waited.
+
+    The claim commits first, so no row lock or connection is held while the
+    model writes and the API sends. A transient error (model call, API call)
+    puts the text back for a later retry; the API's reply-sms route is
+    idempotent per ``sms_id``, so a retried send cannot double-send.
+    """
     async with session_scope() as db:
         claimed = await claim_pending_reply(db)
-        if claimed is None:
-            return False
-        sms = claimed.sms
-        try:
-            history = await thread_messages(db, sms)
-            messages = build_chat_messages(claimed.agent, history)
-            text = await asyncio.wait_for(
-                generate_reply(claimed, messages), timeout=LLM_TIMEOUT_SECONDS
-            )
-        except ProviderKeyError as exc:
-            logger.warning("sms_id=%s text agent provider error: %s", sms.id, exc)
-            await finish_reply(db, sms, "failed")
-            return True
-        except Exception:
-            logger.exception("sms_id=%s text agent failed to write a reply", sms.id)
-            await finish_reply(db, sms, "failed")
-            return True
-        if not text:
-            logger.info("sms_id=%s text agent wrote nothing; skipped", sms.id)
-            await finish_reply(db, sms, "skipped")
-            return True
-        try:
-            result = await api.post(
-                "/internal/agent/reply-sms", {"sms_id": str(sms.id), "body": text}
-            )
-            state = str(result.get("state") or "failed")
-            if state not in ("done", "skipped", "failed"):
-                state = "failed"
-            if state != "done":
-                logger.info(
-                    "sms_id=%s reply %s: %s", sms.id, state, result.get("reason")
-                )
-        except Exception:
-            logger.exception("sms_id=%s reply-sms POST failed", sms.id)
-            state = "failed"
-        await finish_reply(db, sms, state)  # type: ignore[arg-type]
+    if claimed is None:
+        return False
+    sms = claimed.sms
+    try:
+        messages = await _prepare(claimed)
+        text = await asyncio.wait_for(
+            generate_reply(claimed, messages), timeout=LLM_TIMEOUT_SECONDS
+        )
+    except ProviderKeyError as exc:
+        # A missing or bad key does not fix itself: no retry.
+        logger.warning("sms_id=%s text agent provider error: %s", sms.id, exc)
+        await _settle(claimed, "failed")
         return True
+    except Exception:
+        logger.exception(
+            "sms_id=%s text agent failed to write a reply (attempt %s)",
+            sms.id,
+            claimed.attempt,
+        )
+        await _settle(claimed, None, retry=True)
+        return True
+    if not text:
+        logger.info("sms_id=%s text agent wrote nothing; skipped", sms.id)
+        await _settle(claimed, "skipped")
+        return True
+    try:
+        result = await api.post(
+            "/internal/agent/reply-sms", {"sms_id": str(sms.id), "body": text}
+        )
+    except Exception:
+        logger.exception(
+            "sms_id=%s reply-sms POST failed (attempt %s)", sms.id, claimed.attempt
+        )
+        await _settle(claimed, None, retry=True)
+        return True
+    state = str(result.get("state") or "failed")
+    if state not in ("done", "skipped", "failed"):
+        state = "failed"
+    if state != "done":
+        logger.info("sms_id=%s reply %s: %s", sms.id, state, result.get("reason"))
+    await _settle(claimed, state)  # type: ignore[arg-type]
+    return True
+
+
+async def _poll_loop(api: AgentApiClient, stop: threading.Event | None) -> None:
+    while stop is None or not stop.is_set():
+        try:
+            busy = await reply_once(api)
+        except Exception:
+            logger.exception("text worker iteration failed; will retry")
+            busy = False
+        if not busy:
+            await asyncio.sleep(POLL_SECONDS)
 
 
 async def run_forever(stop: threading.Event | None = None) -> None:
     api = AgentApiClient(settings.hail_api_url, settings.hail_internal_secret)
-    logger.info("text worker started (poll every %ss)", POLL_SECONDS)
+    n = settings.hail_text_reply_concurrency
+    logger.info("text worker started (%s at once, poll every %ss)", n, POLL_SECONDS)
     try:
-        while stop is None or not stop.is_set():
-            try:
-                busy = await reply_once(api)
-            except Exception:
-                logger.exception("text worker iteration failed; will retry")
-                busy = False
-            if not busy:
-                await asyncio.sleep(POLL_SECONDS)
+        await asyncio.gather(*(_poll_loop(api, stop) for _ in range(n)))
     finally:
         await api.aclose()
 

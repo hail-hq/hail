@@ -220,3 +220,122 @@ async def test_claim_moves_past_dropped_texts_to_the_next_row(async_session) -> 
     assert claimed.sms.id == second.sms_id
     await async_session.refresh(row1)
     assert row1.agent_reply_state == "skipped"
+
+
+async def test_claim_marks_processing_and_commits(
+    async_session, session_factory
+) -> None:
+    """The claim holds no row lock: another session can read and update it."""
+    await _seed(async_session)
+    result = await _ingest(async_session, "hi", "SM20")
+    claimed = await text_agent.claim_pending_reply(async_session)
+    assert claimed is not None and claimed.attempt == 1
+    async with session_factory() as other:
+        row = await other.get(Sms, result.sms_id)
+        assert row.agent_reply_state == "processing"
+        assert row.agent_reply_attempts == 1
+        assert row.agent_reply_available_at > datetime.now(timezone.utc)
+        # Not lockable-blocking: NOWAIT would raise if the claim kept the lock.
+        await other.execute(
+            select(Sms).where(Sms.id == result.sms_id).with_for_update(nowait=True)
+        )
+    # A live lease is not claimed twice.
+    async with session_factory() as other:
+        assert await text_agent.claim_pending_reply(other) is None
+
+
+async def test_two_workers_claim_different_texts(
+    async_session, session_factory
+) -> None:
+    await _seed(async_session)
+    await _ingest(async_session, "one", "SM21")
+    await _ingest(async_session, "two", "SM22")
+    await async_session.commit()
+    async with session_factory() as a, session_factory() as b:
+        first = await text_agent.claim_pending_reply(a)
+        second = await text_agent.claim_pending_reply(b)
+        assert first is not None and second is not None
+        assert first.sms.id != second.sms.id
+        assert await text_agent.claim_pending_reply(a) is None
+
+
+async def test_expired_lease_is_reclaimed_then_fails_after_max_attempts(
+    async_session,
+) -> None:
+    await _seed(async_session)
+    result = await _ingest(async_session, "hi", "SM23")
+    row = await async_session.get(Sms, result.sms_id)
+    for attempt in range(1, text_agent.MAX_ATTEMPTS + 1):
+        claimed = await text_agent.claim_pending_reply(async_session)
+        assert claimed is not None and claimed.attempt == attempt
+        # The worker dies: its lease runs out.
+        row.agent_reply_available_at = datetime.now(timezone.utc) - timedelta(seconds=1)
+        await async_session.commit()
+    assert await text_agent.claim_pending_reply(async_session) is None
+    await async_session.refresh(row)
+    assert row.agent_reply_state == "failed"
+
+
+async def test_retry_waits_for_backoff_then_gives_up(async_session) -> None:
+    await _seed(async_session)
+    result = await _ingest(async_session, "hi", "SM24")
+    row = await async_session.get(Sms, result.sms_id)
+
+    claimed = await text_agent.claim_pending_reply(async_session)
+    assert await text_agent.retry_reply(async_session, claimed) == "pending"
+    await async_session.refresh(row)
+    assert row.agent_reply_state == "pending"
+    assert row.agent_reply_available_at > datetime.now(timezone.utc)
+    assert await text_agent.claim_pending_reply(async_session) is None  # backoff
+
+    row.agent_reply_available_at = datetime.now(timezone.utc) - timedelta(seconds=1)
+    await async_session.commit()
+    claimed = await text_agent.claim_pending_reply(async_session)
+    assert claimed is not None and claimed.attempt == 2
+
+    row.agent_reply_attempts = text_agent.MAX_ATTEMPTS
+    await async_session.commit()
+    claimed = text_agent.ClaimedReply(
+        sms=claimed.sms, agent=claimed.agent, number=claimed.number, attempt=3
+    )
+    assert await text_agent.retry_reply(async_session, claimed) == "failed"
+    await async_session.refresh(row)
+    assert row.agent_reply_state == "failed"
+
+
+async def test_stale_claim_does_not_overwrite_a_reclaimed_row(async_session) -> None:
+    await _seed(async_session)
+    result = await _ingest(async_session, "hi", "SM25")
+    row = await async_session.get(Sms, result.sms_id)
+    old = await text_agent.claim_pending_reply(async_session)
+    row.agent_reply_available_at = datetime.now(timezone.utc) - timedelta(seconds=1)
+    await async_session.commit()
+    new = await text_agent.claim_pending_reply(async_session)
+    assert new is not None and new.attempt == 2
+    await text_agent.finish_reply(async_session, old.sms, "failed", attempt=old.attempt)
+    assert await text_agent.retry_reply(async_session, old) in ("pending", None)
+    await async_session.refresh(row)
+    # The old worker's retry targeted attempt 1, which no longer owns the row.
+    assert row.agent_reply_state == "processing"
+    await text_agent.finish_reply(async_session, new.sms, "done", attempt=new.attempt)
+    await async_session.refresh(row)
+    assert row.agent_reply_state == "done"
+
+
+async def test_old_pending_text_is_skipped_not_answered(
+    async_session, monkeypatch
+) -> None:
+    from hailhq.core.config import settings
+
+    monkeypatch.setattr(settings, "hail_text_reply_max_age_seconds", 60)
+    await _seed(async_session)
+    old = await _ingest(async_session, "old", "SM26")
+    fresh = await _ingest(async_session, "fresh", "SM27")
+    row = await async_session.get(Sms, old.sms_id)
+    row.requested_at = datetime.now(timezone.utc) - timedelta(seconds=120)
+    await async_session.commit()
+
+    claimed = await text_agent.claim_pending_reply(async_session)
+    assert claimed is not None and claimed.sms.id == fresh.sms_id
+    await async_session.refresh(row)
+    assert row.agent_reply_state == "skipped"

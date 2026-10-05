@@ -739,8 +739,17 @@ class Sms(Base):
         ForeignKey("agents.id", ondelete="SET NULL"),
         nullable=True,
     )
-    # Inbound rows routed to a text agent: pending | done | skipped | failed.
+    # Inbound rows routed to a text agent:
+    # pending | processing | done | skipped | failed.
     agent_reply_state: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Claims so far. A claim counts even if the worker crashed, so a text that
+    # kills its worker is retried a bounded number of times.
+    agent_reply_attempts: Mapped[int] = mapped_column(
+        Integer, server_default=text("0"), nullable=False
+    )
+    # pending: do not claim before this time (retry backoff; NULL = now).
+    # processing: the lease; past it the claim is dead and the row is reclaimed.
+    agent_reply_available_at: Mapped[datetime | None] = mapped_column(TS, nullable=True)
 
     __table_args__ = (
         CheckConstraint(
@@ -749,7 +758,7 @@ class Sms(Base):
         ),
         CheckConstraint(
             "agent_reply_state IS NULL OR agent_reply_state IN "
-            "('pending','done','skipped','failed')",
+            "('pending','processing','done','skipped','failed')",
             name="sms_agent_reply_state_check",
         ),
         CheckConstraint(
