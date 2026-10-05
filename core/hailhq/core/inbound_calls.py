@@ -184,7 +184,7 @@ async def _answer_or_refuse(
     agent = (
         await db.get(Agent, number.voice_agent_id) if number.voice_agent_id else None
     )
-    if agent is None or agent.status != "live":
+    if agent is None or agent.status != "live" or not agent.voice_enabled:
         return await _refuse(db, number, attrs, agent, CallEndReason.NO_AGENT)
     if await check_channel_suspended(db, org_id, "voice"):
         return await _refuse(db, number, attrs, agent, CallEndReason.USER_REJECTED)

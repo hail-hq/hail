@@ -731,6 +731,10 @@ class AgentCreate(BaseModel):
         le=3600,
         description="Soft cap per call in seconds (60..3600). Omitted: the workspace limit.",
     )
+    voice_enabled: bool = Field(
+        default=True,
+        description="Answer calls on numbers that route calls to this agent.",
+    )
     sms_enabled: bool = Field(
         default=True,
         description="Answer texts on numbers that route texts to this agent.",
@@ -787,6 +791,9 @@ class AgentUpdate(BaseModel):
         le=3600,
         description="New soft cap per call; null returns to the workspace limit.",
     )
+    voice_enabled: bool | None = Field(
+        default=None, description="Whether the agent answers calls."
+    )
     sms_enabled: bool | None = Field(
         default=None, description="Whether the agent answers texts."
     )
@@ -820,6 +827,7 @@ class AgentResponse(BaseModel):
     max_duration_seconds: int | None = Field(
         description="Soft cap per call; null means the workspace limit."
     )
+    voice_enabled: bool = Field(description="Whether the agent answers calls.")
     sms_enabled: bool = Field(description="Whether the agent answers texts.")
     status: AgentStatus = Field(description="'live' or 'paused'.")
     created_at: datetime = Field(description="ISO 8601 timestamp.")

@@ -305,6 +305,7 @@ class AgentResponse(BaseModel):
     voice_config: dict[str, Any] = Field(default_factory=dict)
     tools: list[str] | None = None
     max_duration_seconds: int | None = None
+    voice_enabled: bool = True
     sms_enabled: bool = True
     status: AgentStatus = "live"
     created_at: datetime

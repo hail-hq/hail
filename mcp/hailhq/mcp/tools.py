@@ -1186,7 +1186,7 @@ def register_tools(
 
         Returns ``{"items": [{"id", "name", "system_prompt", "first_message",
         "ai_disclosure", "ai_disclosure_line", "voice_config", "tools",
-        "max_duration_seconds", "sms_enabled", "status"}, ...]}``.
+        "max_duration_seconds", "voice_enabled", "sms_enabled", "status"}, ...]}``.
         """
         try:
             async with _client_for(ctx, mode=mode, singleton=singleton) as client:
@@ -1206,6 +1206,7 @@ def register_tools(
         voice_id: str | None = None,
         tools: list[str] | None = None,
         max_duration_seconds: int | None = None,
+        voice_enabled: bool = True,
         sms_enabled: bool = True,
     ) -> dict[str, Any]:
         """Save an agent. Then call ``route_number`` so a number answers
@@ -1224,6 +1225,7 @@ def register_tools(
             "name": name,
             "system_prompt": system_prompt,
             "ai_disclosure": ai_disclosure,
+            "voice_enabled": voice_enabled,
             "sms_enabled": sms_enabled,
         }
         if first_message is not None:

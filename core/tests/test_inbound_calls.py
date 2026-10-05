@@ -306,3 +306,14 @@ async def test_service_default_cap_when_nothing_is_set(async_session) -> None:
     assert isinstance(outcome, inbound_calls.Accepted)
     assert outcome.metadata["max_duration_seconds"] == 300
     assert outcome.metadata["ai_disclosure_line"] is None
+
+
+async def test_agent_that_does_not_answer_calls_counts_as_no_agent(
+    async_session,
+) -> None:
+    _org, agent, _number = await _seed(async_session)
+    agent.voice_enabled = False
+    await async_session.commit()
+    outcome = await inbound_calls.open_inbound_call(async_session, _attrs())
+    assert isinstance(outcome, inbound_calls.Rejected)
+    assert outcome.reason == "no_agent"

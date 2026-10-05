@@ -763,6 +763,7 @@ class _AgentsResource:
         voice_id: str | None = None,
         tools: list[str] | None = None,
         max_duration_seconds: int | None = None,
+        voice_enabled: bool = True,
         sms_enabled: bool = True,
         status: str = "live",
     ) -> AgentResponse:
@@ -774,6 +775,7 @@ class _AgentsResource:
             "name": name,
             "system_prompt": system_prompt,
             "ai_disclosure": ai_disclosure,
+            "voice_enabled": voice_enabled,
             "sms_enabled": sms_enabled,
             "status": status,
         }

@@ -432,6 +432,11 @@ class Agent(Base):
     tools: Mapped[list[str] | None] = mapped_column(ARRAY(Text), nullable=True)
     # NULL = the workspace limit.
     max_duration_seconds: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Which channels the agent answers. Both default on; a number can only
+    # route a channel to an agent that answers it.
+    voice_enabled: Mapped[bool] = mapped_column(
+        Boolean, server_default=text("TRUE"), nullable=False
+    )
     sms_enabled: Mapped[bool] = mapped_column(
         Boolean, server_default=text("TRUE"), nullable=False
     )

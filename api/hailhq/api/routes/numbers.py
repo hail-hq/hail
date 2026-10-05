@@ -403,13 +403,25 @@ async def route_number(
             raise unprocessable(
                 "this number has no voice capability", loc=["body", "voice_agent_id"]
             )
-        await _load_org_agent_or_404(db, body.voice_agent_id, principal.organization_id)
+        agent = await _load_org_agent_or_404(
+            db, body.voice_agent_id, principal.organization_id
+        )
+        if not agent.voice_enabled:
+            raise unprocessable(
+                "this agent does not answer calls", loc=["body", "voice_agent_id"]
+            )
     if "sms_agent_id" in fields and body.sms_agent_id is not None:
         if "sms" not in number.capabilities:
             raise unprocessable(
                 "this number has no sms capability", loc=["body", "sms_agent_id"]
             )
-        await _load_org_agent_or_404(db, body.sms_agent_id, principal.organization_id)
+        agent = await _load_org_agent_or_404(
+            db, body.sms_agent_id, principal.organization_id
+        )
+        if not agent.sms_enabled:
+            raise unprocessable(
+                "this agent does not answer texts", loc=["body", "sms_agent_id"]
+            )
 
     try:
         if "voice_agent_id" in fields:
