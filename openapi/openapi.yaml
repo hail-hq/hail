@@ -2169,6 +2169,10 @@ paths:
                 type: integer
         "404":
           description: The number does not exist for this organization.
+        "502":
+          description:
+            The carrier refused to enable SMS on this number; the detail
+            gives its reason.
         "503":
           description: SMS is not configured for this number's carrier on this server.
         "422":
