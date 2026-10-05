@@ -224,17 +224,26 @@ async def release_org_number(
             status_code=409,
             detail=f"{number.provider} numbers cannot be released through the API yet",
         )
-    if lk is not None and number.inbound_registered_at is not None:
-        try:
-            await inbound_routing.unregister(db, lk, number)
-        except inbound_routing.InboundRoutingError:
+    if number.inbound_registered_at is not None:
+        if lk is not None:
+            try:
+                await inbound_routing.unregister(db, lk, number)
+            except inbound_routing.InboundRoutingError:
+                logger.warning(
+                    "number %s: inbound unregister failed before release (%s)",
+                    number.id,
+                    number.e164,
+                    exc_info=True,
+                )
+        else:
             logger.warning(
-                "number %s: inbound unregister failed before release (%s)",
+                "number %s: released without LiveKit settings; its inbound "
+                "trunk entry (%s) stays until removed by hand",
                 number.id,
                 number.e164,
-                exc_info=True,
             )
-            number.inbound_registered_at = None
+        # The row is a tombstone after this call: never leave it "registered".
+        number.inbound_registered_at = None
     number.voice_agent_id = None
     number.sms_agent_id = None
     try:
