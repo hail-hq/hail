@@ -55,7 +55,7 @@ from hailhq.core.text_agent import (
     replies_in_thread,
 )
 from pydantic import BaseModel, ConfigDict, Field
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 router = APIRouter(
@@ -398,9 +398,16 @@ async def agent_reply_sms(
     ):
         return AgentReplySmsResponse(ok=False, state="skipped", reason="no_agent")
 
+    # One request per inbound text at a time: the lock is held until the reply
+    # row is committed, so a retry that races the original sees it below. A
+    # lock on the inbound row (FOR UPDATE) would deadlock with the worker's
+    # claim, hence an advisory lock keyed by sms_id.
+    await db.execute(
+        text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))"),
+        {"key": f"reply-sms:{inbound.id}"},
+    )
     # Idempotent: the worker retries a timed-out POST with the same sms_id.
-    # ``first()``, not ``scalar_one_or_none()``: two racing requests can each
-    # have written a reply, and a retry must still answer ``done``.
+    # ``first()`` stays as a belt for rows written before the lock existed.
     prior = (
         (
             await db.execute(

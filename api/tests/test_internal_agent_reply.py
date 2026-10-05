@@ -3,6 +3,7 @@ number the person wrote to, gated like every other send."""
 
 from __future__ import annotations
 
+import asyncio
 import json
 import uuid
 
@@ -11,7 +12,7 @@ from hailhq.core import hmac_signing
 from hailhq.core.config import settings
 from hailhq.core.models import AccountCredit, Agent, PhoneNumber, Sms
 from hailhq.core.sms_ingest import ingest_inbound_sms
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 HMAC_SECRET = "test-internal-secret"
@@ -160,3 +161,28 @@ async def test_reply_unknown_sms_fails(client, async_session) -> None:
     )
     assert resp.json()["state"] == "failed"
     assert (await async_session.execute(select(Sms))).first() is None
+
+
+async def test_reply_waits_for_a_concurrent_request_on_the_same_text(
+    client, async_session, session_factory, sms_mock
+) -> None:
+    """The per-text lock makes a racing retry wait, then see the first reply
+    and answer ``done`` without a second send."""
+    _org, _agent, _number, sms_id = await _seed(async_session)
+    body = _payload(sms_id)
+    async with session_factory() as other:
+        await other.execute(
+            text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))"),
+            {"key": f"reply-sms:{sms_id}"},
+        )
+        task = asyncio.create_task(
+            client.post(
+                "/internal/agent/reply-sms", content=body, headers=_signed(body)
+            )
+        )
+        await asyncio.sleep(0.5)
+        assert not task.done()  # blocked behind the "first" request
+        await other.rollback()
+    resp = await asyncio.wait_for(task, 10)
+    assert resp.json()["state"] == "done"
+    assert sms_mock.send_sms.await_count == 1
