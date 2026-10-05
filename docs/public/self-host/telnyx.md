@@ -18,10 +18,10 @@ curl -X POST "$HAIL_API_URL/v1/numbers" -H "Authorization: Bearer $HAIL_API_KEY"
 ```
 
 Or `hail numbers acquire --country PT --provider telnyx`. Schemas:
-[`openapi/openapi.yaml`](https://github.com/hail-hq/hail/blob/main/openapi/openapi.yaml). Code:
-[`carrier_routing.py`](https://github.com/hail-hq/hail/blob/main/core/hailhq/core/carrier_routing.py),
-[`number_offers.py`](https://github.com/hail-hq/hail/blob/main/core/hailhq/core/number_offers.py),
-[`number_orders.py`](https://github.com/hail-hq/hail/blob/main/api/hailhq/api/number_orders.py).
+[`openapi/openapi.yaml`](../../../openapi/openapi.yaml). Code:
+[`carrier_routing.py`](../../../core/hailhq/core/carrier_routing.py),
+[`number_offers.py`](../../../core/hailhq/core/number_offers.py),
+[`number_orders.py`](../../../api/hailhq/api/number_orders.py).
 
 Telnyx stays off until all five values below are set. With only
 `TELNYX_API_KEY` set, quotes list Twilio offers only.
@@ -99,7 +99,7 @@ lists the fields and documents Telnyx asks for, `POST /v1/verifications`
 superadmin approval submits it to Telnyx. Once Telnyx approves, quotes for
 that country and type turn `ready` and the order carries the group. The
 console does all of this from the number picker. Plug-in:
-[`core/hailhq/core/providers/verification/telnyx.py`](https://github.com/hail-hq/hail/blob/main/core/hailhq/core/providers/verification/telnyx.py).
+[`core/hailhq/core/providers/verification/telnyx.py`](../../../core/hailhq/core/providers/verification/telnyx.py).
 
 ## Orders
 

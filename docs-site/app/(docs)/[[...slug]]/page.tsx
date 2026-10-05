@@ -1,4 +1,4 @@
-import { createRelativeLink } from "fumadocs-ui/mdx";
+import { createDocsLink } from "@/components/docs-link";
 import { DocsBody, DocsPage } from "fumadocs-ui/page";
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
@@ -20,12 +20,9 @@ export default async function Page(props: {
           its own `# H1`, which also has to render correctly on GitHub. Adding
           the title component would print the heading twice. */}
       <DocsBody>
-        {/* The source links to sibling docs with relative .md paths so it also
-            renders on GitHub. createRelativeLink resolves those to /docs routes;
-            absolute links (github blob URLs) pass through untouched. */}
-        <MDX
-          components={getMDXComponents({ a: createRelativeLink(source, page) })}
-        />
+        {/* Preserve relative Markdown links on GitHub. Resolve published guides
+            to docs routes and repository source files to GitHub in the renderer. */}
+        <MDX components={getMDXComponents({ a: createDocsLink(page) })} />
       </DocsBody>
     </DocsPage>
   );

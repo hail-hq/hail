@@ -2,7 +2,7 @@
 
 Second voice carrier, next to [Twilio](./twilio.md). Calls in and out.
 A number's `provider` column picks its trunk
-([`core/hailhq/core/carrier_routing.py`](https://github.com/hail-hq/hail/blob/main/core/hailhq/core/carrier_routing.py)).
+([`core/hailhq/core/carrier_routing.py`](../../../core/hailhq/core/carrier_routing.py)).
 
 ```bash
 # A call from a DIDWW number goes out through LIVEKIT_DIDWW_SIP_OUTBOUND_TRUNK_ID.
@@ -96,7 +96,7 @@ Order of events for a country that needs end-user registration:
    (console wizard). Hail creates the identity, address and proofs at DIDWW and
    validates them (`address_requirement_validations`). Papers that pass are
    approved at once. No person reviews them
-   ([`create_verification`](https://github.com/hail-hq/hail/blob/main/api/hailhq/api/routes/verifications.py)).
+   ([`create_verification`](../../../api/hailhq/api/routes/verifications.py)).
 2. `POST /numbers` reserves setup + first month, orders the DID
    (`provisioning_state: pending`).
 3. The reconciler files the registration (`address_verifications`) once the
@@ -111,12 +111,12 @@ If the terminate call fails, the DID id is kept in
 `provisioning_metadata.unreleased_resource_id` and the reconciler retries every
 minute until DIDWW accepts it.
 
-Schemas: [`openapi/openapi.yaml`](https://github.com/hail-hq/hail/blob/main/openapi/openapi.yaml). Code:
-[`providers/voice/didww.py`](https://github.com/hail-hq/hail/blob/main/core/hailhq/core/providers/voice/didww.py),
-[`providers/verification/didww.py`](https://github.com/hail-hq/hail/blob/main/core/hailhq/core/providers/verification/didww.py),
-[`number_orders.py`](https://github.com/hail-hq/hail/blob/main/api/hailhq/api/number_orders.py), the `didww`
+Schemas: [`openapi/openapi.yaml`](../../../openapi/openapi.yaml). Code:
+[`providers/voice/didww.py`](../../../core/hailhq/core/providers/voice/didww.py),
+[`providers/verification/didww.py`](../../../core/hailhq/core/providers/verification/didww.py),
+[`number_orders.py`](../../../api/hailhq/api/number_orders.py), the `didww`
 entry of `CARRIERS` in
-[`carrier_routing.py`](https://github.com/hail-hq/hail/blob/main/core/hailhq/core/carrier_routing.py).
+[`carrier_routing.py`](../../../core/hailhq/core/carrier_routing.py).
 
 A call from a `didww` number with `LIVEKIT_DIDWW_SIP_OUTBOUND_TRUNK_ID` empty
 fails with `end_reason = carrier_route_failed` before any LiveKit room exists.
