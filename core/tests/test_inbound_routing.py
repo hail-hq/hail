@@ -59,7 +59,7 @@ async def test_register_attaches_then_adds_then_stamps(async_session, hooks) -> 
     assert lk.add_inbound_number.await_count == 1
 
 
-async def test_unregister_removes_then_detaches_then_clears(
+async def test_unregister_detaches_then_removes_then_clears(
     async_session, hooks
 ) -> None:
     lk = AsyncMock()
@@ -75,6 +75,52 @@ async def test_unregister_removes_then_detaches_then_clears(
     assert number.inbound_registered_at is None
     await inbound_routing.unregister(async_session, lk, number)
     assert hooks["detach"].await_count == 1
+
+
+async def test_unregister_detaches_at_the_carrier_before_livekit(
+    async_session, hooks
+) -> None:
+    order: list[str] = []
+    lk = AsyncMock()
+    number = _number()
+    async_session.add(number)
+    await async_session.flush()
+    await inbound_routing.register(async_session, lk, number)
+    hooks["detach"].side_effect = lambda *a: order.append("carrier")
+    lk.remove_inbound_number.side_effect = lambda *a: order.append("livekit")
+    await inbound_routing.unregister(async_session, lk, number)
+    assert order == ["carrier", "livekit"]
+
+
+async def test_failed_carrier_detach_leaves_livekit_and_row_untouched(
+    async_session, hooks
+) -> None:
+    lk = AsyncMock()
+    number = _number()
+    async_session.add(number)
+    await async_session.flush()
+    await inbound_routing.register(async_session, lk, number)
+    hooks["detach"].side_effect = RuntimeError("carrier 500")
+    with pytest.raises(inbound_routing.InboundRoutingError) as exc_info:
+        await inbound_routing.unregister(async_session, lk, number)
+    assert exc_info.value.stage == "carrier_detach"
+    lk.remove_inbound_number.assert_not_awaited()
+    assert number.inbound_registered_at is not None
+
+
+async def test_failed_livekit_remove_keeps_the_row_registered(
+    async_session, hooks
+) -> None:
+    lk = AsyncMock()
+    number = _number()
+    async_session.add(number)
+    await async_session.flush()
+    await inbound_routing.register(async_session, lk, number)
+    lk.remove_inbound_number.side_effect = RuntimeError("twirp 500")
+    with pytest.raises(inbound_routing.InboundRoutingError) as exc_info:
+        await inbound_routing.unregister(async_session, lk, number)
+    assert exc_info.value.stage == "livekit_remove"
+    assert number.inbound_registered_at is not None
 
 
 async def test_carrier_failure_leaves_number_unregistered(async_session, hooks) -> None:

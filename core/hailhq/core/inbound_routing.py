@@ -3,8 +3,9 @@
 Two steps, in this order: the carrier points the number at LiveKit
 (``Carrier.attach_inbound``), then LiveKit's inbound trunk for that carrier
 lists the number so the INVITE is accepted. ``phone_numbers.inbound_registered_at``
-is set only when both succeeded. ``unregister`` is the reverse, run when the
-number stops routing calls to an agent and before a release.
+is set only when both succeeded. ``unregister`` is the reverse (carrier
+detach first, then LiveKit), run when the number stops routing calls to an
+agent and before a release.
 """
 
 from __future__ import annotations
@@ -76,16 +77,21 @@ async def unregister(db: AsyncSession, lk: LiveKitClient, number: PhoneNumber) -
         trunk_id = entry.inbound_trunk()
     except ValueError as exc:
         raise InboundRoutingError("livekit_remove", exc, config=True) from exc
-    try:
-        await lk.remove_inbound_number(trunk_id, number.e164)
-    except Exception as exc:
-        raise InboundRoutingError("livekit_remove", exc) from exc
+    # Carrier first: while the carrier still sends calls, the LiveKit trunk
+    # must keep accepting them. A failed detach leaves LiveKit and the row
+    # untouched, so a retry starts from the same state.
     try:
         await entry.detach_inbound(number.provider_resource_id, number.e164)
     except Exception as exc:
         raise InboundRoutingError(
             "carrier_detach", exc, config=_is_config_error(exc)
         ) from exc
+    try:
+        await lk.remove_inbound_number(trunk_id, number.e164)
+    except Exception as exc:
+        # The carrier is already detached; the row stays registered so the
+        # next unregister (idempotent at the carrier) finishes the removal.
+        raise InboundRoutingError("livekit_remove", exc) from exc
     number.inbound_registered_at = None
     await db.flush()
 
