@@ -4809,7 +4809,8 @@ components:
             Place the call with a saved agent (POST /agents). The agent
             supplies system_prompt, first_message, ai_disclosure, voice_config, tools
             and max duration; any of those given explicitly on this request wins.
-            Satisfies the system_prompt or llm requirement on its own.
+            Satisfies the system_prompt or llm requirement on its own. A paused agent
+            is refused with 409.
       additionalProperties: false
       type: object
       required:

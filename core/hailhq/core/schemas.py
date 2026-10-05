@@ -295,7 +295,8 @@ class CallCreate(ConsentAttestationMixin):
             "supplies system_prompt, first_message, ai_disclosure, "
             "voice_config, tools and max duration; any of those given "
             "explicitly on this request wins. Satisfies the system_prompt "
-            "or llm requirement on its own."
+            "or llm requirement on its own. A paused agent is refused "
+            "with 409."
         ),
     )
 

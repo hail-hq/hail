@@ -1706,3 +1706,37 @@ async def test_post_calls_with_agent_id_fills_defaults(
     )
     assert resp.status_code == 404
     assert livekit_mock.create_room.await_count == 2
+
+
+async def test_post_calls_rejects_a_paused_agent(
+    client: httpx.AsyncClient,
+    async_session: AsyncSession,
+    org_and_key: tuple[str, ApiKey, str],
+    livekit_mock: AsyncMock,
+    add_phone_number,
+) -> None:
+    from hailhq.core.models import Agent
+
+    org_id, _, plain = org_and_key
+    await add_phone_number(async_session, org_id)
+    agent = Agent(
+        organization_id=org_id,
+        name="Recruiter",
+        system_prompt="Screen the candidate.",
+        status="paused",
+    )
+    async_session.add(agent)
+    await async_session.commit()
+
+    resp = await client.post(
+        "/calls",
+        json={
+            "to": "+14155559999",
+            "recipient_consent": True,
+            "agent_id": str(agent.id),
+        },
+        headers={"Authorization": f"Bearer {plain}"},
+    )
+    assert resp.status_code == 409
+    assert resp.json()["detail"] == "agent is paused"
+    livekit_mock.create_room.assert_not_awaited()

@@ -1503,7 +1503,7 @@ type BodyUploadEmailAttachment struct {
 
 // CallCreate defines model for CallCreate.
 type CallCreate struct {
-	// AgentId Place the call with a saved agent (POST /agents). The agent supplies system_prompt, first_message, ai_disclosure, voice_config, tools and max duration; any of those given explicitly on this request wins. Satisfies the system_prompt or llm requirement on its own.
+	// AgentId Place the call with a saved agent (POST /agents). The agent supplies system_prompt, first_message, ai_disclosure, voice_config, tools and max duration; any of those given explicitly on this request wins. Satisfies the system_prompt or llm requirement on its own. A paused agent is refused with 409.
 	AgentId *openapi_types.UUID `json:"agent_id,omitempty"`
 
 	// AiDisclosure Speak the AI self-disclosure line ('Hi, this is an AI assistant calling on behalf of ...') as the first thing on the call. Enabled by default. Disable only if you have verified the disclosure is not required for this call — 47 CFR 64.1200(b)(1) requires identifying the initiating business at the start of artificial-voice calls in the US, and several jurisdictions have AI bot-disclosure laws. Hail does not verify this for you. The agent still identifies itself as an AI if asked.
