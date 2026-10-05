@@ -5,7 +5,9 @@ the dispatch rule's static metadata (``{"direction": "inbound"}``). The
 voicebot reads the SIP participant's attributes and calls
 :func:`open_inbound_call`, which decides who answers:
 
-* unknown, pool, or misrouted number: dropped, no row (same as inbound SMS);
+* unknown or pool number: dropped, no row (same as inbound SMS);
+* known number on the wrong trunk, or without voice: ``Call`` failed with
+  ``end_reason = carrier_route_failed`` (logged at WARNING);
 * no live voice agent: ``Call`` failed with ``end_reason = no_agent``;
 * no credits or voice suspended: ``Call`` failed with ``insufficient_funds``
   (or ``user_rejected`` when the channel is suspended);
@@ -147,8 +149,10 @@ async def open_inbound_call(
         or attrs.trunk_id != expected_trunk
         or "voice" not in number.capabilities
     ):
-        logger.info(
-            "inbound call to %s dropped: trunk=%s expected=%s carrier=%s "
+        # A real number of a real customer: keep a failed Call (and its event
+        # and webhook) so the customer sees the missed call.
+        logger.warning(
+            "inbound call to %s refused: trunk=%s expected=%s carrier=%s "
             "capabilities=%s",
             attrs.dialed,
             attrs.trunk_id,
@@ -156,7 +160,9 @@ async def open_inbound_call(
             number.provider,
             number.capabilities,
         )
-        return Rejected("wrong_carrier")
+        return await _refuse(
+            db, number, attrs, None, CallEndReason.CARRIER_ROUTE_FAILED
+        )
 
     # The caller is already connected and hearing silence: look the name up
     # while the checks and the Call row are written, as POST /calls does.

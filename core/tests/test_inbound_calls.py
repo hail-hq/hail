@@ -138,14 +138,34 @@ async def test_pool_number_is_dropped(async_session) -> None:
     assert outcome.reason == "unknown_number"
 
 
-async def test_wrong_trunk_for_the_carrier_is_dropped(async_session) -> None:
+async def test_wrong_trunk_for_the_carrier_writes_a_failed_call(
+    async_session, caplog
+) -> None:
     await _seed(async_session)
-    outcome = await inbound_calls.open_inbound_call(
-        async_session, _attrs(trunk_id="ST_in_tx")
-    )
+    with caplog.at_level("WARNING", logger="hailhq.core.inbound_calls"):
+        outcome = await inbound_calls.open_inbound_call(
+            async_session, _attrs(trunk_id="ST_in_tx")
+        )
     assert isinstance(outcome, inbound_calls.Rejected)
-    assert outcome.reason == "wrong_carrier"
-    assert (await async_session.execute(select(Call))).first() is None
+    assert outcome.reason == "carrier_route_failed"
+    call = (await async_session.execute(select(Call))).scalar_one()
+    assert call.id == outcome.call_id
+    assert call.status == "failed"
+    assert call.end_reason == "carrier_route_failed"
+    assert call.direction == "inbound"
+    event = (await async_session.execute(select(CallEvent))).scalar_one()
+    assert event.payload["reason"] == "carrier_route_failed"
+    assert any(r.levelname == "WARNING" for r in caplog.records)
+
+
+async def test_number_without_voice_writes_a_failed_call(async_session) -> None:
+    _org, _agent, number = await _seed(async_session)
+    number.capabilities = ["sms"]
+    await async_session.commit()
+    outcome = await inbound_calls.open_inbound_call(async_session, _attrs())
+    assert isinstance(outcome, inbound_calls.Rejected)
+    assert outcome.reason == "carrier_route_failed"
+    assert (await async_session.execute(select(Call))).scalar_one().status == "failed"
 
 
 async def test_shared_trunk_serves_every_carrier(async_session, monkeypatch) -> None:
@@ -160,11 +180,11 @@ async def test_shared_trunk_serves_every_carrier(async_session, monkeypatch) -> 
     assert isinstance(outcome, inbound_calls.Accepted)
 
 
-async def test_missing_trunk_id_is_dropped(async_session) -> None:
+async def test_missing_trunk_id_is_refused(async_session) -> None:
     await _seed(async_session)
     outcome = await inbound_calls.open_inbound_call(async_session, _attrs(trunk_id=""))
     assert isinstance(outcome, inbound_calls.Rejected)
-    assert outcome.reason == "wrong_carrier"
+    assert outcome.reason == "carrier_route_failed"
 
 
 async def test_no_agent_writes_a_failed_call(async_session) -> None:
