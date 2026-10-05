@@ -347,3 +347,109 @@ async def test_numbers_acquire_with_quote_sends_number_type_only_when_given(
     first, second = (json.loads(call.request.content) for call in route.calls)
     assert first == {"country_code": "PT", "quote_id": str(quote_id)}
     assert second["number_type"] == "mobile"
+
+
+# --------------------------------------------------------------------------- #
+# numbers.route and agents
+# --------------------------------------------------------------------------- #
+
+
+@respx.mock
+async def test_numbers_route_sends_only_given_fields(
+    base_url: str, api_key: str
+) -> None:
+    number_id = uuid4()
+    agent_id = uuid4()
+    body = make_phone_number_response(number_id=number_id)
+    body["voice_agent_id"] = str(agent_id)
+    body["inbound_registered"] = True
+    route = respx.patch(f"{base_url}/numbers/{number_id}").mock(
+        return_value=httpx.Response(200, json=body)
+    )
+    async with Client(api_key=api_key, base_url=base_url) as client:
+        n = await client.numbers.route(number_id, voice_agent_id=agent_id)
+        assert n.voice_agent_id == agent_id
+        assert n.inbound_registered is True
+        assert json.loads(route.calls.last.request.content) == {
+            "voice_agent_id": str(agent_id)
+        }
+        await client.numbers.route(number_id, sms_agent_id=None)
+        assert json.loads(route.calls.last.request.content) == {"sms_agent_id": None}
+
+
+def _agent_json(**over):
+    base = {
+        "id": str(uuid4()),
+        "organization_id": str(uuid4()),
+        "name": "Front desk",
+        "system_prompt": "Book appointments.",
+        "first_message": None,
+        "ai_disclosure": True,
+        "ai_disclosure_line": None,
+        "voice_config": {},
+        "tools": None,
+        "max_duration_seconds": None,
+        "sms_enabled": True,
+        "status": "live",
+        "created_at": "2026-10-02T12:00:00Z",
+        "updated_at": "2026-10-02T12:00:00Z",
+    }
+    base.update(over)
+    return base
+
+
+@respx.mock
+async def test_agents_create_list_update_delete(base_url: str, api_key: str) -> None:
+    created = _agent_json(first_message="Hi.")
+    agent_id = created["id"]
+    respx.post(f"{base_url}/agents").mock(
+        return_value=httpx.Response(201, json=created)
+    )
+    respx.get(f"{base_url}/agents").mock(
+        return_value=httpx.Response(200, json={"items": [created]})
+    )
+    patch = respx.patch(f"{base_url}/agents/{agent_id}").mock(
+        return_value=httpx.Response(200, json=_agent_json(id=agent_id, status="paused"))
+    )
+    delete = respx.delete(f"{base_url}/agents/{agent_id}").mock(
+        return_value=httpx.Response(204)
+    )
+    async with Client(api_key=api_key, base_url=base_url) as client:
+        a = await client.agents.create(
+            name="Front desk",
+            system_prompt="Book appointments.",
+            first_message="Hi.",
+            language="fr",
+        )
+        assert a.name == "Front desk"
+        sent = json.loads(respx.calls[0].request.content)
+        assert sent["voice_config"] == {"language": "fr"}
+        assert "ai_disclosure_line" not in sent
+        assert [x.id for x in (await client.agents.list()).items] == [UUID(agent_id)]
+        updated = await client.agents.update(
+            agent_id, status="paused", first_message=None
+        )
+        assert updated.status == "paused"
+        assert json.loads(patch.calls.last.request.content) == {
+            "status": "paused",
+            "first_message": None,
+        }
+        await client.agents.delete(agent_id)
+        assert delete.called
+
+
+@respx.mock
+async def test_calls_create_with_agent_id(base_url: str, api_key: str) -> None:
+    from tests.conftest import make_call_response
+
+    agent_id = uuid4()
+    route = respx.post(f"{base_url}/calls").mock(
+        return_value=httpx.Response(201, json=make_call_response())
+    )
+    async with Client(api_key=api_key, base_url=base_url) as client:
+        await client.calls.create(
+            to="+14155550100", recipient_consent=True, agent_id=agent_id
+        )
+    sent = json.loads(route.calls.last.request.content)
+    assert sent["agent_id"] == str(agent_id)
+    assert "system_prompt" not in sent

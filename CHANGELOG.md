@@ -4,9 +4,42 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 
 ## [Unreleased]
 
+### Added
+
+- **Agents.** `POST /v1/agents` saves a brain (instructions, greeting, AI
+  line, voice, tools, limits). `PATCH /v1/numbers/{id}` routes a number's
+  calls (`voice_agent_id`) and texts (`sms_agent_id`) to one. `POST /v1/calls`
+  accepts `agent_id`. CLI `hail agents`, `hail numbers route`; MCP
+  `list_agents`, `create_agent`, `route_number`; SDK `client.agents`,
+  `client.numbers.route`. [docs/public/agents.md](docs/public/agents.md).
+- **Inbound calls** on Twilio, Telnyx and DIDWW numbers. Hail registers the
+  number at the carrier and on a per-carrier LiveKit inbound trunk when it
+  routes calls to an agent, and the voicebot answers with the agent. New
+  webhook `call.received`; every `call.*` payload carries `direction`,
+  `from`, `to`, `agent_id`. New `end_reason` values `no_agent`,
+  `insufficient_funds`. Setup: [LiveKit Cloud §4](docs/public/self-host/livekit-cloud.md#4-inbound-calls)
+  and the carrier pages.
+- **Inbound texts answered by an agent.** A text worker in the voicebot
+  service replies from the agent's instructions and the thread, through the
+  same LLM chain as calls; STOP/HELP stay Hail's. YES/START/UNSTOP are an
+  opt-in only from a person who opted out; from anyone else the agent gets them.
+- **AI line templates.** Inbound default `Hi, this is an AI assistant
+answering on behalf of {org}.`; workspace default in
+  `organization_call_settings.ai_disclosure_line`, per-agent override.
 - DIDWW numbers can be quoted and bought through `POST /numbers/quotes` and
   `POST /numbers`; end-user registration runs through `/verifications`
   (`provider=didww`). New settings `DIDWW_API_KEY`, `DIDWW_ENVIRONMENT`.
+- Env: `LIVEKIT_SIP_INBOUND_TRUNK_ID` (one inbound trunk for every carrier;
+  `LIVEKIT_TWILIO_SIP_INBOUND_TRUNK_ID` and friends stay as optional
+  per-carrier overrides), `TWILIO_SIP_TRUNK_SID`, `DIDWW_VOICE_IN_TRUNK_ID`.
+  Migration `0050`.
+
+### Changed
+
+- `CallResponse`, `SmsResponse` gain `agent_id`; `PhoneNumberResponse` gains
+  `voice_agent_id`, `sms_agent_id`, `inbound_registered`.
+- `organization_call_settings.max_duration_seconds` is nullable (null = service default).
+- `POST /v1/calls` 422 text: "either system_prompt, llm or agent_id must be provided".
 
 ## [0.25.0] — 2026-09-28
 

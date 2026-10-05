@@ -14,11 +14,14 @@ async def test_reads_current_service_default(monkeypatch):
     db = AsyncMock()
     db.get.return_value = None
     org = uuid4()
-    assert await get_call_settings(org, db) == {
-        "max_duration_seconds": 420,
-        "default_max_duration_seconds": 420,
-        "uses_default": True,
-    }
+    result = await get_call_settings(org, db)
+    assert result["max_duration_seconds"] == 420
+    assert result["default_max_duration_seconds"] == 420
+    assert result["uses_default"] is True
+    assert result["ai_disclosure_line"] is None
+    assert result["default_ai_disclosure_lines"]["inbound"].startswith(
+        "Hi, this is an AI"
+    )
     db.get.assert_awaited_once_with(OrganizationCallSettings, org)
 
 
@@ -26,10 +29,25 @@ async def test_reads_current_service_default(monkeypatch):
 async def test_workspace_override_wins(monkeypatch):
     monkeypatch.setattr(settings, "hail_voice_max_duration_seconds", 420)
     db = AsyncMock()
-    db.get.return_value = SimpleNamespace(max_duration_seconds=120)
+    db.get.return_value = SimpleNamespace(
+        max_duration_seconds=120, ai_disclosure_line="AI for {org}."
+    )
     result = await get_call_settings(uuid4(), db)
     assert result["max_duration_seconds"] == 120
     assert result["uses_default"] is False
+    assert result["ai_disclosure_line"] == "AI for {org}."
+
+
+@pytest.mark.asyncio
+async def test_line_only_row_keeps_default_duration(monkeypatch):
+    monkeypatch.setattr(settings, "hail_voice_max_duration_seconds", 420)
+    db = AsyncMock()
+    db.get.return_value = SimpleNamespace(
+        max_duration_seconds=None, ai_disclosure_line="AI for {org}."
+    )
+    result = await get_call_settings(uuid4(), db)
+    assert result["max_duration_seconds"] == 420
+    assert result["uses_default"] is True
 
 
 @pytest.mark.asyncio

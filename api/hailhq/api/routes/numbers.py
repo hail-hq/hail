@@ -36,10 +36,12 @@ from hailhq.api.number_orders import (
 from hailhq.api.pagination import fetch_cursor_page
 from hailhq.api.ratelimit import GENERAL_RATE_LIMITED_RESPONSES
 from hailhq.api.route_prefixes import request_mount_prefix
-from hailhq.core import telephony_catalog
+from hailhq.api.routes.calls import get_livekit_optional
+from hailhq.core import inbound_routing, telephony_catalog
 from hailhq.core.carrier_routing import CARRIERS, carrier, sms_route
 from hailhq.core.db import get_session, org_lock
-from hailhq.core.models import NumberOffer, PhoneNumber
+from hailhq.core.livekit import LiveKitClient
+from hailhq.core.models import Agent, NumberOffer, PhoneNumber
 from hailhq.core.number_offers import (
     PROVIDERS,
     CarrierOffer,
@@ -52,6 +54,7 @@ from hailhq.core.schemas import (
     NumberQuoteRequest,
     PhoneNumberListResponse,
     PhoneNumberResponse,
+    PhoneNumberRoutingUpdate,
 )
 from pydantic import BaseModel, Field
 from sqlalchemy import or_, select
@@ -177,13 +180,19 @@ def _reject_if_released(number: PhoneNumber) -> None:
         )
 
 
-async def release_org_number(db: AsyncSession, number: PhoneNumber) -> PhoneNumber:
+async def release_org_number(
+    db: AsyncSession, number: PhoneNumber, lk: LiveKitClient | None = None
+) -> PhoneNumber:
     """Release a dedicated number at the carrier and mark the row released.
 
     Idempotent: an already-released row is returned unchanged, and the
     provider tolerates a number that is already gone at the carrier.
     Shared by DELETE /numbers/{id} and the internal dunning release
     (routes/internal/numbers.py) so both paths stay identical.
+
+    A number registered for inbound is taken off the LiveKit trunk first
+    (best effort: the carrier release below removes the number either way,
+    and a stale trunk entry only wastes a lookup on LiveKit's side).
     """
     # Serialize against enable_sms: it re-checks provisioning_state under the
     # org-keyed advisory lock and then talks to Twilio, so a release that does
@@ -215,9 +224,39 @@ async def release_org_number(db: AsyncSession, number: PhoneNumber) -> PhoneNumb
             status_code=409,
             detail=f"{number.provider} numbers cannot be released through the API yet",
         )
+    if number.inbound_registered_at is not None:
+        if lk is not None:
+            try:
+                await inbound_routing.unregister(db, lk, number)
+            except inbound_routing.InboundRoutingError:
+                logger.warning(
+                    "number %s: inbound unregister failed before release (%s)",
+                    number.id,
+                    number.e164,
+                    exc_info=True,
+                )
+        else:
+            logger.warning(
+                "number %s: released without LiveKit settings; its inbound "
+                "trunk entry (%s) stays until removed by hand",
+                number.id,
+                number.e164,
+            )
+        # The row is a tombstone after this call: never leave it "registered".
+        number.inbound_registered_at = None
+    number.voice_agent_id = None
+    number.sms_agent_id = None
     try:
         await carrier(number.provider).release(number.provider_resource_id)
-    except CarrierNotConfigured as exc:
+    except Exception as exc:
+        # Keep the unregister: the row must not still say the number is
+        # registered. Committed here, not before the carrier call, so the org
+        # lock is held until the release is done (a commit drops the lock and
+        # lets enable_sms or PATCH /numbers/{id} run against a number that is
+        # being deleted at the carrier).
+        await db.commit()
+        if not isinstance(exc, CarrierNotConfigured):
+            raise
         # Carrier not configured: an operator problem, not a server fault.
         # The customer reads this: never the carrier's name or an env var.
         logger.error("%s release failed: %s", number.provider, exc)
@@ -260,17 +299,19 @@ async def release_number(
     number_id: UUID,
     principal: Annotated[Principal, Depends(get_current_principal)],
     db: Annotated[AsyncSession, Depends(get_session)],
+    lk: Annotated[LiveKitClient | None, Depends(get_livekit_optional)],
 ) -> None:
     """Release a dedicated number. The monthly fee stops accruing after the
     release month; months already accrued stay owed (the rater bills late,
-    never forgives)."""
+    never forgives). A number that answered calls is taken off the inbound
+    trunk first."""
     number = await _get_org_number_or_404(db, number_id, principal.organization_id)
     # Best-effort pre-check so an idempotent re-DELETE doesn't append a
     # second audit entry (audit is a safety net, not a correctness gate).
     was_released = (
         number.provisioning_state == "released" or number.released_at is not None
     )
-    await release_org_number(db, number)
+    await release_org_number(db, number, lk)
     if not was_released:
         actor_user_id, actor_kind = actor_of(principal)
         await write_audit_log(
@@ -283,6 +324,145 @@ async def release_number(
             actor_user_id=actor_user_id,
             actor_kind=actor_kind,
         )
+
+
+_ROUTING_RESPONSES: dict = {
+    404: {
+        "description": "The number or the agent does not exist for this organization."
+    },
+    422: {"description": "The number lacks the capability the agent would answer on."},
+    502: {
+        "description": "The carrier or LiveKit refused to register the number for inbound."
+    },
+    503: {
+        "description": "This server is not configured for inbound calls, or not on the number's carrier."
+    },
+}
+
+
+async def _load_org_agent_or_404(
+    db: AsyncSession, agent_id: UUID, organization_id: UUID
+) -> Agent:
+    agent = (
+        await db.execute(
+            select(Agent).where(
+                Agent.id == agent_id, Agent.organization_id == organization_id
+            )
+        )
+    ).scalar_one_or_none()
+    if agent is None:
+        raise HTTPException(
+            status_code=http_status.HTTP_404_NOT_FOUND, detail="agent not found"
+        )
+    return agent
+
+
+def _routing_http_error(exc: inbound_routing.InboundRoutingError) -> HTTPException:
+    # The customer reads this: never the carrier's name or an env var. ``exc``
+    # names both (it is logged by the caller).
+    if exc.config:
+        return HTTPException(
+            status_code=http_status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="inbound calls are not configured for this carrier",
+        )
+    return HTTPException(
+        status_code=http_status.HTTP_502_BAD_GATEWAY,
+        detail=f"could not register the number for inbound calls (stage: {exc.stage})",
+    )
+
+
+@router.patch(
+    "/{number_id}",
+    response_model=PhoneNumberResponse,
+    responses=_ROUTING_RESPONSES,
+)
+async def route_number(
+    number_id: UUID,
+    body: PhoneNumberRoutingUpdate,
+    principal: Annotated[Principal, Depends(get_current_principal)],
+    db: Annotated[AsyncSession, Depends(get_session)],
+    lk: Annotated[LiveKitClient | None, Depends(get_livekit_optional)],
+) -> PhoneNumberResponse:
+    """Choose which agent answers this number.
+
+    Setting ``voice_agent_id`` registers the number for inbound calls at the
+    carrier and on Hail's LiveKit inbound trunk; ``null`` unregisters it, and
+    calls ring out again. ``sms_agent_id`` only needs the sms capability;
+    inbound texts already reach Hail. A field left out keeps its value.
+    """
+    # Same org lock release_org_number takes: a PATCH racing a release (or
+    # another PATCH) must not commit an agent onto a released row or leave a
+    # registered number with no agent.
+    await org_lock(db, principal.organization_id)
+    number = await _get_org_number_or_404(db, number_id, principal.organization_id)
+    await db.refresh(number)
+    _reject_if_released(number)
+    fields = body.model_fields_set
+    if "voice_agent_id" in fields and body.voice_agent_id is not None:
+        if "voice" not in number.capabilities:
+            raise unprocessable(
+                "this number has no voice capability", loc=["body", "voice_agent_id"]
+            )
+        await _load_org_agent_or_404(db, body.voice_agent_id, principal.organization_id)
+    if "sms_agent_id" in fields and body.sms_agent_id is not None:
+        if "sms" not in number.capabilities:
+            raise unprocessable(
+                "this number has no sms capability", loc=["body", "sms_agent_id"]
+            )
+        await _load_org_agent_or_404(db, body.sms_agent_id, principal.organization_id)
+
+    try:
+        if "voice_agent_id" in fields:
+            # LiveKit is only touched to register a number or to unregister a
+            # registered one: a server without LiveKit settings still routes
+            # texts and clears the agent off an unregistered number.
+            if (
+                body.voice_agent_id is not None
+                or number.inbound_registered_at is not None
+            ):
+                if lk is None:
+                    raise HTTPException(
+                        status_code=http_status.HTTP_503_SERVICE_UNAVAILABLE,
+                        detail="inbound calls are not configured on this server",
+                    )
+                if body.voice_agent_id is None:
+                    await inbound_routing.unregister(db, lk, number)
+                else:
+                    await inbound_routing.register(db, lk, number)
+            number.voice_agent_id = body.voice_agent_id
+        if "sms_agent_id" in fields:
+            number.sms_agent_id = body.sms_agent_id
+    except inbound_routing.InboundRoutingError as exc:
+        # Rollback expires the row; log the path id, not the ORM attribute.
+        await db.rollback()
+        logger.warning(
+            "number %s inbound routing failed stage=%s",
+            number_id,
+            exc.stage,
+            exc_info=True,
+        )
+        raise _routing_http_error(exc) from exc
+    number.updated_at = datetime.now(timezone.utc)
+    await db.commit()
+    await db.refresh(number)
+    actor_user_id, actor_kind = actor_of(principal)
+    await write_audit_log(
+        organization_id=principal.organization_id,
+        api_key_id=principal.api_key_id,
+        action="number.route",
+        resource_type="phone_number",
+        resource_id=number.id,
+        payload={
+            "e164": number.e164,
+            "voice_agent_id": (
+                str(number.voice_agent_id) if number.voice_agent_id else None
+            ),
+            "sms_agent_id": str(number.sms_agent_id) if number.sms_agent_id else None,
+        },
+        actor_user_id=actor_user_id,
+        actor_kind=actor_kind,
+    )
+    return PhoneNumberResponse.model_validate(number)
 
 
 @router.get(

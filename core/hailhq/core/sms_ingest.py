@@ -15,10 +15,15 @@ import logging
 from dataclasses import dataclass
 from uuid import UUID
 
-from hailhq.core.compliance_gate import add_suppression, remove_suppression
+from hailhq.core.compliance_gate import (
+    add_suppression,
+    is_suppressed,
+    remove_suppression,
+)
 from hailhq.core.config import settings
 from hailhq.core.models import PhoneNumber, Sms, SmsEvent
 from hailhq.core.providers.sms import ProviderSmsResult, SmsProvider
+from hailhq.core.text_agent import should_queue_reply
 from hailhq.core.webhook_fanout import fanout_sms_event
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
@@ -26,7 +31,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["IngestResult", "ingest_inbound_sms"]
+__all__ = ["IngestResult", "active_dedicated_number", "ingest_inbound_sms"]
 
 # Unique-constraint name whose violation is a benign duplicate delivery
 # (Twilio at-least-once retry) to absorb; every other IntegrityError
@@ -111,7 +116,9 @@ async def _send_compliance_reply(
     await db.flush()
 
 
-async def _resolve_org_for_number(db: AsyncSession, to_e164: str) -> PhoneNumber | None:
+async def active_dedicated_number(db: AsyncSession, to_e164: str) -> PhoneNumber | None:
+    """The active, org-owned (non-pool) number ``to_e164``, or None. Shared by
+    inbound texts and inbound calls (``hailhq.core.inbound_calls``)."""
     stmt = select(PhoneNumber).where(
         PhoneNumber.e164 == to_e164,
         PhoneNumber.is_pool.is_(False),
@@ -131,7 +138,7 @@ async def ingest_inbound_sms(
     carrier: str,
     provider: SmsProvider | None = None,
 ) -> IngestResult:
-    number = await _resolve_org_for_number(db, to_e164)
+    number = await active_dedicated_number(db, to_e164)
     if number is None or number.organization_id is None:
         logger.info("inbound sms to unrecognized/pool number=%s dropped", to_e164)
         return IngestResult(sms_id=None, dropped_reason="unknown_number")
@@ -194,6 +201,13 @@ async def ingest_inbound_sms(
         return IngestResult(sms_id=existing.id if existing else None)
 
     action = _opt_out_action(body, opt_out_type)
+    # YES/START from someone who never opted out is an answer to the agent,
+    # not an opt-in: leave it to the text agent. Hail only handles it as an
+    # opt-in when the sender is currently opted out.
+    if action == "START" and not await is_suppressed(
+        db, organization_id, from_e164, "sms"
+    ):
+        action = None
     reply_body: str | None = None
     if action == "STOP":
         await add_suppression(
@@ -221,6 +235,11 @@ async def ingest_inbound_sms(
         await _send_compliance_reply(
             db, provider, org_number=number, sender_e164=from_e164, body=reply_body
         )
+
+    # Hand a plain message to the number's text agent. STOP, HELP and an
+    # opt-in from an opted-out sender are Hail's to answer, never the agent's.
+    if action is None and await should_queue_reply(db, number):
+        sms.agent_reply_state = "pending"
 
     # Record a lifecycle event so the inbound message surfaces on the
     # org-wide GET /events stream (which is built solely from SmsEvent rows),

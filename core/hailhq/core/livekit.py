@@ -22,6 +22,7 @@ from uuid import UUID
 
 from hailhq.core.config import settings
 from livekit import api
+from livekit.protocol.models import ListUpdate
 
 
 class LiveKitClient:
@@ -123,4 +124,20 @@ class LiveKitClient:
                 participant_name=participant_identity,
                 headers=headers or {},
             )
+        )
+
+    async def add_inbound_number(self, trunk_id: str, e164: str) -> None:
+        """Register ``e164`` on an inbound trunk so LiveKit accepts calls to it.
+
+        ``ListUpdate(add=...)`` is a set-add on the trunk's ``numbers``: a
+        number already listed stays listed once.
+        """
+        await self._lkapi.sip.update_inbound_trunk_fields(
+            trunk_id, numbers=ListUpdate(add=[e164])
+        )
+
+    async def remove_inbound_number(self, trunk_id: str, e164: str) -> None:
+        """Drop ``e164`` from an inbound trunk; a number not listed is a no-op."""
+        await self._lkapi.sip.update_inbound_trunk_fields(
+            trunk_id, numbers=ListUpdate(remove=[e164])
         )

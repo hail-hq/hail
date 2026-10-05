@@ -27,6 +27,9 @@ from typing import Any
 import httpx
 from hailhq.core.config import settings
 from hailhq.core.schemas import (
+    AgentCreate,
+    AgentListResponse,
+    AgentResponse,
     CallCreate,
     CallListResponse,
     CallResponse,
@@ -40,6 +43,8 @@ from hailhq.core.schemas import (
     EmailResponse,
     EmailStatsResponse,
     EventStreamResponse,
+    PhoneNumberResponse,
+    PhoneNumberRoutingUpdate,
     SmsCreate,
     SmsListResponse,
     SmsResponse,
@@ -118,6 +123,7 @@ class HailClient:
         consent_source: str | None = None,
         consent_obtained_at: str | None = None,
         message_type: str = "informational",
+        agent_id: str | None = None,
     ) -> dict[str, Any]:
         """POST /calls — originate an outbound call.
 
@@ -151,6 +157,8 @@ class HailClient:
             fields["consent_source"] = consent_source
         if consent_obtained_at is not None:
             fields["consent_obtained_at"] = consent_obtained_at
+        if agent_id is not None:
+            fields["agent_id"] = agent_id
 
         body = CallCreate.model_validate(fields).model_dump(
             mode="json", by_alias=True, exclude_unset=True
@@ -236,6 +244,41 @@ class HailClient:
         )
         resp = await self._client.post("/contacts", json=body)
         return ContactEntry.model_validate(_decode(resp)).model_dump(mode="json")
+
+    # ------------------------------------------------------------------ #
+    # /agents and PATCH /numbers/{id}
+    # ------------------------------------------------------------------ #
+
+    async def list_agents(self) -> dict[str, Any]:
+        resp = await self._client.get("/agents")
+        return AgentListResponse.model_validate(_decode(resp)).model_dump(mode="json")
+
+    async def create_agent(self, **fields: Any) -> dict[str, Any]:
+        """POST /agents — body validated by :class:`AgentCreate` first."""
+        body = AgentCreate.model_validate(fields).model_dump(
+            mode="json", exclude_unset=True
+        )
+        resp = await self._client.post("/agents", json=body)
+        return AgentResponse.model_validate(_decode(resp)).model_dump(mode="json")
+
+    async def route_number(
+        self,
+        number_id: str,
+        *,
+        voice_agent_id: str | None = None,
+        sms_agent_id: str | None = None,
+        clear_voice: bool = False,
+        clear_sms: bool = False,
+    ) -> dict[str, Any]:
+        """PATCH /numbers/{id} — which agent answers. ``clear_*`` sends null."""
+        body: dict[str, Any] = {}
+        if voice_agent_id is not None or clear_voice:
+            body["voice_agent_id"] = voice_agent_id
+        if sms_agent_id is not None or clear_sms:
+            body["sms_agent_id"] = sms_agent_id
+        PhoneNumberRoutingUpdate.model_validate(body)
+        resp = await self._client.patch(f"/numbers/{number_id}", json=body)
+        return PhoneNumberResponse.model_validate(_decode(resp)).model_dump(mode="json")
 
     # ------------------------------------------------------------------ #
     # POST /sms

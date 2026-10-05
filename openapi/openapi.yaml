@@ -10,6 +10,309 @@ servers:
   - url: https://api.hail.so
     description: Hail Cloud
 paths:
+  /v1/agents:
+    post:
+      tags:
+        - agents
+      summary: Create Agent
+      description:
+        "Create an agent. Route numbers to it with PATCH /numbers/{id},
+        or
+
+        place calls with it via ``agent_id`` on POST /calls."
+      operationId: create_agent_v1_agents_post
+      parameters:
+        - name: authorization
+          in: header
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            title: Authorization
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AgentCreate"
+      responses:
+        "201":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentResponse"
+        "429":
+          description:
+            Rate limited. This caller exceeded the general request-rate
+            ceiling. Retry after the Retry-After header (seconds).
+          headers:
+            Retry-After:
+              description: Seconds to wait before retrying.
+              schema:
+                type: integer
+            RateLimit-Limit:
+              description: The request ceiling for the current window.
+              schema:
+                type: integer
+            RateLimit-Remaining:
+              description: Requests remaining in the current window.
+              schema:
+                type: integer
+            RateLimit-Reset:
+              description: Seconds until the current window resets.
+              schema:
+                type: integer
+        "409":
+          description: An agent with this name already exists.
+        "422":
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
+    get:
+      tags:
+        - agents
+      summary: List Agents
+      description: List the organization's agents, newest first.
+      operationId: list_agents_v1_agents_get
+      parameters:
+        - name: authorization
+          in: header
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            title: Authorization
+      responses:
+        "200":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentListResponse"
+        "429":
+          description:
+            Rate limited. This caller exceeded the general request-rate
+            ceiling. Retry after the Retry-After header (seconds).
+          headers:
+            Retry-After:
+              description: Seconds to wait before retrying.
+              schema:
+                type: integer
+            RateLimit-Limit:
+              description: The request ceiling for the current window.
+              schema:
+                type: integer
+            RateLimit-Remaining:
+              description: Requests remaining in the current window.
+              schema:
+                type: integer
+            RateLimit-Reset:
+              description: Seconds until the current window resets.
+              schema:
+                type: integer
+        "422":
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
+  /v1/agents/{agent_id}:
+    get:
+      tags:
+        - agents
+      summary: Get Agent
+      description: Fetch one agent by id, including its instructions and voice settings.
+      operationId: get_agent_v1_agents__agent_id__get
+      parameters:
+        - name: agent_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+            title: Agent Id
+        - name: authorization
+          in: header
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            title: Authorization
+      responses:
+        "200":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentResponse"
+        "429":
+          description:
+            Rate limited. This caller exceeded the general request-rate
+            ceiling. Retry after the Retry-After header (seconds).
+          headers:
+            Retry-After:
+              description: Seconds to wait before retrying.
+              schema:
+                type: integer
+            RateLimit-Limit:
+              description: The request ceiling for the current window.
+              schema:
+                type: integer
+            RateLimit-Remaining:
+              description: Requests remaining in the current window.
+              schema:
+                type: integer
+            RateLimit-Reset:
+              description: Seconds until the current window resets.
+              schema:
+                type: integer
+        "422":
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
+    patch:
+      tags:
+        - agents
+      summary: Update Agent
+      description:
+        "Change some fields. Fields left out keep their value; ``null``
+        clears
+
+        first_message, ai_disclosure_line, tools or max_duration_seconds. Live
+
+        calls keep the settings they started with."
+      operationId: update_agent_v1_agents__agent_id__patch
+      parameters:
+        - name: agent_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+            title: Agent Id
+        - name: authorization
+          in: header
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            title: Authorization
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AgentUpdate"
+      responses:
+        "200":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentResponse"
+        "429":
+          description:
+            Rate limited. This caller exceeded the general request-rate
+            ceiling. Retry after the Retry-After header (seconds).
+          headers:
+            Retry-After:
+              description: Seconds to wait before retrying.
+              schema:
+                type: integer
+            RateLimit-Limit:
+              description: The request ceiling for the current window.
+              schema:
+                type: integer
+            RateLimit-Remaining:
+              description: Requests remaining in the current window.
+              schema:
+                type: integer
+            RateLimit-Reset:
+              description: Seconds until the current window resets.
+              schema:
+                type: integer
+        "409":
+          description: An agent with this name already exists.
+        "422":
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
+    delete:
+      tags:
+        - agents
+      summary: Delete Agent
+      description:
+        "Delete an agent. Numbers that routed calls to it are unregistered
+
+        for inbound and ring out again; numbers that routed texts to it go back
+
+        to webhooks only."
+      operationId: delete_agent_v1_agents__agent_id__delete
+      parameters:
+        - name: agent_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+            title: Agent Id
+        - name: authorization
+          in: header
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            title: Authorization
+      responses:
+        "204":
+          description: Successful Response
+        "429":
+          description:
+            Rate limited. This caller exceeded the general request-rate
+            ceiling. Retry after the Retry-After header (seconds).
+          headers:
+            Retry-After:
+              description: Seconds to wait before retrying.
+              schema:
+                type: integer
+            RateLimit-Limit:
+              description: The request ceiling for the current window.
+              schema:
+                type: integer
+            RateLimit-Remaining:
+              description: Requests remaining in the current window.
+              schema:
+                type: integer
+            RateLimit-Reset:
+              description: Seconds until the current window resets.
+              schema:
+                type: integer
+        "502":
+          description:
+            A number could not be taken off the inbound trunk; nothing
+            was deleted.
+        "503":
+          description:
+            A number is registered for inbound calls and this server is
+            not configured for them; nothing was deleted.
+        "422":
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
   /v1/calls:
     post:
       tags:
@@ -1609,7 +1912,9 @@ paths:
 
         release month; months already accrued stay owed (the rater bills late,
 
-        never forgives)."
+        never forgives). A number that answered calls is taken off the inbound
+
+        trunk first."
       operationId: release_number_v1_numbers__number_id__delete
       parameters:
         - name: number_id
@@ -1666,6 +1971,81 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HTTPValidationError"
+    patch:
+      tags:
+        - numbers
+      summary: Route Number
+      description: "Choose which agent answers this number.
+
+
+        Setting ``voice_agent_id`` registers the number for inbound calls at the
+
+        carrier and on Hail's LiveKit inbound trunk; ``null`` unregisters it, and
+
+        calls ring out again. ``sms_agent_id`` only needs the sms capability;
+
+        inbound texts already reach Hail. A field left out keeps its value."
+      operationId: route_number_v1_numbers__number_id__patch
+      parameters:
+        - name: number_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+            title: Number Id
+        - name: authorization
+          in: header
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            title: Authorization
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PhoneNumberRoutingUpdate"
+      responses:
+        "200":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PhoneNumberResponse"
+        "429":
+          description:
+            Rate limited. This caller exceeded the general request-rate
+            ceiling. Retry after the Retry-After header (seconds).
+          headers:
+            Retry-After:
+              description: Seconds to wait before retrying.
+              schema:
+                type: integer
+            RateLimit-Limit:
+              description: The request ceiling for the current window.
+              schema:
+                type: integer
+            RateLimit-Remaining:
+              description: Requests remaining in the current window.
+              schema:
+                type: integer
+            RateLimit-Reset:
+              description: Seconds until the current window resets.
+              schema:
+                type: integer
+        "404":
+          description: The number or the agent does not exist for this organization.
+        "422":
+          description: The number lacks the capability the agent would answer on.
+        "502":
+          description: The carrier or LiveKit refused to register the number for inbound.
+        "503":
+          description:
+            This server is not configured for inbound calls, or not on
+            the number's carrier.
     get:
       tags:
         - numbers
@@ -4008,6 +4388,286 @@ paths:
                 title: Response Healthz Healthz Get
 components:
   schemas:
+    AgentCreate:
+      properties:
+        name:
+          type: string
+          maxLength: 80
+          minLength: 1
+          title: Name
+          description: Display name, unique per organization.
+        system_prompt:
+          type: string
+          minLength: 1
+          title: System Prompt
+          description: Task instructions, sent as the agent's leading system message.
+        first_message:
+          anyOf:
+            - type: string
+              maxLength: 1000
+            - type: "null"
+          title: First Message
+          description:
+            "Opening line spoken after the AI line. Omitted: the agent
+            waits for the other side to speak first."
+        ai_disclosure:
+          type: boolean
+          title: Ai Disclosure
+          description:
+            Speak the AI line first on every call. Enabled by default.
+            Disable only if you have verified the disclosure is not required (47 CFR
+            64.1200(b)(1) and several AI bot-disclosure laws). Hail does not verify
+            this for you.
+          default: true
+        ai_disclosure_line:
+          anyOf:
+            - type: string
+              maxLength: 300
+            - type: "null"
+          title: Ai Disclosure Line
+          description:
+            "The AI line this agent speaks. '{org}' is replaced by the
+            organization's name. Omitted: the workspace line, else Hail's built-in
+            line for the call's direction."
+        voice_config:
+          $ref: "#/components/schemas/VoiceConfig"
+          description: TTS voice and spoken language, same shape as on POST /calls.
+        tools:
+          anyOf:
+            - items:
+                type: string
+              type: array
+            - type: "null"
+          title: Tools
+          description:
+            "Agent tools to allow. Omitted: every tool the organization's
+            channels support. Empty list: none."
+        max_duration_seconds:
+          anyOf:
+            - type: integer
+              maximum: 3600.0
+              minimum: 60.0
+            - type: "null"
+          title: Max Duration Seconds
+          description:
+            "Soft cap per call in seconds (60..3600). Omitted: the workspace
+            limit."
+        sms_enabled:
+          type: boolean
+          title: Sms Enabled
+          description: Answer texts on numbers that route texts to this agent.
+          default: true
+        status:
+          type: string
+          enum:
+            - live
+            - paused
+          title: Status
+          description:
+            "'paused' agents do not answer; calls to their numbers fail
+            with end_reason 'no_agent'."
+          default: live
+      additionalProperties: false
+      type: object
+      required:
+        - name
+        - system_prompt
+      title: AgentCreate
+      description:
+        "A saved agent: what a number answers with, and what POST /calls
+        can
+
+        place calls with via ``agent_id``."
+    AgentListResponse:
+      properties:
+        items:
+          items:
+            $ref: "#/components/schemas/AgentResponse"
+          type: array
+          title: Items
+          description: Agents, newest first.
+      type: object
+      required:
+        - items
+      title: AgentListResponse
+    AgentResponse:
+      properties:
+        id:
+          type: string
+          format: uuid
+          title: Id
+          description: Unique identifier for this agent.
+        organization_id:
+          type: string
+          format: uuid
+          title: Organization Id
+          description: Organization that owns this agent.
+        name:
+          type: string
+          title: Name
+          description: Display name, unique per organization.
+        system_prompt:
+          type: string
+          title: System Prompt
+          description: Task instructions.
+        first_message:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: First Message
+          description: Opening line, or null to wait.
+        ai_disclosure:
+          type: boolean
+          title: Ai Disclosure
+          description: Whether the AI line is spoken first.
+        ai_disclosure_line:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Ai Disclosure Line
+          description: This agent's AI line template, or null for the workspace line.
+        voice_config:
+          additionalProperties: true
+          type: object
+          title: Voice Config
+          description: TTS voice and language settings.
+        tools:
+          anyOf:
+            - items:
+                type: string
+              type: array
+            - type: "null"
+          title: Tools
+          description: Allowed tools; null means all.
+        max_duration_seconds:
+          anyOf:
+            - type: integer
+            - type: "null"
+          title: Max Duration Seconds
+          description: Soft cap per call; null means the workspace limit.
+        sms_enabled:
+          type: boolean
+          title: Sms Enabled
+          description: Whether the agent answers texts.
+        status:
+          type: string
+          enum:
+            - live
+            - paused
+          title: Status
+          description: "'live' or 'paused'."
+        created_at:
+          type: string
+          format: date-time
+          title: Created At
+          description: ISO 8601 timestamp.
+        updated_at:
+          type: string
+          format: date-time
+          title: Updated At
+          description: ISO 8601 timestamp.
+      type: object
+      required:
+        - id
+        - organization_id
+        - name
+        - system_prompt
+        - first_message
+        - ai_disclosure
+        - ai_disclosure_line
+        - voice_config
+        - tools
+        - max_duration_seconds
+        - sms_enabled
+        - status
+        - created_at
+        - updated_at
+      title: AgentResponse
+    AgentUpdate:
+      properties:
+        name:
+          anyOf:
+            - type: string
+              maxLength: 80
+              minLength: 1
+            - type: "null"
+          title: Name
+          description: New display name.
+        system_prompt:
+          anyOf:
+            - type: string
+              minLength: 1
+            - type: "null"
+          title: System Prompt
+          description: New task instructions.
+        first_message:
+          anyOf:
+            - type: string
+              maxLength: 1000
+            - type: "null"
+          title: First Message
+          description: New opening line; null makes the agent wait for the other side.
+        ai_disclosure:
+          anyOf:
+            - type: boolean
+            - type: "null"
+          title: Ai Disclosure
+          description: Whether the AI line is spoken first.
+        ai_disclosure_line:
+          anyOf:
+            - type: string
+              maxLength: 300
+            - type: "null"
+          title: Ai Disclosure Line
+          description:
+            New AI line template ('{org}' = organization name); null returns
+            to the workspace line.
+        voice_config:
+          anyOf:
+            - $ref: "#/components/schemas/VoiceConfig"
+            - type: "null"
+          description: New TTS voice and language settings.
+        tools:
+          anyOf:
+            - items:
+                type: string
+              type: array
+            - type: "null"
+          title: Tools
+          description: New allowed tools; null allows every tool.
+        max_duration_seconds:
+          anyOf:
+            - type: integer
+              maximum: 3600.0
+              minimum: 60.0
+            - type: "null"
+          title: Max Duration Seconds
+          description: New soft cap per call; null returns to the workspace limit.
+        sms_enabled:
+          anyOf:
+            - type: boolean
+            - type: "null"
+          title: Sms Enabled
+          description: Whether the agent answers texts.
+        status:
+          anyOf:
+            - type: string
+              enum:
+                - live
+                - paused
+            - type: "null"
+          title: Status
+          description: "'live' or 'paused'."
+      additionalProperties: false
+      type: object
+      title: AgentUpdate
+      description:
+        "PATCH /agents/{id}. Fields left out keep their value; ``null``
+        clears
+
+        the nullable ones (first_message, ai_disclosure_line, tools,
+
+        max_duration_seconds)."
     Body_upload_email_attachment:
       properties:
         file:
@@ -4139,6 +4799,18 @@ components:
             "Agent tools to allow on this call. Omitted: every tool the
             organization's configured channels support (new channels appear automatically).
             Empty list: no tools. Tool names are validated against the server's registry."
+        agent_id:
+          anyOf:
+            - type: string
+              format: uuid
+            - type: "null"
+          title: Agent Id
+          description:
+            Place the call with a saved agent (POST /agents). The agent
+            supplies system_prompt, first_message, ai_disclosure, voice_config, tools
+            and max duration; any of those given explicitly on this request wins.
+            Satisfies the system_prompt or llm requirement on its own. A paused agent
+            is refused with 409.
       additionalProperties: false
       type: object
       required:
@@ -4202,6 +4874,15 @@ components:
           title: Direction
           description: "'outbound' for calls Hail placed, 'inbound' for calls
             received."
+        agent_id:
+          anyOf:
+            - type: string
+              format: uuid
+            - type: "null"
+          title: Agent Id
+          description:
+            Agent that answered (inbound) or placed (outbound) this call.
+            Null when the call was placed with an inline system_prompt.
         status:
           type: string
           enum:
@@ -6568,6 +7249,32 @@ components:
           description:
             Provider messaging-service identifier once SMS has been enabled
             on this number. Null until then.
+        voice_agent_id:
+          anyOf:
+            - type: string
+              format: uuid
+            - type: "null"
+          title: Voice Agent Id
+          description:
+            "Agent that answers calls to this number. Null: calls ring
+            out."
+        sms_agent_id:
+          anyOf:
+            - type: string
+              format: uuid
+            - type: "null"
+          title: Sms Agent Id
+          description:
+            "Agent that answers texts to this number. Null: texts only
+            reach your webhooks."
+        inbound_registered:
+          type: boolean
+          title: Inbound Registered
+          description:
+            True while the number is attached for inbound calls at the
+            carrier and on Hail's LiveKit inbound trunk. Set when voice_agent_id is
+            set.
+          default: false
       type: object
       required:
         - id
@@ -6578,6 +7285,35 @@ components:
         - provisioning_state
         - is_dedicated
       title: PhoneNumberResponse
+    PhoneNumberRoutingUpdate:
+      properties:
+        voice_agent_id:
+          anyOf:
+            - type: string
+              format: uuid
+            - type: "null"
+          title: Voice Agent Id
+          description:
+            Agent that answers calls to this number. Setting it registers
+            the number for inbound calls at the carrier and at LiveKit; null unregisters
+            it. The number needs the voice capability.
+        sms_agent_id:
+          anyOf:
+            - type: string
+              format: uuid
+            - type: "null"
+          title: Sms Agent Id
+          description:
+            "Agent that answers texts to this number. The number needs
+            the sms capability. Null: texts only reach your webhooks."
+      additionalProperties: false
+      type: object
+      title: PhoneNumberRoutingUpdate
+      description:
+        "PATCH /numbers/{id}: which agent answers. A field left out keeps
+        its
+
+        value; ``null`` detaches."
     ProviderActivateRequest:
       properties:
         provider:
@@ -6986,6 +7722,15 @@ components:
           description:
             "'outbound' for messages Hail sent, 'inbound' for messages
             received."
+        agent_id:
+          anyOf:
+            - type: string
+              format: uuid
+            - type: "null"
+          title: Agent Id
+          description:
+            Agent that wrote this message. Null unless an agent replied
+            to a text.
         status:
           type: string
           enum:
@@ -7444,6 +8189,7 @@ components:
               - sms.delivered
               - sms.undelivered
               - sms.failed
+              - call.received
               - call.answered
               - call.completed
               - call.failed
@@ -7506,6 +8252,7 @@ components:
                   - sms.delivered
                   - sms.undelivered
                   - sms.failed
+                  - call.received
                   - call.answered
                   - call.completed
                   - call.failed

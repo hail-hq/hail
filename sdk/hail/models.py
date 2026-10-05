@@ -109,17 +109,22 @@ class CallCreate(BaseModel):
     consent_source: str | None = None
     consent_obtained_at: datetime | None = None
     message_type: Literal["marketing", "informational"] = "informational"
+    # A saved agent supplies prompt, first message, AI line, voice and
+    # tools; explicit fields win.
+    agent_id: UUID | None = None
 
     _validate_e164 = field_validator("to", "from_")(_e164_or_error)
 
     @model_validator(mode="after")
     def _prompt_or_llm(self) -> CallCreate:
         """Mirrors ``hailhq.core.schemas.CallCreate._prompt_or_llm``: at
-        least one of the two, both together permitted."""
+        least one of system_prompt, llm or agent_id."""
         has_prompt = self.system_prompt is not None and self.system_prompt != ""
         has_llm = self.llm is not None
-        if not has_prompt and not has_llm:
-            raise ValueError("must provide either system_prompt or a full llm block")
+        if not has_prompt and not has_llm and self.agent_id is None:
+            raise ValueError(
+                "must provide either system_prompt, a full llm block or agent_id"
+            )
         return self
 
 
@@ -134,6 +139,7 @@ class CallResponse(BaseModel):
     from_e164: str
     to_e164: str
     direction: Literal["outbound", "inbound"]
+    agent_id: UUID | None = None
     status: CallStatus
     end_reason: str | None = None
     provider_call_sid: str | None = None
@@ -269,11 +275,44 @@ class PhoneNumberResponse(BaseModel):
     is_dedicated: bool
     messaging_service_sid: str | None = None
     provider: str = "twilio"
+    # Who answers. None: calls ring out / texts reach webhooks only.
+    voice_agent_id: UUID | None = None
+    sms_agent_id: UUID | None = None
+    inbound_registered: bool = False
 
 
 class PhoneNumberListResponse(BaseModel):
     items: list[PhoneNumberResponse]
     next_cursor: str | None = None
+
+
+AgentStatus = Literal["live", "paused"]
+
+
+class AgentResponse(BaseModel):
+    """Shape returned by the ``/agents`` endpoints: a saved brain a number
+    answers with, and that ``calls.create(agent_id=...)`` can use."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    organization_id: UUID
+    name: str
+    system_prompt: str
+    first_message: str | None = None
+    ai_disclosure: bool = True
+    ai_disclosure_line: str | None = None
+    voice_config: dict[str, Any] = Field(default_factory=dict)
+    tools: list[str] | None = None
+    max_duration_seconds: int | None = None
+    sms_enabled: bool = True
+    status: AgentStatus = "live"
+    created_at: datetime
+    updated_at: datetime
+
+
+class AgentListResponse(BaseModel):
+    items: list[AgentResponse]
 
 
 class SenderIdResponse(BaseModel):
@@ -784,6 +823,9 @@ __all__ = [
     "LOCAL_PREFIX",
     "TERMINAL_CALL_STATUSES",
     "TERMINAL_EMAIL_STATUSES",
+    "AgentListResponse",
+    "AgentResponse",
+    "AgentStatus",
     "CallCreate",
     "CallEventResponse",
     "CallListResponse",

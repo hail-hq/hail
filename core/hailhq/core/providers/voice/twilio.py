@@ -341,3 +341,57 @@ async def order_outcome(
 
 async def release(resource_id: str) -> None:
     await release_twilio_number(resource_id)
+
+
+# --- inbound: attach the number to the Elastic SIP trunk whose origination
+# URI is LiveKit (docs/public/self-host/twilio.md). Trunk membership is what
+# makes Twilio send the INVITE to LiveKit; without it the number rings out.
+
+
+def _trunk_sid() -> str:
+    if not settings.twilio_sip_trunk_sid:
+        raise CarrierNotConfigured("TWILIO_SIP_TRUNK_SID is not set")
+    return settings.twilio_sip_trunk_sid
+
+
+async def attach_inbound_number(resource_id: str | None, e164: str) -> None:
+    """Idempotent: a number already on the trunk is left alone."""
+    if not resource_id:
+        raise CarrierNotConfigured(f"{e164} has no Twilio phone number SID")
+    trunk_sid = _trunk_sid()
+
+    def attach() -> None:
+        trunk = _order_client().trunking.v1.trunks(trunk_sid)
+        try:
+            trunk.phone_numbers(resource_id).fetch()
+            return  # already attached
+        except TwilioRestException as exc:
+            if exc.status != 404:
+                raise
+        trunk.phone_numbers.create(phone_number_sid=resource_id)
+
+    try:
+        await asyncio.to_thread(attach)
+    except TwilioRestException as exc:
+        raise CarrierRequestError(exc.status) from exc
+
+
+async def detach_inbound_number(resource_id: str | None, e164: str) -> None:
+    """Idempotent: a number not on the trunk (or already released) is fine."""
+    if not resource_id:
+        return
+    trunk_sid = _trunk_sid()
+
+    def detach() -> None:
+        try:
+            _order_client().trunking.v1.trunks(trunk_sid).phone_numbers(
+                resource_id
+            ).delete()
+        except TwilioRestException as exc:
+            if exc.status != 404:
+                raise
+
+    try:
+        await asyncio.to_thread(detach)
+    except TwilioRestException as exc:
+        raise CarrierRequestError(exc.status) from exc

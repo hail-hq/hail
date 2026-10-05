@@ -20,7 +20,7 @@ from cryptography.hazmat.primitives.asymmetric import ed25519 as _ed25519
 from hailhq.api import auth as _auth_module
 from hailhq.api.auth import hash_key
 from hailhq.api.main import app
-from hailhq.api.routes.calls import get_livekit
+from hailhq.api.routes.calls import get_livekit, get_livekit_optional
 from hailhq.api.routes.email_domains import get_email_provider
 from hailhq.core.db import get_session
 from hailhq.core.livekit import LiveKitClient
@@ -266,6 +266,7 @@ async def client(
 
     app.dependency_overrides[get_session] = override_get_session
     app.dependency_overrides[get_livekit] = lambda: livekit_mock
+    app.dependency_overrides[get_livekit_optional] = lambda: livekit_mock
     app.dependency_overrides[get_email_provider] = lambda: email_mock
 
     transport = httpx.ASGITransport(app=app)
@@ -275,6 +276,7 @@ async def client(
     finally:
         app.dependency_overrides.pop(get_session, None)
         app.dependency_overrides.pop(get_livekit, None)
+        app.dependency_overrides.pop(get_livekit_optional, None)
         app.dependency_overrides.pop(get_email_provider, None)
 
 

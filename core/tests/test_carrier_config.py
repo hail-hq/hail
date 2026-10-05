@@ -23,3 +23,19 @@ def test_blank_canonical_trunk_does_not_hide_a_legacy_value(monkeypatch, directi
     monkeypatch.setenv(canonical, "")
     monkeypatch.setenv(f"LIVEKIT_SIP_{direction.upper()}_TRUNK_ID", "ST_legacy")
     assert getattr(Settings(_env_file=None), canonical.lower()) == "ST_legacy"
+
+
+def test_shared_inbound_trunk_feeds_every_carrier(monkeypatch):
+    for name in (
+        "LIVEKIT_TWILIO_SIP_INBOUND_TRUNK_ID",
+        "LIVEKIT_TELNYX_SIP_INBOUND_TRUNK_ID",
+        "LIVEKIT_DIDWW_SIP_INBOUND_TRUNK_ID",
+    ):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("LIVEKIT_SIP_INBOUND_TRUNK_ID", "ST_shared")
+    config = Settings(_env_file=None)
+    assert config.livekit_twilio_sip_inbound_trunk_id == "ST_shared"
+    assert config.livekit_telnyx_sip_inbound_trunk_id == "ST_shared"
+    assert config.livekit_didww_sip_inbound_trunk_id == "ST_shared"
+    monkeypatch.setenv("LIVEKIT_DIDWW_SIP_INBOUND_TRUNK_ID", "ST_dw")
+    assert Settings(_env_file=None).livekit_didww_sip_inbound_trunk_id == "ST_dw"

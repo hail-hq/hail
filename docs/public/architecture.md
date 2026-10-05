@@ -27,7 +27,7 @@ LiveKit Cloud is external. The `hail` Go CLI is a scriptable tool for humans, no
 
 ## Outbound call flow
 
-1. The caller (an agent via MCP, the CLI, or direct HTTP) sends `POST /calls` with `{to, from, first_message?, …llm}`.
+1. The caller (an agent via MCP, the CLI, or direct HTTP) sends `POST /calls` with `{to, from, first_message?, …llm}` or with `agent_id` ([Agents](./agents.md)).
 2. The Hail API creates a LiveKit room and dispatches the voicebot into it.
 3. The voicebot joins the room. LiveKit places an outbound SIP call to `to` through the trunk of the carrier that owns `from` (Twilio, Telnyx or DIDWW; [`carrier_routing.py`](https://github.com/hail-hq/hail/blob/main/core/hailhq/core/carrier_routing.py)).
 4. On pickup, the voicebot classifies who answered before it speaks (refer to the section below). Then it speaks the AI disclosure and the `first_message` (if set), and runs the STT → LLM → TTS loop. If the call set `ai_disclosure: false`, the voicebot skips the disclosure; Hail audit-logs the opt-out, and the opt-out is the caller's responsibility.
@@ -42,6 +42,16 @@ On `machine-ivr`, the voicebot does **not** speak the greeting. A menu cannot he
 Billing no longer requires a `completed` status. Hail bills a call when `answered_at` is set (the SIP leg went active) **or** when the call completed normally. The first clause bills a machine-answered call and a call that failed mid-conversation. The second clause keeps billing for a completed call whose answer signal never arrived.
 
 The agent can press keypad digits at any point with the `send_dtmf` tool ([`core/hailhq/core/agent_tools/send_dtmf.py`](https://github.com/hail-hq/hail/blob/main/core/hailhq/core/agent_tools/send_dtmf.py)) — not only after an IVR verdict. Thus the agent can navigate phone trees that it reaches mid-call.
+
+## Inbound call flow
+
+1. The carrier sends the INVITE to LiveKit (Twilio origination URI, Telnyx FQDN connection, DIDWW voice IN trunk; [LiveKit Cloud §4](./self-host/livekit-cloud.md#4-inbound-calls)). LiveKit matches it to the carrier's inbound trunk, which lists the numbers Hail registered ([`inbound_routing.py`](https://github.com/hail-hq/hail/blob/main/core/hailhq/core/inbound_routing.py)), creates a room and dispatches the voicebot with the dispatch rule's static metadata `{"direction": "inbound"}`.
+2. The voicebot reads the SIP participant's attributes (`sip.trunkPhoneNumber`, `sip.phoneNumber`, `sip.trunkID`) and calls [`inbound_calls.open_inbound_call`](https://github.com/hail-hq/hail/blob/main/core/hailhq/core/inbound_calls.py): it resolves the number and its voice agent, checks suspension and funds, writes the `ringing` call and fires `call.received`. A refused call gets a `failed` row (`no_agent`, `insufficient_funds`) and `call.failed`; an unknown number is dropped and the room deleted.
+3. The rest is the outbound path without AMD: AI line, `first_message`, the STT → LLM → TTS loop with the agent's tools, `call.answered` on `sip.callStatus = active`, `call.completed` and billing on hangup.
+
+## Inbound texts answered by an agent
+
+A text to a number with `sms_agent_id` set is stored and `sms.received` fires as before; then the row is marked `agent_reply_state = pending` (never for `STOP`/`START`/`HELP`). The text worker in the voicebot service ([`textbot.py`](https://github.com/hail-hq/hail/blob/main/voicebot/hailhq/voicebot/textbot.py)) claims it, builds the chat from the agent's instructions and the last 20 messages of the thread ([`text_agent.py`](https://github.com/hail-hq/hail/blob/main/core/hailhq/core/text_agent.py)), runs the same LLM chain calls use, and sends the reply through `POST /internal/agent/reply-sms` (thread cap, funds, suppression, velocity, billing, delivery).
 
 ## LLM modes
 

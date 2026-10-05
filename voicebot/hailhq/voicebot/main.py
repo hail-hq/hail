@@ -17,6 +17,7 @@ import sys
 
 from hailhq.voicebot.agent import entrypoint, prewarm
 from hailhq.voicebot.pipeline import startup_capability_warnings
+from hailhq.voicebot.textbot import start_thread as start_text_worker
 from livekit.agents import WorkerOptions, cli
 
 logger = logging.getLogger("hailhq.voicebot")
@@ -28,6 +29,11 @@ def main() -> None:
     if sys.argv[1:2] != ["download-files"]:
         for warning in startup_capability_warnings():
             logger.warning(warning)
+        # Inbound texts are answered here too (hailhq.voicebot.textbot), in a
+        # thread beside the LiveKit worker, so calls and texts share one LLM
+        # setup. Only the `start` / `dev` commands run it.
+        if sys.argv[1:2] in (["start"], ["dev"]):
+            start_text_worker()
 
     cli.run_app(
         WorkerOptions(

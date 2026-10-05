@@ -615,3 +615,33 @@ async def test_agent_send_email_still_picks_a_sender_with_several_verified(
     rows = (await async_session.execute(select(Email))).scalars().all()
     assert len(rows) == 1
     assert rows[0].from_address == "noreply@first.test"
+
+
+async def test_send_sms_on_inbound_call_texts_the_caller_from_the_dialed_number(
+    client, async_session, sms_mock, add_phone_number
+):
+    """Inbound: the person is `from_e164`; the reply goes out from the
+    number they dialed."""
+    org = uuid.uuid4()
+    number = await add_phone_number(async_session, org)
+    call = Call(
+        organization_id=org,
+        to_number_id=number.id,
+        from_e164="+33612345678",
+        to_e164=number.e164,
+        direction="inbound",
+        status="in_progress",
+        voice_config={},
+        metadata_={CALL_META_BILLED: False},
+    )
+    async_session.add(call)
+    await async_session.commit()
+    body = _sms_payload(call.id, body="Here is the link.")
+    resp = await client.post(
+        "/internal/agent/send-sms", content=body, headers=_signed(body)
+    )
+    assert resp.json()["ok"] is True
+    rows = (await async_session.execute(Sms.__table__.select())).fetchall()
+    assert len(rows) == 1
+    assert rows[0].to_e164 == "+33612345678"
+    assert rows[0].from_e164 == number.e164
