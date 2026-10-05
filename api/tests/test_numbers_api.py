@@ -7,6 +7,7 @@ import uuid
 
 import pytest
 from hailhq.core import telephony_catalog
+from hailhq.core.providers.sms.base import SmsProvisioningError
 
 
 @pytest.fixture(autouse=True)
@@ -338,6 +339,45 @@ async def test_enable_sms_creates_messaging_service_and_attaches(
     sms_mock.attach_number.assert_awaited_once_with(
         messaging_service_sid="MG_new_service", provider_resource_id="PN_sms_ok"
     )
+
+
+async def test_enable_sms_carrier_refusal_is_502_with_reason(
+    client, async_session, org_and_key, sms_mock
+) -> None:
+    """A carrier refusal (unknown number sid, number already in a service)
+    is a 502 with a plain message: no 500, no carrier name or reason."""
+    from hailhq.core.models import PhoneNumber
+
+    org_id, _, plaintext = org_and_key
+    pn = PhoneNumber(
+        organization_id=org_id,
+        e164="+14155553334",
+        country_code="US",
+        number_type="local",
+        provider_resource_id="PN_gone",
+        provisioning_state="active",
+        capabilities=["voice", "sms"],
+    )
+    async_session.add(pn)
+    await async_session.commit()
+
+    sms_mock.ensure_messaging_service.return_value = "MG_new_service"
+    sms_mock.attach_number.side_effect = SmsProvisioningError(
+        "The requested resource /Services/MG_new_service/PhoneNumbers was not found"
+    )
+
+    resp = await client.post(
+        f"/numbers/{pn.id}/enable-sms", headers={"Authorization": f"Bearer {plaintext}"}
+    )
+    assert resp.status_code == 502, resp.text
+    detail = resp.json()["detail"]
+    assert detail == (
+        "SMS could not be enabled on this number right now. "
+        "Try again later or contact support."
+    )
+    assert "was not found" not in detail and "Twilio" not in detail
+    await async_session.refresh(pn)
+    assert pn.messaging_service_sid is None
 
 
 async def test_enable_sms_reuses_existing_org_messaging_service(

@@ -11,7 +11,11 @@ import asyncio
 from uuid import UUID
 
 from hailhq.core.config import settings
-from hailhq.core.providers.sms.base import ProviderSmsResult, SmsProvider
+from hailhq.core.providers.sms.base import (
+    ProviderSmsResult,
+    SmsProvider,
+    SmsProvisioningError,
+)
 from twilio.base.exceptions import TwilioRestException
 from twilio.rest import Client as TwilioClient
 
@@ -89,21 +93,30 @@ class TwilioSmsProvider(SmsProvider):
     ) -> str:
         if existing_sid is not None:
             return existing_sid
-        service = await asyncio.to_thread(
-            self._client.messaging.v1.services.create,
-            friendly_name=f"hail-org-{organization_id}",
-        )
+        try:
+            service = await asyncio.to_thread(
+                self._client.messaging.v1.services.create,
+                friendly_name=f"hail-org-{organization_id}",
+            )
+        except TwilioRestException as exc:
+            raise SmsProvisioningError(exc.msg or str(exc)) from exc
         return service.sid
 
     async def attach_number(
         self, messaging_service_sid: str, provider_resource_id: str
     ) -> None:
-        await asyncio.to_thread(
-            self._client.messaging.v1.services(
-                messaging_service_sid
-            ).phone_numbers.create,
-            phone_number_sid=provider_resource_id,
-        )
+        try:
+            await asyncio.to_thread(
+                self._client.messaging.v1.services(
+                    messaging_service_sid
+                ).phone_numbers.create,
+                phone_number_sid=provider_resource_id,
+            )
+        except TwilioRestException as exc:
+            # A refused attach (unknown number sid, number already in another
+            # service, account restriction) is the carrier's answer, not a
+            # server fault: the route turns it into a 502 with the reason.
+            raise SmsProvisioningError(exc.msg or str(exc)) from exc
 
 
 class LazyTwilioSmsProvider(SmsProvider):

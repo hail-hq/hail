@@ -17,7 +17,17 @@ from uuid import UUID
 
 from pydantic import BaseModel
 
-__all__ = ["ProviderSmsResult", "SmsProvider"]
+__all__ = ["ProviderSmsResult", "SmsProvider", "SmsProvisioningError"]
+
+
+class SmsProvisioningError(Exception):
+    """The carrier refused to set up SMS on a number (create the messaging
+    service or attach the number). ``detail`` is the carrier's reason, for
+    the server log only: the customer never sees carrier names or errors."""
+
+    def __init__(self, detail: str) -> None:
+        super().__init__(detail)
+        self.detail = detail
 
 
 class ProviderSmsResult(BaseModel):

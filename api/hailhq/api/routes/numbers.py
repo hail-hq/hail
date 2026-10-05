@@ -48,6 +48,7 @@ from hailhq.core.number_offers import (
     discover_offers,
     rank_offers,
 )
+from hailhq.core.providers.sms.base import SmsProvisioningError
 from hailhq.core.providers.voice import CarrierNotConfigured
 from hailhq.core.schemas import (
     NumberAcquireRequest,
@@ -542,6 +543,9 @@ async def list_numbers(
     response_model=PhoneNumberResponse,
     responses={
         404: {"description": "The number does not exist for this organization."},
+        502: {
+            "description": "SMS could not be enabled on this number; the reason is in the server log."
+        },
         503: {
             "description": "SMS is not configured for this number's carrier on this server."
         },
@@ -619,13 +623,29 @@ async def enable_sms(
         raise HTTPException(
             status_code=503, detail="SMS is not available on this number's carrier"
         ) from exc
-    messaging_service_sid = await provider.ensure_messaging_service(
-        organization_id=principal.organization_id, existing_sid=existing_sid
-    )
-    await provider.attach_number(
-        messaging_service_sid=messaging_service_sid,
-        provider_resource_id=number.provider_resource_id,
-    )
+    try:
+        messaging_service_sid = await provider.ensure_messaging_service(
+            organization_id=principal.organization_id, existing_sid=existing_sid
+        )
+        await provider.attach_number(
+            messaging_service_sid=messaging_service_sid,
+            provider_resource_id=number.provider_resource_id,
+        )
+    except SmsProvisioningError as exc:
+        logger.error(
+            "enable-sms refused for %s (%s, %s): %s",
+            number.e164,
+            number.provider,
+            number.provider_resource_id,
+            exc.detail,
+        )
+        # The customer reads this: never the carrier's name or its reason
+        # (those are in the log above for the operator).
+        raise HTTPException(
+            status_code=http_status.HTTP_502_BAD_GATEWAY,
+            detail="SMS could not be enabled on this number right now. "
+            "Try again later or contact support.",
+        ) from exc
 
     # Stored for future send routing: this provisions and records the org's
     # Messaging Service, but POST /sms does not yet send *through* it (it sends
