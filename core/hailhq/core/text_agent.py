@@ -181,6 +181,12 @@ def _thread_filter(a: str, b: str):
     )
 
 
+def thread_lock_key(sms: Sms) -> str:
+    """Advisory-lock key for one thread: same for both directions."""
+    a, b = sorted((sms.from_e164, sms.to_e164))
+    return f"reply-sms:{sms.organization_id}:{a}:{b}"
+
+
 async def thread_messages(
     db: AsyncSession, sms: Sms, *, limit: int = THREAD_LIMIT
 ) -> list[Sms]:

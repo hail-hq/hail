@@ -53,6 +53,7 @@ from hailhq.core.text_agent import (
     MAX_REPLIES_PER_THREAD,
     answers_texts,
     replies_in_thread,
+    thread_lock_key,
 )
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import func, select, text
@@ -398,13 +399,14 @@ async def agent_reply_sms(
     ):
         return AgentReplySmsResponse(ok=False, state="skipped", reason="no_agent")
 
-    # One request per inbound text at a time: the lock is held until the reply
-    # row is committed, so a retry that races the original sees it below. A
-    # lock on the inbound row (FOR UPDATE) would deadlock with the worker's
-    # claim, hence an advisory lock keyed by sms_id.
+    # One request per thread at a time: the lock is held until the reply row
+    # is committed, so a retry that races the original sees it below and the
+    # per-thread reply cap below is exact. A lock on the inbound row (FOR
+    # UPDATE) would deadlock with the worker's claim, hence an advisory lock
+    # keyed by thread.
     await db.execute(
         text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))"),
-        {"key": f"reply-sms:{inbound.id}"},
+        {"key": thread_lock_key(inbound)},
     )
     # Idempotent: the worker retries a timed-out POST with the same sms_id.
     # ``first()`` stays as a belt for rows written before the lock existed.

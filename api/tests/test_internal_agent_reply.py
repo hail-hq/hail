@@ -12,6 +12,7 @@ from hailhq.core import hmac_signing
 from hailhq.core.config import settings
 from hailhq.core.models import AccountCredit, Agent, PhoneNumber, Sms
 from hailhq.core.sms_ingest import ingest_inbound_sms
+from hailhq.core.text_agent import thread_lock_key
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -163,17 +164,18 @@ async def test_reply_unknown_sms_fails(client, async_session) -> None:
     assert (await async_session.execute(select(Sms))).first() is None
 
 
-async def test_reply_waits_for_a_concurrent_request_on_the_same_text(
+async def test_reply_waits_for_a_concurrent_request_in_the_same_thread(
     client, async_session, session_factory, sms_mock
 ) -> None:
-    """The per-text lock makes a racing retry wait, then see the first reply
+    """The per-thread lock makes a racing retry wait, then see the first reply
     and answer ``done`` without a second send."""
     _org, _agent, _number, sms_id = await _seed(async_session)
     body = _payload(sms_id)
+    inbound = await async_session.get(Sms, sms_id)
     async with session_factory() as other:
         await other.execute(
             text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))"),
-            {"key": f"reply-sms:{sms_id}"},
+            {"key": thread_lock_key(inbound)},
         )
         task = asyncio.create_task(
             client.post(
