@@ -816,6 +816,7 @@ async def sync_sms_setup() -> None:
                 .all()
             )
     all_ok = True
+    refresh_ids = set(refresh)
     for number_id in [*pending, *refresh]:
         try:
             async with session_scope() as db:
@@ -826,7 +827,10 @@ async def sync_sms_setup() -> None:
                 await db.refresh(number)
                 if number.provisioning_state != "active":
                     continue
-                await sms_setup.ensure_sms(db, number)
+                if number_id in refresh_ids:
+                    await sms_setup.refresh_sms(number)
+                else:
+                    await sms_setup.ensure_sms(db, number)
                 await db.commit()
         except sms_setup.SmsSetupError as exc:
             all_ok = False
