@@ -96,6 +96,12 @@ def _ensure_initialized() -> async_sessionmaker[AsyncSession]:
     global _engine, _sessionmaker
     if _sessionmaker is None:
         _engine = create_async_engine(to_async_url(settings.database_url))
+        from hailhq.core.telemetry import telemetry_enabled
+
+        if telemetry_enabled():
+            import logfire
+
+            logfire.instrument_sqlalchemy(engine=_engine)
         _sessionmaker = async_sessionmaker(_engine, expire_on_commit=False)
     return _sessionmaker
 

@@ -29,6 +29,12 @@ from typing import Any
 from uuid import UUID
 
 from hailhq.core.models import WebhookDelivery, WebhookSubscription
+from hailhq.core.telemetry import operation, telemetry_enabled
+from hailhq.core.telemetry_identity import (
+    identity_scope,
+    resolve_identity,
+    set_identity,
+)
 from hailhq.core.webhooks import build_event_payload, next_attempt_delay, sign_payload
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -137,6 +143,12 @@ class WebhookWorker:
         return ids
 
     async def _deliver(self, delivery_id: UUID) -> None:
+        with identity_scope({}), operation(
+            "webhook.deliver", delivery_id=str(delivery_id)
+        ):
+            await self._deliver_one(delivery_id)
+
+    async def _deliver_one(self, delivery_id: UUID) -> None:
         try:
             async with self._session_factory() as session:
                 row = (
@@ -145,6 +157,19 @@ class WebhookWorker:
                     )
                 ).scalar_one()
 
+                if telemetry_enabled():
+                    org_id = row.payload.get("organization_id")
+                    if org_id:
+                        try:
+                            org_uuid = UUID(str(org_id))
+                        except (ValueError, TypeError):
+                            org_uuid = None
+                        if org_uuid is not None:
+                            set_identity(
+                                await resolve_identity(
+                                    session, org_uuid, actor_kind="system"
+                                )
+                            )
                 resolved = await self._resolve_target_url(session, row)
                 if resolved is None:
                     await self._record_failure(session, row, None, "no target url")

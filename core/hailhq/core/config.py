@@ -9,6 +9,14 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
+    # Optional backend observability (EU only).
+    hail_logfire_enabled: bool = False
+    logfire_token: str = ""
+    logfire_credentials_dir: str = ".logfire"
+    logfire_environment: str = "development"
+    logfire_service_version: str = ""
+    hail_logfire_sample_rate: float = Field(default=1.0, ge=0, le=1)
+
     # LLM providers
     openai_api_base_url: str = "https://api.openai.com/v1"
     openai_api_key: str = ""

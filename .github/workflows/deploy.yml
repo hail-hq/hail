@@ -106,6 +106,7 @@ jobs:
             git fetch origin
             git checkout --detach "$DEPLOY_GITHUB_SHA"
             echo "$DEPLOY_GITHUB_TOKEN" | docker login ghcr.io -u "$DEPLOY_GITHUB_ACTOR" --password-stdin
+            export LOGFIRE_SERVICE_VERSION="$DEPLOY_GITHUB_SHA"
             COMPOSE="docker compose -f docker-compose.yml -f docker-compose.prod.yml"
             $COMPOSE pull
 

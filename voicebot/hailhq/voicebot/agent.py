@@ -48,6 +48,12 @@ from hailhq.core.prompts import (
 )
 from hailhq.core.schemas import TERMINAL_CALL_STATUSES
 from hailhq.core.secret_cipher import SecretKeyMissing
+from hailhq.core.telemetry import (
+    configure_telemetry,
+    flush_telemetry,
+    telemetry_enabled,
+)
+from hailhq.core.telemetry_identity import get_identity, identity_scope, set_identity
 from hailhq.core.url_guard import assert_public_https_url
 from hailhq.core.webhook_fanout import fanout_call_event
 from hailhq.voicebot.amd import (
@@ -64,12 +70,16 @@ from hailhq.voicebot.pipeline import (
     resolve_org_configs,
 )
 from hailhq.voicebot.recording import upload_recording
+from hailhq.voicebot.telemetry import connect_livekit_tracing
 from hailhq.voicebot.tools import build_agent_tools
 from livekit import rtc
 from livekit.agents import Agent, JobContext, JobProcess
 from livekit.agents.llm import LLMError
 from livekit.agents.voice import AgentSession
 from livekit.plugins import silero
+from opentelemetry import context as otel_context
+from opentelemetry import trace
+from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapPropagator
 from sqlalchemy import select, update
 from sqlalchemy.exc import SQLAlchemyError
 
@@ -1177,6 +1187,61 @@ def attach_event_handlers(
 
 
 async def entrypoint(ctx: JobContext) -> None:
+    # LiveKit jobs spawn separately from main; configure in every job process.
+    # https://docs.livekit.io/testing/observability/tracing/
+    configure_telemetry("hail-voicebot")
+    if not telemetry_enabled():
+        await _run_call(ctx)
+        return
+    connect_livekit_tracing()
+    raw = json.loads(ctx.job.metadata or "{}")
+    carrier = raw.get("hail_trace_context", {}) if isinstance(raw, dict) else {}
+    parent = TraceContextTextMapPropagator().extract(
+        carrier if isinstance(carrier, dict) else {}
+    )
+    identity = raw.get("hail_actor_identity", {}) if isinstance(raw, dict) else {}
+    with identity_scope(identity if isinstance(identity, dict) else {}):
+        await _run_traced_call(ctx, parent)
+
+
+async def _run_traced_call(ctx: JobContext, parent) -> None:
+    span = trace.get_tracer("hailhq").start_span(
+        "invoke_agent hail-voicebot",
+        context=parent,
+        attributes={
+            **get_identity(),
+            "gen_ai.operation.name": "invoke_agent",
+            "gen_ai.agent.name": "hail-voicebot",
+        },
+    )
+
+    settlement_registered = [False]
+
+    async def finish_trace() -> None:
+        if settlement_registered[0]:
+            return
+        if span.is_recording():
+            span.end()
+        await asyncio.to_thread(flush_telemetry)
+
+    ctx.add_shutdown_callback(finish_trace)
+    token = otel_context.attach(trace.set_span_in_context(span, parent))
+    try:
+        await _run_call(
+            ctx, telemetry_span=span, settlement_registered=settlement_registered
+        )
+    except BaseException as exc:
+        span.record_exception(exc)
+        span.end()
+        await asyncio.to_thread(flush_telemetry)
+        raise
+    finally:
+        otel_context.detach(token)
+
+
+async def _run_call(
+    ctx: JobContext, telemetry_span=None, settlement_registered=None
+) -> None:
     """The function ``WorkerOptions.entrypoint_fnc`` points at."""
     metadata = parse_metadata(ctx.job.metadata)
 
@@ -1189,6 +1254,19 @@ async def entrypoint(ctx: JobContext) -> None:
             return
         metadata = opened
     call_id: UUID = metadata["call_id"]
+    if telemetry_span is not None:
+        identity = get_identity()
+        identity.setdefault("actor_kind", "agent")
+        identity["organization_id"] = str(metadata.get("organization_id", ""))
+        if metadata.get("org_name"):
+            identity["organization_name"] = metadata["org_name"]
+        set_identity(identity)
+        telemetry_span.set_attributes(identity)
+        telemetry_span.set_attribute("call_id", str(call_id))
+        telemetry_span.set_attribute(
+            "organization_id", str(metadata.get("organization_id", ""))
+        )
+        telemetry_span.set_attribute("agent_id", str(metadata.get("agent_id", "")))
 
     # Captured terminal status / end_reason set by the SIP-participant
     # disconnect handler below. Read by `_shutdown` to override the default
@@ -1447,24 +1525,43 @@ async def entrypoint(ctx: JobContext) -> None:
             ctx, session, call_id, event_tasks, on_fire=_on_byo_llm_giveup
         )
 
+    shutdown_identity = get_identity()
+
+    async def _shutdown_body() -> None:
+        try:
+            if soft_cap_task is not None and not soft_cap_task.done():
+                soft_cap_task.cancel()
+                await asyncio.gather(soft_cap_task, return_exceptions=True)
+            if event_tasks:
+                await asyncio.gather(*list(event_tasks), return_exceptions=True)
+            if answer_tasks:
+                await asyncio.gather(*list(answer_tasks), return_exceptions=True)
+            if agent_api is not None:
+                await agent_api.aclose()
+            await on_call_end(
+                call_id,
+                room_name,
+                status_override=captured["status"],
+                end_reason_override=captured["end_reason"],
+            )
+        finally:
+            if telemetry_span is not None:
+                telemetry_span.set_attribute(
+                    "call.status", captured["status"] or "completed"
+                )
+                telemetry_span.set_attribute(
+                    "call.end_reason", captured["end_reason"] or ""
+                )
+                telemetry_span.end()
+            await asyncio.to_thread(flush_telemetry)
+
     async def _shutdown() -> None:
-        if soft_cap_task is not None and not soft_cap_task.done():
-            soft_cap_task.cancel()
-            await asyncio.gather(soft_cap_task, return_exceptions=True)
-        if event_tasks:
-            await asyncio.gather(*list(event_tasks), return_exceptions=True)
-        if answer_tasks:
-            await asyncio.gather(*list(answer_tasks), return_exceptions=True)
-        if agent_api is not None:
-            await agent_api.aclose()
-        await on_call_end(
-            call_id,
-            room_name,
-            status_override=captured["status"],
-            end_reason_override=captured["end_reason"],
-        )
+        with identity_scope(shutdown_identity):
+            await _shutdown_body()
 
     ctx.add_shutdown_callback(_shutdown)
+    if settlement_registered is not None:
+        settlement_registered[0] = True
 
     # Answering machine detection: classify the greeting before we say
     # anything. The event is written on every call, machine or not, so

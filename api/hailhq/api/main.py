@@ -6,6 +6,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from functools import partial
 
+import logfire
 from fastapi import FastAPI, Request
 from fastapi.encoders import jsonable_encoder
 from fastapi.exception_handlers import request_validation_exception_handler
@@ -58,8 +59,15 @@ from hailhq.core.providers.telnyx import close_http_client
 from hailhq.core.reconcile import sweep_stale_calls
 from hailhq.core.s3_mail import S3MailClient
 from hailhq.core.secret_cipher import SecretCipher, SecretKeyMissing
+from hailhq.core.telemetry import (
+    configure_telemetry,
+    flush_telemetry,
+    request_span_attributes,
+)
+from hailhq.core.telemetry_identity import IdentityMiddleware
 from hailhq.core.webhook_worker import WebhookWorker
 
+_telemetry = configure_telemetry("hail-api")
 logger = logging.getLogger(__name__)
 
 
@@ -304,6 +312,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         await internal_webhook.aclose()
         await calls_routes.close_livekit_singleton()
         await dispose_engine()
+        await asyncio.to_thread(flush_telemetry)
 
 
 app = FastAPI(
@@ -320,6 +329,15 @@ app = FastAPI(
     servers=[{"url": "https://api.hail.so", "description": "Hail Cloud"}],
     lifespan=lifespan,
 )
+if _telemetry:
+    app.add_middleware(IdentityMiddleware)
+    logfire.instrument_fastapi(
+        app,
+        excluded_urls=r"/healthz$",
+        extra_spans=False,
+        server_request_hook=request_span_attributes,
+    )
+
 app.add_middleware(DeprecationHeaderMiddleware)
 # Starlette's add_middleware prepends, so the most-recently-added middleware
 # runs outermost/first. Rate limiting first means a 429 short-circuits

@@ -21,8 +21,11 @@ import json
 from uuid import UUID
 
 from hailhq.core.config import settings
+from hailhq.core.telemetry import telemetry_enabled
+from hailhq.core.telemetry_identity import get_identity
 from livekit import api
 from livekit.protocol.models import ListUpdate
+from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapPropagator
 
 
 class LiveKitClient:
@@ -77,6 +80,12 @@ class LiveKitClient:
         Returns the dispatch id (``AgentDispatch.id``) for traceability /
         logging.
         """
+        metadata = dict(metadata)
+        if telemetry_enabled():
+            carrier: dict[str, str] = {}
+            TraceContextTextMapPropagator().inject(carrier)
+            metadata["hail_trace_context"] = carrier
+            metadata["hail_actor_identity"] = get_identity()
         result = await self._lkapi.agent_dispatch.create_dispatch(
             api.CreateAgentDispatchRequest(
                 room=room_name,

@@ -55,7 +55,10 @@ import uuid
 from collections.abc import AsyncIterator
 from typing import Any
 
+from hailhq.core.internal_webhook import fetch_organization_name
 from hailhq.core.schemas import parse_resource_id
+from hailhq.core.telemetry import telemetry_enabled
+from hailhq.core.telemetry_identity import identity_scope
 from hailhq.mcp.auth import AuthMode
 from hailhq.mcp.hail_client import HailAPIError, HailClient
 from pydantic import ValidationError
@@ -568,7 +571,8 @@ async def _client_for(
         bearer = _bearer_from_ctx(ctx)
         client = HailClient(api_key=bearer)
         try:
-            yield client
+            async with _actor_for(client):
+                yield client
         finally:
             await client.aclose()
         return
@@ -576,7 +580,34 @@ async def _client_for(
     # static-key
     if singleton is None:  # defensive — server.py wires this
         raise RuntimeError("static-key mode requires a singleton HailClient")
-    yield singleton
+    async with _actor_for(singleton):
+        yield singleton
+
+
+@contextlib.asynccontextmanager
+async def _actor_for(client: HailClient):
+    identity = {}
+    if telemetry_enabled():
+        try:
+            # Resolve the actor only through the API that verifies the bearer.
+            actor = await client.whoami()
+            identity = {
+                "organization_id": actor.get("organization_id"),
+                "user_id": actor.get("user_id"),
+                "user_email": actor.get("email"),
+                "auth_kind": actor.get("auth_kind"),
+                "actor_kind": actor.get("auth_kind"),
+            }
+            org_id = actor.get("organization_id")
+            if org_id:
+                identity["organization_name"] = await fetch_organization_name(
+                    str(org_id)
+                )
+        except Exception:
+            # Metadata enrichment never decides whether the tool is authorized.
+            pass
+    with identity_scope(identity):
+        yield
 
 
 # --------------------------------------------------------------------------- #

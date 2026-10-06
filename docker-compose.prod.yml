@@ -49,6 +49,8 @@ services:
         condition: service_healthy
 
   api:
+    environment:
+      LOGFIRE_SERVICE_VERSION: ${LOGFIRE_SERVICE_VERSION:-}
     image: ghcr.io/hail-hq/hail-api:latest
     build: !reset null
     restart: unless-stopped
@@ -59,8 +61,12 @@ services:
     image: ghcr.io/hail-hq/hail-voicebot:latest
     build: !reset null
     restart: unless-stopped
+    environment:
+      LOGFIRE_SERVICE_VERSION: ${LOGFIRE_SERVICE_VERSION:-}
 
   mcp:
+    environment:
+      LOGFIRE_SERVICE_VERSION: ${LOGFIRE_SERVICE_VERSION:-}
     image: ghcr.io/hail-hq/hail-mcp:latest
     build: !reset null
     restart: unless-stopped

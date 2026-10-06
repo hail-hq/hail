@@ -22,3 +22,6 @@ docs/
 openapi/
 sdk/
 .github/
+
+# Logfire write credentials must never enter build contexts.
+**/.logfire

@@ -34,6 +34,8 @@ from hailhq.core.email_delivery_events import record_sent_event
 from hailhq.core.models import Email, EmailAttachment
 from hailhq.core.providers.email.base import EmailProvider, ProviderAttachment
 from hailhq.core.s3_mail import S3MailClient
+from hailhq.core.telemetry import operation, telemetry_enabled
+from hailhq.core.telemetry_identity import identity_scope, resolve_identity
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -178,6 +180,22 @@ class OutboundForwardWorker:
             )
 
     async def _send_one(self, session: AsyncSession, row: Email) -> str:
+        identity = {}
+        if telemetry_enabled():
+            identity = await resolve_identity(
+                session, row.organization_id, actor_kind="system"
+            )
+        with identity_scope(identity), operation(
+            "email.forward",
+            email_id=str(row.id),
+            organization_id=str(row.organization_id),
+        ) as span:
+            outcome = await self._send_one_impl(session, row)
+            if span is not None:
+                span.set_attribute("outcome", outcome)
+            return outcome
+
+    async def _send_one_impl(self, session: AsyncSession, row: Email) -> str:
         """Attempt one forward. Returns ``"sent" | "failed" | "deferred"``.
 
         ``deferred`` means a transient infra failure before any send was
