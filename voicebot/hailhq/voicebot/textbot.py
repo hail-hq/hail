@@ -110,8 +110,12 @@ async def reply_once(api: AgentApiClient) -> bool:
         return False
     identity = {}
     if telemetry_enabled():
-        async with session_scope() as db:
-            identity = await resolve_identity(db, claimed.agent.organization_id)
+        try:
+            async with session_scope() as db:
+                identity = await resolve_identity(db, claimed.agent.organization_id)
+        except Exception:
+            # Telemetry enrichment must not strand a claimed reply.
+            logger.warning("sms_id=%s actor telemetry lookup failed", claimed.sms.id)
     with identity_scope(identity), operation(
         "invoke_agent hail-textbot",
         **{

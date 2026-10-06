@@ -1232,7 +1232,9 @@ async def _run_traced_call(ctx: JobContext, parent) -> None:
         )
     except BaseException as exc:
         span.record_exception(exc)
-        span.end()
+        if not settlement_registered[0]:
+            # Otherwise _shutdown ends the span with the final call status.
+            span.end()
         await asyncio.to_thread(flush_telemetry)
         raise
     finally:
