@@ -106,6 +106,8 @@ jobs:
             git fetch origin
             git checkout --detach "$DEPLOY_GITHUB_SHA"
             echo "$DEPLOY_GITHUB_TOKEN" | docker login ghcr.io -u "$DEPLOY_GITHUB_ACTOR" --password-stdin
+            # Containers read the release SHA from the VM .env (env_file).
+            sed -i "s|^LOGFIRE_SERVICE_VERSION=.*|LOGFIRE_SERVICE_VERSION=$DEPLOY_GITHUB_SHA|" .env
             COMPOSE="docker compose -f docker-compose.yml -f docker-compose.prod.yml"
             $COMPOSE pull
 

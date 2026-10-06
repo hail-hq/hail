@@ -4,6 +4,14 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 
 ## [Unreleased]
 
+### Added
+
+- Optional Logfire backend and AI-agent observability: service logs, request/HTTP/database traces, actor identity, voice/SMS model and tool spans, and API-to-voicebot correlation. Payload filtering keeps conversation content and credentials out of exported traces.
+
+### Changed
+
+- API, voicebot, and MCP deployments report their deployed commit SHA in telemetry. Backend images roll through the existing deployment workflow; no CLI or SDK release is required for these changes.
+
 ## [0.26.0] — 2026-10-06
 
 Agents that answer calls and texts on a number, inbound calls on Twilio,

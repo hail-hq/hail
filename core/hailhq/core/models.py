@@ -1457,13 +1457,14 @@ class Organization(Base):
     """Read-only mapping of the website-owned ``organizations`` table.
 
     hail-website's better-auth migrations own the schema (same posture as
-    ``members``/``OrganizationMember``); hail/api only reads ``origin`` to
+    ``members``/``OrganizationMember``); telemetry reads ``name`` and the API reads ``origin`` to
     decide whether agent velocity caps apply. Never written from Python.
     """
 
     __tablename__ = "organizations"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    name: Mapped[str] = mapped_column(Text, nullable=False, server_default="")
     origin: Mapped[str] = mapped_column(Text, nullable=False, server_default="human")
 
 

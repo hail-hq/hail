@@ -65,3 +65,46 @@ async def test_client_for_static_key_yields_singleton():
     # Singleton stays open after the context exits.
     assert not singleton._client.is_closed
     await singleton.aclose()
+
+
+@pytest.mark.asyncio
+async def test_actor_enrichment_preserves_verified_identity_and_restores_scope(
+    monkeypatch,
+):
+    from unittest.mock import AsyncMock
+
+    from hailhq.core.telemetry_identity import get_identity, identity_scope
+    from hailhq.mcp import tools
+
+    monkeypatch.setattr(tools, "telemetry_enabled", lambda: True)
+    monkeypatch.setattr(
+        tools, "fetch_organization_name", AsyncMock(return_value="Example Workspace")
+    )
+    client = SimpleNamespace(
+        whoami=AsyncMock(
+            return_value={
+                "organization_id": "org-id",
+                "user_id": "user-id",
+                "email": "actor@example.org",
+                "auth_kind": "jwt",
+            }
+        )
+    )
+    with identity_scope({"organization_id": "outer"}):
+        async with tools._actor_for(client):
+            assert get_identity()["user_email"] == "actor@example.org"
+            assert get_identity()["organization_name"] == "Example Workspace"
+        assert get_identity() == {"organization_id": "outer"}
+
+
+@pytest.mark.asyncio
+async def test_actor_enrichment_failure_does_not_prevent_tool_execution(monkeypatch):
+    from unittest.mock import AsyncMock
+
+    from hailhq.core.telemetry_identity import get_identity
+    from hailhq.mcp import tools
+
+    monkeypatch.setattr(tools, "telemetry_enabled", lambda: True)
+    client = SimpleNamespace(whoami=AsyncMock(side_effect=RuntimeError("unavailable")))
+    async with tools._actor_for(client):
+        assert get_identity() == {}

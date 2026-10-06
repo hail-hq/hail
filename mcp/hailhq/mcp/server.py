@@ -24,10 +24,18 @@ Starlette lifespan, but here we own the combined parent app, so we drive
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 from collections.abc import AsyncIterator
 
+import logfire
 from hailhq.core.config import settings
+from hailhq.core.telemetry import (
+    configure_telemetry,
+    flush_telemetry,
+    request_span_attributes,
+)
+from hailhq.core.telemetry_identity import IdentityMiddleware
 from hailhq.mcp.auth import AuthMode, PassThroughVerifier, select_auth_mode
 from hailhq.mcp.discovery_auth import DiscoveryAuthMiddleware
 from hailhq.mcp.hail_client import HailClient
@@ -40,6 +48,10 @@ from starlette.routing import Route
 
 from mcp.server.auth.settings import AuthSettings
 from mcp.server.fastmcp import FastMCP
+
+_telemetry = configure_telemetry("hail-mcp")
+if _telemetry:
+    logfire.instrument_mcp()
 
 
 def _build_app() -> tuple[FastMCP, HailClient | None, Starlette]:
@@ -88,7 +100,10 @@ def _build_app() -> tuple[FastMCP, HailClient | None, Starlette]:
     @contextlib.asynccontextmanager
     async def lifespan(_app: Starlette) -> AsyncIterator[None]:
         async with mcp_app.session_manager.run():
-            yield
+            try:
+                yield
+            finally:
+                await asyncio.to_thread(flush_telemetry)
 
     # Splatting sub_app.routes drops sub_app.user_middleware. FastMCP
     # adds AuthenticationMiddleware + AuthContextMiddleware *inside*
@@ -110,6 +125,9 @@ def _build_app() -> tuple[FastMCP, HailClient | None, Starlette]:
         middleware=[Middleware(DiscoveryAuthMiddleware), *http_app.user_middleware],
         lifespan=lifespan,
     )
+    if _telemetry:
+        app.add_middleware(IdentityMiddleware)
+        logfire.instrument_starlette(app, server_request_hook=request_span_attributes)
     return mcp_app, singleton, app
 
 

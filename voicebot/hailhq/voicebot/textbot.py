@@ -20,9 +20,12 @@ import logging
 import threading
 from typing import Any
 
+import logfire
 from hailhq.core.agent_tools.client import AgentApiClient
 from hailhq.core.config import settings
 from hailhq.core.db import session_scope
+from hailhq.core.telemetry import operation, telemetry_enabled
+from hailhq.core.telemetry_identity import identity_scope, resolve_identity
 from hailhq.core.text_agent import (
     MAX_REPLY_CHARS,
     ClaimedReply,
@@ -100,10 +103,34 @@ async def reply_once(api: AgentApiClient) -> bool:
     puts the text back for a later retry; the API's reply-sms route is
     idempotent per ``sms_id``, so a retried send cannot double-send.
     """
-    async with session_scope() as db:
-        claimed = await claim_pending_reply(db)
+    with logfire.suppress_instrumentation():
+        async with session_scope() as db:
+            claimed = await claim_pending_reply(db)
     if claimed is None:
         return False
+    identity = {}
+    if telemetry_enabled():
+        try:
+            async with session_scope() as db:
+                identity = await resolve_identity(db, claimed.agent.organization_id)
+        except Exception:
+            # Telemetry enrichment must not strand a claimed reply.
+            logger.warning("sms_id=%s actor telemetry lookup failed", claimed.sms.id)
+    with identity_scope(identity), operation(
+        "invoke_agent hail-textbot",
+        **{
+            "gen_ai.operation.name": "invoke_agent",
+            "gen_ai.agent.name": "hail-textbot",
+            "sms_id": str(claimed.sms.id),
+            "agent_id": str(claimed.agent.id),
+            "organization_id": str(claimed.agent.organization_id),
+            "attempt": claimed.attempt,
+        },
+    ) as span:
+        return await _reply_claimed(api, claimed, span)
+
+
+async def _reply_claimed(api: AgentApiClient, claimed: ClaimedReply, span=None) -> bool:
     sms = claimed.sms
     try:
         messages = await _prepare(claimed)
@@ -111,11 +138,17 @@ async def reply_once(api: AgentApiClient) -> bool:
             generate_reply(claimed, messages), timeout=LLM_TIMEOUT_SECONDS
         )
     except ProviderKeyError as exc:
+        if span is not None:
+            span.set_attribute("reply.state", "failed")
+            span.record_exception(exc)
         # A missing or bad key does not fix itself: no retry.
         logger.warning("sms_id=%s text agent provider error: %s", sms.id, exc)
         await _settle(claimed, "failed")
         return True
-    except Exception:
+    except Exception as exc:
+        if span is not None:
+            span.set_attribute("reply.state", "retry")
+            span.record_exception(exc)
         logger.exception(
             "sms_id=%s text agent failed to write a reply (attempt %s)",
             sms.id,
@@ -124,6 +157,8 @@ async def reply_once(api: AgentApiClient) -> bool:
         await _settle(claimed, None, retry=True)
         return True
     if not text:
+        if span is not None:
+            span.set_attribute("reply.state", "skipped")
         logger.info("sms_id=%s text agent wrote nothing; skipped", sms.id)
         await _settle(claimed, "skipped")
         return True
@@ -131,7 +166,10 @@ async def reply_once(api: AgentApiClient) -> bool:
         result = await api.post(
             "/internal/agent/reply-sms", {"sms_id": str(sms.id), "body": text}
         )
-    except Exception:
+    except Exception as exc:
+        if span is not None:
+            span.set_attribute("reply.state", "retry")
+            span.record_exception(exc)
         logger.exception(
             "sms_id=%s reply-sms POST failed (attempt %s)", sms.id, claimed.attempt
         )
@@ -142,6 +180,8 @@ async def reply_once(api: AgentApiClient) -> bool:
         state = "failed"
     if state != "done":
         logger.info("sms_id=%s reply %s: %s", sms.id, state, result.get("reason"))
+    if span is not None:
+        span.set_attribute("reply.state", state)
     await _settle(claimed, state)  # type: ignore[arg-type]
     return True
 
