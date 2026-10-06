@@ -24,6 +24,8 @@ logger = logging.getLogger(__name__)
 
 # Twilio error 21712: the number sits in another messaging service.
 _NUMBER_IN_ANOTHER_SERVICE = 21712
+# Twilio error 21710: the number is already in this messaging service.
+_NUMBER_ALREADY_IN_SERVICE = 21710
 
 
 class TwilioSmsProvider(SmsProvider):
@@ -114,6 +116,8 @@ class TwilioSmsProvider(SmsProvider):
         try:
             await self._attach(messaging_service_sid, provider_resource_id)
         except TwilioRestException as exc:
+            if exc.code == _NUMBER_ALREADY_IN_SERVICE:
+                return  # Retry after a success: nothing to do.
             if exc.code != _NUMBER_IN_ANOTHER_SERVICE:
                 # A refused attach (unknown number sid, account restriction)
                 # is the carrier's answer, not a server fault: the route
@@ -125,7 +129,12 @@ class TwilioSmsProvider(SmsProvider):
         # account is Hail's and the number is this org's, so a number another
         # service holds (Twilio's own "Default Messaging Service for
         # Conversations", a service of a released row) is moved to ours.
-        holder = await asyncio.to_thread(self._service_holding, provider_resource_id)
+        try:
+            holder = await asyncio.to_thread(
+                self._service_holding, provider_resource_id
+            )
+        except TwilioRestException as exc:
+            raise SmsProvisioningError(exc.msg or str(exc)) from exc
         if holder == messaging_service_sid:
             return  # Already ours: nothing to do.
         if holder is None:
@@ -145,8 +154,20 @@ class TwilioSmsProvider(SmsProvider):
                 .phone_numbers(provider_resource_id)
                 .delete
             )
+        except TwilioRestException as exc:
+            raise SmsProvisioningError(exc.msg or str(exc)) from exc
+        try:
             await self._attach(messaging_service_sid, provider_resource_id)
         except TwilioRestException as exc:
+            # Put the number back so the old service is not left without it.
+            try:
+                await self._attach(holder, provider_resource_id)
+            except TwilioRestException:
+                logger.error(
+                    "could not restore %s to messaging service %s",
+                    provider_resource_id,
+                    holder,
+                )
             raise SmsProvisioningError(exc.msg or str(exc)) from exc
 
     async def _attach(
