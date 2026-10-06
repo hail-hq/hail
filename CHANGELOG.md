@@ -4,13 +4,14 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 
 ## [Unreleased]
 
-### Changed
+## [0.26.0] — 2026-10-06
 
-- **SMS setup is automatic.** An SMS-capable number joins its organization's
-  messaging service when it becomes active, and again when a texts agent is
-  assigned to it. Twilio Messaging Services now carry Hail's inbound webhook
-  (`/sms/inbound`), so inbound texts need no console setup.
-  `POST /numbers/{id}/enable-sms` stays as the idempotent repair call.
+Agents that answer calls and texts on a number, inbound calls on Twilio,
+Telnyx and DIDWW, and SMS that sets itself up.
+
+Component versions cut alongside this release:
+**`cli-v0.25.0`** (Homebrew + GitHub Releases) and **`sdk-v0.18.0`** (PyPI).
+Migrations `0050` and `0051`.
 
 ### Added
 
@@ -34,6 +35,9 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 - **AI line templates.** Inbound default `Hi, this is an AI assistant
 answering on behalf of {org}.`; workspace default in
   `organization_call_settings.ai_disclosure_line`, per-agent override.
+- `GET /v1/agents/prompt-templates` returns the full prompt the model gets
+  for calls it answers, calls it makes and texts, read-only. The console shows
+  it under Instructions.
 - DIDWW numbers can be quoted and bought through `POST /numbers/quotes` and
   `POST /numbers`; end-user registration runs through `/verifications`
   (`provider=didww`). New settings `DIDWW_API_KEY`, `DIDWW_ENVIRONMENT`.
@@ -44,6 +48,15 @@ answering on behalf of {org}.`; workspace default in
 
 ### Changed
 
+- **SMS setup is automatic.** An SMS-capable number joins its organization's
+  messaging service when it becomes active, and again when a texts agent is
+  assigned to it. A background pass finishes any setup that failed. Twilio
+  Messaging Services now carry Hail's inbound webhook (`/sms/inbound`), so
+  inbound texts need no console setup. `POST /numbers/{id}/enable-sms` stays
+  as the idempotent repair call, and a carrier refusal is a 502 with a plain
+  message.
+- A text reply and an inbound call now say what the agent can help with when
+  the opening line did not.
 - `CallResponse`, `SmsResponse` gain `agent_id`; `PhoneNumberResponse` gains
   `voice_agent_id`, `sms_agent_id`, `inbound_registered`.
 - `organization_call_settings.max_duration_seconds` is nullable (null = service default).
