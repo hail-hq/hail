@@ -769,3 +769,70 @@ async def purge_expired_quotes() -> int:
         )
         await db.commit()
         return result.rowcount or 0
+
+
+_sms_services_refreshed = False
+
+
+async def sync_sms_setup() -> None:
+    """Keep SMS set up without anyone clicking: retry numbers whose setup
+    failed (no messaging service yet), and once per process set every
+    existing service's own settings again, so a service made before its
+    inbound webhook existed, or after HAIL_API_URL changed, still delivers.
+    A fresh session and the org lock per number: one carrier failure cannot
+    stall the rest."""
+    global _sms_services_refreshed
+    async with session_scope() as db:
+        pending = (
+            (
+                await db.execute(
+                    select(PhoneNumber.id)
+                    .where(
+                        PhoneNumber.provisioning_state == "active",
+                        PhoneNumber.messaging_service_sid.is_(None),
+                        PhoneNumber.capabilities.any("sms"),
+                    )
+                    .limit(50)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        refresh: list = []
+        if not _sms_services_refreshed:
+            refresh = list(
+                (
+                    await db.execute(
+                        select(PhoneNumber.id)
+                        .where(
+                            PhoneNumber.provisioning_state == "active",
+                            PhoneNumber.messaging_service_sid.is_not(None),
+                        )
+                        .distinct(PhoneNumber.messaging_service_sid)
+                        .order_by(PhoneNumber.messaging_service_sid)
+                    )
+                )
+                .scalars()
+                .all()
+            )
+    all_ok = True
+    for number_id in [*pending, *refresh]:
+        try:
+            async with session_scope() as db:
+                number = await db.get(PhoneNumber, number_id)
+                if number is None:
+                    continue
+                await org_lock(db, number.organization_id)
+                await db.refresh(number)
+                if number.provisioning_state != "active":
+                    continue
+                await sms_setup.ensure_sms(db, number)
+                await db.commit()
+        except sms_setup.SmsSetupError as exc:
+            all_ok = False
+            logger.warning("SMS setup retry failed (%s): %s", number_id, exc.stage)
+        except Exception:
+            all_ok = False
+            logger.exception("SMS setup retry crashed for %s", number_id)
+    if refresh and all_ok:
+        _sms_services_refreshed = True

@@ -490,3 +490,46 @@ async def test_route_requires_an_agent_that_answers_that_channel(
         f"/numbers/{number.id}", json={"sms_agent_id": agent["id"]}, headers=headers
     )
     assert r.status_code == 200, r.text
+
+
+async def test_background_sync_finishes_failed_sms_setup_and_refreshes_services(
+    org, async_session: AsyncSession, sms_mock
+) -> None:
+    """Nobody clicks anything: a number whose SMS setup failed is attached by
+    the background pass, and an attached number's service is set again once
+    per process."""
+    from hailhq.api import number_orders
+
+    org_id, _ = org
+    number = await _seed_number(async_session, org_id)
+    other = PhoneNumber(
+        organization_id=org_id,
+        e164="+14155550101",
+        country_code="US",
+        number_type="local",
+        capabilities=["voice", "sms"],
+        provider="twilio",
+        provider_resource_id="PN_other",
+        provisioning_state="active",
+        messaging_service_sid="MG_old",
+    )
+    async_session.add(other)
+    await async_session.commit()
+
+    number_orders._sms_services_refreshed = False
+    await number_orders.sync_sms_setup()
+
+    await async_session.refresh(number)
+    assert number.messaging_service_sid == "MG_test_service"
+    sms_mock.attach_number.assert_awaited_once()
+    refreshed = [
+        c.kwargs["existing_sid"]
+        for c in sms_mock.ensure_messaging_service.await_args_list
+    ]
+    assert "MG_old" in refreshed
+    assert number_orders._sms_services_refreshed is True
+
+    # Second pass: nothing left to do, no carrier calls.
+    calls = sms_mock.ensure_messaging_service.await_count
+    await number_orders.sync_sms_setup()
+    assert sms_mock.ensure_messaging_service.await_count == calls

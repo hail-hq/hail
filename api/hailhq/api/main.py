@@ -16,6 +16,7 @@ from hailhq.api.number_orders import (
     purge_expired_quotes,
     reconcile_pending_orders,
     retry_unreleased_numbers,
+    sync_sms_setup,
 )
 from hailhq.api.ratelimit import GeneralRateLimitMiddleware
 from hailhq.api.routes import agents as agents_routes
@@ -126,8 +127,8 @@ async def _backstop_sweeper_loop() -> None:
 
 
 async def _order_reconciler_loop() -> None:
-    """Poll pending carrier number orders, retry failed carrier releases and
-    drop expired quotes.
+    """Poll pending carrier number orders, retry failed carrier releases,
+    drop expired quotes and finish SMS setup that failed.
 
     Runs apart from the backstop sweeper: carrier calls can take 20s each and
     must not delay the stale-call and pool-reservation sweeps.
@@ -137,6 +138,7 @@ async def _order_reconciler_loop() -> None:
             await reconcile_pending_orders()
             await retry_unreleased_numbers()
             await purge_expired_quotes()
+            await sync_sms_setup()
         except asyncio.CancelledError:
             raise
         except Exception:  # pragma: no cover — defensive; logged + retried
