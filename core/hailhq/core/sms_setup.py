@@ -63,14 +63,18 @@ async def ensure_sms(db: AsyncSession, number: PhoneNumber) -> bool:
             messaging_service_sid=sid,
             provider_resource_id=number.provider_resource_id,
         )
-    except SmsProvisioningError as exc:
+    except Exception as exc:
+        # Telnyx raises httpx / ValueError, Twilio SmsProvisioningError: all
+        # of them mean "the carrier did not set the number up".
+        detail = exc.detail if isinstance(exc, SmsProvisioningError) else str(exc)
         logger.error(
             "SMS setup refused for %s (%s, %s): %s",
             number.e164,
             number.provider,
             number.provider_resource_id,
-            exc.detail,
+            detail,
+            exc_info=not isinstance(exc, SmsProvisioningError),
         )
-        raise SmsSetupError("refused", exc.detail) from exc
+        raise SmsSetupError("refused", detail) from exc
     number.messaging_service_sid = sid
     return True

@@ -143,10 +143,16 @@ async def finish_order(
     if not failed and "sms" in number.capabilities:
         # The number is bought and billed; SMS setup is a separate, retried
         # step (assigning a texts agent or POST /enable-sms runs it again).
+        # The commit above released the transaction-scoped org lock. Take it
+        # again: two purchases must not both see "no service" and each
+        # create one.
         try:
+            await org_lock(db, number.organization_id)
+            await db.refresh(number)
             await sms_setup.ensure_sms(db, number)
             await db.commit()
         except sms_setup.SmsSetupError as exc:
+            await db.rollback()
             logger.warning(
                 "SMS setup deferred for %s after purchase: %s", number.e164, exc.stage
             )

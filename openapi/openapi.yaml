@@ -1983,11 +1983,10 @@ paths:
         carrier and on Hail's LiveKit inbound trunk; ``null`` unregisters it, and
 
         calls ring out again. ``sms_agent_id`` needs the sms capability and sets the
-        number up for SMS
 
-        at the carrier if that has not happened yet;
+        number up for SMS at the carrier if that has not happened yet. A field left
 
-        inbound texts already reach Hail. A field left out keeps its value."
+        out keeps its value."
       operationId: route_number_v1_numbers__number_id__patch
       parameters:
         - name: number_id

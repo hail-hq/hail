@@ -387,9 +387,9 @@ async def route_number(
 
     Setting ``voice_agent_id`` registers the number for inbound calls at the
     carrier and on Hail's LiveKit inbound trunk; ``null`` unregisters it, and
-    calls ring out again. ``sms_agent_id`` needs the sms capability and sets the number up for SMS
-    at the carrier if that has not happened yet;
-    inbound texts already reach Hail. A field left out keeps its value.
+    calls ring out again. ``sms_agent_id`` needs the sms capability and sets the
+    number up for SMS at the carrier if that has not happened yet. A field left
+    out keeps its value.
     """
     # Same org lock release_org_number takes: a PATCH racing a release (or
     # another PATCH) must not commit an agent onto a released row or leave a
@@ -424,6 +424,18 @@ async def route_number(
                 "this agent does not answer texts", loc=["body", "sms_agent_id"]
             )
 
+    if "sms_agent_id" in fields and body.sms_agent_id is not None:
+        # Texts can only be answered once the number is set up for SMS at its
+        # carrier. Normally done at purchase; this covers numbers bought
+        # before that and setups that failed then. Runs before the voice
+        # change: a failure here must not roll back a voice registration
+        # that already happened at the carrier and LiveKit.
+        try:
+            await sms_setup.ensure_sms(db, number)
+        except sms_setup.SmsSetupError as exc:
+            await db.rollback()
+            raise _sms_setup_http_error(exc) from exc
+
     try:
         if "voice_agent_id" in fields:
             # LiveKit is only touched to register a number or to unregister a
@@ -444,15 +456,6 @@ async def route_number(
                     await inbound_routing.register(db, lk, number)
             number.voice_agent_id = body.voice_agent_id
         if "sms_agent_id" in fields:
-            if body.sms_agent_id is not None:
-                # Texts can only be answered once the number is set up for
-                # SMS at its carrier. Normally done at purchase; this covers
-                # numbers bought before that and setups that failed then.
-                try:
-                    await sms_setup.ensure_sms(db, number)
-                except sms_setup.SmsSetupError as exc:
-                    await db.rollback()
-                    raise _sms_setup_http_error(exc) from exc
             number.sms_agent_id = body.sms_agent_id
     except inbound_routing.InboundRoutingError as exc:
         # Rollback expires the row; log the path id, not the ORM attribute.
