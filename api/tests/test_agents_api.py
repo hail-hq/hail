@@ -436,6 +436,17 @@ async def test_assigning_texts_agent_sets_sms_up(
     assert r.status_code == 200, r.text
     assert sms_mock.attach_number.await_count == 1
 
+    # The repair call sets the service's own settings (inbound webhook)
+    # again, so a service made before that setting existed still delivers.
+    r = await client.post(f"/numbers/{number.id}/enable-sms", headers=headers)
+    assert r.status_code == 200, r.text
+    assert sms_mock.ensure_messaging_service.await_count == 2
+    assert (
+        sms_mock.ensure_messaging_service.await_args.kwargs["existing_sid"]
+        == "MG_test_service"
+    )
+    assert sms_mock.attach_number.await_count == 1
+
 
 async def test_texts_agent_is_not_assigned_when_sms_setup_fails(
     client, org, async_session, inbound_hooks, sms_mock

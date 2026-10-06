@@ -30,6 +30,14 @@ class SmsSetupError(Exception):
         self.detail = detail
 
 
+def _provider(number: PhoneNumber):
+    try:
+        return sms_route(number.provider)
+    except ValueError as exc:
+        logger.error("%s SMS route unavailable: %s", number.provider, exc)
+        raise SmsSetupError("unavailable", str(exc)) from exc
+
+
 async def ensure_sms(db: AsyncSession, number: PhoneNumber) -> None:
     """Attach ``number`` to its organization's messaging service. The caller
     holds the org lock and commits. Idempotent: an attached number is left
@@ -50,11 +58,7 @@ async def ensure_sms(db: AsyncSession, number: PhoneNumber) -> None:
             .limit(1)
         )
     ).scalar_one_or_none()
-    try:
-        provider = sms_route(number.provider)
-    except ValueError as exc:
-        logger.error("%s SMS route unavailable: %s", number.provider, exc)
-        raise SmsSetupError("unavailable", str(exc)) from exc
+    provider = _provider(number)
     try:
         sid = await provider.ensure_messaging_service(
             organization_id=number.organization_id, existing_sid=existing_sid
