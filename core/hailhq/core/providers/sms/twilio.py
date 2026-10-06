@@ -17,6 +17,7 @@ from hailhq.core.providers.sms.base import (
     SmsProvider,
     SmsProvisioningError,
 )
+from hailhq.core.urls import join_url
 from twilio.base.exceptions import TwilioException, TwilioRestException
 from twilio.rest import Client as TwilioClient
 
@@ -99,12 +100,34 @@ class TwilioSmsProvider(SmsProvider):
     async def ensure_messaging_service(
         self, organization_id: UUID, existing_sid: str | None
     ) -> str:
-        if existing_sid is not None:
-            return existing_sid
+        # Inbound texts to every number in the service reach Hail here; the
+        # number's own "A Message Comes In" webhook is not used. An existing
+        # service gets the same URL, so one created before this setting (or
+        # one whose HAIL_API_URL changed) still delivers.
+        inbound = {
+            "inbound_request_url": join_url(settings.hail_api_url, "sms/inbound"),
+            "inbound_method": "POST",
+            "use_inbound_webhook_on_number": False,
+        }
         try:
+            if existing_sid is not None:
+                await asyncio.to_thread(
+                    self._client.messaging.v1.services(existing_sid).update, **inbound
+                )
+                return existing_sid
+            # A first attach that failed left a service no row records.
+            # Find it by name so a retry reuses it instead of adding another.
+            name = f"hail-org-{organization_id}"
+            found = await asyncio.to_thread(self._find_service_sid_by_name, name)
+            if found is not None:
+                await asyncio.to_thread(
+                    self._client.messaging.v1.services(found).update, **inbound
+                )
+                return found
             service = await asyncio.to_thread(
                 self._client.messaging.v1.services.create,
-                friendly_name=f"hail-org-{organization_id}",
+                friendly_name=name,
+                **inbound,
             )
         except TwilioRestException as exc:
             raise SmsProvisioningError(exc.msg or str(exc)) from exc
@@ -180,6 +203,12 @@ class TwilioSmsProvider(SmsProvider):
             ).phone_numbers.create,
             phone_number_sid=provider_resource_id,
         )
+
+    def _find_service_sid_by_name(self, friendly_name: str) -> str | None:
+        for service in self._client.messaging.v1.services.stream():
+            if service.friendly_name == friendly_name:
+                return service.sid
+        return None
 
     def _service_holding(self, provider_resource_id: str) -> str | None:
         """The sid of the messaging service that holds this number, if any.

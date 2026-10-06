@@ -4,6 +4,14 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 
 ## [Unreleased]
 
+### Changed
+
+- **SMS setup is automatic.** An SMS-capable number joins its organization's
+  messaging service when it becomes active, and again when a texts agent is
+  assigned to it. Twilio Messaging Services now carry Hail's inbound webhook
+  (`/sms/inbound`), so inbound texts need no console setup.
+  `POST /numbers/{id}/enable-sms` stays as the idempotent repair call.
+
 ### Added
 
 - **Agents.** `POST /v1/agents` saves a brain (instructions, greeting, AI

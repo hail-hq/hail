@@ -82,7 +82,7 @@ hail numbers acquire --country US --type local          # buys the cheapest read
 hail numbers acquire --country US --quote-id <quote-id>  # buys one exact offer from POST /numbers/quotes
 hail numbers list
 hail numbers get <id>
-hail numbers enable-sms <id>   # attach a Messaging Service so the number can send SMS
+hail numbers enable-sms <id>   # repair SMS setup; Hail does this itself when a number becomes active
 ```
 
 `acquire` requests live quotes ([`POST /numbers/quotes`](../../openapi/openapi.yaml)), then buys the cheapest ready offer (monthly plus setup) with its `quote_id`. Flags: `--country` (required), `--type` (`local|mobile|toll_free|national`), `--provider` (`auto|twilio|telnyx`), `--quote-id` (skip the quote and buy that offer), `--voice-only`, `--sms-only` (default: voice and SMS), `--idempotency-key`.

@@ -1982,9 +1982,11 @@ paths:
 
         carrier and on Hail's LiveKit inbound trunk; ``null`` unregisters it, and
 
-        calls ring out again. ``sms_agent_id`` only needs the sms capability;
+        calls ring out again. ``sms_agent_id`` needs the sms capability and sets the
 
-        inbound texts already reach Hail. A field left out keeps its value."
+        number up for SMS at the carrier if that has not happened yet. A field left
+
+        out keeps its value."
       operationId: route_number_v1_numbers__number_id__patch
       parameters:
         - name: number_id
@@ -2118,10 +2120,12 @@ paths:
       summary: Enable Sms
       description:
         "Attach a dedicated number to the org's shared SMS Messaging Service.\n\
-        \nRequired once per number before it can send/receive SMS; the number\nmust\
-        \ already have been acquired with sms capability. Idempotent \u2014\ncalling\
-        \ this again on an already-enabled number just returns its\ncurrent state.\
-        \ Fails with 422 for a released number or one that lacks\nsms capability."
+        \nHail does this itself when an sms-capable number becomes active and when\n\
+        a texts agent is assigned, so this call is only needed to repair a number\n\
+        whose setup failed, or an older one whose service lacks the inbound\n\
+        text settings. Idempotent \u2014 an already-enabled number gets those settings\n\
+        set again and returns its current state. Fails with 422 for a released number or one that lacks\nsms\
+        \ capability."
       operationId: enable_sms_v1_numbers__number_id__enable_sms_post
       parameters:
         - name: number_id

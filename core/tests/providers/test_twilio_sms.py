@@ -249,6 +249,12 @@ async def test_ensure_messaging_service_creates_when_none_exists(
 ) -> None:
     org_id = uuid.uuid4()
     responses.add(
+        responses.GET,
+        "https://messaging.twilio.com/v1/Services",
+        json={"services": [], "meta": {"next_page_url": None, "key": "services"}},
+        status=200,
+    )
+    responses.add(
         responses.POST,
         "https://messaging.twilio.com/v1/Services",
         json={"sid": "MG_test_service", "friendly_name": f"hail-org-{org_id}"},
@@ -258,16 +264,61 @@ async def test_ensure_messaging_service_creates_when_none_exists(
         organization_id=org_id, existing_sid=None
     )
     assert sid == "MG_test_service"
+    sent = parse_qs(responses.calls[1].request.body)
+    # Inbound texts to every number in the service reach Hail.
+    assert sent["InboundRequestUrl"] == ["http://localhost:8080/sms/inbound"]
+    assert sent["InboundMethod"] == ["POST"]
+    assert sent["UseInboundWebhookOnNumber"] == ["false"]
 
 
-async def test_ensure_messaging_service_returns_existing_without_api_call(
+@responses.activate
+async def test_ensure_messaging_service_reuses_a_service_found_by_name(
     provider: TwilioSmsProvider,
 ) -> None:
+    """A service left by a failed first attach is found by its name, so a
+    retry does not create a second one."""
+    org_id = uuid.uuid4()
+    responses.add(
+        responses.GET,
+        "https://messaging.twilio.com/v1/Services",
+        json={
+            "services": [{"sid": "MG_orphan", "friendly_name": f"hail-org-{org_id}"}],
+            "meta": {"next_page_url": None, "key": "services"},
+        },
+        status=200,
+    )
+    responses.add(
+        responses.POST,
+        "https://messaging.twilio.com/v1/Services/MG_orphan",
+        json={"sid": "MG_orphan"},
+        status=200,
+    )
+    sid = await provider.ensure_messaging_service(
+        organization_id=org_id, existing_sid=None
+    )
+    assert sid == "MG_orphan"
+
+
+@responses.activate
+async def test_ensure_messaging_service_reuses_existing_and_sets_its_webhook(
+    provider: TwilioSmsProvider,
+) -> None:
+    """An org's existing service is kept, but its inbound webhook is set
+    again: services made before this setting, or after HAIL_API_URL
+    changed, still deliver texts to Hail."""
+    responses.add(
+        responses.POST,
+        "https://messaging.twilio.com/v1/Services/MG_already_have_one",
+        json={"sid": "MG_already_have_one"},
+        status=200,
+    )
     org_id = uuid.uuid4()
     sid = await provider.ensure_messaging_service(
         organization_id=org_id, existing_sid="MG_already_have_one"
     )
     assert sid == "MG_already_have_one"
+    sent = parse_qs(responses.calls[0].request.body)
+    assert sent["InboundRequestUrl"] == ["http://localhost:8080/sms/inbound"]
 
 
 @responses.activate
