@@ -37,8 +37,8 @@ from hailhq.api.pagination import fetch_cursor_page
 from hailhq.api.ratelimit import GENERAL_RATE_LIMITED_RESPONSES
 from hailhq.api.route_prefixes import request_mount_prefix
 from hailhq.api.routes.calls import get_livekit_optional
-from hailhq.core import inbound_routing, telephony_catalog
-from hailhq.core.carrier_routing import CARRIERS, carrier, sms_route
+from hailhq.core import inbound_routing, sms_setup, telephony_catalog
+from hailhq.core.carrier_routing import CARRIERS, carrier
 from hailhq.core.db import get_session, org_lock
 from hailhq.core.livekit import LiveKitClient
 from hailhq.core.models import Agent, NumberOffer, PhoneNumber
@@ -48,7 +48,6 @@ from hailhq.core.number_offers import (
     discover_offers,
     rank_offers,
 )
-from hailhq.core.providers.sms.base import SmsProvisioningError
 from hailhq.core.providers.voice import CarrierNotConfigured
 from hailhq.core.schemas import (
     NumberAcquireRequest,
@@ -388,7 +387,8 @@ async def route_number(
 
     Setting ``voice_agent_id`` registers the number for inbound calls at the
     carrier and on Hail's LiveKit inbound trunk; ``null`` unregisters it, and
-    calls ring out again. ``sms_agent_id`` only needs the sms capability;
+    calls ring out again. ``sms_agent_id`` needs the sms capability and sets the number up for SMS
+    at the carrier if that has not happened yet;
     inbound texts already reach Hail. A field left out keeps its value.
     """
     # Same org lock release_org_number takes: a PATCH racing a release (or
@@ -444,6 +444,15 @@ async def route_number(
                     await inbound_routing.register(db, lk, number)
             number.voice_agent_id = body.voice_agent_id
         if "sms_agent_id" in fields:
+            if body.sms_agent_id is not None:
+                # Texts can only be answered once the number is set up for
+                # SMS at its carrier. Normally done at purchase; this covers
+                # numbers bought before that and setups that failed then.
+                try:
+                    await sms_setup.ensure_sms(db, number)
+                except sms_setup.SmsSetupError as exc:
+                    await db.rollback()
+                    raise _sms_setup_http_error(exc) from exc
             number.sms_agent_id = body.sms_agent_id
     except inbound_routing.InboundRoutingError as exc:
         # Rollback expires the row; log the path id, not the ORM attribute.
@@ -558,9 +567,9 @@ async def enable_sms(
 ) -> PhoneNumberResponse:
     """Attach a dedicated number to the org's shared SMS Messaging Service.
 
-    Required once per number before it can send/receive SMS; the number
-    must already have been acquired with sms capability. Idempotent —
-    calling this again on an already-enabled number just returns its
+    Hail does this itself when an sms-capable number becomes active and when
+    a texts agent is assigned, so this call is only needed to repair a number
+    whose setup failed. Idempotent — an already-enabled number returns its
     current state. Fails with 422 for a released number or one that lacks
     sms capability.
     """
@@ -580,81 +589,33 @@ async def enable_sms(
     if number.messaging_service_sid is not None:
         return PhoneNumberResponse.model_validate(number)
 
-    # Serialize concurrent enable-sms within an org. Provisioning the org's
-    # shared Messaging Service is a get-or-create: two parallel enables would
-    # otherwise both observe no existing service and each create one (leaving
-    # orphaned duplicates). A transaction-scoped advisory lock keyed on the org
-    # (auto-released at commit/rollback) makes any waiter see the first
-    # request's committed result. release_org_number takes the same org-keyed
-    # lock on purpose — that is what makes the released re-check below
-    # authoritative rather than a race window. Purchases, order reconciliation
-    # and the monthly-fee rater take the same lock (see ``org_lock``).
+    # Serialize with purchases, routing and releases in this org (see
+    # ``org_lock``): two parallel enables would otherwise both see no service
+    # and each create one. Re-read under the lock: a concurrent enable may
+    # have attached THIS number, a concurrent release may have tombstoned it.
     await org_lock(db, principal.organization_id)
-    # Re-read under the lock: a concurrent enable of THIS number may have just
-    # attached it (its SID was NULL when the row was first loaded), and a
-    # concurrent release may have tombstoned it (its PN is gone at Twilio).
     await db.refresh(number, ["messaging_service_sid", "provisioning_state"])
     _reject_if_released(number)
-    if number.messaging_service_sid is not None:
-        return PhoneNumberResponse.model_validate(number)
-
-    # One Messaging Service per org (a shared sender pool). Reuse the org's
-    # existing service if any of its numbers already has one; only when the org
-    # has none does ensure_messaging_service create a fresh one — otherwise
-    # every enabled number would spawn its own orphan Messaging Service.
-    existing_sid = (
-        await db.execute(
-            select(PhoneNumber.messaging_service_sid)
-            .where(
-                PhoneNumber.organization_id == principal.organization_id,
-                PhoneNumber.messaging_service_sid.is_not(None),
-                PhoneNumber.provider == number.provider,
-            )
-            .limit(1)
-        )
-    ).scalar_one_or_none()
-
     try:
-        provider = sms_route(number.provider)
-    except ValueError as exc:
-        # Carrier not configured for SMS: an operator problem, not a server fault.
-        # The customer reads this: never the carrier's name or an env var.
-        logger.error("%s SMS route unavailable: %s", number.provider, exc)
-        raise HTTPException(
-            status_code=503, detail="SMS is not available on this number's carrier"
-        ) from exc
-    try:
-        messaging_service_sid = await provider.ensure_messaging_service(
-            organization_id=principal.organization_id, existing_sid=existing_sid
-        )
-        await provider.attach_number(
-            messaging_service_sid=messaging_service_sid,
-            provider_resource_id=number.provider_resource_id,
-        )
-    except SmsProvisioningError as exc:
-        logger.error(
-            "enable-sms refused for %s (%s, %s): %s",
-            number.e164,
-            number.provider,
-            number.provider_resource_id,
-            exc.detail,
-        )
-        # The customer reads this: never the carrier's name or its reason
-        # (those are in the log above for the operator).
-        raise HTTPException(
-            status_code=http_status.HTTP_502_BAD_GATEWAY,
-            detail="SMS could not be enabled on this number right now. "
-            "Try again later or contact support.",
-        ) from exc
-
-    # Stored for future send routing: this provisions and records the org's
-    # Messaging Service, but POST /sms does not yet send *through* it (it sends
-    # with an explicit from_e164 / alphanumeric sender). Routing outbound SMS
-    # via the Messaging Service is a later phase — the SID is persisted now so
-    # that wiring has it ready.
-    number.messaging_service_sid = messaging_service_sid
+        await sms_setup.ensure_sms(db, number)
+    except sms_setup.SmsSetupError as exc:
+        raise _sms_setup_http_error(exc) from exc
     await db.commit()
     return PhoneNumberResponse.model_validate(number)
+
+
+def _sms_setup_http_error(exc: sms_setup.SmsSetupError) -> HTTPException:
+    # The customer reads this: never the carrier's name, its reason or an
+    # env var (those are in the log for the operator).
+    if exc.stage == "unavailable":
+        return HTTPException(
+            status_code=503, detail="SMS is not available on this number's carrier"
+        )
+    return HTTPException(
+        status_code=http_status.HTTP_502_BAD_GATEWAY,
+        detail="SMS could not be enabled on this number right now. "
+        "Try again later or contact support.",
+    )
 
 
 class NumberQuotesResponse(BaseModel):

@@ -410,6 +410,53 @@ async def test_routing_503_does_not_name_the_carrier_or_an_env_var(
     assert "livekit_" not in detail
 
 
+async def test_assigning_texts_agent_sets_sms_up(
+    client, org, async_session, inbound_hooks, sms_mock
+) -> None:
+    """A number bought before automatic setup (no messaging service yet) is
+    set up the moment a texts agent is assigned; a second assignment does
+    not touch the carrier again."""
+    org_id, headers = org
+    agent = await _create_agent(client, headers)
+    number = await _seed_number(async_session, org_id)
+    assert number.messaging_service_sid is None
+
+    r = await client.patch(
+        f"/numbers/{number.id}", json={"sms_agent_id": agent["id"]}, headers=headers
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["messaging_service_sid"] == "MG_test_service"
+    sms_mock.attach_number.assert_awaited_once_with(
+        messaging_service_sid="MG_test_service", provider_resource_id="PN_test"
+    )
+
+    r = await client.patch(
+        f"/numbers/{number.id}", json={"sms_agent_id": agent["id"]}, headers=headers
+    )
+    assert r.status_code == 200, r.text
+    assert sms_mock.attach_number.await_count == 1
+
+
+async def test_texts_agent_is_not_assigned_when_sms_setup_fails(
+    client, org, async_session, inbound_hooks, sms_mock
+) -> None:
+    from hailhq.core.providers.sms.base import SmsProvisioningError
+
+    org_id, headers = org
+    agent = await _create_agent(client, headers)
+    number = await _seed_number(async_session, org_id)
+    sms_mock.attach_number.side_effect = SmsProvisioningError("carrier said no")
+
+    r = await client.patch(
+        f"/numbers/{number.id}", json={"sms_agent_id": agent["id"]}, headers=headers
+    )
+    assert r.status_code == 502, r.text
+    assert "carrier said no" not in r.text
+    await async_session.refresh(number)
+    assert number.sms_agent_id is None
+    assert number.messaging_service_sid is None
+
+
 async def test_route_requires_an_agent_that_answers_that_channel(
     client, org, async_session, inbound_hooks
 ) -> None:

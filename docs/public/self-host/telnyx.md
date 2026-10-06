@@ -80,9 +80,10 @@ with `end_reason = carrier_route_failed` before any LiveKit room exists.
 
 ## 4. SMS
 
-Nothing to create by hand. `POST /numbers/{id}/enable-sms` creates one Telnyx
-messaging profile per organization, with its webhook at
-`<HAIL_API_URL>/sms/telnyx`, and attaches the number to it. Delivery status
+Nothing to create by hand. When an SMS-capable number becomes active, Hail
+creates one Telnyx messaging profile per organization, with its webhook at
+`<HAIL_API_URL>/sms/telnyx`, and attaches the number to it (assigning a texts
+agent, or `POST /numbers/{id}/enable-sms`, runs the same step again). Delivery status
 and inbound messages (including `STOP`/`START`/`HELP`) arrive on that route;
 Hail checks the Ed25519 signature with `TELNYX_PUBLIC_KEY` and rejects
 requests older than five minutes. `HAIL_API_URL` must be the public URL Telnyx

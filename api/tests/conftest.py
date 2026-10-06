@@ -222,6 +222,8 @@ def sms_mock(monkeypatch: pytest.MonkeyPatch) -> AsyncMock:
     monkeypatch.setattr(
         "hailhq.core.providers.sms.twilio.twilio_sms_provider", lambda: mock
     )
+    # SMS setup runs on its own at purchase and routing: give it a service id.
+    mock.ensure_messaging_service.return_value = "MG_test_service"
 
     counter = {"n": 0}
 

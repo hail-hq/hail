@@ -160,6 +160,21 @@ async def test_acquire_number_happy_path(buy_number) -> None:
     assert set(body["capabilities"]) == {"voice", "sms"}
 
 
+async def test_purchase_sets_sms_up_on_sms_capable_number(
+    buy_number, sms_mock, async_session
+) -> None:
+    """Nobody clicks "Enable SMS": the number joins the org's messaging
+    service as soon as it is active."""
+    resp = await buy_number()
+    assert resp.status_code == 201, resp.text
+    assert resp.json()["messaging_service_sid"] == "MG_test_service"
+    sms_mock.attach_number.assert_awaited_once()
+    assert (
+        sms_mock.attach_number.await_args.kwargs["messaging_service_sid"]
+        == "MG_test_service"
+    )
+
+
 async def test_acquire_number_idempotent_replay(buy_number) -> None:
     """Same Idempotency-Key on a retried acquire must NOT purchase a second
     number: the replay returns the cached number without calling the carrier."""

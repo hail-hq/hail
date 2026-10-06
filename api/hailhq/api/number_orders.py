@@ -13,7 +13,7 @@ from hailhq.api.audit import write_audit_log
 from hailhq.api.deps import Principal
 from hailhq.api.errors import unprocessable
 from hailhq.api.funds import BILLING_URL
-from hailhq.core import telephony_catalog
+from hailhq.core import sms_setup, telephony_catalog
 from hailhq.core.billing import get_balance_cents, monthly_fee_ref
 from hailhq.core.carrier_routing import Outcome, carrier
 from hailhq.core.db import org_lock, session_scope
@@ -140,6 +140,16 @@ async def finish_order(
         meta["failure_reason"] = reason or "the carrier did not complete the order"
     number.provisioning_metadata = meta
     await db.commit()
+    if not failed and "sms" in number.capabilities:
+        # The number is bought and billed; SMS setup is a separate, retried
+        # step (assigning a texts agent or POST /enable-sms runs it again).
+        try:
+            await sms_setup.ensure_sms(db, number)
+            await db.commit()
+        except sms_setup.SmsSetupError as exc:
+            logger.warning(
+                "SMS setup deferred for %s after purchase: %s", number.e164, exc.stage
+            )
 
 
 async def give_back(number: PhoneNumber, resource_id: str) -> None:
