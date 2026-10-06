@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { pageMetadata } from "../../../../../shared/site-metadata";
 import { notFound } from "next/navigation";
 import { featuredPairs, pairBySlug, pairSlug } from "@/lib/featured";
 import type { FeaturedPair } from "@/lib/featured";
@@ -27,13 +28,23 @@ export async function generateMetadata({
   const entry = pairBySlug.get(pair);
   if (!entry) return {};
   const [a, b] = entry.models;
-  return {
-    title: `${a.display_name} vs ${b.display_name} — cost comparison`,
-    description: `Side-by-side pricing and capabilities for ${a.display_name} (${a.provider}) and ${b.display_name} (${b.provider}). Schema-validated, refreshed weekly.`,
-    alternates: {
-      canonical: new URL(`/costs/compare/${pair}`, SITE_ORIGIN).toString(),
-    },
-  };
+  const names = `${a.display_name} vs ${b.display_name}`;
+  // Long names can include a provider suffix already shown in the comparison.
+  const shortNames =
+    names.length <= 50
+      ? names
+      : [a, b]
+          .map((model) => model.display_name.replace(/\s+\([^)]*\)$/, ""))
+          .join(" vs ");
+  const titleNames =
+    shortNames.length <= 50 ? shortNames : `${shortNames.slice(0, 49)}…`;
+  return pageMetadata({
+    title: `${titleNames} | hail.so`,
+    description: `Compare pricing and capabilities for ${a.display_name} and ${b.display_name}. View current model costs side by side.`,
+    path: `/costs/compare/${pair}`,
+    image: "/costs/opengraph-image",
+    origin: SITE_ORIGIN,
+  });
 }
 
 function successorSlugFor(entry: FeaturedPair): string | null {

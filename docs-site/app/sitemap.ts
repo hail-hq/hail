@@ -1,4 +1,5 @@
 import type { MetadataRoute } from "next";
+import { docsPath } from "../../shared/site-metadata";
 import { apiSource, source } from "@/lib/source";
 
 // Served at hail.so/docs/sitemap.xml (basePath applies to metadata routes).
@@ -13,7 +14,7 @@ export default function sitemap(): MetadataRoute.Sitemap {
   const prose: MetadataRoute.Sitemap = source.getPages().map((page) => ({
     // page.url is loader-relative ("/architecture", "/" for the index); the
     // public URL adds the /docs basePath.
-    url: `${ORIGIN}/docs${page.url === "/" ? "" : page.url}`,
+    url: new URL(docsPath(page.url), ORIGIN).href,
     lastModified: now,
     changeFrequency: "weekly",
     priority: page.url === "/" ? 0.9 : 0.7,
@@ -27,7 +28,7 @@ export default function sitemap(): MetadataRoute.Sitemap {
       priority: 0.8,
     },
     ...apiSource.getPages().map((page) => ({
-      url: `${ORIGIN}/docs${page.url}`,
+      url: new URL(docsPath(page.url), ORIGIN).href,
       lastModified: now,
       changeFrequency: "weekly" as const,
       priority: 0.5,

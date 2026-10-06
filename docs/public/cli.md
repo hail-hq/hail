@@ -1,6 +1,6 @@
 # CLI reference
 
-`hail` is the Go CLI. It codegens its client from [`openapi/openapi.yaml`](https://github.com/hail-hq/hail/blob/main/openapi/openapi.yaml) — that spec is the canonical contract. This page is a brief summary of each command group. Run `hail <cmd> --help` for the full, authoritative flag list.
+`hail` is the Go CLI. It codegens its client from [`openapi/openapi.yaml`](../../openapi/openapi.yaml) — that spec is the canonical contract. This page is a brief summary of each command group. Run `hail <cmd> --help` for the full, authoritative flag list.
 
 ## Install
 
@@ -56,7 +56,7 @@ To point a call at your own OpenAI-compatible endpoint, see [Bring your own LLM]
 
 Language support:
 
-- `--language` — one of 39 lowercase ISO 639-1 codes (e.g. `en`, `da`, `hi`). Hail auto-routes STT and turn detection per language (see [docs/languages.md](https://github.com/hail-hq/hail/blob/main/docs/languages.md) for the full table). STT provider selection is console-BYO-only — there is no per-call flag to pin one.
+- `--language` — one of 39 lowercase ISO 639-1 codes (e.g. `en`, `da`, `hi`). Hail auto-routes STT and turn detection per language (see [docs/languages.md](../../docs/languages.md) for the full table). STT provider selection is console-BYO-only — there is no per-call flag to pin one.
 
 ## SMS
 
@@ -220,7 +220,7 @@ curl -X POST "$HAIL_API_URL/v1/webhooks/<sub-id>/deliveries/<delivery-id>/redeli
   -H "Authorization: Bearer $HAIL_API_KEY"
 ```
 
-Other endpoints: `PATCH /webhooks/{id}` (update URL, events, or status), `DELETE /webhooks/{id}`, and `POST /webhooks/{id}/rotate-secret`. Event types cover email, SMS, and call events — the canonical list is `WebhookEventType` in [`core/hailhq/core/schemas.py`](https://github.com/hail-hq/hail/blob/main/core/hailhq/core/schemas.py).
+Other endpoints: `PATCH /webhooks/{id}` (update URL, events, or status), `DELETE /webhooks/{id}`, and `POST /webhooks/{id}/rotate-secret`. Event types cover email, SMS, and call events — the canonical list is `WebhookEventType` in [`core/hailhq/core/schemas.py`](../../core/hailhq/core/schemas.py).
 
 ## Auth and utilities
 

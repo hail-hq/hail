@@ -3,17 +3,18 @@ import { llm, stt, tts } from "@/lib/costs";
 import { CompareModels } from "@/components/compare-picker";
 import { featuredPairs } from "@/lib/featured";
 import { SITE_ORIGIN } from "@/lib/url";
+import { pageMetadata } from "../../../../shared/site-metadata";
 
 export const dynamic = "force-static";
 
-export const metadata = {
-  title: "Compare model costs — Hail",
+export const metadata = pageMetadata({
+  title: "Compare AI model costs | hail.so",
   description:
-    "Compare AI model providers side-by-side. Schema-validated, refreshed weekly.",
-  alternates: {
-    canonical: new URL("/costs/compare", SITE_ORIGIN).toString(),
-  },
-};
+    "Compare pricing for language, speech recognition, and speech synthesis models. View model costs and capabilities side by side.",
+  path: "/costs/compare",
+  image: "/costs/opengraph-image",
+  origin: SITE_ORIGIN,
+});
 
 export default function ComparePage() {
   return (
