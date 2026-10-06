@@ -4,14 +4,14 @@ import logging
 import time
 from contextlib import contextmanager
 from contextvars import ContextVar
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
-from hailhq.core.models import Organization, User
 from opentelemetry import trace
 from opentelemetry.sdk.trace import SpanProcessor
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
+
+if TYPE_CHECKING:
+    from sqlalchemy.ext.asyncio import AsyncSession
 
 IDENTITY_FIELDS = frozenset(
     {
@@ -62,12 +62,16 @@ def set_identity(attributes: dict[str, Any]) -> None:
 
 
 async def resolve_identity(
-    db: AsyncSession,
+    db: "AsyncSession",
     organization_id: UUID,
     user_id: UUID | None = None,
     *,
     actor_kind: str = "agent"
 ) -> dict[str, str]:
+    # Imported here: the MCP image has no DB driver stack (greenlet).
+    from hailhq.core.models import Organization, User
+    from sqlalchemy import select
+
     key = (organization_id, user_id, actor_kind)
     cached = _cache_get(key)
     if cached is not None:
