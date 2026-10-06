@@ -17,7 +17,7 @@ from hailhq.core.providers.sms.base import (
     SmsProvider,
     SmsProvisioningError,
 )
-from twilio.base.exceptions import TwilioRestException
+from twilio.base.exceptions import TwilioException, TwilioRestException
 from twilio.rest import Client as TwilioClient
 
 logger = logging.getLogger(__name__)
@@ -133,8 +133,9 @@ class TwilioSmsProvider(SmsProvider):
             holder = await asyncio.to_thread(
                 self._service_holding, provider_resource_id
             )
-        except TwilioRestException as exc:
-            raise SmsProvisioningError(exc.msg or str(exc)) from exc
+        except TwilioException as exc:
+            # List calls raise the base class, not TwilioRestException.
+            raise SmsProvisioningError(str(exc)) from exc
         if holder == messaging_service_sid:
             return  # Already ours: nothing to do.
         if holder is None:

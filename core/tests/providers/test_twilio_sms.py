@@ -13,6 +13,7 @@ from urllib.parse import parse_qs
 import pytest
 import responses
 from hailhq.core.providers.sms import ProviderSmsResult, TwilioSmsProvider
+from hailhq.core.providers.sms.base import SmsProvisioningError
 
 ACCOUNT_SID = "ACtest1234567890abcdef1234567890ab"
 AUTH_TOKEN = "test-auth-token"
@@ -384,3 +385,134 @@ async def test_attach_number_already_in_our_service_is_a_no_op(
         messaging_service_sid="MG_ours", provider_resource_id=pn
     )
     assert [c.request.method for c in responses.calls] == ["POST", "GET", "GET"]
+
+
+_PN = "PN1234567890abcdef1234567890abcd"
+_ATTACH = "https://messaging.twilio.com/v1/Services/MG_ours/PhoneNumbers"
+_SERVICES = "https://messaging.twilio.com/v1/Services"
+_OTHER_NUMBERS = "https://messaging.twilio.com/v1/Services/MG_other/PhoneNumbers"
+
+
+def _twilio_error(code: int, status: int) -> dict:
+    return {"code": code, "message": f"error {code}", "status": status}
+
+
+def _add_in_another_service() -> None:
+    responses.add(responses.POST, _ATTACH, json=_twilio_error(21712, 409), status=409)
+
+
+def _add_holder_scan() -> None:
+    responses.add(
+        responses.GET, _SERVICES, json=_page("services", [{"sid": "MG_other"}])
+    )
+    responses.add(
+        responses.GET,
+        _OTHER_NUMBERS,
+        json=_page("phone_numbers", [{"sid": _PN, "phone_number": "+12762763280"}]),
+    )
+
+
+@responses.activate
+async def test_attach_number_already_in_this_service_is_a_no_op(
+    provider: TwilioSmsProvider,
+) -> None:
+    responses.add(responses.POST, _ATTACH, json=_twilio_error(21710, 409), status=409)
+    await provider.attach_number(
+        messaging_service_sid="MG_ours", provider_resource_id=_PN
+    )
+    assert len(responses.calls) == 1
+
+
+@responses.activate
+async def test_attach_number_other_error_raises_provisioning_error(
+    provider: TwilioSmsProvider,
+) -> None:
+    responses.add(responses.POST, _ATTACH, json=_twilio_error(20404, 404), status=404)
+    with pytest.raises(SmsProvisioningError):
+        await provider.attach_number(
+            messaging_service_sid="MG_ours", provider_resource_id=_PN
+        )
+    assert len(responses.calls) == 1
+
+
+@responses.activate
+async def test_attach_number_no_holder_found_raises(
+    provider: TwilioSmsProvider,
+) -> None:
+    _add_in_another_service()
+    responses.add(responses.GET, _SERVICES, json=_page("services", []))
+    with pytest.raises(SmsProvisioningError):
+        await provider.attach_number(
+            messaging_service_sid="MG_ours", provider_resource_id=_PN
+        )
+
+
+@responses.activate
+async def test_attach_number_scan_error_raises_provisioning_error(
+    provider: TwilioSmsProvider,
+) -> None:
+    _add_in_another_service()
+    responses.add(responses.GET, _SERVICES, json=_twilio_error(20429, 429), status=429)
+    with pytest.raises(SmsProvisioningError):
+        await provider.attach_number(
+            messaging_service_sid="MG_ours", provider_resource_id=_PN
+        )
+
+
+@responses.activate
+async def test_attach_number_failed_delete_raises_and_does_not_reattach(
+    provider: TwilioSmsProvider,
+) -> None:
+    _add_in_another_service()
+    _add_holder_scan()
+    responses.add(
+        responses.DELETE,
+        f"{_OTHER_NUMBERS}/{_PN}",
+        json=_twilio_error(20500, 500),
+        status=500,
+    )
+    with pytest.raises(SmsProvisioningError):
+        await provider.attach_number(
+            messaging_service_sid="MG_ours", provider_resource_id=_PN
+        )
+    assert [c.request.method for c in responses.calls] == [
+        "POST",
+        "GET",
+        "GET",
+        "DELETE",
+    ]
+
+
+@responses.activate
+async def test_attach_number_failed_move_restores_old_service(
+    provider: TwilioSmsProvider,
+) -> None:
+    other_attach = _OTHER_NUMBERS
+    responses.add(responses.POST, _ATTACH, json=_twilio_error(21712, 409), status=409)
+    _add_holder_scan()
+    responses.add(responses.DELETE, f"{_OTHER_NUMBERS}/{_PN}", status=204)
+    responses.add(responses.POST, _ATTACH, json=_twilio_error(21714, 400), status=400)
+    responses.add(responses.POST, other_attach, json={"sid": _PN}, status=201)
+    with pytest.raises(SmsProvisioningError):
+        await provider.attach_number(
+            messaging_service_sid="MG_ours", provider_resource_id=_PN
+        )
+    last = responses.calls[-1].request
+    assert (last.method, last.url.split("?")[0]) == ("POST", other_attach)
+
+
+@responses.activate
+async def test_attach_number_failed_move_and_failed_restore_still_raises(
+    provider: TwilioSmsProvider,
+) -> None:
+    responses.add(responses.POST, _ATTACH, json=_twilio_error(21712, 409), status=409)
+    _add_holder_scan()
+    responses.add(responses.DELETE, f"{_OTHER_NUMBERS}/{_PN}", status=204)
+    responses.add(responses.POST, _ATTACH, json=_twilio_error(21714, 400), status=400)
+    responses.add(
+        responses.POST, _OTHER_NUMBERS, json=_twilio_error(20500, 500), status=500
+    )
+    with pytest.raises(SmsProvisioningError):
+        await provider.attach_number(
+            messaging_service_sid="MG_ours", provider_resource_id=_PN
+        )
