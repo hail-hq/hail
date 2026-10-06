@@ -121,6 +121,62 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HTTPValidationError"
+  /v1/agents/prompt-templates:
+    get:
+      tags:
+        - agents
+      summary: Get Prompt Templates
+      description:
+        "The full prompt the model gets on each channel, with a marker
+        where the
+
+        agent's own instructions go. Hail's framing is fixed; only the
+
+        instructions are the agent's."
+      operationId: get_prompt_templates_v1_agents_prompt_templates_get
+      parameters:
+        - name: authorization
+          in: header
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            title: Authorization
+      responses:
+        "200":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentPromptTemplates"
+        "429":
+          description:
+            Rate limited. This caller exceeded the general request-rate
+            ceiling. Retry after the Retry-After header (seconds).
+          headers:
+            Retry-After:
+              description: Seconds to wait before retrying.
+              schema:
+                type: integer
+            RateLimit-Limit:
+              description: The request ceiling for the current window.
+              schema:
+                type: integer
+            RateLimit-Remaining:
+              description: Requests remaining in the current window.
+              schema:
+                type: integer
+            RateLimit-Reset:
+              description: Seconds until the current window resets.
+              schema:
+                type: integer
+        "422":
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
   /v1/agents/{agent_id}:
     get:
       tags:
@@ -2122,10 +2178,10 @@ paths:
         "Attach a dedicated number to the org's shared SMS Messaging Service.\n\
         \nHail does this itself when an sms-capable number becomes active and when\n\
         a texts agent is assigned, so this call is only needed to repair a number\n\
-        whose setup failed, or an older one whose service lacks the inbound\n\
-        text settings. Idempotent \u2014 an already-enabled number gets those settings\n\
-        set again and returns its current state. Fails with 422 for a released number or one that lacks\nsms\
-        \ capability."
+        whose setup failed, or an older one whose service lacks the inbound\ntext\
+        \ settings. Idempotent \u2014 an already-enabled number gets those settings\n\
+        set again and returns its current state. Fails with 422 for a released number\
+        \ or one that lacks\nsms capability."
       operationId: enable_sms_v1_numbers__number_id__enable_sms_post
       parameters:
         - name: number_id
@@ -4503,6 +4559,40 @@ components:
       required:
         - items
       title: AgentListResponse
+    AgentPromptTemplates:
+      properties:
+        instructions_placeholder:
+          type: string
+          title: Instructions Placeholder
+          description:
+            The marker inside each template where the agent's instructions
+            go.
+        calls_in:
+          type: string
+          title: Calls In
+          description: Full prompt for a call the agent answers.
+        calls_out:
+          type: string
+          title: Calls Out
+          description: Full prompt for a call the agent places.
+        texts:
+          type: string
+          title: Texts
+          description: Full prompt for a text reply.
+      type: object
+      required:
+        - instructions_placeholder
+        - calls_in
+        - calls_out
+        - texts
+      title: AgentPromptTemplates
+      description:
+        "What the model is told on each channel, read-only. Hail's framing
+        leads
+
+        and cannot be edited; ``instructions_placeholder`` marks where the agent's
+
+        own instructions go."
     AgentResponse:
       properties:
         id:

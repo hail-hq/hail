@@ -24,7 +24,7 @@ from hailhq.api.deps import Principal, get_current_principal
 from hailhq.api.errors import unprocessable
 from hailhq.api.ratelimit import GENERAL_RATE_LIMITED_RESPONSES
 from hailhq.api.routes.calls import get_livekit_optional
-from hailhq.core import inbound_routing
+from hailhq.core import inbound_routing, prompts
 from hailhq.core.agent_tools.registry import all_tools
 from hailhq.core.db import get_session, org_lock
 from hailhq.core.livekit import LiveKitClient
@@ -32,6 +32,7 @@ from hailhq.core.models import Agent, PhoneNumber
 from hailhq.core.schemas import (
     AgentCreate,
     AgentListResponse,
+    AgentPromptTemplates,
     AgentResponse,
     AgentUpdate,
 )
@@ -147,6 +148,21 @@ async def list_agents(
         .all()
     )
     return AgentListResponse(items=[AgentResponse.model_validate(a) for a in rows])
+
+
+@router.get("/prompt-templates", response_model=AgentPromptTemplates)
+async def get_prompt_templates(
+    principal: Annotated[Principal, Depends(get_current_principal)],
+) -> AgentPromptTemplates:
+    """The full prompt the model gets on each channel, with a marker where the
+    agent's own instructions go. Hail's framing is fixed; only the
+    instructions are the agent's."""
+    return AgentPromptTemplates(
+        instructions_placeholder=prompts.INSTRUCTIONS_PLACEHOLDER,
+        calls_in=prompts.prompt_template("calls_in"),
+        calls_out=prompts.prompt_template("calls_out"),
+        texts=prompts.prompt_template("texts"),
+    )
 
 
 @router.get("/{agent_id}", response_model=AgentResponse)
