@@ -30,12 +30,12 @@ class SmsSetupError(Exception):
         self.detail = detail
 
 
-async def ensure_sms(db: AsyncSession, number: PhoneNumber) -> bool:
+async def ensure_sms(db: AsyncSession, number: PhoneNumber) -> None:
     """Attach ``number`` to its organization's messaging service. The caller
     holds the org lock and commits. Idempotent: an attached number is left
-    alone. Returns True when the number was attached by this call."""
+    alone."""
     if number.messaging_service_sid is not None:
-        return False
+        return
     # One service per organization and carrier (a shared sender pool). Reuse
     # the one any sibling number already has; only when the org has none is
     # a fresh one created, so numbers never spawn orphan services.
@@ -77,4 +77,3 @@ async def ensure_sms(db: AsyncSession, number: PhoneNumber) -> bool:
         )
         raise SmsSetupError("refused", detail) from exc
     number.messaging_service_sid = sid
-    return True

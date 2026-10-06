@@ -115,9 +115,18 @@ class TwilioSmsProvider(SmsProvider):
                     self._client.messaging.v1.services(existing_sid).update, **inbound
                 )
                 return existing_sid
+            # A first attach that failed left a service no row records.
+            # Find it by name so a retry reuses it instead of adding another.
+            name = f"hail-org-{organization_id}"
+            found = await asyncio.to_thread(self._find_service_sid_by_name, name)
+            if found is not None:
+                await asyncio.to_thread(
+                    self._client.messaging.v1.services(found).update, **inbound
+                )
+                return found
             service = await asyncio.to_thread(
                 self._client.messaging.v1.services.create,
-                friendly_name=f"hail-org-{organization_id}",
+                friendly_name=name,
                 **inbound,
             )
         except TwilioRestException as exc:
@@ -194,6 +203,12 @@ class TwilioSmsProvider(SmsProvider):
             ).phone_numbers.create,
             phone_number_sid=provider_resource_id,
         )
+
+    def _find_service_sid_by_name(self, friendly_name: str) -> str | None:
+        for service in self._client.messaging.v1.services.stream():
+            if service.friendly_name == friendly_name:
+                return service.sid
+        return None
 
     def _service_holding(self, provider_resource_id: str) -> str | None:
         """The sid of the messaging service that holds this number, if any.
