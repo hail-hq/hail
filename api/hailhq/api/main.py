@@ -16,6 +16,7 @@ from hailhq.api.number_orders import (
     purge_expired_quotes,
     reconcile_pending_orders,
     retry_unreleased_numbers,
+    sync_sms_setup,
 )
 from hailhq.api.ratelimit import GeneralRateLimitMiddleware
 from hailhq.api.routes import agents as agents_routes
@@ -126,7 +127,7 @@ async def _backstop_sweeper_loop() -> None:
 
 
 async def _order_reconciler_loop() -> None:
-    """Poll pending carrier number orders, retry failed carrier releases and
+    """Poll pending carrier number orders, retry failed carrier releases,
     drop expired quotes.
 
     Runs apart from the backstop sweeper: carrier calls can take 20s each and
@@ -141,6 +142,20 @@ async def _order_reconciler_loop() -> None:
             raise
         except Exception:  # pragma: no cover — defensive; logged + retried
             logger.exception("number order reconciler iteration failed; will retry")
+        await asyncio.sleep(SWEEP_INTERVAL_SECONDS)
+
+
+async def _sms_setup_loop() -> None:
+    """Finish SMS setup that failed and refresh messaging services. Its own
+    loop: a failing step in the order reconciler must never keep it from
+    running."""
+    while True:
+        try:
+            await sync_sms_setup()
+        except asyncio.CancelledError:
+            raise
+        except Exception:  # pragma: no cover — defensive; logged + retried
+            logger.exception("SMS setup pass failed; will retry")
         await asyncio.sleep(SWEEP_INTERVAL_SECONDS)
 
 
@@ -175,6 +190,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     order_reconciler_task = asyncio.create_task(
         _order_reconciler_loop(), name="number-order-reconciler"
     )
+    sms_setup_task = asyncio.create_task(_sms_setup_loop(), name="sms-setup")
 
     webhook_worker: WebhookWorker | None = None
     webhook_task: asyncio.Task | None = None
@@ -266,7 +282,8 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     finally:
         sweeper_task.cancel()
         order_reconciler_task.cancel()
-        for task in (sweeper_task, order_reconciler_task):
+        sms_setup_task.cancel()
+        for task in (sweeper_task, order_reconciler_task, sms_setup_task):
             try:
                 await task
             except (asyncio.CancelledError, Exception):
