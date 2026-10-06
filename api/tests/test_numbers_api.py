@@ -445,8 +445,8 @@ async def test_enable_sms_reuses_existing_org_messaging_service(
 async def test_enable_sms_is_idempotent_when_already_enabled(
     client, async_session, org_and_key, sms_mock
 ) -> None:
-    """Re-enabling an already-enabled number is a no-op — no re-attach (which
-    Twilio would reject)."""
+    """Re-enabling an already-enabled number does not re-attach (which Twilio
+    would reject); it sets the service's inbound settings again."""
     from hailhq.core.models import PhoneNumber
 
     org_id, _, plaintext = org_and_key
@@ -468,7 +468,9 @@ async def test_enable_sms_is_idempotent_when_already_enabled(
     )
     assert resp.status_code == 200, resp.text
     assert resp.json()["messaging_service_sid"] == "MG_done"
-    sms_mock.ensure_messaging_service.assert_not_awaited()
+    sms_mock.ensure_messaging_service.assert_awaited_once_with(
+        organization_id=org_id, existing_sid="MG_done"
+    )
     sms_mock.attach_number.assert_not_awaited()
 
 

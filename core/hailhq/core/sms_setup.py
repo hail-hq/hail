@@ -77,3 +77,29 @@ async def ensure_sms(db: AsyncSession, number: PhoneNumber) -> None:
         )
         raise SmsSetupError("refused", detail) from exc
     number.messaging_service_sid = sid
+
+
+async def refresh_sms(number: PhoneNumber) -> None:
+    """Set the carrier's inbound text settings again on the service an
+    attached ``number`` already uses. Repairs services made before those
+    settings existed."""
+    if number.messaging_service_sid is None:
+        return
+    try:
+        provider = sms_route(number.provider)
+        await provider.ensure_messaging_service(
+            organization_id=number.organization_id,
+            existing_sid=number.messaging_service_sid,
+        )
+    except ValueError as exc:
+        logger.error("%s SMS route unavailable: %s", number.provider, exc)
+        raise SmsSetupError("unavailable", str(exc)) from exc
+    except Exception as exc:
+        logger.error(
+            "SMS refresh refused for %s (%s): %s",
+            number.e164,
+            number.provider,
+            exc,
+            exc_info=not isinstance(exc, SmsProvisioningError),
+        )
+        raise SmsSetupError("refused", str(exc)) from exc

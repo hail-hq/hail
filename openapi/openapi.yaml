@@ -2122,8 +2122,9 @@ paths:
         "Attach a dedicated number to the org's shared SMS Messaging Service.\n\
         \nHail does this itself when an sms-capable number becomes active and when\n\
         a texts agent is assigned, so this call is only needed to repair a number\n\
-        whose setup failed. Idempotent \u2014 an already-enabled number returns its\n\
-        current state. Fails with 422 for a released number or one that lacks\nsms\
+        whose setup failed, or an older one whose service lacks the inbound\n\
+        text settings. Idempotent \u2014 an already-enabled number gets those settings\n\
+        set again and returns its current state. Fails with 422 for a released number or one that lacks\nsms\
         \ capability."
       operationId: enable_sms_v1_numbers__number_id__enable_sms_post
       parameters:

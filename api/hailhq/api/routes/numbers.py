@@ -572,8 +572,9 @@ async def enable_sms(
 
     Hail does this itself when an sms-capable number becomes active and when
     a texts agent is assigned, so this call is only needed to repair a number
-    whose setup failed. Idempotent — an already-enabled number returns its
-    current state. Fails with 422 for a released number or one that lacks
+    whose setup failed, or an older one whose service lacks the inbound
+    text settings. Idempotent — an already-enabled number gets those settings
+    set again and returns its current state. Fails with 422 for a released number or one that lacks
     sms capability.
     """
     number = await _get_org_number_or_404(db, number_id, principal.organization_id)
@@ -588,8 +589,14 @@ async def enable_sms(
         )
 
     # Idempotent: an already-enabled number is attached to its Messaging
-    # Service; re-attaching would error at Twilio. Return the current state.
+    # Service; re-attaching would error at Twilio. The service's inbound
+    # settings are set again (older services lack them), then the current
+    # state is returned.
     if number.messaging_service_sid is not None:
+        try:
+            await sms_setup.refresh_sms(number)
+        except sms_setup.SmsSetupError as exc:
+            raise _sms_setup_http_error(exc) from exc
         return PhoneNumberResponse.model_validate(number)
 
     # Serialize with purchases, routing and releases in this org (see
