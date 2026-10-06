@@ -285,3 +285,102 @@ async def test_attach_number_calls_phone_numbers_create(
     )
     sent_body = parse_qs(responses.calls[0].request.body)
     assert sent_body == {"PhoneNumberSid": ["PN1234567890abcdef1234567890abcd"]}
+
+
+def _page(key: str, items: list[dict]) -> dict:
+    """A Twilio list page: the SDK reads ``meta.key`` to find the items."""
+    return {
+        key: items,
+        "meta": {
+            "page": 0,
+            "page_size": 50,
+            "first_page_url": "",
+            "previous_page_url": None,
+            "url": "",
+            "next_page_url": None,
+            "key": key,
+        },
+    }
+
+
+@responses.activate
+async def test_attach_number_moves_it_out_of_another_messaging_service(
+    provider: TwilioSmsProvider,
+) -> None:
+    """Twilio keeps a number in one messaging service at a time (error
+    21712). A number that another service holds, such as Twilio's own
+    "Default Messaging Service for Conversations", is detached from it and
+    attached to ours."""
+    pn = "PN1234567890abcdef1234567890abcd"
+    attach_url = "https://messaging.twilio.com/v1/Services/MG_ours/PhoneNumbers"
+    responses.add(
+        responses.POST,
+        attach_url,
+        json={
+            "code": 21712,
+            "message": "Phone Number or Short Code is associated with another Messaging Service.",
+            "status": 409,
+        },
+        status=409,
+    )
+    responses.add(
+        responses.GET,
+        "https://messaging.twilio.com/v1/Services",
+        json=_page("services", [{"sid": "MG_other"}, {"sid": "MG_ours"}]),
+    )
+    responses.add(
+        responses.GET,
+        "https://messaging.twilio.com/v1/Services/MG_other/PhoneNumbers",
+        json=_page("phone_numbers", [{"sid": pn, "phone_number": "+12762763280"}]),
+    )
+    responses.add(
+        responses.DELETE,
+        f"https://messaging.twilio.com/v1/Services/MG_other/PhoneNumbers/{pn}",
+        status=204,
+    )
+    responses.add(
+        responses.POST, attach_url, json={"sid": pn, "phone_number_sid": pn}, status=201
+    )
+
+    await provider.attach_number(
+        messaging_service_sid="MG_ours", provider_resource_id=pn
+    )
+
+    methods = [(c.request.method, c.request.url.split("?")[0]) for c in responses.calls]
+    assert methods == [
+        ("POST", attach_url),
+        ("GET", "https://messaging.twilio.com/v1/Services"),
+        ("GET", "https://messaging.twilio.com/v1/Services/MG_other/PhoneNumbers"),
+        (
+            "DELETE",
+            f"https://messaging.twilio.com/v1/Services/MG_other/PhoneNumbers/{pn}",
+        ),
+        ("POST", attach_url),
+    ]
+
+
+@responses.activate
+async def test_attach_number_already_in_our_service_is_a_no_op(
+    provider: TwilioSmsProvider,
+) -> None:
+    pn = "PN1234567890abcdef1234567890abcd"
+    responses.add(
+        responses.POST,
+        "https://messaging.twilio.com/v1/Services/MG_ours/PhoneNumbers",
+        json={"code": 21712, "message": "associated with another", "status": 409},
+        status=409,
+    )
+    responses.add(
+        responses.GET,
+        "https://messaging.twilio.com/v1/Services",
+        json=_page("services", [{"sid": "MG_ours"}]),
+    )
+    responses.add(
+        responses.GET,
+        "https://messaging.twilio.com/v1/Services/MG_ours/PhoneNumbers",
+        json=_page("phone_numbers", [{"sid": pn, "phone_number": "+12762763280"}]),
+    )
+    await provider.attach_number(
+        messaging_service_sid="MG_ours", provider_resource_id=pn
+    )
+    assert [c.request.method for c in responses.calls] == ["POST", "GET", "GET"]
