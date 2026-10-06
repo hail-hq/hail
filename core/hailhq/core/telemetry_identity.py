@@ -1,6 +1,7 @@
 """Authenticated actor metadata, scoped to one request or background job."""
 
 import logging
+import time
 from contextlib import contextmanager
 from contextvars import ContextVar
 from typing import Any
@@ -28,6 +29,24 @@ _identity: ContextVar[dict[str, str] | None] = ContextVar(
 )
 
 
+_CACHE_TTL_SECONDS = 300
+_CACHE_MAX = 1024
+_cache: dict[tuple, tuple[float, dict[str, str]]] = {}
+
+
+def _cache_get(key: tuple) -> dict[str, str] | None:
+    hit = _cache.get(key)
+    if hit and hit[0] > time.monotonic():
+        return dict(hit[1])
+    return None
+
+
+def _cache_put(key: tuple, identity: dict[str, str]) -> None:
+    if len(_cache) >= _CACHE_MAX:
+        _cache.clear()
+    _cache[key] = (time.monotonic() + _CACHE_TTL_SECONDS, dict(identity))
+
+
 def get_identity() -> dict[str, str]:
     return dict(_identity.get() or {})
 
@@ -49,6 +68,10 @@ async def resolve_identity(
     *,
     actor_kind: str = "agent"
 ) -> dict[str, str]:
+    key = (organization_id, user_id, actor_kind)
+    cached = _cache_get(key)
+    if cached is not None:
+        return cached
     identity = {"organization_id": str(organization_id), "actor_kind": actor_kind}
     if user_id is not None:
         identity["user_id"] = str(user_id)
@@ -70,6 +93,8 @@ async def resolve_identity(
                     identity["user_email"] = email
     except Exception:
         logging.getLogger(__name__).warning("Actor telemetry lookup unavailable")
+        return identity
+    _cache_put(key, identity)
     return identity
 
 

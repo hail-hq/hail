@@ -71,7 +71,7 @@ def test_export_removes_content_but_preserves_trace_and_usage():
     assert "+46701234567" not in str(exported.attributes)
     assert len(exported.events) == 1
     assert exported.events[0].attributes["exception.type"] == "TimeoutError"
-    assert exported.events[0].attributes["exception.message"] == "[email]"
+    assert "exception.message" not in exported.events[0].attributes
     assert original.attributes["lk.chat_ctx"] == "PRIVATE CHAT"
 
 
@@ -136,6 +136,7 @@ assert all(s.attributes.get("organization_name") == "Session Team" for s in span
             **os.environ,
             "HAIL_LOGFIRE_ENABLED": "true",
             "LOGFIRE_TOKEN": "test-only-placeholder",
+            "LOGFIRE_BASE_URL": "https://logfire.example.test",
         },
         text=True,
         check=False,

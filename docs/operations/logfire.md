@@ -7,6 +7,7 @@ normal deployment workflow:
 HAIL_LOGFIRE_ENABLED=true
 LOGFIRE_TOKEN=<your-project-send-only-token>
 LOGFIRE_ENVIRONMENT=production
+LOGFIRE_BASE_URL=https://logfire-eu.pydantic.dev
 LOGFIRE_SERVICE_VERSION=<release SHA>
 HAIL_LOGFIRE_SAMPLE_RATE=1.0
 ```
@@ -56,6 +57,6 @@ uvx logfire-cli --region=eu --org YOUR_ORGANIZATION --no-input --output json mcp
 
 Caddy/container/host telemetry, SES Lambda instrumentation, production alerts
 and dashboards require a separate infrastructure rollout. Production deployments
-set `LOGFIRE_SERVICE_VERSION` to the deployed commit SHA for API, MCP, and voicebot.
+the deploy workflow writes `LOGFIRE_SERVICE_VERSION` into the VM `.env` as the deployed commit SHA for API, MCP, and voicebot.
 CLI and SDK package versions are unaffected. This change does not
 deploy or restart production services.

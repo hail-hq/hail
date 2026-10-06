@@ -85,7 +85,12 @@ class LiveKitClient:
             carrier: dict[str, str] = {}
             TraceContextTextMapPropagator().inject(carrier)
             metadata["hail_trace_context"] = carrier
-            metadata["hail_actor_identity"] = get_identity()
+            # Ids only: names and emails stay out of LiveKit; the voicebot looks them up.
+            metadata["hail_actor_identity"] = {
+                k: v
+                for k, v in get_identity().items()
+                if k not in {"user_email", "organization_name"}
+            }
         result = await self._lkapi.agent_dispatch.create_dispatch(
             api.CreateAgentDispatchRequest(
                 room=room_name,

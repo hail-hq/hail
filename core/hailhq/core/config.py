@@ -12,6 +12,7 @@ class Settings(BaseSettings):
     # Optional backend observability (EU only).
     hail_logfire_enabled: bool = False
     logfire_token: str = ""
+    logfire_base_url: str = ""
     logfire_credentials_dir: str = ".logfire"
     logfire_environment: str = "development"
     logfire_service_version: str = ""

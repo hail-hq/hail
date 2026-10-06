@@ -25,6 +25,7 @@ from hailhq.core.telemetry_identity import (
     IdentitySpanProcessor,
     get_identity,
 )
+from hailhq.core.urls import join_url
 from opentelemetry import trace
 from opentelemetry.exporter.otlp.proto.http.metric_exporter import OTLPMetricExporter
 from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
@@ -38,7 +39,7 @@ from opentelemetry.sdk.trace.export import (
 )
 from opentelemetry.trace import Link, Status
 
-EU_ENDPOINT = "https://logfire-eu.pydantic.dev/v1/traces"
+logger = logging.getLogger(__name__)
 _configured_pid: int | None = None
 _span_processor: BatchSpanProcessor | None = None
 _extra_providers: list[TracerProvider] = []
@@ -80,6 +81,8 @@ def _safe_attributes(attributes: Mapping[str, Any] | None) -> dict[str, Any]:
             "lk.participant_identity",
             "lk.participant_id",
             "lk.amd.reason",
+            "exception.message",
+            "exception.stacktrace",
         } or key.startswith("lk.pii."):
             continue
         if (
@@ -202,18 +205,26 @@ def configure_telemetry(service_name: str) -> bool:
         return False
     if _configured_pid == os.getpid():
         return True
+    if not settings.logfire_base_url:
+        logger.warning("Telemetry disabled: LOGFIRE_BASE_URL is not set")
+        return False
     token = settings.logfire_token
     if not token:
         credentials = (
             Path(settings.logfire_credentials_dir) / "logfire_credentials.json"
         )
-        if credentials.is_symlink() or credentials.parent.is_symlink():
-            raise RuntimeError("Logfire credentials must not be symlinks")
-        token = json.loads(credentials.read_text())["token"]
+        try:
+            if credentials.is_symlink() or credentials.parent.is_symlink():
+                raise RuntimeError("Logfire credentials must not be symlinks")
+            token = json.loads(credentials.read_text())["token"]
+        except Exception as exc:
+            # Optional telemetry must never stop the service from starting.
+            logger.warning("Telemetry disabled: no usable Logfire token (%s)", exc)
+            return False
     processor = BatchSpanProcessor(
         PrivateSpanExporter(
             OTLPSpanExporter(
-                endpoint=EU_ENDPOINT,
+                endpoint=join_url(settings.logfire_base_url, "v1/traces"),
                 headers={"Authorization": token},
                 timeout=5,
             ),
@@ -232,7 +243,7 @@ def configure_telemetry(service_name: str) -> bool:
             additional_readers=[
                 PeriodicExportingMetricReader(
                     OTLPMetricExporter(
-                        endpoint="https://logfire-eu.pydantic.dev/v1/metrics",
+                        endpoint=join_url(settings.logfire_base_url, "v1/metrics"),
                         headers={"Authorization": token},
                         timeout=5,
                     ),

@@ -51,6 +51,8 @@ from __future__ import annotations
 
 import base64
 import contextlib
+import hashlib
+import time
 import uuid
 from collections.abc import AsyncIterator
 from typing import Any
@@ -571,7 +573,7 @@ async def _client_for(
         bearer = _bearer_from_ctx(ctx)
         client = HailClient(api_key=bearer)
         try:
-            async with _actor_for(client):
+            async with _actor_for(client, cache_key=bearer):
                 yield client
         finally:
             await client.aclose()
@@ -584,28 +586,46 @@ async def _client_for(
         yield singleton
 
 
+_ACTOR_TTL_SECONDS = 300
+_ACTOR_CACHE_MAX = 1024
+_actor_cache: dict[str, tuple[float, dict[str, Any]]] = {}
+
+
 @contextlib.asynccontextmanager
-async def _actor_for(client: HailClient):
-    identity = {}
+async def _actor_for(client: HailClient, cache_key: str | None = None):
+    identity: dict[str, Any] = {}
     if telemetry_enabled():
-        try:
-            # Resolve the actor only through the API that verifies the bearer.
-            actor = await client.whoami()
-            identity = {
-                "organization_id": actor.get("organization_id"),
-                "user_id": actor.get("user_id"),
-                "user_email": actor.get("email"),
-                "auth_kind": actor.get("auth_kind"),
-                "actor_kind": actor.get("auth_kind"),
-            }
-            org_id = actor.get("organization_id")
-            if org_id:
-                identity["organization_name"] = await fetch_organization_name(
-                    str(org_id)
-                )
-        except Exception:
-            # Metadata enrichment never decides whether the tool is authorized.
-            pass
+        # Key by token hash so the raw bearer is never held as a dict key.
+        key = hashlib.sha256(cache_key.encode()).hexdigest() if cache_key else None
+        hit = _actor_cache.get(key) if key else None
+        if hit and hit[0] > time.monotonic():
+            identity = dict(hit[1])
+        else:
+            try:
+                # Resolve the actor only through the API that verifies the bearer.
+                actor = await client.whoami()
+                identity = {
+                    "organization_id": actor.get("organization_id"),
+                    "user_id": actor.get("user_id"),
+                    "user_email": actor.get("email"),
+                    "auth_kind": actor.get("auth_kind"),
+                    "actor_kind": actor.get("auth_kind"),
+                }
+                org_id = actor.get("organization_id")
+                if org_id:
+                    identity["organization_name"] = await fetch_organization_name(
+                        str(org_id)
+                    )
+                if key:
+                    if len(_actor_cache) >= _ACTOR_CACHE_MAX:
+                        _actor_cache.clear()
+                    _actor_cache[key] = (
+                        time.monotonic() + _ACTOR_TTL_SECONDS,
+                        dict(identity),
+                    )
+            except Exception:
+                # Metadata enrichment never decides whether the tool is authorized.
+                pass
     with identity_scope(identity):
         yield
 

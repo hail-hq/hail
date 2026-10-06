@@ -53,7 +53,12 @@ from hailhq.core.telemetry import (
     flush_telemetry,
     telemetry_enabled,
 )
-from hailhq.core.telemetry_identity import get_identity, identity_scope, set_identity
+from hailhq.core.telemetry_identity import (
+    get_identity,
+    identity_scope,
+    resolve_identity,
+    set_identity,
+)
 from hailhq.core.url_guard import assert_public_https_url
 from hailhq.core.webhook_fanout import fanout_call_event
 from hailhq.voicebot.amd import (
@@ -1194,12 +1199,29 @@ async def entrypoint(ctx: JobContext) -> None:
         await _run_call(ctx)
         return
     connect_livekit_tracing()
-    raw = json.loads(ctx.job.metadata or "{}")
+    try:
+        raw = json.loads(ctx.job.metadata or "{}")
+    except ValueError:
+        raw = {}
     carrier = raw.get("hail_trace_context", {}) if isinstance(raw, dict) else {}
     parent = TraceContextTextMapPropagator().extract(
         carrier if isinstance(carrier, dict) else {}
     )
     identity = raw.get("hail_actor_identity", {}) if isinstance(raw, dict) else {}
+    identity = identity if isinstance(identity, dict) else {}
+    try:
+        # The dispatch carries ids only; look up the org name and email here.
+        org_id = UUID(str(identity["organization_id"]))
+        user_id = UUID(str(identity["user_id"])) if identity.get("user_id") else None
+        async with session_scope() as db:
+            identity = {
+                **identity,
+                **await resolve_identity(
+                    db, org_id, user_id, actor_kind=identity.get("actor_kind", "agent")
+                ),
+            }
+    except Exception:
+        logger.warning("actor telemetry lookup failed")
     with identity_scope(identity if isinstance(identity, dict) else {}):
         await _run_traced_call(ctx, parent)
 
