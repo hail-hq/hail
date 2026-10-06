@@ -1412,6 +1412,23 @@ type AgentListResponse struct {
 	Items []AgentResponse `json:"items"`
 }
 
+// AgentPromptTemplates What the model is told on each channel, read-only. Hail's framing leads
+// and cannot be edited; “instructions_placeholder“ marks where the agent's
+// own instructions go.
+type AgentPromptTemplates struct {
+	// CallsIn Full prompt for a call the agent answers.
+	CallsIn string `json:"calls_in"`
+
+	// CallsOut Full prompt for a call the agent places.
+	CallsOut string `json:"calls_out"`
+
+	// InstructionsPlaceholder The marker inside each template where the agent's instructions go.
+	InstructionsPlaceholder string `json:"instructions_placeholder"`
+
+	// Texts Full prompt for a text reply.
+	Texts string `json:"texts"`
+}
+
 // AgentResponse defines model for AgentResponse.
 type AgentResponse struct {
 	// AiDisclosure Whether the AI line is spoken first.
@@ -3204,6 +3221,11 @@ type CreateAgentV1AgentsPostParams struct {
 	Authorization *string `json:"authorization,omitempty"`
 }
 
+// GetPromptTemplatesV1AgentsPromptTemplatesGetParams defines parameters for GetPromptTemplatesV1AgentsPromptTemplatesGet.
+type GetPromptTemplatesV1AgentsPromptTemplatesGetParams struct {
+	Authorization *string `json:"authorization,omitempty"`
+}
+
 // DeleteAgentV1AgentsAgentIdDeleteParams defines parameters for DeleteAgentV1AgentsAgentIdDelete.
 type DeleteAgentV1AgentsAgentIdDeleteParams struct {
 	Authorization *string `json:"authorization,omitempty"`
@@ -4017,6 +4039,9 @@ type ClientInterface interface {
 
 	CreateAgentV1AgentsPost(ctx context.Context, params *CreateAgentV1AgentsPostParams, body CreateAgentV1AgentsPostJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
+	// GetPromptTemplatesV1AgentsPromptTemplatesGet request
+	GetPromptTemplatesV1AgentsPromptTemplatesGet(ctx context.Context, params *GetPromptTemplatesV1AgentsPromptTemplatesGetParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
 	// DeleteAgentV1AgentsAgentIdDelete request
 	DeleteAgentV1AgentsAgentIdDelete(ctx context.Context, agentId openapi_types.UUID, params *DeleteAgentV1AgentsAgentIdDeleteParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
@@ -4281,6 +4306,18 @@ func (c *Client) CreateAgentV1AgentsPostWithBody(ctx context.Context, params *Cr
 
 func (c *Client) CreateAgentV1AgentsPost(ctx context.Context, params *CreateAgentV1AgentsPostParams, body CreateAgentV1AgentsPostJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewCreateAgentV1AgentsPostRequest(c.Server, params, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) GetPromptTemplatesV1AgentsPromptTemplatesGet(ctx context.Context, params *GetPromptTemplatesV1AgentsPromptTemplatesGetParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetPromptTemplatesV1AgentsPromptTemplatesGetRequest(c.Server, params)
 	if err != nil {
 		return nil, err
 	}
@@ -5368,6 +5405,48 @@ func NewCreateAgentV1AgentsPostRequestWithBody(server string, params *CreateAgen
 	}
 
 	req.Header.Add("Content-Type", contentType)
+
+	if params != nil {
+
+		if params.Authorization != nil {
+			var headerParam0 string
+
+			headerParam0, err = runtime.StyleParamWithOptions("simple", false, "authorization", *params.Authorization, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationHeader, Type: "string", Format: ""})
+			if err != nil {
+				return nil, err
+			}
+
+			req.Header.Set("authorization", headerParam0)
+		}
+
+	}
+
+	return req, nil
+}
+
+// NewGetPromptTemplatesV1AgentsPromptTemplatesGetRequest generates requests for GetPromptTemplatesV1AgentsPromptTemplatesGet
+func NewGetPromptTemplatesV1AgentsPromptTemplatesGetRequest(server string, params *GetPromptTemplatesV1AgentsPromptTemplatesGetParams) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v1/agents/prompt-templates")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("GET", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
 
 	if params != nil {
 
@@ -9332,6 +9411,9 @@ type ClientWithResponsesInterface interface {
 
 	CreateAgentV1AgentsPostWithResponse(ctx context.Context, params *CreateAgentV1AgentsPostParams, body CreateAgentV1AgentsPostJSONRequestBody, reqEditors ...RequestEditorFn) (*CreateAgentV1AgentsPostResponse, error)
 
+	// GetPromptTemplatesV1AgentsPromptTemplatesGetWithResponse request
+	GetPromptTemplatesV1AgentsPromptTemplatesGetWithResponse(ctx context.Context, params *GetPromptTemplatesV1AgentsPromptTemplatesGetParams, reqEditors ...RequestEditorFn) (*GetPromptTemplatesV1AgentsPromptTemplatesGetResponse, error)
+
 	// DeleteAgentV1AgentsAgentIdDeleteWithResponse request
 	DeleteAgentV1AgentsAgentIdDeleteWithResponse(ctx context.Context, agentId openapi_types.UUID, params *DeleteAgentV1AgentsAgentIdDeleteParams, reqEditors ...RequestEditorFn) (*DeleteAgentV1AgentsAgentIdDeleteResponse, error)
 
@@ -9620,6 +9702,29 @@ func (r CreateAgentV1AgentsPostResponse) Status() string {
 
 // StatusCode returns HTTPResponse.StatusCode
 func (r CreateAgentV1AgentsPostResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type GetPromptTemplatesV1AgentsPromptTemplatesGetResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *AgentPromptTemplates
+	JSON422      *HTTPValidationError
+}
+
+// Status returns HTTPResponse.Status
+func (r GetPromptTemplatesV1AgentsPromptTemplatesGetResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetPromptTemplatesV1AgentsPromptTemplatesGetResponse) StatusCode() int {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.StatusCode
 	}
@@ -11099,6 +11204,15 @@ func (c *ClientWithResponses) CreateAgentV1AgentsPostWithResponse(ctx context.Co
 	return ParseCreateAgentV1AgentsPostResponse(rsp)
 }
 
+// GetPromptTemplatesV1AgentsPromptTemplatesGetWithResponse request returning *GetPromptTemplatesV1AgentsPromptTemplatesGetResponse
+func (c *ClientWithResponses) GetPromptTemplatesV1AgentsPromptTemplatesGetWithResponse(ctx context.Context, params *GetPromptTemplatesV1AgentsPromptTemplatesGetParams, reqEditors ...RequestEditorFn) (*GetPromptTemplatesV1AgentsPromptTemplatesGetResponse, error) {
+	rsp, err := c.GetPromptTemplatesV1AgentsPromptTemplatesGet(ctx, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetPromptTemplatesV1AgentsPromptTemplatesGetResponse(rsp)
+}
+
 // DeleteAgentV1AgentsAgentIdDeleteWithResponse request returning *DeleteAgentV1AgentsAgentIdDeleteResponse
 func (c *ClientWithResponses) DeleteAgentV1AgentsAgentIdDeleteWithResponse(ctx context.Context, agentId openapi_types.UUID, params *DeleteAgentV1AgentsAgentIdDeleteParams, reqEditors ...RequestEditorFn) (*DeleteAgentV1AgentsAgentIdDeleteResponse, error) {
 	rsp, err := c.DeleteAgentV1AgentsAgentIdDelete(ctx, agentId, params, reqEditors...)
@@ -11889,6 +12003,39 @@ func ParseCreateAgentV1AgentsPostResponse(rsp *http.Response) (*CreateAgentV1Age
 			return nil, err
 		}
 		response.JSON201 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 422:
+		var dest HTTPValidationError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON422 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseGetPromptTemplatesV1AgentsPromptTemplatesGetResponse parses an HTTP response from a GetPromptTemplatesV1AgentsPromptTemplatesGetWithResponse call
+func ParseGetPromptTemplatesV1AgentsPromptTemplatesGetResponse(rsp *http.Response) (*GetPromptTemplatesV1AgentsPromptTemplatesGetResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetPromptTemplatesV1AgentsPromptTemplatesGetResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest AgentPromptTemplates
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
 
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 422:
 		var dest HTTPValidationError

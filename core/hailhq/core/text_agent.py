@@ -16,6 +16,7 @@ from typing import Any, Literal
 
 from hailhq.core.config import settings
 from hailhq.core.models import Agent, PhoneNumber, Sms
+from hailhq.core.prompts import TEXT_PREAMBLE, build_text_instructions
 from sqlalchemy import and_, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -39,20 +40,6 @@ __all__ = [
     "should_queue_reply",
     "thread_messages",
 ]
-
-# A text is a text: short, plain, no markdown, no voice stage directions.
-TEXT_PREAMBLE = (
-    "You are replying by SMS on behalf of the business described below. "
-    "Write like a person texting: plain text, no markdown, no lists, no "
-    "emoji unless the other side used them. Keep each reply under 300 "
-    "characters and answer only what was asked. If you cannot help, say so "
-    "and tell the person how to reach a human. Never claim to be a human: if "
-    "asked, say you are an AI assistant. In your first reply in a thread, "
-    "greet the person, name the business, and say in one sentence what you "
-    'can help with, using the instructions. A bare greeting such as "Hello" '
-    "is not a question: do not just ask how you can help. Do not repeat that "
-    "introduction in later replies."
-)
 
 MAX_REPLY_CHARS = 480  # same cap as the voice send_sms tool (about 3 segments)
 THREAD_LIMIT = 20  # messages of history given to the model
@@ -232,7 +219,7 @@ def build_chat_messages(agent: Agent, history: list[Sms]) -> list[dict[str, Any]
     messages: list[dict[str, Any]] = [
         {
             "role": "system",
-            "content": f"{TEXT_PREAMBLE}\n\n# Business instructions\n\n{agent.system_prompt}",
+            "content": build_text_instructions(agent.system_prompt),
         }
     ]
     for row in history:

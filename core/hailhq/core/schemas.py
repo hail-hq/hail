@@ -838,6 +838,19 @@ class AgentListResponse(BaseModel):
     items: list[AgentResponse] = Field(description="Agents, newest first.")
 
 
+class AgentPromptTemplates(BaseModel):
+    """What the model is told on each channel, read-only. Hail's framing leads
+    and cannot be edited; ``instructions_placeholder`` marks where the agent's
+    own instructions go."""
+
+    instructions_placeholder: str = Field(
+        description="The marker inside each template where the agent's instructions go."
+    )
+    calls_in: str = Field(description="Full prompt for a call the agent answers.")
+    calls_out: str = Field(description="Full prompt for a call the agent places.")
+    texts: str = Field(description="Full prompt for a text reply.")
+
+
 class PhoneNumberListResponse(BaseModel):
     items: list[PhoneNumberResponse] = Field(description="Numbers in this page.")
     next_cursor: str | None = Field(
