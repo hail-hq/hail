@@ -9,6 +9,7 @@ from uuid import UUID
 
 from opentelemetry import trace
 from opentelemetry.sdk.trace import SpanProcessor
+from sqlalchemy import select
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
@@ -70,7 +71,6 @@ async def resolve_identity(
 ) -> dict[str, str]:
     # Imported here: the MCP image has no DB driver stack (greenlet).
     from hailhq.core.models import Organization, User
-    from sqlalchemy import select
 
     key = (organization_id, user_id, actor_kind)
     cached = _cache_get(key)
