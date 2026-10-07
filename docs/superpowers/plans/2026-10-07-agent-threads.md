@@ -55,13 +55,11 @@ Run all work in this worktree. Python commands run from the repo root with `uv r
 ### Task 1: Indexes and model comment
 
 **Files:**
-
 - Create: `api/migrations/versions/0052_thread_indexes.py`
 - Modify: `core/hailhq/core/models.py` (`Call.__table_args__`, `Sms.__table_args__`, `Sms.agent_id` comment at ~line 741)
 - Test: `api/tests/test_migrations.py` (existing; must still pass)
 
 **Interfaces:**
-
 - Produces: indexes `calls_thread_from_idx`, `calls_thread_to_idx`, `sms_thread_from_idx`, `sms_thread_to_idx`. The caller sits in `from_e164` on inbound rows and `to_e164` on outbound rows, so each table gets two indexes.
 
 - [ ] **Step 1: Add indexes to the models**
@@ -153,12 +151,10 @@ git commit -m "feat(threads): index calls and sms by agent and caller"
 ### Task 2: Thread query and rendering (`core/hailhq/core/threads.py`)
 
 **Files:**
-
 - Create: `core/hailhq/core/threads.py`
 - Test: `core/tests/test_threads.py`
 
 **Interfaces:**
-
 - Produces:
   - `THREAD_LIMIT: int = 30`, `THREAD_WINDOW: timedelta`, `CUT_CHARS: int = 500`, `TEXT_MARKER: str = "[text message from caller] "`
   - `@dataclass(frozen=True) class ThreadItem: id: str; at: datetime; kind: Literal["text_in","text_out","call_caller","call_agent"]; text: str`
@@ -639,13 +635,11 @@ git commit -m "feat(threads): thread query over texts and call turns"
 ### Task 3: Set `sms.agent_id` on every agent-routed text
 
 **Files:**
-
 - Modify: `core/hailhq/core/sms_ingest.py:~241`
 - Modify: `api/hailhq/api/routes/internal/agent.py:307` (the in-call `send_sms` `Sms(...)`)
 - Test: `core/tests/test_sms_ingest.py`, `api/tests/test_internal_agent_send.py`
 
 **Interfaces:**
-
 - Consumes: `PhoneNumber.sms_agent_id`, `Call.agent_id`.
 - Produces: inbound `Sms.agent_id = number.sms_agent_id` (even when the agent is paused); outbound in-call text `Sms.agent_id = call.agent_id`.
 
@@ -720,13 +714,11 @@ git commit -m "feat(threads): tag agent texts with their agent"
 ### Task 4: Choose the SMS number (`resolve_sms_number`)
 
 **Files:**
-
 - Modify: `api/hailhq/api/numbers.py`
 - Modify: `api/hailhq/api/routes/internal/agent.py:291-305`
 - Test: `api/tests/test_internal_agent_send.py`
 
 **Interfaces:**
-
 - Produces: `async def resolve_sms_number(db, organization_id, agent_id: UUID | None, dialed: PhoneNumber | None) -> PhoneNumber | None` implementing spec §5:
   1. `dialed` if active and has `sms`.
   2. Oldest active org number with `sms` and `sms_agent_id == agent_id`.
@@ -897,14 +889,12 @@ git commit -m "feat(threads): text from a number of the same agent"
 ### Task 5: Text agent uses the thread; no auto-reply during a call
 
 **Files:**
-
 - Modify: `core/hailhq/core/text_agent.py` (`build_chat_messages`, remove `thread_messages`, `THREAD_LIMIT`, `THREAD_WINDOW` re-exports as needed)
 - Modify: `core/hailhq/core/sms_ingest.py` (skip when a call is active)
 - Modify: `voicebot/hailhq/voicebot/textbot.py:~84`
 - Test: `core/tests/test_text_agent.py`, `core/tests/test_sms_ingest.py`
 
 **Interfaces:**
-
 - Consumes: `threads.thread_items`, `threads.active_call_for_thread`.
 - Produces:
   - `async def thread_history_for_reply(db, sms: Sms, agent: Agent) -> list[ThreadItem]` in `text_agent.py`: `thread_items(db, sms.organization_id, agent.id, sms.from_e164, until=sms.requested_at)`.
@@ -1044,13 +1034,11 @@ git commit -m "feat(threads): text agent reads texts and call turns"
 ### Task 6: Voice agent gets the thread at call start
 
 **Files:**
-
 - Modify: `core/hailhq/core/prompts.py` (`build_voice_instructions`)
 - Modify: `voicebot/hailhq/voicebot/agent.py` (`build_instructions`, call setup near line 1495)
 - Test: `core/tests/test_prompts.py`, `voicebot/tests/test_agent_inbound.py`
 
 **Interfaces:**
-
 - Consumes: `threads.call_thread_key`, `threads.thread_items`, `threads.render_thread`.
 - Produces:
   - `build_voice_instructions(system_prompt, direction=None, history: str | None = None)`: when `history` is non-empty, appends `"\n\n# Earlier with this caller\n\n{history}"` after the caller instructions. Heading constant `HISTORY_HEADING = "# Earlier with this caller"`.
@@ -1189,13 +1177,11 @@ git commit -m "feat(threads): voice agent starts with the caller's history"
 ### Task 7: Live texts during a call (`voicebot/text_watch.py`)
 
 **Files:**
-
 - Create: `voicebot/hailhq/voicebot/text_watch.py`
 - Modify: `voicebot/hailhq/voicebot/agent.py` (start the watcher after `session.start`, cancel in `_shutdown`)
 - Test: `voicebot/tests/test_text_watch.py`
 
 **Interfaces:**
-
 - Consumes: `threads.call_thread_key`, `threads.TEXT_MARKER`, `Sms`.
 - Produces:
   - `POLL_SECONDS = 2.0`, `MAX_INJECT_CHARS = 1000`
@@ -1406,13 +1392,11 @@ git commit -m "feat(threads): caller texts reach the live call"
 ### Task 8: `thread_history` tool
 
 **Files:**
-
 - Create: `core/hailhq/core/agent_tools/thread_history.py`
 - Modify: `core/hailhq/core/agent_tools/registry.py`
 - Test: `core/tests/test_agent_tools.py`
 
 **Interfaces:**
-
 - Consumes: `threads.call_thread_key`, `thread_items`, `thread_item`, `render_thread`.
 - Produces: `SPEC` named `thread_history`, tier `read_only`, parameters `before` (string), `limit` (integer 1 to 30), `item_id` (string). No number parameter. Always available.
   - With `item_id`: the full text of that item, or `"I can't find that message."`.
@@ -1590,7 +1574,6 @@ git commit -m "feat(threads): thread_history tool for the voice agent"
 ### Task 9: End-to-end test, docs, full run
 
 **Files:**
-
 - Create: `core/tests/test_threads_flow.py`
 - Modify: `docs/public/agents.md`
 - Modify: `docs/superpowers/specs/2026-10-07-agent-threads-design.md` (two spec amendments, see Step 3)
@@ -1658,18 +1641,15 @@ Expected: PASS.
 `docs/public/agents.md`: add a short section "Threads" (lead with the example: caller texts an order number on the SMS number, then calls; the agent greets knowing it). State: scope is agent + caller number; calls and texts both count; the last 30 items from the last 7 days are in the prompt; the voice agent has the `thread_history` tool; a text sent during a call goes to the voice agent and the text agent does not reply; `send_sms` uses the dialed number if it can text, else a text number of the same agent, else an unbound org text number (which becomes this agent's), and never takes a number bound to another agent. Keep it under one screen.
 
 Amend the spec in the same commit:
-
 - §1: replace "Add index on `sms` (...)" and "Add the same index on `calls`" with: "Add two indexes per table, one per caller column (`from_e164`, `to_e164`), because the caller sits in a different column by direction."
 - §5 step 4: replace "None found: the tool is hidden. The agent prompt says it cannot text." with "None found: the agent tells the caller it cannot text (the tool stays listed while the org has any SMS number; it is hidden when the org has none)."
 
 - [ ] **Step 4: Full verification**
 
 Run:
-
 ```bash
 cd core && uv run pytest tests -q && cd ../api && uv run pytest tests -q && cd ../voicebot && uv run pytest tests -q && cd .. && uv run ruff check . && uv run black --check core api voicebot
 ```
-
 Expected: all PASS, ruff and black clean. If `openapi/openapi.yaml` check exists in CI, no regeneration is needed (no public route changed); confirm with `cd api && uv run pytest tests/test_openapi_descriptions.py -q`.
 
 - [ ] **Step 5: Commit**
