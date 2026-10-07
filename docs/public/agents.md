@@ -70,7 +70,8 @@ agent skips it; the responsibility for that is yours.
 3. Any other text to a number with `sms_agent_id` set (agent `live`,
    `sms_enabled: true`) is answered by the agent: one reply, written from
    `system_prompt` and the [thread](#threads) (30 items from the last 7 days,
-   texts and call turns), sent from the same number through its carrier. The agent sends at most 20
+   texts and call turns, plus texts you sent through `POST /sms` to the same
+   caller from that number), sent from the same number through its carrier. The agent sends at most 20
    replies per thread in any 24 hours; past that it stays quiet until older
    replies leave the window. Replies bill as outbound SMS. Inbound rows carry `agent_reply_state`
    (`pending`, `processing`, `done`, `skipped`, `failed`) in the database;
@@ -87,7 +88,8 @@ retried up to 3 times with backoff; a text still unanswered after
 
 A caller texts an order number to the agent's SMS number, then calls the agent.
 The agent greets them already knowing the order number. A text sent during a
-call goes to the voice agent, and the text agent does not reply.
+call goes to the voice agent (if it did not get it by call end, the text agent
+answers it then).
 
 - Scope: agent + caller number. Texts and call turns both count.
 - Each call and text reply starts with the last 30 items from the last 7 days.
@@ -96,10 +98,18 @@ call goes to the voice agent, and the text agent does not reply.
 - Caller ID on a phone call can be faked. Do not put secrets in an agent's
   instructions or in texts it sends.
 - The history is sent to the agent's LLM, including a bring-your-own endpoint.
-- `send_sms` sends from the dialed number if it can text, else an org SMS number
-  routed to the same agent, else an unbound SMS number (it is bound to this
-  agent when the agent has `sms_enabled`). It never uses a number bound to
-  another agent. With no SMS number, the agent says it cannot text.
+- `send_sms` picks the number in this order:
+  1. the dialed number, if it can text and is not bound to another agent.
+     Bound to this agent: used. Free: it is bound to this agent when the agent
+     has `sms_enabled`, else used unbound;
+  2. the oldest org SMS number bound to this agent;
+  3. the oldest free org SMS number: bound to this agent when it has
+     `sms_enabled`, else used unbound;
+  4. none: the agent says it cannot text.
+
+  It never uses a number bound to another agent. A number bound this way
+  makes the agent answer every text sent to it (audit entry `number.route`).
+  A number used unbound stays unrouted.
 
 Code: [`threads.py`](../../core/hailhq/core/threads.py),
 [`text_watch.py`](../../voicebot/hailhq/voicebot/text_watch.py),

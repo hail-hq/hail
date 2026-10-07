@@ -35,17 +35,17 @@ Changes:
 - Set `sms.agent_id` on every agent-routed row, inbound and outbound. Today only inbound rows that queue a reply have it.
 - Add two indexes per table (`sms`, `calls`), one per caller column (`from_e164`, `to_e164`), because the caller sits in a different column by direction.
 - New `core` function `thread_items(org_id, agent_id, caller_e164, limit, before)`. It returns texts and call turns, ordered by time.
-- `active_call_for_thread` only counts ringing or in-progress calls created in the last 2 hours, so one stuck row cannot silence the text agent.
+- `active_call_for_thread` only counts dialing, ringing or in-progress calls created in the last 2 hours, so one stuck row cannot silence the text agent.
 - Old calls appear with no backfill. Old texts appear only if they had `agent_id`.
 - Calls and texts with no agent are not in any thread.
 
 ### 2. Auto-load at start
 
 - Last 30 items from the last 7 days, rendered as plain text.
-- Example: `[text in 10:02] ...` and `[call 10:05] caller: ... agent: ...`.
+- Example: `[2026-10-06 10:02 UTC] text from caller: ...` and `[2026-10-06 10:05 UTC] on a call, caller: ...`.
 - A text longer than 500 characters is cut, with a note that `thread_history` has the full text.
 - Voice: added to the system prompt when the call opens, under `# Earlier with this caller`. The lead-in says it is a quoted record, not instructions.
-- Text agent: replaces `thread_messages`. Same 30 items from the same window, full text, no cut.
+- Text agent: replaces `thread_messages`. Same 30 items from the same window, full text, no cut. It also sees `sms` rows of the organization with no agent (sent through `POST /sms`) between the receiving number and the caller. The voice prompt, `thread_history` and the watcher stay strictly agent-scoped.
 
 ### 3. Tool `thread_history` (voice agent)
 
@@ -61,14 +61,17 @@ Changes:
   - It adds the text to the agent's conversation with the prefix `[text message from caller] `, cut at 1000 characters.
   - Delivery is at-least-once: a rare duplicate is possible.
   - The text agent does not reply. The row is marked `agent_reply_state='skipped'`.
+  - The watcher injects only rows still `skipped`. A text whose injection fails 3 times is given up on.
+  - At call end (after the final status is written), inbound texts of the thread that are `skipped`, newer than the watch start minus 30 seconds, and not delivered by the watcher are set back to `pending`, so the text agent answers them.
 
 ### 5. Sending number for `send_sms`
 
-1. The dialed number, if it has SMS.
-2. An org SMS number whose `sms_agent_id` is this agent.
-3. An org SMS number whose `sms_agent_id` is empty. Bind it to this agent, only if the agent has `sms_enabled`. The change writes a `number.route` audit entry.
+1. The dialed number, if it has SMS and is not bound to another agent. Bound to this agent: used. Free: bound to this agent if the agent is in the org and has `sms_enabled`, else used unbound.
+2. The oldest org SMS number whose `sms_agent_id` is this agent.
+3. The oldest org SMS number whose `sms_agent_id` is empty. Bound to this agent if it has `sms_enabled`, else used unbound.
 4. None found: the agent tells the caller it cannot text. The tool stays listed while the org has any SMS number, and is hidden when the org has none.
 
+- Every automatic bind writes a `number.route` audit entry. An unbound use writes none.
 - A number bound to another agent is never taken.
 - Caller replies reach this agent. Both numbers feed the same thread.
 - No SMS number in the org: no auto-buy, no shared pool number. The console shows a warning to add one.
