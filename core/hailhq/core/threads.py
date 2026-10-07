@@ -15,7 +15,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Literal
 
 from hailhq.core.models import Call, CallEvent, Sms
-from sqlalchemy import and_, or_, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 __all__ = [
@@ -95,6 +95,16 @@ def _event_item(ev: CallEvent) -> ThreadItem | None:
     )
 
 
+def _before(at_col, id_col, prefix, a_at, a_prefix, a_key):
+    """SQL for: this row sorts before the anchor on ``(at, "<prefix>:<uuid>")``."""
+    if prefix == a_prefix:
+        tie = at_col == a_at, id_col < a_key
+        return or_(at_col < a_at, and_(*tie))
+    if prefix < a_prefix:
+        return at_col <= a_at
+    return at_col < a_at
+
+
 async def thread_items(
     db: AsyncSession,
     organization_id: uuid.UUID,
@@ -106,45 +116,66 @@ async def thread_items(
     until: datetime | None = None,
 ) -> list[ThreadItem]:
     """The last ``limit`` items of the thread inside ``THREAD_WINDOW``, oldest
-    first. ``before`` is an item id: only items older than it come back.
-    ``until`` drops items after that time."""
+    first. ``before`` is an item id: only items older than it come back, by
+    (time, id) order. ``until`` drops items after that time and must be
+    timezone-aware."""
     since = datetime.now(timezone.utc) - THREAD_WINDOW
-    cutoff = None
+    anchor = None
     if before is not None:
         anchor = await thread_item(db, organization_id, agent_id, caller_e164, before)
         if anchor is None:
             return []
-        cutoff = anchor.at
 
     sms_stmt = (
         select(Sms)
         .where(*_sms_filter(organization_id, agent_id, caller_e164))
         .where(Sms.requested_at >= since)
     )
-    # Over-fetch events: injected-text turns are dropped after the query.
+    # Injected-text turns and blank turns are excluded in SQL, so ``limit``
+    # counts only items that can be returned.
+    text = func.coalesce(CallEvent.payload["text"].astext, "")
     ev_stmt = (
         select(CallEvent)
         .join(Call, Call.id == CallEvent.call_id)
         .where(*_call_filter(organization_id, agent_id, caller_e164))
         .where(CallEvent.kind.in_(("user_turn", "agent_turn")))
         .where(CallEvent.occurred_at >= since)
+        .where(func.btrim(text) != "")
+        .where(
+            ~and_(
+                CallEvent.kind == "user_turn",
+                text.startswith(TEXT_MARKER, autoescape=True),
+            )
+        )
     )
-    # Bound by the cursor and ``until`` in SQL, so ``limit`` counts only
-    # items that can be returned.
-    if cutoff is not None:
-        sms_stmt = sms_stmt.where(Sms.requested_at < cutoff)
-        ev_stmt = ev_stmt.where(CallEvent.occurred_at < cutoff)
+    # Cut at the anchor by (time, id), the same key the result is sorted by.
+    # Ties on time are broken by the id prefix, then by the uuid.
+    if anchor is not None:
+        a_prefix, _, a_raw = anchor.id.partition(":")
+        a_key = uuid.UUID(a_raw)
+        sms_stmt = sms_stmt.where(
+            _before(Sms.requested_at, Sms.id, "sms", anchor.at, a_prefix, a_key)
+        )
+        ev_stmt = ev_stmt.where(
+            _before(
+                CallEvent.occurred_at, CallEvent.id, "event", anchor.at, a_prefix, a_key
+            )
+        )
     if until is not None:
         sms_stmt = sms_stmt.where(Sms.requested_at <= until)
         ev_stmt = ev_stmt.where(CallEvent.occurred_at <= until)
-    sms_stmt = sms_stmt.order_by(Sms.requested_at.desc()).limit(limit)
-    ev_stmt = ev_stmt.order_by(CallEvent.occurred_at.desc()).limit(limit * 2)
+    sms_stmt = sms_stmt.order_by(Sms.requested_at.desc(), Sms.id.desc()).limit(limit)
+    ev_stmt = ev_stmt.order_by(CallEvent.occurred_at.desc(), CallEvent.id.desc()).limit(
+        limit
+    )
     items = [_sms_item(r) for r in (await db.execute(sms_stmt)).scalars()]
     for ev in (await db.execute(ev_stmt)).scalars():
         item = _event_item(ev)
         if item is not None:
             items.append(item)
     items.sort(key=lambda i: (i.at, i.id))
+    if anchor is not None:
+        items = [i for i in items if (i.at, i.id) < (anchor.at, anchor.id)]
     return items[-limit:]
 
 

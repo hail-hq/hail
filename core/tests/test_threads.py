@@ -7,6 +7,7 @@ from datetime import datetime, timedelta, timezone
 
 from hailhq.core import threads
 from hailhq.core.models import Agent, Call, CallEvent, PhoneNumber, Sms
+from sqlalchemy import select
 
 ORG_NUMBER = "+14155550100"
 PERSON = "+33612345678"
@@ -251,3 +252,124 @@ def test_render_cuts_long_text_and_labels_channels():
     assert "text from caller" in out and "text from you" in out
     assert "x" * 600 in threads.render_thread(items, cut=None)
     assert threads.render_thread([]) == ""
+
+
+async def test_many_marker_turns_do_not_hide_older_real_turns(async_session):
+    org = uuid.uuid4()
+    agent = await _agent(async_session, org)
+    marked = [("user", threads.TEXT_MARKER + f"t{n}") for n in range(7)]
+    call = await _call(async_session, org, agent.id, turns=[("user", "real")])
+    for i, (role, text) in enumerate(marked):
+        async_session.add(
+            CallEvent(
+                call_id=call.id,
+                kind="user_turn",
+                payload={"role": role, "text": text},
+                occurred_at=NOW + timedelta(seconds=10 + i),
+            )
+        )
+    await async_session.commit()
+
+    items = await threads.thread_items(async_session, org, agent.id, PERSON, limit=3)
+
+    assert [i.text for i in items] == ["real"]
+
+
+async def test_before_paging_with_timestamp_ties_loses_nothing(async_session):
+    org = uuid.uuid4()
+    agent = await _agent(async_session, org)
+    for n in range(3):
+        async_session.add(_sms(org, agent.id, inbound=True, body=f"s{n}", at=NOW))
+    call = await _call(async_session, org, agent.id)
+    for n in range(3):
+        async_session.add(
+            CallEvent(
+                call_id=call.id,
+                kind="user_turn",
+                payload={"role": "user", "text": f"e{n}"},
+                occurred_at=NOW,
+            )
+        )
+    await async_session.commit()
+    everything = await threads.thread_items(async_session, org, agent.id, PERSON)
+    assert len(everything) == 6
+
+    seen, before = [], None
+    for _ in range(10):
+        page = await threads.thread_items(
+            async_session, org, agent.id, PERSON, limit=2, before=before
+        )
+        if not page:
+            break
+        seen = [i.id for i in page] + seen
+        before = page[0].id
+
+    assert seen == [i.id for i in everything]
+
+
+async def test_until_drops_later_items(async_session):
+    org = uuid.uuid4()
+    agent = await _agent(async_session, org)
+    for n in range(3):
+        async_session.add(
+            _sms(
+                org,
+                agent.id,
+                inbound=True,
+                body=f"m{n}",
+                at=NOW - timedelta(minutes=10 - n),
+            )
+        )
+    await async_session.commit()
+
+    items = await threads.thread_items(
+        async_session, org, agent.id, PERSON, until=NOW - timedelta(minutes=9)
+    )
+
+    assert [i.text for i in items] == ["m0", "m1"]
+
+
+async def test_foreign_before_id_returns_nothing(async_session):
+    org, other_org = uuid.uuid4(), uuid.uuid4()
+    a = await _agent(async_session, org, "a")
+    b = await _agent(async_session, org, "b")
+    c = await _agent(async_session, other_org, "c")
+    async_session.add(_sms(org, a.id, inbound=True, body="mine"))
+    rows = [
+        _sms(org, b.id, inbound=True, body="other agent"),
+        _sms(org, a.id, inbound=True, person=OTHER, body="other caller"),
+        _sms(other_org, c.id, inbound=True, body="other org"),
+    ]
+    for r in rows:
+        async_session.add(r)
+    await async_session.commit()
+
+    for r in rows:
+        got = await threads.thread_items(
+            async_session, org, a.id, PERSON, before=f"sms:{r.id}"
+        )
+        assert got == []
+
+
+async def test_event_and_call_from_other_thread_are_excluded(async_session):
+    org, other_org = uuid.uuid4(), uuid.uuid4()
+    a = await _agent(async_session, org, "a")
+    c = await _agent(async_session, other_org, "c")
+    await _call(async_session, other_org, c.id, turns=[("user", "other org call")])
+    mine = await _call(async_session, org, a.id, person=OTHER, turns=[("user", "x")])
+    await async_session.commit()
+    event_id = (
+        await async_session.execute(
+            select(CallEvent.id).where(CallEvent.call_id == mine.id)
+        )
+    ).scalar_one()
+
+    assert await threads.thread_items(async_session, org, a.id, PERSON) == []
+    assert (
+        await threads.thread_item(async_session, org, a.id, PERSON, f"event:{event_id}")
+        is None
+    )
+    found = await threads.thread_item(
+        async_session, org, a.id, OTHER, f"event:{event_id}"
+    )
+    assert found.text == "x"
