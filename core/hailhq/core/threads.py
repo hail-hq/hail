@@ -1,0 +1,240 @@
+"""Agent threads: one history per (organization, agent, caller number).
+
+A thread is a query, not a table. It merges the agent's texts with the caller
+(``sms``) and the spoken turns of its calls (``call_events``). The caller is
+``from_e164`` on inbound rows and ``to_e164`` on outbound rows. Every read here
+takes the organization, the agent and the caller from the server; nothing reads
+a thread by a number the model supplied.
+"""
+
+from __future__ import annotations
+
+import uuid
+from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
+from typing import Literal
+
+from hailhq.core.models import Call, CallEvent, Sms
+from sqlalchemy import and_, or_, select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+__all__ = [
+    "CUT_CHARS",
+    "TEXT_MARKER",
+    "THREAD_LIMIT",
+    "THREAD_WINDOW",
+    "ThreadItem",
+    "active_call_for_thread",
+    "call_thread_key",
+    "render_thread",
+    "thread_item",
+    "thread_items",
+]
+
+THREAD_LIMIT = 30
+THREAD_WINDOW = timedelta(days=7)
+CUT_CHARS = 500
+# Prefix of the conversation item the voicebot adds when the caller texts
+# during a call. That text is already an ``sms`` row, so the matching
+# ``user_turn`` event is left out of the thread.
+TEXT_MARKER = "[text message from caller] "
+
+ItemKind = Literal["text_in", "text_out", "call_caller", "call_agent"]
+
+
+@dataclass(frozen=True)
+class ThreadItem:
+    id: str  # "sms:<uuid>" or "event:<uuid>"
+    at: datetime
+    kind: ItemKind
+    text: str
+
+
+def _sms_filter(organization_id, agent_id, caller):
+    return (
+        Sms.organization_id == organization_id,
+        Sms.agent_id == agent_id,
+        or_(
+            and_(Sms.direction == "inbound", Sms.from_e164 == caller),
+            and_(Sms.direction == "outbound", Sms.to_e164 == caller),
+        ),
+    )
+
+
+def _call_filter(organization_id, agent_id, caller):
+    return (
+        Call.organization_id == organization_id,
+        Call.agent_id == agent_id,
+        or_(
+            and_(Call.direction == "inbound", Call.from_e164 == caller),
+            and_(Call.direction == "outbound", Call.to_e164 == caller),
+        ),
+    )
+
+
+def _sms_item(row: Sms) -> ThreadItem:
+    return ThreadItem(
+        id=f"sms:{row.id}",
+        at=row.requested_at,
+        kind="text_in" if row.direction == "inbound" else "text_out",
+        text=row.body or "",
+    )
+
+
+def _event_item(ev: CallEvent) -> ThreadItem | None:
+    text = str((ev.payload or {}).get("text", ""))
+    if ev.kind == "user_turn" and text.startswith(TEXT_MARKER):
+        return None
+    if not text.strip():
+        return None
+    return ThreadItem(
+        id=f"event:{ev.id}",
+        at=ev.occurred_at,
+        kind="call_caller" if ev.kind == "user_turn" else "call_agent",
+        text=text,
+    )
+
+
+async def thread_items(
+    db: AsyncSession,
+    organization_id: uuid.UUID,
+    agent_id: uuid.UUID,
+    caller_e164: str,
+    *,
+    limit: int = THREAD_LIMIT,
+    before: str | None = None,
+    until: datetime | None = None,
+) -> list[ThreadItem]:
+    """The last ``limit`` items of the thread inside ``THREAD_WINDOW``, oldest
+    first. ``before`` is an item id: only items older than it come back.
+    ``until`` drops items after that time."""
+    since = datetime.now(timezone.utc) - THREAD_WINDOW
+    cutoff = None
+    if before is not None:
+        anchor = await thread_item(db, organization_id, agent_id, caller_e164, before)
+        if anchor is None:
+            return []
+        cutoff = anchor.at
+
+    sms_stmt = (
+        select(Sms)
+        .where(*_sms_filter(organization_id, agent_id, caller_e164))
+        .where(Sms.requested_at >= since)
+    )
+    # Over-fetch events: injected-text turns are dropped after the query.
+    ev_stmt = (
+        select(CallEvent)
+        .join(Call, Call.id == CallEvent.call_id)
+        .where(*_call_filter(organization_id, agent_id, caller_e164))
+        .where(CallEvent.kind.in_(("user_turn", "agent_turn")))
+        .where(CallEvent.occurred_at >= since)
+    )
+    # Bound by the cursor and ``until`` in SQL, so ``limit`` counts only
+    # items that can be returned.
+    if cutoff is not None:
+        sms_stmt = sms_stmt.where(Sms.requested_at < cutoff)
+        ev_stmt = ev_stmt.where(CallEvent.occurred_at < cutoff)
+    if until is not None:
+        sms_stmt = sms_stmt.where(Sms.requested_at <= until)
+        ev_stmt = ev_stmt.where(CallEvent.occurred_at <= until)
+    sms_stmt = sms_stmt.order_by(Sms.requested_at.desc()).limit(limit)
+    ev_stmt = ev_stmt.order_by(CallEvent.occurred_at.desc()).limit(limit * 2)
+    items = [_sms_item(r) for r in (await db.execute(sms_stmt)).scalars()]
+    for ev in (await db.execute(ev_stmt)).scalars():
+        item = _event_item(ev)
+        if item is not None:
+            items.append(item)
+    items.sort(key=lambda i: (i.at, i.id))
+    return items[-limit:]
+
+
+async def thread_item(
+    db: AsyncSession,
+    organization_id: uuid.UUID,
+    agent_id: uuid.UUID,
+    caller_e164: str,
+    item_id: str,
+) -> ThreadItem | None:
+    """One item, only if it belongs to this thread."""
+    kind, _, raw = item_id.partition(":")
+    try:
+        key = uuid.UUID(raw)
+    except ValueError:
+        return None
+    if kind == "sms":
+        row = (
+            await db.execute(
+                select(Sms).where(
+                    Sms.id == key, *_sms_filter(organization_id, agent_id, caller_e164)
+                )
+            )
+        ).scalar_one_or_none()
+        return _sms_item(row) if row is not None else None
+    if kind == "event":
+        ev = (
+            await db.execute(
+                select(CallEvent)
+                .join(Call, Call.id == CallEvent.call_id)
+                .where(
+                    CallEvent.id == key,
+                    CallEvent.kind.in_(("user_turn", "agent_turn")),
+                    *_call_filter(organization_id, agent_id, caller_e164),
+                )
+            )
+        ).scalar_one_or_none()
+        return _event_item(ev) if ev is not None else None
+    return None
+
+
+async def call_thread_key(
+    db: AsyncSession, call_id: uuid.UUID
+) -> tuple[uuid.UUID, uuid.UUID, str] | None:
+    """``(organization_id, agent_id, caller_e164)`` for a call, or None when no
+    agent is on it. The caller is the person on the line."""
+    call = await db.get(Call, call_id)
+    if call is None or call.agent_id is None:
+        return None
+    caller = call.from_e164 if call.direction == "inbound" else call.to_e164
+    return call.organization_id, call.agent_id, caller
+
+
+async def active_call_for_thread(
+    db: AsyncSession,
+    organization_id: uuid.UUID,
+    agent_id: uuid.UUID,
+    caller_e164: str,
+) -> Call | None:
+    stmt = (
+        select(Call)
+        .where(*_call_filter(organization_id, agent_id, caller_e164))
+        .where(Call.status.in_(("ringing", "in_progress")))
+        .order_by(Call.created_at.desc())
+        .limit(1)
+    )
+    return (await db.execute(stmt)).scalar_one_or_none()
+
+
+_LABEL: dict[str, str] = {
+    "text_in": "text from caller",
+    "text_out": "text from you",
+    "call_caller": "caller",
+    "call_agent": "you",
+}
+
+
+def render_thread(items: list[ThreadItem], *, cut: int | None = CUT_CHARS) -> str:
+    """Plain-text lines for a prompt. ``cut`` caps one item's text."""
+    lines: list[str] = []
+    for item in items:
+        text = item.text.strip()
+        if cut is not None and len(text) > cut:
+            text = (
+                f"{text[:cut]}... (cut, ask thread_history with "
+                f'item_id "{item.id}" for the full text)'
+            )
+        stamp = item.at.strftime("%Y-%m-%d %H:%M")
+        if item.kind.startswith("text"):
+            lines.append(f"[{stamp}] {_LABEL[item.kind]}: {text}")
+        else:
+            lines.append(f"[{stamp}] on a call, {_LABEL[item.kind]}: {text}")
+    return "\n".join(lines)
