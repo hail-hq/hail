@@ -399,3 +399,20 @@ async def test_stuck_old_call_is_not_active(async_session):
     await async_session.commit()
     active = await threads.active_call_for_thread(async_session, org, agent.id, PERSON)
     assert active.id == fresh.id
+
+
+async def test_withheld_or_invalid_callers_have_no_thread(async_session):
+    org = uuid.uuid4()
+    agent = await _agent(async_session, org)
+    for bad in ("", "anonymous", "+0123", "12345"):
+        call = await _call(async_session, org, agent.id, person=bad)
+        async_session.add(_sms(org, agent.id, inbound=True, person=bad, body="x"))
+        await async_session.flush()
+
+        assert await threads.call_thread_key(async_session, call.id) is None
+        assert await threads.thread_items(async_session, org, agent.id, bad) == []
+        assert await threads.thread_item(async_session, org, agent.id, bad, "x") is None
+        assert (
+            await threads.active_call_for_thread(async_session, org, agent.id, bad)
+            is None
+        )

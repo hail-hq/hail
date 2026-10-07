@@ -9,6 +9,7 @@ a thread by a number the model supplied.
 
 from __future__ import annotations
 
+import re
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -17,6 +18,15 @@ from typing import Literal
 from hailhq.core.models import Call, CallEvent, Sms
 from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
+
+_E164 = re.compile(r"^\+[1-9]\d{6,14}$")
+
+
+def is_e164(value: str | None) -> bool:
+    """Withheld callers arrive as "", "anonymous", "restricted" and the like.
+    Only a real E.164 number identifies a thread; anything else has none."""
+    return bool(value) and _E164.fullmatch(value) is not None
+
 
 __all__ = [
     "ACTIVE_CALL_MAX_AGE",
@@ -125,6 +135,8 @@ async def thread_items(
     first. ``before`` is an item id: only items older than it come back, by
     (time, id) order. ``until`` drops items after that time and must be
     timezone-aware."""
+    if not is_e164(caller_e164):
+        return []
     since = datetime.now(timezone.utc) - THREAD_WINDOW
     anchor = None
     if before is not None:
@@ -193,6 +205,8 @@ async def thread_item(
     item_id: str,
 ) -> ThreadItem | None:
     """One item, only if it belongs to this thread."""
+    if not is_e164(caller_e164):
+        return None
     kind, _, raw = item_id.partition(":")
     try:
         key = uuid.UUID(raw)
@@ -227,11 +241,14 @@ async def call_thread_key(
     db: AsyncSession, call_id: uuid.UUID
 ) -> tuple[uuid.UUID, uuid.UUID, str] | None:
     """``(organization_id, agent_id, caller_e164)`` for a call, or None when no
-    agent is on it. The caller is the person on the line."""
+    agent is on it or the caller number is not E.164 (withheld). The caller is
+    the person on the line."""
     call = await db.get(Call, call_id)
     if call is None or call.agent_id is None:
         return None
     caller = call.from_e164 if call.direction == "inbound" else call.to_e164
+    if not is_e164(caller):
+        return None
     return call.organization_id, call.agent_id, caller
 
 
@@ -243,6 +260,8 @@ async def active_call_for_thread(
 ) -> Call | None:
     """The newest ringing or in-progress call of this thread created within
     ``ACTIVE_CALL_MAX_AGE``, or None."""
+    if not is_e164(caller_e164):
+        return None
     since = datetime.now(timezone.utc) - ACTIVE_CALL_MAX_AGE
     stmt = (
         select(Call)

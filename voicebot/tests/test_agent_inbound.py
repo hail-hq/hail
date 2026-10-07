@@ -425,3 +425,49 @@ async def test_load_thread_context_is_none_when_the_read_is_slow(
     start = time.monotonic()
     assert await agent_mod.load_thread_context(uuid.uuid4()) is None
     assert time.monotonic() - start < 2
+
+
+async def test_load_thread_context_is_none_for_a_withheld_caller(
+    async_session,
+) -> None:
+    org = uuid.uuid4()
+    agent = Agent(organization_id=org, name="a", system_prompt="x")
+    async_session.add(agent)
+    number = PhoneNumber(
+        organization_id=org,
+        e164="+14155550101",
+        country_code="US",
+        number_type="local",
+        provider="twilio",
+        provisioning_state="active",
+    )
+    async_session.add(number)
+    await async_session.flush()
+    call = Call(
+        organization_id=org,
+        agent_id=agent.id,
+        to_number_id=number.id,
+        voice_config={},
+        from_e164="anonymous",
+        to_e164="+14155550101",
+        direction="inbound",
+        status="in_progress",
+        provider="twilio",
+    )
+    async_session.add(call)
+    async_session.add(
+        Sms(
+            organization_id=org,
+            agent_id=agent.id,
+            provider="twilio",
+            from_e164="anonymous",
+            to_e164="+14155550101",
+            direction="inbound",
+            status="received",
+            body="secret",
+            requested_at=datetime.now(timezone.utc),
+        )
+    )
+    await async_session.commit()
+
+    assert await agent_mod.load_thread_context(call.id) is None
