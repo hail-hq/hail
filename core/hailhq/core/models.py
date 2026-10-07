@@ -773,8 +773,20 @@ class Sms(Base):
             "status IN ('queued','sent','delivered','failed','undelivered','received')",
             name="sms_status_check",
         ),
-        Index("sms_thread_from_idx", "organization_id", "agent_id", "from_e164", "requested_at"),
-        Index("sms_thread_to_idx", "organization_id", "agent_id", "to_e164", "requested_at"),
+        Index(
+            "sms_thread_from_idx",
+            "organization_id",
+            "agent_id",
+            "from_e164",
+            "requested_at",
+        ),
+        Index(
+            "sms_thread_to_idx",
+            "organization_id",
+            "agent_id",
+            "to_e164",
+            "requested_at",
+        ),
     )
 
 
