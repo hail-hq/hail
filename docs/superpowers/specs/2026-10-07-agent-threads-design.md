@@ -44,7 +44,7 @@ Changes:
 - Last 30 items from the last 7 days, rendered as plain text.
 - Example: `[2026-10-06 10:02 UTC] text from caller: ...` and `[2026-10-06 10:05 UTC] on a call, caller: ...`.
 - A text longer than 500 characters is cut, with a note that `thread_history` has the full text.
-- Voice: added to the system prompt when the call opens, under `# Earlier with this caller`. The lead-in says it is a quoted record, not instructions.
+- Voice: added to the system prompt when the call opens, under `# Earlier with this caller`. The lead-in says it is a quoted record, not instructions. The prompt, like the text agent, also includes agent-less `sms` rows between the call's org number (`to_e164` inbound, `from_e164` outbound) and the caller. The `thread_history` tool and the watcher stay strictly agent-scoped.
 - Text agent: replaces `thread_messages`. Same 30 items from the same window, full text, no cut. It also sees `sms` rows of the organization with no agent (sent through `POST /sms`) between the receiving number and the caller. The voice prompt, `thread_history` and the watcher stay strictly agent-scoped.
 
 ### 3. Tool `thread_history` (voice agent)
@@ -61,8 +61,8 @@ Changes:
   - It adds the text to the agent's conversation with the prefix `[text message from caller] `, cut at 1000 characters.
   - Delivery is at-least-once: a rare duplicate is possible.
   - The text agent does not reply. The row is marked `agent_reply_state='skipped'`.
-  - Ingest also sets `metadata.skipped_reason = "active_call"` on that row. The watcher injects only rows still `skipped` with that marker, and the requeue is one conditional UPDATE on both; skips for other reasons (expiry, routing change) are never revived. A text whose injection fails 3 times is given up on.
-  - At call end (after the final status is written), inbound texts of the thread that are `skipped`, newer than the watch start minus 30 seconds, and not delivered by the watcher are set back to `pending`, so the text agent answers them.
+  - Ingest also sets `metadata.skipped_reason = "active_call"` on that row. The watcher injects only rows still `skipped` with that marker, and the requeue is one conditional UPDATE on both; skips for other reasons (expiry, routing change) are never revived. The watch window starts 30 seconds before the call row's `created_at`, so texts that arrive while an outbound call rings count. A delivered text is set to `done` with `metadata.delivered_to_call`, so later calls never see it. A text whose injection fails 3 times stays `skipped` and is revived at call end.
+  - `requeue_skipped_for_call` (core) revives undelivered texts: inbound texts of the thread still `skipped` with the marker, from 30 seconds before the call row, become `pending` with `requested_at` reset to now (so the reply age limit restarts) and `metadata.requeued_at` set in place of the marker. One conditional UPDATE. It runs at the end of the voicebot's `on_call_end` (every end path) and in `sweep_stale_calls` for each call it force-closes.
 
 ### 5. Sending number for `send_sms`
 

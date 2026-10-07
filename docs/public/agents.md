@@ -88,13 +88,17 @@ retried up to 3 times with backoff; a text still unanswered after
 
 A caller texts an order number to the agent's SMS number, then calls the agent.
 The agent greets them already knowing the order number. A text sent during a
-call goes to the voice agent. If the voice agent did not get it, the text agent
-answers it after the call, unless it is older than
-`HAIL_TEXT_REPLY_MAX_AGE_SECONDS`.
+call goes to the voice agent and is then marked `done`. A text sent from the
+moment the call row is created (ringing included) counts. If the voice agent
+never got it, the text agent answers it when the call ends, or when the
+stale-call sweep closes the call. The reply age limit
+(`HAIL_TEXT_REPLY_MAX_AGE_SECONDS`) restarts then.
 
 - Scope: agent + caller number. Texts and call turns both count.
 - Each call and text reply starts with the last 30 items from the last 7 days.
   A voice agent can page back with the `thread_history` tool.
+- The voice prompt and the text agent also show texts between the number and
+  the caller that have no agent. The `thread_history` tool does not.
 - Hidden or invalid caller numbers get no history.
 - Caller ID on a phone call can be faked. Do not put secrets in an agent's
   instructions or in texts it sends.
