@@ -51,6 +51,11 @@ def capabilities(
         row = _load(name).get((country_code, number_type))
         if not row:
             continue
+        # Takes calls but cannot place them, or the carrier picks the number
+        # at order time: neither can be quoted and bought here. Support
+        # orders a by_request number by hand.
+        if row.get("receive_only") or row.get("by_request"):
+            continue
         # Hail routes no SMS through this carrier. Its catalog row may list
         # SMS, because the carrier sells it; Hail cannot deliver it, so it
         # is never promised.

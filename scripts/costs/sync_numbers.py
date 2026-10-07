@@ -125,6 +125,8 @@ def _row(
     verification_required: bool,
     setup_usd: str | None = None,
     notes: str | None = None,
+    receive_only: bool = False,
+    by_request: bool = False,
 ) -> dict:
     row = {
         "country_code": country_code,
@@ -142,6 +144,11 @@ def _row(
         row["setup_usd"] = setup_usd
     if notes:
         row["notes"] = notes
+    # Written only when true: a row without them is sold as usual.
+    if receive_only:
+        row["receive_only"] = True
+    if by_request:
+        row["by_request"] = True
     return row
 
 
@@ -488,6 +495,13 @@ def map_didww(
                     .get("address_requirement", {})
                     .get("data")
                     is not None,
+                    "outbound": "voice_out" in g["attributes"].get("features", []),
+                    # DIDWW lists each number of this area for sale, so a
+                    # customer can be shown one and buy it. When false,
+                    # DIDWW picks the number at order time.
+                    "listed": bool(
+                        g.get("meta", {}).get("available_dids_enabled", True)
+                    ),
                 }
             )
         # DIDWW still lists the type but has nothing to sell right now (no
@@ -495,10 +509,18 @@ def map_didww(
         # line below keeps the row as it was instead of marking it gone.
         for number_type in sorted(listed - set(by_type)):
             skipped.append(f"{iso}:{number_type}: listed, no numbers in stock")
-        for number_type, groups in by_type.items():
+        for number_type, all_groups in by_type.items():
+            features = set().union(*(g["features"] for g in all_groups))
+            # Hail sells a number it can show (listed) and that can place
+            # calls. Price the row from the areas Hail can sell; mark the row
+            # when there are none.
+            outbound = [g for g in all_groups if g["outbound"]]
+            sellable = [g for g in outbound if g["listed"]]
+            groups = sellable or outbound or all_groups
+            receive_only = not outbound
+            by_request = bool(outbound) and not sellable
             prices = sorted(g["monthly"] for g in groups)
             cheapest = min(groups, key=lambda g: g["monthly"])
-            features = set().union(*(g["features"] for g in groups))
             notes = None
             if prices[0] != prices[-1]:
                 notes = f"monthly price varies by area: {money(prices[0])} to {money(prices[-1])} USD across {len(groups)} areas"
@@ -516,6 +538,8 @@ def map_didww(
                     verification_required=cheapest["needs_registration"]
                     or cheapest["address"],
                     notes=notes,
+                    receive_only=receive_only,
+                    by_request=by_request,
                 )
             )
     return rows, skipped
@@ -633,6 +657,8 @@ def merge(
         "verification_required",
         "setup_usd",
         "available",
+        "receive_only",
+        "by_request",
     )
     seen = set()
     numbers = []
