@@ -67,7 +67,8 @@ picking up this codebase: read it before making any infra-shaped change.**
 Internal runbooks (not published) live in `docs/operations/`:
 [carrier-verification.md](docs/operations/carrier-verification.md) (verification states, background pass, cancel rules),
 [number-catalog-sync.md](docs/operations/number-catalog-sync.md) (the `costs/<carrier>.json` files, weekly sync, secrets, purchase gate),
-[refresh-costs.md](docs/operations/refresh-costs.md) (weekly LLM/STT/TTS price refresh).
+[refresh-costs.md](docs/operations/refresh-costs.md) (weekly LLM/STT/TTS price refresh),
+[didww-by-request.md](docs/operations/didww-by-request.md) (ordering a DIDWW number a customer asked support for).
 
 ## Style
 

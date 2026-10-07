@@ -122,6 +122,33 @@ A call from a `didww` number with `LIVEKIT_DIDWW_SIP_OUTBOUND_TRUNK_ID` empty
 fails with `end_reason = carrier_route_failed` before any LiveKit room exists.
 The same applies to Twilio numbers when `LIVEKIT_TWILIO_SIP_OUTBOUND_TRUNK_ID` is empty.
 
+## Numbers Hail cannot sell
+
+The catalog ([`costs/didww.json`](../../../costs/didww.json)) marks two kinds
+of DIDWW number that the console and `POST /numbers/quotes` never offer:
+
+```bash
+jq -r '.numbers[] | select(.by_request) | "\(.country_code):\(.number_type)"' costs/didww.json
+jq -r '.numbers[] | select(.receive_only) | "\(.country_code):\(.number_type)"' costs/didww.json
+```
+
+- `by_request: true` (40 rows on 2026-10-07): DIDWW picks the number when
+  the order is placed, so there is no number to show and buy. Examples:
+  PT national, DE local, GB local, FR local, ES local. The console shows
+  "set up by our team, not bought here" with an **Ask support for a number**
+  button that emails hi@hail.so. Twilio or Telnyx sell most of these
+  country and type pairs; only these 8 have no other carrier: AL local,
+  CH toll-free, DE national, DK national, HK national, IE national,
+  MT national, NG local. Fulfilment:
+  [`docs/operations/didww-by-request.md`](../../operations/didww-by-request.md).
+- `receive_only: true` (86 rows, mostly toll-free): the number takes calls
+  but cannot place them (DIDWW feature `voice_in` without `voice_out`).
+
+The weekly catalog sync sets both from DIDWW's number groups
+([runbook](../../operations/number-catalog-sync.md)); the API purchase gate
+skips marked rows
+([`telephony_catalog.py`](../../../core/hailhq/core/telephony_catalog.py)).
+
 ## Inbound calls
 
 A DID takes calls through the voice IN trunk it is assigned to. Hail assigns
