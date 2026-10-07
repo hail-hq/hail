@@ -24,7 +24,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
 from hailhq.api.audit import write_audit_log
-from hailhq.api.numbers import resolve_org_number, resolve_sms_number
+from hailhq.api.numbers import resolve_sms_number
 from hailhq.api.routes.email_domains import get_email_provider
 from hailhq.api.routes.emails import deliver_email, resolve_sender
 from hailhq.api.routes.internal.auth import verify_internal_request
