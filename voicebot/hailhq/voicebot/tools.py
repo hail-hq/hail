@@ -20,6 +20,7 @@ from hailhq.core.agent_tools.registry import all_tools
 from hailhq.core.agent_tools.spec import SPOKEN_FALLBACK, ToolContext, ToolSpec
 from hailhq.core.config import settings
 from hailhq.core.db import session_scope
+from hailhq.core.threads import ThreadScope
 from livekit.agents.llm import function_tool
 from livekit.agents.voice import RunContext
 
@@ -45,7 +46,8 @@ def _make_handler(spec: ToolSpec, tctx: ToolContext):
     return handler
 
 
-def _wrap(spec: ToolSpec, tctx: ToolContext):
+def wrap_tool(spec: ToolSpec, tctx: ToolContext):
+    """One core tool as a LiveKit function tool bound to ``tctx``."""
     return function_tool(
         _make_handler(spec, tctx),
         raw_schema={
@@ -57,9 +59,17 @@ def _wrap(spec: ToolSpec, tctx: ToolContext):
 
 
 async def build_agent_tools(
-    metadata: dict[str, Any], *, call_id: UUID, hangup, send_dtmf
+    metadata: dict[str, Any],
+    *,
+    call_id: UUID,
+    hangup,
+    send_dtmf,
+    thread: ThreadScope | None = None,
 ) -> tuple[list, AgentApiClient | None]:
     """Build this call's LiveKit tools. Returns (tools, api_client).
+
+    ``thread`` is the caller's thread, looked up once at call start, for
+    ``thread_history``.
 
     The caller must ``aclose()`` the client at shutdown. Returns no tools
     when the dispatch predates the ``organization_id`` field (rolling
@@ -102,6 +112,7 @@ async def build_agent_tools(
         api=api,
         hangup=hangup,
         send_dtmf=send_dtmf,
+        thread=thread,
     )
 
     available: list[ToolSpec] = []
@@ -118,7 +129,7 @@ async def build_agent_tools(
                 # swallowed too, silently disabling available tools.
                 await session.rollback()
 
-    return [_wrap(s, tctx) for s in available], api
+    return [wrap_tool(s, tctx) for s in available], api
 
 
-__all__ = ["SPOKEN_TOOL_FAILURE", "build_agent_tools"]
+__all__ = ["SPOKEN_TOOL_FAILURE", "build_agent_tools", "wrap_tool"]

@@ -157,3 +157,24 @@ async def test_availability_failure_does_not_poison_session(db, monkeypatch):
     finally:
         if api is not None:
             await api.aclose()
+
+
+async def test_thread_scope_reaches_the_tool_context(monkeypatch):
+    import hailhq.voicebot.tools as tools_mod
+    from hailhq.core.threads import ThreadScope
+
+    seen = []
+    monkeypatch.setattr(tools_mod, "all_tools", lambda: (_spec(name="t"),))
+    monkeypatch.setattr(tools_mod, "wrap_tool", lambda spec, tctx: seen.append(tctx))
+    org = uuid.uuid4()
+    scope = ThreadScope(org, uuid.uuid4(), "+33612345678", "+14155550100")
+
+    await build_agent_tools(
+        {"organization_id": str(org)},
+        call_id=uuid.uuid4(),
+        hangup=None,
+        send_dtmf=None,
+        thread=scope,
+    )
+
+    assert [c.thread for c in seen] == [scope]

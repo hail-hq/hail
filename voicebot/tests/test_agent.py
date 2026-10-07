@@ -1518,9 +1518,17 @@ async def test_build_tools_safely_passes_through_on_success(
     sentinel_tools = [object()]
     sentinel_api = object()
 
+    seen: dict = {}
+
     async def _ok(
-        _metadata: dict, *, call_id: UUID, hangup: object, send_dtmf: object
+        _metadata: dict,
+        *,
+        call_id: UUID,
+        hangup: object,
+        send_dtmf: object,
+        thread: object = None,
     ) -> tuple:
+        seen["thread"] = thread
         return sentinel_tools, sentinel_api
 
     monkeypatch.setattr(agent_mod, "build_agent_tools", _ok)
@@ -1532,10 +1540,14 @@ async def test_build_tools_safely_passes_through_on_success(
         return None
 
     call_id = UUID("11111111-2222-3333-4444-555555555558")
-    tools, api = await build_tools_safely({}, call_id, _hangup, _send_dtmf)
+    scope = object()
+    tools, api = await build_tools_safely(
+        {}, call_id, _hangup, _send_dtmf, scope  # type: ignore[arg-type]
+    )
 
     assert tools is sentinel_tools
     assert api is sentinel_api
+    assert seen["thread"] is scope
 
 
 async def test_speak_greeting_uses_inbound_line_and_agent_template():
