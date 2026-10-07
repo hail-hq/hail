@@ -5,11 +5,13 @@ from __future__ import annotations
 import asyncio
 import json
 import uuid
+from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
 from hailhq.core.inbound_calls import Accepted, Rejected, SipAttributes
+from hailhq.core.models import Agent, Call, PhoneNumber, Sms
 from hailhq.voicebot import agent as agent_mod
 from hailhq.voicebot.agent import parse_metadata
 from livekit import rtc
@@ -345,3 +347,61 @@ async def test_inbound_without_first_message_waits_for_the_caller() -> None:
     await speak_greeting(session, {"direction": "inbound", "ai_disclosure": False})
     assert session.say_calls == []
     assert session.generate_reply_calls == []
+
+
+async def test_load_thread_context_renders_the_callers_texts(async_session) -> None:
+    org = uuid.uuid4()
+    agent = Agent(organization_id=org, name="a", system_prompt="x")
+    async_session.add(agent)
+    number = PhoneNumber(
+        organization_id=org,
+        e164="+14155550100",
+        country_code="US",
+        number_type="local",
+        provider="twilio",
+        provisioning_state="active",
+    )
+    async_session.add(number)
+    await async_session.flush()
+    call = Call(
+        organization_id=org,
+        agent_id=agent.id,
+        to_number_id=number.id,
+        voice_config={},
+        from_e164="+33612345678",
+        to_e164="+14155550100",
+        direction="inbound",
+        status="in_progress",
+        provider="twilio",
+    )
+    async_session.add(call)
+    async_session.add(
+        Sms(
+            organization_id=org,
+            agent_id=agent.id,
+            provider="twilio",
+            from_e164="+33612345678",
+            to_e164="+14155550100",
+            direction="inbound",
+            status="received",
+            body="my order is 4411",
+            requested_at=datetime.now(timezone.utc),
+        )
+    )
+    await async_session.commit()
+
+    text = await agent_mod.load_thread_context(call.id)
+
+    assert text is not None and "my order is 4411" in text
+
+
+async def test_load_thread_context_is_none_without_an_agent(async_session) -> None:
+    assert await agent_mod.load_thread_context(uuid.uuid4()) is None
+
+
+async def test_load_thread_context_is_none_when_the_read_fails(monkeypatch) -> None:
+    async def boom(*args, **kwargs):
+        raise RuntimeError("db down")
+
+    monkeypatch.setattr(agent_mod.threads, "call_thread_key", boom)
+    assert await agent_mod.load_thread_context(uuid.uuid4()) is None

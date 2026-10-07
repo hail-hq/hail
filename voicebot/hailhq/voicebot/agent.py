@@ -31,6 +31,7 @@ from typing import Any
 from uuid import UUID
 
 from cryptography.fernet import InvalidToken
+from hailhq.core import threads
 from hailhq.core.agent_tools.client import AgentApiClient
 from hailhq.core.agent_tools.send_dtmf import DTMF_CODES
 from hailhq.core.call_end_reasons import CallEndReason
@@ -187,9 +188,13 @@ class SpeechSanitizingAgent(Agent):
         return Agent.default.tts_node(self, _sanitize_tts_stream(text), model_settings)
 
 
-def build_instructions(system_prompt: str | None, direction: str | None = None) -> str:
+def build_instructions(
+    system_prompt: str | None,
+    direction: str | None = None,
+    history: str | None = None,
+) -> str:
     """The call's instructions (see :func:`hailhq.core.prompts.build_voice_instructions`)."""
-    return build_voice_instructions(system_prompt, direction)
+    return build_voice_instructions(system_prompt, direction, history)
 
 
 # Proactive AI disclosure — spoken by default as the first thing on every
@@ -594,6 +599,23 @@ def disconnect_reason_to_status(reason: int | None) -> tuple[str | None, str | N
 
 
 logger = logging.getLogger("hailhq.voicebot")
+
+
+async def load_thread_context(call_id: UUID) -> str | None:
+    """This caller's earlier texts and calls with this agent, rendered for the
+    prompt. None when there is nothing, or when the read fails: a call never
+    waits on its history."""
+    try:
+        async with session_scope() as db:
+            key = await threads.call_thread_key(db, call_id)
+            if key is None:
+                return None
+            org, agent_id, caller = key
+            items = await threads.thread_items(db, org, agent_id, caller)
+        return threads.render_thread(items) or None
+    except Exception:
+        logger.exception("call_id=%s thread history unavailable", call_id)
+        return None
 
 
 def prewarm(proc: JobProcess) -> None:
@@ -1494,9 +1516,10 @@ async def _run_call(
             [t.info.name for t in agent_tools],
         )
 
+    history = await load_thread_context(call_id)
     agent = SpeechSanitizingAgent(
         instructions=build_instructions(
-            metadata.get("system_prompt"), metadata.get("direction")
+            metadata.get("system_prompt"), metadata.get("direction"), history
         ),
         tools=agent_tools,
     )
