@@ -273,7 +273,7 @@ async def active_call_for_thread(
     agent_id: uuid.UUID,
     caller_e164: str,
 ) -> Call | None:
-    """The newest ringing or in-progress call of this thread created within
+    """The newest dialing, ringing or in-progress call of this thread created within
     ``ACTIVE_CALL_MAX_AGE``, or None."""
     if not is_e164(caller_e164):
         return None
@@ -281,7 +281,7 @@ async def active_call_for_thread(
     stmt = (
         select(Call)
         .where(*_call_filter(organization_id, agent_id, caller_e164))
-        .where(Call.status.in_(("ringing", "in_progress")))
+        .where(Call.status.in_(("dialing", "ringing", "in_progress")))
         .where(Call.created_at >= since)
         .order_by(Call.created_at.desc())
         .limit(1)

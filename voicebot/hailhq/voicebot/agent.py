@@ -1591,6 +1591,24 @@ async def _run_call(
     # has run (both run on the same event loop, so the check is atomic).
     text_watch_task: asyncio.Task[None] | None = None
     shutting_down = False
+    # Ids of texts the watcher gave the voice agent; the rest go back to the
+    # text agent when the call ends.
+    delivered_texts: set[UUID] = set()
+
+    async def _requeue_undelivered_texts() -> None:
+        """The call is over: texts that arrived during it and were not handed
+        to the voice agent go back to the text agent. Never blocks shutdown."""
+        try:
+            async with session_scope() as db:
+                key = await threads.call_thread_key(db, call_id)
+            if key is not None:
+                n = await text_watch.requeue_undelivered(
+                    key, watch_since, delivered_texts
+                )
+                if n:
+                    logger.info("call_id=%s requeued %d undelivered texts", call_id, n)
+        except Exception:
+            logger.exception("call_id=%s requeue of undelivered texts failed", call_id)
 
     async def _shutdown_body() -> None:
         nonlocal shutting_down
@@ -1614,6 +1632,7 @@ async def _run_call(
                 status_override=captured["status"],
                 end_reason_override=captured["end_reason"],
             )
+            await _requeue_undelivered_texts()
         finally:
             if telemetry_span is not None:
                 telemetry_span.set_attribute(
@@ -1723,7 +1742,9 @@ async def _run_call(
 
     if not shutting_down:
         text_watch_task = asyncio.create_task(
-            text_watch.watch_incoming_texts(session, call_id, since=watch_since)
+            text_watch.watch_incoming_texts(
+                session, call_id, since=watch_since, delivered=delivered_texts
+            )
         )
 
 

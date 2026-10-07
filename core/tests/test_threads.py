@@ -235,6 +235,16 @@ async def test_call_thread_key_and_active_call(async_session):
     assert done.id != live.id
 
 
+async def test_dialing_outbound_call_counts_as_active(async_session):
+    org = uuid.uuid4()
+    agent = await _agent(async_session, org)
+    dialing = await _call(async_session, org, agent.id, status="dialing")
+    await async_session.commit()
+
+    active = await threads.active_call_for_thread(async_session, org, agent.id, PERSON)
+    assert active is not None and active.id == dialing.id
+
+
 def test_render_cuts_long_text_and_labels_channels():
     long = "x" * 600
     items = [

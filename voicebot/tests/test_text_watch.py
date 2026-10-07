@@ -70,7 +70,9 @@ async def _seed_call(async_session, *, caller=PERSON):
     return org, agent, call
 
 
-def _text(org, agent_id, body, *, person=PERSON, at, inbound=True, id=None):
+def _text(
+    org, agent_id, body, *, person=PERSON, at, inbound=True, id=None, state="skipped"
+):
     return Sms(
         id=id or uuid.uuid4(),
         organization_id=org,
@@ -82,6 +84,7 @@ def _text(org, agent_id, body, *, person=PERSON, at, inbound=True, id=None):
         status="received" if inbound else "sent",
         body=body,
         requested_at=at,
+        agent_reply_state=state,
     )
 
 
@@ -215,6 +218,97 @@ async def test_generate_reply_failure_is_retried_not_marked_delivered(async_sess
     await asyncio.sleep(POLL * 8)
     await _stop(task)
     assert fake.inputs == [threads.TEXT_MARKER + "retry me"]
+
+
+async def test_generate_reply_failing_three_times_is_given_up(async_session):
+    org, agent, call = await _seed_call(async_session)
+    since = _now()
+    bad = _text(org, agent.id, "bad", at=since + timedelta(seconds=1))
+    good = _text(org, agent.id, "good", at=since + timedelta(seconds=2))
+    async_session.add_all([bad, good])
+    await async_session.commit()
+
+    class Picky(FakeSession):
+        attempts = 0
+
+        def generate_reply(self, **kwargs) -> None:
+            if kwargs["user_input"].endswith("bad"):
+                Picky.attempts += 1
+                raise ValueError("boom")
+            super().generate_reply(**kwargs)
+
+    fake = Picky()
+    delivered: set[uuid.UUID] = set()
+    task = _start(fake, call, since, delivered=delivered)
+    await wait_for(lambda: len(fake.inputs) == 1)
+    await asyncio.sleep(POLL * 10)
+    await _stop(task)
+    assert Picky.attempts == 3
+    assert fake.inputs == [threads.TEXT_MARKER + "good"]
+    assert delivered == {bad.id, good.id}
+
+
+async def test_only_skipped_texts_are_injected(async_session):
+    org, agent, call = await _seed_call(async_session)
+    since = _now()
+    at = since + timedelta(seconds=1)
+    async_session.add(_text(org, agent.id, "skipped", at=at))
+    for state in ("pending", "processing", "done", "failed", None):
+        async_session.add(_text(org, agent.id, state or "none", at=at, state=state))
+    await async_session.commit()
+    fake = FakeSession()
+    task = _start(fake, call, since)
+    await wait_for(lambda: len(fake.inputs) >= 1)
+    await asyncio.sleep(POLL * 8)
+    await _stop(task)
+    assert fake.inputs == [threads.TEXT_MARKER + "skipped"]
+
+
+async def test_requeue_undelivered_only_touches_this_threads_undelivered(
+    async_session,
+):
+    org, agent, call = await _seed_call(async_session)
+    other_agent = Agent(organization_id=org, name="b", system_prompt="x")
+    async_session.add(other_agent)
+    await async_session.flush()
+    since = _now()
+    at = since + timedelta(seconds=1)
+    delivered = _text(org, agent.id, "delivered", at=at)
+    missed = _text(org, agent.id, "missed", at=at)
+    slightly_early = _text(org, agent.id, "early", at=since - timedelta(seconds=10))
+    too_old = _text(org, agent.id, "old", at=since - timedelta(minutes=5))
+    other_caller = _text(org, agent.id, "caller", person="+33600000000", at=at)
+    other_ag = _text(org, other_agent.id, "agent", at=at)
+    other_org = _text(uuid.uuid4(), agent.id, "org", at=at)
+    outbound = _text(org, agent.id, "out", at=at, inbound=False)
+    done = _text(org, agent.id, "done", at=at, state="done")
+    rows = [
+        delivered, missed, slightly_early, too_old, other_caller, other_ag,
+        other_org, outbound, done,
+    ]  # fmt: skip
+    async_session.add_all(rows)
+    await async_session.commit()
+
+    n = await text_watch.requeue_undelivered(
+        (org, agent.id, PERSON), since, {delivered.id}
+    )
+
+    assert n == 2
+    states = {}
+    for r in rows:
+        await async_session.refresh(r)
+        states[r.body] = r.agent_reply_state
+    assert states == {
+        "delivered": "skipped",
+        "missed": "pending",
+        "early": "pending",
+        "old": "skipped",
+        "caller": "skipped",
+        "agent": "skipped",
+        "org": "skipped",
+        "out": "skipped",
+        "done": "done",
+    }
 
 
 async def test_closed_session_stops_the_loop(async_session):
