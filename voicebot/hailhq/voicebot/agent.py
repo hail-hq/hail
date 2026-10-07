@@ -1527,6 +1527,9 @@ async def _run_call(
             [t.info.name for t in agent_tools],
         )
 
+    # Captured before the history read: a text that arrives after this moment
+    # is either in the history or caught by the watcher (at-least-once).
+    watch_since = datetime.now(timezone.utc)
     history = await load_thread_context(call_id)
     agent = SpeechSanitizingAgent(
         instructions=build_instructions(
@@ -1535,12 +1538,6 @@ async def _run_call(
         tools=agent_tools,
     )
     await session.start(agent=agent, room=ctx.room)
-    # Feeds texts the caller sends during the call into the session. Held
-    # here so it is not garbage collected; cancelled in `_shutdown`.
-    text_watch_task: asyncio.Task[None] | None = asyncio.create_task(
-        text_watch.watch_incoming_texts(session, call_id)
-    )
-
     room_name = ctx.room.name
 
     soft_cap_seconds = metadata.get(
@@ -1589,8 +1586,15 @@ async def _run_call(
         )
 
     shutdown_identity = get_identity()
+    # Watcher for texts the caller sends during the call. Started at the end of
+    # the entrypoint; `shutting_down` stops a late start after `_shutdown_body`
+    # has run (both run on the same event loop, so the check is atomic).
+    text_watch_task: asyncio.Task[None] | None = None
+    shutting_down = False
 
     async def _shutdown_body() -> None:
+        nonlocal shutting_down
+        shutting_down = True
         try:
             if soft_cap_task is not None and not soft_cap_task.done():
                 soft_cap_task.cancel()
@@ -1716,6 +1720,11 @@ async def _run_call(
             logger.exception(
                 "call_id=%s greeting failed; session closed during detection", call_id
             )
+
+    if not shutting_down:
+        text_watch_task = asyncio.create_task(
+            text_watch.watch_incoming_texts(session, call_id, since=watch_since)
+        )
 
 
 __all__ = [

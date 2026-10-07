@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta
 from typing import Any
 from uuid import UUID
 
@@ -23,6 +23,9 @@ logger = logging.getLogger("hailhq.voicebot")
 
 POLL_SECONDS = 2.0
 MAX_INJECT_CHARS = 1000
+# Covers app/DB clock skew and the ingest transaction stamping requested_at at
+# its start. A text inside the overlap may be injected once more than needed.
+CURSOR_OVERLAP = timedelta(seconds=30)
 
 
 async def new_inbound_texts(
@@ -39,17 +42,24 @@ async def new_inbound_texts(
             Sms.agent_id == agent_id,
             Sms.direction == "inbound",
             Sms.from_e164 == caller_e164,
-            Sms.requested_at > after,
+            Sms.requested_at >= after,
         )
-        .order_by(Sms.requested_at)
+        .order_by(Sms.requested_at, Sms.id)
     )
     return list((await db.execute(stmt)).scalars().all())
 
 
 async def watch_incoming_texts(
-    session: Any, call_id: UUID, *, poll_seconds: float = POLL_SECONDS
+    session: Any,
+    call_id: UUID,
+    *,
+    since: datetime,
+    poll_seconds: float = POLL_SECONDS,
 ) -> None:
-    """Run until cancelled. A failed poll is logged and retried."""
+    """Run until cancelled. Delivery is at-least-once: every poll re-reads the
+    window starting ``CURSOR_OVERLAP`` before ``since`` and skips ids already
+    delivered, so no clock skew or commit order can lose a text. A failed poll
+    is logged and retried."""
     try:
         async with session_scope() as db:
             key = await threads.call_thread_key(db, call_id)
@@ -59,18 +69,22 @@ async def watch_incoming_texts(
     if key is None:
         return
     org, agent_id, caller = key
-    cursor = datetime.now(timezone.utc)
+    after = since - CURSOR_OVERLAP
+    delivered: set[UUID] = set()
     while True:
         await asyncio.sleep(poll_seconds)
         try:
             async with session_scope() as db:
-                rows = await new_inbound_texts(db, org, agent_id, caller, cursor)
+                rows = await new_inbound_texts(db, org, agent_id, caller, after)
             for row in rows:
-                cursor = max(cursor, row.requested_at)
+                if row.id in delivered:
+                    continue
                 session.generate_reply(
                     user_input=threads.TEXT_MARKER + (row.body or "")[:MAX_INJECT_CHARS]
                 )
-        except asyncio.CancelledError:
-            raise
+                delivered.add(row.id)
+        except RuntimeError:
+            logger.info("call_id=%s text watch stopped: session closed", call_id)
+            return
         except Exception:
             logger.exception("call_id=%s text watch poll failed", call_id)
