@@ -17,7 +17,7 @@ from hailhq.voicebot import textbot
 from hailhq.voicebot.pipeline import ProviderKeyError
 from sqlalchemy import select
 
-from ._fakes import FakeLLM
+from ._fakes import FakeLLM, ScriptedLLM
 
 ORG_NUMBER = "+14155550100"
 PERSON = "+33612345678"
@@ -135,9 +135,8 @@ async def test_generate_reply_builds_chat_from_thread(
     monkeypatch.setattr(
         textbot, "build_llm", lambda cfg, org=None: _RecordingLLM(reply="ok " * 400)
     )
-    claimed = SimpleNamespace(agent=SimpleNamespace(organization_id=uuid.uuid4()))
     text = await textbot.generate_reply(
-        claimed,  # type: ignore[arg-type]
+        _claimed(),  # type: ignore[arg-type]
         [
             {"role": "system", "content": "sys"},
             {"role": "assistant", "content": "earlier"},
@@ -146,6 +145,231 @@ async def test_generate_reply_builds_chat_from_thread(
     )
     assert captured["roles"] == ["system", "assistant", "user"]
     assert len(text) <= textbot.MAX_REPLY_CHARS
+
+
+def _claimed(org=None, agent_id=None):
+    return SimpleNamespace(
+        agent=SimpleNamespace(organization_id=org or uuid.uuid4(), id=agent_id),
+        sms=SimpleNamespace(id=uuid.uuid4(), from_e164=PERSON, to_e164=ORG_NUMBER),
+    )
+
+
+_MESSAGES = [
+    {"role": "system", "content": "sys"},
+    {"role": "user", "content": "what was my order number?"},
+]
+
+
+def _use(monkeypatch, llm) -> None:
+    async def fake_resolve(_org, *, skip_llm=False):
+        return {}
+
+    monkeypatch.setattr(textbot, "resolve_org_configs", fake_resolve)
+    monkeypatch.setattr(textbot, "build_llm", lambda cfg, org=None: llm)
+
+
+async def test_chat_from_the_db_has_only_texts_and_the_current_text_last(
+    async_session,
+) -> None:
+    from hailhq.core.models import Call, CallEvent
+
+    sms_id = await _seed(async_session)
+    sms = await async_session.get(Sms, sms_id)
+    call = Call(
+        organization_id=sms.organization_id,
+        agent_id=sms.agent_id,
+        to_number_id=sms.to_number_id,
+        from_e164=PERSON,
+        to_e164=ORG_NUMBER,
+        direction="inbound",
+        status="completed",
+        end_reason="normal_hangup",
+        provider="twilio",
+        voice_config={},
+    )
+    async_session.add(call)
+    await async_session.flush()
+    async_session.add(
+        CallEvent(
+            call_id=call.id,
+            kind="agent_turn",
+            payload={"role": "assistant", "text": "I don't have that number."},
+            occurred_at=datetime.now(timezone.utc),
+        )
+    )
+    await async_session.commit()
+    claimed = await text_agent.claim_pending_reply(async_session)
+
+    messages = await textbot._prepare(claimed)
+
+    assert [m["role"] for m in messages] == ["system", "user"]
+    assert messages[-1]["content"] == "Can I book for Tuesday?"
+    assert "I don't have that number." not in str(messages)
+
+
+async def test_tool_loop_reads_the_thread_then_answers(
+    async_session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    sms_id = await _seed(async_session)
+    sms = await async_session.get(Sms, sms_id)
+    async_session.add(
+        Sms(
+            organization_id=sms.organization_id,
+            agent_id=sms.agent_id,
+            provider="twilio",
+            from_e164=PERSON,
+            to_e164=ORG_NUMBER,
+            direction="inbound",
+            status="received",
+            body="order 4411",
+            requested_at=datetime.now(timezone.utc) - timedelta(days=3),
+        )
+    )
+    await async_session.commit()
+    llm = ScriptedLLM(
+        [
+            ("tool", "thread_history", '{"source": "sms"}'),
+            ("text", "Your order is 4411."),
+        ]
+    )
+    _use(monkeypatch, llm)
+
+    text = await textbot.generate_reply(
+        _claimed(sms.organization_id, sms.agent_id), _MESSAGES  # type: ignore[arg-type]
+    )
+
+    assert text == "Your order is 4411."
+    assert len(llm.calls) == 2
+    assert [t.info.name for t in llm.calls[0]["tools"]] == ["thread_history"]
+    second = llm.calls[1]["items"]
+    assert [i.type for i in second[-2:]] == ["function_call", "function_call_output"]
+    assert "order 4411" in second[-1].output
+    assert second[-1].call_id == second[-2].call_id
+    assert llm.aclosed
+
+
+async def test_tool_scope_comes_from_the_text_not_the_model(
+    async_session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    sms_id = await _seed(async_session)
+    sms = await async_session.get(Sms, sms_id)
+    async_session.add(
+        Sms(
+            organization_id=sms.organization_id,
+            agent_id=sms.agent_id,
+            provider="twilio",
+            from_e164="+33699999999",
+            to_e164=ORG_NUMBER,
+            direction="inbound",
+            status="received",
+            body="someone else's secret",
+        )
+    )
+    await async_session.commit()
+    llm = ScriptedLLM(
+        [
+            ("tool", "thread_history", '{"caller": "+33699999999"}'),
+            ("text", "ok"),
+        ]
+    )
+    _use(monkeypatch, llm)
+
+    await textbot.generate_reply(
+        _claimed(sms.organization_id, sms.agent_id), _MESSAGES  # type: ignore[arg-type]
+    )
+
+    output = llm.calls[1]["items"][-1].output
+    assert "Can I book for Tuesday?" in output
+    assert "secret" not in output
+
+
+async def test_tool_loop_stops_after_three_rounds(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake_execute(ctx, args):
+        return "nothing"
+
+    monkeypatch.setattr(textbot, "THREAD_HISTORY", _spec_with(fake_execute))
+    llm = ScriptedLLM(
+        [
+            ("tool", "thread_history", "{}"),
+            ("tool", "thread_history", "{}"),
+            ("tool", "thread_history", "{}"),
+            ("text", "never asked"),
+        ],
+        text_with_tool="Let me check.",
+    )
+    _use(monkeypatch, llm)
+
+    text = await textbot.generate_reply(_claimed(), _MESSAGES)  # type: ignore[arg-type]
+
+    assert len(llm.calls) == textbot.MAX_TOOL_ROUNDS == 3
+    assert llm.calls[-1]["tool_choice"] == "none"
+    assert text == "Let me check."
+
+
+async def test_tool_call_without_text_on_the_last_round_raises(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake_execute(ctx, args):
+        return "nothing"
+
+    monkeypatch.setattr(textbot, "THREAD_HISTORY", _spec_with(fake_execute))
+    llm = ScriptedLLM([("tool", "thread_history", "{}")] * 3)
+    _use(monkeypatch, llm)
+
+    with pytest.raises(RuntimeError):
+        await textbot.generate_reply(_claimed(), _MESSAGES)  # type: ignore[arg-type]
+
+
+async def test_tool_error_becomes_an_apology_not_an_exception(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def boom(ctx, args):
+        raise RuntimeError("db down")
+
+    monkeypatch.setattr(textbot, "THREAD_HISTORY", _spec_with(boom))
+    llm = ScriptedLLM(
+        [("tool", "thread_history", "not json"), ("text", "Sorry, try again later.")]
+    )
+    _use(monkeypatch, llm)
+
+    text = await textbot.generate_reply(_claimed(), _MESSAGES)  # type: ignore[arg-type]
+
+    assert text == "Sorry, try again later."
+    out = llm.calls[1]["items"][-1]
+    assert out.output == textbot.TOOL_APOLOGY
+    assert out.is_error is True
+
+
+async def test_unknown_tool_gets_a_plain_refusal(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    llm = ScriptedLLM([("tool", "send_sms", "{}"), ("text", "ok")])
+    _use(monkeypatch, llm)
+
+    await textbot.generate_reply(_claimed(), _MESSAGES)  # type: ignore[arg-type]
+
+    assert llm.calls[1]["items"][-1].output == textbot.TOOL_APOLOGY
+
+
+async def test_reply_after_a_tool_is_trimmed(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def fake_execute(ctx, args):
+        return "nothing"
+
+    monkeypatch.setattr(textbot, "THREAD_HISTORY", _spec_with(fake_execute))
+    llm = ScriptedLLM([("tool", "thread_history", "{}"), ("text", "x" * 2000)])
+    _use(monkeypatch, llm)
+
+    text = await textbot.generate_reply(_claimed(), _MESSAGES)  # type: ignore[arg-type]
+
+    assert text == "x" * textbot.MAX_REPLY_CHARS
+
+
+def _spec_with(execute):
+    import dataclasses
+
+    return dataclasses.replace(textbot.THREAD_HISTORY, execute=execute)
 
 
 async def test_transient_post_error_leaves_the_text_retryable(

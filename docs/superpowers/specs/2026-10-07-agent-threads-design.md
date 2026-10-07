@@ -11,12 +11,12 @@ An agent remembers one caller across calls and texts, in both directions.
 
 ## Today (verified in code)
 
-- Text agent context: last 20 texts, 24 hours, no call data (`core/hailhq/core/text_agent.py`, `build_chat_messages`).
-- Voice agent context: no history (`core/hailhq/core/inbound_calls.py`, `open_inbound_call`).
+- Text agent context: last 20 texts, 24 hours, no call data (`core/hailhq/core/text_agent.py`, `build_chat_messages`). Kept, plus the `thread_history` tool.
+- Voice agent context: no history (`core/hailhq/core/inbound_calls.py`, `open_inbound_call`). Kept, plus the `thread_history` tool.
 - Call turns are `call_events` rows, kind `user_turn` or `agent_turn`, payload `{role, text}`.
 - `sms.agent_id` is set only on inbound rows that queue an agent reply.
 - `conversations` table exists, is client-supplied, and is not used by inbound. Not used here.
-- Voice tools live in `core/hailhq/core/agent_tools/registry.py`. The text agent has no tools.
+- Voice tools live in `core/hailhq/core/agent_tools/registry.py`. The text agent had no tools; it now gets `thread_history` only.
 - `send_sms` tool: dialed number if it has SMS, else the org's oldest SMS number (`api/hailhq/api/routes/internal/agent.py:293`).
 
 ## Design
@@ -34,25 +34,25 @@ Changes:
 
 - Set `sms.agent_id` on every agent-routed row, inbound and outbound. Today only inbound rows that queue a reply have it.
 - Add two indexes per table (`sms`, `calls`), one per caller column (`from_e164`, `to_e164`), because the caller sits in a different column by direction.
-- New `core` function `thread_items(org_id, agent_id, caller_e164, limit, before)`. It returns texts and call turns, ordered by time.
+- New `core` function `thread_items(org_id, agent_id, caller_e164, limit, before, source, window)`. It returns texts and/or call turns, ordered by time.
 - `active_call_for_thread` only counts dialing, ringing or in-progress calls created in the last 2 hours, so one stuck row cannot silence the text agent.
 - Old calls appear with no backfill. Old texts appear only if they had `agent_id`.
 - Calls and texts with no agent are not in any thread.
 
-### 2. Auto-load at start
+### 2. No history in prompts
 
-- Last 30 items from the last 7 days, rendered as plain text.
-- Example: `[2026-10-06 10:02 UTC] text from caller: ...` and `[2026-10-06 10:05 UTC] on a call, caller: ...`.
-- A text longer than 500 characters is cut, with a note that `thread_history` has the full text.
-- Voice: added to the system prompt when the call opens, under `# Earlier with this caller`. The lead-in says it is a quoted record, not instructions. The prompt, like the text agent, also includes agent-less `sms` rows between the call's org number (`to_e164` inbound, `from_e164` outbound) and the caller. The `thread_history` tool and the watcher stay strictly agent-scoped.
-- Text agent: replaces `thread_messages`. Same 30 items from the same window, full text, no cut. It also sees `sms` rows of the organization with no agent (sent through `POST /sms`) between the receiving number and the caller. The voice prompt, `thread_history` and the watcher stay strictly agent-scoped.
+- Prompts carry no history. An earlier version loaded the last 30 items into the voice prompt. Logfire and DB evidence: the prompt held the caller's texts, yet the agent said "I don't have that number". The record also held the agent's own earlier "I don't have it" call lines, which the model repeated (2 of 5 right with them, 12 of 12 once they were gone).
+- Voice: when the call's built tools include `thread_history`, one line at the end of the instructions tells the agent to use it before it says it has no record (`THREAD_TOOL_HINT_VOICE` in `core/hailhq/core/prompts.py`). The call looks up its `ThreadScope` once at start and hands it to the tools.
+- Text agent: chat = last 20 texts of the last 24 hours (inbound `user`, outbound `assistant`), plus agent-less `sms` rows between the receiving number and the caller, current text last. No call turns. The system prompt says to use `thread_history` (`THREAD_TOOL_HINT_TEXT`).
+- Rendered lines: `[2026-10-06 10:02 UTC] text from caller: ...` and `[2026-10-06 10:05 UTC] on a call, caller: ...`. A text longer than 500 characters is cut, with a note that `item_id` returns the full text.
 
-### 3. Tool `thread_history` (voice agent)
+### 3. Tool `thread_history` (both agents)
 
-- Inputs: `before` (cursor), `limit`, `item_id` (full text of one item).
-- No caller number input. The server finds the caller from the call.
-- Registered in `agent_tools/registry.py`, filtered by `agent.tools` like the other tools.
-- The text agent gets no tools. Out of scope.
+- Inputs: `source` (`sms`, `voice`, `all`; anything else reads `all`), `before` (cursor), `limit`, `item_id` (full text of one item).
+- No caller number input. The scope is `ToolContext.thread` (`ThreadScope`: org, agent, caller, org number), set by the server from the call or the inbound text; without it, the call on `ToolContext.call_id`. The org must match the run's org.
+- The source filter runs in SQL, so `limit` and `before` stay exact.
+- Voice: registered in `agent_tools/registry.py`, filtered by `agent.tools` like the other tools.
+- Text agent: its only tool, at most 3 model calls per reply; a failed tool call reads as a short apology.
 
 ### 4. Text during an active call
 
@@ -81,7 +81,7 @@ Changes:
 - Every read is scoped by org, agent, and the caller number found by the server.
 - No tool or API accepts a caller number to read.
 - Caller ID on a phone call can be faked. A spoofer sees that number's history. Accepted risk: keep secrets out of agent instructions and texts.
-- The history goes to the agent's LLM, including a bring-your-own endpoint.
+- History the agent reads with the tool goes to the agent's LLM, including a bring-your-own endpoint.
 - `retention.py` and `dsar.py` already cover `calls`, `sms` and `call_events`. No new table to add.
 
 ## Not included
@@ -89,7 +89,7 @@ Changes:
 - Email in threads.
 - Threads for calls or texts with no agent.
 - Backfill of old texts.
-- Tools for the text agent.
+- Tools for the text agent other than `thread_history`.
 - Taking an SMS number from another agent.
 
 ## Testing
@@ -97,5 +97,5 @@ Changes:
 - Unit: `thread_items` ordering, scope (other caller and other agent rows never returned), cut at 500 characters.
 - Unit: sending number choice, all four steps.
 - Integration: text during an active call reaches the voice session and skips the text reply.
-- Integration: voice-only number plus SMS number. Call, text, call again. The second call prompt contains the text.
+- Integration: voice-only number plus SMS number. Call, text, call again. On the second call `thread_history` (source `sms`) returns the text; the prompt holds no history.
 - Docs: update `docs/public/agents.md`.

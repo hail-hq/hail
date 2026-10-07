@@ -43,10 +43,8 @@ from hailhq.core.internal_webhook import notify_usage_event_recorded
 from hailhq.core.models import Call, CallEvent, UsageEvent
 from hailhq.core.pool import release_pool_reservation
 from hailhq.core.prompts import (
-    RECENT_COUNT,
     VOICE_PREAMBLE,
     VOICE_PREAMBLE_INBOUND,
-    VoiceHistory,
     build_voice_instructions,
 )
 from hailhq.core.schemas import TERMINAL_CALL_STATUSES
@@ -194,20 +192,14 @@ class SpeechSanitizingAgent(Agent):
 def build_instructions(
     system_prompt: str | None,
     direction: str | None = None,
-    history: HistoryText | None = None,
     *,
-    history_tool: bool = True,
+    thread_tool: bool = False,
 ) -> str:
     """The call's instructions (see :func:`hailhq.core.prompts.build_voice_instructions`)."""
-    return build_voice_instructions(
-        system_prompt,
-        direction,
-        history,
-        history_tool=history_tool,
-    )
+    return build_voice_instructions(system_prompt, direction, thread_tool=thread_tool)
 
 
-def has_history_tool(tools: list[Any]) -> bool:
+def has_thread_tool(tools: list[Any]) -> bool:
     """Whether ``thread_history`` is among the tools actually built for this
     call (dispatch allow-list, availability checks and build failures applied)."""
     return any(getattr(t.info, "name", None) == "thread_history" for t in tools)
@@ -315,7 +307,10 @@ async def build_tools_safely(
     """
     try:
         return await build_agent_tools(
-            metadata, call_id=call_id, hangup=hangup, send_dtmf=send_dtmf
+            metadata,
+            call_id=call_id,
+            hangup=hangup,
+            send_dtmf=send_dtmf,
         )
     except Exception:
         logger.exception(
@@ -615,54 +610,6 @@ def disconnect_reason_to_status(reason: int | None) -> tuple[str | None, str | N
 
 
 logger = logging.getLogger("hailhq.voicebot")
-
-
-HISTORY_TIMEOUT_SECONDS = 1.5
-
-
-HistoryText = VoiceHistory
-
-
-async def _read_thread(call_id: UUID) -> HistoryText | None:
-    async with session_scope() as db:
-        ctx = await threads.call_thread_context(db, call_id)
-        if ctx is None:
-            return None
-        # The prompt also shows texts of this number pair that have no agent
-        # (sent through POST /sms), as the text agent's history does.
-        items = await threads.thread_items(
-            db,
-            ctx.organization_id,
-            ctx.agent_id,
-            ctx.caller_e164,
-            unassigned_pair=(ctx.org_number_e164, ctx.caller_e164),
-        )
-    record = threads.render_thread(items)
-    if not record:
-        return None
-    recent = ""
-    if len(items) > RECENT_COUNT:
-        recent = threads.render_thread(items[-RECENT_COUNT:])
-    return HistoryText(record, recent, len(items))
-
-
-async def load_thread_context(call_id: UUID) -> HistoryText | None:
-    """This caller's earlier texts and calls with this agent, rendered for the
-    prompt. None when there is nothing, or when the read fails or exceeds
-    HISTORY_TIMEOUT_SECONDS: a call never
-    waits on its history."""
-    try:
-        found = await asyncio.wait_for(
-            _read_thread(call_id), timeout=HISTORY_TIMEOUT_SECONDS
-        )
-    except Exception:
-        logger.exception("call_id=%s thread history unavailable", call_id)
-        return None
-    if found is None:
-        logger.info("call_id=%s thread history items=0", call_id)
-        return None
-    logger.info("call_id=%s thread history items=%d", call_id, found.count)
-    return found
 
 
 def prewarm(proc: JobProcess) -> None:
@@ -1568,9 +1515,6 @@ async def _run_call(
             captured["end_reason"] = CallEndReason.WORKER_SHUTDOWN.value
             captured["status"] = "failed"
 
-    # Read the caller's history while the tools are built: a call never waits
-    # longer than HISTORY_TIMEOUT_SECONDS for it.
-    history_task = asyncio.create_task(load_thread_context(call_id))
     agent_tools, agent_api = await build_tools_safely(
         metadata,
         call_id,
@@ -1584,13 +1528,13 @@ async def _run_call(
             [t.info.name for t in agent_tools],
         )
 
-    history = await history_task
+    thread_tool = has_thread_tool(agent_tools)
+    logger.info("call_id=%s thread_history tool=%s", call_id, thread_tool)
     agent = SpeechSanitizingAgent(
         instructions=build_instructions(
             metadata.get("system_prompt"),
             metadata.get("direction"),
-            history,
-            history_tool=has_history_tool(agent_tools),
+            thread_tool=thread_tool,
         ),
         tools=agent_tools,
     )

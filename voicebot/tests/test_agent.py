@@ -1519,7 +1519,11 @@ async def test_build_tools_safely_passes_through_on_success(
     sentinel_api = object()
 
     async def _ok(
-        _metadata: dict, *, call_id: UUID, hangup: object, send_dtmf: object
+        _metadata: dict,
+        *,
+        call_id: UUID,
+        hangup: object,
+        send_dtmf: object,
     ) -> tuple:
         return sentinel_tools, sentinel_api
 

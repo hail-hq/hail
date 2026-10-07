@@ -24,6 +24,7 @@ from livekit.agents.llm import (
     ChatChunk,
     ChatContext,
     ChoiceDelta,
+    FunctionToolCall,
     LLMStream,
     Tool,
     ToolChoice,
@@ -206,3 +207,79 @@ __all__ = [
     "FakeRoom",
     "FakeSpeechHandle",
 ]
+
+
+class ScriptedLLM(LLM):
+    """An LLM that answers each ``chat`` call with the next scripted step:
+    ``("text", reply)`` or ``("tool", name, arguments_json)``. Records what
+    each call saw (chat items, tools, tool_choice)."""
+
+    def __init__(
+        self, steps: list[tuple[str, ...]], *, text_with_tool: str = ""
+    ) -> None:
+        super().__init__()
+        self._steps = list(steps)
+        self._text_with_tool = text_with_tool
+        self.calls: list[dict[str, Any]] = []
+        self.aclosed = False
+
+    def chat(
+        self,
+        *,
+        chat_ctx: ChatContext,
+        tools: list[Tool] | None = None,
+        conn_options: APIConnectOptions = DEFAULT_API_CONNECT_OPTIONS,
+        parallel_tool_calls: NotGivenOr[bool] = NOT_GIVEN,
+        tool_choice: NotGivenOr[ToolChoice] = NOT_GIVEN,
+        extra_kwargs: NotGivenOr[dict[str, Any]] = NOT_GIVEN,
+    ) -> LLMStream:
+        self.calls.append(
+            {
+                "items": list(chat_ctx.items),
+                "tools": list(tools or []),
+                "tool_choice": tool_choice,
+            }
+        )
+        return _ScriptedStream(
+            self,
+            self._steps.pop(0),
+            chat_ctx=chat_ctx,
+            tools=tools or [],
+            conn_options=conn_options,
+        )
+
+    async def aclose(self) -> None:
+        self.aclosed = True
+
+
+class _ScriptedStream(LLMStream):
+    def __init__(
+        self,
+        llm: ScriptedLLM,
+        step: tuple[str, ...],
+        *,
+        chat_ctx: ChatContext,
+        tools: list[Tool],
+        conn_options: APIConnectOptions,
+    ) -> None:
+        super().__init__(llm, chat_ctx=chat_ctx, tools=tools, conn_options=conn_options)
+        self._step = step
+        self._scripted = llm
+
+    async def _run(self) -> None:
+        if self._step[0] == "text":
+            delta = ChoiceDelta(role="assistant", content=self._step[1])
+        else:
+            _, name, arguments = self._step
+            delta = ChoiceDelta(
+                role="assistant",
+                content=self._scripted._text_with_tool or None,
+                tool_calls=[
+                    FunctionToolCall(
+                        name=name,
+                        arguments=arguments,
+                        call_id=f"call_{len(self._scripted.calls)}",
+                    )
+                ],
+            )
+        self._event_ch.send_nowait(ChatChunk(id=str(id(self)), delta=delta))

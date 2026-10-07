@@ -4,15 +4,15 @@ from __future__ import annotations
 
 import asyncio
 import json
-import time
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
 from hailhq.core.inbound_calls import Accepted, Rejected, SipAttributes
 from hailhq.core.models import Agent, Call, PhoneNumber, Sms
+from hailhq.core.prompts import THREAD_TOOL_HINT_VOICE
 from hailhq.voicebot import agent as agent_mod
 from hailhq.voicebot.agent import parse_metadata
 from livekit import rtc
@@ -350,264 +350,72 @@ async def test_inbound_without_first_message_waits_for_the_caller() -> None:
     assert session.generate_reply_calls == []
 
 
-async def test_load_thread_context_renders_the_callers_texts(async_session) -> None:
+async def _call_row(session, caller="+33612345678", with_agent=True):
     org = uuid.uuid4()
     agent = Agent(organization_id=org, name="a", system_prompt="x")
-    async_session.add(agent)
+    session.add(agent)
     number = PhoneNumber(
         organization_id=org,
-        e164="+14155550100",
+        e164=f"+1415{uuid.uuid4().int % 10**7:07d}",
         country_code="US",
         number_type="local",
         provider="twilio",
         provisioning_state="active",
     )
-    async_session.add(number)
-    await async_session.flush()
+    session.add(number)
+    await session.flush()
     call = Call(
         organization_id=org,
-        agent_id=agent.id,
+        agent_id=agent.id if with_agent else None,
         to_number_id=number.id,
         voice_config={},
-        from_e164="+33612345678",
-        to_e164="+14155550100",
+        from_e164=caller,
+        to_e164=number.e164,
         direction="inbound",
         status="in_progress",
         provider="twilio",
     )
-    async_session.add(call)
-    async_session.add(
+    session.add(call)
+    session.add(
         Sms(
             organization_id=org,
             agent_id=agent.id,
             provider="twilio",
-            from_e164="+33612345678",
-            to_e164="+14155550100",
+            from_e164=caller,
+            to_e164=number.e164,
             direction="inbound",
             status="received",
             body="my order is 4411",
             requested_at=datetime.now(timezone.utc),
         )
     )
-    await async_session.commit()
-
-    text = await agent_mod.load_thread_context(call.id)
-
-    assert text is not None and "my order is 4411" in text.record
-    assert "text from caller" in text.record
-    assert text.recent == ""  # one item: nothing to repeat
+    await session.commit()
+    return call, agent, number
 
 
-async def test_load_thread_context_repeats_the_newest_items_in_recent(
-    async_session,
-) -> None:
-    org = uuid.uuid4()
-    agent = Agent(organization_id=org, name="a", system_prompt="x")
-    async_session.add(agent)
-    number = PhoneNumber(
-        organization_id=org,
-        e164="+14155550100",
-        country_code="US",
-        number_type="local",
-        provider="twilio",
-        provisioning_state="active",
-    )
-    async_session.add(number)
-    await async_session.flush()
-    call = Call(
-        organization_id=org,
-        agent_id=agent.id,
-        to_number_id=number.id,
-        voice_config={},
-        from_e164="+33612345678",
-        to_e164="+14155550100",
-        direction="inbound",
-        status="in_progress",
-        provider="twilio",
-    )
-    async_session.add(call)
-    base = datetime.now(timezone.utc) - timedelta(hours=1)
-    for i in range(7):
-        async_session.add(
-            Sms(
-                organization_id=org,
-                agent_id=agent.id,
-                provider="twilio",
-                from_e164="+33612345678",
-                to_e164="+14155550100",
-                direction="inbound",
-                status="received",
-                body=f"msg{i}",
-                requested_at=base + timedelta(minutes=i),
-            )
-        )
-    await async_session.commit()
-
-    text = await agent_mod.load_thread_context(call.id)
-
-    assert text is not None
-    assert "msg6" in text.recent and "msg2" in text.recent
-    assert "msg1" not in text.recent and "msg0" not in text.recent
-    assert text.record.count("msg") == 7
-
-
-def test_lead_in_follows_the_tools_actually_built() -> None:
+def test_thread_hint_follows_the_tools_actually_built() -> None:
     def tool(name: str) -> SimpleNamespace:
         return SimpleNamespace(info=SimpleNamespace(name=name))
 
-    history = agent_mod.HistoryText(record="[t] text from caller: hi")
     for tools, expected in (
         ([tool("thread_history"), tool("hangup")], True),
         ([tool("hangup")], False),
         ([], False),
     ):
-        assert agent_mod.has_history_tool(tools) is expected
+        assert agent_mod.has_thread_tool(tools) is expected
         out = agent_mod.build_instructions(
-            "x", None, history, history_tool=agent_mod.has_history_tool(tools)
+            "x", None, thread_tool=agent_mod.has_thread_tool(tools)
         )
-        assert ("call the thread_history tool" in out) is expected
+        assert ("thread_history tool" in out) is expected
+        assert out.endswith(THREAD_TOOL_HINT_VOICE) is expected
 
 
-async def test_voice_prompt_includes_unassigned_rows_of_the_number_pair(
-    async_session,
-) -> None:
-    org = uuid.uuid4()
-    other_org = uuid.uuid4()
-    agent = Agent(organization_id=org, name="a", system_prompt="x")
-    async_session.add(agent)
-    number = PhoneNumber(
-        organization_id=org,
-        e164="+14155550100",
-        country_code="US",
-        number_type="local",
-        provider="twilio",
-        provisioning_state="active",
-    )
-    async_session.add(number)
-    await async_session.flush()
-    call = Call(
-        organization_id=org,
-        agent_id=agent.id,
-        to_number_id=number.id,
-        voice_config={},
-        from_e164="+33612345678",
-        to_e164="+14155550100",
-        direction="inbound",
-        status="in_progress",
-        provider="twilio",
-    )
-    async_session.add(call)
-    now = datetime.now(timezone.utc)
-
-    def row(org_id, frm, to, body, **kw):
-        return Sms(
-            organization_id=org_id,
-            provider="twilio",
-            from_e164=frm,
-            to_e164=to,
-            direction="outbound" if frm == "+14155550100" else "inbound",
-            status="sent",
-            body=body,
-            requested_at=now,
-            **kw,
-        )
-
-    async_session.add_all(
-        [
-            row(org, "+14155550100", "+33612345678", "api sent receipt"),
-            row(org, "+33612345678", "+14155550100", "agentless inbound"),
-            row(org, "+14155550999", "+33612345678", "other number"),
-            row(other_org, "+14155550100", "+33612345678", "other org"),
-            row(org, "+14155550100", "+33600000000", "other caller"),
-        ]
-    )
-    await async_session.commit()
-
-    text = await agent_mod.load_thread_context(call.id)
-
-    assert text is not None
-    assert "api sent receipt" in text.record and "agentless inbound" in text.record
-    for hidden in ("other number", "other org", "other caller"):
-        assert hidden not in text.record
-
-
-async def test_load_thread_context_is_none_without_an_agent(async_session) -> None:
-    assert await agent_mod.load_thread_context(uuid.uuid4()) is None
-
-
-async def test_load_thread_context_is_none_when_the_read_fails(monkeypatch) -> None:
-    async def boom(*args, **kwargs):
-        raise RuntimeError("db down")
-
-    monkeypatch.setattr(agent_mod.threads, "call_thread_context", boom)
-    assert await agent_mod.load_thread_context(uuid.uuid4()) is None
-
-
-async def test_load_thread_context_is_none_when_the_read_is_slow(
-    async_session, monkeypatch
-) -> None:
-    async def slow(*args, **kwargs):
-        await asyncio.sleep(10)
-
-    async def key(*args, **kwargs):
-        return agent_mod.threads.CallThread(
-            uuid.uuid4(),
-            uuid.uuid4(),
-            "+33612345678",
-            "+14155550100",
-            datetime.now(timezone.utc),
-        )
-
-    monkeypatch.setattr(agent_mod.threads, "call_thread_context", key)
-    monkeypatch.setattr(agent_mod.threads, "thread_items", slow)
-    monkeypatch.setattr(agent_mod, "HISTORY_TIMEOUT_SECONDS", 0.05)
-
-    start = time.monotonic()
-    assert await agent_mod.load_thread_context(uuid.uuid4()) is None
-    assert time.monotonic() - start < 2
-
-
-async def test_load_thread_context_is_none_for_a_withheld_caller(
-    async_session,
-) -> None:
-    org = uuid.uuid4()
-    agent = Agent(organization_id=org, name="a", system_prompt="x")
-    async_session.add(agent)
-    number = PhoneNumber(
-        organization_id=org,
-        e164="+14155550101",
-        country_code="US",
-        number_type="local",
-        provider="twilio",
-        provisioning_state="active",
-    )
-    async_session.add(number)
-    await async_session.flush()
-    call = Call(
-        organization_id=org,
-        agent_id=agent.id,
-        to_number_id=number.id,
-        voice_config={},
-        from_e164="anonymous",
-        to_e164="+14155550101",
-        direction="inbound",
-        status="in_progress",
-        provider="twilio",
-    )
-    async_session.add(call)
-    async_session.add(
-        Sms(
-            organization_id=org,
-            agent_id=agent.id,
-            provider="twilio",
-            from_e164="anonymous",
-            to_e164="+14155550101",
-            direction="inbound",
-            status="received",
-            body="secret",
-            requested_at=datetime.now(timezone.utc),
-        )
-    )
-    await async_session.commit()
-
-    assert await agent_mod.load_thread_context(call.id) is None
+def test_the_prompt_loader_for_history_is_gone() -> None:
+    for name in (
+        "load_thread_context",
+        "_read_thread",
+        "HISTORY_TIMEOUT_SECONDS",
+        "HistoryText",
+        "has_history_tool",
+    ):
+        assert not hasattr(agent_mod, name), name

@@ -69,9 +69,11 @@ agent skips it; the responsibility for that is yours.
    turns texts back on and replies. From anyone else they are an answer, and the agent gets them.
 3. Any other text to a number with `sms_agent_id` set (agent `live`,
    `sms_enabled: true`) is answered by the agent: one reply, written from
-   `system_prompt` and the [thread](#threads) (30 items from the last 7 days,
-   texts and call turns, plus texts between that number and the caller that
-   have no agent: sent through `POST /sms`, or received before the number had a text agent), sent from the same number through its carrier. The agent sends at most 20
+   `system_prompt` and the last 20 texts of the last 24 hours with the caller
+   (plus texts between that number and the caller that have no agent: sent
+   through `POST /sms`, or received before the number had a text agent). Older
+   texts and calls it reads with the `thread_history` tool (see [Threads](#threads)).
+   The reply is sent from the same number through its carrier. The agent sends at most 20
    replies per thread in any 24 hours; past that it stays quiet until older
    replies leave the window. Replies bill as outbound SMS. Inbound rows carry `agent_reply_state`
    (`pending`, `processing`, `done`, `skipped`, `failed`) in the database;
@@ -87,24 +89,28 @@ retried up to 3 times with backoff; a text still unanswered after
 ## Threads
 
 A caller texts an order number to the agent's SMS number, then calls the agent.
-The agent greets them already knowing the order number. A text sent during a
-call goes to the voice agent and is then marked `done`. A text sent from the
-moment the call row is created (ringing included) counts. If the voice agent
-never got it, the text agent answers it when the call ends, or when the
-stale-call sweep closes the call. The reply age limit
+When the caller asks about it, the agent looks it up with the `thread_history`
+tool. A text sent during a call goes to the voice agent and is then marked
+`done`. A text sent from the moment the call row is created (ringing included)
+counts. If the voice agent never got it, the text agent answers it when the
+call ends, or when the stale-call sweep closes the call. The reply age limit
 (`HAIL_TEXT_REPLY_MAX_AGE_SECONDS`) restarts then.
 
 - Scope: agent + caller number. Texts and call turns both count.
-- Each call and text reply starts with the last 30 items from the last 7 days.
-  A voice agent can page back with the `thread_history` tool. The prompt tells
-  it to check the record, and call `thread_history`, before it says it has no
-  record.
-- The voice prompt and the text agent also show texts between the number and
-  the caller that have no agent. The `thread_history` tool does not.
+- Prompts carry no history. Both agents read it with the `thread_history` tool:
+  `source` is `sms` (texts), `voice` (call turns) or `all`; `before` pages back
+  over the last 7 days; `item_id` returns one full message. The voice prompt
+  gets one line telling the agent to use the tool when the call has it; the
+  text prompt always has it. Why: history in the prompt also held the agent's
+  own past "I don't have that" lines, and the model repeated them.
+- The text agent's chat holds the last 20 texts of the last 24 hours, no call
+  turns. `thread_history` is its only tool.
+- `thread_history` also returns texts between the number and the caller that
+  have no agent.
 - Hidden or invalid caller numbers get no history.
 - Caller ID on a phone call can be faked. Do not put secrets in an agent's
   instructions or in texts it sends.
-- The history is sent to the agent's LLM, including a bring-your-own endpoint.
+- History the tool returns is sent to the agent's LLM, including a bring-your-own endpoint.
 - `send_sms` picks the number in this order:
   1. the dialed number, if it can text and is not bound to another agent.
      Bound to this agent: used. Free: it is bound to this agent when the agent

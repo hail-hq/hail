@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from typing import Any, Literal
 
 from hailhq.core.agent_tools.client import AgentApiClient
+from hailhq.core.threads import ThreadScope
 from sqlalchemy.ext.asyncio import AsyncSession
 
 RiskTier = Literal["read_only", "session_control", "outbound_send"]
@@ -22,6 +23,8 @@ RiskTier = Literal["read_only", "session_control", "outbound_send"]
 # tools and the voicebot's own tool-failure path use this exact string so
 # the callee hears one consistent apology regardless of where it originates.
 SPOKEN_FALLBACK = "Sorry, that didn't work."
+# A call-scoped tool run with no call (the text agent).
+NO_CALL = "I can do that only during a call."
 
 
 @dataclass
@@ -35,13 +38,18 @@ class ToolContext:
     ``send_dtmf`` takes the already-validated digit string and publishes it to
     the SIP leg. Keeping it a handle (rather than importing ``livekit`` here)
     is what keeps ``core`` free of transport dependencies.
+
+    ``call_id`` is None outside a call (the text agent); tools that act on
+    a call refuse then. ``thread`` is the one thread ``thread_history`` may
+    read, set by the server when the run starts.
     """
 
-    call_id: uuid.UUID
+    call_id: uuid.UUID | None
     organization_id: uuid.UUID
     api: AgentApiClient | None
     hangup: Callable[[], Awaitable[None]] | None
     send_dtmf: Callable[[str], Awaitable[None]] | None
+    thread: ThreadScope | None = None
 
 
 @dataclass(frozen=True)
@@ -54,4 +62,4 @@ class ToolSpec:
     execute: Callable[[ToolContext, dict[str, Any]], Awaitable[str]]
 
 
-__all__ = ["SPOKEN_FALLBACK", "RiskTier", "ToolContext", "ToolSpec"]
+__all__ = ["NO_CALL", "SPOKEN_FALLBACK", "RiskTier", "ToolContext", "ToolSpec"]

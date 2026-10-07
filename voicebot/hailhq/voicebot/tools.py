@@ -45,7 +45,8 @@ def _make_handler(spec: ToolSpec, tctx: ToolContext):
     return handler
 
 
-def _wrap(spec: ToolSpec, tctx: ToolContext):
+def wrap_tool(spec: ToolSpec, tctx: ToolContext):
+    """One core tool as a LiveKit function tool bound to ``tctx``."""
     return function_tool(
         _make_handler(spec, tctx),
         raw_schema={
@@ -57,7 +58,11 @@ def _wrap(spec: ToolSpec, tctx: ToolContext):
 
 
 async def build_agent_tools(
-    metadata: dict[str, Any], *, call_id: UUID, hangup, send_dtmf
+    metadata: dict[str, Any],
+    *,
+    call_id: UUID,
+    hangup,
+    send_dtmf,
 ) -> tuple[list, AgentApiClient | None]:
     """Build this call's LiveKit tools. Returns (tools, api_client).
 
@@ -118,7 +123,7 @@ async def build_agent_tools(
                 # swallowed too, silently disabling available tools.
                 await session.rollback()
 
-    return [_wrap(s, tctx) for s in available], api
+    return [wrap_tool(s, tctx) for s in available], api
 
 
-__all__ = ["SPOKEN_TOOL_FAILURE", "build_agent_tools"]
+__all__ = ["SPOKEN_TOOL_FAILURE", "build_agent_tools", "wrap_tool"]
