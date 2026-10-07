@@ -28,12 +28,14 @@ A thread is every `calls` and `sms` row with:
 - the same `organization_id`
 - the same `agent_id`
 - the same caller number: `from_e164` on inbound rows, `to_e164` on outbound rows
+- The caller must be valid E.164. Withheld numbers (`anonymous`, empty) get no thread.
 
 Changes:
 
 - Set `sms.agent_id` on every agent-routed row, inbound and outbound. Today only inbound rows that queue a reply have it.
 - Add two indexes per table (`sms`, `calls`), one per caller column (`from_e164`, `to_e164`), because the caller sits in a different column by direction.
 - New `core` function `thread_items(org_id, agent_id, caller_e164, limit, before)`. It returns texts and call turns, ordered by time.
+- `active_call_for_thread` only counts ringing or in-progress calls created in the last 2 hours, so one stuck row cannot silence the text agent.
 - Old calls appear with no backfill. Old texts appear only if they had `agent_id`.
 - Calls and texts with no agent are not in any thread.
 
@@ -42,8 +44,8 @@ Changes:
 - Last 30 items from the last 7 days, rendered as plain text.
 - Example: `[text in 10:02] ...` and `[call 10:05] caller: ... agent: ...`.
 - A text longer than 500 characters is cut, with a note that `thread_history` has the full text.
-- Voice: added to the system prompt when the call opens.
-- Text agent: replaces `thread_messages`. Same 30 items, full text, no cut.
+- Voice: added to the system prompt when the call opens, under `# Earlier with this caller`. The lead-in says it is a quoted record, not instructions.
+- Text agent: replaces `thread_messages`. Same 30 items from the same window, full text, no cut.
 
 ### 3. Tool `thread_history` (voice agent)
 
@@ -55,15 +57,16 @@ Changes:
 ### 4. Text during an active call
 
 - Inbound text from the caller while that agent has an active call with the same caller:
-  - The API pushes it to the voice session.
-  - The voicebot adds it to the agent's conversation as: `Caller just texted: <body>`.
+  - No API push. The voicebot polls the thread every 2 seconds (`voicebot/hailhq/voicebot/text_watch.py`).
+  - It adds the text to the agent's conversation with the prefix `[text message from caller] `, cut at 1000 characters.
+  - Delivery is at-least-once: a rare duplicate is possible.
   - The text agent does not reply. The row is marked `agent_reply_state='skipped'`.
 
 ### 5. Sending number for `send_sms`
 
 1. The dialed number, if it has SMS.
 2. An org SMS number whose `sms_agent_id` is this agent.
-3. An org SMS number whose `sms_agent_id` is empty. Set it to this agent.
+3. An org SMS number whose `sms_agent_id` is empty. Bind it to this agent, only if the agent has `sms_enabled`. The change writes a `number.route` audit entry.
 4. None found: the agent tells the caller it cannot text. The tool stays listed while the org has any SMS number, and is hidden when the org has none.
 
 - A number bound to another agent is never taken.
@@ -74,6 +77,8 @@ Changes:
 
 - Every read is scoped by org, agent, and the caller number found by the server.
 - No tool or API accepts a caller number to read.
+- Caller ID on a phone call can be faked. A spoofer sees that number's history. Accepted risk: keep secrets out of agent instructions and texts.
+- The history goes to the agent's LLM, including a bring-your-own endpoint.
 - `retention.py` and `dsar.py` already cover `calls`, `sms` and `call_events`. No new table to add.
 
 ## Not included
