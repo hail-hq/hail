@@ -27,6 +27,7 @@ import uuid
 from hailhq.core.call_end_reasons import CallEndReason
 from hailhq.core.models import Call, CallEvent
 from hailhq.core.schemas import TERMINAL_CALL_STATUSES
+from hailhq.core.threads import requeue_skipped_for_call
 from hailhq.core.webhook_fanout import fanout_call_event
 from sqlalchemy import bindparam, func, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -119,6 +120,11 @@ async def sweep_stale_calls(
                 "end_reason": CallEndReason.SWEEPER_TIMEOUT.value,
             },
         )
+        if agent_id is not None:
+            # Texts skipped for this call never reached the voice agent.
+            call = await session.get(Call, call_id)
+            if call is not None:
+                await requeue_skipped_for_call(session, call)
     return ids
 
 

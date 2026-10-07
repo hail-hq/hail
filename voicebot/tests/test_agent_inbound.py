@@ -397,6 +397,69 @@ async def test_load_thread_context_renders_the_callers_texts(async_session) -> N
     assert "text from caller" in text
 
 
+async def test_voice_prompt_includes_unassigned_rows_of_the_number_pair(
+    async_session,
+) -> None:
+    org = uuid.uuid4()
+    other_org = uuid.uuid4()
+    agent = Agent(organization_id=org, name="a", system_prompt="x")
+    async_session.add(agent)
+    number = PhoneNumber(
+        organization_id=org,
+        e164="+14155550100",
+        country_code="US",
+        number_type="local",
+        provider="twilio",
+        provisioning_state="active",
+    )
+    async_session.add(number)
+    await async_session.flush()
+    call = Call(
+        organization_id=org,
+        agent_id=agent.id,
+        to_number_id=number.id,
+        voice_config={},
+        from_e164="+33612345678",
+        to_e164="+14155550100",
+        direction="inbound",
+        status="in_progress",
+        provider="twilio",
+    )
+    async_session.add(call)
+    now = datetime.now(timezone.utc)
+
+    def row(org_id, frm, to, body, **kw):
+        return Sms(
+            organization_id=org_id,
+            provider="twilio",
+            from_e164=frm,
+            to_e164=to,
+            direction="outbound" if frm == "+14155550100" else "inbound",
+            status="sent",
+            body=body,
+            requested_at=now,
+            **kw,
+        )
+
+    async_session.add_all(
+        [
+            row(org, "+14155550100", "+33612345678", "api sent receipt"),
+            row(org, "+33612345678", "+14155550100", "agentless inbound"),
+            row(org, "+14155550999", "+33612345678", "other number"),
+            row(other_org, "+14155550100", "+33612345678", "other org"),
+            row(org, "+14155550100", "+33600000000", "other caller"),
+        ]
+    )
+    await async_session.commit()
+
+    text = await agent_mod.load_thread_context(call.id)
+
+    assert text is not None
+    assert "api sent receipt" in text and "agentless inbound" in text
+    for hidden in ("other number", "other org", "other caller"):
+        assert hidden not in text
+
+
 async def test_load_thread_context_is_none_without_an_agent(async_session) -> None:
     assert await agent_mod.load_thread_context(uuid.uuid4()) is None
 
@@ -405,7 +468,7 @@ async def test_load_thread_context_is_none_when_the_read_fails(monkeypatch) -> N
     async def boom(*args, **kwargs):
         raise RuntimeError("db down")
 
-    monkeypatch.setattr(agent_mod.threads, "call_thread_key", boom)
+    monkeypatch.setattr(agent_mod.threads, "call_thread_context", boom)
     assert await agent_mod.load_thread_context(uuid.uuid4()) is None
 
 
@@ -416,9 +479,15 @@ async def test_load_thread_context_is_none_when_the_read_is_slow(
         await asyncio.sleep(10)
 
     async def key(*args, **kwargs):
-        return uuid.uuid4(), uuid.uuid4(), "+33612345678"
+        return agent_mod.threads.CallThread(
+            uuid.uuid4(),
+            uuid.uuid4(),
+            "+33612345678",
+            "+14155550100",
+            datetime.now(timezone.utc),
+        )
 
-    monkeypatch.setattr(agent_mod.threads, "call_thread_key", key)
+    monkeypatch.setattr(agent_mod.threads, "call_thread_context", key)
     monkeypatch.setattr(agent_mod.threads, "thread_items", slow)
     monkeypatch.setattr(agent_mod, "HISTORY_TIMEOUT_SECONDS", 0.05)
 

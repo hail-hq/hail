@@ -24,7 +24,7 @@ from hailhq.core.config import settings
 from hailhq.core.models import PhoneNumber, Sms, SmsEvent
 from hailhq.core.providers.sms import ProviderSmsResult, SmsProvider
 from hailhq.core.text_agent import should_queue_reply
-from hailhq.core.threads import active_call_for_thread
+from hailhq.core.threads import ACTIVE_CALL_SKIP, active_call_for_thread
 from hailhq.core.webhook_fanout import fanout_sms_event
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
@@ -250,7 +250,10 @@ async def ingest_inbound_sms(
             # The marker tells the watcher and the call-end requeue that this
             # skip is theirs; other skips (expiry, routing) are never revived.
             sms.agent_reply_state = "skipped"
-            sms.metadata_ = {**(sms.metadata_ or {}), "skipped_reason": "active_call"}
+            sms.metadata_ = {
+                **(sms.metadata_ or {}),
+                "skipped_reason": ACTIVE_CALL_SKIP,
+            }
         else:
             sms.agent_reply_state = "pending"
 

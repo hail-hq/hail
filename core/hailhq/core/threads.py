@@ -9,35 +9,54 @@ a thread by a number the model supplied.
 
 from __future__ import annotations
 
-import re
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Literal
 
 from hailhq.core.models import Call, CallEvent, Sms
-from sqlalchemy import and_, func, or_, select
+from hailhq.core.schemas import E164
+from sqlalchemy import (
+    Text,
+    and_,
+    cast,
+    func,
+    literal,
+    literal_column,
+    or_,
+    select,
+    update,
+)
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.asyncio import AsyncSession
 
-_E164 = re.compile(r"^\+[1-9]\d{6,14}$")
+# Shorter than 7 digits is not a real caller (service codes), though E164
+# itself allows it.
+_MIN_E164_LENGTH = 8  # "+" and 7 digits
 
 
 def is_e164(value: str | None) -> bool:
     """Withheld callers arrive as "", "anonymous", "restricted" and the like.
     Only a real E.164 number identifies a thread; anything else has none."""
-    return bool(value) and _E164.fullmatch(value) is not None
+    return (
+        bool(value) and len(value) >= _MIN_E164_LENGTH and E164.match(value) is not None
+    )
 
 
 __all__ = [
     "ACTIVE_CALL_MAX_AGE",
+    "ACTIVE_CALL_SKIP",
     "CUT_CHARS",
     "TEXT_MARKER",
     "THREAD_LIMIT",
     "THREAD_WINDOW",
+    "CallThread",
     "ThreadItem",
     "active_call_for_thread",
+    "call_thread_context",
     "call_thread_key",
     "render_thread",
+    "requeue_skipped_for_call",
     "thread_item",
     "thread_items",
 ]
@@ -54,6 +73,12 @@ ACTIVE_CALL_MAX_AGE = timedelta(hours=2)
 # during a call. That text is already an ``sms`` row, so the matching
 # ``user_turn`` event is left out of the thread.
 TEXT_MARKER = "[text message from caller] "
+# ``sms.metadata_["skipped_reason"]`` written by ingest for a text skipped
+# because the agent was on a call. Only such rows are injected or requeued.
+ACTIVE_CALL_SKIP = "active_call"
+# A text skipped for a call counts from this long before the call was created
+# (clock skew; ingest stamps requested_at at the start of its transaction).
+CALL_TEXT_OVERLAP = timedelta(seconds=30)
 
 ItemKind = Literal["text_in", "text_out", "call_caller", "call_agent"]
 
@@ -265,6 +290,76 @@ async def call_thread_key(
     if not is_e164(caller):
         return None
     return call.organization_id, call.agent_id, caller
+
+
+@dataclass(frozen=True)
+class CallThread:
+    organization_id: uuid.UUID
+    agent_id: uuid.UUID
+    caller_e164: str
+    org_number_e164: str  # the Hail number on the call: dialed or dialing from
+    created_at: datetime  # when the call row was created
+
+
+def _call_ends(call: Call) -> tuple[str, str]:
+    """``(caller, org number)`` of a call."""
+    if call.direction == "inbound":
+        return call.from_e164, call.to_e164
+    return call.to_e164, call.from_e164
+
+
+async def call_thread_context(
+    db: AsyncSession, call_id: uuid.UUID
+) -> CallThread | None:
+    """Like ``call_thread_key`` plus the org number and the call's creation
+    time. None when no agent is on the call or the caller is withheld."""
+    call = await db.get(Call, call_id)
+    if call is None or call.agent_id is None:
+        return None
+    caller, org_number = _call_ends(call)
+    if not is_e164(caller):
+        return None
+    return CallThread(
+        call.organization_id, call.agent_id, caller, org_number, call.created_at
+    )
+
+
+async def requeue_skipped_for_call(db: AsyncSession, call: Call) -> int:
+    """Give the text agent the texts that were skipped for this call and never
+    reached the voice agent. One conditional UPDATE: inbound texts of the
+    call's thread, still ``skipped`` with the active-call marker, created from
+    30 seconds before the call row, become ``pending``. ``requested_at`` is
+    reset to now so the reply age limit counts from here, and the marker is
+    replaced by ``requeued_at`` so a row is revived once. The caller commits.
+    Returns how many rows changed."""
+    if call.agent_id is None:
+        return 0
+    caller, _ = _call_ends(call)
+    if not is_e164(caller):
+        return 0
+    meta = (Sms.metadata_.op("-")(cast(literal("skipped_reason"), Text))).op("||")(
+        func.jsonb_build_object(literal_column("'requeued_at'"), func.now())
+    )
+    result = await db.execute(
+        update(Sms)
+        .where(
+            Sms.organization_id == call.organization_id,
+            Sms.agent_id == call.agent_id,
+            Sms.direction == "inbound",
+            Sms.from_e164 == caller,
+            Sms.agent_reply_state == "skipped",
+            Sms.metadata_["skipped_reason"].astext == ACTIVE_CALL_SKIP,
+            Sms.requested_at >= call.created_at - CALL_TEXT_OVERLAP,
+        )
+        .values(
+            agent_reply_state="pending",
+            agent_reply_available_at=None,
+            requested_at=func.now(),
+            metadata_=cast(meta, JSONB),
+        )
+        .execution_options(synchronize_session=False)
+    )
+    return int(result.rowcount or 0)  # type: ignore[attr-defined]
 
 
 async def active_call_for_thread(

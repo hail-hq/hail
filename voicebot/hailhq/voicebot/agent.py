@@ -607,11 +607,18 @@ HISTORY_TIMEOUT_SECONDS = 1.5
 
 async def _read_thread(call_id: UUID) -> str | None:
     async with session_scope() as db:
-        key = await threads.call_thread_key(db, call_id)
-        if key is None:
+        ctx = await threads.call_thread_context(db, call_id)
+        if ctx is None:
             return None
-        org, agent_id, caller = key
-        items = await threads.thread_items(db, org, agent_id, caller)
+        # The prompt also shows texts of this number pair that have no agent
+        # (sent through POST /sms), as the text agent's history does.
+        items = await threads.thread_items(
+            db,
+            ctx.organization_id,
+            ctx.agent_id,
+            ctx.caller_e164,
+            unassigned_pair=(ctx.org_number_e164, ctx.caller_e164),
+        )
     return threads.render_thread(items) or None
 
 
@@ -970,6 +977,23 @@ async def mark_call_answered(call_id: UUID) -> bool:
     return transitioned
 
 
+async def _revive_skipped_texts(call_id: UUID) -> None:
+    """The call is over (every end path runs ``on_call_end``): texts skipped
+    for it that the voice agent never got go back to the text agent. Never
+    blocks or fails the shutdown."""
+    try:
+        async with session_scope() as db:
+            call = await db.get(Call, call_id)
+            if call is None:
+                return
+            n = await threads.requeue_skipped_for_call(db, call)
+            await db.commit()
+        if n:
+            logger.info("call_id=%s requeued %d skipped texts", call_id, n)
+    except Exception:
+        logger.exception("call_id=%s requeue of skipped texts failed", call_id)
+
+
 async def on_call_end(
     call_id: UUID,
     room_name: str,
@@ -1145,6 +1169,7 @@ async def on_call_end(
             usage_event_id = str(usage.id)
         await session.commit()
 
+    await _revive_skipped_texts(call_id)
     if usage_event_id is not None:
         notify_usage_event_recorded(usage_event_id)
 
@@ -1529,7 +1554,6 @@ async def _run_call(
 
     # Captured before the history read: a text that arrives after this moment
     # is either in the history or caught by the watcher (at-least-once).
-    watch_since = datetime.now(timezone.utc)
     history = await load_thread_context(call_id)
     agent = SpeechSanitizingAgent(
         instructions=build_instructions(
@@ -1591,24 +1615,6 @@ async def _run_call(
     # has run (both run on the same event loop, so the check is atomic).
     text_watch_task: asyncio.Task[None] | None = None
     shutting_down = False
-    # Ids of texts the watcher gave the voice agent; the rest go back to the
-    # text agent when the call ends.
-    delivered_texts: set[UUID] = set()
-
-    async def _requeue_undelivered_texts() -> None:
-        """The call is over: texts that arrived during it and were not handed
-        to the voice agent go back to the text agent. Never blocks shutdown."""
-        try:
-            async with session_scope() as db:
-                key = await threads.call_thread_key(db, call_id)
-            if key is not None:
-                n = await text_watch.requeue_undelivered(
-                    key, watch_since, delivered_texts
-                )
-                if n:
-                    logger.info("call_id=%s requeued %d undelivered texts", call_id, n)
-        except Exception:
-            logger.exception("call_id=%s requeue of undelivered texts failed", call_id)
 
     async def _shutdown_body() -> None:
         nonlocal shutting_down
@@ -1632,7 +1638,6 @@ async def _run_call(
                 status_override=captured["status"],
                 end_reason_override=captured["end_reason"],
             )
-            await _requeue_undelivered_texts()
         finally:
             if telemetry_span is not None:
                 telemetry_span.set_attribute(
@@ -1742,9 +1747,7 @@ async def _run_call(
 
     if not shutting_down:
         text_watch_task = asyncio.create_task(
-            text_watch.watch_incoming_texts(
-                session, call_id, since=watch_since, delivered=delivered_texts
-            )
+            text_watch.watch_incoming_texts(session, call_id)
         )
 
 

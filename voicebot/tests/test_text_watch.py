@@ -7,6 +7,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 
 from hailhq.core import threads
+from hailhq.core.db import session_scope
 from hailhq.core.models import Agent, Call, PhoneNumber, Sms
 from hailhq.voicebot import text_watch
 
@@ -39,7 +40,7 @@ async def _stop(task: asyncio.Task) -> None:
     await asyncio.gather(task, return_exceptions=True)
 
 
-async def _seed_call(async_session, *, caller=PERSON):
+async def _seed_call(async_session, *, caller=PERSON, created_at=None):
     org = uuid.uuid4()
     agent = Agent(organization_id=org, name="a", system_prompt="x")
     async_session.add(agent)
@@ -65,6 +66,8 @@ async def _seed_call(async_session, *, caller=PERSON):
         provider="twilio",
         voice_config={},
     )
+    if created_at is not None:
+        call.created_at = created_at
     async_session.add(call)
     await async_session.commit()
     return org, agent, call
@@ -98,11 +101,10 @@ def _text(
     )
 
 
-def _start(fake, call, since, **kw):
+def _start(fake, call, since=None, **kw):
+    """``since`` is unused: the watcher reads the call row's created_at."""
     return asyncio.create_task(
-        text_watch.watch_incoming_texts(
-            fake, call.id, since=since, poll_seconds=POLL, **kw
-        )
+        text_watch.watch_incoming_texts(fake, call.id, poll_seconds=POLL, **kw)
     )
 
 
@@ -293,58 +295,13 @@ async def test_rows_skipped_for_other_reasons_are_never_injected_or_requeued(
     await _stop(task)
     assert fake.inputs == [threads.TEXT_MARKER + "mine"]
 
-    n = await text_watch.requeue_undelivered((org, agent.id, PERSON), since, set())
-    assert n == 1
-    for r, state in ((unmarked, "skipped"), (expired, "skipped"), (mine, "pending")):
+    async with session_scope() as db:
+        n = await threads.requeue_skipped_for_call(db, call)
+        await db.commit()
+    assert n == 0  # mine was delivered (done); the others are not call skips
+    for r, state in ((unmarked, "skipped"), (expired, "skipped"), (mine, "done")):
         await async_session.refresh(r)
         assert r.agent_reply_state == state
-
-
-async def test_requeue_undelivered_only_touches_this_threads_undelivered(
-    async_session,
-):
-    org, agent, _call = await _seed_call(async_session)
-    other_agent = Agent(organization_id=org, name="b", system_prompt="x")
-    async_session.add(other_agent)
-    await async_session.flush()
-    since = _now()
-    at = since + timedelta(seconds=1)
-    delivered = _text(org, agent.id, "delivered", at=at)
-    missed = _text(org, agent.id, "missed", at=at)
-    slightly_early = _text(org, agent.id, "early", at=since - timedelta(seconds=10))
-    too_old = _text(org, agent.id, "old", at=since - timedelta(minutes=5))
-    other_caller = _text(org, agent.id, "caller", person="+33600000000", at=at)
-    other_ag = _text(org, other_agent.id, "agent", at=at)
-    other_org = _text(uuid.uuid4(), agent.id, "org", at=at)
-    outbound = _text(org, agent.id, "out", at=at, inbound=False)
-    done = _text(org, agent.id, "done", at=at, state="done")  # answered: stays
-    rows = [
-        delivered, missed, slightly_early, too_old, other_caller, other_ag,
-        other_org, outbound, done,
-    ]  # fmt: skip
-    async_session.add_all(rows)
-    await async_session.commit()
-
-    n = await text_watch.requeue_undelivered(
-        (org, agent.id, PERSON), since, {delivered.id}
-    )
-
-    assert n == 2
-    states = {}
-    for r in rows:
-        await async_session.refresh(r)
-        states[r.body] = r.agent_reply_state
-    assert states == {
-        "delivered": "skipped",
-        "missed": "pending",
-        "early": "pending",
-        "old": "skipped",
-        "caller": "skipped",
-        "agent": "skipped",
-        "org": "skipped",
-        "out": "skipped",
-        "done": "done",
-    }
 
 
 async def test_closed_session_stops_the_loop(async_session):
@@ -395,7 +352,7 @@ async def test_db_runtime_error_does_not_stop_the_watcher(async_session, monkeyp
 async def test_transient_key_lookup_failure_is_retried(async_session, monkeypatch):
     org, agent, call = await _seed_call(async_session)
     since = _now()
-    real = threads.call_thread_key
+    real = threads.call_thread_context
     calls = {"n": 0}
 
     async def flaky(*a, **kw):
@@ -404,7 +361,7 @@ async def test_transient_key_lookup_failure_is_retried(async_session, monkeypatc
             raise ValueError("db blip")
         return await real(*a, **kw)
 
-    monkeypatch.setattr(threads, "call_thread_key", flaky)
+    monkeypatch.setattr(threads, "call_thread_context", flaky)
     async_session.add(_text(org, agent.id, "hello", at=since + timedelta(seconds=1)))
     await async_session.commit()
     fake = FakeSession()
@@ -412,3 +369,82 @@ async def test_transient_key_lookup_failure_is_retried(async_session, monkeypatc
     await wait_for(lambda: len(fake.inputs) == 1)
     await _stop(task)
     assert calls["n"] == 2
+
+
+async def test_text_during_a_long_ring_is_injected(async_session):
+    """An outbound call rings 45s before the voicebot starts: the window is
+    anchored to the call row, not to the watcher start."""
+    now = _now()
+    org, agent, call = await _seed_call(
+        async_session, created_at=now - timedelta(seconds=45)
+    )
+    during_ring = _text(org, agent.id, "while ringing", at=now - timedelta(seconds=30))
+    before_call = _text(org, agent.id, "long before", at=now - timedelta(minutes=5))
+    async_session.add_all([during_ring, before_call])
+    await async_session.commit()
+    fake = FakeSession()
+    task = _start(fake, call)
+    await wait_for(lambda: len(fake.inputs) >= 1)
+    await asyncio.sleep(POLL * 6)
+    await _stop(task)
+    assert fake.inputs == [threads.TEXT_MARKER + "while ringing"]
+
+
+async def test_delivered_text_is_marked_done_and_not_reinjected(async_session):
+    org, agent, call = await _seed_call(async_session)
+    since = _now()
+    row = _text(org, agent.id, "hello", at=since + timedelta(seconds=1))
+    async_session.add(row)
+    await async_session.commit()
+    fake = FakeSession()
+    task = _start(fake, call)
+    await wait_for(lambda: len(fake.inputs) == 1)
+    await asyncio.sleep(POLL * 6)
+    await _stop(task)
+    await async_session.refresh(row)
+    assert row.agent_reply_state == "done"
+    assert row.metadata_["delivered_to_call"] == str(call.id)
+    assert row.metadata_["skipped_reason"] == "active_call"
+
+    # The next call of the same thread does not get it again.
+    second = Call(
+        organization_id=org,
+        agent_id=agent.id,
+        to_number_id=call.to_number_id,
+        from_e164=PERSON,
+        to_e164=ORG_NUMBER,
+        direction="inbound",
+        status="in_progress",
+        provider="twilio",
+        voice_config={},
+    )
+    async_session.add(second)
+    await async_session.commit()
+    fake2 = FakeSession()
+    task = _start(fake2, second)
+    await asyncio.sleep(POLL * 8)
+    await _stop(task)
+    assert fake2.inputs == []
+
+
+async def test_call_end_revives_undelivered_texts_and_never_raises(
+    async_session, monkeypatch
+):
+    from hailhq.voicebot import agent as agent_mod
+
+    org, agent, call = await _seed_call(
+        async_session, created_at=_now() - timedelta(seconds=45)
+    )
+    missed = _text(org, agent.id, "missed", at=_now() - timedelta(seconds=30))
+    async_session.add(missed)
+    await async_session.commit()
+
+    await agent_mod._revive_skipped_texts(call.id)
+    await async_session.refresh(missed)
+    assert missed.agent_reply_state == "pending"
+
+    async def boom(*a, **kw):
+        raise RuntimeError("db down")
+
+    monkeypatch.setattr(agent_mod.threads, "requeue_skipped_for_call", boom)
+    await agent_mod._revive_skipped_texts(call.id)  # logged, not raised

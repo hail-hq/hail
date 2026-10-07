@@ -17,7 +17,8 @@ from uuid import UUID
 from hailhq.core import threads
 from hailhq.core.db import session_scope
 from hailhq.core.models import Sms
-from sqlalchemy import select, update
+from sqlalchemy import Text, cast, func, literal, literal_column, select, update
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger("hailhq.voicebot")
@@ -31,9 +32,7 @@ CURSOR_OVERLAP = timedelta(seconds=30)
 # Failed ``generate_reply`` calls (other than a closed session) per text before
 # the watcher gives up on it and counts it as delivered.
 MAX_INJECT_ATTEMPTS = 3
-# ``sms.metadata_["skipped_reason"]`` written by ingest for a text skipped
-# because the agent was on a call. Only such rows are injected or requeued.
-ACTIVE_CALL_SKIP = "active_call"
+ACTIVE_CALL_SKIP = threads.ACTIVE_CALL_SKIP
 
 
 async def new_inbound_texts(
@@ -68,31 +67,32 @@ async def watch_incoming_texts(
     session: Any,
     call_id: UUID,
     *,
-    since: datetime,
     poll_seconds: float = POLL_SECONDS,
     delivered: set[UUID] | None = None,
 ) -> None:
     """Run until cancelled. Delivery is at-least-once: every poll re-reads the
-    window starting ``CURSOR_OVERLAP`` before ``since`` and skips ids already
-    delivered, so no clock skew or commit order can lose a text. A failed poll
-    is logged and retried. ``delivered`` is filled with the ids handed to the
-    session (the caller passes it in to read it after the call ends); a text
-    whose injection fails 3 times is counted as delivered and logged."""
-    key = None
+    window starting ``CURSOR_OVERLAP`` before the call row was created and skips
+    ids already delivered, so no clock skew or commit order can lose a text. A failed poll
+    is logged and retried. A delivered text is marked ``done`` in the database
+    (so no later call or requeue touches it) and its id is added to
+    ``delivered``; a text whose injection fails 3 times is counted as delivered
+    and logged, but stays ``skipped`` so the call-end requeue gives it to the
+    text agent."""
+    ctx = None
     for attempt in range(KEY_LOOKUP_ATTEMPTS):
         try:
             async with session_scope() as db:
-                key = await threads.call_thread_key(db, call_id)
+                ctx = await threads.call_thread_context(db, call_id)
             break
         except Exception:
             logger.exception("call_id=%s text watch lookup failed", call_id)
             if attempt == KEY_LOOKUP_ATTEMPTS - 1:
                 return
             await asyncio.sleep(poll_seconds)
-    if key is None:
+    if ctx is None:
         return
-    org, agent_id, caller = key
-    after = since - CURSOR_OVERLAP
+    org, agent_id, caller = ctx.organization_id, ctx.agent_id, ctx.caller_e164
+    after = ctx.created_at - CURSOR_OVERLAP
     if delivered is None:
         delivered = set()
     failures: dict[UUID, int] = {}
@@ -129,31 +129,33 @@ async def watch_incoming_texts(
                         delivered.add(row.id)
                     continue
                 delivered.add(row.id)
+                await mark_delivered(row.id, call_id)
         except Exception:
             logger.exception("call_id=%s text watch poll failed", call_id)
 
 
-async def requeue_undelivered(
-    key: tuple[UUID, UUID, str], since: datetime, delivered_ids: set[UUID]
-) -> int:
-    """At call end, hand texts the voice agent never got back to the text
-    agent: inbound texts of this thread ``skipped`` during the call (requested
-    at or after ``since`` minus ``CURSOR_OVERLAP``) and not in ``delivered_ids``
-    become ``pending``, only when still ``skipped`` with the active-call marker
-    (one conditional UPDATE). Returns how many. ``key`` is ``call_thread_key``."""
-    org, agent_id, caller = key
-    stmt = update(Sms).where(
-        Sms.organization_id == org,
-        Sms.agent_id == agent_id,
-        Sms.direction == "inbound",
-        Sms.from_e164 == caller,
-        Sms.agent_reply_state == "skipped",
-        Sms.metadata_["skipped_reason"].astext == ACTIVE_CALL_SKIP,
-        Sms.requested_at >= since - CURSOR_OVERLAP,
+async def mark_delivered(sms_id: UUID, call_id: UUID) -> None:
+    """A text handed to the live call: ``done``, only while it is still
+    ``skipped`` for a call, with ``delivered_to_call`` noted. Best effort: a
+    failure is logged and the in-memory ``delivered`` set still protects this
+    call."""
+    meta = Sms.metadata_.op("||")(
+        func.jsonb_build_object(
+            literal_column("'delivered_to_call'"), cast(literal(str(call_id)), Text)
+        )
     )
-    if delivered_ids:
-        stmt = stmt.where(Sms.id.not_in(delivered_ids))
-    async with session_scope() as db:
-        result = await db.execute(stmt.values(agent_reply_state="pending"))
-        await db.commit()
-        return int(result.rowcount or 0)  # type: ignore[attr-defined]
+    try:
+        async with session_scope() as db:
+            await db.execute(
+                update(Sms)
+                .where(
+                    Sms.id == sms_id,
+                    Sms.agent_reply_state == "skipped",
+                    Sms.metadata_["skipped_reason"].astext == ACTIVE_CALL_SKIP,
+                )
+                .values(agent_reply_state="done", metadata_=cast(meta, JSONB))
+                .execution_options(synchronize_session=False)
+            )
+            await db.commit()
+    except Exception:
+        logger.exception("call_id=%s marking sms_id=%s done failed", call_id, sms_id)
