@@ -45,24 +45,89 @@ async def resolve_org_number(
     return (await db.execute(stmt)).scalar_one_or_none()
 
 
+async def _bind_free(
+    db: AsyncSession, organization_id: UUID, agent_id: UUID, stmt
+) -> PhoneNumber | None:
+    """Bind the number ``stmt`` selects (one row, sms_agent_id still NULL) to
+    the agent. Same gates as PATCH /numbers/{id}: the agent is in this org and
+    answers texts. Same org lock, and the row is locked, so two calls cannot
+    bind one number. Returns the bound number, or None when no gate or row
+    allows it (the caller then decides about an unbound use)."""
+    agent = (
+        await db.execute(
+            select(Agent).where(
+                Agent.id == agent_id, Agent.organization_id == organization_id
+            )
+        )
+    ).scalar_one_or_none()
+    if agent is None or not agent.sms_enabled:
+        return None
+    await org_lock(db, organization_id)
+    free = (
+        await db.execute(
+            stmt.where(PhoneNumber.sms_agent_id.is_(None))
+            .with_for_update(skip_locked=True)
+            .execution_options(populate_existing=True)
+        )
+    ).scalar_one_or_none()
+    if free is None:
+        return None
+    free.sms_agent_id = agent_id
+    await db.flush()
+    # Tells the caller to audit the bind once it commits.
+    db.info["auto_bound_sms_number_id"] = free.id
+    return free
+
+
 async def resolve_sms_number(
     db: AsyncSession,
     organization_id: UUID,
     agent_id: UUID | None,
     dialed: PhoneNumber | None,
 ) -> PhoneNumber | None:
-    """The org number an agent texts from. Order: the number the person dialed
-    (if it can text), a text number already routed to this agent, a text
-    number with no agent (it is routed to this agent), else None. A number
-    routed to another agent is never taken."""
+    """The org number an agent texts from. Order:
+
+    1. the number the person dialed, if it can text and is not routed to
+       another agent. Routed to this agent: used. Free: bound to the agent when
+       the agent is in the org and ``sms_enabled``, else used unbound.
+    2. the oldest text number already routed to this agent.
+    3. the oldest text number with no agent: bound to the agent when it is
+       ``sms_enabled``, else used unbound.
+    4. None.
+
+    A number routed to another agent is never taken. Every automatic bind sets
+    ``db.info["auto_bound_sms_number_id"]``; an unbound use sets nothing.
+    """
+    if agent_id is None:
+        if (
+            dialed is not None
+            and dialed.provisioning_state == "active"
+            and "sms" in dialed.capabilities
+        ):
+            return dialed
+        return await resolve_org_number(db, organization_id, None, capability="sms")
     if (
         dialed is not None
+        and dialed.organization_id == organization_id
         and dialed.provisioning_state == "active"
         and "sms" in dialed.capabilities
     ):
-        return dialed
-    if agent_id is None:
-        return await resolve_org_number(db, organization_id, None, capability="sms")
+        if dialed.sms_agent_id == agent_id:
+            return dialed
+        if dialed.sms_agent_id is None:
+            bound = await _bind_free(
+                db,
+                organization_id,
+                agent_id,
+                select(PhoneNumber).where(PhoneNumber.id == dialed.id),
+            )
+            if bound is not None:
+                return bound
+            # Not bound (agent cannot text, or another call bound it first):
+            # re-read, since the row may now be routed elsewhere.
+            await db.refresh(dialed)
+            if dialed.sms_agent_id in (None, agent_id):
+                return dialed
     base = (
         select(PhoneNumber)
         .where(
@@ -78,29 +143,10 @@ async def resolve_sms_number(
     ).scalar_one_or_none()
     if routed is not None:
         return routed
-    # Binding changes routing, so it takes the gates PATCH /numbers/{id} does:
-    # the agent is in this org and answers texts. Same org lock as that route,
-    # and the candidate row is locked, so two calls cannot bind one number.
-    agent = (
-        await db.execute(
-            select(Agent).where(
-                Agent.id == agent_id, Agent.organization_id == organization_id
-            )
-        )
+    bound = await _bind_free(db, organization_id, agent_id, base)
+    if bound is not None:
+        return bound
+    # Unbound use: only a number nobody routes texts to.
+    return (
+        await db.execute(base.where(PhoneNumber.sms_agent_id.is_(None)))
     ).scalar_one_or_none()
-    if agent is None or not agent.sms_enabled:
-        return None
-    await org_lock(db, organization_id)
-    free = (
-        await db.execute(
-            base.where(PhoneNumber.sms_agent_id.is_(None)).with_for_update(
-                skip_locked=True
-            )
-        )
-    ).scalar_one_or_none()
-    if free is not None:
-        free.sms_agent_id = agent_id
-        await db.flush()
-        # Tells the caller to audit the bind once it commits.
-        db.info["auto_bound_sms_number_id"] = free.id
-    return free
