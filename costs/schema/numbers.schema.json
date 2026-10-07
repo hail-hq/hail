@@ -133,6 +133,14 @@
           "type": "boolean",
           "description": "The carrier offers this number type today. false keeps a row (held numbers stay billable) but hides it from the picker."
         },
+        "receive_only": {
+          "type": "boolean",
+          "description": "The number takes calls but cannot place them. Hail does not sell it in the console or the API. Absent means false."
+        },
+        "by_request": {
+          "type": "boolean",
+          "description": "The carrier picks the number at order time, so it cannot be shown and bought in the console or the API. Hail's team orders it on request (hi@hail.so). Absent means false."
+        },
         "setup_usd": {
           "$ref": "#/$defs/decimal",
           "description": "One-time price, when the carrier charges one."

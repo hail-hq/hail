@@ -18,6 +18,8 @@ const columns: ColumnDef<NumberRow>[] = [
         <div style={{ fontWeight: 700 }}>{row.original.display_name}</div>
         <div style={{ fontSize: 13, marginTop: 2 }}>
           {row.original.country_code} · {row.original.number_type}
+          {row.original.by_request && " · via support"}
+          {row.original.receive_only && " · receives calls only"}
         </div>
       </div>
     ),
@@ -40,7 +42,7 @@ const columns: ColumnDef<NumberRow>[] = [
     id: "calls",
     header: "Calls",
     accessorKey: "voice",
-    cell: ({ row }) => (row.original.voice ? "✓" : "—"),
+    cell: ({ row }) => (row.original.receive_only ? "in only" : row.original.voice ? "✓" : "—"),
     meta: { num: true },
   },
   {
@@ -82,7 +84,8 @@ export function TelephonySection({ data }: { data: NumberRow[] }) {
       title="Phone numbers"
       count={data.length}
       rangeLabel={priceRange(
-        data.map((r) => r.usd_per_month),
+        // Only numbers a customer can buy set the range.
+        data.filter((r) => !r.receive_only && !r.by_request).map((r) => r.usd_per_month),
         2,
         2,
         "mo",

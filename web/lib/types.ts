@@ -146,6 +146,10 @@ export interface TelephonyNumberRow extends TelephonyProvenance {
   mms: boolean;
   verification_required: boolean;
   available: boolean;
+  /** Takes calls but cannot place them. Hail does not sell it. */
+  receive_only?: boolean;
+  /** The carrier picks the number at order time. Hail's team orders it on request. */
+  by_request?: boolean;
   setup_usd?: string;
   notes?: string;
 }

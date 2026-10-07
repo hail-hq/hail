@@ -21,6 +21,11 @@ export const numberCatalogs = [twilioJson, telnyxJson, didwwJson] as NumberCatal
 export const numbers: NumberRow[] = numberCatalogs.flatMap((f) =>
   f.numbers.filter((n) => n.available !== false).map((n) => ({ ...n, provider: f.provider })),
 );
+/** A number a customer can buy in the console or the API. The others are
+ * listed, labelled, and kept out of "from" prices. */
+export function onSale(n: NumberRow): boolean {
+  return !n.receive_only && !n.by_request;
+}
 /** Twilio's file also carries the US A2P 10DLC fee table. */
 export const a2p10dlc = (numberCatalogs.find((f) => f.provider === 'twilio')?.a2p_10dlc ?? []) as TelephonyFeeRow[];
 export const sms = smsJson as SmsFile;

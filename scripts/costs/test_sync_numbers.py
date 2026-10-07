@@ -159,6 +159,103 @@ def test_didww_gb_rows():
     assert by["local"]["sms"] is False
 
 
+def test_didww_marks_numbers_hail_cannot_sell():
+    """Portugal-like country. Mobile: listed numbers that call out, sold as
+    usual. National: calls out, but DIDWW picks the number at order time
+    (not listed), so only support can order it. Toll-free: takes calls,
+    cannot place them. Local: one listed and one unlisted area; the price
+    comes from the listed one, the one Hail can sell."""
+    countries = [
+        {"id": "c1", "attributes": {"iso": "PT", "name": "Portugal", "prefix": "351"}}
+    ]
+    types = {"t-m": "Mobile", "t-n": "National", "t-t": "Toll-free", "t-l": "Local"}
+
+    def group(gid, tid, features, listed, registration=False):
+        return {
+            "id": gid,
+            "attributes": {"features": features},
+            "meta": {
+                "is_available": True,
+                "needs_registration": registration,
+                "available_dids_enabled": listed,
+            },
+            "relationships": {
+                "did_group_type": {"data": {"type": "did_group_types", "id": tid}},
+                "stock_keeping_units": {
+                    "data": [{"type": "stock_keeping_units", "id": f"sku-{gid}"}]
+                },
+            },
+        }
+
+    def sku(gid, price):
+        return {
+            "type": "stock_keeping_units",
+            "id": f"sku-{gid}",
+            "attributes": {
+                "monthly_price": price,
+                "setup_price": "0.0",
+                "channels_included_count": 0,
+            },
+        }
+
+    out = ["voice_in", "voice_out"]
+    payload = {
+        "data": [
+            group("m", "t-m", out, True),
+            group("n", "t-n", out, False, registration=True),
+            group("t", "t-t", ["voice_in"], False),
+            group("l1", "t-l", out, False),
+            group("l2", "t-l", out, True),
+        ],
+        "included": [
+            sku("m", "8.0"),
+            sku("n", "3.5"),
+            sku("t", "10.0"),
+            sku("l1", "1.0"),
+            sku("l2", "2.0"),
+        ],
+    }
+    rows, skipped = sync.map_didww(countries, types, {"PT": payload})
+    by = {r["number_type"]: r for r in rows}
+    assert not skipped
+    assert "by_request" not in by["mobile"] and "receive_only" not in by["mobile"]
+    assert by["national"]["by_request"] is True
+    assert "receive_only" not in by["national"]
+    assert by["national"]["verification_required"] is True
+    assert by["toll_free"]["receive_only"] is True
+    assert "by_request" not in by["toll_free"]
+    assert by["toll_free"]["voice"] is True  # it takes calls
+    assert "by_request" not in by["local"]
+    assert by["local"]["usd_per_month"] == "2.00"
+    assert "notes" not in by["local"]
+
+
+def test_merge_reports_a_sale_mode_change():
+    prev = {
+        "country_code": "PT",
+        "number_type": "national",
+        "dial_code": "351",
+        "usd_per_month": "3.50",
+        "voice": True,
+        "sms": False,
+        "mms": False,
+        "verification_required": True,
+        "available": True,
+        "last_verified": "2026-09-26",
+        "last_changed_at": "2026-09-26",
+        "verification_method": "carrier-sync",
+        "verified_by": "didww-api-sync",
+    }
+    fetched = {**prev, "by_request": True}
+    for k in ("last_verified", "last_changed_at", "verification_method", "verified_by"):
+        fetched.pop(k)
+    numbers, report = sync.merge(
+        [prev], [fetched], "2026-10-07", "https://src", "didww-api-sync"
+    )
+    assert numbers[0]["by_request"] is True
+    assert report["changed"] == ["PT:national: by_request None -> True"]
+
+
 def test_merge_keeps_hand_verified_and_vanished_rows():
     existing = [
         {

@@ -108,3 +108,46 @@ def test_calls_only_carrier_never_promises_sms(tmp_path, monkeypatch):
         assert telephony_catalog.capabilities("CA", "mobile", "didww") is None
     finally:
         telephony_catalog._load.cache_clear()
+
+
+def test_a_number_hail_cannot_sell_is_not_offered(tmp_path, monkeypatch):
+    """A receive-only number, or one the carrier picks at order time, is
+    never quoted or bought through the API. Another carrier that sells the
+    same kind still answers."""
+
+    def row(kind, **over):
+        return {
+            "country_code": "PT",
+            "number_type": kind,
+            "usd_per_month": "3.50",
+            "voice": True,
+            "sms": False,
+            "mms": False,
+            **over,
+        }
+
+    empty = {"numbers": [], "a2p_10dlc": []}
+    (tmp_path / "twilio.json").write_text(json.dumps(empty))
+    (tmp_path / "telnyx.json").write_text(json.dumps({"numbers": [row("toll_free")]}))
+    (tmp_path / "didww.json").write_text(
+        json.dumps(
+            {
+                "numbers": [
+                    row("national", by_request=True),
+                    row("toll_free", receive_only=True),
+                    row("mobile"),
+                ]
+            }
+        )
+    )
+    monkeypatch.setenv("HAIL_TELEPHONY_CATALOG_DIR", str(tmp_path))
+    telephony_catalog._load.cache_clear()
+    try:
+        calls_only = {"voice": True, "sms": False, "mms": False}
+        assert telephony_catalog.capabilities("PT", "national", "didww") is None
+        assert telephony_catalog.capabilities("PT", "national") is None
+        assert telephony_catalog.capabilities("PT", "toll_free", "didww") is None
+        assert telephony_catalog.capabilities("PT", "toll_free") == calls_only
+        assert telephony_catalog.capabilities("PT", "mobile", "didww") == calls_only
+    finally:
+        telephony_catalog._load.cache_clear()
