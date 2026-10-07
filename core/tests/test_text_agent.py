@@ -6,7 +6,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 
 from hailhq.core import text_agent
-from hailhq.core.models import Agent, PhoneNumber, Sms
+from hailhq.core.models import Agent, Call, CallEvent, PhoneNumber, Sms
 from hailhq.core.sms_ingest import ingest_inbound_sms
 from sqlalchemy import select
 
@@ -133,6 +133,7 @@ async def test_claim_history_and_chat_shape(async_session) -> None:
             Sms(
                 organization_id=org,
                 to_number_id=number.id,
+                agent_id=agent.id,
                 from_e164=PERSON,
                 to_e164=ORG_NUMBER,
                 direction="inbound",
@@ -162,11 +163,13 @@ async def test_claim_history_and_chat_shape(async_session) -> None:
     assert claimed.sms.id == result.sms_id
     assert claimed.agent.id == agent.id
 
-    history = await text_agent.thread_messages(async_session, claimed.sms)
-    assert len(history) == text_agent.THREAD_LIMIT
-    assert history[-1].body == "Tuesday then?"
-    assert history[-2].body == "Sure."
-    assert next(h.body for h in history) == "msg 4"  # oldest kept, in order
+    history = await text_agent.thread_history_for_reply(
+        async_session, claimed.sms, agent
+    )
+    assert len(history) == 24  # 22 earlier + the reply + the new text
+    assert history[-1].text == "Tuesday then?"
+    assert history[-2].text == "Sure."
+    assert history[0].text == "msg 0"  # oldest first, in order
 
     messages = text_agent.build_chat_messages(agent, history)
     assert messages[0]["role"] == "system"
@@ -360,3 +363,67 @@ async def test_inbound_text_on_unrouted_number_has_no_agent(async_session) -> No
     await _seed(async_session, route=False)
     result = await _ingest(async_session, "Hello", "SM11")
     assert (await async_session.get(Sms, result.sms_id)).agent_id is None
+
+
+async def _call(session, org, agent, number, *, status, turns=()):
+    call = Call(
+        organization_id=org,
+        agent_id=agent.id,
+        to_number_id=number.id,
+        from_e164=PERSON,
+        to_e164=ORG_NUMBER,
+        direction="inbound",
+        status=status,
+        end_reason="normal_hangup" if status == "completed" else None,
+        provider="twilio",
+        voice_config={},
+    )
+    session.add(call)
+    await session.flush()
+    for role, text in turns:
+        session.add(
+            CallEvent(
+                call_id=call.id,
+                kind="user_turn" if role == "user" else "agent_turn",
+                payload={"role": role, "text": text},
+            )
+        )
+    await session.commit()
+    return call
+
+
+async def test_reply_history_includes_call_turns(async_session) -> None:
+    org, agent, number = await _seed(async_session)
+    await _call(
+        async_session,
+        org,
+        agent,
+        number,
+        status="completed",
+        turns=[("user", "I want Tuesday")],
+    )
+    result = await _ingest(async_session, "Did you book it?", "SM20")
+    sms = await async_session.get(Sms, result.sms_id)
+
+    history = await text_agent.thread_history_for_reply(async_session, sms, agent)
+    messages = text_agent.build_chat_messages(agent, history)
+
+    assert [m["role"] for m in messages] == ["system", "user", "user"]
+    assert messages[1]["content"] == "(on a call) I want Tuesday"
+    assert messages[2]["content"] == "Did you book it?"
+
+
+async def test_text_during_an_active_call_is_not_queued(async_session) -> None:
+    org, agent, number = await _seed(async_session)
+    await _call(async_session, org, agent, number, status="in_progress")
+    result = await _ingest(async_session, "my address is 5 Rue X", "SM21")
+    row = await async_session.get(Sms, result.sms_id)
+    assert row.agent_reply_state == "skipped"
+    assert row.agent_id == agent.id
+
+
+async def test_text_after_a_finished_call_is_queued(async_session) -> None:
+    org, agent, number = await _seed(async_session)
+    await _call(async_session, org, agent, number, status="completed")
+    result = await _ingest(async_session, "hello again", "SM22")
+    assert (await async_session.get(Sms, result.sms_id)).agent_reply_state == "pending"

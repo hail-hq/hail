@@ -24,6 +24,7 @@ from hailhq.core.config import settings
 from hailhq.core.models import PhoneNumber, Sms, SmsEvent
 from hailhq.core.providers.sms import ProviderSmsResult, SmsProvider
 from hailhq.core.text_agent import should_queue_reply
+from hailhq.core.threads import active_call_for_thread
 from hailhq.core.webhook_fanout import fanout_sms_event
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
@@ -242,7 +243,13 @@ async def ingest_inbound_sms(
     # puts it in the agent's thread.
     sms.agent_id = number.sms_agent_id
     if action is None and await should_queue_reply(db, number):
-        sms.agent_reply_state = "pending"
+        if await active_call_for_thread(
+            db, organization_id, number.sms_agent_id, from_e164
+        ):
+            # The voice agent on the line gets this text (voicebot text watch).
+            sms.agent_reply_state = "skipped"
+        else:
+            sms.agent_reply_state = "pending"
 
     # Record a lifecycle event so the inbound message surfaces on the
     # org-wide GET /events stream (which is built solely from SmsEvent rows),
