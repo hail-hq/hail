@@ -18,7 +18,7 @@ from hailhq.core.config import settings
 from hailhq.core.models import Agent, PhoneNumber, Sms
 from hailhq.core.prompts import TEXT_PREAMBLE, build_text_instructions
 from hailhq.core.threads import ThreadItem, thread_items
-from sqlalchemy import and_, func, or_, select, update
+from sqlalchemy import DateTime, and_, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 __all__ = [
@@ -92,10 +92,13 @@ async def _expire_unclaimable(db: AsyncSession, now: datetime) -> None:
     """Close rows that must not be answered: too old, or out of attempts."""
     base = (Sms.direction == "inbound", _claimable(now))
     cutoff = now - timedelta(seconds=settings.hail_text_reply_max_age_seconds)
+    # A text revived after a call counts its age from the requeue.
+    age_from = func.coalesce(
+        Sms.metadata_["requeued_at"].astext.cast(DateTime(timezone=True)),
+        Sms.requested_at,
+    )
     await db.execute(
-        update(Sms)
-        .where(*base, Sms.requested_at < cutoff)
-        .values(agent_reply_state="skipped")
+        update(Sms).where(*base, age_from < cutoff).values(agent_reply_state="skipped")
     )
     await db.execute(
         update(Sms)

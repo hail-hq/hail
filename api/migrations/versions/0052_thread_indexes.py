@@ -2,7 +2,8 @@
 
 A thread is (organization_id, agent_id, caller number). The caller is in
 from_e164 on inbound rows and to_e164 on outbound rows, so each table gets
-one index per column.
+one index per column. Built CONCURRENTLY so writes to calls and sms do not
+block; that cannot run in a transaction, hence the autocommit block.
 
 Revision ID: 0052
 Revises: 0051
@@ -19,26 +20,39 @@ depends_on = None
 
 
 def upgrade() -> None:
-    op.create_index(
-        "calls_thread_from_idx", "calls", ["organization_id", "agent_id", "from_e164"]
-    )
-    op.create_index(
-        "calls_thread_to_idx", "calls", ["organization_id", "agent_id", "to_e164"]
-    )
-    op.create_index(
-        "sms_thread_from_idx",
-        "sms",
-        ["organization_id", "agent_id", "from_e164", "requested_at"],
-    )
-    op.create_index(
-        "sms_thread_to_idx",
-        "sms",
-        ["organization_id", "agent_id", "to_e164", "requested_at"],
-    )
+    with op.get_context().autocommit_block():
+        op.create_index(
+            "calls_thread_from_idx",
+            "calls",
+            ["organization_id", "agent_id", "from_e164"],
+            postgresql_concurrently=True,
+        )
+        op.create_index(
+            "calls_thread_to_idx",
+            "calls",
+            ["organization_id", "agent_id", "to_e164"],
+            postgresql_concurrently=True,
+        )
+        op.create_index(
+            "sms_thread_from_idx",
+            "sms",
+            ["organization_id", "agent_id", "from_e164", "requested_at"],
+            postgresql_concurrently=True,
+        )
+        op.create_index(
+            "sms_thread_to_idx",
+            "sms",
+            ["organization_id", "agent_id", "to_e164", "requested_at"],
+            postgresql_concurrently=True,
+        )
 
 
 def downgrade() -> None:
-    op.drop_index("sms_thread_to_idx", table_name="sms")
-    op.drop_index("sms_thread_from_idx", table_name="sms")
-    op.drop_index("calls_thread_to_idx", table_name="calls")
-    op.drop_index("calls_thread_from_idx", table_name="calls")
+    with op.get_context().autocommit_block():
+        for name, table in (
+            ("sms_thread_to_idx", "sms"),
+            ("sms_thread_from_idx", "sms"),
+            ("calls_thread_to_idx", "calls"),
+            ("calls_thread_from_idx", "calls"),
+        ):
+            op.drop_index(name, table_name=table, postgresql_concurrently=True)

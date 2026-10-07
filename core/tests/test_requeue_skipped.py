@@ -124,6 +124,9 @@ async def test_ringing_window_text_is_revived_and_others_are_not(async_session):
         "done": "done",
         "outbound": "skipped",
     }
+    # Arrival time is kept so revived texts stay in order.
+    assert rows["ringing"].requested_at == created + timedelta(seconds=10)
+    assert rows["overlap"].requested_at == created - timedelta(seconds=10)
     revived = rows["ringing"]
     assert "skipped_reason" not in revived.metadata_
     assert "requeued_at" in revived.metadata_
@@ -148,7 +151,8 @@ async def test_revived_text_older_than_the_age_limit_is_answerable(async_session
     assert await threads.requeue_skipped_for_call(async_session, call) == 1
     await async_session.commit()
     await async_session.refresh(old)
-    assert old.requested_at > _now() - timedelta(minutes=1)
+    # Arrival time kept; the age limit counts from requeued_at.
+    assert old.requested_at < _now() - timedelta(hours=1)
 
     claimed = await text_agent.claim_pending_reply(async_session)
     assert claimed is not None and claimed.sms.id == old.id

@@ -62,7 +62,7 @@ Changes:
   - Delivery is at-least-once: a rare duplicate is possible.
   - The text agent does not reply. The row is marked `agent_reply_state='skipped'`.
   - Ingest also sets `metadata.skipped_reason = "active_call"` on that row. The watcher injects only rows still `skipped` with that marker, and the requeue is one conditional UPDATE on both; skips for other reasons (expiry, routing change) are never revived. The watch window starts 30 seconds before the call row's `created_at`, so texts that arrive while an outbound call rings count. A delivered text is set to `done` with `metadata.delivered_to_call`, so later calls never see it. A text whose injection fails 3 times stays `skipped` and is revived at call end.
-  - `requeue_skipped_for_call` (core) revives undelivered texts: inbound texts of the thread still `skipped` with the marker, from 30 seconds before the call row, become `pending` with `requested_at` reset to now (so the reply age limit restarts) and `metadata.requeued_at` set in place of the marker. One conditional UPDATE. It runs at the end of the voicebot's `on_call_end` (every end path) and in `sweep_stale_calls` for each call it force-closes.
+  - `requeue_skipped_for_call` (core) revives undelivered texts: inbound texts of the thread still `skipped` with the marker, from 30 seconds before the call row, become `pending` with `metadata.requeued_at` set in place of the marker. The reply age limit counts from `requeued_at`; `requested_at` keeps the arrival time, so revived texts keep their order. One conditional UPDATE. It runs at the end of the voicebot's `on_call_end` (every end path) and in `sweep_stale_calls` for each call it force-closes.
 
 ### 5. Sending number for `send_sms`
 

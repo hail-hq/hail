@@ -345,9 +345,10 @@ async def requeue_skipped_for_call(db: AsyncSession, call: Call) -> int:
     """Give the text agent the texts that were skipped for this call and never
     reached the voice agent. One conditional UPDATE: inbound texts of the
     call's thread, still ``skipped`` with the active-call marker, created from
-    30 seconds before the call row, become ``pending``. ``requested_at`` is
-    reset to now so the reply age limit counts from here, and the marker is
-    replaced by ``requeued_at`` so a row is revived once. The caller commits.
+    30 seconds before the call row, become ``pending``. The marker is replaced
+    by ``requeued_at``, so a row is revived once and the reply age limit
+    counts from here. ``requested_at`` keeps the arrival time, so revived
+    texts keep their order. The caller commits.
     Returns how many rows changed."""
     if call.agent_id is None:
         return 0
@@ -371,7 +372,6 @@ async def requeue_skipped_for_call(db: AsyncSession, call: Call) -> int:
         .values(
             agent_reply_state="pending",
             agent_reply_available_at=None,
-            requested_at=func.now(),
             metadata_=cast(meta, JSONB),
         )
         .execution_options(synchronize_session=False)
