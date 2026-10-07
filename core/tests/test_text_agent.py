@@ -211,6 +211,7 @@ async def test_claim_skips_when_routing_changed(async_session) -> None:
     row = await async_session.get(Sms, result.sms_id)
     await async_session.refresh(row)
     assert row.agent_reply_state == "skipped"
+    assert "skipped_reason" not in row.metadata_  # not an active-call skip
 
 
 async def test_claim_moves_past_dropped_texts_to_the_next_row(async_session) -> None:
@@ -360,6 +361,7 @@ async def test_old_pending_text_is_skipped_not_answered(
     assert claimed is not None and claimed.sms.id == fresh.sms_id
     await async_session.refresh(row)
     assert row.agent_reply_state == "skipped"
+    assert "skipped_reason" not in row.metadata_  # expiry is not a call skip
 
 
 async def test_inbound_text_carries_the_numbers_agent(async_session) -> None:
@@ -437,6 +439,7 @@ async def test_text_during_an_active_call_is_not_queued(async_session) -> None:
     result = await _ingest(async_session, "my address is 5 Rue X", "SM21")
     row = await async_session.get(Sms, result.sms_id)
     assert row.agent_reply_state == "skipped"
+    assert row.metadata_ == {"skipped_reason": "active_call"}
     assert row.agent_id == agent.id
 
 
@@ -500,6 +503,7 @@ async def test_text_during_a_ringing_call_is_not_queued(async_session) -> None:
     result = await _ingest(async_session, "hi", "SM32")
     row = await async_session.get(Sms, result.sms_id)
     assert row.agent_reply_state == "skipped"
+    assert row.metadata_["skipped_reason"] == "active_call"
 
 
 def test_chat_messages_map_call_agent_and_leading_assistant() -> None:

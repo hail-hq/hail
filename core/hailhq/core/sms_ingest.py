@@ -247,7 +247,10 @@ async def ingest_inbound_sms(
             db, organization_id, number.sms_agent_id, from_e164
         ):
             # The voice agent on the line gets this text (voicebot text watch).
+            # The marker tells the watcher and the call-end requeue that this
+            # skip is theirs; other skips (expiry, routing) are never revived.
             sms.agent_reply_state = "skipped"
+            sms.metadata_ = {**(sms.metadata_ or {}), "skipped_reason": "active_call"}
         else:
             sms.agent_reply_state = "pending"
 

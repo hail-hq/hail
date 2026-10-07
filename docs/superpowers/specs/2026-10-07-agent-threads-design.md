@@ -61,7 +61,7 @@ Changes:
   - It adds the text to the agent's conversation with the prefix `[text message from caller] `, cut at 1000 characters.
   - Delivery is at-least-once: a rare duplicate is possible.
   - The text agent does not reply. The row is marked `agent_reply_state='skipped'`.
-  - The watcher injects only rows still `skipped`. A text whose injection fails 3 times is given up on.
+  - Ingest also sets `metadata.skipped_reason = "active_call"` on that row. The watcher injects only rows still `skipped` with that marker, and the requeue is one conditional UPDATE on both; skips for other reasons (expiry, routing change) are never revived. A text whose injection fails 3 times is given up on.
   - At call end (after the final status is written), inbound texts of the thread that are `skipped`, newer than the watch start minus 30 seconds, and not delivered by the watcher are set back to `pending`, so the text agent answers them.
 
 ### 5. Sending number for `send_sms`

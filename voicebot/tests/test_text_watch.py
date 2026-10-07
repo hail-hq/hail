@@ -71,7 +71,16 @@ async def _seed_call(async_session, *, caller=PERSON):
 
 
 def _text(
-    org, agent_id, body, *, person=PERSON, at, inbound=True, id=None, state="skipped"
+    org,
+    agent_id,
+    body,
+    *,
+    person=PERSON,
+    at,
+    inbound=True,
+    id=None,
+    state="skipped",
+    reason="active_call",
 ):
     return Sms(
         id=id or uuid.uuid4(),
@@ -85,6 +94,7 @@ def _text(
         body=body,
         requested_at=at,
         agent_reply_state=state,
+        metadata_=({"skipped_reason": reason} if reason is not None else {}),
     )
 
 
@@ -264,6 +274,32 @@ async def test_only_skipped_texts_are_injected(async_session):
     assert fake.inputs == [threads.TEXT_MARKER + "skipped"]
 
 
+async def test_rows_skipped_for_other_reasons_are_never_injected_or_requeued(
+    async_session,
+):
+    org, agent, call = await _seed_call(async_session)
+    since = _now()
+    at = since + timedelta(seconds=1)
+    unmarked = _text(org, agent.id, "unmarked", at=at, reason=None)
+    expired = _text(org, agent.id, "expired", at=at, reason="expired")
+    mine = _text(org, agent.id, "mine", at=at)
+    async_session.add_all([unmarked, expired, mine])
+    await async_session.commit()
+
+    fake = FakeSession()
+    task = _start(fake, call, since)
+    await wait_for(lambda: len(fake.inputs) >= 1)
+    await asyncio.sleep(POLL * 8)
+    await _stop(task)
+    assert fake.inputs == [threads.TEXT_MARKER + "mine"]
+
+    n = await text_watch.requeue_undelivered((org, agent.id, PERSON), since, set())
+    assert n == 1
+    for r, state in ((unmarked, "skipped"), (expired, "skipped"), (mine, "pending")):
+        await async_session.refresh(r)
+        assert r.agent_reply_state == state
+
+
 async def test_requeue_undelivered_only_touches_this_threads_undelivered(
     async_session,
 ):
@@ -281,7 +317,7 @@ async def test_requeue_undelivered_only_touches_this_threads_undelivered(
     other_ag = _text(org, other_agent.id, "agent", at=at)
     other_org = _text(uuid.uuid4(), agent.id, "org", at=at)
     outbound = _text(org, agent.id, "out", at=at, inbound=False)
-    done = _text(org, agent.id, "done", at=at, state="done")
+    done = _text(org, agent.id, "done", at=at, state="done")  # answered: stays
     rows = [
         delivered, missed, slightly_early, too_old, other_caller, other_ag,
         other_org, outbound, done,

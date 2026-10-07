@@ -30,6 +30,9 @@ CURSOR_OVERLAP = timedelta(seconds=30)
 # Failed ``generate_reply`` calls (other than a closed session) per text before
 # the watcher gives up on it and counts it as delivered.
 MAX_INJECT_ATTEMPTS = 3
+# ``sms.metadata_["skipped_reason"]`` written by ingest for a text skipped
+# because the agent was on a call. Only such rows are injected or requeued.
+ACTIVE_CALL_SKIP = "active_call"
 
 
 async def new_inbound_texts(
@@ -46,6 +49,7 @@ async def new_inbound_texts(
             Sms.agent_id == agent_id,
             Sms.direction == "inbound",
             Sms.agent_reply_state == "skipped",
+            Sms.metadata_["skipped_reason"].astext == ACTIVE_CALL_SKIP,
             Sms.from_e164 == caller_e164,
             Sms.requested_at >= after,
         )
@@ -127,7 +131,8 @@ async def requeue_undelivered(
     """At call end, hand texts the voice agent never got back to the text
     agent: inbound texts of this thread ``skipped`` during the call (requested
     at or after ``since`` minus ``CURSOR_OVERLAP``) and not in ``delivered_ids``
-    become ``pending``. Returns how many. ``key`` is ``call_thread_key``."""
+    become ``pending``, only when still ``skipped`` with the active-call marker
+    (one conditional UPDATE). Returns how many. ``key`` is ``call_thread_key``."""
     org, agent_id, caller = key
     stmt = update(Sms).where(
         Sms.organization_id == org,
@@ -135,6 +140,7 @@ async def requeue_undelivered(
         Sms.direction == "inbound",
         Sms.from_e164 == caller,
         Sms.agent_reply_state == "skipped",
+        Sms.metadata_["skipped_reason"].astext == ACTIVE_CALL_SKIP,
         Sms.requested_at >= since - CURSOR_OVERLAP,
     )
     if delivered_ids:
