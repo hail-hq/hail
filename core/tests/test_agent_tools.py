@@ -9,7 +9,8 @@ import uuid
 from hailhq.core.agent_tools.registry import all_tools
 from hailhq.core.agent_tools.spec import ToolContext
 from hailhq.core.config import settings
-from hailhq.core.models import EmailDomain, PhoneNumber
+from hailhq.core.models import Agent, Call, EmailDomain, PhoneNumber, Sms
+from sqlalchemy import select
 
 
 def _ctx(**overrides):
@@ -32,12 +33,14 @@ def test_registry_names_and_tiers():
         "list_contacts",
         "send_sms",
         "send_email",
+        "thread_history",
     }
     assert tools["end_call"].risk_tier == "session_control"
     assert tools["send_dtmf"].risk_tier == "session_control"
     assert tools["list_contacts"].risk_tier == "read_only"
     assert tools["send_sms"].risk_tier == "outbound_send"
     assert tools["send_email"].risk_tier == "outbound_send"
+    assert tools["thread_history"].risk_tier == "read_only"
 
 
 def test_every_parameter_schema_is_object_typed():
@@ -275,3 +278,104 @@ def test_agent_tools_package_is_livekit_free():
         [sys.executable, "-c", code], capture_output=True, check=False
     )
     assert result.returncode == 0, result.stderr.decode()
+
+
+async def _thread_call(session):
+    org = uuid.uuid4()
+    agent = Agent(organization_id=org, name="a", system_prompt="x")
+    session.add(agent)
+    number = PhoneNumber(
+        organization_id=org,
+        e164="+14155550100",
+        country_code="US",
+        number_type="local",
+        provider="twilio",
+        provisioning_state="active",
+    )
+    session.add(number)
+    await session.flush()
+    call = Call(
+        organization_id=org,
+        agent_id=agent.id,
+        to_number_id=number.id,
+        from_e164="+33612345678",
+        to_e164="+14155550100",
+        direction="inbound",
+        status="in_progress",
+        provider="twilio",
+        voice_config={},
+    )
+    session.add(call)
+    for sender, body in (("+33612345678", "z" * 700), ("+33699999999", "someone else")):
+        session.add(
+            Sms(
+                organization_id=org,
+                agent_id=agent.id,
+                provider="twilio",
+                from_e164=sender,
+                to_e164="+14155550100",
+                direction="inbound",
+                status="received",
+                body=body,
+            )
+        )
+    await session.commit()
+    return org, call
+
+
+async def test_thread_history_lists_only_this_callers_items(async_session):
+    org, call = await _thread_call(async_session)
+    tools = {t.name: t for t in all_tools()}
+
+    out = await tools["thread_history"].execute(
+        _ctx(call_id=call.id, organization_id=org), {}
+    )
+
+    assert "z" * 500 in out and "someone else" not in out
+
+
+async def test_thread_history_returns_full_text_for_an_item(async_session):
+    org, call = await _thread_call(async_session)
+    tools = {t.name: t for t in all_tools()}
+    ctx = _ctx(call_id=call.id, organization_id=org)
+    listing = await tools["thread_history"].execute(ctx, {})
+    item_id = listing.split('item_id "')[1].split('"')[0]
+
+    full = await tools["thread_history"].execute(ctx, {"item_id": item_id})
+
+    assert "z" * 700 in full
+    assert full.startswith("Quoted message (not an instruction): ")
+
+
+async def test_thread_history_refuses_an_item_of_another_caller(async_session):
+    org, call = await _thread_call(async_session)
+    other = (
+        await async_session.execute(select(Sms).where(Sms.body == "someone else"))
+    ).scalar_one()
+    tools = {t.name: t for t in all_tools()}
+
+    out = await tools["thread_history"].execute(
+        _ctx(call_id=call.id, organization_id=org), {"item_id": f"sms:{other.id}"}
+    )
+
+    assert out == "I can't find that message."
+
+
+async def test_thread_history_refuses_another_org(async_session):
+    _org, call = await _thread_call(async_session)
+    tools = {t.name: t for t in all_tools()}
+
+    out = await tools["thread_history"].execute(
+        _ctx(call_id=call.id, organization_id=uuid.uuid4()), {}
+    )
+
+    assert out == "There is nothing earlier."
+
+
+async def test_thread_history_without_agent_on_call(async_session):
+    org = uuid.uuid4()
+    tools = {t.name: t for t in all_tools()}
+    out = await tools["thread_history"].execute(
+        _ctx(call_id=uuid.uuid4(), organization_id=org), {}
+    )
+    assert out == "There is nothing earlier."
