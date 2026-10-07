@@ -91,7 +91,9 @@ OpenAPI regenerated; CLI (`make codegen`, `cli/internal/cmd/agents.go`) and MCP 
 
 New tool `transfer_call` (`core/hailhq/core/agent_tools/transfer_call.py`):
 
-- Parameter: `contact` — enum of the target names from metadata.
+- Parameters:
+  - `contact` — enum of the target names from metadata;
+  - `reason` — one short sentence for the person ("an invoice question"). Capped at 200 chars.
 - Description lists each name with its note: "Sam (billing questions)".
 - `is_available`: false when `handover_targets` is empty.
 - `risk_tier="session_control"`, so the agent finishes speaking first.
