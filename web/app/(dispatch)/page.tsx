@@ -1,4 +1,4 @@
-import { a2p10dlc, llm, numbers, sms, stt, tts } from "@/lib/costs";
+import { a2p10dlc, llm, numbers, onSale, sms, stt, tts } from "@/lib/costs";
 import { LLMSection } from "@/components/categories/llm-section";
 import { STTSection } from "@/components/categories/stt-section";
 import { TTSSection } from "@/components/categories/tts-section";
@@ -179,7 +179,7 @@ export default function CostsPage() {
               <div className="v">{numbers.length}</div>
               <div className="n">
                 {priceRange(
-                  numbers.map((r) => r.usd_per_month),
+                  numbers.filter(onSale).map((r) => r.usd_per_month),
                   2,
                   2,
                   "mo",
