@@ -16,12 +16,15 @@ Process model: this thread is the only DB user in the worker's main process
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import threading
 from typing import Any
 
 import logfire
 from hailhq.core.agent_tools.client import AgentApiClient
+from hailhq.core.agent_tools.spec import ToolContext
+from hailhq.core.agent_tools.thread_history import SPEC as THREAD_HISTORY
 from hailhq.core.config import settings
 from hailhq.core.db import session_scope
 from hailhq.core.telemetry import operation, telemetry_enabled
@@ -36,16 +39,29 @@ from hailhq.core.text_agent import (
     retry_reply,
     thread_history_for_reply,
 )
+from hailhq.core.threads import ThreadScope
 from hailhq.voicebot.pipeline import ProviderKeyError, build_llm, resolve_org_configs
-from livekit.agents.llm import ChatContext
+from hailhq.voicebot.tools import wrap_tool
+from livekit.agents.llm import (
+    ChatContext,
+    FunctionCall,
+    FunctionCallOutput,
+    FunctionToolCall,
+)
 
 logger = logging.getLogger("hailhq.voicebot.textbot")
 
 POLL_SECONDS = 2.0
 LLM_TIMEOUT_SECONDS = 30.0
+# Model calls per reply. The last one may not call a tool, so it writes text.
+MAX_TOOL_ROUNDS = 3
+# What the model reads when a tool call fails or names a tool it does not have.
+TOOL_APOLOGY = "Sorry, the earlier messages could not be read."
 
 __all__ = [
+    "MAX_TOOL_ROUNDS",
     "POLL_SECONDS",
+    "TOOL_APOLOGY",
     "generate_reply",
     "reply_once",
     "run_forever",
@@ -60,21 +76,94 @@ def _chat_context(messages: list[dict[str, Any]]) -> ChatContext:
     return ctx
 
 
+def _tool_context(claimed: ClaimedReply) -> ToolContext:
+    """The text agent's only tool reads this caller's thread, fixed by the
+    inbound text, never by the model's arguments."""
+    org = claimed.agent.organization_id
+    sms = claimed.sms
+    return ToolContext(
+        call_id=None,
+        organization_id=org,
+        api=None,
+        hangup=None,
+        send_dtmf=None,
+        thread=ThreadScope(org, claimed.agent.id, sms.from_e164, sms.to_e164),
+    )
+
+
+async def _run_tool(call: FunctionToolCall, tctx: ToolContext) -> tuple[str, bool]:
+    """``(output, is_error)`` for one tool call. Never raises."""
+    if call.name != THREAD_HISTORY.name:
+        return TOOL_APOLOGY, True
+    try:
+        args = json.loads(call.arguments or "{}")
+    except ValueError:
+        args = {}
+    if not isinstance(args, dict):
+        args = {}
+    try:
+        return await THREAD_HISTORY.execute(tctx, args), False
+    except Exception:
+        logger.exception("text agent tool %s failed", call.name)
+        return TOOL_APOLOGY, True
+
+
 async def generate_reply(claimed: ClaimedReply, messages: list[dict[str, Any]]) -> str:
-    """One model turn over the thread; the text, trimmed to the SMS cap."""
+    """The model's reply over the chat, trimmed to the SMS cap. The model may
+    call ``thread_history``; each call's result goes back into the chat and
+    the model is asked again, for at most ``MAX_TOOL_ROUNDS`` model calls."""
     org_cfgs = await resolve_org_configs(claimed.agent.organization_id)
     llm = build_llm(None, org_cfgs.get("llm"))
-    parts: list[str] = []
+    tctx = _tool_context(claimed)
+    tools = [wrap_tool(THREAD_HISTORY, tctx)]
+    chat_ctx = _chat_context(messages)
+    text = ""
     try:
-        async with llm.chat(chat_ctx=_chat_context(messages)) as stream:
-            async for chunk in stream:
-                delta = getattr(chunk, "delta", None)
-                if delta is not None and delta.content:
-                    parts.append(delta.content)
+        for round_no in range(1, MAX_TOOL_ROUNDS + 1):
+            last = round_no == MAX_TOOL_ROUNDS
+            parts: list[str] = []
+            calls: list[FunctionToolCall] = []
+            async with llm.chat(
+                chat_ctx=chat_ctx, tools=tools, tool_choice="none" if last else "auto"
+            ) as stream:
+                async for chunk in stream:
+                    delta = getattr(chunk, "delta", None)
+                    if delta is None:
+                        continue
+                    if delta.content:
+                        parts.append(delta.content)
+                    calls.extend(delta.tool_calls or [])
+            text = "".join(parts).strip() or text
+            if not calls or last:
+                break
+            for call in calls:
+                output, is_error = await _run_tool(call, tctx)
+                logger.info(
+                    "sms_id=%s text agent tool=%s round=%d error=%s",
+                    claimed.sms.id,
+                    call.name,
+                    round_no,
+                    is_error,
+                )
+                chat_ctx.insert(
+                    FunctionCall(
+                        call_id=call.call_id,
+                        name=call.name,
+                        arguments=call.arguments,
+                        extra=call.extra or {},
+                    )
+                )
+                chat_ctx.insert(
+                    FunctionCallOutput(
+                        call_id=call.call_id,
+                        name=call.name,
+                        output=output,
+                        is_error=is_error,
+                    )
+                )
     finally:
         # Plugin LLMs own an HTTP client each; one is built per reply.
         await llm.aclose()
-    text = "".join(parts).strip()
     return text[:MAX_REPLY_CHARS]
 
 

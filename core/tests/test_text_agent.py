@@ -7,6 +7,7 @@ from datetime import datetime, timedelta, timezone
 
 from hailhq.core import text_agent, threads
 from hailhq.core.models import Agent, Call, CallEvent, PhoneNumber, Sms
+from hailhq.core.prompts import THREAD_TOOL_HINT_TEXT
 from hailhq.core.sms_ingest import ingest_inbound_sms
 from sqlalchemy import select
 
@@ -182,11 +183,12 @@ async def test_claim_history_and_chat_shape(async_session) -> None:
     history = await text_agent.thread_history_for_reply(
         async_session, claimed.sms, agent
     )
-    assert len(history) == 25  # 22 earlier + 2 agent texts + the new text
+    # The last CHAT_LIMIT texts, the new one included.
+    assert len(history) == text_agent.CHAT_LIMIT == 20
     assert history[-1].text == "Tuesday then?"
     assert history[-2].text == "Voice sent."
     assert history[-3].text == "Sure."
-    assert history[0].text == "msg 0"  # oldest first, in order
+    assert history[0].text == "msg 5"  # oldest first, in order
 
     messages = text_agent.build_chat_messages(agent, history)
     assert messages[0]["role"] == "system"
@@ -412,15 +414,29 @@ async def _call(session, org, agent, number, *, status, turns=()):
     return call
 
 
-async def test_reply_history_includes_call_turns(async_session) -> None:
+async def test_reply_chat_has_texts_only_no_call_lines(async_session) -> None:
     org, agent, number = await _seed(async_session)
+    async_session.add(
+        Sms(
+            organization_id=org,
+            from_number_id=number.id,
+            agent_id=agent.id,
+            from_e164=ORG_NUMBER,
+            to_e164=PERSON,
+            direction="outbound",
+            status="sent",
+            body="See you Tuesday.",
+            requested_at=datetime.now(timezone.utc) - timedelta(minutes=5),
+        )
+    )
+    await async_session.commit()
     await _call(
         async_session,
         org,
         agent,
         number,
         status="completed",
-        turns=[("user", "I want Tuesday")],
+        turns=[("user", "I want Tuesday"), ("assistant", "I don't have that.")],
     )
     result = await _ingest(async_session, "Did you book it?", "SM20")
     sms = await async_session.get(Sms, result.sms_id)
@@ -428,9 +444,45 @@ async def test_reply_history_includes_call_turns(async_session) -> None:
     history = await text_agent.thread_history_for_reply(async_session, sms, agent)
     messages = text_agent.build_chat_messages(agent, history)
 
-    assert [m["role"] for m in messages] == ["system", "user", "user"]
-    assert messages[1]["content"] == "(on a call) I want Tuesday"
-    assert messages[2]["content"] == "Did you book it?"
+    assert {i.kind for i in history} <= {"text_in", "text_out"}
+    assert messages[1:] == [
+        {"role": "assistant", "content": "See you Tuesday."},
+        {"role": "user", "content": "Did you book it?"},
+    ]
+    joined = " ".join(m["content"] for m in messages)
+    assert "I want Tuesday" not in joined and "(on a call)" not in joined
+    assert "I don't have that." not in joined
+
+
+async def test_reply_chat_keeps_only_the_last_24_hours(async_session) -> None:
+    org, agent, number = await _seed(async_session)
+    for hours, body in ((30, "day old"), (2, "two hours")):
+        async_session.add(
+            Sms(
+                organization_id=org,
+                to_number_id=number.id,
+                agent_id=agent.id,
+                from_e164=PERSON,
+                to_e164=ORG_NUMBER,
+                direction="inbound",
+                status="received",
+                body=body,
+                requested_at=datetime.now(timezone.utc) - timedelta(hours=hours),
+            )
+        )
+    await async_session.commit()
+    result = await _ingest(async_session, "and now?", "SM24")
+    sms = await async_session.get(Sms, result.sms_id)
+
+    history = await text_agent.thread_history_for_reply(async_session, sms, agent)
+
+    assert [i.text for i in history] == ["two hours", "and now?"]
+
+
+async def test_system_prompt_names_the_thread_tool(async_session) -> None:
+    agent = Agent(organization_id=uuid.uuid4(), name="A", system_prompt="Be nice.")
+    messages = text_agent.build_chat_messages(agent, [])
+    assert THREAD_TOOL_HINT_TEXT in messages[0]["content"]
 
 
 async def test_text_during_an_active_call_is_not_queued(async_session) -> None:
@@ -506,20 +558,22 @@ async def test_text_during_a_ringing_call_is_not_queued(async_session) -> None:
     assert row.metadata_["skipped_reason"] == "active_call"
 
 
-def test_chat_messages_map_call_agent_and_leading_assistant() -> None:
+def test_chat_messages_map_texts_and_drop_call_items() -> None:
     from hailhq.core.threads import ThreadItem
 
     now = datetime.now(timezone.utc)
     agent = Agent(organization_id=uuid.uuid4(), name="A", system_prompt="Be nice.")
     history = [
         ThreadItem(id="event:1", at=now, kind="call_agent", text="Hello, Hail."),
+        ThreadItem(id="event:2", at=now, kind="call_caller", text="Hi."),
         ThreadItem(id="sms:2", at=now, kind="text_out", text="Sent."),
         ThreadItem(id="sms:3", at=now, kind="text_in", text="Thanks"),
     ]
     messages = text_agent.build_chat_messages(agent, history)
-    assert [m["role"] for m in messages] == ["system", "assistant", "assistant", "user"]
-    assert messages[1]["content"] == "Hello, Hail."  # agent turns: no prefix
-    assert messages[2]["content"] == "Sent."
+    assert messages[1:] == [
+        {"role": "assistant", "content": "Sent."},
+        {"role": "user", "content": "Thanks"},
+    ]
 
 
 async def test_api_sent_text_is_in_text_agent_history_only(async_session) -> None:

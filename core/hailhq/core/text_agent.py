@@ -3,8 +3,9 @@
 ``ingest_inbound_sms`` marks an inbound row ``agent_reply_state = 'pending'``
 when the number routes texts to a live agent with ``sms_enabled``. The
 voicebot's text worker (``hailhq.voicebot.textbot``) claims pending rows,
-builds the chat from the agent's instructions plus the recent thread, asks
-the LLM for one reply, and sends it through ``POST /internal/agent/reply-sms``.
+builds the chat from the agent's instructions plus the recent texts, asks
+the LLM for one reply (it may read older texts and calls with the
+``thread_history`` tool), and sends it through ``POST /internal/agent/reply-sms``.
 This module holds the DB side so the worker stays LLM-only.
 """
 
@@ -22,6 +23,8 @@ from sqlalchemy import DateTime, and_, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 __all__ = [
+    "CHAT_LIMIT",
+    "CHAT_WINDOW",
     "CLAIM_LEASE",
     "MAX_ATTEMPTS",
     "MAX_REPLIES_PER_THREAD",
@@ -41,6 +44,10 @@ __all__ = [
 ]
 
 MAX_REPLY_CHARS = 480  # same cap as the voice send_sms tool (about 3 segments)
+# The chat holds at most this many texts (the new one included) from this
+# long ago. Calls are not in it: the model reads them with thread_history.
+CHAT_LIMIT = 20
+CHAT_WINDOW = timedelta(hours=24)
 # At most this many agent replies in one thread per REPLY_CAP_WINDOW (a rolling
 # 24 hours, no reset when a person writes): past it the agent stays quiet until
 # older replies leave the window. A loop breaker.
@@ -182,7 +189,8 @@ def thread_lock_key(sms: Sms) -> str:
 async def thread_history_for_reply(
     db: AsyncSession, sms: Sms, agent: Agent
 ) -> list[ThreadItem]:
-    """The thread up to and including ``sms``: texts and call turns."""
+    """The last ``CHAT_LIMIT`` texts of the thread within ``CHAT_WINDOW`` up to
+    and including ``sms``, oldest first. Texts only: no call turns."""
     # Texts sent through POST /sms (no agent) between this number pair belong
     # to the conversation the text agent is having, so it sees them too.
     items = await thread_items(
@@ -190,8 +198,11 @@ async def thread_history_for_reply(
         sms.organization_id,
         agent.id,
         sms.from_e164,
+        limit=CHAT_LIMIT,
         until=sms.requested_at,
         unassigned_pair=(sms.to_e164, sms.from_e164),
+        source="sms",
+        window=CHAT_WINDOW,
     )
     # The reply answers ``sms``: keep it last even when another item shares its
     # timestamp.
@@ -199,7 +210,8 @@ async def thread_history_for_reply(
     current = next((i for i in items if i.id == key), None)
     if current is None:
         current = ThreadItem(id=key, at=sms.requested_at, kind="text_in", text=sms.body)
-    return [i for i in items if i.id != key] + [current]
+    earlier = [i for i in items if i.id != key]
+    return earlier[-(CHAT_LIMIT - 1) :] + [current]
 
 
 async def replies_in_thread(db: AsyncSession, sms: Sms) -> int:
@@ -219,16 +231,20 @@ async def replies_in_thread(db: AsyncSession, sms: Sms) -> int:
 def build_chat_messages(
     agent: Agent, history: list[ThreadItem]
 ) -> list[dict[str, Any]]:
-    """OpenAI-style messages: system (preamble + instructions) then the
-    thread, the caller as ``user`` and the agent as ``assistant``. The
-    caller's call turns carry an ``(on a call)`` prefix."""
+    """OpenAI-style messages: system (preamble, the thread_history hint and
+    the instructions) then the texts, inbound as ``user`` and outbound as
+    ``assistant``. Call items are left out."""
     messages: list[dict[str, Any]] = [
-        {"role": "system", "content": build_text_instructions(agent.system_prompt)}
+        {
+            "role": "system",
+            "content": build_text_instructions(agent.system_prompt, thread_tool=True),
+        }
     ]
     for item in history:
-        role = "user" if item.kind in ("text_in", "call_caller") else "assistant"
-        prefix = "(on a call) " if item.kind == "call_caller" else ""
-        messages.append({"role": role, "content": prefix + item.text})
+        if item.kind not in ("text_in", "text_out"):
+            continue
+        role = "user" if item.kind == "text_in" else "assistant"
+        messages.append({"role": role, "content": item.text})
     return messages
 
 
