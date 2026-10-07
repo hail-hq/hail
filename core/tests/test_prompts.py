@@ -1,4 +1,5 @@
 from hailhq.core import prompts
+from hailhq.core.prompts import VoiceHistory
 
 
 def test_framing_leads_and_instructions_follow() -> None:
@@ -27,7 +28,7 @@ def test_templates_hold_the_marker_exactly_once() -> None:
 
 def test_voice_instructions_append_history_section() -> None:
     out = prompts.build_voice_instructions(
-        "Be kind.", "inbound", history="[2026-10-06 10:00] text from caller: hi"
+        "Be kind.", "inbound", VoiceHistory("[2026-10-06 10:00] text from caller: hi")
     )
     assert out.endswith(
         f"{prompts.HISTORY_HEADING}\n\n{prompts.HISTORY_LEAD_IN}\n\n"
@@ -41,23 +42,21 @@ def test_voice_instructions_append_history_section() -> None:
 def test_voice_instructions_without_history_are_unchanged() -> None:
     expected = prompts.VOICE_PREAMBLE_INBOUND + "\n\n# Caller instructions\n\nBe kind."
     assert prompts.build_voice_instructions("Be kind.", "inbound") == expected
-    assert prompts.build_voice_instructions("Be kind.", "inbound", history=None) == (
-        expected
-    )
+    assert prompts.build_voice_instructions("Be kind.", "inbound", None) == (expected)
     for blank in ("", "  \n "):
-        out = prompts.build_voice_instructions("x", None, history=blank)
+        out = prompts.build_voice_instructions("x", None, VoiceHistory(blank))
         assert "Earlier with this caller" not in out
 
 
 def test_lead_in_tells_the_agent_to_use_the_record_and_the_tool() -> None:
-    out = prompts.build_voice_instructions("x", None, history="[t] text: hi")
+    out = prompts.build_voice_instructions("x", None, VoiceHistory("[t] text: hi"))
     assert "answer from this record" in out
     assert "call the thread_history tool before you say you have no record" in out
 
 
 def test_lead_in_omits_the_tool_sentence_without_the_tool() -> None:
     out = prompts.build_voice_instructions(
-        "x", None, history="[t] text: hi", history_tool=False
+        "x", None, VoiceHistory("[t] text: hi"), history_tool=False
     )
     assert "answer from this record; if it is not here, say so" in out
     assert "thread_history" not in out
@@ -70,7 +69,9 @@ def _lines(n: int) -> str:
 
 def test_recent_block_has_exactly_the_given_newest_items() -> None:
     out = prompts.build_voice_instructions(
-        "x", None, history=_lines(8), recent="line03\nline04\nline05\nline06\nline07"
+        "x",
+        None,
+        VoiceHistory(_lines(8), "line03\nline04\nline05\nline06\nline07"),
     )
     assert out.endswith(
         f"{prompts.RECENT_HEADING}\n\n{prompts.RECENT_NOTE}\n\nline03\nline04\nline05\nline06\nline07"
@@ -79,10 +80,10 @@ def test_recent_block_has_exactly_the_given_newest_items() -> None:
     assert out.count("line07") == 2
 
 
-def test_recent_block_absent_without_recent_or_history() -> None:
+def test_recent_block_absent_without_recent_or_record() -> None:
     assert prompts.RECENT_HEADING not in prompts.build_voice_instructions(
-        "x", None, history=_lines(3), recent=""
+        "x", None, VoiceHistory(_lines(3), "")
     )
     assert prompts.RECENT_HEADING not in prompts.build_voice_instructions(
-        "x", None, history=None, recent="line01"
+        "x", None, VoiceHistory("", "line01")
     )

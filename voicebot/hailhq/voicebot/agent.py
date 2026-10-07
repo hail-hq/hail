@@ -26,7 +26,6 @@ import asyncio
 import json
 import logging
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 from uuid import UUID
@@ -47,6 +46,7 @@ from hailhq.core.prompts import (
     RECENT_COUNT,
     VOICE_PREAMBLE,
     VOICE_PREAMBLE_INBOUND,
+    VoiceHistory,
     build_voice_instructions,
 )
 from hailhq.core.schemas import TERMINAL_CALL_STATUSES
@@ -202,8 +202,7 @@ def build_instructions(
     return build_voice_instructions(
         system_prompt,
         direction,
-        history.record if history else None,
-        history.recent if history else None,
+        history,
         history_tool=history_tool,
     )
 
@@ -621,16 +620,10 @@ logger = logging.getLogger("hailhq.voicebot")
 HISTORY_TIMEOUT_SECONDS = 1.5
 
 
-@dataclass(frozen=True)
-class HistoryText:
-    """The caller's thread, rendered for the prompt: the full ``record`` and
-    ``recent`` (the newest items again, empty when the record is that short)."""
-
-    record: str
-    recent: str = ""
+HistoryText = VoiceHistory
 
 
-async def _read_thread(call_id: UUID) -> tuple[str, str, int] | None:
+async def _read_thread(call_id: UUID) -> HistoryText | None:
     async with session_scope() as db:
         ctx = await threads.call_thread_context(db, call_id)
         if ctx is None:
@@ -650,7 +643,7 @@ async def _read_thread(call_id: UUID) -> tuple[str, str, int] | None:
     recent = ""
     if len(items) > RECENT_COUNT:
         recent = threads.render_thread(items[-RECENT_COUNT:])
-    return record, recent, len(items)
+    return HistoryText(record, recent, len(items))
 
 
 async def load_thread_context(call_id: UUID) -> HistoryText | None:
@@ -668,9 +661,8 @@ async def load_thread_context(call_id: UUID) -> HistoryText | None:
     if found is None:
         logger.info("call_id=%s thread history items=0", call_id)
         return None
-    record, recent, count = found
-    logger.info("call_id=%s thread history items=%d", call_id, count)
-    return HistoryText(record, recent)
+    logger.info("call_id=%s thread history items=%d", call_id, found.count)
+    return found
 
 
 def prewarm(proc: JobProcess) -> None:
