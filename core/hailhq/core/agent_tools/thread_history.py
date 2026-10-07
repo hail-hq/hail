@@ -9,7 +9,7 @@ thread.
 from __future__ import annotations
 
 import uuid
-from typing import Any
+from typing import Any, get_args
 
 from hailhq.core import threads
 from hailhq.core.agent_tools.spec import ToolContext, ToolSpec
@@ -19,7 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 _NOT_FOUND = "I can't find that message."
 _EMPTY = "There is nothing earlier."
 _DEFAULT_LIMIT = 10
-_SOURCES = ("all", "sms", "voice")
+_SOURCES: tuple[threads.Source, ...] = get_args(threads.Source)
 
 
 async def _always(_org: uuid.UUID, _session: AsyncSession) -> bool:
@@ -45,7 +45,7 @@ async def _scope(db: AsyncSession, ctx: ToolContext) -> threads.ThreadScope | No
 
 def _source(raw: Any) -> threads.Source:
     """Anything but a known source reads the whole thread."""
-    return raw if isinstance(raw, str) and raw in _SOURCES else "all"  # type: ignore[return-value]
+    return next((s for s in _SOURCES if s == raw), "all")
 
 
 async def _execute(ctx: ToolContext, args: dict[str, Any]) -> str:

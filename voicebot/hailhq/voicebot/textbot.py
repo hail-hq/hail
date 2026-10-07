@@ -52,6 +52,7 @@ from livekit.agents.llm import (
 logger = logging.getLogger("hailhq.voicebot.textbot")
 
 POLL_SECONDS = 2.0
+# Per model call. One reply may make MAX_TOOL_ROUNDS of them.
 LLM_TIMEOUT_SECONDS = 30.0
 # Model calls per reply. The last one may not call a tool, so it writes text.
 MAX_TOOL_ROUNDS = 3
@@ -135,6 +136,9 @@ async def generate_reply(claimed: ClaimedReply, messages: list[dict[str, Any]]) 
                     calls.extend(delta.tool_calls or [])
             # Text beside a tool call ("let me check") is not the reply.
             text = "".join(parts).strip()
+            if last and calls and not text:
+                # The model ignored tool_choice="none"; retry, do not skip.
+                raise RuntimeError("model made a tool call on the last round")
             if not calls or last:
                 break
             for call in calls:
@@ -225,7 +229,8 @@ async def _reply_claimed(api: AgentApiClient, claimed: ClaimedReply, span=None) 
     try:
         messages = await _prepare(claimed)
         text = await asyncio.wait_for(
-            generate_reply(claimed, messages), timeout=LLM_TIMEOUT_SECONDS
+            generate_reply(claimed, messages),
+            timeout=LLM_TIMEOUT_SECONDS * MAX_TOOL_ROUNDS,
         )
     except ProviderKeyError as exc:
         if span is not None:

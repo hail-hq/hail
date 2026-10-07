@@ -308,6 +308,20 @@ async def test_tool_loop_stops_after_three_rounds(
     assert text == "Let me check."
 
 
+async def test_tool_call_without_text_on_the_last_round_raises(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake_execute(ctx, args):
+        return "nothing"
+
+    monkeypatch.setattr(textbot, "THREAD_HISTORY", _spec_with(fake_execute))
+    llm = ScriptedLLM([("tool", "thread_history", "{}")] * 3)
+    _use(monkeypatch, llm)
+
+    with pytest.raises(RuntimeError):
+        await textbot.generate_reply(_claimed(), _MESSAGES)  # type: ignore[arg-type]
+
+
 async def test_tool_error_becomes_an_apology_not_an_exception(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
