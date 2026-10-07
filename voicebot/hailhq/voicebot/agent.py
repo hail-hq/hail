@@ -76,6 +76,7 @@ from hailhq.voicebot.pipeline import (
     resolve_org_configs,
 )
 from hailhq.voicebot.recording import upload_recording
+from hailhq.voicebot import text_watch
 from hailhq.voicebot.telemetry import connect_livekit_tracing
 from hailhq.voicebot.tools import build_agent_tools
 from livekit import rtc
@@ -1534,6 +1535,11 @@ async def _run_call(
         tools=agent_tools,
     )
     await session.start(agent=agent, room=ctx.room)
+    # Feeds texts the caller sends during the call into the session. Held
+    # here so it is not garbage collected; cancelled in `_shutdown`.
+    text_watch_task: asyncio.Task[None] | None = asyncio.create_task(
+        text_watch.watch_incoming_texts(session, call_id)
+    )
 
     room_name = ctx.room.name
 
@@ -1589,6 +1595,9 @@ async def _run_call(
             if soft_cap_task is not None and not soft_cap_task.done():
                 soft_cap_task.cancel()
                 await asyncio.gather(soft_cap_task, return_exceptions=True)
+            if text_watch_task is not None and not text_watch_task.done():
+                text_watch_task.cancel()
+                await asyncio.gather(text_watch_task, return_exceptions=True)
             if event_tasks:
                 await asyncio.gather(*list(event_tasks), return_exceptions=True)
             if answer_tasks:
