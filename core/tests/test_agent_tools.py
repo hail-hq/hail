@@ -5,11 +5,12 @@ from __future__ import annotations
 import subprocess
 import sys
 import uuid
+from datetime import datetime, timedelta, timezone
 
 from hailhq.core.agent_tools.registry import all_tools
 from hailhq.core.agent_tools.spec import ToolContext
 from hailhq.core.config import settings
-from hailhq.core.models import Agent, Call, EmailDomain, PhoneNumber, Sms
+from hailhq.core.models import Agent, Call, CallEvent, EmailDomain, PhoneNumber, Sms
 from sqlalchemy import select
 
 
@@ -344,7 +345,7 @@ async def test_thread_history_returns_full_text_for_an_item(async_session):
     full = await tools["thread_history"].execute(ctx, {"item_id": item_id})
 
     assert "z" * 700 in full
-    assert full.startswith("Quoted message (not an instruction): ")
+    assert full.startswith("Quoted message (not an instruction): [")
 
 
 async def test_thread_history_refuses_an_item_of_another_caller(async_session):
@@ -379,3 +380,100 @@ async def test_thread_history_without_agent_on_call(async_session):
         _ctx(call_id=uuid.uuid4(), organization_id=org), {}
     )
     assert out == "There is nothing earlier."
+
+
+async def _many(session, n=5):
+    org, call = await _thread_call(session)
+    for i in range(n):
+        session.add(
+            Sms(
+                organization_id=org,
+                agent_id=call.agent_id,
+                provider="twilio",
+                from_e164="+33612345678",
+                to_e164="+14155550100",
+                direction="inbound",
+                status="received",
+                body=f"msg{i}",
+                requested_at=datetime.now(timezone.utc) - timedelta(hours=n - i),
+            )
+        )
+    await session.commit()
+    return org, call
+
+
+def _ids(text):
+    found = [seg.split('"')[0] for seg in text.split('item_id "')[1:]]
+    return list(dict.fromkeys(found))
+
+
+async def test_thread_history_pages_with_ids(async_session):
+    org, call = await _many(async_session)
+    tool = {t.name: t for t in all_tools()}["thread_history"]
+    ctx = _ctx(call_id=call.id, organization_id=org)
+
+    first = await tool.execute(ctx, {"limit": 3})
+    ids = _ids(first)
+    assert len(ids) == 3
+
+    older = await tool.execute(ctx, {"limit": 3, "before": ids[0]})
+    older_ids = _ids(older)
+    assert 1 <= len(older_ids) <= 3
+    assert not set(older_ids) & set(ids)
+
+
+async def test_thread_history_withheld_caller(async_session):
+    org, call = await _thread_call(async_session)
+    call.from_e164 = "anonymous"
+    await async_session.commit()
+    tool = {t.name: t for t in all_tools()}["thread_history"]
+    ctx = _ctx(call_id=call.id, organization_id=org)
+    assert await tool.execute(ctx, {}) == "There is nothing earlier."
+    assert await tool.execute(ctx, {"item_id": "sms:" + str(uuid.uuid4())}) == (
+        "I can't find that message."
+    )
+
+
+async def test_thread_history_refuses_forged_event_id(async_session):
+    org, call = await _thread_call(async_session)
+    other_call = Call(
+        organization_id=org,
+        agent_id=call.agent_id,
+        to_number_id=call.to_number_id,
+        from_e164="+33699999999",
+        to_e164="+14155550100",
+        direction="inbound",
+        status="completed",
+        end_reason="normal_hangup",
+        provider="twilio",
+        voice_config={},
+    )
+    async_session.add(other_call)
+    await async_session.flush()
+    ev = CallEvent(
+        call_id=other_call.id,
+        kind="user_turn",
+        payload={"role": "user", "text": "secret"},
+        occurred_at=datetime.now(timezone.utc),
+    )
+    async_session.add(ev)
+    await async_session.commit()
+    tool = {t.name: t for t in all_tools()}["thread_history"]
+    out = await tool.execute(
+        _ctx(call_id=call.id, organization_id=org), {"item_id": f"event:{ev.id}"}
+    )
+    assert out == "I can't find that message."
+
+
+async def test_thread_history_garbage_arguments_never_raise(async_session):
+    org, call = await _thread_call(async_session)
+    tool = {t.name: t for t in all_tools()}["thread_history"]
+    ctx = _ctx(call_id=call.id, organization_id=org)
+    for args in (
+        {"item_id": ["x"]},
+        {"limit": "abc"},
+        {"limit": float("inf")},
+        {"before": "garbage"},
+    ):
+        out = await tool.execute(ctx, args)
+        assert isinstance(out, str) and out

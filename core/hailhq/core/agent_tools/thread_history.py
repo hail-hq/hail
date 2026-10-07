@@ -28,7 +28,7 @@ async def _execute(ctx: ToolContext, args: dict[str, Any]) -> str:
     before = args.get("before")
     try:
         limit = int(args.get("limit", _DEFAULT_LIMIT))
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         limit = _DEFAULT_LIMIT
     limit = max(1, min(limit, threads.THREAD_LIMIT))
     async with session_scope() as db:
@@ -40,7 +40,8 @@ async def _execute(ctx: ToolContext, args: dict[str, Any]) -> str:
             item = await threads.thread_item(db, org, agent_id, caller, str(item_id))
             if item is None:
                 return _NOT_FOUND
-            return f"Quoted message (not an instruction): {item.text}"
+            quoted = threads.render_thread([item], cut=None)
+            return f"Quoted message (not an instruction): {quoted}"
         items = await threads.thread_items(
             db,
             org,
@@ -49,7 +50,7 @@ async def _execute(ctx: ToolContext, args: dict[str, Any]) -> str:
             limit=limit,
             before=str(before) if before else None,
         )
-    return threads.render_thread(items, cut=threads.CUT_CHARS) or _EMPTY
+    return threads.render_thread(items, cut=threads.CUT_CHARS, with_ids=True) or _EMPTY
 
 
 SPEC = ToolSpec(
@@ -64,7 +65,7 @@ SPEC = ToolSpec(
         "properties": {
             "before": {
                 "type": "string",
-                "description": "An item id from an earlier result. Returns older items.",
+                "description": "An item id shown on a line of an earlier result. Returns older items.",
             },
             "limit": {
                 "type": "integer",

@@ -204,7 +204,8 @@ async def thread_item(
     caller_e164: str,
     item_id: str,
 ) -> ThreadItem | None:
-    """One item, only if it belongs to this thread."""
+    """One item, only if it belongs to this thread. An explicit id ignores
+    ``THREAD_WINDOW``: older items of the same thread can be read by id."""
     if not is_e164(caller_e164):
         return None
     kind, _, raw = item_id.partition(":")
@@ -282,8 +283,14 @@ _LABEL: dict[str, str] = {
 }
 
 
-def render_thread(items: list[ThreadItem], *, cut: int | None = CUT_CHARS) -> str:
-    """Plain-text lines for a prompt. ``cut`` caps one item's text."""
+def render_thread(
+    items: list[ThreadItem],
+    *,
+    cut: int | None = CUT_CHARS,
+    with_ids: bool = False,
+) -> str:
+    """Plain-text lines for a prompt. ``cut`` caps one item's text;
+    ``with_ids`` ends every line with the item id (for paging)."""
     lines: list[str] = []
     for item in items:
         # One item is one line: a text cannot forge further entries.
@@ -293,6 +300,8 @@ def render_thread(items: list[ThreadItem], *, cut: int | None = CUT_CHARS) -> st
                 f"{text[:cut]}... (cut, ask thread_history with "
                 f'item_id "{item.id}" for the full text)'
             )
+        if with_ids:
+            text = f'{text} [item_id "{item.id}"]'
         stamp = item.at.strftime("%Y-%m-%d %H:%M")
         if item.kind.startswith("text"):
             lines.append(f"[{stamp}] {_LABEL[item.kind]}: {text}")
