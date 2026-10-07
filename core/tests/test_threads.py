@@ -249,6 +249,8 @@ def test_render_cuts_long_text_and_labels_channels():
     assert "x" * 500 + "..." in out and "x" * 501 not in out
     assert "thread_history" in out  # the cut note names the tool
     assert "caller: hello" in out and "you: hi" in out
+    assert f"[{NOW.strftime('%Y-%m-%d %H:%M')} UTC] text from caller: " in out
+    assert f"[{NOW.strftime('%Y-%m-%d %H:%M')} UTC] on a call, caller: hello" in out
     assert "text from caller" in out and "text from you" in out
     assert "x" * 600 in threads.render_thread(items, cut=None)
     assert threads.render_thread([]) == ""

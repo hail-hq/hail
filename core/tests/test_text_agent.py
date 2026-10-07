@@ -5,7 +5,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timedelta, timezone
 
-from hailhq.core import text_agent
+from hailhq.core import text_agent, threads
 from hailhq.core.models import Agent, Call, CallEvent, PhoneNumber, Sms
 from hailhq.core.sms_ingest import ingest_inbound_sms
 from sqlalchemy import select
@@ -152,7 +152,23 @@ async def test_claim_history_and_chat_shape(async_session) -> None:
             direction="outbound",
             status="sent",
             body="Sure.",
+            metadata_={"reply_to_sms_id": str(uuid.uuid4())},
             requested_at=base + timedelta(seconds=22),
+        )
+    )
+    # A voice send_sms row (no reply_to_sms_id) is history but not a reply.
+    async_session.add(
+        Sms(
+            organization_id=org,
+            from_number_id=number.id,
+            agent_id=agent.id,
+            from_e164=ORG_NUMBER,
+            to_e164=PERSON,
+            direction="outbound",
+            status="sent",
+            body="Voice sent.",
+            metadata_={"call_id": str(uuid.uuid4())},
+            requested_at=base + timedelta(seconds=23),
         )
     )
     await async_session.commit()
@@ -166,9 +182,10 @@ async def test_claim_history_and_chat_shape(async_session) -> None:
     history = await text_agent.thread_history_for_reply(
         async_session, claimed.sms, agent
     )
-    assert len(history) == 24  # 22 earlier + the reply + the new text
+    assert len(history) == 25  # 22 earlier + 2 agent texts + the new text
     assert history[-1].text == "Tuesday then?"
-    assert history[-2].text == "Sure."
+    assert history[-2].text == "Voice sent."
+    assert history[-3].text == "Sure."
     assert history[0].text == "msg 0"  # oldest first, in order
 
     messages = text_agent.build_chat_messages(agent, history)
@@ -176,7 +193,8 @@ async def test_claim_history_and_chat_shape(async_session) -> None:
     assert "Book appointments." in messages[0]["content"]
     assert text_agent.TEXT_PREAMBLE in messages[0]["content"]
     assert messages[-1] == {"role": "user", "content": "Tuesday then?"}
-    assert messages[-2] == {"role": "assistant", "content": "Sure."}
+    assert messages[-2] == {"role": "assistant", "content": "Voice sent."}
+    assert messages[-3] == {"role": "assistant", "content": "Sure."}
 
     assert await text_agent.replies_in_thread(async_session, claimed.sms) == 1
 
@@ -496,5 +514,42 @@ def test_chat_messages_map_call_agent_and_leading_assistant() -> None:
     ]
     messages = text_agent.build_chat_messages(agent, history)
     assert [m["role"] for m in messages] == ["system", "assistant", "assistant", "user"]
-    assert messages[1]["content"] == "(on a call) Hello, Hail."
+    assert messages[1]["content"] == "Hello, Hail."  # agent turns: no prefix
     assert messages[2]["content"] == "Sent."
+
+
+async def test_api_sent_text_is_in_text_agent_history_only(async_session) -> None:
+    org, agent, number = await _seed(async_session)
+    base = datetime.now(timezone.utc) - timedelta(minutes=10)
+
+    def row(org_id, frm, to, body, secs, agent_id=None):
+        return Sms(
+            organization_id=org_id,
+            agent_id=agent_id,
+            from_e164=frm,
+            to_e164=to,
+            direction="outbound" if frm == ORG_NUMBER else "inbound",
+            status="sent",
+            body=body,
+            requested_at=base + timedelta(seconds=secs),
+        )
+
+    other_org = uuid.uuid4()
+    async_session.add_all(
+        [
+            row(org, ORG_NUMBER, PERSON, "api out", 1),
+            row(org, PERSON, ORG_NUMBER, "api in", 2),
+            row(org, ORG_NUMBER, "+33600000000", "other caller", 3),
+            row(org, "+14155550999", PERSON, "other org number", 4),
+            row(other_org, ORG_NUMBER, PERSON, "other org", 5),
+        ]
+    )
+    await async_session.commit()
+    result = await _ingest(async_session, "now?", "SM-API1")
+    sms = await async_session.get(Sms, result.sms_id)
+
+    history = await text_agent.thread_history_for_reply(async_session, sms, agent)
+    assert [i.text for i in history] == ["api out", "api in", "now?"]
+
+    voice = await threads.thread_items(async_session, org, agent.id, PERSON)
+    assert [i.text for i in voice if i.kind.startswith("text")] == ["now?"]

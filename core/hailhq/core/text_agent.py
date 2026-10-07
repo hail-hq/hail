@@ -180,8 +180,15 @@ async def thread_history_for_reply(
     db: AsyncSession, sms: Sms, agent: Agent
 ) -> list[ThreadItem]:
     """The thread up to and including ``sms``: texts and call turns."""
+    # Texts sent through POST /sms (no agent) between this number pair belong
+    # to the conversation the text agent is having, so it sees them too.
     items = await thread_items(
-        db, sms.organization_id, agent.id, sms.from_e164, until=sms.requested_at
+        db,
+        sms.organization_id,
+        agent.id,
+        sms.from_e164,
+        until=sms.requested_at,
+        unassigned_pair=(sms.to_e164, sms.from_e164),
     )
     # The reply answers ``sms``: keep it last even when another item shares its
     # timestamp.
@@ -193,12 +200,13 @@ async def thread_history_for_reply(
 
 
 async def replies_in_thread(db: AsyncSession, sms: Sms) -> int:
-    """Agent replies already sent in this thread within ``REPLY_CAP_WINDOW``."""
+    """Agent text replies (not voice send_sms rows) in this thread within ``REPLY_CAP_WINDOW``."""
     since = datetime.now(timezone.utc) - REPLY_CAP_WINDOW
     stmt = select(func.count(Sms.id)).where(
         Sms.organization_id == sms.organization_id,
         Sms.direction == "outbound",
         Sms.agent_id.is_not(None),
+        Sms.metadata_["reply_to_sms_id"].astext.is_not(None),
         _thread_filter(sms.from_e164, sms.to_e164),
         Sms.requested_at >= since,
     )
@@ -209,14 +217,14 @@ def build_chat_messages(
     agent: Agent, history: list[ThreadItem]
 ) -> list[dict[str, Any]]:
     """OpenAI-style messages: system (preamble + instructions) then the
-    thread, the caller as ``user`` and the agent as ``assistant``. Call turns
-    carry an ``(on a call)`` prefix."""
+    thread, the caller as ``user`` and the agent as ``assistant``. The
+    caller's call turns carry an ``(on a call)`` prefix."""
     messages: list[dict[str, Any]] = [
         {"role": "system", "content": build_text_instructions(agent.system_prompt)}
     ]
     for item in history:
         role = "user" if item.kind in ("text_in", "call_caller") else "assistant"
-        prefix = "(on a call) " if item.kind.startswith("call") else ""
+        prefix = "(on a call) " if item.kind == "call_caller" else ""
         messages.append({"role": role, "content": prefix + item.text})
     return messages
 

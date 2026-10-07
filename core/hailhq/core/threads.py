@@ -130,11 +130,14 @@ async def thread_items(
     limit: int = THREAD_LIMIT,
     before: str | None = None,
     until: datetime | None = None,
+    unassigned_pair: tuple[str, str] | None = None,
 ) -> list[ThreadItem]:
     """The last ``limit`` items of the thread inside ``THREAD_WINDOW``, oldest
     first. ``before`` is an item id: only items older than it come back, by
     (time, id) order. ``until`` drops items after that time and must be
-    timezone-aware."""
+    timezone-aware. ``unassigned_pair`` is ``(org number, caller)``: it also
+    brings in texts of the organization with no agent (sent through the API)
+    between those two numbers, either direction. Only the text agent asks."""
     if not is_e164(caller_e164):
         return []
     since = datetime.now(timezone.utc) - THREAD_WINDOW
@@ -144,11 +147,22 @@ async def thread_items(
         if anchor is None:
             return []
 
-    sms_stmt = (
-        select(Sms)
-        .where(*_sms_filter(organization_id, agent_id, caller_e164))
-        .where(Sms.requested_at >= since)
-    )
+    sms_where = and_(*_sms_filter(organization_id, agent_id, caller_e164))
+    if unassigned_pair is not None:
+        org_number, pair_caller = unassigned_pair
+        if is_e164(org_number) and pair_caller == caller_e164:
+            sms_where = or_(
+                sms_where,
+                and_(
+                    Sms.organization_id == organization_id,
+                    Sms.agent_id.is_(None),
+                    or_(
+                        and_(Sms.from_e164 == caller_e164, Sms.to_e164 == org_number),
+                        and_(Sms.from_e164 == org_number, Sms.to_e164 == caller_e164),
+                    ),
+                ),
+            )
+    sms_stmt = select(Sms).where(sms_where).where(Sms.requested_at >= since)
     # Injected-text turns and blank turns are excluded in SQL, so ``limit``
     # counts only items that can be returned.
     text = func.coalesce(CallEvent.payload["text"].astext, "")
@@ -302,7 +316,7 @@ def render_thread(
             )
         if with_ids:
             text = f'{text} [item_id "{item.id}"]'
-        stamp = item.at.strftime("%Y-%m-%d %H:%M")
+        stamp = item.at.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
         if item.kind.startswith("text"):
             lines.append(f"[{stamp}] {_LABEL[item.kind]}: {text}")
         else:
