@@ -427,3 +427,74 @@ async def test_text_after_a_finished_call_is_queued(async_session) -> None:
     await _call(async_session, org, agent, number, status="completed")
     result = await _ingest(async_session, "hello again", "SM22")
     assert (await async_session.get(Sms, result.sms_id)).agent_reply_state == "pending"
+
+
+async def test_current_text_is_last_even_on_a_timestamp_tie(async_session) -> None:
+    org, agent, number = await _seed(async_session)
+    at = datetime.now(timezone.utc) - timedelta(minutes=1)
+    rows = []
+    for i in range(2):
+        row = Sms(
+            organization_id=org,
+            to_number_id=number.id,
+            agent_id=agent.id,
+            from_e164=PERSON,
+            to_e164=ORG_NUMBER,
+            direction="inbound",
+            status="received",
+            body=f"tie {i}",
+            requested_at=at,
+        )
+        async_session.add(row)
+        rows.append(row)
+    await async_session.commit()
+    for row in rows:  # whichever sorts first, the current one ends up last
+        history = await text_agent.thread_history_for_reply(async_session, row, agent)
+        assert [h.text for h in history].count(row.body) == 1
+        assert history[-1].text == row.body
+        assert len(history) == 2
+
+
+async def test_active_call_of_another_caller_does_not_skip(async_session) -> None:
+    org, agent, number = await _seed(async_session)
+    call = await _call(async_session, org, agent, number, status="in_progress")
+    call.from_e164 = "+33699999999"
+    await async_session.commit()
+    result = await _ingest(async_session, "hi", "SM30")
+    row = await async_session.get(Sms, result.sms_id)
+    assert row.agent_reply_state == "pending"
+
+
+async def test_active_call_of_another_agent_does_not_skip(async_session) -> None:
+    org, agent, number = await _seed(async_session)
+    other = Agent(organization_id=org, name="Other", system_prompt="x")
+    async_session.add(other)
+    await async_session.flush()
+    await _call(async_session, org, other, number, status="in_progress")
+    result = await _ingest(async_session, "hi", "SM31")
+    row = await async_session.get(Sms, result.sms_id)
+    assert row.agent_reply_state == "pending"
+
+
+async def test_text_during_a_ringing_call_is_not_queued(async_session) -> None:
+    org, agent, number = await _seed(async_session)
+    await _call(async_session, org, agent, number, status="ringing")
+    result = await _ingest(async_session, "hi", "SM32")
+    row = await async_session.get(Sms, result.sms_id)
+    assert row.agent_reply_state == "skipped"
+
+
+def test_chat_messages_map_call_agent_and_leading_assistant() -> None:
+    from hailhq.core.threads import ThreadItem
+
+    now = datetime.now(timezone.utc)
+    agent = Agent(organization_id=uuid.uuid4(), name="A", system_prompt="Be nice.")
+    history = [
+        ThreadItem(id="event:1", at=now, kind="call_agent", text="Hello, Hail."),
+        ThreadItem(id="sms:2", at=now, kind="text_out", text="Sent."),
+        ThreadItem(id="sms:3", at=now, kind="text_in", text="Thanks"),
+    ]
+    messages = text_agent.build_chat_messages(agent, history)
+    assert [m["role"] for m in messages] == ["system", "assistant", "assistant", "user"]
+    assert messages[1]["content"] == "(on a call) Hello, Hail."
+    assert messages[2]["content"] == "Sent."

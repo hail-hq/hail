@@ -180,9 +180,16 @@ async def thread_history_for_reply(
     db: AsyncSession, sms: Sms, agent: Agent
 ) -> list[ThreadItem]:
     """The thread up to and including ``sms``: texts and call turns."""
-    return await thread_items(
+    items = await thread_items(
         db, sms.organization_id, agent.id, sms.from_e164, until=sms.requested_at
     )
+    # The reply answers ``sms``: keep it last even when another item shares its
+    # timestamp.
+    key = f"sms:{sms.id}"
+    current = next((i for i in items if i.id == key), None)
+    if current is None:
+        current = ThreadItem(id=key, at=sms.requested_at, kind="text_in", text=sms.body)
+    return [i for i in items if i.id != key] + [current]
 
 
 async def replies_in_thread(db: AsyncSession, sms: Sms) -> int:

@@ -373,3 +373,20 @@ async def test_event_and_call_from_other_thread_are_excluded(async_session):
         async_session, org, a.id, OTHER, f"event:{event_id}"
     )
     assert found.text == "x"
+
+
+async def test_stuck_old_call_is_not_active(async_session):
+    org = uuid.uuid4()
+    agent = await _agent(async_session, org)
+    old = await _call(async_session, org, agent.id, status="in_progress")
+    old.created_at = datetime.now(timezone.utc) - timedelta(hours=3)
+    await async_session.commit()
+    assert (
+        await threads.active_call_for_thread(async_session, org, agent.id, PERSON)
+        is None
+    )
+    fresh = await _call(async_session, org, agent.id, status="in_progress")
+    fresh.created_at = datetime.now(timezone.utc) - timedelta(minutes=10)
+    await async_session.commit()
+    active = await threads.active_call_for_thread(async_session, org, agent.id, PERSON)
+    assert active.id == fresh.id

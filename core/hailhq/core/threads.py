@@ -19,6 +19,7 @@ from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 __all__ = [
+    "ACTIVE_CALL_MAX_AGE",
     "CUT_CHARS",
     "TEXT_MARKER",
     "THREAD_LIMIT",
@@ -34,6 +35,11 @@ __all__ = [
 THREAD_LIMIT = 30
 THREAD_WINDOW = timedelta(days=7)
 CUT_CHARS = 500
+# A call older than this is never "active", even if its status is stuck. Above
+# the 3600s duration cap plus grace; the stale-call sweep skips calls with no
+# max_duration_seconds, so this bound keeps one stuck row from silencing the
+# text agent for a caller forever.
+ACTIVE_CALL_MAX_AGE = timedelta(hours=2)
 # Prefix of the conversation item the voicebot adds when the caller texts
 # during a call. That text is already an ``sms`` row, so the matching
 # ``user_turn`` event is left out of the thread.
@@ -235,10 +241,14 @@ async def active_call_for_thread(
     agent_id: uuid.UUID,
     caller_e164: str,
 ) -> Call | None:
+    """The newest ringing or in-progress call of this thread created within
+    ``ACTIVE_CALL_MAX_AGE``, or None."""
+    since = datetime.now(timezone.utc) - ACTIVE_CALL_MAX_AGE
     stmt = (
         select(Call)
         .where(*_call_filter(organization_id, agent_id, caller_e164))
         .where(Call.status.in_(("ringing", "in_progress")))
+        .where(Call.created_at >= since)
         .order_by(Call.created_at.desc())
         .limit(1)
     )
