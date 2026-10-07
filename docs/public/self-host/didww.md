@@ -1,6 +1,6 @@
 # DIDWW
 
-Second voice carrier, next to [Twilio](./twilio.md). Outbound calls only.
+Second voice carrier, next to [Twilio](./twilio.md). Calls in and out.
 A number's `provider` column picks its trunk
 ([`core/hailhq/core/carrier_routing.py`](../../../core/hailhq/core/carrier_routing.py)).
 
@@ -16,7 +16,8 @@ Buying goes through the normal quote flow once `DIDWW_API_KEY` and
 inventory search on the account ([§1](#1-didww-account), step 3). With any
 of the three missing, no DIDWW number is quoted ([§6](#6-no-didww-offer-shows-up)).
 
-Not supported on DIDWW: SMS and inbound calls. Hail sends no SMS through
+Not supported on DIDWW: SMS. Inbound calls: see [below](#inbound-calls).
+Hail sends no SMS through
 DIDWW (`CARRIERS["didww"].sms_route` is `None`), so a quote with `"sms"` in
 `capabilities` never gets a DIDWW offer. DIDWW itself sells SMS-capable
 numbers only in US, CA, MX and PR (number groups with the `sms_in` feature);
@@ -173,3 +174,22 @@ curl -s -X POST "$HAIL_API_URL/numbers/quotes" -H "Authorization: Bearer $HAIL_A
 
 The console's "both jobs" card (calls + SMS) never lists DIDWW; only
 "calls-only numbers" does.
+
+## Inbound calls
+
+A DID takes calls through the voice IN trunk it is assigned to. Hail assigns
+the DID when it routes calls to an agent; you create the trunk once.
+
+1. **Voice → Inbound Trunks → Create**: type SIP, host
+   `<project>.sip.livekit.cloud`, port 5060, transport TCP. Copy the trunk
+   id into `.env` as `DIDWW_VOICE_IN_TRUNK_ID`. Set `DIDWW_API_KEY`
+   (**my.didww.com → API**).
+2. Create the LiveKit inbound trunk and dispatch rule
+   ([LiveKit Cloud §4](./livekit-cloud.md#4-inbound-calls)) and set
+   `LIVEKIT_SIP_INBOUND_TRUNK_ID`.
+
+`PATCH /v1/numbers/{id}` with `voice_agent_id` then assigns the DID to the
+trunk (`PATCH /v3/dids/{id}`, relationship `voice_in_trunk`) and lists the
+number on the LiveKit trunk; `null` clears both ([Agents](../agents.md)).
+A DID added by hand without a stored DID id is looked up by number.
+Reference: DIDWW [voice IN trunks](https://doc.didww.com/voice/inbound-trunks/index.html).

@@ -6,6 +6,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from functools import partial
 
+import logfire
 from fastapi import FastAPI, Request
 from fastapi.encoders import jsonable_encoder
 from fastapi.exception_handlers import request_validation_exception_handler
@@ -16,8 +17,10 @@ from hailhq.api.number_orders import (
     purge_expired_quotes,
     reconcile_pending_orders,
     retry_unreleased_numbers,
+    sync_sms_setup,
 )
 from hailhq.api.ratelimit import GeneralRateLimitMiddleware
+from hailhq.api.routes import agents as agents_routes
 from hailhq.api.routes import calls as calls_routes
 from hailhq.api.routes import contacts as contacts_routes
 from hailhq.api.routes import email_attachments as email_attachments_routes
@@ -56,8 +59,15 @@ from hailhq.core.providers.telnyx import close_http_client
 from hailhq.core.reconcile import sweep_stale_calls
 from hailhq.core.s3_mail import S3MailClient
 from hailhq.core.secret_cipher import SecretCipher, SecretKeyMissing
+from hailhq.core.telemetry import (
+    configure_telemetry,
+    flush_telemetry,
+    request_span_attributes,
+)
+from hailhq.core.telemetry_identity import IdentityMiddleware
 from hailhq.core.webhook_worker import WebhookWorker
 
+_telemetry = configure_telemetry("hail-api")
 logger = logging.getLogger(__name__)
 
 
@@ -125,7 +135,7 @@ async def _backstop_sweeper_loop() -> None:
 
 
 async def _order_reconciler_loop() -> None:
-    """Poll pending carrier number orders, retry failed carrier releases and
+    """Poll pending carrier number orders, retry failed carrier releases,
     drop expired quotes.
 
     Runs apart from the backstop sweeper: carrier calls can take 20s each and
@@ -140,6 +150,20 @@ async def _order_reconciler_loop() -> None:
             raise
         except Exception:  # pragma: no cover — defensive; logged + retried
             logger.exception("number order reconciler iteration failed; will retry")
+        await asyncio.sleep(SWEEP_INTERVAL_SECONDS)
+
+
+async def _sms_setup_loop() -> None:
+    """Finish SMS setup that failed and refresh messaging services. Its own
+    loop: a failing step in the order reconciler must never keep it from
+    running."""
+    while True:
+        try:
+            await sync_sms_setup()
+        except asyncio.CancelledError:
+            raise
+        except Exception:  # pragma: no cover — defensive; logged + retried
+            logger.exception("SMS setup pass failed; will retry")
         await asyncio.sleep(SWEEP_INTERVAL_SECONDS)
 
 
@@ -174,6 +198,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     order_reconciler_task = asyncio.create_task(
         _order_reconciler_loop(), name="number-order-reconciler"
     )
+    sms_setup_task = asyncio.create_task(_sms_setup_loop(), name="sms-setup")
 
     webhook_worker: WebhookWorker | None = None
     webhook_task: asyncio.Task | None = None
@@ -265,7 +290,8 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     finally:
         sweeper_task.cancel()
         order_reconciler_task.cancel()
-        for task in (sweeper_task, order_reconciler_task):
+        sms_setup_task.cancel()
+        for task in (sweeper_task, order_reconciler_task, sms_setup_task):
             try:
                 await task
             except (asyncio.CancelledError, Exception):
@@ -286,6 +312,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         await internal_webhook.aclose()
         await calls_routes.close_livekit_singleton()
         await dispose_engine()
+        await asyncio.to_thread(flush_telemetry)
 
 
 app = FastAPI(
@@ -302,6 +329,15 @@ app = FastAPI(
     servers=[{"url": "https://api.hail.so", "description": "Hail Cloud"}],
     lifespan=lifespan,
 )
+if _telemetry:
+    app.add_middleware(IdentityMiddleware)
+    logfire.instrument_fastapi(
+        app,
+        excluded_urls=r"/healthz$",
+        extra_spans=False,
+        server_request_hook=request_span_attributes,
+    )
+
 app.add_middleware(DeprecationHeaderMiddleware)
 # Starlette's add_middleware prepends, so the most-recently-added middleware
 # runs outermost/first. Rate limiting first means a 429 short-circuits
@@ -403,6 +439,7 @@ async def _cache_422_for_idempotent_retry(
 # Deprecation: true instead (see deprecation.py). No route handler is
 # duplicated, both mounts point at the same router object.
 _CUSTOMER_ROUTERS = [
+    agents_routes.router,
     calls_routes.router,
     email_attachments_routes.router,
     emails_routes.router,

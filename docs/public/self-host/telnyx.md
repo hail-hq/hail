@@ -80,9 +80,10 @@ with `end_reason = carrier_route_failed` before any LiveKit room exists.
 
 ## 4. SMS
 
-Nothing to create by hand. `POST /numbers/{id}/enable-sms` creates one Telnyx
-messaging profile per organization, with its webhook at
-`<HAIL_API_URL>/sms/telnyx`, and attaches the number to it. Delivery status
+Nothing to create by hand. When an SMS-capable number becomes active, Hail
+creates one Telnyx messaging profile per organization, with its webhook at
+`<HAIL_API_URL>/sms/telnyx`, and attaches the number to it (assigning a texts
+agent, or `POST /numbers/{id}/enable-sms`, runs the same step again). Delivery status
 and inbound messages (including `STOP`/`START`/`HELP`) arrive on that route;
 Hail checks the Ed25519 signature with `TELNYX_PUBLIC_KEY` and rejects
 requests older than five minutes. `HAIL_API_URL` must be the public URL Telnyx
@@ -110,3 +111,22 @@ becomes `active` and the reservation turns into the monthly fee. An order still
 pending after two hours, or one Telnyx has no record of, is marked `failed` and
 refunded once. If Telnyx completes it later, release the number in Mission
 Control by hand; the API log names the order.
+
+## Inbound calls
+
+Telnyx sends a call to LiveKit through the FQDN connection
+(`TELNYX_CONNECTION_ID`) when that connection has inbound enabled and its
+FQDN is LiveKit's SIP endpoint. Hail sets the number's voice connection when
+it routes calls to an agent; you set up the connection once.
+
+1. On the connection, **Inbound**: Destination number format `+E.164`,
+   Origination number format `+E.164`, transport TCP.
+2. Add an FQDN: `<project>.sip.livekit.cloud` (port 5060, no username).
+3. Create the LiveKit inbound trunk and dispatch rule
+   ([LiveKit Cloud §4](./livekit-cloud.md#4-inbound-calls)) and set
+   `LIVEKIT_SIP_INBOUND_TRUNK_ID`.
+
+`PATCH /v1/numbers/{id}` with `voice_agent_id` then sets
+`connection_id` on the number (`PATCH /v2/phone_numbers/{id}/voice`) and
+lists it on the LiveKit trunk; `null` clears both ([Agents](../agents.md)).
+Reference: LiveKit [Telnyx guide](https://docs.livekit.io/telephony/start/providers/telnyx/).

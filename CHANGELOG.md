@@ -4,9 +4,71 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 
 ## [Unreleased]
 
+### Added
+
+- Optional Logfire backend and AI-agent observability: service logs, request/HTTP/database traces, actor identity, voice/SMS model and tool spans, and API-to-voicebot correlation. Payload filtering keeps conversation content and credentials out of exported traces.
+
+### Changed
+
+- API, voicebot, and MCP deployments report their deployed commit SHA in telemetry. Backend images roll through the existing deployment workflow; no CLI or SDK release is required for these changes.
+
+## [0.26.0] — 2026-10-06
+
+Agents that answer calls and texts on a number, inbound calls on Twilio,
+Telnyx and DIDWW, and SMS that sets itself up.
+
+Component versions cut alongside this release:
+**`cli-v0.25.0`** (Homebrew + GitHub Releases) and **`sdk-v0.18.0`** (PyPI).
+Migrations `0050` and `0051`.
+
+### Added
+
+- **Agents.** `POST /v1/agents` saves a brain (instructions, greeting, AI
+  line, voice, tools, limits). `PATCH /v1/numbers/{id}` routes a number's
+  calls (`voice_agent_id`) and texts (`sms_agent_id`) to one. `POST /v1/calls`
+  accepts `agent_id`. CLI `hail agents`, `hail numbers route`; MCP
+  `list_agents`, `create_agent`, `route_number`; SDK `client.agents`,
+  `client.numbers.route`. [docs/public/agents.md](docs/public/agents.md).
+- **Inbound calls** on Twilio, Telnyx and DIDWW numbers. Hail registers the
+  number at the carrier and on a per-carrier LiveKit inbound trunk when it
+  routes calls to an agent, and the voicebot answers with the agent. New
+  webhook `call.received`; every `call.*` payload carries `direction`,
+  `from`, `to`, `agent_id`. New `end_reason` values `no_agent`,
+  `insufficient_funds`. Setup: [LiveKit Cloud §4](docs/public/self-host/livekit-cloud.md#4-inbound-calls)
+  and the carrier pages.
+- **Inbound texts answered by an agent.** A text worker in the voicebot
+  service replies from the agent's instructions and the thread, through the
+  same LLM chain as calls; STOP/HELP stay Hail's. YES/START/UNSTOP are an
+  opt-in only from a person who opted out; from anyone else the agent gets them.
+- **AI line templates.** Inbound default `Hi, this is an AI assistant
+answering on behalf of {org}.`; workspace default in
+  `organization_call_settings.ai_disclosure_line`, per-agent override.
+- `GET /v1/agents/prompt-templates` returns the full prompt the model gets
+  for calls it answers, calls it makes and texts, read-only. The console shows
+  it under Instructions.
 - DIDWW numbers can be quoted and bought through `POST /numbers/quotes` and
   `POST /numbers`; end-user registration runs through `/verifications`
   (`provider=didww`). New settings `DIDWW_API_KEY`, `DIDWW_ENVIRONMENT`.
+- Env: `LIVEKIT_SIP_INBOUND_TRUNK_ID` (one inbound trunk for every carrier;
+  `LIVEKIT_TWILIO_SIP_INBOUND_TRUNK_ID` and friends stay as optional
+  per-carrier overrides), `TWILIO_SIP_TRUNK_SID`, `DIDWW_VOICE_IN_TRUNK_ID`.
+  Migration `0050`.
+
+### Changed
+
+- **SMS setup is automatic.** An SMS-capable number joins its organization's
+  messaging service when it becomes active, and again when a texts agent is
+  assigned to it. A background pass finishes any setup that failed. Twilio
+  Messaging Services now carry Hail's inbound webhook (`/sms/inbound`), so
+  inbound texts need no console setup. `POST /numbers/{id}/enable-sms` stays
+  as the idempotent repair call, and a carrier refusal is a 502 with a plain
+  message.
+- A text reply and an inbound call now say what the agent can help with when
+  the opening line did not.
+- `CallResponse`, `SmsResponse` gain `agent_id`; `PhoneNumberResponse` gains
+  `voice_agent_id`, `sms_agent_id`, `inbound_registered`.
+- `organization_call_settings.max_duration_seconds` is nullable (null = service default).
+- `POST /v1/calls` 422 text: "either system_prompt, llm or agent_id must be provided".
 
 ## [0.25.0] — 2026-09-28
 

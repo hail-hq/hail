@@ -13,12 +13,13 @@ from __future__ import annotations
 from typing import Any
 from uuid import UUID
 
-from hailhq.core.models import WebhookDelivery, WebhookSubscription
+from hailhq.core.models import Call, WebhookDelivery, WebhookSubscription
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 __all__ = [
     "build_event_data",
+    "call_event_data",
     "fanout_call_event",
     "fanout_email_event",
     "fanout_sms_event",
@@ -125,6 +126,24 @@ async def fanout_sms_event(
         event_id=event_id,
         data=data,
     )
+
+
+def call_event_data(call: Call, **extra: Any) -> dict[str, Any]:
+    """The ``data`` object of every ``call.*`` event: id and status, plus the
+    fields that tell an inbound call from an outbound one. ``end_reason`` is
+    included only once the call is terminal."""
+    data: dict[str, Any] = {
+        "id": str(call.id),
+        "status": call.status,
+        "direction": call.direction,
+        "from": call.from_e164,
+        "to": call.to_e164,
+        "agent_id": str(call.agent_id) if call.agent_id else None,
+    }
+    if call.end_reason is not None:
+        data["end_reason"] = call.end_reason
+    data.update(extra)
+    return data
 
 
 async def fanout_call_event(

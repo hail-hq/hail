@@ -36,6 +36,8 @@ from hail._http import _HailHTTP, generate_idempotency_key
 from hail._resource_id import parse_resource_id
 from hail.models import (
     TERMINAL_CALL_STATUSES,
+    AgentListResponse,
+    AgentResponse,
     CallEventResponse,
     CallListResponse,
     CallResponse,
@@ -103,6 +105,7 @@ class _CallsResource:
         message_type: Literal["marketing", "informational"] | None = None,
         tools: list[str] | None = None,
         idempotency_key: str | None = None,
+        agent_id: str | UUID | None = None,
     ) -> CallResponse:
         """Originate an outbound call.
 
@@ -147,6 +150,9 @@ class _CallsResource:
         # key for [] too — only omit when the caller left it None.
         if tools is not None:
             body["tools"] = tools
+        # A saved agent (client.agents) fills the fields left out above.
+        if agent_id is not None:
+            body["agent_id"] = str(agent_id)
 
         key = idempotency_key or generate_idempotency_key()
         data = await self._http.request(
@@ -711,6 +717,103 @@ class _NumbersResource:
         data = await self._http.request("POST", f"/numbers/{nid}/enable-sms")
         return PhoneNumberResponse.model_validate(data)
 
+    _KEEP = object()
+
+    async def route(
+        self,
+        number_id: str | UUID,
+        *,
+        voice_agent_id: str | UUID | None | object = _KEEP,
+        sms_agent_id: str | UUID | None | object = _KEEP,
+    ) -> PhoneNumberResponse:
+        """Choose which agent answers this number (``PATCH /numbers/{id}``).
+
+        ``voice_agent_id`` registers the number for inbound calls at the
+        carrier and on Hail's LiveKit inbound trunk; pass ``None`` to stop
+        answering calls. ``sms_agent_id`` makes the agent reply to texts;
+        ``None`` sends texts to your webhooks only. An argument left out
+        keeps its value.
+        """
+        body: dict[str, Any] = {}
+        if voice_agent_id is not self._KEEP:
+            body["voice_agent_id"] = (
+                None if voice_agent_id is None else str(voice_agent_id)
+            )
+        if sms_agent_id is not self._KEEP:
+            body["sms_agent_id"] = None if sms_agent_id is None else str(sms_agent_id)
+        data = await self._http.request("PATCH", f"/numbers/{number_id}", json=body)
+        return PhoneNumberResponse.model_validate(data)
+
+
+class _AgentsResource:
+    """``client.agents.*`` — the saved brains numbers answer with."""
+
+    def __init__(self, http: _HailHTTP) -> None:
+        self._http = http
+
+    async def create(
+        self,
+        *,
+        name: str,
+        system_prompt: str,
+        first_message: str | None = None,
+        ai_disclosure: bool = True,
+        ai_disclosure_line: str | None = None,
+        language: str | None = None,
+        voice_id: str | None = None,
+        tools: list[str] | None = None,
+        max_duration_seconds: int | None = None,
+        voice_enabled: bool = True,
+        sms_enabled: bool = True,
+        status: str = "live",
+    ) -> AgentResponse:
+        """Save an agent. Route a number to it with ``client.numbers.route``
+        or place calls with ``client.calls.create(agent_id=...)``.
+        ``ai_disclosure_line`` is a template; ``{org}`` becomes the
+        organization name. ``max_duration_seconds`` is 60..3600."""
+        body: dict[str, Any] = {
+            "name": name,
+            "system_prompt": system_prompt,
+            "ai_disclosure": ai_disclosure,
+            "voice_enabled": voice_enabled,
+            "sms_enabled": sms_enabled,
+            "status": status,
+        }
+        if first_message is not None:
+            body["first_message"] = first_message
+        if ai_disclosure_line is not None:
+            body["ai_disclosure_line"] = ai_disclosure_line
+        voice_config = {
+            k: v for k, v in (("language", language), ("voice_id", voice_id)) if v
+        }
+        if voice_config:
+            body["voice_config"] = voice_config
+        if tools is not None:
+            body["tools"] = tools
+        if max_duration_seconds is not None:
+            body["max_duration_seconds"] = max_duration_seconds
+        data = await self._http.request("POST", "/agents", json=body)
+        return AgentResponse.model_validate(data)
+
+    async def list(self) -> AgentListResponse:
+        data = await self._http.request("GET", "/agents")
+        return AgentListResponse.model_validate(data)
+
+    async def get(self, agent_id: str | UUID) -> AgentResponse:
+        data = await self._http.request("GET", f"/agents/{agent_id}")
+        return AgentResponse.model_validate(data)
+
+    async def update(self, agent_id: str | UUID, **fields: Any) -> AgentResponse:
+        """``PATCH /agents/{id}``: pass only the fields to change; ``None``
+        clears first_message, ai_disclosure_line, tools or
+        max_duration_seconds."""
+        data = await self._http.request("PATCH", f"/agents/{agent_id}", json=fields)
+        return AgentResponse.model_validate(data)
+
+    async def delete(self, agent_id: str | UUID) -> None:
+        """Delete an agent; its numbers ring out again."""
+        await self._http.request("DELETE", f"/agents/{agent_id}")
+
 
 class _WebhooksResource:
     """``client.webhooks.*`` — manage outbound webhook subscriptions."""
@@ -998,6 +1101,7 @@ class Client:
         self.calls = _CallsResource(self._http)
         self.sms = _SmsResource(self._http)
         self.numbers = _NumbersResource(self._http)
+        self.agents = _AgentsResource(self._http)
         self.emails = _EmailsResource(self._http)
         self.email_attachments = _EmailAttachmentsResource(self._http)
         self.email_domains = _EmailDomainsResource(self._http)

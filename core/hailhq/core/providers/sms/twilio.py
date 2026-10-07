@@ -8,12 +8,25 @@ Same sync-SDK-wrapped-in-``asyncio.to_thread`` approach as
 from __future__ import annotations
 
 import asyncio
+import logging
 from uuid import UUID
 
 from hailhq.core.config import settings
-from hailhq.core.providers.sms.base import ProviderSmsResult, SmsProvider
-from twilio.base.exceptions import TwilioRestException
+from hailhq.core.providers.sms.base import (
+    ProviderSmsResult,
+    SmsProvider,
+    SmsProvisioningError,
+)
+from hailhq.core.urls import join_url
+from twilio.base.exceptions import TwilioException, TwilioRestException
 from twilio.rest import Client as TwilioClient
+
+logger = logging.getLogger(__name__)
+
+# Twilio error 21712: the number sits in another messaging service.
+_NUMBER_IN_ANOTHER_SERVICE = 21712
+# Twilio error 21710: the number is already in this messaging service.
+_NUMBER_ALREADY_IN_SERVICE = 21710
 
 
 class TwilioSmsProvider(SmsProvider):
@@ -87,15 +100,101 @@ class TwilioSmsProvider(SmsProvider):
     async def ensure_messaging_service(
         self, organization_id: UUID, existing_sid: str | None
     ) -> str:
-        if existing_sid is not None:
-            return existing_sid
-        service = await asyncio.to_thread(
-            self._client.messaging.v1.services.create,
-            friendly_name=f"hail-org-{organization_id}",
-        )
+        # Inbound texts to every number in the service reach Hail here; the
+        # number's own "A Message Comes In" webhook is not used. An existing
+        # service gets the same URL, so one created before this setting (or
+        # one whose HAIL_API_URL changed) still delivers.
+        inbound = {
+            "inbound_request_url": join_url(settings.hail_api_url, "sms/inbound"),
+            "inbound_method": "POST",
+            "use_inbound_webhook_on_number": False,
+        }
+        try:
+            if existing_sid is not None:
+                await asyncio.to_thread(
+                    self._client.messaging.v1.services(existing_sid).update, **inbound
+                )
+                return existing_sid
+            # A first attach that failed left a service no row records.
+            # Find it by name so a retry reuses it instead of adding another.
+            name = f"hail-org-{organization_id}"
+            found = await asyncio.to_thread(self._find_service_sid_by_name, name)
+            if found is not None:
+                await asyncio.to_thread(
+                    self._client.messaging.v1.services(found).update, **inbound
+                )
+                return found
+            service = await asyncio.to_thread(
+                self._client.messaging.v1.services.create,
+                friendly_name=name,
+                **inbound,
+            )
+        except TwilioRestException as exc:
+            raise SmsProvisioningError(exc.msg or str(exc)) from exc
         return service.sid
 
     async def attach_number(
+        self, messaging_service_sid: str, provider_resource_id: str
+    ) -> None:
+        try:
+            await self._attach(messaging_service_sid, provider_resource_id)
+        except TwilioRestException as exc:
+            if exc.code == _NUMBER_ALREADY_IN_SERVICE:
+                return  # Retry after a success: nothing to do.
+            if exc.code != _NUMBER_IN_ANOTHER_SERVICE:
+                # A refused attach (unknown number sid, account restriction)
+                # is the carrier's answer, not a server fault: the route
+                # turns it into a 502.
+                raise SmsProvisioningError(exc.msg or str(exc)) from exc
+        else:
+            return
+        # Twilio keeps a number in one messaging service at a time. The
+        # account is Hail's and the number is this org's, so a number another
+        # service holds (Twilio's own "Default Messaging Service for
+        # Conversations", a service of a released row) is moved to ours.
+        try:
+            holder = await asyncio.to_thread(
+                self._service_holding, provider_resource_id
+            )
+        except TwilioException as exc:
+            # List calls raise the base class, not TwilioRestException.
+            raise SmsProvisioningError(str(exc)) from exc
+        if holder == messaging_service_sid:
+            return  # Already ours: nothing to do.
+        if holder is None:
+            raise SmsProvisioningError(
+                f"{provider_resource_id} is in another messaging service that this "
+                "account cannot see"
+            )
+        logger.info(
+            "moving %s from messaging service %s to %s",
+            provider_resource_id,
+            holder,
+            messaging_service_sid,
+        )
+        try:
+            await asyncio.to_thread(
+                self._client.messaging.v1.services(holder)
+                .phone_numbers(provider_resource_id)
+                .delete
+            )
+        except TwilioRestException as exc:
+            raise SmsProvisioningError(exc.msg or str(exc)) from exc
+        try:
+            await self._attach(messaging_service_sid, provider_resource_id)
+        except TwilioRestException as exc:
+            # Put the number back so the old service is not left without it.
+            try:
+                await self._attach(holder, provider_resource_id)
+            except TwilioRestException:
+                logger.error(
+                    "could not restore %s to messaging service %s",
+                    provider_resource_id,
+                    holder,
+                )
+            raise SmsProvisioningError(exc.msg or str(exc)) from exc
+
+    async def _attach(
         self, messaging_service_sid: str, provider_resource_id: str
     ) -> None:
         await asyncio.to_thread(
@@ -104,6 +203,21 @@ class TwilioSmsProvider(SmsProvider):
             ).phone_numbers.create,
             phone_number_sid=provider_resource_id,
         )
+
+    def _find_service_sid_by_name(self, friendly_name: str) -> str | None:
+        for service in self._client.messaging.v1.services.stream():
+            if service.friendly_name == friendly_name:
+                return service.sid
+        return None
+
+    def _service_holding(self, provider_resource_id: str) -> str | None:
+        """The sid of the messaging service that holds this number, if any.
+        Twilio has no lookup by number, so every service is scanned."""
+        for service in self._client.messaging.v1.services.stream():
+            numbers = self._client.messaging.v1.services(service.sid).phone_numbers
+            if any(n.sid == provider_resource_id for n in numbers.stream()):
+                return service.sid
+        return None
 
 
 class LazyTwilioSmsProvider(SmsProvider):

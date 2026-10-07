@@ -102,3 +102,6 @@ docs-site/content/api/
 .claude/worktrees/
 web/.claude/
 docs-site/public/api/
+
+# Local Logfire SDK credentials
+.logfire/

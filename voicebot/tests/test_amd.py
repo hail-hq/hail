@@ -389,7 +389,7 @@ async def test_non_hangup_categories_speak_the_disclosure(
         async_session, monkeypatch, amd_result=_prediction(category)
     )
 
-    assert session.say_calls == [AI_DISCLOSURE_LINE, "Is this a good time?"]
+    assert session.say_calls == [f"{AI_DISCLOSURE_LINE} Is this a good time?"]
     assert ctx.delete_room_calls == 0
     assert ctx.shutdown_calls == []
 
@@ -472,7 +472,7 @@ async def test_greeting_fires_on_vad_with_no_transcript(
     await asyncio.sleep(0)
     await asyncio.sleep(0)
 
-    assert session.say_calls == [AI_DISCLOSURE_LINE, "Is this a good time?"]
+    assert session.say_calls == [f"{AI_DISCLOSURE_LINE} Is this a good time?"]
 
 
 async def test_greeting_stays_held_until_keys_are_pressed(
@@ -507,7 +507,8 @@ async def test_greeting_fires_once_across_both_triggers(
         await asyncio.sleep(0)
     await asyncio.sleep(0)
 
-    assert session.say_calls.count(AI_DISCLOSURE_LINE) == 1
+    assert len(session.say_calls) == 1
+    assert session.say_calls[0].startswith(AI_DISCLOSURE_LINE)
 
 
 async def test_ivr_greeting_is_deferred_to_the_first_person(
@@ -526,7 +527,7 @@ async def test_ivr_greeting_is_deferred_to_the_first_person(
     await asyncio.sleep(0)
     await asyncio.sleep(0)
 
-    assert session.say_calls == [AI_DISCLOSURE_LINE, "Is this a good time?"]
+    assert session.say_calls == [f"{AI_DISCLOSURE_LINE} Is this a good time?"]
 
 
 async def test_detection_failure_proceeds_like_a_human_answer(
@@ -538,7 +539,7 @@ async def test_detection_failure_proceeds_like_a_human_answer(
         async_session, monkeypatch, amd_result=None
     )
 
-    assert session.say_calls[0] == AI_DISCLOSURE_LINE
+    assert session.say_calls[0].startswith(AI_DISCLOSURE_LINE)
     assert ctx.delete_room_calls == 0
 
 

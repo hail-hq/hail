@@ -95,6 +95,17 @@ async def _suppression_hit(
     return (await db.execute(stmt)).scalar_one_or_none()
 
 
+async def is_suppressed(
+    db: AsyncSession, organization_id: UUID, recipient: str, channel: str
+) -> bool:
+    """True iff ``recipient`` has a suppression row for ``channel`` (or
+    ``all``) in this org or platform-wide."""
+    hit = await _suppression_hit(
+        db, organization_id, [normalize_recipient(recipient)], channel
+    )
+    return hit is not None
+
+
 async def check_national_dnc(e164: str) -> bool:
     """Check the US National Do Not Call registry (donotcall.gov).
 

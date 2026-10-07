@@ -62,7 +62,7 @@ The [client picker](https://hail.so/mcp) has setup snippets for Cursor, Gemini, 
 
 ## Authorized apps
 
-Each cloud client that you connect appears as a row at [`hail.so/console/apps`](https://hail.so/console/apps). Revoke deletes the consent and every active access and refresh token for that client. The client's next tool call returns 401 and runs OAuth again from the start.
+Each cloud client that you connect appears as a row at [`hail.so/console/apps`](https://hail.so/signin?next=%2Fconsole%2Fapps). Revoke deletes the consent and every active access and refresh token for that client. The client's next tool call returns 401 and runs OAuth again from the start.
 
 Access tokens last 30 days, and refresh tokens last 180 days. In practice, you authorize each client again approximately every six months. The consent screen opens, you click **Allow**, and the client continues.
 

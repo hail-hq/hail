@@ -100,14 +100,37 @@ The full set is the `WebhookEventType` enum in
 - **`sms.undelivered`** — the carrier reported the message was not delivered.
 - **`sms.failed`** — the send failed (transport error or carrier rejection).
 
-**Call lifecycle** — covers `answered`, `completed`, `failed`, `busy`, `no_answer`
-only (no `ringing` or `canceled` events; no data source):
+**Call lifecycle** — `received` (inbound only), `answered`, `completed`,
+`failed`, `busy`, `no_answer` (no `canceled` event; no data source):
 
-- **`call.answered`** — the callee picked up (call entered in-progress).
+- **`call.received`** — an inbound call reached one of your numbers and an
+  agent is about to answer ([Agents](agents.md)). Fired before the answer.
+- **`call.answered`** — the other side is on the line (call entered in-progress).
 - **`call.completed`** — the call ended normally.
-- **`call.failed`** — the call failed (setup error, trunk/media failure, or force-closed).
+- **`call.failed`** — the call failed (setup error, trunk/media failure,
+  force-closed, or an inbound call Hail refused: `end_reason` `no_agent` or
+  `insufficient_funds`).
 - **`call.busy`** — the callee was busy or rejected the call.
 - **`call.no_answer`** — the callee did not answer.
+
+Every `call.*` payload's `data` carries `id`, `status`, `direction`
+(`inbound` or `outbound`), `from`, `to`, `agent_id` (null for calls placed
+with an inline prompt) and, once terminal, `end_reason`
+([`call_event_data`](https://github.com/hail-hq/hail/blob/main/core/hailhq/core/webhook_fanout.py)):
+
+```json
+{
+  "type": "call.received",
+  "data": {
+    "id": "0d9c…",
+    "status": "ringing",
+    "direction": "inbound",
+    "from": "+33612345678",
+    "to": "+14155550100",
+    "agent_id": "a1b2…"
+  }
+}
+```
 
 ## Payload
 

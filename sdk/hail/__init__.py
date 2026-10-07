@@ -22,6 +22,8 @@ from hail.client import Client
 from hail.models import (
     TERMINAL_CALL_STATUSES,
     TERMINAL_EMAIL_STATUSES,
+    AgentListResponse,
+    AgentResponse,
     CallCreate,
     CallEventResponse,
     CallListResponse,
@@ -64,13 +66,15 @@ from hail.models import (
     WhoamiResponse,
 )
 
-__version__ = "0.17.0"
+__version__ = "0.18.0"
 
 __all__ = [
     # helpers
     "SUPPORTED_RESOURCE_TYPES",
     "TERMINAL_CALL_STATUSES",
     "TERMINAL_EMAIL_STATUSES",
+    "AgentListResponse",
+    "AgentResponse",
     # models
     "CallCreate",
     "CallEventResponse",

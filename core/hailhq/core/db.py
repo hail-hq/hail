@@ -13,7 +13,9 @@ from contextlib import asynccontextmanager
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from uuid import UUID
 
+import logfire
 from hailhq.core.config import settings
+from hailhq.core.telemetry import telemetry_enabled
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
@@ -96,6 +98,8 @@ def _ensure_initialized() -> async_sessionmaker[AsyncSession]:
     global _engine, _sessionmaker
     if _sessionmaker is None:
         _engine = create_async_engine(to_async_url(settings.database_url))
+        if telemetry_enabled():
+            logfire.instrument_sqlalchemy(engine=_engine)
         _sessionmaker = async_sessionmaker(_engine, expire_on_commit=False)
     return _sessionmaker
 

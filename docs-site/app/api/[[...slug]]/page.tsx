@@ -7,6 +7,7 @@ import { OpenAPIPage } from "@/components/openapi-page";
 import { openapi } from "@/lib/openapi";
 import { getMDXComponents } from "@/mdx-components";
 import { apiSource } from "@/lib/source";
+import { docsPath, pageMetadata } from "../../../../shared/site-metadata";
 
 // The /docs/api root has no generated page, so render an index that lists every
 // operation. Deeper slugs render the generated OpenAPI page for one endpoint.
@@ -86,12 +87,22 @@ export async function generateMetadata(props: {
 }): Promise<Metadata> {
   const { slug } = await props.params;
   if (!slug || slug.length === 0) {
-    return {
-      title: "API Reference",
-      description: "REST API reference for Hail.",
-    };
+    return pageMetadata({
+      title: "API reference | hail.so",
+      description:
+        "Read Hail’s REST API reference for calls, SMS, email, and phone numbers. Find request fields, response formats, and the OpenAPI spec.",
+      path: "/docs/api",
+      image: "/docs/opengraph-image",
+    });
   }
   const page = apiSource.getPage(slug);
   if (!page) notFound();
-  return { title: page.data.title, description: page.data.description };
+  return pageMetadata({
+    title: `${page.data.title} | hail.so`,
+    description:
+      page.data.description ??
+      `Read the request fields and responses for ${page.data.title} in Hail’s REST API.`,
+    path: docsPath(page.url),
+    image: "/docs/opengraph-image",
+  });
 }

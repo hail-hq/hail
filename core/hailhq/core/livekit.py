@@ -21,7 +21,11 @@ import json
 from uuid import UUID
 
 from hailhq.core.config import settings
+from hailhq.core.telemetry import telemetry_enabled
+from hailhq.core.telemetry_identity import get_identity
 from livekit import api
+from livekit.protocol.models import ListUpdate
+from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapPropagator
 
 
 class LiveKitClient:
@@ -76,6 +80,17 @@ class LiveKitClient:
         Returns the dispatch id (``AgentDispatch.id``) for traceability /
         logging.
         """
+        metadata = dict(metadata)
+        if telemetry_enabled():
+            carrier: dict[str, str] = {}
+            TraceContextTextMapPropagator().inject(carrier)
+            metadata["hail_trace_context"] = carrier
+            # Ids only: names and emails stay out of LiveKit; the voicebot looks them up.
+            metadata["hail_actor_identity"] = {
+                k: v
+                for k, v in get_identity().items()
+                if k not in {"user_email", "organization_name"}
+            }
         result = await self._lkapi.agent_dispatch.create_dispatch(
             api.CreateAgentDispatchRequest(
                 room=room_name,
@@ -123,4 +138,20 @@ class LiveKitClient:
                 participant_name=participant_identity,
                 headers=headers or {},
             )
+        )
+
+    async def add_inbound_number(self, trunk_id: str, e164: str) -> None:
+        """Register ``e164`` on an inbound trunk so LiveKit accepts calls to it.
+
+        ``ListUpdate(add=...)`` is a set-add on the trunk's ``numbers``: a
+        number already listed stays listed once.
+        """
+        await self._lkapi.sip.update_inbound_trunk_fields(
+            trunk_id, numbers=ListUpdate(add=[e164])
+        )
+
+    async def remove_inbound_number(self, trunk_id: str, e164: str) -> None:
+        """Drop ``e164`` from an inbound trunk; a number not listed is a no-op."""
+        await self._lkapi.sip.update_inbound_trunk_fields(
+            trunk_id, numbers=ListUpdate(remove=[e164])
         )

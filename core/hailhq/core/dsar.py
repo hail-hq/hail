@@ -18,6 +18,7 @@ from uuid import UUID
 from hailhq.core.compliance_gate import normalize_recipient
 from hailhq.core.models import AuditLog, Call, Contact, Email, Sms, Suppression
 from sqlalchemy import (
+    and_,
     case,
     cast,
     delete,
@@ -102,14 +103,39 @@ async def lookup_recipient(session: AsyncSession, identifier: str) -> DSARRecord
     contacts, suppressions, and audit_log."""
     norm = normalize_recipient(identifier)
 
+    # The person is the callee on outbound rows and the caller on inbound rows
+    # (calls answered by an agent, texts received). Matching either column
+    # regardless of direction would also pull in every outbound row sent *from*
+    # a number that happens to be ``norm`` (a Hail number), which are other
+    # people's conversations.
     calls = list(
-        (await session.execute(select(Call).where(Call.to_e164 == norm)))
+        (
+            await session.execute(
+                select(Call).where(
+                    or_(
+                        and_(Call.direction == "outbound", Call.to_e164 == norm),
+                        and_(Call.direction == "inbound", Call.from_e164 == norm),
+                    )
+                )
+            )
+        )
         .scalars()
         .all()
     )
 
     sms = list(
-        (await session.execute(select(Sms).where(Sms.to_e164 == norm))).scalars().all()
+        (
+            await session.execute(
+                select(Sms).where(
+                    or_(
+                        and_(Sms.direction == "outbound", Sms.to_e164 == norm),
+                        and_(Sms.direction == "inbound", Sms.from_e164 == norm),
+                    )
+                )
+            )
+        )
+        .scalars()
+        .all()
     )
 
     # Case-insensitive match against stored addresses: to_addresses/cc/bcc

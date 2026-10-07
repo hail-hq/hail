@@ -18,9 +18,11 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends
 from hailhq.api.audit import write_audit_log
+from hailhq.api.routes.calls import get_livekit_optional
 from hailhq.api.routes.internal.auth import verify_internal_request
 from hailhq.api.routes.numbers import _get_org_number_or_404, release_org_number
 from hailhq.core.db import get_session
+from hailhq.core.livekit import LiveKitClient
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -46,6 +48,7 @@ class NumberReleaseIn(BaseModel):
 async def release_number_internal(
     body: NumberReleaseIn,
     db: Annotated[AsyncSession, Depends(get_session)],
+    lk: Annotated[LiveKitClient | None, Depends(get_livekit_optional)],
 ) -> dict:
     # Same lookup as the public routes (no is_pool filter needed: the
     # phone_numbers_pool_owner_xor CHECK guarantees a row matching a non-null
@@ -63,7 +66,7 @@ async def release_number_internal(
     was_released = (
         number.provisioning_state == "released" or number.released_at is not None
     )
-    number = await release_org_number(db, number)
+    number = await release_org_number(db, number, lk)
     if not was_released:
         # Same audit action as DELETE /numbers/{id}; api_key_id is None
         # because no API key acts here — `source` says who did.

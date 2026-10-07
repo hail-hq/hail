@@ -48,7 +48,13 @@ from hailhq.core.db import get_session
 from hailhq.core.internal_webhook import fetch_organization_name
 from hailhq.core.languages import SUPPORTED_LANGUAGES
 from hailhq.core.livekit import LiveKitClient
-from hailhq.core.models import Call, CallEvent, OrganizationCallSettings, PhoneNumber
+from hailhq.core.models import (
+    Agent,
+    Call,
+    CallEvent,
+    OrganizationCallSettings,
+    PhoneNumber,
+)
 from hailhq.core.pool import (
     CALL_META_FROM_POOL,
     claim_pool_number,
@@ -61,10 +67,11 @@ from hailhq.core.schemas import (
     CallListResponse,
     CallResponse,
     CallStatus,
+    VoiceConfig,
 )
 from hailhq.core.secret_cipher import SecretKeyMissing
 from hailhq.core.url_guard import UnsafeUrlError, assert_public_https_url
-from hailhq.core.webhook_fanout import fanout_call_event
+from hailhq.core.webhook_fanout import call_event_data, fanout_call_event
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -73,6 +80,31 @@ logger = logging.getLogger(__name__)
 router = APIRouter(
     prefix="/calls", tags=["calls"], responses=GENERAL_RATE_LIMITED_RESPONSES
 )
+
+# CallCreate fields a saved agent supplies when the request leaves them out.
+_AGENT_FIELDS = (
+    "system_prompt",
+    "first_message",
+    "ai_disclosure",
+    "voice_config",
+    "tools",
+)
+
+
+def apply_agent_defaults(body: CallCreate, agent: Agent) -> CallCreate:
+    """The request merged over the agent: a field the caller sent explicitly
+    (even to its default value) wins; everything else comes from the agent."""
+    sent = body.model_fields_set
+    update: dict = {}
+    for field in _AGENT_FIELDS:
+        if field in sent:
+            continue
+        value = getattr(agent, field)
+        if field == "voice_config":
+            value = VoiceConfig.model_validate(value or {})
+        update[field] = value
+    return body.model_copy(update=update)
+
 
 _DEFAULT_LIST_LIMIT = 50
 _MAX_LIST_LIMIT = 200
@@ -102,6 +134,19 @@ async def get_livekit() -> LiveKitClient:
     if _livekit_singleton is None:
         _livekit_singleton = LiveKitClient()
     return _livekit_singleton
+
+
+async def get_livekit_optional() -> LiveKitClient | None:
+    """``get_livekit``, or None when LiveKit is not configured here.
+
+    For routes that touch LiveKit only when a number is registered for
+    inbound calls (number release): a server without LiveKit settings must
+    still release numbers. Tests override this beside ``get_livekit``.
+    """
+    try:
+        return await get_livekit()
+    except ValueError:  # LiveKitAPI: "url must be set" / credentials missing
+        return None
 
 
 async def close_livekit_singleton() -> None:
@@ -196,6 +241,44 @@ async def create_call(
             actor_kind=actor_kind,
         )
         return CallResponse.model_validate(cached)
+
+    # Saved agent: fills every field the request left out (explicit fields
+    # win), stamps calls.agent_id, and may carry its own AI line and cap.
+    agent: Agent | None = None
+    if body.agent_id is not None:
+        agent = (
+            await db.execute(
+                select(Agent).where(
+                    Agent.id == body.agent_id,
+                    Agent.organization_id == principal.organization_id,
+                )
+            )
+        ).scalar_one_or_none()
+        if agent is None:
+            raise await cache_failure(
+                idem,
+                HTTPException(
+                    status_code=http_status.HTTP_404_NOT_FOUND,
+                    detail="agent not found",
+                ),
+            )
+        if agent.status == "paused":
+            raise await cache_failure(
+                idem,
+                HTTPException(
+                    status_code=http_status.HTTP_409_CONFLICT,
+                    detail="agent is paused",
+                ),
+            )
+        if not agent.voice_enabled:
+            raise await cache_failure(
+                idem,
+                HTTPException(
+                    status_code=http_status.HTTP_409_CONFLICT,
+                    detail="agent does not answer calls",
+                ),
+            )
+        body = apply_agent_defaults(body, agent)
 
     # SSRF guard for a per-call BYO llm.base_url — the full resolving check
     # (DNS + private/loopback/link-local/reserved address rejection), off the
@@ -373,13 +456,17 @@ async def create_call(
         OrganizationCallSettings, principal.organization_id
     )
     max_duration_seconds = (
-        org_call_settings.max_duration_seconds
-        if org_call_settings
-        else settings.hail_voice_max_duration_seconds
+        (agent.max_duration_seconds if agent else None)
+        or (org_call_settings.max_duration_seconds if org_call_settings else None)
+        or settings.hail_voice_max_duration_seconds
+    )
+    ai_disclosure_line = (agent.ai_disclosure_line if agent else None) or (
+        org_call_settings.ai_disclosure_line if org_call_settings else None
     )
     call = Call(
         organization_id=principal.organization_id,
         conversation_id=body.conversation_id,
+        agent_id=agent.id if agent else None,
         from_number_id=from_number.id,
         from_e164=from_number.e164,
         # The number's carrier decides the SIP trunk (voice_route below).
@@ -468,6 +555,8 @@ async def create_call(
             agent_name="hail-voicebot",
             metadata={
                 "call_id": str(call.id),
+                "direction": "outbound",
+                "agent_id": str(agent.id) if agent else None,
                 "max_duration_seconds": call.max_duration_seconds,
                 "organization_id": str(call.organization_id),
                 "voice_config": voice_config,
@@ -475,6 +564,7 @@ async def create_call(
                 "llm": llm_meta,
                 "first_message": body.first_message,
                 "ai_disclosure": body.ai_disclosure,
+                "ai_disclosure_line": ai_disclosure_line,
                 "tools": body.tools,
                 "org_name": await org_name_task,
             },
@@ -531,7 +621,7 @@ async def create_call(
                 organization_id=call.organization_id,
                 event_type="call.failed",
                 event_id=call.id,
-                data={"id": str(call.id), "status": "failed"},
+                data=call_event_data(call, status="failed", end_reason=failure_code),
             )
         # No-op when this call didn't hold a pool reservation.
         await release_pool_reservation(db, call_id=call.id)

@@ -28,8 +28,8 @@ Go to **Phone Numbers → Buy a number**. Select a number with the Voice capabil
 
 Do not add the termination domain to Hail's `.env`: Hail uses the resulting
 LiveKit trunk ID (`LIVEKIT_TWILIO_SIP_OUTBOUND_TRUNK_ID`) at runtime. Twilio calls
-traffic from LiveKit to the PSTN “termination.” Its “origination” settings are
-for inbound PSTN calls, which Hail does not yet support.
+traffic from LiveKit to the PSTN “termination.” Its “origination” settings
+carry inbound calls to LiveKit: see [§6](#6-inbound-calls).
 
 Twilio requires outbound destinations and caller IDs in E.164 format. Trial
 accounts can call only verified destination numbers. See Twilio's
@@ -37,15 +37,17 @@ accounts can call only verified destination numbers. See Twilio's
 
 ## 4. Outbound SMS
 
-Hail sends SMS from a dedicated number that you enable for messaging.
+Hail sends SMS from a dedicated number.
 
-1. **Acquire an SMS-capable number** (step 2 above), or pick one you already
-   hold. Only numbers with the SMS capability can send.
-2. **Enable SMS on the number.** Call `POST /numbers/{id}/enable-sms`. Hail
-   attaches the number to your organization's Twilio Messaging Service and
-   creates that service the first time. There is one Messaging Service per
-   organization; every enabled number joins the same shared sender pool. The
-   call is idempotent — an already-enabled number returns its current state.
+1. **Acquire an SMS-capable number** (step 2 above). Only numbers with the SMS
+   capability can send.
+2. **Hail sets the number up.** When the number becomes active, Hail attaches
+   it to your organization's Twilio Messaging Service and creates that service
+   the first time, with its inbound webhook pointed at
+   `<HAIL_API_URL>/sms/inbound`. There is one Messaging Service per
+   organization; every number joins the same shared sender pool. If that step
+   failed (the API log says why), assigning a texts agent runs it again, and
+   `POST /numbers/{id}/enable-sms` runs it by hand. Both are idempotent.
 3. **Send.** Call `POST /sms` with the recipient and body. Hail sends from your
    organization's dedicated number.
 
@@ -70,10 +72,11 @@ opt-out rate is too high — see [operations](./operations.md) for the
 
 ## 5. Inbound SMS & opt-out
 
-Point the number's **A Message Comes In** webhook at
-`https://<your-api-host>/sms/inbound` (HTTP POST). Hail verifies Twilio's
-`X-Twilio-Signature` against `HAIL_API_URL`. Make sure that this value matches
-the public URL that Twilio posts to.
+Inbound texts arrive through the Messaging Service's inbound webhook, which
+Hail sets to `<HAIL_API_URL>/sms/inbound` (HTTP POST) when it creates or reuses
+the service. Nothing to set on the number itself. Hail verifies Twilio's
+`X-Twilio-Signature` against `HAIL_API_URL`, so that value must be the public
+URL that Twilio posts to.
 
 **Recognized keywords** (Hail matches them on the message body, case-insensitive):
 
@@ -92,3 +95,23 @@ do the two steps that follow. **Caution: if you disable Twilio's default
 opt-out handling, the change is account-wide and requires a Twilio Support
 request; there is no API for it.** First, disable Twilio's default opt-out
 handling. Then set `HAIL_SMS_COMPLIANCE_REPLIES_ENABLED=true`.
+
+## 6. Inbound calls
+
+Twilio sends a call to LiveKit when the number sits on an Elastic SIP trunk
+whose origination URI is LiveKit. Hail attaches the number when it routes
+calls to an agent; you set up the trunk once.
+
+1. On the trunk from step 3, open **Origination** and add the origination
+   URI `sip:<project>.sip.livekit.cloud;transport=tcp` (your LiveKit SIP
+   endpoint is on the project's settings page).
+2. Copy the trunk SID (`TK...`) into `.env` as `TWILIO_SIP_TRUNK_SID`.
+3. Create the LiveKit inbound trunk and dispatch rule
+   ([LiveKit Cloud §4](./livekit-cloud.md#4-inbound-calls)) and set
+   `LIVEKIT_SIP_INBOUND_TRUNK_ID`.
+
+Twilio Elastic SIP Trunking has no inbound username/password, so the LiveKit
+trunk lists the numbers instead: `PATCH /v1/numbers/{id}` with
+`voice_agent_id` adds the number to the Twilio trunk
+(`trunking.v1.trunks(TK...).phone_numbers`) and to the LiveKit trunk; `null`
+removes it from both ([Agents](../agents.md)).

@@ -16,7 +16,8 @@
     "docs:dev": "pnpm --filter @hail-hq/docs-site dev",
     "docs:build": "pnpm --filter @hail-hq/docs-site build",
     "docs:urls": "node docs-site/scripts/urls.mjs",
-    "docs:check-urls": "node docs-site/scripts/urls.mjs --check"
+    "docs:check-urls": "node docs-site/scripts/urls.mjs --check",
+    "test:site-audit": "node --test scripts/site-audit.test.mjs"
   },
   "devDependencies": {
     "husky": "^9.1.7",

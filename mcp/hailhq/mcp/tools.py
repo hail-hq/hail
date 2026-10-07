@@ -51,11 +51,16 @@ from __future__ import annotations
 
 import base64
 import contextlib
+import hashlib
+import time
 import uuid
 from collections.abc import AsyncIterator
 from typing import Any
 
+from hailhq.core.internal_webhook import fetch_organization_name
 from hailhq.core.schemas import parse_resource_id
+from hailhq.core.telemetry import telemetry_enabled
+from hailhq.core.telemetry_identity import identity_scope
 from hailhq.mcp.auth import AuthMode
 from hailhq.mcp.hail_client import HailAPIError, HailClient
 from pydantic import ValidationError
@@ -133,6 +138,7 @@ async def place_call(
     consent_source: str | None = None,
     consent_obtained_at: str | None = None,
     message_type: str = "informational",
+    agent_id: str | None = None,
 ) -> dict[str, Any]:
     if idempotency_key is None:
         idempotency_key = str(uuid.uuid4())
@@ -152,6 +158,7 @@ async def place_call(
             consent_source=consent_source,
             consent_obtained_at=consent_obtained_at,
             message_type=message_type,
+            agent_id=agent_id,
         )
     except ValidationError as exc:
         return {"error": _validation_error_message(exc)}
@@ -479,6 +486,45 @@ async def create_contact(
         return _format_api_error(exc)
 
 
+async def list_agents(*, client: HailClient) -> dict[str, Any]:
+    try:
+        return await client.list_agents()
+    except HailAPIError as exc:
+        return _format_api_error(exc)
+
+
+async def create_agent(*, client: HailClient, **fields: Any) -> dict[str, Any]:
+    try:
+        return await client.create_agent(**fields)
+    except ValidationError as exc:
+        return {"error": _validation_error_message(exc)}
+    except HailAPIError as exc:
+        return _format_api_error(exc)
+
+
+async def route_number(
+    *,
+    client: HailClient,
+    number_id: str,
+    voice_agent_id: str | None = None,
+    sms_agent_id: str | None = None,
+    clear_voice: bool = False,
+    clear_sms: bool = False,
+) -> dict[str, Any]:
+    try:
+        return await client.route_number(
+            number_id,
+            voice_agent_id=voice_agent_id,
+            sms_agent_id=sms_agent_id,
+            clear_voice=clear_voice,
+            clear_sms=clear_sms,
+        )
+    except ValidationError as exc:
+        return {"error": _validation_error_message(exc)}
+    except HailAPIError as exc:
+        return _format_api_error(exc)
+
+
 # --------------------------------------------------------------------------- #
 # Per-tool-call client helper.
 #
@@ -527,7 +573,8 @@ async def _client_for(
         bearer = _bearer_from_ctx(ctx)
         client = HailClient(api_key=bearer)
         try:
-            yield client
+            async with _actor_for(client, cache_key=bearer):
+                yield client
         finally:
             await client.aclose()
         return
@@ -535,7 +582,52 @@ async def _client_for(
     # static-key
     if singleton is None:  # defensive — server.py wires this
         raise RuntimeError("static-key mode requires a singleton HailClient")
-    yield singleton
+    async with _actor_for(singleton):
+        yield singleton
+
+
+_ACTOR_TTL_SECONDS = 300
+_ACTOR_CACHE_MAX = 1024
+_actor_cache: dict[str, tuple[float, dict[str, Any]]] = {}
+
+
+@contextlib.asynccontextmanager
+async def _actor_for(client: HailClient, cache_key: str | None = None):
+    identity: dict[str, Any] = {}
+    if telemetry_enabled():
+        # Key by token hash so the raw bearer is never held as a dict key.
+        key = hashlib.sha256(cache_key.encode()).hexdigest() if cache_key else None
+        hit = _actor_cache.get(key) if key else None
+        if hit and hit[0] > time.monotonic():
+            identity = dict(hit[1])
+        else:
+            try:
+                # Resolve the actor only through the API that verifies the bearer.
+                actor = await client.whoami()
+                identity = {
+                    "organization_id": actor.get("organization_id"),
+                    "user_id": actor.get("user_id"),
+                    "user_email": actor.get("email"),
+                    "auth_kind": actor.get("auth_kind"),
+                    "actor_kind": actor.get("auth_kind"),
+                }
+                org_id = actor.get("organization_id")
+                if org_id:
+                    identity["organization_name"] = await fetch_organization_name(
+                        str(org_id)
+                    )
+                if key:
+                    if len(_actor_cache) >= _ACTOR_CACHE_MAX:
+                        _actor_cache.clear()
+                    _actor_cache[key] = (
+                        time.monotonic() + _ACTOR_TTL_SECONDS,
+                        dict(identity),
+                    )
+            except Exception:
+                # Metadata enrichment never decides whether the tool is authorized.
+                pass
+    with identity_scope(identity):
+        yield
 
 
 # --------------------------------------------------------------------------- #
@@ -558,7 +650,7 @@ def register_tools(
     mode: AuthMode,
     singleton: HailClient | None,
 ) -> None:
-    """Register the eighteen Hail tools on a FastMCP app.
+    """Register the Hail tools on a FastMCP app.
 
     Tools accept a FastMCP ``Context`` parameter (auto-injected). The
     ``_client_for`` helper picks the right HailClient for the active mode
@@ -582,14 +674,17 @@ def register_tools(
         consent_source: str | None = None,
         consent_obtained_at: str | None = None,
         message_type: str = "informational",
+        agent_id: str | None = None,
     ) -> dict[str, Any]:
         """Originate an outbound phone call.
 
         Provide ``system_prompt`` (mode A — Hail's bundled fallback LLM
         uses this prompt) or ``llm`` (mode B — bring your own
         OpenAI-compatible endpoint as
-        ``{"base_url": ..., "api_key": ..., "model": ...}``), or both.
-        At least one is required. Passing both runs your prompt on your
+        ``{"base_url": ..., "api_key": ..., "model": ...}``), or both, or
+        ``agent_id`` (a saved agent from ``list_agents`` supplies the
+        prompt, first message, AI line, voice and tools; fields you pass
+        here win). At least one is required. Passing both runs your prompt on your
         own endpoint: it receives Hail's voice preamble plus your prompt
         as the leading system message.
 
@@ -657,6 +752,7 @@ def register_tools(
                     consent_source=consent_source,
                     consent_obtained_at=consent_obtained_at,
                     message_type=message_type,
+                    agent_id=agent_id,
                 )
         except RuntimeError as exc:
             return {"error": str(exc)}
@@ -1132,6 +1228,109 @@ def register_tools(
                 )
         except RuntimeError as exc:
             return {"error": str(exc)}
+
+    @mcp_app.tool(name="list_agents")
+    async def list_agents_tool(ctx: Context) -> dict[str, Any]:
+        """List the workspace's saved agents: the brains that answer calls
+        and texts on its numbers, and that ``place_call`` can use via
+        ``agent_id``.
+
+        Returns ``{"items": [{"id", "name", "system_prompt", "first_message",
+        "ai_disclosure", "ai_disclosure_line", "voice_config", "tools",
+        "max_duration_seconds", "voice_enabled", "sms_enabled", "status"}, ...]}``.
+        """
+        try:
+            async with _client_for(ctx, mode=mode, singleton=singleton) as client:
+                return await list_agents(client=client)
+        except HailAPIError as exc:
+            return _format_api_error(exc)
+
+    @mcp_app.tool(name="create_agent")
+    async def create_agent_tool(
+        ctx: Context,
+        name: str,
+        system_prompt: str,
+        first_message: str | None = None,
+        ai_disclosure: bool = True,
+        ai_disclosure_line: str | None = None,
+        language: str | None = None,
+        voice_id: str | None = None,
+        tools: list[str] | None = None,
+        max_duration_seconds: int | None = None,
+        voice_enabled: bool = True,
+        sms_enabled: bool = True,
+    ) -> dict[str, Any]:
+        """Save an agent. Then call ``route_number`` so a number answers
+        with it, or pass its id as ``agent_id`` to ``place_call``.
+
+        ``system_prompt`` is what the agent follows. ``first_message`` is
+        spoken after the AI line; omit it to let the caller speak first.
+        ``ai_disclosure_line`` replaces the workspace AI line for this
+        agent; ``{org}`` becomes the organization name. ``language`` is a
+        lowercase ISO 639-1 code. ``max_duration_seconds`` is 60..3600.
+
+        Returns the API's ``AgentResponse`` as a dict, or
+        ``{"error": "<message>"}``.
+        """
+        fields: dict[str, Any] = {
+            "name": name,
+            "system_prompt": system_prompt,
+            "ai_disclosure": ai_disclosure,
+            "voice_enabled": voice_enabled,
+            "sms_enabled": sms_enabled,
+        }
+        if first_message is not None:
+            fields["first_message"] = first_message
+        if ai_disclosure_line is not None:
+            fields["ai_disclosure_line"] = ai_disclosure_line
+        if language is not None or voice_id is not None:
+            fields["voice_config"] = {
+                k: v
+                for k, v in (("language", language), ("voice_id", voice_id))
+                if v is not None
+            }
+        if tools is not None:
+            fields["tools"] = tools
+        if max_duration_seconds is not None:
+            fields["max_duration_seconds"] = max_duration_seconds
+        try:
+            async with _client_for(ctx, mode=mode, singleton=singleton) as client:
+                return await create_agent(client=client, **fields)
+        except HailAPIError as exc:
+            return _format_api_error(exc)
+
+    @mcp_app.tool(name="route_number")
+    async def route_number_tool(
+        ctx: Context,
+        number_id: str,
+        voice_agent_id: str | None = None,
+        sms_agent_id: str | None = None,
+        clear_voice: bool = False,
+        clear_sms: bool = False,
+    ) -> dict[str, Any]:
+        """Choose which agent answers a number's calls and texts.
+
+        ``voice_agent_id`` makes the number answer calls with that agent
+        (Hail registers it for inbound at the carrier and LiveKit);
+        ``clear_voice=True`` stops answering calls. ``sms_agent_id`` makes
+        the agent reply to texts; ``clear_sms=True`` stops that. A field
+        left out keeps its value. ``number_id`` comes from GET /numbers.
+
+        Returns the updated ``PhoneNumberResponse`` as a dict, or
+        ``{"error": "<message>"}``.
+        """
+        try:
+            async with _client_for(ctx, mode=mode, singleton=singleton) as client:
+                return await route_number(
+                    client=client,
+                    number_id=number_id,
+                    voice_agent_id=voice_agent_id,
+                    sms_agent_id=sms_agent_id,
+                    clear_voice=clear_voice,
+                    clear_sms=clear_sms,
+                )
+        except HailAPIError as exc:
+            return _format_api_error(exc)
 
     @mcp_app.tool(name="list_contacts")
     async def list_contacts_tool(

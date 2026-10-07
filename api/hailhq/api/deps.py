@@ -33,7 +33,10 @@ from hailhq.core.config import settings
 from hailhq.core.db import get_session, session_scope
 from hailhq.core.models import ApiKey, Organization, OrganizationMember
 from hailhq.core.s3_mail import S3MailClient
+from hailhq.core.telemetry import telemetry_enabled
+from hailhq.core.telemetry_identity import resolve_identity, set_identity
 from hailhq.core.urls import url_variants
+from opentelemetry import trace
 from pydantic import BaseModel
 from sqlalchemy import cast, func, select, text, update
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
@@ -381,6 +384,29 @@ async def _principal_from_jwt(token: str, db: AsyncSession) -> Principal:
 
 
 async def get_current_principal(
+    authorization: Annotated[str | None, Header()] = None,
+    db: AsyncSession = Depends(get_session),
+) -> Principal:
+    principal = await _resolve_current_principal(authorization, db)
+    if telemetry_enabled():
+        identity = await resolve_identity(
+            db,
+            principal.organization_id,
+            principal.user_id,
+            actor_kind=principal.auth_kind,
+        )
+        identity["auth_kind"] = principal.auth_kind
+        if principal.api_key_id is not None:
+            identity["api_key_id"] = str(principal.api_key_id)
+        set_identity(identity)
+    span = trace.get_current_span()
+    if span.is_recording():
+        span.set_attribute("organization_id", str(principal.organization_id))
+        span.set_attribute("auth_kind", principal.auth_kind)
+    return principal
+
+
+async def _resolve_current_principal(
     authorization: Annotated[str | None, Header()] = None,
     db: AsyncSession = Depends(get_session),
 ) -> Principal:

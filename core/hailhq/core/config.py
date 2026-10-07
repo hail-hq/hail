@@ -9,6 +9,15 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
+    # Optional backend observability (EU only).
+    hail_logfire_enabled: bool = False
+    logfire_token: str = ""
+    logfire_base_url: str = ""
+    logfire_credentials_dir: str = ".logfire"
+    logfire_environment: str = "development"
+    logfire_service_version: str = ""
+    hail_logfire_sample_rate: float = Field(default=1.0, ge=0, le=1)
+
     # LLM providers
     openai_api_base_url: str = "https://api.openai.com/v1"
     openai_api_key: str = ""
@@ -46,6 +55,10 @@ class Settings(BaseSettings):
     # Carriers
     twilio_account_sid: str = ""
     twilio_auth_token: str = ""
+    # Elastic SIP trunk (TK...) whose origination URI is LiveKit. Numbers are
+    # attached to it when they route calls to an agent. Empty = Twilio
+    # numbers cannot take calls.
+    twilio_sip_trunk_sid: str = ""
     telnyx_api_key: str = ""
     telnyx_connection_id: str = ""
     telnyx_sip_username: str = ""
@@ -59,6 +72,9 @@ class Settings(BaseSettings):
     didww_api_key: str = ""
     # "production" or "sandbox" (https://sandbox-api.didww.com/v3).
     didww_environment: str = "production"
+    # DIDWW voice IN trunk (SIP, pointed at LiveKit) DIDs are assigned to when
+    # they route calls to an agent. Empty = DIDWW numbers cannot take calls.
+    didww_voice_in_trunk_id: str = ""
 
     # AWS — used today for SES (outbound email). boto3 falls back to its
     # default credential chain (env / config file / IAM role) when these
@@ -138,21 +154,26 @@ class Settings(BaseSettings):
     livekit_url: str = ""
     livekit_api_key: str = ""
     livekit_api_secret: str = ""
-    # LiveKit SIP trunks are direction-specific. Outbound is used today by
-    # POST /calls (CreateSIPParticipantRequest.sip_trunk_id). Inbound is for
-    # the v1.1 inbound-calls milestone — kept here so the config schema is
-    # ready and operators only set both up once.
-    # Canonical carrier-specific names. The legacy names below stay supported as
-    # fallbacks for existing deployments (see the validator at the end).
+    # LiveKit outbound SIP trunks, one per carrier: POST /calls dials through
+    # the trunk of the number's carrier (core/hailhq/core/carrier_routing.py).
+    # The legacy LIVEKIT_SIP_OUTBOUND_TRUNK_ID stays a Twilio alias (see the
+    # validator at the end).
     livekit_twilio_sip_outbound_trunk_id: str = ""
-    livekit_twilio_sip_inbound_trunk_id: str = ""
     livekit_sip_outbound_trunk_id: str = ""
-    livekit_sip_inbound_trunk_id: str = ""
     livekit_telnyx_sip_outbound_trunk_id: str = ""
-    # Second carrier. A number's ``provider`` picks the trunk
-    # (core/hailhq/core/carrier_routing.py). Empty = DIDWW numbers cannot dial
-    # and DIDWW offers are hidden.
+    # Empty = DIDWW numbers cannot dial and DIDWW offers are hidden.
     livekit_didww_sip_outbound_trunk_id: str = ""
+    # LiveKit inbound SIP trunk, ONE for every carrier: LiveKit allows a single
+    # wildcard inbound trunk per project, and Hail finds a call's carrier from
+    # the dialed number, not from the trunk. It holds the numbers Hail registers
+    # when a number routes calls to an agent (core/hailhq/core/inbound_routing.py).
+    # Empty = no number can take calls. The per-carrier names below are
+    # optional overrides for a project that runs one inbound trunk per carrier
+    # (each locked to that carrier's IPs); they are not in .env.example.
+    livekit_sip_inbound_trunk_id: str = ""
+    livekit_twilio_sip_inbound_trunk_id: str = ""
+    livekit_telnyx_sip_inbound_trunk_id: str = ""
+    livekit_didww_sip_inbound_trunk_id: str = ""
 
     # Storage
     database_url: str = "postgresql://hail:hail@postgres:5432/hail"
@@ -258,6 +279,11 @@ class Settings(BaseSettings):
     # the carrier's decision for submitted ones. 0 disables the worker.
     hail_verification_poll_seconds: int = 600
 
+    # Text worker (voicebot): an inbound text pending longer than this is
+    # skipped, not answered; how many texts are answered at once per worker.
+    hail_text_reply_max_age_seconds: int = Field(default=3600, ge=1)
+    hail_text_reply_concurrency: int = Field(default=4, ge=1)
+
     # Agent self-signup velocity caps (spec: 2026-07-14-agent-self-signup-design).
     # Per agent-origin org:
     agent_email_per_hour: int = 20
@@ -307,16 +333,24 @@ class Settings(BaseSettings):
     )
 
     @model_validator(mode="after")
-    def _legacy_twilio_trunk_fallback(self) -> "Settings":
-        """The explicit Twilio name wins. A blank canonical value, such as the
-        empty line in .env.example, must not hide a populated legacy value."""
+    def _trunk_fallbacks(self) -> "Settings":
+        """Outbound: the explicit Twilio name wins over the legacy alias; a
+        blank explicit value must not hide a populated legacy one. Inbound:
+        a per-carrier override wins over the shared trunk; blank falls back
+        to the shared one."""
         self.livekit_twilio_sip_outbound_trunk_id = (
             self.livekit_twilio_sip_outbound_trunk_id
             or self.livekit_sip_outbound_trunk_id
         )
+        shared = self.livekit_sip_inbound_trunk_id
         self.livekit_twilio_sip_inbound_trunk_id = (
-            self.livekit_twilio_sip_inbound_trunk_id
-            or self.livekit_sip_inbound_trunk_id
+            self.livekit_twilio_sip_inbound_trunk_id or shared
+        )
+        self.livekit_telnyx_sip_inbound_trunk_id = (
+            self.livekit_telnyx_sip_inbound_trunk_id or shared
+        )
+        self.livekit_didww_sip_inbound_trunk_id = (
+            self.livekit_didww_sip_inbound_trunk_id or shared
         )
         return self
 

@@ -51,7 +51,8 @@ async def sweep_stale_calls(
     sweep idempotent.
     """
     select_stmt = text("""
-        SELECT c.id, c.status, c.organization_id
+        SELECT c.id, c.status, c.organization_id,
+               c.direction, c.from_e164, c.to_e164, c.agent_id
           FROM calls c
          WHERE c.status NOT IN :terminal_statuses
            AND c.max_duration_seconds IS NOT NULL
@@ -83,7 +84,15 @@ async def sweep_stale_calls(
             ended_at=func.now(),
         )
     )
-    for call_id, prior_status, organization_id in rows:
+    for (
+        call_id,
+        prior_status,
+        organization_id,
+        direction,
+        from_e164,
+        to_e164,
+        agent_id,
+    ) in rows:
         session.add(
             CallEvent(
                 call_id=call_id,
@@ -103,6 +112,10 @@ async def sweep_stale_calls(
             data={
                 "id": str(call_id),
                 "status": "failed",
+                "direction": direction,
+                "from": from_e164,
+                "to": to_e164,
+                "agent_id": str(agent_id) if agent_id else None,
                 "end_reason": CallEndReason.SWEEPER_TIMEOUT.value,
             },
         )

@@ -7,6 +7,7 @@ import uuid
 
 import pytest
 from hailhq.core import telephony_catalog
+from hailhq.core.providers.sms.base import SmsProvisioningError
 
 
 @pytest.fixture(autouse=True)
@@ -157,6 +158,21 @@ async def test_acquire_number_happy_path(buy_number) -> None:
     assert body["e164"] == "+14155550001"
     assert body["is_dedicated"] is True
     assert set(body["capabilities"]) == {"voice", "sms"}
+
+
+async def test_purchase_sets_sms_up_on_sms_capable_number(
+    buy_number, sms_mock, async_session
+) -> None:
+    """Nobody clicks "Enable SMS": the number joins the org's messaging
+    service as soon as it is active."""
+    resp = await buy_number()
+    assert resp.status_code == 201, resp.text
+    assert resp.json()["messaging_service_sid"] == "MG_test_service"
+    sms_mock.attach_number.assert_awaited_once()
+    assert (
+        sms_mock.attach_number.await_args.kwargs["messaging_service_sid"]
+        == "MG_test_service"
+    )
 
 
 async def test_acquire_number_idempotent_replay(buy_number) -> None:
@@ -340,6 +356,45 @@ async def test_enable_sms_creates_messaging_service_and_attaches(
     )
 
 
+async def test_enable_sms_carrier_refusal_is_502_with_reason(
+    client, async_session, org_and_key, sms_mock
+) -> None:
+    """A carrier refusal (unknown number sid, number already in a service)
+    is a 502 with a plain message: no 500, no carrier name or reason."""
+    from hailhq.core.models import PhoneNumber
+
+    org_id, _, plaintext = org_and_key
+    pn = PhoneNumber(
+        organization_id=org_id,
+        e164="+14155553334",
+        country_code="US",
+        number_type="local",
+        provider_resource_id="PN_gone",
+        provisioning_state="active",
+        capabilities=["voice", "sms"],
+    )
+    async_session.add(pn)
+    await async_session.commit()
+
+    sms_mock.ensure_messaging_service.return_value = "MG_new_service"
+    sms_mock.attach_number.side_effect = SmsProvisioningError(
+        "The requested resource /Services/MG_new_service/PhoneNumbers was not found"
+    )
+
+    resp = await client.post(
+        f"/numbers/{pn.id}/enable-sms", headers={"Authorization": f"Bearer {plaintext}"}
+    )
+    assert resp.status_code == 502, resp.text
+    detail = resp.json()["detail"]
+    assert detail == (
+        "SMS could not be enabled on this number right now. "
+        "Try again later or contact support."
+    )
+    assert "was not found" not in detail and "Twilio" not in detail
+    await async_session.refresh(pn)
+    assert pn.messaging_service_sid is None
+
+
 async def test_enable_sms_reuses_existing_org_messaging_service(
     client, async_session, org_and_key, sms_mock
 ) -> None:
@@ -390,8 +445,8 @@ async def test_enable_sms_reuses_existing_org_messaging_service(
 async def test_enable_sms_is_idempotent_when_already_enabled(
     client, async_session, org_and_key, sms_mock
 ) -> None:
-    """Re-enabling an already-enabled number is a no-op — no re-attach (which
-    Twilio would reject)."""
+    """Re-enabling an already-enabled number does not re-attach (which Twilio
+    would reject); it sets the service's inbound settings again."""
     from hailhq.core.models import PhoneNumber
 
     org_id, _, plaintext = org_and_key
@@ -413,7 +468,9 @@ async def test_enable_sms_is_idempotent_when_already_enabled(
     )
     assert resp.status_code == 200, resp.text
     assert resp.json()["messaging_service_sid"] == "MG_done"
-    sms_mock.ensure_messaging_service.assert_not_awaited()
+    sms_mock.ensure_messaging_service.assert_awaited_once_with(
+        organization_id=org_id, existing_sid="MG_done"
+    )
     sms_mock.attach_number.assert_not_awaited()
 
 

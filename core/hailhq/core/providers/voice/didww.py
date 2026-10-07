@@ -539,3 +539,75 @@ async def revoke(offer: CarrierOffer, org: UUID) -> str | None:
     return await revoke_registration(
         offer.address_id, org, offer.country_code, offer.number_type
     )
+
+
+# -- inbound: assign the DID to the voice IN trunk pointed at LiveKit -------
+# (docs/public/self-host/didww.md). ``DIDWW_VOICE_IN_TRUNK_ID`` is created once
+# by the operator; Hail assigns a DID to it when the number routes calls to an
+# agent and clears it when the agent is removed.
+
+
+class _NoSuchDid(Exception):
+    """The number is not on this DIDWW account (released, or never there).
+    Not a ``CarrierNotConfigured``: that one tells the customer the server is
+    not set up for inbound calls, which is not what a missing DID means."""
+
+
+def _did_id_sync(resource_id: str | None, e164: str) -> str:
+    """The DID's id: the stored resource id, else a lookup by number (rows
+    registered by hand before Hail stored DID ids)."""
+    if resource_id:
+        return resource_id
+    found = didww_client().get("dids", params={"filter[number]": e164.lstrip("+")})
+    for did in found.get("data", []):
+        if did.get("attributes", {}).get("number") == e164.lstrip("+"):
+            return did["id"]
+    raise _NoSuchDid(f"{e164} is not a DID on this DIDWW account")
+
+
+def _set_voice_in_trunk_sync(did_id: str, trunk_id: str | None) -> None:
+    data = {"type": "voice_in_trunks", "id": trunk_id} if trunk_id else None
+    didww_client().patch(
+        f"dids/{did_id}",
+        {
+            "data": {
+                "id": did_id,
+                "type": "dids",
+                "relationships": {"voice_in_trunk": {"data": data}},
+            }
+        },
+    )
+
+
+async def attach_inbound_number(resource_id: str | None, e164: str) -> None:
+    if not settings.didww_voice_in_trunk_id:
+        raise CarrierNotConfigured("DIDWW_VOICE_IN_TRUNK_ID is not set")
+
+    def attach() -> None:
+        did_id = _did_id_sync(resource_id, e164)
+        _set_voice_in_trunk_sync(did_id, settings.didww_voice_in_trunk_id)
+
+    try:
+        await asyncio.to_thread(attach)
+    except DidwwApiError as exc:
+        raise CarrierRequestError(carrier_status(exc)) from exc
+    except _NoSuchDid as exc:
+        raise CarrierRequestError(404) from exc
+
+
+async def detach_inbound_number(resource_id: str | None, e164: str) -> None:
+    def detach() -> None:
+        try:
+            did_id = _did_id_sync(resource_id, e164)
+        except _NoSuchDid:
+            return  # already gone from the account; a missing API key still raises
+        try:
+            _set_voice_in_trunk_sync(did_id, None)
+        except DidwwApiError as exc:
+            if carrier_status(exc) != 404:
+                raise
+
+    try:
+        await asyncio.to_thread(detach)
+    except DidwwApiError as exc:
+        raise CarrierRequestError(carrier_status(exc)) from exc

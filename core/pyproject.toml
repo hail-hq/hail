@@ -17,6 +17,7 @@ dependencies = [
     "tldextract>=5.3.2",
     "phonenumbers>=9.0.39",
     "didww>=3.1",
+    "logfire[aiohttp-client,httpx,requests,sqlalchemy]>=5.1.1",
 ]
 
 [project.optional-dependencies]
