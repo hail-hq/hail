@@ -9,9 +9,9 @@ from datetime import datetime, timedelta, timezone
 
 from hailhq.core.agent_tools.registry import all_tools
 from hailhq.core.agent_tools.spec import ToolContext
-from hailhq.core.threads import ThreadScope
 from hailhq.core.config import settings
 from hailhq.core.models import Agent, Call, CallEvent, EmailDomain, PhoneNumber, Sms
+from hailhq.core.threads import ThreadScope
 from sqlalchemy import select
 
 
