@@ -133,7 +133,8 @@ async def generate_reply(claimed: ClaimedReply, messages: list[dict[str, Any]]) 
                     if delta.content:
                         parts.append(delta.content)
                     calls.extend(delta.tool_calls or [])
-            text = "".join(parts).strip() or text
+            # Text beside a tool call ("let me check") is not the reply.
+            text = "".join(parts).strip()
             if not calls or last:
                 break
             for call in calls:
