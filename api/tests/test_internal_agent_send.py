@@ -656,3 +656,89 @@ async def test_send_sms_on_inbound_call_texts_the_caller_from_the_dialed_number(
     assert len(rows) == 1
     assert rows[0].to_e164 == "+33612345678"
     assert rows[0].from_e164 == number.e164
+
+
+async def _inbound_call_on_voice_only_number(
+    session, add_phone_number, *, sms_agent_id="same"
+):
+    """Agent A, voice-only number V (dialed), and one SMS number S."""
+    org = uuid.uuid4()
+    agent = Agent(organization_id=org, name="A", system_prompt="x")
+    other = Agent(organization_id=org, name="B", system_prompt="x")
+    session.add_all([agent, other])
+    await session.commit()
+    voice = await add_phone_number(
+        session, org, e164="+14155550001", provider_resource_id="PN_V"
+    )
+    voice.capabilities = ["voice"]
+    voice.voice_agent_id = agent.id
+    sms_number = await add_phone_number(
+        session, org, e164="+14155550002", provider_resource_id="PN_S"
+    )
+    sms_number.capabilities = ["sms"]
+    sms_number.sms_agent_id = {"same": agent.id, "other": other.id, "none": None}[
+        sms_agent_id
+    ]
+    call = Call(
+        organization_id=org,
+        agent_id=agent.id,
+        to_number_id=voice.id,
+        from_e164="+14155550123",
+        to_e164=voice.e164,
+        direction="inbound",
+        status="in_progress",
+        voice_config={},
+        metadata_={CALL_META_BILLED: False},
+    )
+    session.add(call)
+    await session.commit()
+    return agent, other, voice, sms_number, call
+
+
+async def test_voice_only_dialed_number_texts_from_the_agents_sms_number(
+    client, async_session, sms_mock, add_phone_number
+):
+    agent, _, _, sms_number, call = await _inbound_call_on_voice_only_number(
+        async_session, add_phone_number, sms_agent_id="same"
+    )
+    body = _sms_payload(call.id, body="Your code is 42.")
+    resp = await client.post(
+        "/internal/agent/send-sms", content=body, headers=_signed(body)
+    )
+    assert resp.json()["ok"] is True
+    sent = (await async_session.execute(select(Sms))).scalars().one()
+    assert sent.from_number_id == sms_number.id
+    assert sent.agent_id == agent.id
+
+
+async def test_voice_only_dialed_number_binds_an_unbound_sms_number(
+    client, async_session, sms_mock, add_phone_number
+):
+    agent, _, _, sms_number, call = await _inbound_call_on_voice_only_number(
+        async_session, add_phone_number, sms_agent_id="none"
+    )
+    body = _sms_payload(call.id)
+    resp = await client.post(
+        "/internal/agent/send-sms", content=body, headers=_signed(body)
+    )
+    assert resp.json()["ok"] is True
+    await async_session.refresh(sms_number)
+    assert sms_number.sms_agent_id == agent.id
+
+
+async def test_sms_number_bound_to_another_agent_is_not_taken(
+    client, async_session, sms_mock, add_phone_number
+):
+    _, other, _, sms_number, call = await _inbound_call_on_voice_only_number(
+        async_session, add_phone_number, sms_agent_id="other"
+    )
+    body = _sms_payload(call.id)
+    resp = await client.post(
+        "/internal/agent/send-sms", content=body, headers=_signed(body)
+    )
+    data = resp.json()
+    assert data["ok"] is False
+    assert data["spoken"]
+    await async_session.refresh(sms_number)
+    assert sms_number.sms_agent_id == other.id
+    assert (await async_session.execute(select(Sms))).scalars().all() == []

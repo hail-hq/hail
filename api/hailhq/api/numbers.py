@@ -42,3 +42,45 @@ async def resolve_org_number(
     else:
         stmt = stmt.order_by(PhoneNumber.created_at.asc()).limit(1)
     return (await db.execute(stmt)).scalar_one_or_none()
+
+
+async def resolve_sms_number(
+    db: AsyncSession,
+    organization_id: UUID,
+    agent_id: UUID | None,
+    dialed: PhoneNumber | None,
+) -> PhoneNumber | None:
+    """The org number an agent texts from. Order: the number the person dialed
+    (if it can text), a text number already routed to this agent, a text
+    number with no agent (it is routed to this agent), else None. A number
+    routed to another agent is never taken."""
+    if (
+        dialed is not None
+        and dialed.provisioning_state == "active"
+        and "sms" in dialed.capabilities
+    ):
+        return dialed
+    if agent_id is None:
+        return await resolve_org_number(db, organization_id, None, capability="sms")
+    base = (
+        select(PhoneNumber)
+        .where(
+            PhoneNumber.organization_id == organization_id,
+            PhoneNumber.provisioning_state == "active",
+            PhoneNumber.capabilities.any("sms"),
+        )
+        .order_by(PhoneNumber.created_at)
+        .limit(1)
+    )
+    routed = (
+        await db.execute(base.where(PhoneNumber.sms_agent_id == agent_id))
+    ).scalar_one_or_none()
+    if routed is not None:
+        return routed
+    free = (
+        await db.execute(base.where(PhoneNumber.sms_agent_id.is_(None)))
+    ).scalar_one_or_none()
+    if free is not None:
+        free.sms_agent_id = agent_id
+        await db.flush()
+    return free
