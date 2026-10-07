@@ -69,8 +69,9 @@ agent skips it; the responsibility for that is yours.
    turns texts back on and replies. From anyone else they are an answer, and the agent gets them.
 3. Any other text to a number with `sms_agent_id` set (agent `live`,
    `sms_enabled: true`) is answered by the agent: one reply, written from
-   `system_prompt` and the last 20 messages of the thread (24 hours), sent
-   from the same number through its carrier. The agent sends at most 20
+   `system_prompt` and the [thread](#threads) (30 items from the last 7 days,
+   texts and call turns, plus texts between that number and the caller that
+   have no agent: sent through `POST /sms`, or received before the number had a text agent), sent from the same number through its carrier. The agent sends at most 20
    replies per thread in any 24 hours; past that it stays quiet until older
    replies leave the window. Replies bill as outbound SMS. Inbound rows carry `agent_reply_state`
    (`pending`, `processing`, `done`, `skipped`, `failed`) in the database;
@@ -82,6 +83,42 @@ needs `HAIL_INTERNAL_SECRET` and `HAIL_API_URL`. It answers
 `HAIL_TEXT_REPLY_CONCURRENCY` texts at once. A failed model or API call is
 retried up to 3 times with backoff; a text still unanswered after
 `HAIL_TEXT_REPLY_MAX_AGE_SECONDS` is skipped.
+
+## Threads
+
+A caller texts an order number to the agent's SMS number, then calls the agent.
+The agent greets them already knowing the order number. A text sent during a
+call goes to the voice agent and is then marked `done`. A text sent from the
+moment the call row is created (ringing included) counts. If the voice agent
+never got it, the text agent answers it when the call ends, or when the
+stale-call sweep closes the call. The reply age limit
+(`HAIL_TEXT_REPLY_MAX_AGE_SECONDS`) restarts then.
+
+- Scope: agent + caller number. Texts and call turns both count.
+- Each call and text reply starts with the last 30 items from the last 7 days.
+  A voice agent can page back with the `thread_history` tool.
+- The voice prompt and the text agent also show texts between the number and
+  the caller that have no agent. The `thread_history` tool does not.
+- Hidden or invalid caller numbers get no history.
+- Caller ID on a phone call can be faked. Do not put secrets in an agent's
+  instructions or in texts it sends.
+- The history is sent to the agent's LLM, including a bring-your-own endpoint.
+- `send_sms` picks the number in this order:
+  1. the dialed number, if it can text and is not bound to another agent.
+     Bound to this agent: used. Free: it is bound to this agent when the agent
+     has `sms_enabled`, else used unbound;
+  2. the oldest org SMS number bound to this agent;
+  3. the oldest free org SMS number: bound to this agent when it has
+     `sms_enabled`, else used unbound;
+  4. none: the agent says it cannot text.
+
+  It never uses a number bound to another agent. A number bound this way
+  makes the agent answer every text sent to it (audit entry `number.route`).
+  A number used unbound stays unrouted.
+
+Code: [`threads.py`](../../core/hailhq/core/threads.py),
+[`text_watch.py`](../../voicebot/hailhq/voicebot/text_watch.py),
+[`thread_history.py`](../../core/hailhq/core/agent_tools/thread_history.py).
 
 ## Routing rules
 

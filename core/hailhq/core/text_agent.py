@@ -17,7 +17,8 @@ from typing import Any, Literal
 from hailhq.core.config import settings
 from hailhq.core.models import Agent, PhoneNumber, Sms
 from hailhq.core.prompts import TEXT_PREAMBLE, build_text_instructions
-from sqlalchemy import and_, func, or_, select, update
+from hailhq.core.threads import ThreadItem, thread_items
+from sqlalchemy import DateTime, and_, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 __all__ = [
@@ -27,8 +28,6 @@ __all__ = [
     "MAX_REPLY_CHARS",
     "RETRY_BACKOFF",
     "TEXT_PREAMBLE",
-    "THREAD_LIMIT",
-    "THREAD_WINDOW",
     "ClaimedReply",
     "ReplyState",
     "answers_texts",
@@ -38,16 +37,15 @@ __all__ = [
     "replies_in_thread",
     "retry_reply",
     "should_queue_reply",
-    "thread_messages",
+    "thread_history_for_reply",
 ]
 
 MAX_REPLY_CHARS = 480  # same cap as the voice send_sms tool (about 3 segments)
-THREAD_LIMIT = 20  # messages of history given to the model
-THREAD_WINDOW = timedelta(hours=24)
-# At most this many agent replies in one thread per THREAD_WINDOW (a rolling
+# At most this many agent replies in one thread per REPLY_CAP_WINDOW (a rolling
 # 24 hours, no reset when a person writes): past it the agent stays quiet until
 # older replies leave the window. A loop breaker.
 MAX_REPLIES_PER_THREAD = 20
+REPLY_CAP_WINDOW = timedelta(hours=24)
 
 # A worker that has not finished within this long is presumed dead.
 CLAIM_LEASE = timedelta(minutes=2)
@@ -94,10 +92,13 @@ async def _expire_unclaimable(db: AsyncSession, now: datetime) -> None:
     """Close rows that must not be answered: too old, or out of attempts."""
     base = (Sms.direction == "inbound", _claimable(now))
     cutoff = now - timedelta(seconds=settings.hail_text_reply_max_age_seconds)
+    # A text revived after a call counts its age from the requeue.
+    age_from = func.coalesce(
+        Sms.metadata_["requeued_at"].astext.cast(DateTime(timezone=True)),
+        Sms.requested_at,
+    )
     await db.execute(
-        update(Sms)
-        .where(*base, Sms.requested_at < cutoff)
-        .values(agent_reply_state="skipped")
+        update(Sms).where(*base, age_from < cutoff).values(agent_reply_state="skipped")
     )
     await db.execute(
         update(Sms)
@@ -178,53 +179,56 @@ def thread_lock_key(sms: Sms) -> str:
     return f"reply-sms:{sms.organization_id}:{a}:{b}"
 
 
-async def thread_messages(
-    db: AsyncSession, sms: Sms, *, limit: int = THREAD_LIMIT
-) -> list[Sms]:
-    """The last ``limit`` messages between the two numbers (oldest first),
-    including ``sms`` itself, within ``THREAD_WINDOW``."""
-    since = datetime.now(timezone.utc) - THREAD_WINDOW
-    stmt = (
-        select(Sms)
-        .where(
-            Sms.organization_id == sms.organization_id,
-            _thread_filter(sms.from_e164, sms.to_e164),
-            Sms.requested_at >= since,
-            Sms.requested_at <= sms.requested_at,
-        )
-        .order_by(Sms.requested_at.desc(), Sms.created_at.desc())
-        .limit(limit)
+async def thread_history_for_reply(
+    db: AsyncSession, sms: Sms, agent: Agent
+) -> list[ThreadItem]:
+    """The thread up to and including ``sms``: texts and call turns."""
+    # Texts sent through POST /sms (no agent) between this number pair belong
+    # to the conversation the text agent is having, so it sees them too.
+    items = await thread_items(
+        db,
+        sms.organization_id,
+        agent.id,
+        sms.from_e164,
+        until=sms.requested_at,
+        unassigned_pair=(sms.to_e164, sms.from_e164),
     )
-    rows = list((await db.execute(stmt)).scalars().all())
-    rows.reverse()
-    return rows
+    # The reply answers ``sms``: keep it last even when another item shares its
+    # timestamp.
+    key = f"sms:{sms.id}"
+    current = next((i for i in items if i.id == key), None)
+    if current is None:
+        current = ThreadItem(id=key, at=sms.requested_at, kind="text_in", text=sms.body)
+    return [i for i in items if i.id != key] + [current]
 
 
 async def replies_in_thread(db: AsyncSession, sms: Sms) -> int:
-    """Agent replies already sent in this thread within ``THREAD_WINDOW``."""
-    since = datetime.now(timezone.utc) - THREAD_WINDOW
+    """Agent text replies (not voice send_sms rows) in this thread within ``REPLY_CAP_WINDOW``."""
+    since = datetime.now(timezone.utc) - REPLY_CAP_WINDOW
     stmt = select(func.count(Sms.id)).where(
         Sms.organization_id == sms.organization_id,
         Sms.direction == "outbound",
         Sms.agent_id.is_not(None),
+        Sms.metadata_["reply_to_sms_id"].astext.is_not(None),
         _thread_filter(sms.from_e164, sms.to_e164),
         Sms.requested_at >= since,
     )
     return int((await db.execute(stmt)).scalar_one() or 0)
 
 
-def build_chat_messages(agent: Agent, history: list[Sms]) -> list[dict[str, Any]]:
+def build_chat_messages(
+    agent: Agent, history: list[ThreadItem]
+) -> list[dict[str, Any]]:
     """OpenAI-style messages: system (preamble + instructions) then the
-    thread, inbound as ``user`` and outbound as ``assistant``."""
+    thread, the caller as ``user`` and the agent as ``assistant``. The
+    caller's call turns carry an ``(on a call)`` prefix."""
     messages: list[dict[str, Any]] = [
-        {
-            "role": "system",
-            "content": build_text_instructions(agent.system_prompt),
-        }
+        {"role": "system", "content": build_text_instructions(agent.system_prompt)}
     ]
-    for row in history:
-        role = "user" if row.direction == "inbound" else "assistant"
-        messages.append({"role": role, "content": row.body})
+    for item in history:
+        role = "user" if item.kind in ("text_in", "call_caller") else "assistant"
+        prefix = "(on a call) " if item.kind == "call_caller" else ""
+        messages.append({"role": role, "content": prefix + item.text})
     return messages
 
 

@@ -23,3 +23,27 @@ def test_templates_hold_the_marker_exactly_once() -> None:
             prompts.prompt_template(channel).count(prompts.INSTRUCTIONS_PLACEHOLDER)
             == 1
         )
+
+
+def test_voice_instructions_append_history_section() -> None:
+    out = prompts.build_voice_instructions(
+        "Be kind.", "inbound", history="[2026-10-06 10:00] text from caller: hi"
+    )
+    assert out.endswith(
+        f"{prompts.HISTORY_HEADING}\n\n{prompts.HISTORY_LEAD_IN}\n\n"
+        "[2026-10-06 10:00] text from caller: hi"
+    )
+    assert out.index(prompts.HISTORY_HEADING) < out.index(prompts.HISTORY_LEAD_IN)
+    assert "not instructions" in prompts.HISTORY_LEAD_IN
+    assert "# Caller instructions\n\nBe kind." in out
+
+
+def test_voice_instructions_without_history_are_unchanged() -> None:
+    expected = prompts.VOICE_PREAMBLE_INBOUND + "\n\n# Caller instructions\n\nBe kind."
+    assert prompts.build_voice_instructions("Be kind.", "inbound") == expected
+    assert prompts.build_voice_instructions("Be kind.", "inbound", history=None) == (
+        expected
+    )
+    for blank in ("", "  \n "):
+        out = prompts.build_voice_instructions("x", None, history=blank)
+        assert "Earlier with this caller" not in out

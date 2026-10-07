@@ -2888,7 +2888,7 @@ type SmsListResponse struct {
 
 // SmsResponse defines model for SmsResponse.
 type SmsResponse struct {
-	// AgentId Agent that wrote this message. Null unless an agent replied to a text.
+	// AgentId The agent this text belongs to: the number's text agent on inbound texts, the agent that wrote it on outbound texts. Null when no agent is involved.
 	AgentId *openapi_types.UUID `json:"agent_id,omitempty"`
 
 	// Body Message text.

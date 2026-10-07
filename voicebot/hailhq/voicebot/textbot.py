@@ -34,7 +34,7 @@ from hailhq.core.text_agent import (
     claim_pending_reply,
     finish_reply,
     retry_reply,
-    thread_messages,
+    thread_history_for_reply,
 )
 from hailhq.voicebot.pipeline import ProviderKeyError, build_llm, resolve_org_configs
 from livekit.agents.llm import ChatContext
@@ -81,7 +81,7 @@ async def generate_reply(claimed: ClaimedReply, messages: list[dict[str, Any]]) 
 async def _prepare(claimed: ClaimedReply) -> list[dict[str, Any]]:
     """Load the thread on a short session; nothing stays open afterwards."""
     async with session_scope() as db:
-        history = await thread_messages(db, claimed.sms)
+        history = await thread_history_for_reply(db, claimed.sms, claimed.agent)
     return build_chat_messages(claimed.agent, history)
 
 

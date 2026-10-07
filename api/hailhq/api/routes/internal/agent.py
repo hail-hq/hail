@@ -24,7 +24,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
 from hailhq.api.audit import write_audit_log
-from hailhq.api.numbers import resolve_org_number
+from hailhq.api.numbers import resolve_sms_number
 from hailhq.api.routes.email_domains import get_email_provider
 from hailhq.api.routes.emails import deliver_email, resolve_sender
 from hailhq.api.routes.internal.auth import verify_internal_request
@@ -288,21 +288,18 @@ async def agent_send_sms(
             },
         )
 
-    # Inbound: text back from the number the caller dialed, when it can
-    # text; otherwise (and on outbound) the org's default SMS number.
-    from_number = None
-    if call.direction == "inbound" and call.to_number_id is not None:
-        dialed = await db.get(PhoneNumber, call.to_number_id)
-        if (
-            dialed is not None
-            and dialed.provisioning_state == "active"
-            and "sms" in dialed.capabilities
-        ):
-            from_number = dialed
-    if from_number is None:
-        from_number = await resolve_org_number(db, org, None, capability="sms")
+    # Text from the number the caller dialed when it can text; else a text
+    # number of this agent (see resolve_sms_number).
+    dialed = (
+        await db.get(PhoneNumber, call.to_number_id)
+        if call.direction == "inbound" and call.to_number_id is not None
+        else None
+    )
+    from_number = await resolve_sms_number(db, org, call.agent_id, dialed)
     if from_number is None:
         return AgentSendResponse(ok=False, spoken=_SPOKEN_SMS_UNCONFIGURED)
+
+    auto_bound = db.info.pop("auto_bound_sms_number_id", None) == from_number.id
 
     sms = Sms(
         organization_id=org,
@@ -310,6 +307,7 @@ async def agent_send_sms(
         from_number_id=from_number.id,
         from_e164=from_number.e164,
         to_e164=counterpart,  # the person on the line — never a parameter
+        agent_id=call.agent_id,
         direction="outbound",
         status="queued",
         body=body.body,
@@ -317,6 +315,23 @@ async def agent_send_sms(
     )
     db.add(sms)
     await db.commit()
+
+    if auto_bound:
+        await write_audit_log(
+            organization_id=org,
+            api_key_id=None,
+            action="number.route",
+            resource_type="phone_number",
+            resource_id=from_number.id,
+            payload={
+                "e164": from_number.e164,
+                "sms_agent_id": str(call.agent_id),
+                "automatic": True,
+                "source": "in-call send_sms",
+                "call_id": str(call.id),
+            },
+            actor_kind="system",
+        )
 
     await write_audit_log(
         organization_id=org,

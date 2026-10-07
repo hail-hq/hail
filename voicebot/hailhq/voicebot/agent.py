@@ -31,6 +31,7 @@ from typing import Any
 from uuid import UUID
 
 from cryptography.fernet import InvalidToken
+from hailhq.core import threads
 from hailhq.core.agent_tools.client import AgentApiClient
 from hailhq.core.agent_tools.send_dtmf import DTMF_CODES
 from hailhq.core.call_end_reasons import CallEndReason
@@ -61,6 +62,7 @@ from hailhq.core.telemetry_identity import (
 )
 from hailhq.core.url_guard import assert_public_https_url
 from hailhq.core.webhook_fanout import fanout_call_event
+from hailhq.voicebot import text_watch
 from hailhq.voicebot.amd import (
     MACHINE_HANGUP_CATEGORIES,
     MACHINE_IVR_CATEGORY,
@@ -187,9 +189,13 @@ class SpeechSanitizingAgent(Agent):
         return Agent.default.tts_node(self, _sanitize_tts_stream(text), model_settings)
 
 
-def build_instructions(system_prompt: str | None, direction: str | None = None) -> str:
+def build_instructions(
+    system_prompt: str | None,
+    direction: str | None = None,
+    history: str | None = None,
+) -> str:
     """The call's instructions (see :func:`hailhq.core.prompts.build_voice_instructions`)."""
-    return build_voice_instructions(system_prompt, direction)
+    return build_voice_instructions(system_prompt, direction, history)
 
 
 # Proactive AI disclosure — spoken by default as the first thing on every
@@ -596,6 +602,40 @@ def disconnect_reason_to_status(reason: int | None) -> tuple[str | None, str | N
 logger = logging.getLogger("hailhq.voicebot")
 
 
+HISTORY_TIMEOUT_SECONDS = 1.5
+
+
+async def _read_thread(call_id: UUID) -> str | None:
+    async with session_scope() as db:
+        ctx = await threads.call_thread_context(db, call_id)
+        if ctx is None:
+            return None
+        # The prompt also shows texts of this number pair that have no agent
+        # (sent through POST /sms), as the text agent's history does.
+        items = await threads.thread_items(
+            db,
+            ctx.organization_id,
+            ctx.agent_id,
+            ctx.caller_e164,
+            unassigned_pair=(ctx.org_number_e164, ctx.caller_e164),
+        )
+    return threads.render_thread(items) or None
+
+
+async def load_thread_context(call_id: UUID) -> str | None:
+    """This caller's earlier texts and calls with this agent, rendered for the
+    prompt. None when there is nothing, or when the read fails or exceeds
+    HISTORY_TIMEOUT_SECONDS: a call never
+    waits on its history."""
+    try:
+        return await asyncio.wait_for(
+            _read_thread(call_id), timeout=HISTORY_TIMEOUT_SECONDS
+        )
+    except Exception:
+        logger.exception("call_id=%s thread history unavailable", call_id)
+        return None
+
+
 def prewarm(proc: JobProcess) -> None:
     """Load Silero VAD once per worker process.
 
@@ -937,6 +977,23 @@ async def mark_call_answered(call_id: UUID) -> bool:
     return transitioned
 
 
+async def _revive_skipped_texts(call_id: UUID) -> None:
+    """The call is over (every end path runs ``on_call_end``): texts skipped
+    for it that the voice agent never got go back to the text agent. Never
+    blocks or fails the shutdown."""
+    try:
+        async with session_scope() as db:
+            call = await db.get(Call, call_id)
+            if call is None:
+                return
+            n = await threads.requeue_skipped_for_call(db, call)
+            await db.commit()
+        if n:
+            logger.info("call_id=%s requeued %d skipped texts", call_id, n)
+    except Exception:
+        logger.exception("call_id=%s requeue of skipped texts failed", call_id)
+
+
 async def on_call_end(
     call_id: UUID,
     room_name: str,
@@ -1112,6 +1169,7 @@ async def on_call_end(
             usage_event_id = str(usage.id)
         await session.commit()
 
+    await _revive_skipped_texts(call_id)
     if usage_event_id is not None:
         notify_usage_event_recorded(usage_event_id)
 
@@ -1481,6 +1539,9 @@ async def _run_call(
             captured["end_reason"] = CallEndReason.WORKER_SHUTDOWN.value
             captured["status"] = "failed"
 
+    # Read the caller's history while the tools are built: a call never waits
+    # longer than HISTORY_TIMEOUT_SECONDS for it.
+    history_task = asyncio.create_task(load_thread_context(call_id))
     agent_tools, agent_api = await build_tools_safely(
         metadata,
         call_id,
@@ -1494,14 +1555,14 @@ async def _run_call(
             [t.info.name for t in agent_tools],
         )
 
+    history = await history_task
     agent = SpeechSanitizingAgent(
         instructions=build_instructions(
-            metadata.get("system_prompt"), metadata.get("direction")
+            metadata.get("system_prompt"), metadata.get("direction"), history
         ),
         tools=agent_tools,
     )
     await session.start(agent=agent, room=ctx.room)
-
     room_name = ctx.room.name
 
     soft_cap_seconds = metadata.get(
@@ -1550,12 +1611,22 @@ async def _run_call(
         )
 
     shutdown_identity = get_identity()
+    # Watcher for texts the caller sends during the call. Started at the end of
+    # the entrypoint; `shutting_down` stops a late start after `_shutdown_body`
+    # has run (both run on the same event loop, so the check is atomic).
+    text_watch_task: asyncio.Task[None] | None = None
+    shutting_down = False
 
     async def _shutdown_body() -> None:
+        nonlocal shutting_down
+        shutting_down = True
         try:
             if soft_cap_task is not None and not soft_cap_task.done():
                 soft_cap_task.cancel()
                 await asyncio.gather(soft_cap_task, return_exceptions=True)
+            if text_watch_task is not None and not text_watch_task.done():
+                text_watch_task.cancel()
+                await asyncio.gather(text_watch_task, return_exceptions=True)
             if event_tasks:
                 await asyncio.gather(*list(event_tasks), return_exceptions=True)
             if answer_tasks:
@@ -1674,6 +1745,11 @@ async def _run_call(
             logger.exception(
                 "call_id=%s greeting failed; session closed during detection", call_id
             )
+
+    if not shutting_down:
+        text_watch_task = asyncio.create_task(
+            text_watch.watch_incoming_texts(session, call_id)
+        )
 
 
 __all__ = [
