@@ -26,6 +26,7 @@ from hailhq.core.models import (
     EmailDomain,
     Organization,
     OrganizationMember,
+    PhoneNumber,
     PlatformFlag,
     Sms,
     User,
@@ -993,3 +994,30 @@ async def test_inactive_dialed_number_falls_through(async_session, add_phone_num
     await async_session.commit()
     got = await resolve_sms_number(async_session, org, agent.id, dialed)
     assert got.id == routed.id
+
+
+async def test_locked_free_number_is_not_used_unbound(
+    async_session, session_factory, add_phone_number
+):
+    """Another call holds the only free number's row lock: refuse, as before.
+    Neither a bind nor an unbound use."""
+    org = uuid.uuid4()
+    agent = Agent(organization_id=org, name="A", system_prompt="x")
+    async_session.add(agent)
+    await async_session.commit()
+    free = await add_phone_number(
+        async_session, org, e164="+14155550051", provider_resource_id="PN_L"
+    )
+    await async_session.commit()
+    async with session_factory() as other:
+        await other.execute(
+            select(PhoneNumber).where(PhoneNumber.id == free.id).with_for_update()
+        )
+        got = await resolve_sms_number(async_session, org, agent.id, None)
+        assert got is None
+        # A free dialed number that is locked is skipped the same way.
+        assert await resolve_sms_number(async_session, org, agent.id, free) is None
+        await other.rollback()
+    await async_session.rollback()
+    await async_session.refresh(free)
+    assert free.sms_agent_id is None

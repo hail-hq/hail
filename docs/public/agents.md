@@ -70,8 +70,8 @@ agent skips it; the responsibility for that is yours.
 3. Any other text to a number with `sms_agent_id` set (agent `live`,
    `sms_enabled: true`) is answered by the agent: one reply, written from
    `system_prompt` and the [thread](#threads) (30 items from the last 7 days,
-   texts and call turns, plus texts you sent through `POST /sms` to the same
-   caller from that number), sent from the same number through its carrier. The agent sends at most 20
+   texts and call turns, plus texts between that number and the caller that
+   have no agent: sent through `POST /sms`, or received before the number had a text agent), sent from the same number through its carrier. The agent sends at most 20
    replies per thread in any 24 hours; past that it stays quiet until older
    replies leave the window. Replies bill as outbound SMS. Inbound rows carry `agent_reply_state`
    (`pending`, `processing`, `done`, `skipped`, `failed`) in the database;
@@ -88,8 +88,9 @@ retried up to 3 times with backoff; a text still unanswered after
 
 A caller texts an order number to the agent's SMS number, then calls the agent.
 The agent greets them already knowing the order number. A text sent during a
-call goes to the voice agent (if it did not get it by call end, the text agent
-answers it then).
+call goes to the voice agent. If the voice agent did not get it, the text agent
+answers it after the call, unless it is older than
+`HAIL_TEXT_REPLY_MAX_AGE_SECONDS`.
 
 - Scope: agent + caller number. Texts and call turns both count.
 - Each call and text reply starts with the last 30 items from the last 7 days.
