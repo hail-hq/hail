@@ -339,3 +339,24 @@ async def test_old_pending_text_is_skipped_not_answered(
     assert claimed is not None and claimed.sms.id == fresh.sms_id
     await async_session.refresh(row)
     assert row.agent_reply_state == "skipped"
+
+
+async def test_inbound_text_carries_the_numbers_agent(async_session) -> None:
+    _, agent, _ = await _seed(async_session)
+    result = await _ingest(async_session, "Hello", "SM9")
+    row = await async_session.get(Sms, result.sms_id)
+    assert row.agent_id == agent.id
+
+
+async def test_inbound_text_to_paused_agent_still_belongs_to_it(async_session) -> None:
+    _, agent, _ = await _seed(async_session, status="paused")
+    result = await _ingest(async_session, "Hello", "SM10")
+    row = await async_session.get(Sms, result.sms_id)
+    assert row.agent_id == agent.id
+    assert row.agent_reply_state is None
+
+
+async def test_inbound_text_on_unrouted_number_has_no_agent(async_session) -> None:
+    await _seed(async_session, route=False)
+    result = await _ingest(async_session, "Hello", "SM11")
+    assert (await async_session.get(Sms, result.sms_id)).agent_id is None

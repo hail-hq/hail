@@ -17,6 +17,7 @@ from hailhq.core.compliance_gate import add_suppression
 from hailhq.core.config import settings
 from hailhq.core.db import get_session
 from hailhq.core.models import (
+    Agent,
     AuditLog,
     Call,
     Email,
@@ -52,6 +53,7 @@ async def _insert_live_call(
     *,
     to_e164="+14155550123",
     billed=False,
+    agent_id=None,
 ) -> Call:
     # add_phone_number (conftest.py factory fixture, see test_calls_api.py)
     # covers the same required columns this used to hand-roll: PhoneNumber
@@ -64,6 +66,7 @@ async def _insert_live_call(
         from_e164=number.e164,
         to_e164=to_e164,
         status="in_progress",
+        agent_id=agent_id,
         voice_config={},
         metadata_={CALL_META_BILLED: billed},
     )
@@ -122,8 +125,15 @@ async def test_send_sms_happy_path_targets_counterpart(
     client, async_session, sms_mock, add_phone_number
 ):
     org = uuid.uuid4()
+    agent = Agent(organization_id=org, name="Front desk", system_prompt="Help.")
+    async_session.add(agent)
+    await async_session.flush()
     call = await _insert_live_call(
-        async_session, org, add_phone_number, to_e164="+14155550123"
+        async_session,
+        org,
+        add_phone_number,
+        to_e164="+14155550123",
+        agent_id=agent.id,
     )
     body = _sms_payload(call.id, body="Your code is 42.")
     resp = await client.post(
@@ -137,6 +147,7 @@ async def test_send_sms_happy_path_targets_counterpart(
     assert rows[0].to_e164 == "+14155550123"  # always the counterpart
     meta = rows[0].metadata
     assert meta["call_id"] == str(call.id)
+    assert rows[0].agent_id == agent.id
 
 
 async def test_send_sms_replays_same_invocation_without_double_send(

@@ -310,6 +310,7 @@ async def agent_send_sms(
         from_number_id=from_number.id,
         from_e164=from_number.e164,
         to_e164=counterpart,  # the person on the line — never a parameter
+        agent_id=call.agent_id,
         direction="outbound",
         status="queued",
         body=body.body,

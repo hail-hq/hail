@@ -238,6 +238,9 @@ async def ingest_inbound_sms(
 
     # Hand a plain message to the number's text agent. STOP, HELP and an
     # opt-in from an opted-out sender are Hail's to answer, never the agent's.
+    # The row belongs to the number's text agent (live or not): that is what
+    # puts it in the agent's thread.
+    sms.agent_id = number.sms_agent_id
     if action is None and await should_queue_reply(db, number):
         sms.agent_reply_state = "pending"
 
