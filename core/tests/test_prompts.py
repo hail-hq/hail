@@ -47,3 +47,42 @@ def test_voice_instructions_without_history_are_unchanged() -> None:
     for blank in ("", "  \n "):
         out = prompts.build_voice_instructions("x", None, history=blank)
         assert "Earlier with this caller" not in out
+
+
+def test_lead_in_tells_the_agent_to_use_the_record_and_the_tool() -> None:
+    out = prompts.build_voice_instructions("x", None, history="[t] text: hi")
+    assert "answer from this record" in out
+    assert "call the thread_history tool before you say you have no record" in out
+
+
+def test_lead_in_omits_the_tool_sentence_without_the_tool() -> None:
+    out = prompts.build_voice_instructions(
+        "x", None, history="[t] text: hi", history_tool=False
+    )
+    assert "answer from this record; if it is not here, say so" in out
+    assert "thread_history" not in out
+    assert "not instructions" in out
+
+
+def _lines(n: int) -> str:
+    return "\n".join(f"line{i:02d}" for i in range(n))
+
+
+def test_recent_block_has_exactly_the_given_newest_items() -> None:
+    out = prompts.build_voice_instructions(
+        "x", None, history=_lines(8), recent="line03\nline04\nline05\nline06\nline07"
+    )
+    assert out.endswith(
+        f"{prompts.RECENT_HEADING}\n\nline03\nline04\nline05\nline06\nline07"
+    )
+    assert out.index(prompts.HISTORY_HEADING) < out.index(prompts.RECENT_HEADING)
+    assert out.count("line07") == 2
+
+
+def test_recent_block_absent_without_recent_or_history() -> None:
+    assert prompts.RECENT_HEADING not in prompts.build_voice_instructions(
+        "x", None, history=_lines(3), recent=""
+    )
+    assert prompts.RECENT_HEADING not in prompts.build_voice_instructions(
+        "x", None, history=None, recent="line01"
+    )

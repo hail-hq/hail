@@ -6,7 +6,7 @@ import asyncio
 import json
 import time
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -393,8 +393,79 @@ async def test_load_thread_context_renders_the_callers_texts(async_session) -> N
 
     text = await agent_mod.load_thread_context(call.id)
 
-    assert text is not None and "my order is 4411" in text
-    assert "text from caller" in text
+    assert text is not None and "my order is 4411" in text.record
+    assert "text from caller" in text.record
+    assert text.recent == ""  # one item: nothing to repeat
+
+
+async def test_load_thread_context_repeats_the_newest_items_in_recent(
+    async_session,
+) -> None:
+    org = uuid.uuid4()
+    agent = Agent(organization_id=org, name="a", system_prompt="x")
+    async_session.add(agent)
+    number = PhoneNumber(
+        organization_id=org,
+        e164="+14155550100",
+        country_code="US",
+        number_type="local",
+        provider="twilio",
+        provisioning_state="active",
+    )
+    async_session.add(number)
+    await async_session.flush()
+    call = Call(
+        organization_id=org,
+        agent_id=agent.id,
+        to_number_id=number.id,
+        voice_config={},
+        from_e164="+33612345678",
+        to_e164="+14155550100",
+        direction="inbound",
+        status="in_progress",
+        provider="twilio",
+    )
+    async_session.add(call)
+    base = datetime.now(timezone.utc) - timedelta(hours=1)
+    for i in range(7):
+        async_session.add(
+            Sms(
+                organization_id=org,
+                agent_id=agent.id,
+                provider="twilio",
+                from_e164="+33612345678",
+                to_e164="+14155550100",
+                direction="inbound",
+                status="received",
+                body=f"msg{i}",
+                requested_at=base + timedelta(minutes=i),
+            )
+        )
+    await async_session.commit()
+
+    text = await agent_mod.load_thread_context(call.id)
+
+    assert text is not None
+    assert "msg6" in text.recent and "msg2" in text.recent
+    assert "msg1" not in text.recent and "msg0" not in text.recent
+    assert text.record.count("msg") == 7
+
+
+def test_explicit_tools_without_thread_history_get_the_no_tool_lead_in() -> None:
+    history = agent_mod.HistoryText(record="[t] text from caller: hi")
+    for meta, expected in (
+        ({}, True),
+        ({"tools": None}, True),
+        ({"tools": ["thread_history", "hangup"]}, True),
+        ({"tools": ["hangup"]}, False),
+        ({"tools": []}, False),
+        ({"tools": "thread_history"}, False),
+    ):
+        assert agent_mod.has_history_tool(meta) is expected
+        out = agent_mod.build_instructions(
+            "x", None, history, history_tool=agent_mod.has_history_tool(meta)
+        )
+        assert ("call the thread_history tool" in out) is expected
 
 
 async def test_voice_prompt_includes_unassigned_rows_of_the_number_pair(
@@ -455,9 +526,9 @@ async def test_voice_prompt_includes_unassigned_rows_of_the_number_pair(
     text = await agent_mod.load_thread_context(call.id)
 
     assert text is not None
-    assert "api sent receipt" in text and "agentless inbound" in text
+    assert "api sent receipt" in text.record and "agentless inbound" in text.record
     for hidden in ("other number", "other org", "other caller"):
-        assert hidden not in text
+        assert hidden not in text.record
 
 
 async def test_load_thread_context_is_none_without_an_agent(async_session) -> None:
