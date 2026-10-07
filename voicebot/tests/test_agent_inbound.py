@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
 import uuid
 from datetime import datetime, timezone
 from types import SimpleNamespace
@@ -393,6 +394,7 @@ async def test_load_thread_context_renders_the_callers_texts(async_session) -> N
     text = await agent_mod.load_thread_context(call.id)
 
     assert text is not None and "my order is 4411" in text
+    assert "text from caller" in text
 
 
 async def test_load_thread_context_is_none_without_an_agent(async_session) -> None:
@@ -405,3 +407,21 @@ async def test_load_thread_context_is_none_when_the_read_fails(monkeypatch) -> N
 
     monkeypatch.setattr(agent_mod.threads, "call_thread_key", boom)
     assert await agent_mod.load_thread_context(uuid.uuid4()) is None
+
+
+async def test_load_thread_context_is_none_when_the_read_is_slow(
+    async_session, monkeypatch
+) -> None:
+    async def slow(*args, **kwargs):
+        await asyncio.sleep(10)
+
+    async def key(*args, **kwargs):
+        return uuid.uuid4(), uuid.uuid4(), "+33612345678"
+
+    monkeypatch.setattr(agent_mod.threads, "call_thread_key", key)
+    monkeypatch.setattr(agent_mod.threads, "thread_items", slow)
+    monkeypatch.setattr(agent_mod, "HISTORY_TIMEOUT_SECONDS", 0.05)
+
+    start = time.monotonic()
+    assert await agent_mod.load_thread_context(uuid.uuid4()) is None
+    assert time.monotonic() - start < 2

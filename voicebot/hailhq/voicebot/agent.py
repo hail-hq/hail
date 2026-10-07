@@ -601,18 +601,28 @@ def disconnect_reason_to_status(reason: int | None) -> tuple[str | None, str | N
 logger = logging.getLogger("hailhq.voicebot")
 
 
+HISTORY_TIMEOUT_SECONDS = 1.5
+
+
+async def _read_thread(call_id: UUID) -> str | None:
+    async with session_scope() as db:
+        key = await threads.call_thread_key(db, call_id)
+        if key is None:
+            return None
+        org, agent_id, caller = key
+        items = await threads.thread_items(db, org, agent_id, caller)
+    return threads.render_thread(items) or None
+
+
 async def load_thread_context(call_id: UUID) -> str | None:
     """This caller's earlier texts and calls with this agent, rendered for the
-    prompt. None when there is nothing, or when the read fails: a call never
+    prompt. None when there is nothing, or when the read fails or exceeds
+    HISTORY_TIMEOUT_SECONDS: a call never
     waits on its history."""
     try:
-        async with session_scope() as db:
-            key = await threads.call_thread_key(db, call_id)
-            if key is None:
-                return None
-            org, agent_id, caller = key
-            items = await threads.thread_items(db, org, agent_id, caller)
-        return threads.render_thread(items) or None
+        return await asyncio.wait_for(
+            _read_thread(call_id), timeout=HISTORY_TIMEOUT_SECONDS
+        )
     except Exception:
         logger.exception("call_id=%s thread history unavailable", call_id)
         return None

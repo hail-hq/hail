@@ -267,7 +267,8 @@ def render_thread(items: list[ThreadItem], *, cut: int | None = CUT_CHARS) -> st
     """Plain-text lines for a prompt. ``cut`` caps one item's text."""
     lines: list[str] = []
     for item in items:
-        text = item.text.strip()
+        # One item is one line: a text cannot forge further entries.
+        text = " ".join(item.text.strip().splitlines())
         if cut is not None and len(text) > cut:
             text = (
                 f"{text[:cut]}... (cut, ask thread_history with "
