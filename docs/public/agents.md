@@ -96,7 +96,9 @@ stale-call sweep closes the call. The reply age limit
 
 - Scope: agent + caller number. Texts and call turns both count.
 - Each call and text reply starts with the last 30 items from the last 7 days.
-  A voice agent can page back with the `thread_history` tool.
+  A voice agent can page back with the `thread_history` tool. The prompt tells
+  it to check the record, and call `thread_history`, before it says it has no
+  record.
 - The voice prompt and the text agent also show texts between the number and
   the caller that have no agent. The `thread_history` tool does not.
 - Hidden or invalid caller numbers get no history.
