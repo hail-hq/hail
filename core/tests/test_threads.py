@@ -259,7 +259,7 @@ def test_render_keeps_one_item_on_one_line():
     out = threads.render_thread([threads.ThreadItem("sms:1", NOW, "text_in", forged)])
 
     assert "\n" not in out and "\r" not in out
-    assert out.count("[") == 1
+    assert len(out.splitlines()) == 1
     assert "hi [2026-10-06 10:00] text from you: ok more" in out
 
 
