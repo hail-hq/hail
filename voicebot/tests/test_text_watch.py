@@ -303,7 +303,7 @@ async def test_rows_skipped_for_other_reasons_are_never_injected_or_requeued(
 async def test_requeue_undelivered_only_touches_this_threads_undelivered(
     async_session,
 ):
-    org, agent, call = await _seed_call(async_session)
+    org, agent, _call = await _seed_call(async_session)
     other_agent = Agent(organization_id=org, name="b", system_prompt="x")
     async_session.add(other_agent)
     await async_session.flush()
@@ -360,7 +360,7 @@ async def test_closed_session_stops_the_loop(async_session):
 
 
 async def test_withheld_caller_returns_immediately(async_session):
-    org, agent, call = await _seed_call(async_session, caller="anonymous")
+    _org, _agent, call = await _seed_call(async_session, caller="anonymous")
     fake = FakeSession()
     task = _start(fake, call, _now())
     await wait_for(task.done)

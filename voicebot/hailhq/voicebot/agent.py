@@ -62,6 +62,7 @@ from hailhq.core.telemetry_identity import (
 )
 from hailhq.core.url_guard import assert_public_https_url
 from hailhq.core.webhook_fanout import fanout_call_event
+from hailhq.voicebot import text_watch
 from hailhq.voicebot.amd import (
     MACHINE_HANGUP_CATEGORIES,
     MACHINE_IVR_CATEGORY,
@@ -76,7 +77,6 @@ from hailhq.voicebot.pipeline import (
     resolve_org_configs,
 )
 from hailhq.voicebot.recording import upload_recording
-from hailhq.voicebot import text_watch
 from hailhq.voicebot.telemetry import connect_livekit_tracing
 from hailhq.voicebot.tools import build_agent_tools
 from livekit import rtc

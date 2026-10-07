@@ -487,7 +487,7 @@ async def test_active_call_of_another_caller_does_not_skip(async_session) -> Non
 
 
 async def test_active_call_of_another_agent_does_not_skip(async_session) -> None:
-    org, agent, number = await _seed(async_session)
+    org, _agent, number = await _seed(async_session)
     other = Agent(organization_id=org, name="Other", system_prompt="x")
     async_session.add(other)
     await async_session.flush()
@@ -523,7 +523,7 @@ def test_chat_messages_map_call_agent_and_leading_assistant() -> None:
 
 
 async def test_api_sent_text_is_in_text_agent_history_only(async_session) -> None:
-    org, agent, number = await _seed(async_session)
+    org, agent, _number = await _seed(async_session)
     base = datetime.now(timezone.utc) - timedelta(minutes=10)
 
     def row(org_id, frm, to, body, secs, agent_id=None):
