@@ -14,7 +14,7 @@ order is placed, so Hail cannot quote and sell it
 2. If the row has `verification_required: true`, the customer first files
    their papers. The console's **Verify** button needs an offer, and these
    rows have none, so they file through the API: `GET
-   /v1/verifications/requirements` then `POST /v1/verifications` with
+/v1/verifications/requirements` then `POST /v1/verifications` with
    `provider=didww` ([OpenAPI](../../openapi/openapi.yaml)). Wait for the Hail
    verification to be `approved`.
 3. Order in the DIDWW panel: **my.didww.com → Buy Numbers → \<country\> →
@@ -38,6 +38,16 @@ order is placed, so Hail cannot quote and sell it
    \set monthly <area monthly price x 100>
    \set setup <area setup price x 100, or 0>
    BEGIN;
+   -- Same lock and balance rule as an API purchase (POST /v1/numbers answers 402).
+   SELECT pg_advisory_xact_lock(hashtextextended(:'org', 0));
+   SELECT COALESCE(SUM(amount_cents), 0) >= :monthly + :setup AS funded
+   FROM account_credits WHERE organization_id = :'org' \gset
+   \if :funded
+   \else
+     \echo 'Balance too low for setup + first month: nothing added, nothing charged. Ask the customer to top up.'
+     ROLLBACK;
+     \q
+   \endif
    INSERT INTO phone_numbers (id, organization_id, e164, country_code, number_type, capabilities, provider, provider_resource_id, provisioning_state, provisioning_metadata, is_pool, acquired_at)
    VALUES (gen_random_uuid(), :'org', :'e164', :'cc', :'kind', ARRAY['voice'], 'didww', :'did', 'active', jsonb_build_object('monthly_cents', :monthly, 'currency', 'USD', 'order_state', 'complete'), FALSE, now())
    RETURNING id \gset num_
