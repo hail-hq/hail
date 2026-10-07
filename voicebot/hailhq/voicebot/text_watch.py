@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import Collection
 from datetime import datetime, timedelta
 from typing import Any
 from uuid import UUID
@@ -41,7 +42,10 @@ async def new_inbound_texts(
     agent_id: UUID,
     caller_e164: str,
     after: datetime,
+    exclude: Collection[UUID] = (),
 ) -> list[Sms]:
+    """Skipped-for-call inbound texts of the thread since ``after``, oldest
+    first, leaving out the ids in ``exclude`` (already delivered)."""
     stmt = (
         select(Sms)
         .where(
@@ -55,6 +59,8 @@ async def new_inbound_texts(
         )
         .order_by(Sms.requested_at, Sms.id)
     )
+    if exclude:
+        stmt = stmt.where(Sms.id.not_in(exclude))
     return list((await db.execute(stmt)).scalars().all())
 
 
@@ -94,7 +100,9 @@ async def watch_incoming_texts(
         await asyncio.sleep(poll_seconds)
         try:
             async with session_scope() as db:
-                rows = await new_inbound_texts(db, org, agent_id, caller, after)
+                rows = await new_inbound_texts(
+                    db, org, agent_id, caller, after, delivered
+                )
             for row in rows:
                 if row.id in delivered:
                     continue
