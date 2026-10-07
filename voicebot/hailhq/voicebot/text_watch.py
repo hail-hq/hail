@@ -23,6 +23,7 @@ logger = logging.getLogger("hailhq.voicebot")
 
 POLL_SECONDS = 2.0
 MAX_INJECT_CHARS = 1000
+KEY_LOOKUP_ATTEMPTS = 3
 # Covers app/DB clock skew and the ingest transaction stamping requested_at at
 # its start. A text inside the overlap may be injected once more than needed.
 CURSOR_OVERLAP = timedelta(seconds=30)
@@ -60,12 +61,17 @@ async def watch_incoming_texts(
     window starting ``CURSOR_OVERLAP`` before ``since`` and skips ids already
     delivered, so no clock skew or commit order can lose a text. A failed poll
     is logged and retried."""
-    try:
-        async with session_scope() as db:
-            key = await threads.call_thread_key(db, call_id)
-    except Exception:
-        logger.exception("call_id=%s text watch could not start", call_id)
-        return
+    key = None
+    for attempt in range(KEY_LOOKUP_ATTEMPTS):
+        try:
+            async with session_scope() as db:
+                key = await threads.call_thread_key(db, call_id)
+            break
+        except Exception:
+            logger.exception("call_id=%s text watch lookup failed", call_id)
+            if attempt == KEY_LOOKUP_ATTEMPTS - 1:
+                return
+            await asyncio.sleep(poll_seconds)
     if key is None:
         return
     org, agent_id, caller = key
@@ -79,12 +85,16 @@ async def watch_incoming_texts(
             for row in rows:
                 if row.id in delivered:
                     continue
-                session.generate_reply(
-                    user_input=threads.TEXT_MARKER + (row.body or "")[:MAX_INJECT_CHARS]
-                )
+                try:
+                    session.generate_reply(
+                        user_input=threads.TEXT_MARKER
+                        + (row.body or "")[:MAX_INJECT_CHARS]
+                    )
+                except RuntimeError:
+                    logger.info(
+                        "call_id=%s text watch stopped: session closed", call_id
+                    )
+                    return
                 delivered.add(row.id)
-        except RuntimeError:
-            logger.info("call_id=%s text watch stopped: session closed", call_id)
-            return
         except Exception:
             logger.exception("call_id=%s text watch poll failed", call_id)

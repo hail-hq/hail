@@ -236,3 +236,49 @@ async def test_withheld_caller_returns_immediately(async_session):
     await wait_for(task.done)
     assert task.exception() is None
     assert fake.inputs == []
+
+
+async def test_db_runtime_error_does_not_stop_the_watcher(async_session, monkeypatch):
+    org, agent, call = await _seed_call(async_session)
+    since = _now()
+    real = text_watch.new_inbound_texts
+    calls = {"n": 0}
+
+    async def flaky(*a, **kw):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise RuntimeError("pool blip")
+        return await real(*a, **kw)
+
+    monkeypatch.setattr(text_watch, "new_inbound_texts", flaky)
+    async_session.add(
+        _text(org, agent.id, "still here", at=since + timedelta(seconds=1))
+    )
+    await async_session.commit()
+    fake = FakeSession()
+    task = _start(fake, call, since)
+    await wait_for(lambda: len(fake.inputs) == 1)
+    await _stop(task)
+    assert fake.inputs == [threads.TEXT_MARKER + "still here"]
+
+
+async def test_transient_key_lookup_failure_is_retried(async_session, monkeypatch):
+    org, agent, call = await _seed_call(async_session)
+    since = _now()
+    real = threads.call_thread_key
+    calls = {"n": 0}
+
+    async def flaky(*a, **kw):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise ValueError("db blip")
+        return await real(*a, **kw)
+
+    monkeypatch.setattr(threads, "call_thread_key", flaky)
+    async_session.add(_text(org, agent.id, "hello", at=since + timedelta(seconds=1)))
+    await async_session.commit()
+    fake = FakeSession()
+    task = _start(fake, call, since)
+    await wait_for(lambda: len(fake.inputs) == 1)
+    await _stop(task)
+    assert calls["n"] == 2
