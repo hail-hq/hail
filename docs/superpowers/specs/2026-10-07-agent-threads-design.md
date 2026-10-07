@@ -32,8 +32,7 @@ A thread is every `calls` and `sms` row with:
 Changes:
 
 - Set `sms.agent_id` on every agent-routed row, inbound and outbound. Today only inbound rows that queue a reply have it.
-- Add index on `sms` (`organization_id`, `agent_id`, caller number, `created_at`).
-- Add the same index on `calls`.
+- Add two indexes per table (`sms`, `calls`), one per caller column (`from_e164`, `to_e164`), because the caller sits in a different column by direction.
 - New `core` function `thread_items(org_id, agent_id, caller_e164, limit, before)`. It returns texts and call turns, ordered by time.
 - Old calls appear with no backfill. Old texts appear only if they had `agent_id`.
 - Calls and texts with no agent are not in any thread.
@@ -65,7 +64,7 @@ Changes:
 1. The dialed number, if it has SMS.
 2. An org SMS number whose `sms_agent_id` is this agent.
 3. An org SMS number whose `sms_agent_id` is empty. Set it to this agent.
-4. None found: the tool is hidden. The agent prompt says it cannot text.
+4. None found: the agent tells the caller it cannot text. The tool stays listed while the org has any SMS number, and is hidden when the org has none.
 
 - A number bound to another agent is never taken.
 - Caller replies reach this agent. Both numbers feed the same thread.
