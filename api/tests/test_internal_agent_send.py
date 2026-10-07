@@ -10,6 +10,8 @@ from datetime import datetime, timedelta, timezone
 import httpx
 import pytest
 from hailhq.api.main import app
+from hailhq.api.numbers import resolve_sms_number
+from hailhq.api.routes.internal.agent import _SPOKEN_SMS_UNCONFIGURED
 from hailhq.core import hmac_signing
 from hailhq.core.agent_caps import AGENT_OUTBOUND_DISABLED_FLAG
 from hailhq.core.billing import CALL_META_BILLED
@@ -738,7 +740,146 @@ async def test_sms_number_bound_to_another_agent_is_not_taken(
     )
     data = resp.json()
     assert data["ok"] is False
-    assert data["spoken"]
+    assert data["spoken"] == _SPOKEN_SMS_UNCONFIGURED
     await async_session.refresh(sms_number)
     assert sms_number.sms_agent_id == other.id
     assert (await async_session.execute(select(Sms))).scalars().all() == []
+
+
+async def _send(client, call):
+    body = _sms_payload(call.id)
+    return await client.post(
+        "/internal/agent/send-sms", content=body, headers=_signed(body)
+    )
+
+
+async def test_bind_writes_a_system_audit_entry(
+    client, async_session, sms_mock, add_phone_number
+):
+    agent, _, _, sms_number, call = await _inbound_call_on_voice_only_number(
+        async_session, add_phone_number, sms_agent_id="none"
+    )
+    assert (await _send(client, call)).json()["ok"] is True
+    rows = (
+        (
+            await async_session.execute(
+                select(AuditLog).where(AuditLog.action == "number.route")
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert len(rows) == 1
+    assert rows[0].actor_kind == "system"
+    assert rows[0].resource_id == sms_number.id
+    assert rows[0].payload["sms_agent_id"] == str(agent.id)
+    assert rows[0].payload["automatic"] is True
+
+
+async def test_already_routed_number_writes_no_route_audit(
+    client, async_session, sms_mock, add_phone_number
+):
+    _, _, _, _, call = await _inbound_call_on_voice_only_number(
+        async_session, add_phone_number, sms_agent_id="same"
+    )
+    assert (await _send(client, call)).json()["ok"] is True
+    rows = (
+        (
+            await async_session.execute(
+                select(AuditLog).where(AuditLog.action == "number.route")
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert rows == []
+
+
+async def test_agent_without_sms_enabled_is_not_bound(
+    client, async_session, sms_mock, add_phone_number
+):
+    agent, _, _, sms_number, call = await _inbound_call_on_voice_only_number(
+        async_session, add_phone_number, sms_agent_id="none"
+    )
+    agent.sms_enabled = False
+    await async_session.commit()
+    data = (await _send(client, call)).json()
+    assert data["ok"] is False
+    assert data["spoken"] == _SPOKEN_SMS_UNCONFIGURED
+    await async_session.refresh(sms_number)
+    assert sms_number.sms_agent_id is None
+
+
+async def test_second_agent_does_not_take_a_number_the_first_bound(
+    async_session, add_phone_number
+):
+    _, other, voice, sms_number, call = await _inbound_call_on_voice_only_number(
+        async_session, add_phone_number, sms_agent_id="none"
+    )
+    org = call.organization_id
+    first = await resolve_sms_number(async_session, org, call.agent_id, voice)
+    assert first.id == sms_number.id
+    await async_session.commit()
+    assert await resolve_sms_number(async_session, org, other.id, voice) is None
+    await async_session.refresh(sms_number)
+    assert sms_number.sms_agent_id == call.agent_id
+
+
+async def test_no_agent_keeps_oldest_sms_number(async_session, add_phone_number):
+    org = uuid.uuid4()
+    older = await add_phone_number(
+        async_session, org, e164="+14155550011", provider_resource_id="PN_1"
+    )
+    other_agent = Agent(organization_id=org, name="B", system_prompt="x")
+    async_session.add(other_agent)
+    await async_session.commit()
+    older.sms_agent_id = other_agent.id
+    await add_phone_number(
+        async_session, org, e164="+14155550012", provider_resource_id="PN_2"
+    )
+    await async_session.commit()
+    got = await resolve_sms_number(async_session, org, None, None)
+    assert got.id == older.id
+    assert got.sms_agent_id == other_agent.id
+
+
+async def test_routed_number_preferred_over_unbound_one(
+    async_session, add_phone_number
+):
+    org = uuid.uuid4()
+    agent = Agent(organization_id=org, name="A", system_prompt="x")
+    async_session.add(agent)
+    await async_session.commit()
+    unbound = await add_phone_number(
+        async_session, org, e164="+14155550021", provider_resource_id="PN_1"
+    )
+    routed = await add_phone_number(
+        async_session, org, e164="+14155550022", provider_resource_id="PN_2"
+    )
+    routed.sms_agent_id = agent.id
+    await async_session.commit()
+    got = await resolve_sms_number(async_session, org, agent.id, None)
+    assert got.id == routed.id
+    await async_session.refresh(unbound)
+    assert unbound.sms_agent_id is None
+
+
+async def test_inactive_dialed_number_falls_through(async_session, add_phone_number):
+    org = uuid.uuid4()
+    agent = Agent(organization_id=org, name="A", system_prompt="x")
+    async_session.add(agent)
+    await async_session.commit()
+    dialed = await add_phone_number(
+        async_session,
+        org,
+        e164="+14155550031",
+        provider_resource_id="PN_1",
+        state="released",
+    )
+    routed = await add_phone_number(
+        async_session, org, e164="+14155550032", provider_resource_id="PN_2"
+    )
+    routed.sms_agent_id = agent.id
+    await async_session.commit()
+    got = await resolve_sms_number(async_session, org, agent.id, dialed)
+    assert got.id == routed.id

@@ -299,6 +299,8 @@ async def agent_send_sms(
     if from_number is None:
         return AgentSendResponse(ok=False, spoken=_SPOKEN_SMS_UNCONFIGURED)
 
+    auto_bound = db.info.pop("auto_bound_sms_number_id", None) == from_number.id
+
     sms = Sms(
         organization_id=org,
         provider=from_number.provider,
@@ -313,6 +315,23 @@ async def agent_send_sms(
     )
     db.add(sms)
     await db.commit()
+
+    if auto_bound:
+        await write_audit_log(
+            organization_id=org,
+            api_key_id=None,
+            action="number.route",
+            resource_type="phone_number",
+            resource_id=from_number.id,
+            payload={
+                "e164": from_number.e164,
+                "sms_agent_id": str(call.agent_id),
+                "automatic": True,
+                "source": "in-call send_sms",
+                "call_id": str(call.id),
+            },
+            actor_kind="system",
+        )
 
     await write_audit_log(
         organization_id=org,

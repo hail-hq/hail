@@ -10,7 +10,8 @@ from __future__ import annotations
 
 from uuid import UUID
 
-from hailhq.core.models import PhoneNumber
+from hailhq.core.db import org_lock
+from hailhq.core.models import Agent, PhoneNumber
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -77,10 +78,29 @@ async def resolve_sms_number(
     ).scalar_one_or_none()
     if routed is not None:
         return routed
+    # Binding changes routing, so it takes the gates PATCH /numbers/{id} does:
+    # the agent is in this org and answers texts. Same org lock as that route,
+    # and the candidate row is locked, so two calls cannot bind one number.
+    agent = (
+        await db.execute(
+            select(Agent).where(
+                Agent.id == agent_id, Agent.organization_id == organization_id
+            )
+        )
+    ).scalar_one_or_none()
+    if agent is None or not agent.sms_enabled:
+        return None
+    await org_lock(db, organization_id)
     free = (
-        await db.execute(base.where(PhoneNumber.sms_agent_id.is_(None)))
+        await db.execute(
+            base.where(PhoneNumber.sms_agent_id.is_(None)).with_for_update(
+                skip_locked=True
+            )
+        )
     ).scalar_one_or_none()
     if free is not None:
         free.sms_agent_id = agent_id
         await db.flush()
+        # Tells the caller to audit the bind once it commits.
+        db.info["auto_bound_sms_number_id"] = free.id
     return free
