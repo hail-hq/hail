@@ -466,7 +466,11 @@ class SmsResponse(BaseModel):
     )
     agent_id: UUID | None = Field(
         default=None,
-        description="Agent that wrote this message. Null unless an agent replied to a text.",
+        description=(
+            "The agent this text belongs to: the number's text agent on inbound "
+            "texts, the agent that wrote it on outbound texts. Null when no "
+            "agent is involved."
+        ),
     )
     status: SmsStatus = Field(
         description=(
