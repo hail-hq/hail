@@ -208,13 +208,10 @@ def build_instructions(
     )
 
 
-def has_history_tool(metadata: dict[str, Any]) -> bool:
-    """Whether this call's agent can call ``thread_history``: ``tools`` absent
-    means all tools; a malformed value means none (see ``build_agent_tools``)."""
-    allowed = metadata.get("tools")
-    return allowed is None or (
-        isinstance(allowed, list) and "thread_history" in allowed
-    )
+def has_history_tool(tools: list[Any]) -> bool:
+    """Whether ``thread_history`` is among the tools actually built for this
+    call (dispatch allow-list, availability checks and build failures applied)."""
+    return any(getattr(t.info, "name", None) == "thread_history" for t in tools)
 
 
 # Proactive AI disclosure — spoken by default as the first thing on every
@@ -1601,7 +1598,7 @@ async def _run_call(
             metadata.get("system_prompt"),
             metadata.get("direction"),
             history,
-            history_tool=has_history_tool(metadata),
+            history_tool=has_history_tool(agent_tools),
         ),
         tools=agent_tools,
     )

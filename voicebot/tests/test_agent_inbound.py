@@ -451,19 +451,19 @@ async def test_load_thread_context_repeats_the_newest_items_in_recent(
     assert text.record.count("msg") == 7
 
 
-def test_explicit_tools_without_thread_history_get_the_no_tool_lead_in() -> None:
+def test_lead_in_follows_the_tools_actually_built() -> None:
+    def tool(name: str) -> SimpleNamespace:
+        return SimpleNamespace(info=SimpleNamespace(name=name))
+
     history = agent_mod.HistoryText(record="[t] text from caller: hi")
-    for meta, expected in (
-        ({}, True),
-        ({"tools": None}, True),
-        ({"tools": ["thread_history", "hangup"]}, True),
-        ({"tools": ["hangup"]}, False),
-        ({"tools": []}, False),
-        ({"tools": "thread_history"}, False),
+    for tools, expected in (
+        ([tool("thread_history"), tool("hangup")], True),
+        ([tool("hangup")], False),
+        ([], False),
     ):
-        assert agent_mod.has_history_tool(meta) is expected
+        assert agent_mod.has_history_tool(tools) is expected
         out = agent_mod.build_instructions(
-            "x", None, history, history_tool=agent_mod.has_history_tool(meta)
+            "x", None, history, history_tool=agent_mod.has_history_tool(tools)
         )
         assert ("call the thread_history tool" in out) is expected
 

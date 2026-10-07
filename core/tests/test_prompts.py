@@ -73,7 +73,7 @@ def test_recent_block_has_exactly_the_given_newest_items() -> None:
         "x", None, history=_lines(8), recent="line03\nline04\nline05\nline06\nline07"
     )
     assert out.endswith(
-        f"{prompts.RECENT_HEADING}\n\nline03\nline04\nline05\nline06\nline07"
+        f"{prompts.RECENT_HEADING}\n\n{prompts.RECENT_NOTE}\n\nline03\nline04\nline05\nline06\nline07"
     )
     assert out.index(prompts.HISTORY_HEADING) < out.index(prompts.RECENT_HEADING)
     assert out.count("line07") == 2
