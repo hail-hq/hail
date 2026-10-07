@@ -12,9 +12,16 @@ curl -X POST "$HAIL_API_URL/calls" -H "Authorization: Bearer $HAIL_API_KEY" \
 ```
 
 Buying goes through the normal quote flow once `DIDWW_API_KEY` and
-`LIVEKIT_DIDWW_SIP_OUTBOUND_TRUNK_ID` are both set; with either one empty no
-DIDWW number is quoted. Not supported on DIDWW: SMS (offers are voice only).
-Inbound calls: see [below](#inbound-calls).
+`LIVEKIT_DIDWW_SIP_OUTBOUND_TRUNK_ID` are both set and DIDWW has enabled
+inventory search on the account ([§1](#1-didww-account), step 3). With any
+of the three missing, no DIDWW number is quoted ([§6](#6-no-didww-offer-shows-up)).
+
+Not supported on DIDWW: SMS. Inbound calls: see [below](#inbound-calls).
+Hail sends no SMS through
+DIDWW (`CARRIERS["didww"].sms_route` is `None`), so a quote with `"sms"` in
+`capabilities` never gets a DIDWW offer. DIDWW itself sells SMS-capable
+numbers only in US, CA, MX and PR (number groups with the `sms_in` feature);
+Portugal and the rest are voice only on their side too.
 
 ## 1. DIDWW account
 
@@ -23,7 +30,21 @@ Inbound calls: see [below](#inbound-calls).
    check; a non-USD account will silently mis-price every DIDWW number.
 2. Outbound trunks are off by default. Ask `support@didww.com` to enable
    "Outbound Trunks" on the account.
-3. Numbers are bought through Hail ([§5](#5-buying-a-number)); the DIDWW
+3. Inventory search over the API is off by default too. Ask
+   `support@didww.com` to enable `GET /v3/available_dids` on the account
+   (and on the sandbox account, if you have one). Check:
+
+   ```bash
+   curl -s -H "Api-Key: $DIDWW_API_KEY" -H "Accept: application/vnd.api+json" \
+     "https://api.didww.com/v3/available_dids?page[size]=1"
+   # 403 {"errors":[{"detail":"Access for Customer is Denied"}]} → not enabled yet
+   # 200 {"data":[...]}                                           → enabled
+   ```
+
+   Every other call works without it (`balance`, `countries`, `did_groups`,
+   `address_requirements`), so the key looks fine while quotes stay empty.
+
+4. Numbers are bought through Hail ([§5](#5-buying-a-number)); the DIDWW
    panel is only needed for the trunk and the API key.
 
 ## 2. DIDWW outbound trunk
@@ -75,8 +96,20 @@ DIDWW_API_KEY=<key>
 DIDWW_ENVIRONMENT=production
 ```
 
-`DIDWW_ENVIRONMENT=sandbox` points every call at `sandbox-api.didww.com`
-(sandbox key from the Sandbox User Panel → API → DIDWW API 3). Restart `api`.
+`DIDWW_ENVIRONMENT=sandbox` points every call at `sandbox-api.didww.com`.
+The sandbox is a separate site with its own login and key:
+[my-sandbox.didww.com](https://my-sandbox.didww.com) → **API → DIDWW API 3 →
+Create new API Key**. No sandbox login? Ask `support@didww.com` for a sandbox
+account tied to your production account. The sandbox needs
+`available_dids` enabled as well (step 3 of [§1](#1-didww-account)).
+
+For a local smoke test keep the production values in `.env` and override on
+the command line:
+
+```bash
+DIDWW_API_KEY=<sandbox key> DIDWW_ENVIRONMENT=sandbox \
+  uv run --directory api uvicorn hailhq.api.main:app --port 8080
+```
 
 ## 5. Buying a number
 
@@ -121,6 +154,27 @@ entry of `CARRIERS` in
 A call from a `didww` number with `LIVEKIT_DIDWW_SIP_OUTBOUND_TRUNK_ID` empty
 fails with `end_reason = carrier_route_failed` before any LiveKit room exists.
 The same applies to Twilio numbers when `LIVEKIT_TWILIO_SIP_OUTBOUND_TRUNK_ID` is empty.
+
+## 6. No DIDWW offer shows up
+
+Ask for a quote and read `unavailable_providers`:
+
+```bash
+curl -s -X POST "$HAIL_API_URL/numbers/quotes" -H "Authorization: Bearer $HAIL_API_KEY" \
+  -H 'Content-Type: application/json' \
+  -d '{"country_code":"PT","number_type":"national","capabilities":["voice"]}' \
+  | python3 -c 'import json,sys; q=json.load(sys.stdin); print(q["unavailable_providers"], [o["provider"] for o in q["offers"]])'
+```
+
+| You see                                 | Cause                                                                                 | Fix                                                                                     |
+| --------------------------------------- | ------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| `["didww"]` in `unavailable_providers`  | The DIDWW lookup failed. Almost always `available_dids` is not enabled (§1, step 3).  | Run the `curl` in §1 step 3. 403 → ask DIDWW support. Other error → see the `api` log.  |
+| `[]` and no `didww` offer               | `DIDWW_API_KEY` or `LIVEKIT_DIDWW_SIP_OUTBOUND_TRUNK_ID` empty, or `"sms"` requested. | Set both in `.env`, restart `api`. Quote with `"capabilities":["voice"]`.               |
+| 422 `we don't offer a national number…` | The pair (country, type) is not in `costs/didww.json`.                                | Wait for the weekly catalog sync, or run it (`docs/operations/number-catalog-sync.md`). |
+| 422 for a pair `costs/didww.json` lists | The row has `by_request` or `receive_only` ([below](#numbers-hail-cannot-sell)).      | Nothing to fix: Hail does not sell it. For `by_request`, support orders it by hand.     |
+
+The console's "both jobs" card (calls + SMS) never lists DIDWW; only
+"calls-only numbers" does.
 
 ## Numbers Hail cannot sell
 

@@ -10,6 +10,8 @@ from datetime import datetime, timedelta, timezone
 import httpx
 import pytest
 from hailhq.api.main import app
+from hailhq.api.numbers import resolve_sms_number
+from hailhq.api.routes.internal.agent import _SPOKEN_SMS_UNCONFIGURED
 from hailhq.core import hmac_signing
 from hailhq.core.agent_caps import AGENT_OUTBOUND_DISABLED_FLAG
 from hailhq.core.billing import CALL_META_BILLED
@@ -17,12 +19,14 @@ from hailhq.core.compliance_gate import add_suppression
 from hailhq.core.config import settings
 from hailhq.core.db import get_session
 from hailhq.core.models import (
+    Agent,
     AuditLog,
     Call,
     Email,
     EmailDomain,
     Organization,
     OrganizationMember,
+    PhoneNumber,
     PlatformFlag,
     Sms,
     User,
@@ -52,6 +56,7 @@ async def _insert_live_call(
     *,
     to_e164="+14155550123",
     billed=False,
+    agent_id=None,
 ) -> Call:
     # add_phone_number (conftest.py factory fixture, see test_calls_api.py)
     # covers the same required columns this used to hand-roll: PhoneNumber
@@ -64,6 +69,7 @@ async def _insert_live_call(
         from_e164=number.e164,
         to_e164=to_e164,
         status="in_progress",
+        agent_id=agent_id,
         voice_config={},
         metadata_={CALL_META_BILLED: billed},
     )
@@ -122,8 +128,15 @@ async def test_send_sms_happy_path_targets_counterpart(
     client, async_session, sms_mock, add_phone_number
 ):
     org = uuid.uuid4()
+    agent = Agent(organization_id=org, name="Front desk", system_prompt="Help.")
+    async_session.add(agent)
+    await async_session.flush()
     call = await _insert_live_call(
-        async_session, org, add_phone_number, to_e164="+14155550123"
+        async_session,
+        org,
+        add_phone_number,
+        to_e164="+14155550123",
+        agent_id=agent.id,
     )
     body = _sms_payload(call.id, body="Your code is 42.")
     resp = await client.post(
@@ -137,6 +150,7 @@ async def test_send_sms_happy_path_targets_counterpart(
     assert rows[0].to_e164 == "+14155550123"  # always the counterpart
     meta = rows[0].metadata
     assert meta["call_id"] == str(call.id)
+    assert rows[0].agent_id == agent.id
 
 
 async def test_send_sms_replays_same_invocation_without_double_send(
@@ -645,3 +659,365 @@ async def test_send_sms_on_inbound_call_texts_the_caller_from_the_dialed_number(
     assert len(rows) == 1
     assert rows[0].to_e164 == "+33612345678"
     assert rows[0].from_e164 == number.e164
+
+
+async def _inbound_call_on_voice_only_number(
+    session, add_phone_number, *, sms_agent_id="same"
+):
+    """Agent A, voice-only number V (dialed), and one SMS number S."""
+    org = uuid.uuid4()
+    agent = Agent(organization_id=org, name="A", system_prompt="x")
+    other = Agent(organization_id=org, name="B", system_prompt="x")
+    session.add_all([agent, other])
+    await session.commit()
+    voice = await add_phone_number(
+        session, org, e164="+14155550001", provider_resource_id="PN_V"
+    )
+    voice.capabilities = ["voice"]
+    voice.voice_agent_id = agent.id
+    sms_number = await add_phone_number(
+        session, org, e164="+14155550002", provider_resource_id="PN_S"
+    )
+    sms_number.capabilities = ["sms"]
+    sms_number.sms_agent_id = {"same": agent.id, "other": other.id, "none": None}[
+        sms_agent_id
+    ]
+    call = Call(
+        organization_id=org,
+        agent_id=agent.id,
+        to_number_id=voice.id,
+        from_e164="+14155550123",
+        to_e164=voice.e164,
+        direction="inbound",
+        status="in_progress",
+        voice_config={},
+        metadata_={CALL_META_BILLED: False},
+    )
+    session.add(call)
+    await session.commit()
+    return agent, other, voice, sms_number, call
+
+
+async def test_voice_only_dialed_number_texts_from_the_agents_sms_number(
+    client, async_session, sms_mock, add_phone_number
+):
+    agent, _, _, sms_number, call = await _inbound_call_on_voice_only_number(
+        async_session, add_phone_number, sms_agent_id="same"
+    )
+    body = _sms_payload(call.id, body="Your code is 42.")
+    resp = await client.post(
+        "/internal/agent/send-sms", content=body, headers=_signed(body)
+    )
+    assert resp.json()["ok"] is True
+    sent = (await async_session.execute(select(Sms))).scalars().one()
+    assert sent.from_number_id == sms_number.id
+    assert sent.agent_id == agent.id
+
+
+async def test_voice_only_dialed_number_binds_an_unbound_sms_number(
+    client, async_session, sms_mock, add_phone_number
+):
+    agent, _, _, sms_number, call = await _inbound_call_on_voice_only_number(
+        async_session, add_phone_number, sms_agent_id="none"
+    )
+    body = _sms_payload(call.id)
+    resp = await client.post(
+        "/internal/agent/send-sms", content=body, headers=_signed(body)
+    )
+    assert resp.json()["ok"] is True
+    await async_session.refresh(sms_number)
+    assert sms_number.sms_agent_id == agent.id
+
+
+async def test_sms_number_bound_to_another_agent_is_not_taken(
+    client, async_session, sms_mock, add_phone_number
+):
+    _, other, _, sms_number, call = await _inbound_call_on_voice_only_number(
+        async_session, add_phone_number, sms_agent_id="other"
+    )
+    body = _sms_payload(call.id)
+    resp = await client.post(
+        "/internal/agent/send-sms", content=body, headers=_signed(body)
+    )
+    data = resp.json()
+    assert data["ok"] is False
+    assert data["spoken"] == _SPOKEN_SMS_UNCONFIGURED
+    await async_session.refresh(sms_number)
+    assert sms_number.sms_agent_id == other.id
+    assert (await async_session.execute(select(Sms))).scalars().all() == []
+
+
+async def _send(client, call):
+    body = _sms_payload(call.id)
+    return await client.post(
+        "/internal/agent/send-sms", content=body, headers=_signed(body)
+    )
+
+
+async def test_bind_writes_a_system_audit_entry(
+    client, async_session, sms_mock, add_phone_number
+):
+    agent, _, _, sms_number, call = await _inbound_call_on_voice_only_number(
+        async_session, add_phone_number, sms_agent_id="none"
+    )
+    assert (await _send(client, call)).json()["ok"] is True
+    rows = (
+        (
+            await async_session.execute(
+                select(AuditLog).where(AuditLog.action == "number.route")
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert len(rows) == 1
+    assert rows[0].actor_kind == "system"
+    assert rows[0].resource_id == sms_number.id
+    assert rows[0].payload["sms_agent_id"] == str(agent.id)
+    assert rows[0].payload["automatic"] is True
+
+
+async def test_already_routed_number_writes_no_route_audit(
+    client, async_session, sms_mock, add_phone_number
+):
+    _, _, _, _, call = await _inbound_call_on_voice_only_number(
+        async_session, add_phone_number, sms_agent_id="same"
+    )
+    assert (await _send(client, call)).json()["ok"] is True
+    rows = (
+        (
+            await async_session.execute(
+                select(AuditLog).where(AuditLog.action == "number.route")
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert rows == []
+
+
+async def _route_audits(session):
+    return (
+        (
+            await session.execute(
+                select(AuditLog).where(AuditLog.action == "number.route")
+            )
+        )
+        .scalars()
+        .all()
+    )
+
+
+async def test_agent_without_sms_enabled_is_not_bound(
+    client, async_session, sms_mock, add_phone_number
+):
+    agent, _, _, sms_number, call = await _inbound_call_on_voice_only_number(
+        async_session, add_phone_number, sms_agent_id="none"
+    )
+    agent.sms_enabled = False
+    await async_session.commit()
+    assert (await _send(client, call)).json()["ok"] is True
+    sent = (await async_session.execute(select(Sms))).scalars().one()
+    assert sent.from_number_id == sms_number.id
+    await async_session.refresh(sms_number)
+    assert sms_number.sms_agent_id is None
+    assert await _route_audits(async_session) == []
+
+
+async def _inbound_call_on_sms_number(session, add_phone_number, *, dialed_agent):
+    """Agent A dials-in on SMS number D (bound per ``dialed_agent``); org also
+    has an older-created unbound SMS number S2 and a number routed to A."""
+    org = uuid.uuid4()
+    agent = Agent(organization_id=org, name="A", system_prompt="x")
+    other = Agent(organization_id=org, name="B", system_prompt="x")
+    session.add_all([agent, other])
+    await session.commit()
+    dialed = await add_phone_number(
+        session, org, e164="+14155550041", provider_resource_id="PN_D"
+    )
+    dialed.sms_agent_id = {"same": agent.id, "other": other.id, "none": None}[
+        dialed_agent
+    ]
+    org_number = await add_phone_number(
+        session, org, e164="+14155550042", provider_resource_id="PN_O"
+    )
+    call = Call(
+        organization_id=org,
+        agent_id=agent.id,
+        to_number_id=dialed.id,
+        from_e164="+14155550123",
+        to_e164=dialed.e164,
+        direction="inbound",
+        status="in_progress",
+        voice_config={},
+        metadata_={CALL_META_BILLED: False},
+    )
+    session.add(call)
+    await session.commit()
+    return agent, other, dialed, org_number, call
+
+
+async def test_dialed_number_bound_to_this_agent_is_used(
+    client, async_session, sms_mock, add_phone_number
+):
+    _, _, dialed, org_number, call = await _inbound_call_on_sms_number(
+        async_session, add_phone_number, dialed_agent="same"
+    )
+    assert (await _send(client, call)).json()["ok"] is True
+    sent = (await async_session.execute(select(Sms))).scalars().one()
+    assert sent.from_number_id == dialed.id
+    assert await _route_audits(async_session) == []
+    await async_session.refresh(org_number)
+    assert org_number.sms_agent_id is None
+
+
+async def test_free_dialed_number_is_bound_and_audited(
+    client, async_session, sms_mock, add_phone_number
+):
+    agent, _, dialed, org_number, call = await _inbound_call_on_sms_number(
+        async_session, add_phone_number, dialed_agent="none"
+    )
+    assert (await _send(client, call)).json()["ok"] is True
+    sent = (await async_session.execute(select(Sms))).scalars().one()
+    assert sent.from_number_id == dialed.id
+    await async_session.refresh(dialed)
+    await async_session.refresh(org_number)
+    assert dialed.sms_agent_id == agent.id
+    assert org_number.sms_agent_id is None
+    audits = await _route_audits(async_session)
+    assert len(audits) == 1
+    assert audits[0].resource_id == dialed.id
+    assert audits[0].payload["sms_agent_id"] == str(agent.id)
+
+
+async def test_dialed_number_bound_to_another_agent_is_skipped(
+    client, async_session, sms_mock, add_phone_number
+):
+    agent, other, dialed, org_number, call = await _inbound_call_on_sms_number(
+        async_session, add_phone_number, dialed_agent="other"
+    )
+    assert (await _send(client, call)).json()["ok"] is True
+    sent = (await async_session.execute(select(Sms))).scalars().one()
+    assert sent.from_number_id == org_number.id
+    await async_session.refresh(dialed)
+    await async_session.refresh(org_number)
+    assert dialed.sms_agent_id == other.id
+    assert org_number.sms_agent_id == agent.id
+
+
+async def test_free_dialed_number_without_sms_enabled_is_used_unbound(
+    client, async_session, sms_mock, add_phone_number
+):
+    agent, _, dialed, _, call = await _inbound_call_on_sms_number(
+        async_session, add_phone_number, dialed_agent="none"
+    )
+    agent.sms_enabled = False
+    await async_session.commit()
+    assert (await _send(client, call)).json()["ok"] is True
+    sent = (await async_session.execute(select(Sms))).scalars().one()
+    assert sent.from_number_id == dialed.id
+    await async_session.refresh(dialed)
+    assert dialed.sms_agent_id is None
+    assert await _route_audits(async_session) == []
+
+
+async def test_second_agent_does_not_take_a_number_the_first_bound(
+    async_session, add_phone_number
+):
+    _, other, voice, sms_number, call = await _inbound_call_on_voice_only_number(
+        async_session, add_phone_number, sms_agent_id="none"
+    )
+    org = call.organization_id
+    first = await resolve_sms_number(async_session, org, call.agent_id, voice)
+    assert first.id == sms_number.id
+    await async_session.commit()
+    assert await resolve_sms_number(async_session, org, other.id, voice) is None
+    await async_session.refresh(sms_number)
+    assert sms_number.sms_agent_id == call.agent_id
+
+
+async def test_no_agent_keeps_oldest_sms_number(async_session, add_phone_number):
+    org = uuid.uuid4()
+    older = await add_phone_number(
+        async_session, org, e164="+14155550011", provider_resource_id="PN_1"
+    )
+    other_agent = Agent(organization_id=org, name="B", system_prompt="x")
+    async_session.add(other_agent)
+    await async_session.commit()
+    older.sms_agent_id = other_agent.id
+    await add_phone_number(
+        async_session, org, e164="+14155550012", provider_resource_id="PN_2"
+    )
+    await async_session.commit()
+    got = await resolve_sms_number(async_session, org, None, None)
+    assert got.id == older.id
+    assert got.sms_agent_id == other_agent.id
+
+
+async def test_routed_number_preferred_over_unbound_one(
+    async_session, add_phone_number
+):
+    org = uuid.uuid4()
+    agent = Agent(organization_id=org, name="A", system_prompt="x")
+    async_session.add(agent)
+    await async_session.commit()
+    unbound = await add_phone_number(
+        async_session, org, e164="+14155550021", provider_resource_id="PN_1"
+    )
+    routed = await add_phone_number(
+        async_session, org, e164="+14155550022", provider_resource_id="PN_2"
+    )
+    routed.sms_agent_id = agent.id
+    await async_session.commit()
+    got = await resolve_sms_number(async_session, org, agent.id, None)
+    assert got.id == routed.id
+    await async_session.refresh(unbound)
+    assert unbound.sms_agent_id is None
+
+
+async def test_inactive_dialed_number_falls_through(async_session, add_phone_number):
+    org = uuid.uuid4()
+    agent = Agent(organization_id=org, name="A", system_prompt="x")
+    async_session.add(agent)
+    await async_session.commit()
+    dialed = await add_phone_number(
+        async_session,
+        org,
+        e164="+14155550031",
+        provider_resource_id="PN_1",
+        state="released",
+    )
+    routed = await add_phone_number(
+        async_session, org, e164="+14155550032", provider_resource_id="PN_2"
+    )
+    routed.sms_agent_id = agent.id
+    await async_session.commit()
+    got = await resolve_sms_number(async_session, org, agent.id, dialed)
+    assert got.id == routed.id
+
+
+async def test_locked_free_number_is_not_used_unbound(
+    async_session, session_factory, add_phone_number
+):
+    """Another call holds the only free number's row lock: refuse, as before.
+    Neither a bind nor an unbound use."""
+    org = uuid.uuid4()
+    agent = Agent(organization_id=org, name="A", system_prompt="x")
+    async_session.add(agent)
+    await async_session.commit()
+    free = await add_phone_number(
+        async_session, org, e164="+14155550051", provider_resource_id="PN_L"
+    )
+    await async_session.commit()
+    async with session_factory() as other:
+        await other.execute(
+            select(PhoneNumber).where(PhoneNumber.id == free.id).with_for_update()
+        )
+        got = await resolve_sms_number(async_session, org, agent.id, None)
+        assert got is None
+        # A free dialed number that is locked is skipped the same way.
+        assert await resolve_sms_number(async_session, org, agent.id, free) is None
+        await other.rollback()
+    await async_session.rollback()
+    await async_session.refresh(free)
+    assert free.sms_agent_id is None

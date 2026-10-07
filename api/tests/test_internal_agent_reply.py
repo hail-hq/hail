@@ -139,6 +139,7 @@ async def test_reply_skipped_after_thread_cap(
             direction="outbound",
             status="sent",
             body="earlier reply",
+            metadata_={"reply_to_sms_id": str(uuid.uuid4())},
         )
     )
     await async_session.commit()
@@ -153,6 +154,35 @@ async def test_reply_skipped_after_thread_cap(
         "reply_id": None,
     }
     sms_mock.send_sms.assert_not_awaited()
+
+
+async def test_voice_send_sms_row_does_not_count_toward_the_cap(
+    client, async_session, sms_mock, monkeypatch
+) -> None:
+    from hailhq.api.routes.internal import agent as route_mod
+
+    monkeypatch.setattr(route_mod, "MAX_REPLIES_PER_THREAD", 1)
+    org, agent, number, sms_id = await _seed(async_session)
+    async_session.add(
+        Sms(
+            organization_id=org,
+            from_number_id=number.id,
+            agent_id=agent.id,
+            from_e164=ORG_NUMBER,
+            to_e164=PERSON,
+            direction="outbound",
+            status="sent",
+            body="sent during a call",
+            metadata_={"call_id": str(uuid.uuid4())},
+        )
+    )
+    await async_session.commit()
+    body = _payload(sms_id)
+    resp = await client.post(
+        "/internal/agent/reply-sms", content=body, headers=_signed(body)
+    )
+    assert resp.json()["ok"] is True
+    sms_mock.send_sms.assert_awaited_once()
 
 
 async def test_reply_unknown_sms_fails(client, async_session) -> None:

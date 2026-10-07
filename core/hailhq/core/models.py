@@ -678,6 +678,8 @@ class Call(Base):
             " OR (direction = 'inbound' AND to_number_id IS NOT NULL)",
             name="calls_number_for_direction",
         ),
+        Index("calls_thread_from_idx", "organization_id", "agent_id", "from_e164"),
+        Index("calls_thread_to_idx", "organization_id", "agent_id", "to_e164"),
     )
 
 
@@ -738,7 +740,8 @@ class Sms(Base):
         TS, server_default=text("now()"), nullable=False
     )
 
-    # Outbound: the agent that wrote this reply. Inbound: NULL.
+    # The agent this text belongs to: the number's text agent on inbound rows,
+    # the agent that wrote it on outbound rows. NULL when no agent is involved.
     agent_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("agents.id", ondelete="SET NULL"),
@@ -769,6 +772,20 @@ class Sms(Base):
         CheckConstraint(
             "status IN ('queued','sent','delivered','failed','undelivered','received')",
             name="sms_status_check",
+        ),
+        Index(
+            "sms_thread_from_idx",
+            "organization_id",
+            "agent_id",
+            "from_e164",
+            "requested_at",
+        ),
+        Index(
+            "sms_thread_to_idx",
+            "organization_id",
+            "agent_id",
+            "to_e164",
+            "requested_at",
         ),
     )
 
