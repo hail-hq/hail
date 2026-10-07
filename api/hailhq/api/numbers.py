@@ -16,7 +16,7 @@ from hailhq.core.models import Agent, PhoneNumber
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-__all__ = ["resolve_org_number"]
+__all__ = ["resolve_org_number", "resolve_sms_number"]
 
 
 async def resolve_org_number(

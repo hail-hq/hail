@@ -32,12 +32,16 @@ async def _execute(ctx: ToolContext, args: dict[str, Any]) -> str:
         limit = _DEFAULT_LIMIT
     limit = max(1, min(limit, threads.THREAD_LIMIT))
     async with session_scope() as db:
-        key = await threads.call_thread_key(db, ctx.call_id)
-        if key is None or key[0] != ctx.organization_id:
+        call = await threads.call_thread_context(db, ctx.call_id)
+        if call is None or call.organization_id != ctx.organization_id:
             return _NOT_FOUND if item_id else _EMPTY
-        org, agent_id, caller = key
+        org, agent_id, caller = call.organization_id, call.agent_id, call.caller_e164
+        # Same texts the call prompt shows, including those with no agent.
+        pair = (call.org_number_e164, caller)
         if item_id:
-            item = await threads.thread_item(db, org, agent_id, caller, str(item_id))
+            item = await threads.thread_item(
+                db, org, agent_id, caller, str(item_id), unassigned_pair=pair
+            )
             if item is None:
                 return _NOT_FOUND
             quoted = threads.render_thread([item], cut=None)
@@ -49,6 +53,7 @@ async def _execute(ctx: ToolContext, args: dict[str, Any]) -> str:
             caller,
             limit=limit,
             before=str(before) if before else None,
+            unassigned_pair=pair,
         )
     return threads.render_thread(items, cut=threads.CUT_CHARS, with_ids=True) or _EMPTY
 

@@ -102,6 +102,29 @@ def _sms_filter(organization_id, agent_id, caller):
     )
 
 
+def _sms_where(organization_id, agent_id, caller, unassigned_pair):
+    """The thread's texts. ``unassigned_pair`` is ``(org number, caller)``: it
+    also matches texts of the organization with no agent between those two
+    numbers, either direction."""
+    where = and_(*_sms_filter(organization_id, agent_id, caller))
+    if unassigned_pair is None:
+        return where
+    org_number, pair_caller = unassigned_pair
+    if not is_e164(org_number) or pair_caller != caller:
+        return where
+    return or_(
+        where,
+        and_(
+            Sms.organization_id == organization_id,
+            Sms.agent_id.is_(None),
+            or_(
+                and_(Sms.from_e164 == caller, Sms.to_e164 == org_number),
+                and_(Sms.from_e164 == org_number, Sms.to_e164 == caller),
+            ),
+        ),
+    )
+
+
 def _call_filter(organization_id, agent_id, caller):
     return (
         Call.organization_id == organization_id,
@@ -168,25 +191,18 @@ async def thread_items(
     since = datetime.now(timezone.utc) - THREAD_WINDOW
     anchor = None
     if before is not None:
-        anchor = await thread_item(db, organization_id, agent_id, caller_e164, before)
+        anchor = await thread_item(
+            db,
+            organization_id,
+            agent_id,
+            caller_e164,
+            before,
+            unassigned_pair=unassigned_pair,
+        )
         if anchor is None:
             return []
 
-    sms_where = and_(*_sms_filter(organization_id, agent_id, caller_e164))
-    if unassigned_pair is not None:
-        org_number, pair_caller = unassigned_pair
-        if is_e164(org_number) and pair_caller == caller_e164:
-            sms_where = or_(
-                sms_where,
-                and_(
-                    Sms.organization_id == organization_id,
-                    Sms.agent_id.is_(None),
-                    or_(
-                        and_(Sms.from_e164 == caller_e164, Sms.to_e164 == org_number),
-                        and_(Sms.from_e164 == org_number, Sms.to_e164 == caller_e164),
-                    ),
-                ),
-            )
+    sms_where = _sms_where(organization_id, agent_id, caller_e164, unassigned_pair)
     sms_stmt = select(Sms).where(sms_where).where(Sms.requested_at >= since)
     # Injected-text turns and blank turns are excluded in SQL, so ``limit``
     # counts only items that can be returned.
@@ -242,9 +258,12 @@ async def thread_item(
     agent_id: uuid.UUID,
     caller_e164: str,
     item_id: str,
+    *,
+    unassigned_pair: tuple[str, str] | None = None,
 ) -> ThreadItem | None:
     """One item, only if it belongs to this thread. An explicit id ignores
-    ``THREAD_WINDOW``: older items of the same thread can be read by id."""
+    ``THREAD_WINDOW``: older items of the same thread can be read by id.
+    ``unassigned_pair`` is as in :func:`thread_items`."""
     if not is_e164(caller_e164):
         return None
     kind, _, raw = item_id.partition(":")
@@ -256,7 +275,8 @@ async def thread_item(
         row = (
             await db.execute(
                 select(Sms).where(
-                    Sms.id == key, *_sms_filter(organization_id, agent_id, caller_e164)
+                    Sms.id == key,
+                    _sms_where(organization_id, agent_id, caller_e164, unassigned_pair),
                 )
             )
         ).scalar_one_or_none()
@@ -283,13 +303,10 @@ async def call_thread_key(
     """``(organization_id, agent_id, caller_e164)`` for a call, or None when no
     agent is on it or the caller number is not E.164 (withheld). The caller is
     the person on the line."""
-    call = await db.get(Call, call_id)
-    if call is None or call.agent_id is None:
+    ctx = await call_thread_context(db, call_id)
+    if ctx is None:
         return None
-    caller = call.from_e164 if call.direction == "inbound" else call.to_e164
-    if not is_e164(caller):
-        return None
-    return call.organization_id, call.agent_id, caller
+    return ctx.organization_id, ctx.agent_id, ctx.caller_e164
 
 
 @dataclass(frozen=True)
@@ -380,6 +397,10 @@ async def active_call_for_thread(
         .where(Call.created_at >= since)
         .order_by(Call.created_at.desc())
         .limit(1)
+        # FOR SHARE: a call end that races this read waits for the caller's
+        # commit, so its requeue sees the text skipped here. A call already
+        # ended no longer matches once the lock is granted.
+        .with_for_update(read=True)
     )
     return (await db.execute(stmt)).scalar_one_or_none()
 

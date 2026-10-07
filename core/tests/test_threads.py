@@ -214,6 +214,40 @@ async def test_thread_item_is_scoped(async_session):
     )
 
 
+async def test_thread_item_reads_unassigned_pair_texts(async_session):
+    """A text with no agent shown in the call prompt can be read by id."""
+    org = uuid.uuid4()
+    agent = await _agent(async_session, org)
+    row = _sms(org, None, inbound=False, body="sent through the API")
+    async_session.add(row)
+    await async_session.commit()
+    item_id = f"sms:{row.id}"
+
+    assert (
+        await threads.thread_item(async_session, org, agent.id, PERSON, item_id) is None
+    )
+    found = await threads.thread_item(
+        async_session,
+        org,
+        agent.id,
+        PERSON,
+        item_id,
+        unassigned_pair=(ORG_NUMBER, PERSON),
+    )
+    assert found.text == "sent through the API"
+    assert (
+        await threads.thread_item(
+            async_session,
+            org,
+            agent.id,
+            PERSON,
+            item_id,
+            unassigned_pair=("+14155550199", PERSON),
+        )
+        is None
+    )
+
+
 async def test_call_thread_key_and_active_call(async_session):
     org = uuid.uuid4()
     agent = await _agent(async_session, org)

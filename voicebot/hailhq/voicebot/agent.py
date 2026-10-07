@@ -1539,6 +1539,9 @@ async def _run_call(
             captured["end_reason"] = CallEndReason.WORKER_SHUTDOWN.value
             captured["status"] = "failed"
 
+    # Read the caller's history while the tools are built: a call never waits
+    # longer than HISTORY_TIMEOUT_SECONDS for it.
+    history_task = asyncio.create_task(load_thread_context(call_id))
     agent_tools, agent_api = await build_tools_safely(
         metadata,
         call_id,
@@ -1552,9 +1555,7 @@ async def _run_call(
             [t.info.name for t in agent_tools],
         )
 
-    # Captured before the history read: a text that arrives after this moment
-    # is either in the history or caught by the watcher (at-least-once).
-    history = await load_thread_context(call_id)
+    history = await history_task
     agent = SpeechSanitizingAgent(
         instructions=build_instructions(
             metadata.get("system_prompt"), metadata.get("direction"), history
