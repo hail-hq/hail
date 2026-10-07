@@ -20,7 +20,6 @@ from hailhq.core.agent_tools.registry import all_tools
 from hailhq.core.agent_tools.spec import SPOKEN_FALLBACK, ToolContext, ToolSpec
 from hailhq.core.config import settings
 from hailhq.core.db import session_scope
-from hailhq.core.threads import ThreadScope
 from livekit.agents.llm import function_tool
 from livekit.agents.voice import RunContext
 
@@ -64,12 +63,8 @@ async def build_agent_tools(
     call_id: UUID,
     hangup,
     send_dtmf,
-    thread: ThreadScope | None = None,
 ) -> tuple[list, AgentApiClient | None]:
     """Build this call's LiveKit tools. Returns (tools, api_client).
-
-    ``thread`` is the caller's thread, looked up once at call start, for
-    ``thread_history``.
 
     The caller must ``aclose()`` the client at shutdown. Returns no tools
     when the dispatch predates the ``organization_id`` field (rolling
@@ -112,7 +107,6 @@ async def build_agent_tools(
         api=api,
         hangup=hangup,
         send_dtmf=send_dtmf,
-        thread=thread,
     )
 
     available: list[ToolSpec] = []

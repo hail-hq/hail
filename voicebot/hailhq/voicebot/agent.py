@@ -297,7 +297,6 @@ async def build_tools_safely(
     call_id: UUID,
     hangup: Callable[[], Awaitable[None]],
     send_dtmf: Callable[[str], Awaitable[None]],
-    thread: threads.ThreadScope | None = None,
 ) -> tuple[list, AgentApiClient | None]:
     """Build this call's agent tools, degrading to none on any failure.
 
@@ -312,7 +311,6 @@ async def build_tools_safely(
             call_id=call_id,
             hangup=hangup,
             send_dtmf=send_dtmf,
-            thread=thread,
         )
     except Exception:
         logger.exception(
@@ -612,34 +610,6 @@ def disconnect_reason_to_status(reason: int | None) -> tuple[str | None, str | N
 
 
 logger = logging.getLogger("hailhq.voicebot")
-
-
-# The prompt carries no history: the agent reads it with thread_history.
-# The call only looks up which thread that tool may read, and never waits
-# longer than this for it (the tool then finds the thread from the call).
-THREAD_SCOPE_TIMEOUT_SECONDS = 1.5
-
-
-async def _read_scope(call_id: UUID) -> threads.ThreadScope | None:
-    async with session_scope() as db:
-        ctx = await threads.call_thread_context(db, call_id)
-    if ctx is None:
-        return None
-    return threads.ThreadScope(
-        ctx.organization_id, ctx.agent_id, ctx.caller_e164, ctx.org_number_e164
-    )
-
-
-async def load_thread_scope(call_id: UUID) -> threads.ThreadScope | None:
-    """The thread ``thread_history`` may read on this call: None when no agent
-    is on it, the caller is withheld, or the lookup fails or is slow."""
-    try:
-        return await asyncio.wait_for(
-            _read_scope(call_id), timeout=THREAD_SCOPE_TIMEOUT_SECONDS
-        )
-    except Exception:
-        logger.exception("call_id=%s thread scope unavailable", call_id)
-        return None
 
 
 def prewarm(proc: JobProcess) -> None:
@@ -1550,7 +1520,6 @@ async def _run_call(
         call_id,
         make_agent_hangup(ctx, captured),
         make_agent_send_dtmf(ctx),
-        await load_thread_scope(call_id),
     )
     if agent_tools:
         logger.info(

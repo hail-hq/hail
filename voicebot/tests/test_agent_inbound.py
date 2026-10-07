@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import time
 import uuid
 from datetime import datetime, timezone
 from types import SimpleNamespace
@@ -420,50 +419,3 @@ def test_the_prompt_loader_for_history_is_gone() -> None:
         "has_history_tool",
     ):
         assert not hasattr(agent_mod, name), name
-
-
-async def test_thread_scope_reads_the_call_and_no_history(
-    async_session, monkeypatch
-) -> None:
-    call, agent, number = await _call_row(async_session)
-
-    async def no_history(*args, **kwargs):
-        raise AssertionError("history must not be read at call start")
-
-    monkeypatch.setattr(agent_mod.threads, "thread_items", no_history)
-
-    scope = await agent_mod.load_thread_scope(call.id)
-
-    assert scope == agent_mod.threads.ThreadScope(
-        call.organization_id, agent.id, "+33612345678", number.e164
-    )
-
-
-async def test_thread_scope_is_none_without_agent_or_for_a_withheld_caller(
-    async_session,
-) -> None:
-    no_agent, _, _ = await _call_row(async_session, with_agent=False)
-    withheld, _, _ = await _call_row(async_session, caller="anonymous")
-
-    assert await agent_mod.load_thread_scope(no_agent.id) is None
-    assert await agent_mod.load_thread_scope(withheld.id) is None
-    assert await agent_mod.load_thread_scope(uuid.uuid4()) is None
-
-
-async def test_thread_scope_is_none_when_the_read_fails_or_is_slow(
-    monkeypatch,
-) -> None:
-    async def boom(*args, **kwargs):
-        raise RuntimeError("db down")
-
-    monkeypatch.setattr(agent_mod.threads, "call_thread_context", boom)
-    assert await agent_mod.load_thread_scope(uuid.uuid4()) is None
-
-    async def slow(*args, **kwargs):
-        await asyncio.sleep(10)
-
-    monkeypatch.setattr(agent_mod.threads, "call_thread_context", slow)
-    monkeypatch.setattr(agent_mod, "THREAD_SCOPE_TIMEOUT_SECONDS", 0.05)
-    start = time.monotonic()
-    assert await agent_mod.load_thread_scope(uuid.uuid4()) is None
-    assert time.monotonic() - start < 2
