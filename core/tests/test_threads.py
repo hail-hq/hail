@@ -462,3 +462,138 @@ async def test_withheld_or_invalid_callers_have_no_thread(async_session):
             await threads.active_call_for_thread(async_session, org, agent.id, bad)
             is None
         )
+
+
+async def _mixed_thread(session):
+    """Texts and call turns interleaved, some on the same timestamp."""
+    org = uuid.uuid4()
+    agent = await _agent(session, org)
+    await _call(
+        session,
+        org,
+        agent.id,
+        turns=[(("user", "assistant")[n % 2], f"c{n}") for n in range(6)],
+    )
+    for n in range(6):
+        # Same second as call turn n: ties across prefixes.
+        session.add(
+            _sms(
+                org,
+                agent.id,
+                inbound=n % 2 == 0,
+                body=f"t{n}",
+                at=NOW + timedelta(seconds=n),
+            )
+        )
+    await session.commit()
+    return org, agent
+
+
+async def test_source_sms_returns_only_texts(async_session):
+    org, agent = await _mixed_thread(async_session)
+
+    items = await threads.thread_items(
+        async_session, org, agent.id, PERSON, source="sms"
+    )
+
+    assert [i.text for i in items] == [f"t{n}" for n in range(6)]
+    assert {i.kind for i in items} == {"text_in", "text_out"}
+
+
+async def test_source_voice_returns_only_call_turns(async_session):
+    org, agent = await _mixed_thread(async_session)
+
+    items = await threads.thread_items(
+        async_session, org, agent.id, PERSON, source="voice"
+    )
+
+    assert [i.text for i in items] == [f"c{n}" for n in range(6)]
+    assert {i.kind for i in items} == {"call_caller", "call_agent"}
+
+
+async def test_source_all_is_the_default(async_session):
+    org, agent = await _mixed_thread(async_session)
+
+    default = await threads.thread_items(async_session, org, agent.id, PERSON)
+    explicit = await threads.thread_items(
+        async_session, org, agent.id, PERSON, source="all"
+    )
+
+    assert default == explicit and len(default) == 12
+
+
+async def test_source_limit_counts_only_that_source(async_session):
+    org, agent = await _mixed_thread(async_session)
+
+    items = await threads.thread_items(
+        async_session, org, agent.id, PERSON, source="sms", limit=3
+    )
+
+    assert [i.text for i in items] == ["t3", "t4", "t5"]
+
+
+async def _page_all(session, org, agent_id, source, before=None):
+    seen: list[str] = []
+    while True:
+        page = await threads.thread_items(
+            session, org, agent_id, PERSON, source=source, limit=2, before=before
+        )
+        if not page:
+            return seen
+        seen = [i.text for i in page] + seen
+        before = page[0].id
+
+
+async def test_paging_under_each_source_loses_and_repeats_nothing(async_session):
+    org, agent = await _mixed_thread(async_session)
+
+    for source, expected in (
+        ("sms", [f"t{n}" for n in range(6)]),
+        ("voice", [f"c{n}" for n in range(6)]),
+        ("all", None),
+    ):
+        seen = await _page_all(async_session, org, agent.id, source)
+        if expected is None:
+            full = await threads.thread_items(async_session, org, agent.id, PERSON)
+            expected = [i.text for i in full]
+        assert seen == expected, source
+
+
+async def test_sms_source_with_an_event_cursor_pages_texts(async_session):
+    """A cursor taken from an "all" listing can point at a call turn."""
+    org, agent = await _mixed_thread(async_session)
+    full = await threads.thread_items(async_session, org, agent.id, PERSON)
+    anchor = next(i for i in full if i.text == "c3")
+
+    older = await threads.thread_items(
+        async_session, org, agent.id, PERSON, source="sms", before=anchor.id
+    )
+
+    # Texts that sort before the call turn by (time, id): "event:" < "sms:",
+    # so t3 (same second as c3) comes after it.
+    assert [i.text for i in older] == ["t0", "t1", "t2"]
+    assert [i.text for i in older] == [
+        i.text
+        for i in full
+        if i.kind.startswith("text") and (i.at, i.id) < (anchor.at, anchor.id)
+    ]
+
+
+async def test_window_keyword_narrows_the_window(async_session):
+    org = uuid.uuid4()
+    agent = await _agent(async_session, org)
+    async_session.add(
+        _sms(org, agent.id, inbound=True, body="2 days", at=NOW - timedelta(days=2))
+    )
+    async_session.add(
+        _sms(org, agent.id, inbound=True, body="1 hour", at=NOW - timedelta(hours=1))
+    )
+    await async_session.commit()
+
+    wide = await threads.thread_items(async_session, org, agent.id, PERSON)
+    narrow = await threads.thread_items(
+        async_session, org, agent.id, PERSON, window=timedelta(hours=24)
+    )
+
+    assert [i.text for i in wide] == ["2 days", "1 hour"]
+    assert [i.text for i in narrow] == ["1 hour"]

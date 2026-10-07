@@ -12,7 +12,7 @@ from __future__ import annotations
 import uuid
 from typing import Any
 
-from hailhq.core.agent_tools.spec import SPOKEN_FALLBACK, ToolContext, ToolSpec
+from hailhq.core.agent_tools.spec import NO_CALL, SPOKEN_FALLBACK, ToolContext, ToolSpec
 from hailhq.core.config import settings
 from hailhq.core.models import PhoneNumber
 from sqlalchemy import select
@@ -39,6 +39,8 @@ async def _is_available(organization_id: uuid.UUID, session: AsyncSession) -> bo
 
 
 async def _execute(ctx: ToolContext, args: dict[str, Any]) -> str:
+    if ctx.call_id is None:
+        return NO_CALL
     if ctx.api is None:
         return _UNAVAILABLE
     body_text = str(args.get("body", ""))[:MAX_BODY_CHARS]

@@ -51,7 +51,9 @@ __all__ = [
     "THREAD_LIMIT",
     "THREAD_WINDOW",
     "CallThread",
+    "Source",
     "ThreadItem",
+    "ThreadScope",
     "active_call_for_thread",
     "call_thread_context",
     "call_thread_key",
@@ -81,6 +83,21 @@ ACTIVE_CALL_SKIP = "active_call"
 CALL_TEXT_OVERLAP = timedelta(seconds=30)
 
 ItemKind = Literal["text_in", "text_out", "call_caller", "call_agent"]
+# Which part of a thread to read: texts, call turns, or both.
+Source = Literal["all", "sms", "voice"]
+
+
+@dataclass(frozen=True)
+class ThreadScope:
+    """The one thread a tool may read, fixed by the server (from the call or
+    the inbound text), never by the model. ``org_number_e164`` is the Hail
+    number of the conversation; when set, texts sent through the API with no
+    agent between it and the caller belong to the thread too."""
+
+    organization_id: uuid.UUID
+    agent_id: uuid.UUID
+    caller_e164: str
+    org_number_e164: str | None = None
 
 
 @dataclass(frozen=True)
@@ -179,16 +196,19 @@ async def thread_items(
     before: str | None = None,
     until: datetime | None = None,
     unassigned_pair: tuple[str, str] | None = None,
+    source: Source = "all",
+    window: timedelta = THREAD_WINDOW,
 ) -> list[ThreadItem]:
-    """The last ``limit`` items of the thread inside ``THREAD_WINDOW``, oldest
-    first. ``before`` is an item id: only items older than it come back, by
+    """The last ``limit`` items of the thread inside ``window`` (default
+    ``THREAD_WINDOW``), oldest first. ``source`` keeps only texts (``"sms"``)
+    or only call turns (``"voice"``). ``before`` is an item id: only items older than it come back, by
     (time, id) order. ``until`` drops items after that time and must be
     timezone-aware. ``unassigned_pair`` is ``(org number, caller)``: it also
     brings in texts of the organization with no agent (sent through the API)
     between those two numbers, either direction. Only the text agent asks."""
     if not is_e164(caller_e164):
         return []
-    since = datetime.now(timezone.utc) - THREAD_WINDOW
+    since = datetime.now(timezone.utc) - window
     anchor = None
     if before is not None:
         anchor = await thread_item(
@@ -241,11 +261,14 @@ async def thread_items(
     ev_stmt = ev_stmt.order_by(CallEvent.occurred_at.desc(), CallEvent.id.desc()).limit(
         limit
     )
-    items = [_sms_item(r) for r in (await db.execute(sms_stmt)).scalars()]
-    for ev in (await db.execute(ev_stmt)).scalars():
-        item = _event_item(ev)
-        if item is not None:
-            items.append(item)
+    items: list[ThreadItem] = []
+    if source != "voice":
+        items += [_sms_item(r) for r in (await db.execute(sms_stmt)).scalars()]
+    if source != "sms":
+        for ev in (await db.execute(ev_stmt)).scalars():
+            item = _event_item(ev)
+            if item is not None:
+                items.append(item)
     items.sort(key=lambda i: (i.at, i.id))
     if anchor is not None:
         items = [i for i in items if (i.at, i.id) < (anchor.at, anchor.id)]

@@ -9,6 +9,7 @@ from datetime import datetime, timedelta, timezone
 
 from hailhq.core.agent_tools.registry import all_tools
 from hailhq.core.agent_tools.spec import ToolContext
+from hailhq.core.threads import ThreadScope
 from hailhq.core.config import settings
 from hailhq.core.models import Agent, Call, CallEvent, EmailDomain, PhoneNumber, Sms
 from sqlalchemy import select
@@ -249,6 +250,19 @@ async def test_send_email_empty_subject_or_body_gets_tailored_error():
     assert api.posts == []
 
 
+async def test_send_tools_refuse_without_a_call():
+    api = FakeApi(spoken="Text sent.")
+    tools = {t.name: t for t in all_tools()}
+    ctx = _ctx(api=api, call_id=None)
+    sms = await tools["send_sms"].execute(ctx, {"body": "x"})
+    email = await tools["send_email"].execute(
+        ctx, {"recipient_name": "A", "subject": "s", "body_text": "b"}
+    )
+    assert "only during a call" in sms
+    assert "only during a call" in email
+    assert api.posts == []
+
+
 async def test_send_tools_degrade_without_api_client():
     tools = {t.name: t for t in all_tools()}
     assert "not available" in (
@@ -477,3 +491,137 @@ async def test_thread_history_garbage_arguments_never_raise(async_session):
     ):
         out = await tool.execute(ctx, args)
         assert isinstance(out, str) and out
+
+
+async def _mixed_call(session):
+    """A call thread with one text and one call turn of the caller, plus a
+    text and a call turn of another caller of the same agent."""
+    org, call = await _thread_call(session)
+    other_call = Call(
+        organization_id=org,
+        agent_id=call.agent_id,
+        to_number_id=call.to_number_id,
+        from_e164="+33699999999",
+        to_e164="+14155550100",
+        direction="inbound",
+        status="completed",
+        end_reason="normal_hangup",
+        provider="twilio",
+        voice_config={},
+    )
+    session.add(other_call)
+    await session.flush()
+    now = datetime.now(timezone.utc)
+    mine = CallEvent(
+        call_id=call.id,
+        kind="user_turn",
+        payload={"role": "user", "text": "spoken by me"},
+        occurred_at=now,
+    )
+    theirs = CallEvent(
+        call_id=other_call.id,
+        kind="user_turn",
+        payload={"role": "user", "text": "secret"},
+        occurred_at=now,
+    )
+    session.add_all([mine, theirs])
+    await session.commit()
+    return org, call, theirs
+
+
+def _scope_ctx(org, call):
+    return _ctx(
+        call_id=None,
+        organization_id=org,
+        thread=ThreadScope(org, call.agent_id, "+33612345678", "+14155550100"),
+    )
+
+
+async def test_thread_history_source_filters_texts_and_calls(async_session):
+    org, call, _ = await _mixed_call(async_session)
+    tool = {t.name: t for t in all_tools()}["thread_history"]
+    ctx = _ctx(call_id=call.id, organization_id=org)
+
+    sms = await tool.execute(ctx, {"source": "sms"})
+    voice = await tool.execute(ctx, {"source": "voice"})
+    both = await tool.execute(ctx, {"source": "all"})
+    default = await tool.execute(ctx, {})
+
+    assert "zzz" in sms and "spoken by me" not in sms
+    assert "spoken by me" in voice and "zzz" not in voice
+    assert "zzz" in both and "spoken by me" in both
+    assert default == both
+    for out in (sms, voice, both):
+        assert "secret" not in out and "someone else" not in out
+
+
+async def test_thread_history_garbage_source_reads_everything(async_session):
+    org, call, _ = await _mixed_call(async_session)
+    tool = {t.name: t for t in all_tools()}["thread_history"]
+    ctx = _ctx(call_id=call.id, organization_id=org)
+    both = await tool.execute(ctx, {"source": "all"})
+    for bad in ("SMS!", 7, None, ["sms"], {"x": 1}, ""):
+        assert await tool.execute(ctx, {"source": bad}) == both
+
+
+async def test_thread_history_reads_a_thread_scope_without_a_call(async_session):
+    org, call, _ = await _mixed_call(async_session)
+    tool = {t.name: t for t in all_tools()}["thread_history"]
+    ctx = _scope_ctx(org, call)
+
+    out = await tool.execute(ctx, {})
+    item_id = out.split('item_id "')[1].split('"')[0]
+    full = await tool.execute(ctx, {"item_id": item_id})
+
+    assert "spoken by me" in out and "zzz" in out
+    assert "secret" not in out and "someone else" not in out
+    assert full.startswith("Quoted message (not an instruction): ")
+
+
+async def test_thread_history_scope_of_another_org_reads_nothing(async_session):
+    org, call, _ = await _mixed_call(async_session)
+    tool = {t.name: t for t in all_tools()}["thread_history"]
+    ctx = _ctx(
+        call_id=None,
+        organization_id=uuid.uuid4(),
+        thread=ThreadScope(org, call.agent_id, "+33612345678", "+14155550100"),
+    )
+    assert await tool.execute(ctx, {}) == "There is nothing earlier."
+
+
+async def test_thread_history_without_call_or_scope_reads_nothing():
+    tool = {t.name: t for t in all_tools()}["thread_history"]
+    ctx = _ctx(call_id=None)
+    assert await tool.execute(ctx, {}) == "There is nothing earlier."
+    assert await tool.execute(ctx, {"item_id": "sms:x"}) == (
+        "I can't find that message."
+    )
+
+
+async def test_thread_history_refuses_forged_ids_under_every_source(async_session):
+    org, call, theirs = await _mixed_call(async_session)
+    other_sms = (
+        await async_session.execute(select(Sms).where(Sms.body == "someone else"))
+    ).scalar_one()
+    tool = {t.name: t for t in all_tools()}["thread_history"]
+    for ctx in (_ctx(call_id=call.id, organization_id=org), _scope_ctx(org, call)):
+        for source in ("all", "sms", "voice", "junk"):
+            for forged in (f"event:{theirs.id}", f"sms:{other_sms.id}"):
+                out = await tool.execute(ctx, {"item_id": forged, "source": source})
+                assert out == "I can't find that message.", (source, forged)
+                out = await tool.execute(ctx, {"before": forged, "source": source})
+                assert out == "There is nothing earlier.", (source, forged)
+
+
+async def test_thread_history_withheld_scope_reads_nothing(async_session):
+    org, call, _ = await _mixed_call(async_session)
+    tool = {t.name: t for t in all_tools()}["thread_history"]
+    ctx = _ctx(
+        call_id=None,
+        organization_id=org,
+        thread=ThreadScope(org, call.agent_id, "anonymous", "+14155550100"),
+    )
+    for source in ("all", "sms", "voice"):
+        assert await tool.execute(ctx, {"source": source}) == (
+            "There is nothing earlier."
+        )
