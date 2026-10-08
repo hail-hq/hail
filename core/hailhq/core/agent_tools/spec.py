@@ -36,7 +36,8 @@ class BridgeRoute:
     name: str
     reason: str
     # Called with ring_ms the moment the contact picks up, before the intro
-    # plays, so the answer is recorded at once. Must not raise.
+    # plays. Returns the post that records the answer; the bridge runs it in
+    # the background so a slow API never delays the intro.
     on_answered: Callable[[int], Awaitable[None]] | None = None
 
 

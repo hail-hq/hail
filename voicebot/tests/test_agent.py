@@ -1937,18 +1937,71 @@ async def test_soft_cap_while_ringing_ends_both_legs() -> None:
 
 
 async def test_bridge_reports_answer_before_intro() -> None:
-    """The answer is recorded as soon as the contact picks up, before the
+    """The answer post starts as soon as the contact picks up, before the
     intro plays, so the sweepers see it even if the intro is long."""
     ctx = FakeJobContext()
     session = FakeBridgeSession()
     state: dict = {"human": None, "connected": False}
     seen: list[tuple[int, int]] = []
+    posted: list[int] = []
 
-    async def on_answered(ring_ms: int) -> None:
+    async def _post(ring_ms: int) -> None:
+        posted.append(ring_ms)
+
+    def on_answered(ring_ms: int):
         seen.append((ring_ms, len(session.said)))
+        return _post(ring_ms)
 
     route = BridgeRoute("+1", "+1", "ST", None, "Sam", "", on_answered=on_answered)
     out = await make_agent_bridge(ctx, session, CALL_ID, state)(route)  # type: ignore[arg-type]
     assert out.outcome == "answered"
     assert len(seen) == 1 and seen[0][1] == 0
     assert len(session.said) == 1
+    await state["answer_task"]
+    assert len(posted) == 1
+
+
+async def test_slow_answer_post_does_not_delay_intro_or_mute() -> None:
+    """The answer post runs in the background: a slow API never leaves the
+    contact in silence with the agent's audio on."""
+    ctx = FakeJobContext()
+    session = FakeBridgeSession()
+    state: dict = {"human": None, "connected": False}
+    never = asyncio.Event()
+
+    async def on_answered(_ring_ms: int) -> None:
+        await never.wait()
+
+    route = BridgeRoute("+1", "+1", "ST", None, "Sam", "", on_answered=on_answered)
+    out = await asyncio.wait_for(
+        make_agent_bridge(ctx, session, CALL_ID, state)(route),  # type: ignore[arg-type]
+        timeout=2,
+    )
+    assert out.outcome == "answered"
+    assert len(session.said) == 1
+    assert session.input.enabled == [False] and session.output.enabled == [False]
+    task = state["answer_task"]
+    await asyncio.sleep(0)
+    assert not task.done()
+    task.cancel()
+    await asyncio.gather(task, return_exceptions=True)
+
+
+async def test_shutdown_waits_briefly_for_answer_post(monkeypatch) -> None:
+    from hailhq.voicebot import agent as agent_mod
+    from hailhq.voicebot.agent import finish_answer_post
+
+    monkeypatch.setattr(agent_mod, "ANSWER_POST_SHUTDOWN_WAIT_SECONDS", 0.05)
+    done: list[bool] = []
+
+    async def quick() -> None:
+        await asyncio.sleep(0.01)
+        done.append(True)
+
+    state: dict = {"answer_task": asyncio.create_task(quick())}
+    await finish_answer_post(state, CALL_ID)
+    assert done == [True]
+
+    stuck = asyncio.create_task(asyncio.Event().wait())
+    await finish_answer_post({"answer_task": stuck}, CALL_ID)
+    assert stuck.cancelled()

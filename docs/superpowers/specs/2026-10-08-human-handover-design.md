@@ -107,7 +107,7 @@ New `ToolContext.bridge` handle, built in `agent.py` as `make_agent_bridge`:
 2. Call `/internal/agent/handover`. Denied → return the reason; the agent tells the caller.
 3. `create_sip_participant` with `sip_number=from_e164`, trunk from the response, identity `human-{call_id}`, `wait_until_answered=True`, `ringing_timeout=30s`, `play_dialtone=True`.
 4. Answered:
-   - write `call_events` kind `handover`, payload `{contact_id, name, outcome: "answered", ring_ms}`, right away, before the intro plays (`BridgeRoute.on_answered`; up to 3 attempts, 0.5 s and 1 s apart; never raises into the call). The tool does not post "answered" again after the bridge returns;
+   - write `call_events` kind `handover`, payload `{contact_id, name, outcome: "answered", ring_ms}`, right away, before the intro plays (`BridgeRoute.on_answered`; the post runs in the background so the intro is never delayed; up to 3 attempts, 0.5 s and 1 s apart; never raises into the call; job shutdown waits up to 5 s for it, then cancels it). The tool does not post "answered" again after the bridge returns;
    - fan out `call.transferred`;
    - agent says one line to both: "Hi {name}, I have a caller on the line. They say it is about {reason}. Connecting you now." (`{name}` without the " (n)" suffix; without a reason: "Hi {name}, I have a caller on the line. Connecting you now.");
    - disable the session's audio input and output; the agent stays in the room;

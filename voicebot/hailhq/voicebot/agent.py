@@ -355,6 +355,32 @@ def _sip_outcome(code: int | None) -> str:
     return "failed"
 
 
+# How long job shutdown waits for a pending "answered" post before cancelling.
+ANSWER_POST_SHUTDOWN_WAIT_SECONDS = 5.0
+
+
+async def _report_answer(post: Awaitable[None], call_id: UUID) -> None:
+    try:
+        await post
+    except asyncio.CancelledError:
+        raise
+    except Exception:
+        logger.exception("call_id=%s handover answered post failed", call_id)
+
+
+async def finish_answer_post(bridge_state: dict[str, Any], call_id: UUID) -> None:
+    """At job shutdown, give a pending "answered" post a few seconds to land,
+    then cancel it."""
+    task = bridge_state.get("answer_task")
+    if task is None or task.done():
+        return
+    await asyncio.wait({task}, timeout=ANSWER_POST_SHUTDOWN_WAIT_SECONDS)
+    if not task.done():
+        logger.warning("call_id=%s handover answered post cancelled", call_id)
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+
+
 def make_agent_bridge(
     ctx: JobContext,
     session: AgentSession,
@@ -445,11 +471,17 @@ def make_agent_bridge(
             await asyncio.gather(soft_cap, return_exceptions=True)
         if route.on_answered is not None:
             # Record the answer before the intro: the sweepers lift the time
-            # limit only once the "answered" event exists.
+            # limit only once the "answered" event exists. Runs in the
+            # background (posts can retry for a minute); the task is held in
+            # bridge_state and awaited briefly at job shutdown.
             try:
-                await route.on_answered(ring_ms)
+                post = route.on_answered(ring_ms)
             except Exception:
                 logger.exception("call_id=%s handover answered hook failed", call_id)
+            else:
+                bridge_state["answer_task"] = asyncio.create_task(
+                    _report_answer(post, call_id)
+                )
         try:
             handle = session.say(
                 handover_intro(route.name, route.reason), allow_interruptions=False
@@ -1878,6 +1910,7 @@ async def _run_call(
             # Worker shutdown, BYO-LLM give-up or any other end while a
             # contact leg is up: drop both legs, not just the job.
             await drop_handover_leg(ctx, bridge_state, call_id)
+            await finish_answer_post(bridge_state, call_id)
             if text_watch_task is not None and not text_watch_task.done():
                 text_watch_task.cancel()
                 await asyncio.gather(text_watch_task, return_exceptions=True)

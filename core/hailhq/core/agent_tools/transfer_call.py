@@ -13,6 +13,7 @@ import asyncio
 import dataclasses
 import logging
 import uuid
+from collections.abc import Awaitable
 from typing import Any
 
 from hailhq.core.agent_tools.spec import (
@@ -55,6 +56,18 @@ SPEC = ToolSpec(
 )
 
 
+async def _post_answered(ctx: ToolContext, body: dict[str, Any]) -> None:
+    """Post the "answered" result; retried, never raises."""
+    for attempt in range(len(_ANSWERED_BACKOFF) + 1):
+        try:
+            await ctx.api.post("/internal/agent/handover-result", body)
+            return
+        except Exception:
+            _log.exception("handover answered post failed")
+        if attempt < len(_ANSWERED_BACKOFF):
+            await asyncio.sleep(_ANSWERED_BACKOFF[attempt])
+
+
 def bind(metadata: dict[str, Any]) -> ToolSpec | None:
     raw = metadata.get("handover_targets") or []
     if not isinstance(raw, list):
@@ -87,20 +100,13 @@ def bind(metadata: dict[str, Any]) -> ToolSpec | None:
 
         answer_reported = False
 
-        async def on_answered(ring_ms: int) -> None:
-            # Recorded the moment the contact picks up, before the intro.
-            # Retried; never raises into the call.
+        def on_answered(ring_ms: int) -> Awaitable[None]:
+            # Called the moment the contact picks up, before the intro; the
+            # bridge runs the returned post in the background. The flag is
+            # set here, synchronously, so the result is never posted twice.
             nonlocal answer_reported
             answer_reported = True
-            body = _result("answered", None, ring_ms)
-            for attempt in range(len(_ANSWERED_BACKOFF) + 1):
-                try:
-                    await ctx.api.post("/internal/agent/handover-result", body)
-                    return
-                except Exception:
-                    _log.exception("handover answered post failed")
-                if attempt < len(_ANSWERED_BACKOFF):
-                    await asyncio.sleep(_ANSWERED_BACKOFF[attempt])
+            return _post_answered(ctx, _result("answered", None, ring_ms))
 
         route = await ctx.api.post(
             "/internal/agent/handover",
