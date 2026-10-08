@@ -723,6 +723,9 @@ async def _linked_person(
     still links it and it still belongs to the call's org."""
     if call.agent_id is None:
         return None
+    agent = await db.get(Agent, call.agent_id)
+    if agent is None or agent.organization_id != call.organization_id:
+        return None
     for row in (await load_handover(db, [call.agent_id])).get(call.agent_id, []):
         if row["contact_id"] == wire_id:
             return HandoverPerson(wire_id, row["name"], row["phone_e164"])

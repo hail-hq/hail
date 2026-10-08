@@ -502,3 +502,21 @@ async def test_result_for_member_who_left_org_rejected(
         },
     )
     assert r.json() == {"ok": False}
+
+
+async def test_handover_denied_when_agent_org_differs_from_call(
+    client, async_session, add_phone_number
+):
+    """Defense in depth: a call pointing at another org's agent dials no one."""
+    call, contact = await _seed(async_session, add_phone_number)
+    agent = await async_session.get(Agent, call.agent_id)
+    other = uuid.uuid4()
+    agent.organization_id = other
+    contact.organization_id = other
+    await async_session.commit()
+    r = await _post(
+        client,
+        "/internal/agent/handover",
+        {"call_id": str(call.id), "contact_id": str(contact.id)},
+    )
+    assert r.json()["ok"] is False

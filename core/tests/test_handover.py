@@ -310,3 +310,42 @@ async def test_targets_contacts_only_without_member_tables(async_session) -> Non
     targets = await handover_targets(async_session, agent.id)
     assert [t["contact_id"] for t in targets] == [str(c.id)]
     assert (await async_session.execute(text("SELECT 1"))).scalar() == 1
+
+
+async def test_member_lookup_reraises_other_schema_errors(async_session) -> None:
+    """Only a missing table means self-host. A renamed column (or lost
+    privilege) is a real fault and must not silently drop members."""
+    from sqlalchemy import text
+    from sqlalchemy.exc import ProgrammingError
+
+    org, agent, _ = await _agent_and_contacts(async_session)
+    m = await _member(async_session, org, "Sam", "+14155550131")
+    await replace_handover(
+        async_session, agent.id, [HandoverItem(f"member:{m.id}", "x")]
+    )
+    await async_session.execute(
+        text("ALTER TABLE users RENAME COLUMN phone_number TO phone_x")
+    )
+    with pytest.raises(ProgrammingError):
+        await handover_targets(async_session, agent.id)
+    with pytest.raises(ProgrammingError):
+        await validate_handover(
+            async_session, org, [HandoverItem(f"member:{m.id}", "x")]
+        )
+
+
+async def test_missing_member_tables_warn_once(async_session, monkeypatch, caplog):
+    import logging
+
+    from hailhq.core import handover
+    from sqlalchemy import text
+
+    monkeypatch.setattr(handover, "_warned_no_member_tables", False)
+    _, agent, (c,) = await _agent_and_contacts(async_session, "+14155550132")
+    await replace_handover(async_session, agent.id, [HandoverItem(str(c.id), "x")])
+    await async_session.execute(text("DROP TABLE members CASCADE"))
+    with caplog.at_level(logging.DEBUG, logger="hailhq.core.handover"):
+        await handover_targets(async_session, agent.id)
+        await handover_targets(async_session, agent.id)
+    levels = [r.levelno for r in caplog.records if r.name == "hailhq.core.handover"]
+    assert levels == [logging.WARNING, logging.DEBUG]

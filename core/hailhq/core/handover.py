@@ -109,6 +109,24 @@ def country_of(e164: str) -> str | None:
     return region if region and region != "001" else None
 
 
+# Postgres "undefined_table". asyncpg maps every syntax/access error
+# (missing column, lost privilege, ...) to ProgrammingError; only this one
+# means a self-host without the website-owned users/members tables.
+_UNDEFINED_TABLE = "42P01"
+_warned_no_member_tables = False
+
+
+def _reraise_unless_no_member_tables(exc: ProgrammingError) -> None:
+    """Re-raise ``exc`` unless a member table is missing. Logs the missing
+    table once at warning, then at debug, so self-hosts are not flooded."""
+    global _warned_no_member_tables
+    if getattr(exc.orig, "sqlstate", None) != _UNDEFINED_TABLE:
+        raise exc
+    level = logging.DEBUG if _warned_no_member_tables else logging.WARNING
+    _warned_no_member_tables = True
+    _log.log(level, "handover: no users/members tables, members skipped: %s", exc)
+
+
 async def _member_people(
     db: AsyncSession, org_id: UUID, user_ids: list[UUID]
 ) -> dict[UUID, HandoverPerson]:
@@ -130,7 +148,7 @@ async def _member_people(
                 )
             ).all()
     except ProgrammingError as exc:
-        _log.warning("handover member lookup failed (no member tables?): %s", exc)
+        _reraise_unless_no_member_tables(exc)
         return {}
     return {
         uid: HandoverPerson(contact_wire_id("member", uid), name, phone)
@@ -247,7 +265,7 @@ async def _member_links(
                 ).all()
             ]
     except ProgrammingError as exc:
-        _log.warning("handover member lookup failed (no member tables?): %s", exc)
+        _reraise_unless_no_member_tables(exc)
         return []
 
 
