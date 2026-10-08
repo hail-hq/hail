@@ -15,6 +15,10 @@ server-side, so anything past that bound plus a teardown/clock-skew grace
 cannot legitimately still be running. Such rows are failed with
 ``end_reason='sweeper_timeout'`` (an existing ``call_end_reason`` ENUM member).
 
+Exception: a call with an ``answered`` ``handover`` call event has no time
+limit (the two people talk until someone hangs up), so it is only swept after
+:data:`HANDOVER_BACKSTOP_SECONDS` (12 h).
+
 Run alongside the pool sweeper in the API service's periodic loop. Ordering it
 *before* the pool sweep means a call it force-closes here is seen as terminal
 by the pool sweep in the same tick, so its reservation is released immediately.
@@ -31,6 +35,12 @@ from hailhq.core.threads import requeue_skipped_for_call
 from hailhq.core.webhook_fanout import fanout_call_event
 from sqlalchemy import bindparam, func, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
+
+# Once a handover contact answers, max_duration_seconds no longer applies and
+# the call runs until someone hangs up. The sweep then waits this long after
+# COALESCE(started_at, requested_at) before closing the row. It only closes
+# the DB row of a crashed worker; the voicebot does not enforce it.
+HANDOVER_BACKSTOP_SECONDS = 12 * 60 * 60
 
 
 async def sweep_stale_calls(
@@ -57,10 +67,20 @@ async def sweep_stale_calls(
           FROM calls c
          WHERE c.status NOT IN :terminal_statuses
            AND c.max_duration_seconds IS NOT NULL
-           AND now() > COALESCE(c.started_at, c.requested_at)
-                       + make_interval(secs => (
-                           c.max_duration_seconds + :grace_s
-                         )::int)
+           AND (
+             (now() > COALESCE(c.started_at, c.requested_at)
+                      + make_interval(secs => (
+                          c.max_duration_seconds + :grace_s
+                        )::int)
+              AND NOT EXISTS (
+                SELECT 1 FROM call_events e
+                 WHERE e.call_id = c.id
+                   AND e.kind = 'handover'
+                   AND e.payload->>'outcome' = 'answered'
+              ))
+             OR now() > COALESCE(c.started_at, c.requested_at)
+                        + make_interval(secs => :backstop_s)
+           )
          FOR UPDATE SKIP LOCKED
         """).bindparams(bindparam("terminal_statuses", expanding=True))
     rows = (
@@ -68,6 +88,7 @@ async def sweep_stale_calls(
             select_stmt,
             {
                 "grace_s": grace_seconds,
+                "backstop_s": HANDOVER_BACKSTOP_SECONDS,
                 "terminal_statuses": list(TERMINAL_CALL_STATUSES),
             },
         )
@@ -128,4 +149,4 @@ async def sweep_stale_calls(
     return ids
 
 
-__all__ = ["sweep_stale_calls"]
+__all__ = ["HANDOVER_BACKSTOP_SECONDS", "sweep_stale_calls"]
