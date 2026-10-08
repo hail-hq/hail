@@ -372,6 +372,8 @@ def make_agent_bridge(
     ``bridge_state["human"]`` is set before dialing so
     :func:`handle_sip_disconnect` can tell the contact's leg from the
     caller's while it rings; ``bridge_state["connected"]`` flips on answer.
+    On answer the pending soft cap task (``bridge_state["soft_cap_task"]``)
+    is cancelled: the time limit stops applying once the contact answers.
 
     Verified against livekit-api ``sip_service.py`` (``create_sip_participant``
     raises ``SipCallError`` with ``sip_status_code``; ``wait_until_answered``
@@ -430,6 +432,17 @@ def make_agent_bridge(
         ring_ms = _ring_ms()
         bridge_state["connected"] = True
         logger.info("call_id=%s handover answered after %d ms", call_id, ring_ms)
+        # The contact answered: max_duration_seconds no longer applies. The
+        # call runs until the caller or the contact hangs up. A cap that
+        # already fired (announcing now) is left to finish.
+        soft_cap = bridge_state.pop("soft_cap_task", None)
+        if (
+            soft_cap is not None
+            and not soft_cap.done()
+            and not bridge_state.get("soft_cap_fired")
+        ):
+            soft_cap.cancel()
+            await asyncio.gather(soft_cap, return_exceptions=True)
         try:
             handle = session.say(
                 handover_intro(route.name, route.reason), allow_interruptions=False
@@ -1003,16 +1016,20 @@ async def soft_cap_announce_and_hangup(
     hook to stamp ``end_reason='soft_cap_reached'`` in its captured-state
     dict so ``on_call_end`` writes the right value.
 
-    The cap covers the whole call, handover included. With a connected
-    handover the agent's output audio is off, so it is turned back on for
-    the announcement (both people hear it). With a contact leg ringing or
-    connected the room is deleted before shutdown, so no leg outlives the
-    job.
+    The cap stops applying once a handover contact answers: the bridge
+    handle cancels this task (it sets ``bridge_state["soft_cap_fired"]``
+    once the wait is over, so a cap already announcing is not cut short).
+    With a connected handover the agent's output audio is off, so it is
+    turned back on for the announcement (both people hear it). With a
+    contact leg ringing or connected the room is deleted before shutdown,
+    so no leg outlives the job.
     """
     try:
         await asyncio.sleep(delay_seconds)
     except asyncio.CancelledError:
         return
+    if bridge_state is not None:
+        bridge_state["soft_cap_fired"] = True
 
     logger.info(
         "call_id=%s reached %ds soft-cap, announcing and ending",
@@ -1817,6 +1834,8 @@ async def _run_call(
                 bridge_state=bridge_state,
             )
         )
+        # The bridge handle cancels it when the handover contact answers.
+        bridge_state["soft_cap_task"] = soft_cap_task
 
     if llm_cfg is not None:
         # Mode B (per-call BYO endpoint) only — see arm_byo_llm_giveup. Mode A

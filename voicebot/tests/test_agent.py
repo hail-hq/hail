@@ -1878,3 +1878,59 @@ def test_handover_intro_strips_dedupe_suffix() -> None:
 
     assert handover_intro("Sam (2)", "x").startswith("Hi Sam, ")
     assert handover_intro("Sam (12)", "").startswith("Hi Sam, ")
+
+
+# --- no time limit after the contact answers ---------------------------------
+
+
+async def test_bridge_answer_cancels_pending_soft_cap() -> None:
+    """Once the contact answers, max_duration_seconds no longer applies: the
+    bridge cancels the pending soft cap task so it never fires."""
+    ctx = FakeJobContext()
+    session = FakeBridgeSession()
+    state: dict = {"human": None, "connected": False}
+    fired: list[bool] = []
+    cap = asyncio.create_task(
+        soft_cap_announce_and_hangup(
+            ctx,  # type: ignore[arg-type]
+            session,  # type: ignore[arg-type]
+            CALL_ID,
+            delay_seconds=60,
+            on_fire=lambda: fired.append(True),
+            bridge_state=state,
+        )
+    )
+    state["soft_cap_task"] = cap
+    await asyncio.sleep(0)
+    out = await make_agent_bridge(ctx, session, CALL_ID, state)(  # type: ignore[arg-type]
+        BridgeRoute("+1", "+1", "ST", None, "Sam", "")
+    )
+    assert out.outcome == "answered"
+    assert cap.done()
+    assert fired == []
+    assert SOFT_CAP_ANNOUNCEMENT not in session.said
+    assert ctx.shutdown_calls == []
+    assert ctx.delete_room_calls == 0
+
+
+async def test_soft_cap_while_ringing_ends_both_legs() -> None:
+    """Before the answer the limit still applies: a cap firing while the
+    contact rings deletes the room (both legs) and ends the job."""
+    ctx = FakeJobContext()
+    session = FakeBridgeSession()
+    state = {"human": f"human-{CALL_ID}", "connected": False}
+    fired: list[bool] = []
+    await soft_cap_announce_and_hangup(
+        ctx,  # type: ignore[arg-type]
+        session,  # type: ignore[arg-type]
+        CALL_ID,
+        delay_seconds=0,
+        on_fire=lambda: fired.append(True),
+        bridge_state=state,
+    )
+    assert session.output.enabled == []
+    assert session.said == [SOFT_CAP_ANNOUNCEMENT]
+    assert fired == [True]
+    assert state["ending"] is True
+    assert ctx.delete_room_calls == 1
+    assert ctx.shutdown_calls == [SOFT_CAP_END_REASON]
