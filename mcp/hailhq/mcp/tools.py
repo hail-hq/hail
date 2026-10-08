@@ -1237,7 +1237,8 @@ def register_tools(
 
         Returns ``{"items": [{"id", "name", "system_prompt", "first_message",
         "ai_disclosure", "ai_disclosure_line", "voice_config", "tools",
-        "max_duration_seconds", "voice_enabled", "sms_enabled", "status"}, ...]}``.
+        "max_duration_seconds", "handover_max_duration_seconds", "voice_enabled",
+        "sms_enabled", "status", "handover_contacts"}, ...]}``.
         """
         try:
             async with _client_for(ctx, mode=mode, singleton=singleton) as client:
@@ -1257,8 +1258,10 @@ def register_tools(
         voice_id: str | None = None,
         tools: list[str] | None = None,
         max_duration_seconds: int | None = None,
+        handover_max_duration_seconds: int | None = None,
         voice_enabled: bool = True,
         sms_enabled: bool = True,
+        handover_contacts: list[dict] | None = None,
     ) -> dict[str, Any]:
         """Save an agent. Then call ``route_number`` so a number answers
         with it, or pass its id as ``agent_id`` to ``place_call``.
@@ -1268,6 +1271,11 @@ def register_tools(
         ``ai_disclosure_line`` replaces the workspace AI line for this
         agent; ``{org}`` becomes the organization name. ``language`` is a
         lowercase ISO 639-1 code. ``max_duration_seconds`` is 60..3600.
+        ``handover_max_duration_seconds`` (60..3600, default 1800) is the
+        call limit once a handover contact answers.
+        ``handover_contacts``: People the agent may hand a live call to:
+        ``[{contact_id, note}]`` (max 10; ``note`` 1-200 chars says when to
+        hand over). The contact needs a phone number. The agent never sees it.
 
         Returns the API's ``AgentResponse`` as a dict, or
         ``{"error": "<message>"}``.
@@ -1293,6 +1301,10 @@ def register_tools(
             fields["tools"] = tools
         if max_duration_seconds is not None:
             fields["max_duration_seconds"] = max_duration_seconds
+        if handover_max_duration_seconds is not None:
+            fields["handover_max_duration_seconds"] = handover_max_duration_seconds
+        if handover_contacts is not None:
+            fields["handover_contacts"] = handover_contacts
         try:
             async with _client_for(ctx, mode=mode, singleton=singleton) as client:
                 return await create_agent(client=client, **fields)

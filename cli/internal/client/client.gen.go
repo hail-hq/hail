@@ -1025,6 +1025,7 @@ const (
 	WebhookSubscriptionCreateEventTypesCallFailed              WebhookSubscriptionCreateEventTypes = "call.failed"
 	WebhookSubscriptionCreateEventTypesCallNoAnswer            WebhookSubscriptionCreateEventTypes = "call.no_answer"
 	WebhookSubscriptionCreateEventTypesCallReceived            WebhookSubscriptionCreateEventTypes = "call.received"
+	WebhookSubscriptionCreateEventTypesCallTransferred         WebhookSubscriptionCreateEventTypes = "call.transferred"
 	WebhookSubscriptionCreateEventTypesEmailBounced            WebhookSubscriptionCreateEventTypes = "email.bounced"
 	WebhookSubscriptionCreateEventTypesEmailClicked            WebhookSubscriptionCreateEventTypes = "email.clicked"
 	WebhookSubscriptionCreateEventTypesEmailComplained         WebhookSubscriptionCreateEventTypes = "email.complained"
@@ -1054,6 +1055,8 @@ func (e WebhookSubscriptionCreateEventTypes) Valid() bool {
 	case WebhookSubscriptionCreateEventTypesCallNoAnswer:
 		return true
 	case WebhookSubscriptionCreateEventTypesCallReceived:
+		return true
+	case WebhookSubscriptionCreateEventTypesCallTransferred:
 		return true
 	case WebhookSubscriptionCreateEventTypesEmailBounced:
 		return true
@@ -1094,6 +1097,7 @@ const (
 	WebhookSubscriptionPatchEventTypesCallFailed              WebhookSubscriptionPatchEventTypes = "call.failed"
 	WebhookSubscriptionPatchEventTypesCallNoAnswer            WebhookSubscriptionPatchEventTypes = "call.no_answer"
 	WebhookSubscriptionPatchEventTypesCallReceived            WebhookSubscriptionPatchEventTypes = "call.received"
+	WebhookSubscriptionPatchEventTypesCallTransferred         WebhookSubscriptionPatchEventTypes = "call.transferred"
 	WebhookSubscriptionPatchEventTypesEmailBounced            WebhookSubscriptionPatchEventTypes = "email.bounced"
 	WebhookSubscriptionPatchEventTypesEmailClicked            WebhookSubscriptionPatchEventTypes = "email.clicked"
 	WebhookSubscriptionPatchEventTypesEmailComplained         WebhookSubscriptionPatchEventTypes = "email.complained"
@@ -1123,6 +1127,8 @@ func (e WebhookSubscriptionPatchEventTypes) Valid() bool {
 	case WebhookSubscriptionPatchEventTypesCallNoAnswer:
 		return true
 	case WebhookSubscriptionPatchEventTypesCallReceived:
+		return true
+	case WebhookSubscriptionPatchEventTypesCallTransferred:
 		return true
 	case WebhookSubscriptionPatchEventTypesEmailBounced:
 		return true
@@ -1380,6 +1386,12 @@ type AgentCreate struct {
 	// FirstMessage Opening line spoken after the AI line. Omitted: the agent waits for the other side to speak first.
 	FirstMessage *string `json:"first_message,omitempty"`
 
+	// HandoverContacts People the agent may hand a live call to, in order. The agent never sees their numbers.
+	HandoverContacts *[]HandoverContactIn `json:"handover_contacts,omitempty"`
+
+	// HandoverMaxDurationSeconds Call limit in seconds (60..3600) once a handover contact answers, counted from the answer. Omitted: 1800 (30 minutes).
+	HandoverMaxDurationSeconds *int `json:"handover_max_duration_seconds,omitempty"`
+
 	// MaxDurationSeconds Soft cap per call in seconds (60..3600). Omitted: the workspace limit.
 	MaxDurationSeconds *int `json:"max_duration_seconds,omitempty"`
 
@@ -1443,6 +1455,12 @@ type AgentResponse struct {
 	// FirstMessage Opening line, or null to wait.
 	FirstMessage *string `json:"first_message"`
 
+	// HandoverContacts People the agent may hand a live call to.
+	HandoverContacts *[]HandoverContactOut `json:"handover_contacts,omitempty"`
+
+	// HandoverMaxDurationSeconds Call limit after a handover contact answers; null means 1800 (30 minutes).
+	HandoverMaxDurationSeconds *int `json:"handover_max_duration_seconds"`
+
 	// Id Unique identifier for this agent.
 	Id openapi_types.UUID `json:"id"`
 
@@ -1482,7 +1500,7 @@ type AgentResponseStatus string
 
 // AgentUpdate PATCH /agents/{id}. Fields left out keep their value; “null“ clears
 // the nullable ones (first_message, ai_disclosure_line, tools,
-// max_duration_seconds).
+// max_duration_seconds, handover_max_duration_seconds).
 type AgentUpdate struct {
 	// AiDisclosure Whether the AI line is spoken first.
 	AiDisclosure *bool `json:"ai_disclosure,omitempty"`
@@ -1492,6 +1510,12 @@ type AgentUpdate struct {
 
 	// FirstMessage New opening line; null makes the agent wait for the other side.
 	FirstMessage *string `json:"first_message,omitempty"`
+
+	// HandoverContacts New handover list; replaces the old one. [] removes all; null leaves it.
+	HandoverContacts *[]HandoverContactIn `json:"handover_contacts,omitempty"`
+
+	// HandoverMaxDurationSeconds New call limit after a handover contact answers; null returns to 1800 (30 minutes).
+	HandoverMaxDurationSeconds *int `json:"handover_max_duration_seconds,omitempty"`
 
 	// MaxDurationSeconds New soft cap per call; null returns to the workspace limit.
 	MaxDurationSeconds *int `json:"max_duration_seconds,omitempty"`
@@ -2538,6 +2562,30 @@ type FieldSpecKind string
 type HTTPValidationError struct {
 	// Detail List of validation errors: each entry gives the field location (loc), the problem (msg), and the error type (type).
 	Detail *[]ValidationError `json:"detail,omitempty"`
+}
+
+// HandoverContactIn defines model for HandoverContactIn.
+type HandoverContactIn struct {
+	// ContactId A contact of this organization with a phone number.
+	ContactId openapi_types.UUID `json:"contact_id"`
+
+	// Note When the agent should hand over to this person, e.g. 'billing questions'. Read by the agent.
+	Note string `json:"note"`
+}
+
+// HandoverContactOut defines model for HandoverContactOut.
+type HandoverContactOut struct {
+	// ContactId The contact.
+	ContactId openapi_types.UUID `json:"contact_id"`
+
+	// Name Contact name, as the agent says it.
+	Name string `json:"name"`
+
+	// Note When the agent hands over to this person.
+	Note string `json:"note"`
+
+	// PhoneE164 Number Hail dials. Null when the contact lost its number; it is then skipped.
+	PhoneE164 *string `json:"phone_e164"`
 }
 
 // LLMConfig defines model for LLMConfig.

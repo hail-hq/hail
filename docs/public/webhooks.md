@@ -101,7 +101,7 @@ The full set is the `WebhookEventType` enum in
 - **`sms.failed`** — the send failed (transport error or carrier rejection).
 
 **Call lifecycle** — `received` (inbound only), `answered`, `completed`,
-`failed`, `busy`, `no_answer` (no `canceled` event; no data source):
+`failed`, `busy`, `no_answer`, `transferred` (there is no `canceled` event; it has no data source):
 
 - **`call.received`** — an inbound call reached one of your numbers and an
   agent is about to answer ([Agents](agents.md)). Fired before the answer.
@@ -112,6 +112,10 @@ The full set is the `WebhookEventType` enum in
   `insufficient_funds`).
 - **`call.busy`** — the callee was busy or rejected the call.
 - **`call.no_answer`** — the callee did not answer.
+- **`call.transferred`** — the agent handed the live call to a person
+  ([Agents](agents.md#hand-over-to-a-person)). Sent once, when that person
+  answers. `data` is the call object plus `transfer`:
+  `{"contact_id": "…", "contact_name": "Sam"}`. Never a phone number.
 
 Every `call.*` payload's `data` carries `id`, `status`, `direction`
 (`inbound` or `outbound`), `from`, `to`, `agent_id` (null for calls placed

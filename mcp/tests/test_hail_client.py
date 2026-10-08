@@ -8,6 +8,7 @@ import httpx
 import pytest
 import respx
 from hailhq.mcp.hail_client import HailClient
+from pydantic import ValidationError
 
 _BASE_URL = "http://hail-test"
 _API_KEY = "test-key"
@@ -142,3 +143,72 @@ async def test_send_email_without_attachment_ids(client: HailClient) -> None:
     # Verify attachment_ids not in body when not provided
     body = httpx.Response(200, content=captured["body"]).json()
     assert "attachment_ids" not in body
+
+
+# --------------------------------------------------------------------------- #
+# create_agent — handover_contacts
+# --------------------------------------------------------------------------- #
+
+
+def _agent_response(contact_id: str) -> dict:
+    return {
+        "id": str(uuid4()),
+        "organization_id": str(uuid4()),
+        "name": "Desk",
+        "system_prompt": "Help.",
+        "first_message": None,
+        "ai_disclosure": True,
+        "ai_disclosure_line": None,
+        "voice_config": {},
+        "tools": None,
+        "max_duration_seconds": None,
+        "handover_max_duration_seconds": None,
+        "voice_enabled": True,
+        "sms_enabled": True,
+        "status": "live",
+        "handover_contacts": [
+            {
+                "contact_id": contact_id,
+                "name": "Sam",
+                "phone_e164": "+14155550100",
+                "note": "billing",
+            }
+        ],
+        "created_at": "2026-10-08T00:00:00+00:00",
+        "updated_at": "2026-10-08T00:00:00+00:00",
+    }
+
+
+@respx.mock
+async def test_create_agent_sends_handover_contacts(client: HailClient) -> None:
+    captured: dict = {}
+    contact_id = str(uuid4())
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        import json
+
+        captured["body"] = json.loads(request.content)
+        return httpx.Response(201, json=_agent_response(contact_id))
+
+    respx.post(f"{_BASE_URL}/agents").mock(side_effect=handler)
+    out = await client.create_agent(
+        name="Desk",
+        system_prompt="Help.",
+        handover_contacts=[{"contact_id": contact_id, "note": "billing"}],
+    )
+    assert captured["body"]["handover_contacts"] == [
+        {"contact_id": contact_id, "note": "billing"}
+    ]
+    assert out["handover_contacts"][0]["name"] == "Sam"
+
+
+@respx.mock
+async def test_create_agent_rejects_empty_handover_note(client: HailClient) -> None:
+    route = respx.post(f"{_BASE_URL}/agents")
+    with pytest.raises(ValidationError):
+        await client.create_agent(
+            name="Desk",
+            system_prompt="Help.",
+            handover_contacts=[{"contact_id": str(uuid4()), "note": ""}],
+        )
+    assert not route.called

@@ -256,6 +256,21 @@ async def check_call_allowed(
     return GateResult(allowed=True, checks=checks)
 
 
+async def check_handover_allowed(
+    db: AsyncSession, organization_id: UUID, to_e164: str
+) -> GateResult:
+    """Destination checks for transferring a live call: suppression, national
+    DNC and premium-rate prefix block. No velocity cap: a transfer adds no
+    usage event and the call it joins was already counted."""
+    checks: dict[str, Any] = {}
+    reason = await _check_phone_destination(
+        db, organization_id, to_e164, "voice", checks
+    )
+    if reason is not None:
+        return GateResult(allowed=False, reason=reason, checks=checks)
+    return GateResult(allowed=True, checks=checks)
+
+
 async def check_sms_allowed(
     db: AsyncSession, organization_id: UUID, to_e164: str
 ) -> GateResult:

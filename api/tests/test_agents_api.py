@@ -548,3 +548,310 @@ async def test_prompt_templates_show_the_full_prompt_per_channel(client, org) ->
     assert "SMS" in body["texts"]
     # The agent's own text follows Hail's framing, never leads it.
     assert body["calls_in"].index(marker) > body["calls_in"].index("# Guardrails")
+
+
+async def _contact(client, headers, name="Sam", phone="+14155550111") -> str:
+    r = await client.post(
+        "/contacts", json={"name": name, "phone_e164": phone}, headers=headers
+    )
+    assert r.status_code == 201, r.text
+    return r.json()["id"]
+
+
+async def test_agent_handover_contacts_round_trip(client, org) -> None:
+    _, headers = org
+    cid = await _contact(client, headers)
+    r = await client.post(
+        "/agents",
+        json={
+            "name": "Desk",
+            "system_prompt": "Help.",
+            "handover_contacts": [{"contact_id": cid, "note": "Billing"}],
+        },
+        headers=headers,
+    )
+    assert r.status_code == 201, r.text
+    body = r.json()
+    assert body["handover_contacts"] == [
+        {
+            "contact_id": cid,
+            "name": "Sam",
+            "phone_e164": "+14155550111",
+            "note": "Billing",
+        }
+    ]
+    agent_id = body["id"]
+    r = await client.patch(
+        f"/agents/{agent_id}", json={"name": "Desk 2"}, headers=headers
+    )
+    assert r.json()["handover_contacts"][0]["contact_id"] == cid  # untouched
+    r = await client.patch(
+        f"/agents/{agent_id}", json={"handover_contacts": []}, headers=headers
+    )
+    assert r.json()["handover_contacts"] == []
+    listed = (await client.get("/agents", headers=headers)).json()["items"]
+    assert listed[0]["handover_contacts"] == []
+
+
+async def test_agent_handover_contact_from_other_org_is_422(client, org) -> None:
+    _, headers = org
+    r = await client.post(
+        "/agents",
+        json={
+            "name": "Desk",
+            "system_prompt": "Help.",
+            "handover_contacts": [{"contact_id": str(uuid.uuid4()), "note": "x"}],
+        },
+        headers=headers,
+    )
+    assert r.status_code == 422
+    assert r.json()["detail"][0]["loc"] == ["body", "handover_contacts", 0]
+
+
+async def test_agent_handover_note_required(client, org) -> None:
+    _, headers = org
+    cid = await _contact(client, headers)
+    r = await client.post(
+        "/agents",
+        json={
+            "name": "Desk",
+            "system_prompt": "Help.",
+            "handover_contacts": [{"contact_id": cid, "note": ""}],
+        },
+        headers=headers,
+    )
+    assert r.status_code == 422
+
+
+async def test_agent_handover_blank_note_is_422(client, org) -> None:
+    _, headers = org
+    cid = await _contact(client, headers)
+    r = await client.post(
+        "/agents",
+        json={
+            "name": "Desk",
+            "system_prompt": "Help.",
+            "handover_contacts": [{"contact_id": cid, "note": "   "}],
+        },
+        headers=headers,
+    )
+    assert r.status_code == 422
+    assert r.json()["detail"][0]["loc"] == ["body", "handover_contacts", 0]
+
+
+async def test_agent_handover_patch_set_and_null(client, org) -> None:
+    _, headers = org
+    cid = await _contact(client, headers)
+    agent_id = (
+        await client.post(
+            "/agents", json={"name": "Desk", "system_prompt": "Help."}, headers=headers
+        )
+    ).json()["id"]
+    r = await client.patch(
+        f"/agents/{agent_id}",
+        json={"handover_contacts": [{"contact_id": cid, "note": " Billing "}]},
+        headers=headers,
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["handover_contacts"][0]["note"] == "Billing"
+    r = await client.patch(
+        f"/agents/{agent_id}", json={"handover_contacts": None}, headers=headers
+    )
+    assert r.status_code == 200, r.text
+    assert len(r.json()["handover_contacts"]) == 1
+
+
+async def test_agent_patch_duplicate_name_with_handover_is_409(client, org) -> None:
+    _, headers = org
+    cid = await _contact(client, headers)
+    await client.post(
+        "/agents", json={"name": "A", "system_prompt": "Help."}, headers=headers
+    )
+    b = (
+        await client.post(
+            "/agents", json={"name": "B", "system_prompt": "Help."}, headers=headers
+        )
+    ).json()["id"]
+    r = await client.patch(
+        f"/agents/{b}",
+        json={
+            "name": "A",
+            "handover_contacts": [{"contact_id": cid, "note": "Billing"}],
+        },
+        headers=headers,
+    )
+    assert r.status_code == 409, r.text
+
+
+async def test_agent_create_with_tools_list_adds_transfer_call(client, org) -> None:
+    """An explicit tools list without transfer_call still gets the tool when
+    handover contacts are saved (the console's rule)."""
+    _, headers = org
+    cid = await _contact(client, headers)
+    r = await client.post(
+        "/agents",
+        json={
+            "name": "Desk",
+            "system_prompt": "Help.",
+            "tools": ["end_call"],
+            "handover_contacts": [{"contact_id": cid, "note": "Billing"}],
+        },
+        headers=headers,
+    )
+    assert r.status_code == 201, r.text
+    assert r.json()["tools"] == ["end_call", "transfer_call"]
+
+
+async def test_agent_create_all_tools_stays_null(client, org) -> None:
+    _, headers = org
+    cid = await _contact(client, headers)
+    r = await client.post(
+        "/agents",
+        json={
+            "name": "Desk",
+            "system_prompt": "Help.",
+            "handover_contacts": [{"contact_id": cid, "note": "Billing"}],
+        },
+        headers=headers,
+    )
+    assert r.status_code == 201, r.text
+    assert r.json()["tools"] is None
+
+
+async def test_agent_create_without_handover_drops_transfer_call(client, org) -> None:
+    _, headers = org
+    r = await client.post(
+        "/agents",
+        json={
+            "name": "Desk",
+            "system_prompt": "Help.",
+            "tools": ["end_call", "transfer_call"],
+        },
+        headers=headers,
+    )
+    assert r.status_code == 201, r.text
+    assert r.json()["tools"] == ["end_call"]
+
+
+async def test_agent_patch_handover_syncs_transfer_call(client, org) -> None:
+    _, headers = org
+    cid = await _contact(client, headers)
+    agent_id = (
+        await client.post(
+            "/agents",
+            json={"name": "Desk", "system_prompt": "Help.", "tools": ["end_call"]},
+            headers=headers,
+        )
+    ).json()["id"]
+    # Set contacts: stored tools list gains transfer_call.
+    r = await client.patch(
+        f"/agents/{agent_id}",
+        json={"handover_contacts": [{"contact_id": cid, "note": "Billing"}]},
+        headers=headers,
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["tools"] == ["end_call", "transfer_call"]
+    # New tools list without it, contacts stored: it is added back.
+    r = await client.patch(
+        f"/agents/{agent_id}", json={"tools": ["send_sms"]}, headers=headers
+    )
+    assert r.json()["tools"] == ["send_sms", "transfer_call"]
+    # Clear contacts: the tool goes.
+    r = await client.patch(
+        f"/agents/{agent_id}", json={"handover_contacts": []}, headers=headers
+    )
+    assert r.json()["tools"] == ["send_sms"]
+    # tools null (all) stays null.
+    r = await client.patch(
+        f"/agents/{agent_id}",
+        json={
+            "tools": None,
+            "handover_contacts": [{"contact_id": cid, "note": "Billing"}],
+        },
+        headers=headers,
+    )
+    assert r.json()["tools"] is None
+
+
+async def test_agent_patch_does_not_recheck_contacts_already_linked(
+    client, org, async_session
+) -> None:
+    """The console resends the whole list on every save. A linked contact
+    whose number is later blocked must not stop an unrelated edit; a newly
+    added blocked contact is still refused."""
+    from hailhq.core.compliance_gate import add_suppression
+
+    org_id, headers = org
+    old = await _contact(client, headers)
+    new = await _contact(client, headers, name="Kim", phone="+14155550122")
+    agent_id = (
+        await client.post(
+            "/agents",
+            json={
+                "name": "Desk",
+                "system_prompt": "Help.",
+                "handover_contacts": [{"contact_id": old, "note": "Billing"}],
+            },
+            headers=headers,
+        )
+    ).json()["id"]
+    for phone in ("+14155550111", "+14155550122"):
+        await add_suppression(
+            async_session,
+            organization_id=org_id,
+            recipient=phone,
+            channel="voice",
+            reason="manual",
+            source="test",
+        )
+    await async_session.commit()
+    r = await client.patch(
+        f"/agents/{agent_id}",
+        json={
+            "name": "Desk 2",
+            "handover_contacts": [{"contact_id": old, "note": "Billing"}],
+        },
+        headers=headers,
+    )
+    assert r.status_code == 200, r.text
+    r = await client.patch(
+        f"/agents/{agent_id}",
+        json={
+            "handover_contacts": [
+                {"contact_id": old, "note": "Billing"},
+                {"contact_id": new, "note": "Sales"},
+            ]
+        },
+        headers=headers,
+    )
+    assert r.status_code == 422, r.text
+    assert r.json()["detail"][0]["loc"] == ["body", "handover_contacts", 1]
+
+
+async def test_agent_handover_max_duration_round_trip(client, org) -> None:
+    _, headers = org
+    r = await client.post(
+        "/agents", json={"name": "Desk", "system_prompt": "Help."}, headers=headers
+    )
+    assert r.json()["handover_max_duration_seconds"] is None
+    agent_id = r.json()["id"]
+    r = await client.patch(
+        f"/agents/{agent_id}",
+        json={"handover_max_duration_seconds": 900},
+        headers=headers,
+    )
+    assert r.json()["handover_max_duration_seconds"] == 900
+    r = await client.patch(f"/agents/{agent_id}", json={"name": "D2"}, headers=headers)
+    assert r.json()["handover_max_duration_seconds"] == 900  # untouched
+    r = await client.patch(
+        f"/agents/{agent_id}",
+        json={"handover_max_duration_seconds": None},
+        headers=headers,
+    )
+    assert r.json()["handover_max_duration_seconds"] is None
+    r = await client.patch(
+        f"/agents/{agent_id}",
+        json={"handover_max_duration_seconds": 30},
+        headers=headers,
+    )
+    assert r.status_code == 422

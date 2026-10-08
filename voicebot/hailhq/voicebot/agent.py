@@ -25,19 +25,24 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
+import time
 from collections.abc import Awaitable, Callable
 from datetime import datetime, timezone
 from typing import Any
 from uuid import UUID
 
 from cryptography.fernet import InvalidToken
+from google.protobuf.duration_pb2 import Duration
 from hailhq.core import threads
 from hailhq.core.agent_tools.client import AgentApiClient
 from hailhq.core.agent_tools.send_dtmf import DTMF_CODES
+from hailhq.core.agent_tools.spec import BridgeOutcome, BridgeRoute
 from hailhq.core.call_end_reasons import CallEndReason
 from hailhq.core.config import settings
 from hailhq.core.db import session_scope
 from hailhq.core.disclosure import disclosure_text
+from hailhq.core.handover import HANDOVER_DEFAULT_MAX_SECONDS
 from hailhq.core.inbound_calls import Rejected, SipAttributes, open_inbound_call
 from hailhq.core.internal_webhook import notify_usage_event_recorded
 from hailhq.core.models import Call, CallEvent, UsageEvent
@@ -83,6 +88,7 @@ from livekit import rtc
 from livekit.agents import Agent, JobContext, JobProcess
 from livekit.agents.llm import LLMError
 from livekit.agents.voice import AgentSession
+from livekit.api import CreateSIPParticipantRequest, SipCallError
 from livekit.plugins import silero
 from opentelemetry import context as otel_context
 from opentelemetry import trace
@@ -234,7 +240,9 @@ def disclosure_line(
 
 
 def make_agent_hangup(
-    ctx: JobContext, captured: dict[str, str | None]
+    ctx: JobContext,
+    captured: dict[str, str | None],
+    bridge_state: dict[str, Any] | None = None,
 ) -> Callable[[], Awaitable[None]]:
     """Build the hangup handle wired into the ``end_call`` agent tool.
 
@@ -255,10 +263,20 @@ def make_agent_hangup(
     runs afterwards as a belt-and-braces job release — and as the only
     path to ``on_call_end`` if the delete fails (the room then dies via
     LiveKit's empty-timeout instead).
+
+    While a handover is connected the agent is muted and the two people are
+    talking; ``end_call`` then does nothing, so a stray tool call cannot drop
+    them. While the contact rings, ``bridge_state["ending"]`` is set before
+    the delete so the disconnect handler and the shutdown path skip it.
     """
 
     async def _hangup() -> None:
+        if bridge_state is not None and bridge_state.get("connected"):
+            logger.info("end_call ignored: a handover is connected")
+            return
         captured["end_reason"] = CallEndReason.NORMAL_HANGUP.value
+        if bridge_state is not None and bridge_state.get("human"):
+            bridge_state["ending"] = True
         try:
             await ctx.delete_room()
         except Exception:
@@ -292,11 +310,218 @@ def make_agent_send_dtmf(ctx: JobContext) -> Callable[[str], Awaitable[None]]:
     return _send_dtmf
 
 
+# How long the handover contact's phone rings before the dial gives up.
+HANDOVER_RING_SECONDS = 30
+
+# SIP final responses that mean the person is there but declined / busy, and
+# the ones that mean nobody picked up. Anything else is a failed dial.
+_SIP_BUSY = frozenset({486, 600, 603})
+_SIP_NO_ANSWER = frozenset({408, 480, 487})
+
+
+def human_identity(call_id: UUID) -> str:
+    """Room identity of the handover contact's SIP leg."""
+    return f"human-{call_id}"
+
+
+# " (2)" that core.handover adds to repeated names in the tool's labels.
+_DEDUPE_SUFFIX = re.compile(r"\s\(\d+\)$")
+
+# Cap on the caller-supplied reason spoken to the contact.
+HANDOVER_INTRO_REASON_CHARS = 120
+
+
+def handover_intro(name: str, reason: str | None) -> str:
+    """What the agent says to the contact once they answer.
+
+    ``reason`` is LLM-written and a caller can steer it, so it is attributed
+    to the caller ("They say …") and kept short. ``name`` is the tool label;
+    a dedupe suffix (``"Sam (2)"``) is dropped so the contact hears their name.
+    """
+    name = _DEDUPE_SUFFIX.sub("", name)
+    said = " ".join((reason or "").split())[:HANDOVER_INTRO_REASON_CHARS]
+    if said:
+        return (
+            f"Hi {name}, I have a caller on the line. "
+            f"They say it is about {said}. Connecting you now."
+        )
+    return f"Hi {name}, I have a caller on the line. Connecting you now."
+
+
+def _sip_outcome(code: int | None) -> str:
+    if code in _SIP_BUSY:
+        return "busy"
+    if code in _SIP_NO_ANSWER:
+        return "no_answer"
+    return "failed"
+
+
+# How long job shutdown waits for a pending "answered" post before cancelling.
+ANSWER_POST_SHUTDOWN_WAIT_SECONDS = 5.0
+
+
+async def _report_answer(post: Awaitable[None], call_id: UUID) -> None:
+    try:
+        await post
+    except asyncio.CancelledError:
+        raise
+    except Exception:
+        logger.exception("call_id=%s handover answered post failed", call_id)
+
+
+async def finish_answer_post(bridge_state: dict[str, Any], call_id: UUID) -> None:
+    """At job shutdown, give a pending "answered" post a few seconds to land,
+    then cancel it."""
+    task = bridge_state.get("answer_task")
+    if task is None or task.done():
+        return
+    await asyncio.wait({task}, timeout=ANSWER_POST_SHUTDOWN_WAIT_SECONDS)
+    if not task.done():
+        logger.warning("call_id=%s handover answered post cancelled", call_id)
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+
+
+def make_agent_bridge(
+    ctx: JobContext,
+    session: AgentSession,
+    call_id: UUID,
+    bridge_state: dict[str, Any],
+    handover_seconds: int = 0,
+    on_cap_fired: Callable[[], None] | None = None,
+) -> Callable[[BridgeRoute], Awaitable[BridgeOutcome]]:
+    """Build the bridge handle wired into the ``transfer_call`` agent tool.
+
+    Dials the contact into this room as ``human-{call_id}`` and waits for an
+    answer. Expected dial failures come back as outcomes (the tool tells the
+    caller the person could not pick up); only bugs raise. On answer the
+    agent introduces the caller, then stops listening and speaking so the
+    two people talk directly.
+
+    ``bridge_state["human"]`` is set before dialing so
+    :func:`handle_sip_disconnect` can tell the contact's leg from the
+    caller's while it rings; ``bridge_state["connected"]`` flips on answer.
+    On answer the pending soft cap task (``bridge_state["soft_cap_task"]``)
+    is cancelled and, when ``handover_seconds`` is above 0, replaced by a new
+    one that counts from the answer: the handover call limit
+    (``handover_max_duration_seconds``) takes over from ``max_duration_seconds``.
+
+    Verified against livekit-api ``sip_service.py`` (``create_sip_participant``
+    raises ``SipCallError`` with ``sip_status_code``; ``wait_until_answered``
+    pins ``ringing_timeout`` and sizes the HTTP timeout from it) and
+    livekit-agents ``voice/agent_activity.py`` (the tool's own speech is
+    marked generation-done before tools run, so a ``say()`` from inside a
+    tool is scheduled and played; with output audio disabled a later reply
+    is generated with no audio output).
+    """
+
+    async def _bridge(route: BridgeRoute) -> BridgeOutcome:
+        if bridge_state.get("human") or bridge_state.get("connected"):
+            # Parallel tool calls or a retry while ringing: the contact leg's
+            # identity is fixed, so a second dial would collide with the first.
+            logger.info("call_id=%s handover already in progress", call_id)
+            return BridgeOutcome("failed", None, 0)
+        identity = human_identity(call_id)
+        bridge_state["human"] = identity
+        started = time.monotonic()
+
+        def _ring_ms() -> int:
+            return int((time.monotonic() - started) * 1000)
+
+        try:
+            await ctx.api.sip.create_sip_participant(
+                CreateSIPParticipantRequest(
+                    sip_trunk_id=route.trunk_id,
+                    sip_call_to=route.to_e164,
+                    sip_number=route.from_e164,
+                    room_name=ctx.room.name,
+                    participant_identity=identity,
+                    participant_name=route.name,
+                    headers=route.headers or {},
+                    wait_until_answered=True,
+                    ringing_timeout=Duration(seconds=HANDOVER_RING_SECONDS),
+                    play_dialtone=True,
+                )
+            )
+        except SipCallError as exc:
+            bridge_state["human"] = None
+            code = exc.sip_status_code
+            outcome = _sip_outcome(code)
+            logger.info(
+                "call_id=%s handover dial ended: %s (sip %s)", call_id, outcome, code
+            )
+            return BridgeOutcome(outcome, code, _ring_ms())
+        except asyncio.TimeoutError:
+            bridge_state["human"] = None
+            logger.info("call_id=%s handover dial timed out", call_id)
+            return BridgeOutcome("no_answer", None, _ring_ms())
+        except Exception:
+            bridge_state["human"] = None
+            logger.exception("call_id=%s handover dial failed", call_id)
+            return BridgeOutcome("failed", None, _ring_ms())
+
+        ring_ms = _ring_ms()
+        bridge_state["connected"] = True
+        logger.info("call_id=%s handover answered after %d ms", call_id, ring_ms)
+        # The contact answered: max_duration_seconds no longer applies. The
+        # handover limit counts from now. A cap that already fired
+        # (announcing now) is left to finish.
+        soft_cap = bridge_state.pop("soft_cap_task", None)
+        if (
+            soft_cap is not None
+            and not soft_cap.done()
+            and not bridge_state.get("soft_cap_fired")
+        ):
+            soft_cap.cancel()
+            await asyncio.gather(soft_cap, return_exceptions=True)
+            if handover_seconds > 0:
+                bridge_state["soft_cap_task"] = asyncio.create_task(
+                    soft_cap_announce_and_hangup(
+                        ctx,
+                        session,
+                        call_id,
+                        handover_seconds,
+                        on_fire=on_cap_fired,
+                        bridge_state=bridge_state,
+                    )
+                )
+        if route.on_answered is not None:
+            # Record the answer before the intro: the sweepers lift the time
+            # limit only once the "answered" event exists. Runs in the
+            # background (the post retries for about a minute, see transfer_call._post_answered);
+            # the task is held in bridge_state and awaited briefly at job
+            # shutdown.
+            try:
+                post = route.on_answered(ring_ms)
+            except Exception:
+                logger.exception("call_id=%s handover answered hook failed", call_id)
+            else:
+                bridge_state["answer_task"] = asyncio.create_task(
+                    _report_answer(post, call_id)
+                )
+        try:
+            handle = session.say(
+                handover_intro(route.name, route.reason), allow_interruptions=False
+            )
+            await handle.wait_for_playout()
+        except Exception:
+            # The contact is on the line either way; never leave the agent
+            # talking over the two people.
+            logger.exception("call_id=%s handover intro failed", call_id)
+        finally:
+            session.input.set_audio_enabled(False)
+            session.output.set_audio_enabled(False)
+        return BridgeOutcome("answered", None, ring_ms)
+
+    return _bridge
+
+
 async def build_tools_safely(
     metadata: dict[str, Any],
     call_id: UUID,
     hangup: Callable[[], Awaitable[None]],
     send_dtmf: Callable[[str], Awaitable[None]],
+    bridge: Callable[[BridgeRoute], Awaitable[BridgeOutcome]] | None = None,
 ) -> tuple[list, AgentApiClient | None]:
     """Build this call's agent tools, degrading to none on any failure.
 
@@ -311,6 +536,7 @@ async def build_tools_safely(
             call_id=call_id,
             hangup=hangup,
             send_dtmf=send_dtmf,
+            bridge=bridge,
         )
     except Exception:
         logger.exception(
@@ -609,6 +835,103 @@ def disconnect_reason_to_status(reason: int | None) -> tuple[str | None, str | N
     return (status, end_reason.value)
 
 
+async def _drop_room(ctx: JobContext, call_id: UUID) -> None:
+    try:
+        await ctx.delete_room()
+    except Exception:
+        logger.exception("call_id=%s delete_room failed after handover", call_id)
+
+
+async def drop_handover_leg(
+    ctx: JobContext, bridge_state: dict[str, Any], call_id: UUID
+) -> None:
+    """Delete the room if a contact leg is ringing or connected and no
+    handover teardown ran yet.
+
+    ``ctx.shutdown()`` does not delete the room, so without this the caller
+    and the contact stay connected after the job ends (and after billing
+    stops). Sets ``bridge_state["ending"]`` first, so it runs once and the
+    disconnect handler ignores the legs leaving because of it.
+    """
+    if not bridge_state.get("human") or bridge_state.get("ending"):
+        return
+    bridge_state["ending"] = True
+    await _drop_room(ctx, call_id)
+
+
+def handle_sip_disconnect(
+    ctx: JobContext,
+    participant: rtc.RemoteParticipant,
+    captured: dict[str, str | None],
+    bridge_state: dict[str, Any],
+    call_id: UUID,
+) -> None:
+    """The room's ``participant_disconnected`` handler.
+
+    Without a handover this maps the SIP leg's disconnect reason onto the
+    call's terminal status (see :func:`disconnect_reason_to_status`).
+
+    With a handover there are two SIP legs. The contact's leg is identified
+    only by ``human-{call_id}`` (an inbound caller's identity is assigned by
+    LiveKit, so everything else SIP is the caller):
+
+    * contact leaves while ringing → nothing; the bridge handle reports it.
+    * contact hangs up after connecting → normal hangup; end the call.
+    * caller leaves → today's mapping, then delete the room so the contact's
+      leg (ringing or connected) is dropped too, then shut down.
+    """
+    # We only care about SIP participants — the agent (this process)
+    # also fires participant_disconnected on shutdown, which we ignore.
+    if participant.kind != rtc.ParticipantKind.PARTICIPANT_KIND_SIP:
+        return
+    if bridge_state.get("ending"):
+        # A handover teardown already deleted the room; this is the other
+        # leg leaving because of it.
+        return
+    # Match the contact's leg by its fixed identity, not by
+    # bridge_state["human"]: the handle clears that on a failed dial, and
+    # the leg's own disconnect can arrive after it.
+    if participant.identity == human_identity(call_id):
+        if not bridge_state.get("connected"):
+            return
+        logger.info("call_id=%s handover contact hung up — ending call", call_id)
+        if captured["end_reason"] is None:
+            captured["end_reason"] = CallEndReason.NORMAL_HANGUP.value
+        bridge_state["ending"] = True
+        asyncio.ensure_future(_drop_room(ctx, call_id))
+        ctx.shutdown(reason="handover_ended")
+        return
+    human = bridge_state.get("human")
+    status, end_reason = disconnect_reason_to_status(participant.disconnect_reason)
+    if status is not None:
+        captured["status"] = status
+        captured["end_reason"] = end_reason
+        logger.info(
+            "call_id=%s sip participant disconnected — status=%s reason=%s",
+            call_id,
+            status,
+            end_reason,
+        )
+    if human is not None:
+        logger.info("call_id=%s caller left during handover — ending call", call_id)
+        if captured["end_reason"] is None:
+            captured["end_reason"] = CallEndReason.NORMAL_HANGUP.value
+        bridge_state["ending"] = True
+        asyncio.ensure_future(_drop_room(ctx, call_id))
+        ctx.shutdown(reason="caller_left")
+        return
+    if status is None:
+        # CLIENT_INITIATED — normal hangup after a real conversation.
+        # Leave captured as-is so `_shutdown` falls back to "completed".
+        return
+    # For reasons the agent SDK does not auto-close on (notably
+    # USER_UNAVAILABLE for no-answer), the session would otherwise sit
+    # idle until the worker times out. Force a graceful shutdown so
+    # `_shutdown` → `on_call_end` runs promptly.
+    if participant.disconnect_reason not in _SDK_AUTO_CLOSE_REASONS:
+        ctx.shutdown(reason=status)
+
+
 logger = logging.getLogger("hailhq.voicebot")
 
 
@@ -731,6 +1054,7 @@ async def soft_cap_announce_and_hangup(
     call_id: UUID,
     delay_seconds: int,
     on_fire: Callable[[], None] | None = None,
+    bridge_state: dict[str, Any] | None = None,
 ) -> None:
     """Wait ``delay_seconds`` then politely end the call.
 
@@ -747,17 +1071,29 @@ async def soft_cap_announce_and_hangup(
     the cap actually fires (i.e. not cancelled). The entrypoint uses this
     hook to stamp ``end_reason='soft_cap_reached'`` in its captured-state
     dict so ``on_call_end`` writes the right value.
+
+    The cap stops applying once a handover contact answers: the bridge
+    handle cancels this task (it sets ``bridge_state["soft_cap_fired"]``
+    once the wait is over, so a cap already announcing is not cut short).
+    With a connected handover the agent's output audio is off, so it is
+    turned back on for the announcement (both people hear it). With a
+    contact leg ringing or connected the room is deleted before shutdown,
+    so no leg outlives the job.
     """
     try:
         await asyncio.sleep(delay_seconds)
     except asyncio.CancelledError:
         return
+    if bridge_state is not None:
+        bridge_state["soft_cap_fired"] = True
 
     logger.info(
         "call_id=%s reached %ds soft-cap, announcing and ending",
         call_id,
         delay_seconds,
     )
+    if bridge_state is not None and bridge_state.get("connected"):
+        session.output.set_audio_enabled(True)
     try:
         handle = session.say(SOFT_CAP_ANNOUNCEMENT, allow_interruptions=False)
         await handle.wait_for_playout()
@@ -768,6 +1104,8 @@ async def soft_cap_announce_and_hangup(
         )
     if on_fire is not None:
         on_fire()
+    if bridge_state is not None:
+        await drop_handover_leg(ctx, bridge_state, call_id)
     ctx.shutdown(reason=SOFT_CAP_END_REASON)
 
 
@@ -1333,31 +1671,13 @@ async def _run_call(
     # carries the latest value, not a snapshot.
     captured: dict[str, str | None] = {"status": None, "end_reason": None}
 
+    # Human handover: identity of the contact's leg while one is dialed or
+    # connected, and whether it answered. Written by the bridge handle.
+    bridge_state: dict[str, Any] = {"human": None, "connected": False}
+
     @ctx.room.on("participant_disconnected")
     def _on_participant_disconnected(participant: rtc.RemoteParticipant) -> None:
-        # We only care about the SIP participant — the agent (this process)
-        # also fires participant_disconnected on shutdown, which we ignore.
-        if participant.kind != rtc.ParticipantKind.PARTICIPANT_KIND_SIP:
-            return
-        status, end_reason = disconnect_reason_to_status(participant.disconnect_reason)
-        if status is None:
-            # CLIENT_INITIATED — normal hangup after a real conversation.
-            # Leave captured as-is so `_shutdown` falls back to "completed".
-            return
-        captured["status"] = status
-        captured["end_reason"] = end_reason
-        logger.info(
-            "call_id=%s sip participant disconnected — status=%s reason=%s",
-            call_id,
-            status,
-            end_reason,
-        )
-        # For reasons the agent SDK does not auto-close on (notably
-        # USER_UNAVAILABLE for no-answer), the session would otherwise sit
-        # idle until the worker times out. Force a graceful shutdown so
-        # `_shutdown` → `on_call_end` runs promptly.
-        if participant.disconnect_reason not in _SDK_AUTO_CLOSE_REASONS:
-            ctx.shutdown(reason=status)
+        handle_sip_disconnect(ctx, participant, captured, bridge_state, call_id)
 
     # Answer detection: flip the call to `in_progress` + stamp `answered_at`
     # the moment the SIP leg's `sip.callStatus` reaches `active` (callee
@@ -1515,11 +1835,24 @@ async def _run_call(
             captured["end_reason"] = CallEndReason.WORKER_SHUTDOWN.value
             captured["status"] = "failed"
 
+    def _on_soft_cap_fired() -> None:
+        captured["end_reason"] = CallEndReason.SOFT_CAP_REACHED.value
+        # Status stays None → on_call_end falls back to "completed".
+
     agent_tools, agent_api = await build_tools_safely(
         metadata,
         call_id,
-        make_agent_hangup(ctx, captured),
+        make_agent_hangup(ctx, captured, bridge_state),
         make_agent_send_dtmf(ctx),
+        make_agent_bridge(
+            ctx,
+            session,
+            call_id,
+            bridge_state,
+            handover_seconds=metadata.get("handover_max_duration_seconds")
+            or HANDOVER_DEFAULT_MAX_SECONDS,
+            on_cap_fired=_on_soft_cap_fired,
+        ),
     )
     if agent_tools:
         logger.info(
@@ -1553,12 +1886,8 @@ async def _run_call(
         # configured. Cancelled in `_shutdown` on every other exit path.
         #
         # When the cap actually fires (vs being cancelled by a natural
-        # hangup) stamp end_reason='soft_cap_reached' before ctx.shutdown so
-        # the shutdown callback writes it.
-        def _on_soft_cap_fired() -> None:
-            captured["end_reason"] = CallEndReason.SOFT_CAP_REACHED.value
-            # Status stays None → on_call_end falls back to "completed".
-
+        # hangup) _on_soft_cap_fired stamps end_reason='soft_cap_reached'
+        # before ctx.shutdown so the shutdown callback writes it.
         soft_cap_task = asyncio.create_task(
             soft_cap_announce_and_hangup(
                 ctx,
@@ -1566,8 +1895,11 @@ async def _run_call(
                 call_id,
                 soft_cap_seconds,
                 on_fire=_on_soft_cap_fired,
+                bridge_state=bridge_state,
             )
         )
+        # The bridge handle cancels it when the handover contact answers.
+        bridge_state["soft_cap_task"] = soft_cap_task
 
     if llm_cfg is not None:
         # Mode B (per-call BYO endpoint) only — see arm_byo_llm_giveup. Mode A
@@ -1597,9 +1929,15 @@ async def _run_call(
         nonlocal shutting_down
         shutting_down = True
         try:
-            if soft_cap_task is not None and not soft_cap_task.done():
-                soft_cap_task.cancel()
-                await asyncio.gather(soft_cap_task, return_exceptions=True)
+            # The bridge swaps in the handover cap once a contact answers.
+            cap_task = bridge_state.get("soft_cap_task") or soft_cap_task
+            if cap_task is not None and not cap_task.done():
+                cap_task.cancel()
+                await asyncio.gather(cap_task, return_exceptions=True)
+            # Worker shutdown, BYO-LLM give-up or any other end while a
+            # contact leg is up: drop both legs, not just the job.
+            await drop_handover_leg(ctx, bridge_state, call_id)
+            await finish_answer_post(bridge_state, call_id)
             if text_watch_task is not None and not text_watch_task.done():
                 text_watch_task.cancel()
                 await asyncio.gather(text_watch_task, return_exceptions=True)

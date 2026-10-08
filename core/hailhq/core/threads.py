@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Literal
 
+from hailhq.core.handover import HANDOVER_BACKSTOP_SECONDS, answered_handover_exists
 from hailhq.core.models import Call, CallEvent, Sms
 from hailhq.core.schemas import E164
 from sqlalchemy import (
@@ -409,15 +410,23 @@ async def active_call_for_thread(
     caller_e164: str,
 ) -> Call | None:
     """The newest dialing, ringing or in-progress call of this thread created within
-    ``ACTIVE_CALL_MAX_AGE``, or None."""
+    ``ACTIVE_CALL_MAX_AGE``, or None. A call whose contact answered a handover
+    has no time limit, so it counts up to ``HANDOVER_BACKSTOP_SECONDS``."""
     if not is_e164(caller_e164):
         return None
-    since = datetime.now(timezone.utc) - ACTIVE_CALL_MAX_AGE
+    now = datetime.now(timezone.utc)
+    since = now - ACTIVE_CALL_MAX_AGE
+    backstop = now - timedelta(seconds=HANDOVER_BACKSTOP_SECONDS)
     stmt = (
         select(Call)
         .where(*_call_filter(organization_id, agent_id, caller_e164))
         .where(Call.status.in_(("dialing", "ringing", "in_progress")))
-        .where(Call.created_at >= since)
+        .where(
+            or_(
+                Call.created_at >= since,
+                and_(Call.created_at >= backstop, answered_handover_exists()),
+            )
+        )
         .order_by(Call.created_at.desc())
         .limit(1)
         # FOR SHARE: a call end that races this read waits for the caller's

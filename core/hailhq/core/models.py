@@ -13,6 +13,7 @@ from sqlalchemy import (
     Index,
     Integer,
     Numeric,
+    SmallInteger,
     Text,
     UniqueConstraint,
     func,
@@ -432,6 +433,11 @@ class Agent(Base):
     tools: Mapped[list[str] | None] = mapped_column(ARRAY(Text), nullable=True)
     # NULL = the workspace limit.
     max_duration_seconds: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Limit once a handover contact answers, counted from the answer.
+    # NULL = handover.HANDOVER_DEFAULT_MAX_SECONDS (30 min).
+    handover_max_duration_seconds: Mapped[int | None] = mapped_column(
+        Integer, nullable=True
+    )
     # Which channels the agent answers. Both default on; a number can only
     # route a channel to an agent that answers it.
     voice_enabled: Mapped[bool] = mapped_column(
@@ -454,6 +460,40 @@ class Agent(Base):
         CheckConstraint(
             "max_duration_seconds IS NULL OR max_duration_seconds BETWEEN 60 AND 3600",
             name="agents_max_duration_check",
+        ),
+        CheckConstraint(
+            "handover_max_duration_seconds IS NULL "
+            "OR handover_max_duration_seconds BETWEEN 60 AND 3600",
+            name="agents_handover_max_duration_check",
+        ),
+    )
+
+
+class AgentHandoverContact(Base):
+    """A contact the agent may hand a live call over to (spec:
+    docs/superpowers/specs/2026-10-08-human-handover-design.md)."""
+
+    __tablename__ = "agent_handover_contacts"
+
+    agent_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("agents.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    contact_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("contacts.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    note: Mapped[str] = mapped_column(Text, nullable=False)
+    position: Mapped[int] = mapped_column(SmallInteger, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        TS, server_default=text("now()"), nullable=False
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "char_length(note) BETWEEN 1 AND 200", name="agent_handover_note_len"
         ),
     )
 

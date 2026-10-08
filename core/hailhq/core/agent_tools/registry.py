@@ -9,6 +9,7 @@ from hailhq.core.agent_tools import (
     send_email,
     send_sms,
     thread_history,
+    transfer_call,
 )
 from hailhq.core.agent_tools.spec import ToolSpec
 
@@ -17,6 +18,7 @@ def all_tools() -> tuple[ToolSpec, ...]:
     return (
         end_call.SPEC,
         send_dtmf.SPEC,
+        transfer_call.SPEC,
         list_contacts.SPEC,
         send_sms.SPEC,
         send_email.SPEC,

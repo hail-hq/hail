@@ -65,7 +65,9 @@ paths:
               schema:
                 type: integer
         "409":
-          description: An agent with this name already exists.
+          description:
+            An agent with this name already exists, or a handover contact
+            changed while saving.
         "422":
           description: Validation Error
           content:
@@ -242,9 +244,13 @@ paths:
         "Change some fields. Fields left out keep their value; ``null``
         clears
 
-        first_message, ai_disclosure_line, tools or max_duration_seconds. Live
+        first_message, ai_disclosure_line, tools, max_duration_seconds or
 
-        calls keep the settings they started with."
+        handover_max_duration_seconds. Live
+
+        calls keep the settings they started with. ``handover_contacts`` replaces
+
+        the list; ``[]`` clears it and ``null`` leaves it."
       operationId: update_agent_v1_agents__agent_id__patch
       parameters:
         - name: agent_id
@@ -297,7 +303,9 @@ paths:
               schema:
                 type: integer
         "409":
-          description: An agent with this name already exists.
+          description:
+            An agent with this name already exists, or a handover contact
+            changed while saving.
         "422":
           description: Validation Error
           content:
@@ -4516,6 +4524,16 @@ components:
           description:
             "Soft cap per call in seconds (60..3600). Omitted: the workspace
             limit."
+        handover_max_duration_seconds:
+          anyOf:
+            - type: integer
+              maximum: 3600.0
+              minimum: 60.0
+            - type: "null"
+          title: Handover Max Duration Seconds
+          description:
+            "Call limit in seconds (60..3600) once a handover contact answers,
+            counted from the answer. Omitted: 1800 (30 minutes)."
         voice_enabled:
           type: boolean
           title: Voice Enabled
@@ -4536,6 +4554,15 @@ components:
             "'paused' agents do not answer; calls to their numbers fail
             with end_reason 'no_agent'."
           default: live
+        handover_contacts:
+          items:
+            $ref: "#/components/schemas/HandoverContactIn"
+          type: array
+          maxItems: 10
+          title: Handover Contacts
+          description:
+            People the agent may hand a live call to, in order. The agent
+            never sees their numbers.
       additionalProperties: false
       type: object
       required:
@@ -4648,6 +4675,14 @@ components:
             - type: "null"
           title: Max Duration Seconds
           description: Soft cap per call; null means the workspace limit.
+        handover_max_duration_seconds:
+          anyOf:
+            - type: integer
+            - type: "null"
+          title: Handover Max Duration Seconds
+          description:
+            Call limit after a handover contact answers; null means 1800
+            (30 minutes).
         voice_enabled:
           type: boolean
           title: Voice Enabled
@@ -4663,6 +4698,12 @@ components:
             - paused
           title: Status
           description: "'live' or 'paused'."
+        handover_contacts:
+          items:
+            $ref: "#/components/schemas/HandoverContactOut"
+          type: array
+          title: Handover Contacts
+          description: People the agent may hand a live call to.
         created_at:
           type: string
           format: date-time
@@ -4685,6 +4726,7 @@ components:
         - voice_config
         - tools
         - max_duration_seconds
+        - handover_max_duration_seconds
         - voice_enabled
         - sms_enabled
         - status
@@ -4751,6 +4793,16 @@ components:
             - type: "null"
           title: Max Duration Seconds
           description: New soft cap per call; null returns to the workspace limit.
+        handover_max_duration_seconds:
+          anyOf:
+            - type: integer
+              maximum: 3600.0
+              minimum: 60.0
+            - type: "null"
+          title: Handover Max Duration Seconds
+          description:
+            New call limit after a handover contact answers; null returns
+            to 1800 (30 minutes).
         voice_enabled:
           anyOf:
             - type: boolean
@@ -4772,6 +4824,17 @@ components:
             - type: "null"
           title: Status
           description: "'live' or 'paused'."
+        handover_contacts:
+          anyOf:
+            - items:
+                $ref: "#/components/schemas/HandoverContactIn"
+              type: array
+              maxItems: 10
+            - type: "null"
+          title: Handover Contacts
+          description:
+            New handover list; replaces the old one. [] removes all; null
+            leaves it.
       additionalProperties: false
       type: object
       title: AgentUpdate
@@ -4781,7 +4844,7 @@ components:
 
         the nullable ones (first_message, ai_disclosure_line, tools,
 
-        max_duration_seconds)."
+        max_duration_seconds, handover_max_duration_seconds)."
     Body_upload_email_attachment:
       properties:
         file:
@@ -7067,6 +7130,57 @@ components:
             (loc), the problem (msg), and the error type (type)."
       type: object
       title: HTTPValidationError
+    HandoverContactIn:
+      properties:
+        contact_id:
+          type: string
+          format: uuid
+          title: Contact Id
+          description: A contact of this organization with a phone number.
+        note:
+          type: string
+          maxLength: 200
+          minLength: 1
+          title: Note
+          description:
+            When the agent should hand over to this person, e.g. 'billing
+            questions'. Read by the agent.
+      additionalProperties: false
+      type: object
+      required:
+        - contact_id
+        - note
+      title: HandoverContactIn
+    HandoverContactOut:
+      properties:
+        contact_id:
+          type: string
+          format: uuid
+          title: Contact Id
+          description: The contact.
+        name:
+          type: string
+          title: Name
+          description: Contact name, as the agent says it.
+        phone_e164:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Phone E164
+          description:
+            Number Hail dials. Null when the contact lost its number; it
+            is then skipped.
+        note:
+          type: string
+          title: Note
+          description: When the agent hands over to this person.
+      type: object
+      required:
+        - contact_id
+        - name
+        - phone_e164
+        - note
+      title: HandoverContactOut
     LLMConfig:
       properties:
         base_url:
@@ -8310,6 +8424,7 @@ components:
               - call.failed
               - call.busy
               - call.no_answer
+              - call.transferred
           type: array
           minItems: 1
           title: Event Types
@@ -8373,6 +8488,7 @@ components:
                   - call.failed
                   - call.busy
                   - call.no_answer
+                  - call.transferred
               type: array
             - type: "null"
           title: Event Types

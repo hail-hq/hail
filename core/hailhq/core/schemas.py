@@ -683,6 +683,28 @@ AgentStatus = Literal["live", "paused"]
 _AGENT_LINE_MAX = 300
 
 
+class HandoverContactIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    contact_id: UUID = Field(
+        description="A contact of this organization with a phone number."
+    )
+    note: str = Field(
+        min_length=1,
+        max_length=200,
+        description="When the agent should hand over to this person, e.g. 'billing questions'. Read by the agent.",
+    )
+
+
+class HandoverContactOut(BaseModel):
+    contact_id: UUID = Field(description="The contact.")
+    name: str = Field(description="Contact name, as the agent says it.")
+    phone_e164: str | None = Field(
+        description="Number Hail dials. Null when the contact lost its number; it is then skipped."
+    )
+    note: str = Field(description="When the agent hands over to this person.")
+
+
 class AgentCreate(BaseModel):
     """A saved agent: what a number answers with, and what POST /calls can
     place calls with via ``agent_id``."""
@@ -735,6 +757,15 @@ class AgentCreate(BaseModel):
         le=3600,
         description="Soft cap per call in seconds (60..3600). Omitted: the workspace limit.",
     )
+    handover_max_duration_seconds: int | None = Field(
+        default=None,
+        ge=60,
+        le=3600,
+        description=(
+            "Call limit in seconds (60..3600) once a handover contact answers, "
+            "counted from the answer. Omitted: 1800 (30 minutes)."
+        ),
+    )
     voice_enabled: bool = Field(
         default=True,
         description="Answer calls on numbers that route calls to this agent.",
@@ -746,6 +777,11 @@ class AgentCreate(BaseModel):
     status: AgentStatus = Field(
         default="live",
         description="'paused' agents do not answer; calls to their numbers fail with end_reason 'no_agent'.",
+    )
+    handover_contacts: list[HandoverContactIn] = Field(
+        default_factory=list,
+        max_length=10,
+        description="People the agent may hand a live call to, in order. The agent never sees their numbers.",
     )
 
     @field_validator("name")
@@ -760,7 +796,7 @@ class AgentCreate(BaseModel):
 class AgentUpdate(BaseModel):
     """PATCH /agents/{id}. Fields left out keep their value; ``null`` clears
     the nullable ones (first_message, ai_disclosure_line, tools,
-    max_duration_seconds)."""
+    max_duration_seconds, handover_max_duration_seconds)."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -795,6 +831,12 @@ class AgentUpdate(BaseModel):
         le=3600,
         description="New soft cap per call; null returns to the workspace limit.",
     )
+    handover_max_duration_seconds: int | None = Field(
+        default=None,
+        ge=60,
+        le=3600,
+        description="New call limit after a handover contact answers; null returns to 1800 (30 minutes).",
+    )
     voice_enabled: bool | None = Field(
         default=None, description="Whether the agent answers calls."
     )
@@ -802,6 +844,11 @@ class AgentUpdate(BaseModel):
         default=None, description="Whether the agent answers texts."
     )
     status: AgentStatus | None = Field(default=None, description="'live' or 'paused'.")
+    handover_contacts: list[HandoverContactIn] | None = Field(
+        default=None,
+        max_length=10,
+        description="New handover list; replaces the old one. [] removes all; null leaves it.",
+    )
 
     @field_validator("name")
     @classmethod
@@ -831,9 +878,15 @@ class AgentResponse(BaseModel):
     max_duration_seconds: int | None = Field(
         description="Soft cap per call; null means the workspace limit."
     )
+    handover_max_duration_seconds: int | None = Field(
+        description="Call limit after a handover contact answers; null means 1800 (30 minutes)."
+    )
     voice_enabled: bool = Field(description="Whether the agent answers calls.")
     sms_enabled: bool = Field(description="Whether the agent answers texts.")
     status: AgentStatus = Field(description="'live' or 'paused'.")
+    handover_contacts: list[HandoverContactOut] = Field(
+        default_factory=list, description="People the agent may hand a live call to."
+    )
     created_at: datetime = Field(description="ISO 8601 timestamp.")
     updated_at: datetime = Field(description="ISO 8601 timestamp.")
 
@@ -1894,6 +1947,7 @@ WebhookEventType = Literal[
     "call.failed",
     "call.busy",
     "call.no_answer",
+    "call.transferred",
 ]
 
 WebhookSubscriptionStatus = Literal["active", "disabled"]

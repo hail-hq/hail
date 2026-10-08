@@ -262,3 +262,75 @@ async def test_sweep_handles_multiple_calls_in_one_pass(async_session):
     swept = await sweep_stale_calls(async_session, grace_seconds=120)
     await async_session.commit()
     assert set(swept) == {a.id, b.id}
+
+
+async def _add_handover(session, call_id: uuid.UUID, outcome: str) -> None:
+    session.add(
+        CallEvent(
+            call_id=call_id,
+            kind="handover",
+            payload={"contact_id": str(uuid.uuid4()), "outcome": outcome},
+        )
+    )
+    await session.commit()
+
+
+@pytest.mark.asyncio
+async def test_sweep_skips_answered_handover_past_max_duration(async_session):
+    """Once the contact answers a handover the time limit no longer applies:
+    the call is not swept at max_duration + grace."""
+    now = datetime.now(timezone.utc)
+    call = await _make_call(
+        async_session,
+        status="in_progress",
+        started_at=now - timedelta(seconds=600),
+        max_duration_seconds=300,
+    )
+    await _add_handover(async_session, call.id, "answered")
+
+    swept = await sweep_stale_calls(async_session, grace_seconds=120)
+    await async_session.commit()
+
+    assert call.id not in swept
+    await async_session.refresh(call)
+    assert call.status == "in_progress"
+    assert await _state_change_events(async_session, call.id) == []
+
+
+@pytest.mark.asyncio
+async def test_sweep_closes_answered_handover_past_backstop(async_session):
+    """A handed-over call still open 12 h after start is a crashed worker's row."""
+    now = datetime.now(timezone.utc)
+    call = await _make_call(
+        async_session,
+        status="in_progress",
+        started_at=now - timedelta(hours=13),
+        max_duration_seconds=300,
+    )
+    await _add_handover(async_session, call.id, "answered")
+
+    swept = await sweep_stale_calls(async_session, grace_seconds=120)
+    await async_session.commit()
+
+    assert call.id in swept
+    await async_session.refresh(call)
+    assert call.status == "failed"
+    assert call.end_reason == "sweeper_timeout"
+
+
+@pytest.mark.asyncio
+async def test_sweep_closes_unanswered_handover_past_max_duration(async_session):
+    """Only an answered handover lifts the limit; a no_answer one does not."""
+    now = datetime.now(timezone.utc)
+    call = await _make_call(
+        async_session,
+        status="in_progress",
+        started_at=now - timedelta(seconds=600),
+        max_duration_seconds=300,
+    )
+    await _add_handover(async_session, call.id, "no_answer")
+
+    swept = await sweep_stale_calls(async_session, grace_seconds=120)
+    await async_session.commit()
+
+    assert call.id in swept

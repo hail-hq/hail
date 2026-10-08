@@ -241,6 +241,7 @@ class _FakeAmdRoom:
             if event == "participant_disconnected" and self._disconnect_on_register:
                 fn(
                     SimpleNamespace(
+                        identity="sip-callee",
                         kind=rtc.ParticipantKind.PARTICIPANT_KIND_SIP,
                         disconnect_reason=rtc.DisconnectReason.USER_REJECTED,
                     )

@@ -6,6 +6,7 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 
 ### Added
 
+- Human handover: agents can hand a live call to a contact you pick (`handover_contacts` on agents, `hail agents --handover`, `transfer_call` tool, `call.transferred` webhook).
 - Optional Logfire backend and AI-agent observability: service logs, request/HTTP/database traces, actor identity, voice/SMS model and tool spans, and API-to-voicebot correlation. Payload filtering keeps conversation content and credentials out of exported traces.
 
 ### Changed
