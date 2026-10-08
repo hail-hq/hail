@@ -118,6 +118,7 @@ type agentFlags struct {
 	noCalls      bool
 	status       string
 	name         string
+	handover     []string
 }
 
 func (f *agentFlags) bind(cmd *cobra.Command) {
@@ -133,6 +134,7 @@ func (f *agentFlags) bind(cmd *cobra.Command) {
 	cmd.Flags().BoolVar(&f.noSms, "no-sms", false, "Do not answer texts")
 	cmd.Flags().BoolVar(&f.noCalls, "no-calls", false, "Do not answer calls")
 	cmd.Flags().StringVar(&f.status, "status", "", "live or paused")
+	cmd.Flags().StringArrayVar(&f.handover, "handover", nil, "Person the agent may hand a live call to: <contact_id>=<note> (repeatable, max 10; replaces the list)")
 }
 
 func (f *agentFlags) readPrompt() (string, bool, error) {
@@ -213,6 +215,17 @@ func (f *agentFlags) body(cmd *cobra.Command, create bool, voice map[string]any)
 	if changed("tools") {
 		// pflag hands `--tools ''` over as an empty, non-nil slice: no tools.
 		b["tools"] = f.tools
+	}
+	if changed("handover") {
+		contacts := []map[string]string{}
+		for _, h := range f.handover {
+			id, note, ok := strings.Cut(h, "=")
+			if _, err := uuid.Parse(id); err != nil || !ok || strings.TrimSpace(note) == "" {
+				return nil, fmt.Errorf("--handover must be <contact_id>=<note>, got %q", h)
+			}
+			contacts = append(contacts, map[string]string{"contact_id": id, "note": strings.TrimSpace(note)})
+		}
+		b["handover_contacts"] = contacts
 	}
 	if changed("voice") || changed("language") {
 		vc := map[string]any{}
@@ -300,7 +313,7 @@ Example:
 
 func newAgentsUpdateCmd(opts *Options) *cobra.Command {
 	f := &agentFlags{}
-	var allTools bool
+	var allTools, noHandover bool
 	cmd := &cobra.Command{
 		Use:   "update <id>",
 		Short: "Change an agent (only the flags you pass change)",
@@ -327,6 +340,9 @@ func newAgentsUpdateCmd(opts *Options) *cobra.Command {
 			if allTools {
 				body["tools"] = nil // null: every tool the channels support
 			}
+			if noHandover {
+				body["handover_contacts"] = []map[string]string{} // []: clear the list
+			}
 			if len(body) == 0 {
 				return fmt.Errorf("nothing to change: pass at least one flag")
 			}
@@ -346,7 +362,9 @@ func newAgentsUpdateCmd(opts *Options) *cobra.Command {
 	f.bind(cmd)
 	cmd.Flags().StringVar(&f.name, "name", "", "New display name")
 	cmd.Flags().BoolVar(&allTools, "all-tools", false, "Allow every tool again (clears --tools)")
+	cmd.Flags().BoolVar(&noHandover, "no-handover", false, "Remove all handover contacts")
 	cmd.MarkFlagsMutuallyExclusive("tools", "all-tools")
+	cmd.MarkFlagsMutuallyExclusive("handover", "no-handover")
 	return cmd
 }
 

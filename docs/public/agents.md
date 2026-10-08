@@ -36,6 +36,37 @@ SDK: `client.agents.create(...)`, `client.numbers.route(...)`.
 Schemas: `AgentCreate`, `AgentUpdate`, `AgentResponse`, `PhoneNumberRoutingUpdate`
 in [`openapi/openapi.yaml`](../../openapi/openapi.yaml).
 
+## Hand over to a person
+
+Let the agent pass a live call to a contact you picked.
+
+```bash
+curl -X PATCH "$HAIL_API_URL/v1/agents/$AGENT_ID" -H "Authorization: Bearer $HAIL_API_KEY" \
+  -H 'Content-Type: application/json' -d '{
+    "handover_contacts": [
+      {"contact_id": "'"$CONTACT_ID"'", "note": "billing questions or an angry caller"}
+    ]
+  }'
+```
+
+CLI: `hail agents update <id> --handover "<contact-id>=billing questions"`
+(repeat the flag for more people; `--no-handover` clears the list).
+MCP: `create_agent(handover_contacts=[{"contact_id": "...", "note": "..."}])`.
+
+- Up to 10 contacts. Each needs a phone number in a country Hail sells
+  numbers in. It must pass the do-not-call and premium-rate checks, on save
+  and again before dialing. `note` is 1-200 characters and tells the agent
+  when to hand over.
+- The agent gets the `transfer_call` tool. It never sees a phone number.
+- The contact sees your Hail number as caller ID.
+- The contact has 30 seconds to answer. If not, the agent comes back and
+  offers to take a message.
+- On answer, the agent says who is calling and why, then goes silent. If
+  either side hangs up, the call ends.
+- Billed as one call at the normal voice rate.
+- Sends a [`call.transferred`](webhooks.md) webhook when the contact answers.
+- `PATCH` with `[]` clears the list; omit the field (or send `null`) to leave it.
+
 ## What happens on an inbound call
 
 1. The carrier sends the call to LiveKit. LiveKit creates a room and

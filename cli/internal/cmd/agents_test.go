@@ -194,3 +194,55 @@ func TestAgentsUpdate_AllToolsConflictsWithTools(t *testing.T) {
 		t.Fatal("--all-tools with --tools must fail")
 	}
 }
+
+func TestAgentsUpdate_HandoverBuildsContacts(t *testing.T) {
+	srv := newFakeServer(t, http.StatusOK, sampleAgent())
+	a := "55555555-5555-5555-5555-555555555555"
+	b := "66666666-6666-6666-6666-666666666666"
+	_, _, err := runRoot(t,
+		map[string]string{"HAIL_API_KEY": "sk_test", "HAIL_API_URL": srv.URL},
+		"agents", "update", "33333333-3333-3333-3333-333333333333",
+		"--handover", a+"=billing, refunds", "--handover", b+"=anything else",
+	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	var body map[string]any
+	_ = json.Unmarshal(srv.lastBody, &body)
+	got, _ := body["handover_contacts"].([]any)
+	if len(got) != 2 {
+		t.Fatalf("want 2 contacts: %s", srv.lastBody)
+	}
+	first := got[0].(map[string]any)
+	if first["contact_id"] != a || first["note"] != "billing, refunds" {
+		t.Errorf("bad first contact: %s", srv.lastBody)
+	}
+}
+
+func TestAgentsUpdate_NoHandoverSendsEmptyList(t *testing.T) {
+	srv := newFakeServer(t, http.StatusOK, sampleAgent())
+	_, _, err := runRoot(t,
+		map[string]string{"HAIL_API_KEY": "sk_test", "HAIL_API_URL": srv.URL},
+		"agents", "update", "33333333-3333-3333-3333-333333333333", "--no-handover",
+	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	var body map[string]any
+	_ = json.Unmarshal(srv.lastBody, &body)
+	got, present := body["handover_contacts"].([]any)
+	if !present || len(got) != 0 {
+		t.Errorf("handover_contacts must be an empty list: %s", srv.lastBody)
+	}
+}
+
+func TestAgentsCreate_HandoverRejectsBadValue(t *testing.T) {
+	srv := newFakeServer(t, http.StatusOK, sampleAgent())
+	_, _, err := runRoot(t,
+		map[string]string{"HAIL_API_KEY": "sk_test", "HAIL_API_URL": srv.URL},
+		"agents", "create", "--prompt", "hi", "--handover", "not-a-uuid=billing",
+	)
+	if err == nil {
+		t.Fatal("bad --handover must fail")
+	}
+}
