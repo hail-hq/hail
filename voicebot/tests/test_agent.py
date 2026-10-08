@@ -1757,3 +1757,122 @@ async def test_bridge_intro_failure_still_mutes_and_answers() -> None:
     )
     assert out.outcome == "answered"
     assert session.input.enabled == [False] and session.output.enabled == [False]
+
+
+# --- final review fixes ------------------------------------------------------
+
+
+async def test_soft_cap_while_connected_unmutes_announces_and_drops_room() -> None:
+    """max_duration_seconds covers the whole call: after a connected handover
+    the cap re-enables the agent's audio, says the line to both people, then
+    deletes the room so neither phone leg outlives the job."""
+    ctx = FakeJobContext()
+    session = FakeBridgeSession()
+    state = {"human": f"human-{CALL_ID}", "connected": True}
+    fired: list[bool] = []
+    await soft_cap_announce_and_hangup(
+        ctx,  # type: ignore[arg-type]
+        session,  # type: ignore[arg-type]
+        CALL_ID,
+        delay_seconds=0,
+        on_fire=lambda: fired.append(True),
+        bridge_state=state,
+    )
+    assert session.output.enabled == [True]
+    assert session.said == [SOFT_CAP_ANNOUNCEMENT]
+    assert fired == [True]
+    assert state["ending"] is True
+    assert ctx.delete_room_calls == 1
+    assert ctx.shutdown_calls == [SOFT_CAP_END_REASON]
+
+
+async def test_soft_cap_without_handover_keeps_audio_and_room() -> None:
+    ctx = FakeJobContext()
+    session = FakeBridgeSession()
+    state = {"human": None, "connected": False}
+    await soft_cap_announce_and_hangup(
+        ctx, session, CALL_ID, delay_seconds=0, bridge_state=state  # type: ignore[arg-type]
+    )
+    assert session.output.enabled == []
+    assert session.said == [SOFT_CAP_ANNOUNCEMENT]
+    assert ctx.delete_room_calls == 0
+    assert ctx.shutdown_calls == [SOFT_CAP_END_REASON]
+
+
+async def test_drop_handover_leg_deletes_room_once() -> None:
+    """The shutdown path deletes the room when a contact leg is ringing or
+    connected, and only once."""
+    from hailhq.voicebot.agent import drop_handover_leg
+
+    ctx = FakeJobContext()
+    state = {"human": f"human-{CALL_ID}", "connected": False}
+    await drop_handover_leg(ctx, state, CALL_ID)  # type: ignore[arg-type]
+    await drop_handover_leg(ctx, state, CALL_ID)  # type: ignore[arg-type]
+    assert ctx.delete_room_calls == 1
+    assert state["ending"] is True
+
+
+async def test_drop_handover_leg_skips_without_leg_or_after_teardown() -> None:
+    from hailhq.voicebot.agent import drop_handover_leg
+
+    ctx = FakeJobContext()
+    await drop_handover_leg(ctx, {"human": None, "connected": False}, CALL_ID)  # type: ignore[arg-type]
+    await drop_handover_leg(
+        ctx,  # type: ignore[arg-type]
+        {"human": f"human-{CALL_ID}", "connected": True, "ending": True},
+        CALL_ID,
+    )
+    assert ctx.delete_room_calls == 0
+
+
+async def test_agent_hangup_ignored_while_handover_connected() -> None:
+    """After "Connected." the LLM still has end_call; it must not drop the
+    two people."""
+    captured: dict[str, str | None] = {"status": None, "end_reason": None}
+    ctx = FakeJobContext()
+    state = {"human": f"human-{CALL_ID}", "connected": True}
+    hangup = make_agent_hangup(ctx, captured, state)  # type: ignore[arg-type]
+    await hangup()
+    assert ctx.delete_room_calls == 0
+    assert ctx.shutdown_calls == []
+    assert captured == {"status": None, "end_reason": None}
+
+
+async def test_agent_hangup_while_ringing_marks_teardown() -> None:
+    """Hanging up while the contact rings deletes the room once; the shutdown
+    path must not delete it again."""
+    from hailhq.voicebot.agent import drop_handover_leg
+
+    captured: dict[str, str | None] = {"status": None, "end_reason": None}
+    ctx = FakeJobContext()
+    state = {"human": f"human-{CALL_ID}", "connected": False}
+    await make_agent_hangup(ctx, captured, state)()  # type: ignore[arg-type]
+    await drop_handover_leg(ctx, state, CALL_ID)  # type: ignore[arg-type]
+    assert ctx.delete_room_calls == 1
+    assert ctx.shutdown_calls == ["agent_end_call"]
+
+
+@pytest.mark.parametrize(
+    "state",
+    [
+        {"human": f"human-{CALL_ID}", "connected": False},
+        {"human": f"human-{CALL_ID}", "connected": True},
+    ],
+)
+async def test_bridge_refuses_second_dial(state) -> None:
+    ctx = FakeJobContext()
+    session = FakeBridgeSession()
+    out = await make_agent_bridge(ctx, session, CALL_ID, state)(  # type: ignore[arg-type]
+        BridgeRoute("+1", "+1", "ST", None, "Sam", "")
+    )
+    assert out.outcome == "failed" and out.sip_status is None and out.ring_ms == 0
+    assert ctx.api.sip.create_sip_participant.await_count == 0
+    assert state["human"] == f"human-{CALL_ID}"
+    assert session.input.enabled == [] and session.output.enabled == []
+
+
+def test_handover_intro_strips_dedupe_suffix() -> None:
+    from hailhq.voicebot.agent import handover_intro
+
+    assert handover_intro("Sam (2)", "x").startswith("Hi Sam, ")
+    assert handover_intro("Sam (12)", "").startswith("Hi Sam, ")
