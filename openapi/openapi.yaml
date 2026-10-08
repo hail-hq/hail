@@ -7134,9 +7134,12 @@ components:
       properties:
         contact_id:
           type: string
-          format: uuid
           title: Contact Id
-          description: A contact of this organization with a phone number.
+          description:
+            "A person with a phone number, as GET /contacts returns it:
+            a contact's id, or `member:<user id>` for a team member."
+          examples:
+            - member:6f1c2a9e-3b7d-4c51-9a8e-2d4f6b1e0c37
         note:
           type: string
           maxLength: 200
@@ -7155,13 +7158,14 @@ components:
       properties:
         contact_id:
           type: string
-          format: uuid
           title: Contact Id
-          description: The contact.
+          description:
+            "The person: a contact's id, or `member:<user id>` for a team
+            member."
         name:
           type: string
           title: Name
-          description: Contact name, as the agent says it.
+          description: Name, as the agent says it.
         phone_e164:
           anyOf:
             - type: string

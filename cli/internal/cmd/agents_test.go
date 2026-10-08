@@ -280,3 +280,32 @@ func TestAgentsCreate_HandoverRejectsLongNote(t *testing.T) {
 		t.Fatalf("want a 200-char error, got %v", err)
 	}
 }
+
+func TestAgentsCreate_HandoverAcceptsTeamMember(t *testing.T) {
+	srv := newFakeServer(t, http.StatusCreated, sampleAgent())
+	m := "member:77777777-7777-7777-7777-777777777777"
+	_, _, err := runRoot(t,
+		map[string]string{"HAIL_API_KEY": "sk_test", "HAIL_API_URL": srv.URL},
+		"agents", "create", "Desk", "--prompt", "hi", "--handover", m+"=sales",
+	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	var body map[string]any
+	_ = json.Unmarshal(srv.lastBody, &body)
+	got, _ := body["handover_contacts"].([]any)
+	if len(got) != 1 || got[0].(map[string]any)["contact_id"] != m {
+		t.Errorf("bad member contact: %s", srv.lastBody)
+	}
+}
+
+func TestAgentsCreate_HandoverRejectsBadMember(t *testing.T) {
+	srv := newFakeServer(t, http.StatusOK, sampleAgent())
+	_, _, err := runRoot(t,
+		map[string]string{"HAIL_API_KEY": "sk_test", "HAIL_API_URL": srv.URL},
+		"agents", "create", "Desk", "--prompt", "hi", "--handover", "member:nope=sales",
+	)
+	if err == nil {
+		t.Fatal("bad member id must fail")
+	}
+}
