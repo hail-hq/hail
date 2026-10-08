@@ -25,15 +25,18 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import time
 from collections.abc import Awaitable, Callable
 from datetime import datetime, timezone
 from typing import Any
 from uuid import UUID
 
 from cryptography.fernet import InvalidToken
+from google.protobuf.duration_pb2 import Duration
 from hailhq.core import threads
 from hailhq.core.agent_tools.client import AgentApiClient
 from hailhq.core.agent_tools.send_dtmf import DTMF_CODES
+from hailhq.core.agent_tools.spec import BridgeOutcome, BridgeRoute
 from hailhq.core.call_end_reasons import CallEndReason
 from hailhq.core.config import settings
 from hailhq.core.db import session_scope
@@ -83,6 +86,7 @@ from livekit import rtc
 from livekit.agents import Agent, JobContext, JobProcess
 from livekit.agents.llm import LLMError
 from livekit.agents.voice import AgentSession
+from livekit.api import CreateSIPParticipantRequest, SipCallError
 from livekit.plugins import silero
 from opentelemetry import context as otel_context
 from opentelemetry import trace
@@ -292,11 +296,117 @@ def make_agent_send_dtmf(ctx: JobContext) -> Callable[[str], Awaitable[None]]:
     return _send_dtmf
 
 
+# How long the handover contact's phone rings before the dial gives up.
+HANDOVER_RING_SECONDS = 30
+
+# SIP final responses that mean the person is there but declined / busy, and
+# the ones that mean nobody picked up. Anything else is a failed dial.
+_SIP_BUSY = frozenset({486, 600, 603})
+_SIP_NO_ANSWER = frozenset({408, 480, 487})
+
+
+def human_identity(call_id: UUID) -> str:
+    """Room identity of the handover contact's SIP leg."""
+    return f"human-{call_id}"
+
+
+def _sip_outcome(code: int | None) -> str:
+    if code in _SIP_BUSY:
+        return "busy"
+    if code in _SIP_NO_ANSWER:
+        return "no_answer"
+    return "failed"
+
+
+def make_agent_bridge(
+    ctx: JobContext,
+    session: AgentSession,
+    call_id: UUID,
+    bridge_state: dict[str, Any],
+) -> Callable[[BridgeRoute], Awaitable[BridgeOutcome]]:
+    """Build the bridge handle wired into the ``transfer_call`` agent tool.
+
+    Dials the contact into this room as ``human-{call_id}`` and waits for an
+    answer. Expected dial failures come back as outcomes (the tool tells the
+    caller the person could not pick up); only bugs raise. On answer the
+    agent introduces the caller, then stops listening and speaking so the
+    two people talk directly.
+
+    ``bridge_state["human"]`` is set before dialing so
+    :func:`handle_sip_disconnect` can tell the contact's leg from the
+    caller's while it rings; ``bridge_state["connected"]`` flips on answer.
+
+    Verified against livekit-api ``sip_service.py`` (``create_sip_participant``
+    raises ``SipCallError`` with ``sip_status_code``; ``wait_until_answered``
+    pins ``ringing_timeout`` and sizes the HTTP timeout from it) and
+    livekit-agents ``voice/agent_activity.py`` (the tool's own speech is
+    marked generation-done before tools run, so a ``say()`` from inside a
+    tool is scheduled and played; with output audio disabled a later reply
+    is generated with no audio output).
+    """
+
+    async def _bridge(route: BridgeRoute) -> BridgeOutcome:
+        identity = human_identity(call_id)
+        bridge_state["human"] = identity
+        started = time.monotonic()
+
+        def _ring_ms() -> int:
+            return int((time.monotonic() - started) * 1000)
+
+        try:
+            await ctx.api.sip.create_sip_participant(
+                CreateSIPParticipantRequest(
+                    sip_trunk_id=route.trunk_id,
+                    sip_call_to=route.to_e164,
+                    sip_number=route.from_e164,
+                    room_name=ctx.room.name,
+                    participant_identity=identity,
+                    participant_name=route.name,
+                    headers=route.headers or {},
+                    wait_until_answered=True,
+                    ringing_timeout=Duration(seconds=HANDOVER_RING_SECONDS),
+                    play_dialtone=True,
+                )
+            )
+        except SipCallError as exc:
+            bridge_state["human"] = None
+            code = exc.sip_status_code
+            outcome = _sip_outcome(code)
+            logger.info(
+                "call_id=%s handover dial ended: %s (sip %s)", call_id, outcome, code
+            )
+            return BridgeOutcome(outcome, code, _ring_ms())
+        except asyncio.TimeoutError:
+            bridge_state["human"] = None
+            logger.info("call_id=%s handover dial timed out", call_id)
+            return BridgeOutcome("no_answer", None, _ring_ms())
+        except Exception:
+            bridge_state["human"] = None
+            logger.exception("call_id=%s handover dial failed", call_id)
+            return BridgeOutcome("failed", None, _ring_ms())
+
+        ring_ms = _ring_ms()
+        bridge_state["connected"] = True
+        logger.info("call_id=%s handover answered after %d ms", call_id, ring_ms)
+        handle = session.say(
+            f"Hi {route.name}, I have a caller about "
+            f"{route.reason or 'a question'}. Connecting you now.",
+            allow_interruptions=False,
+        )
+        await handle.wait_for_playout()
+        session.input.set_audio_enabled(False)
+        session.output.set_audio_enabled(False)
+        return BridgeOutcome("answered", None, ring_ms)
+
+    return _bridge
+
+
 async def build_tools_safely(
     metadata: dict[str, Any],
     call_id: UUID,
     hangup: Callable[[], Awaitable[None]],
     send_dtmf: Callable[[str], Awaitable[None]],
+    bridge: Callable[[BridgeRoute], Awaitable[BridgeOutcome]] | None = None,
 ) -> tuple[list, AgentApiClient | None]:
     """Build this call's agent tools, degrading to none on any failure.
 
@@ -311,6 +421,7 @@ async def build_tools_safely(
             call_id=call_id,
             hangup=hangup,
             send_dtmf=send_dtmf,
+            bridge=bridge,
         )
     except Exception:
         logger.exception(
@@ -607,6 +718,75 @@ def disconnect_reason_to_status(reason: int | None) -> tuple[str | None, str | N
         return (None, None)
     status, end_reason = mapped
     return (status, end_reason.value)
+
+
+async def _drop_room(ctx: JobContext, call_id: UUID) -> None:
+    try:
+        await ctx.delete_room()
+    except Exception:
+        logger.exception("call_id=%s delete_room failed after handover", call_id)
+
+
+def handle_sip_disconnect(
+    ctx: JobContext,
+    participant: rtc.RemoteParticipant,
+    captured: dict[str, str | None],
+    bridge_state: dict[str, Any],
+    call_id: UUID,
+) -> None:
+    """The room's ``participant_disconnected`` handler.
+
+    Without a handover this maps the SIP leg's disconnect reason onto the
+    call's terminal status (see :func:`disconnect_reason_to_status`).
+
+    With a handover there are two SIP legs. The contact's leg is identified
+    only by ``human-{call_id}`` (an inbound caller's identity is assigned by
+    LiveKit, so everything else SIP is the caller):
+
+    * contact leaves while ringing → nothing; the bridge handle reports it.
+    * contact hangs up after connecting → normal hangup; end the call.
+    * caller leaves → today's mapping, then delete the room so the contact's
+      leg (ringing or connected) is dropped too, then shut down.
+    """
+    # We only care about SIP participants — the agent (this process)
+    # also fires participant_disconnected on shutdown, which we ignore.
+    if participant.kind != rtc.ParticipantKind.PARTICIPANT_KIND_SIP:
+        return
+    human = bridge_state.get("human")
+    if human is not None and participant.identity == human:
+        if not bridge_state.get("connected"):
+            return
+        logger.info("call_id=%s handover contact hung up — ending call", call_id)
+        if captured["end_reason"] is None:
+            captured["end_reason"] = CallEndReason.NORMAL_HANGUP.value
+        asyncio.ensure_future(_drop_room(ctx, call_id))
+        ctx.shutdown(reason="handover_ended")
+        return
+    status, end_reason = disconnect_reason_to_status(participant.disconnect_reason)
+    if status is not None:
+        captured["status"] = status
+        captured["end_reason"] = end_reason
+        logger.info(
+            "call_id=%s sip participant disconnected — status=%s reason=%s",
+            call_id,
+            status,
+            end_reason,
+        )
+    if human is not None:
+        logger.info("call_id=%s caller left during handover — ending call", call_id)
+        asyncio.ensure_future(_drop_room(ctx, call_id))
+        ctx.shutdown(reason="caller_left")
+        return
+    if status is None:
+        # CLIENT_INITIATED — normal hangup after a real conversation.
+        # Leave captured as-is so `_shutdown` falls back to "completed".
+        return
+    # For reasons the agent SDK does not auto-close on (notably
+    # USER_UNAVAILABLE for no-answer), the session would otherwise sit
+    # idle until the worker times out. Force a graceful shutdown so
+    # `_shutdown` → `on_call_end` runs promptly.
+    if participant.disconnect_reason not in _SDK_AUTO_CLOSE_REASONS:
+        ctx.shutdown(reason=status)
 
 
 logger = logging.getLogger("hailhq.voicebot")
@@ -1333,31 +1513,13 @@ async def _run_call(
     # carries the latest value, not a snapshot.
     captured: dict[str, str | None] = {"status": None, "end_reason": None}
 
+    # Human handover: identity of the contact's leg while one is dialed or
+    # connected, and whether it answered. Written by the bridge handle.
+    bridge_state: dict[str, Any] = {"human": None, "connected": False}
+
     @ctx.room.on("participant_disconnected")
     def _on_participant_disconnected(participant: rtc.RemoteParticipant) -> None:
-        # We only care about the SIP participant — the agent (this process)
-        # also fires participant_disconnected on shutdown, which we ignore.
-        if participant.kind != rtc.ParticipantKind.PARTICIPANT_KIND_SIP:
-            return
-        status, end_reason = disconnect_reason_to_status(participant.disconnect_reason)
-        if status is None:
-            # CLIENT_INITIATED — normal hangup after a real conversation.
-            # Leave captured as-is so `_shutdown` falls back to "completed".
-            return
-        captured["status"] = status
-        captured["end_reason"] = end_reason
-        logger.info(
-            "call_id=%s sip participant disconnected — status=%s reason=%s",
-            call_id,
-            status,
-            end_reason,
-        )
-        # For reasons the agent SDK does not auto-close on (notably
-        # USER_UNAVAILABLE for no-answer), the session would otherwise sit
-        # idle until the worker times out. Force a graceful shutdown so
-        # `_shutdown` → `on_call_end` runs promptly.
-        if participant.disconnect_reason not in _SDK_AUTO_CLOSE_REASONS:
-            ctx.shutdown(reason=status)
+        handle_sip_disconnect(ctx, participant, captured, bridge_state, call_id)
 
     # Answer detection: flip the call to `in_progress` + stamp `answered_at`
     # the moment the SIP leg's `sip.callStatus` reaches `active` (callee
@@ -1520,6 +1682,7 @@ async def _run_call(
         call_id,
         make_agent_hangup(ctx, captured),
         make_agent_send_dtmf(ctx),
+        make_agent_bridge(ctx, session, call_id, bridge_state),
     )
     if agent_tools:
         logger.info(

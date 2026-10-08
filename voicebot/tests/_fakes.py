@@ -18,7 +18,9 @@ from __future__ import annotations
 
 import asyncio
 from typing import Any
+from unittest.mock import AsyncMock
 
+from livekit import rtc
 from livekit.agents.llm import (
     LLM,
     ChatChunk,
@@ -171,6 +173,53 @@ class FakeRoom:
         self.local_participant = FakeLocalParticipant()
 
 
+class FakeSip:
+    """``ctx.api.sip``: ``create_sip_participant`` is an ``AsyncMock``."""
+
+    def __init__(self) -> None:
+        self.create_sip_participant = AsyncMock()
+
+
+class FakeLKApi:
+    """``ctx.api`` (a ``LiveKitAPI``): only the SIP service is used."""
+
+    def __init__(self) -> None:
+        self.sip = FakeSip()
+
+
+class FakeAudioToggle:
+    """``session.input`` / ``session.output``: records ``set_audio_enabled``."""
+
+    def __init__(self) -> None:
+        self.enabled: list[bool] = []
+
+    def set_audio_enabled(self, enabled: bool) -> None:
+        self.enabled.append(enabled)
+
+
+class FakeBridgeSession:
+    """AgentSession surface used by the bridge handle: ``say`` plus the
+    ``input`` / ``output`` audio toggles."""
+
+    def __init__(self) -> None:
+        self.said: list[str] = []
+        self.input = FakeAudioToggle()
+        self.output = FakeAudioToggle()
+
+    def say(self, text: str, *, allow_interruptions: bool = True) -> FakeSpeechHandle:
+        self.said.append(text)
+        return FakeSpeechHandle()
+
+
+class FakeParticipant:
+    """A SIP ``RemoteParticipant`` as seen by the disconnect handler."""
+
+    def __init__(self, identity: str, reason: int) -> None:
+        self.identity = identity
+        self.kind = rtc.ParticipantKind.PARTICIPANT_KIND_SIP
+        self.disconnect_reason = reason
+
+
 class FakeJobContext:
     """Stand-in for livekit.agents.JobContext.
 
@@ -185,6 +234,7 @@ class FakeJobContext:
         self.delete_room_calls: int = 0
         self.delete_room_error: Exception | None = None
         self.room = FakeRoom()
+        self.api = FakeLKApi()
 
     def shutdown(self, reason: str = "") -> None:
         self.shutdown_calls.append(reason)
@@ -201,10 +251,15 @@ class FakeJobContext:
 
 __all__ = [
     "FakeAnnouncingSession",
+    "FakeAudioToggle",
+    "FakeBridgeSession",
     "FakeJobContext",
+    "FakeLKApi",
     "FakeLLM",
     "FakeLocalParticipant",
+    "FakeParticipant",
     "FakeRoom",
+    "FakeSip",
     "FakeSpeechHandle",
 ]
 

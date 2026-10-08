@@ -63,6 +63,7 @@ async def build_agent_tools(
     call_id: UUID,
     hangup,
     send_dtmf,
+    bridge=None,
 ) -> tuple[list, AgentApiClient | None]:
     """Build this call's LiveKit tools. Returns (tools, api_client).
 
@@ -93,7 +94,18 @@ async def build_agent_tools(
             type(allowed).__name__,
         )
         return [], None
-    specs = [s for s in all_tools() if allowed is None or s.name in allowed]
+    specs: list[ToolSpec] = []
+    for s in all_tools():
+        if allowed is not None and s.name not in allowed:
+            continue
+        if s.bind is not None:
+            # Per-call tools (transfer_call) shape themselves from the
+            # dispatch metadata, or drop out when it has nothing for them.
+            bound = s.bind(metadata)
+            if bound is None:
+                continue
+            s = bound
+        specs.append(s)
     if not specs:
         return [], None
 
@@ -107,6 +119,7 @@ async def build_agent_tools(
         api=api,
         hangup=hangup,
         send_dtmf=send_dtmf,
+        bridge=bridge,
     )
 
     available: list[ToolSpec] = []

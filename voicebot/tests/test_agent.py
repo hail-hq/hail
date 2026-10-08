@@ -19,6 +19,7 @@ from uuid import UUID
 
 import pytest
 from cryptography.fernet import InvalidToken
+from hailhq.core.agent_tools.spec import BridgeRoute
 from hailhq.core.call_end_reasons import CallEndReason
 from hailhq.core.models import Call, CallEvent, PhoneNumber, UsageEvent
 from hailhq.core.pool import CALL_META_FROM_POOL
@@ -35,7 +36,9 @@ from hailhq.voicebot.agent import (
     build_tools_safely,
     disconnect_reason_to_status,
     entrypoint,
+    handle_sip_disconnect,
     is_sip_answer_signal,
+    make_agent_bridge,
     make_agent_hangup,
     make_agent_send_dtmf,
     mark_call_answered,
@@ -48,10 +51,19 @@ from hailhq.voicebot.agent import (
 )
 from livekit import rtc
 from livekit.agents import Agent, AgentSession
+from livekit.api import SipCallError
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ._fakes import FakeAnnouncingSession, FakeJobContext, FakeLLM
+from ._fakes import (
+    FakeAnnouncingSession,
+    FakeBridgeSession,
+    FakeJobContext,
+    FakeLLM,
+    FakeParticipant,
+)
+
+CALL_ID = UUID("22222222-3333-4444-5555-666666666666")
 
 
 def test_metadata_parser_handles_missing_optional_fields() -> None:
@@ -1524,6 +1536,7 @@ async def test_build_tools_safely_passes_through_on_success(
         call_id: UUID,
         hangup: object,
         send_dtmf: object,
+        bridge: object = None,
     ) -> tuple:
         return sentinel_tools, sentinel_api
 
@@ -1572,3 +1585,113 @@ async def test_speak_greeting_uses_inbound_line_and_agent_template():
         },
     )
     assert session.say_calls == [("You reached Acme. I am an AI. Hello.", True)]
+
+
+# --- human handover bridge -------------------------------------------------
+
+
+async def test_bridge_answered_mutes_agent() -> None:
+    ctx = FakeJobContext()
+    session = FakeBridgeSession()
+    state = {"human": None, "connected": False}
+    bridge = make_agent_bridge(ctx, session, CALL_ID, state)  # type: ignore[arg-type]
+    out = await bridge(
+        BridgeRoute("+14155550120", "+14155550100", "ST_x", None, "Sam", "an invoice")
+    )
+    assert out.outcome == "answered"
+    req = ctx.api.sip.create_sip_participant.await_args.args[0]
+    assert req.sip_number == "+14155550100"
+    assert req.sip_call_to == "+14155550120"
+    assert req.sip_trunk_id == "ST_x"
+    assert req.room_name == ctx.room.name
+    assert req.participant_identity == f"human-{CALL_ID}"
+    assert req.wait_until_answered is True
+    assert req.ringing_timeout.seconds == 30
+    assert session.said == [
+        "Hi Sam, I have a caller about an invoice. Connecting you now."
+    ]
+    assert session.input.enabled == [False] and session.output.enabled == [False]
+    assert state["connected"] is True
+
+
+@pytest.mark.parametrize(
+    "status,expected", [(486, "busy"), (480, "no_answer"), (500, "failed")]
+)
+async def test_bridge_failure_keeps_agent(status, expected) -> None:
+    ctx = FakeJobContext()
+    ctx.api.sip.create_sip_participant.side_effect = SipCallError(
+        "unavailable", "fail", status=200, metadata={"sip_status_code": str(status)}
+    )
+    session = FakeBridgeSession()
+    state = {"human": None, "connected": False}
+    out = await make_agent_bridge(ctx, session, CALL_ID, state)(  # type: ignore[arg-type]
+        BridgeRoute("+1", "+1", "ST", None, "Sam", "")
+    )
+    assert out.outcome == expected and out.sip_status == status
+    assert session.input.enabled == [] and state["human"] is None
+
+
+async def test_bridge_timeout_is_no_answer() -> None:
+    ctx = FakeJobContext()
+    ctx.api.sip.create_sip_participant.side_effect = asyncio.TimeoutError()
+    session = FakeBridgeSession()
+    state = {"human": None, "connected": False}
+    out = await make_agent_bridge(ctx, session, CALL_ID, state)(  # type: ignore[arg-type]
+        BridgeRoute("+1", "+1", "ST", None, "Sam", "")
+    )
+    assert out.outcome == "no_answer" and out.sip_status is None
+    assert state == {"human": None, "connected": False}
+
+
+def test_human_leg_disconnect_does_not_restamp_call() -> None:
+    ctx = FakeJobContext()
+    captured = {"status": None, "end_reason": None}
+    state = {"human": f"human-{CALL_ID}", "connected": False}
+    p = FakeParticipant(
+        identity=f"human-{CALL_ID}", reason=rtc.DisconnectReason.USER_REJECTED
+    )
+    handle_sip_disconnect(ctx, p, captured, state, CALL_ID)  # type: ignore[arg-type]
+    assert captured == {"status": None, "end_reason": None}
+    assert ctx.shutdown_calls == []
+
+
+async def test_caller_leaves_while_ringing_deletes_room() -> None:
+    ctx = FakeJobContext()
+    captured = {"status": None, "end_reason": None}
+    state = {"human": f"human-{CALL_ID}", "connected": False}
+    p = FakeParticipant(
+        identity="caller-x", reason=rtc.DisconnectReason.CLIENT_INITIATED
+    )
+    handle_sip_disconnect(ctx, p, captured, state, CALL_ID)  # type: ignore[arg-type]
+    await asyncio.sleep(0)
+    assert ctx.delete_room_calls == 1
+    assert ctx.shutdown_calls == ["caller_left"]
+
+
+async def test_person_hangs_up_after_connect_ends_call() -> None:
+    ctx = FakeJobContext()
+    captured = {"status": None, "end_reason": None}
+    state = {"human": f"human-{CALL_ID}", "connected": True}
+    p = FakeParticipant(
+        identity=f"human-{CALL_ID}", reason=rtc.DisconnectReason.CLIENT_INITIATED
+    )
+    handle_sip_disconnect(ctx, p, captured, state, CALL_ID)  # type: ignore[arg-type]
+    await asyncio.sleep(0)
+    assert captured["end_reason"] == CallEndReason.NORMAL_HANGUP.value
+    assert ctx.delete_room_calls == 1
+
+
+async def test_disconnect_without_handover_keeps_mapping() -> None:
+    ctx = FakeJobContext()
+    captured = {"status": None, "end_reason": None}
+    state = {"human": None, "connected": False}
+    p = FakeParticipant(
+        identity="caller-x", reason=rtc.DisconnectReason.USER_UNAVAILABLE
+    )
+    handle_sip_disconnect(ctx, p, captured, state, CALL_ID)  # type: ignore[arg-type]
+    status, end_reason = disconnect_reason_to_status(
+        rtc.DisconnectReason.USER_UNAVAILABLE
+    )
+    assert captured == {"status": status, "end_reason": end_reason}
+    assert ctx.shutdown_calls == [status]
+    assert ctx.delete_room_calls == 0

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import uuid
+from unittest.mock import AsyncMock
 
 from hailhq.voicebot.tools import (
     SPOKEN_TOOL_FAILURE,
@@ -154,6 +155,43 @@ async def test_availability_failure_does_not_poison_session(db, monkeypatch):
     )
     try:
         assert [get_raw_function_info(t).name for t in tools] == ["healthy_tool"]
+    finally:
+        if api is not None:
+            await api.aclose()
+
+
+async def test_bind_shapes_transfer_call(db) -> None:
+    meta = {
+        "organization_id": str(uuid.uuid4()),
+        "tools": None,
+        "handover_targets": [
+            {"contact_id": str(uuid.uuid4()), "label": "Sam", "note": "Billing"}
+        ],
+    }
+    tools, api = await build_agent_tools(
+        meta, call_id=uuid.uuid4(), hangup=None, send_dtmf=None, bridge=AsyncMock()
+    )
+    try:
+        names = [t.info.name for t in tools]
+        assert "transfer_call" in names
+        (tool,) = [t for t in tools if t.info.name == "transfer_call"]
+        assert "Sam (Billing)" in tool.info.raw_schema["description"]
+    finally:
+        if api is not None:
+            await api.aclose()
+
+
+async def test_transfer_call_hidden_without_targets(db) -> None:
+    meta = {
+        "organization_id": str(uuid.uuid4()),
+        "tools": None,
+        "handover_targets": [],
+    }
+    tools, api = await build_agent_tools(
+        meta, call_id=uuid.uuid4(), hangup=None, send_dtmf=None, bridge=AsyncMock()
+    )
+    try:
+        assert "transfer_call" not in [t.info.name for t in tools]
     finally:
         if api is not None:
             await api.aclose()
