@@ -41,15 +41,20 @@ from hailhq.core.agent_tools.send_sms import MAX_BODY_CHARS as SMS_MAX_BODY_CHAR
 from hailhq.core.billing import CALL_META_BILLED, has_funds
 from hailhq.core.carrier_routing import voice_route
 from hailhq.core.compliance_gate import (
-    check_call_allowed,
     check_email_allowed,
+    check_handover_allowed,
     check_sms_allowed,
     normalize_recipient,
 )
 from hailhq.core.db import get_session
 from hailhq.core.directory import resolve_member_emails
 from hailhq.core.email_sender import from_address_for
-from hailhq.core.handover import country_of
+from hailhq.core.handover import (
+    HANDOVER_ANSWERED,
+    HANDOVER_EVENT_KIND,
+    country_of,
+    has_answered_handover,
+)
 from hailhq.core.models import (
     Agent,
     AgentHandoverContact,
@@ -676,6 +681,7 @@ class AgentHandoverResponse(BaseModel):
 
 class AgentHandoverResultRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
+    tool_invocation_id: UUID
     call_id: UUID
     contact_id: UUID
     outcome: Literal["answered", "no_answer", "busy", "failed"]
@@ -683,14 +689,17 @@ class AgentHandoverResultRequest(BaseModel):
     ring_ms: int = Field(ge=0)
 
 
-async def _answered_handover(db: AsyncSession, call_id: UUID) -> bool:
+async def _handover_result_recorded(
+    db: AsyncSession, call_id: UUID, tool_invocation_id: UUID
+) -> bool:
     return (
         await db.execute(
             select(CallEvent.id)
             .where(
                 CallEvent.call_id == call_id,
-                CallEvent.kind == "handover",
-                CallEvent.payload["outcome"].astext == "answered",
+                CallEvent.kind == HANDOVER_EVENT_KIND,
+                CallEvent.payload["tool_invocation_id"].astext
+                == str(tool_invocation_id),
             )
             .limit(1)
         )
@@ -724,7 +733,7 @@ async def agent_handover(
     call = await db.get(Call, body.call_id)
     if call is None or call.status != "in_progress":
         return deny
-    if await _answered_handover(db, call.id):
+    if await has_answered_handover(db, call.id):
         return AgentHandoverResponse(ok=False, spoken=_SPOKEN_HANDOVER_DONE)
     if call.metadata_.get(CALL_META_BILLED) and not await has_funds(
         db, call.organization_id
@@ -740,7 +749,7 @@ async def agent_handover(
         sold = False
     if not sold:
         return await _deny_handover(call, body, "country_not_sold")
-    gate = await check_call_allowed(db, call.organization_id, contact.phone_e164)
+    gate = await check_handover_allowed(db, call.organization_id, contact.phone_e164)
     if not gate.allowed:
         return await _deny_handover(call, body, gate.reason or "gate")
     try:
@@ -785,14 +794,17 @@ async def agent_handover_result(
     contact = await _linked_contact(db, call, body.contact_id)
     if contact is None:
         return {"ok": False}
-    if body.outcome == "answered" and await _answered_handover(db, call.id):
+    if body.outcome == HANDOVER_ANSWERED and await has_answered_handover(db, call.id):
         return {"ok": True}  # retried result: already recorded
+    if await _handover_result_recorded(db, call.id, body.tool_invocation_id):
+        return {"ok": True}
     name = contact.name
     db.add(
         CallEvent(
             call_id=call.id,
-            kind="handover",
+            kind=HANDOVER_EVENT_KIND,
             payload={
+                "tool_invocation_id": str(body.tool_invocation_id),
                 "contact_id": str(body.contact_id),
                 "name": name,
                 "outcome": body.outcome,
@@ -801,7 +813,7 @@ async def agent_handover_result(
             },
         )
     )
-    if body.outcome == "answered":
+    if body.outcome == HANDOVER_ANSWERED:
         await fanout_call_event(
             db,
             organization_id=call.organization_id,

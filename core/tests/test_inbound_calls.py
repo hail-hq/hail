@@ -277,6 +277,7 @@ async def test_accepted_call_rings_and_returns_dispatch_metadata(async_session) 
     assert md["tools"] == ["end_call"]
     assert md["handover_targets"] == []
     assert md["max_duration_seconds"] == 600
+    assert md["handover_max_duration_seconds"] == 1800  # the default: 30 minutes
     assert md["voice_config"] == {"voice_id": "v1", "language": "fr"}
     assert md["llm"] is None
 

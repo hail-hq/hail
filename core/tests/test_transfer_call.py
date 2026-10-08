@@ -190,7 +190,7 @@ async def test_answered_post_retries(monkeypatch) -> None:
     assert api.post.await_count == 4
 
 
-async def test_answered_post_gives_up_after_three_attempts(monkeypatch) -> None:
+async def test_answered_post_gives_up_after_the_last_attempt(monkeypatch) -> None:
     monkeypatch.setattr(transfer_call, "_ANSWERED_BACKOFF", (0, 0))
     spec = transfer_call.bind(META)
     ctx, api, _ = _ctx(ROUTE)

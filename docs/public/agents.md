@@ -66,9 +66,11 @@ There is no MCP update tool; change them with the CLI or the API.
   offers to take a message.
 - On answer, the agent says who is calling and why, then goes silent. If
   either side hangs up, the call ends.
-- `max_duration_seconds` stops applying once the contact answers: the call
-  runs until the caller or the contact hangs up. After 12 hours Hail closes
-  the call record.
+- `max_duration_seconds` stops applying once the contact answers.
+  `handover_max_duration_seconds` (60..3600, default 1800 = 30 minutes;
+  CLI `--handover-max-minutes`) counts from the answer. When it is reached
+  the agent says goodbye and the call ends for both people. Either person
+  can hang up sooner.
 - Billed as one call at the normal voice rate.
 - Sends a [`call.transferred`](webhooks.md) webhook when the contact answers.
 - `PATCH` with `[]` clears the list; omit the field (or send `null`) to leave it.

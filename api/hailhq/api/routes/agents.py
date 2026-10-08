@@ -54,7 +54,14 @@ router = APIRouter(
     prefix="/agents", tags=["agents"], responses=GENERAL_RATE_LIMITED_RESPONSES
 )
 
-_CONFLICT = {409: {"description": "An agent with this name already exists."}}
+_CONFLICT = {
+    409: {
+        "description": (
+            "An agent with this name already exists, or a handover contact "
+            "changed while saving."
+        )
+    }
+}
 
 
 async def _load_owned(db: AsyncSession, agent_id: UUID, org_id: UUID) -> Agent:
@@ -96,7 +103,12 @@ def _with_handover_tool(
     return list(tools) if "transfer_call" in tools else [*tools, "transfer_call"]
 
 
-async def _check_handover(db: AsyncSession, org_id: UUID, items) -> list[HandoverItem]:
+async def _check_handover(
+    db: AsyncSession,
+    org_id: UUID,
+    items,
+    unchanged: frozenset[UUID] = frozenset(),
+) -> list[HandoverItem]:
     parsed = [HandoverItem(i.contact_id, i.note.strip()) for i in items]
     for index, item in enumerate(parsed):
         if not item.note:
@@ -104,7 +116,7 @@ async def _check_handover(db: AsyncSession, org_id: UUID, items) -> list[Handove
                 "note must not be blank", loc=["body", "handover_contacts", index]
             )
     try:
-        await validate_handover(db, org_id, parsed)
+        await validate_handover(db, org_id, parsed, unchanged)
     except HandoverInvalid as exc:
         loc: list = ["body", "handover_contacts"]
         if exc.index is not None:
@@ -127,11 +139,14 @@ async def _respond(db: AsyncSession, agents: list[Agent]) -> list[AgentResponse]
     ]
 
 
-def _name_conflict() -> HTTPException:
-    return HTTPException(
-        status_code=http_status.HTTP_409_CONFLICT,
-        detail="an agent with this name already exists",
-    )
+def _save_conflict(exc: IntegrityError) -> HTTPException:
+    """409 for a failed save: a duplicate name, or a handover contact that was
+    deleted or relinked by another request between the check and the commit."""
+    if "agents_org_name_uq" in str(exc.orig):
+        detail = "an agent with this name already exists"
+    else:
+        detail = "a handover contact changed while saving; try again"
+    return HTTPException(status_code=http_status.HTTP_409_CONFLICT, detail=detail)
 
 
 @router.post(
@@ -161,6 +176,7 @@ async def create_agent(
         voice_config=body.voice_config.model_dump(mode="json"),
         tools=_with_handover_tool(body.tools, bool(handover)),
         max_duration_seconds=body.max_duration_seconds,
+        handover_max_duration_seconds=body.handover_max_duration_seconds,
         voice_enabled=body.voice_enabled,
         sms_enabled=body.sms_enabled,
         status=body.status,
@@ -172,7 +188,7 @@ async def create_agent(
         await db.commit()
     except IntegrityError as exc:
         await db.rollback()
-        raise _name_conflict() from exc
+        raise _save_conflict(exc) from exc
     await db.refresh(agent)
     actor_user_id, actor_kind = actor_of(principal)
     await write_audit_log(
@@ -242,7 +258,8 @@ async def update_agent(
     db: Annotated[AsyncSession, Depends(get_session)],
 ) -> AgentResponse:
     """Change some fields. Fields left out keep their value; ``null`` clears
-    first_message, ai_disclosure_line, tools or max_duration_seconds. Live
+    first_message, ai_disclosure_line, tools, max_duration_seconds or
+    handover_max_duration_seconds. Live
     calls keep the settings they started with. ``handover_contacts`` replaces
     the list; ``[]`` clears it and ``null`` leaves it."""
     agent = await _load_owned(db, agent_id, principal.organization_id)
@@ -270,8 +287,16 @@ async def update_agent(
     # autoflush a pending name change outside the conflict handler below.
     items = None
     if body.handover_contacts is not None:
+        # Contacts already linked are not re-checked: the console sends the
+        # whole list on every save, and an old link whose number later went
+        # on the DNC list must not block an unrelated edit. /handover checks
+        # again before every dial.
+        linked = frozenset(
+            c["contact_id"]
+            for c in (await load_handover(db, [agent.id])).get(agent.id, [])
+        )
         items = await _check_handover(
-            db, principal.organization_id, body.handover_contacts
+            db, principal.organization_id, body.handover_contacts, linked
         )
     if "tools" in changes or items is not None:
         # Same rule as create, on the values the agent will have after this.
@@ -295,7 +320,7 @@ async def update_agent(
             await db.commit()
         except IntegrityError as exc:
             await db.rollback()
-            raise _name_conflict() from exc
+            raise _save_conflict(exc) from exc
         await db.refresh(agent)
         actor_user_id, actor_kind = actor_of(principal)
         await write_audit_log(

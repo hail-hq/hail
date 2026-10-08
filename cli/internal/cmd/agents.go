@@ -106,20 +106,21 @@ func newAgentsGetCmd(opts *Options) *cobra.Command {
 // agentFlags are shared by create and update. update sends only the flags
 // the user set (cobra's Changed), so a field left out keeps its value.
 type agentFlags struct {
-	prompt       string
-	promptFile   string
-	firstMessage string
-	aiLine       string
-	noAILine     bool
-	voiceID      string
-	language     string
-	maxMinutes   int
-	tools        []string
-	noSms        bool
-	noCalls      bool
-	status       string
-	name         string
-	handover     []string
+	prompt          string
+	promptFile      string
+	firstMessage    string
+	aiLine          string
+	noAILine        bool
+	voiceID         string
+	language        string
+	maxMinutes      int
+	handoverMinutes int
+	tools           []string
+	noSms           bool
+	noCalls         bool
+	status          string
+	name            string
+	handover        []string
 }
 
 func (f *agentFlags) bind(cmd *cobra.Command) {
@@ -131,6 +132,7 @@ func (f *agentFlags) bind(cmd *cobra.Command) {
 	cmd.Flags().StringVar(&f.voiceID, "voice", "", "TTS voice id")
 	cmd.Flags().StringVar(&f.language, "language", "", "Spoken language, ISO 639-1 (e.g. fr)")
 	cmd.Flags().IntVar(&f.maxMinutes, "max-minutes", 0, "Soft cap per call, 1..60 minutes (0 = workspace limit)")
+	cmd.Flags().IntVar(&f.handoverMinutes, "handover-max-minutes", 0, "Call limit after a handover contact answers, 1..60 minutes (0 = default, 30)")
 	cmd.Flags().StringSliceVar(&f.tools, "tools", nil, "Allowed tools, comma-separated ('' = none; omitted = all; on update, --all-tools resets to all)")
 	cmd.Flags().BoolVar(&f.noSms, "no-sms", false, "Do not answer texts")
 	cmd.Flags().BoolVar(&f.noCalls, "no-calls", false, "Do not answer calls")
@@ -211,6 +213,13 @@ func (f *agentFlags) body(cmd *cobra.Command, create bool, voice map[string]any)
 			b["max_duration_seconds"] = nil
 		} else {
 			b["max_duration_seconds"] = f.maxMinutes * 60
+		}
+	}
+	if changed("handover-max-minutes") {
+		if f.handoverMinutes == 0 {
+			b["handover_max_duration_seconds"] = nil
+		} else {
+			b["handover_max_duration_seconds"] = f.handoverMinutes * 60
 		}
 	}
 	if changed("tools") {

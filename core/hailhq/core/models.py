@@ -433,6 +433,11 @@ class Agent(Base):
     tools: Mapped[list[str] | None] = mapped_column(ARRAY(Text), nullable=True)
     # NULL = the workspace limit.
     max_duration_seconds: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Limit once a handover contact answers, counted from the answer.
+    # NULL = handover.HANDOVER_DEFAULT_MAX_SECONDS (30 min).
+    handover_max_duration_seconds: Mapped[int | None] = mapped_column(
+        Integer, nullable=True
+    )
     # Which channels the agent answers. Both default on; a number can only
     # route a channel to an agent that answers it.
     voice_enabled: Mapped[bool] = mapped_column(
@@ -455,6 +460,11 @@ class Agent(Base):
         CheckConstraint(
             "max_duration_seconds IS NULL OR max_duration_seconds BETWEEN 60 AND 3600",
             name="agents_max_duration_check",
+        ),
+        CheckConstraint(
+            "handover_max_duration_seconds IS NULL "
+            "OR handover_max_duration_seconds BETWEEN 60 AND 3600",
+            name="agents_handover_max_duration_check",
         ),
     )
 

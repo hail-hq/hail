@@ -771,3 +771,87 @@ async def test_agent_patch_handover_syncs_transfer_call(client, org) -> None:
         headers=headers,
     )
     assert r.json()["tools"] is None
+
+
+async def test_agent_patch_does_not_recheck_contacts_already_linked(
+    client, org, async_session
+) -> None:
+    """The console resends the whole list on every save. A linked contact
+    whose number is later blocked must not stop an unrelated edit; a newly
+    added blocked contact is still refused."""
+    from hailhq.core.compliance_gate import add_suppression
+
+    org_id, headers = org
+    old = await _contact(client, headers)
+    new = await _contact(client, headers, name="Kim", phone="+14155550122")
+    agent_id = (
+        await client.post(
+            "/agents",
+            json={
+                "name": "Desk",
+                "system_prompt": "Help.",
+                "handover_contacts": [{"contact_id": old, "note": "Billing"}],
+            },
+            headers=headers,
+        )
+    ).json()["id"]
+    for phone in ("+14155550111", "+14155550122"):
+        await add_suppression(
+            async_session,
+            organization_id=org_id,
+            recipient=phone,
+            channel="voice",
+            reason="manual",
+            source="test",
+        )
+    await async_session.commit()
+    r = await client.patch(
+        f"/agents/{agent_id}",
+        json={
+            "name": "Desk 2",
+            "handover_contacts": [{"contact_id": old, "note": "Billing"}],
+        },
+        headers=headers,
+    )
+    assert r.status_code == 200, r.text
+    r = await client.patch(
+        f"/agents/{agent_id}",
+        json={
+            "handover_contacts": [
+                {"contact_id": old, "note": "Billing"},
+                {"contact_id": new, "note": "Sales"},
+            ]
+        },
+        headers=headers,
+    )
+    assert r.status_code == 422, r.text
+    assert r.json()["detail"][0]["loc"] == ["body", "handover_contacts", 1]
+
+
+async def test_agent_handover_max_duration_round_trip(client, org) -> None:
+    _, headers = org
+    r = await client.post(
+        "/agents", json={"name": "Desk", "system_prompt": "Help."}, headers=headers
+    )
+    assert r.json()["handover_max_duration_seconds"] is None
+    agent_id = r.json()["id"]
+    r = await client.patch(
+        f"/agents/{agent_id}",
+        json={"handover_max_duration_seconds": 900},
+        headers=headers,
+    )
+    assert r.json()["handover_max_duration_seconds"] == 900
+    r = await client.patch(f"/agents/{agent_id}", json={"name": "D2"}, headers=headers)
+    assert r.json()["handover_max_duration_seconds"] == 900  # untouched
+    r = await client.patch(
+        f"/agents/{agent_id}",
+        json={"handover_max_duration_seconds": None},
+        headers=headers,
+    )
+    assert r.json()["handover_max_duration_seconds"] is None
+    r = await client.patch(
+        f"/agents/{agent_id}",
+        json={"handover_max_duration_seconds": 30},
+        headers=headers,
+    )
+    assert r.status_code == 422

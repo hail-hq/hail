@@ -69,9 +69,18 @@ def capabilities(
 
 def sells_in(country_code: str, provider: str = "auto") -> bool:
     """True when ``provider`` (or any carrier the API buys from, for 'auto')
-    lists any number in ``country_code``. The handover destination guard:
-    a flat per-minute rate only covers countries Hail already sells in."""
+    sells a number in ``country_code`` that can place calls: the same test
+    as :func:`capabilities`, so receive-only and by-request rows do not
+    count. The handover destination guard: a flat per-minute rate only
+    covers countries Hail already sells in."""
     from hailhq.core.number_offers import PROVIDERS
 
     providers = PROVIDERS if provider == "auto" else (provider,)
-    return any(cc == country_code for name in providers for cc, _ in _load(name))
+    number_types = {
+        nt for name in providers for cc, nt in _load(name) if cc == country_code
+    }
+    for number_type in number_types:
+        caps = capabilities(country_code, number_type, provider)
+        if caps is not None and caps["voice"]:
+            return True
+    return False

@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from uuid import UUID
 
 import phonenumbers
-from hailhq.core.compliance_gate import check_call_allowed
+from hailhq.core.compliance_gate import check_handover_allowed
 from hailhq.core.models import AgentHandoverContact, Call, CallEvent, Contact
 from hailhq.core.telephony_catalog import sells_in
 from sqlalchemy import Exists, delete, exists, select
@@ -19,20 +19,30 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 MAX_HANDOVER_CONTACTS = 10
 
+# How long a call may run after a handover contact answers, counted from the
+# answer, when the agent sets no ``handover_max_duration_seconds``.
+HANDOVER_DEFAULT_MAX_SECONDS = 30 * 60
+
 # Once a handover contact answers, max_duration_seconds no longer applies and
 # the call runs until someone hangs up. The sweep then waits this long after
 # COALESCE(started_at, requested_at) before closing the row. It only closes
 # the DB row of a crashed worker; the voicebot does not enforce it.
 HANDOVER_BACKSTOP_SECONDS = 12 * 60 * 60
 
+# The one definition of "a handover contact answered": a call_events row with
+# kind HANDOVER_EVENT_KIND and payload outcome HANDOVER_ANSWERED. The SQL and
+# ORM forms below and the voicebot's result post all read these two values.
+HANDOVER_EVENT_KIND = "handover"
+HANDOVER_ANSWERED = "answered"
+
 # SQL: true when call ``c`` has a handover the contact answered. Shared with
 # :func:`hailhq.core.pool.sweep_pool_reservations` and
 # :func:`hailhq.core.reconcile.sweep_stale_calls`.
-ANSWERED_HANDOVER_SQL = """EXISTS (
+ANSWERED_HANDOVER_SQL = f"""EXISTS (
                 SELECT 1 FROM call_events e
                  WHERE e.call_id = c.id
-                   AND e.kind = 'handover'
-                   AND e.payload->>'outcome' = 'answered'
+                   AND e.kind = '{HANDOVER_EVENT_KIND}'
+                   AND e.payload->>'outcome' = '{HANDOVER_ANSWERED}'
               )"""
 
 
@@ -40,9 +50,17 @@ def answered_handover_exists() -> Exists:
     """ORM form of :data:`ANSWERED_HANDOVER_SQL` for a query over ``Call``."""
     return exists().where(
         CallEvent.call_id == Call.id,
-        CallEvent.kind == "handover",
-        CallEvent.payload["outcome"].astext == "answered",
+        CallEvent.kind == HANDOVER_EVENT_KIND,
+        CallEvent.payload["outcome"].astext == HANDOVER_ANSWERED,
     )
+
+
+async def has_answered_handover(db: AsyncSession, call_id: UUID) -> bool:
+    return (
+        await db.execute(
+            select(Call.id).where(Call.id == call_id, answered_handover_exists())
+        )
+    ).first() is not None
 
 
 @dataclass(frozen=True)
@@ -67,8 +85,15 @@ def country_of(e164: str) -> str | None:
 
 
 async def validate_handover(
-    db: AsyncSession, org_id: UUID, items: list[HandoverItem]
+    db: AsyncSession,
+    org_id: UUID,
+    items: list[HandoverItem],
+    unchanged: frozenset[UUID] = frozenset(),
 ) -> None:
+    """Check the whole list's shape, and each contact's number and gate.
+    Contacts in ``unchanged`` (already linked to the agent) skip the number
+    and gate checks, so editing something else never fails on an old link.
+    The runtime /handover route re-checks before every dial."""
     if len(items) > MAX_HANDOVER_CONTACTS:
         raise HandoverInvalid(f"at most {MAX_HANDOVER_CONTACTS} handover contacts")
     ids = [i.contact_id for i in items]
@@ -88,6 +113,8 @@ async def validate_handover(
         contact = rows.get(item.contact_id)
         if contact is None:
             raise HandoverInvalid("contact not found", index)
+        if item.contact_id in unchanged:
+            continue
         if not contact.phone_e164:
             raise HandoverInvalid(f"{contact.name} has no phone number", index)
         country = country_of(contact.phone_e164)
@@ -95,7 +122,7 @@ async def validate_handover(
             raise HandoverInvalid(
                 f"{contact.name}'s number is in a country Hail does not call", index
             )
-        gate = await check_call_allowed(db, org_id, contact.phone_e164)
+        gate = await check_handover_allowed(db, org_id, contact.phone_e164)
         if not gate.allowed:
             raise HandoverInvalid(f"{contact.name}'s number cannot be called", index)
 

@@ -162,6 +162,7 @@ def _agent_response(contact_id: str) -> dict:
         "voice_config": {},
         "tools": None,
         "max_duration_seconds": None,
+        "handover_max_duration_seconds": None,
         "voice_enabled": True,
         "sms_enabled": True,
         "status": "live",

@@ -161,3 +161,37 @@ def test_sells_in_known_country() -> None:
 def test_sells_in_unknown_country() -> None:
     assert telephony_catalog.sells_in("ZZ") is False
     assert telephony_catalog.sells_in("ZZ", "twilio") is False
+
+
+def test_sells_in_ignores_receive_only_and_by_request(tmp_path, monkeypatch):
+    def row(kind, **over):
+        return {
+            "country_code": "PT",
+            "number_type": kind,
+            "usd_per_month": "3.50",
+            "voice": True,
+            "sms": False,
+            "mms": False,
+            **over,
+        }
+
+    empty = {"numbers": [], "a2p_10dlc": []}
+    for name in ("twilio", "telnyx"):
+        (tmp_path / f"{name}.json").write_text(json.dumps(empty))
+    (tmp_path / "didww.json").write_text(
+        json.dumps(
+            {
+                "numbers": [
+                    row("national", by_request=True),
+                    row("toll_free", receive_only=True),
+                ]
+            }
+        )
+    )
+    monkeypatch.setenv("HAIL_TELEPHONY_CATALOG_DIR", str(tmp_path))
+    telephony_catalog._load.cache_clear()
+    try:
+        assert telephony_catalog.sells_in("PT") is False
+        assert telephony_catalog.sells_in("PT", "didww") is False
+    finally:
+        telephony_catalog._load.cache_clear()

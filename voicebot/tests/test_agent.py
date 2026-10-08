@@ -1913,6 +1913,34 @@ async def test_bridge_answer_cancels_pending_soft_cap() -> None:
     assert ctx.delete_room_calls == 0
 
 
+async def test_bridge_answer_starts_the_handover_limit_from_the_answer() -> None:
+    """The handover limit replaces the call limit: a new cap task counts from
+    the answer, and when it fires it announces and ends both legs."""
+    ctx = FakeJobContext()
+    session = FakeBridgeSession()
+    state: dict = {"human": None, "connected": False}
+    fired: list[bool] = []
+    cap = asyncio.create_task(asyncio.sleep(60))
+    state["soft_cap_task"] = cap
+    await asyncio.sleep(0)
+    out = await make_agent_bridge(
+        ctx,  # type: ignore[arg-type]
+        session,  # type: ignore[arg-type]
+        CALL_ID,
+        state,
+        handover_seconds=0.01,  # type: ignore[arg-type]
+        on_cap_fired=lambda: fired.append(True),
+    )(BridgeRoute("+1", "+1", "ST", None, "Sam", ""))
+    assert out.outcome == "answered"
+    assert cap.cancelled()
+    new_cap = state["soft_cap_task"]
+    assert new_cap is not cap
+    await new_cap
+    assert fired == [True]
+    assert SOFT_CAP_ANNOUNCEMENT in session.said
+    assert ctx.delete_room_calls == 1
+
+
 async def test_soft_cap_while_ringing_ends_both_legs() -> None:
     """Before the answer the limit still applies: a cap firing while the
     contact rings deletes the room (both legs) and ends the job."""

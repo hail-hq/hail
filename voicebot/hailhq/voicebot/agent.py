@@ -42,6 +42,7 @@ from hailhq.core.call_end_reasons import CallEndReason
 from hailhq.core.config import settings
 from hailhq.core.db import session_scope
 from hailhq.core.disclosure import disclosure_text
+from hailhq.core.handover import HANDOVER_DEFAULT_MAX_SECONDS
 from hailhq.core.inbound_calls import Rejected, SipAttributes, open_inbound_call
 from hailhq.core.internal_webhook import notify_usage_event_recorded
 from hailhq.core.models import Call, CallEvent, UsageEvent
@@ -386,6 +387,8 @@ def make_agent_bridge(
     session: AgentSession,
     call_id: UUID,
     bridge_state: dict[str, Any],
+    handover_seconds: int = 0,
+    on_cap_fired: Callable[[], None] | None = None,
 ) -> Callable[[BridgeRoute], Awaitable[BridgeOutcome]]:
     """Build the bridge handle wired into the ``transfer_call`` agent tool.
 
@@ -399,7 +402,9 @@ def make_agent_bridge(
     :func:`handle_sip_disconnect` can tell the contact's leg from the
     caller's while it rings; ``bridge_state["connected"]`` flips on answer.
     On answer the pending soft cap task (``bridge_state["soft_cap_task"]``)
-    is cancelled: the time limit stops applying once the contact answers.
+    is cancelled and, when ``handover_seconds`` is above 0, replaced by a new
+    one that counts from the answer: the handover call limit
+    (``handover_max_duration_seconds``) takes over from ``max_duration_seconds``.
 
     Verified against livekit-api ``sip_service.py`` (``create_sip_participant``
     raises ``SipCallError`` with ``sip_status_code``; ``wait_until_answered``
@@ -459,8 +464,8 @@ def make_agent_bridge(
         bridge_state["connected"] = True
         logger.info("call_id=%s handover answered after %d ms", call_id, ring_ms)
         # The contact answered: max_duration_seconds no longer applies. The
-        # call runs until the caller or the contact hangs up. A cap that
-        # already fired (announcing now) is left to finish.
+        # handover limit counts from now. A cap that already fired
+        # (announcing now) is left to finish.
         soft_cap = bridge_state.pop("soft_cap_task", None)
         if (
             soft_cap is not None
@@ -469,11 +474,23 @@ def make_agent_bridge(
         ):
             soft_cap.cancel()
             await asyncio.gather(soft_cap, return_exceptions=True)
+            if handover_seconds > 0:
+                bridge_state["soft_cap_task"] = asyncio.create_task(
+                    soft_cap_announce_and_hangup(
+                        ctx,
+                        session,
+                        call_id,
+                        handover_seconds,
+                        on_fire=on_cap_fired,
+                        bridge_state=bridge_state,
+                    )
+                )
         if route.on_answered is not None:
             # Record the answer before the intro: the sweepers lift the time
             # limit only once the "answered" event exists. Runs in the
-            # background (posts can retry for a minute); the task is held in
-            # bridge_state and awaited briefly at job shutdown.
+            # background (the post retries for about a minute, see transfer_call._post_answered);
+            # the task is held in bridge_state and awaited briefly at job
+            # shutdown.
             try:
                 post = route.on_answered(ring_ms)
             except Exception:
@@ -1818,12 +1835,24 @@ async def _run_call(
             captured["end_reason"] = CallEndReason.WORKER_SHUTDOWN.value
             captured["status"] = "failed"
 
+    def _on_soft_cap_fired() -> None:
+        captured["end_reason"] = CallEndReason.SOFT_CAP_REACHED.value
+        # Status stays None → on_call_end falls back to "completed".
+
     agent_tools, agent_api = await build_tools_safely(
         metadata,
         call_id,
         make_agent_hangup(ctx, captured, bridge_state),
         make_agent_send_dtmf(ctx),
-        make_agent_bridge(ctx, session, call_id, bridge_state),
+        make_agent_bridge(
+            ctx,
+            session,
+            call_id,
+            bridge_state,
+            handover_seconds=metadata.get("handover_max_duration_seconds")
+            or HANDOVER_DEFAULT_MAX_SECONDS,
+            on_cap_fired=_on_soft_cap_fired,
+        ),
     )
     if agent_tools:
         logger.info(
@@ -1857,12 +1886,8 @@ async def _run_call(
         # configured. Cancelled in `_shutdown` on every other exit path.
         #
         # When the cap actually fires (vs being cancelled by a natural
-        # hangup) stamp end_reason='soft_cap_reached' before ctx.shutdown so
-        # the shutdown callback writes it.
-        def _on_soft_cap_fired() -> None:
-            captured["end_reason"] = CallEndReason.SOFT_CAP_REACHED.value
-            # Status stays None → on_call_end falls back to "completed".
-
+        # hangup) _on_soft_cap_fired stamps end_reason='soft_cap_reached'
+        # before ctx.shutdown so the shutdown callback writes it.
         soft_cap_task = asyncio.create_task(
             soft_cap_announce_and_hangup(
                 ctx,
@@ -1904,9 +1929,11 @@ async def _run_call(
         nonlocal shutting_down
         shutting_down = True
         try:
-            if soft_cap_task is not None and not soft_cap_task.done():
-                soft_cap_task.cancel()
-                await asyncio.gather(soft_cap_task, return_exceptions=True)
+            # The bridge swaps in the handover cap once a contact answers.
+            cap_task = bridge_state.get("soft_cap_task") or soft_cap_task
+            if cap_task is not None and not cap_task.done():
+                cap_task.cancel()
+                await asyncio.gather(cap_task, return_exceptions=True)
             # Worker shutdown, BYO-LLM give-up or any other end while a
             # contact leg is up: drop both legs, not just the job.
             await drop_handover_leg(ctx, bridge_state, call_id)

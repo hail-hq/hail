@@ -32,9 +32,10 @@ _log = logging.getLogger("hailhq.core.agent_tools")
 _UNAVAILABLE = "I can't connect you to anyone right now."
 _CONNECTED = "Connected. They are talking now. Say nothing and do not end the call."
 _NO_ANSWER = "They could not pick up. Offer to take a message."
-# Waits between the 3 attempts of the "answered" result post. The stale-call
-# and pool sweeps rely on that event to lift the time limit.
-_ANSWERED_BACKOFF = (0.5, 1.0)
+# Waits between the 7 attempts of the "answered" result post (about a minute
+# in all). The stale-call and pool sweeps rely on that event to lift the time
+# limit, so a short API outage must not lose it.
+_ANSWERED_BACKOFF = (0.5, 1.0, 2.0, 4.0, 8.0, 15.0, 30.0)
 
 
 async def _always(_org: uuid.UUID, _session: AsyncSession) -> bool:
@@ -90,8 +91,13 @@ def bind(metadata: dict[str, Any]) -> ToolSpec | None:
             return "I can only connect you to: " + ", ".join(by_label) + "."
         reason = " ".join(str(args.get("reason", "")).split())[:MAX_REASON_CHARS]
 
+        # One id per attempt: the route stores one event per id, so a retried
+        # post (timeout, dropped connection) is not recorded twice.
+        invocation_id = str(uuid.uuid4())
+
         def _result(outcome: str, sip_status: int | None, ring_ms: int) -> dict:
             return {
+                "tool_invocation_id": invocation_id,
                 "call_id": str(ctx.call_id),
                 "contact_id": contact_id,
                 "outcome": outcome,

@@ -757,6 +757,15 @@ class AgentCreate(BaseModel):
         le=3600,
         description="Soft cap per call in seconds (60..3600). Omitted: the workspace limit.",
     )
+    handover_max_duration_seconds: int | None = Field(
+        default=None,
+        ge=60,
+        le=3600,
+        description=(
+            "Call limit in seconds (60..3600) once a handover contact answers, "
+            "counted from the answer. Omitted: 1800 (30 minutes)."
+        ),
+    )
     voice_enabled: bool = Field(
         default=True,
         description="Answer calls on numbers that route calls to this agent.",
@@ -787,7 +796,7 @@ class AgentCreate(BaseModel):
 class AgentUpdate(BaseModel):
     """PATCH /agents/{id}. Fields left out keep their value; ``null`` clears
     the nullable ones (first_message, ai_disclosure_line, tools,
-    max_duration_seconds)."""
+    max_duration_seconds, handover_max_duration_seconds)."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -821,6 +830,12 @@ class AgentUpdate(BaseModel):
         ge=60,
         le=3600,
         description="New soft cap per call; null returns to the workspace limit.",
+    )
+    handover_max_duration_seconds: int | None = Field(
+        default=None,
+        ge=60,
+        le=3600,
+        description="New call limit after a handover contact answers; null returns to 1800 (30 minutes).",
     )
     voice_enabled: bool | None = Field(
         default=None, description="Whether the agent answers calls."
@@ -862,6 +877,9 @@ class AgentResponse(BaseModel):
     tools: list[str] | None = Field(description="Allowed tools; null means all.")
     max_duration_seconds: int | None = Field(
         description="Soft cap per call; null means the workspace limit."
+    )
+    handover_max_duration_seconds: int | None = Field(
+        description="Call limit after a handover contact answers; null means 1800 (30 minutes)."
     )
     voice_enabled: bool = Field(description="Whether the agent answers calls.")
     sms_enabled: bool = Field(description="Whether the agent answers texts.")

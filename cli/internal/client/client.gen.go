@@ -1389,6 +1389,9 @@ type AgentCreate struct {
 	// HandoverContacts People the agent may hand a live call to, in order. The agent never sees their numbers.
 	HandoverContacts *[]HandoverContactIn `json:"handover_contacts,omitempty"`
 
+	// HandoverMaxDurationSeconds Call limit in seconds (60..3600) once a handover contact answers, counted from the answer. Omitted: 1800 (30 minutes).
+	HandoverMaxDurationSeconds *int `json:"handover_max_duration_seconds,omitempty"`
+
 	// MaxDurationSeconds Soft cap per call in seconds (60..3600). Omitted: the workspace limit.
 	MaxDurationSeconds *int `json:"max_duration_seconds,omitempty"`
 
@@ -1455,6 +1458,9 @@ type AgentResponse struct {
 	// HandoverContacts People the agent may hand a live call to.
 	HandoverContacts *[]HandoverContactOut `json:"handover_contacts,omitempty"`
 
+	// HandoverMaxDurationSeconds Call limit after a handover contact answers; null means 1800 (30 minutes).
+	HandoverMaxDurationSeconds *int `json:"handover_max_duration_seconds"`
+
 	// Id Unique identifier for this agent.
 	Id openapi_types.UUID `json:"id"`
 
@@ -1494,7 +1500,7 @@ type AgentResponseStatus string
 
 // AgentUpdate PATCH /agents/{id}. Fields left out keep their value; “null“ clears
 // the nullable ones (first_message, ai_disclosure_line, tools,
-// max_duration_seconds).
+// max_duration_seconds, handover_max_duration_seconds).
 type AgentUpdate struct {
 	// AiDisclosure Whether the AI line is spoken first.
 	AiDisclosure *bool `json:"ai_disclosure,omitempty"`
@@ -1507,6 +1513,9 @@ type AgentUpdate struct {
 
 	// HandoverContacts New handover list; replaces the old one. [] removes all; null leaves it.
 	HandoverContacts *[]HandoverContactIn `json:"handover_contacts,omitempty"`
+
+	// HandoverMaxDurationSeconds New call limit after a handover contact answers; null returns to 1800 (30 minutes).
+	HandoverMaxDurationSeconds *int `json:"handover_max_duration_seconds,omitempty"`
 
 	// MaxDurationSeconds New soft cap per call; null returns to the workspace limit.
 	MaxDurationSeconds *int `json:"max_duration_seconds,omitempty"`

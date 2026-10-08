@@ -1,4 +1,5 @@
-"""Contacts an agent may hand a live call over to.
+"""Contacts an agent may hand a live call over to, and the call limit after
+the contact answers.
 
 Revision ID: 0053
 Revises: 0052
@@ -17,6 +18,16 @@ depends_on = None
 
 
 def upgrade() -> None:
+    op.add_column(
+        "agents",
+        sa.Column("handover_max_duration_seconds", sa.Integer(), nullable=True),
+    )
+    op.create_check_constraint(
+        "agents_handover_max_duration_check",
+        "agents",
+        "handover_max_duration_seconds IS NULL "
+        "OR handover_max_duration_seconds BETWEEN 60 AND 3600",
+    )
     op.create_table(
         "agent_handover_contacts",
         sa.Column(
@@ -53,3 +64,5 @@ def upgrade() -> None:
 def downgrade() -> None:
     op.drop_index("agent_handover_contacts_contact_idx")
     op.drop_table("agent_handover_contacts")
+    op.drop_constraint("agents_handover_max_duration_check", "agents")
+    op.drop_column("agents", "handover_max_duration_seconds")

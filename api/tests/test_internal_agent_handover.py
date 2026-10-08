@@ -17,6 +17,7 @@ from hailhq.core.models import (
     Call,
     CallEvent,
     Contact,
+    UsageEvent,
     WebhookDelivery,
     WebhookSubscription,
 )
@@ -138,6 +139,7 @@ async def test_result_answered_writes_event_and_webhook(
         client,
         "/internal/agent/handover-result",
         {
+            "tool_invocation_id": str(uuid.uuid4()),
             "call_id": str(call.id),
             "contact_id": str(contact.id),
             "outcome": "answered",
@@ -154,6 +156,7 @@ async def test_result_answered_writes_event_and_webhook(
         )
     ).scalar_one()
     assert ev.payload == {
+        "tool_invocation_id": ev.payload["tool_invocation_id"],
         "contact_id": str(contact.id),
         "name": "Sam",
         "outcome": "answered",
@@ -182,6 +185,7 @@ async def test_result_no_answer_writes_event_only(
         client,
         "/internal/agent/handover-result",
         {
+            "tool_invocation_id": str(uuid.uuid4()),
             "call_id": str(call.id),
             "contact_id": str(contact.id),
             "outcome": "no_answer",
@@ -217,6 +221,7 @@ async def test_result_answered_twice_is_idempotent(
     )
     await async_session.commit()
     payload = {
+        "tool_invocation_id": str(uuid.uuid4()),
         "call_id": str(call.id),
         "contact_id": str(contact.id),
         "outcome": "answered",
@@ -260,6 +265,7 @@ async def test_result_unlinked_contact_rejected(
         client,
         "/internal/agent/handover-result",
         {
+            "tool_invocation_id": str(uuid.uuid4()),
             "call_id": str(call.id),
             "contact_id": str(contact.id),
             "outcome": "answered",
@@ -306,3 +312,57 @@ async def test_handover_denied_when_billed_org_has_no_funds(
     )
     assert len(rows) == 1
     assert rows[0].payload["reason"] == "insufficient_funds"
+
+
+async def test_result_retry_with_same_invocation_id_is_recorded_once(
+    client, async_session, add_phone_number
+):
+    call, contact = await _seed(async_session, add_phone_number)
+    payload = {
+        "tool_invocation_id": str(uuid.uuid4()),
+        "call_id": str(call.id),
+        "contact_id": str(contact.id),
+        "outcome": "no_answer",
+        "sip_status": 480,
+        "ring_ms": 30000,
+    }
+    for _ in range(2):
+        r = await _post(client, "/internal/agent/handover-result", payload)
+        assert r.json() == {"ok": True}
+    # A second, separate attempt is a new event.
+    await _post(
+        client,
+        "/internal/agent/handover-result",
+        {**payload, "tool_invocation_id": str(uuid.uuid4())},
+    )
+    events = (
+        (
+            await async_session.execute(
+                select(CallEvent).where(
+                    CallEvent.call_id == call.id, CallEvent.kind == "handover"
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert len(events) == 2
+
+
+async def test_handover_ignores_the_org_velocity_cap(
+    client, async_session, add_phone_number, monkeypatch
+):
+    """A transfer joins a call that was already counted; the cap must not
+    refuse it."""
+    monkeypatch.setattr(settings, "hail_velocity_call_per_hour", 1)
+    call, contact = await _seed(async_session, add_phone_number)
+    async_session.add(
+        UsageEvent(organization_id=call.organization_id, channel="voice", units=60)
+    )
+    await async_session.commit()
+    r = await _post(
+        client,
+        "/internal/agent/handover",
+        {"call_id": str(call.id), "contact_id": str(contact.id)},
+    )
+    assert r.json()["ok"] is True

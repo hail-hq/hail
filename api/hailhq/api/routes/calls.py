@@ -45,7 +45,7 @@ from hailhq.core.carrier_routing import voice_route
 from hailhq.core.compliance_gate import check_call_allowed
 from hailhq.core.config import settings
 from hailhq.core.db import get_session
-from hailhq.core.handover import handover_targets
+from hailhq.core.handover import HANDOVER_DEFAULT_MAX_SECONDS, handover_targets
 from hailhq.core.internal_webhook import fetch_organization_name
 from hailhq.core.languages import SUPPORTED_LANGUAGES
 from hailhq.core.livekit import LiveKitClient
@@ -570,6 +570,10 @@ async def create_call(
                 "handover_targets": await handover_targets(
                     db, agent.id if agent else None
                 ),
+                "handover_max_duration_seconds": (
+                    agent.handover_max_duration_seconds if agent else None
+                )
+                or HANDOVER_DEFAULT_MAX_SECONDS,
                 "org_name": await org_name_task,
             },
         )

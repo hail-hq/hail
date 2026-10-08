@@ -65,7 +65,9 @@ paths:
               schema:
                 type: integer
         "409":
-          description: An agent with this name already exists.
+          description:
+            An agent with this name already exists, or a handover contact
+            changed while saving.
         "422":
           description: Validation Error
           content:
@@ -242,7 +244,9 @@ paths:
         "Change some fields. Fields left out keep their value; ``null``
         clears
 
-        first_message, ai_disclosure_line, tools or max_duration_seconds. Live
+        first_message, ai_disclosure_line, tools, max_duration_seconds or
+
+        handover_max_duration_seconds. Live
 
         calls keep the settings they started with. ``handover_contacts`` replaces
 
@@ -299,7 +303,9 @@ paths:
               schema:
                 type: integer
         "409":
-          description: An agent with this name already exists.
+          description:
+            An agent with this name already exists, or a handover contact
+            changed while saving.
         "422":
           description: Validation Error
           content:
@@ -4518,6 +4524,16 @@ components:
           description:
             "Soft cap per call in seconds (60..3600). Omitted: the workspace
             limit."
+        handover_max_duration_seconds:
+          anyOf:
+            - type: integer
+              maximum: 3600.0
+              minimum: 60.0
+            - type: "null"
+          title: Handover Max Duration Seconds
+          description:
+            "Call limit in seconds (60..3600) once a handover contact answers,
+            counted from the answer. Omitted: 1800 (30 minutes)."
         voice_enabled:
           type: boolean
           title: Voice Enabled
@@ -4659,6 +4675,14 @@ components:
             - type: "null"
           title: Max Duration Seconds
           description: Soft cap per call; null means the workspace limit.
+        handover_max_duration_seconds:
+          anyOf:
+            - type: integer
+            - type: "null"
+          title: Handover Max Duration Seconds
+          description:
+            Call limit after a handover contact answers; null means 1800
+            (30 minutes).
         voice_enabled:
           type: boolean
           title: Voice Enabled
@@ -4702,6 +4726,7 @@ components:
         - voice_config
         - tools
         - max_duration_seconds
+        - handover_max_duration_seconds
         - voice_enabled
         - sms_enabled
         - status
@@ -4768,6 +4793,16 @@ components:
             - type: "null"
           title: Max Duration Seconds
           description: New soft cap per call; null returns to the workspace limit.
+        handover_max_duration_seconds:
+          anyOf:
+            - type: integer
+              maximum: 3600.0
+              minimum: 60.0
+            - type: "null"
+          title: Handover Max Duration Seconds
+          description:
+            New call limit after a handover contact answers; null returns
+            to 1800 (30 minutes).
         voice_enabled:
           anyOf:
             - type: boolean
@@ -4809,7 +4844,7 @@ components:
 
         the nullable ones (first_message, ai_disclosure_line, tools,
 
-        max_duration_seconds)."
+        max_duration_seconds, handover_max_duration_seconds)."
     Body_upload_email_attachment:
       properties:
         file:
