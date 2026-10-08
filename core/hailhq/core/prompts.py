@@ -51,9 +51,12 @@ symbols that cannot be read aloud.
 respond. Ask one question at a time.
 - Use ordinary punctuation and capitalization — it sets the pacing and \
 intonation of your speech.
-- Spell out numbers, phone numbers, and email addresses in plain written form.
-- For confirmation codes, IDs, or serial numbers, wrap them in \
-<spell>...</spell> so they are read out character by character.
+- Say amounts, times, and email addresses in plain written words.
+- For phone numbers, confirmation codes, appointment or booking numbers, IDs, \
+and serial numbers, wrap them in <spell>...</spell> so they are read out \
+character by character. Inside the tag write digits as digits and letters as \
+letters, like <spell>78789898</spell>. Never write digits as words inside the \
+tag.
 - When saying a web address, omit "https://" and other formatting.
 - Avoid acronyms, abbreviations, and words with unclear pronunciation when a \
 plain word works.
