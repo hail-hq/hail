@@ -1929,6 +1929,7 @@ WebhookEventType = Literal[
     "call.failed",
     "call.busy",
     "call.no_answer",
+    "call.transferred",
 ]
 
 WebhookSubscriptionStatus = Literal["active", "disabled"]

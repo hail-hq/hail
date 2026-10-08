@@ -19,7 +19,7 @@ here, scoped to the call's org.
 
 from __future__ import annotations
 
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -39,7 +39,9 @@ from hailhq.core.agent_tools.send_email import (
 )
 from hailhq.core.agent_tools.send_sms import MAX_BODY_CHARS as SMS_MAX_BODY_CHARS
 from hailhq.core.billing import CALL_META_BILLED, has_funds
+from hailhq.core.carrier_routing import voice_route
 from hailhq.core.compliance_gate import (
+    check_call_allowed,
     check_email_allowed,
     check_sms_allowed,
     normalize_recipient,
@@ -47,7 +49,17 @@ from hailhq.core.compliance_gate import (
 from hailhq.core.db import get_session
 from hailhq.core.directory import resolve_member_emails
 from hailhq.core.email_sender import from_address_for
-from hailhq.core.models import Agent, Call, Email, PhoneNumber, Sms
+from hailhq.core.handover import country_of
+from hailhq.core.models import (
+    Agent,
+    AgentHandoverContact,
+    Call,
+    CallEvent,
+    Contact,
+    Email,
+    PhoneNumber,
+    Sms,
+)
 from hailhq.core.providers.email import EmailProvider
 from hailhq.core.text_agent import (
     MAX_REPLIES_PER_THREAD,
@@ -55,6 +67,8 @@ from hailhq.core.text_agent import (
     replies_in_thread,
     thread_lock_key,
 )
+from hailhq.core.telephony_catalog import sells_in
+from hailhq.core.webhook_fanout import call_event_data, fanout_call_event
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -642,3 +656,153 @@ async def agent_send_email(
 
 
 __all__ = ["AGENT_SEND_CAP", "router"]
+
+
+_SPOKEN_HANDOVER_UNAVAILABLE = "I can't connect you to that person right now."
+_SPOKEN_HANDOVER_DONE = "You are already connected."
+
+
+class AgentHandoverRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    call_id: UUID
+    contact_id: UUID
+
+
+class AgentHandoverResponse(BaseModel):
+    ok: bool
+    spoken: str
+    to_e164: str | None = None
+    from_e164: str | None = None
+    trunk_id: str | None = None
+    headers: dict[str, str] | None = None
+
+
+class AgentHandoverResultRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    call_id: UUID
+    contact_id: UUID
+    outcome: Literal["answered", "no_answer", "busy", "failed"]
+    sip_status: int | None = None
+    ring_ms: int = Field(ge=0)
+
+
+async def _answered_handover(db: AsyncSession, call_id: UUID) -> bool:
+    return (
+        await db.execute(
+            select(CallEvent.id)
+            .where(
+                CallEvent.call_id == call_id,
+                CallEvent.kind == "handover",
+                CallEvent.payload["outcome"].astext == "answered",
+            )
+            .limit(1)
+        )
+    ).first() is not None
+
+
+async def _linked_contact(db: AsyncSession, call: Call, contact_id: UUID) -> Contact | None:
+    if call.agent_id is None:
+        return None
+    return (
+        await db.execute(
+            select(Contact)
+            .join(AgentHandoverContact, AgentHandoverContact.contact_id == Contact.id)
+            .where(
+                AgentHandoverContact.agent_id == call.agent_id,
+                Contact.id == contact_id,
+                Contact.organization_id == call.organization_id,
+            )
+        )
+    ).scalar_one_or_none()
+
+
+@router.post("/handover", response_model=AgentHandoverResponse)
+async def agent_handover(
+    body: AgentHandoverRequest,
+    db: Annotated[AsyncSession, Depends(get_session)],
+) -> AgentHandoverResponse:
+    deny = AgentHandoverResponse(ok=False, spoken=_SPOKEN_HANDOVER_UNAVAILABLE)
+    call = await db.get(Call, body.call_id)
+    if call is None or call.status != "in_progress":
+        return deny
+    if await _answered_handover(db, call.id):
+        return AgentHandoverResponse(ok=False, spoken=_SPOKEN_HANDOVER_DONE)
+    contact = await _linked_contact(db, call, body.contact_id)
+    if contact is None or not contact.phone_e164:
+        return deny
+    country = country_of(contact.phone_e164)
+    try:
+        sold = country is not None and sells_in(country, call.provider)
+    except Exception:  # e.g. provider without a catalog file
+        sold = False
+    if not sold:
+        return await _deny_handover(call, body, "country_not_sold")
+    gate = await check_call_allowed(db, call.organization_id, contact.phone_e164)
+    if not gate.allowed:
+        return await _deny_handover(call, body, gate.reason or "gate")
+    try:
+        trunk_id, headers = voice_route(call.provider)
+    except Exception:
+        return await _deny_handover(call, body, "carrier_route_failed")
+    # The Hail number on this call: outbound dials from it, inbound rang it.
+    hail_number = call.to_e164 if call.direction == "inbound" else call.from_e164
+    return AgentHandoverResponse(
+        ok=True,
+        spoken="",
+        to_e164=contact.phone_e164,
+        from_e164=hail_number,
+        trunk_id=trunk_id,
+        headers=headers or None,
+    )
+
+
+async def _deny_handover(
+    call: Call, body: AgentHandoverRequest, reason: str
+) -> AgentHandoverResponse:
+    await write_audit_log(
+        organization_id=call.organization_id,
+        api_key_id=None,
+        action="agent.handover.blocked",
+        resource_type="call",
+        resource_id=call.id,
+        payload={"contact_id": str(body.contact_id), "reason": reason},
+        actor_kind="system",
+    )
+    return AgentHandoverResponse(ok=False, spoken=_SPOKEN_HANDOVER_UNAVAILABLE)
+
+
+@router.post("/handover-result")
+async def agent_handover_result(
+    body: AgentHandoverResultRequest,
+    db: Annotated[AsyncSession, Depends(get_session)],
+) -> dict[str, bool]:
+    call = await db.get(Call, body.call_id)
+    if call is None:
+        return {"ok": False}
+    contact = await db.get(Contact, body.contact_id)
+    name = contact.name if contact and contact.organization_id == call.organization_id else ""
+    db.add(
+        CallEvent(
+            call_id=call.id,
+            kind="handover",
+            payload={
+                "contact_id": str(body.contact_id),
+                "name": name,
+                "outcome": body.outcome,
+                "sip_status": body.sip_status,
+                "ring_ms": body.ring_ms,
+            },
+        )
+    )
+    if body.outcome == "answered":
+        await fanout_call_event(
+            db,
+            organization_id=call.organization_id,
+            event_type="call.transferred",
+            event_id=call.id,
+            data=call_event_data(
+                call, transfer={"contact_id": str(body.contact_id), "contact_name": name}
+            ),
+        )
+    await db.commit()
+    return {"ok": True}
