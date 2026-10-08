@@ -1,4 +1,5 @@
-"""Human handover: which contacts an agent may hand a live call to.
+"""Human handover: which people (manual contacts or org members) an agent
+may hand a live call to.
 
 Spec: docs/superpowers/specs/2026-10-08-human-handover-design.md. Numbers
 stay server-side: ``handover_targets`` (what reaches the LLM via dispatch
@@ -7,15 +8,28 @@ metadata) carries names and notes only.
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from uuid import UUID
 
 import phonenumbers
 from hailhq.core.compliance_gate import check_handover_allowed
-from hailhq.core.models import AgentHandoverContact, Call, CallEvent, Contact
+from hailhq.core.contact_ids import contact_wire_id, parse_contact_id
+from hailhq.core.models import (
+    Agent,
+    AgentHandoverContact,
+    Call,
+    CallEvent,
+    Contact,
+    OrganizationMember,
+    User,
+)
 from hailhq.core.telephony_catalog import sells_in
 from sqlalchemy import Exists, delete, exists, select
+from sqlalchemy.exc import ProgrammingError
 from sqlalchemy.ext.asyncio import AsyncSession
+
+_log = logging.getLogger("hailhq.core.handover")
 
 MAX_HANDOVER_CONTACTS = 10
 
@@ -65,8 +79,19 @@ async def has_answered_handover(db: AsyncSession, call_id: UUID) -> bool:
 
 @dataclass(frozen=True)
 class HandoverItem:
-    contact_id: UUID
+    # Wire id, normalized: a manual contact's uuid or ``member:<user uuid>``
+    # (:mod:`hailhq.core.contact_ids`).
+    contact_id: str
     note: str
+
+
+@dataclass(frozen=True)
+class HandoverPerson:
+    """A resolved handover target: a manual contact or an org member."""
+
+    contact_id: str  # wire id
+    name: str
+    phone_e164: str | None
 
 
 class HandoverInvalid(ValueError):
@@ -84,47 +109,96 @@ def country_of(e164: str) -> str | None:
     return region if region and region != "001" else None
 
 
+async def _member_people(
+    db: AsyncSession, org_id: UUID, user_ids: list[UUID]
+) -> dict[UUID, HandoverPerson]:
+    """Members of ``org_id`` among ``user_ids``. Empty when the website-owned
+    ``users``/``members`` tables are missing (pure self-host); a savepoint
+    keeps the caller's transaction usable."""
+    if not user_ids:
+        return {}
+    try:
+        async with db.begin_nested():
+            rows = (
+                await db.execute(
+                    select(User.id, User.name, User.phone_number)
+                    .join(OrganizationMember, OrganizationMember.user_id == User.id)
+                    .where(
+                        OrganizationMember.organization_id == org_id,
+                        User.id.in_(user_ids),
+                    )
+                )
+            ).all()
+    except ProgrammingError as exc:
+        _log.warning("handover member lookup failed (no member tables?): %s", exc)
+        return {}
+    return {
+        uid: HandoverPerson(contact_wire_id("member", uid), name, phone)
+        for uid, name, phone in rows
+    }
+
+
+async def resolve_people(
+    db: AsyncSession, org_id: UUID, wire_ids: list[str]
+) -> dict[str, HandoverPerson]:
+    """Wire id -> person, for ids that are contacts or members of ``org_id``.
+    Unknown, malformed or foreign ids are left out."""
+    contact_ids: list[UUID] = []
+    user_ids: list[UUID] = []
+    for wire in wire_ids:
+        try:
+            kind, value = parse_contact_id(wire)
+        except ValueError:
+            continue
+        (user_ids if kind == "member" else contact_ids).append(value)
+    out: dict[str, HandoverPerson] = {}
+    if contact_ids:
+        for c in (
+            await db.execute(
+                select(Contact).where(
+                    Contact.organization_id == org_id, Contact.id.in_(contact_ids)
+                )
+            )
+        ).scalars():
+            out[str(c.id)] = HandoverPerson(str(c.id), c.name, c.phone_e164)
+    for person in (await _member_people(db, org_id, user_ids)).values():
+        out[person.contact_id] = person
+    return out
+
+
 async def validate_handover(
     db: AsyncSession,
     org_id: UUID,
     items: list[HandoverItem],
-    unchanged: frozenset[UUID] = frozenset(),
+    unchanged: frozenset[str] = frozenset(),
 ) -> None:
-    """Check the whole list's shape, and each contact's number and gate.
-    Contacts in ``unchanged`` (already linked to the agent) skip the number
-    and gate checks, so editing something else never fails on an old link.
-    The runtime /handover route re-checks before every dial."""
+    """Check the whole list's shape, and each person's number and gate.
+    Items are contacts or members (wire ids). Those in ``unchanged`` (already
+    linked to the agent) skip the number and gate checks, so editing
+    something else never fails on an old link. The runtime /handover route
+    re-checks before every dial."""
     if len(items) > MAX_HANDOVER_CONTACTS:
         raise HandoverInvalid(f"at most {MAX_HANDOVER_CONTACTS} handover contacts")
     ids = [i.contact_id for i in items]
     if len(set(ids)) != len(ids):
         raise HandoverInvalid("a contact is listed twice")
-    rows = {
-        c.id: c
-        for c in (
-            await db.execute(
-                select(Contact).where(
-                    Contact.organization_id == org_id, Contact.id.in_(ids)
-                )
-            )
-        ).scalars()
-    }
+    people = await resolve_people(db, org_id, ids)
     for index, item in enumerate(items):
-        contact = rows.get(item.contact_id)
-        if contact is None:
+        person = people.get(item.contact_id)
+        if person is None:
             raise HandoverInvalid("contact not found", index)
         if item.contact_id in unchanged:
             continue
-        if not contact.phone_e164:
-            raise HandoverInvalid(f"{contact.name} has no phone number", index)
-        country = country_of(contact.phone_e164)
+        if not person.phone_e164:
+            raise HandoverInvalid(f"{person.name} has no phone number", index)
+        country = country_of(person.phone_e164)
         if country is None or not sells_in(country):
             raise HandoverInvalid(
-                f"{contact.name}'s number is in a country Hail does not call", index
+                f"{person.name}'s number is in a country Hail does not call", index
             )
-        gate = await check_handover_allowed(db, org_id, contact.phone_e164)
+        gate = await check_handover_allowed(db, org_id, person.phone_e164)
         if not gate.allowed:
-            raise HandoverInvalid(f"{contact.name}'s number cannot be called", index)
+            raise HandoverInvalid(f"{person.name}'s number cannot be called", index)
 
 
 async def replace_handover(
@@ -134,10 +208,12 @@ async def replace_handover(
         delete(AgentHandoverContact).where(AgentHandoverContact.agent_id == agent_id)
     )
     for position, item in enumerate(items):
+        kind, value = parse_contact_id(item.contact_id)
         db.add(
             AgentHandoverContact(
                 agent_id=agent_id,
-                contact_id=item.contact_id,
+                contact_id=value if kind == "contact" else None,
+                user_id=value if kind == "member" else None,
                 note=item.note,
                 position=position,
             )
@@ -145,32 +221,74 @@ async def replace_handover(
     await db.flush()
 
 
+async def _member_links(
+    db: AsyncSession, agent_ids: list[UUID]
+) -> list[tuple[AgentHandoverContact, str, str | None]]:
+    """Member links whose user is still a member of the agent's org. Empty
+    when the member tables are missing (pure self-host)."""
+    try:
+        async with db.begin_nested():
+            return [
+                (link, name, phone)
+                for link, name, phone in (
+                    await db.execute(
+                        select(AgentHandoverContact, User.name, User.phone_number)
+                        .join(Agent, Agent.id == AgentHandoverContact.agent_id)
+                        .join(User, User.id == AgentHandoverContact.user_id)
+                        .where(
+                            AgentHandoverContact.agent_id.in_(agent_ids),
+                            exists().where(
+                                OrganizationMember.user_id == User.id,
+                                OrganizationMember.organization_id
+                                == Agent.organization_id,
+                            ),
+                        )
+                    )
+                ).all()
+            ]
+    except ProgrammingError as exc:
+        _log.warning("handover member lookup failed (no member tables?): %s", exc)
+        return []
+
+
 async def load_handover(
     db: AsyncSession, agent_ids: list[UUID]
 ) -> dict[UUID, list[dict]]:
+    """Each agent's handover people in order, contacts and members mixed.
+    ``contact_id`` is the wire id. Members no longer in the org are left
+    out."""
     if not agent_ids:
         return {}
-    result = await db.execute(
-        select(AgentHandoverContact, Contact)
-        .join(Contact, Contact.id == AgentHandoverContact.contact_id)
-        .where(AgentHandoverContact.agent_id.in_(agent_ids))
-        .order_by(AgentHandoverContact.agent_id, AgentHandoverContact.position)
-    )
+    rows: list[tuple[AgentHandoverContact, str, str, str | None]] = [
+        (link, str(contact.id), contact.name, contact.phone_e164)
+        for link, contact in (
+            await db.execute(
+                select(AgentHandoverContact, Contact)
+                .join(Agent, Agent.id == AgentHandoverContact.agent_id)
+                .join(Contact, Contact.id == AgentHandoverContact.contact_id)
+                .where(
+                    AgentHandoverContact.agent_id.in_(agent_ids),
+                    Contact.organization_id == Agent.organization_id,
+                )
+            )
+        ).all()
+    ]
+    rows += [
+        (link, contact_wire_id("member", link.user_id), name, phone)
+        for link, name, phone in await _member_links(db, agent_ids)
+    ]
+    rows.sort(key=lambda r: (str(r[0].agent_id), r[0].position))
     out: dict[UUID, list[dict]] = {}
-    for link, contact in result.all():
+    for link, wire, name, phone in rows:
         out.setdefault(link.agent_id, []).append(
-            {
-                "contact_id": contact.id,
-                "name": contact.name,
-                "phone_e164": contact.phone_e164,
-                "note": link.note,
-            }
+            {"contact_id": wire, "name": name, "phone_e164": phone, "note": link.note}
         )
     return out
 
 
 async def handover_targets(db: AsyncSession, agent_id: UUID | None) -> list[dict]:
-    """Dispatch-metadata shape. No numbers. Labels unique per call."""
+    """Dispatch-metadata shape. No numbers. Labels unique per call, across
+    contacts and members."""
     if agent_id is None:
         return []
     rows = (await load_handover(db, [agent_id])).get(agent_id, [])
@@ -183,6 +301,6 @@ async def handover_targets(db: AsyncSession, agent_id: UUID | None) -> list[dict
         seen[name] = seen.get(name, 0) + 1
         label = name if seen[name] == 1 else f"{name} ({seen[name]})"
         targets.append(
-            {"contact_id": str(row["contact_id"]), "label": label, "note": row["note"]}
+            {"contact_id": row["contact_id"], "label": label, "note": row["note"]}
         )
     return targets

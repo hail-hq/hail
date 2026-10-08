@@ -366,3 +366,139 @@ async def test_handover_ignores_the_org_velocity_cap(
         {"call_id": str(call.id), "contact_id": str(contact.id)},
     )
     assert r.json()["ok"] is True
+
+
+async def _seed_member(s, add_phone_number, *, in_org=True, phone="+14155550150"):
+    """A call whose agent links a team member (``member:<user id>``)."""
+    from datetime import datetime, timezone
+
+    from hailhq.core.models import OrganizationMember, User
+
+    call, _ = await _seed(s, add_phone_number, link=False)
+    user = User(
+        id=uuid.uuid4(),
+        name="Ana",
+        email=f"{uuid.uuid4().hex}@example.com",
+        phone_number=phone,
+        created_at=datetime.now(timezone.utc),
+    )
+    s.add(user)
+    if in_org:
+        s.add(
+            OrganizationMember(
+                id=uuid.uuid4(),
+                user_id=user.id,
+                organization_id=call.organization_id,
+                role="member",
+                created_at=datetime.now(timezone.utc),
+            )
+        )
+    s.add(
+        AgentHandoverContact(
+            agent_id=call.agent_id, user_id=user.id, note="Sales", position=0
+        )
+    )
+    await s.commit()
+    return call, f"member:{user.id}"
+
+
+async def test_handover_to_team_member_returns_route(
+    client, async_session, add_phone_number
+):
+    call, wire = await _seed_member(async_session, add_phone_number)
+    r = await _post(
+        client,
+        "/internal/agent/handover",
+        {"call_id": str(call.id), "contact_id": wire},
+    )
+    data = r.json()
+    assert data["ok"] is True
+    assert data["to_e164"] == "+14155550150"
+
+
+@pytest.mark.parametrize("case", ["left_org", "unlinked", "malformed"])
+async def test_handover_to_team_member_denied(
+    client, async_session, add_phone_number, case
+):
+    call, wire = await _seed_member(
+        async_session, add_phone_number, in_org=case != "left_org"
+    )
+    if case == "unlinked":
+        wire = f"member:{uuid.uuid4()}"
+    if case == "malformed":
+        wire = "member:nope"
+    r = await _post(
+        client,
+        "/internal/agent/handover",
+        {"call_id": str(call.id), "contact_id": wire},
+    )
+    assert r.status_code in (200, 422)
+    if r.status_code == 200:
+        assert r.json()["ok"] is False
+
+
+async def test_result_for_team_member_carries_wire_id(
+    client, async_session, add_phone_number
+):
+    call, wire = await _seed_member(async_session, add_phone_number)
+    async_session.add(
+        WebhookSubscription(
+            organization_id=call.organization_id,
+            target_url="https://example.com/hook",
+            event_types=["call.transferred"],
+            secret_encrypted="x",
+        )
+    )
+    await async_session.commit()
+    r = await _post(
+        client,
+        "/internal/agent/handover-result",
+        {
+            "tool_invocation_id": str(uuid.uuid4()),
+            "call_id": str(call.id),
+            "contact_id": wire,
+            "outcome": "answered",
+            "sip_status": None,
+            "ring_ms": 3000,
+        },
+    )
+    assert r.json() == {"ok": True}
+    ev = (
+        await async_session.execute(
+            select(CallEvent).where(
+                CallEvent.call_id == call.id, CallEvent.kind == "handover"
+            )
+        )
+    ).scalar_one()
+    assert ev.payload["contact_id"] == wire
+    assert ev.payload["name"] == "Ana"
+    delivery = (
+        await async_session.execute(
+            select(WebhookDelivery).where(
+                WebhookDelivery.event_type == "call.transferred"
+            )
+        )
+    ).scalar_one()
+    assert delivery.payload["data"]["transfer"] == {
+        "contact_id": wire,
+        "contact_name": "Ana",
+    }
+
+
+async def test_result_for_member_who_left_org_rejected(
+    client, async_session, add_phone_number
+):
+    call, wire = await _seed_member(async_session, add_phone_number, in_org=False)
+    r = await _post(
+        client,
+        "/internal/agent/handover-result",
+        {
+            "tool_invocation_id": str(uuid.uuid4()),
+            "call_id": str(call.id),
+            "contact_id": wire,
+            "outcome": "no_answer",
+            "sip_status": 480,
+            "ring_ms": 30000,
+        },
+    )
+    assert r.json() == {"ok": False}

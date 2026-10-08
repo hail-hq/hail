@@ -46,21 +46,22 @@ from hailhq.core.compliance_gate import (
     check_sms_allowed,
     normalize_recipient,
 )
+from hailhq.core.contact_ids import normalize_contact_id
 from hailhq.core.db import get_session
 from hailhq.core.directory import resolve_member_emails
 from hailhq.core.email_sender import from_address_for
 from hailhq.core.handover import (
     HANDOVER_ANSWERED,
     HANDOVER_EVENT_KIND,
+    HandoverPerson,
     country_of,
     has_answered_handover,
+    load_handover,
 )
 from hailhq.core.models import (
     Agent,
-    AgentHandoverContact,
     Call,
     CallEvent,
-    Contact,
     Email,
     PhoneNumber,
     Sms,
@@ -74,7 +75,7 @@ from hailhq.core.text_agent import (
     thread_lock_key,
 )
 from hailhq.core.webhook_fanout import call_event_data, fanout_call_event
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import AfterValidator, BaseModel, ConfigDict, Field
 from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -664,10 +665,19 @@ _SPOKEN_HANDOVER_UNAVAILABLE = "I can't connect you to that person right now."
 _SPOKEN_HANDOVER_DONE = "You are already connected."
 
 
+def _wire_id(v: str) -> str:
+    return normalize_contact_id(v)
+
+
+# Wire id: a contact's uuid or ``member:<user uuid>`` (dispatch metadata
+# ``handover_targets``).
+HandoverWireId = Annotated[str, AfterValidator(_wire_id)]
+
+
 class AgentHandoverRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     call_id: UUID
-    contact_id: UUID
+    contact_id: HandoverWireId
 
 
 class AgentHandoverResponse(BaseModel):
@@ -683,7 +693,7 @@ class AgentHandoverResultRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     tool_invocation_id: UUID
     call_id: UUID
-    contact_id: UUID
+    contact_id: HandoverWireId
     outcome: Literal["answered", "no_answer", "busy", "failed"]
     sip_status: int | None = None
     ring_ms: int = Field(ge=0)
@@ -706,22 +716,17 @@ async def _handover_result_recorded(
     ).first() is not None
 
 
-async def _linked_contact(
-    db: AsyncSession, call: Call, contact_id: UUID
-) -> Contact | None:
+async def _linked_person(
+    db: AsyncSession, call: Call, wire_id: str
+) -> HandoverPerson | None:
+    """The contact or org member behind ``wire_id``, if the call's agent
+    still links it and it still belongs to the call's org."""
     if call.agent_id is None:
         return None
-    return (
-        await db.execute(
-            select(Contact)
-            .join(AgentHandoverContact, AgentHandoverContact.contact_id == Contact.id)
-            .where(
-                AgentHandoverContact.agent_id == call.agent_id,
-                Contact.id == contact_id,
-                Contact.organization_id == call.organization_id,
-            )
-        )
-    ).scalar_one_or_none()
+    for row in (await load_handover(db, [call.agent_id])).get(call.agent_id, []):
+        if row["contact_id"] == wire_id:
+            return HandoverPerson(wire_id, row["name"], row["phone_e164"])
+    return None
 
 
 @router.post("/handover", response_model=AgentHandoverResponse)
@@ -739,7 +744,7 @@ async def agent_handover(
         db, call.organization_id
     ):
         return await _deny_handover(call, body, "insufficient_funds")
-    contact = await _linked_contact(db, call, body.contact_id)
+    contact = await _linked_person(db, call, body.contact_id)
     if contact is None or not contact.phone_e164:
         return deny
     country = country_of(contact.phone_e164)
@@ -777,7 +782,7 @@ async def _deny_handover(
         action="agent.handover.blocked",
         resource_type="call",
         resource_id=call.id,
-        payload={"contact_id": str(body.contact_id), "reason": reason},
+        payload={"contact_id": body.contact_id, "reason": reason},
         actor_kind="system",
     )
     return AgentHandoverResponse(ok=False, spoken=_SPOKEN_HANDOVER_UNAVAILABLE)
@@ -791,7 +796,7 @@ async def agent_handover_result(
     call = await _load_call_for_update(db, body.call_id)
     if call is None:
         return {"ok": False}
-    contact = await _linked_contact(db, call, body.contact_id)
+    contact = await _linked_person(db, call, body.contact_id)
     if contact is None:
         return {"ok": False}
     if body.outcome == HANDOVER_ANSWERED and await has_answered_handover(db, call.id):
@@ -805,7 +810,7 @@ async def agent_handover_result(
             kind=HANDOVER_EVENT_KIND,
             payload={
                 "tool_invocation_id": str(body.tool_invocation_id),
-                "contact_id": str(body.contact_id),
+                "contact_id": body.contact_id,
                 "name": name,
                 "outcome": body.outcome,
                 "sip_status": body.sip_status,
@@ -821,7 +826,7 @@ async def agent_handover_result(
             event_id=call.id,
             data=call_event_data(
                 call,
-                transfer={"contact_id": str(body.contact_id), "contact_name": name},
+                transfer={"contact_id": body.contact_id, "contact_name": name},
             ),
         )
     await db.commit()

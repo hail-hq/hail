@@ -107,7 +107,7 @@ async def _check_handover(
     db: AsyncSession,
     org_id: UUID,
     items,
-    unchanged: frozenset[UUID] = frozenset(),
+    unchanged: frozenset[str] = frozenset(),
 ) -> list[HandoverItem]:
     parsed = [HandoverItem(i.contact_id, i.note.strip()) for i in items]
     for index, item in enumerate(parsed):
