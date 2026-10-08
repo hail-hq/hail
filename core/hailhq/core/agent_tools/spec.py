@@ -80,7 +80,7 @@ class ToolSpec:
     execute: Callable[[ToolContext, dict[str, Any]], Awaitable[str]]
     # Per-call shaping from dispatch metadata (names in the description,
     # enum of choices). None result hides the tool for this call.
-    bind: Callable[[dict[str, Any]], "ToolSpec | None"] | None = None
+    bind: Callable[[dict[str, Any]], ToolSpec | None] | None = None
 
 
 __all__ = [

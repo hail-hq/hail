@@ -275,7 +275,7 @@ async def update_agent(
         )
     if "tools" in changes or items is not None:
         # Same rule as create, on the values the agent will have after this.
-        tools = changes["tools"] if "tools" in changes else agent.tools
+        tools = changes.get("tools", agent.tools)
         if items is not None:
             has_handover = bool(items)
         else:

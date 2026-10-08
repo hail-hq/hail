@@ -1608,8 +1608,10 @@ async def test_bridge_answered_mutes_agent() -> None:
     assert req.wait_until_answered is True
     assert req.ringing_timeout.seconds == 30
     assert session.said == [
-        "Hi Sam, I have a caller on the line. "
-        "They say it is about an invoice. Connecting you now."
+        (
+            "Hi Sam, I have a caller on the line. "
+            "They say it is about an invoice. Connecting you now."
+        )
     ]
     assert session.input.enabled == [False] and session.output.enabled == [False]
     assert state["connected"] is True

@@ -7,8 +7,8 @@ from uuid import uuid4
 import httpx
 import pytest
 import respx
-from pydantic import ValidationError
 from hailhq.mcp.hail_client import HailClient
+from pydantic import ValidationError
 
 _BASE_URL = "http://hail-test"
 _API_KEY = "test-key"

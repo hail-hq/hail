@@ -7,13 +7,13 @@ import uuid
 
 import pytest
 from hailhq.core import hmac_signing
-from hailhq.core.compliance_gate import add_suppression
 from hailhq.core.billing import CALL_META_BILLED
+from hailhq.core.compliance_gate import add_suppression
 from hailhq.core.config import settings
 from hailhq.core.models import (
     Agent,
-    AuditLog,
     AgentHandoverContact,
+    AuditLog,
     Call,
     CallEvent,
     Contact,

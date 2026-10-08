@@ -61,13 +61,13 @@ from hailhq.core.models import (
     Sms,
 )
 from hailhq.core.providers.email import EmailProvider
+from hailhq.core.telephony_catalog import sells_in
 from hailhq.core.text_agent import (
     MAX_REPLIES_PER_THREAD,
     answers_texts,
     replies_in_thread,
     thread_lock_key,
 )
-from hailhq.core.telephony_catalog import sells_in
 from hailhq.core.webhook_fanout import call_event_data, fanout_call_event
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import func, select, text
