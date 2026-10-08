@@ -27,6 +27,23 @@ SPOKEN_FALLBACK = "Sorry, that didn't work."
 NO_CALL = "I can do that only during a call."
 
 
+@dataclass(frozen=True)
+class BridgeRoute:
+    to_e164: str
+    from_e164: str
+    trunk_id: str
+    headers: dict[str, str] | None
+    name: str
+    reason: str
+
+
+@dataclass(frozen=True)
+class BridgeOutcome:
+    outcome: Literal["answered", "no_answer", "busy", "failed"]
+    sip_status: int | None
+    ring_ms: int
+
+
 @dataclass
 class ToolContext:
     """Capability handles the voicebot supplies per call.
@@ -50,6 +67,7 @@ class ToolContext:
     hangup: Callable[[], Awaitable[None]] | None
     send_dtmf: Callable[[str], Awaitable[None]] | None
     thread: ThreadScope | None = None
+    bridge: Callable[[BridgeRoute], Awaitable[BridgeOutcome]] | None = None
 
 
 @dataclass(frozen=True)
@@ -60,6 +78,17 @@ class ToolSpec:
     risk_tier: RiskTier
     is_available: Callable[[uuid.UUID, AsyncSession], Awaitable[bool]]
     execute: Callable[[ToolContext, dict[str, Any]], Awaitable[str]]
+    # Per-call shaping from dispatch metadata (names in the description,
+    # enum of choices). None result hides the tool for this call.
+    bind: Callable[[dict[str, Any]], "ToolSpec | None"] | None = None
 
 
-__all__ = ["NO_CALL", "SPOKEN_FALLBACK", "RiskTier", "ToolContext", "ToolSpec"]
+__all__ = [
+    "NO_CALL",
+    "SPOKEN_FALLBACK",
+    "BridgeOutcome",
+    "BridgeRoute",
+    "RiskTier",
+    "ToolContext",
+    "ToolSpec",
+]

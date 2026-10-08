@@ -36,6 +36,7 @@ def test_registry_names_and_tiers():
         "send_sms",
         "send_email",
         "thread_history",
+        "transfer_call",
     }
     assert tools["end_call"].risk_tier == "session_control"
     assert tools["send_dtmf"].risk_tier == "session_control"
@@ -43,6 +44,7 @@ def test_registry_names_and_tiers():
     assert tools["send_sms"].risk_tier == "outbound_send"
     assert tools["send_email"].risk_tier == "outbound_send"
     assert tools["thread_history"].risk_tier == "read_only"
+    assert tools["transfer_call"].risk_tier == "session_control"
 
 
 def test_every_parameter_schema_is_object_typed():
