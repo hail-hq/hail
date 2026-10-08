@@ -174,75 +174,6 @@ async def _sanitize_tts_stream(source: Any) -> Any:
         yield carry
 
 
-_DIGIT_WORDS = {
-    "zero": "0",
-    "oh": "0",
-    "one": "1",
-    "two": "2",
-    "three": "3",
-    "four": "4",
-    "five": "5",
-    "six": "6",
-    "seven": "7",
-    "eight": "8",
-    "nine": "9",
-}
-_SPELL_OPEN = "<spell>"
-_SPELL_CLOSE = "</spell>"
-
-
-def spell_digits(inner: str) -> str:
-    """Digit words inside a ``<spell>`` tag back to digits: "seven eight" ->
-    "78". The TTS reads the tag letter by letter, so a word comes out as
-    "e-i-g-h-t". Text that is not only digit words is left as it is."""
-    tokens = inner.replace("-", " ").replace(",", " ").split()
-    digits = [_DIGIT_WORDS.get(t.lower().strip(".")) for t in tokens]
-    if not tokens or None in digits:
-        return inner
-    return "".join(d for d in digits if d)
-
-
-async def _spell_digits_stream(source: Any) -> Any:
-    """Apply :func:`spell_digits` to each ``<spell>...</spell>`` in the TTS
-    text stream. Text outside a tag streams through at once; text inside
-    one waits for its closing tag."""
-    buf = ""
-    inside = False
-    async for chunk in source:
-        buf += chunk
-        while True:
-            if inside:
-                end = buf.find(_SPELL_CLOSE)
-                if end == -1:
-                    break
-                yield _SPELL_OPEN + spell_digits(buf[:end]) + _SPELL_CLOSE
-                buf = buf[end + len(_SPELL_CLOSE) :]
-                inside = False
-                continue
-            start = buf.find(_SPELL_OPEN)
-            if start != -1:
-                if start:
-                    yield buf[:start]
-                buf = buf[start + len(_SPELL_OPEN) :]
-                inside = True
-                continue
-            # Hold back a tail that may be the start of an opening tag.
-            keep = next(
-                (
-                    n
-                    for n in range(len(_SPELL_OPEN) - 1, 0, -1)
-                    if buf.endswith(_SPELL_OPEN[:n])
-                ),
-                0,
-            )
-            if len(buf) > keep:
-                yield buf[: len(buf) - keep]
-                buf = buf[len(buf) - keep :]
-            break
-    if buf:
-        yield (_SPELL_OPEN + buf) if inside else buf
-
-
 class SpeechSanitizingAgent(Agent):
     """Agent whose TTS input passes through :func:`_sanitize_tts_stream`.
 
@@ -255,9 +186,7 @@ class SpeechSanitizingAgent(Agent):
     """
 
     async def tts_node(self, text: Any, model_settings: Any) -> Any:
-        return Agent.default.tts_node(
-            self, _sanitize_tts_stream(_spell_digits_stream(text)), model_settings
-        )
+        return Agent.default.tts_node(self, _sanitize_tts_stream(text), model_settings)
 
 
 def build_instructions(
@@ -1832,6 +1761,5 @@ __all__ = [
     "soft_cap_announce_and_hangup",
     "speak_greeting",
     "speech_text",
-    "spell_digits",
     "write_call_event",
 ]
