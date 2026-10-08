@@ -19,6 +19,7 @@ During a call, the agent can connect the caller to a person the admin chose.
 | Caller ID shown to the person | The Hail number on the call. Never the caller's number. |
 | No answer / busy | After 30 s of ringing, the agent comes back and offers to take a message. |
 | Agent after connect | Says one line to both, then mutes its mic and stops listening. Stays in the room. |
+| Time limit | `max_duration_seconds` applies until the contact answers (agent talking, contact ringing). Once the contact answers, it stops applying: the call runs until the caller or the contact hangs up. |
 | Person hangs up first | The whole call ends. |
 | Safety check | `check_call_allowed` (DNC, premium rate) when the admin saves the agent AND right before dialing. |
 | Billing | Unchanged: one call, all minutes until the last hang-up, normal voice rate (10¢/min). After the handover the AI is muted, so its STT/LLM/TTS cost stops and covers the second phone leg. |
@@ -120,7 +121,8 @@ Participant handling:
 
 - `_on_participant_disconnected` treats `human-{call_id}` leaving as the end of the call too (decision: person hangs up → call ends). Both legs leaving end the room.
 - AMD stays bound to the caller identity only.
-- `max_duration_seconds` still covers the whole call. When the soft cap fires after a connected handover, the agent's output audio is turned back on, it says the cap line to both people, then the room is deleted and the job shuts down.
+- `max_duration_seconds` stops applying once the contact answers. On answer the bridge handle cancels the pending soft cap task, so the call runs until the caller or the contact hangs up. Before the answer the cap applies as today: if it fires while the contact rings, the agent says the cap line, the room is deleted (both legs drop) and the job shuts down. A cap that already fired and is announcing when the contact answers finishes and ends the call.
+- Stale-call sweep (`sweep_stale_calls`): a call with an `answered` `handover` event is not swept at `max_duration_seconds + grace`. A fixed 12 h backstop after `COALESCE(started_at, requested_at)` (`HANDOVER_BACKSTOP_SECONDS`) closes the row of a crashed worker. The voicebot does not enforce the 12 h; it never cuts a live call.
 - Any job end while the contact leg is ringing or connected (soft cap, worker shutdown, BYO-LLM give-up) deletes the room, so no leg stays up unbilled.
 - One dial at a time: a second `transfer_call` while one rings or is connected fails without dialing.
 - Only one connected handover per call. After it, the tool returns "Already connected."

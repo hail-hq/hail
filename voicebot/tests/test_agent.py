@@ -1765,9 +1765,9 @@ async def test_bridge_intro_failure_still_mutes_and_answers() -> None:
 
 
 async def test_soft_cap_while_connected_unmutes_announces_and_drops_room() -> None:
-    """max_duration_seconds covers the whole call: after a connected handover
-    the cap re-enables the agent's audio, says the line to both people, then
-    deletes the room so neither phone leg outlives the job."""
+    """A cap that fired before the answer and is still running once the
+    handover connects re-enables the agent's audio, says the line to both
+    people, then deletes the room so neither phone leg outlives the job."""
     ctx = FakeJobContext()
     session = FakeBridgeSession()
     state = {"human": f"human-{CALL_ID}", "connected": True}

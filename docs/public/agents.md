@@ -66,6 +66,8 @@ There is no MCP update tool; change them with the CLI or the API.
   offers to take a message.
 - On answer, the agent says who is calling and why, then goes silent. If
   either side hangs up, the call ends.
+- `max_duration_seconds` stops applying once the contact answers: the call
+  runs until the caller or the contact hangs up.
 - Billed as one call at the normal voice rate.
 - Sends a [`call.transferred`](webhooks.md) webhook when the contact answers.
 - `PATCH` with `[]` clears the list; omit the field (or send `null`) to leave it.
