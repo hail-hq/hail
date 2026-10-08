@@ -621,3 +621,63 @@ async def test_agent_handover_note_required(client, org) -> None:
         headers=headers,
     )
     assert r.status_code == 422
+
+
+async def test_agent_handover_blank_note_is_422(client, org) -> None:
+    _, headers = org
+    cid = await _contact(client, headers)
+    r = await client.post(
+        "/agents",
+        json={
+            "name": "Desk",
+            "system_prompt": "Help.",
+            "handover_contacts": [{"contact_id": cid, "note": "   "}],
+        },
+        headers=headers,
+    )
+    assert r.status_code == 422
+    assert r.json()["detail"][0]["loc"] == ["body", "handover_contacts", 0]
+
+
+async def test_agent_handover_patch_set_and_null(client, org) -> None:
+    _, headers = org
+    cid = await _contact(client, headers)
+    agent_id = (
+        await client.post(
+            "/agents", json={"name": "Desk", "system_prompt": "Help."}, headers=headers
+        )
+    ).json()["id"]
+    r = await client.patch(
+        f"/agents/{agent_id}",
+        json={"handover_contacts": [{"contact_id": cid, "note": " Billing "}]},
+        headers=headers,
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["handover_contacts"][0]["note"] == "Billing"
+    r = await client.patch(
+        f"/agents/{agent_id}", json={"handover_contacts": None}, headers=headers
+    )
+    assert r.status_code == 200, r.text
+    assert len(r.json()["handover_contacts"]) == 1
+
+
+async def test_agent_patch_duplicate_name_with_handover_is_409(client, org) -> None:
+    _, headers = org
+    cid = await _contact(client, headers)
+    await client.post(
+        "/agents", json={"name": "A", "system_prompt": "Help."}, headers=headers
+    )
+    b = (
+        await client.post(
+            "/agents", json={"name": "B", "system_prompt": "Help."}, headers=headers
+        )
+    ).json()["id"]
+    r = await client.patch(
+        f"/agents/{b}",
+        json={
+            "name": "A",
+            "handover_contacts": [{"contact_id": cid, "note": "Billing"}],
+        },
+        headers=headers,
+    )
+    assert r.status_code == 409, r.text

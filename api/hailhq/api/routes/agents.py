@@ -84,6 +84,11 @@ def _check_tools(tools: list[str] | None) -> None:
 
 async def _check_handover(db: AsyncSession, org_id: UUID, items) -> list[HandoverItem]:
     parsed = [HandoverItem(i.contact_id, i.note.strip()) for i in items]
+    for index, item in enumerate(parsed):
+        if not item.note:
+            raise unprocessable(
+                "note must not be blank", loc=["body", "handover_contacts", index]
+            )
     try:
         await validate_handover(db, org_id, parsed)
     except HandoverInvalid as exc:
@@ -224,7 +229,8 @@ async def update_agent(
 ) -> AgentResponse:
     """Change some fields. Fields left out keep their value; ``null`` clears
     first_message, ai_disclosure_line, tools or max_duration_seconds. Live
-    calls keep the settings they started with."""
+    calls keep the settings they started with. ``handover_contacts`` replaces
+    the list; ``[]`` clears it and ``null`` leaves it."""
     agent = await _load_owned(db, agent_id, principal.organization_id)
     changes = body.model_dump(exclude_unset=True)
     changes.pop("handover_contacts", None)
@@ -246,17 +252,22 @@ async def update_agent(
             changes.pop(field)
     if "voice_config" in changes:
         changes["voice_config"] = body.voice_config.model_dump(mode="json")
-    for field, value in changes.items():
-        setattr(agent, field, value)
+    # Validate before any attribute is set: the validation queries would
+    # autoflush a pending name change outside the conflict handler below.
+    items = None
     if body.handover_contacts is not None:
         items = await _check_handover(
             db, principal.organization_id, body.handover_contacts
         )
-        await replace_handover(db, agent.id, items)
+    for field, value in changes.items():
+        setattr(agent, field, value)
+    if items is not None:
         changes["handover_contacts"] = True
     if changes:
         agent.updated_at = datetime.now(timezone.utc)
         try:
+            if items is not None:
+                await replace_handover(db, agent.id, items)
             await db.commit()
         except IntegrityError as exc:
             await db.rollback()
