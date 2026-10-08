@@ -275,6 +275,7 @@ async def test_accepted_call_rings_and_returns_dispatch_metadata(async_session) 
     assert md["ai_disclosure_line"] == "You reached {org}. I am an AI."
     assert md["org_name"] == "Acme Dental"
     assert md["tools"] == ["end_call"]
+    assert md["handover_targets"] == []
     assert md["max_duration_seconds"] == 600
     assert md["voice_config"] == {"voice_id": "v1", "language": "fr"}
     assert md["llm"] is None

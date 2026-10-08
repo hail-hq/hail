@@ -32,6 +32,7 @@ from hailhq.core.call_end_reasons import CallEndReason
 from hailhq.core.carrier_routing import inbound_trunk
 from hailhq.core.compliance_gate import check_channel_suspended
 from hailhq.core.config import settings
+from hailhq.core.handover import handover_targets
 from hailhq.core.internal_webhook import fetch_organization_name
 from hailhq.core.models import (
     Agent,
@@ -256,6 +257,7 @@ async def _answer_or_refuse(
             "ai_disclosure": agent.ai_disclosure,
             "ai_disclosure_line": disclosure_line,
             "tools": agent.tools,
+            "handover_targets": await handover_targets(db, agent.id),
             "org_name": await org_name,
         }
     )

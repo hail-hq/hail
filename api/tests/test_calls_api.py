@@ -1230,6 +1230,52 @@ async def test_post_calls_dispatch_metadata_org_name_none_on_lookup_failure(
     assert dispatch_kwargs["metadata"]["org_name"] is None
 
 
+async def test_post_calls_dispatch_metadata_carries_handover_targets(
+    client: httpx.AsyncClient,
+    async_session: AsyncSession,
+    org_and_key: tuple[str, ApiKey, str],
+    livekit_mock: AsyncMock,
+    add_phone_number,
+) -> None:
+    import json
+
+    org_id, _, plain = org_and_key
+    await add_phone_number(async_session, org_id)
+    headers = {"Authorization": f"Bearer {plain}"}
+    r = await client.post(
+        "/contacts",
+        json={"name": "Sam", "phone_e164": "+14155550111"},
+        headers=headers,
+    )
+    assert r.status_code == 201, r.text
+    cid = r.json()["id"]
+    r = await client.post(
+        "/agents",
+        json={
+            "name": "Helper",
+            "system_prompt": "Help.",
+            "handover_contacts": [{"contact_id": cid, "note": "Billing"}],
+        },
+        headers=headers,
+    )
+    assert r.status_code == 201, r.text
+    resp = await client.post(
+        "/calls",
+        json={
+            "to": "+14155559999",
+            "recipient_consent": True,
+            "agent_id": r.json()["id"],
+        },
+        headers=headers,
+    )
+    assert resp.status_code == 201, resp.text
+    meta = livekit_mock.dispatch_agent.await_args.kwargs["metadata"]
+    assert meta["handover_targets"] == [
+        {"contact_id": cid, "label": "Sam", "note": "Billing"}
+    ]
+    assert "+14155550111" not in json.dumps(meta)
+
+
 async def test_voice_config_stt_rejected_422(
     client: httpx.AsyncClient,
     async_session: AsyncSession,
@@ -1675,6 +1721,7 @@ async def test_post_calls_with_agent_id_fills_defaults(
     assert md["tools"] == ["end_call"]
     assert md["voice_config"]["voice_id"] == "v9"
     assert md["max_duration_seconds"] == 900
+    assert md["handover_targets"] == []
 
     # Explicit fields win over the agent.
     resp = await client.post(
