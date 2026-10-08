@@ -70,7 +70,7 @@ Agent schemas (`core/hailhq/core/schemas.py`):
 
 Dispatch metadata (outbound in `calls.py`, inbound in `inbound_calls.py`) gains:
 
-- `handover_targets: [{contact_id, name, note}]` — no numbers.
+- `handover_targets: [{contact_id, label, note}]` — no numbers. `label` is the contact name; a repeated name gets " (2)", " (3)".
 
 New internal endpoint `POST /internal/agent/handover` (`api/hailhq/api/routes/internal/agent.py`, same auth as `send_sms`):
 
@@ -108,8 +108,9 @@ New `ToolContext.bridge` handle, built in `agent.py` as `make_agent_bridge`:
 4. Answered:
    - write `call_events` kind `handover`, payload `{contact_id, name, outcome: "answered", ring_ms}`;
    - fan out `call.transferred`;
-   - agent says one line to both: "Hi {name}, I have a caller about {reason}. Connecting you now.";
-   - disable the session's audio input and output; the agent stays in the room.
+   - agent says one line to both: "Hi {name}, I have a caller on the line. They say it is about {reason}. Connecting you now." (`{name}` without the " (n)" suffix; without a reason: "Hi {name}, I have a caller on the line. Connecting you now.");
+   - disable the session's audio input and output; the agent stays in the room;
+   - the tool returns "Connected. They are talking now. Say nothing and do not end the call." and `end_call` does nothing while connected.
 5. `SipCallError` or timeout:
    - write `handover` event with `outcome: "no_answer" | "busy" | "failed"` and the SIP status;
    - return "They could not pick up." The agent offers to take a message.
@@ -119,7 +120,9 @@ Participant handling:
 
 - `_on_participant_disconnected` treats `human-{call_id}` leaving as the end of the call too (decision: person hangs up → call ends). Both legs leaving end the room.
 - AMD stays bound to the caller identity only.
-- `max_duration_seconds` still covers the whole call.
+- `max_duration_seconds` still covers the whole call. When the soft cap fires after a connected handover, the agent's output audio is turned back on, it says the cap line to both people, then the room is deleted and the job shuts down.
+- Any job end while the contact leg is ringing or connected (soft cap, worker shutdown, BYO-LLM give-up) deletes the room, so no leg stays up unbilled.
+- One dial at a time: a second `transfer_call` while one rings or is connected fails without dialing.
 - Only one connected handover per call. After it, the tool returns "Already connected."
 
 ### 4. Billing
@@ -152,7 +155,7 @@ Built with the `frontend-design` skill.
 | Contact removed from agent during the call | Endpoint denies; agent says it cannot connect. |
 | Contact on DNC / premium rate | Save fails (422). If it changes later, dial-time check denies. |
 | Contact's country not in the call's carrier catalog | Endpoint denies; agent says it cannot connect. |
-| No outbound trunk for the carrier | Endpoint denies; `handover` event `outcome: failed`. |
+| No outbound trunk for the carrier | Endpoint denies and writes audit log `agent.handover.blocked` with reason `carrier_route_failed`; no `handover` event. |
 | Person busy / no answer / declined | Agent comes back; event records SIP status. |
 | Second handover attempt after connect | Tool returns "Already connected." |
 
