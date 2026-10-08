@@ -74,7 +74,9 @@ async def test_no_answer_comes_back() -> None:
 
 async def test_denied_by_api() -> None:
     spec = transfer_call.bind(META)
-    ctx, api, bridge = _ctx({"ok": False, "spoken": "I can't connect you to that person right now."})
+    ctx, api, bridge = _ctx(
+        {"ok": False, "spoken": "I can't connect you to that person right now."}
+    )
     said = await spec.execute(ctx, {"contact": "Sam", "reason": "x"})
     assert said == "I can't connect you to that person right now."
     bridge.assert_not_awaited()

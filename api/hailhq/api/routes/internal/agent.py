@@ -697,7 +697,9 @@ async def _answered_handover(db: AsyncSession, call_id: UUID) -> bool:
     ).first() is not None
 
 
-async def _linked_contact(db: AsyncSession, call: Call, contact_id: UUID) -> Contact | None:
+async def _linked_contact(
+    db: AsyncSession, call: Call, contact_id: UUID
+) -> Contact | None:
     if call.agent_id is None:
         return None
     return (
@@ -806,7 +808,8 @@ async def agent_handover_result(
             event_type="call.transferred",
             event_id=call.id,
             data=call_event_data(
-                call, transfer={"contact_id": str(body.contact_id), "contact_name": name}
+                call,
+                transfer={"contact_id": str(body.contact_id), "contact_name": name},
             ),
         )
     await db.commit()

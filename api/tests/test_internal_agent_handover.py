@@ -148,7 +148,9 @@ async def test_result_answered_writes_event_and_webhook(
     assert r.json() == {"ok": True}
     ev = (
         await async_session.execute(
-            select(CallEvent).where(CallEvent.call_id == call.id, CallEvent.kind == "handover")
+            select(CallEvent).where(
+                CallEvent.call_id == call.id, CallEvent.kind == "handover"
+            )
         )
     ).scalar_one()
     assert ev.payload == {
@@ -159,14 +161,22 @@ async def test_result_answered_writes_event_and_webhook(
         "ring_ms": 12000,
     }
     deliveries = (
-        await async_session.execute(
-            select(WebhookDelivery).where(WebhookDelivery.event_type == "call.transferred")
+        (
+            await async_session.execute(
+                select(WebhookDelivery).where(
+                    WebhookDelivery.event_type == "call.transferred"
+                )
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     assert len(deliveries) == 1
 
 
-async def test_result_no_answer_writes_event_only(client, async_session, add_phone_number):
+async def test_result_no_answer_writes_event_only(
+    client, async_session, add_phone_number
+):
     call, contact = await _seed(async_session, add_phone_number)
     await _post(
         client,
@@ -180,14 +190,22 @@ async def test_result_no_answer_writes_event_only(client, async_session, add_pho
         },
     )
     deliveries = (
-        await async_session.execute(
-            select(WebhookDelivery).where(WebhookDelivery.event_type == "call.transferred")
+        (
+            await async_session.execute(
+                select(WebhookDelivery).where(
+                    WebhookDelivery.event_type == "call.transferred"
+                )
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     assert deliveries == []
 
 
-async def test_result_answered_twice_is_idempotent(client, async_session, add_phone_number):
+async def test_result_answered_twice_is_idempotent(
+    client, async_session, add_phone_number
+):
     call, contact = await _seed(async_session, add_phone_number)
     async_session.add(
         WebhookSubscription(
@@ -209,20 +227,34 @@ async def test_result_answered_twice_is_idempotent(client, async_session, add_ph
         r = await _post(client, "/internal/agent/handover-result", payload)
         assert r.json() == {"ok": True}
     events = (
-        await async_session.execute(
-            select(CallEvent).where(CallEvent.call_id == call.id, CallEvent.kind == "handover")
+        (
+            await async_session.execute(
+                select(CallEvent).where(
+                    CallEvent.call_id == call.id, CallEvent.kind == "handover"
+                )
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     deliveries = (
-        await async_session.execute(
-            select(WebhookDelivery).where(WebhookDelivery.event_type == "call.transferred")
+        (
+            await async_session.execute(
+                select(WebhookDelivery).where(
+                    WebhookDelivery.event_type == "call.transferred"
+                )
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     assert len(events) == 1
     assert len(deliveries) == 1
 
 
-async def test_result_unlinked_contact_rejected(client, async_session, add_phone_number):
+async def test_result_unlinked_contact_rejected(
+    client, async_session, add_phone_number
+):
     call, contact = await _seed(async_session, add_phone_number, link=False)
     r = await _post(
         client,
@@ -237,8 +269,14 @@ async def test_result_unlinked_contact_rejected(client, async_session, add_phone
     )
     assert r.json() == {"ok": False}
     events = (
-        await async_session.execute(select(CallEvent).where(CallEvent.call_id == call.id))
-    ).scalars().all()
+        (
+            await async_session.execute(
+                select(CallEvent).where(CallEvent.call_id == call.id)
+            )
+        )
+        .scalars()
+        .all()
+    )
     assert events == []
 
 
