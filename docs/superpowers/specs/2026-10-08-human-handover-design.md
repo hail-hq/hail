@@ -71,18 +71,19 @@ Agent schemas (`core/hailhq/core/schemas.py`):
 Dispatch metadata (outbound in `calls.py`, inbound in `inbound_calls.py`) gains:
 
 - `handover_targets: [{contact_id, name, note}]` — no numbers.
-- `hail_number` (the org number on the call) and `provider`, so the voicebot dials from the same number and trunk.
 
 New internal endpoint `POST /internal/agent/handover` (`api/hailhq/api/routes/internal/agent.py`, same auth as `send_sms`):
 
 - Request: `{call_id, contact_id}`.
 - Checks: the call is live; its agent still links this contact; contact has a phone; `check_call_allowed` passes; the phone's country has a row in the call's carrier catalog (`costs/<call.provider>.json`); no earlier connected handover on this call.
-- Response: `{to_e164, from_e164, trunk_id, headers}` or a denial reason the agent can say.
+- Response: `{to_e164, from_e164, trunk_id, headers}` or a denial reason the agent can say. `from_e164` is the Hail number on the call; `trunk_id`/`headers` come from `voice_route(call.provider)`, so metadata needs no number or carrier.
+
+New internal endpoint `POST /internal/agent/handover-result`: `{call_id, contact_id, outcome, sip_status, ring_ms}`. Writes the `handover` call event and, on `answered`, the webhook.
 
 Webhook:
 
 - Add `call.transferred` to the event type list (`schemas.py`).
-- Payload: the call object plus `transfer: {contact_id, contact_name, answered_at}`.
+- Payload: the call object plus `transfer: {contact_id, contact_name}`.
 - Sent once, when the person answers.
 
 OpenAPI regenerated; CLI (`make codegen`, `cli/internal/cmd/agents.go`) and MCP (`mcp/hailhq/mcp/tools.py`) gain the agent field.
