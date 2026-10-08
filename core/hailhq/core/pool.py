@@ -24,8 +24,8 @@ from __future__ import annotations
 
 import uuid
 
+from hailhq.core.handover import ANSWERED_HANDOVER_SQL, HANDOVER_BACKSTOP_SECONDS
 from hailhq.core.models import PhoneNumber
-from hailhq.core.reconcile import ANSWERED_HANDOVER_SQL, HANDOVER_BACKSTOP_SECONDS
 from hailhq.core.schemas import TERMINAL_CALL_STATUSES
 from sqlalchemy import bindparam, func, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -126,7 +126,7 @@ async def sweep_pool_reservations(
        side, plus a configurable grace window absorbs LiveKit/Twilio
        teardown + clock skew. Exception: a call whose contact answered a
        handover has no time limit, so it is held until the 12 h
-       :data:`~hailhq.core.reconcile.HANDOVER_BACKSTOP_SECONDS` backstop.
+       :data:`~hailhq.core.handover.HANDOVER_BACKSTOP_SECONDS` backstop.
 
     3. **Orphan FK** — ``reserved_call_id`` points at a Call row that no
        longer exists. The FK has ``ON DELETE SET NULL`` so this shouldn't

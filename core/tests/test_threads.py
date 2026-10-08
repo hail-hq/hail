@@ -597,3 +597,25 @@ async def test_window_keyword_narrows_the_window(async_session):
 
     assert [i.text for i in wide] == ["2 days", "1 hour"]
     assert [i.text for i in narrow] == ["1 hour"]
+
+
+async def test_answered_handover_call_stays_active_until_backstop(async_session):
+    """A call whose contact answered a handover has no time limit: it stays
+    active past ACTIVE_CALL_MAX_AGE, up to the 12 h backstop."""
+    org = uuid.uuid4()
+    agent = await _agent(async_session, org)
+    call = await _call(async_session, org, agent.id, status="in_progress")
+    call.created_at = datetime.now(timezone.utc) - timedelta(hours=3)
+    async_session.add(
+        CallEvent(call_id=call.id, kind="handover", payload={"outcome": "answered"})
+    )
+    await async_session.commit()
+    active = await threads.active_call_for_thread(async_session, org, agent.id, PERSON)
+    assert active is not None and active.id == call.id
+
+    call.created_at = datetime.now(timezone.utc) - timedelta(hours=13)
+    await async_session.commit()
+    assert (
+        await threads.active_call_for_thread(async_session, org, agent.id, PERSON)
+        is None
+    )

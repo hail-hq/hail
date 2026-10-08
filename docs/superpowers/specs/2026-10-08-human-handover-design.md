@@ -107,7 +107,7 @@ New `ToolContext.bridge` handle, built in `agent.py` as `make_agent_bridge`:
 2. Call `/internal/agent/handover`. Denied → return the reason; the agent tells the caller.
 3. `create_sip_participant` with `sip_number=from_e164`, trunk from the response, identity `human-{call_id}`, `wait_until_answered=True`, `ringing_timeout=30s`, `play_dialtone=True`.
 4. Answered:
-   - write `call_events` kind `handover`, payload `{contact_id, name, outcome: "answered", ring_ms}`;
+   - write `call_events` kind `handover`, payload `{contact_id, name, outcome: "answered", ring_ms}`, right away, before the intro plays (`BridgeRoute.on_answered`; up to 3 attempts, 0.5 s and 1 s apart; never raises into the call). The tool does not post "answered" again after the bridge returns;
    - fan out `call.transferred`;
    - agent says one line to both: "Hi {name}, I have a caller on the line. They say it is about {reason}. Connecting you now." (`{name}` without the " (n)" suffix; without a reason: "Hi {name}, I have a caller on the line. Connecting you now.");
    - disable the session's audio input and output; the agent stays in the room;
@@ -122,7 +122,7 @@ Participant handling:
 - `_on_participant_disconnected` treats `human-{call_id}` leaving as the end of the call too (decision: person hangs up → call ends). Both legs leaving end the room.
 - AMD stays bound to the caller identity only.
 - `max_duration_seconds` stops applying once the contact answers. On answer the bridge handle cancels the pending soft cap task, so the call runs until the caller or the contact hangs up. Before the answer the cap applies as today: if it fires while the contact rings, the agent says the cap line, the room is deleted (both legs drop) and the job shuts down. A cap that already fired and is announcing when the contact answers finishes and ends the call.
-- Stale-call sweep (`sweep_stale_calls`) and pool sweep (`sweep_pool_reservations`): a call with an `answered` `handover` event is not swept, and its pool number stays reserved, at `max_duration_seconds + grace`. A fixed 12 h backstop after `COALESCE(started_at, requested_at)` (`HANDOVER_BACKSTOP_SECONDS`) closes the row of a crashed worker. The voicebot does not enforce the 12 h; it never cuts a live call.
+- Stale-call sweep (`sweep_stale_calls`) and pool sweep (`sweep_pool_reservations`): a call with an `answered` `handover` event is not swept, and its pool number stays reserved, at `max_duration_seconds + grace`. A fixed 12 h backstop after `COALESCE(started_at, requested_at)` (`HANDOVER_BACKSTOP_SECONDS`) closes the row of a crashed worker. The voicebot does not enforce the 12 h; it never cuts a live call. For the same reason `active_call_for_thread` counts such a call as active past `ACTIVE_CALL_MAX_AGE` (2 h), up to 12 h, so the text agent does not answer the caller's texts mid-call.
 - Any job end while the contact leg is ringing or connected (soft cap, worker shutdown, BYO-LLM give-up) deletes the room, so no leg stays up unbilled.
 - One dial at a time: a second `transfer_call` while one rings or is connected fails without dialing.
 - Only one connected handover per call. After it, the tool returns "Already connected."

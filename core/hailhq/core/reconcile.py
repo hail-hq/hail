@@ -17,7 +17,7 @@ cannot legitimately still be running. Such rows are failed with
 
 Exception: a call with an ``answered`` ``handover`` call event has no time
 limit (the two people talk until someone hangs up), so it is only swept after
-:data:`HANDOVER_BACKSTOP_SECONDS` (12 h).
+:data:`hailhq.core.handover.HANDOVER_BACKSTOP_SECONDS` (12 h).
 
 Run alongside the pool sweeper in the API service's periodic loop. Ordering it
 *before* the pool sweep means a call it force-closes here is seen as terminal
@@ -29,27 +29,13 @@ from __future__ import annotations
 import uuid
 
 from hailhq.core.call_end_reasons import CallEndReason
+from hailhq.core.handover import ANSWERED_HANDOVER_SQL, HANDOVER_BACKSTOP_SECONDS
 from hailhq.core.models import Call, CallEvent
 from hailhq.core.schemas import TERMINAL_CALL_STATUSES
 from hailhq.core.threads import requeue_skipped_for_call
 from hailhq.core.webhook_fanout import fanout_call_event
 from sqlalchemy import bindparam, func, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
-
-# Once a handover contact answers, max_duration_seconds no longer applies and
-# the call runs until someone hangs up. The sweep then waits this long after
-# COALESCE(started_at, requested_at) before closing the row. It only closes
-# the DB row of a crashed worker; the voicebot does not enforce it.
-HANDOVER_BACKSTOP_SECONDS = 12 * 60 * 60
-
-# SQL: true when call ``c`` has a handover the contact answered. Shared with
-# :func:`hailhq.core.pool.sweep_pool_reservations`.
-ANSWERED_HANDOVER_SQL = """EXISTS (
-                SELECT 1 FROM call_events e
-                 WHERE e.call_id = c.id
-                   AND e.kind = 'handover'
-                   AND e.payload->>'outcome' = 'answered'
-              )"""
 
 
 async def sweep_stale_calls(
@@ -153,8 +139,4 @@ async def sweep_stale_calls(
     return ids
 
 
-__all__ = [
-    "ANSWERED_HANDOVER_SQL",
-    "HANDOVER_BACKSTOP_SECONDS",
-    "sweep_stale_calls",
-]
+__all__ = ["sweep_stale_calls"]

@@ -12,12 +12,37 @@ from uuid import UUID
 
 import phonenumbers
 from hailhq.core.compliance_gate import check_call_allowed
-from hailhq.core.models import AgentHandoverContact, Contact
+from hailhq.core.models import AgentHandoverContact, Call, CallEvent, Contact
 from hailhq.core.telephony_catalog import sells_in
-from sqlalchemy import delete, select
+from sqlalchemy import Exists, delete, exists, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 MAX_HANDOVER_CONTACTS = 10
+
+# Once a handover contact answers, max_duration_seconds no longer applies and
+# the call runs until someone hangs up. The sweep then waits this long after
+# COALESCE(started_at, requested_at) before closing the row. It only closes
+# the DB row of a crashed worker; the voicebot does not enforce it.
+HANDOVER_BACKSTOP_SECONDS = 12 * 60 * 60
+
+# SQL: true when call ``c`` has a handover the contact answered. Shared with
+# :func:`hailhq.core.pool.sweep_pool_reservations` and
+# :func:`hailhq.core.reconcile.sweep_stale_calls`.
+ANSWERED_HANDOVER_SQL = """EXISTS (
+                SELECT 1 FROM call_events e
+                 WHERE e.call_id = c.id
+                   AND e.kind = 'handover'
+                   AND e.payload->>'outcome' = 'answered'
+              )"""
+
+
+def answered_handover_exists() -> Exists:
+    """ORM form of :data:`ANSWERED_HANDOVER_SQL` for a query over ``Call``."""
+    return exists().where(
+        CallEvent.call_id == Call.id,
+        CallEvent.kind == "handover",
+        CallEvent.payload["outcome"].astext == "answered",
+    )
 
 
 @dataclass(frozen=True)
