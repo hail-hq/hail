@@ -246,3 +246,37 @@ func TestAgentsCreate_HandoverRejectsBadValue(t *testing.T) {
 		t.Fatal("bad --handover must fail")
 	}
 }
+
+func TestAgentsCreate_HandoverSendsContacts(t *testing.T) {
+	srv := newFakeServer(t, http.StatusOK, sampleAgent())
+	a := "55555555-5555-5555-5555-555555555555"
+	_, _, err := runRoot(t,
+		map[string]string{"HAIL_API_KEY": "sk_test", "HAIL_API_URL": srv.URL},
+		"agents", "create", "--prompt", "hi", "--handover", a+"=billing",
+	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	var body map[string]any
+	_ = json.Unmarshal(srv.lastBody, &body)
+	got, _ := body["handover_contacts"].([]any)
+	if len(got) != 1 {
+		t.Fatalf("want 1 contact: %s", srv.lastBody)
+	}
+	c := got[0].(map[string]any)
+	if c["contact_id"] != a || c["note"] != "billing" {
+		t.Errorf("bad contact: %s", srv.lastBody)
+	}
+}
+
+func TestAgentsCreate_HandoverRejectsLongNote(t *testing.T) {
+	srv := newFakeServer(t, http.StatusOK, sampleAgent())
+	_, _, err := runRoot(t,
+		map[string]string{"HAIL_API_KEY": "sk_test", "HAIL_API_URL": srv.URL},
+		"agents", "create", "--prompt", "hi",
+		"--handover", "55555555-5555-5555-5555-555555555555="+strings.Repeat("x", 201),
+	)
+	if err == nil || !strings.Contains(err.Error(), "200") {
+		t.Fatalf("want a 200-char error, got %v", err)
+	}
+}

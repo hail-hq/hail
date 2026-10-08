@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"unicode/utf8"
 	"text/tabwriter"
 
 	"github.com/google/uuid"
@@ -222,6 +223,9 @@ func (f *agentFlags) body(cmd *cobra.Command, create bool, voice map[string]any)
 			id, note, ok := strings.Cut(h, "=")
 			if _, err := uuid.Parse(id); err != nil || !ok || strings.TrimSpace(note) == "" {
 				return nil, fmt.Errorf("--handover must be <contact_id>=<note>, got %q", h)
+			}
+			if utf8.RuneCountInString(note) > 200 {
+				return nil, fmt.Errorf("--handover note for %s is longer than 200 characters", id)
 			}
 			contacts = append(contacts, map[string]string{"contact_id": id, "note": strings.TrimSpace(note)})
 		}

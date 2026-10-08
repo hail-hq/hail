@@ -101,7 +101,7 @@ The full set is the `WebhookEventType` enum in
 - **`sms.failed`** — the send failed (transport error or carrier rejection).
 
 **Call lifecycle** — `received` (inbound only), `answered`, `completed`,
-`failed`, `busy`, `no_answer`, `transferred` (no `canceled` event; no data source):
+`failed`, `busy`, `no_answer`, `transferred` (there is no `canceled` event; it has no data source):
 
 - **`call.received`** — an inbound call reached one of your numbers and an
   agent is about to answer ([Agents](agents.md)). Fired before the answer.

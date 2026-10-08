@@ -51,7 +51,8 @@ curl -X PATCH "$HAIL_API_URL/v1/agents/$AGENT_ID" -H "Authorization: Bearer $HAI
 
 CLI: `hail agents update <id> --handover "<contact-id>=billing questions"`
 (repeat the flag for more people; `--no-handover` clears the list).
-MCP: `create_agent(handover_contacts=[{"contact_id": "...", "note": "..."}])`.
+MCP sets contacts at creation only: `create_agent(handover_contacts=[{"contact_id": "...", "note": "..."}])`.
+There is no MCP update tool; change them with the CLI or the API.
 
 - Up to 10 contacts. Each needs a phone number in a country Hail sells
   numbers in. It must pass the do-not-call and premium-rate checks, on save
