@@ -6,7 +6,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 
 import pytest
-from hailhq.core.models import Call, PhoneNumber
+from hailhq.core.models import Call, CallEvent, PhoneNumber
 from hailhq.core.pool import (
     claim_pool_number,
     release_pool_reservation,
@@ -360,3 +360,56 @@ async def test_sweeper_handles_multiple_reservations_in_one_pass(async_session):
     released = await sweep_pool_reservations(async_session, grace_seconds=120)
     await async_session.commit()
     assert set(released) == {pn_a.id, pn_b.id}
+
+
+async def _handed_over_pool_call(session, e164: str, age: timedelta) -> PhoneNumber:
+    """A reserved pool call, past its max_duration bound by ``age``, whose
+    contact answered a handover."""
+    pn = await _make_pool_number(session, e164=e164)
+    call = await _make_call(session, from_number_id=pn.id)
+    await _reserve(session, pn, call)
+    await session.execute(
+        update(Call)
+        .where(Call.id == call.id)
+        .values(
+            status="in_progress",
+            requested_at=datetime.now(timezone.utc) - age,
+            started_at=datetime.now(timezone.utc) - age,
+            max_duration_seconds=300,
+        )
+    )
+    session.add(
+        CallEvent(call_id=call.id, kind="handover", payload={"outcome": "answered"})
+    )
+    await session.commit()
+    return pn
+
+
+@pytest.mark.asyncio
+async def test_sweeper_keeps_answered_handover_reservation(async_session):
+    """No time limit after the contact answers: the pool number stays
+    reserved past max_duration + grace."""
+    pn = await _handed_over_pool_call(
+        async_session, "+14155550691", timedelta(seconds=600)
+    )
+
+    released = await sweep_pool_reservations(async_session, grace_seconds=120)
+    await async_session.commit()
+
+    assert pn.id not in released
+    await async_session.refresh(pn)
+    assert pn.reserved_call_id is not None
+
+
+@pytest.mark.asyncio
+async def test_sweeper_releases_answered_handover_after_backstop(async_session):
+    pn = await _handed_over_pool_call(
+        async_session, "+14155550692", timedelta(hours=13)
+    )
+
+    released = await sweep_pool_reservations(async_session, grace_seconds=120)
+    await async_session.commit()
+
+    assert pn.id in released
+    await async_session.refresh(pn)
+    assert pn.reserved_call_id is None

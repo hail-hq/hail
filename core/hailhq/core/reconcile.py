@@ -42,6 +42,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 # the DB row of a crashed worker; the voicebot does not enforce it.
 HANDOVER_BACKSTOP_SECONDS = 12 * 60 * 60
 
+# SQL: true when call ``c`` has a handover the contact answered. Shared with
+# :func:`hailhq.core.pool.sweep_pool_reservations`.
+ANSWERED_HANDOVER_SQL = """EXISTS (
+                SELECT 1 FROM call_events e
+                 WHERE e.call_id = c.id
+                   AND e.kind = 'handover'
+                   AND e.payload->>'outcome' = 'answered'
+              )"""
+
 
 async def sweep_stale_calls(
     session: AsyncSession, *, grace_seconds: int
@@ -61,7 +70,7 @@ async def sweep_stale_calls(
     row). The terminal guard (``status NOT IN terminal``) makes a redundant
     sweep idempotent.
     """
-    select_stmt = text("""
+    select_stmt = text(f"""
         SELECT c.id, c.status, c.organization_id,
                c.direction, c.from_e164, c.to_e164, c.agent_id
           FROM calls c
@@ -72,12 +81,7 @@ async def sweep_stale_calls(
                       + make_interval(secs => (
                           c.max_duration_seconds + :grace_s
                         )::int)
-              AND NOT EXISTS (
-                SELECT 1 FROM call_events e
-                 WHERE e.call_id = c.id
-                   AND e.kind = 'handover'
-                   AND e.payload->>'outcome' = 'answered'
-              ))
+              AND NOT {ANSWERED_HANDOVER_SQL})
              OR now() > COALESCE(c.started_at, c.requested_at)
                         + make_interval(secs => :backstop_s)
            )
@@ -149,4 +153,8 @@ async def sweep_stale_calls(
     return ids
 
 
-__all__ = ["HANDOVER_BACKSTOP_SECONDS", "sweep_stale_calls"]
+__all__ = [
+    "ANSWERED_HANDOVER_SQL",
+    "HANDOVER_BACKSTOP_SECONDS",
+    "sweep_stale_calls",
+]

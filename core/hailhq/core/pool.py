@@ -25,6 +25,7 @@ from __future__ import annotations
 import uuid
 
 from hailhq.core.models import PhoneNumber
+from hailhq.core.reconcile import ANSWERED_HANDOVER_SQL, HANDOVER_BACKSTOP_SECONDS
 from hailhq.core.schemas import TERMINAL_CALL_STATUSES
 from sqlalchemy import bindparam, func, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -123,7 +124,9 @@ async def sweep_pool_reservations(
        grace_seconds`` means the call cannot legitimately still be
        running: the voicebot enforces ``max_duration_seconds`` server-
        side, plus a configurable grace window absorbs LiveKit/Twilio
-       teardown + clock skew.
+       teardown + clock skew. Exception: a call whose contact answered a
+       handover has no time limit, so it is held until the 12 h
+       :data:`~hailhq.core.reconcile.HANDOVER_BACKSTOP_SECONDS` backstop.
 
     3. **Orphan FK** — ``reserved_call_id`` points at a Call row that no
        longer exists. The FK has ``ON DELETE SET NULL`` so this shouldn't
@@ -134,7 +137,7 @@ async def sweep_pool_reservations(
     so the caller can log them. Force-releases should be rare; surfacing
     them is the signal for operational investigation.
     """
-    stmt = text("""
+    stmt = text(f"""
         UPDATE phone_numbers pn
            SET reserved_call_id = NULL
          WHERE pn.is_pool = TRUE
@@ -149,10 +152,15 @@ async def sweep_pool_reservations(
                SELECT 1 FROM calls c
                 WHERE c.id = pn.reserved_call_id
                   AND c.max_duration_seconds IS NOT NULL
-                  AND now() > c.requested_at
-                              + make_interval(secs => (
-                                  c.max_duration_seconds + :grace_s
-                                )::int)
+                  AND (
+                    (now() > c.requested_at
+                             + make_interval(secs => (
+                                 c.max_duration_seconds + :grace_s
+                               )::int)
+                     AND NOT {ANSWERED_HANDOVER_SQL})
+                    OR now() > COALESCE(c.started_at, c.requested_at)
+                               + make_interval(secs => :backstop_s)
+                  )
              )
              OR NOT EXISTS (
                SELECT 1 FROM calls c WHERE c.id = pn.reserved_call_id
@@ -164,6 +172,7 @@ async def sweep_pool_reservations(
         stmt,
         {
             "grace_s": grace_seconds,
+            "backstop_s": HANDOVER_BACKSTOP_SECONDS,
             "terminal_statuses": list(TERMINAL_CALL_STATUSES),
         },
     )
