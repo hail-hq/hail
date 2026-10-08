@@ -146,3 +146,56 @@ async def test_reason_whitespace_collapsed() -> None:
 def test_bind_wiring() -> None:
     assert transfer_call.SPEC.bind is transfer_call.bind
     assert transfer_call.bind(META).bind is None
+
+
+def _answering_bridge(order: list[str], ring_ms: int = 9000):
+    """A bridge that reports the answer through ``on_answered`` and then
+    plays the intro, like the voicebot's."""
+
+    async def bridge(route):
+        await route.on_answered(ring_ms)
+        order.append("intro")
+        return BridgeOutcome("answered", None, ring_ms)
+
+    return bridge
+
+
+async def test_answered_posted_before_intro_and_once() -> None:
+    spec = transfer_call.bind(META)
+    order: list[str] = []
+    ctx, api, _ = _ctx(ROUTE)
+
+    async def post(path, body):
+        order.append(body.get("outcome") or "route")
+        return ROUTE if path.endswith("/handover") else {"ok": True}
+
+    api.post.side_effect = post
+    ctx.bridge = _answering_bridge(order)
+    said = await spec.execute(ctx, {"contact": "Sam", "reason": "x"})
+    assert said == transfer_call._CONNECTED
+    assert order == ["route", "answered", "intro"]
+    result = api.post.await_args_list[1].args[1]
+    assert result["ring_ms"] == 9000 and result["contact_id"] == CID
+
+
+async def test_answered_post_retries(monkeypatch) -> None:
+    monkeypatch.setattr(transfer_call, "_ANSWERED_BACKOFF", (0, 0))
+    spec = transfer_call.bind(META)
+    order: list[str] = []
+    ctx, api, _ = _ctx(ROUTE)
+    api.post.side_effect = [ROUTE, RuntimeError("a"), RuntimeError("b"), {"ok": True}]
+    ctx.bridge = _answering_bridge(order)
+    said = await spec.execute(ctx, {"contact": "Sam", "reason": "x"})
+    assert said == transfer_call._CONNECTED
+    assert api.post.await_count == 4
+
+
+async def test_answered_post_gives_up_after_three_attempts(monkeypatch) -> None:
+    monkeypatch.setattr(transfer_call, "_ANSWERED_BACKOFF", (0, 0))
+    spec = transfer_call.bind(META)
+    ctx, api, _ = _ctx(ROUTE)
+    api.post.side_effect = [ROUTE] + [RuntimeError("x")] * 5
+    ctx.bridge = _answering_bridge([])
+    said = await spec.execute(ctx, {"contact": "Sam", "reason": "x"})
+    assert said == transfer_call._CONNECTED
+    assert api.post.await_count == 4

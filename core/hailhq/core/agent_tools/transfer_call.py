@@ -9,6 +9,7 @@ the outcome (``/internal/agent/handover-result``).
 
 from __future__ import annotations
 
+import asyncio
 import dataclasses
 import logging
 import uuid
@@ -30,6 +31,9 @@ _log = logging.getLogger("hailhq.core.agent_tools")
 _UNAVAILABLE = "I can't connect you to anyone right now."
 _CONNECTED = "Connected. They are talking now. Say nothing and do not end the call."
 _NO_ANSWER = "They could not pick up. Offer to take a message."
+# Waits between the 3 attempts of the "answered" result post. The stale-call
+# and pool sweeps rely on that event to lift the time limit.
+_ANSWERED_BACKOFF = (0.5, 1.0)
 
 
 async def _always(_org: uuid.UUID, _session: AsyncSession) -> bool:
@@ -71,6 +75,33 @@ def bind(metadata: dict[str, Any]) -> ToolSpec | None:
         if contact_id is None:
             return "I can only connect you to: " + ", ".join(by_label) + "."
         reason = " ".join(str(args.get("reason", "")).split())[:MAX_REASON_CHARS]
+
+        def _result(outcome: str, sip_status: int | None, ring_ms: int) -> dict:
+            return {
+                "call_id": str(ctx.call_id),
+                "contact_id": contact_id,
+                "outcome": outcome,
+                "sip_status": sip_status,
+                "ring_ms": ring_ms,
+            }
+
+        answer_reported = False
+
+        async def on_answered(ring_ms: int) -> None:
+            # Recorded the moment the contact picks up, before the intro.
+            # Retried; never raises into the call.
+            nonlocal answer_reported
+            answer_reported = True
+            body = _result("answered", None, ring_ms)
+            for attempt in range(len(_ANSWERED_BACKOFF) + 1):
+                try:
+                    await ctx.api.post("/internal/agent/handover-result", body)
+                    return
+                except Exception:
+                    _log.exception("handover answered post failed")
+                if attempt < len(_ANSWERED_BACKOFF):
+                    await asyncio.sleep(_ANSWERED_BACKOFF[attempt])
+
         route = await ctx.api.post(
             "/internal/agent/handover",
             {"call_id": str(ctx.call_id), "contact_id": contact_id},
@@ -86,21 +117,18 @@ def bind(metadata: dict[str, Any]) -> ToolSpec | None:
                     headers=route.get("headers"),
                     name=label,
                     reason=reason,
+                    on_answered=on_answered,
                 )
             )
         except Exception:
             _log.exception("handover bridge failed")
             outcome = BridgeOutcome("failed", None, 0)
+        if outcome.outcome == "answered" and answer_reported:
+            return _CONNECTED
         try:
             await ctx.api.post(
                 "/internal/agent/handover-result",
-                {
-                    "call_id": str(ctx.call_id),
-                    "contact_id": contact_id,
-                    "outcome": outcome.outcome,
-                    "sip_status": outcome.sip_status,
-                    "ring_ms": outcome.ring_ms,
-                },
+                _result(outcome.outcome, outcome.sip_status, outcome.ring_ms),
             )
         except Exception:
             _log.exception("handover result post failed")

@@ -1934,3 +1934,21 @@ async def test_soft_cap_while_ringing_ends_both_legs() -> None:
     assert state["ending"] is True
     assert ctx.delete_room_calls == 1
     assert ctx.shutdown_calls == [SOFT_CAP_END_REASON]
+
+
+async def test_bridge_reports_answer_before_intro() -> None:
+    """The answer is recorded as soon as the contact picks up, before the
+    intro plays, so the sweepers see it even if the intro is long."""
+    ctx = FakeJobContext()
+    session = FakeBridgeSession()
+    state: dict = {"human": None, "connected": False}
+    seen: list[tuple[int, int]] = []
+
+    async def on_answered(ring_ms: int) -> None:
+        seen.append((ring_ms, len(session.said)))
+
+    route = BridgeRoute("+1", "+1", "ST", None, "Sam", "", on_answered=on_answered)
+    out = await make_agent_bridge(ctx, session, CALL_ID, state)(route)  # type: ignore[arg-type]
+    assert out.outcome == "answered"
+    assert len(seen) == 1 and seen[0][1] == 0
+    assert len(session.said) == 1

@@ -443,6 +443,13 @@ def make_agent_bridge(
         ):
             soft_cap.cancel()
             await asyncio.gather(soft_cap, return_exceptions=True)
+        if route.on_answered is not None:
+            # Record the answer before the intro: the sweepers lift the time
+            # limit only once the "answered" event exists.
+            try:
+                await route.on_answered(ring_ms)
+            except Exception:
+                logger.exception("call_id=%s handover answered hook failed", call_id)
         try:
             handle = session.say(
                 handover_intro(route.name, route.reason), allow_interruptions=False
