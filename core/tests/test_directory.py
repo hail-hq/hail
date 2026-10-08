@@ -99,7 +99,7 @@ async def test_list_directory_tolerates_missing_contacts_table(async_session):
     """
     org = uuid.uuid4()
     await _add_member(async_session, org, "Alice", "alice@a.test")
-    await async_session.execute(text("DROP TABLE contacts"))
+    await async_session.execute(text("DROP TABLE contacts CASCADE"))
     await async_session.commit()
 
     entries = await list_directory(async_session, org)

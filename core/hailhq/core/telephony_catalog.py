@@ -14,7 +14,7 @@ import os
 from functools import lru_cache
 from pathlib import Path
 
-__all__ = ["capabilities"]
+__all__ = ["capabilities", "sells_in"]
 
 # In the API image costs/ is copied to /app/costs (see api/Dockerfile); in dev
 # the module sits at core/hailhq/core/ so parents[3] is the repo root. An env
@@ -65,3 +65,13 @@ def capabilities(
             return {"voice": True, "sms": False, "mms": False}
         return {"voice": row["voice"], "sms": row["sms"], "mms": row["mms"]}
     return None
+
+
+def sells_in(country_code: str, provider: str = "auto") -> bool:
+    """True when ``provider`` (or any carrier the API buys from, for 'auto')
+    lists any number in ``country_code``. The handover destination guard:
+    a flat per-minute rate only covers countries Hail already sells in."""
+    from hailhq.core.number_offers import PROVIDERS
+
+    providers = PROVIDERS if provider == "auto" else (provider,)
+    return any(cc == country_code for name in providers for cc, _ in _load(name))

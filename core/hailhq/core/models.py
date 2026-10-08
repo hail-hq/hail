@@ -13,6 +13,7 @@ from sqlalchemy import (
     Index,
     Integer,
     Numeric,
+    SmallInteger,
     Text,
     UniqueConstraint,
     func,
@@ -454,6 +455,35 @@ class Agent(Base):
         CheckConstraint(
             "max_duration_seconds IS NULL OR max_duration_seconds BETWEEN 60 AND 3600",
             name="agents_max_duration_check",
+        ),
+    )
+
+
+class AgentHandoverContact(Base):
+    """A contact the agent may hand a live call over to (spec:
+    docs/superpowers/specs/2026-10-08-human-handover-design.md)."""
+
+    __tablename__ = "agent_handover_contacts"
+
+    agent_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("agents.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    contact_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("contacts.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    note: Mapped[str] = mapped_column(Text, nullable=False)
+    position: Mapped[int] = mapped_column(SmallInteger, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        TS, server_default=text("now()"), nullable=False
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "char_length(note) BETWEEN 1 AND 200", name="agent_handover_note_len"
         ),
     )
 

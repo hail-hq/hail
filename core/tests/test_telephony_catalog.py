@@ -151,3 +151,13 @@ def test_a_number_hail_cannot_sell_is_not_offered(tmp_path, monkeypatch):
         assert telephony_catalog.capabilities("PT", "mobile", "didww") == calls_only
     finally:
         telephony_catalog._load.cache_clear()
+
+
+def test_sells_in_known_country() -> None:
+    assert telephony_catalog.sells_in("US") is True
+    assert telephony_catalog.sells_in("US", "twilio") is True
+
+
+def test_sells_in_unknown_country() -> None:
+    assert telephony_catalog.sells_in("ZZ") is False
+    assert telephony_catalog.sells_in("ZZ", "twilio") is False
