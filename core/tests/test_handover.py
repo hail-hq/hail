@@ -34,7 +34,8 @@ async def _agent_and_contacts(s, *phones):
 
 def test_country_of() -> None:
     assert country_of("+14155550100") == "US"
-    assert country_of("+447700900123") == "GB"
+    assert country_of("+447400123456") == "GB"
+    assert country_of("+447700900123") is None  # reserved range: invalid
     assert country_of("+999") is None
 
 
@@ -52,7 +53,7 @@ async def test_validate_rejects(async_session, case) -> None:
         "other_org": [HandoverItem(uuid.uuid4(), "x")],
         "no_phone": [HandoverItem(nophone.id, "x")],
         "duplicate": [HandoverItem(c.id, "x"), HandoverItem(c.id, "y")],
-        "too_many": [HandoverItem(c.id, "x")] * 11,
+        "too_many": [HandoverItem(uuid.uuid4(), "x") for _ in range(11)],
     }[case]
     with pytest.raises(HandoverInvalid):
         await validate_handover(async_session, org, items)

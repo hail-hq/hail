@@ -38,10 +38,6 @@ def country_of(e164: str) -> str | None:
     except phonenumbers.NumberParseException:
         return None
     region = phonenumbers.region_code_for_number(number)
-    if region is None:
-        # Not a currently valid number (e.g. a reserved range): use the
-        # calling code's main country.
-        region = phonenumbers.region_code_for_country_code(number.country_code)
     return region if region and region != "001" else None
 
 
