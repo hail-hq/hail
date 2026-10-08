@@ -1608,7 +1608,8 @@ async def test_bridge_answered_mutes_agent() -> None:
     assert req.wait_until_answered is True
     assert req.ringing_timeout.seconds == 30
     assert session.said == [
-        "Hi Sam, I have a caller about an invoice. Connecting you now."
+        "Hi Sam, I have a caller on the line. "
+        "They say it is about an invoice. Connecting you now."
     ]
     assert session.input.enabled == [False] and session.output.enabled == [False]
     assert state["connected"] is True
@@ -1666,6 +1667,7 @@ async def test_caller_leaves_while_ringing_deletes_room() -> None:
     await asyncio.sleep(0)
     assert ctx.delete_room_calls == 1
     assert ctx.shutdown_calls == ["caller_left"]
+    assert captured["end_reason"] == CallEndReason.NORMAL_HANGUP.value
 
 
 async def test_person_hangs_up_after_connect_ends_call() -> None:
@@ -1695,3 +1697,63 @@ async def test_disconnect_without_handover_keeps_mapping() -> None:
     assert captured == {"status": status, "end_reason": end_reason}
     assert ctx.shutdown_calls == [status]
     assert ctx.delete_room_calls == 0
+
+
+def test_handover_intro_without_reason_and_capped() -> None:
+    from hailhq.voicebot.agent import HANDOVER_INTRO_REASON_CHARS, handover_intro
+
+    assert handover_intro("Sam", "") == (
+        "Hi Sam, I have a caller on the line. Connecting you now."
+    )
+    long = "x" * 300
+    said = handover_intro("Sam", long)
+    assert "x" * HANDOVER_INTRO_REASON_CHARS + "." in said
+    assert "x" * (HANDOVER_INTRO_REASON_CHARS + 1) not in said
+
+
+def test_failed_dial_late_human_disconnect_keeps_call() -> None:
+    """The dial failed and the handle already cleared bridge_state["human"];
+    the contact leg's own disconnect must not be mistaken for the caller."""
+    ctx = FakeJobContext()
+    captured = {"status": None, "end_reason": None}
+    state = {"human": None, "connected": False}
+    p = FakeParticipant(
+        identity=f"human-{CALL_ID}", reason=rtc.DisconnectReason.USER_UNAVAILABLE
+    )
+    handle_sip_disconnect(ctx, p, captured, state, CALL_ID)  # type: ignore[arg-type]
+    assert captured == {"status": None, "end_reason": None}
+    assert ctx.shutdown_calls == []
+    assert ctx.delete_room_calls == 0
+
+
+async def test_second_leg_after_handover_teardown_is_ignored() -> None:
+    ctx = FakeJobContext()
+    captured = {"status": None, "end_reason": None}
+    state = {"human": f"human-{CALL_ID}", "connected": True}
+    human = FakeParticipant(
+        identity=f"human-{CALL_ID}", reason=rtc.DisconnectReason.CLIENT_INITIATED
+    )
+    caller = FakeParticipant(
+        identity="caller-x", reason=rtc.DisconnectReason.ROOM_DELETED
+    )
+    handle_sip_disconnect(ctx, human, captured, state, CALL_ID)  # type: ignore[arg-type]
+    handle_sip_disconnect(ctx, caller, captured, state, CALL_ID)  # type: ignore[arg-type]
+    await asyncio.sleep(0)
+    assert ctx.delete_room_calls == 1
+    assert ctx.shutdown_calls == ["handover_ended"]
+
+
+async def test_bridge_intro_failure_still_mutes_and_answers() -> None:
+    ctx = FakeJobContext()
+    session = FakeBridgeSession()
+
+    def _boom(text: str, *, allow_interruptions: bool = True) -> None:
+        raise RuntimeError("session closed")
+
+    session.say = _boom  # type: ignore[method-assign]
+    state = {"human": None, "connected": False}
+    out = await make_agent_bridge(ctx, session, CALL_ID, state)(  # type: ignore[arg-type]
+        BridgeRoute("+1", "+1", "ST", None, "Sam", "")
+    )
+    assert out.outcome == "answered"
+    assert session.input.enabled == [False] and session.output.enabled == [False]

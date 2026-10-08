@@ -310,6 +310,25 @@ def human_identity(call_id: UUID) -> str:
     return f"human-{call_id}"
 
 
+# Cap on the caller-supplied reason spoken to the contact.
+HANDOVER_INTRO_REASON_CHARS = 120
+
+
+def handover_intro(name: str, reason: str | None) -> str:
+    """What the agent says to the contact once they answer.
+
+    ``reason`` is LLM-written and a caller can steer it, so it is attributed
+    to the caller ("They say …") and kept short.
+    """
+    said = " ".join((reason or "").split())[:HANDOVER_INTRO_REASON_CHARS]
+    if said:
+        return (
+            f"Hi {name}, I have a caller on the line. "
+            f"They say it is about {said}. Connecting you now."
+        )
+    return f"Hi {name}, I have a caller on the line. Connecting you now."
+
+
 def _sip_outcome(code: int | None) -> str:
     if code in _SIP_BUSY:
         return "busy"
@@ -388,14 +407,18 @@ def make_agent_bridge(
         ring_ms = _ring_ms()
         bridge_state["connected"] = True
         logger.info("call_id=%s handover answered after %d ms", call_id, ring_ms)
-        handle = session.say(
-            f"Hi {route.name}, I have a caller about "
-            f"{route.reason or 'a question'}. Connecting you now.",
-            allow_interruptions=False,
-        )
-        await handle.wait_for_playout()
-        session.input.set_audio_enabled(False)
-        session.output.set_audio_enabled(False)
+        try:
+            handle = session.say(
+                handover_intro(route.name, route.reason), allow_interruptions=False
+            )
+            await handle.wait_for_playout()
+        except Exception:
+            # The contact is on the line either way; never leave the agent
+            # talking over the two people.
+            logger.exception("call_id=%s handover intro failed", call_id)
+        finally:
+            session.input.set_audio_enabled(False)
+            session.output.set_audio_enabled(False)
         return BridgeOutcome("answered", None, ring_ms)
 
     return _bridge
@@ -752,16 +775,24 @@ def handle_sip_disconnect(
     # also fires participant_disconnected on shutdown, which we ignore.
     if participant.kind != rtc.ParticipantKind.PARTICIPANT_KIND_SIP:
         return
-    human = bridge_state.get("human")
-    if human is not None and participant.identity == human:
+    if bridge_state.get("ending"):
+        # A handover teardown already deleted the room; this is the other
+        # leg leaving because of it.
+        return
+    # Match the contact's leg by its fixed identity, not by
+    # bridge_state["human"]: the handle clears that on a failed dial, and
+    # the leg's own disconnect can arrive after it.
+    if participant.identity == human_identity(call_id):
         if not bridge_state.get("connected"):
             return
         logger.info("call_id=%s handover contact hung up — ending call", call_id)
         if captured["end_reason"] is None:
             captured["end_reason"] = CallEndReason.NORMAL_HANGUP.value
+        bridge_state["ending"] = True
         asyncio.ensure_future(_drop_room(ctx, call_id))
         ctx.shutdown(reason="handover_ended")
         return
+    human = bridge_state.get("human")
     status, end_reason = disconnect_reason_to_status(participant.disconnect_reason)
     if status is not None:
         captured["status"] = status
@@ -774,6 +805,9 @@ def handle_sip_disconnect(
         )
     if human is not None:
         logger.info("call_id=%s caller left during handover — ending call", call_id)
+        if captured["end_reason"] is None:
+            captured["end_reason"] = CallEndReason.NORMAL_HANGUP.value
+        bridge_state["ending"] = True
         asyncio.ensure_future(_drop_room(ctx, call_id))
         ctx.shutdown(reason="caller_left")
         return
