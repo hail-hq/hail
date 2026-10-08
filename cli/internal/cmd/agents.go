@@ -8,8 +8,8 @@ import (
 	"net/http"
 	"os"
 	"strings"
-	"unicode/utf8"
 	"text/tabwriter"
+	"unicode/utf8"
 
 	"github.com/google/uuid"
 	openapi_types "github.com/oapi-codegen/runtime/types"
