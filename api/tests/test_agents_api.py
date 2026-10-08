@@ -548,3 +548,76 @@ async def test_prompt_templates_show_the_full_prompt_per_channel(client, org) ->
     assert "SMS" in body["texts"]
     # The agent's own text follows Hail's framing, never leads it.
     assert body["calls_in"].index(marker) > body["calls_in"].index("# Guardrails")
+
+
+async def _contact(client, headers, name="Sam", phone="+14155550111") -> str:
+    r = await client.post(
+        "/contacts", json={"name": name, "phone_e164": phone}, headers=headers
+    )
+    assert r.status_code == 201, r.text
+    return r.json()["id"]
+
+
+async def test_agent_handover_contacts_round_trip(client, org) -> None:
+    _, headers = org
+    cid = await _contact(client, headers)
+    r = await client.post(
+        "/agents",
+        json={
+            "name": "Desk",
+            "system_prompt": "Help.",
+            "handover_contacts": [{"contact_id": cid, "note": "Billing"}],
+        },
+        headers=headers,
+    )
+    assert r.status_code == 201, r.text
+    body = r.json()
+    assert body["handover_contacts"] == [
+        {
+            "contact_id": cid,
+            "name": "Sam",
+            "phone_e164": "+14155550111",
+            "note": "Billing",
+        }
+    ]
+    agent_id = body["id"]
+    r = await client.patch(
+        f"/agents/{agent_id}", json={"name": "Desk 2"}, headers=headers
+    )
+    assert r.json()["handover_contacts"][0]["contact_id"] == cid  # untouched
+    r = await client.patch(
+        f"/agents/{agent_id}", json={"handover_contacts": []}, headers=headers
+    )
+    assert r.json()["handover_contacts"] == []
+    listed = (await client.get("/agents", headers=headers)).json()["items"]
+    assert listed[0]["handover_contacts"] == []
+
+
+async def test_agent_handover_contact_from_other_org_is_422(client, org) -> None:
+    _, headers = org
+    r = await client.post(
+        "/agents",
+        json={
+            "name": "Desk",
+            "system_prompt": "Help.",
+            "handover_contacts": [{"contact_id": str(uuid.uuid4()), "note": "x"}],
+        },
+        headers=headers,
+    )
+    assert r.status_code == 422
+    assert r.json()["detail"][0]["loc"] == ["body", "handover_contacts", 0]
+
+
+async def test_agent_handover_note_required(client, org) -> None:
+    _, headers = org
+    cid = await _contact(client, headers)
+    r = await client.post(
+        "/agents",
+        json={
+            "name": "Desk",
+            "system_prompt": "Help.",
+            "handover_contacts": [{"contact_id": cid, "note": ""}],
+        },
+        headers=headers,
+    )
+    assert r.status_code == 422

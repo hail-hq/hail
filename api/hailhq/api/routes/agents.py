@@ -27,6 +27,13 @@ from hailhq.api.routes.calls import get_livekit_optional
 from hailhq.core import inbound_routing, prompts
 from hailhq.core.agent_tools.registry import all_tools
 from hailhq.core.db import get_session, org_lock
+from hailhq.core.handover import (
+    HandoverInvalid,
+    HandoverItem,
+    load_handover,
+    replace_handover,
+    validate_handover,
+)
 from hailhq.core.livekit import LiveKitClient
 from hailhq.core.models import Agent, PhoneNumber
 from hailhq.core.schemas import (
@@ -35,6 +42,7 @@ from hailhq.core.schemas import (
     AgentPromptTemplates,
     AgentResponse,
     AgentUpdate,
+    HandoverContactOut,
 )
 from sqlalchemy import or_, select
 from sqlalchemy.exc import IntegrityError
@@ -74,6 +82,32 @@ def _check_tools(tools: list[str] | None) -> None:
         )
 
 
+async def _check_handover(db: AsyncSession, org_id: UUID, items) -> list[HandoverItem]:
+    parsed = [HandoverItem(i.contact_id, i.note.strip()) for i in items]
+    try:
+        await validate_handover(db, org_id, parsed)
+    except HandoverInvalid as exc:
+        loc: list = ["body", "handover_contacts"]
+        if exc.index is not None:
+            loc.append(exc.index)
+        raise unprocessable(str(exc), loc=loc) from exc
+    return parsed
+
+
+async def _respond(db: AsyncSession, agents: list[Agent]) -> list[AgentResponse]:
+    links = await load_handover(db, [a.id for a in agents])
+    return [
+        AgentResponse.model_validate(a).model_copy(
+            update={
+                "handover_contacts": [
+                    HandoverContactOut(**link) for link in links.get(a.id, [])
+                ]
+            }
+        )
+        for a in agents
+    ]
+
+
 def _name_conflict() -> HTTPException:
     return HTTPException(
         status_code=http_status.HTTP_409_CONFLICT,
@@ -95,6 +129,9 @@ async def create_agent(
     """Create an agent. Route numbers to it with PATCH /numbers/{id}, or
     place calls with it via ``agent_id`` on POST /calls."""
     _check_tools(body.tools)
+    handover = await _check_handover(
+        db, principal.organization_id, body.handover_contacts
+    )
     agent = Agent(
         organization_id=principal.organization_id,
         name=body.name,
@@ -111,6 +148,8 @@ async def create_agent(
     )
     db.add(agent)
     try:
+        await db.flush()
+        await replace_handover(db, agent.id, handover)
         await db.commit()
     except IntegrityError as exc:
         await db.rollback()
@@ -127,7 +166,7 @@ async def create_agent(
         actor_user_id=actor_user_id,
         actor_kind=actor_kind,
     )
-    return AgentResponse.model_validate(agent)
+    return (await _respond(db, [agent]))[0]
 
 
 @router.get("", response_model=AgentListResponse)
@@ -147,7 +186,7 @@ async def list_agents(
         .scalars()
         .all()
     )
-    return AgentListResponse(items=[AgentResponse.model_validate(a) for a in rows])
+    return AgentListResponse(items=await _respond(db, list(rows)))
 
 
 @router.get("/prompt-templates", response_model=AgentPromptTemplates)
@@ -172,9 +211,8 @@ async def get_agent(
     db: Annotated[AsyncSession, Depends(get_session)],
 ) -> AgentResponse:
     """Fetch one agent by id, including its instructions and voice settings."""
-    return AgentResponse.model_validate(
-        await _load_owned(db, agent_id, principal.organization_id)
-    )
+    agent = await _load_owned(db, agent_id, principal.organization_id)
+    return (await _respond(db, [agent]))[0]
 
 
 @router.patch("/{agent_id}", response_model=AgentResponse, responses=_CONFLICT)
@@ -189,6 +227,7 @@ async def update_agent(
     calls keep the settings they started with."""
     agent = await _load_owned(db, agent_id, principal.organization_id)
     changes = body.model_dump(exclude_unset=True)
+    changes.pop("handover_contacts", None)
     if "tools" in changes:
         _check_tools(changes["tools"])
     for field in (
@@ -209,6 +248,12 @@ async def update_agent(
         changes["voice_config"] = body.voice_config.model_dump(mode="json")
     for field, value in changes.items():
         setattr(agent, field, value)
+    if body.handover_contacts is not None:
+        items = await _check_handover(
+            db, principal.organization_id, body.handover_contacts
+        )
+        await replace_handover(db, agent.id, items)
+        changes["handover_contacts"] = True
     if changes:
         agent.updated_at = datetime.now(timezone.utc)
         try:
@@ -228,7 +273,7 @@ async def update_agent(
             actor_user_id=actor_user_id,
             actor_kind=actor_kind,
         )
-    return AgentResponse.model_validate(agent)
+    return (await _respond(db, [agent]))[0]
 
 
 @router.delete(
