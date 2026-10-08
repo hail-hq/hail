@@ -681,3 +681,93 @@ async def test_agent_patch_duplicate_name_with_handover_is_409(client, org) -> N
         headers=headers,
     )
     assert r.status_code == 409, r.text
+
+
+async def test_agent_create_with_tools_list_adds_transfer_call(client, org) -> None:
+    """An explicit tools list without transfer_call still gets the tool when
+    handover contacts are saved (the console's rule)."""
+    _, headers = org
+    cid = await _contact(client, headers)
+    r = await client.post(
+        "/agents",
+        json={
+            "name": "Desk",
+            "system_prompt": "Help.",
+            "tools": ["end_call"],
+            "handover_contacts": [{"contact_id": cid, "note": "Billing"}],
+        },
+        headers=headers,
+    )
+    assert r.status_code == 201, r.text
+    assert r.json()["tools"] == ["end_call", "transfer_call"]
+
+
+async def test_agent_create_all_tools_stays_null(client, org) -> None:
+    _, headers = org
+    cid = await _contact(client, headers)
+    r = await client.post(
+        "/agents",
+        json={
+            "name": "Desk",
+            "system_prompt": "Help.",
+            "handover_contacts": [{"contact_id": cid, "note": "Billing"}],
+        },
+        headers=headers,
+    )
+    assert r.status_code == 201, r.text
+    assert r.json()["tools"] is None
+
+
+async def test_agent_create_without_handover_drops_transfer_call(client, org) -> None:
+    _, headers = org
+    r = await client.post(
+        "/agents",
+        json={
+            "name": "Desk",
+            "system_prompt": "Help.",
+            "tools": ["end_call", "transfer_call"],
+        },
+        headers=headers,
+    )
+    assert r.status_code == 201, r.text
+    assert r.json()["tools"] == ["end_call"]
+
+
+async def test_agent_patch_handover_syncs_transfer_call(client, org) -> None:
+    _, headers = org
+    cid = await _contact(client, headers)
+    agent_id = (
+        await client.post(
+            "/agents",
+            json={"name": "Desk", "system_prompt": "Help.", "tools": ["end_call"]},
+            headers=headers,
+        )
+    ).json()["id"]
+    # Set contacts: stored tools list gains transfer_call.
+    r = await client.patch(
+        f"/agents/{agent_id}",
+        json={"handover_contacts": [{"contact_id": cid, "note": "Billing"}]},
+        headers=headers,
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["tools"] == ["end_call", "transfer_call"]
+    # New tools list without it, contacts stored: it is added back.
+    r = await client.patch(
+        f"/agents/{agent_id}", json={"tools": ["send_sms"]}, headers=headers
+    )
+    assert r.json()["tools"] == ["send_sms", "transfer_call"]
+    # Clear contacts: the tool goes.
+    r = await client.patch(
+        f"/agents/{agent_id}", json={"handover_contacts": []}, headers=headers
+    )
+    assert r.json()["tools"] == ["send_sms"]
+    # tools null (all) stays null.
+    r = await client.patch(
+        f"/agents/{agent_id}",
+        json={
+            "tools": None,
+            "handover_contacts": [{"contact_id": cid, "note": "Billing"}],
+        },
+        headers=headers,
+    )
+    assert r.json()["tools"] is None

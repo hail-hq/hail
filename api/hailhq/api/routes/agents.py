@@ -82,6 +82,20 @@ def _check_tools(tools: list[str] | None) -> None:
         )
 
 
+def _with_handover_tool(
+    tools: list[str] | None, has_handover: bool
+) -> list[str] | None:
+    """Keep ``transfer_call`` in an explicit tools list exactly when the agent
+    has handover contacts (the console applies the same rule). ``None``
+    (every tool) is left alone. Returns a new list."""
+    if tools is None:
+        return None
+    rest = [t for t in tools if t != "transfer_call"]
+    if not has_handover:
+        return rest
+    return list(tools) if "transfer_call" in tools else [*tools, "transfer_call"]
+
+
 async def _check_handover(db: AsyncSession, org_id: UUID, items) -> list[HandoverItem]:
     parsed = [HandoverItem(i.contact_id, i.note.strip()) for i in items]
     for index, item in enumerate(parsed):
@@ -145,7 +159,7 @@ async def create_agent(
         ai_disclosure=body.ai_disclosure,
         ai_disclosure_line=body.ai_disclosure_line,
         voice_config=body.voice_config.model_dump(mode="json"),
-        tools=body.tools,
+        tools=_with_handover_tool(body.tools, bool(handover)),
         max_duration_seconds=body.max_duration_seconds,
         voice_enabled=body.voice_enabled,
         sms_enabled=body.sms_enabled,
@@ -259,6 +273,16 @@ async def update_agent(
         items = await _check_handover(
             db, principal.organization_id, body.handover_contacts
         )
+    if "tools" in changes or items is not None:
+        # Same rule as create, on the values the agent will have after this.
+        tools = changes["tools"] if "tools" in changes else agent.tools
+        if items is not None:
+            has_handover = bool(items)
+        else:
+            has_handover = bool((await load_handover(db, [agent.id])).get(agent.id))
+        synced = _with_handover_tool(tools, has_handover)
+        if synced != tools or "tools" in changes:
+            changes["tools"] = synced
     for field, value in changes.items():
         setattr(agent, field, value)
     if items is not None:

@@ -58,7 +58,9 @@ There is no MCP update tool; change them with the CLI or the API.
   numbers in. It must pass the do-not-call and premium-rate checks, on save
   and again before dialing. `note` is 1-200 characters and tells the agent
   when to hand over.
-- The agent gets the `transfer_call` tool. It never sees a phone number.
+- The agent gets the `transfer_call` tool. If `tools` is a list, saving
+  contacts adds `transfer_call` to it and clearing them removes it; `null`
+  (all tools) stays `null`. The agent never sees a phone number.
 - The contact sees your Hail number as caller ID.
 - The contact has 30 seconds to answer. If not, the agent comes back and
   offers to take a message.
