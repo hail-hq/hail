@@ -8,6 +8,7 @@ import uuid
 import pytest
 from hailhq.core import hmac_signing
 from hailhq.core.compliance_gate import add_suppression
+from hailhq.core.billing import CALL_META_BILLED
 from hailhq.core.config import settings
 from hailhq.core.models import (
     Agent,
@@ -183,3 +184,75 @@ async def test_result_no_answer_writes_event_only(client, async_session, add_pho
         )
     ).scalars().all()
     assert deliveries == []
+
+
+async def test_result_answered_twice_is_idempotent(client, async_session, add_phone_number):
+    call, contact = await _seed(async_session, add_phone_number)
+    async_session.add(
+        WebhookSubscription(
+            organization_id=call.organization_id,
+            target_url="https://example.com/hook",
+            event_types=["call.transferred"],
+            secret_encrypted="x",
+        )
+    )
+    await async_session.commit()
+    payload = {
+        "call_id": str(call.id),
+        "contact_id": str(contact.id),
+        "outcome": "answered",
+        "sip_status": None,
+        "ring_ms": 1000,
+    }
+    for _ in range(2):
+        r = await _post(client, "/internal/agent/handover-result", payload)
+        assert r.json() == {"ok": True}
+    events = (
+        await async_session.execute(
+            select(CallEvent).where(CallEvent.call_id == call.id, CallEvent.kind == "handover")
+        )
+    ).scalars().all()
+    deliveries = (
+        await async_session.execute(
+            select(WebhookDelivery).where(WebhookDelivery.event_type == "call.transferred")
+        )
+    ).scalars().all()
+    assert len(events) == 1
+    assert len(deliveries) == 1
+
+
+async def test_result_unlinked_contact_rejected(client, async_session, add_phone_number):
+    call, contact = await _seed(async_session, add_phone_number, link=False)
+    r = await _post(
+        client,
+        "/internal/agent/handover-result",
+        {
+            "call_id": str(call.id),
+            "contact_id": str(contact.id),
+            "outcome": "answered",
+            "sip_status": None,
+            "ring_ms": 1000,
+        },
+    )
+    assert r.json() == {"ok": False}
+    events = (
+        await async_session.execute(select(CallEvent).where(CallEvent.call_id == call.id))
+    ).scalars().all()
+    assert events == []
+
+
+async def test_handover_denied_when_billed_org_has_no_funds(
+    client, async_session, add_phone_number
+):
+    call, contact = await _seed(async_session, add_phone_number)
+    call.metadata_ = {CALL_META_BILLED: True}
+    await async_session.commit()
+    r = await _post(
+        client,
+        "/internal/agent/handover",
+        {"call_id": str(call.id), "contact_id": str(contact.id)},
+    )
+    data = r.json()
+    assert data["ok"] is False
+    assert data["spoken"]
+    assert data.get("to_e164") is None

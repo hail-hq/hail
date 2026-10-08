@@ -655,9 +655,6 @@ async def agent_send_email(
     return AgentSendResponse(ok=True, spoken=_SPOKEN_EMAIL_SENT)
 
 
-__all__ = ["AGENT_SEND_CAP", "router"]
-
-
 _SPOKEN_HANDOVER_UNAVAILABLE = "I can't connect you to that person right now."
 _SPOKEN_HANDOVER_DONE = "You are already connected."
 
@@ -727,6 +724,10 @@ async def agent_handover(
         return deny
     if await _answered_handover(db, call.id):
         return AgentHandoverResponse(ok=False, spoken=_SPOKEN_HANDOVER_DONE)
+    if call.metadata_.get(CALL_META_BILLED) and not await has_funds(
+        db, call.organization_id
+    ):
+        return await _deny_handover(call, body, "insufficient_funds")
     contact = await _linked_contact(db, call, body.contact_id)
     if contact is None or not contact.phone_e164:
         return deny
@@ -779,8 +780,12 @@ async def agent_handover_result(
     call = await db.get(Call, body.call_id)
     if call is None:
         return {"ok": False}
-    contact = await db.get(Contact, body.contact_id)
-    name = contact.name if contact and contact.organization_id == call.organization_id else ""
+    contact = await _linked_contact(db, call, body.contact_id)
+    if contact is None:
+        return {"ok": False}
+    if body.outcome == "answered" and await _answered_handover(db, call.id):
+        return {"ok": True}  # retried result: already recorded
+    name = contact.name
     db.add(
         CallEvent(
             call_id=call.id,
@@ -806,3 +811,6 @@ async def agent_handover_result(
         )
     await db.commit()
     return {"ok": True}
+
+
+__all__ = ["AGENT_SEND_CAP", "router"]
