@@ -248,7 +248,7 @@ func TestAgentsCreate_HandoverRejectsBadValue(t *testing.T) {
 }
 
 func TestAgentsCreate_HandoverSendsContacts(t *testing.T) {
-	srv := newFakeServer(t, http.StatusOK, sampleAgent())
+	srv := newFakeServer(t, http.StatusCreated, sampleAgent())
 	a := "55555555-5555-5555-5555-555555555555"
 	_, _, err := runRoot(t,
 		map[string]string{"HAIL_API_KEY": "sk_test", "HAIL_API_URL": srv.URL},
