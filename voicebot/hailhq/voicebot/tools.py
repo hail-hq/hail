@@ -31,6 +31,10 @@ SPOKEN_TOOL_FAILURE = SPOKEN_FALLBACK
 def _make_handler(spec: ToolSpec, tctx: ToolContext):
     async def handler(raw_arguments: dict[str, Any], context: RunContext) -> str:
         try:
+            if spec.uninterruptible:
+                # The caller talking while a dial rings must not cancel this
+                # tool: that would leave the contact leg half-dialed.
+                context.disallow_interruptions()
             # session_control tools (end_call) must not cut off the agent's
             # own goodbye: wait for the pre-tool speech to finish playing.
             if spec.risk_tier == "session_control":

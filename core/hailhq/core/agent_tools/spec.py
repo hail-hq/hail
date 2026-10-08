@@ -85,6 +85,9 @@ class ToolSpec:
     # Per-call shaping from dispatch metadata (names in the description,
     # enum of choices). None result hides the tool for this call.
     bind: Callable[[dict[str, Any]], ToolSpec | None] | None = None
+    # True when a caller speaking mid-call must not cancel the tool (a dial
+    # that rings for up to 30 s would be left half-done).
+    uninterruptible: bool = False
 
 
 __all__ = [

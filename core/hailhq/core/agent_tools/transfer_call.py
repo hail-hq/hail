@@ -53,6 +53,7 @@ SPEC = ToolSpec(
     risk_tier="session_control",
     is_available=_always,
     execute=_unbound,
+    uninterruptible=True,
 )
 
 

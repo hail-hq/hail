@@ -15,6 +15,10 @@ from hailhq.voicebot.tools import (
 class FakeRunContext:
     def __init__(self):
         self.waited = False
+        self.interruptions_allowed = True
+
+    def disallow_interruptions(self):
+        self.interruptions_allowed = False
 
     async def wait_for_playout(self):
         self.waited = True
@@ -195,3 +199,12 @@ async def test_transfer_call_hidden_without_targets(db) -> None:
     finally:
         if api is not None:
             await api.aclose()
+
+
+async def test_uninterruptible_tool_disallows_interruptions():
+    import dataclasses
+
+    spec = dataclasses.replace(_spec(tier="session_control"), uninterruptible=True)
+    rc = FakeRunContext()
+    await _make_handler(spec, _tctx())({}, rc)
+    assert rc.interruptions_allowed is False
