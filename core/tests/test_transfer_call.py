@@ -96,3 +96,41 @@ async def test_no_bridge_handle() -> None:
     said = await spec.execute(ctx, {"contact": "Sam", "reason": "x"})
     assert said
     api.post.assert_not_awaited()
+
+
+async def test_result_post_failure_still_connected() -> None:
+    spec = transfer_call.bind(META)
+    ctx, api, _ = _ctx(ROUTE, BridgeOutcome("answered", None, 1))
+    api.post.side_effect = [ROUTE, RuntimeError("boom")]
+    assert await spec.execute(ctx, {"contact": "Sam", "reason": "x"}) == "Connected."
+
+
+async def test_bridge_raises_posts_failed() -> None:
+    spec = transfer_call.bind(META)
+    ctx, api, bridge = _ctx(ROUTE)
+    bridge.side_effect = RuntimeError("boom")
+    said = await spec.execute(ctx, {"contact": "Sam", "reason": "x"})
+    assert "could not pick up" in said
+    result = api.post.await_args_list[1].args[1]
+    assert result["outcome"] == "failed"
+    assert result["sip_status"] is None and result["ring_ms"] == 0
+
+
+def test_bind_ignores_malformed_targets() -> None:
+    for bad in ([{}], [{"label": "x"}], ["not-a-dict"]):
+        assert transfer_call.bind({"handover_targets": bad}) is None
+    mixed = [{}, {"contact_id": CID, "label": "Sam"}, "x"]
+    spec = transfer_call.bind({"handover_targets": mixed})
+    assert spec.parameters["properties"]["contact"]["enum"] == ["Sam"]
+
+
+async def test_reason_whitespace_collapsed() -> None:
+    spec = transfer_call.bind(META)
+    ctx, _, bridge = _ctx(ROUTE, BridgeOutcome("answered", None, 1))
+    await spec.execute(ctx, {"contact": "Sam", "reason": " an \n  invoice "})
+    assert bridge.await_args.args[0].reason == "an invoice"
+
+
+def test_bind_wiring() -> None:
+    assert transfer_call.SPEC.bind is transfer_call.bind
+    assert transfer_call.bind(META).bind is None

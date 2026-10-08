@@ -10,11 +10,13 @@ the outcome (``/internal/agent/handover-result``).
 from __future__ import annotations
 
 import dataclasses
+import logging
 import uuid
 from typing import Any
 
 from hailhq.core.agent_tools.spec import (
     SPOKEN_FALLBACK,
+    BridgeOutcome,
     BridgeRoute,
     ToolContext,
     ToolSpec,
@@ -22,6 +24,8 @@ from hailhq.core.agent_tools.spec import (
 from sqlalchemy.ext.asyncio import AsyncSession
 
 MAX_REASON_CHARS = 200
+
+_log = logging.getLogger("hailhq.core.agent_tools")
 
 _UNAVAILABLE = "I can't connect you to anyone right now."
 _CONNECTED = "Connected."
@@ -48,11 +52,16 @@ SPEC = ToolSpec(
 
 
 def bind(metadata: dict[str, Any]) -> ToolSpec | None:
-    targets = metadata.get("handover_targets") or []
-    if not isinstance(targets, list) or not targets:
+    raw = metadata.get("handover_targets") or []
+    if not isinstance(raw, list):
+        return None
+    targets = [
+        t for t in raw if isinstance(t, dict) and t.get("label") and t.get("contact_id")
+    ]
+    if not targets:
         return None
     by_label = {t["label"]: t["contact_id"] for t in targets}
-    menu = "; ".join(f"{t['label']} ({t['note']})" for t in targets)
+    menu = "; ".join(f"{t['label']} ({t.get('note') or ''})" for t in targets)
 
     async def execute(ctx: ToolContext, args: dict[str, Any]) -> str:
         if ctx.api is None or ctx.bridge is None:
@@ -61,33 +70,40 @@ def bind(metadata: dict[str, Any]) -> ToolSpec | None:
         contact_id = by_label.get(label)
         if contact_id is None:
             return "I can only connect you to: " + ", ".join(by_label) + "."
-        reason = str(args.get("reason", "")).strip()[:MAX_REASON_CHARS]
+        reason = " ".join(str(args.get("reason", "")).split())[:MAX_REASON_CHARS]
         route = await ctx.api.post(
             "/internal/agent/handover",
             {"call_id": str(ctx.call_id), "contact_id": contact_id},
         )
         if not route.get("ok"):
             return str(route.get("spoken") or SPOKEN_FALLBACK)
-        outcome = await ctx.bridge(
-            BridgeRoute(
-                to_e164=route["to_e164"],
-                from_e164=route["from_e164"],
-                trunk_id=route["trunk_id"],
-                headers=route.get("headers"),
-                name=label,
-                reason=reason,
+        try:
+            outcome = await ctx.bridge(
+                BridgeRoute(
+                    to_e164=route["to_e164"],
+                    from_e164=route["from_e164"],
+                    trunk_id=route["trunk_id"],
+                    headers=route.get("headers"),
+                    name=label,
+                    reason=reason,
+                )
             )
-        )
-        await ctx.api.post(
-            "/internal/agent/handover-result",
-            {
-                "call_id": str(ctx.call_id),
-                "contact_id": contact_id,
-                "outcome": outcome.outcome,
-                "sip_status": outcome.sip_status,
-                "ring_ms": outcome.ring_ms,
-            },
-        )
+        except Exception:
+            _log.exception("handover bridge failed")
+            outcome = BridgeOutcome("failed", None, 0)
+        try:
+            await ctx.api.post(
+                "/internal/agent/handover-result",
+                {
+                    "call_id": str(ctx.call_id),
+                    "contact_id": contact_id,
+                    "outcome": outcome.outcome,
+                    "sip_status": outcome.sip_status,
+                    "ring_ms": outcome.ring_ms,
+                },
+            )
+        except Exception:
+            _log.exception("handover result post failed")
         return _CONNECTED if outcome.outcome == "answered" else _NO_ANSWER
 
     return dataclasses.replace(
