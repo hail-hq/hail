@@ -12,6 +12,7 @@ from hailhq.core.billing import CALL_META_BILLED
 from hailhq.core.config import settings
 from hailhq.core.models import (
     Agent,
+    AuditLog,
     AgentHandoverContact,
     Call,
     CallEvent,
@@ -256,3 +257,14 @@ async def test_handover_denied_when_billed_org_has_no_funds(
     assert data["ok"] is False
     assert data["spoken"]
     assert data.get("to_e164") is None
+    rows = (
+        (
+            await async_session.execute(
+                select(AuditLog).where(AuditLog.action == "agent.handover.blocked")
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert len(rows) == 1
+    assert rows[0].payload["reason"] == "insufficient_funds"

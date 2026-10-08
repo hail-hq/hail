@@ -777,7 +777,7 @@ async def agent_handover_result(
     body: AgentHandoverResultRequest,
     db: Annotated[AsyncSession, Depends(get_session)],
 ) -> dict[str, bool]:
-    call = await db.get(Call, body.call_id)
+    call = await _load_call_for_update(db, body.call_id)
     if call is None:
         return {"ok": False}
     contact = await _linked_contact(db, call, body.contact_id)
