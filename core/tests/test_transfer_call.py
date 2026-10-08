@@ -104,7 +104,17 @@ async def test_result_post_failure_still_connected() -> None:
     spec = transfer_call.bind(META)
     ctx, api, _ = _ctx(ROUTE, BridgeOutcome("answered", None, 1))
     api.post.side_effect = [ROUTE, RuntimeError("boom")]
-    assert await spec.execute(ctx, {"contact": "Sam", "reason": "x"}) == "Connected."
+    assert await spec.execute(ctx, {"contact": "Sam", "reason": "x"}) == (
+        transfer_call._CONNECTED
+    )
+
+
+def test_connected_line_tells_the_model_to_stay_silent() -> None:
+    """After the tool returns, the LLM gets a turn with end_call still bound;
+    the result must tell it to say nothing and not hang up."""
+    assert transfer_call._CONNECTED == (
+        "Connected. They are talking now. Say nothing and do not end the call."
+    )
 
 
 async def test_bridge_raises_posts_failed() -> None:

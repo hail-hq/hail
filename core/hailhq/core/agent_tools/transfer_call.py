@@ -28,7 +28,7 @@ MAX_REASON_CHARS = 200
 _log = logging.getLogger("hailhq.core.agent_tools")
 
 _UNAVAILABLE = "I can't connect you to anyone right now."
-_CONNECTED = "Connected."
+_CONNECTED = "Connected. They are talking now. Say nothing and do not end the call."
 _NO_ANSWER = "They could not pick up. Offer to take a message."
 
 
