@@ -30,6 +30,7 @@ from hailhq.voicebot.agent import (
     SOFT_CAP_END_REASON,
     VOICE_PREAMBLE,
     _sanitize_tts_stream,
+    _spell_digits_stream,
     attach_event_handlers,
     build_instructions,
     build_tools_safely,
@@ -45,6 +46,7 @@ from hailhq.voicebot.agent import (
     soft_cap_announce_and_hangup,
     speak_greeting,
     speech_text,
+    spell_digits,
 )
 from livekit import rtc
 from livekit.agents import Agent, AgentSession
@@ -1118,6 +1120,33 @@ async def test_sanitize_tts_stream_filters_like_speech_text() -> None:
     # The sanctioned "..." nothing-to-say reply is dropped, not synthesized.
     assert await collect("...") == ""
     assert await collect("..", ". OK") == "... OK"
+
+
+def test_spell_digits_turns_digit_words_into_digits() -> None:
+    assert spell_digits("seven eight nine-oh, five.") == "789 05".replace(" ", "")
+    assert spell_digits("78789898") == "78789898"
+    assert spell_digits("A one") == "A one"
+    assert spell_digits("") == ""
+
+
+async def test_spell_digits_stream_rewrites_only_inside_the_tag() -> None:
+    async def gen(*chunks: str):
+        for c in chunks:
+            yield c
+
+    async def collect(*chunks: str) -> str:
+        return "".join([c async for c in _spell_digits_stream(gen(*chunks))])
+
+    turn = "It is <spell>seven eight</spell>, that is seven eight."
+    assert await collect(turn) == "It is <spell>78</spell>, that is seven eight."
+    # The tags split across chunks.
+    assert (
+        await collect("It is <sp", "ell>seven ", "eight</sp", "ell>, ok.")
+        == "It is <spell>78</spell>, ok."
+    )
+    assert await collect("a < b and <spe") == "a < b and <spe"
+    assert await collect("Code <spell>seven") == "Code <spell>seven"
+    assert await collect("No tag here.") == "No tag here."
 
 
 async def test_agent_turn_tool_syntax_not_recorded(
