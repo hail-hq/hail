@@ -689,3 +689,71 @@ def test_0041_e164_unique_is_partial(empty_db: str) -> None:
         ), "partial unique index phone_numbers_e164_live_uniq missing"
         assert "UNIQUE" in indexdef
         assert "released" in indexdef, "index WHERE clause missing released filter"
+
+
+def test_0054_handover_members(empty_db: str) -> None:
+    """0054 lets a handover row point at a contact OR an org member (no FK
+    to the website-owned users table). Existing contact rows survive and get
+    a surrogate id; downgrade drops member rows and restores the old PK."""
+    import uuid
+
+    _run_alembic(empty_db, ["upgrade", "0053"])
+    org, agent, contact, user = (uuid.uuid4() for _ in range(4))
+    url = _to_libpq_url(to_sync_url(empty_db))
+    with psycopg.connect(url, autocommit=True) as conn:
+        conn.execute(
+            "INSERT INTO agents (id, organization_id, name, system_prompt) "
+            "VALUES (%s, %s, 'Desk', 'Help.')",
+            (agent, org),
+        )
+        conn.execute(
+            "INSERT INTO contacts (id, organization_id, name, phone_e164) "
+            "VALUES (%s, %s, 'Sam', '+14155550100')",
+            (contact, org),
+        )
+        conn.execute(
+            "INSERT INTO agent_handover_contacts "
+            "(agent_id, contact_id, note, position) VALUES (%s, %s, 'x', 0)",
+            (agent, contact),
+        )
+
+    _run_alembic(empty_db, ["upgrade", "head"])
+    with psycopg.connect(url, autocommit=True) as conn:
+        row = conn.execute(
+            "SELECT id, contact_id, user_id FROM agent_handover_contacts"
+        ).fetchone()
+        assert row[0] is not None and row[1] == contact and row[2] is None
+        conn.execute(
+            "INSERT INTO agent_handover_contacts "
+            "(agent_id, user_id, note, position) VALUES (%s, %s, 'y', 1)",
+            (agent, user),
+        )
+        ins = "INSERT INTO agent_handover_contacts "
+        for sql, args in (
+            # neither set
+            (
+                ins + "(agent_id, note, position) VALUES (%s, 'z', 2)",
+                (agent,),
+            ),
+            # duplicate member
+            (
+                ins + "(agent_id, user_id, note, position) VALUES (%s, %s, 'z', 2)",
+                (agent, user),
+            ),
+            # duplicate contact
+            (
+                ins + "(agent_id, contact_id, note, position) VALUES (%s, %s, 'z', 2)",
+                (agent, contact),
+            ),
+        ):
+            with pytest.raises(psycopg.errors.IntegrityError):
+                conn.execute(sql, args)
+
+    _run_alembic(empty_db, ["downgrade", "0053"])
+    with psycopg.connect(url, autocommit=True) as conn:
+        rows = conn.execute(
+            "SELECT agent_id, contact_id FROM agent_handover_contacts"
+        ).fetchall()
+        assert rows == [(agent, contact)]
+        assert _column_data_type(conn, "agent_handover_contacts", "user_id") is None
+        assert _constraint_exists(conn, "agent_handover_contacts_pkey")

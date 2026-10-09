@@ -2566,8 +2566,8 @@ type HTTPValidationError struct {
 
 // HandoverContactIn defines model for HandoverContactIn.
 type HandoverContactIn struct {
-	// ContactId A contact of this organization with a phone number.
-	ContactId openapi_types.UUID `json:"contact_id"`
+	// ContactId A person with a phone number, as GET /contacts returns it: a contact's id, or `member:<user id>` for a team member.
+	ContactId string `json:"contact_id"`
 
 	// Note When the agent should hand over to this person, e.g. 'billing questions'. Read by the agent.
 	Note string `json:"note"`
@@ -2575,10 +2575,10 @@ type HandoverContactIn struct {
 
 // HandoverContactOut defines model for HandoverContactOut.
 type HandoverContactOut struct {
-	// ContactId The contact.
-	ContactId openapi_types.UUID `json:"contact_id"`
+	// ContactId The person: a contact's id, or `member:<user id>` for a team member.
+	ContactId string `json:"contact_id"`
 
-	// Name Contact name, as the agent says it.
+	// Name Name, as the agent says it.
 	Name string `json:"name"`
 
 	// Note When the agent hands over to this person.

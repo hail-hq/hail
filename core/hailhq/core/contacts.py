@@ -9,12 +9,11 @@ from __future__ import annotations
 import re
 from uuid import UUID
 
+from hailhq.core.contact_ids import MEMBER_ID_PREFIX
 from hailhq.core.models import Contact, OrganizationMember, User
 from hailhq.core.schemas import ContactEntry
 from sqlalchemy import Text, cast, literal, or_, select, union_all
 from sqlalchemy.ext.asyncio import AsyncSession
-
-MEMBER_ID_PREFIX = "member:"
 
 # Backslash-escape ILIKE metacharacters (\, %, _) in a user-supplied search
 # fragment so they match literally instead of acting as SQL wildcards —
