@@ -1763,6 +1763,65 @@ async def test_acquire_number_propagates_explicit_idempotency_key(
     assert result["idempotency_key"] == "buy-once-1"
 
 
+@respx.mock
+async def test_acquire_number_timeout_returns_key_and_sends_one_request(
+    client: HailClient,
+) -> None:
+    route = respx.post(f"{_BASE_URL}/numbers").mock(
+        side_effect=httpx.ReadTimeout("slow")
+    )
+    result = await tools.acquire_number(
+        client=client, idempotency_key="buy-once-2", **_ACQUIRE_ARGS
+    )
+    assert route.call_count == 1
+    assert result["idempotency_key"] == "buy-once-2"
+    assert "request timed out; the purchase may have completed" in result["error"]
+    assert "list_numbers" in result["error"]
+    assert "Do not request a new quote" in result["error"]
+
+
+@respx.mock
+async def test_acquire_number_timeout_returns_generated_key(
+    client: HailClient,
+) -> None:
+    respx.post(f"{_BASE_URL}/numbers").mock(side_effect=httpx.ReadTimeout("slow"))
+    result = await tools.acquire_number(client=client, **_ACQUIRE_ARGS)
+    assert _UUID_RE.match(result["idempotency_key"])
+
+
+@respx.mock
+async def test_acquire_number_api_error_returns_the_key(client: HailClient) -> None:
+    respx.post(f"{_BASE_URL}/numbers").mock(
+        return_value=httpx.Response(409, json={"detail": "Quote expired"})
+    )
+    result = await tools.acquire_number(
+        client=client, idempotency_key="k-409", **_ACQUIRE_ARGS
+    )
+    assert result == {"error": "Quote expired", "idempotency_key": "k-409"}
+
+
+@respx.mock
+async def test_acquire_number_retry_reuses_key_and_quote(client: HailClient) -> None:
+    seen: list[tuple[str | None, dict]] = []
+
+    def _handler(request: httpx.Request) -> httpx.Response:
+        seen.append(
+            (request.headers.get("idempotency-key"), json.loads(request.read()))
+        )
+        if len(seen) == 1:
+            raise httpx.ReadTimeout("slow")
+        return httpx.Response(201, json=_number_response())
+
+    respx.post(f"{_BASE_URL}/numbers").mock(side_effect=_handler)
+    first = await tools.acquire_number(client=client, **_ACQUIRE_ARGS)
+    second = await tools.acquire_number(
+        client=client, idempotency_key=first["idempotency_key"], **_ACQUIRE_ARGS
+    )
+    assert second["e164"] == "+14155550100"
+    assert seen[0][0] == seen[1][0] == first["idempotency_key"]
+    assert seen[0][1]["quote_id"] == seen[1][1]["quote_id"]
+
+
 _NO_FUNDS = (
     "insufficient credits; setup and the first month cost $1.65; "
     "top up at https://hail.so/console/billing"
@@ -1794,7 +1853,8 @@ async def test_acquire_number_maps_api_errors(
         return_value=httpx.Response(status, json={"detail": detail})
     )
     result = await tools.acquire_number(client=client, **_ACQUIRE_ARGS)
-    assert result == {"error": expected}
+    assert result["error"] == expected
+    assert _UUID_RE.match(result["idempotency_key"])
 
 
 @pytest.mark.parametrize(

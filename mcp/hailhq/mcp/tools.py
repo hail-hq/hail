@@ -72,6 +72,7 @@ import uuid
 from collections.abc import AsyncIterator
 from typing import Any
 
+import httpx
 from hailhq.core.internal_webhook import fetch_organization_name
 from hailhq.core.schemas import parse_resource_id
 from hailhq.core.telemetry import telemetry_enabled
@@ -587,8 +588,15 @@ async def acquire_number(
         )
     except ValidationError as exc:
         return {"error": _validation_error_message(exc)}
+    except httpx.TransportError:
+        return {
+            "error": "request timed out; the purchase may have completed. "
+            "Call list_numbers to check, or retry with the same quote_id and "
+            "this idempotency_key. Do not request a new quote.",
+            "idempotency_key": idempotency_key,
+        }
     except HailAPIError as exc:
-        return _format_api_error(exc)
+        return {**_format_api_error(exc), "idempotency_key": idempotency_key}
     # Echo the key so the agent can retry this exact purchase safely.
     result.setdefault("idempotency_key", idempotency_key)
     return result
@@ -1762,17 +1770,22 @@ def register_tools(
         month now and renews monthly. Call quote_numbers first. Pass the
         offer's quote_id, country_code, number_type, and confirm_total_cents =
         monthly_cents + setup_cents from that offer. If the quote expired or
-        the price changed you get an error: quote again. Only buy when your
-        user asked for this number. After buying, call route_number to point
-        it at an agent.
+        the price changed (409) you get an error: quote again. Only buy when
+        your user asked for this number. After buying, call route_number to
+        point it at an agent.
+
+        A quote buys at most one number. After a timeout, retry with the same
+        quote_id and idempotency_key, or check list_numbers. Never request a
+        new quote after a timeout.
 
         ``provider`` is ``auto`` (the quoted carrier) or the quoted carrier's
-        name. ``idempotency_key`` is optional; to retry after a timeout, pass
-        the ``idempotency_key`` the first result returned, so the number is
-        bought once.
+        name. ``idempotency_key`` is optional; to retry, pass the
+        ``idempotency_key`` the first result returned (it is on errors too),
+        so the number is bought once.
 
         Returns the number (``id``, ``e164``, ``provisioning_state``, ...)
-        plus ``idempotency_key``, or ``{"error": "<message>"}``."""
+        plus ``idempotency_key``, or ``{"error": "<message>",
+        "idempotency_key": ...}``."""
         try:
             async with _client_for(ctx, mode=mode, singleton=singleton) as client:
                 return await acquire_number(
