@@ -105,6 +105,19 @@ def _file(
     return {"slot": slot, "content_type": ct, "content_base64": _b64(data)}
 
 
+_MAGIC = {
+    "application/pdf": b"%PDF-1.4 ",
+    "image/jpeg": b"\xff\xd8\xff\xe0 ",
+    "image/png": b"\x89PNG\r\n\x1a\n ",
+}
+
+
+def _sized(n: int, ct: str = "application/pdf") -> bytes:
+    """``n`` bytes that start with the magic bytes of ``ct``."""
+    head = _MAGIC[ct]
+    return head + b"a" * (n - len(head))
+
+
 def _kwargs(client: HailClient, **over) -> dict:
     base = {
         "client": client,
@@ -256,6 +269,64 @@ async def test_cancel_verification_409_under_review(client: HailClient) -> None:
     assert result == {"error": "this verification is under review; wait for the result"}
 
 
+@respx.mock
+async def test_get_verification_204_returns_a_fixed_error(client: HailClient) -> None:
+    vid = str(uuid4())
+    respx.get(f"{_BASE_URL}/verifications/{vid}").mock(return_value=httpx.Response(204))
+    result = await tools.get_verification(client=client, verification_id=vid)
+    assert result == {"error": "unexpected error; try again"}
+
+
+@respx.mock
+async def test_get_verification_bad_json_returns_a_fixed_error(
+    client: HailClient,
+) -> None:
+    vid = str(uuid4())
+    respx.get(f"{_BASE_URL}/verifications/{vid}").mock(
+        return_value=httpx.Response(200, text="SENTINEL_BODY not json")
+    )
+    result = await tools.get_verification(client=client, verification_id=vid)
+    assert result == {"error": "unexpected error; try again"}
+
+
+@respx.mock
+@pytest.mark.parametrize("tool", ["get_verification", "cancel_verification"])
+async def test_verification_id_tools_map_transport_errors(
+    client: HailClient, tool: str
+) -> None:
+    vid = str(uuid4())
+    respx.route().mock(side_effect=httpx.ReadTimeout("SENTINEL_TIMEOUT_TEXT"))
+    result = await getattr(tools, tool)(client=client, verification_id=vid)
+    assert result == {"error": "request timed out or failed; try again"}
+
+
+@respx.mock
+async def test_list_verifications_maps_transport_and_decode_errors(
+    client: HailClient,
+) -> None:
+    route = respx.get(f"{_BASE_URL}/verifications")
+    route.mock(side_effect=httpx.ConnectError("SENTINEL_TEXT"))
+    assert await tools.list_verifications(client=client) == {
+        "error": "request timed out or failed; try again"
+    }
+    route.mock(return_value=httpx.Response(200, text="SENTINEL_BODY"))
+    assert await tools.list_verifications(client=client) == {
+        "error": "unexpected error; try again"
+    }
+
+
+@respx.mock
+async def test_cancel_verification_bad_body_returns_a_fixed_error(
+    client: HailClient,
+) -> None:
+    vid = str(uuid4())
+    respx.delete(f"{_BASE_URL}/verifications/{vid}").mock(
+        return_value=httpx.Response(200, json={"id": "SENTINEL_ID"})
+    )
+    result = await tools.cancel_verification(client=client, verification_id=vid)
+    assert result == {"error": "unexpected error; try again"}
+
+
 # --------------------------------------------------------------------------- #
 # submit_verification: the request
 # --------------------------------------------------------------------------- #
@@ -392,7 +463,7 @@ _BAD_CASES = {
         ]
     },
     "empty_file": {"files": [_file(data=b"")]},
-    "oversize_file": {"files": [_file(data=b"a" * (10 * _MIB + 1))]},
+    "oversize_file": {"files": [_file(data=_sized(10 * _MIB + 1))]},
     "missing_slot_in_documents": {"files": [_file(slot="proof_of_address")]},
     "duplicate_slot": {"files": [_file(), _file()]},
     "too_many_files": {
@@ -402,7 +473,30 @@ _BAD_CASES = {
     "too_many_fields": {"fields": {f"f{i}": _FIELD_VALUE for i in range(21)}},
     "malformed_file_entry": {"files": [{"slot": "identity", "extra": _NAME}]},
     "file_not_a_dict": {"files": [_NAME]},
+    "fields_too_large": {"fields": {"f": _FIELD_VALUE * 5000}},
+    "address_too_large": {"address": {"street": _STREET * 5000}},
+    "documents_too_large": {
+        "documents": {"identity": {"option": "x", "fields": {"k": _NAME * 5000}}}
+    },
 }
+for _bad_slot in ("a b", "a/b", "../x", "a" * 65, "", "caf\u00e9", "a.b", "x\n"):
+    _BAD_CASES[f"bad_slot_{_bad_slot!r}"] = {
+        "files": [_file(slot=_bad_slot)],
+        "documents": {_bad_slot: {"option": "x", "fields": {}}},
+    }
+_BAD_CASES["bad_document_key"] = {
+    "documents": {"../x": {"option": "x", "fields": {}}},
+    "files": [],
+}
+for _ct, _data in (
+    ("application/pdf", b"\x00" * 2000 + b"%PDF-"),  # marker too far in
+    ("application/pdf", b"not a pdf"),
+    ("image/jpeg", b"\x89PNG\r\n\x1a\n"),
+    ("image/jpeg", b" \xff\xd8\xff"),
+    ("image/png", b"\xff\xd8\xff\xe0"),
+    ("image/png", b"%PDF-1.4"),
+):
+    _BAD_CASES[f"magic_{_ct}_{_data[:6]!r}"] = {"files": [_file(data=_data, ct=_ct)]}
 
 
 @respx.mock
@@ -410,23 +504,39 @@ _BAD_CASES = {
 async def test_submit_local_validation_makes_no_call_and_leaks_nothing(
     client: HailClient, case: str
 ) -> None:
+    catch_all = respx.route().mock(return_value=httpx.Response(500))
     result = await tools.submit_verification(**_kwargs(client, **_BAD_CASES[case]))
     assert set(result) == {"error"}
     assert result["error"]
-    assert not respx.calls.called
+    assert catch_all.call_count == 0
+    assert "unexpected error" not in result["error"]
     _assert_no_sentinel(result)
 
 
 @respx.mock
 async def test_submit_total_size_limit(client: HailClient) -> None:
-    big = b"a" * (10 * _MIB)
+    big = _sized(10 * _MIB)
     files = [_file(slot=f"s{i}", data=big) for i in range(4)]
     docs = {f"s{i}": {"option": "x", "fields": {}} for i in range(4)}
     result = await tools.submit_verification(
         **_kwargs(client, files=files, documents=docs)
     )
-    assert "30" in result["error"]
+    assert "29" in result["error"]
     assert not respx.calls.called
+
+
+@respx.mock
+async def test_submit_refuses_three_full_files_locally(client: HailClient) -> None:
+    files = [_file(slot=f"s{i}", data=_sized(10 * _MIB)) for i in range(3)]
+    docs = {f"s{i}": {"option": "x", "fields": {}} for i in range(3)}
+    result = await tools.submit_verification(
+        **_kwargs(client, files=files, documents=docs)
+    )
+    assert "29 MiB" in result["error"]
+    assert not respx.calls.called
+    for i in range(3):
+        assert f"s{i}" not in result["error"]
+    _assert_no_sentinel(result)
 
 
 @respx.mock
@@ -434,7 +544,8 @@ async def test_submit_accepts_exact_limits(client: HailClient) -> None:
     respx.post(f"{_BASE_URL}/verifications").mock(
         return_value=httpx.Response(201, json=_verification())
     )
-    files = [_file(slot=f"s{i}", data=b"a" * (10 * _MIB)) for i in range(3)]
+    sizes = [10 * _MIB, 10 * _MIB, 9 * _MIB]
+    files = [_file(slot=f"s{i}", data=_sized(n)) for i, n in enumerate(sizes)]
     docs = {f"s{i}": {"option": "x", "fields": {}} for i in range(3)}
     result = await tools.submit_verification(
         **_kwargs(client, files=files, documents=docs)
@@ -448,7 +559,66 @@ async def test_submit_accepts_allowed_types(client: HailClient, ct: str) -> None
     respx.post(f"{_BASE_URL}/verifications").mock(
         return_value=httpx.Response(201, json=_verification())
     )
-    result = await tools.submit_verification(**_kwargs(client, files=[_file(ct=ct)]))
+    files = [_file(data=_sized(100, ct), ct=ct)]
+    result = await tools.submit_verification(**_kwargs(client, files=files))
+    assert "error" not in result
+
+
+@respx.mock
+async def test_submit_accepts_uuid_and_underscore_slot_names(
+    client: HailClient,
+) -> None:
+    respx.post(f"{_BASE_URL}/verifications").mock(
+        return_value=httpx.Response(201, json=_verification())
+    )
+    slots = [str(uuid4()), "proof_of_identity", "A-b_9"]
+    docs = {s: {"option": "x", "fields": {}} for s in slots}
+    files = [_file(slot=s) for s in slots]
+    result = await tools.submit_verification(
+        **_kwargs(client, files=files, documents=docs)
+    )
+    assert "error" not in result
+
+
+@respx.mock
+async def test_submit_slot_errors_do_not_echo_the_slot_name(
+    client: HailClient,
+) -> None:
+    result = await tools.submit_verification(
+        **_kwargs(
+            client,
+            files=[_file(slot="SENTINEL slot/../x")],
+            documents={"SENTINEL slot/../x": {"option": "x", "fields": {}}},
+        )
+    )
+    assert "SENTINEL" not in json.dumps(result)
+    assert not respx.calls.called
+
+
+@respx.mock
+async def test_submit_magic_byte_error_names_index_and_type_only(
+    client: HailClient,
+) -> None:
+    result = await tools.submit_verification(
+        **_kwargs(client, files=[_file(data=b"SENTINEL_BYTES", ct="image/png")])
+    )
+    assert "files[0]" in result["error"]
+    assert "image/png" in result["error"]
+    assert "SENTINEL_BYTES" not in json.dumps(result)
+    assert not respx.calls.called
+
+
+@respx.mock
+async def test_submit_accepts_pdf_marker_inside_first_kilobyte(
+    client: HailClient,
+) -> None:
+    respx.post(f"{_BASE_URL}/verifications").mock(
+        return_value=httpx.Response(201, json=_verification())
+    )
+    data = b"\x00" * 1000 + b"%PDF-1.7"
+    result = await tools.submit_verification(
+        **_kwargs(client, files=[_file(data=data)])
+    )
     assert "error" not in result
 
 

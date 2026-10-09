@@ -75,6 +75,8 @@ import base64
 import binascii
 import contextlib
 import hashlib
+import json
+import re
 import time
 import uuid
 from collections.abc import AsyncIterator
@@ -702,11 +704,27 @@ _TRANSPORT_ERROR = "request timed out or failed; try again"
 _UNEXPECTED_ERROR = "unexpected error; try again"
 _VERIFICATION_FILE_TYPES = ("image/jpeg", "image/png", "application/pdf")
 _VERIFICATION_MAX_FILE_BYTES = 10 * 1024 * 1024
-_VERIFICATION_MAX_TOTAL_BYTES = 30 * 1024 * 1024
+# The API caps the whole 30 MiB multipart body, so the files get 29 MiB and
+# the rest (details, boundaries) fits in the last MiB.
+_VERIFICATION_MAX_TOTAL_BYTES = 29 * 1024 * 1024
+_VERIFICATION_MAX_DETAILS_BYTES = 64 * 1024
+_SLOT_NAME = re.compile(r"[A-Za-z0-9_-]{1,64}")
+_SLOT_RULE = "use 1 to 64 letters, digits, - or _"
+_PDF_MARKER_WINDOW = 1024
 _VERIFICATION_MAX_FILES = 20
 _VERIFICATION_MAX_FIELDS = 20
 # Largest base64 text a legal file can have; checked before decoding.
 _VERIFICATION_MAX_B64_CHARS = (_VERIFICATION_MAX_FILE_BYTES + 2) // 3 * 4
+
+
+def _matches_declared_type(content: bytes, content_type: str) -> bool:
+    if content_type == "application/pdf":
+        return b"%PDF-" in content[:_PDF_MARKER_WINDOW]
+    if content_type == "image/jpeg":
+        return content.startswith(b"\xff\xd8\xff")
+    if content_type == "image/png":
+        return content.startswith(b"\x89PNG\r\n\x1a\n")
+    return False
 
 
 def _check_verification_files(
@@ -720,6 +738,10 @@ def _check_verification_files(
     decoded: list[tuple[str, str, bytes]] = []
     seen: set[str] = set()
     total = 0
+    if any(
+        not isinstance(key, str) or not _SLOT_NAME.fullmatch(key) for key in documents
+    ):
+        return f"documents has a key that is not a valid slot name ({_SLOT_RULE})", []
     if len(files) > _VERIFICATION_MAX_FILES:
         return f"too many files: {len(files)} (at most {_VERIFICATION_MAX_FILES})", []
     for i, entry in enumerate(files):
@@ -737,6 +759,9 @@ def _check_verification_files(
                 [],
             )
         slot = entry["slot"]
+        # Validated before it appears in any message below.
+        if not _SLOT_NAME.fullmatch(slot):
+            return f"files[{i}]: slot is not a valid slot name ({_SLOT_RULE})", []
         if entry["content_type"] not in _VERIFICATION_FILE_TYPES:
             return (
                 f"files[{i}] (slot {slot!r}): content_type must be one of "
@@ -769,6 +794,12 @@ def _check_verification_files(
                     f"files[{i}] (slot {slot!r}): file is {len(content)} bytes; "
                     f"the limit is {_VERIFICATION_MAX_FILE_BYTES} bytes"
                 ),
+                [],
+            )
+        if not _matches_declared_type(content, entry["content_type"]):
+            return (
+                f"files[{i}]: the content does not look like "
+                f"{entry['content_type']}",
                 [],
             )
         total += len(content)
@@ -866,6 +897,18 @@ async def submit_verification(
         return {
             "error": f"too many fields: {len(fields)} "
             f"(at most {_VERIFICATION_MAX_FIELDS}). Nothing was sent."
+        }
+    try:
+        details_bytes = sum(
+            len(json.dumps(part)) for part in (fields, address or {}, documents)
+        )
+    except (TypeError, ValueError):
+        return {"error": "fields, address and documents must be JSON values"}
+    if details_bytes > _VERIFICATION_MAX_DETAILS_BYTES:
+        return {
+            "error": f"fields, address and documents total {details_bytes} "
+            f"bytes; the limit is {_VERIFICATION_MAX_DETAILS_BYTES} bytes. "
+            "Nothing was sent."
         }
     error, decoded = _check_verification_files(files, documents)
     if error:
@@ -2281,9 +2324,10 @@ def register_tools(
         ``documents`` is ``{slot: {"option": <option key>, "fields": {...}}}``
         for each slot with ``needs_input``. ``files`` is a list of
         ``{"slot", "content_type", "content_base64"}``, one per slot that
-        needs a file; ``slot`` must be a key in ``documents``.
+        needs a file; ``slot`` must be a key in ``documents``
+        and match letters, digits, - and _ (at most 64).
         ``content_type`` is ``image/jpeg``, ``image/png`` or
-        ``application/pdf``. Limits: 10 MiB per file, 30 MiB in total, at
+        ``application/pdf``. Limits: 10 MiB per file, 29 MiB in total, at
         most 20 files and 20 fields. Compress images to JPG or PNG under about
         7 MiB so the call stays small.
 
