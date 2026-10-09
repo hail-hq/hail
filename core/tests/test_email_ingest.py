@@ -9,7 +9,7 @@ from hailhq.core.email_ingest import (
     _persist_one,
     ingest_inbound,
 )
-from hailhq.core.models import Email, EmailAttachment, EmailDomain
+from hailhq.core.models import Email, EmailAttachment, EmailDomain, EmailForwardTarget
 from hailhq.core.providers.email.inbound.base import InboundMessage
 from sqlalchemy import func, select
 
@@ -35,6 +35,18 @@ def _make_inbound_domain(org_id, user_prefix="alice", org_prefix="acme"):
         provider="ses",
         verified_at=datetime.now(timezone.utc),
     )
+
+
+def _verified_targets(org_id, *addresses):
+    """Forward-target rows that already proved they want the mail. Ingest
+    forwards only to verified addresses (hailhq.core.forward_targets)."""
+    now = datetime.now(timezone.utc)
+    return [
+        EmailForwardTarget(
+            organization_id=org_id, address=a, status="verified", verified_at=now
+        )
+        for a in addresses
+    ]
 
 
 def _make_custom_inbound_domain(
@@ -337,6 +349,9 @@ async def test_forward_enqueues_per_target(async_session):
     # what unlocks forwarding.
     domain.inbound_enabled = True
     domain.forward_to = ["ops@example.com", "billing@example.com"]
+    async_session.add_all(
+        _verified_targets(org_id, *["ops@example.com", "billing@example.com"])
+    )
     async_session.add(domain)
     await async_session.commit()
 
@@ -376,6 +391,7 @@ async def test_forward_skipped_when_inbound_disabled(async_session):
     # inbound_enabled stays False (default). forward_to alone is meaningless
     # without the flag — ingest persists but doesn't enqueue forwards.
     domain.forward_to = ["ops@example.com"]
+    async_session.add_all(_verified_targets(org_id, *["ops@example.com"]))
     async_session.add(domain)
     await async_session.commit()
 
@@ -410,6 +426,7 @@ async def test_forward_loop_header_suppresses(async_session):
     domain = _make_inbound_domain(org_id, user_prefix="grace", org_prefix="loopco")
     domain.inbound_enabled = True
     domain.forward_to = ["ops@example.com"]
+    async_session.add_all(_verified_targets(org_id, *["ops@example.com"]))
     async_session.add(domain)
     await async_session.commit()
 
@@ -457,6 +474,7 @@ async def test_forward_rejects_target_on_base_domain(async_session):
     domain = _make_inbound_domain(org_id, user_prefix="hank", org_prefix="selfloop")
     domain.inbound_enabled = True
     domain.forward_to = ["other@mail.hail.so"]  # base domain — loop trap
+    async_session.add_all(_verified_targets(org_id, *["other@mail.hail.so"]))
     async_session.add(domain)
     await async_session.commit()
 
@@ -494,6 +512,9 @@ async def test_base_domain_target_skips_sibling_survives(async_session):
     domain = _make_inbound_domain(org_id, user_prefix="ivan", org_prefix="sibling")
     domain.inbound_enabled = True
     domain.forward_to = ["self@mail.hail.so", "valid@external.com"]
+    async_session.add_all(
+        _verified_targets(org_id, *["self@mail.hail.so", "valid@external.com"])
+    )
     async_session.add(domain)
     await async_session.commit()
 
@@ -928,6 +949,7 @@ async def test_replay_does_not_refire_forwards_or_fanout(async_session):
     domain = _make_inbound_domain(org_id)
     domain.inbound_enabled = True
     domain.forward_to = ["ops@example.com"]
+    async_session.add_all(_verified_targets(org_id, *["ops@example.com"]))
     async_session.add(domain)
     await async_session.commit()
 
@@ -1058,6 +1080,7 @@ async def test_org_cap_suppresses_forwarding_too(async_session):
     domain = _make_inbound_domain(org_id)
     domain.inbound_enabled = True
     domain.forward_to = ["ops@example.com"]
+    async_session.add_all(_verified_targets(org_id, *["ops@example.com"]))
     async_session.add(domain)
     await async_session.commit()
 
@@ -1133,6 +1156,7 @@ async def test_suppressed_event_emitted_on_forward_loop(async_session):
     domain = _make_inbound_domain(org_id)
     domain.inbound_enabled = True
     domain.forward_to = ["ops@mail.hail.so"]  # base-domain target → loop
+    async_session.add_all(_verified_targets(org_id, *["ops@mail.hail.so"]))
     async_session.add(domain)
     await async_session.commit()
 
@@ -1180,6 +1204,7 @@ async def test_suppressed_event_emitted_on_forward_rate_limit(async_session):
     domain = _make_inbound_domain(org_id)
     domain.inbound_enabled = True
     domain.forward_to = ["ops@example.com"]
+    async_session.add_all(_verified_targets(org_id, *["ops@example.com"]))
     domain.forward_rate_per_hour = 0  # cap of 0 → always over
     async_session.add(domain)
     await async_session.commit()
@@ -1349,6 +1374,7 @@ async def test_unfunded_org_suppresses_forwarding_with_reason(async_session):
     domain = _make_inbound_domain(org_id)
     domain.inbound_enabled = True
     domain.forward_to = ["ops@example.com"]
+    async_session.add_all(_verified_targets(org_id, *["ops@example.com"]))
     async_session.add(domain)
     await async_session.commit()
 
@@ -1401,6 +1427,7 @@ async def test_funded_org_forwards_normally(async_session):
     domain = _make_inbound_domain(org_id)
     domain.inbound_enabled = True
     domain.forward_to = ["ops@example.com"]
+    async_session.add_all(_verified_targets(org_id, *["ops@example.com"]))
     async_session.add(domain)
     await async_session.commit()
     s3 = AsyncMock()
@@ -1441,6 +1468,7 @@ async def test_suppression_reason_persisted_on_row(async_session):
     domain = _make_inbound_domain(org_id)
     domain.inbound_enabled = True
     domain.forward_to = ["ops@example.com"]
+    async_session.add_all(_verified_targets(org_id, *["ops@example.com"]))
     async_session.add(domain)
     await async_session.commit()
     s3 = AsyncMock()
@@ -1636,3 +1664,89 @@ async def test_two_custom_domains_same_org_yield_two_rows(async_session):
         ]
     }
     assert len(domain_ids) == 2
+
+
+def _inbound(provider_message_id, recipient):
+    return InboundMessage(
+        provider_message_id=provider_message_id,
+        envelope_from="alice@example.com",
+        envelope_recipients=[recipient],
+        raw_s3_bucket="b",
+        raw_s3_key=f"raw/{provider_message_id}",
+        spam_verdict="PASS",
+        virus_verdict="PASS",
+        spf_verdict="PASS",
+        dkim_verdict="PASS",
+        dmarc_verdict="PASS",
+        received_at=datetime(2026, 6, 6, tzinfo=timezone.utc),
+    )
+
+
+@pytest.mark.asyncio
+async def test_forward_skips_target_without_verified_row(async_session):
+    """An address with no forward-target row (never confirmed) gets nothing;
+    the inbound row says why."""
+    org_id = uuid.uuid4()
+    domain = _make_inbound_domain(org_id)
+    domain.inbound_enabled = True
+    domain.forward_to = ["stranger@example.com"]
+    async_session.add(domain)
+    await async_session.commit()
+
+    s3 = AsyncMock()
+    s3.fetch_raw.return_value = (FIX / "simple.eml").read_bytes()
+    forward_enqueue = AsyncMock()
+
+    result = await ingest_inbound(
+        async_session,
+        message=_inbound("ft-1", domain.domain),
+        s3=s3,
+        hail_mail_base_domain="mail.hail.so",
+        forward_enqueue=forward_enqueue,
+        org_rate_per_hour=10_000,
+    )
+    forward_enqueue.assert_not_awaited()
+    assert result.suppressed_reasons == ["forward_target_pending"]
+    row = (
+        await async_session.execute(
+            select(Email).where(Email.id == result.email_ids[0])
+        )
+    ).scalar_one()
+    assert row.metadata_["suppressed_reasons"] == ["forward_target_pending"]
+
+
+@pytest.mark.asyncio
+async def test_forward_skips_stopped_target_but_sends_verified_sibling(async_session):
+    org_id = uuid.uuid4()
+    domain = _make_inbound_domain(org_id)
+    domain.inbound_enabled = True
+    domain.forward_to = ["Stopped@example.com", "ok@example.com"]
+    async_session.add(domain)
+    async_session.add_all(_verified_targets(org_id, "ok@example.com"))
+    async_session.add(
+        EmailForwardTarget(
+            organization_id=org_id,
+            address="stopped@example.com",
+            status="stopped",
+            stopped_reason="complaint",
+        )
+    )
+    await async_session.commit()
+
+    s3 = AsyncMock()
+    s3.fetch_raw.return_value = (FIX / "simple.eml").read_bytes()
+    captured: list[dict] = []
+
+    async def fake_enqueue(_db, **kw):
+        captured.append(kw)
+
+    result = await ingest_inbound(
+        async_session,
+        message=_inbound("ft-2", domain.domain),
+        s3=s3,
+        hail_mail_base_domain="mail.hail.so",
+        forward_enqueue=fake_enqueue,
+        org_rate_per_hour=10_000,
+    )
+    assert [c["to"] for c in captured] == ["ok@example.com"]
+    assert result.suppressed_reasons == ["forward_target_stopped"]

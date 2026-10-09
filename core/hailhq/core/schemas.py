@@ -1176,6 +1176,11 @@ class EmailDomainCreate(BaseModel):
         return self
 
 
+# Cap on ``forward_to`` per domain row. Every new non-member address costs
+# one confirm mail to a possibly unwilling stranger, so the list stays short.
+MAX_FORWARD_TARGETS = 10
+
+
 class EmailDomainPatch(BaseModel):
     """Body for PATCH /email-domains/{id}.
 
@@ -1213,7 +1218,14 @@ class EmailDomainPatch(BaseModel):
     )
     forward_to: list[str] | None = Field(
         default=None,
-        description="Email addresses to forward inbound mail to. Omit to leave unchanged.",
+        max_length=MAX_FORWARD_TARGETS,
+        description=(
+            "Email addresses to forward inbound mail to (at most "
+            f"{MAX_FORWARD_TARGETS}). A new address that is not a verified "
+            "member's login email gets a confirm link and receives nothing "
+            "until it is clicked — see GET /forward-targets. Omit to leave "
+            "unchanged."
+        ),
     )
     forward_rate_per_hour: int | None = Field(
         default=None,
@@ -1424,6 +1436,43 @@ class EmailDomainDnsCheck(BaseModel):
             "observed: null while lookup_ok stays true. Always true for "
             "kind='hail_mail' rows, which run no lookups."
         )
+    )
+
+
+ForwardTargetStatus = Literal["pending", "verified", "stopped"]
+
+
+class ForwardTargetResponse(BaseModel):
+    """One forward address of the organization and whether it may receive
+    forwards. Rows come from ``email_forward_targets``; see
+    ``hailhq.core.forward_targets``."""
+
+    address: str = Field(description="Normalized (lower-cased) email address.")
+    status: ForwardTargetStatus = Field(
+        description=(
+            "'verified' receives forwards. 'pending' was sent a confirm link "
+            "that is not yet clicked. 'stopped' got a spam complaint and "
+            "needs a new confirm link (POST /forward-targets/{address}/resend)."
+        )
+    )
+    verified_at: datetime | None = Field(
+        default=None, description="When the address was verified, ISO 8601."
+    )
+    token_sent_at: datetime | None = Field(
+        default=None,
+        description="When the latest confirm link was sent, ISO 8601. Null once verified.",
+    )
+    stopped_at: datetime | None = Field(
+        default=None, description="When forwarding was stopped, ISO 8601."
+    )
+    stopped_reason: str | None = Field(
+        default=None, description="Why forwarding was stopped, e.g. 'complaint'."
+    )
+
+
+class ForwardTargetListResponse(BaseModel):
+    items: list[ForwardTargetResponse] = Field(
+        description="Every forward address ever configured for this organization."
     )
 
 

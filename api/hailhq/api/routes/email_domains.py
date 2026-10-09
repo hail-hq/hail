@@ -4,7 +4,9 @@ POST   /email-domains             — register a custom domain or mint a hail-ma
 GET    /email-domains             — cursor-paginated list (org-scoped).
 GET    /email-domains/{id}        — single domain (org-scoped).
 GET    /email-domains/{id}/dns-check — DNS host + record observation + DMARC (org-scoped, read-only).
-PATCH  /email-domains/{id}        — edit the user/org prefix on a hail-mail row.
+PATCH  /email-domains/{id}        — edit the user/org prefix on a hail-mail row,
+                                     or the inbound action (forward_to — new
+                                     addresses get a confirm link first).
 POST   /email-domains/{id}/verify — re-poll the email provider's view of the identity.
 DELETE /email-domains/{id}        — delete from provider + DB (idempotent on missing).
 
@@ -56,6 +58,7 @@ from hailhq.core.dns_lookup import (
     ses_inbound_host,
 )
 from hailhq.core.email_sender import from_address_for
+from hailhq.core.forward_targets import IssuedToken, sync_targets
 from hailhq.core.hail_mail import org_prefix_from_id
 from hailhq.core.models import Email, EmailDomain
 from hailhq.core.providers.email import EmailProvider, SesEmailProvider
@@ -71,6 +74,13 @@ from hailhq.core.schemas import (
     EmailDomainPatch,
     EmailDomainResponse,
     ObservedDnsRecord,
+)
+from hailhq.core.system_email import (
+    SYSTEM_KIND_FORWARD_CONFIRM,
+    confirm_url,
+    enqueue_system_email,
+    forwarder_address,
+    render_forward_confirm,
 )
 from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
@@ -768,6 +778,34 @@ async def patch_email_domain(
 
     if not updates:
         return EmailDomainResponse.model_validate(sd)
+
+    # Every forward address needs proof it wants the mail. A brand-new
+    # address that is not a verified member login gets one confirm mail,
+    # queued in this same transaction; re-saving a list sends nothing.
+    issued: list[IssuedToken] = []
+    if body.forward_to:
+        issued = await sync_targets(db, sd.organization_id, body.forward_to)
+    if issued:
+        sender = forwarder_address(
+            sd.organization_id, sd.local_prefix_org, settings.hail_mail_base_domain
+        )
+        for item in issued:
+            subject, text, html = render_forward_confirm(
+                address=item.target.address,
+                forwarder=sender,
+                url=confirm_url(item.raw_token),
+            )
+            await enqueue_system_email(
+                db,
+                organization_id=sd.organization_id,
+                email_domain_id=sd.id,
+                from_address=sender,
+                to=item.target.address,
+                subject=subject,
+                body_text=text,
+                body_html=html,
+                kind=SYSTEM_KIND_FORWARD_CONFIRM,
+            )
 
     try:
         await db.execute(

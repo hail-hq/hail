@@ -465,3 +465,50 @@ async def test_tick_ignores_direct_post_emails_queued_rows(async_session):
     processed = await _worker(async_session, provider).tick()
     assert processed == 0
     provider.send_email.assert_not_awaited()
+
+
+def _queued_system_mail(org_id, domain_id):
+    return Email(
+        organization_id=org_id,
+        email_domain_id=domain_id,
+        direction="outbound",
+        from_address="forwarder+acme@mail.hail.so",
+        to_addresses=["stranger@example.com"],
+        subject="Confirm email forwarding from Hail",
+        body_text="confirm",
+        status="queued",
+        provider="ses",
+        metadata_={
+            "system_kind": "forward_confirm",
+            "forward_headers": {"Auto-Submitted": "auto-generated"},
+        },
+    )
+
+
+@pytest.mark.asyncio
+async def test_tick_sends_system_mail_without_metering(async_session):
+    """Hail's own confirm/notice mail rides the forward worker but is never
+    billed to the tenant and needs no inbound row for attachments."""
+    org_id = uuid.uuid4()
+    dom = _domain(org_id)
+    async_session.add(dom)
+    await async_session.flush()
+    row = _queued_system_mail(org_id, dom.id)
+    async_session.add(row)
+    await async_session.commit()
+
+    provider = AsyncMock()
+    provider.send_email.return_value = ProviderSendResult(provider_message_id="ses-9")
+    usage = AsyncMock()
+
+    processed = await _worker(async_session, provider, usage_callback=usage).tick()
+
+    assert processed == 1
+    usage.assert_not_awaited()
+    refreshed = (
+        await async_session.execute(select(Email).where(Email.id == row.id))
+    ).scalar_one()
+    assert refreshed.status == "sent"
+    kwargs = provider.send_email.await_args.kwargs
+    assert kwargs["headers"] == {"Auto-Submitted": "auto-generated"}
+    assert kwargs["attachments"] is None
