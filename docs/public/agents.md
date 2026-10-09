@@ -30,7 +30,7 @@ CLI: `hail agents create "Front desk" --prompt-file ./front-desk.md`, then
 `hail numbers route <number-id> --calls <agent-id> --texts <agent-id>`.
 Restrict tools with `hail agents update <id> --tools end_call,send_sms`; allow
 all again with `hail agents update <id> --all-tools`.
-MCP: `list_agents`, `create_agent`, `route_number`, and `place_call(agent_id=...)`.
+MCP: `list_agents`, `get_agent`, `create_agent`, `update_agent`, `delete_agent`, `route_number`, and `place_call(agent_id=...)`.
 SDK: `client.agents.create(...)`, `client.numbers.route(...)`.
 
 Schemas: `AgentCreate`, `AgentUpdate`, `AgentResponse`, `PhoneNumberRoutingUpdate`

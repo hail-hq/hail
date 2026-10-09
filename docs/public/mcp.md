@@ -15,30 +15,56 @@ The Streamable HTTP transport serves the MCP root path. There is no `/mcp` suffi
 
 ## Tools
 
-The server exposes 20 tools. Schemas (args, validation, return shapes) are the source of truth — refer to [`mcp/hailhq/mcp/tools.py`](https://github.com/hail-hq/hail/blob/main/mcp/hailhq/mcp/tools.py).
+Example. Ask your agent: "Find me a US number that can call and text." It calls `quote_numbers` with:
 
-| Tool                      | Does                                                    |
-| ------------------------- | ------------------------------------------------------- |
-| `place_call`              | Originate an outbound phone call.                       |
-| `get_call`                | Fetch the current state of one call.                    |
-| `list_calls`              | List recent calls (cursor-paginated).                   |
-| `send_sms`                | Send an outbound SMS (recipient consent is required).   |
-| `get_sms`                 | Fetch the current state of one SMS.                     |
-| `list_sms`                | List recent SMS messages (cursor-paginated).            |
-| `send_email`              | Send an outbound email (supports `attachment_ids`).     |
-| `upload_email_attachment` | Upload a file, get back a reusable id.                  |
-| `get_email`               | Fetch one email's full record (body + inbound headers). |
-| `list_emails`             | List emails (`direction="inbound"` for replies).        |
-| `get_email_raw`           | Presigned URL for an inbound email's raw MIME.          |
-| `get_email_attachment`    | Presigned URL for one inbound attachment.               |
-| `get_email_events`        | Page through one email's event history.                 |
-| `get_email_stats`         | Aggregate email counts for a time window.               |
-| `get_events`              | Page through the event stream.                          |
-| `list_email_domains`      | List sending identities + the default `from` address.   |
-| `whoami`                  | Identify the human behind the session (for `reply_to`). |
-| `list_contacts`           | List the org's contacts (members + manual contacts).    |
-| `lookup_contact`          | Find one contact by name, email, or phone fragment.     |
-| `create_contact`          | Add a manual contact.                                   |
+```json
+{ "country_code": "US", "capabilities": ["voice", "sms"] }
+```
+
+The server exposes 30 tools. Schemas (args, validation, return shapes) are the source of truth — refer to [`mcp/hailhq/mcp/tools.py`](https://github.com/hail-hq/hail/blob/main/mcp/hailhq/mcp/tools.py).
+
+Every tool sets the MCP hints `readOnlyHint`, `destructiveHint`, `idempotentHint` and `openWorldHint`, so clients can ask for approval before a write. `release_number` and `delete_agent` are marked destructive. Each one also needs a confirmation argument that must match the resource (`confirm_e164`, `confirm_name`).
+
+| Tool                      | Does                                                               |
+| ------------------------- | ------------------------------------------------------------------ |
+| `place_call`              | Originate an outbound phone call.                                  |
+| `get_call`                | Fetch the current state of one call.                               |
+| `list_calls`              | List recent calls (cursor-paginated).                              |
+| `send_sms`                | Send an outbound SMS (recipient consent is required).              |
+| `get_sms`                 | Fetch the current state of one SMS.                                |
+| `list_sms`                | List recent SMS messages (cursor-paginated).                       |
+| `send_email`              | Send an outbound email (supports `attachment_ids`).                |
+| `upload_email_attachment` | Upload a file, get back a reusable id.                             |
+| `get_email`               | Fetch one email's full record (body + inbound headers).            |
+| `list_emails`             | List emails (`direction="inbound"` for replies).                   |
+| `get_email_raw`           | Presigned URL for an inbound email's raw MIME.                     |
+| `get_email_attachment`    | Presigned URL for one inbound attachment.                          |
+| `get_email_events`        | Page through one email's event history.                            |
+| `get_email_stats`         | Aggregate email counts for a time window.                          |
+| `get_events`              | Page through the event stream.                                     |
+| `list_email_domains`      | List sending identities + the default `from` address.              |
+| `whoami`                  | Identify the human behind the session (for `reply_to`).            |
+| `list_contacts`           | List the org's contacts (members + manual contacts).               |
+| `lookup_contact`          | Find one contact by name, email, or phone fragment.                |
+| `create_contact`          | Add a manual contact.                                              |
+| `list_agents`             | List saved agents.                                                 |
+| `get_agent`               | Fetch one saved agent.                                             |
+| `create_agent`            | Save an agent that answers calls and texts.                        |
+| `update_agent`            | Change an agent. `clear_fields` removes optional values.           |
+| `delete_agent`            | Delete an agent. Destructive. Needs `confirm_name`.                |
+| `route_number`            | Choose which agent answers a number.                               |
+| `quote_numbers`           | Compare live carrier offers for a new number (read-only).          |
+| `list_numbers`            | List the org's numbers (cursor-paginated).                         |
+| `get_number`              | Fetch one number.                                                  |
+| `release_number`          | Release a number. Destructive and permanent. Needs `confirm_e164`. |
+
+### Getting a number over MCP
+
+1. `quote_numbers`: `{"country_code": "US", "capabilities": ["voice", "sms"]}`. Offers list `monthly_cents`, `setup_cents` and `quote_id`. Money is in cents. Quotes expire in 10 minutes.
+2. Buy the offer with `acquire_number`. This tool is not available yet. It follows in a later release.
+3. `route_number`: `{"number_id": "<id>", "voice_agent_id": "<agent-id>"}`.
+
+An offer with `readiness: "verification_required"` cannot be bought until the organization finishes verification in the console.
 
 ## Claude.ai (web)
 
