@@ -621,6 +621,7 @@ class _NumbersResource:
         capabilities: list[Literal["voice", "sms"]] | None = None,
         quote_id: str | UUID | None = None,
         provider: Literal["auto", "twilio", "telnyx"] | None = None,
+        expected_total_cents: int | None = None,
         idempotency_key: str | None = None,
     ) -> PhoneNumberResponse:
         """Buy a dedicated number from a live quote.
@@ -632,7 +633,9 @@ class _NumbersResource:
         (default ``"local"``) and ``capabilities`` (default voice and SMS),
         then buys the cheapest ready offer (monthly plus setup). It raises
         ``HailError`` if no offer is ready to buy. ``provider`` restricts the
-        carrier. ``idempotency_key`` defaults to a fresh UUIDv4 and covers the
+        carrier. ``expected_total_cents`` is the monthly plus setup price you
+        expect to pay now; the order is refused with 409 if the quote differs.
+        ``idempotency_key`` defaults to a fresh UUIDv4 and covers the
         purchase only.
         """
         if quote_id is None:
@@ -656,6 +659,8 @@ class _NumbersResource:
             body["number_type"] = number_type
         if provider is not None:
             body["provider"] = provider
+        if expected_total_cents is not None:
+            body["expected_total_cents"] = expected_total_cents
         key = idempotency_key or generate_idempotency_key()
         data = await self._http.request(
             "POST",
