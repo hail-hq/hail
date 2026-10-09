@@ -33,12 +33,27 @@ _READ_ONLY = {
     "list_numbers",
     "get_number",
     "quote_numbers",
+    "get_verification_requirements",
+    "list_verifications",
+    "get_verification",
 }
 # Read-only tools that talk to outside systems.
-_READ_ONLY_OPEN_WORLD = {"quote_numbers"}
+_READ_ONLY_OPEN_WORLD = {
+    "quote_numbers",
+    "get_verification_requirements",
+    "list_verifications",
+    "get_verification",
+}
 
 # Destructive tools. acquire_number spends money, so clients ask a human.
-_DESTRUCTIVE = {"release_number", "delete_agent", "acquire_number"}
+# submit_verification cannot be undone; cancel_verification discards a draft.
+_DESTRUCTIVE = {
+    "release_number",
+    "delete_agent",
+    "acquire_number",
+    "submit_verification",
+    "cancel_verification",
+}
 
 # Tools that reach people or carriers outside Hail.
 _OPEN_WORLD_WRITES = {
@@ -47,9 +62,11 @@ _OPEN_WORLD_WRITES = {
     "send_email",
     "release_number",
     "acquire_number",
+    "submit_verification",
+    "cancel_verification",
 }
 
-_EXPECTED_COUNT = 31
+_EXPECTED_COUNT = 36
 
 
 @pytest.fixture()
@@ -97,9 +114,12 @@ async def test_read_only_tools_are_idempotent_not_destructive(tools_by_name) -> 
 async def test_destructive_set_is_exact(tools_by_name) -> None:
     got = {n for n, t in tools_by_name.items() if t.annotations.destructiveHint is True}
     assert got == _DESTRUCTIVE
+    # Not idempotent: a repeat submits again or fails.
+    not_idempotent = {"submit_verification", "cancel_verification"}
     for name in _DESTRUCTIVE:
-        assert tools_by_name[name].annotations.idempotentHint is True, name
-        assert tools_by_name[name].annotations.readOnlyHint is False, name
+        a = tools_by_name[name].annotations
+        assert a.idempotentHint is (name not in not_idempotent), name
+        assert a.readOnlyHint is False, name
 
 
 async def test_open_world_writes(tools_by_name) -> None:

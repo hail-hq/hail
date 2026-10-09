@@ -21,12 +21,16 @@ kwargs override for tests.
 
 from __future__ import annotations
 
+import json
+import re
 import uuid
 from typing import Any
+from urllib.parse import quote
 
 import httpx
 from hailhq.core.carrier_offer import NumberQuotesResponse
 from hailhq.core.config import settings
+from hailhq.core.providers.verification import Requirements
 from hailhq.core.schemas import (
     AgentCreate,
     AgentListResponse,
@@ -53,6 +57,7 @@ from hailhq.core.schemas import (
     SmsCreate,
     SmsListResponse,
     SmsResponse,
+    VerificationResponse,
     WhoamiResponse,
 )
 from typing_extensions import Self
@@ -70,12 +75,19 @@ class HailAPIError(Exception):
     """
 
     def __init__(
-        self, status: int, detail: str, retry_after: str | None = None
+        self,
+        status: int,
+        detail: str,
+        retry_after: str | None = None,
+        problems: list[dict[str, Any]] | None = None,
     ) -> None:
         super().__init__(f"hail api error {status}: {detail}")
         self.status = status
         self.detail = detail
         self.retry_after = retry_after
+        # Carrier problems from a 422 on POST /verifications, reduced to
+        # ``loc`` and ``msg`` only. See ``HailClient.submit_verification``.
+        self.problems = problems
 
 
 class HailClient:
@@ -177,7 +189,8 @@ class HailClient:
     # ------------------------------------------------------------------ #
 
     async def get_call(self, call_id: str) -> dict[str, Any]:
-        resp = await self._client.get(f"/calls/{call_id}")
+        call_id_ = _path_id(call_id, name="call_id")
+        resp = await self._client.get(f"/calls/{call_id_}")
         return CallResponse.model_validate(_decode(resp)).model_dump(mode="json")
 
     # ------------------------------------------------------------------ #
@@ -282,11 +295,13 @@ class HailClient:
         if sms_agent_id is not None or clear_sms:
             body["sms_agent_id"] = sms_agent_id
         PhoneNumberRoutingUpdate.model_validate(body)
-        resp = await self._client.patch(f"/numbers/{number_id}", json=body)
+        number_id_ = _path_id(number_id, name="number_id")
+        resp = await self._client.patch(f"/numbers/{number_id_}", json=body)
         return PhoneNumberResponse.model_validate(_decode(resp)).model_dump(mode="json")
 
     async def get_agent(self, agent_id: str) -> dict[str, Any]:
-        resp = await self._client.get(f"/agents/{agent_id}")
+        agent_id_ = _path_id(agent_id, name="agent_id")
+        resp = await self._client.get(f"/agents/{agent_id_}")
         return AgentResponse.model_validate(_decode(resp)).model_dump(mode="json")
 
     async def update_agent(self, agent_id: str, **fields: Any) -> dict[str, Any]:
@@ -299,12 +314,14 @@ class HailClient:
         body = AgentUpdate.model_validate(fields).model_dump(
             mode="json", exclude_unset=True
         )
-        resp = await self._client.patch(f"/agents/{agent_id}", json=body)
+        agent_id_ = _path_id(agent_id, name="agent_id")
+        resp = await self._client.patch(f"/agents/{agent_id_}", json=body)
         return AgentResponse.model_validate(_decode(resp)).model_dump(mode="json")
 
     async def delete_agent(self, agent_id: str) -> None:
         """DELETE /agents/{id} — 204; the API clears routing on its numbers."""
-        _decode_empty(await self._client.delete(f"/agents/{agent_id}"))
+        agent_id_ = _path_id(agent_id, name="agent_id")
+        _decode_empty(await self._client.delete(f"/agents/{agent_id_}"))
 
     # ------------------------------------------------------------------ #
     # /numbers
@@ -348,12 +365,14 @@ class HailClient:
         )
 
     async def get_number(self, number_id: str) -> dict[str, Any]:
-        resp = await self._client.get(f"/numbers/{number_id}")
+        number_id_ = _path_id(number_id, name="number_id")
+        resp = await self._client.get(f"/numbers/{number_id_}")
         return PhoneNumberResponse.model_validate(_decode(resp)).model_dump(mode="json")
 
     async def delete_number(self, number_id: str) -> None:
         """DELETE /numbers/{id} — 204; releases the number at the carrier."""
-        _decode_empty(await self._client.delete(f"/numbers/{number_id}"))
+        number_id_ = _path_id(number_id, name="number_id")
+        _decode_empty(await self._client.delete(f"/numbers/{number_id_}"))
 
     # ------------------------------------------------------------------ #
     # POST /sms
@@ -405,7 +424,8 @@ class HailClient:
     # ------------------------------------------------------------------ #
 
     async def get_sms(self, sms_id: str) -> dict[str, Any]:
-        resp = await self._client.get(f"/sms/{sms_id}")
+        sms_id_ = _path_id(sms_id, name="sms_id")
+        resp = await self._client.get(f"/sms/{sms_id_}")
         return SmsResponse.model_validate(_decode(resp)).model_dump(mode="json")
 
     # ------------------------------------------------------------------ #
@@ -518,11 +538,112 @@ class HailClient:
         return _decode(resp)
 
     # ------------------------------------------------------------------ #
+    # /verifications
+    # ------------------------------------------------------------------ #
+
+    async def get_verification_requirements(
+        self,
+        *,
+        country_code: str,
+        number_type: str,
+        subject_type: str = "person",
+        provider: str | None = None,
+    ) -> dict[str, Any]:
+        params: dict[str, Any] = {
+            "country_code": country_code,
+            "number_type": number_type,
+            "subject_type": subject_type,
+        }
+        if provider is not None:
+            params["provider"] = provider
+        resp = await self._client.get("/verifications/requirements", params=params)
+        return Requirements.model_validate(_decode(resp)).model_dump(mode="json")
+
+    async def list_verifications(self) -> dict[str, Any]:
+        resp = await self._client.get("/verifications")
+        items = [VerificationResponse.model_validate(r) for r in _decode(resp)]
+        return {"items": [i.model_dump(mode="json") for i in items]}
+
+    async def get_verification(self, verification_id: str) -> dict[str, Any]:
+        verification_id_ = _path_id(verification_id, name="verification_id")
+        resp = await self._client.get(f"/verifications/{verification_id_}")
+        return VerificationResponse.model_validate(_decode(resp)).model_dump(
+            mode="json"
+        )
+
+    async def cancel_verification(self, verification_id: str) -> dict[str, Any]:
+        verification_id_ = _path_id(verification_id, name="verification_id")
+        resp = await self._client.delete(f"/verifications/{verification_id_}")
+        return VerificationResponse.model_validate(_decode(resp)).model_dump(
+            mode="json"
+        )
+
+    async def submit_verification(
+        self,
+        *,
+        country_code: str,
+        number_type: str,
+        fields: dict[str, str],
+        documents: dict[str, Any],
+        files: list[tuple[str, str, bytes]],
+        subject_type: str = "person",
+        address: dict[str, str] | None = None,
+        provider: str | None = None,
+    ) -> dict[str, Any]:
+        """POST /verifications — multipart/form-data, personal data in transit.
+
+        ``files`` is ``(slot, content_type, bytes)``; each goes out as the
+        part ``file.<slot>`` with the fixed filename ``upload``. No
+        ``Idempotency-Key``: the route has none (a repeat returns 409).
+
+        A non-2xx response never exposes its raw body. A 422 keeps only
+        ``loc`` and ``msg`` of each problem (the carrier's text says what to
+        fix); the API's ``input`` and ``ctx`` keys are dropped. Any other
+        status keeps ``detail`` only for the API's own short messages, which
+        the tool layer decides to show.
+        """
+        data: dict[str, str] = {
+            "country_code": country_code,
+            "number_type": number_type,
+            "subject_type": subject_type,
+            "fields": json.dumps(fields),
+            "documents": json.dumps(documents),
+        }
+        if provider is not None:
+            data["provider"] = provider
+        if address is not None:
+            data["address"] = json.dumps(address)
+        parts = [
+            (f"file.{slot}", ("upload", content, content_type))
+            for slot, content_type, content in files
+        ]
+        resp = await self._client.post(
+            "/verifications", data=data, files=parts, timeout=120.0
+        )
+        if resp.status_code == 422:
+            raise HailAPIError(
+                status=422,
+                detail="verification rejected",
+                problems=_problems(resp),
+            )
+        if resp.status_code in (409, 503):
+            raise HailAPIError(status=resp.status_code, detail=_error_detail(resp))
+        if not 200 <= resp.status_code < 300:
+            # Unknown failure: keep the status, drop the body.
+            raise HailAPIError(
+                status=resp.status_code,
+                detail="request failed",
+                retry_after=resp.headers.get("retry-after"),
+            )
+        return VerificationResponse.model_validate(resp.json()).model_dump(mode="json")
+
+    # ------------------------------------------------------------------ #
     # GET /emails/{id}
     # ------------------------------------------------------------------ #
 
     async def get_email(self, email_id: str) -> dict[str, Any]:
-        resp = await self._client.get(f"/emails/{email_id}")
+        email_id_ = _path_id(email_id, name="email_id")
+        resp = await self._client.get(f"/emails/{email_id_}")
         return EmailResponse.model_validate(_decode(resp)).model_dump(mode="json")
 
     # ------------------------------------------------------------------ #
@@ -554,7 +675,10 @@ class HailClient:
     # ------------------------------------------------------------------ #
 
     async def get_email_raw(self, email_id: str) -> dict[str, Any]:
-        resp = await self._client.get(f"/emails/{email_id}/raw", follow_redirects=False)
+        email_id_ = _path_id(email_id, name="email_id")
+        resp = await self._client.get(
+            f"/emails/{email_id_}/raw", follow_redirects=False
+        )
         return {"url": _location(resp)}
 
     # ------------------------------------------------------------------ #
@@ -564,8 +688,10 @@ class HailClient:
     async def get_email_attachment(
         self, email_id: str, attachment_id: str
     ) -> dict[str, Any]:
+        email_id_ = _path_id(email_id, name="email_id")
+        attachment_id_ = _path_id(attachment_id, name="attachment_id")
         resp = await self._client.get(
-            f"/emails/{email_id}/attachments/{attachment_id}",
+            f"/emails/{email_id_}/attachments/{attachment_id_}",
             follow_redirects=False,
         )
         return {"url": _location(resp)}
@@ -610,7 +736,8 @@ class HailClient:
             params["cursor"] = cursor
         if limit is not None:
             params["limit"] = limit
-        resp = await self._client.get(f"/emails/{email_id}/events", params=params)
+        email_id_ = _path_id(email_id, name="email_id")
+        resp = await self._client.get(f"/emails/{email_id_}/events", params=params)
         return EmailEventListResponse.model_validate(_decode(resp)).model_dump(
             mode="json"
         )
@@ -666,6 +793,28 @@ class HailClient:
         return WhoamiResponse.model_validate(_decode(resp)).model_dump(mode="json")
 
 
+_PATH_ID_BAD = re.compile(r"[/\\?#%\s\x00-\x1f\x7f]")
+
+
+class InvalidPathIdError(ValueError):
+    """An id that cannot go into a URL path."""
+
+
+def _path_id(value: str, *, name: str = "id") -> str:
+    """Return ``value`` quoted for one URL path segment, or raise.
+
+    httpx resolves dot segments, so ``../numbers/x`` would reach another
+    route. The message names the parameter and never echoes the value.
+    """
+    if (
+        not isinstance(value, str)
+        or value in {"", ".", ".."}
+        or _PATH_ID_BAD.search(value)
+    ):
+        raise InvalidPathIdError(f"{name} is not a valid id")
+    return quote(value, safe="")
+
+
 def _decode(resp: httpx.Response) -> Any:
     """Return the JSON body on 2xx, raise :class:`HailAPIError` otherwise."""
     if 200 <= resp.status_code < 300:
@@ -703,6 +852,33 @@ def _location(resp: httpx.Response) -> str:
             return loc
         raise HailAPIError(status=resp.status_code, detail="redirect without Location")
     raise HailAPIError(status=resp.status_code, detail=_error_detail(resp))
+
+
+def _problems(resp: httpx.Response) -> list[dict[str, Any]]:
+    """Reduce a 422 body to ``[{"loc": [...], "msg": "..."}]``.
+
+    Nothing else from the body survives (FastAPI adds ``input`` and ``ctx``,
+    which can hold submitted values). A body that is not a list of problems
+    gives an empty list.
+    """
+    try:
+        detail = resp.json().get("detail")
+    except (ValueError, AttributeError):
+        return []
+    if not isinstance(detail, list):
+        return []
+    out: list[dict[str, Any]] = []
+    for item in detail:
+        if not isinstance(item, dict) or not isinstance(item.get("msg"), str):
+            continue
+        loc = item.get("loc")
+        loc = (
+            [p if isinstance(p, int) else str(p) for p in loc]
+            if isinstance(loc, list)
+            else []
+        )
+        out.append({"loc": loc, "msg": item["msg"]})
+    return out
 
 
 def _error_detail(resp: httpx.Response) -> str:

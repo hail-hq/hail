@@ -177,3 +177,36 @@ def test_native_provider_keeps_its_exporter_and_mirrors_private_spans(monkeypatc
         == "hail-voicebot"
     )
     provider.shutdown()
+
+
+def test_export_drops_mcp_tool_call_arguments_by_design():
+    """The private exporter, not per-tool redaction, keeps tool arguments out."""
+    sentinel = "SENTINEL-VERIFICATION-DETAILS"
+    context = SpanContext(321, 654, False, TraceFlags(1))
+    original = ReadableSpan(
+        "MCP request: tools/call",
+        context=context,
+        attributes={
+            "arguments": {"fields": sentinel},
+            "mcp.tool.arguments": sentinel,
+            "request": f'{{"params": {{"arguments": "{sentinel}"}}}}',
+            "response": f'{{"content": "{sentinel}"}}',
+            "exception.message": sentinel,
+            "mcp.tool.name": "submit_verification",
+        },
+        events=[
+            Event(
+                "exception",
+                {"exception.type": "ValueError", "exception.message": sentinel},
+                2,
+            )
+        ],
+        start_time=1,
+        end_time=2,
+    )
+    memory = InMemorySpanExporter()
+    telemetry.PrivateSpanExporter(memory).export([original])
+    exported = memory.get_finished_spans()[0]
+    assert sentinel not in str(exported.attributes)
+    assert sentinel not in str(exported.events[0].attributes)
+    assert exported.attributes["mcp.tool.name"] == "submit_verification"
