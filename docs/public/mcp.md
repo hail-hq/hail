@@ -25,6 +25,8 @@ The server exposes 36 tools. Schemas (args, validation, return shapes) are the s
 
 Every tool sets the MCP hints `readOnlyHint`, `destructiveHint`, `idempotentHint` and `openWorldHint`, so clients can ask for approval before a write. `release_number`, `delete_agent`, `acquire_number`, `submit_verification` and `cancel_verification` are marked destructive. The first three also need a confirmation argument (`confirm_e164`, `confirm_name`, `confirm_total_cents`). `submit_verification` needs `attest_authorized: true`.
 
+`place_call`, `send_sms` and `send_email` need `recipient_consent` set to the JSON boolean `true`. Strings such as `"true"` and numbers such as `1` are refused before any request is sent.
+
 | Tool                            | Does                                                                                |
 | ------------------------------- | ----------------------------------------------------------------------------------- |
 | `place_call`                    | Originate an outbound phone call.                                                   |

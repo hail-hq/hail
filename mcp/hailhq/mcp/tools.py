@@ -1182,7 +1182,7 @@ def register_tools(
     async def place_call_tool(
         ctx: Context,
         to: str,
-        recipient_consent: bool,
+        recipient_consent: StrictBool,
         system_prompt: str | None = None,
         llm: dict[str, Any] | None = None,
         from_: str | None = None,
@@ -1230,7 +1230,8 @@ def register_tools(
         ``tools`` are the agent tools to allow on this call. Omit for all
         available; pass ``[]`` to disable.
 
-        ``recipient_consent`` is required: attest that you (the caller
+        ``recipient_consent`` is required and must be the JSON boolean
+        ``true`` (strings and numbers are refused): attest that you (the caller
         triggering this request) have obtained the lawful consent needed
         to contact this recipient. The API rejects the request (422) if
         this is not ``true`` — Hail does not verify consent for you, you
@@ -1292,7 +1293,7 @@ def register_tools(
         ctx: Context,
         to: list[str],
         subject: str,
-        recipient_consent: bool,
+        recipient_consent: StrictBool,
         body_text: str | None = None,
         body_html: str | None = None,
         from_: str | None = None,
@@ -1321,7 +1322,8 @@ def register_tools(
         replies reach the human running this session, call ``whoami``
         and pass their ``email``.
 
-        ``recipient_consent`` is required: attest that you (the caller
+        ``recipient_consent`` is required and must be the JSON boolean
+        ``true`` (strings and numbers are refused): attest that you (the caller
         triggering this request) have obtained the lawful consent needed
         to email this recipient. The API rejects the request (422) if
         this is not ``true`` — Hail does not verify consent for you. Set
@@ -1501,7 +1503,7 @@ def register_tools(
         ctx: Context,
         to: str,
         body: str,
-        recipient_consent: bool,
+        recipient_consent: StrictBool,
         from_: str | None = None,
         metadata: dict[str, Any] | None = None,
         idempotency_key: str | None = None,
@@ -1519,7 +1521,8 @@ def register_tools(
         SMS-capable number and the API returns 422 when there is none.
         SMS never uses the shared voice-call pool.
 
-        ``recipient_consent`` is required: attest that you (the caller
+        ``recipient_consent`` is required and must be the JSON boolean
+        ``true`` (strings and numbers are refused): attest that you (the caller
         triggering this request) have obtained the lawful consent needed
         to text this recipient. The API rejects the request (422) if
         this is not ``true`` — Hail does not verify consent for you. Set

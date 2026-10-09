@@ -16,6 +16,7 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 
 ### Changed
 
+- **Behavior change.** MCP: `recipient_consent` on `place_call`, `send_sms` and `send_email` must be the boolean `true`; strings and numbers are refused. Clients that sent a string such as `"true"` must now send a JSON boolean.
 - API, voicebot, and MCP deployments report their deployed commit SHA in telemetry. Backend images roll through the existing deployment workflow; no CLI or SDK release is required for these changes.
 
 ## [0.26.0] — 2026-10-06
