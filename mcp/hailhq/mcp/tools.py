@@ -86,7 +86,7 @@ from hailhq.core.schemas import parse_resource_id
 from hailhq.core.telemetry import telemetry_enabled
 from hailhq.core.telemetry_identity import identity_scope
 from hailhq.mcp.auth import AuthMode
-from hailhq.mcp.hail_client import HailAPIError, HailClient
+from hailhq.mcp.hail_client import HailAPIError, HailClient, InvalidPathIdError
 from pydantic import ValidationError
 
 from mcp.server.fastmcp import Context, FastMCP
@@ -120,6 +120,19 @@ def _format_api_error(exc: HailAPIError) -> dict[str, Any]:
     if 500 <= status < 600:
         return {"error": f"hail upstream error: {status}"}
     return {"error": f"hail api error {status}: {exc.detail}"}
+
+
+def _as_uuid(value: Any) -> str | None:
+    """Canonical text of a UUID, or None. Checked before any HTTP call."""
+    try:
+        return str(uuid.UUID(value))
+    except (ValueError, AttributeError, TypeError):
+        return None
+
+
+def _not_uuid(name: str) -> dict[str, Any]:
+    # Never echo the value: it may be a hostile or personal string.
+    return {"error": f"{name} must be a UUID"}
 
 
 def _validation_error_message(exc: ValidationError) -> str:
@@ -267,6 +280,8 @@ async def get_call(*, client: HailClient, call_id: str) -> dict[str, Any]:
         return await client.get_call(call_id)
     except ValidationError as exc:
         return {"error": _validation_error_message(exc)}
+    except InvalidPathIdError as exc:
+        return {"error": str(exc)}
     except HailAPIError as exc:
         return _format_api_error(exc)
 
@@ -328,6 +343,8 @@ async def get_sms(*, client: HailClient, sms_id: str) -> dict[str, Any]:
         return await client.get_sms(sms_id)
     except ValidationError as exc:
         return {"error": _validation_error_message(exc)}
+    except InvalidPathIdError as exc:
+        return {"error": str(exc)}
     except HailAPIError as exc:
         return _format_api_error(exc)
 
@@ -353,6 +370,8 @@ async def get_email(*, client: HailClient, email_id: str) -> dict[str, Any]:
         return await client.get_email(email_id)
     except ValidationError as exc:
         return {"error": _validation_error_message(exc)}
+    except InvalidPathIdError as exc:
+        return {"error": str(exc)}
     except HailAPIError as exc:
         return _format_api_error(exc)
 
@@ -380,6 +399,8 @@ async def get_email_raw(*, client: HailClient, email_id: str) -> dict[str, Any]:
         return await client.get_email_raw(email_id)
     except ValidationError as exc:
         return {"error": _validation_error_message(exc)}
+    except InvalidPathIdError as exc:
+        return {"error": str(exc)}
     except HailAPIError as exc:
         return _format_api_error(exc)
 
@@ -391,6 +412,8 @@ async def get_email_attachment(
         return await client.get_email_attachment(email_id, attachment_id)
     except ValidationError as exc:
         return {"error": _validation_error_message(exc)}
+    except InvalidPathIdError as exc:
+        return {"error": str(exc)}
     except HailAPIError as exc:
         return _format_api_error(exc)
 
@@ -406,6 +429,8 @@ async def get_email_events(
         return await client.get_email_events(email_id, cursor=cursor, limit=limit)
     except ValidationError as exc:
         return {"error": _validation_error_message(exc)}
+    except InvalidPathIdError as exc:
+        return {"error": str(exc)}
     except HailAPIError as exc:
         return _format_api_error(exc)
 
@@ -536,9 +561,12 @@ async def route_number(
     clear_voice: bool = False,
     clear_sms: bool = False,
 ) -> dict[str, Any]:
+    number_id_ = _as_uuid(number_id)
+    if number_id_ is None:
+        return _not_uuid("number_id")
     try:
         return await client.route_number(
-            number_id,
+            number_id_,
             voice_agent_id=voice_agent_id,
             sms_agent_id=sms_agent_id,
             clear_voice=clear_voice,
@@ -583,11 +611,14 @@ async def acquire_number(
     provider: str = "auto",
     idempotency_key: str | None = None,
 ) -> dict[str, Any]:
+    quote_id_ = _as_uuid(quote_id)
+    if quote_id_ is None:
+        return _not_uuid("quote_id")
     if idempotency_key is None:
         idempotency_key = str(uuid.uuid4())
     try:
         result = await client.acquire_number(
-            quote_id=quote_id,
+            quote_id=quote_id_,
             country_code=country_code,
             number_type=number_type,
             provider=provider,
@@ -620,8 +651,11 @@ async def list_numbers(
 
 
 async def get_number(*, client: HailClient, number_id: str) -> dict[str, Any]:
+    number_id_ = _as_uuid(number_id)
+    if number_id_ is None:
+        return _not_uuid("number_id")
     try:
-        return await client.get_number(number_id)
+        return await client.get_number(number_id_)
     except HailAPIError as exc:
         return _format_api_error(exc)
 
@@ -635,15 +669,18 @@ async def release_number(
 ) -> dict[str, Any]:
     # Destructive: read the number first and release only when the caller
     # typed back its exact E.164. A mismatch makes no DELETE call.
+    number_id_ = _as_uuid(number_id)
+    if number_id_ is None:
+        return _not_uuid("number_id")
     try:
-        number = await client.get_number(number_id)
+        number = await client.get_number(number_id_)
         e164 = str(number["e164"])
         if _squash_whitespace(confirm_e164) != _squash_whitespace(e164):
             return {
                 "error": "confirm_e164 does not match this number. "
                 f"Pass {e164} to release it. Nothing was released."
             }
-        await client.delete_number(number_id)
+        await client.delete_number(number_id_)
     except HailAPIError as exc:
         return _format_api_error(exc)
     if number.get("provisioning_state") == "failed":
@@ -661,6 +698,8 @@ async def release_number(
 # and never return exception text.
 # --------------------------------------------------------------------------- #
 
+_TRANSPORT_ERROR = "request timed out or failed; try again"
+_UNEXPECTED_ERROR = "unexpected error; try again"
 _VERIFICATION_FILE_TYPES = ("image/jpeg", "image/png", "application/pdf")
 _VERIFICATION_MAX_FILE_BYTES = 10 * 1024 * 1024
 _VERIFICATION_MAX_TOTAL_BYTES = 30 * 1024 * 1024
@@ -764,24 +803,43 @@ async def list_verifications(*, client: HailClient) -> dict[str, Any]:
         return await client.list_verifications()
     except HailAPIError as exc:
         return _format_api_error(exc)
+    except httpx.TransportError:
+        return {"error": _TRANSPORT_ERROR}
+    except Exception:
+        return {"error": _UNEXPECTED_ERROR}
 
 
 async def get_verification(
     *, client: HailClient, verification_id: str
 ) -> dict[str, Any]:
+    verification_id_ = _as_uuid(verification_id)
+    if verification_id_ is None:
+        return _not_uuid("verification_id")
     try:
-        return await client.get_verification(verification_id)
+        return await client.get_verification(verification_id_)
     except HailAPIError as exc:
         return _format_api_error(exc)
+    except httpx.TransportError:
+        return {"error": _TRANSPORT_ERROR}
+    except Exception:
+        # No exception text: a decode or validation error can carry a body.
+        return {"error": _UNEXPECTED_ERROR}
 
 
 async def cancel_verification(
     *, client: HailClient, verification_id: str
 ) -> dict[str, Any]:
+    verification_id_ = _as_uuid(verification_id)
+    if verification_id_ is None:
+        return _not_uuid("verification_id")
     try:
-        return await client.cancel_verification(verification_id)
+        return await client.cancel_verification(verification_id_)
     except HailAPIError as exc:
         return _format_api_error(exc)
+    except httpx.TransportError:
+        return {"error": _TRANSPORT_ERROR}
+    except Exception:
+        return {"error": _UNEXPECTED_ERROR}
 
 
 async def submit_verification(
@@ -851,8 +909,11 @@ def _submit_error(exc: HailAPIError) -> dict[str, Any]:
 
 
 async def get_agent(*, client: HailClient, agent_id: str) -> dict[str, Any]:
+    agent_id_ = _as_uuid(agent_id)
+    if agent_id_ is None:
+        return _not_uuid("agent_id")
     try:
-        return await client.get_agent(agent_id)
+        return await client.get_agent(agent_id_)
     except HailAPIError as exc:
         return _format_api_error(exc)
 
@@ -877,11 +938,14 @@ async def update_agent(
     **fields: Any,
 ) -> dict[str, Any]:
     """``fields`` holds only the values to set; ``clear_fields`` the nulls."""
+    agent_id_ = _as_uuid(agent_id)
+    if agent_id_ is None:
+        return _not_uuid("agent_id")
     if (language is None) != (voice_id is None):
         # The API replaces voice_config whole on PATCH: start from the
         # agent's current one so the value not given is kept.
         try:
-            current = await client.get_agent(agent_id)
+            current = await client.get_agent(agent_id_)
         except HailAPIError as exc:
             return _format_api_error(exc)
         fields["voice_config"] = {**(current.get("voice_config") or {})}
@@ -905,7 +969,7 @@ async def update_agent(
     for name in clear:
         body[name] = None
     try:
-        return await client.update_agent(agent_id, **body)
+        return await client.update_agent(agent_id_, **body)
     except ValidationError as exc:
         return {"error": _validation_error_message(exc)}
     except HailAPIError as exc:
@@ -916,15 +980,18 @@ async def delete_agent(
     *, client: HailClient, agent_id: str, confirm_name: str
 ) -> dict[str, Any]:
     # Destructive: delete only when the caller typed back the agent's name.
+    agent_id_ = _as_uuid(agent_id)
+    if agent_id_ is None:
+        return _not_uuid("agent_id")
     try:
-        agent = await client.get_agent(agent_id)
+        agent = await client.get_agent(agent_id_)
         name = str(agent["name"])
         if confirm_name.strip() != name:
             return {
                 "error": "confirm_name does not match this agent. "
                 f'Pass "{name}" to delete it. Nothing was deleted.'
             }
-        await client.delete_agent(agent_id)
+        await client.delete_agent(agent_id_)
     except HailAPIError as exc:
         return _format_api_error(exc)
     return {"deleted": True, "agent_id": agent_id, "name": name}
