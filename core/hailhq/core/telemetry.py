@@ -196,22 +196,7 @@ def _scrub_identity(match: logfire.ScrubMatch):
         and match.path[1] in IDENTITY_FIELDS
     ):
         return match.value
-    if match.pattern_match.group(0).lower() == "arguments":
-        # The extra pattern below, not a default one. Keep the value, except
-        # the arguments of submit_verification: they hold identity details
-        # and documents.
-        if isinstance(match.value, dict) and "attest_authorized" in match.value:
-            return None
-        return match.value
     return None
-
-
-def scrubbing_options() -> logfire.ScrubbingOptions:
-    # "arguments" is the key under which logfire.instrument_mcp() records the
-    # arguments of a tools/call request.
-    return logfire.ScrubbingOptions(
-        extra_patterns=["arguments"], callback=_scrub_identity
-    )
 
 
 def configure_telemetry(service_name: str) -> bool:
@@ -271,7 +256,7 @@ def configure_telemetry(service_name: str) -> bool:
         environment=settings.logfire_environment,
         additional_span_processors=[IdentitySpanProcessor(), processor],
         sampling=logfire.SamplingOptions(head=settings.hail_logfire_sample_rate),
-        scrubbing=scrubbing_options(),
+        scrubbing=logfire.ScrubbingOptions(callback=_scrub_identity),
         inspect_arguments=False,
         distributed_tracing=True,
     )
