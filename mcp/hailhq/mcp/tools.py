@@ -35,6 +35,13 @@ Exposes the following tools to the calling agent:
 * ``list_numbers`` — page through the workspace's numbers
 * ``get_number`` — fetch one number
 * ``release_number`` — release a number (destructive; needs ``confirm_e164``)
+* ``get_verification_requirements`` — what a carrier needs to verify the org
+  for a number type (fields, documents, address)
+* ``submit_verification`` — send the user's details and documents to the
+  carrier (irreversible once submitted; needs ``attest_authorized=True``)
+* ``list_verifications`` — the org's verifications and their states
+* ``get_verification`` — one verification; poll it until ``approved``
+* ``cancel_verification`` — cancel or dismiss (``awaiting_review``/``rejected`` only)
 
 Every tool sets explicit ``ToolAnnotations`` hints (read-only, destructive,
 idempotent, open-world) and a human title; ``tests/test_tool_annotations.py``
@@ -65,6 +72,7 @@ FastMCP ``Context`` (auto-injected on dispatch) and uses the
 from __future__ import annotations
 
 import base64
+import binascii
 import contextlib
 import hashlib
 import time
@@ -642,6 +650,204 @@ async def release_number(
         # DELETE on a failed order only hides the row; nothing was released.
         return {"dismissed": True, "number_id": number_id, "e164": e164}
     return {"released": True, "number_id": number_id, "e164": e164}
+
+
+# --------------------------------------------------------------------------- #
+# Carrier verification.
+#
+# ``submit_verification`` carries personal data and identity documents. Rules
+# for this code: never log an argument, never put a submitted value into a
+# return value or an error string (errors name slots, counts and sizes only),
+# and never return exception text.
+# --------------------------------------------------------------------------- #
+
+_VERIFICATION_FILE_TYPES = ("image/jpeg", "image/png", "application/pdf")
+_VERIFICATION_MAX_FILE_BYTES = 10 * 1024 * 1024
+_VERIFICATION_MAX_TOTAL_BYTES = 30 * 1024 * 1024
+_VERIFICATION_MAX_FILES = 20
+_VERIFICATION_MAX_FIELDS = 20
+# Largest base64 text a legal file can have; checked before decoding.
+_VERIFICATION_MAX_B64_CHARS = (_VERIFICATION_MAX_FILE_BYTES + 2) // 3 * 4
+
+
+def _check_verification_files(
+    files: list[dict[str, str]], documents: dict[str, Any]
+) -> tuple[str | None, list[tuple[str, str, bytes]]]:
+    """Validate and decode the files. Returns ``(error, decoded)``.
+
+    Every message names an index, a slot, a count or a size. None of them
+    contains a submitted value or any part of the base64 text.
+    """
+    decoded: list[tuple[str, str, bytes]] = []
+    seen: set[str] = set()
+    total = 0
+    if len(files) > _VERIFICATION_MAX_FILES:
+        return f"too many files: {len(files)} (at most {_VERIFICATION_MAX_FILES})", []
+    for i, entry in enumerate(files):
+        if (
+            not isinstance(entry, dict)
+            or not isinstance(entry.get("slot"), str)
+            or not isinstance(entry.get("content_type"), str)
+            or not isinstance(entry.get("content_base64"), str)
+        ):
+            return (
+                (
+                    f"files[{i}] must be an object with string keys slot, "
+                    "content_type and content_base64"
+                ),
+                [],
+            )
+        slot = entry["slot"]
+        if entry["content_type"] not in _VERIFICATION_FILE_TYPES:
+            return (
+                f"files[{i}] (slot {slot!r}): content_type must be one of "
+                + ", ".join(_VERIFICATION_FILE_TYPES),
+                [],
+            )
+        if slot in seen:
+            return f"files[{i}]: more than one file for slot {slot!r}", []
+        seen.add(slot)
+        if slot not in documents:
+            return f"files[{i}]: slot {slot!r} is not a key in documents", []
+        b64 = entry["content_base64"]
+        if len(b64) > _VERIFICATION_MAX_B64_CHARS:
+            return (
+                (
+                    f"files[{i}] (slot {slot!r}): file is larger than "
+                    f"{_VERIFICATION_MAX_FILE_BYTES // (1024 * 1024)} MiB"
+                ),
+                [],
+            )
+        try:
+            content = base64.b64decode(b64, validate=True)
+        except (binascii.Error, ValueError):
+            return f"files[{i}] (slot {slot!r}): content_base64 is not valid base64", []
+        if not content:
+            return f"files[{i}] (slot {slot!r}): file is empty", []
+        if len(content) > _VERIFICATION_MAX_FILE_BYTES:
+            return (
+                (
+                    f"files[{i}] (slot {slot!r}): file is {len(content)} bytes; "
+                    f"the limit is {_VERIFICATION_MAX_FILE_BYTES} bytes"
+                ),
+                [],
+            )
+        total += len(content)
+        if total > _VERIFICATION_MAX_TOTAL_BYTES:
+            limit_mib = _VERIFICATION_MAX_TOTAL_BYTES // (1024 * 1024)
+            return f"files total more than {limit_mib} MiB", []
+        decoded.append((slot, entry["content_type"], content))
+    return None, decoded
+
+
+async def get_verification_requirements(
+    *,
+    client: HailClient,
+    country_code: str,
+    number_type: str,
+    subject_type: str = "person",
+    provider: str | None = None,
+) -> dict[str, Any]:
+    try:
+        return await client.get_verification_requirements(
+            country_code=country_code,
+            number_type=number_type,
+            subject_type=subject_type,
+            provider=provider,
+        )
+    except HailAPIError as exc:
+        return _format_api_error(exc)
+
+
+async def list_verifications(*, client: HailClient) -> dict[str, Any]:
+    try:
+        return await client.list_verifications()
+    except HailAPIError as exc:
+        return _format_api_error(exc)
+
+
+async def get_verification(
+    *, client: HailClient, verification_id: str
+) -> dict[str, Any]:
+    try:
+        return await client.get_verification(verification_id)
+    except HailAPIError as exc:
+        return _format_api_error(exc)
+
+
+async def cancel_verification(
+    *, client: HailClient, verification_id: str
+) -> dict[str, Any]:
+    try:
+        return await client.cancel_verification(verification_id)
+    except HailAPIError as exc:
+        return _format_api_error(exc)
+
+
+async def submit_verification(
+    *,
+    client: HailClient,
+    country_code: str,
+    number_type: str,
+    fields: dict[str, str],
+    documents: dict[str, Any],
+    files: list[dict[str, str]],
+    attest_authorized: bool,
+    subject_type: str = "person",
+    address: dict[str, str] | None = None,
+    provider: str | None = None,
+) -> dict[str, Any]:
+    if attest_authorized is not True:
+        return {
+            "error": "attest_authorized must be true. Pass true only if the "
+            "person or company in these details asked for this submission "
+            "and gave you the details and files in this conversation. "
+            "Nothing was sent."
+        }
+    if len(fields) > _VERIFICATION_MAX_FIELDS:
+        return {
+            "error": f"too many fields: {len(fields)} "
+            f"(at most {_VERIFICATION_MAX_FIELDS}). Nothing was sent."
+        }
+    error, decoded = _check_verification_files(files, documents)
+    if error:
+        return {"error": f"{error}. Nothing was sent."}
+    try:
+        return await client.submit_verification(
+            country_code=country_code,
+            number_type=number_type,
+            subject_type=subject_type,
+            fields=fields,
+            documents=documents,
+            files=decoded,
+            address=address,
+            provider=provider,
+        )
+    except httpx.TransportError:
+        return {
+            "error": "request timed out; the submission may have gone through. "
+            "Call list_verifications to check before submitting again."
+        }
+    except HailAPIError as exc:
+        return _submit_error(exc)
+    except Exception:
+        # No exception text: it could carry a request or response body.
+        return {
+            "error": "unexpected error; the submission may have gone through. "
+            "Call list_verifications to check before submitting again."
+        }
+
+
+def _submit_error(exc: HailAPIError) -> dict[str, Any]:
+    if exc.status == 422:
+        return {
+            "error": "the carrier or the API rejected the submission; nothing "
+            "was stored. Fix the listed problems with the user and submit again.",
+            "problems": exc.problems or [],
+        }
+    if exc.status in (401, 404, 409, 429, 503):
+        return _format_api_error(exc)
+    return {"error": f"hail api error {exc.status}"}
 
 
 async def get_agent(*, client: HailClient, agent_id: str) -> dict[str, Any]:
@@ -1914,6 +2120,220 @@ def register_tools(
             return {"error": str(exc)}
         except HailAPIError as exc:
             return _format_api_error(exc)
+
+    @mcp_app.tool(
+        name="get_verification_requirements",
+        title="Get verification requirements",
+        annotations=ToolAnnotations(
+            readOnlyHint=True,
+            destructiveHint=False,
+            idempotentHint=True,
+            openWorldHint=True,
+        ),
+    )
+    async def get_verification_requirements_tool(
+        ctx: Context,
+        country_code: str,
+        number_type: str,
+        subject_type: str = "person",
+        provider: str | None = None,
+    ) -> dict[str, Any]:
+        """Read what the carrier needs to verify the organization before it
+        can buy a number. Call this when quote_numbers shows an offer with
+        ``readiness == "verification_required"``. Read-only.
+
+        ``country_code`` is ISO alpha-2 (for example ``"GB"``). ``number_type``
+        is ``local``, ``mobile``, ``national`` or ``toll_free``.
+        ``subject_type`` is ``person`` (default) or ``business``; the result's
+        ``subject_types`` lists what the carrier accepts. ``provider`` is
+        optional.
+
+        Returns ``required`` (false means no verification is needed and
+        submit_verification would fail), ``fields`` (values to collect),
+        ``documents`` (slots, each with ``options``), ``address_required``.
+        Skip any document slot whose ``needs_input`` is false: do not send it.
+
+        Ask the USER for every value and every file. Never invent, guess or
+        infer personal or company data. Never reuse data from another task.
+
+        Errors come back as ``{"error": "<message>"}``."""
+        try:
+            async with _client_for(ctx, mode=mode, singleton=singleton) as client:
+                return await get_verification_requirements(
+                    client=client,
+                    country_code=country_code,
+                    number_type=number_type,
+                    subject_type=subject_type,
+                    provider=provider,
+                )
+        except RuntimeError as exc:
+            return {"error": str(exc)}
+
+    @mcp_app.tool(
+        name="submit_verification",
+        title="Submit a verification",
+        annotations=ToolAnnotations(
+            readOnlyHint=False,
+            destructiveHint=True,
+            idempotentHint=False,
+            openWorldHint=True,
+        ),
+    )
+    async def submit_verification_tool(
+        ctx: Context,
+        country_code: str,
+        number_type: str,
+        fields: dict[str, str],
+        documents: dict[str, dict[str, Any]],
+        files: list[dict[str, str]],
+        attest_authorized: bool,
+        subject_type: str = "person",
+        address: dict[str, str] | None = None,
+        provider: str | None = None,
+    ) -> dict[str, Any]:
+        """Send the user's personal or company details and identity documents
+        to the carrier for verification. IRREVERSIBLE: once submitted it
+        cannot be cancelled, and the carrier keeps the documents.
+
+        ``attest_authorized``: pass true only if the person or company named
+        in these details and documents asked for this submission and gave you
+        the details and files in this conversation. Never invent, guess, infer
+        or reuse personal data or documents. Anything else: pass false (the
+        call then sends nothing).
+
+        Steps: 1) call get_verification_requirements. 2) Ask the user for each
+        field and file. 3) Call this once. Do not submit twice: a 409 means
+        one already exists (see list_verifications).
+
+        Arguments, as listed by get_verification_requirements:
+        ``fields`` is ``{field name: value}``. ``address`` is
+        ``{"customer_name", "street", "city", "region", "postal_code",
+        "country_code"}`` (all required when ``address_required``).
+        ``documents`` is ``{slot: {"option": <option key>, "fields": {...}}}``
+        for each slot with ``needs_input``. ``files`` is a list of
+        ``{"slot", "content_type", "content_base64"}``, one per slot that
+        needs a file; ``slot`` must be a key in ``documents``.
+        ``content_type`` is ``image/jpeg``, ``image/png`` or
+        ``application/pdf``. Limits: 10 MiB per file, 30 MiB in total, at
+        most 20 files and 20 fields. Compress images to JPG or PNG under about
+        7 MiB so the call stays small.
+
+        Returns the verification: ``id`` and ``state`` (no personal data).
+        Review takes business days and nothing notifies you: poll
+        get_verification. If the carrier finds a problem you get
+        ``{"error", "problems": [{"loc", "msg"}]}`` and nothing is stored:
+        ask the user to fix it, then submit again. After a timeout call
+        list_verifications before trying again."""
+        try:
+            async with _client_for(ctx, mode=mode, singleton=singleton) as client:
+                return await submit_verification(
+                    client=client,
+                    country_code=country_code,
+                    number_type=number_type,
+                    fields=fields,
+                    documents=documents,
+                    files=files,
+                    attest_authorized=attest_authorized,
+                    subject_type=subject_type,
+                    address=address,
+                    provider=provider,
+                )
+        except RuntimeError:
+            # Not the exception text: it must never carry submitted values.
+            return {"error": "could not authenticate the request"}
+
+    @mcp_app.tool(
+        name="list_verifications",
+        title="List verifications",
+        annotations=ToolAnnotations(
+            readOnlyHint=True,
+            destructiveHint=False,
+            idempotentHint=True,
+            openWorldHint=False,
+        ),
+    )
+    async def list_verifications_tool(ctx: Context) -> dict[str, Any]:
+        """List the organization's carrier verifications, newest first.
+
+        Returns ``{"items": [{"id", "provider", "country_code", "number_type",
+        "subject_type", "state", "rejection_reason", "created_at",
+        "updated_at", "submitted_at", "approved_at"}]}``. ``state`` is
+        ``awaiting_review``, ``submitting``, ``submitted``, ``approved``,
+        ``rejected`` or ``cancelled``. Use it to check whether a submission
+        already exists before submitting again.
+
+        Errors come back as ``{"error": "<message>"}``."""
+        try:
+            async with _client_for(ctx, mode=mode, singleton=singleton) as client:
+                return await list_verifications(client=client)
+        except RuntimeError as exc:
+            return {"error": str(exc)}
+
+    @mcp_app.tool(
+        name="get_verification",
+        title="Get a verification",
+        annotations=ToolAnnotations(
+            readOnlyHint=True,
+            destructiveHint=False,
+            idempotentHint=True,
+            openWorldHint=False,
+        ),
+    )
+    async def get_verification_tool(
+        ctx: Context, verification_id: str
+    ) -> dict[str, Any]:
+        """Fetch one verification and its state. Use it to poll.
+
+        There is no notification, and review takes business days. Poll every
+        few minutes to hours, not every few seconds; the state refreshes from
+        the carrier at most once a minute.
+
+        On ``approved``: call quote_numbers again. The offer is now
+        ``ready``; then acquire_number. On ``rejected``: read
+        ``rejection_reason``, ask the user, dismiss it with
+        cancel_verification, then submit a new one. ``verification_id`` comes
+        from submit_verification or list_verifications.
+
+        Returns ``{"id", "state", "rejection_reason", ...}`` or
+        ``{"error": "<message>"}``."""
+        try:
+            async with _client_for(ctx, mode=mode, singleton=singleton) as client:
+                return await get_verification(
+                    client=client, verification_id=verification_id
+                )
+        except RuntimeError as exc:
+            return {"error": str(exc)}
+
+    @mcp_app.tool(
+        name="cancel_verification",
+        title="Cancel a verification",
+        annotations=ToolAnnotations(
+            readOnlyHint=False,
+            destructiveHint=True,
+            idempotentHint=False,
+            openWorldHint=False,
+        ),
+    )
+    async def cancel_verification_tool(
+        ctx: Context, verification_id: str
+    ) -> dict[str, Any]:
+        """Cancel a verification that has not been sent for review, or dismiss
+        a rejected one (needed before submitting a new one for the same
+        country and number type). The draft is discarded.
+
+        Works only in state ``awaiting_review`` or ``rejected``. A
+        ``submitting`` or ``submitted`` verification is under review and
+        cannot be cancelled (409): wait for the result with get_verification.
+
+        Returns the verification with ``state: "cancelled"``, or
+        ``{"error": "<message>"}``."""
+        try:
+            async with _client_for(ctx, mode=mode, singleton=singleton) as client:
+                return await cancel_verification(
+                    client=client, verification_id=verification_id
+                )
+        except RuntimeError as exc:
+            return {"error": str(exc)}
 
     @mcp_app.tool(
         name="get_agent",

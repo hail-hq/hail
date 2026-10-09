@@ -21,12 +21,14 @@ kwargs override for tests.
 
 from __future__ import annotations
 
+import json
 import uuid
 from typing import Any
 
 import httpx
 from hailhq.core.carrier_offer import NumberQuotesResponse
 from hailhq.core.config import settings
+from hailhq.core.providers.verification import Requirements
 from hailhq.core.schemas import (
     AgentCreate,
     AgentListResponse,
@@ -53,6 +55,7 @@ from hailhq.core.schemas import (
     SmsCreate,
     SmsListResponse,
     SmsResponse,
+    VerificationResponse,
     WhoamiResponse,
 )
 from typing_extensions import Self
@@ -70,12 +73,19 @@ class HailAPIError(Exception):
     """
 
     def __init__(
-        self, status: int, detail: str, retry_after: str | None = None
+        self,
+        status: int,
+        detail: str,
+        retry_after: str | None = None,
+        problems: list[dict[str, Any]] | None = None,
     ) -> None:
         super().__init__(f"hail api error {status}: {detail}")
         self.status = status
         self.detail = detail
         self.retry_after = retry_after
+        # Carrier problems from a 422 on POST /verifications, reduced to
+        # ``loc`` and ``msg`` only. See ``HailClient.submit_verification``.
+        self.problems = problems
 
 
 class HailClient:
@@ -518,6 +528,104 @@ class HailClient:
         return _decode(resp)
 
     # ------------------------------------------------------------------ #
+    # /verifications
+    # ------------------------------------------------------------------ #
+
+    async def get_verification_requirements(
+        self,
+        *,
+        country_code: str,
+        number_type: str,
+        subject_type: str = "person",
+        provider: str | None = None,
+    ) -> dict[str, Any]:
+        params: dict[str, Any] = {
+            "country_code": country_code,
+            "number_type": number_type,
+            "subject_type": subject_type,
+        }
+        if provider is not None:
+            params["provider"] = provider
+        resp = await self._client.get("/verifications/requirements", params=params)
+        return Requirements.model_validate(_decode(resp)).model_dump(mode="json")
+
+    async def list_verifications(self) -> dict[str, Any]:
+        resp = await self._client.get("/verifications")
+        items = [VerificationResponse.model_validate(r) for r in _decode(resp)]
+        return {"items": [i.model_dump(mode="json") for i in items]}
+
+    async def get_verification(self, verification_id: str) -> dict[str, Any]:
+        resp = await self._client.get(f"/verifications/{verification_id}")
+        return VerificationResponse.model_validate(_decode(resp)).model_dump(
+            mode="json"
+        )
+
+    async def cancel_verification(self, verification_id: str) -> dict[str, Any]:
+        resp = await self._client.delete(f"/verifications/{verification_id}")
+        return VerificationResponse.model_validate(_decode(resp)).model_dump(
+            mode="json"
+        )
+
+    async def submit_verification(
+        self,
+        *,
+        country_code: str,
+        number_type: str,
+        fields: dict[str, str],
+        documents: dict[str, Any],
+        files: list[tuple[str, str, bytes]],
+        subject_type: str = "person",
+        address: dict[str, str] | None = None,
+        provider: str | None = None,
+    ) -> dict[str, Any]:
+        """POST /verifications — multipart/form-data, personal data in transit.
+
+        ``files`` is ``(slot, content_type, bytes)``; each goes out as the
+        part ``file.<slot>`` with the fixed filename ``upload``. No
+        ``Idempotency-Key``: the route has none (a repeat returns 409).
+
+        A non-2xx response never exposes its raw body. A 422 keeps only
+        ``loc`` and ``msg`` of each problem (the carrier's text says what to
+        fix); the API's ``input`` and ``ctx`` keys are dropped. Any other
+        status keeps ``detail`` only for the API's own short messages, which
+        the tool layer decides to show.
+        """
+        data: dict[str, str] = {
+            "country_code": country_code,
+            "number_type": number_type,
+            "subject_type": subject_type,
+            "fields": json.dumps(fields),
+            "documents": json.dumps(documents),
+        }
+        if provider is not None:
+            data["provider"] = provider
+        if address is not None:
+            data["address"] = json.dumps(address)
+        parts = [
+            (f"file.{slot}", ("upload", content, content_type))
+            for slot, content_type, content in files
+        ]
+        resp = await self._client.post(
+            "/verifications", data=data, files=parts, timeout=120.0
+        )
+        if resp.status_code == 422:
+            raise HailAPIError(
+                status=422,
+                detail="verification rejected",
+                problems=_problems(resp),
+            )
+        if resp.status_code in (409, 503):
+            raise HailAPIError(status=resp.status_code, detail=_error_detail(resp))
+        if not 200 <= resp.status_code < 300:
+            # Unknown failure: keep the status, drop the body.
+            raise HailAPIError(
+                status=resp.status_code,
+                detail="request failed",
+                retry_after=resp.headers.get("retry-after"),
+            )
+        return VerificationResponse.model_validate(resp.json()).model_dump(mode="json")
+
+    # ------------------------------------------------------------------ #
     # GET /emails/{id}
     # ------------------------------------------------------------------ #
 
@@ -703,6 +811,33 @@ def _location(resp: httpx.Response) -> str:
             return loc
         raise HailAPIError(status=resp.status_code, detail="redirect without Location")
     raise HailAPIError(status=resp.status_code, detail=_error_detail(resp))
+
+
+def _problems(resp: httpx.Response) -> list[dict[str, Any]]:
+    """Reduce a 422 body to ``[{"loc": [...], "msg": "..."}]``.
+
+    Nothing else from the body survives (FastAPI adds ``input`` and ``ctx``,
+    which can hold submitted values). A body that is not a list of problems
+    gives an empty list.
+    """
+    try:
+        detail = resp.json().get("detail")
+    except (ValueError, AttributeError):
+        return []
+    if not isinstance(detail, list):
+        return []
+    out: list[dict[str, Any]] = []
+    for item in detail:
+        if not isinstance(item, dict) or not isinstance(item.get("msg"), str):
+            continue
+        loc = item.get("loc")
+        loc = (
+            [p if isinstance(p, int) else str(p) for p in loc]
+            if isinstance(loc, list)
+            else []
+        )
+        out.append({"loc": loc, "msg": item["msg"]})
+    return out
 
 
 def _error_detail(resp: httpx.Response) -> str:
