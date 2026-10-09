@@ -1946,8 +1946,10 @@ def register_tools(
         Quotes expire in 10 minutes (``expires_at``); quote again after that.
 
         An offer with ``readiness == "verification_required"`` cannot be
-        bought until the organization finishes verification in the console.
-        ``requirements`` lists what the carrier needs. Prefer an offer whose
+        bought until the organization is verified. Call
+        get_verification_requirements, ask the user for the details, then
+        submit_verification and poll get_verification (review takes business
+        days). ``requirements`` lists what the carrier needs. Prefer an offer whose
         ``readiness`` is ``"ready"``; ``recommended_quote_id`` points at the
         best one, or is null if none is ready.
 

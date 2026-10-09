@@ -21,43 +21,48 @@ Example. Ask your agent: "Find me a US number that can call and text." It calls 
 { "country_code": "US", "capabilities": ["voice", "sms"] }
 ```
 
-The server exposes 31 tools. Schemas (args, validation, return shapes) are the source of truth — refer to [`mcp/hailhq/mcp/tools.py`](https://github.com/hail-hq/hail/blob/main/mcp/hailhq/mcp/tools.py).
+The server exposes 36 tools. Schemas (args, validation, return shapes) are the source of truth — refer to [`mcp/hailhq/mcp/tools.py`](https://github.com/hail-hq/hail/blob/main/mcp/hailhq/mcp/tools.py).
 
-Every tool sets the MCP hints `readOnlyHint`, `destructiveHint`, `idempotentHint` and `openWorldHint`, so clients can ask for approval before a write. `release_number`, `delete_agent` and `acquire_number` are marked destructive. Each one also needs a confirmation argument (`confirm_e164`, `confirm_name`, `confirm_total_cents`).
+Every tool sets the MCP hints `readOnlyHint`, `destructiveHint`, `idempotentHint` and `openWorldHint`, so clients can ask for approval before a write. `release_number`, `delete_agent`, `acquire_number`, `submit_verification` and `cancel_verification` are marked destructive. The first three also need a confirmation argument (`confirm_e164`, `confirm_name`, `confirm_total_cents`). `submit_verification` needs `attest_authorized: true`.
 
-| Tool                      | Does                                                               |
-| ------------------------- | ------------------------------------------------------------------ |
-| `place_call`              | Originate an outbound phone call.                                  |
-| `get_call`                | Fetch the current state of one call.                               |
-| `list_calls`              | List recent calls (cursor-paginated).                              |
-| `send_sms`                | Send an outbound SMS (recipient consent is required).              |
-| `get_sms`                 | Fetch the current state of one SMS.                                |
-| `list_sms`                | List recent SMS messages (cursor-paginated).                       |
-| `send_email`              | Send an outbound email (supports `attachment_ids`).                |
-| `upload_email_attachment` | Upload a file, get back a reusable id.                             |
-| `get_email`               | Fetch one email's full record (body + inbound headers).            |
-| `list_emails`             | List emails (`direction="inbound"` for replies).                   |
-| `get_email_raw`           | Presigned URL for an inbound email's raw MIME.                     |
-| `get_email_attachment`    | Presigned URL for one inbound attachment.                          |
-| `get_email_events`        | Page through one email's event history.                            |
-| `get_email_stats`         | Aggregate email counts for a time window.                          |
-| `get_events`              | Page through the event stream.                                     |
-| `list_email_domains`      | List sending identities + the default `from` address.              |
-| `whoami`                  | Identify the human behind the session (for `reply_to`).            |
-| `list_contacts`           | List the org's contacts (members + manual contacts).               |
-| `lookup_contact`          | Find one contact by name, email, or phone fragment.                |
-| `create_contact`          | Add a manual contact.                                              |
-| `list_agents`             | List saved agents.                                                 |
-| `get_agent`               | Fetch one saved agent.                                             |
-| `create_agent`            | Save an agent that answers calls and texts.                        |
-| `update_agent`            | Change an agent. `clear_fields` removes optional values.           |
-| `delete_agent`            | Delete an agent. Destructive. Needs `confirm_name`.                |
-| `route_number`            | Choose which agent answers a number.                               |
-| `quote_numbers`           | Compare live carrier offers for a new number (read-only).          |
-| `acquire_number`          | Buy a quoted number. Spends money. Needs `confirm_total_cents`.    |
-| `list_numbers`            | List the org's numbers (cursor-paginated).                         |
-| `get_number`              | Fetch one number.                                                  |
-| `release_number`          | Release a number. Destructive and permanent. Needs `confirm_e164`. |
+| Tool                            | Does                                                                                |
+| ------------------------------- | ----------------------------------------------------------------------------------- |
+| `place_call`                    | Originate an outbound phone call.                                                   |
+| `get_call`                      | Fetch the current state of one call.                                                |
+| `list_calls`                    | List recent calls (cursor-paginated).                                               |
+| `send_sms`                      | Send an outbound SMS (recipient consent is required).                               |
+| `get_sms`                       | Fetch the current state of one SMS.                                                 |
+| `list_sms`                      | List recent SMS messages (cursor-paginated).                                        |
+| `send_email`                    | Send an outbound email (supports `attachment_ids`).                                 |
+| `upload_email_attachment`       | Upload a file, get back a reusable id.                                              |
+| `get_email`                     | Fetch one email's full record (body + inbound headers).                             |
+| `list_emails`                   | List emails (`direction="inbound"` for replies).                                    |
+| `get_email_raw`                 | Presigned URL for an inbound email's raw MIME.                                      |
+| `get_email_attachment`          | Presigned URL for one inbound attachment.                                           |
+| `get_email_events`              | Page through one email's event history.                                             |
+| `get_email_stats`               | Aggregate email counts for a time window.                                           |
+| `get_events`                    | Page through the event stream.                                                      |
+| `list_email_domains`            | List sending identities + the default `from` address.                               |
+| `whoami`                        | Identify the human behind the session (for `reply_to`).                             |
+| `list_contacts`                 | List the org's contacts (members + manual contacts).                                |
+| `lookup_contact`                | Find one contact by name, email, or phone fragment.                                 |
+| `create_contact`                | Add a manual contact.                                                               |
+| `list_agents`                   | List saved agents.                                                                  |
+| `get_agent`                     | Fetch one saved agent.                                                              |
+| `create_agent`                  | Save an agent that answers calls and texts.                                         |
+| `update_agent`                  | Change an agent. `clear_fields` removes optional values.                            |
+| `delete_agent`                  | Delete an agent. Destructive. Needs `confirm_name`.                                 |
+| `route_number`                  | Choose which agent answers a number.                                                |
+| `quote_numbers`                 | Compare live carrier offers for a new number (read-only).                           |
+| `acquire_number`                | Buy a quoted number. Spends money. Needs `confirm_total_cents`.                     |
+| `list_numbers`                  | List the org's numbers (cursor-paginated).                                          |
+| `get_number`                    | Fetch one number.                                                                   |
+| `release_number`                | Release a number. Destructive and permanent. Needs `confirm_e164`.                  |
+| `get_verification_requirements` | Read what a carrier needs to verify the org for a number type (read-only).          |
+| `submit_verification`           | Send details and documents to the carrier. Irreversible. Needs `attest_authorized`. |
+| `list_verifications`            | List the org's verifications and their states (read-only).                          |
+| `get_verification`              | Fetch one verification; poll it for `approved` (read-only).                         |
+| `cancel_verification`           | Cancel an `awaiting_review` one or dismiss a `rejected` one.                        |
 
 ### Getting a number over MCP
 
@@ -79,7 +84,49 @@ Every tool sets the MCP hints `readOnlyHint`, `destructiveHint`, `idempotentHint
 
 > **Warning:** `acquire_number` buys a real number. It charges the setup fee and the first month now, then renews monthly. The account balance is the only spending limit. Keep the human approval prompt on for this tool.
 
-An offer with `readiness: "verification_required"` cannot be bought until the organization finishes verification in the console.
+### Buying a number that needs verification
+
+Some numbers, for example a UK mobile, need a carrier check of the organization first. `quote_numbers` marks those offers `readiness: "verification_required"`. The whole flow works over MCP:
+
+1. `quote_numbers`: `{"country_code": "GB", "number_type": "mobile"}`. The offer has `readiness: "verification_required"`.
+2. `get_verification_requirements`: `{"country_code": "GB", "number_type": "mobile"}`. The result lists `fields`, `documents` (skip a slot whose `needs_input` is false) and `address_required`.
+3. Ask the user for every field and file. The agent must not invent or guess any value.
+4. `submit_verification`. `files[].content_base64` is the file's bytes in base64. Slot names in `files` must be keys in `documents`:
+
+   ```json
+   {
+     "country_code": "GB",
+     "number_type": "mobile",
+     "fields": { "first_name": "Ada", "last_name": "Lovelace" },
+     "address": {
+       "customer_name": "Ada Lovelace",
+       "street": "1 Example Road",
+       "city": "London",
+       "region": "London",
+       "postal_code": "N1 1AA",
+       "country_code": "GB"
+     },
+     "documents": { "identity": { "option": "passport", "fields": {} } },
+     "files": [
+       {
+         "slot": "identity",
+         "content_type": "image/jpeg",
+         "content_base64": "<base64 of the passport photo>"
+       }
+     ],
+     "attest_authorized": true
+   }
+   ```
+
+   The result holds the verification `id` and `state`, never the details. If the carrier finds a problem, the result lists `problems` (`loc`, `msg`) and nothing is stored. Fix them with the user and submit again.
+
+5. `get_verification`: `{"verification_id": "<id>"}`. Poll every few minutes to hours, not every few seconds. Review takes business days. Hail sends no email or webhook when it ends.
+6. On `approved`: `quote_numbers` again. The offer is now `ready`. Then `acquire_number` and `route_number` as above.
+7. On `rejected`: read `rejection_reason`, ask the user, call `cancel_verification` to dismiss it, and submit a new one.
+
+Limits: JPG, PNG or PDF files, 10 MiB each, 30 MiB in total, at most 20 files and 20 fields. Compress photos to under about 7 MiB. A second submission for the same country and number type returns 409 while one exists.
+
+> **Warning:** The user's details and documents pass through the model's context and are kept in the client's transcript. Keep the human approval prompt on for `submit_verification`, and have the user hand over each value and file in the conversation. A submitted verification cannot be cancelled, and the carrier keeps the documents. Only `awaiting_review` and `rejected` ones can be cancelled.
 
 ## Claude.ai (web)
 
