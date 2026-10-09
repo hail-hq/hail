@@ -215,6 +215,11 @@ async def sync_targets(
     token — only brand-new non-member addresses. An existing row (pending,
     verified or stopped) is never touched, so re-saving the same list sends
     no mail. Flushes, does not commit."""
+    # Lock first: the console saves one list to every domain row of the org
+    # in parallel, so two requests with the same new address arrive together.
+    # The second one waits here, then reads the first one's committed row and
+    # has nothing new to do — no duplicate row, no second confirm mail.
+    await _lock_org(db, organization_id)
     existing = await _rows_for(db, organization_id, addresses)
     wanted: list[str] = []
     for a in addresses:
@@ -229,7 +234,6 @@ async def sync_targets(
     if strangers:
         # Caps apply before any row is written so a rejected save leaves
         # the org exactly as it was.
-        await _lock_org(db, organization_id)
         if await _pending_count(db, organization_id) + len(strangers) > (
             MAX_PENDING_TARGETS
         ):

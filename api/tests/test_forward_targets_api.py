@@ -281,3 +281,48 @@ async def test_post_emails_rejects_reserved_metadata_keys(
         )
         assert r.status_code == 422, (key, r.text)
         assert "reserved" in r.text
+
+
+@pytest.mark.asyncio
+async def test_same_list_saved_to_two_domain_rows_sends_one_confirm(
+    client: httpx.AsyncClient, async_session: AsyncSession, org
+):
+    """The console writes one org-level list to every domain row. The second
+    row must find the first row's target and send nothing new."""
+    org_id, headers, domain = org
+    custom = EmailDomain(
+        organization_id=org_id,
+        kind="custom",
+        domain="inbox.acme.com",
+        verification_status="verified",
+        provider="ses",
+        verified_at=datetime.now(timezone.utc),
+    )
+    async_session.add(custom)
+    await async_session.commit()
+    await async_session.refresh(custom)
+
+    for did in (domain.id, custom.id):
+        r = await client.patch(
+            f"/email-domains/{did}",
+            json={"inbound_enabled": True, "forward_to": ["stranger@other.com"]},
+            headers=headers,
+        )
+        assert r.status_code == 200, r.text
+
+    rows = (
+        (
+            await async_session.execute(
+                select(EmailForwardTarget).where(
+                    EmailForwardTarget.organization_id == org_id
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert [(t.address, t.status) for t in rows] == [("stranger@other.com", "pending")]
+    queued = await _queued_system(async_session, org_id)
+    assert len(queued) == 1
+    # Custom rows have no org prefix; the sender falls back to the id-derived one.
+    assert queued[0].from_address == "forwarder+acme@mail.hail.so"
