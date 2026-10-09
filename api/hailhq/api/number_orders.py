@@ -444,11 +444,11 @@ async def acquire_offer(
         raise HTTPException(
             status_code=409,
             detail=(
-                "price differs from your expected total: quoted "
-                f"${(offer.monthly_cents + offer.setup_cents) / 100:.2f} now "
+                "price differs from your expected total: the quote is "
+                f"${(offer.monthly_cents + offer.setup_cents) / 100:.2f} "
                 f"(${offer.monthly_cents / 100:.2f} monthly + "
                 f"${offer.setup_cents / 100:.2f} setup); "
-                "call quote_numbers again"
+                "request a new quote"
             ),
         )
     if row.number_id:

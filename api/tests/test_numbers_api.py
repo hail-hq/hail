@@ -610,8 +610,10 @@ async def test_expected_total_mismatch_is_409_and_spends_nothing(
     assert response.status_code == 409, response.text
     detail = response.json()["detail"]
     assert "price differs from your expected total" in detail
-    assert "$1.65 now ($1.15 monthly + $0.50 setup)" in detail
-    assert "quote_numbers" in detail
+    assert detail == (
+        "price differs from your expected total: the quote is $1.65 "
+        "($1.15 monthly + $0.50 setup); request a new quote"
+    )
     assert await get_balance_cents(async_session, org) == before
     buy_number.purchase.assert_not_awaited()
 
