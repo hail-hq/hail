@@ -665,13 +665,9 @@ _SPOKEN_HANDOVER_UNAVAILABLE = "I can't connect you to that person right now."
 _SPOKEN_HANDOVER_DONE = "You are already connected."
 
 
-def _wire_id(v: str) -> str:
-    return normalize_contact_id(v)
-
-
 # Wire id: a contact's uuid or ``member:<user uuid>`` (dispatch metadata
 # ``handover_targets``).
-HandoverWireId = Annotated[str, AfterValidator(_wire_id)]
+HandoverWireId = Annotated[str, AfterValidator(normalize_contact_id)]
 
 
 class AgentHandoverRequest(BaseModel):
