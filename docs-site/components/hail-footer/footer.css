@@ -7,12 +7,12 @@
   background: var(--hf-bg);
   color: var(--hf-ink);
   border-top: 1px solid var(--hf-line);
-  font-family: var(--font-mono, ui-monospace), ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-family: var(--font-grotesk, Arial), Arial, sans-serif;
   font-weight: 400;
   letter-spacing: 0;
   font-size: 13px;
   line-height: 1.65;
-  text-transform: lowercase;
+  text-transform: none;
   width: 100%;
 }
 .hail-footer * {
@@ -172,4 +172,18 @@ html.dark .hail-footer-badge-light {
 html[data-theme="dark"] .hail-footer-badge-dark,
 html.dark .hail-footer-badge-dark {
   display: inline;
+}
+
+.hail-footer.hail-footer,
+.hail-footer.hail-footer * {
+  font-family: var(--font-grotesk, Arial), Arial, sans-serif !important;
+  text-transform: none !important;
+}
+.hail-footer .hail-footer-mark {
+  display: block;
+  font-family: var(--font-mono), monospace !important;
+}
+.hail-footer-mascot {
+  display: block;
+  margin-bottom: 14px;
 }

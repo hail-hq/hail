@@ -9,6 +9,7 @@ if (!check) await mkdir(target, { recursive: true });
 for (const name of [
   "SiteHeader.tsx",
   "SiteHeader.module.css",
+  "BrandButton.module.css",
   "useDropdown.ts",
 ]) {
   const body = await readFile(new URL(name, source), "utf8");

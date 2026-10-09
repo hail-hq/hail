@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { JetBrains_Mono } from "next/font/google";
+import { JetBrains_Mono, Space_Grotesk } from "next/font/google";
 import { siteUrl } from "@/lib/url";
 import {
   COSTS_HERO_COPY,
@@ -7,6 +7,13 @@ import {
   COSTS_SITE_TITLE,
 } from "@/lib/site-copy";
 import "./global.css";
+
+const fontSans = Space_Grotesk({
+  subsets: ["latin"],
+  weight: ["400", "500", "600", "700"],
+  variable: "--font-grotesk",
+  display: "swap",
+});
 
 const fontMono = JetBrains_Mono({
   subsets: ["latin"],
@@ -71,9 +78,17 @@ export const metadata = {
 
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
-    <html lang="en" suppressHydrationWarning className={fontMono.variable}>
+    <html
+      lang="en"
+      suppressHydrationWarning
+      className={`${fontMono.variable} ${fontSans.variable}`}
+    >
       <body>
-        <script dangerouslySetInnerHTML={{ __html: `try{var t=localStorage.getItem('hail-theme');if(t==='light'||t==='dark')document.documentElement.dataset.theme=t}catch{}` }} />
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `try{var t=localStorage.getItem('hail-theme');if(t==='light'||t==='dark')document.documentElement.dataset.theme=t}catch{}`,
+          }}
+        />
         {children}
       </body>
     </html>

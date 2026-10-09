@@ -1,18 +1,27 @@
-/* Self-contained website chrome for costs and docs, independent of each app's theme variables. */
+/*
+ * Self-contained on purpose: this component is used on the landing page
+ * (wrapped in its own `.site` root, app/(marketing)/landing.module.css) and
+ * on every other marketing page (wrapped in `.hsite`, marketing.css) — two
+ * different theme-variable scopes. Defining the header's own colour
+ * variables here means it renders identically regardless of which ancestor
+ * wraps it, instead of depending on either one.
+ */
 .header {
   --a: #1665ff;
   --bg: #f5f3ed;
   --fg: #111;
   --muted: #686868;
   --hairline: color-mix(in srgb, var(--fg) 18%, transparent);
-  /* Match the website: navigation scrolls away with the page. */
-  position: relative;
+  /* The header stays in view on scroll. It sits under the promotion bar,
+     which PromoBanner measures into --promo-h (0px when no bar renders). */
+  position: sticky;
+  top: var(--promo-h, 0px);
   z-index: 40;
   background: var(--bg);
   border-bottom: 1px solid var(--hairline);
-  font-family: var(--font-mono), monospace;
+  font-family: var(--font-grotesk), Arial, sans-serif;
   font-size: 14px;
-  text-transform: lowercase;
+  text-transform: none;
   color: var(--fg);
 }
 @media (prefers-color-scheme: dark) {
@@ -37,8 +46,13 @@
   --muted: #686868;
   --a: #1665ff;
 }
-.header * {
-  border-radius: 0;
+.header.header {
+  font-family: var(--font-grotesk), Arial, sans-serif !important;
+  text-transform: none !important;
+}
+.header.header * {
+  font-family: inherit !important;
+  text-transform: none !important;
 }
 .header a {
   color: inherit;
@@ -47,12 +61,15 @@
 .shell {
   width: min(1100px, calc(100% - 40px));
   margin-inline: auto;
-  min-height: 72px;
+  min-height: 76px;
   display: flex;
   align-items: center;
-  gap: 36px;
+  gap: 32px;
   flex-wrap: wrap;
   padding-block: 10px;
+}
+.header.header .logo {
+  font-family: var(--font-mono), monospace !important;
 }
 .logo {
   font-weight: 700;
@@ -64,7 +81,7 @@
 .nav {
   display: flex;
   align-items: center;
-  gap: 22px;
+  gap: 26px;
   flex-wrap: wrap;
 }
 .navLink {
@@ -74,7 +91,7 @@
   font: inherit;
   text-transform: inherit;
   cursor: pointer;
-  padding: 0;
+  padding: 8px 0;
   display: inline-flex;
   align-items: center;
   gap: 4px;
@@ -97,7 +114,9 @@
   min-width: 200px;
   background: var(--bg);
   border: 1px solid var(--hairline);
-  padding: 14px;
+  padding: 18px;
+  border-radius: 10px;
+  box-shadow: 0 12px 30px #00000012;
   display: flex;
   flex-direction: column;
   gap: 14px;
@@ -111,43 +130,38 @@
 }
 .panelGroup {
   color: var(--muted);
-  font-size: 11px;
-  letter-spacing: 0.06em;
+  font-size: 12px;
+  letter-spacing: 0;
   margin-bottom: 6px;
 }
 
 .navActions {
   display: flex;
   align-items: center;
-  gap: 22px;
+  gap: 14px;
 }
 .primary {
-  display: inline-block;
-  background: var(--fg);
-  color: var(--bg) !important;
-  border: 1px solid var(--fg);
-  padding: 9px 15px;
-  font-weight: 700;
-  text-transform: inherit;
-}
-.primary:hover {
-  background: var(--a);
-  border-color: var(--a);
+  composes: primary from "./BrandButton.module.css";
 }
 
-.themeControl button {
+.primary::after {
+  content: "↗";
+  margin-left: 20px;
+}
+.themeButton {
   display: flex;
   align-items: center;
   justify-content: center;
   width: 36px;
   height: 36px;
   padding: 0;
-  border: 1px solid var(--hairline);
+  border: 0;
+  border-radius: 7px;
   background: transparent;
   color: var(--fg);
   cursor: pointer;
 }
-.themeControl button:hover {
+.themeButton:hover {
   border-color: var(--fg);
 }
 .menuToggle {
@@ -176,7 +190,7 @@
     grid-column: 2;
     grid-row: 1;
   }
-  .themeControl button {
+  .themeButton {
     width: 44px;
     height: 44px;
   }
@@ -186,7 +200,8 @@
     justify-content: center;
     width: 44px;
     height: 44px;
-    border: 1px solid var(--hairline);
+    border: 0;
+    border-radius: 7px;
     background: transparent;
     color: var(--fg);
     cursor: pointer;
@@ -241,15 +256,34 @@
     align-items: center;
   }
 }
+/* The "Create account" label needs more width than the 320px layout had. */
+@media (max-width: 360px) {
+  .shell {
+    width: calc(100% - 20px);
+    gap: 0 8px;
+  }
+  .navActions {
+    gap: 6px;
+  }
+  .primary {
+    padding-inline: 8px;
+  }
+  .themeButton,
+  .menuToggle {
+    width: 40px;
+  }
+}
 
-.header a {
-  text-decoration: none;
-}
-.header {
-  line-height: 1.65;
-}
-.header *,
-.header *::before,
-.header *::after {
-  box-sizing: border-box;
+.themeButton > button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  background: none;
+  border: 0;
+  border-radius: 7px;
+  padding: 0;
+  color: inherit;
+  cursor: pointer;
 }

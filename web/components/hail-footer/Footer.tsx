@@ -23,24 +23,35 @@ export function Footer({
   themeControl,
   badges = [],
   homeHref = "/",
+  mascotSrc = "/assets/hail-messenger.svg",
 }: {
   groups: FooterGroup[];
   themeControl: ReactNode;
   badges?: FooterBadge[];
   homeHref?: string;
+  mascotSrc?: string;
 }) {
   return (
     <footer className="hail-footer" aria-label="Hail">
       <div className="hail-footer-inner">
         <div className="hail-footer-grid">
           <div className="hail-footer-brand">
+            {/* A native image keeps this shared footer usable across all site zones. */}
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              className="hail-footer-mascot"
+              src={mascotSrc}
+              width="64"
+              height="64"
+              alt=""
+              loading="lazy"
+            />
             <a className="hail-footer-mark" href={homeHref}>
               hail.so
             </a>
             <p>
-              Hail sends and receives email, SMS, and phone calls for AI agents
-              and backend applications. Use the open source version or the
-              managed service.
+              Give your assistant calls, texts, and email. Add email and SMS to
+              your app. One account, three ways to connect.
             </p>
             <div className="hail-footer-social">
               <a href="https://github.com/hail-hq/hail">GitHub ↗</a>

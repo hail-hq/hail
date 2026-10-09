@@ -1242,6 +1242,49 @@
 
 /* The shared footer theme control applies to the entire costs surface. */
 @media (prefers-color-scheme: dark) {
-  html:not([data-theme="light"]) { --color-ink:#eeeae2; --color-bg:#0a0a0a; --color-paper:#151515; --color-tape:#252525; --color-mute:#aaa69d; --color-dim:#aaa69d; --color-line:#383838; --color-accent:#4b82ff; }
+  html:not([data-theme="light"]) {
+    --color-ink: #eeeae2;
+    --color-bg: #0a0a0a;
+    --color-paper: #151515;
+    --color-tape: #252525;
+    --color-mute: #aaa69d;
+    --color-dim: #aaa69d;
+    --color-line: #383838;
+    --color-accent: #4b82ff;
+  }
 }
-html[data-theme="dark"] { --color-ink:#eeeae2; --color-bg:#0a0a0a; --color-paper:#151515; --color-tape:#252525; --color-mute:#aaa69d; --color-dim:#aaa69d; --color-line:#383838; --color-accent:#4b82ff; }
+html[data-theme="dark"] {
+  --color-ink: #eeeae2;
+  --color-bg: #0a0a0a;
+  --color-paper: #151515;
+  --color-tape: #252525;
+  --color-mute: #aaa69d;
+  --color-dim: #aaa69d;
+  --color-line: #383838;
+  --color-accent: #4b82ff;
+}
+
+/* Match the public website while keeping prices and code easy to scan. */
+body {
+  font-family: var(--font-grotesk), Arial, sans-serif;
+}
+:is(pre, code, kbd, samp) {
+  font-family: var(--font-mono), monospace;
+}
+.btn {
+  border-radius: 7px;
+  font-family: var(--font-grotesk), Arial, sans-serif;
+  text-transform: none;
+}
+.btn.btn-filled,
+.btn.btn-accent {
+  background: #1665ff;
+  border-color: #1665ff;
+  color: #fff;
+}
+.btn.btn-filled:hover,
+.btn.btn-accent:hover {
+  background: #124fcb;
+  border-color: #124fcb;
+  color: #fff;
+}
