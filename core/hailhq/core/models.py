@@ -1089,6 +1089,12 @@ class EmailDomain(Base):
             "AND local_prefix_org IS NULL)",
             name="email_domains_prefix_kind_consistency",
         ),
+        # Mirrors migration 0056: ``noreply+<org>@`` is Hail's own sender.
+        CheckConstraint(
+            "local_prefix_user IS NULL "
+            "OR local_prefix_user NOT IN ('noreply','forwarder')",
+            name="email_domains_user_prefix_not_reserved",
+        ),
         # An org can't register the same domain twice.  Custom domains are
         # globally unique (one org per domain) — see the partial index below.
         # hail_mail rows are org-scoped by this constraint only (their global
