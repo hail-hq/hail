@@ -27,7 +27,7 @@ from hashlib import sha256
 from uuid import UUID
 
 from hailhq.core.models import Email, EmailForwardTarget, OrganizationMember, User
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 __all__ = [
@@ -129,6 +129,17 @@ async def verified_member_emails(
     return {normalize_address(e) for e in rows}
 
 
+async def _lock_org(db: AsyncSession, organization_id: UUID) -> None:
+    """Serialize cap checks per org for the rest of this transaction.
+
+    The caps are count-then-insert; two saves racing through the count would
+    each pass and together exceed the cap. A transaction-scoped advisory
+    lock keyed on the org makes the second one wait for the first commit.
+    """
+    key = int.from_bytes(sha256(organization_id.bytes).digest()[:8], "big", signed=True)
+    await db.execute(text("SELECT pg_advisory_xact_lock(:key)"), {"key": key})
+
+
 async def _pending_count(db: AsyncSession, organization_id: UUID) -> int:
     stmt = (
         select(func.count())
@@ -218,6 +229,7 @@ async def sync_targets(
     if strangers:
         # Caps apply before any row is written so a rejected save leaves
         # the org exactly as it was.
+        await _lock_org(db, organization_id)
         if await _pending_count(db, organization_id) + len(strangers) > (
             MAX_PENDING_TARGETS
         ):
@@ -256,6 +268,7 @@ async def reissue_token(db: AsyncSession, target: EmailForwardTarget) -> str:
         elapsed = now - target.token_sent_at
         if elapsed < RESEND_COOLDOWN:
             raise ResendTooSoon(RESEND_COOLDOWN - elapsed)
+    await _lock_org(db, target.organization_id)
     await check_confirm_budget(db, target.organization_id, wanted=1)
     raw = _issue(target, now)
     await db.flush()
