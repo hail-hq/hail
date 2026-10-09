@@ -31,6 +31,7 @@ Exposes the following tools to the calling agent:
 * ``delete_agent`` — delete an agent (destructive; needs ``confirm_name``)
 * ``route_number`` — choose which agent answers a number
 * ``quote_numbers`` — compare live carrier offers for a new number
+* ``acquire_number`` — buy a quoted number (spends money; needs ``confirm_total_cents``)
 * ``list_numbers`` — page through the workspace's numbers
 * ``get_number`` — fetch one number
 * ``release_number`` — release a number (destructive; needs ``confirm_e164``)
@@ -561,6 +562,36 @@ async def quote_numbers(
         return {"error": _validation_error_message(exc)}
     except HailAPIError as exc:
         return _format_api_error(exc)
+
+
+async def acquire_number(
+    *,
+    client: HailClient,
+    quote_id: str,
+    country_code: str,
+    number_type: str,
+    confirm_total_cents: int,
+    provider: str = "auto",
+    idempotency_key: str | None = None,
+) -> dict[str, Any]:
+    if idempotency_key is None:
+        idempotency_key = str(uuid.uuid4())
+    try:
+        result = await client.acquire_number(
+            quote_id=quote_id,
+            country_code=country_code,
+            number_type=number_type,
+            provider=provider,
+            expected_total_cents=confirm_total_cents,
+            idempotency_key=idempotency_key,
+        )
+    except ValidationError as exc:
+        return {"error": _validation_error_message(exc)}
+    except HailAPIError as exc:
+        return _format_api_error(exc)
+    # Echo the key so the agent can retry this exact purchase safely.
+    result.setdefault("idempotency_key", idempotency_key)
+    return result
 
 
 async def list_numbers(
@@ -1709,6 +1740,56 @@ def register_tools(
             return _format_api_error(exc)
 
     @mcp_app.tool(
+        name="acquire_number",
+        title="Buy a phone number",
+        annotations=ToolAnnotations(
+            readOnlyHint=False,
+            destructiveHint=True,
+            idempotentHint=True,
+            openWorldHint=True,
+        ),
+    )
+    async def acquire_number_tool(
+        ctx: Context,
+        quote_id: str,
+        country_code: str,
+        number_type: str,
+        confirm_total_cents: int,
+        provider: str = "auto",
+        idempotency_key: str | None = None,
+    ) -> dict[str, Any]:
+        """Buys a real phone number. It charges the setup fee and the first
+        month now and renews monthly. Call quote_numbers first. Pass the
+        offer's quote_id, country_code, number_type, and confirm_total_cents =
+        monthly_cents + setup_cents from that offer. If the quote expired or
+        the price changed you get an error: quote again. Only buy when your
+        user asked for this number. After buying, call route_number to point
+        it at an agent.
+
+        ``provider`` is ``auto`` (the quoted carrier) or the quoted carrier's
+        name. ``idempotency_key`` is optional; to retry after a timeout, pass
+        the ``idempotency_key`` the first result returned, so the number is
+        bought once.
+
+        Returns the number (``id``, ``e164``, ``provisioning_state``, ...)
+        plus ``idempotency_key``, or ``{"error": "<message>"}``."""
+        try:
+            async with _client_for(ctx, mode=mode, singleton=singleton) as client:
+                return await acquire_number(
+                    client=client,
+                    quote_id=quote_id,
+                    country_code=country_code,
+                    number_type=number_type,
+                    confirm_total_cents=confirm_total_cents,
+                    provider=provider,
+                    idempotency_key=idempotency_key,
+                )
+        except RuntimeError as exc:
+            return {"error": str(exc)}
+        except HailAPIError as exc:
+            return _format_api_error(exc)
+
+    @mcp_app.tool(
         name="list_numbers",
         title="List numbers",
         annotations=ToolAnnotations(
@@ -2117,6 +2198,7 @@ def register_tools(
 
 
 __all__ = [
+    "acquire_number",
     "create_contact",
     "get_call",
     "get_email",

@@ -37,16 +37,19 @@ _READ_ONLY = {
 # Read-only tools that talk to outside systems.
 _READ_ONLY_OPEN_WORLD = {"quote_numbers"}
 
-# Destructive tools. acquire_number is NOT destructive but spends money; it
-# is added by the next task (not here), so these sets must allow it later.
-_DESTRUCTIVE = {"release_number", "delete_agent"}
+# Destructive tools. acquire_number spends money, so clients ask a human.
+_DESTRUCTIVE = {"release_number", "delete_agent", "acquire_number"}
 
 # Tools that reach people or carriers outside Hail.
-_OPEN_WORLD_WRITES = {"place_call", "send_sms", "send_email", "release_number"}
+_OPEN_WORLD_WRITES = {
+    "place_call",
+    "send_sms",
+    "send_email",
+    "release_number",
+    "acquire_number",
+}
 
-# 30 tools today. The acquire_number task makes it 31: bump this then.
-_EXPECTED_COUNT = 30
-_NOT_YET_PRESENT = {"acquire_number"}
+_EXPECTED_COUNT = 31
 
 
 @pytest.fixture()
@@ -93,8 +96,7 @@ async def test_read_only_tools_are_idempotent_not_destructive(tools_by_name) -> 
 
 async def test_destructive_set_is_exact(tools_by_name) -> None:
     got = {n for n, t in tools_by_name.items() if t.annotations.destructiveHint is True}
-    # acquire_number may join the set in the next task; absent for now.
-    assert got - _NOT_YET_PRESENT == _DESTRUCTIVE
+    assert got == _DESTRUCTIVE
     for name in _DESTRUCTIVE:
         assert tools_by_name[name].annotations.idempotentHint is True, name
         assert tools_by_name[name].annotations.readOnlyHint is False, name
@@ -106,4 +108,4 @@ async def test_open_world_writes(tools_by_name) -> None:
         for n, t in tools_by_name.items()
         if t.annotations.openWorldHint is True and t.annotations.readOnlyHint is False
     }
-    assert got - _NOT_YET_PRESENT == _OPEN_WORLD_WRITES
+    assert got == _OPEN_WORLD_WRITES

@@ -45,6 +45,7 @@ from hailhq.core.schemas import (
     EmailResponse,
     EmailStatsResponse,
     EventStreamResponse,
+    NumberAcquireRequest,
     NumberQuoteRequest,
     PhoneNumberListResponse,
     PhoneNumberResponse,
@@ -318,6 +319,22 @@ class HailClient:
         return NumberQuotesResponse.model_validate(_decode(resp)).model_dump(
             mode="json"
         )
+
+    async def acquire_number(
+        self, *, idempotency_key: str | None = None, **fields: Any
+    ) -> dict[str, Any]:
+        """POST /numbers — buy a quoted number.
+
+        Body validated by :class:`NumberAcquireRequest` before any HTTP.
+        Spends money: the API refuses it (409) when ``expected_total_cents``
+        differs from the quoted total.
+        """
+        body = NumberAcquireRequest.model_validate(fields).model_dump(
+            mode="json", exclude_none=True
+        )
+        headers = {"Idempotency-Key": idempotency_key or str(uuid.uuid4())}
+        resp = await self._client.post("/numbers", json=body, headers=headers)
+        return PhoneNumberResponse.model_validate(_decode(resp)).model_dump(mode="json")
 
     async def list_numbers(
         self, *, limit: int = 50, cursor: str | None = None

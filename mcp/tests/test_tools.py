@@ -1704,6 +1704,142 @@ async def test_quote_numbers_maps_api_errors(
     assert result == {"error": expected}
 
 
+# --------------------------------------------------------------------------- #
+# acquire_number
+# --------------------------------------------------------------------------- #
+
+_ACQUIRE_ARGS = {
+    "quote_id": "8b1f0c2e-0000-4000-8000-000000000001",
+    "country_code": "us",
+    "number_type": "local",
+    "confirm_total_cents": 165,
+}
+
+
+@respx.mock
+async def test_acquire_number_sends_expected_total_and_returns_number_and_key(
+    client: HailClient,
+) -> None:
+    captured: dict = {}
+
+    def _handler(request: httpx.Request) -> httpx.Response:
+        captured["body"] = json.loads(request.read())
+        captured["key"] = request.headers.get("idempotency-key")
+        return httpx.Response(201, json=_number_response())
+
+    respx.post(f"{_BASE_URL}/numbers").mock(side_effect=_handler)
+
+    result = await tools.acquire_number(client=client, **_ACQUIRE_ARGS)
+
+    assert captured["body"] == {
+        "quote_id": _ACQUIRE_ARGS["quote_id"],
+        "country_code": "US",
+        "number_type": "local",
+        "provider": "auto",
+        "expected_total_cents": 165,
+    }
+    assert _UUID_RE.match(captured["key"])
+    assert result["e164"] == "+14155550100"
+    assert result["idempotency_key"] == captured["key"]
+
+
+@respx.mock
+async def test_acquire_number_propagates_explicit_idempotency_key(
+    client: HailClient,
+) -> None:
+    captured: dict = {}
+
+    def _handler(request: httpx.Request) -> httpx.Response:
+        captured["key"] = request.headers.get("idempotency-key")
+        return httpx.Response(201, json=_number_response())
+
+    respx.post(f"{_BASE_URL}/numbers").mock(side_effect=_handler)
+
+    result = await tools.acquire_number(
+        client=client, idempotency_key="buy-once-1", **_ACQUIRE_ARGS
+    )
+
+    assert captured["key"] == "buy-once-1"
+    assert result["idempotency_key"] == "buy-once-1"
+
+
+_NO_FUNDS = (
+    "insufficient credits; setup and the first month cost $1.65; "
+    "top up at https://hail.so/console/billing"
+)
+_PRICE_DIFFERS = (
+    "price differs from your expected total: quoted $1.65 now "
+    "($1.15 monthly + $0.50 setup); call quote_numbers again"
+)
+
+
+@respx.mock
+@pytest.mark.parametrize(
+    ("status", "detail", "expected"),
+    [
+        (402, _NO_FUNDS, f"hail api error 402: {_NO_FUNDS}"),
+        (409, _PRICE_DIFFERS, _PRICE_DIFFERS),
+        (
+            409,
+            "Quote expired; refresh number offers",
+            "Quote expired; refresh number offers",
+        ),
+        (422, "Complete verification first", "Complete verification first"),
+    ],
+)
+async def test_acquire_number_maps_api_errors(
+    client: HailClient, status: int, detail: str, expected: str
+) -> None:
+    respx.post(f"{_BASE_URL}/numbers").mock(
+        return_value=httpx.Response(status, json={"detail": detail})
+    )
+    result = await tools.acquire_number(client=client, **_ACQUIRE_ARGS)
+    assert result == {"error": expected}
+
+
+@pytest.mark.parametrize(
+    "override",
+    [
+        {"confirm_total_cents": -1},
+        {"country_code": "USA"},
+        {"number_type": "satellite"},
+        {"quote_id": "not-a-uuid"},
+    ],
+)
+async def test_acquire_number_validation_errors_make_no_request(
+    client: HailClient, override: dict
+) -> None:
+    # No route mocked: a request escaping local validation would fail.
+    result = await tools.acquire_number(client=client, **{**_ACQUIRE_ARGS, **override})
+    assert set(result) == {"error"}
+    assert result["error"]
+
+
+async def test_acquire_number_requires_confirm_total_cents_in_the_tool_schema(
+    monkeypatch,
+) -> None:
+    import importlib
+
+    from mcp.server.fastmcp.exceptions import ToolError
+
+    monkeypatch.setattr("hailhq.core.config.settings.hail_auth_url", "")
+    monkeypatch.setattr("hailhq.core.config.settings.hail_api_key", "hl_live_test")
+    import hailhq.mcp.server as srv
+
+    srv = importlib.reload(srv)
+    tool = next(t for t in await srv.mcp_app.list_tools() if t.name == "acquire_number")
+    assert set(tool.inputSchema["required"]) == {
+        "quote_id",
+        "country_code",
+        "number_type",
+        "confirm_total_cents",
+    }
+    assert tool.inputSchema["properties"]["confirm_total_cents"]["type"] == "integer"
+    args = {k: v for k, v in _ACQUIRE_ARGS.items() if k != "confirm_total_cents"}
+    with pytest.raises(ToolError):
+        await srv.mcp_app.call_tool("acquire_number", args)
+
+
 @respx.mock
 async def test_list_numbers_sends_limit_and_cursor(client: HailClient) -> None:
     n = _number_response()
