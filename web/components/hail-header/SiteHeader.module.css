@@ -273,6 +273,11 @@
     width: 40px;
   }
 }
+@media (max-width: 600px) {
+  .primary::after {
+    margin-left: 8px;
+  }
+}
 
 .themeButton > button {
   display: flex;

@@ -374,3 +374,6 @@
 .hail-docs .prose h2::after {
   content: none;
 }
+.hail-docs .prose :is(h1, h2) a {
+  color: inherit;
+}

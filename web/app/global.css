@@ -1288,3 +1288,16 @@ body {
   border-color: #124fcb;
   color: #fff;
 }
+.costs-hero-actions a {
+  border-radius: 7px;
+  min-height: 44px;
+}
+.costs-hero-actions a:first-child {
+  background: #1665ff;
+  border-color: #1665ff;
+  color: #fff;
+}
+.costs-hero-actions a:first-child:hover {
+  background: #124fcb;
+  border-color: #124fcb;
+}
