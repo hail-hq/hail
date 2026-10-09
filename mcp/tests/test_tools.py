@@ -1827,8 +1827,8 @@ _NO_FUNDS = (
     "top up at https://hail.so/console/billing"
 )
 _PRICE_DIFFERS = (
-    "price differs from your expected total: quoted $1.65 now "
-    "($1.15 monthly + $0.50 setup); call quote_numbers again"
+    "price differs from your expected total: the quote is $1.65 "
+    "($1.15 monthly + $0.50 setup); request a new quote"
 )
 
 
