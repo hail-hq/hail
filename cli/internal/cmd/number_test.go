@@ -197,6 +197,37 @@ func TestNumberAcquire_QuoteIDSkipsTheQuoteRequest(t *testing.T) {
 	}
 }
 
+func TestNumberAcquire_ExpectedTotalCentsIsSentOnlyWhenSet(t *testing.T) {
+	bought := samplePhoneNumber("11111111-1111-1111-1111-111111111111", "+14155551234", []string{"voice", "sms"}, nil)
+	env := func(srv *acquireServer) map[string]string {
+		return map[string]string{"HAIL_API_KEY": "sk_test", "HAIL_API_URL": srv.URL}
+	}
+
+	with := newAcquireServer(t, nil, bought)
+	if _, _, err := runRoot(t, env(with),
+		"numbers", "acquire", "--country", "US", "--quote-id", quoteCheap, "--expected-total-cents", "150",
+	); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	var body client.NumberAcquireRequest
+	if err := json.Unmarshal(with.buyBody, &body); err != nil {
+		t.Fatalf("buy body: %v", err)
+	}
+	if body.ExpectedTotalCents == nil || *body.ExpectedTotalCents != 150 {
+		t.Fatalf("ExpectedTotalCents = %v, want 150", body.ExpectedTotalCents)
+	}
+
+	without := newAcquireServer(t, nil, bought)
+	if _, _, err := runRoot(t, env(without),
+		"numbers", "acquire", "--country", "US", "--quote-id", quoteCheap,
+	); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if strings.Contains(string(without.buyBody), "expected_total_cents") {
+		t.Fatalf("body sent expected_total_cents without the flag: %s", without.buyBody)
+	}
+}
+
 func TestNumberAcquire_NoReadyOfferDoesNotBuy(t *testing.T) {
 	bought := samplePhoneNumber("11111111-1111-1111-1111-111111111111", "+14155551234", []string{"voice"}, nil)
 	srv := newAcquireServer(t, []client.CarrierOffer{sampleOffer(quoteNotReady, 100, 0, "verification_required")}, bought)

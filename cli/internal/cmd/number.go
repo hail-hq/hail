@@ -51,6 +51,7 @@ type numberAcquireFlags struct {
 	sms        bool
 	voice      bool
 	idemKey    string
+	expected   int
 }
 
 func newNumberAcquireCmd(opts *Options) *cobra.Command {
@@ -86,6 +87,7 @@ Examples:
 	cmd.Flags().BoolVar(&f.voice, "voice-only", false, "Require voice only (default: voice and SMS)")
 	cmd.Flags().BoolVar(&f.sms, "sms-only", false, "Require SMS only (default: voice and SMS)")
 	cmd.Flags().StringVar(&f.idemKey, "idempotency-key", "", "Defaults to a fresh UUID")
+	cmd.Flags().IntVar(&f.expected, "expected-total-cents", 0, "Refuse the order (409) if the quoted monthly plus setup price differs from this many cents")
 	cmd.MarkFlagRequired("country")
 	return cmd
 }
@@ -128,6 +130,12 @@ func runNumberAcquire(ctx context.Context, cmd *cobra.Command, opts *Options, f 
 		CountryCode: f.country,
 		Provider:    &provider,
 		QuoteId:     quoteID,
+	}
+	if cmd.Flags().Changed("expected-total-cents") {
+		if f.expected < 0 {
+			return helpAndFail(cmd, "--expected-total-cents must be 0 or more")
+		}
+		body.ExpectedTotalCents = &f.expected
 	}
 	// An explicit --type is checked against the quote; without --quote-id the
 	// quote was already requested for this type.
