@@ -1,6 +1,6 @@
 """Unit tests for the MCP tool wrappers.
 
-Tests target the nine tool callables in :mod:`hailhq.mcp.tools`,
+Tests target the tool callables in :mod:`hailhq.mcp.tools`,
 exercising local validation, HTTP request shape, and error mapping.
 The MCP/FastMCP transport layer is not covered here — that's framework
 territory; we trust the registered tools dispatch to the same callables
@@ -10,6 +10,7 @@ we test directly.
 from __future__ import annotations
 
 import base64
+import json
 import re
 from uuid import uuid4
 
@@ -1574,3 +1575,474 @@ async def test_whoami_maps_api_errors(client: HailClient) -> None:
 
     result = await tools.whoami(client=client)
     assert "auth failed" in result["error"]
+
+
+# --------------------------------------------------------------------------- #
+# quote_numbers / list_numbers / get_number / release_number
+# --------------------------------------------------------------------------- #
+
+
+def _number_response(number_id: str | None = None, e164: str = "+14155550100") -> dict:
+    return {
+        "id": number_id or str(uuid4()),
+        "provider": "twilio",
+        "e164": e164,
+        "country_code": "US",
+        "number_type": "local",
+        "capabilities": ["voice", "sms"],
+        "provisioning_state": "active",
+        "is_dedicated": True,
+        "messaging_service_sid": None,
+        "voice_agent_id": None,
+        "sms_agent_id": None,
+        "inbound_registered": False,
+    }
+
+
+def _offer(readiness: str = "ready") -> dict:
+    return {
+        "provider": "twilio",
+        "e164": "+14155550100",
+        "country_code": "US",
+        "number_type": "local",
+        "capabilities": ["voice", "sms"],
+        "monthly_cents": 115,
+        "setup_cents": 0,
+        "currency": "USD",
+        "readiness": readiness,
+        "regulatory_friction": "none",
+        "requirements": [],
+        "verification_id": None,
+        "address_id": None,
+        "quote_id": str(uuid4()),
+    }
+
+
+def _quotes_response() -> dict:
+    offer = _offer()
+    return {
+        "offers": [offer],
+        "recommended_quote_id": offer["quote_id"],
+        "unavailable_providers": [],
+        "expires_at": "2026-10-09T12:10:00+00:00",
+    }
+
+
+@respx.mock
+async def test_quote_numbers_posts_body_and_returns_offers(client: HailClient) -> None:
+    captured: dict = {}
+
+    def _handler(request: httpx.Request) -> httpx.Response:
+        captured["body"] = json.loads(request.read())
+        return httpx.Response(200, json=_quotes_response())
+
+    respx.post(f"{_BASE_URL}/numbers/quotes").mock(side_effect=_handler)
+
+    result = await tools.quote_numbers(
+        client=client, country_code="us", capabilities=["voice"], number_type="local"
+    )
+
+    assert captured["body"] == {
+        "country_code": "US",
+        "number_type": "local",
+        "capabilities": ["voice"],
+        "provider": "auto",
+    }
+    assert result["offers"][0]["monthly_cents"] == 115
+    assert result["offers"][0]["readiness"] == "ready"
+    assert result["recommended_quote_id"] == result["offers"][0]["quote_id"]
+
+
+@respx.mock
+async def test_quote_numbers_omits_number_type_when_none(client: HailClient) -> None:
+    route = respx.post(f"{_BASE_URL}/numbers/quotes").mock(
+        return_value=httpx.Response(200, json=_quotes_response())
+    )
+    await tools.quote_numbers(client=client, country_code="US")
+    body = json.loads(route.calls[0].request.read())
+    assert body == {
+        "country_code": "US",
+        "capabilities": ["voice", "sms"],
+        "provider": "auto",
+    }
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"country_code": "USA"},
+        {"country_code": "US", "capabilities": []},
+        {"country_code": "US", "capabilities": ["fax"]},
+        {"country_code": "US", "provider": "acme"},
+    ],
+)
+async def test_quote_numbers_validation_errors_surface(
+    client: HailClient, kwargs: dict
+) -> None:
+    # No route mocked: a request escaping local validation would fail.
+    result = await tools.quote_numbers(client=client, **kwargs)
+    assert set(result) == {"error"}
+    assert result["error"]
+
+
+@respx.mock
+@pytest.mark.parametrize(
+    ("status", "expected"),
+    [
+        (404, "resource not found"),
+        (409, "conflict detail"),
+        (422, "conflict detail"),
+    ],
+)
+async def test_quote_numbers_maps_api_errors(
+    client: HailClient, status: int, expected: str
+) -> None:
+    respx.post(f"{_BASE_URL}/numbers/quotes").mock(
+        return_value=httpx.Response(status, json={"detail": "conflict detail"})
+    )
+    result = await tools.quote_numbers(client=client, country_code="US")
+    assert result == {"error": expected}
+
+
+@respx.mock
+async def test_list_numbers_sends_limit_and_cursor(client: HailClient) -> None:
+    n = _number_response()
+    route = respx.get(f"{_BASE_URL}/numbers").mock(
+        return_value=httpx.Response(200, json={"items": [n], "next_cursor": "abc"})
+    )
+    result = await tools.list_numbers(client=client, limit=5, cursor="zzz")
+    params = dict(route.calls[0].request.url.params)
+    assert params == {"limit": "5", "cursor": "zzz"}
+    assert result["next_cursor"] == "abc"
+    assert result["items"][0]["e164"] == "+14155550100"
+
+
+@respx.mock
+async def test_list_numbers_omits_cursor_by_default(client: HailClient) -> None:
+    route = respx.get(f"{_BASE_URL}/numbers").mock(
+        return_value=httpx.Response(200, json={"items": [], "next_cursor": None})
+    )
+    result = await tools.list_numbers(client=client)
+    assert dict(route.calls[0].request.url.params) == {"limit": "50"}
+    assert result == {"items": [], "next_cursor": None}
+
+
+@respx.mock
+async def test_list_numbers_maps_422(client: HailClient) -> None:
+    respx.get(f"{_BASE_URL}/numbers").mock(
+        return_value=httpx.Response(422, json={"detail": "bad cursor"})
+    )
+    assert await tools.list_numbers(client=client, cursor="x") == {
+        "error": "bad cursor"
+    }
+
+
+@respx.mock
+async def test_get_number_returns_row(client: HailClient) -> None:
+    nid = str(uuid4())
+    respx.get(f"{_BASE_URL}/numbers/{nid}").mock(
+        return_value=httpx.Response(200, json=_number_response(nid))
+    )
+    result = await tools.get_number(client=client, number_id=nid)
+    assert result["id"] == nid
+    assert result["provisioning_state"] == "active"
+
+
+@respx.mock
+async def test_get_number_maps_404(client: HailClient) -> None:
+    nid = str(uuid4())
+    respx.get(f"{_BASE_URL}/numbers/{nid}").mock(
+        return_value=httpx.Response(404, json={"detail": "no"})
+    )
+    assert await tools.get_number(client=client, number_id=nid) == {
+        "error": "resource not found"
+    }
+
+
+@respx.mock
+async def test_release_number_mismatch_makes_no_delete(client: HailClient) -> None:
+    nid = str(uuid4())
+    respx.get(f"{_BASE_URL}/numbers/{nid}").mock(
+        return_value=httpx.Response(200, json=_number_response(nid, "+14155550100"))
+    )
+    delete = respx.delete(f"{_BASE_URL}/numbers/{nid}").mock(
+        return_value=httpx.Response(204)
+    )
+    result = await tools.release_number(
+        client=client, number_id=nid, confirm_e164="+14155550199"
+    )
+    assert "error" in result
+    assert "+14155550100" in result["error"]
+    assert delete.call_count == 0
+
+
+@respx.mock
+async def test_release_number_match_deletes(client: HailClient) -> None:
+    nid = str(uuid4())
+    respx.get(f"{_BASE_URL}/numbers/{nid}").mock(
+        return_value=httpx.Response(200, json=_number_response(nid, "+14155550100"))
+    )
+    delete = respx.delete(f"{_BASE_URL}/numbers/{nid}").mock(
+        return_value=httpx.Response(204)
+    )
+    result = await tools.release_number(
+        client=client, number_id=nid, confirm_e164=" +1 415 555 0100 "
+    )
+    assert result == {"released": True, "number_id": nid, "e164": "+14155550100"}
+    assert delete.call_count == 1
+
+
+@respx.mock
+async def test_release_number_get_404_makes_no_delete(client: HailClient) -> None:
+    nid = str(uuid4())
+    respx.get(f"{_BASE_URL}/numbers/{nid}").mock(
+        return_value=httpx.Response(404, json={"detail": "no"})
+    )
+    delete = respx.delete(f"{_BASE_URL}/numbers/{nid}").mock(
+        return_value=httpx.Response(204)
+    )
+    result = await tools.release_number(
+        client=client, number_id=nid, confirm_e164="+14155550100"
+    )
+    assert result == {"error": "resource not found"}
+    assert delete.call_count == 0
+
+
+@respx.mock
+async def test_release_number_maps_delete_409(client: HailClient) -> None:
+    nid = str(uuid4())
+    respx.get(f"{_BASE_URL}/numbers/{nid}").mock(
+        return_value=httpx.Response(200, json=_number_response(nid))
+    )
+    respx.delete(f"{_BASE_URL}/numbers/{nid}").mock(
+        return_value=httpx.Response(409, json={"detail": "order is pending"})
+    )
+    result = await tools.release_number(
+        client=client, number_id=nid, confirm_e164="+14155550100"
+    )
+    assert result == {"error": "order is pending"}
+
+
+# --------------------------------------------------------------------------- #
+# get_agent / update_agent / delete_agent
+# --------------------------------------------------------------------------- #
+
+
+def _agent_response(agent_id: str | None = None, name: str = "Front desk") -> dict:
+    return {
+        "id": agent_id or str(uuid4()),
+        "organization_id": str(uuid4()),
+        "name": name,
+        "system_prompt": "Answer politely.",
+        "first_message": "Hello",
+        "ai_disclosure": True,
+        "ai_disclosure_line": None,
+        "voice_config": {},
+        "tools": None,
+        "max_duration_seconds": None,
+        "handover_max_duration_seconds": None,
+        "voice_enabled": True,
+        "sms_enabled": True,
+        "status": "live",
+        "handover_contacts": [],
+        "created_at": "2026-10-09T00:00:00+00:00",
+        "updated_at": "2026-10-09T00:00:00+00:00",
+    }
+
+
+@respx.mock
+async def test_get_agent_returns_row(client: HailClient) -> None:
+    aid = str(uuid4())
+    respx.get(f"{_BASE_URL}/agents/{aid}").mock(
+        return_value=httpx.Response(200, json=_agent_response(aid))
+    )
+    result = await tools.get_agent(client=client, agent_id=aid)
+    assert result["id"] == aid
+    assert result["name"] == "Front desk"
+
+
+@respx.mock
+async def test_get_agent_maps_404(client: HailClient) -> None:
+    aid = str(uuid4())
+    respx.get(f"{_BASE_URL}/agents/{aid}").mock(
+        return_value=httpx.Response(404, json={"detail": "no"})
+    )
+    assert await tools.get_agent(client=client, agent_id=aid) == {
+        "error": "resource not found"
+    }
+
+
+@respx.mock
+async def test_update_agent_sends_only_given_fields(client: HailClient) -> None:
+    aid = str(uuid4())
+    route = respx.patch(f"{_BASE_URL}/agents/{aid}").mock(
+        return_value=httpx.Response(200, json=_agent_response(aid, "New"))
+    )
+    result = await tools.update_agent(
+        client=client, agent_id=aid, name="New", status="paused"
+    )
+    assert json.loads(route.calls[0].request.read()) == {
+        "name": "New",
+        "status": "paused",
+    }
+    assert result["name"] == "New"
+
+
+@respx.mock
+async def test_update_agent_folds_language_and_voice_into_voice_config(
+    client: HailClient,
+) -> None:
+    aid = str(uuid4())
+    route = respx.patch(f"{_BASE_URL}/agents/{aid}").mock(
+        return_value=httpx.Response(200, json=_agent_response(aid))
+    )
+    await tools.update_agent(client=client, agent_id=aid, language="da", voice_id="v1")
+    body = json.loads(route.calls[0].request.read())
+    assert set(body) == {"voice_config"}
+    assert body["voice_config"]["language"] == "da"
+    assert body["voice_config"]["voice_id"] == "v1"
+
+
+@respx.mock
+async def test_update_agent_clear_fields_send_explicit_null(
+    client: HailClient,
+) -> None:
+    aid = str(uuid4())
+    route = respx.patch(f"{_BASE_URL}/agents/{aid}").mock(
+        return_value=httpx.Response(200, json=_agent_response(aid))
+    )
+    await tools.update_agent(
+        client=client,
+        agent_id=aid,
+        clear_fields=["first_message", "tools", "max_duration_seconds"],
+        voice_enabled=False,
+    )
+    assert json.loads(route.calls[0].request.read()) == {
+        "first_message": None,
+        "tools": None,
+        "max_duration_seconds": None,
+        "voice_enabled": False,
+    }
+
+
+@respx.mock
+async def test_update_agent_rejects_unknown_clear_field(client: HailClient) -> None:
+    aid = str(uuid4())
+    route = respx.patch(f"{_BASE_URL}/agents/{aid}").mock(
+        return_value=httpx.Response(200, json=_agent_response(aid))
+    )
+    result = await tools.update_agent(
+        client=client, agent_id=aid, clear_fields=["name"]
+    )
+    assert "error" in result
+    assert "first_message" in result["error"]
+    assert route.call_count == 0
+
+
+@respx.mock
+async def test_update_agent_rejects_set_and_clear_of_same_field(
+    client: HailClient,
+) -> None:
+    aid = str(uuid4())
+    route = respx.patch(f"{_BASE_URL}/agents/{aid}").mock(
+        return_value=httpx.Response(200, json=_agent_response(aid))
+    )
+    result = await tools.update_agent(
+        client=client,
+        agent_id=aid,
+        first_message="Hi",
+        clear_fields=["first_message"],
+    )
+    assert "error" in result
+    assert route.call_count == 0
+
+
+@respx.mock
+async def test_update_agent_validation_error_surfaces(client: HailClient) -> None:
+    aid = str(uuid4())
+    route = respx.patch(f"{_BASE_URL}/agents/{aid}").mock(
+        return_value=httpx.Response(200, json=_agent_response(aid))
+    )
+    result = await tools.update_agent(client=client, agent_id=aid, status="sleeping")
+    assert "error" in result
+    assert route.call_count == 0
+
+
+@respx.mock
+@pytest.mark.parametrize(
+    ("status", "expected"),
+    [(404, "resource not found"), (409, "name taken"), (422, "name taken")],
+)
+async def test_update_agent_maps_api_errors(
+    client: HailClient, status: int, expected: str
+) -> None:
+    aid = str(uuid4())
+    respx.patch(f"{_BASE_URL}/agents/{aid}").mock(
+        return_value=httpx.Response(status, json={"detail": "name taken"})
+    )
+    result = await tools.update_agent(client=client, agent_id=aid, name="X")
+    assert result == {"error": expected}
+
+
+@respx.mock
+async def test_delete_agent_mismatch_makes_no_delete(client: HailClient) -> None:
+    aid = str(uuid4())
+    respx.get(f"{_BASE_URL}/agents/{aid}").mock(
+        return_value=httpx.Response(200, json=_agent_response(aid, "Front desk"))
+    )
+    delete = respx.delete(f"{_BASE_URL}/agents/{aid}").mock(
+        return_value=httpx.Response(204)
+    )
+    result = await tools.delete_agent(
+        client=client, agent_id=aid, confirm_name="Back desk"
+    )
+    assert "error" in result
+    assert "Front desk" in result["error"]
+    assert delete.call_count == 0
+
+
+@respx.mock
+async def test_delete_agent_match_deletes(client: HailClient) -> None:
+    aid = str(uuid4())
+    respx.get(f"{_BASE_URL}/agents/{aid}").mock(
+        return_value=httpx.Response(200, json=_agent_response(aid, "Front desk"))
+    )
+    delete = respx.delete(f"{_BASE_URL}/agents/{aid}").mock(
+        return_value=httpx.Response(204)
+    )
+    result = await tools.delete_agent(
+        client=client, agent_id=aid, confirm_name="Front desk"
+    )
+    assert result == {"deleted": True, "agent_id": aid, "name": "Front desk"}
+    assert delete.call_count == 1
+
+
+@respx.mock
+async def test_delete_agent_get_404_makes_no_delete(client: HailClient) -> None:
+    aid = str(uuid4())
+    respx.get(f"{_BASE_URL}/agents/{aid}").mock(
+        return_value=httpx.Response(404, json={"detail": "no"})
+    )
+    delete = respx.delete(f"{_BASE_URL}/agents/{aid}").mock(
+        return_value=httpx.Response(204)
+    )
+    result = await tools.delete_agent(
+        client=client, agent_id=aid, confirm_name="Front desk"
+    )
+    assert result == {"error": "resource not found"}
+    assert delete.call_count == 0
+
+
+@respx.mock
+async def test_delete_agent_maps_delete_409(client: HailClient) -> None:
+    aid = str(uuid4())
+    respx.get(f"{_BASE_URL}/agents/{aid}").mock(
+        return_value=httpx.Response(200, json=_agent_response(aid, "Front desk"))
+    )
+    respx.delete(f"{_BASE_URL}/agents/{aid}").mock(
+        return_value=httpx.Response(409, json={"detail": "agent in use"})
+    )
+    result = await tools.delete_agent(
+        client=client, agent_id=aid, confirm_name="Front desk"
+    )
+    assert result == {"error": "agent in use"}

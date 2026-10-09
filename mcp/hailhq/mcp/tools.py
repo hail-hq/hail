@@ -1,4 +1,4 @@
-"""MCP tool surface for Hail's outbound-call API.
+"""MCP tool surface for the Hail API.
 
 Exposes the following tools to the calling agent:
 
@@ -24,6 +24,20 @@ Exposes the following tools to the calling agent:
 * ``list_contacts`` — page through the workspace's contacts (members + manual)
 * ``lookup_contact`` — find a contact by name/email/phone fragment
 * ``create_contact`` — save a manual contact (phone and/or email)
+* ``list_agents`` — the workspace's saved agents
+* ``get_agent`` — fetch one saved agent
+* ``create_agent`` — save an agent (the brain behind calls and texts)
+* ``update_agent`` — change an agent; ``clear_fields`` sends explicit nulls
+* ``delete_agent`` — delete an agent (destructive; needs ``confirm_name``)
+* ``route_number`` — choose which agent answers a number
+* ``quote_numbers`` — compare live carrier offers for a new number
+* ``list_numbers`` — page through the workspace's numbers
+* ``get_number`` — fetch one number
+* ``release_number`` — release a number (destructive; needs ``confirm_e164``)
+
+Every tool sets explicit ``ToolAnnotations`` hints (read-only, destructive,
+idempotent, open-world) and a human title; ``tests/test_tool_annotations.py``
+fails when a new tool is left unclassified.
 
 The tool docstrings are the agent's only documentation, so each one
 spells out the contract (required vs optional fields, how modes combine,
@@ -66,6 +80,7 @@ from hailhq.mcp.hail_client import HailAPIError, HailClient
 from pydantic import ValidationError
 
 from mcp.server.fastmcp import Context, FastMCP
+from mcp.types import ToolAnnotations
 
 # --------------------------------------------------------------------------- #
 # Error mapping — turns HailAPIError into a stable agent-facing message.
@@ -525,6 +540,140 @@ async def route_number(
         return _format_api_error(exc)
 
 
+async def quote_numbers(
+    *,
+    client: HailClient,
+    country_code: str,
+    capabilities: list[str] | None = None,
+    number_type: str | None = None,
+    provider: str = "auto",
+) -> dict[str, Any]:
+    fields: dict[str, Any] = {
+        "country_code": country_code,
+        "capabilities": ["voice", "sms"] if capabilities is None else capabilities,
+        "provider": provider,
+    }
+    if number_type is not None:
+        fields["number_type"] = number_type
+    try:
+        return await client.quote_numbers(**fields)
+    except ValidationError as exc:
+        return {"error": _validation_error_message(exc)}
+    except HailAPIError as exc:
+        return _format_api_error(exc)
+
+
+async def list_numbers(
+    *, client: HailClient, limit: int = 50, cursor: str | None = None
+) -> dict[str, Any]:
+    try:
+        return await client.list_numbers(limit=limit, cursor=cursor)
+    except HailAPIError as exc:
+        return _format_api_error(exc)
+
+
+async def get_number(*, client: HailClient, number_id: str) -> dict[str, Any]:
+    try:
+        return await client.get_number(number_id)
+    except HailAPIError as exc:
+        return _format_api_error(exc)
+
+
+def _squash_whitespace(value: str) -> str:
+    return "".join(value.split())
+
+
+async def release_number(
+    *, client: HailClient, number_id: str, confirm_e164: str
+) -> dict[str, Any]:
+    # Destructive: read the number first and release only when the caller
+    # typed back its exact E.164. A mismatch makes no DELETE call.
+    try:
+        number = await client.get_number(number_id)
+        e164 = str(number["e164"])
+        if _squash_whitespace(confirm_e164) != _squash_whitespace(e164):
+            return {
+                "error": "confirm_e164 does not match this number. "
+                f"Pass {e164} to release it. Nothing was released."
+            }
+        await client.delete_number(number_id)
+    except HailAPIError as exc:
+        return _format_api_error(exc)
+    return {"released": True, "number_id": number_id, "e164": e164}
+
+
+async def get_agent(*, client: HailClient, agent_id: str) -> dict[str, Any]:
+    try:
+        return await client.get_agent(agent_id)
+    except HailAPIError as exc:
+        return _format_api_error(exc)
+
+
+# Fields an explicit JSON null clears. Null on any other AgentUpdate field is
+# ignored by the API, so ``update_agent`` refuses them instead of lying.
+_CLEARABLE_AGENT_FIELDS = (
+    "first_message",
+    "ai_disclosure_line",
+    "tools",
+    "max_duration_seconds",
+)
+
+
+async def update_agent(
+    *,
+    client: HailClient,
+    agent_id: str,
+    language: str | None = None,
+    voice_id: str | None = None,
+    clear_fields: list[str] | None = None,
+    **fields: Any,
+) -> dict[str, Any]:
+    """``fields`` holds only the values to set; ``clear_fields`` the nulls."""
+    if language is not None or voice_id is not None:
+        fields["voice_config"] = {
+            k: v
+            for k, v in (("language", language), ("voice_id", voice_id))
+            if v is not None
+        }
+    clear = list(clear_fields or [])
+    bad = [f for f in clear if f not in _CLEARABLE_AGENT_FIELDS]
+    if bad:
+        return {
+            "error": f"cannot clear {', '.join(bad)}. "
+            f"clear_fields accepts only: {', '.join(_CLEARABLE_AGENT_FIELDS)}"
+        }
+    both = [f for f in clear if f in fields]
+    if both:
+        return {"error": f"cannot both set and clear: {', '.join(both)}"}
+    body = dict(fields)
+    for name in clear:
+        body[name] = None
+    try:
+        return await client.update_agent(agent_id, **body)
+    except ValidationError as exc:
+        return {"error": _validation_error_message(exc)}
+    except HailAPIError as exc:
+        return _format_api_error(exc)
+
+
+async def delete_agent(
+    *, client: HailClient, agent_id: str, confirm_name: str
+) -> dict[str, Any]:
+    # Destructive: delete only when the caller typed back the agent's name.
+    try:
+        agent = await client.get_agent(agent_id)
+        name = str(agent["name"])
+        if confirm_name.strip() != name:
+            return {
+                "error": "confirm_name does not match this agent. "
+                f'Pass "{name}" to delete it. Nothing was deleted.'
+            }
+        await client.delete_agent(agent_id)
+    except HailAPIError as exc:
+        return _format_api_error(exc)
+    return {"deleted": True, "agent_id": agent_id, "name": name}
+
+
 # --------------------------------------------------------------------------- #
 # Per-tool-call client helper.
 #
@@ -657,7 +806,16 @@ def register_tools(
     — per-tool-call in oauth-rs, shared singleton in static-key.
     """
 
-    @mcp_app.tool(name="place_call")
+    @mcp_app.tool(
+        name="place_call",
+        title="Place a phone call",
+        annotations=ToolAnnotations(
+            readOnlyHint=False,
+            destructiveHint=False,
+            idempotentHint=False,
+            openWorldHint=True,
+        ),
+    )
     async def place_call_tool(
         ctx: Context,
         to: str,
@@ -757,7 +915,16 @@ def register_tools(
         except RuntimeError as exc:
             return {"error": str(exc)}
 
-    @mcp_app.tool(name="send_email")
+    @mcp_app.tool(
+        name="send_email",
+        title="Send an email",
+        annotations=ToolAnnotations(
+            readOnlyHint=False,
+            destructiveHint=False,
+            idempotentHint=False,
+            openWorldHint=True,
+        ),
+    )
     async def send_email_tool(
         ctx: Context,
         to: list[str],
@@ -860,7 +1027,16 @@ def register_tools(
         except RuntimeError as exc:
             return {"error": str(exc)}
 
-    @mcp_app.tool(name="upload_email_attachment")
+    @mcp_app.tool(
+        name="upload_email_attachment",
+        title="Upload an email attachment",
+        annotations=ToolAnnotations(
+            readOnlyHint=False,
+            destructiveHint=False,
+            idempotentHint=False,
+            openWorldHint=False,
+        ),
+    )
     async def upload_email_attachment_tool(
         ctx: Context,
         content_base64: str,
@@ -889,7 +1065,16 @@ def register_tools(
         except RuntimeError as exc:
             return {"error": str(exc)}
 
-    @mcp_app.tool(name="get_call")
+    @mcp_app.tool(
+        name="get_call",
+        title="Get a call",
+        annotations=ToolAnnotations(
+            readOnlyHint=True,
+            destructiveHint=False,
+            idempotentHint=True,
+            openWorldHint=False,
+        ),
+    )
     async def get_call_tool(ctx: Context, call_id: str) -> dict[str, Any]:
         """Fetch the current state of one call by id.
 
@@ -905,7 +1090,16 @@ def register_tools(
         except RuntimeError as exc:
             return {"error": str(exc)}
 
-    @mcp_app.tool(name="list_calls")
+    @mcp_app.tool(
+        name="list_calls",
+        title="List calls",
+        annotations=ToolAnnotations(
+            readOnlyHint=True,
+            destructiveHint=False,
+            idempotentHint=True,
+            openWorldHint=False,
+        ),
+    )
     async def list_calls_tool(
         ctx: Context,
         cursor: str | None = None,
@@ -930,7 +1124,16 @@ def register_tools(
         except RuntimeError as exc:
             return {"error": str(exc)}
 
-    @mcp_app.tool(name="send_sms")
+    @mcp_app.tool(
+        name="send_sms",
+        title="Send a text message",
+        annotations=ToolAnnotations(
+            readOnlyHint=False,
+            destructiveHint=False,
+            idempotentHint=False,
+            openWorldHint=True,
+        ),
+    )
     async def send_sms_tool(
         ctx: Context,
         to: str,
@@ -990,7 +1193,16 @@ def register_tools(
         except RuntimeError as exc:
             return {"error": str(exc)}
 
-    @mcp_app.tool(name="get_sms")
+    @mcp_app.tool(
+        name="get_sms",
+        title="Get a text message",
+        annotations=ToolAnnotations(
+            readOnlyHint=True,
+            destructiveHint=False,
+            idempotentHint=True,
+            openWorldHint=False,
+        ),
+    )
     async def get_sms_tool(ctx: Context, sms_id: str) -> dict[str, Any]:
         """Fetch the current state of one SMS by id.
 
@@ -1005,7 +1217,16 @@ def register_tools(
         except RuntimeError as exc:
             return {"error": str(exc)}
 
-    @mcp_app.tool(name="list_sms")
+    @mcp_app.tool(
+        name="list_sms",
+        title="List text messages",
+        annotations=ToolAnnotations(
+            readOnlyHint=True,
+            destructiveHint=False,
+            idempotentHint=True,
+            openWorldHint=False,
+        ),
+    )
     async def list_sms_tool(
         ctx: Context,
         cursor: str | None = None,
@@ -1028,7 +1249,16 @@ def register_tools(
         except RuntimeError as exc:
             return {"error": str(exc)}
 
-    @mcp_app.tool(name="get_email")
+    @mcp_app.tool(
+        name="get_email",
+        title="Get an email",
+        annotations=ToolAnnotations(
+            readOnlyHint=True,
+            destructiveHint=False,
+            idempotentHint=True,
+            openWorldHint=False,
+        ),
+    )
     async def get_email_tool(ctx: Context, email_id: str) -> dict[str, Any]:
         """Fetch the full record of one email by id.
 
@@ -1046,7 +1276,16 @@ def register_tools(
         except RuntimeError as exc:
             return {"error": str(exc)}
 
-    @mcp_app.tool(name="list_emails")
+    @mcp_app.tool(
+        name="list_emails",
+        title="List emails",
+        annotations=ToolAnnotations(
+            readOnlyHint=True,
+            destructiveHint=False,
+            idempotentHint=True,
+            openWorldHint=False,
+        ),
+    )
     async def list_emails_tool(
         ctx: Context,
         cursor: str | None = None,
@@ -1085,7 +1324,16 @@ def register_tools(
         except RuntimeError as exc:
             return {"error": str(exc)}
 
-    @mcp_app.tool(name="get_email_raw")
+    @mcp_app.tool(
+        name="get_email_raw",
+        title="Get raw email",
+        annotations=ToolAnnotations(
+            readOnlyHint=True,
+            destructiveHint=False,
+            idempotentHint=True,
+            openWorldHint=False,
+        ),
+    )
     async def get_email_raw_tool(ctx: Context, email_id: str) -> dict[str, Any]:
         """Get a fetchable URL for an email's original MIME source.
 
@@ -1101,7 +1349,16 @@ def register_tools(
         except RuntimeError as exc:
             return {"error": str(exc)}
 
-    @mcp_app.tool(name="get_email_attachment")
+    @mcp_app.tool(
+        name="get_email_attachment",
+        title="Get an email attachment",
+        annotations=ToolAnnotations(
+            readOnlyHint=True,
+            destructiveHint=False,
+            idempotentHint=True,
+            openWorldHint=False,
+        ),
+    )
     async def get_email_attachment_tool(
         ctx: Context, email_id: str, attachment_id: str
     ) -> dict[str, Any]:
@@ -1121,7 +1378,16 @@ def register_tools(
         except RuntimeError as exc:
             return {"error": str(exc)}
 
-    @mcp_app.tool(name="get_email_events")
+    @mcp_app.tool(
+        name="get_email_events",
+        title="Get email events",
+        annotations=ToolAnnotations(
+            readOnlyHint=True,
+            destructiveHint=False,
+            idempotentHint=True,
+            openWorldHint=False,
+        ),
+    )
     async def get_email_events_tool(
         ctx: Context,
         email_id: str,
@@ -1152,7 +1418,16 @@ def register_tools(
         except RuntimeError as exc:
             return {"error": str(exc)}
 
-    @mcp_app.tool(name="get_email_stats")
+    @mcp_app.tool(
+        name="get_email_stats",
+        title="Get email stats",
+        annotations=ToolAnnotations(
+            readOnlyHint=True,
+            destructiveHint=False,
+            idempotentHint=True,
+            openWorldHint=False,
+        ),
+    )
     async def get_email_stats_tool(
         ctx: Context,
         from_: str | None = None,
@@ -1187,7 +1462,16 @@ def register_tools(
         except RuntimeError as exc:
             return {"error": str(exc)}
 
-    @mcp_app.tool(name="get_events")
+    @mcp_app.tool(
+        name="get_events",
+        title="Get events",
+        annotations=ToolAnnotations(
+            readOnlyHint=True,
+            destructiveHint=False,
+            idempotentHint=True,
+            openWorldHint=False,
+        ),
+    )
     async def get_events_tool(
         ctx: Context,
         id: str | None = None,
@@ -1229,7 +1513,16 @@ def register_tools(
         except RuntimeError as exc:
             return {"error": str(exc)}
 
-    @mcp_app.tool(name="list_agents")
+    @mcp_app.tool(
+        name="list_agents",
+        title="List agents",
+        annotations=ToolAnnotations(
+            readOnlyHint=True,
+            destructiveHint=False,
+            idempotentHint=True,
+            openWorldHint=False,
+        ),
+    )
     async def list_agents_tool(ctx: Context) -> dict[str, Any]:
         """List the workspace's saved agents: the brains that answer calls
         and texts on its numbers, and that ``place_call`` can use via
@@ -1246,7 +1539,16 @@ def register_tools(
         except HailAPIError as exc:
             return _format_api_error(exc)
 
-    @mcp_app.tool(name="create_agent")
+    @mcp_app.tool(
+        name="create_agent",
+        title="Create an agent",
+        annotations=ToolAnnotations(
+            readOnlyHint=False,
+            destructiveHint=False,
+            idempotentHint=False,
+            openWorldHint=False,
+        ),
+    )
     async def create_agent_tool(
         ctx: Context,
         name: str,
@@ -1311,7 +1613,16 @@ def register_tools(
         except HailAPIError as exc:
             return _format_api_error(exc)
 
-    @mcp_app.tool(name="route_number")
+    @mcp_app.tool(
+        name="route_number",
+        title="Route a number to an agent",
+        annotations=ToolAnnotations(
+            readOnlyHint=False,
+            destructiveHint=False,
+            idempotentHint=True,
+            openWorldHint=False,
+        ),
+    )
     async def route_number_tool(
         ctx: Context,
         number_id: str,
@@ -1344,7 +1655,310 @@ def register_tools(
         except HailAPIError as exc:
             return _format_api_error(exc)
 
-    @mcp_app.tool(name="list_contacts")
+    @mcp_app.tool(
+        name="quote_numbers",
+        title="Quote phone numbers",
+        annotations=ToolAnnotations(
+            readOnlyHint=True,
+            destructiveHint=False,
+            idempotentHint=True,
+            openWorldHint=True,
+        ),
+    )
+    async def quote_numbers_tool(
+        ctx: Context,
+        country_code: str,
+        capabilities: list[str] | None = None,
+        number_type: str | None = None,
+        provider: str = "auto",
+    ) -> dict[str, Any]:
+        """Compare live phone-number offers from the carriers. Read-only: it
+        buys nothing and charges nothing.
+
+        ``country_code`` is an ISO alpha-2 code such as ``"US"``.
+        ``capabilities`` is ``["voice"]``, ``["sms"]`` or both (default).
+        ``number_type`` is ``local``, ``mobile``, ``national`` or
+        ``toll_free``; omit it to compare all types. ``provider`` is
+        ``auto`` (compare all carriers), ``twilio``, ``telnyx`` or ``didww``.
+
+        Returns ``{"offers": [...], "recommended_quote_id", "unavailable_providers",
+        "expires_at"}``. Each offer has ``e164``, ``provider``, ``number_type``,
+        ``capabilities``, ``monthly_cents``, ``setup_cents``, ``readiness``,
+        ``requirements`` and ``quote_id``. Money fields are cents (USD).
+        Quotes expire in 10 minutes (``expires_at``); quote again after that.
+
+        An offer with ``readiness == "verification_required"`` cannot be
+        bought until the organization finishes verification in the console.
+        ``requirements`` lists what the carrier needs. Prefer an offer whose
+        ``readiness`` is ``"ready"``; ``recommended_quote_id`` points at the
+        best one, or is null if none is ready.
+
+        Errors come back as ``{"error": "<message>"}``."""
+        try:
+            async with _client_for(ctx, mode=mode, singleton=singleton) as client:
+                return await quote_numbers(
+                    client=client,
+                    country_code=country_code,
+                    capabilities=capabilities,
+                    number_type=number_type,
+                    provider=provider,
+                )
+        except RuntimeError as exc:
+            return {"error": str(exc)}
+        except HailAPIError as exc:
+            return _format_api_error(exc)
+
+    @mcp_app.tool(
+        name="list_numbers",
+        title="List numbers",
+        annotations=ToolAnnotations(
+            readOnlyHint=True,
+            destructiveHint=False,
+            idempotentHint=True,
+            openWorldHint=False,
+        ),
+    )
+    async def list_numbers_tool(
+        ctx: Context,
+        limit: int = 50,
+        cursor: str | None = None,
+    ) -> dict[str, Any]:
+        """List the workspace's dedicated phone numbers, newest first.
+
+        ``limit`` is 1..200 (default 50). Pass the returned ``next_cursor``
+        as ``cursor`` for the next page.
+
+        Returns ``{"items": [{"id", "e164", "provider", "country_code",
+        "number_type", "capabilities", "provisioning_state", "voice_agent_id",
+        "sms_agent_id", ...}], "next_cursor"}``, or ``{"error": "<message>"}``."""
+        try:
+            async with _client_for(ctx, mode=mode, singleton=singleton) as client:
+                return await list_numbers(client=client, limit=limit, cursor=cursor)
+        except RuntimeError as exc:
+            return {"error": str(exc)}
+        except HailAPIError as exc:
+            return _format_api_error(exc)
+
+    @mcp_app.tool(
+        name="get_number",
+        title="Get a number",
+        annotations=ToolAnnotations(
+            readOnlyHint=True,
+            destructiveHint=False,
+            idempotentHint=True,
+            openWorldHint=False,
+        ),
+    )
+    async def get_number_tool(
+        ctx: Context,
+        number_id: str,
+    ) -> dict[str, Any]:
+        """Fetch one dedicated number by id: its state, capabilities and which
+        agents answer its calls and texts. ``number_id`` comes from
+        ``list_numbers``.
+
+        Returns the ``PhoneNumberResponse`` as a dict, or
+        ``{"error": "<message>"}``."""
+        try:
+            async with _client_for(ctx, mode=mode, singleton=singleton) as client:
+                return await get_number(client=client, number_id=number_id)
+        except RuntimeError as exc:
+            return {"error": str(exc)}
+        except HailAPIError as exc:
+            return _format_api_error(exc)
+
+    @mcp_app.tool(
+        name="release_number",
+        title="Release a number",
+        annotations=ToolAnnotations(
+            readOnlyHint=False,
+            destructiveHint=True,
+            idempotentHint=True,
+            openWorldHint=True,
+        ),
+    )
+    async def release_number_tool(
+        ctx: Context,
+        number_id: str,
+        confirm_e164: str,
+    ) -> dict[str, Any]:
+        """Release a phone number. DESTRUCTIVE and permanent.
+
+        Calls and texts to the number stop. The monthly fee already billed
+        stays owed; there is no refund. The number may not be recoverable.
+        Ask the user before calling this.
+
+        ``confirm_e164`` must equal the number's ``e164`` (for example
+        ``"+14155550100"``). The tool reads the number first and refuses with
+        ``{"error": ...}`` on a mismatch, without releasing anything. A number
+        whose order is still pending cannot be released (409).
+
+        Returns ``{"released": true, "number_id", "e164"}``, or
+        ``{"error": "<message>"}``."""
+        try:
+            async with _client_for(ctx, mode=mode, singleton=singleton) as client:
+                return await release_number(
+                    client=client, number_id=number_id, confirm_e164=confirm_e164
+                )
+        except RuntimeError as exc:
+            return {"error": str(exc)}
+        except HailAPIError as exc:
+            return _format_api_error(exc)
+
+    @mcp_app.tool(
+        name="get_agent",
+        title="Get an agent",
+        annotations=ToolAnnotations(
+            readOnlyHint=True,
+            destructiveHint=False,
+            idempotentHint=True,
+            openWorldHint=False,
+        ),
+    )
+    async def get_agent_tool(
+        ctx: Context,
+        agent_id: str,
+    ) -> dict[str, Any]:
+        """Fetch one saved agent by id. ``agent_id`` comes from ``list_agents``
+        or ``create_agent``.
+
+        Returns the ``AgentResponse`` as a dict (``name``, ``system_prompt``,
+        ``first_message``, ``ai_disclosure``, ``voice_config``, ``tools``,
+        ``voice_enabled``, ``sms_enabled``, ``status``, ...), or
+        ``{"error": "<message>"}``."""
+        try:
+            async with _client_for(ctx, mode=mode, singleton=singleton) as client:
+                return await get_agent(client=client, agent_id=agent_id)
+        except RuntimeError as exc:
+            return {"error": str(exc)}
+        except HailAPIError as exc:
+            return _format_api_error(exc)
+
+    @mcp_app.tool(
+        name="update_agent",
+        title="Update an agent",
+        annotations=ToolAnnotations(
+            readOnlyHint=False,
+            destructiveHint=False,
+            idempotentHint=True,
+            openWorldHint=False,
+        ),
+    )
+    async def update_agent_tool(
+        ctx: Context,
+        agent_id: str,
+        name: str | None = None,
+        system_prompt: str | None = None,
+        first_message: str | None = None,
+        ai_disclosure: bool | None = None,
+        ai_disclosure_line: str | None = None,
+        language: str | None = None,
+        voice_id: str | None = None,
+        tools: list[str] | None = None,
+        max_duration_seconds: int | None = None,
+        voice_enabled: bool | None = None,
+        sms_enabled: bool | None = None,
+        status: str | None = None,
+        clear_fields: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """Change a saved agent. Safe to repeat: the same call gives the same
+        result.
+
+        Only the fields you pass change; a field left out keeps its value.
+        ``status`` is ``"live"`` or ``"paused"``; a paused agent does not
+        answer. ``language`` is a lowercase ISO 639-1 code. ``language`` and
+        ``voice_id`` replace the agent's whole voice setting, so pass both to
+        keep both. ``max_duration_seconds`` is 60..3600.
+
+        To remove a value, list its name in ``clear_fields``. Allowed:
+        ``first_message`` (the agent waits for the caller),
+        ``ai_disclosure_line`` (back to the workspace line), ``tools``
+        (back to all tools), ``max_duration_seconds`` (back to the workspace
+        limit). Any other name is refused. Do not set and clear one field.
+
+        Live calls keep the settings they started with. The change applies
+        to the next call or text.
+
+        Returns the updated ``AgentResponse`` as a dict, or
+        ``{"error": "<message>"}``."""
+        try:
+            async with _client_for(ctx, mode=mode, singleton=singleton) as client:
+                return await update_agent(
+                    client=client,
+                    agent_id=agent_id,
+                    clear_fields=clear_fields,
+                    **{
+                        k: v
+                        for k, v in {
+                            "name": name,
+                            "system_prompt": system_prompt,
+                            "first_message": first_message,
+                            "ai_disclosure": ai_disclosure,
+                            "ai_disclosure_line": ai_disclosure_line,
+                            "language": language,
+                            "voice_id": voice_id,
+                            "tools": tools,
+                            "max_duration_seconds": max_duration_seconds,
+                            "voice_enabled": voice_enabled,
+                            "sms_enabled": sms_enabled,
+                            "status": status,
+                        }.items()
+                        if v is not None
+                    },
+                )
+        except RuntimeError as exc:
+            return {"error": str(exc)}
+        except HailAPIError as exc:
+            return _format_api_error(exc)
+
+    @mcp_app.tool(
+        name="delete_agent",
+        title="Delete an agent",
+        annotations=ToolAnnotations(
+            readOnlyHint=False,
+            destructiveHint=True,
+            idempotentHint=True,
+            openWorldHint=False,
+        ),
+    )
+    async def delete_agent_tool(
+        ctx: Context,
+        agent_id: str,
+        confirm_name: str,
+    ) -> dict[str, Any]:
+        """Delete a saved agent. DESTRUCTIVE. Ask the user before calling this.
+
+        Numbers that used the agent stop answering with it: calls ring out
+        and texts reach webhooks only. Reroute them first with
+        ``route_number`` if that matters.
+
+        ``confirm_name`` must equal the agent's ``name``. The tool reads the
+        agent first and refuses with ``{"error": ...}`` on a mismatch,
+        without deleting anything. To stop an agent without deleting it, use
+        ``update_agent`` with ``status="paused"``.
+
+        Returns ``{"deleted": true, "agent_id", "name"}``, or
+        ``{"error": "<message>"}``."""
+        try:
+            async with _client_for(ctx, mode=mode, singleton=singleton) as client:
+                return await delete_agent(
+                    client=client, agent_id=agent_id, confirm_name=confirm_name
+                )
+        except RuntimeError as exc:
+            return {"error": str(exc)}
+        except HailAPIError as exc:
+            return _format_api_error(exc)
+
+    @mcp_app.tool(
+        name="list_contacts",
+        title="List contacts",
+        annotations=ToolAnnotations(
+            readOnlyHint=True,
+            destructiveHint=False,
+            idempotentHint=True,
+            openWorldHint=False,
+        ),
+    )
     async def list_contacts_tool(
         ctx: Context,
         q: str | None = None,
@@ -1367,7 +1981,16 @@ def register_tools(
         except RuntimeError as exc:
             return {"error": str(exc)}
 
-    @mcp_app.tool(name="lookup_contact")
+    @mcp_app.tool(
+        name="lookup_contact",
+        title="Look up a contact",
+        annotations=ToolAnnotations(
+            readOnlyHint=True,
+            destructiveHint=False,
+            idempotentHint=True,
+            openWorldHint=False,
+        ),
+    )
     async def lookup_contact_tool(ctx: Context, query: str) -> dict[str, Any]:
         """Find a contact by name, email, or phone fragment. Resolve a person
         to their ``phone_e164``/``email`` BEFORE calling ``place_call``,
@@ -1384,7 +2007,16 @@ def register_tools(
         except RuntimeError as exc:
             return {"error": str(exc)}
 
-    @mcp_app.tool(name="list_email_domains")
+    @mcp_app.tool(
+        name="list_email_domains",
+        title="List email domains",
+        annotations=ToolAnnotations(
+            readOnlyHint=True,
+            destructiveHint=False,
+            idempotentHint=True,
+            openWorldHint=False,
+        ),
+    )
     async def list_email_domains_tool(
         ctx: Context,
         cursor: str | None = None,
@@ -1417,7 +2049,16 @@ def register_tools(
         except RuntimeError as exc:
             return {"error": str(exc)}
 
-    @mcp_app.tool(name="whoami")
+    @mcp_app.tool(
+        name="whoami",
+        title="Who am I",
+        annotations=ToolAnnotations(
+            readOnlyHint=True,
+            destructiveHint=False,
+            idempotentHint=True,
+            openWorldHint=False,
+        ),
+    )
     async def whoami_tool(ctx: Context) -> dict[str, Any]:
         """Identify the human whose credentials this session runs under.
 
@@ -1439,7 +2080,16 @@ def register_tools(
         except RuntimeError as exc:
             return {"error": str(exc)}
 
-    @mcp_app.tool(name="create_contact")
+    @mcp_app.tool(
+        name="create_contact",
+        title="Create a contact",
+        annotations=ToolAnnotations(
+            readOnlyHint=False,
+            destructiveHint=False,
+            idempotentHint=False,
+            openWorldHint=False,
+        ),
+    )
     async def create_contact_tool(
         ctx: Context,
         name: str,
