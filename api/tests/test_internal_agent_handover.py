@@ -485,7 +485,7 @@ async def test_result_for_team_member_carries_wire_id(
     }
 
 
-async def test_result_for_member_who_left_org_rejected(
+async def test_result_for_member_who_left_org_still_recorded(
     client, async_session, add_phone_number
 ):
     call, wire = await _seed_member(async_session, add_phone_number, in_org=False)
@@ -501,7 +501,7 @@ async def test_result_for_member_who_left_org_rejected(
             "ring_ms": 30000,
         },
     )
-    assert r.json() == {"ok": False}
+    assert r.json() == {"ok": True}
 
 
 async def test_handover_denied_when_agent_org_differs_from_call(

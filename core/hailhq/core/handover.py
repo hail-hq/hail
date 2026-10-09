@@ -204,7 +204,15 @@ async def validate_handover(
     for index, item in enumerate(items):
         person = people.get(item.contact_id)
         if person is None:
-            raise HandoverInvalid("contact not found", index)
+            is_member = parse_contact_id(item.contact_id)[0] == "member"
+            raise HandoverInvalid(
+                (
+                    "member not found in this organization"
+                    if is_member
+                    else "contact not found"
+                ),
+                index,
+            )
         if item.contact_id in unchanged:
             continue
         if not person.phone_e164:
@@ -237,6 +245,29 @@ async def replace_handover(
             )
         )
     await db.flush()
+
+
+async def prune_departed_members(db: AsyncSession, agent_id: UUID) -> None:
+    """Delete the agent's member links whose user is no longer a member of
+    its org, so a user who rejoins later is not a handover target again.
+    No-op when the member tables are missing (pure self-host)."""
+    try:
+        async with db.begin_nested():
+            await db.execute(
+                delete(AgentHandoverContact).where(
+                    AgentHandoverContact.agent_id == agent_id,
+                    AgentHandoverContact.user_id.is_not(None),
+                    ~exists().where(
+                        OrganizationMember.user_id == AgentHandoverContact.user_id,
+                        OrganizationMember.organization_id
+                        == select(Agent.organization_id)
+                        .where(Agent.id == agent_id)
+                        .scalar_subquery(),
+                    ),
+                )
+            )
+    except ProgrammingError as exc:
+        _reraise_unless_no_member_tables(exc)
 
 
 async def _member_links(
@@ -291,10 +322,21 @@ async def load_handover(
             )
         ).all()
     ]
-    rows += [
-        (link, contact_wire_id("member", link.user_id), name, phone)
-        for link, name, phone in await _member_links(db, agent_ids)
-    ]
+    has_member_links = (
+        await db.execute(
+            select(AgentHandoverContact.user_id)
+            .where(
+                AgentHandoverContact.agent_id.in_(agent_ids),
+                AgentHandoverContact.user_id.is_not(None),
+            )
+            .limit(1)
+        )
+    ).first() is not None
+    if has_member_links:
+        rows += [
+            (link, contact_wire_id("member", link.user_id), name, phone)
+            for link, name, phone in await _member_links(db, agent_ids)
+        ]
     rows.sort(key=lambda r: (str(r[0].agent_id), r[0].position))
     out: dict[UUID, list[dict]] = {}
     for link, wire, name, phone in rows:

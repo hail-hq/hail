@@ -46,7 +46,7 @@ from hailhq.core.compliance_gate import (
     check_sms_allowed,
     normalize_recipient,
 )
-from hailhq.core.contact_ids import normalize_contact_id
+from hailhq.core.contact_ids import normalize_contact_id, parse_contact_id
 from hailhq.core.db import get_session
 from hailhq.core.directory import resolve_member_emails
 from hailhq.core.email_sender import from_address_for
@@ -60,6 +60,7 @@ from hailhq.core.handover import (
 )
 from hailhq.core.models import (
     Agent,
+    AgentHandoverContact,
     Call,
     CallEvent,
     Email,
@@ -728,6 +729,26 @@ async def _linked_person(
     return None
 
 
+async def _link_row_exists(db: AsyncSession, call: Call, wire_id: str) -> bool:
+    """True if the call's agent has a handover link row for ``wire_id``,
+    even for a member who has since left the org."""
+    if call.agent_id is None:
+        return False
+    kind, value = parse_contact_id(wire_id)
+    column = (
+        AgentHandoverContact.user_id
+        if kind == "member"
+        else AgentHandoverContact.contact_id
+    )
+    return (
+        await db.execute(
+            select(AgentHandoverContact.agent_id)
+            .where(AgentHandoverContact.agent_id == call.agent_id, column == value)
+            .limit(1)
+        )
+    ).first() is not None
+
+
 @router.post("/handover", response_model=AgentHandoverResponse)
 async def agent_handover(
     body: AgentHandoverRequest,
@@ -795,14 +816,16 @@ async def agent_handover_result(
     call = await _load_call_for_update(db, body.call_id)
     if call is None:
         return {"ok": False}
+    # The dial already happened. Record it even if the person left the org
+    # since: the link row still exists, only the name is gone.
     contact = await _linked_person(db, call, body.contact_id)
-    if contact is None:
+    if contact is None and not await _link_row_exists(db, call, body.contact_id):
         return {"ok": False}
     if body.outcome == HANDOVER_ANSWERED and await has_answered_handover(db, call.id):
         return {"ok": True}  # retried result: already recorded
     if await _handover_result_recorded(db, call.id, body.tool_invocation_id):
         return {"ok": True}
-    name = contact.name
+    name = contact.name if contact else None
     db.add(
         CallEvent(
             call_id=call.id,
