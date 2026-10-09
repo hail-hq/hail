@@ -41,7 +41,10 @@ from hailhq.api.audit import actor_of, write_audit_log
 from hailhq.api.deps import Principal, get_current_principal
 from hailhq.api.errors import unprocessable
 from hailhq.api.pagination import fetch_cursor_page
-from hailhq.api.ratelimit import GENERAL_RATE_LIMITED_RESPONSES
+from hailhq.api.ratelimit import (
+    GENERAL_RATE_LIMITED_RESPONSES,
+    merge_rate_limited_responses,
+)
 from hailhq.api.route_prefixes import request_mount_prefix
 from hailhq.core.config import settings
 from hailhq.core.db import get_session
@@ -730,11 +733,14 @@ async def dns_check_email_domain(
 @router.patch(
     "/{domain_id}",
     response_model=EmailDomainResponse,
-    responses={
-        429: {
-            "description": "The organization reached its daily confirm-mail limit for new forward addresses."
+    responses=merge_rate_limited_responses(
+        {
+            429: {
+                "description": "The organization reached its daily confirm-mail limit for new forward addresses."
+            }
         },
-    },
+        GENERAL_RATE_LIMITED_RESPONSES,
+    ),
 )
 async def patch_email_domain(
     domain_id: UUID,

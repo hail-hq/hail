@@ -20,7 +20,10 @@ from fastapi import status as http_status
 from fastapi.responses import HTMLResponse
 from hailhq.api.audit import actor_of, write_audit_log
 from hailhq.api.deps import Principal, get_current_principal
-from hailhq.api.ratelimit import GENERAL_RATE_LIMITED_RESPONSES
+from hailhq.api.ratelimit import (
+    GENERAL_RATE_LIMITED_RESPONSES,
+    merge_rate_limited_responses,
+)
 from hailhq.core.config import settings
 from hailhq.core.db import get_session
 from hailhq.core.forward_targets import (
@@ -100,10 +103,20 @@ async def _sending_identity(db: AsyncSession, organization_id) -> EmailDomain | 
         409: {
             "description": "The address is already verified, or the organization has no sending identity."
         },
-        429: {
-            "description": "A confirm link was sent less than 10 minutes ago, or the organization reached its daily confirm-mail limit."
-        },
-        **GENERAL_RATE_LIMITED_RESPONSES,
+        **merge_rate_limited_responses(
+            {
+                429: {
+                    "description": "A confirm link was sent less than 10 minutes ago, or the organization reached its daily confirm-mail limit.",
+                    "headers": {
+                        "Retry-After": {
+                            "description": "Seconds to wait before retrying (cooldown case).",
+                            "schema": {"type": "integer"},
+                        }
+                    },
+                }
+            },
+            GENERAL_RATE_LIMITED_RESPONSES,
+        ),
     },
 )
 async def resend_forward_confirm(

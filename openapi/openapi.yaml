@@ -1605,7 +1605,25 @@ paths:
         "429":
           description:
             The organization reached its daily confirm-mail limit for new
-            forward addresses.
+            forward addresses. Rate limited. This caller exceeded the general request-rate
+            ceiling. Retry after the Retry-After header (seconds).
+          headers:
+            Retry-After:
+              description: Seconds to wait before retrying.
+              schema:
+                type: integer
+            RateLimit-Limit:
+              description: The request ceiling for the current window.
+              schema:
+                type: integer
+            RateLimit-Remaining:
+              description: Requests remaining in the current window.
+              schema:
+                type: integer
+            RateLimit-Reset:
+              description: Seconds until the current window resets.
+              schema:
+                type: integer
         "422":
           description: Validation Error
           content:
@@ -1893,8 +1911,9 @@ paths:
             sending identity.
         "429":
           description:
-            Rate limited. This caller exceeded the general request-rate
-            ceiling. Retry after the Retry-After header (seconds).
+            A confirm link was sent less than 10 minutes ago, or the organization
+            reached its daily confirm-mail limit. Rate limited. This caller exceeded
+            the general request-rate ceiling. Retry after the Retry-After header (seconds).
           headers:
             Retry-After:
               description: Seconds to wait before retrying.
