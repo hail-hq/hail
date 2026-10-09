@@ -470,21 +470,33 @@ class Agent(Base):
 
 
 class AgentHandoverContact(Base):
-    """A contact the agent may hand a live call over to (spec:
-    docs/superpowers/specs/2026-10-08-human-handover-design.md)."""
+    """A person the agent may hand a live call over to (spec:
+    docs/superpowers/specs/2026-10-08-human-handover-design.md): a manual
+    contact (``contact_id``) or an org member (``user_id``), exactly one.
+
+    ``user_id`` carries no FK: ``users`` is website-owned (see
+    :class:`OrganizationMember`). Membership is checked when the list is
+    loaded and before every dial, so a member who left the org is skipped.
+    """
 
     __tablename__ = "agent_handover_contacts"
 
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        server_default=text("gen_random_uuid()"),
+    )
     agent_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("agents.id", ondelete="CASCADE"),
-        primary_key=True,
+        nullable=False,
     )
-    contact_id: Mapped[uuid.UUID] = mapped_column(
+    contact_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("contacts.id", ondelete="CASCADE"),
-        primary_key=True,
+        nullable=True,
     )
+    user_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
     note: Mapped[str] = mapped_column(Text, nullable=False)
     position: Mapped[int] = mapped_column(SmallInteger, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
@@ -494,6 +506,26 @@ class AgentHandoverContact(Base):
     __table_args__ = (
         CheckConstraint(
             "char_length(note) BETWEEN 1 AND 200", name="agent_handover_note_len"
+        ),
+        CheckConstraint(
+            "num_nonnulls(contact_id, user_id) = 1",
+            name="agent_handover_one_target",
+        ),
+        Index("agent_handover_contacts_agent_idx", "agent_id"),
+        Index("agent_handover_contacts_contact_idx", "contact_id"),
+        Index(
+            "agent_handover_contacts_agent_contact_uq",
+            "agent_id",
+            "contact_id",
+            unique=True,
+            postgresql_where=text("contact_id IS NOT NULL"),
+        ),
+        Index(
+            "agent_handover_contacts_agent_user_uq",
+            "agent_id",
+            "user_id",
+            unique=True,
+            postgresql_where=text("user_id IS NOT NULL"),
         ),
     )
 

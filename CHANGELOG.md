@@ -10,6 +10,7 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 - MCP tool `acquire_number`: buys a quoted number. It needs `confirm_total_cents` (monthly plus setup) from `quote_numbers`, and the server checks it. Marked destructive because it spends money. Deploy the API before the MCP service: against an API without `expected_total_cents`, the hosted MCP tool fails with 422.
 - MCP tools `quote_numbers`, `list_numbers`, `get_number`, `release_number`, `get_agent`, `update_agent` and `delete_agent`. `release_number` and `delete_agent` need a matching confirmation argument. All MCP tools now set `readOnlyHint`, `destructiveHint`, `idempotentHint` and `openWorldHint` annotations and a title.
 - Human handover: agents can hand a live call to a contact you pick (`handover_contacts` on agents, `hail agents --handover`, `transfer_call` tool, `call.transferred` webhook).
+- Human handover to team members: `handover_contacts[].contact_id` also takes `member:<user id>` (the id `GET /contacts` returns), so an agent can hand a call to an org member with a phone, not only a contact.
 - Optional Logfire backend and AI-agent observability: service logs, request/HTTP/database traces, actor identity, voice/SMS model and tool spans, and API-to-voicebot correlation. Payload filtering keeps conversation content and credentials out of exported traces.
 
 ### Changed

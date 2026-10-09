@@ -115,7 +115,9 @@ The full set is the `WebhookEventType` enum in
 - **`call.transferred`** — the agent handed the live call to a person
   ([Agents](agents.md#hand-over-to-a-person)). Sent once, when that person
   answers. `data` is the call object plus `transfer`:
-  `{"contact_id": "…", "contact_name": "Sam"}`. Never a phone number.
+  `{"contact_id": "…", "contact_name": "Sam"}`. `contact_id` is the id
+  `GET /contacts` returns: a contact's uuid, or `member:<user id>` for a
+  team member. Never a phone number.
 
 Every `call.*` payload's `data` carries `id`, `status`, `direction`
 (`inbound` or `outbound`), `from`, `to`, `agent_id` (null for calls placed

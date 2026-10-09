@@ -137,7 +137,7 @@ func (f *agentFlags) bind(cmd *cobra.Command) {
 	cmd.Flags().BoolVar(&f.noSms, "no-sms", false, "Do not answer texts")
 	cmd.Flags().BoolVar(&f.noCalls, "no-calls", false, "Do not answer calls")
 	cmd.Flags().StringVar(&f.status, "status", "", "live or paused")
-	cmd.Flags().StringArrayVar(&f.handover, "handover", nil, "Person the agent may hand a live call to: <contact_id>=<note> (repeatable, max 10; replaces the list)")
+	cmd.Flags().StringArrayVar(&f.handover, "handover", nil, "Person the agent may hand a live call to: <contact_id>=<note>, where contact_id is a contact id or member:<user id> (repeatable, max 10; replaces the list)")
 }
 
 func (f *agentFlags) readPrompt() (string, bool, error) {
@@ -230,7 +230,8 @@ func (f *agentFlags) body(cmd *cobra.Command, create bool, voice map[string]any)
 		contacts := []map[string]string{}
 		for _, h := range f.handover {
 			id, note, ok := strings.Cut(h, "=")
-			if _, err := uuid.Parse(id); err != nil || !ok || strings.TrimSpace(note) == "" {
+			// A contact id or member:<user id>, as `hail contacts list` shows.
+			if _, err := uuid.Parse(strings.TrimPrefix(id, "member:")); err != nil || !ok || strings.TrimSpace(note) == "" {
 				return nil, fmt.Errorf("--handover must be <contact_id>=<note>, got %q", h)
 			}
 			if utf8.RuneCountInString(note) > 200 {

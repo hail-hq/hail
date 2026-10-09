@@ -1627,7 +1627,9 @@ def register_tools(
         call limit once a handover contact answers.
         ``handover_contacts``: People the agent may hand a live call to:
         ``[{contact_id, note}]`` (max 10; ``note`` 1-200 chars says when to
-        hand over). The contact needs a phone number. The agent never sees it.
+        hand over). ``contact_id`` is an id from ``list_contacts``: a
+        contact's uuid, or ``member:<user id>`` for a team member. The
+        person needs a phone number. The agent never sees it.
 
         Returns the API's ``AgentResponse`` as a dict, or
         ``{"error": "<message>"}``.

@@ -38,24 +38,29 @@ in [`openapi/openapi.yaml`](../../openapi/openapi.yaml).
 
 ## Hand over to a person
 
-Let the agent pass a live call to a contact you picked.
+Let the agent pass a live call to a person you picked: a team member with a
+phone number, or a contact. Use the `id` that `GET /contacts` (or
+`hail contacts list`) shows: a contact's uuid, or `member:<user id>` for a
+team member.
 
 ```bash
 curl -X PATCH "$HAIL_API_URL/v1/agents/$AGENT_ID" -H "Authorization: Bearer $HAIL_API_KEY" \
   -H 'Content-Type: application/json' -d '{
     "handover_contacts": [
+      {"contact_id": "member:6f1c2a9e-3b7d-4c51-9a8e-2d4f6b1e0c37", "note": "sales questions"},
       {"contact_id": "'"$CONTACT_ID"'", "note": "billing questions or an angry caller"}
     ]
   }'
 ```
 
-CLI: `hail agents update <id> --handover "<contact-id>=billing questions"`
+CLI: `hail agents update <id> --handover "member:<user-id>=sales questions"`
 (repeat the flag for more people; `--no-handover` clears the list).
 MCP sets contacts at creation only: `create_agent(handover_contacts=[{"contact_id": "...", "note": "..."}])`.
 There is no MCP update tool; change them with the CLI or the API.
 
-- Up to 10 contacts. Each needs a phone number in a country Hail sells
-  numbers in. It must pass the do-not-call and premium-rate checks, on save
+- Up to 10 people. Each needs a phone number in a country Hail sells
+  numbers in. A team member must belong to the organization; one who leaves
+  it is skipped and cannot be dialed. It must pass the do-not-call and premium-rate checks, on save
   and again before dialing. `note` is 1-200 characters and tells the agent
   when to hand over.
 - The agent gets the `transfer_call` tool. If `tools` is a list, saving

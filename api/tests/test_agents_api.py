@@ -855,3 +855,111 @@ async def test_agent_handover_max_duration_round_trip(client, org) -> None:
         headers=headers,
     )
     assert r.status_code == 422
+
+
+async def _team_member(s, org_id, name="Ana", phone="+14155550140") -> str:
+    from datetime import datetime, timezone
+
+    from hailhq.core.models import OrganizationMember, User
+
+    user = User(
+        id=uuid.uuid4(),
+        name=name,
+        email=f"{uuid.uuid4().hex}@example.com",
+        phone_number=phone,
+        created_at=datetime.now(timezone.utc),
+    )
+    s.add(user)
+    s.add(
+        OrganizationMember(
+            id=uuid.uuid4(),
+            user_id=user.id,
+            organization_id=org_id,
+            role="member",
+            created_at=datetime.now(timezone.utc),
+        )
+    )
+    await s.commit()
+    return f"member:{user.id}"
+
+
+async def test_agent_handover_team_member_round_trip(
+    client, org, async_session
+) -> None:
+    org_id, headers = org
+    cid = await _contact(client, headers)
+    mid = await _team_member(async_session, org_id)
+    # The ids GET /contacts returns are the ids handover_contacts takes.
+    listed = (await client.get("/contacts", headers=headers)).json()["items"]
+    assert {c["id"] for c in listed} >= {cid, mid}
+    r = await client.post(
+        "/agents",
+        json={
+            "name": "Desk",
+            "system_prompt": "Help.",
+            "handover_contacts": [
+                {
+                    "contact_id": mid.upper().replace("MEMBER:", "member:"),
+                    "note": "Sales",
+                },
+                {"contact_id": cid, "note": "Billing"},
+            ],
+        },
+        headers=headers,
+    )
+    assert r.status_code == 201, r.text
+    assert r.json()["handover_contacts"] == [
+        {
+            "contact_id": mid,
+            "name": "Ana",
+            "phone_e164": "+14155550140",
+            "note": "Sales",
+        },
+        {
+            "contact_id": cid,
+            "name": "Sam",
+            "phone_e164": "+14155550111",
+            "note": "Billing",
+        },
+    ]
+    agent_id = r.json()["id"]
+    # Resending the same list (as the console does) keeps both.
+    r = await client.patch(
+        f"/agents/{agent_id}",
+        json={
+            "handover_contacts": [
+                {"contact_id": cid, "note": "Billing"},
+                {"contact_id": mid, "note": "Sales"},
+            ]
+        },
+        headers=headers,
+    )
+    assert r.status_code == 200, r.text
+    assert [c["contact_id"] for c in r.json()["handover_contacts"]] == [cid, mid]
+
+
+@pytest.mark.parametrize(
+    "case", ["other_org", "no_phone", "duplicate", "malformed", "unknown"]
+)
+async def test_agent_handover_team_member_rejected(
+    client, org, async_session, case
+) -> None:
+    org_id, headers = org
+    mid = await _team_member(async_session, org_id)
+    ids = {
+        "other_org": [await _team_member(async_session, uuid.uuid4(), "Zed")],
+        "no_phone": [await _team_member(async_session, org_id, "Nophone", None)],
+        "duplicate": [mid, mid],
+        "malformed": ["member:nope"],
+        "unknown": [f"member:{uuid.uuid4()}"],
+    }[case]
+    r = await client.post(
+        "/agents",
+        json={
+            "name": "Desk",
+            "system_prompt": "Help.",
+            "handover_contacts": [{"contact_id": i, "note": "x"} for i in ids],
+        },
+        headers=headers,
+    )
+    assert r.status_code == 422, r.text

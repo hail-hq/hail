@@ -31,6 +31,7 @@ from hailhq.core.handover import (
     HandoverInvalid,
     HandoverItem,
     load_handover,
+    prune_departed_members,
     replace_handover,
     validate_handover,
 )
@@ -107,7 +108,7 @@ async def _check_handover(
     db: AsyncSession,
     org_id: UUID,
     items,
-    unchanged: frozenset[UUID] = frozenset(),
+    unchanged: frozenset[str] = frozenset(),
 ) -> list[HandoverItem]:
     parsed = [HandoverItem(i.contact_id, i.note.strip()) for i in items]
     for index, item in enumerate(parsed):
@@ -317,6 +318,8 @@ async def update_agent(
         try:
             if items is not None:
                 await replace_handover(db, agent.id, items)
+            else:
+                await prune_departed_members(db, agent.id)
             await db.commit()
         except IntegrityError as exc:
             await db.rollback()

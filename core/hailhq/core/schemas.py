@@ -5,6 +5,7 @@ from typing import Any, Literal
 from urllib.parse import urlsplit
 from uuid import UUID
 
+from hailhq.core.contact_ids import normalize_contact_id
 from hailhq.core.languages import Language
 from hailhq.core.sender_id import PLATFORM_DEFAULT_SENDER_ID
 from pydantic import (
@@ -695,8 +696,12 @@ _AGENT_LINE_MAX = 300
 class HandoverContactIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    contact_id: UUID = Field(
-        description="A contact of this organization with a phone number."
+    contact_id: str = Field(
+        description=(
+            "A person with a phone number, as GET /contacts returns it: a "
+            "contact's id, or `member:<user id>` for a team member."
+        ),
+        examples=["member:6f1c2a9e-3b7d-4c51-9a8e-2d4f6b1e0c37"],
     )
     note: str = Field(
         min_length=1,
@@ -704,10 +709,22 @@ class HandoverContactIn(BaseModel):
         description="When the agent should hand over to this person, e.g. 'billing questions'. Read by the agent.",
     )
 
+    @field_validator("contact_id")
+    @classmethod
+    def _wire_id(cls, v: str) -> str:
+        try:
+            return normalize_contact_id(v)
+        except ValueError as exc:
+            raise ValueError(
+                "must be a contact id or member:<user id>, as GET /contacts returns"
+            ) from exc
+
 
 class HandoverContactOut(BaseModel):
-    contact_id: UUID = Field(description="The contact.")
-    name: str = Field(description="Contact name, as the agent says it.")
+    contact_id: str = Field(
+        description="The person: a contact's id, or `member:<user id>` for a team member."
+    )
+    name: str = Field(description="Name, as the agent says it.")
     phone_e164: str | None = Field(
         description="Number Hail dials. Null when the contact lost its number; it is then skipped."
     )
