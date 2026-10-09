@@ -436,6 +436,9 @@ async def acquire_offer(
             loc=["body", "quote_id"],
         )
     kind = offer.number_type
+    if row.number_id:
+        # Replay of a consumed quote charges nothing, so no price check.
+        return await db.get(PhoneNumber, row.number_id)
     if (
         expected_total_cents is not None
         and expected_total_cents != offer.monthly_cents + offer.setup_cents
@@ -451,8 +454,6 @@ async def acquire_offer(
                 "request a new quote"
             ),
         )
-    if row.number_id:
-        return await db.get(PhoneNumber, row.number_id)
     catalog_capabilities(country, kind, offer.provider)
     if row.expires_at <= datetime.now(timezone.utc):
         raise HTTPException(

@@ -629,6 +629,24 @@ async def test_expected_total_mismatch_checked_before_carrier_lookup(
     number_orders.discover_offers.assert_not_awaited()
 
 
+async def test_replay_of_consumed_quote_ignores_a_wrong_expected_total(
+    org_and_key, async_session, buy_number
+):
+    from hailhq.core.billing import get_balance_cents
+
+    org, _, _ = org_and_key
+    first = await buy_number(monthly=115, setup=50, expected_total_cents=165)
+    assert first.status_code == 201, first.text
+    after_first = await get_balance_cents(async_session, org)
+    replay = await buy_number(
+        monthly=115, setup=50, expected_total_cents=1, reuse_quote=True
+    )
+    assert replay.status_code in (200, 201), replay.text
+    assert replay.json()["id"] == first.json()["id"]
+    assert await get_balance_cents(async_session, org) == after_first
+    buy_number.purchase.assert_awaited_once()
+
+
 async def test_omitted_expected_total_behaves_as_before(buy_number):
     response = await buy_number(monthly=115, setup=50)
     assert response.status_code == 201, response.text
