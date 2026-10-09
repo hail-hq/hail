@@ -2100,6 +2100,71 @@ async def test_update_agent_folds_language_and_voice_into_voice_config(
 
 
 @respx.mock
+@pytest.mark.parametrize(
+    ("kwargs", "expected"),
+    [
+        (
+            {"language": "da"},
+            {"language": "da", "voice_id": "old-voice", "tts": "cartesia"},
+        ),
+        (
+            {"voice_id": "v2"},
+            {"language": "en", "voice_id": "v2", "tts": "cartesia"},
+        ),
+    ],
+)
+async def test_update_agent_one_voice_value_keeps_the_other(
+    client: HailClient, kwargs: dict, expected: dict
+) -> None:
+    aid = str(uuid4())
+    existing = _agent_response(aid)
+    existing["voice_config"] = {
+        "language": "en",
+        "voice_id": "old-voice",
+        "tts": "cartesia",
+    }
+    get = respx.get(f"{_BASE_URL}/agents/{aid}").mock(
+        return_value=httpx.Response(200, json=existing)
+    )
+    patch = respx.patch(f"{_BASE_URL}/agents/{aid}").mock(
+        return_value=httpx.Response(200, json=_agent_response(aid))
+    )
+    await tools.update_agent(client=client, agent_id=aid, **kwargs)
+    assert get.call_count == 1
+    assert json.loads(patch.calls[0].request.read()) == {"voice_config": expected}
+
+
+@respx.mock
+async def test_update_agent_both_voice_values_make_no_get(client: HailClient) -> None:
+    aid = str(uuid4())
+    get = respx.get(f"{_BASE_URL}/agents/{aid}").mock(
+        return_value=httpx.Response(200, json=_agent_response(aid))
+    )
+    patch = respx.patch(f"{_BASE_URL}/agents/{aid}").mock(
+        return_value=httpx.Response(200, json=_agent_response(aid))
+    )
+    await tools.update_agent(client=client, agent_id=aid, language="da", voice_id="v1")
+    assert get.call_count == 0
+    assert json.loads(patch.calls[0].request.read()) == {
+        "voice_config": {"language": "da", "voice_id": "v1"}
+    }
+
+
+@respx.mock
+async def test_update_agent_get_404_makes_no_patch(client: HailClient) -> None:
+    aid = str(uuid4())
+    respx.get(f"{_BASE_URL}/agents/{aid}").mock(
+        return_value=httpx.Response(404, json={"detail": "no"})
+    )
+    patch = respx.patch(f"{_BASE_URL}/agents/{aid}").mock(
+        return_value=httpx.Response(200, json=_agent_response(aid))
+    )
+    result = await tools.update_agent(client=client, agent_id=aid, language="da")
+    assert result == {"error": "resource not found"}
+    assert patch.call_count == 0
+
+
+@respx.mock
 async def test_update_agent_clear_fields_send_explicit_null(
     client: HailClient,
 ) -> None:

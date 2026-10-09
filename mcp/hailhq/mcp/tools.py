@@ -668,12 +668,20 @@ async def update_agent(
     **fields: Any,
 ) -> dict[str, Any]:
     """``fields`` holds only the values to set; ``clear_fields`` the nulls."""
-    if language is not None or voice_id is not None:
-        fields["voice_config"] = {
-            k: v
-            for k, v in (("language", language), ("voice_id", voice_id))
-            if v is not None
-        }
+    if (language is None) != (voice_id is None):
+        # The API replaces voice_config whole on PATCH: start from the
+        # agent's current one so the value not given is kept.
+        try:
+            current = await client.get_agent(agent_id)
+        except HailAPIError as exc:
+            return _format_api_error(exc)
+        fields["voice_config"] = {**(current.get("voice_config") or {})}
+    elif language is not None:
+        fields["voice_config"] = {}
+    if "voice_config" in fields:
+        for key, value in (("language", language), ("voice_id", voice_id)):
+            if value is not None:
+                fields["voice_config"][key] = value
     clear = list(clear_fields or [])
     bad = [f for f in clear if f not in _CLEARABLE_AGENT_FIELDS]
     if bad:
@@ -1960,9 +1968,9 @@ def register_tools(
 
         Only the fields you pass change; a field left out keeps its value.
         ``status`` is ``"live"`` or ``"paused"``; a paused agent does not
-        answer. ``language`` is a lowercase ISO 639-1 code. ``language`` and
-        ``voice_id`` replace the agent's whole voice setting, so pass both to
-        keep both. ``max_duration_seconds`` is 60..3600.
+        answer. ``language`` is a lowercase ISO 639-1 code. Pass ``language``
+        or ``voice_id`` alone: the other value is kept. ``max_duration_seconds``
+        is 60..3600.
 
         To remove a value, list its name in ``clear_fields``. Allowed:
         ``first_message`` (the agent waits for the caller),
