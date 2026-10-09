@@ -797,11 +797,8 @@ def _check_verification_files(
                 [],
             )
         if not _matches_declared_type(content, entry["content_type"]):
-            return (
-                f"files[{i}]: the content does not look like "
-                f"{entry['content_type']}",
-                [],
-            )
+            declared = entry["content_type"]
+            return f"files[{i}]: the content does not look like {declared}", []
         total += len(content)
         if total > _VERIFICATION_MAX_TOTAL_BYTES:
             limit_mib = _VERIFICATION_MAX_TOTAL_BYTES // (1024 * 1024)
