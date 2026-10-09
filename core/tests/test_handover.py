@@ -341,8 +341,15 @@ async def test_missing_member_tables_warn_once(async_session, monkeypatch, caplo
     from sqlalchemy import text
 
     monkeypatch.setattr(handover, "_warned_no_member_tables", False)
-    _, agent, (c,) = await _agent_and_contacts(async_session, "+14155550132")
-    await replace_handover(async_session, agent.id, [HandoverItem(str(c.id), "x")])
+    from hailhq.core.contact_ids import contact_wire_id
+
+    _, agent, _ = await _agent_and_contacts(async_session)
+    m = await _member(async_session, agent.organization_id, "Sam", "+14155550132")
+    await replace_handover(
+        async_session,
+        agent.id,
+        [HandoverItem(contact_wire_id("member", m.id), "x")],
+    )
     await async_session.execute(text("DROP TABLE members CASCADE"))
     with caplog.at_level(logging.DEBUG, logger="hailhq.core.handover"):
         await handover_targets(async_session, agent.id)
