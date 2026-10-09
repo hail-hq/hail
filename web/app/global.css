@@ -1357,3 +1357,5 @@ body {
   border-radius: 7px;
   font-size: 12px;
 }
+
+button, [role="button"], a:is(.btn,.docs-cta) { text-decoration:none!important; }

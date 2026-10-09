@@ -118,8 +118,7 @@
 }
 .hail-footer .theme-toggle button[aria-pressed="true"] {
   color: var(--hf-ac);
-  text-decoration: underline;
-  text-underline-offset: 4px;
+  text-decoration: none;
 }
 @media (max-width: 900px) {
   .hail-footer-grid {

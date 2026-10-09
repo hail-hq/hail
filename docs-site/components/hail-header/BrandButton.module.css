@@ -13,7 +13,7 @@
   font-size: 14px;
   font-weight: 600;
   line-height: 1.4;
-  text-decoration: none;
+  text-decoration: none !important;
   cursor: pointer;
 }
 .primary:hover:not(:disabled) {
@@ -48,4 +48,9 @@
   .primary::after {
     transition: none;
   }
+}
+
+.primary:is(:hover, :focus-visible, :active),
+.primary * {
+  text-decoration: none !important;
 }
