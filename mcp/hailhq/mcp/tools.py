@@ -2222,28 +2222,3 @@ def register_tools(
                 )
         except RuntimeError as exc:
             return {"error": str(exc)}
-
-
-__all__ = [
-    "acquire_number",
-    "create_contact",
-    "get_call",
-    "get_email",
-    "get_email_attachment",
-    "get_email_events",
-    "get_email_raw",
-    "get_email_stats",
-    "get_events",
-    "get_sms",
-    "list_calls",
-    "list_contacts",
-    "list_email_domains",
-    "list_emails",
-    "list_sms",
-    "lookup_contact",
-    "place_call",
-    "register_tools",
-    "send_email",
-    "send_sms",
-    "whoami",
-]
