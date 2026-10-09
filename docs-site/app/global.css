@@ -369,3 +369,5 @@
 .hail-docs .prose :is(h1, h2) a {
   color: inherit;
 }
+
+button, [role="button"], a:is(.btn,.docs-cta) { text-decoration:none!important; }
