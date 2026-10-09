@@ -2318,7 +2318,7 @@ def register_tools(
             readOnlyHint=True,
             destructiveHint=False,
             idempotentHint=True,
-            openWorldHint=False,
+            openWorldHint=True,
         ),
     )
     async def list_verifications_tool(ctx: Context) -> dict[str, Any]:
@@ -2345,7 +2345,7 @@ def register_tools(
             readOnlyHint=True,
             destructiveHint=False,
             idempotentHint=True,
-            openWorldHint=False,
+            openWorldHint=True,
         ),
     )
     async def get_verification_tool(
@@ -2380,7 +2380,7 @@ def register_tools(
             readOnlyHint=False,
             destructiveHint=True,
             idempotentHint=False,
-            openWorldHint=False,
+            openWorldHint=True,
         ),
     )
     async def cancel_verification_tool(

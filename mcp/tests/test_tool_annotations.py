@@ -38,7 +38,12 @@ _READ_ONLY = {
     "get_verification",
 }
 # Read-only tools that talk to outside systems.
-_READ_ONLY_OPEN_WORLD = {"quote_numbers", "get_verification_requirements"}
+_READ_ONLY_OPEN_WORLD = {
+    "quote_numbers",
+    "get_verification_requirements",
+    "list_verifications",
+    "get_verification",
+}
 
 # Destructive tools. acquire_number spends money, so clients ask a human.
 # submit_verification cannot be undone; cancel_verification discards a draft.
@@ -58,6 +63,7 @@ _OPEN_WORLD_WRITES = {
     "release_number",
     "acquire_number",
     "submit_verification",
+    "cancel_verification",
 }
 
 _EXPECTED_COUNT = 36
