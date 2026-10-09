@@ -38,13 +38,13 @@ from hailhq.api.ratelimit import GENERAL_RATE_LIMITED_RESPONSES
 from hailhq.api.route_prefixes import request_mount_prefix
 from hailhq.api.routes.calls import get_livekit_optional
 from hailhq.core import inbound_routing, sms_setup, telephony_catalog
+from hailhq.core.carrier_offer import NumberQuotesResponse
 from hailhq.core.carrier_routing import CARRIERS, carrier
 from hailhq.core.db import get_session, org_lock
 from hailhq.core.livekit import LiveKitClient
 from hailhq.core.models import Agent, NumberOffer, PhoneNumber
 from hailhq.core.number_offers import (
     PROVIDERS,
-    CarrierOffer,
     discover_offers,
     rank_offers,
 )
@@ -56,7 +56,6 @@ from hailhq.core.schemas import (
     PhoneNumberResponse,
     PhoneNumberRoutingUpdate,
 )
-from pydantic import BaseModel, Field
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -625,21 +624,6 @@ def _sms_setup_http_error(exc: sms_setup.SmsSetupError) -> HTTPException:
         status_code=http_status.HTTP_502_BAD_GATEWAY,
         detail="SMS could not be enabled on this number right now. "
         "Try again later or contact support.",
-    )
-
-
-class NumberQuotesResponse(BaseModel):
-    offers: list[CarrierOffer] = Field(
-        description="Live carrier offers ordered by readiness, remaining verification effort, monthly price and setup price. On a tie the first carrier listed wins."
-    )
-    recommended_quote_id: UUID | None = Field(
-        description="Recommended ready offer matching the requested carrier preference, or null if none qualifies."
-    )
-    unavailable_providers: list[str] = Field(
-        description="Carriers whose inventory, price, or regulatory lookup failed; comparison may be incomplete."
-    )
-    expires_at: datetime = Field(
-        description="UTC expiry of these persisted quotes; request fresh offers afterward."
     )
 
 

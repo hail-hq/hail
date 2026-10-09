@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from decimal import ROUND_HALF_UP, Decimal
 from typing import Literal
 from uuid import UUID
@@ -63,3 +64,18 @@ def cents(value) -> int:
     if not price.is_finite() or price < 0:
         raise ValueError("Invalid carrier price")
     return int((price * 100).quantize(Decimal(1), rounding=ROUND_HALF_UP))
+
+
+class NumberQuotesResponse(BaseModel):
+    offers: list[CarrierOffer] = Field(
+        description="Live carrier offers ordered by readiness, remaining verification effort, monthly price and setup price. On a tie the first carrier listed wins."
+    )
+    recommended_quote_id: UUID | None = Field(
+        description="Recommended ready offer matching the requested carrier preference, or null if none qualifies."
+    )
+    unavailable_providers: list[str] = Field(
+        description="Carriers whose inventory, price, or regulatory lookup failed; comparison may be incomplete."
+    )
+    expires_at: datetime = Field(
+        description="UTC expiry of these persisted quotes; request fresh offers afterward."
+    )
