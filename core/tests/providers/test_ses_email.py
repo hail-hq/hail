@@ -138,7 +138,7 @@ async def test_send_email_with_headers_uses_simple_headers(
         "send_email",
         {"MessageId": "m-1"},
         {
-            "FromEmailAddress": "forwarder+acme@mail.hail.so",
+            "FromEmailAddress": "noreply+acme@mail.hail.so",
             "Destination": {"ToAddresses": ["ops@example.com"]},
             "Content": {
                 "Simple": {
@@ -155,7 +155,7 @@ async def test_send_email_with_headers_uses_simple_headers(
 
     provider = SesEmailProvider(client=ses_client)
     result = await provider.send_email(
-        from_address="forwarder+acme@mail.hail.so",
+        from_address="noreply+acme@mail.hail.so",
         to_addresses=["ops@example.com"],
         subject="Fwd: hi",
         body_text="x",
@@ -170,7 +170,7 @@ async def test_send_email_with_attachments_uses_raw_mime() -> None:
     fake = FakeClient("m-2")
     provider = SesEmailProvider(client=fake)
     result = await provider.send_email(
-        from_address="forwarder+acme@mail.hail.so",
+        from_address="noreply+acme@mail.hail.so",
         to_addresses=["ops@example.com"],
         subject="Fwd: invoice",
         body_text="see attached",
@@ -220,7 +220,7 @@ async def test_send_email_full_document_html_byte_identical_raw_path() -> None:
     fake = FakeClient("m-doc-raw")
     provider = SesEmailProvider(client=fake)
     result = await provider.send_email(
-        from_address="forwarder+acme@mail.hail.so",
+        from_address="noreply+acme@mail.hail.so",
         to_addresses=["ops@example.com"],
         subject="hi",
         body_text="x",
@@ -426,7 +426,7 @@ async def test_send_email_raw_path_with_configuration_set(monkeypatch) -> None:
     fake = FakeClient("m-attach")
     provider = SesEmailProvider(client=fake)
     result = await provider.send_email(
-        from_address="forwarder+acme@mail.hail.so",
+        from_address="noreply+acme@mail.hail.so",
         to_addresses=["ops@example.com"],
         subject="Fwd: invoice",
         body_text="see attached",
@@ -473,7 +473,7 @@ async def test_send_email_without_configuration_set_raw_path(monkeypatch) -> Non
     fake = FakeClient("m-no-config")
     provider = SesEmailProvider(client=fake)
     result = await provider.send_email(
-        from_address="forwarder+acme@mail.hail.so",
+        from_address="noreply+acme@mail.hail.so",
         to_addresses=["ops@example.com"],
         subject="Fwd: invoice",
         body_text="see attached",

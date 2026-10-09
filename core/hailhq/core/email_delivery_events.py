@@ -25,7 +25,7 @@ from hailhq.core.schemas import EmailEventKind
 from hailhq.core.system_email import (
     SYSTEM_KIND_FORWARD_STOPPED,
     enqueue_system_email,
-    forwarder_address,
+    noreply_address,
     render_forward_stopped,
 )
 from sqlalchemy import select, update
@@ -213,7 +213,7 @@ async def _stop_forwarding_on_complaint(
         return
 
     domain = await db.get(EmailDomain, email.email_domain_id)
-    sender = forwarder_address(
+    sender = noreply_address(
         email.organization_id,
         domain.local_prefix_org if domain is not None else None,
         settings.hail_mail_base_domain,

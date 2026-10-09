@@ -93,7 +93,7 @@ async def test_patch_queues_confirm_for_stranger_only(
     queued = await _queued_system(async_session, org_id)
     assert [q.to_addresses for q in queued] == [["ops@other.com"]]
     mail = queued[0]
-    assert mail.from_address == "forwarder+acme@mail.hail.so"
+    assert mail.from_address == "noreply+acme@mail.hail.so"
     assert mail.email_domain_id == domain.id
     assert mail.metadata_["system_kind"] == "forward_confirm"
     assert "/v1/forward-targets/confirm?token=" in mail.body_text
@@ -325,4 +325,31 @@ async def test_same_list_saved_to_two_domain_rows_sends_one_confirm(
     queued = await _queued_system(async_session, org_id)
     assert len(queued) == 1
     # Custom rows have no org prefix; the sender falls back to the id-derived one.
-    assert queued[0].from_address == "forwarder+acme@mail.hail.so"
+    assert queued[0].from_address == "noreply+acme@mail.hail.so"
+
+
+@pytest.mark.asyncio
+async def test_reserved_user_prefixes_cannot_be_minted_or_renamed(
+    client: httpx.AsyncClient, org
+):
+    """noreply+<org>@ is the sender of every forward. Another org must not be
+    able to own that address and collect the bounces."""
+    _, headers, domain = org
+    for prefix in ("noreply", "forwarder", " NoReply "):
+        r = await client.post(
+            "/email-domains",
+            json={
+                "kind": "hail_mail",
+                "local_prefix_user": prefix,
+                "local_prefix_org": "x",
+            },
+            headers=headers,
+        )
+        assert r.status_code == 422, (prefix, r.text)
+        assert "reserved" in r.text
+        r = await client.patch(
+            f"/email-domains/{domain.id}",
+            json={"local_prefix_user": prefix},
+            headers=headers,
+        )
+        assert r.status_code == 422, (prefix, r.text)

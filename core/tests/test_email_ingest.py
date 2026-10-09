@@ -381,7 +381,7 @@ async def test_forward_enqueues_per_target(async_session):
 
     assert [c["to"] for c in captured] == ["ops@example.com", "billing@example.com"]
     # Forwarder address derived from local_prefix_org.
-    assert all(c["from_address"] == "forwarder+evilcorp@mail.hail.so" for c in captured)
+    assert all(c["from_address"] == "noreply+evilcorp@mail.hail.so" for c in captured)
 
 
 @pytest.mark.asyncio

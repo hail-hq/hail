@@ -74,6 +74,7 @@ from hailhq.core.models import Email, EmailDomain
 from hailhq.core.providers.email import EmailProvider, SesEmailProvider
 from hailhq.core.schemas import (
     LOCAL_PREFIX,
+    RESERVED_USER_PREFIXES,
     DmarcCheck,
     DnsProviderSchema,
     DnsRecordSchema,
@@ -89,7 +90,7 @@ from hailhq.core.system_email import (
     SYSTEM_KIND_FORWARD_CONFIRM,
     confirm_url,
     enqueue_system_email,
-    forwarder_address,
+    noreply_address,
     render_forward_confirm,
 )
 from sqlalchemy import select, update
@@ -215,6 +216,11 @@ def resolve_hail_mail_prefixes(
 
     user = body_user or env_user or settings.hail_mail_default_user_prefix
     org = body_org or env_org or org_prefix_from_id(organization_id)
+    if user in RESERVED_USER_PREFIXES:
+        raise unprocessable(
+            f"user prefix {user!r} is reserved for Hail's own sender address",
+            loc=["body", "local_prefix_user"],
+        )
     if not user:
         raise HTTPException(
             status_code=http_status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -819,7 +825,7 @@ async def patch_email_domain(
                 ),
             ) from exc
     if issued:
-        sender = forwarder_address(
+        sender = noreply_address(
             sd.organization_id, sd.local_prefix_org, settings.hail_mail_base_domain
         )
         for item in issued:

@@ -1031,6 +1031,12 @@ DOMAIN_NAME = re.compile(
 # parenthesized suffix is optional, so we don't need an explicit alternation.
 LOCAL_PREFIX = re.compile(r"^[a-z0-9]([a-z0-9-]{0,18}[a-z0-9])?$")
 
+# User prefixes no tenant may mint. ``noreply+<org>@<base>`` is the sender
+# of every forward and system mail; ``forwarder`` was its old name. Org
+# prefixes are free text, so without this another org could own the
+# address a tenant's forwards come from and receive its bounces.
+RESERVED_USER_PREFIXES = frozenset({"noreply", "forwarder"})
+
 
 def _normalize_domain(addr: str) -> str:
     """Lowercase the domain portion of an email address.
@@ -1158,6 +1164,15 @@ class EmailDomainCreate(BaseModel):
             )
         return v
 
+    @field_validator("local_prefix_user")
+    @classmethod
+    def _user_prefix_not_reserved(cls, v: str | None) -> str | None:
+        if v is not None and v in RESERVED_USER_PREFIXES:
+            raise ValueError(
+                f"user prefix {v!r} is reserved for Hail's own sender address"
+            )
+        return v
+
     @model_validator(mode="after")
     def _kind_field_consistency(self):
         if self.kind == "custom":
@@ -1247,6 +1262,15 @@ class EmailDomainPatch(BaseModel):
             raise ValueError(
                 "must be 1–20 chars of lowercase a–z, 0–9, or '-', "
                 "with no leading or trailing '-'"
+            )
+        return v
+
+    @field_validator("local_prefix_user")
+    @classmethod
+    def _user_prefix_not_reserved(cls, v: str | None) -> str | None:
+        if v is not None and v in RESERVED_USER_PREFIXES:
+            raise ValueError(
+                f"user prefix {v!r} is reserved for Hail's own sender address"
             )
         return v
 

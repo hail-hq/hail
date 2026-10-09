@@ -43,7 +43,7 @@ from hailhq.core.system_email import (
     SYSTEM_KIND_FORWARD_CONFIRM,
     confirm_url,
     enqueue_system_email,
-    forwarder_address,
+    noreply_address,
     render_forward_confirm,
 )
 from sqlalchemy import select
@@ -171,7 +171,7 @@ async def resend_forward_confirm(
             ),
         ) from exc
 
-    sender = forwarder_address(
+    sender = noreply_address(
         principal.organization_id,
         identity.local_prefix_org,
         settings.hail_mail_base_domain,

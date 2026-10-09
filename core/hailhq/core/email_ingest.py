@@ -31,6 +31,7 @@ from hailhq.core.forward_targets import normalize_address, statuses_for
 from hailhq.core.models import Email, EmailAttachment, EmailDomain
 from hailhq.core.providers.email.inbound.base import InboundMessage
 from hailhq.core.s3_mail import S3MailClient
+from hailhq.core.system_email import noreply_address
 from hailhq.core.urls import join_url
 from hailhq.core.webhook_fanout import build_event_data
 from sqlalchemy import cast, func, select, update
@@ -313,7 +314,9 @@ async def _enqueue_forwards(
     ):
         return ["forward_rate_limit"]
 
-    forwarder_address = f"forwarder+{domain.local_prefix_org}@{hail_mail_base_domain}"
+    forwarder_address = noreply_address(
+        domain.organization_id, domain.local_prefix_org, hail_mail_base_domain
+    )
     # Only addresses that proved they want the mail receive it. A pending
     # (confirm link not clicked) or stopped (spam complaint) target is skipped
     # with its own reason so the console can say why.

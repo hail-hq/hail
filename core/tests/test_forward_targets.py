@@ -219,7 +219,7 @@ async def _queued_confirm_mails(session, org_id, n):
                 organization_id=org_id,
                 email_domain_id=dom.id,
                 direction="outbound",
-                from_address="forwarder+b@mail.hail.so",
+                from_address="noreply+b@mail.hail.so",
                 to_addresses=[f"x{i}@example.com"],
                 subject="Confirm email forwarding from Hail",
                 body_text="confirm",

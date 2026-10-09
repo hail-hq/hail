@@ -1,4 +1,4 @@
-"""Hail-to-tenant system mail, sent as the org's own forwarder address.
+"""Hail-to-tenant system mail, sent as the org's own noreply address.
 
 Rows queue through the same ``OutboundForwardWorker`` as forwards, marked
 ``metadata.system_kind`` instead of ``metadata.forwarded_from``: the worker
@@ -7,7 +7,7 @@ them.
 
 Fixed copy only. The recipient of a confirm mail may be a stranger, so no
 tenant-supplied text (org name, user name, subject) ever reaches the
-subject or body — only the forwarder address, the recipient address, the
+subject or body — only the noreply address, the recipient address, the
 link, and the constant text below.
 """
 
@@ -28,7 +28,7 @@ __all__ = [
     "SYSTEM_KIND_FORWARD_STOPPED",
     "confirm_url",
     "enqueue_system_email",
-    "forwarder_address",
+    "noreply_address",
     "render_forward_confirm",
     "render_forward_stopped",
 ]
@@ -39,13 +39,17 @@ SYSTEM_KIND_FORWARD_CONFIRM = "forward_confirm"
 SYSTEM_KIND_FORWARD_STOPPED = "forward_stopped"
 
 
-def forwarder_address(
+def noreply_address(
     organization_id: UUID, local_prefix_org: str | None, base_domain: str
 ) -> str:
-    """``forwarder+<org>@<base>``. Custom-domain rows carry no org prefix, so
-    fall back to the id-derived one every hail-mail address of the org uses."""
+    """``noreply+<org>@<base>``: the From of every forward and system mail.
+
+    ``noreply`` is a reserved user prefix (schemas.RESERVED_USER_PREFIXES),
+    so no tenant can mint this address and receive another org's bounces.
+    Custom-domain rows carry no org prefix; fall back to the id-derived one
+    every hail-mail address of the org uses."""
     prefix = local_prefix_org or org_prefix_from_id(organization_id)
-    return f"forwarder+{prefix}@{base_domain}"
+    return f"noreply+{prefix}@{base_domain}"
 
 
 def confirm_url(raw_token: str) -> str:
