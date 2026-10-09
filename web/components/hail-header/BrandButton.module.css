@@ -1,0 +1,51 @@
+.primary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  min-height: 48px;
+  padding: 12px 20px;
+  border: 1px solid #1665ff;
+  border-radius: 7px;
+  background: #1665ff;
+  color: #fff !important;
+  font-family: var(--font-grotesk), Arial, sans-serif;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.4;
+  text-decoration: none;
+  cursor: pointer;
+}
+.primary:hover:not(:disabled) {
+  background: #124fcb;
+  border-color: #124fcb;
+}
+.primary:focus-visible {
+  outline: 2px solid #1665ff;
+  outline-offset: 4px;
+}
+.primary:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+/* The arrow slides and draws a line on hover. The form buttons in globals.css use the same motion. */
+.primary::after {
+  content: "›";
+  display: inline-block;
+  width: 1.2em;
+  text-align: right;
+  background: linear-gradient(currentColor, currentColor) left 55%/0 1px
+    no-repeat;
+  transition:
+    background-size 0.22s ease,
+    transform 0.22s ease;
+}
+.primary:is(:hover, :focus-visible):not(:disabled)::after {
+  background-size: 0.72em 1px;
+  transform: translateX(0.12em);
+}
+@media (prefers-reduced-motion: reduce) {
+  .primary::after {
+    transition: none;
+  }
+}

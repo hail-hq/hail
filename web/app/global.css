@@ -1242,6 +1242,118 @@
 
 /* The shared footer theme control applies to the entire costs surface. */
 @media (prefers-color-scheme: dark) {
-  html:not([data-theme="light"]) { --color-ink:#eeeae2; --color-bg:#0a0a0a; --color-paper:#151515; --color-tape:#252525; --color-mute:#aaa69d; --color-dim:#aaa69d; --color-line:#383838; --color-accent:#4b82ff; }
+  html:not([data-theme="light"]) {
+    --color-ink: #eeeae2;
+    --color-bg: #0a0a0a;
+    --color-paper: #151515;
+    --color-tape: #252525;
+    --color-mute: #aaa69d;
+    --color-dim: #aaa69d;
+    --color-line: #383838;
+    --color-accent: #4b82ff;
+  }
 }
-html[data-theme="dark"] { --color-ink:#eeeae2; --color-bg:#0a0a0a; --color-paper:#151515; --color-tape:#252525; --color-mute:#aaa69d; --color-dim:#aaa69d; --color-line:#383838; --color-accent:#4b82ff; }
+html[data-theme="dark"] {
+  --color-ink: #eeeae2;
+  --color-bg: #0a0a0a;
+  --color-paper: #151515;
+  --color-tape: #252525;
+  --color-mute: #aaa69d;
+  --color-dim: #aaa69d;
+  --color-line: #383838;
+  --color-accent: #4b82ff;
+}
+
+/* Match the public website while keeping prices and code easy to scan. */
+body {
+  font-family: var(--font-grotesk), Arial, sans-serif;
+}
+:is(pre, code, kbd, samp) {
+  font-family: var(--font-mono), monospace;
+}
+.btn {
+  border-radius: 7px;
+  font-family: var(--font-grotesk), Arial, sans-serif;
+  text-transform: none;
+}
+.btn.btn-filled,
+.btn.btn-accent {
+  background: #1665ff;
+  border-color: #1665ff;
+  color: #fff;
+}
+.btn.btn-filled:hover,
+.btn.btn-accent:hover {
+  background: #124fcb;
+  border-color: #124fcb;
+  color: #fff;
+}
+.costs-hero-actions a {
+  border-radius: 7px;
+  min-height: 44px;
+}
+.costs-hero-actions a:first-child {
+  background: #1665ff;
+  border-color: #1665ff;
+  color: #fff;
+}
+.costs-hero-actions a:first-child:hover {
+  background: #124fcb;
+  border-color: #124fcb;
+}
+.wrap li code {
+  overflow-wrap: anywhere;
+}
+
+/* Public chrome reads like hail.so: Space Grotesk, sentence case. Prices,
+   model IDs, dates, and code keep the mono face. Unlayered, so it wins over
+   the layered rules above. */
+.dispatch-h1,
+.summary-strip .stat .k,
+.cat-bar h2,
+.cat-bar .count,
+.toolbar .anchors a,
+.chips .lbl,
+.chip,
+.wire-table thead th,
+.compare-link,
+.stale-pill,
+.empty,
+.compare-model-prov,
+.compare-table tbody th.compare-attr-label,
+.add-pill-prov {
+  font-family: var(--font-grotesk), Arial, sans-serif;
+  text-transform: none;
+  letter-spacing: 0;
+}
+.dispatch-tape,
+.filed-panel,
+.summary-strip .stat .n {
+  text-transform: none;
+  letter-spacing: 0;
+}
+.dispatch-h1 {
+  font-weight: 600;
+  letter-spacing: -0.045em;
+}
+.cat-bar h2 {
+  font-weight: 600;
+  letter-spacing: -0.025em;
+}
+.toolbar .anchors a,
+.chip,
+.compare-link,
+.stale-pill,
+.compare-model-prov,
+.compare-table tbody th.compare-attr-label,
+.add-pill-prov,
+.wire-table thead th,
+.summary-strip .stat .k,
+.cat-bar .count,
+.chips .lbl {
+  font-weight: 600;
+}
+.toolbar .anchors a {
+  border-radius: 7px;
+  font-size: 12px;
+}

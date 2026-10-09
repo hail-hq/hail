@@ -20,7 +20,7 @@ export function CompareLink({ modelId }: { modelId: string }) {
       >
         <path d="M8 3v10M3 8h10" />
       </svg>
-      <span>compare</span>
+      <span>Compare</span>
     </a>
   );
 }

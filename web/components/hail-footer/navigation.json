@@ -31,6 +31,14 @@
         "href": "/pricing"
       },
       {
+        "label": "Number prices",
+        "href": "/numbers"
+      },
+      {
+        "label": "Twilio number cost",
+        "href": "/numbers/twilio-phone-number-cost"
+      },
+      {
         "label": "AI model pricing",
         "href": "/costs"
       }

@@ -4,7 +4,7 @@ import { useId, useRef, type ReactNode } from "react";
 import { useDropdown } from "./useDropdown";
 import styles from "./SiteHeader.module.css";
 
-export type SiteHeaderActive = "costs" | "docs";
+export type SiteHeaderActive = "docs" | null;
 
 const RESOURCES = [
   {
@@ -14,14 +14,18 @@ const RESOURCES = [
       { label: "SMS API", href: "/sms" },
       { label: "Email API", href: "/email" },
       { label: "integrations", href: "/integrations" },
+      { label: "MCP connections", href: "/mcp" },
     ],
   },
   {
     label: "guides",
     items: [
       { label: "engineering blog", href: "/blog" },
-      { label: "10dlc timeline", href: "/sms#10dlc-registration" },
-      { label: "domain warmup", href: "/email#domain-warmup" },
+      { label: "10DLC timeline guide", href: "/sms#10dlc-registration" },
+      { label: "Domain warmup guide", href: "/email#domain-warmup" },
+      { label: "Compare platforms", href: "/compare" },
+      { label: "Free tools", href: "/tools" },
+      { label: "AI model pricing", href: "/costs" },
     ],
   },
 ];
@@ -35,11 +39,11 @@ function navLinkClass(isActive: boolean, extra?: string) {
 
 /** Shared marketing navigation with a collapsible mobile menu. */
 export function SiteHeader({
-  active,
+  active = null,
   themeControl,
   origin = "https://hail.so",
 }: {
-  active: SiteHeaderActive;
+  active?: SiteHeaderActive;
   themeControl: ReactNode;
   origin?: string;
 }) {
@@ -80,25 +84,6 @@ export function SiteHeader({
             }
           }}
         >
-          <a href={siteHref("/compare")} className={navLinkClass(false)}>
-            compare
-          </a>
-          <a href={siteHref("/pricing")} className={navLinkClass(false)}>
-            pricing
-          </a>
-          <a href={siteHref("/tools")} className={navLinkClass(false)}>
-            tools
-          </a>
-          <a href={siteHref("/mcp")} className={navLinkClass(false)}>
-            mcp
-          </a>
-          <a
-            href={siteHref("/costs")}
-            aria-current={active === "costs" ? "page" : undefined}
-            className={navLinkClass(active === "costs", styles.navHide)}
-          >
-            database
-          </a>
           <div className={styles.dropdown} ref={ref}>
             <button
               type="button"
@@ -107,7 +92,7 @@ export function SiteHeader({
               aria-expanded={open}
               onClick={() => setOpen(!open)}
             >
-              resources <span aria-hidden="true">{open ? "▴" : "▾"}</span>
+              Product <span aria-hidden="true">{open ? "▴" : "▾"}</span>
             </button>
             {open && (
               <div className={styles.panel}>
@@ -128,18 +113,24 @@ export function SiteHeader({
               </div>
             )}
           </div>
+          <a href={siteHref("/pricing")} className={navLinkClass(false)}>
+            Pricing
+          </a>
           <a
             href={siteHref("/docs")}
             aria-current={active === "docs" ? "page" : undefined}
-            className={navLinkClass(active === "docs", styles.navHide)}
+            className={navLinkClass(active === "docs")}
           >
-            docs
+            Docs
+          </a>
+          <a href={siteHref("/blog")} className={navLinkClass(false)}>
+            Resources
           </a>
         </nav>
         <div className={styles.navActions}>
-          <div className={styles.themeControl}>{themeControl}</div>
+          <div className={styles.themeButton}>{themeControl}</div>
           <a className={styles.primary} href={siteHref("/signup")}>
-            get started
+            Create account
           </a>
           <button
             ref={menuButton}

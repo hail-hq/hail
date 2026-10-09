@@ -9,7 +9,7 @@ type Cell = React.ReactNode;
 type CompareRow = { label: string; cells: Cell[]; emphasis?: boolean };
 
 function StaleMaybe({ d }: { d: string }) {
-  return isStale(d) ? <span className="stale-pill">stale {daysSince(d)}d</span> : null;
+  return isStale(d) ? <span className="stale-pill">Stale {daysSince(d)}d</span> : null;
 }
 
 function CompareGrid({

@@ -88,21 +88,21 @@ export default function CostsPage() {
               <h1 className="dispatch-h1">{COSTS_HERO_COPY.heading}</h1>
               <p>{COSTS_HERO_COPY.description}</p>
               <div className="costs-hero-actions">
-                <a href="/costs/compare">compare models</a>
-                <a href="/costs/costs.md">fetch markdown</a>
+                <a href="/costs/compare">Compare models</a>
+                <a href="/costs/costs.md">Fetch markdown</a>
               </div>
             </div>
             <aside className="filed-panel">
-              <b>FILED {today}</b>
+              <b>Filed {today}</b>
               <span>Schema-validated public dataset.</span>
               <dl>
-                <dt>VERSION</dt>
+                <dt>Version</dt>
                 <dd>2</dd>
-                <dt>VERIFIED</dt>
+                <dt>Verified</dt>
                 <dd>{verified}</dd>
-                <dt>LICENSE</dt>
+                <dt>License</dt>
                 <dd>CC-BY-4.0</dd>
-                <dt>SOURCE</dt>
+                <dt>Source</dt>
                 <dd>
                   <a
                     href="https://github.com/hail-hq/hail/tree/main/costs"
@@ -217,11 +217,8 @@ export default function CostsPage() {
         <div className="wrap">
           <h3
             style={{
-              fontFamily: "var(--font-mono)",
-              fontSize: 11,
-              fontWeight: 700,
-              letterSpacing: "0.14em",
-              textTransform: "uppercase",
+              fontSize: 15,
+              fontWeight: 600,
               color: "var(--color-mute)",
               margin: "0 0 14px",
             }}
