@@ -1484,6 +1484,15 @@ class ForwardTargetResponse(BaseModel):
             "needs a new confirm link (POST /forward-targets/{address}/resend)."
         )
     )
+    pending_reason: Literal["confirm_link", "account_unverified"] | None = Field(
+        default=None,
+        description=(
+            "Why a 'pending' address is not live. 'confirm_link': a confirm mail "
+            "was sent and not yet clicked. 'account_unverified': the address is a "
+            "member's login email whose account email is not verified yet; it goes "
+            "live on the account verify click, no confirm mail. Null otherwise."
+        ),
+    )
     verified_at: datetime | None = Field(
         default=None, description="When the address was verified, ISO 8601."
     )

@@ -1,6 +1,6 @@
 module.exports = {
   // Python — lint with Ruff (auto-fix), format with Black.
-  "**/*.py": ["uvx ruff check --fix", "uvx black"],
+  "**/*.py": ["uvx ruff==0.16.10 check --fix", "uvx black==26.10.0"],
 
   // Go — format.
   "cli/**/*.go": ["gofmt -w"],

@@ -22,7 +22,7 @@ from __future__ import annotations
 
 import secrets
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from hashlib import sha256
 from uuid import UUID
 
@@ -43,7 +43,9 @@ __all__ = [
     "confirm_target",
     "find_by_token",
     "list_targets",
+    "member_emails",
     "normalize_address",
+    "promote_verified_members",
     "reissue_token",
     "statuses_for",
     "stop_targets",
@@ -101,7 +103,7 @@ def _hash(raw_token: str) -> str:
 
 
 def _now() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 def _issue(target: EmailForwardTarget, now: datetime) -> str:
@@ -113,20 +115,61 @@ def _issue(target: EmailForwardTarget, now: datetime) -> str:
     return raw
 
 
-async def verified_member_emails(
-    db: AsyncSession, organization_id: UUID, *, roles: tuple[str, ...] | None = None
+async def member_emails(
+    db: AsyncSession,
+    organization_id: UUID,
+    *,
+    verified: bool | None = None,
+    roles: tuple[str, ...] | None = None,
 ) -> set[str]:
-    """Login emails of the org's members whose email better-auth has verified."""
+    """Login emails of the org's members. ``verified=True`` keeps only those
+    better-auth has verified; ``None`` returns all."""
     stmt = (
         select(User.email)
         .join(OrganizationMember, OrganizationMember.user_id == User.id)
         .where(OrganizationMember.organization_id == organization_id)
-        .where(User.email_verified.is_(True))
     )
+    if verified is not None:
+        stmt = stmt.where(User.email_verified.is_(verified))
     if roles is not None:
         stmt = stmt.where(OrganizationMember.role.in_(roles))
     rows = (await db.execute(stmt)).scalars().all()
     return {normalize_address(e) for e in rows}
+
+
+async def verified_member_emails(
+    db: AsyncSession, organization_id: UUID, *, roles: tuple[str, ...] | None = None
+) -> set[str]:
+    """Login emails of the org's members whose email better-auth has verified."""
+    return await member_emails(db, organization_id, verified=True, roles=roles)
+
+
+async def promote_verified_members(db: AsyncSession, organization_id: UUID) -> int:
+    """Flip pending rows to verified once their address is a verified member
+    login. A password signup is signed in before clicking the account verify
+    link; its "forward to me" row waits here (no confirm mail) and starts
+    the moment the account is verified. Stopped rows are never promoted: a
+    complaint stop ends only with a fresh link. Flushes; returns the count."""
+    verified = await member_emails(db, organization_id, verified=True)
+    if not verified:
+        return 0
+    now = _now()
+    stmt = (
+        select(EmailForwardTarget)
+        .where(EmailForwardTarget.organization_id == organization_id)
+        .where(EmailForwardTarget.status == "pending")
+        .where(EmailForwardTarget.address.in_(verified))
+    )
+    rows = (await db.execute(stmt)).scalars().all()
+    for t in rows:
+        t.status = "verified"
+        t.verified_at = now
+        t.token_hash = None
+        t.token_expires_at = None
+        t.updated_at = now
+    if rows:
+        await db.flush()
+    return len(rows)
 
 
 async def _lock_org(db: AsyncSession, organization_id: UUID) -> None:
@@ -177,6 +220,7 @@ async def check_confirm_budget(
 async def list_targets(
     db: AsyncSession, organization_id: UUID
 ) -> list[EmailForwardTarget]:
+    await promote_verified_members(db, organization_id)
     stmt = (
         select(EmailForwardTarget)
         .where(EmailForwardTarget.organization_id == organization_id)
@@ -204,6 +248,7 @@ async def statuses_for(
 ) -> dict[str, str]:
     """``{normalized address: status}``. Addresses with no row are absent —
     callers treat that as not verified."""
+    await promote_verified_members(db, organization_id)
     rows = await _rows_for(db, organization_id, addresses)
     return {addr: t.status for addr, t in rows.items()}
 
@@ -229,8 +274,14 @@ async def sync_targets(
     new = [a for a in wanted if a not in existing]
     if not new:
         return []
-    members = await verified_member_emails(db, organization_id)
-    strangers = [a for a in new if a not in members]
+    members = await member_emails(db, organization_id, verified=True)
+    # A member whose login email is not yet verified gets a pending row with
+    # no confirm mail: the account verify click promotes it (see
+    # promote_verified_members). One email for the signup, not two.
+    unverified_members = (
+        await member_emails(db, organization_id, verified=False)
+    ) - members
+    strangers = [a for a in new if a not in members and a not in unverified_members]
     if strangers:
         # Caps apply before any row is written so a rejected save leaves
         # the org exactly as it was.
@@ -251,6 +302,10 @@ async def sync_targets(
         if addr in members:
             target.status = "verified"
             target.verified_at = now
+            db.add(target)
+            continue
+        if addr in unverified_members:
+            target.status = "pending"
             db.add(target)
             continue
         target.status = "pending"

@@ -5,13 +5,19 @@ public confirm page needs a POST."""
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import httpx
 import pytest
 from hailhq.core.config import settings
 from hailhq.core.forward_targets import MAX_PENDING_TARGETS, RESEND_COOLDOWN
-from hailhq.core.models import Email, EmailDomain, EmailForwardTarget, User
+from hailhq.core.models import (
+    Email,
+    EmailDomain,
+    EmailForwardTarget,
+    OrganizationMember,
+    User,
+)
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -30,7 +36,7 @@ async def org(async_session: AsyncSession, monkeypatch: pytest.MonkeyPatch):
             name="Alice",
             email="alice@acme.com",
             email_verified=True,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
     )
     domain = EmailDomain(
@@ -41,7 +47,7 @@ async def org(async_session: AsyncSession, monkeypatch: pytest.MonkeyPatch):
         local_prefix_org="acme",
         verification_status="verified",
         provider="ses",
-        verified_at=datetime.now(timezone.utc),
+        verified_at=datetime.now(UTC),
     )
     async_session.add(domain)
     await async_session.commit()
@@ -177,9 +183,7 @@ async def test_resend_cooldown_404_and_409(
             )
         )
     ).scalar_one()
-    target.token_sent_at = (
-        datetime.now(timezone.utc) - RESEND_COOLDOWN - timedelta(seconds=5)
-    )
+    target.token_sent_at = datetime.now(UTC) - RESEND_COOLDOWN - timedelta(seconds=5)
     await async_session.commit()
 
     r = await client.post("/forward-targets/OPS@other.com/resend", headers=headers)
@@ -204,7 +208,7 @@ async def test_stopped_target_resend_restarts_after_confirm(
             address="victim@other.com",
             status="stopped",
             stopped_reason="complaint",
-            stopped_at=datetime.now(timezone.utc),
+            stopped_at=datetime.now(UTC),
         )
     )
     await async_session.commit()
@@ -296,7 +300,7 @@ async def test_same_list_saved_to_two_domain_rows_sends_one_confirm(
         domain="inbox.acme.com",
         verification_status="verified",
         provider="ses",
-        verified_at=datetime.now(timezone.utc),
+        verified_at=datetime.now(UTC),
     )
     async_session.add(custom)
     await async_session.commit()
@@ -353,3 +357,55 @@ async def test_reserved_user_prefixes_cannot_be_minted_or_renamed(
             headers=headers,
         )
         assert r.status_code == 422, (prefix, r.text)
+
+
+@pytest.mark.asyncio
+async def test_unverified_member_waits_for_account_verify_without_mail(
+    client: httpx.AsyncClient, async_session: AsyncSession, org
+):
+    """A password signup is signed in before clicking the account verify
+    link. 'Forward to me' must not send a second mail; it goes live when the
+    account is verified."""
+    org_id, headers, domain = org
+    uid = uuid.uuid4()
+    async_session.add(
+        User(
+            id=uid,
+            name="Bob",
+            email="bob@acme.com",
+            email_verified=False,
+            created_at=datetime.now(UTC),
+        )
+    )
+    async_session.add(
+        OrganizationMember(
+            id=uuid.uuid4(),
+            user_id=uid,
+            organization_id=org_id,
+            role="owner",
+            created_at=datetime.now(UTC),
+        )
+    )
+    await async_session.commit()
+
+    r = await client.patch(
+        f"/email-domains/{domain.id}",
+        json={"inbound_enabled": True, "forward_to": ["Bob@acme.com"]},
+        headers=headers,
+    )
+    assert r.status_code == 200, r.text
+    assert await _queued_system(async_session, org_id) == []
+    r = await client.get("/forward-targets", headers=headers)
+    (item,) = r.json()["items"]
+    assert item["status"] == "pending"
+    assert item["pending_reason"] == "account_unverified"
+    assert item["token_sent_at"] is None
+
+    user = await async_session.get(User, uid)
+    user.email_verified = True
+    await async_session.commit()
+
+    r = await client.get("/forward-targets", headers=headers)
+    (item,) = r.json()["items"]
+    assert item["status"] == "verified" and item["pending_reason"] is None
+    assert await _queued_system(async_session, org_id) == []

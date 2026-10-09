@@ -55,9 +55,15 @@ router = APIRouter(prefix="/forward-targets", tags=["forward-targets"])
 
 
 def _to_response(t: EmailForwardTarget) -> ForwardTargetResponse:
+    pending_reason = None
+    if t.status == "pending":
+        # A pending row that never got a token is a member's own login email
+        # waiting for the account verify click (forward_targets.sync_targets).
+        pending_reason = "confirm_link" if t.token_sent_at else "account_unverified"
     return ForwardTargetResponse(
         address=t.address,
         status=t.status,  # type: ignore[arg-type]
+        pending_reason=pending_reason,
         verified_at=t.verified_at,
         token_sent_at=t.token_sent_at if t.status != "verified" else None,
         stopped_at=t.stopped_at,

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from hailhq.core.forward_targets import (
@@ -18,6 +18,7 @@ from hailhq.core.forward_targets import (
     confirm_target,
     find_by_token,
     list_targets,
+    promote_verified_members,
     reissue_token,
     statuses_for,
     stop_targets,
@@ -30,8 +31,9 @@ from hailhq.core.models import (
     OrganizationMember,
     User,
 )
+from sqlalchemy import select
 
-NOW = datetime.now(timezone.utc)
+NOW = datetime.now(UTC)
 
 
 async def _member(session, org_id, email, *, verified=True):
@@ -66,10 +68,9 @@ async def test_sync_auto_verifies_verified_member_and_issues_token_for_stranger(
     )
     await async_session.commit()
 
-    assert sorted(i.target.address for i in issued) == [
-        "stranger@example.com",
-        "unverified@acme.com",
-    ]
+    # The unverified member gets a pending row but NO confirm mail: the
+    # account verify click promotes it instead.
+    assert [i.target.address for i in issued] == ["stranger@example.com"]
     assert all(len(i.raw_token) > 20 for i in issued)
     statuses = await statuses_for(
         async_session,
@@ -243,3 +244,47 @@ async def test_daily_confirm_budget_blocks_new_targets_and_resends(async_session
     issued.target.token_sent_at = NOW - RESEND_COOLDOWN - timedelta(seconds=1)
     with pytest.raises(ConfirmBudgetExceeded):
         await reissue_token(async_session, issued.target)
+
+
+@pytest.mark.asyncio
+async def test_unverified_member_row_goes_live_on_account_verification(async_session):
+    org_id = uuid.uuid4()
+    await _member(async_session, org_id, "me@acme.com", verified=False)
+    issued = await sync_targets(async_session, org_id, ["me@acme.com"])
+    await async_session.commit()
+    assert issued == []
+    (row,) = await list_targets(async_session, org_id)
+    assert (row.status, row.token_sent_at, row.token_hash) == ("pending", None, None)
+    assert await statuses_for(async_session, org_id, ["me@acme.com"]) == {
+        "me@acme.com": "pending"
+    }
+
+    user = (
+        await async_session.execute(select(User).where(User.email == "me@acme.com"))
+    ).scalar_one()
+    user.email_verified = True
+    await async_session.commit()
+
+    # Both read paths promote: ingest's status lookup and the console list.
+    assert await statuses_for(async_session, org_id, ["me@acme.com"]) == {
+        "me@acme.com": "verified"
+    }
+    await async_session.commit()
+    (row,) = await list_targets(async_session, org_id)
+    assert row.status == "verified" and row.verified_at is not None
+    assert await promote_verified_members(async_session, org_id) == 0
+
+
+@pytest.mark.asyncio
+async def test_stopped_member_row_is_not_promoted(async_session):
+    org_id = uuid.uuid4()
+    await _member(async_session, org_id, "me@acme.com")
+    await sync_targets(async_session, org_id, ["me@acme.com"])
+    await stop_targets(
+        async_session, org_id, ["me@acme.com"], reason="complaint", email_id=None
+    )
+    await async_session.commit()
+    assert await promote_verified_members(async_session, org_id) == 0
+    assert await statuses_for(async_session, org_id, ["me@acme.com"]) == {
+        "me@acme.com": "stopped"
+    }
