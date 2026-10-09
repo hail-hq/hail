@@ -1031,6 +1031,12 @@ DOMAIN_NAME = re.compile(
 # parenthesized suffix is optional, so we don't need an explicit alternation.
 LOCAL_PREFIX = re.compile(r"^[a-z0-9]([a-z0-9-]{0,18}[a-z0-9])?$")
 
+# User prefixes no tenant may mint. ``noreply+<org>@<base>`` is the sender
+# of every forward and system mail; ``forwarder`` was its old name. Org
+# prefixes are free text, so without this another org could own the
+# address a tenant's forwards come from and receive its bounces.
+RESERVED_USER_PREFIXES = frozenset({"noreply", "forwarder"})
+
 
 def _normalize_domain(addr: str) -> str:
     """Lowercase the domain portion of an email address.
@@ -1158,6 +1164,15 @@ class EmailDomainCreate(BaseModel):
             )
         return v
 
+    @field_validator("local_prefix_user")
+    @classmethod
+    def _user_prefix_not_reserved(cls, v: str | None) -> str | None:
+        if v is not None and v in RESERVED_USER_PREFIXES:
+            raise ValueError(
+                f"user prefix {v!r} is reserved for Hail's own sender address"
+            )
+        return v
+
     @model_validator(mode="after")
     def _kind_field_consistency(self):
         if self.kind == "custom":
@@ -1174,6 +1189,16 @@ class EmailDomainCreate(BaseModel):
                 "composes it from local_prefix_user + local_prefix_org"
             )
         return self
+
+
+# Cap on ``forward_to`` per domain row. Every new non-member address costs
+# one confirm mail to a possibly unwilling stranger, so the list stays short.
+MAX_FORWARD_TARGETS = 10
+
+# Email.metadata keys the queue uses internally; POST /emails rejects them.
+RESERVED_EMAIL_METADATA_KEYS = frozenset(
+    {"forwarded_from", "forward_headers", "system_kind"}
+)
 
 
 class EmailDomainPatch(BaseModel):
@@ -1213,7 +1238,14 @@ class EmailDomainPatch(BaseModel):
     )
     forward_to: list[str] | None = Field(
         default=None,
-        description="Email addresses to forward inbound mail to. Omit to leave unchanged.",
+        max_length=MAX_FORWARD_TARGETS,
+        description=(
+            "Email addresses to forward inbound mail to (at most "
+            f"{MAX_FORWARD_TARGETS}). A new address that is not a verified "
+            "member's login email gets a confirm link and receives nothing "
+            "until it is clicked — see GET /forward-targets. Omit to leave "
+            "unchanged."
+        ),
     )
     forward_rate_per_hour: int | None = Field(
         default=None,
@@ -1230,6 +1262,15 @@ class EmailDomainPatch(BaseModel):
             raise ValueError(
                 "must be 1–20 chars of lowercase a–z, 0–9, or '-', "
                 "with no leading or trailing '-'"
+            )
+        return v
+
+    @field_validator("local_prefix_user")
+    @classmethod
+    def _user_prefix_not_reserved(cls, v: str | None) -> str | None:
+        if v is not None and v in RESERVED_USER_PREFIXES:
+            raise ValueError(
+                f"user prefix {v!r} is reserved for Hail's own sender address"
             )
         return v
 
@@ -1427,6 +1468,52 @@ class EmailDomainDnsCheck(BaseModel):
     )
 
 
+ForwardTargetStatus = Literal["pending", "verified", "stopped"]
+
+
+class ForwardTargetResponse(BaseModel):
+    """One forward address of the organization and whether it may receive
+    forwards. Rows come from ``email_forward_targets``; see
+    ``hailhq.core.forward_targets``."""
+
+    address: str = Field(description="Normalized (lower-cased) email address.")
+    status: ForwardTargetStatus = Field(
+        description=(
+            "'verified' receives forwards. 'pending' was sent a confirm link "
+            "that is not yet clicked. 'stopped' got a spam complaint and "
+            "needs a new confirm link (POST /forward-targets/{address}/resend)."
+        )
+    )
+    pending_reason: Literal["confirm_link", "account_unverified"] | None = Field(
+        default=None,
+        description=(
+            "Why a 'pending' address is not live. 'confirm_link': a confirm mail "
+            "was sent and not yet clicked. 'account_unverified': the address is a "
+            "member's login email whose account email is not verified yet; it goes "
+            "live on the account verify click, no confirm mail. Null otherwise."
+        ),
+    )
+    verified_at: datetime | None = Field(
+        default=None, description="When the address was verified, ISO 8601."
+    )
+    token_sent_at: datetime | None = Field(
+        default=None,
+        description="When the latest confirm link was sent, ISO 8601. Null once verified.",
+    )
+    stopped_at: datetime | None = Field(
+        default=None, description="When forwarding was stopped, ISO 8601."
+    )
+    stopped_reason: str | None = Field(
+        default=None, description="Why forwarding was stopped, e.g. 'complaint'."
+    )
+
+
+class ForwardTargetListResponse(BaseModel):
+    items: list[ForwardTargetResponse] = Field(
+        description="Every forward address ever configured for this organization."
+    )
+
+
 class EmailDomainListResponse(BaseModel):
     items: list[EmailDomainResponse] = Field(description="Email domains in this page.")
     next_cursor: str | None = Field(
@@ -1513,12 +1600,28 @@ class EmailCreate(ConsentAttestationMixin):
     )
     metadata: dict = Field(
         default_factory=dict,
-        description="Free-form JSON object attached to the email and echoed back on reads. Not interpreted by Hail.",
+        description=(
+            "Free-form JSON object attached to the email and echoed back on "
+            "reads. Not interpreted by Hail. The keys 'forwarded_from', "
+            "'forward_headers' and 'system_kind' are reserved for Hail's own "
+            "queue bookkeeping and are rejected."
+        ),
     )
     attachment_ids: list[UUID] | None = Field(
         default=None,
         description="Ids returned by POST /email-attachments to attach to this send. Omitted: no attachments.",
     )
+
+    @field_validator("metadata")
+    @classmethod
+    def _metadata_has_no_reserved_keys(cls, v: dict) -> dict:
+        # The outbound worker claims queued rows by these keys (forwards and
+        # Hail's own system mail, which is not metered). A caller must not be
+        # able to plant them on a direct send.
+        bad = sorted(set(v) & RESERVED_EMAIL_METADATA_KEYS)
+        if bad:
+            raise ValueError(f"metadata keys are reserved: {', '.join(bad)}")
+        return v
 
     @field_validator("from_name", mode="before")
     @classmethod

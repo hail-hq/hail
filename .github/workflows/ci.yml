@@ -13,8 +13,10 @@ jobs:
       - uses: astral-sh/setup-uv@v3
         with:
           python-version: "3.12"
-      - run: uvx ruff check .
-      - run: uvx black --check .
+      # Pinned: ruff 0.17.0 (2026-10-09) adds auto-fix rules that fail the whole
+      # tree; bump deliberately with a formatting-only PR.
+      - run: uvx ruff==0.16.10 check .
+      - run: uvx black==26.10.0 --check .
 
   test:
     runs-on: ubuntu-latest

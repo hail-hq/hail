@@ -7,10 +7,11 @@ re-attaches the inbound row's attachments from S3, sends via the
 EmailProvider (headers ride the SESv2 Raw/Headers path), and marks each
 row ``sent`` or ``failed``.
 
-Scope guard: rows WITHOUT ``metadata.forwarded_from`` are direct
-``POST /emails`` rows, sent synchronously inline by the route between
-its own commit and status update — the filter below must never claim
-them or mail double-sends.
+Scope guard: rows WITHOUT ``metadata.forwarded_from`` (or
+``metadata.system_kind`` — Hail's own confirm/notice mail, see
+``hailhq.core.system_email``) are direct ``POST /emails`` rows, sent
+synchronously inline by the route between its own commit and status
+update — the filter below must never claim them or mail double-sends.
 
 Single attempt per row (no retry ladder, absent a crash between send
 and commit — which re-queues at most the one in-flight row): a forward
@@ -36,7 +37,7 @@ from hailhq.core.providers.email.base import EmailProvider, ProviderAttachment
 from hailhq.core.s3_mail import S3MailClient
 from hailhq.core.telemetry import operation, telemetry_enabled
 from hailhq.core.telemetry_identity import identity_scope, resolve_identity
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
@@ -129,7 +130,15 @@ class OutboundForwardWorker:
                     select(Email)
                     .where(Email.status == "queued")
                     .where(Email.direction == "outbound")
-                    .where(Email.metadata_["forwarded_from"].astext.isnot(None))
+                    # Forwards, plus Hail's own system mail (forward-target
+                    # confirm links, complaint notices) which queues the same
+                    # way — see hailhq.core.system_email.
+                    .where(
+                        or_(
+                            Email.metadata_["forwarded_from"].astext.isnot(None),
+                            Email.metadata_["system_kind"].astext.isnot(None),
+                        )
+                    )
                     .order_by(Email.created_at.asc())
                     .limit(1)
                     .with_for_update(skip_locked=True)
@@ -143,11 +152,13 @@ class OutboundForwardWorker:
                 # factory with expire_on_commit would otherwise re-fetch them).
                 forward_org_id = row.organization_id
                 forward_email_id = row.id
+                # System mail is Hail's own, never billed to the tenant.
+                billable = (row.metadata_ or {}).get("system_kind") is None
                 await session.commit()
             if outcome == "deferred":
                 # Transient infra failure (S3) — stop the tick; retry next poll.
                 return processed
-            if outcome == "sent":
+            if outcome == "sent" and billable:
                 # Meter the delivered forward as a billable outbound send. Only
                 # after commit, so we never bill mail that didn't durably send.
                 await self._meter_forward(forward_org_id, forward_email_id)

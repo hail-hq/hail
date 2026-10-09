@@ -1604,7 +1604,8 @@ paths:
                 $ref: "#/components/schemas/EmailDomainResponse"
         "429":
           description:
-            Rate limited. This caller exceeded the general request-rate
+            The organization reached its daily confirm-mail limit for new
+            forward addresses. Rate limited. This caller exceeded the general request-rate
             ceiling. Retry after the Retry-After header (seconds).
           headers:
             Retry-After:
@@ -1788,6 +1789,131 @@ paths:
           description:
             Rate limited. This caller exceeded the general request-rate
             ceiling. Retry after the Retry-After header (seconds).
+          headers:
+            Retry-After:
+              description: Seconds to wait before retrying.
+              schema:
+                type: integer
+            RateLimit-Limit:
+              description: The request ceiling for the current window.
+              schema:
+                type: integer
+            RateLimit-Remaining:
+              description: Requests remaining in the current window.
+              schema:
+                type: integer
+            RateLimit-Reset:
+              description: Seconds until the current window resets.
+              schema:
+                type: integer
+        "422":
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
+  /v1/forward-targets:
+    get:
+      tags:
+        - forward-targets
+      summary: List Forward Targets
+      description:
+        "List every forward address of the organization with its status.
+
+
+        An address appears here once it was ever put in a domain's
+
+        ``forward_to``. Only ``verified`` addresses receive forwards."
+      operationId: list_forward_targets_v1_forward_targets_get
+      parameters:
+        - name: authorization
+          in: header
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            title: Authorization
+      responses:
+        "200":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ForwardTargetListResponse"
+        "429":
+          description:
+            Rate limited. This caller exceeded the general request-rate
+            ceiling. Retry after the Retry-After header (seconds).
+          headers:
+            Retry-After:
+              description: Seconds to wait before retrying.
+              schema:
+                type: integer
+            RateLimit-Limit:
+              description: The request ceiling for the current window.
+              schema:
+                type: integer
+            RateLimit-Remaining:
+              description: Requests remaining in the current window.
+              schema:
+                type: integer
+            RateLimit-Reset:
+              description: Seconds until the current window resets.
+              schema:
+                type: integer
+        "422":
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
+  /v1/forward-targets/{address}/resend:
+    post:
+      tags:
+        - forward-targets
+      summary: Resend Forward Confirm
+      description:
+        "Send a new confirm link to a pending or stopped forward address.
+
+
+        Use this when the first mail got lost, or to restart forwarding after a
+
+        spam complaint stopped it. One link per address every 10 minutes."
+      operationId: resend_forward_confirm_v1_forward_targets__address__resend_post
+      parameters:
+        - name: address
+          in: path
+          required: true
+          schema:
+            type: string
+            title: Address
+        - name: authorization
+          in: header
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            title: Authorization
+      responses:
+        "200":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ForwardTargetResponse"
+        "404":
+          description: No such forward address in this organization.
+        "409":
+          description:
+            The address is already verified, or the organization has no
+            sending identity.
+        "429":
+          description:
+            A confirm link was sent less than 10 minutes ago, or the organization
+            reached its daily confirm-mail limit. Rate limited. This caller exceeded
+            the general request-rate ceiling. Retry after the Retry-After header (seconds).
           headers:
             Retry-After:
               description: Seconds to wait before retrying.
@@ -5827,7 +5953,9 @@ components:
           title: Metadata
           description:
             Free-form JSON object attached to the email and echoed back
-            on reads. Not interpreted by Hail.
+            on reads. Not interpreted by Hail. The keys 'forwarded_from', 'forward_headers'
+            and 'system_kind' are reserved for Hail's own queue bookkeeping and are
+            rejected.
         attachment_ids:
           anyOf:
             - items:
@@ -6026,9 +6154,14 @@ components:
             - items:
                 type: string
               type: array
+              maxItems: 10
             - type: "null"
           title: Forward To
-          description: Email addresses to forward inbound mail to. Omit to leave unchanged.
+          description:
+            "Email addresses to forward inbound mail to (at most 10). A\
+            \ new address that is not a verified member's login email gets a confirm\
+            \ link and receives nothing until it is clicked \u2014 see GET /forward-targets.\
+            \ Omit to leave unchanged."
         forward_rate_per_hour:
           anyOf:
             - type: integer
@@ -7118,6 +7251,87 @@ components:
         - label
       title: FieldSpec
       description: One value the customer types in.
+    ForwardTargetListResponse:
+      properties:
+        items:
+          items:
+            $ref: "#/components/schemas/ForwardTargetResponse"
+          type: array
+          title: Items
+          description: Every forward address ever configured for this organization.
+      type: object
+      required:
+        - items
+      title: ForwardTargetListResponse
+    ForwardTargetResponse:
+      properties:
+        address:
+          type: string
+          title: Address
+          description: Normalized (lower-cased) email address.
+        status:
+          type: string
+          enum:
+            - pending
+            - verified
+            - stopped
+          title: Status
+          description:
+            "'verified' receives forwards. 'pending' was sent a confirm
+            link that is not yet clicked. 'stopped' got a spam complaint and needs
+            a new confirm link (POST /forward-targets/{address}/resend)."
+        pending_reason:
+          anyOf:
+            - type: string
+              enum:
+                - confirm_link
+                - account_unverified
+            - type: "null"
+          title: Pending Reason
+          description: "Why a 'pending' address is not live. 'confirm_link': a
+            confirm mail was sent and not yet clicked. 'account_unverified': the
+            address is a member's login email whose account email is not verified
+            yet; it goes live on the account verify click, no confirm mail. Null otherwise."
+        verified_at:
+          anyOf:
+            - type: string
+              format: date-time
+            - type: "null"
+          title: Verified At
+          description: When the address was verified, ISO 8601.
+        token_sent_at:
+          anyOf:
+            - type: string
+              format: date-time
+            - type: "null"
+          title: Token Sent At
+          description:
+            When the latest confirm link was sent, ISO 8601. Null once
+            verified.
+        stopped_at:
+          anyOf:
+            - type: string
+              format: date-time
+            - type: "null"
+          title: Stopped At
+          description: When forwarding was stopped, ISO 8601.
+        stopped_reason:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Stopped Reason
+          description: Why forwarding was stopped, e.g. 'complaint'.
+      type: object
+      required:
+        - address
+        - status
+      title: ForwardTargetResponse
+      description:
+        "One forward address of the organization and whether it may receive
+
+        forwards. Rows come from ``email_forward_targets``; see
+
+        ``hailhq.core.forward_targets``."
     HTTPValidationError:
       properties:
         detail:

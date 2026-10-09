@@ -13,9 +13,21 @@ from datetime import datetime, timezone
 from typing import Any, get_args
 from uuid import UUID, uuid4
 
-from hailhq.core.models import Email, EmailEvent
+from hailhq.core.config import settings
+from hailhq.core.forward_targets import (
+    normalize_address,
+    stop_targets,
+    verified_member_emails,
+)
+from hailhq.core.models import Email, EmailDomain, EmailEvent
 from hailhq.core.providers.email.inbound.ses_delivery import DeliveryEvent
 from hailhq.core.schemas import EmailEventKind
+from hailhq.core.system_email import (
+    SYSTEM_KIND_FORWARD_STOPPED,
+    enqueue_system_email,
+    noreply_address,
+    render_forward_stopped,
+)
 from sqlalchemy import select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -150,6 +162,12 @@ async def apply_delivery_event(
         )
         status_changed = result.rowcount == 1
 
+    if event.kind == "complained" and (email.metadata_ or {}).get("forwarded_from"):
+        # First delivery of this complaint only (the dedup insert above
+        # returned early on a redelivery), so a target is stopped and the
+        # owners notified exactly once per complaint.
+        await _stop_forwarding_on_complaint(db, email, event)
+
     if event.kind in _FANOUT_KINDS:
         await fanout(
             db,
@@ -162,3 +180,59 @@ async def apply_delivery_event(
 
     await db.flush()
     return ApplyResult(email_id=email.id, inserted=True, status_changed=status_changed)
+
+
+async def _stop_forwarding_on_complaint(
+    db: AsyncSession, email: Email, event: DeliveryEvent
+) -> None:
+    """A spam complaint on a forward stops that target and tells the owners.
+
+    Only providers with a feedback loop to SES (Yahoo, Microsoft, ...) send
+    complaints here; Gmail does not. The notice goes to verified owner /
+    admin logins except the complained address itself — SES's account
+    suppression blocks that one anyway. When nobody is left, the console
+    badge is the only signal.
+    """
+    to_addresses = [normalize_address(a) for a in (email.to_addresses or [])]
+    reported = [
+        normalize_address(r)
+        for r in (event.detail.get("recipients") or [])
+        if normalize_address(r) in to_addresses
+    ]
+    addresses = reported or to_addresses
+    if not addresses:
+        return
+    stopped = await stop_targets(
+        db,
+        email.organization_id,
+        addresses,
+        reason="complaint",
+        email_id=email.id,
+    )
+    if not stopped or email.email_domain_id is None:
+        return
+
+    domain = await db.get(EmailDomain, email.email_domain_id)
+    sender = noreply_address(
+        email.organization_id,
+        domain.local_prefix_org if domain is not None else None,
+        settings.hail_mail_base_domain,
+    )
+    owners = await verified_member_emails(
+        db, email.organization_id, roles=("owner", "admin")
+    )
+    stopped_addresses = {t.address for t in stopped}
+    for target in stopped:
+        subject, text, html = render_forward_stopped(address=target.address)
+        for owner in sorted(owners - stopped_addresses):
+            await enqueue_system_email(
+                db,
+                organization_id=email.organization_id,
+                email_domain_id=email.email_domain_id,
+                from_address=sender,
+                to=owner,
+                subject=subject,
+                body_text=text,
+                body_html=html,
+                kind=SYSTEM_KIND_FORWARD_STOPPED,
+            )

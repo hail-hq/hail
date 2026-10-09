@@ -28,11 +28,11 @@ def test_build_forwarded_rewrites_from_and_reply_to():
     fwd = build_forwarded(
         parsed=_parsed(),
         target="team@acme.com",
-        forwarder_address="forwarder+acme@mail.hail.so",
+        forwarder_address="noreply+acme@mail.hail.so",
         inbound_id=inbound_id,
         hops=0,
     )
-    assert fwd.from_address == "forwarder+acme@mail.hail.so"
+    assert fwd.from_address == "noreply+acme@mail.hail.so"
     assert fwd.reply_to == "alice@example.com"
     assert fwd.to_addresses == ["team@acme.com"]
     assert fwd.subject.startswith("Fwd:")
@@ -48,7 +48,7 @@ def test_build_forwarded_does_not_double_prefix_subject():
     fwd = build_forwarded(
         parsed=_parsed(subject="Fwd: already"),
         target="team@acme.com",
-        forwarder_address="forwarder+acme@mail.hail.so",
+        forwarder_address="noreply+acme@mail.hail.so",
         inbound_id=uuid4(),
         hops=0,
     )
@@ -59,7 +59,7 @@ def test_build_forwarded_handles_fw_prefix_case_insensitive():
     fwd = build_forwarded(
         parsed=_parsed(subject="FW: thing"),
         target="team@acme.com",
-        forwarder_address="forwarder+acme@mail.hail.so",
+        forwarder_address="noreply+acme@mail.hail.so",
         inbound_id=uuid4(),
         hops=0,
     )
@@ -70,7 +70,7 @@ def test_build_forwarded_increments_hop_counter():
     fwd = build_forwarded(
         parsed=_parsed(),
         target="team@acme.com",
-        forwarder_address="forwarder+acme@mail.hail.so",
+        forwarder_address="noreply+acme@mail.hail.so",
         inbound_id=uuid4(),
         hops=2,
     )
@@ -92,7 +92,7 @@ def test_build_forwarded_sets_references_and_html_preamble():
     fwd = build_forwarded(
         parsed=parsed,
         target="ops@example.com",
-        forwarder_address="forwarder+acme@mail.hail.so",
+        forwarder_address="noreply+acme@mail.hail.so",
         inbound_id=uuid4(),
         hops=0,
     )
@@ -115,7 +115,7 @@ def test_build_forwarded_bodyless_gets_preamble_text():
     fwd = build_forwarded(
         parsed=parsed,
         target="ops@example.com",
-        forwarder_address="forwarder+acme@mail.hail.so",
+        forwarder_address="noreply+acme@mail.hail.so",
         inbound_id=uuid4(),
         hops=0,
     )
@@ -176,7 +176,7 @@ def test_build_forwarded_strips_crlf_from_hostile_headers():
     fwd = build_forwarded(
         parsed=parsed,
         target="ops@example.com",
-        forwarder_address="forwarder+acme@mail.hail.so",
+        forwarder_address="noreply+acme@mail.hail.so",
         inbound_id=uuid4(),
         hops=0,
     )
@@ -200,7 +200,7 @@ def test_build_forwarded_does_not_append_footer():
     fwd = build_forwarded(
         parsed=parsed,
         target="ops@example.com",
-        forwarder_address="forwarder+acme@mail.hail.so",
+        forwarder_address="noreply+acme@mail.hail.so",
         inbound_id=uuid4(),
         hops=0,
     )

@@ -27,6 +27,7 @@ from hailhq.api.routes import email_attachments as email_attachments_routes
 from hailhq.api.routes import email_domains as email_domains_routes
 from hailhq.api.routes import emails as emails_routes
 from hailhq.api.routes import events as events_routes
+from hailhq.api.routes import forward_targets as forward_targets_routes
 from hailhq.api.routes import numbers as numbers_routes
 from hailhq.api.routes import providers as providers_routes
 from hailhq.api.routes import sms as sms_routes
@@ -445,6 +446,7 @@ _CUSTOMER_ROUTERS = [
     emails_routes.router,
     events_routes.router,
     email_domains_routes.router,
+    forward_targets_routes.router,
     numbers_routes.router,
     webhooks_routes.router,
     unsubscribe_routes.router,

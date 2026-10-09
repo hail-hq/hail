@@ -4,7 +4,9 @@ POST   /email-domains             — register a custom domain or mint a hail-ma
 GET    /email-domains             — cursor-paginated list (org-scoped).
 GET    /email-domains/{id}        — single domain (org-scoped).
 GET    /email-domains/{id}/dns-check — DNS host + record observation + DMARC (org-scoped, read-only).
-PATCH  /email-domains/{id}        — edit the user/org prefix on a hail-mail row.
+PATCH  /email-domains/{id}        — edit the user/org prefix on a hail-mail row,
+                                     or the inbound action (forward_to — new
+                                     addresses get a confirm link first).
 POST   /email-domains/{id}/verify — re-poll the email provider's view of the identity.
 DELETE /email-domains/{id}        — delete from provider + DB (idempotent on missing).
 
@@ -39,7 +41,10 @@ from hailhq.api.audit import actor_of, write_audit_log
 from hailhq.api.deps import Principal, get_current_principal
 from hailhq.api.errors import unprocessable
 from hailhq.api.pagination import fetch_cursor_page
-from hailhq.api.ratelimit import GENERAL_RATE_LIMITED_RESPONSES
+from hailhq.api.ratelimit import (
+    GENERAL_RATE_LIMITED_RESPONSES,
+    merge_rate_limited_responses,
+)
 from hailhq.api.route_prefixes import request_mount_prefix
 from hailhq.core.config import settings
 from hailhq.core.db import get_session
@@ -56,11 +61,20 @@ from hailhq.core.dns_lookup import (
     ses_inbound_host,
 )
 from hailhq.core.email_sender import from_address_for
+from hailhq.core.forward_targets import (
+    MAX_CONFIRM_MAILS_PER_DAY,
+    MAX_PENDING_TARGETS,
+    ConfirmBudgetExceeded,
+    IssuedToken,
+    PendingLimitExceeded,
+    sync_targets,
+)
 from hailhq.core.hail_mail import org_prefix_from_id
 from hailhq.core.models import Email, EmailDomain
 from hailhq.core.providers.email import EmailProvider, SesEmailProvider
 from hailhq.core.schemas import (
     LOCAL_PREFIX,
+    RESERVED_USER_PREFIXES,
     DmarcCheck,
     DnsProviderSchema,
     DnsRecordSchema,
@@ -71,6 +85,13 @@ from hailhq.core.schemas import (
     EmailDomainPatch,
     EmailDomainResponse,
     ObservedDnsRecord,
+)
+from hailhq.core.system_email import (
+    SYSTEM_KIND_FORWARD_CONFIRM,
+    confirm_url,
+    enqueue_system_email,
+    noreply_address,
+    render_forward_confirm,
 )
 from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
@@ -195,6 +216,11 @@ def resolve_hail_mail_prefixes(
 
     user = body_user or env_user or settings.hail_mail_default_user_prefix
     org = body_org or env_org or org_prefix_from_id(organization_id)
+    if user in RESERVED_USER_PREFIXES:
+        raise unprocessable(
+            f"user prefix {user!r} is reserved for Hail's own sender address",
+            loc=["body", "local_prefix_user"],
+        )
     if not user:
         raise HTTPException(
             status_code=http_status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -713,6 +739,14 @@ async def dns_check_email_domain(
 @router.patch(
     "/{domain_id}",
     response_model=EmailDomainResponse,
+    responses=merge_rate_limited_responses(
+        {
+            429: {
+                "description": "The organization reached its daily confirm-mail limit for new forward addresses."
+            }
+        },
+        GENERAL_RATE_LIMITED_RESPONSES,
+    ),
 )
 async def patch_email_domain(
     domain_id: UUID,
@@ -768,6 +802,49 @@ async def patch_email_domain(
 
     if not updates:
         return EmailDomainResponse.model_validate(sd)
+
+    # Every forward address needs proof it wants the mail. A brand-new
+    # address that is not a verified member login gets one confirm mail,
+    # queued in this same transaction; re-saving a list sends nothing.
+    issued: list[IssuedToken] = []
+    if body.forward_to:
+        try:
+            issued = await sync_targets(db, sd.organization_id, body.forward_to)
+        except PendingLimitExceeded as exc:
+            raise unprocessable(
+                f"too many unconfirmed forward addresses (max "
+                f"{MAX_PENDING_TARGETS}); wait for confirmations or remove some",
+                loc=["body", "forward_to"],
+            ) from exc
+        except ConfirmBudgetExceeded as exc:
+            raise HTTPException(
+                status_code=http_status.HTTP_429_TOO_MANY_REQUESTS,
+                detail=(
+                    f"confirm-mail limit reached ({MAX_CONFIRM_MAILS_PER_DAY} per "
+                    "day); try again tomorrow"
+                ),
+            ) from exc
+    if issued:
+        sender = noreply_address(
+            sd.organization_id, sd.local_prefix_org, settings.hail_mail_base_domain
+        )
+        for item in issued:
+            subject, text, html = render_forward_confirm(
+                address=item.target.address,
+                forwarder=sender,
+                url=confirm_url(item.raw_token),
+            )
+            await enqueue_system_email(
+                db,
+                organization_id=sd.organization_id,
+                email_domain_id=sd.id,
+                from_address=sender,
+                to=item.target.address,
+                subject=subject,
+                body_text=text,
+                body_html=html,
+                kind=SYSTEM_KIND_FORWARD_CONFIRM,
+            )
 
     try:
         await db.execute(

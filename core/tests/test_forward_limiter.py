@@ -37,7 +37,7 @@ async def _seed_forwarded_row(
         Email(
             organization_id=org_id,
             email_domain_id=domain_id,
-            from_address="forwarder+acme@mail.hail.so",
+            from_address="noreply+acme@mail.hail.so",
             to_addresses=["x@example.com"],
             subject="Fwd: t",
             body_text="x",
@@ -75,7 +75,7 @@ async def test_at_cap_denies(async_session):
             Email(
                 organization_id=org_id,
                 email_domain_id=domain.id,
-                from_address="forwarder+acme@mail.hail.so",
+                from_address="noreply+acme@mail.hail.so",
                 to_addresses=["x@example.com"],
                 subject="Fwd: t",
                 body_text="x",
@@ -108,7 +108,7 @@ async def test_override_overrides_default(async_session):
             Email(
                 organization_id=org_id,
                 email_domain_id=domain.id,
-                from_address="forwarder+acme@mail.hail.so",
+                from_address="noreply+acme@mail.hail.so",
                 to_addresses=["x@example.com"],
                 subject="Fwd: t",
                 body_text="x",
@@ -141,7 +141,7 @@ async def test_non_forward_outbound_rows_dont_count(async_session):
             Email(
                 organization_id=org_id,
                 email_domain_id=domain.id,
-                from_address="forwarder+acme@mail.hail.so",
+                from_address="noreply+acme@mail.hail.so",
                 to_addresses=["x@example.com"],
                 subject="t",
                 body_text="x",

@@ -89,6 +89,12 @@ class User(Base):
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
     name: Mapped[str] = mapped_column(Text, nullable=False)
     email: Mapped[str] = mapped_column(Text, nullable=False)
+    # better-auth's flag. Read by forward-target verification: only a
+    # verified login email auto-verifies as a forward target — an attacker
+    # can register a victim's address and never click the verify link.
+    email_verified: Mapped[bool] = mapped_column(
+        Boolean, server_default=text("false"), nullable=False
+    )
     created_at: Mapped[datetime] = mapped_column(TS, nullable=False)
     phone_number: Mapped[str | None] = mapped_column(Text, nullable=True)
 
@@ -1083,6 +1089,12 @@ class EmailDomain(Base):
             "AND local_prefix_org IS NULL)",
             name="email_domains_prefix_kind_consistency",
         ),
+        # Mirrors migration 0056: ``noreply+<org>@`` is Hail's own sender.
+        CheckConstraint(
+            "local_prefix_user IS NULL "
+            "OR local_prefix_user NOT IN ('noreply','forwarder')",
+            name="email_domains_user_prefix_not_reserved",
+        ),
         # An org can't register the same domain twice.  Custom domains are
         # globally unique (one org per domain) — see the partial index below.
         # hail_mail rows are org-scoped by this constraint only (their global
@@ -1111,6 +1123,63 @@ class EmailDomain(Base):
             "local_prefix_org",
             unique=True,
             postgresql_where=text("kind = 'hail_mail'"),
+        ),
+    )
+
+
+class EmailForwardTarget(Base):
+    """One forward address per organization, with proof it wants the mail.
+
+    ``email_domains.forward_to`` is the configured list; this table says
+    whether each address may actually receive forwards. Inbound ingest
+    forwards only to ``status='verified'`` rows. See
+    ``hailhq.core.forward_targets`` for the state machine.
+    """
+
+    __tablename__ = "email_forward_targets"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    organization_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), nullable=False
+    )
+    # Lower-cased, trimmed. Matching against forward_to normalizes the same way.
+    address: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(Text, server_default="pending", nullable=False)
+    # sha256 of the raw confirm token; the raw token only ever lives in the
+    # confirm email. NULL once the row is verified.
+    token_hash: Mapped[str | None] = mapped_column(Text, nullable=True)
+    token_expires_at: Mapped[datetime | None] = mapped_column(TS, nullable=True)
+    token_sent_at: Mapped[datetime | None] = mapped_column(TS, nullable=True)
+    verified_at: Mapped[datetime | None] = mapped_column(TS, nullable=True)
+    stopped_at: Mapped[datetime | None] = mapped_column(TS, nullable=True)
+    stopped_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # The forward row whose complaint stopped this address (no FK: emails
+    # may be purged independently).
+    stopped_email_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        TS, server_default=text("now()"), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        TS, server_default=text("now()"), nullable=False
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('pending','verified','stopped')",
+            name="email_forward_targets_status_check",
+        ),
+        UniqueConstraint(
+            "organization_id", "address", name="email_forward_targets_org_address_uq"
+        ),
+        Index(
+            "email_forward_targets_token_hash_idx",
+            "token_hash",
+            unique=True,
+            postgresql_where=text("token_hash IS NOT NULL"),
         ),
     )
 
