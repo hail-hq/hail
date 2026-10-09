@@ -58,7 +58,14 @@ from hailhq.core.dns_lookup import (
     ses_inbound_host,
 )
 from hailhq.core.email_sender import from_address_for
-from hailhq.core.forward_targets import IssuedToken, sync_targets
+from hailhq.core.forward_targets import (
+    MAX_CONFIRM_MAILS_PER_DAY,
+    MAX_PENDING_TARGETS,
+    ConfirmBudgetExceeded,
+    IssuedToken,
+    PendingLimitExceeded,
+    sync_targets,
+)
 from hailhq.core.hail_mail import org_prefix_from_id
 from hailhq.core.models import Email, EmailDomain
 from hailhq.core.providers.email import EmailProvider, SesEmailProvider
@@ -723,6 +730,11 @@ async def dns_check_email_domain(
 @router.patch(
     "/{domain_id}",
     response_model=EmailDomainResponse,
+    responses={
+        429: {
+            "description": "The organization reached its daily confirm-mail limit for new forward addresses."
+        },
+    },
 )
 async def patch_email_domain(
     domain_id: UUID,
@@ -784,7 +796,22 @@ async def patch_email_domain(
     # queued in this same transaction; re-saving a list sends nothing.
     issued: list[IssuedToken] = []
     if body.forward_to:
-        issued = await sync_targets(db, sd.organization_id, body.forward_to)
+        try:
+            issued = await sync_targets(db, sd.organization_id, body.forward_to)
+        except PendingLimitExceeded as exc:
+            raise unprocessable(
+                f"too many unconfirmed forward addresses (max "
+                f"{MAX_PENDING_TARGETS}); wait for confirmations or remove some",
+                loc=["body", "forward_to"],
+            ) from exc
+        except ConfirmBudgetExceeded as exc:
+            raise HTTPException(
+                status_code=http_status.HTTP_429_TOO_MANY_REQUESTS,
+                detail=(
+                    f"confirm-mail limit reached ({MAX_CONFIRM_MAILS_PER_DAY} per "
+                    "day); try again tomorrow"
+                ),
+            ) from exc
     if issued:
         sender = forwarder_address(
             sd.organization_id, sd.local_prefix_org, settings.hail_mail_base_domain

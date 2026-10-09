@@ -1604,25 +1604,8 @@ paths:
                 $ref: "#/components/schemas/EmailDomainResponse"
         "429":
           description:
-            Rate limited. This caller exceeded the general request-rate
-            ceiling. Retry after the Retry-After header (seconds).
-          headers:
-            Retry-After:
-              description: Seconds to wait before retrying.
-              schema:
-                type: integer
-            RateLimit-Limit:
-              description: The request ceiling for the current window.
-              schema:
-                type: integer
-            RateLimit-Remaining:
-              description: Requests remaining in the current window.
-              schema:
-                type: integer
-            RateLimit-Reset:
-              description: Seconds until the current window resets.
-              schema:
-                type: integer
+            The organization reached its daily confirm-mail limit for new
+            forward addresses.
         "422":
           description: Validation Error
           content:
@@ -5951,7 +5934,9 @@ components:
           title: Metadata
           description:
             Free-form JSON object attached to the email and echoed back
-            on reads. Not interpreted by Hail.
+            on reads. Not interpreted by Hail. The keys 'forwarded_from', 'forward_headers'
+            and 'system_kind' are reserved for Hail's own queue bookkeeping and are
+            rejected.
         attachment_ids:
           anyOf:
             - items:

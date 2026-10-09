@@ -1180,6 +1180,11 @@ class EmailDomainCreate(BaseModel):
 # one confirm mail to a possibly unwilling stranger, so the list stays short.
 MAX_FORWARD_TARGETS = 10
 
+# Email.metadata keys the queue uses internally; POST /emails rejects them.
+RESERVED_EMAIL_METADATA_KEYS = frozenset(
+    {"forwarded_from", "forward_headers", "system_kind"}
+)
+
 
 class EmailDomainPatch(BaseModel):
     """Body for PATCH /email-domains/{id}.
@@ -1562,12 +1567,28 @@ class EmailCreate(ConsentAttestationMixin):
     )
     metadata: dict = Field(
         default_factory=dict,
-        description="Free-form JSON object attached to the email and echoed back on reads. Not interpreted by Hail.",
+        description=(
+            "Free-form JSON object attached to the email and echoed back on "
+            "reads. Not interpreted by Hail. The keys 'forwarded_from', "
+            "'forward_headers' and 'system_kind' are reserved for Hail's own "
+            "queue bookkeeping and are rejected."
+        ),
     )
     attachment_ids: list[UUID] | None = Field(
         default=None,
         description="Ids returned by POST /email-attachments to attach to this send. Omitted: no attachments.",
     )
+
+    @field_validator("metadata")
+    @classmethod
+    def _metadata_has_no_reserved_keys(cls, v: dict) -> dict:
+        # The outbound worker claims queued rows by these keys (forwards and
+        # Hail's own system mail, which is not metered). A caller must not be
+        # able to plant them on a direct send.
+        bad = sorted(set(v) & RESERVED_EMAIL_METADATA_KEYS)
+        if bad:
+            raise ValueError(f"metadata keys are reserved: {', '.join(bad)}")
+        return v
 
     @field_validator("from_name", mode="before")
     @classmethod

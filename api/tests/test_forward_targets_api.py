@@ -10,7 +10,7 @@ from datetime import datetime, timedelta, timezone
 import httpx
 import pytest
 from hailhq.core.config import settings
-from hailhq.core.forward_targets import RESEND_COOLDOWN
+from hailhq.core.forward_targets import MAX_PENDING_TARGETS, RESEND_COOLDOWN
 from hailhq.core.models import Email, EmailDomain, EmailForwardTarget, User
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -239,3 +239,45 @@ async def test_forward_targets_are_org_scoped(
     assert r.json()["items"] == []
     r = await client.post("/forward-targets/other@org.com/resend", headers=headers)
     assert r.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_patch_caps_unconfirmed_addresses_across_saves(
+    client: httpx.AsyncClient, async_session: AsyncSession, org
+):
+    org_id, headers, domain = org
+    r = await client.patch(
+        f"/email-domains/{domain.id}",
+        json={"forward_to": [f"s{i}@other.com" for i in range(MAX_PENDING_TARGETS)]},
+        headers=headers,
+    )
+    assert r.status_code == 200, r.text
+    r = await client.patch(
+        f"/email-domains/{domain.id}",
+        json={"forward_to": ["one-more@other.com"]},
+        headers=headers,
+    )
+    assert r.status_code == 422, r.text
+    assert "unconfirmed" in r.text
+    assert len(await _queued_system(async_session, org_id)) == MAX_PENDING_TARGETS
+
+
+@pytest.mark.asyncio
+async def test_post_emails_rejects_reserved_metadata_keys(
+    client: httpx.AsyncClient, org
+):
+    _, headers, _domain = org
+    for key in ("system_kind", "forwarded_from", "forward_headers"):
+        r = await client.post(
+            "/emails",
+            json={
+                "to": ["bob@example.com"],
+                "subject": "hi",
+                "body_text": "hello",
+                "recipient_consent": True,
+                "metadata": {key: "x"},
+            },
+            headers=headers,
+        )
+        assert r.status_code == 422, (key, r.text)
+        assert "reserved" in r.text

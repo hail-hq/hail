@@ -24,7 +24,9 @@ from hailhq.api.ratelimit import GENERAL_RATE_LIMITED_RESPONSES
 from hailhq.core.config import settings
 from hailhq.core.db import get_session
 from hailhq.core.forward_targets import (
+    MAX_CONFIRM_MAILS_PER_DAY,
     AlreadyVerified,
+    ConfirmBudgetExceeded,
     ResendTooSoon,
     confirm_target,
     find_by_token,
@@ -98,7 +100,9 @@ async def _sending_identity(db: AsyncSession, organization_id) -> EmailDomain | 
         409: {
             "description": "The address is already verified, or the organization has no sending identity."
         },
-        429: {"description": "A confirm link was sent less than 10 minutes ago."},
+        429: {
+            "description": "A confirm link was sent less than 10 minutes ago, or the organization reached its daily confirm-mail limit."
+        },
         **GENERAL_RATE_LIMITED_RESPONSES,
     },
 )
@@ -144,6 +148,14 @@ async def resend_forward_confirm(
             status_code=http_status.HTTP_429_TOO_MANY_REQUESTS,
             detail=f"a confirm link was sent recently; retry in {retry}s",
             headers={"Retry-After": str(retry)},
+        ) from exc
+    except ConfirmBudgetExceeded as exc:
+        raise HTTPException(
+            status_code=http_status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=(
+                f"confirm-mail limit reached ({MAX_CONFIRM_MAILS_PER_DAY} per "
+                "day); try again tomorrow"
+            ),
         ) from exc
 
     sender = forwarder_address(

@@ -7,9 +7,13 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 from hailhq.core.forward_targets import (
+    MAX_CONFIRM_MAILS_PER_DAY,
+    MAX_PENDING_TARGETS,
     RESEND_COOLDOWN,
     TOKEN_TTL,
     AlreadyVerified,
+    ConfirmBudgetExceeded,
+    PendingLimitExceeded,
     ResendTooSoon,
     confirm_target,
     find_by_token,
@@ -19,7 +23,13 @@ from hailhq.core.forward_targets import (
     stop_targets,
     sync_targets,
 )
-from hailhq.core.models import EmailForwardTarget, OrganizationMember, User
+from hailhq.core.models import (
+    Email,
+    EmailDomain,
+    EmailForwardTarget,
+    OrganizationMember,
+    User,
+)
 
 NOW = datetime.now(timezone.utc)
 
@@ -170,3 +180,66 @@ async def test_stop_then_reconfirm(async_session):
     await async_session.commit()
     assert me.status == "verified" and me.stopped_at is None
     assert isinstance(me, EmailForwardTarget)
+
+
+@pytest.mark.asyncio
+async def test_pending_cap_blocks_a_second_list_of_strangers(async_session):
+    """Saving a fresh list of strangers on every PATCH must not turn Hail into
+    a confirm-mail cannon: unconfirmed rows count across saves."""
+    org_id = uuid.uuid4()
+    first = [f"s{i}@example.com" for i in range(MAX_PENDING_TARGETS)]
+    issued = await sync_targets(async_session, org_id, first)
+    await async_session.commit()
+    assert len(issued) == MAX_PENDING_TARGETS
+
+    with pytest.raises(PendingLimitExceeded):
+        await sync_targets(async_session, org_id, ["one-more@example.com"])
+    # Nothing was written by the rejected save.
+    assert len(await list_targets(async_session, org_id)) == MAX_PENDING_TARGETS
+    # A verified member is not a stranger and still goes through.
+    await _member(async_session, org_id, "me@acme.com")
+    assert await sync_targets(async_session, org_id, ["me@acme.com"]) == []
+
+
+async def _queued_confirm_mails(session, org_id, n):
+    dom = EmailDomain(
+        organization_id=org_id,
+        kind="hail_mail",
+        domain="a+b@mail.hail.so",
+        local_prefix_user="a",
+        local_prefix_org="b",
+        verification_status="verified",
+        provider="ses",
+    )
+    session.add(dom)
+    await session.flush()
+    for i in range(n):
+        session.add(
+            Email(
+                organization_id=org_id,
+                email_domain_id=dom.id,
+                direction="outbound",
+                from_address="forwarder+b@mail.hail.so",
+                to_addresses=[f"x{i}@example.com"],
+                subject="Confirm email forwarding from Hail",
+                body_text="confirm",
+                status="sent",
+                provider="ses",
+                metadata_={"system_kind": "forward_confirm"},
+            )
+        )
+    await session.flush()
+
+
+@pytest.mark.asyncio
+async def test_daily_confirm_budget_blocks_new_targets_and_resends(async_session):
+    org_id = uuid.uuid4()
+    (issued,) = await sync_targets(async_session, org_id, ["a@example.com"])
+    await _queued_confirm_mails(async_session, org_id, MAX_CONFIRM_MAILS_PER_DAY)
+    await async_session.commit()
+
+    with pytest.raises(ConfirmBudgetExceeded):
+        await sync_targets(async_session, org_id, ["b@example.com"])
+    issued.target.token_sent_at = NOW - RESEND_COOLDOWN - timedelta(seconds=1)
+    with pytest.raises(ConfirmBudgetExceeded):
+        await reissue_token(async_session, issued.target)
