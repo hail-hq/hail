@@ -1888,9 +1888,10 @@ paths:
         "409":
           description:
             The quote expired, the number is taken, the price changed,
-            or the carrier rejected or failed the order. In the last case the credit
-            hold is refunded and the detail gives the reason. Also returned when the
-            quote's number was released since it was bought.
+            expected_total_cents differs from the quoted total, or the carrier rejected
+            or failed the order. In the last case the credit hold is refunded and
+            the detail gives the reason. Also returned when the quote's number was
+            released since it was bought.
         "503":
           description:
             The carrier lookup or number price is unavailable, or no inventory
@@ -7259,6 +7260,16 @@ components:
             "Kind of number to acquire: 'local', 'mobile', 'toll_free',
             or 'national'."
           default: local
+        expected_total_cents:
+          anyOf:
+            - type: integer
+              minimum: 0.0
+            - type: "null"
+          title: Expected Total Cents
+          description:
+            "The total the caller expects to pay now: the quoted monthly
+            price plus the setup price, in cents. When set, the order is refused with
+            409 if the quoted total differs."
       additionalProperties: false
       type: object
       required:

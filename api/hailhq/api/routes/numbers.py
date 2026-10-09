@@ -109,7 +109,8 @@ async def _get_org_number_or_404(
         },
         409: {
             "description": (
-                "The quote expired, the number is taken, the price changed, or the "
+                "The quote expired, the number is taken, the price changed, "
+                "expected_total_cents differs from the quoted total, or the "
                 "carrier rejected or failed the order. In the last case the credit "
                 "hold is refunded and the detail gives the reason. Also returned "
                 "when the quote's number was released since it was bought."

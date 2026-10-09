@@ -565,6 +565,15 @@ class NumberAcquireRequest(BaseModel):
         default="local",
         description="Kind of number to acquire: 'local', 'mobile', 'toll_free', or 'national'.",
     )
+    expected_total_cents: int | None = Field(
+        default=None,
+        ge=0,
+        description=(
+            "The total the caller expects to pay now: the quoted monthly price "
+            "plus the setup price, in cents. When set, the order is refused "
+            "with 409 if the quoted total differs."
+        ),
+    )
 
     @field_validator("country_code")
     @classmethod

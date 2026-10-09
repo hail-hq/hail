@@ -419,6 +419,7 @@ async def acquire_offer(
     kind: str | None,
     provider: str,
     billed: bool,
+    expected_total_cents: int | None = None,
 ) -> PhoneNumber:
     """Buy the quoted number. ``kind`` is the number type the client sent, or
     None to take it from the quote; a different explicit type is a 422."""
@@ -435,6 +436,21 @@ async def acquire_offer(
             loc=["body", "quote_id"],
         )
     kind = offer.number_type
+    if (
+        expected_total_cents is not None
+        and expected_total_cents != offer.monthly_cents + offer.setup_cents
+    ):
+        # Refuse before any hold, charge or carrier call.
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "price differs from your expected total: quoted "
+                f"${(offer.monthly_cents + offer.setup_cents) / 100:.2f} now "
+                f"(${offer.monthly_cents / 100:.2f} monthly + "
+                f"${offer.setup_cents / 100:.2f} setup); "
+                "call quote_numbers again"
+            ),
+        )
     if row.number_id:
         return await db.get(PhoneNumber, row.number_id)
     catalog_capabilities(country, kind, offer.provider)
@@ -634,6 +650,7 @@ async def purchase_number(
         kind=body.number_type if "number_type" in body.model_fields_set else None,
         provider=body.provider,
         billed=principal.auth_kind != "shared",
+        expected_total_cents=body.expected_total_cents,
     )
     if number.provisioning_state == "failed":
         # The hold was refunded; nothing is owed. Say so instead of a 201.

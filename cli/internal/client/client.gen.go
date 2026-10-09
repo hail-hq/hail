@@ -2611,6 +2611,9 @@ type NumberAcquireRequest struct {
 	// CountryCode ISO alpha-2 country code to acquire a number in (e.g. 'US'). Case-insensitive.
 	CountryCode string `json:"country_code"`
 
+	// ExpectedTotalCents The total the caller expects to pay now: the quoted monthly price plus the setup price, in cents. When set, the order is refused with 409 if the quoted total differs.
+	ExpectedTotalCents *int `json:"expected_total_cents,omitempty"`
+
 	// NumberType Kind of number to acquire: 'local', 'mobile', 'toll_free', or 'national'.
 	NumberType *NumberAcquireRequestNumberType `json:"number_type,omitempty"`
 
