@@ -638,6 +638,9 @@ async def release_number(
         await client.delete_number(number_id)
     except HailAPIError as exc:
         return _format_api_error(exc)
+    if number.get("provisioning_state") == "failed":
+        # DELETE on a failed order only hides the row; nothing was released.
+        return {"dismissed": True, "number_id": number_id, "e164": e164}
     return {"released": True, "number_id": number_id, "e164": e164}
 
 
@@ -1886,14 +1889,17 @@ def register_tools(
     ) -> dict[str, Any]:
         """Release a phone number. DESTRUCTIVE and permanent.
 
-        Calls and texts to the number stop. The monthly fee already billed
-        stays owed; there is no refund. The number may not be recoverable.
+        Calls and texts to the number stop. This month's fee and any earlier
+        months are still billed. There is no refund. The number may not be
+        recoverable.
         Ask the user before calling this.
 
         ``confirm_e164`` must equal the number's ``e164`` (for example
         ``"+14155550100"``). The tool reads the number first and refuses with
         ``{"error": ...}`` on a mismatch, without releasing anything. A number
-        whose order is still pending cannot be released (409).
+        whose order is still pending cannot be released (409). A number whose
+        order failed was never bought: the call only hides it from the list
+        and returns ``{"dismissed": true, "number_id", "e164"}``.
 
         Returns ``{"released": true, "number_id", "e164"}``, or
         ``{"error": "<message>"}``."""

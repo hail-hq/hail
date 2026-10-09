@@ -1989,10 +1989,16 @@ async def test_release_number_match_deletes(client: HailClient) -> None:
 
 
 @respx.mock
-async def test_release_number_get_404_makes_no_delete(client: HailClient) -> None:
+@pytest.mark.parametrize(
+    ("status", "expected"),
+    [(404, "resource not found"), (500, "hail upstream error: 500")],
+)
+async def test_release_number_get_failure_makes_no_delete(
+    client: HailClient, status: int, expected: str
+) -> None:
     nid = str(uuid4())
     respx.get(f"{_BASE_URL}/numbers/{nid}").mock(
-        return_value=httpx.Response(404, json={"detail": "no"})
+        return_value=httpx.Response(status, json={"detail": "no"})
     )
     delete = respx.delete(f"{_BASE_URL}/numbers/{nid}").mock(
         return_value=httpx.Response(204)
@@ -2000,8 +2006,28 @@ async def test_release_number_get_404_makes_no_delete(client: HailClient) -> Non
     result = await tools.release_number(
         client=client, number_id=nid, confirm_e164="+14155550100"
     )
-    assert result == {"error": "resource not found"}
+    assert result == {"error": expected}
     assert delete.call_count == 0
+
+
+@respx.mock
+async def test_release_number_failed_order_reports_dismissed(
+    client: HailClient,
+) -> None:
+    nid = str(uuid4())
+    body = _number_response(nid, "+14155550100")
+    body["provisioning_state"] = "failed"
+    respx.get(f"{_BASE_URL}/numbers/{nid}").mock(
+        return_value=httpx.Response(200, json=body)
+    )
+    delete = respx.delete(f"{_BASE_URL}/numbers/{nid}").mock(
+        return_value=httpx.Response(204)
+    )
+    result = await tools.release_number(
+        client=client, number_id=nid, confirm_e164="+14155550100"
+    )
+    assert result == {"dismissed": True, "number_id": nid, "e164": "+14155550100"}
+    assert delete.call_count == 1
 
 
 @respx.mock
@@ -2279,10 +2305,16 @@ async def test_delete_agent_match_deletes(client: HailClient) -> None:
 
 
 @respx.mock
-async def test_delete_agent_get_404_makes_no_delete(client: HailClient) -> None:
+@pytest.mark.parametrize(
+    ("status", "expected"),
+    [(404, "resource not found"), (500, "hail upstream error: 500")],
+)
+async def test_delete_agent_get_failure_makes_no_delete(
+    client: HailClient, status: int, expected: str
+) -> None:
     aid = str(uuid4())
     respx.get(f"{_BASE_URL}/agents/{aid}").mock(
-        return_value=httpx.Response(404, json={"detail": "no"})
+        return_value=httpx.Response(status, json={"detail": "no"})
     )
     delete = respx.delete(f"{_BASE_URL}/agents/{aid}").mock(
         return_value=httpx.Response(204)
@@ -2290,7 +2322,7 @@ async def test_delete_agent_get_404_makes_no_delete(client: HailClient) -> None:
     result = await tools.delete_agent(
         client=client, agent_id=aid, confirm_name="Front desk"
     )
-    assert result == {"error": "resource not found"}
+    assert result == {"error": expected}
     assert delete.call_count == 0
 
 
