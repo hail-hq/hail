@@ -143,11 +143,6 @@
 .primary {
   composes: primary from "./BrandButton.module.css";
 }
-
-.primary::after {
-  content: "↗";
-  margin-left: 20px;
-}
 .themeButton {
   display: flex;
   align-items: center;
@@ -271,11 +266,6 @@
   .themeButton,
   .menuToggle {
     width: 40px;
-  }
-}
-@media (max-width: 600px) {
-  .primary::after {
-    margin-left: 8px;
   }
 }
 @media (max-width: 360px) {

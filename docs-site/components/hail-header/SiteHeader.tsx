@@ -4,7 +4,7 @@ import { useId, useRef, type ReactNode } from "react";
 import { useDropdown } from "./useDropdown";
 import styles from "./SiteHeader.module.css";
 
-export type SiteHeaderActive = "costs" | "docs" | null;
+export type SiteHeaderActive = "docs" | null;
 
 const RESOURCES = [
   {
