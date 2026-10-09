@@ -557,3 +557,71 @@ async def test_submit_unexpected_exception_hides_text(client: HailClient) -> Non
     assert set(result) == {"error"}
     assert "list_verifications" in result["error"]
     _assert_no_sentinel(result)
+
+
+# --------------------------------------------------------------------------- #
+# attest_authorized through the real MCP entry point
+# --------------------------------------------------------------------------- #
+
+
+async def _real_server(monkeypatch):
+    import importlib
+
+    monkeypatch.setattr("hailhq.core.config.settings.hail_auth_url", "")
+    monkeypatch.setattr("hailhq.core.config.settings.hail_api_key", "hl_live_test")
+    monkeypatch.setattr("hailhq.core.config.settings.hail_api_url", _BASE_URL)
+    import hailhq.mcp.server as srv
+
+    return importlib.reload(srv)
+
+
+def _tool_args(**over) -> dict:
+    args = {
+        "country_code": "GB",
+        "number_type": "mobile",
+        "fields": {"first_name": _FIELD_VALUE},
+        "documents": {"identity": {"option": "passport", "fields": {}}},
+        "files": [_file()],
+        "attest_authorized": True,
+    }
+    args.update(over)
+    return args
+
+
+@respx.mock
+@pytest.mark.parametrize("value", ["true", "yes", 1, "1", "on", None, False])
+async def test_attestation_is_strict_through_the_real_entry_point(
+    monkeypatch, value
+) -> None:
+    srv = await _real_server(monkeypatch)
+    route = respx.route().mock(return_value=httpx.Response(500))
+    try:
+        result = await srv.mcp_app.call_tool(
+            "submit_verification", _tool_args(attest_authorized=value)
+        )
+    except Exception:  # a schema refusal is also a refusal
+        result = None
+    assert route.call_count == 0
+    for sentinel in _SENTINELS:
+        assert sentinel not in str(result)
+
+
+@respx.mock
+async def test_attestation_true_passes_through_the_real_entry_point(
+    monkeypatch,
+) -> None:
+    srv = await _real_server(monkeypatch)
+    route = respx.post(f"{_BASE_URL}/verifications").mock(
+        return_value=httpx.Response(201, json=_verification())
+    )
+    await srv.mcp_app.call_tool("submit_verification", _tool_args())
+    assert route.call_count == 1
+
+
+async def test_attestation_schema_is_still_boolean(monkeypatch) -> None:
+    srv = await _real_server(monkeypatch)
+    tool = next(
+        t for t in await srv.mcp_app.list_tools() if t.name == "submit_verification"
+    )
+    assert tool.inputSchema["properties"]["attest_authorized"]["type"] == "boolean"
+    assert "attest_authorized" in tool.inputSchema["required"]

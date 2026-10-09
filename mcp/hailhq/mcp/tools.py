@@ -87,7 +87,7 @@ from hailhq.core.telemetry import telemetry_enabled
 from hailhq.core.telemetry_identity import identity_scope
 from hailhq.mcp.auth import AuthMode
 from hailhq.mcp.hail_client import HailAPIError, HailClient, InvalidPathIdError
-from pydantic import ValidationError
+from pydantic import StrictBool, ValidationError
 
 from mcp.server.fastmcp import Context, FastMCP
 from mcp.types import ToolAnnotations
@@ -2255,7 +2255,7 @@ def register_tools(
         fields: dict[str, str],
         documents: dict[str, dict[str, Any]],
         files: list[dict[str, str]],
-        attest_authorized: bool,
+        attest_authorized: StrictBool,
         subject_type: str = "person",
         address: dict[str, str] | None = None,
         provider: str | None = None,
