@@ -1301,3 +1301,6 @@ body {
   background: #124fcb;
   border-color: #124fcb;
 }
+.wrap li code {
+  overflow-wrap: anywhere;
+}
