@@ -79,11 +79,11 @@ export default async function PairPage({
       <div className="dispatch-tape">
         <div className="wrap row">
           <div className="left">
-            <span className="dot">●</span> HAIL.SO / DISPATCH · {today} ·
-            COMPARE
+            <span className="dot">●</span> hail.so / dispatch · {today} ·
+            compare
           </div>
           <div className="right">
-            FILE: <b>{entry.category.toUpperCase()}</b> · 2 models
+            file: <b>{entry.category}</b> · 2 models
           </div>
         </div>
       </div>
@@ -104,10 +104,10 @@ export default async function PairPage({
       <div className="toolbar">
         <div className="wrap row">
           <a href="/costs" className="btn btn-outline">
-            ← all costs
+            ← All costs
           </a>
           <a href="/costs/compare" className="btn btn-outline">
-            build your own
+            Build your own
           </a>
         </div>
       </div>

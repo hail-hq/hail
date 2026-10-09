@@ -14,17 +14,15 @@ export function FooterTheme() {
     <div>
       <b>theme</b>
       <div className="theme-toggle" role="group" aria-label="Color theme">
-        {(["system", "light", "dark"] as const).map((value, i) => (
-          <span key={value}>
-            {i > 0 ? "· " : ""}
-            <button
-              type="button"
-              aria-pressed={(mounted ? theme : "system") === value}
-              onClick={() => setTheme(value)}
-            >
-              {value}
-            </button>
-          </span>
+        {(["system", "light", "dark"] as const).map((value) => (
+          <button
+            key={value}
+            type="button"
+            aria-pressed={(mounted ? theme : "system") === value}
+            onClick={() => setTheme(value)}
+          >
+            {value}
+          </button>
         ))}
       </div>
     </div>

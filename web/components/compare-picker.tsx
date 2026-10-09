@@ -88,21 +88,21 @@ export function CompareModels({ llm, stt, tts }: Props) {
       <div className="dispatch-tape">
         <div className="wrap row">
           <div className="left">
-            <span className="dot">●</span> HAIL.SO / DISPATCH · {today} ·
-            COMPARE
+            <span className="dot">●</span> hail.so / dispatch · {today} ·
+            compare
           </div>
           <div className="right">
-            FILE: <b>COMPARE</b> · {total} of {MAX_COMPARE} slots
+            file: <b>compare</b> · {total} of {MAX_COMPARE} slots
           </div>
         </div>
       </div>
 
       <div className="wrap" style={{ padding: "20px 0" }}>
         <aside className="filed-panel">
-          <b>COMPARE</b>
+          <b>Compare</b>
           <span>Up to {MAX_COMPARE} models, side-by-side.</span>
           <dl>
-            <dt>SELECTED</dt>
+            <dt>Selected</dt>
             <dd>{total}</dd>
             <dt>LLM</dt>
             <dd>{selectedLLM.length}</dd>
@@ -117,11 +117,11 @@ export function CompareModels({ llm, stt, tts }: Props) {
       <div className="toolbar">
         <div className="wrap row">
           <a href="/costs" className="btn btn-outline">
-            ← all costs
+            ← All costs
           </a>
           {total > 0 && (
             <button type="button" className="btn btn-outline" onClick={clear}>
-              clear
+              Clear
             </button>
           )}
           <div style={{ marginLeft: "auto" }} className="anchors">
@@ -201,11 +201,8 @@ export function CompareModels({ llm, stt, tts }: Props) {
             >
               <div
                 style={{
-                  fontFamily: "var(--font-mono)",
                   fontSize: 11,
                   fontWeight: 700,
-                  letterSpacing: "0.14em",
-                  textTransform: "uppercase",
                   color: "var(--color-mute)",
                   marginBottom: 8,
                 }}
@@ -227,11 +224,8 @@ export function CompareModels({ llm, stt, tts }: Props) {
 
           <h3
             style={{
-              fontFamily: "var(--font-mono)",
               fontSize: 11,
               fontWeight: 700,
-              letterSpacing: "0.14em",
-              textTransform: "uppercase",
               color: "var(--color-mute)",
               margin: "0 0 16px",
             }}
@@ -279,11 +273,9 @@ function ModelGroup({
     <div style={{ marginBottom: 18 }}>
       <div
         style={{
-          fontFamily: "var(--font-mono)",
           fontSize: 10,
           fontWeight: 700,
           letterSpacing: "0.12em",
-          textTransform: "uppercase",
           color: "var(--color-mute)",
           marginBottom: 8,
         }}

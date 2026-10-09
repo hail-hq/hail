@@ -26,7 +26,7 @@ export default function ComparePage() {
         }}
       >
         <div className="wrap">
-          <h1 className="dispatch-h1">side by side.</h1>
+          <h1 className="dispatch-h1">Side by side.</h1>
         </div>
       </header>
 
@@ -40,11 +40,8 @@ export default function ComparePage() {
         <div className="wrap">
           <h2
             style={{
-              fontFamily: "var(--font-mono)",
-              fontSize: 11,
-              fontWeight: 700,
-              letterSpacing: "0.14em",
-              textTransform: "uppercase",
+              fontSize: 15,
+              fontWeight: 600,
               color: "var(--color-mute)",
               margin: "0 0 16px",
             }}

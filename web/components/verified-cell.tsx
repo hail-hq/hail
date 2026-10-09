@@ -6,7 +6,7 @@ export function VerifiedCell({ date }: { date: string }) {
       <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--color-mute)' }}>
         {date}
       </span>
-      {isStale(date) && <span className="stale-pill">stale {daysSince(date)}d</span>}
+      {isStale(date) && <span className="stale-pill">Stale {daysSince(date)}d</span>}
     </span>
   );
 }

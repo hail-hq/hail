@@ -94,7 +94,6 @@
     display: inline-flex;
     align-items: center;
     gap: 0.65rem;
-    text-transform: lowercase;
   }
 
   .docs-cta__mark {
@@ -140,13 +139,6 @@
   .hail-docs #nd-sidebar {
     background: var(--color-fd-card);
     border-color: var(--color-fd-border);
-  }
-
-  .hail-docs #nd-sidebar a,
-  .hail-docs #nd-sidebar button,
-  .hail-docs #nd-subnav a,
-  .hail-docs #nd-subnav button {
-    text-transform: lowercase;
   }
 
   .hail-docs #nd-sidebar a[data-active="true"],

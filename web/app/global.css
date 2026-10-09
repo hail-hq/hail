@@ -1304,3 +1304,56 @@ body {
 .wrap li code {
   overflow-wrap: anywhere;
 }
+
+/* Public chrome reads like hail.so: Space Grotesk, sentence case. Prices,
+   model IDs, dates, and code keep the mono face. Unlayered, so it wins over
+   the layered rules above. */
+.dispatch-h1,
+.summary-strip .stat .k,
+.cat-bar h2,
+.cat-bar .count,
+.toolbar .anchors a,
+.chips .lbl,
+.chip,
+.wire-table thead th,
+.compare-link,
+.stale-pill,
+.empty,
+.compare-model-prov,
+.compare-table tbody th.compare-attr-label,
+.add-pill-prov {
+  font-family: var(--font-grotesk), Arial, sans-serif;
+  text-transform: none;
+  letter-spacing: 0;
+}
+.dispatch-tape,
+.filed-panel,
+.summary-strip .stat .n {
+  text-transform: none;
+  letter-spacing: 0;
+}
+.dispatch-h1 {
+  font-weight: 600;
+  letter-spacing: -0.045em;
+}
+.cat-bar h2 {
+  font-weight: 600;
+  letter-spacing: -0.025em;
+}
+.toolbar .anchors a,
+.chip,
+.compare-link,
+.stale-pill,
+.compare-model-prov,
+.compare-table tbody th.compare-attr-label,
+.add-pill-prov,
+.wire-table thead th,
+.summary-strip .stat .k,
+.cat-bar .count,
+.chips .lbl {
+  font-weight: 600;
+}
+.toolbar .anchors a {
+  border-radius: 7px;
+  font-size: 12px;
+}
