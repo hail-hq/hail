@@ -6,6 +6,7 @@
 [![PyPI — hail-sdk](https://img.shields.io/pypi/v/hail-sdk?label=hail-sdk)](https://pypi.org/project/hail-sdk/)
 [![CLI release](https://img.shields.io/github/v/release/hail-hq/hail?label=hail%20CLI)](https://github.com/hail-hq/hail/releases)
 [![Docs](https://img.shields.io/badge/docs-hail.so%2Fdocs-blue)](https://hail.so/docs)
+[![MCP Queen operational grade](https://mcpqueen.com/badge/io.github.hail-hq/hail-mcp.svg)](https://mcpqueen.com/s/io.github.hail-hq/hail-mcp)
 
 Your agent needs to call a person to move an appointment. Hail connects to the telephone carrier and runs the voice pipeline — STT, TTS, turn detection. Your agent is the brain: point Hail at any OpenAI-compatible endpoint ([bring your own LLM](docs/public/byo-llm.md)), or let Hail's fallback chain (OpenAI → Gemini → Anthropic) do the talking. SMS and email work the same way — one MCP endpoint, one API key, one invoice.
 
