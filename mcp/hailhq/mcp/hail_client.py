@@ -25,11 +25,13 @@ import uuid
 from typing import Any
 
 import httpx
+from hailhq.core.carrier_offer import NumberQuotesResponse
 from hailhq.core.config import settings
 from hailhq.core.schemas import (
     AgentCreate,
     AgentListResponse,
     AgentResponse,
+    AgentUpdate,
     CallCreate,
     CallListResponse,
     CallResponse,
@@ -43,6 +45,9 @@ from hailhq.core.schemas import (
     EmailResponse,
     EmailStatsResponse,
     EventStreamResponse,
+    NumberAcquireRequest,
+    NumberQuoteRequest,
+    PhoneNumberListResponse,
     PhoneNumberResponse,
     PhoneNumberRoutingUpdate,
     SmsCreate,
@@ -279,6 +284,76 @@ class HailClient:
         PhoneNumberRoutingUpdate.model_validate(body)
         resp = await self._client.patch(f"/numbers/{number_id}", json=body)
         return PhoneNumberResponse.model_validate(_decode(resp)).model_dump(mode="json")
+
+    async def get_agent(self, agent_id: str) -> dict[str, Any]:
+        resp = await self._client.get(f"/agents/{agent_id}")
+        return AgentResponse.model_validate(_decode(resp)).model_dump(mode="json")
+
+    async def update_agent(self, agent_id: str, **fields: Any) -> dict[str, Any]:
+        """PATCH /agents/{id} — body validated by :class:`AgentUpdate` first.
+
+        Only the keys in ``fields`` are sent. A key whose value is ``None``
+        goes out as an explicit JSON null (the API's clear convention), so
+        the caller decides which Nones to pass.
+        """
+        body = AgentUpdate.model_validate(fields).model_dump(
+            mode="json", exclude_unset=True
+        )
+        resp = await self._client.patch(f"/agents/{agent_id}", json=body)
+        return AgentResponse.model_validate(_decode(resp)).model_dump(mode="json")
+
+    async def delete_agent(self, agent_id: str) -> None:
+        """DELETE /agents/{id} — 204; the API clears routing on its numbers."""
+        _decode_empty(await self._client.delete(f"/agents/{agent_id}"))
+
+    # ------------------------------------------------------------------ #
+    # /numbers
+    # ------------------------------------------------------------------ #
+
+    async def quote_numbers(self, **fields: Any) -> dict[str, Any]:
+        """POST /numbers/quotes — body validated by :class:`NumberQuoteRequest`."""
+        body = NumberQuoteRequest.model_validate(fields).model_dump(
+            mode="json", exclude_none=True
+        )
+        resp = await self._client.post("/numbers/quotes", json=body)
+        return NumberQuotesResponse.model_validate(_decode(resp)).model_dump(
+            mode="json"
+        )
+
+    async def acquire_number(
+        self, *, idempotency_key: str | None = None, **fields: Any
+    ) -> dict[str, Any]:
+        """POST /numbers — buy a quoted number.
+
+        Body validated by :class:`NumberAcquireRequest` before any HTTP.
+        Spends money: the API refuses it (409) when ``expected_total_cents``
+        differs from the quoted total.
+        """
+        body = NumberAcquireRequest.model_validate(fields).model_dump(
+            mode="json", exclude_none=True
+        )
+        headers = {"Idempotency-Key": idempotency_key or str(uuid.uuid4())}
+        resp = await self._client.post("/numbers", json=body, headers=headers)
+        return PhoneNumberResponse.model_validate(_decode(resp)).model_dump(mode="json")
+
+    async def list_numbers(
+        self, *, limit: int = 50, cursor: str | None = None
+    ) -> dict[str, Any]:
+        params: dict[str, Any] = {"limit": limit}
+        if cursor is not None:
+            params["cursor"] = cursor
+        resp = await self._client.get("/numbers", params=params)
+        return PhoneNumberListResponse.model_validate(_decode(resp)).model_dump(
+            mode="json"
+        )
+
+    async def get_number(self, number_id: str) -> dict[str, Any]:
+        resp = await self._client.get(f"/numbers/{number_id}")
+        return PhoneNumberResponse.model_validate(_decode(resp)).model_dump(mode="json")
+
+    async def delete_number(self, number_id: str) -> None:
+        """DELETE /numbers/{id} — 204; releases the number at the carrier."""
+        _decode_empty(await self._client.delete(f"/numbers/{number_id}"))
 
     # ------------------------------------------------------------------ #
     # POST /sms
@@ -595,6 +670,17 @@ def _decode(resp: httpx.Response) -> Any:
     """Return the JSON body on 2xx, raise :class:`HailAPIError` otherwise."""
     if 200 <= resp.status_code < 300:
         return resp.json()
+    raise HailAPIError(
+        status=resp.status_code,
+        detail=_error_detail(resp),
+        retry_after=resp.headers.get("retry-after"),
+    )
+
+
+def _decode_empty(resp: httpx.Response) -> None:
+    """Return on 2xx (a 204 has no body), raise :class:`HailAPIError` otherwise."""
+    if 200 <= resp.status_code < 300:
+        return
     raise HailAPIError(
         status=resp.status_code,
         detail=_error_detail(resp),

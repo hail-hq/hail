@@ -132,6 +132,29 @@ async def test_numbers_acquire_with_quote_id_skips_quotes(
 
 
 @respx.mock
+async def test_numbers_acquire_sends_expected_total_cents_only_when_set(
+    base_url: str, api_key: str
+) -> None:
+    route = respx.post(f"{base_url}/numbers").mock(
+        return_value=httpx.Response(201, json=make_phone_number_response())
+    )
+    quote_id = uuid4()
+    async with Client(api_key=api_key, base_url=base_url) as c:
+        await c.numbers.acquire(
+            country="US", quote_id=quote_id, expected_total_cents=165
+        )
+        assert json.loads(route.calls.last.request.content) == {
+            "country_code": "US",
+            "quote_id": str(quote_id),
+            "expected_total_cents": 165,
+        }
+        await c.numbers.acquire(country="US", quote_id=quote_id)
+        assert "expected_total_cents" not in json.loads(
+            route.calls.last.request.content
+        )
+
+
+@respx.mock
 async def test_numbers_acquire_without_a_ready_offer_raises_and_does_not_buy(
     base_url: str, api_key: str
 ) -> None:

@@ -68,6 +68,8 @@ def buy_number(client, async_session, org_and_key, monkeypatch, voice_provider_m
         monthly=115,
         carrier_down=False,
         reuse_quote=False,
+        setup=0,
+        expected_total_cents=None,
     ):
         org = org or org_and_key[0]
         key = key or org_and_key[2]
@@ -78,7 +80,7 @@ def buy_number(client, async_session, org_and_key, monkeypatch, voice_provider_m
             number_type="local",
             capabilities=["voice", "sms"],
             monthly_cents=monthly,
-            setup_cents=0,
+            setup_cents=setup,
             readiness="ready",
         )
         monkeypatch.setattr(
@@ -96,9 +98,12 @@ def buy_number(client, async_session, org_and_key, monkeypatch, voice_provider_m
             async_session.add(quote)
             await async_session.commit()
             _buy.last_quote = quote
+        payload = {"country_code": "US", "quote_id": str(quote.id)}
+        if expected_total_cents is not None:
+            payload["expected_total_cents"] = expected_total_cents
         return await client.post(
             "/numbers",
-            json={"country_code": "US", "quote_id": str(quote.id)},
+            json=payload,
             headers={"Authorization": f"Bearer {key}", **(headers or {})},
         )
 
@@ -578,3 +583,122 @@ async def test_list_numbers_hides_dismissed_failed_but_keeps_released(
     ).status_code == 204
     listed = await client.get("/numbers", headers=headers)
     assert [i["id"] for i in listed.json()["items"]] == [str(released.id)]
+
+
+async def test_expected_total_matching_quote_proceeds(
+    org_and_key, async_session, buy_number
+):
+    from hailhq.core.billing import get_balance_cents
+
+    org, _, _ = org_and_key
+    before = await get_balance_cents(async_session, org)
+    response = await buy_number(monthly=115, setup=50, expected_total_cents=165)
+    assert response.status_code == 201, response.text
+    assert await get_balance_cents(async_session, org) == before - 165
+    buy_number.purchase.assert_awaited_once()
+
+
+@pytest.mark.parametrize("expected", [0, 115, 164, 166])
+async def test_expected_total_mismatch_is_409_and_spends_nothing(
+    org_and_key, async_session, buy_number, expected
+):
+    from hailhq.core.billing import get_balance_cents
+
+    org, _, _ = org_and_key
+    before = await get_balance_cents(async_session, org)
+    response = await buy_number(monthly=115, setup=50, expected_total_cents=expected)
+    assert response.status_code == 409, response.text
+    detail = response.json()["detail"]
+    assert "price differs from your expected total" in detail
+    assert detail == (
+        "price differs from your expected total: the quote is $1.65 "
+        "($1.15 monthly + $0.50 setup); request a new quote"
+    )
+    assert await get_balance_cents(async_session, org) == before
+    buy_number.purchase.assert_not_awaited()
+
+
+async def test_expected_total_mismatch_checked_before_carrier_lookup(
+    org_and_key, async_session, buy_number
+):
+    """A stale total is refused from the stored quote, with no live re-quote."""
+    from hailhq.api import number_orders
+
+    response = await buy_number(monthly=115, setup=0, expected_total_cents=1)
+    assert response.status_code == 409
+    number_orders.discover_offers.assert_not_awaited()
+
+
+async def test_replay_of_consumed_quote_ignores_a_wrong_expected_total(
+    org_and_key, async_session, buy_number
+):
+    from hailhq.core.billing import get_balance_cents
+
+    org, _, _ = org_and_key
+    first = await buy_number(monthly=115, setup=50, expected_total_cents=165)
+    assert first.status_code == 201, first.text
+    after_first = await get_balance_cents(async_session, org)
+    replay = await buy_number(
+        monthly=115, setup=50, expected_total_cents=1, reuse_quote=True
+    )
+    assert replay.status_code in (200, 201), replay.text
+    assert replay.json()["id"] == first.json()["id"]
+    assert await get_balance_cents(async_session, org) == after_first
+    buy_number.purchase.assert_awaited_once()
+
+
+async def test_omitted_expected_total_behaves_as_before(buy_number):
+    response = await buy_number(monthly=115, setup=50)
+    assert response.status_code == 201, response.text
+
+
+async def test_negative_expected_total_is_422(client, org_and_key) -> None:
+    _, _, key = org_and_key
+    response = await client.post(
+        "/numbers",
+        json={
+            "country_code": "US",
+            "quote_id": str(uuid.uuid4()),
+            "expected_total_cents": -1,
+        },
+        headers={"Authorization": f"Bearer {key}"},
+    )
+    assert response.status_code == 422, response.text
+
+
+async def test_retry_after_mismatch_with_corrected_total_and_new_key_works(
+    buy_number,
+):
+    first = await buy_number(
+        monthly=115,
+        setup=50,
+        expected_total_cents=115,
+        headers={"Idempotency-Key": "mismatch-key"},
+    )
+    assert first.status_code == 409
+    second = await buy_number(
+        monthly=115,
+        setup=50,
+        expected_total_cents=165,
+        reuse_quote=True,
+        headers={"Idempotency-Key": "corrected-key"},
+    )
+    assert second.status_code == 201, second.text
+    buy_number.purchase.assert_awaited_once()
+
+
+async def test_same_key_replay_after_mismatch_returns_cached_409(buy_number):
+    headers = {"Idempotency-Key": "mismatch-replay"}
+    first = await buy_number(
+        monthly=115, setup=0, expected_total_cents=1, headers=headers
+    )
+    second = await buy_number(
+        monthly=115,
+        setup=0,
+        expected_total_cents=1,
+        reuse_quote=True,
+        headers=headers,
+    )
+    assert first.status_code == second.status_code == 409
+    assert first.json() == second.json()
+    buy_number.purchase.assert_not_awaited()

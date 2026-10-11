@@ -6,12 +6,16 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 
 ### Added
 
+- `POST /numbers` takes an optional `expected_total_cents` (monthly plus setup, in cents). The order is refused with 409 and nothing is charged when the quoted total differs. Python SDK: `client.numbers.acquire(expected_total_cents=...)`. CLI: `hail numbers acquire --expected-total-cents`. Clients that omit it behave as before.
+- MCP tool `acquire_number`: buys a quoted number. It needs `confirm_total_cents` (monthly plus setup) from `quote_numbers`, and the server checks it. Marked destructive because it spends money. Deploy the API before the MCP service: against an API without `expected_total_cents`, the hosted MCP tool fails with 422.
+- MCP tools `quote_numbers`, `list_numbers`, `get_number`, `release_number`, `get_agent`, `update_agent` and `delete_agent`. `release_number` and `delete_agent` need a matching confirmation argument. All MCP tools now set `readOnlyHint`, `destructiveHint`, `idempotentHint` and `openWorldHint` annotations and a title.
 - Human handover: agents can hand a live call to a contact you pick (`handover_contacts` on agents, `hail agents --handover`, `transfer_call` tool, `call.transferred` webhook).
 - Human handover to team members: `handover_contacts[].contact_id` also takes `member:<user id>` (the id `GET /contacts` returns), so an agent can hand a call to an org member with a phone, not only a contact.
 - Optional Logfire backend and AI-agent observability: service logs, request/HTTP/database traces, actor identity, voice/SMS model and tool spans, and API-to-voicebot correlation. Payload filtering keeps conversation content and credentials out of exported traces.
 
 ### Changed
 
+- **Behavior change.** MCP: `recipient_consent` on `place_call`, `send_sms` and `send_email` must be the boolean `true`; strings and numbers are refused. Clients that sent a string such as `"true"` must now send a JSON boolean.
 - API, voicebot, and MCP deployments report their deployed commit SHA in telemetry. Backend images roll through the existing deployment workflow; no CLI or SDK release is required for these changes.
 
 ## [0.26.0] — 2026-10-06
