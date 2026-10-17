@@ -7,7 +7,7 @@ import logging
 from uuid import UUID
 
 from hailhq.core.carrier_offer import CarrierOffer
-from hailhq.core.carrier_routing import CARRIERS, carrier
+from hailhq.core.carrier_routing import CARRIERS, TELNYX, carrier
 from hailhq.core.schemas import NumberType
 
 logger = logging.getLogger(__name__)
@@ -26,7 +26,7 @@ PROVIDERS = tuple(CARRIERS)
 # At equal price and readiness, the carrier to buy from per country. US
 # numbers go to Telnyx: its US texting registration takes persons and
 # companies today. Everywhere else the first carrier in ``CARRIERS`` wins.
-_PREFERRED = {"US": "telnyx"}
+_PREFERRED = {"US": TELNYX}
 
 
 def preferred_provider(country_code: str) -> str:

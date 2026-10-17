@@ -68,7 +68,7 @@ def cents(value) -> int:
 
 class NumberQuotesResponse(BaseModel):
     offers: list[CarrierOffer] = Field(
-        description="Live carrier offers ordered by readiness, remaining verification effort, monthly price and setup price. On a tie the first carrier listed wins."
+        description="Live carrier offers ordered by readiness, remaining verification effort, monthly price and setup price. On a tie the first carrier listed wins, except US numbers, where Telnyx wins."
     )
     recommended_quote_id: UUID | None = Field(
         description="Recommended ready offer matching the requested carrier preference, or null if none qualifies."

@@ -144,7 +144,8 @@ class Carrier:
     ) = None
 
 
-# Listed in offer order: the first carrier wins a tie on price.
+# Listed in offer order: the first carrier wins a tie on price, unless
+# ``number_offers._PREFERRED`` names another carrier for the country.
 CARRIERS: dict[str, Carrier] = {
     TWILIO: Carrier(
         _twilio_voice,

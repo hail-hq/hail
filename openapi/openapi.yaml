@@ -2390,8 +2390,9 @@ paths:
 
         Auto recommends a ready offer with the lowest monthly rent, then setup
 
-        cost. On a tie the first carrier listed wins. Blocked offers sort by verification
-        effort. SMS capability does not waive messaging registration requirements."
+        cost. On a tie the first carrier listed wins, except US numbers, where Telnyx
+        wins. Blocked offers sort by verification effort. SMS capability does not waive
+        messaging registration requirements."
       operationId: quote_numbers_v1_numbers_quotes_post
       parameters:
         - name: authorization
@@ -7788,7 +7789,7 @@ components:
           description:
             Live carrier offers ordered by readiness, remaining verification
             effort, monthly price and setup price. On a tie the first carrier listed
-            wins.
+            wins, except US numbers, where Telnyx wins.
         recommended_quote_id:
           anyOf:
             - type: string

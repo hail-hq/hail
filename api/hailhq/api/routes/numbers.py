@@ -670,7 +670,7 @@ async def quote_numbers(
     """Compare live, org-specific offers. Prices include setup + monthly rent.
 
     Auto recommends a ready offer with the lowest monthly rent, then setup
-    cost. On a tie the first carrier listed wins. Blocked offers sort by verification effort. SMS capability does not waive messaging registration requirements.
+    cost. On a tie the first carrier listed wins, except US numbers, where Telnyx wins. Blocked offers sort by verification effort. SMS capability does not waive messaging registration requirements.
     """
 
     # Only number types the requested carrier's catalog lists (any carrier

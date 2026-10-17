@@ -2670,7 +2670,7 @@ type NumberQuotesResponse struct {
 	// ExpiresAt UTC expiry of these persisted quotes; request fresh offers afterward.
 	ExpiresAt time.Time `json:"expires_at"`
 
-	// Offers Live carrier offers ordered by readiness, remaining verification effort, monthly price and setup price. On a tie the first carrier listed wins.
+	// Offers Live carrier offers ordered by readiness, remaining verification effort, monthly price and setup price. On a tie the first carrier listed wins, except US numbers, where Telnyx wins.
 	Offers []CarrierOffer `json:"offers"`
 
 	// RecommendedQuoteId Recommended ready offer matching the requested carrier preference, or null if none qualifies.
