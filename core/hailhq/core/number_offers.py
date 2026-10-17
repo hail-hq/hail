@@ -12,10 +12,25 @@ from hailhq.core.schemas import NumberType
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["PROVIDERS", "CarrierOffer", "discover_offers", "rank_offers"]
+__all__ = [
+    "PROVIDERS",
+    "CarrierOffer",
+    "discover_offers",
+    "preferred_provider",
+    "rank_offers",
+]
 
 # Every carrier, in the order ``CARRIERS`` lists them.
 PROVIDERS = tuple(CARRIERS)
+
+# At equal price and readiness, the carrier to buy from per country. US
+# numbers go to Telnyx: its US texting registration takes persons and
+# companies today. Everywhere else the first carrier in ``CARRIERS`` wins.
+_PREFERRED = {"US": "telnyx"}
+
+
+def preferred_provider(country_code: str) -> str:
+    return _PREFERRED.get(country_code.upper(), PROVIDERS[0])
 
 
 def rank_offers(
@@ -39,7 +54,7 @@ def rank_offers(
             ),
             o.monthly_cents,
             o.setup_cents,
-            o.provider != PROVIDERS[0],
+            o.provider != preferred_provider(o.country_code),
             o.e164,
         ),
     )
