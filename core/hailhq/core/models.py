@@ -383,6 +383,35 @@ class NumberDunning(Base):
     )
 
 
+class IdleNumberRelease(Base):
+    """Warn-then-release state for a dedicated number with no activity.
+
+    A row exists while a number has had no calls or texts for the idle
+    window and its owners have been warned. ``release_after`` is fixed at
+    warn time. The website's billing job (lib/idle-number-release.ts in
+    hail-website) owns the lifecycle: it inserts on warning, deletes the row
+    when the number sees activity again, and releases the number via
+    ``POST /internal/numbers/release`` (source ``idle``) once
+    ``release_after`` passes.
+    """
+
+    __tablename__ = "idle_number_releases"
+
+    phone_number_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("phone_numbers.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    organization_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), nullable=False
+    )
+    warned_at: Mapped[datetime] = mapped_column(TS, nullable=False)
+    release_after: Mapped[datetime] = mapped_column(TS, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        TS, server_default=text("now()"), nullable=False
+    )
+
+
 class ApiKey(Base):
     """Read-only mirror of the auth backend's ``api_keys`` table.
 
