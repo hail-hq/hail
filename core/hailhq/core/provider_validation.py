@@ -102,7 +102,7 @@ def _probe_for(provider: str, api_key: str, params: dict) -> _Probe | None:
             "https://api.cartesia.ai/tts/bytes",
             {"X-API-Key": api_key, "Cartesia-Version": _CARTESIA_VERSION},
             {
-                "model_id": "sonic-2",
+                "model_id": "sonic-3.6",
                 "transcript": ".",
                 "voice": {"mode": "id", "id": _SENTINEL_VOICE_UUID},
                 "output_format": {
