@@ -52,7 +52,6 @@ func sampleResponse() client.CallResponse {
 	return client.CallResponse{
 		Id:              id,
 		OrganizationId:  orgID,
-		ConversationId:  nil,
 		FromE164:        "+14155551234",
 		ToE164:          "+15551234567",
 		Direction:       client.CallResponseDirectionOutbound,

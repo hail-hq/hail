@@ -29,7 +29,6 @@ def _email_response(email_id: str | None = None, status: str = "sent") -> dict:
     return {
         "id": eid,
         "organization_id": str(uuid4()),
-        "conversation_id": None,
         "email_domain_id": str(uuid4()),
         "from_address": "alice+acme@mail.hail.so",
         "to_addresses": ["x@example.com"],

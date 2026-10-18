@@ -240,7 +240,7 @@ def _model_to_dict(obj: Any) -> dict[str, Any]:
 
     Iterates ``column_attrs`` (not ``obj.__table__.columns``) so the
     python-side attribute name is used for ``getattr`` — needed for
-    columns like ``Conversation.metadata_``/``Call.metadata_``, whose
+    columns like ``Call.metadata_``, whose
     python attribute differs from the DB column name (``metadata``).
     The DB column name is used as the output dict key.
     """

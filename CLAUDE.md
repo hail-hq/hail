@@ -48,6 +48,17 @@ Go CLI module path is `github.com/hail-hq/hail/cli`. npm packages are published 
 - **Docs are agent-first.** When writing or updating any doc: lead with a concrete runnable example, link canonical sources (OpenAPI spec, MCP tool schemas, code paths) instead of paraphrasing them, and avoid screenshots when a snippet would work. Use GitHub-flavored Markdown.
 - **URLs are not strings.** Use [`hailhq.core.urls`](core/hailhq/core/urls.py) helpers (`canonical_url`, `url_variants`, `join_url`) — never f-string `{base}/{path}`, never raw `==` against a URL minted by another service, never `.rstrip("/")` ad-hoc. Pydantic adds trailing slashes to root URLs; Node TS doesn't; OAuth audience checks are exact-string equality. Skipping this has cost us OAuth flows already (consent succeeded, token endpoint rejected `resource=https://mcp.hail.so/` because hail-website held `https://mcp.hail.so`). If a URL crosses a language boundary and lands in any comparison, reach for the helpers.
 
+## Schema changes (tables and columns)
+
+Group data by what it is, not by the feature that needs it. No approval step: follow these rules every time.
+
+1. **Reuse first.** Before any migration, list the tables that already hold the same kind of record. Read `core/hailhq/core/models.py` (hail API tables) and `better-auth_migrations/*.sql` (auth tables in hail-website).
+2. **Extend the closest table.** A new variant of an existing record gets a `reason` or `kind` column on that table, not a sibling table. Example: idle-number warnings are rows in `number_dunning` with `reason = 'idle'`, next to the low-balance rows (`reason = 'balance'`).
+3. **Keep entity tables lean.** Do not add one feature's job state (warn dates, retry counters) as columns on `phone_numbers`, `calls`, `sms`, `emails`, `organizations`, or `users` when a state table for that job exists or fits.
+4. **New table only when nothing fits.** That means no existing table holds that kind of record. The migration docstring names the tables you checked and why each does not fit.
+5. **Uniqueness and links in the database.** Use FKs with an explicit `ondelete`, CHECK constraints for allowed values, and partial unique indexes when one table holds more than one kind of row.
+6. **Remove what you stop using.** A PR that stops using a table or column also drops it, or opens a follow-up issue that names it.
+
 ## Dev commands
 
 - Data services (local Postgres): `docker compose -f docker-compose.yml -f docker-compose.local.yml up postgres`

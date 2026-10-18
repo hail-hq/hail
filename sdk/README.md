@@ -52,7 +52,7 @@ asyncio.run(main())
 
 ### Emails
 
-- `client.emails.create(*, to, subject, body_text=None, body_html=None, from_=None, cc=None, bcc=None, reply_to=None, conversation_id=None, metadata=None, idempotency_key=None)` — send an outbound email. At least one of `body_text` / `body_html` is required. `from_` is optional while the org has one verified sender; with several the server returns 422 and you must name one (read `default_from` from `client.email_domains.list()`). With none it auto-mints a hail-mail address (operator-configured). `idempotency_key` defaults to a fresh UUIDv4.
+- `client.emails.create(*, to, subject, body_text=None, body_html=None, from_=None, cc=None, bcc=None, reply_to=None, metadata=None, idempotency_key=None)`: send an outbound email. At least one of `body_text` / `body_html` is required. `from_` is optional while the org has one verified sender; with several the server returns 422 and you must name one (read `default_from` from `client.email_domains.list()`). With none it auto-mints a hail-mail address (operator-configured). `idempotency_key` defaults to a fresh UUIDv4.
 - `client.emails.get(email_id)` — fetch a single email.
 - `client.emails.list(*, cursor=None, limit=50, status=None)` — cursor-paginated org list.
 

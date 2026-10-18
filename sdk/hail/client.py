@@ -319,7 +319,6 @@ class _EmailsResource:
         cc: list[str] | None = None,
         bcc: list[str] | None = None,
         reply_to: str | None = None,
-        conversation_id: UUID | str | None = None,
         metadata: dict[str, Any] | None = None,
         consent_source: str | None = None,
         consent_obtained_at: datetime | None = None,
@@ -366,8 +365,6 @@ class _EmailsResource:
             body["bcc"] = list(bcc)
         if reply_to is not None:
             body["reply_to"] = reply_to
-        if conversation_id is not None:
-            body["conversation_id"] = str(conversation_id)
         if metadata is not None:
             body["metadata"] = metadata
         if consent_source is not None:

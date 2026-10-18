@@ -577,7 +577,6 @@ async def create_email(
 
     email = Email(
         organization_id=principal.organization_id,
-        conversation_id=body.conversation_id,
         email_domain_id=sd.id,
         from_address=from_address,
         from_name=body.from_name,

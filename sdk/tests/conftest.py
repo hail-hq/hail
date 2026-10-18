@@ -40,7 +40,6 @@ def make_call_response(
     return {
         "id": str(cid),
         "organization_id": str(uuid4()),
-        "conversation_id": None,
         "from_e164": "+15550001111",
         "to_e164": "+15555550123",
         "direction": "outbound",
@@ -240,7 +239,6 @@ def make_email_response(
     return {
         "id": str(eid),
         "organization_id": str(uuid4()),
-        "conversation_id": None,
         "email_domain_id": str(uuid4()),
         "from_address": from_address,
         "to_addresses": ["recipient@example.com"],

@@ -231,10 +231,10 @@ The expand/contract rule is the one that the workflow cannot enforce. If you bre
 
 Two services migrate the same Postgres database independently:
 
-| Owner            | Migration tool                                                  | Tables                                                                                                                       |
-| ---------------- | --------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
-| **hail-website** | `pnpm dlx @better-auth/cli migrate` (introspects `lib/auth.ts`) | `users`, `accounts`, `sessions`, `verifications`, `device_codes`, `api_keys`, `organizations`, `members`, `invitations`      |
-| **hail/api**     | alembic                                                         | `account_credits`, `usage_events`, `phone_numbers`, `conversations`, `calls`, `call_events`, `idempotency_keys`, `audit_log` |
+| Owner            | Migration tool                                                  | Tables                                                                                                                  |
+| ---------------- | --------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| **hail-website** | `pnpm dlx @better-auth/cli migrate` (introspects `lib/auth.ts`) | `users`, `accounts`, `sessions`, `verifications`, `device_codes`, `api_keys`, `organizations`, `members`, `invitations` |
+| **hail/api**     | alembic                                                         | `account_credits`, `usage_events`, `phone_numbers`, `calls`, `call_events`, `idempotency_keys`, `audit_log`             |
 
 The schema source of truth for the website is `lib/auth.ts`. After each change to that file, run `pnpm dlx @better-auth/cli generate -y` to emit the resulting SQL into `better-auth_migrations/`, and commit it (audit trail). Then run `pnpm dlx @better-auth/cli migrate -y` to apply the diff against the target DB. Both subcommands introspect the auth config. `generate` writes the SQL file; `migrate` runs the same diff against the DB.
 

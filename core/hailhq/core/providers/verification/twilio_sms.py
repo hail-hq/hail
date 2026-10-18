@@ -21,7 +21,11 @@ from hailhq.core.providers.verification.base import (
     SmsRegistrationProvider,
     VerificationProviderError,
 )
-from hailhq.core.providers.verification.sms_form import campaign_text, sms_requirements
+from hailhq.core.providers.verification.sms_form import (
+    campaign_text,
+    field_problems,
+    sms_requirements,
+)
 from twilio.base.exceptions import TwilioException, TwilioRestException
 from twilio.rest import Client as TwilioClient
 
@@ -35,6 +39,17 @@ _EIN = re.compile(r"^\d{2}-?\d{7}$")
 # A person's brand waits for them to confirm the code sent to their mobile.
 # Past this age, the code is sent again.
 _OTP_RESEND_AFTER = timedelta(hours=24)
+
+
+def _policy_links(text: dict) -> dict:
+    """Privacy and terms links for the campaign. Drafts filed before these
+    fields existed carry no links; they are filed without them."""
+    links = {}
+    if text.get("privacy_policy_url"):
+        links["privacy_policy_url"] = text["privacy_policy_url"]
+    if text.get("terms_url"):
+        links["terms_and_conditions_url"] = text["terms_url"]
+    return links
 
 
 class TwilioSmsRegistrationProvider(SmsRegistrationProvider):
@@ -89,15 +104,7 @@ class TwilioSmsRegistrationProvider(SmsRegistrationProvider):
             return False
 
     def _validate(self, fields, address, subject_type) -> list[Problem]:
-        problems: list[Problem] = []
-        required = [
-            f.name
-            for f in sms_requirements(self.name, subject_type).fields
-            if f.required
-        ]
-        for name in required:
-            if not (fields.get(name) or "").strip():
-                problems.append(Problem(field=name, message="This is required."))
+        problems = field_problems(fields, subject_type)
         if (
             subject_type == "business"
             and fields.get("ein")
@@ -353,6 +360,7 @@ class TwilioSmsRegistrationProvider(SmsRegistrationProvider):
                 us_app_to_person_usecase=text["use_case"],
                 has_embedded_links=text["has_links"],
                 has_embedded_phone=False,
+                **_policy_links(text),
             )
             refs["campaign_sid"] = campaign.sid
             return ProviderStatus(state="pending")

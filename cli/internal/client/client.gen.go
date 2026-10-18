@@ -1541,9 +1541,6 @@ type CallCreate struct {
 	// ConsentSource Where/how consent was obtained (e.g. 'signup form', 'prior customer relationship'). Required (non-empty) when message_type is 'marketing'.
 	ConsentSource *string `json:"consent_source,omitempty"`
 
-	// ConversationId Groups this call with other calls/emails/SMS into one conversation thread. Omitted: the call is not linked to a conversation.
-	ConversationId *openapi_types.UUID `json:"conversation_id,omitempty"`
-
 	// FirstMessage Opening line the agent speaks first. Omitted: the agent waits for the callee to speak first.
 	FirstMessage *string `json:"first_message,omitempty"`
 
@@ -1595,9 +1592,6 @@ type CallResponse struct {
 
 	// AnsweredAt When the callee answered, ISO 8601 timestamp. Null if never answered.
 	AnsweredAt *time.Time `json:"answered_at"`
-
-	// ConversationId Conversation thread this call is grouped into, if any. Null when the call was not linked to a conversation.
-	ConversationId *openapi_types.UUID `json:"conversation_id"`
 
 	// Direction 'outbound' for calls Hail placed, 'inbound' for calls received.
 	Direction CallResponseDirection `json:"direction"`
@@ -1951,9 +1945,6 @@ type EmailCreate struct {
 	// ConsentSource Where/how consent was obtained (e.g. 'signup form', 'prior customer relationship'). Required (non-empty) when message_type is 'marketing'.
 	ConsentSource *string `json:"consent_source,omitempty"`
 
-	// ConversationId Groups this email with other calls/emails/SMS into one conversation thread. Omitted: the email is not linked to a conversation.
-	ConversationId *openapi_types.UUID `json:"conversation_id,omitempty"`
-
 	// From Sender email address. Must be a verified identity on the organization's email domains. Omitted: the org's resolved default sending address, if one exists.
 	From *string `json:"from,omitempty"`
 
@@ -2201,9 +2192,6 @@ type EmailResponse struct {
 	// CcAddresses CC recipient email addresses, if any.
 	CcAddresses *[]string `json:"cc_addresses"`
 
-	// ConversationId Conversation thread this email is grouped into, if any. Null when it was not linked to a conversation.
-	ConversationId *openapi_types.UUID `json:"conversation_id"`
-
 	// Direction 'outbound' for emails Hail sent, 'inbound' for emails received.
 	Direction *EmailResponseDirection `json:"direction,omitempty"`
 
@@ -2418,9 +2406,6 @@ type EmailSummary struct {
 
 	// CcAddresses CC recipient email addresses, if any.
 	CcAddresses *[]string `json:"cc_addresses"`
-
-	// ConversationId Conversation thread this email is grouped into, if any. Null when it was not linked to a conversation.
-	ConversationId *openapi_types.UUID `json:"conversation_id"`
 
 	// Direction 'outbound' for emails Hail sent, 'inbound' for emails received.
 	Direction *EmailSummaryDirection `json:"direction,omitempty"`

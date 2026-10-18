@@ -361,27 +361,60 @@ class OrgClosure(Base):
 
 
 class NumberDunning(Base):
-    """Per-org dunning state for the unfunded-numbers sweep.
+    """Release warnings: owners were told numbers go on ``release_after``.
 
-    A row exists while an org holds active dedicated numbers on a zero or
-    negative balance and has been warned by email that they will be
-    released. ``release_after`` is fixed at warn time (warned_at + grace)
-    so a later change to the grace setting never retroactively shortens an
-    already-announced deadline. The website's dunning job
-    (app/api/internal/billing/dunning in hail-website) owns the lifecycle:
-    it inserts on first detection, releases the org's numbers via
-    ``POST /internal/numbers/release`` once ``release_after`` passes, and
-    deletes the row when the org tops up or the numbers are gone.
+    Two kinds, set by ``reason``:
+
+    - ``balance``: one row per org whose balance does not cover next month's
+      number fees. ``phone_number_id`` is NULL (all the org's numbers).
+    - ``idle``: one row per dedicated number with no calls or texts for the
+      idle window. ``phone_number_id`` is that number.
+
+    ``release_after`` is fixed at warn time so a later settings change never
+    moves an announced date. hail-website's billing job owns the lifecycle
+    (lib/number-dunning.ts, lib/idle-number-release.ts): it inserts on
+    warning, releases via ``POST /internal/numbers/release`` once
+    ``release_after`` passes, and deletes the row when the org tops up, the
+    number is used again, or the numbers are gone.
     """
 
     __tablename__ = "number_dunning"
+    __table_args__ = (
+        CheckConstraint(
+            "(reason = 'balance' AND phone_number_id IS NULL)"
+            " OR (reason = 'idle' AND phone_number_id IS NOT NULL)",
+            name="number_dunning_reason",
+        ),
+        Index(
+            "number_dunning_balance_org_key",
+            "organization_id",
+            unique=True,
+            postgresql_where=text("reason = 'balance'"),
+        ),
+        Index(
+            "number_dunning_idle_number_key",
+            "phone_number_id",
+            unique=True,
+            postgresql_where=text("reason = 'idle'"),
+        ),
+    )
 
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
+    )
     organization_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), primary_key=True
+        UUID(as_uuid=True), nullable=False
+    )
+    reason: Mapped[str] = mapped_column(Text, server_default="balance", nullable=False)
+    phone_number_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("phone_numbers.id", ondelete="CASCADE"),
+        nullable=True,
     )
     warned_at: Mapped[datetime] = mapped_column(TS, nullable=False)
     release_after: Mapped[datetime] = mapped_column(TS, nullable=False)
-    # Set once the 3-day / 1-day reminder reached at least one owner.
+    # Set once the 3-day / 1-day reminder reached at least one owner
+    # (``balance`` only).
     reminder_3d_sent_at: Mapped[datetime | None] = mapped_column(TS, nullable=True)
     reminder_1d_sent_at: Mapped[datetime | None] = mapped_column(TS, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
@@ -670,27 +703,6 @@ class PhoneNumber(Base):
         return self.inbound_registered_at is not None
 
 
-class Conversation(Base):
-    __tablename__ = "conversations"
-
-    id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
-    )
-    organization_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), nullable=False
-    )
-    external_id: Mapped[str | None] = mapped_column(Text, nullable=True)
-    metadata_: Mapped[dict] = mapped_column(
-        "metadata", JSONB, server_default=text("'{}'::jsonb"), nullable=False
-    )
-    created_at: Mapped[datetime] = mapped_column(
-        TS, server_default=text("now()"), nullable=False
-    )
-    updated_at: Mapped[datetime] = mapped_column(
-        TS, server_default=text("now()"), nullable=False
-    )
-
-
 class Call(Base):
     __tablename__ = "calls"
 
@@ -699,11 +711,6 @@ class Call(Base):
     )
     organization_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), nullable=False
-    )
-    conversation_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True),
-        ForeignKey("conversations.id", ondelete="SET NULL"),
-        nullable=True,
     )
     # Outbound: the org (or pool) number Hail dialed from. NULL on inbound
     # rows, where the caller has no PhoneNumber row.
@@ -1231,11 +1238,6 @@ class Email(Base):
     )
     organization_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), nullable=False
-    )
-    conversation_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True),
-        ForeignKey("conversations.id", ondelete="SET NULL"),
-        nullable=True,
     )
     email_domain_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),

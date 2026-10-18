@@ -61,11 +61,11 @@ Runnable example:
 ```bash
 curl -s -X POST "$HAIL_API_URL/verifications" -H "Authorization: Bearer $HAIL_API_KEY" \
   -F purpose=sms -F country_code=US -F number_type=local -F subject_type=business -F provider=twilio \
-  -F 'fields={"legal_name":"Acme Inc","business_type":"PRIVATE_PROFIT","ein":"12-3456789","industry":"RETAIL","website":"https://acme.example","rep_name":"Ada Lovelace","rep_email":"ada@acme.example","rep_phone":"+15125550100","rep_title":"CEO","campaign_description":"Order updates for customers who bought on our site.","sample_1":"Acme: your order 123 shipped. Reply STOP to opt out.","sample_2":"Acme: your order 123 was delivered. Reply STOP to opt out.","opt_in_description":"Customers tick a box at checkout.","has_links":"NO"}' \
+  -F 'fields={"legal_name":"Acme Inc","business_type":"PRIVATE_PROFIT","ein":"12-3456789","industry":"RETAIL","website":"https://acme.example","rep_name":"Ada Lovelace","rep_email":"ada@acme.example","rep_phone":"+15125550100","rep_title":"CEO","campaign_description":"Order updates for customers who bought on our site.","sample_1":"Acme: your order 123 shipped. Reply STOP to opt out.","sample_2":"Acme: your order 123 was delivered. Reply STOP to opt out.","opt_in_description":"Customers tick a separate, unchecked SMS box at checkout.","privacy_policy_url":"https://acme.example/privacy","terms_url":"https://acme.example/terms","has_links":"NO"}' \
   -F 'address={"customer_name":"Acme Inc","street":"1 Main St","city":"Austin","region":"TX","postal_code":"78701","country_code":"US"}'
 ```
 
-Same flow as above with `purpose=sms`: each organization registers its own US A2P 10DLC brand and campaign. Design: [`docs/superpowers/specs/2026-10-13-us-sms-registration-design.md`](../superpowers/specs/2026-10-13-us-sms-registration-design.md). Fees: `GET /verifications/sms-fees`. CLI: `hail numbers register-sms`.
+Same flow as above with `purpose=sms`: each organization registers its own US A2P 10DLC brand and campaign. The filing sends the customer's opt-in text followed by the fixed consent lines (not a condition of purchase, frequency, rates, STOP, HELP) and the privacy policy and terms links, because reviewers reject filings without them (`campaign_text` in [`sms_form.py`](../../core/hailhq/core/providers/verification/sms_form.py)). Design: [`docs/superpowers/specs/2026-10-13-us-sms-registration-design.md`](../superpowers/specs/2026-10-13-us-sms-registration-design.md). Fees: `GET /verifications/sms-fees`. CLI: `hail numbers register-sms`.
 
 | State             | Meaning                                                                   |
 | ----------------- | ------------------------------------------------------------------------- |

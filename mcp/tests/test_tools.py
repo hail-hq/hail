@@ -40,7 +40,6 @@ def _call_response(call_id: str | None = None, status: str = "dialing") -> dict:
     return {
         "id": cid,
         "organization_id": str(uuid4()),
-        "conversation_id": None,
         "from_e164": "+14155551234",
         "to_e164": "+14155559999",
         "direction": "outbound",
@@ -379,7 +378,6 @@ def _email_response(email_id: str | None = None, status: str = "sent") -> dict:
     return {
         "id": eid,
         "organization_id": str(uuid4()),
-        "conversation_id": None,
         "email_domain_id": str(uuid4()),
         "from_address": "alice+acme@mail.hail.so",
         "to_addresses": ["x@example.com"],
@@ -910,7 +908,6 @@ def _email_summary(email_id: str | None = None, direction: str = "inbound") -> d
     return {
         "id": eid,
         "organization_id": str(uuid4()),
-        "conversation_id": None,
         "email_domain_id": str(uuid4()),
         "direction": direction,
         "from_address": "sender@example.com",

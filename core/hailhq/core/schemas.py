@@ -66,8 +66,7 @@ def decode_cursor(cursor: str) -> tuple[datetime, UUID]:
 # Wire format on the events stream filter is ``<type>:<uuid>`` — e.g.
 # ``call:abc-def-...``. ``audit_log`` already uses the ``resource_type`` /
 # ``resource_id`` vocabulary; the events query surface adopts the same
-# convention so SMS / email / conversation can join later without a second
-# rename.
+# convention.
 #
 # Unknown types fail closed with a 422 so a client never silently gets back
 # zero rows for a typo. The list lives here so the helper, the route, and
@@ -279,14 +278,6 @@ class CallCreate(ConsentAttestationMixin):
             "for this call."
         ),
     )
-    conversation_id: UUID | None = Field(
-        default=None,
-        description=(
-            "Groups this call with other calls/emails/SMS into one "
-            "conversation thread. Omitted: the call is not linked to a "
-            "conversation."
-        ),
-    )
     metadata: dict = Field(
         default_factory=dict,
         description=(
@@ -378,12 +369,6 @@ class CallResponse(BaseModel):
     id: UUID = Field(description="Unique identifier for this call.")
     organization_id: UUID = Field(
         description="Organization that placed or received this call."
-    )
-    conversation_id: UUID | None = Field(
-        description=(
-            "Conversation thread this call is grouped into, if any. Null "
-            "when the call was not linked to a conversation."
-        )
     )
     from_e164: str = Field(description="Caller-id phone number used, E.164 format.")
     to_e164: str = Field(description="Recipient phone number, E.164 format.")
@@ -1744,14 +1729,6 @@ class EmailCreate(ConsentAttestationMixin):
             "never tracked."
         ),
     )
-    conversation_id: UUID | None = Field(
-        default=None,
-        description=(
-            "Groups this email with other calls/emails/SMS into one "
-            "conversation thread. Omitted: the email is not linked to a "
-            "conversation."
-        ),
-    )
     metadata: dict = Field(
         default_factory=dict,
         description=(
@@ -2016,12 +1993,6 @@ class EmailSummary(BaseModel):
     id: UUID = Field(description="Unique identifier for this email.")
     organization_id: UUID = Field(
         description="Organization that sent or received this email."
-    )
-    conversation_id: UUID | None = Field(
-        description=(
-            "Conversation thread this email is grouped into, if any. Null "
-            "when it was not linked to a conversation."
-        )
     )
     email_domain_id: UUID | None = Field(
         description="The sending domain used, if from_address belongs to one of the org's configured domains."

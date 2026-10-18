@@ -475,7 +475,6 @@ async def create_call(
     )
     call = Call(
         organization_id=principal.organization_id,
-        conversation_id=body.conversation_id,
         agent_id=agent.id if agent else None,
         from_number_id=from_number.id,
         from_e164=from_number.e164,

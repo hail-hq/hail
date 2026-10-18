@@ -24,6 +24,7 @@ from hailhq.core.providers.verification.base import (
 )
 from hailhq.core.providers.verification.sms_form import (
     campaign_text,
+    field_problems,
     sms_requirements,
 )
 
@@ -53,6 +54,17 @@ _REJECTED = {
 }
 
 
+def _policy_links(text: dict) -> dict:
+    """Privacy and terms links for the campaign. Drafts filed before these
+    fields existed carry no links; they are filed without them."""
+    links = {}
+    if text.get("privacy_policy_url"):
+        links["privacyPolicyLink"] = text["privacy_policy_url"]
+    if text.get("terms_url"):
+        links["termsAndConditionsLink"] = text["terms_url"]
+    return links
+
+
 class TelnyxSmsRegistrationProvider(SmsRegistrationProvider):
     name = "telnyx"
 
@@ -65,10 +77,7 @@ class TelnyxSmsRegistrationProvider(SmsRegistrationProvider):
         return sms_requirements(self.name, subject_type)
 
     def _validate(self, fields, address, subject_type) -> list[Problem]:
-        problems: list[Problem] = []
-        for spec in sms_requirements(self.name, subject_type).fields:
-            if spec.required and not (fields.get(spec.name) or "").strip():
-                problems.append(Problem(field=spec.name, message="This is required."))
+        problems = field_problems(fields, subject_type)
         mobile = (fields.get("mobile_phone_number") or "").strip()
         if subject_type == "person" and mobile and not mobile.startswith("+1"):
             problems.append(
@@ -265,6 +274,7 @@ class TelnyxSmsRegistrationProvider(SmsRegistrationProvider):
                         "helpKeywords": _HELP,
                         "helpMessage": "Reply STOP to opt out. For help contact hi@hail.so.",
                         "optinMessage": "You are opted in. Reply STOP to opt out, HELP for help.",
+                        **_policy_links(text),
                     },
                 )
                 refs["campaign_id"] = campaign["campaignId"]

@@ -317,7 +317,6 @@ def test_email_response_inbound_fields_parse() -> None:
         {
             "id": str(uuid4()),
             "organization_id": str(uuid4()),
-            "conversation_id": None,
             "email_domain_id": str(uuid4()),
             "from_address": "sender@example.com",
             "to_addresses": ["inbox@mail.hail.so"],
@@ -418,7 +417,6 @@ def test_email_response_outbound_keeps_defaults() -> None:
         {
             "id": str(uuid4()),
             "organization_id": str(uuid4()),
-            "conversation_id": None,
             "email_domain_id": str(uuid4()),
             "from_address": "sender@example.com",
             "to_addresses": ["dest@example.com"],

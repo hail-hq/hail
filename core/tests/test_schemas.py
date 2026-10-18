@@ -123,7 +123,6 @@ def _email_row_stub(**overrides) -> SimpleNamespace:
     base = {
         "id": uuid4(),
         "organization_id": uuid4(),
-        "conversation_id": None,
         "email_domain_id": uuid4(),
         "from_address": "alice+acme@mail.hail.so",
         "to_addresses": ["dest@example.com"],
