@@ -173,6 +173,7 @@ async def create_agent(
         system_prompt=body.system_prompt,
         first_message=body.first_message,
         ai_disclosure=body.ai_disclosure,
+        recording_enabled=body.recording_enabled,
         ai_disclosure_line=body.ai_disclosure_line,
         voice_config=body.voice_config.model_dump(mode="json"),
         tools=_with_handover_tool(body.tools, bool(handover)),

@@ -1,15 +1,7 @@
-"""Regression test for the "no call audio is ever stored" guarantee.
+"""Workspaces that have not opted in never retain call audio.
 
-This is a Privacy Policy claim, not just an implementation detail — see
-``hailhq/voicebot/recording.py``. It must stay standalone and impossible to
-miss (as opposed to being buried inside an unrelated behavioral assertion)
-because the moment someone wires up real LiveKit Egress recording, this test
-starts failing loudly and points them at the policy language that needs to
-change alongside the code.
-
-Every assertion here goes through :func:`on_call_end` — the real
-call-completion path (shutdown callback -> upload_recording -> Call row
-update) — not by calling ``upload_recording`` directly.
+Optional recording has its own lifecycle and tests in test_recording.py.
+These checks cover the unchanged, disabled-by-default call finalizer.
 """
 
 from __future__ import annotations
@@ -39,18 +31,12 @@ _CALL_END_PERMUTATIONS: list[tuple[str | None, str | None]] = [
 
 
 @pytest.mark.parametrize("status_override,end_reason_override", _CALL_END_PERMUTATIONS)
-async def test_no_audio_ever_stored(
+async def test_audio_off_without_workspace_opt_in(
     async_session: AsyncSession,
     status_override: str | None,
     end_reason_override: str | None,
 ) -> None:
-    """No matter how a call ends, no recording ever lands on the Call row.
-
-    v1 has no Egress wiring (hailhq.voicebot.recording.upload_recording is a
-    stub that always returns None), so recording_s3_key and
-    recording_duration_ms must stay None through the real on_call_end path
-    for every status/end_reason permutation the voicebot can produce.
-    """
+    """Default calls retain no audio through every call-completion path."""
     call_id: UUID = await _make_call_row(async_session)
 
     await on_call_end(

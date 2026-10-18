@@ -30,7 +30,9 @@ async def test_workspace_override_wins(monkeypatch):
     monkeypatch.setattr(settings, "hail_voice_max_duration_seconds", 420)
     db = AsyncMock()
     db.get.return_value = SimpleNamespace(
-        max_duration_seconds=120, ai_disclosure_line="AI for {org}."
+        recording_enabled=None,
+        max_duration_seconds=120,
+        ai_disclosure_line="AI for {org}.",
     )
     result = await get_call_settings(uuid4(), db)
     assert result["max_duration_seconds"] == 120
@@ -43,7 +45,9 @@ async def test_line_only_row_keeps_default_duration(monkeypatch):
     monkeypatch.setattr(settings, "hail_voice_max_duration_seconds", 420)
     db = AsyncMock()
     db.get.return_value = SimpleNamespace(
-        max_duration_seconds=None, ai_disclosure_line="AI for {org}."
+        recording_enabled=None,
+        max_duration_seconds=None,
+        ai_disclosure_line="AI for {org}.",
     )
     result = await get_call_settings(uuid4(), db)
     assert result["max_duration_seconds"] == 420

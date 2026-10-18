@@ -97,6 +97,7 @@ class CallCreate(BaseModel):
     # Speak the AI self-disclosure line first on the call (default True).
     # Disabling is the caller's responsibility — see the API schema notes
     # on 47 CFR 64.1200(b)(1) and state AI bot-disclosure laws.
+    recording_enabled: bool | None = None
     ai_disclosure: bool = True
     voice_config: VoiceConfig = Field(default_factory=VoiceConfig)
     conversation_id: UUID | None = None
@@ -145,6 +146,9 @@ class CallResponse(BaseModel):
     provider_call_sid: str | None = None
     livekit_room: str | None = None
     initial_prompt: str | None = None
+    recording_enabled: bool = False
+    recording_status: str = "disabled"
+    recording_duration_ms: int | None = None
     recording_s3_key: str | None = None
     requested_at: datetime
     started_at: datetime | None = None
@@ -312,6 +316,7 @@ class AgentResponse(BaseModel):
     name: str
     system_prompt: str
     first_message: str | None = None
+    recording_enabled: bool | None = None
     ai_disclosure: bool = True
     ai_disclosure_line: str | None = None
     voice_config: dict[str, Any] = Field(default_factory=dict)

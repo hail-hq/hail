@@ -122,3 +122,5 @@ pnpm costs:validate
 ## Adding a new category
 
 If you need a category beyond LLM/STT/TTS (e.g. embedding models, image generation), open an issue first to agree on the shape — once a schema ships and consumers depend on it, breaking changes are expensive.
+
+Recording provider costs: `recording.json`, validated by `schema/recording.schema.json`. Rates are normalized to two-sided call minutes. Build allowances are hard caps; a paid LiveKit plan is required for overages.

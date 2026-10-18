@@ -1,0 +1,51 @@
+{
+  "version": 1,
+  "license": "CC-BY-4.0",
+  "basis": "USD per two-sided call minute. Excludes transport, object storage and transfer. Build allowances are hard caps. Included minutes normalized to call minutes.",
+  "recording": [
+    {
+      "provider": "livekit",
+      "method": "audio-only-composite",
+      "usd_per_minute": "0.005",
+      "plan_monthly_usd": "50",
+      "included_minutes": 600,
+      "build_included_minutes": 60,
+      "build_concurrent_exports": 2,
+      "exports_per_call": 1,
+      "source_url": "https://livekit.com/pricing",
+      "last_verified": "2026-10-18",
+      "model_id": "livekit-audio-only-composite"
+    },
+    {
+      "provider": "livekit",
+      "method": "two-track-exports",
+      "usd_per_minute": "0.002",
+      "plan_monthly_usd": "50",
+      "included_minutes": 300,
+      "build_included_minutes": 30,
+      "build_concurrent_exports": 2,
+      "exports_per_call": 2,
+      "source_url": "https://livekit.com/pricing",
+      "last_verified": "2026-10-18",
+      "model_id": "livekit-two-track-exports"
+    },
+    {
+      "provider": "twilio",
+      "method": "sip-trunk-recording",
+      "usd_per_minute": "0.0025",
+      "storage_usd_per_minute_month": "0.0005",
+      "source_url": "https://www.twilio.com/en-us/sip-trunking/pricing/us",
+      "last_verified": "2026-10-18",
+      "model_id": "twilio-sip-trunk-recording"
+    },
+    {
+      "provider": "telnyx",
+      "method": "sip-trunk-recording",
+      "usd_per_minute": "0.002",
+      "storage_usd_per_minute_month": "0",
+      "source_url": "https://telnyx.com/pricing/elastic-sip",
+      "last_verified": "2026-10-18",
+      "model_id": "telnyx-sip-trunk-recording"
+    }
+  ]
+}

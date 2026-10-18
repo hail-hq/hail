@@ -1,5 +1,7 @@
 # Changelog
 
+Optional call recording: explicit workspace choice, agent/per-call opt-out, best-effort audio-only Egress, authenticated playback, and one recording-enabled call usage entry. Disabled by default. Recording failures never change call status. Migration 0060 is required.
+
 All notable changes to Hail are documented here. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and Hail adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]

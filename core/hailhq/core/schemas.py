@@ -250,6 +250,10 @@ class CallCreate(ConsentAttestationMixin):
             "for the callee to speak first."
         ),
     )
+    recording_enabled: bool | None = Field(
+        default=None,
+        description="Request best-effort audio recording. Requires workspace recording enabled. Null inherits the agent/workspace. Recording failure never prevents the call. Hail Cloud charges the recording-enabled call rate regardless of capture outcome.",
+    )
     ai_disclosure: bool = Field(
         default=True,
         description=(
@@ -299,7 +303,7 @@ class CallCreate(ConsentAttestationMixin):
         default=None,
         description=(
             "Place the call with a saved agent (POST /agents). The agent "
-            "supplies system_prompt, first_message, ai_disclosure, "
+            "supplies system_prompt, first_message, ai_disclosure, recording_enabled, "
             "voice_config, tools and max duration; any of those given "
             "explicitly on this request wins. Satisfies the system_prompt "
             "or llm requirement on its own. A paused agent is refused "
@@ -394,6 +398,18 @@ class CallResponse(BaseModel):
     )
     initial_prompt: str | None = Field(
         description="The system_prompt this call was created with, if any."
+    )
+    recording_enabled: bool = Field(
+        default=False,
+        description="Whether the recording-enabled call rate applies, regardless of capture outcome.",
+    )
+    recording_status: str = Field(
+        default="disabled",
+        description="disabled, requested, starting, recording, processing, ready, unavailable, failed, or erased.",
+    )
+    recording_duration_ms: int | None = Field(
+        default=None,
+        description="Duration of captured audio, independent of billed call duration.",
     )
     recording_s3_key: str | None = Field(
         description="Internal storage key for the call recording. Not a directly fetchable URL."
@@ -847,6 +863,10 @@ class AgentCreate(BaseModel):
         max_length=1000,
         description="Opening line spoken after the AI line. Omitted: the agent waits for the other side to speak first.",
     )
+    recording_enabled: bool | None = Field(
+        default=None,
+        description="Null inherits the workspace recording choice; false disables recording for this agent. A workspace that disables recording cannot be overridden.",
+    )
     ai_disclosure: bool = Field(
         default=True,
         description=(
@@ -933,6 +953,10 @@ class AgentUpdate(BaseModel):
         max_length=1000,
         description="New opening line; null makes the agent wait for the other side.",
     )
+    recording_enabled: bool | None = Field(
+        default=None,
+        description="Null inherits workspace recording; false disables it for this agent.",
+    )
     ai_disclosure: bool | None = Field(
         default=None, description="Whether the AI line is spoken first."
     )
@@ -991,6 +1015,10 @@ class AgentResponse(BaseModel):
     name: str = Field(description="Display name, unique per organization.")
     system_prompt: str = Field(description="Task instructions.")
     first_message: str | None = Field(description="Opening line, or null to wait.")
+    recording_enabled: bool | None = Field(
+        default=None,
+        description="Null inherits the workspace recording choice; false disables recording for this agent. A workspace that disables recording cannot be overridden.",
+    )
     ai_disclosure: bool = Field(description="Whether the AI line is spoken first.")
     ai_disclosure_line: str | None = Field(
         description="This agent's AI line template, or null for the workspace line."
@@ -1874,13 +1902,13 @@ class EmailStatsCounts(BaseModel):
     unique_opened: int = Field(
         default=0,
         description=(
-            "Distinct emails opened at least once in the window " "(HTML emails only)."
+            "Distinct emails opened at least once in the window (HTML emails only)."
         ),
     )
     unique_clicked: int = Field(
         default=0,
         description=(
-            "Distinct emails clicked at least once in the window " "(HTML emails only)."
+            "Distinct emails clicked at least once in the window (HTML emails only)."
         ),
     )
 

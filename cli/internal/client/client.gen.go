@@ -1365,6 +1365,9 @@ type AgentCreate struct {
 	// Name Display name, unique per organization.
 	Name string `json:"name"`
 
+	// RecordingEnabled Null inherits the workspace recording choice; false disables recording for this agent. A workspace that disables recording cannot be overridden.
+	RecordingEnabled *bool `json:"recording_enabled,omitempty"`
+
 	// SmsEnabled Answer texts on numbers that route texts to this agent.
 	SmsEnabled *bool `json:"sms_enabled,omitempty"`
 
@@ -1440,6 +1443,9 @@ type AgentResponse struct {
 	// OrganizationId Organization that owns this agent.
 	OrganizationId openapi_types.UUID `json:"organization_id"`
 
+	// RecordingEnabled Null inherits the workspace recording choice; false disables recording for this agent. A workspace that disables recording cannot be overridden.
+	RecordingEnabled *bool `json:"recording_enabled,omitempty"`
+
 	// SmsEnabled Whether the agent answers texts.
 	SmsEnabled bool `json:"sms_enabled"`
 
@@ -1490,6 +1496,9 @@ type AgentUpdate struct {
 	// Name New display name.
 	Name *string `json:"name,omitempty"`
 
+	// RecordingEnabled Null inherits workspace recording; false disables it for this agent.
+	RecordingEnabled *bool `json:"recording_enabled,omitempty"`
+
 	// SmsEnabled Whether the agent answers texts.
 	SmsEnabled *bool `json:"sms_enabled,omitempty"`
 
@@ -1520,7 +1529,7 @@ type BodyUploadEmailAttachment struct {
 
 // CallCreate defines model for CallCreate.
 type CallCreate struct {
-	// AgentId Place the call with a saved agent (POST /agents). The agent supplies system_prompt, first_message, ai_disclosure, voice_config, tools and max duration; any of those given explicitly on this request wins. Satisfies the system_prompt or llm requirement on its own. A paused agent is refused with 409.
+	// AgentId Place the call with a saved agent (POST /agents). The agent supplies system_prompt, first_message, ai_disclosure, recording_enabled, voice_config, tools and max duration; any of those given explicitly on this request wins. Satisfies the system_prompt or llm requirement on its own. A paused agent is refused with 409.
 	AgentId *openapi_types.UUID `json:"agent_id,omitempty"`
 
 	// AiDisclosure Speak the AI self-disclosure line ('Hi, this is an AI assistant calling on behalf of ...') as the first thing on the call. Enabled by default. Disable only if you have verified the disclosure is not required for this call — 47 CFR 64.1200(b)(1) requires identifying the initiating business at the start of artificial-voice calls in the US, and several jurisdictions have AI bot-disclosure laws. Hail does not verify this for you. The agent still identifies itself as an AI if asked.
@@ -1552,6 +1561,9 @@ type CallCreate struct {
 
 	// RecipientConsent Attestation that you have obtained the lawful consent required to contact this recipient. Hail does not verify consent itself — you are responsible for a lawful basis under TCPA/ePrivacy/PECR/CAN-SPAM/GDPR as applicable. Rejected (422) if not true.
 	RecipientConsent bool `json:"recipient_consent"`
+
+	// RecordingEnabled Request best-effort audio recording. Requires workspace recording enabled. Null inherits the agent/workspace. Recording failure never prevents the call. Hail Cloud charges the recording-enabled call rate regardless of capture outcome.
+	RecordingEnabled *bool `json:"recording_enabled,omitempty"`
 
 	// SystemPrompt Task instructions for the agent, sent as its leading system message. At least one of system_prompt or llm is required; both together is also valid.
 	SystemPrompt *string `json:"system_prompt,omitempty"`
@@ -1614,8 +1626,17 @@ type CallResponse struct {
 	// ProviderCallSid The telephony provider's identifier for this call leg, if assigned.
 	ProviderCallSid *string `json:"provider_call_sid"`
 
+	// RecordingDurationMs Duration of captured audio, independent of billed call duration.
+	RecordingDurationMs *int `json:"recording_duration_ms,omitempty"`
+
+	// RecordingEnabled Whether the recording-enabled call rate applies, regardless of capture outcome.
+	RecordingEnabled *bool `json:"recording_enabled,omitempty"`
+
 	// RecordingS3Key Internal storage key for the call recording. Not a directly fetchable URL.
 	RecordingS3Key *string `json:"recording_s3_key"`
+
+	// RecordingStatus disabled, requested, starting, recording, processing, ready, unavailable, failed, or erased.
+	RecordingStatus *string `json:"recording_status,omitempty"`
 
 	// RequestedAt When the call was requested, ISO 8601 timestamp.
 	RequestedAt time.Time `json:"requested_at"`
@@ -3390,6 +3411,11 @@ type GetCallV1CallsCallIdGetParams struct {
 	Authorization *string `json:"authorization,omitempty"`
 }
 
+// GetRecordingV1CallsCallIdRecordingGetParams defines parameters for GetRecordingV1CallsCallIdRecordingGet.
+type GetRecordingV1CallsCallIdRecordingGetParams struct {
+	Authorization *string `json:"authorization,omitempty"`
+}
+
 // ListContactsV1ContactsGetParams defines parameters for ListContactsV1ContactsGet.
 type ListContactsV1ContactsGetParams struct {
 	Q             *string `form:"q,omitempty" json:"q,omitempty"`
@@ -4220,6 +4246,9 @@ type ClientInterface interface {
 	// GetCallV1CallsCallIdGet request
 	GetCallV1CallsCallIdGet(ctx context.Context, callId openapi_types.UUID, params *GetCallV1CallsCallIdGetParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
+	// GetRecordingV1CallsCallIdRecordingGet request
+	GetRecordingV1CallsCallIdRecordingGet(ctx context.Context, callId openapi_types.UUID, params *GetRecordingV1CallsCallIdRecordingGetParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
 	// ListContactsV1ContactsGet request
 	ListContactsV1ContactsGet(ctx context.Context, params *ListContactsV1ContactsGetParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
@@ -4590,6 +4619,18 @@ func (c *Client) CreateCallV1CallsPost(ctx context.Context, params *CreateCallV1
 
 func (c *Client) GetCallV1CallsCallIdGet(ctx context.Context, callId openapi_types.UUID, params *GetCallV1CallsCallIdGetParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewGetCallV1CallsCallIdGetRequest(c.Server, callId, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) GetRecordingV1CallsCallIdRecordingGet(ctx context.Context, callId openapi_types.UUID, params *GetRecordingV1CallsCallIdRecordingGetParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetRecordingV1CallsCallIdRecordingGetRequest(c.Server, callId, params)
 	if err != nil {
 		return nil, err
 	}
@@ -6081,6 +6122,55 @@ func NewGetCallV1CallsCallIdGetRequest(server string, callId openapi_types.UUID,
 	}
 
 	operationPath := fmt.Sprintf("/v1/calls/%s", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("GET", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+
+		if params.Authorization != nil {
+			var headerParam0 string
+
+			headerParam0, err = runtime.StyleParamWithOptions("simple", false, "authorization", *params.Authorization, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationHeader, Type: "string", Format: ""})
+			if err != nil {
+				return nil, err
+			}
+
+			req.Header.Set("authorization", headerParam0)
+		}
+
+	}
+
+	return req, nil
+}
+
+// NewGetRecordingV1CallsCallIdRecordingGetRequest generates requests for GetRecordingV1CallsCallIdRecordingGet
+func NewGetRecordingV1CallsCallIdRecordingGetRequest(server string, callId openapi_types.UUID, params *GetRecordingV1CallsCallIdRecordingGetParams) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "call_id", callId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v1/calls/%s/recording", pathParam0)
 	if operationPath[0] == '/' {
 		operationPath = "." + operationPath
 	}
@@ -9998,6 +10088,9 @@ type ClientWithResponsesInterface interface {
 	// GetCallV1CallsCallIdGetWithResponse request
 	GetCallV1CallsCallIdGetWithResponse(ctx context.Context, callId openapi_types.UUID, params *GetCallV1CallsCallIdGetParams, reqEditors ...RequestEditorFn) (*GetCallV1CallsCallIdGetResponse, error)
 
+	// GetRecordingV1CallsCallIdRecordingGetWithResponse request
+	GetRecordingV1CallsCallIdRecordingGetWithResponse(ctx context.Context, callId openapi_types.UUID, params *GetRecordingV1CallsCallIdRecordingGetParams, reqEditors ...RequestEditorFn) (*GetRecordingV1CallsCallIdRecordingGetResponse, error)
+
 	// ListContactsV1ContactsGetWithResponse request
 	ListContactsV1ContactsGetWithResponse(ctx context.Context, params *ListContactsV1ContactsGetParams, reqEditors ...RequestEditorFn) (*ListContactsV1ContactsGetResponse, error)
 
@@ -10444,6 +10537,28 @@ func (r GetCallV1CallsCallIdGetResponse) Status() string {
 
 // StatusCode returns HTTPResponse.StatusCode
 func (r GetCallV1CallsCallIdGetResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type GetRecordingV1CallsCallIdRecordingGetResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON422      *HTTPValidationError
+}
+
+// Status returns HTTPResponse.Status
+func (r GetRecordingV1CallsCallIdRecordingGetResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetRecordingV1CallsCallIdRecordingGetResponse) StatusCode() int {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.StatusCode
 	}
@@ -12002,6 +12117,15 @@ func (c *ClientWithResponses) GetCallV1CallsCallIdGetWithResponse(ctx context.Co
 	return ParseGetCallV1CallsCallIdGetResponse(rsp)
 }
 
+// GetRecordingV1CallsCallIdRecordingGetWithResponse request returning *GetRecordingV1CallsCallIdRecordingGetResponse
+func (c *ClientWithResponses) GetRecordingV1CallsCallIdRecordingGetWithResponse(ctx context.Context, callId openapi_types.UUID, params *GetRecordingV1CallsCallIdRecordingGetParams, reqEditors ...RequestEditorFn) (*GetRecordingV1CallsCallIdRecordingGetResponse, error) {
+	rsp, err := c.GetRecordingV1CallsCallIdRecordingGet(ctx, callId, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetRecordingV1CallsCallIdRecordingGetResponse(rsp)
+}
+
 // ListContactsV1ContactsGetWithResponse request returning *ListContactsV1ContactsGetResponse
 func (c *ClientWithResponses) ListContactsV1ContactsGetWithResponse(ctx context.Context, params *ListContactsV1ContactsGetParams, reqEditors ...RequestEditorFn) (*ListContactsV1ContactsGetResponse, error) {
 	rsp, err := c.ListContactsV1ContactsGet(ctx, params, reqEditors...)
@@ -13009,6 +13133,32 @@ func ParseGetCallV1CallsCallIdGetResponse(rsp *http.Response) (*GetCallV1CallsCa
 		}
 		response.JSON200 = &dest
 
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 422:
+		var dest HTTPValidationError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON422 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseGetRecordingV1CallsCallIdRecordingGetResponse parses an HTTP response from a GetRecordingV1CallsCallIdRecordingGetWithResponse call
+func ParseGetRecordingV1CallsCallIdRecordingGetResponse(rsp *http.Response) (*GetRecordingV1CallsCallIdRecordingGetResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetRecordingV1CallsCallIdRecordingGetResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 422:
 		var dest HTTPValidationError
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {

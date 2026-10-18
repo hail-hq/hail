@@ -30,6 +30,7 @@ from hailhq.api.routes import events as events_routes
 from hailhq.api.routes import forward_targets as forward_targets_routes
 from hailhq.api.routes import numbers as numbers_routes
 from hailhq.api.routes import providers as providers_routes
+from hailhq.api.routes import recordings as recordings_routes
 from hailhq.api.routes import sms as sms_routes
 from hailhq.api.routes import sms_webhooks
 from hailhq.api.routes import unsubscribe as unsubscribe_routes
@@ -442,6 +443,7 @@ async def _cache_422_for_idempotent_retry(
 _CUSTOMER_ROUTERS = [
     agents_routes.router,
     calls_routes.router,
+    recordings_routes.router,
     email_attachments_routes.router,
     emails_routes.router,
     events_routes.router,

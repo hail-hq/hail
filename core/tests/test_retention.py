@@ -253,9 +253,14 @@ async def test_purge_expired_data_never_touches_audit_log(async_session):
     assert audit.payload == {"to": "+14155551234"}
 
 
-async def test_purge_expired_data_flags_unexpected_recording(async_session):
-    """recording_s3_key should already be NULL (transcript-only guarantee);
-    if it isn't, purge logs a warning and reports it, without clearing it."""
+async def test_purge_expired_data_deletes_optional_recording(
+    async_session, monkeypatch
+):
+    """Closed-account cleanup deletes optional audio before clearing its key."""
+    from unittest.mock import Mock
+
+    storage = Mock()
+    monkeypatch.setattr("hailhq.core.recordings.recording_storage", lambda: storage)
     org_id = uuid.uuid4()
     now = datetime.now(timezone.utc)
     session = async_session
@@ -274,8 +279,8 @@ async def test_purge_expired_data_flags_unexpected_recording(async_session):
 
     summary = await purge_expired_data(session, now)
 
-    assert summary.calls_with_unexpected_recording == 1
+    assert summary.calls_with_unexpected_recording == 0
     await session.refresh(call)
-    # Not cleared -- purge doesn't mutate a field it wasn't asked to touch.
-    assert call.recording_s3_key == "recordings/unexpected.wav"
+    assert call.recording_s3_key is None
+    storage.delete_object.assert_called_once()
     assert call.transcript is None

@@ -43,6 +43,7 @@ class OrganizationCallSettings(Base):
     )
     # NULL = the service default (HAIL_VOICE_MAX_DURATION_SECONDS).
     max_duration_seconds: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    recording_enabled: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     # Workspace AI line template; ``{org}`` is the workspace name. NULL = the
     # built-in line for the call's direction (hailhq.core.disclosure).
     ai_disclosure_line: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -429,6 +430,7 @@ class Agent(Base):
     system_prompt: Mapped[str] = mapped_column(Text, nullable=False)
     # NULL = the agent waits for the other side to speak first.
     first_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    recording_enabled: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     ai_disclosure: Mapped[bool] = mapped_column(
         Boolean, server_default=text("TRUE"), nullable=False
     )
@@ -774,6 +776,15 @@ class Call(Base):
         Index("calls_thread_from_idx", "organization_id", "agent_id", "from_e164"),
         Index("calls_thread_to_idx", "organization_id", "agent_id", "to_e164"),
     )
+
+    @property
+    def recording_enabled(self) -> bool:
+        return (self.metadata_ or {}).get("recording_enabled") is True
+
+    @property
+    def recording_status(self) -> str:
+        value = (self.metadata_ or {}).get("recording_status")
+        return value if isinstance(value, str) else "disabled"
 
 
 class CallEvent(Base):

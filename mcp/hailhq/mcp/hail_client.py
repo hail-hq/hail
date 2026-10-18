@@ -135,6 +135,7 @@ class HailClient:
         first_message: str | None = None,
         language: str | None = None,
         ai_disclosure: bool = True,
+        recording_enabled: bool | None = None,
         metadata: dict[str, Any] | None = None,
         tools: list[str] | None = None,
         idempotency_key: str | None = None,
@@ -165,6 +166,8 @@ class HailClient:
             fields["first_message"] = first_message
         if language is not None:
             fields["voice_config"] = {"language": language}
+        if recording_enabled is not None:
+            fields["recording_enabled"] = recording_enabled
         if not ai_disclosure:
             fields["ai_disclosure"] = False
         if metadata is not None:

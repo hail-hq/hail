@@ -4860,6 +4860,38 @@ paths:
                   type: string
                 type: object
                 title: Response Healthz Healthz Get
+  /v1/calls/{call_id}/recording:
+    get:
+      tags:
+        - calls
+      summary: Get Recording
+      description: Redirect to a short-lived recording URL. Returns 404 if unavailable or expired.
+      operationId: get_recording_v1_calls__call_id__recording_get
+      parameters:
+        - name: call_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+            title: Call Id
+        - name: authorization
+          in: header
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            title: Authorization
+      responses:
+        "302":
+          description: Successful Response
+        "422":
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
 components:
   schemas:
     AgentCreate:
@@ -4882,16 +4914,23 @@ components:
             - type: "null"
           title: First Message
           description:
-            "Opening line spoken after the AI line. Omitted: the agent
-            waits for the other side to speak first."
+            "Opening line spoken after the AI line. Omitted: the agent waits for the
+            other side to speak first."
+        recording_enabled:
+          anyOf:
+            - type: boolean
+            - type: "null"
+          title: Recording Enabled
+          description:
+            Null inherits the workspace recording choice; false disables recording for
+            this agent. A workspace that disables recording cannot be overridden.
         ai_disclosure:
           type: boolean
           title: Ai Disclosure
           description:
-            Speak the AI line first on every call. Enabled by default.
-            Disable only if you have verified the disclosure is not required (47 CFR
-            64.1200(b)(1) and several AI bot-disclosure laws). Hail does not verify
-            this for you.
+            Speak the AI line first on every call. Enabled by default. Disable only if
+            you have verified the disclosure is not required (47 CFR 64.1200(b)(1) and several AI
+            bot-disclosure laws). Hail does not verify this for you.
           default: true
         ai_disclosure_line:
           anyOf:
@@ -4900,9 +4939,8 @@ components:
             - type: "null"
           title: Ai Disclosure Line
           description:
-            "The AI line this agent speaks. '{org}' is replaced by the
-            organization's name. Omitted: the workspace line, else Hail's built-in
-            line for the call's direction."
+            "The AI line this agent speaks. '{org}' is replaced by the organization's
+            name. Omitted: the workspace line, else Hail's built-in line for the call's direction."
         voice_config:
           $ref: "#/components/schemas/VoiceConfig"
           description: TTS voice and spoken language, same shape as on POST /calls.
@@ -4914,8 +4952,8 @@ components:
             - type: "null"
           title: Tools
           description:
-            "Agent tools to allow. Omitted: every tool the organization's
-            channels support. Empty list: none."
+            "Agent tools to allow. Omitted: every tool the organization's channels support.
+            Empty list: none."
         max_duration_seconds:
           anyOf:
             - type: integer
@@ -4923,9 +4961,7 @@ components:
               minimum: 60.0
             - type: "null"
           title: Max Duration Seconds
-          description:
-            "Soft cap per call in seconds (60..3600). Omitted: the workspace
-            limit."
+          description: "Soft cap per call in seconds (60..3600). Omitted: the workspace limit."
         handover_max_duration_seconds:
           anyOf:
             - type: integer
@@ -4934,8 +4970,8 @@ components:
             - type: "null"
           title: Handover Max Duration Seconds
           description:
-            "Call limit in seconds (60..3600) once a handover contact answers,
-            counted from the answer. Omitted: 1800 (30 minutes)."
+            "Call limit in seconds (60..3600) once a handover contact answers, counted
+            from the answer. Omitted: 1800 (30 minutes)."
         voice_enabled:
           type: boolean
           title: Voice Enabled
@@ -4953,8 +4989,8 @@ components:
             - paused
           title: Status
           description:
-            "'paused' agents do not answer; calls to their numbers fail
-            with end_reason 'no_agent'."
+            "'paused' agents do not answer; calls to their numbers fail with end_reason
+            'no_agent'."
           default: live
         handover_contacts:
           items:
@@ -4963,8 +4999,8 @@ components:
           maxItems: 10
           title: Handover Contacts
           description:
-            People the agent may hand a live call to, in order. The agent
-            never sees their numbers.
+            People the agent may hand a live call to, in order. The agent never sees
+            their numbers.
       additionalProperties: false
       type: object
       required:
@@ -4972,8 +5008,7 @@ components:
         - system_prompt
       title: AgentCreate
       description:
-        "A saved agent: what a number answers with, and what POST /calls
-        can
+        "A saved agent: what a number answers with, and what POST /calls can
 
         place calls with via ``agent_id``."
     AgentListResponse:
@@ -5048,6 +5083,14 @@ components:
             - type: "null"
           title: First Message
           description: Opening line, or null to wait.
+        recording_enabled:
+          anyOf:
+            - type: boolean
+            - type: "null"
+          title: Recording Enabled
+          description:
+            Null inherits the workspace recording choice; false disables recording for
+            this agent. A workspace that disables recording cannot be overridden.
         ai_disclosure:
           type: boolean
           title: Ai Disclosure
@@ -5082,9 +5125,7 @@ components:
             - type: integer
             - type: "null"
           title: Handover Max Duration Seconds
-          description:
-            Call limit after a handover contact answers; null means 1800
-            (30 minutes).
+          description: Call limit after a handover contact answers; null means 1800 (30 minutes).
         voice_enabled:
           type: boolean
           title: Voice Enabled
@@ -5159,6 +5200,12 @@ components:
             - type: "null"
           title: First Message
           description: New opening line; null makes the agent wait for the other side.
+        recording_enabled:
+          anyOf:
+            - type: boolean
+            - type: "null"
+          title: Recording Enabled
+          description: Null inherits workspace recording; false disables it for this agent.
         ai_disclosure:
           anyOf:
             - type: boolean
@@ -5172,8 +5219,8 @@ components:
             - type: "null"
           title: Ai Disclosure Line
           description:
-            New AI line template ('{org}' = organization name); null returns
-            to the workspace line.
+            New AI line template ('{org}' = organization name); null returns to the workspace
+            line.
         voice_config:
           anyOf:
             - $ref: "#/components/schemas/VoiceConfig"
@@ -5203,8 +5250,8 @@ components:
             - type: "null"
           title: Handover Max Duration Seconds
           description:
-            New call limit after a handover contact answers; null returns
-            to 1800 (30 minutes).
+            New call limit after a handover contact answers; null returns to 1800 (30
+            minutes).
         voice_enabled:
           anyOf:
             - type: boolean
@@ -5234,15 +5281,12 @@ components:
               maxItems: 10
             - type: "null"
           title: Handover Contacts
-          description:
-            New handover list; replaces the old one. [] removes all; null
-            leaves it.
+          description: New handover list; replaces the old one. [] removes all; null leaves it.
       additionalProperties: false
       type: object
       title: AgentUpdate
       description:
-        "PATCH /agents/{id}. Fields left out keep their value; ``null``
-        clears
+        "PATCH /agents/{id}. Fields left out keep their value; ``null`` clears
 
         the nullable ones (first_message, ai_disclosure_line, tools,
 
@@ -5266,18 +5310,17 @@ components:
           type: boolean
           title: Recipient Consent
           description:
-            "Attestation that you have obtained the lawful consent required\
-            \ to contact this recipient. Hail does not verify consent itself \u2014\
-            \ you are responsible for a lawful basis under TCPA/ePrivacy/PECR/CAN-SPAM/GDPR\
-            \ as applicable. Rejected (422) if not true."
+            Attestation that you have obtained the lawful consent required to contact
+            this recipient. Hail does not verify consent itself — you are responsible for a lawful
+            basis under TCPA/ePrivacy/PECR/CAN-SPAM/GDPR as applicable. Rejected (422) if not true.
         consent_source:
           anyOf:
             - type: string
             - type: "null"
           title: Consent Source
           description:
-            Where/how consent was obtained (e.g. 'signup form', 'prior
-            customer relationship'). Required (non-empty) when message_type is 'marketing'.
+            Where/how consent was obtained (e.g. 'signup form', 'prior customer relationship').
+            Required (non-empty) when message_type is 'marketing'.
         consent_obtained_at:
           anyOf:
             - type: string
@@ -5292,8 +5335,8 @@ components:
             - informational
           title: Message Type
           description:
-            "'marketing' additionally requires a non-empty consent_source.
-            Use 'informational' for transactional/service communications."
+            "'marketing' additionally requires a non-empty consent_source. Use 'informational'
+            for transactional/service communications."
           default: informational
         to:
           type: string
@@ -5305,52 +5348,55 @@ components:
             - type: "null"
           title: From
           description:
-            "Caller-id phone number, E.164 format. Must be a number owned
-            by the organization with the voice capability. Omitted: an active org-owned
-            number is used if one exists, else a number is claimed from the shared
-            pool."
+            "Caller-id phone number, E.164 format. Must be a number owned by the organization
+            with the voice capability. Omitted: an active org-owned number is used if one exists,
+            else a number is claimed from the shared pool."
         system_prompt:
           anyOf:
             - type: string
             - type: "null"
           title: System Prompt
           description:
-            Task instructions for the agent, sent as its leading system
-            message. At least one of system_prompt or llm is required; both together
-            is also valid.
+            Task instructions for the agent, sent as its leading system message. At least
+            one of system_prompt or llm is required; both together is also valid.
         llm:
           anyOf:
             - $ref: "#/components/schemas/LLMConfig"
             - type: "null"
           description:
-            BYO LLM endpoint the call runs on instead of Hail's default
-            model. At least one of system_prompt or llm is required; both together
-            is also valid.
+            BYO LLM endpoint the call runs on instead of Hail's default model. At least
+            one of system_prompt or llm is required; both together is also valid.
         first_message:
           anyOf:
             - type: string
             - type: "null"
           title: First Message
           description:
-            "Opening line the agent speaks first. Omitted: the agent waits
-            for the callee to speak first."
+            "Opening line the agent speaks first. Omitted: the agent waits for the callee
+            to speak first."
+        recording_enabled:
+          anyOf:
+            - type: boolean
+            - type: "null"
+          title: Recording Enabled
+          description:
+            Request best-effort audio recording. Requires workspace recording enabled.
+            Null inherits the agent/workspace. Recording failure never prevents the call. Hail Cloud
+            charges the recording-enabled call rate regardless of capture outcome.
         ai_disclosure:
           type: boolean
           title: Ai Disclosure
           description:
-            "Speak the AI self-disclosure line ('Hi, this is an AI assistant\
-            \ calling on behalf of ...') as the first thing on the call. Enabled by\
-            \ default. Disable only if you have verified the disclosure is not required\
-            \ for this call \u2014 47 CFR 64.1200(b)(1) requires identifying the initiating\
-            \ business at the start of artificial-voice calls in the US, and several\
-            \ jurisdictions have AI bot-disclosure laws. Hail does not verify this\
-            \ for you. The agent still identifies itself as an AI if asked."
+            Speak the AI self-disclosure line ('Hi, this is an AI assistant calling on
+            behalf of ...') as the first thing on the call. Enabled by default. Disable only if
+            you have verified the disclosure is not required for this call — 47 CFR 64.1200(b)(1)
+            requires identifying the initiating business at the start of artificial-voice calls
+            in the US, and several jurisdictions have AI bot-disclosure laws. Hail does not verify
+            this for you. The agent still identifies itself as an AI if asked.
           default: true
         voice_config:
           $ref: "#/components/schemas/VoiceConfig"
-          description:
-            TTS voice, VAD, turn-detection, and spoken-language settings
-            for this call.
+          description: TTS voice, VAD, turn-detection, and spoken-language settings for this call.
         conversation_id:
           anyOf:
             - type: string
@@ -5358,15 +5404,15 @@ components:
             - type: "null"
           title: Conversation Id
           description:
-            "Groups this call with other calls/emails/SMS into one conversation
-            thread. Omitted: the call is not linked to a conversation."
+            "Groups this call with other calls/emails/SMS into one conversation thread.
+            Omitted: the call is not linked to a conversation."
         metadata:
           additionalProperties: true
           type: object
           title: Metadata
           description:
-            Free-form JSON object attached to the call and echoed back
-            on reads. Not interpreted by Hail.
+            Free-form JSON object attached to the call and echoed back on reads. Not
+            interpreted by Hail.
         tools:
           anyOf:
             - items:
@@ -5375,9 +5421,9 @@ components:
             - type: "null"
           title: Tools
           description:
-            "Agent tools to allow on this call. Omitted: every tool the
-            organization's configured channels support (new channels appear automatically).
-            Empty list: no tools. Tool names are validated against the server's registry."
+            "Agent tools to allow on this call. Omitted: every tool the organization's
+            configured channels support (new channels appear automatically). Empty list: no tools.
+            Tool names are validated against the server's registry."
         agent_id:
           anyOf:
             - type: string
@@ -5385,11 +5431,10 @@ components:
             - type: "null"
           title: Agent Id
           description:
-            Place the call with a saved agent (POST /agents). The agent
-            supplies system_prompt, first_message, ai_disclosure, voice_config, tools
-            and max duration; any of those given explicitly on this request wins.
-            Satisfies the system_prompt or llm requirement on its own. A paused agent
-            is refused with 409.
+            Place the call with a saved agent (POST /agents). The agent supplies system_prompt,
+            first_message, ai_disclosure, recording_enabled, voice_config, tools and max duration;
+            any of those given explicitly on this request wins. Satisfies the system_prompt or llm
+            requirement on its own. A paused agent is refused with 409.
       additionalProperties: false
       type: object
       required:
@@ -5435,8 +5480,8 @@ components:
             - type: "null"
           title: Conversation Id
           description:
-            Conversation thread this call is grouped into, if any. Null
-            when the call was not linked to a conversation.
+            Conversation thread this call is grouped into, if any. Null when the call
+            was not linked to a conversation.
         from_e164:
           type: string
           title: From E164
@@ -5451,8 +5496,7 @@ components:
             - outbound
             - inbound
           title: Direction
-          description: "'outbound' for calls Hail placed, 'inbound' for calls
-            received."
+          description: "'outbound' for calls Hail placed, 'inbound' for calls received."
         agent_id:
           anyOf:
             - type: string
@@ -5460,8 +5504,8 @@ components:
             - type: "null"
           title: Agent Id
           description:
-            Agent that answered (inbound) or placed (outbound) this call.
-            Null when the call was placed with an inline system_prompt.
+            Agent that answered (inbound) or placed (outbound) this call. Null when the
+            call was placed with an inline system_prompt.
         status:
           type: string
           enum:
@@ -5476,18 +5520,16 @@ components:
             - canceled
           title: Status
           description:
-            "Current call-progress state: 'queued', 'dialing', 'ringing',
-            'in_progress', or one of the terminal states 'completed', 'failed',
-            'busy', 'no_answer', 'canceled'."
+            "Current call-progress state: 'queued', 'dialing', 'ringing', 'in_progress',
+            or one of the terminal states 'completed', 'failed', 'busy', 'no_answer', 'canceled'."
         end_reason:
           anyOf:
             - type: string
             - type: "null"
           title: End Reason
           description:
-            Machine-readable reason the call reached a terminal status
-            (e.g. 'normal_hangup', 'user_rejected', 'sip_trunk_failure'). Null while
-            the call is still in progress.
+            Machine-readable reason the call reached a terminal status (e.g. 'normal_hangup',
+            'user_rejected', 'sip_trunk_failure'). Null while the call is still in progress.
         provider_call_sid:
           anyOf:
             - type: string
@@ -5499,23 +5541,37 @@ components:
             - type: string
             - type: "null"
           title: Livekit Room
-          description:
-            Name of the LiveKit room hosting this call's media session,
-            if one was created.
+          description: Name of the LiveKit room hosting this call's media session, if one was created.
         initial_prompt:
           anyOf:
             - type: string
             - type: "null"
           title: Initial Prompt
           description: The system_prompt this call was created with, if any.
+        recording_enabled:
+          type: boolean
+          title: Recording Enabled
+          description: Whether the recording-enabled call rate applies, regardless of capture outcome.
+          default: false
+        recording_status:
+          type: string
+          title: Recording Status
+          description:
+            disabled, requested, starting, recording, processing, ready, unavailable,
+            failed, or erased.
+          default: disabled
+        recording_duration_ms:
+          anyOf:
+            - type: integer
+            - type: "null"
+          title: Recording Duration Ms
+          description: Duration of captured audio, independent of billed call duration.
         recording_s3_key:
           anyOf:
             - type: string
             - type: "null"
           title: Recording S3 Key
-          description:
-            Internal storage key for the call recording. Not a directly
-            fetchable URL.
+          description: Internal storage key for the call recording. Not a directly fetchable URL.
         requested_at:
           type: string
           format: date-time
@@ -5527,27 +5583,21 @@ components:
               format: date-time
             - type: "null"
           title: Started At
-          description:
-            When dialing began, ISO 8601 timestamp. Null until the call
-            starts.
+          description: When dialing began, ISO 8601 timestamp. Null until the call starts.
         answered_at:
           anyOf:
             - type: string
               format: date-time
             - type: "null"
           title: Answered At
-          description:
-            When the callee answered, ISO 8601 timestamp. Null if never
-            answered.
+          description: When the callee answered, ISO 8601 timestamp. Null if never answered.
         ended_at:
           anyOf:
             - type: string
               format: date-time
             - type: "null"
           title: Ended At
-          description:
-            When the call ended, ISO 8601 timestamp. Null while still in
-            progress.
+          description: When the call ended, ISO 8601 timestamp. Null while still in progress.
       type: object
       required:
         - id

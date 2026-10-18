@@ -22,3 +22,5 @@ Hail gives your AI agent a voice, a real phone number, and an inbox — place AI
 - [Contributing](./contributing.md) — dev environment, regenerating OpenAPI, PR flow.
 
 Source lives at [github.com/hail-hq/hail](https://github.com/hail-hq/hail). Every page here is also plain markdown in `docs/public/` — anything in that folder is published, anything outside it is not.
+
+- [Optional call recording](call-recording.md): settings, playback, billing and self-hosted storage.

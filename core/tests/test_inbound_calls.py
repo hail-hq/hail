@@ -249,7 +249,11 @@ async def test_accepted_call_rings_and_returns_dispatch_metadata(async_session) 
     assert call.livekit_room == "hail-in-abc"
     assert call.started_at is not None
     assert call.max_duration_seconds == 600  # the agent's cap wins over the workspace
-    assert call.metadata_ == {"billed": True}
+    assert call.metadata_ == {
+        "billed": True,
+        "recording_enabled": False,
+        "recording_status": "disabled",
+    }
     assert call.voice_config == {"voice_id": "v1", "language": "fr"}
 
     events = (await async_session.execute(select(CallEvent))).scalars().all()

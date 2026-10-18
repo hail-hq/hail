@@ -178,10 +178,14 @@ class Settings(BaseSettings):
     livekit_telnyx_sip_inbound_trunk_id: str = ""
     livekit_didww_sip_inbound_trunk_id: str = ""
 
+    # Optional recording: deploy capability, separately from workspace consent.
+    hail_recording_enabled: bool = False
+    hail_recording_retention_days: int = 30
+
     # Storage
     database_url: str = "postgresql://hail:hail@postgres:5432/hail"
     s3_endpoint: str = ""
-    s3_bucket: str = "hail-recordings"
+    s3_bucket: str = "hail-assets"
     s3_access_key: str = ""
     s3_secret_key: str = ""
     s3_region: str = "us-east-1"

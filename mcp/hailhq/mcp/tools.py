@@ -175,6 +175,7 @@ async def place_call(
     first_message: str | None = None,
     language: str | None = None,
     ai_disclosure: bool = True,
+    recording_enabled: bool | None = None,
     metadata: dict[str, Any] | None = None,
     tools: list[str] | None = None,
     idempotency_key: str | None = None,
@@ -195,6 +196,7 @@ async def place_call(
             first_message=first_message,
             language=language,
             ai_disclosure=ai_disclosure,
+            recording_enabled=recording_enabled,
             metadata=metadata,
             tools=tools,
             idempotency_key=idempotency_key,
@@ -1053,6 +1055,7 @@ async def get_agent(*, client: HailClient, agent_id: str) -> dict[str, Any]:
 # Fields an explicit JSON null clears. Null on any other AgentUpdate field is
 # ignored by the API, so ``update_agent`` refuses them instead of lying.
 _CLEARABLE_AGENT_FIELDS = (
+    "recording_enabled",
     "first_message",
     "ai_disclosure_line",
     "tools",
@@ -1283,6 +1286,7 @@ def register_tools(
         first_message: str | None = None,
         language: str | None = None,
         ai_disclosure: bool = True,
+        recording_enabled: bool | None = None,
         metadata: dict[str, Any] | None = None,
         tools: list[str] | None = None,
         idempotency_key: str | None = None,
@@ -1362,6 +1366,7 @@ def register_tools(
                     first_message=first_message,
                     language=language,
                     ai_disclosure=ai_disclosure,
+                    recording_enabled=recording_enabled,
                     metadata=metadata,
                     tools=tools,
                     idempotency_key=idempotency_key,
@@ -2015,6 +2020,7 @@ def register_tools(
         system_prompt: str,
         first_message: str | None = None,
         ai_disclosure: bool = True,
+        recording_enabled: bool | None = None,
         ai_disclosure_line: str | None = None,
         language: str | None = None,
         voice_id: str | None = None,
@@ -2051,6 +2057,8 @@ def register_tools(
             "voice_enabled": voice_enabled,
             "sms_enabled": sms_enabled,
         }
+        if recording_enabled is not None:
+            fields["recording_enabled"] = recording_enabled
         if first_message is not None:
             fields["first_message"] = first_message
         if ai_disclosure_line is not None:
@@ -2678,6 +2686,7 @@ def register_tools(
         system_prompt: str | None = None,
         first_message: str | None = None,
         ai_disclosure: bool | None = None,
+        recording_enabled: bool | None = None,
         ai_disclosure_line: str | None = None,
         language: str | None = None,
         voice_id: str | None = None,
@@ -2726,6 +2735,7 @@ def register_tools(
                             "system_prompt": system_prompt,
                             "first_message": first_message,
                             "ai_disclosure": ai_disclosure,
+                            "recording_enabled": recording_enabled,
                             "ai_disclosure_line": ai_disclosure_line,
                             "language": language,
                             "voice_id": voice_id,

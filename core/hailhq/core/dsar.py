@@ -293,6 +293,10 @@ async def delete_recipient_data(
 
     calls_scrubbed = 0
     for call in record.calls:
+        if call.recording_s3_key or (call.metadata_ or {}).get("recording_enabled"):
+            from hailhq.core.recordings import delete_recording
+
+            await delete_recording(call)
         if call.transcript is not None:
             call.transcript = None
             calls_scrubbed += 1

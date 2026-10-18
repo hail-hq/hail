@@ -249,7 +249,7 @@ A checked box is a released feature. Per-artifact changelogs (GitHub Releases fo
 - LLM — BYO-endpoint mode
   - [x] OpenAI chat-completions-compatible ([docs](docs/public/byo-llm.md))
 - Recording
-  - [ ] S3 upload
+  - [x] Optional S3-compatible recording (best effort; disabled by default)
   - [ ] Diarization
 
 ### Distribution

@@ -12,6 +12,7 @@ const MS_PER_DAY = 1000 * 60 * 60 * 24;
 // file is a hard error, not a silent skip: silently skipping is exactly how a
 // price file could rot unnoticed while the invoice keeps citing it.
 const ROW_ARRAYS = {
+  recording: ['recording'],
   llm: ['models'],
   stt: ['models'],
   tts: ['models'],

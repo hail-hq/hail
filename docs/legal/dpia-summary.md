@@ -26,8 +26,8 @@ this as required rather than optional.
   → text-to-speech → stored transcript. See our
   [Privacy Policy](https://hail.so/legal/privacy) for the full data-flow
   description and [sub-processor list](https://hail.so/legal/subprocessors).
-- **Data minimization** — call audio is not recorded or retained; only a
-  text transcript is stored. Voice output is limited to a fixed set of
+- **Data minimization** — call audio is off until a workspace explicitly enables best-effort recording.
+  Recordings use private storage, authenticated playback and 30-day expiry. Voice output is limited to a fixed set of
   platform-provided voices — Developers cannot supply or select a custom
   or cloned voice, which closes off voice-cloning misuse as a platform
   capability rather than relying solely on policy to prohibit it.
@@ -60,3 +60,5 @@ usage grows.
 
 _This summary is not a substitute for the full internal risk assessment
 and does not constitute legal advice._
+
+Recording implementation review (2026-10-18): deployment capability remains off until storage, controls, notices and migration 0060 are deployed together. Validate isolation, deletion, retention and consent before enabling. This note does not constitute completed DPIA approval.

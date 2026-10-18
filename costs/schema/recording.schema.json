@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "required": ["version", "license", "basis", "recording"],
+  "properties": {
+    "version": {
+      "const": 1
+    },
+    "license": {
+      "const": "CC-BY-4.0"
+    },
+    "basis": {
+      "type": "string"
+    },
+    "recording": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "provider",
+          "method",
+          "usd_per_minute",
+          "source_url",
+          "last_verified"
+        ],
+        "properties": {
+          "provider": {
+            "type": "string"
+          },
+          "method": {
+            "type": "string"
+          },
+          "usd_per_minute": {
+            "type": "string",
+            "pattern": "^[0-9]+(\\.[0-9]+)?$"
+          },
+          "source_url": {
+            "type": "string"
+          },
+          "last_verified": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  }
+}

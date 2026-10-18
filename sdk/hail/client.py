@@ -100,6 +100,7 @@ class _CallsResource:
         first_message: str | None = None,
         language: str | None = None,
         ai_disclosure: bool = True,
+        recording_enabled: bool | None = None,
         metadata: dict[str, Any] | None = None,
         consent_source: str | None = None,
         consent_obtained_at: datetime | None = None,
@@ -133,6 +134,8 @@ class _CallsResource:
             body["system_prompt"] = system_prompt
         if first_message is not None:
             body["first_message"] = first_message
+        if recording_enabled is not None:
+            body["recording_enabled"] = recording_enabled
         if not ai_disclosure:
             body["ai_disclosure"] = False
         if language is not None:
@@ -789,6 +792,7 @@ class _AgentsResource:
         system_prompt: str,
         first_message: str | None = None,
         ai_disclosure: bool = True,
+        recording_enabled: bool | None = None,
         ai_disclosure_line: str | None = None,
         language: str | None = None,
         voice_id: str | None = None,
@@ -806,6 +810,7 @@ class _AgentsResource:
             "name": name,
             "system_prompt": system_prompt,
             "ai_disclosure": ai_disclosure,
+            "recording_enabled": recording_enabled,
             "voice_enabled": voice_enabled,
             "sms_enabled": sms_enabled,
             "status": status,

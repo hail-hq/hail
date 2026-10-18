@@ -39,6 +39,27 @@ def inbound_hooks(monkeypatch: pytest.MonkeyPatch) -> dict[str, AsyncMock]:
     return {"attach": attach, "detach": detach}
 
 
+async def test_recording_override_can_return_to_workspace_default(client, org):
+    _, headers = org
+    created = await client.post(
+        "/v1/agents",
+        headers=headers,
+        json={
+            "name": "Front desk",
+            "system_prompt": "Help the caller.",
+            "recording_enabled": False,
+        },
+    )
+    assert created.status_code == 201
+    agent = created.json()
+    assert agent["recording_enabled"] is False
+    updated = await client.patch(
+        f"/v1/agents/{agent['id']}", headers=headers, json={"recording_enabled": None}
+    )
+    assert updated.status_code == 200
+    assert updated.json()["recording_enabled"] is None
+
+
 async def _seed_number(
     session: AsyncSession, org_id: uuid.UUID, capabilities=("voice", "sms")
 ) -> PhoneNumber:

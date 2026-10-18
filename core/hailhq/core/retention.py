@@ -46,7 +46,7 @@ from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
 from hailhq.core.models import Call, Contact, Email, OrgClosure, Sms
-from sqlalchemy import delete, func, select, update
+from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
@@ -67,10 +67,7 @@ class PurgeSummary:
     sms_scrubbed: int = 0
     emails_scrubbed: int = 0
     contacts_deleted: int = 0
-    # Rows that should already satisfy the transcript-only storage
-    # guarantee (voicebot never persists audio) but didn't — logged as a
-    # warning, not silently overwritten, since clearing them wasn't asked
-    # for and their presence signals a bug elsewhere worth investigating.
+    # Compatibility counter for older operator consumers. Audio is now optional.
     calls_with_unexpected_recording: int = 0
 
 
@@ -80,13 +77,7 @@ async def purge_expired_data(session: AsyncSession, now: datetime) -> PurgeSumma
     For every ``organization_id`` in ``org_closures`` with
     ``closed_at < now - 12 months``:
 
-    * ``Call`` rows: ``transcript`` is set to ``NULL``. ``recording_s3_key``
-      / ``recording_duration_ms`` are expected to already be ``NULL`` per
-      the transcript-only storage guarantee — this function checks that
-      and logs a warning if it doesn't hold, it does not mutate those
-      columns (clearing them wasn't part of the ask, and if they're
-      unexpectedly populated that's a separate bug to chase down, not
-      paper over here).
+    * ``Call`` rows: delete optional audio, clear recording references and transcripts.
     * ``Sms`` rows: ``body`` is set to ``""`` (the column is NOT NULL; an
       empty string clears the content, same convention as
       ``Email.body_text`` below).
@@ -122,23 +113,25 @@ async def purge_expired_data(session: AsyncSession, now: datetime) -> PurgeSumma
     if not org_ids:
         return summary
 
-    anomaly_count = (
-        await session.execute(
-            select(func.count())
-            .select_from(Call)
-            .where(
-                Call.organization_id.in_(org_ids),
-                Call.recording_s3_key.isnot(None),
+    # Audio has a shorter independent lifecycle. Erase any remaining objects
+    # before scrubbing closed-account content; never leave a dangling public URL.
+    recordings = (
+        (
+            await session.execute(
+                select(Call).where(
+                    Call.organization_id.in_(org_ids),
+                    Call.recording_s3_key.isnot(None),
+                )
             )
         )
-    ).scalar_one()
-    summary.calls_with_unexpected_recording = anomaly_count
-    if anomaly_count:
-        logger.warning(
-            "retention: %d Call row(s) for closed orgs unexpectedly carry "
-            "recording_s3_key (transcript-only storage guarantee violated)",
-            anomaly_count,
-        )
+        .scalars()
+        .all()
+    )
+    if recordings:
+        from hailhq.core.recordings import delete_recording
+
+        for call in recordings:
+            await delete_recording(call)
 
     call_result = await session.execute(
         update(Call)
