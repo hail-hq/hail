@@ -27,6 +27,7 @@ async def reconcile_recording(db: AsyncSession, call: Call) -> None:
         "ready",
         "failed",
         "unavailable",
+        "erased",
     }:
         return
     try:

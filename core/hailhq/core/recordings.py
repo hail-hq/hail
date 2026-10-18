@@ -107,7 +107,9 @@ async def apply_egress_info(db: AsyncSession, call: Call, info: api.EgressInfo) 
     values = {"recording_status": "processing"}
     if started > 0:
         values["recording_started_at"] = started
-    if info.status == api.EGRESS_ACTIVE:
+    if info.status == api.EGRESS_STARTING:
+        values["recording_status"] = "starting"
+    elif info.status == api.EGRESS_ACTIVE:
         values["recording_status"] = "recording"
     elif info.status in {api.EGRESS_COMPLETE, api.EGRESS_LIMIT_REACHED}:
         if (
