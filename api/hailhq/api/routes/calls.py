@@ -62,7 +62,7 @@ from hailhq.core.pool import (
     release_pool_reservation,
 )
 from hailhq.core.provider_config import load_org_provider_configs, provider_cipher
-from hailhq.core.recordings import recording_enabled
+from hailhq.core.recordings import recording_call_metadata
 from hailhq.core.schemas import (
     TERMINAL_CALL_STATUSES,
     CallCreate,
@@ -458,19 +458,13 @@ async def create_call(
     org_call_settings = await db.get(
         OrganizationCallSettings, principal.organization_id
     )
-    record = recording_enabled(
-        (
-            True
-            if principal.auth_kind == "shared" and settings.hail_recording_enabled
-            else org_call_settings.recording_enabled if org_call_settings else None
-        ),
-        body.recording_enabled,
+    call_metadata.update(
+        recording_call_metadata(
+            org_call_settings,
+            override=body.recording_enabled,
+            self_hosted=principal.auth_kind == "shared",
+        )
     )
-    call_metadata["recording_retention_days"] = (
-        org_call_settings.recording_retention_days if org_call_settings else None
-    ) or settings.hail_recording_retention_days
-    call_metadata["recording_enabled"] = record
-    call_metadata["recording_status"] = "requested" if record else "disabled"
     max_duration_seconds = (
         (agent.max_duration_seconds if agent else None)
         or (org_call_settings.max_duration_seconds if org_call_settings else None)

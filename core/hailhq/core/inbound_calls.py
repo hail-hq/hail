@@ -41,7 +41,7 @@ from hailhq.core.models import (
     OrganizationCallSettings,
     PhoneNumber,
 )
-from hailhq.core.recordings import recording_enabled
+from hailhq.core.recordings import recording_call_metadata
 from hailhq.core.sms_ingest import active_dedicated_number
 from hailhq.core.webhook_fanout import call_event_data, fanout_call_event
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -202,14 +202,6 @@ async def _answer_or_refuse(
     disclosure_line = agent.ai_disclosure_line or (
         workspace.ai_disclosure_line if workspace else None
     )
-    record = recording_enabled(
-        (
-            True
-            if settings.hail_api_key and settings.hail_recording_enabled
-            else workspace.recording_enabled if workspace else None
-        ),
-        agent.recording_enabled,
-    )
     now = datetime.now(timezone.utc)
     call = Call(
         organization_id=org_id,
@@ -228,12 +220,11 @@ async def _answer_or_refuse(
         started_at=now,
         metadata_={
             CALL_META_BILLED: True,
-            "recording_retention_days": (
-                workspace.recording_retention_days if workspace else None
-            )
-            or settings.hail_recording_retention_days,
-            "recording_enabled": record,
-            "recording_status": "requested" if record else "disabled",
+            **recording_call_metadata(
+                workspace,
+                override=agent.recording_enabled,
+                self_hosted=bool(settings.hail_api_key),
+            ),
         },
     )
     db.add(call)

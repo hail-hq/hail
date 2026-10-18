@@ -1843,7 +1843,6 @@ async def test_call_snapshots_workspace_recording_retention(
             "to": "+14155559999",
             "system_prompt": "hi",
             "recipient_consent": True,
-            "metadata": {"recording_retention_days": 365},
         },
         headers={"Authorization": f"Bearer {plain}"},
     )
@@ -1854,3 +1853,28 @@ async def test_call_snapshots_workspace_recording_retention(
     await async_session.commit()
     await async_session.refresh(call)
     assert call.metadata_["recording_retention_days"] == 7
+
+
+@pytest.mark.parametrize(
+    "key", ["recording_object_key", "recording_egress_id", "recording_status"]
+)
+async def test_post_calls_rejects_reserved_recording_metadata(
+    client, async_session, org_and_key, livekit_mock, add_phone_number, key
+):
+    """Recording state is Hail-owned: a caller must not plant an object key
+    or Egress id that erasure and stop would then act on."""
+    org_id, _, plain = org_and_key
+    await add_phone_number(async_session, org_id)
+    response = await client.post(
+        "/calls",
+        json={
+            "to": "+14155559999",
+            "system_prompt": "hi",
+            "recipient_consent": True,
+            "metadata": {key: "recordings/365d/other-org/other-call/audio.ogg"},
+        },
+        headers={"Authorization": f"Bearer {plain}"},
+    )
+    assert response.status_code == 422, response.text
+    assert "reserved" in response.text
+    livekit_mock.create_room.assert_not_awaited()

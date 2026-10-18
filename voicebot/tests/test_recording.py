@@ -9,7 +9,7 @@ from hailhq.core.config import settings
 from hailhq.core.models import Call, UsageEvent
 from hailhq.core.recordings import apply_egress_info, recording_enabled
 from hailhq.voicebot.agent import on_call_end
-from hailhq.voicebot.recording import start_recording
+from hailhq.voicebot.recording import start_recording, stop_recording
 from livekit import api
 from sqlalchemy import select
 
@@ -177,3 +177,21 @@ async def test_recording_uses_snapshotted_storage_expiry(
     await start_recording(call_id, call.livekit_room, lk)
     request = lk.egress.start_room_composite_egress.await_args.args[0]
     assert request.file_outputs[0].filepath.startswith(f"recordings/{days}d/")
+
+
+async def test_cancelled_start_never_leaves_recording_starting(async_session):
+    """A start that died before LiveKit answered has no Egress id to reconcile,
+    so the stop path settles the status instead of leaving it "starting"."""
+    call_id = await _make_call_row(async_session)
+    call = await async_session.get(Call, call_id)
+    call.metadata_ = {
+        "recording_enabled": True,
+        "recording_status": "starting",
+        "recording_object_key": "recordings/365d/org/call/audio.ogg",
+    }
+    await async_session.commit()
+    lk = SimpleNamespace(egress=SimpleNamespace(stop_egress=AsyncMock()))
+    await stop_recording(call_id, lk)
+    await async_session.refresh(call)
+    assert call.recording_status == "unavailable"
+    lk.egress.stop_egress.assert_not_awaited()

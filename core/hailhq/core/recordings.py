@@ -8,7 +8,7 @@ from uuid import UUID
 
 import boto3
 from hailhq.core.config import settings
-from hailhq.core.models import Call
+from hailhq.core.models import Call, OrganizationCallSettings
 from livekit import api
 from sqlalchemy import cast, update
 from sqlalchemy.dialects.postgresql import JSONB
@@ -20,20 +20,54 @@ def recording_enabled(workspace: bool | None, override: bool | None = None) -> b
     return workspace is True and override is not False
 
 
+def recording_call_metadata(
+    workspace: OrganizationCallSettings | None,
+    *,
+    override: bool | None,
+    self_hosted: bool,
+) -> dict:
+    """Snapshot the recording decision and retention onto a new ``Call``.
+
+    The deploy flag gates every path: a workspace that opted in on a deploy
+    that later turned recording off is neither recorded nor charged the
+    recording rate. A self-hosted deploy (shared key) consents through the
+    flag alone. Old calls keep their snapshot when the workspace changes.
+    """
+    permitted: bool | None = (
+        True if self_hosted else (workspace.recording_enabled if workspace else None)
+    )
+    record = settings.hail_recording_enabled and recording_enabled(permitted, override)
+    return {
+        "recording_retention_days": (
+            workspace.recording_retention_days if workspace else None
+        )
+        or settings.hail_recording_retention_days,
+        "recording_enabled": record,
+        "recording_status": "requested" if record else "disabled",
+    }
+
+
 def recording_retention_days(call: Call) -> int:
     """Use the call snapshot; changing workspace settings never changes old audio."""
     days = (call.metadata_ or {}).get("recording_retention_days")
     return days if type(days) is int and days in (7, 30, 365) else 365
 
 
+_storage = None
+
+
 def recording_storage():
-    return boto3.client(
-        "s3",
-        endpoint_url=settings.s3_endpoint or None,
-        region_name=settings.s3_region,
-        aws_access_key_id=settings.s3_access_key or None,
-        aws_secret_access_key=settings.s3_secret_key or None,
-    )
+    """One boto3 client per process; it is thread-safe and reusable."""
+    global _storage
+    if _storage is None:
+        _storage = boto3.client(
+            "s3",
+            endpoint_url=settings.s3_endpoint or None,
+            region_name=settings.s3_region,
+            aws_access_key_id=settings.s3_access_key or None,
+            aws_secret_access_key=settings.s3_secret_key or None,
+        )
+    return _storage
 
 
 async def recording_state(db: AsyncSession, call_id: UUID, **values) -> None:

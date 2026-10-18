@@ -1556,7 +1556,7 @@ type CallCreate struct {
 	// MessageType 'marketing' additionally requires a non-empty consent_source. Use 'informational' for transactional/service communications.
 	MessageType *CallCreateMessageType `json:"message_type,omitempty"`
 
-	// Metadata Free-form JSON object attached to the call and echoed back on reads. Not interpreted by Hail.
+	// Metadata Free-form JSON object attached to the call and echoed back on reads. Not interpreted by Hail. Keys starting with 'recording_' are reserved and rejected.
 	Metadata *map[string]interface{} `json:"metadata,omitempty"`
 
 	// RecipientConsent Attestation that you have obtained the lawful consent required to contact this recipient. Hail does not verify consent itself — you are responsible for a lawful basis under TCPA/ePrivacy/PECR/CAN-SPAM/GDPR as applicable. Rejected (422) if not true.

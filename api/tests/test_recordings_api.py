@@ -8,6 +8,7 @@ from uuid import uuid4
 import pytest
 from fastapi import HTTPException
 from hailhq.api.routes import recordings
+from hailhq.core.config import settings
 from hailhq.core.models import Call, PhoneNumber
 
 
@@ -77,7 +78,7 @@ async def test_playback_is_scoped_to_authenticated_workspace(
 async def test_recording_playback_honors_retention(
     async_session, monkeypatch, age_days, retention_days, expected_status
 ):
-    monkeypatch.setattr(recordings.settings, "hail_recording_retention_days", 365)
+    monkeypatch.setattr(settings, "hail_recording_retention_days", 365)
     storage = Mock()
     storage.generate_presigned_url.return_value = (
         "https://storage.example/audio?signed=yes"
@@ -124,7 +125,7 @@ async def test_signed_url_does_not_outlive_recording_expiry(monkeypatch):
 async def test_legacy_recording_keeps_original_year_when_service_default_changes(
     monkeypatch,
 ):
-    monkeypatch.setattr(recordings.settings, "hail_recording_retention_days", 7)
+    monkeypatch.setattr(settings, "hail_recording_retention_days", 7)
     storage = Mock()
     storage.generate_presigned_url.return_value = (
         "https://storage.example/audio?signed=yes"

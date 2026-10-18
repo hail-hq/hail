@@ -5412,7 +5412,8 @@ components:
           title: Metadata
           description:
             Free-form JSON object attached to the call and echoed back on reads. Not
-            interpreted by Hail.
+            interpreted by Hail. Keys starting with 'recording_' are reserved and
+            rejected.
         tools:
           anyOf:
             - items:

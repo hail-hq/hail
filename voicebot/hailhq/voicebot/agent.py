@@ -81,7 +81,7 @@ from hailhq.voicebot.pipeline import (
     decrypt_llm_metadata,
     resolve_org_configs,
 )
-from hailhq.voicebot.recording import start_recording, stop_recording, upload_recording
+from hailhq.voicebot.recording import start_recording, stop_recording
 from hailhq.voicebot.telemetry import connect_livekit_tracing
 from hailhq.voicebot.tools import build_agent_tools
 from livekit import rtc
@@ -1316,8 +1316,8 @@ async def on_call_end(
 ) -> None:
     """Finalize the ``Call`` row when the session ends.
 
-    Called from a shutdown callback registered against ``ctx``. Uploads the
-    recording independently through Egress (see :mod:`hailhq.voicebot.recording`), marks
+    Called from a shutdown callback registered against ``ctx``. Egress handles
+    the recording on its own (see :mod:`hailhq.voicebot.recording`). This marks
     the call with the final status (``"completed"`` by default), sets
     ``ended_at = now()``, and records one raw ``usage_events`` row with the
     call duration in milliseconds.
@@ -1343,7 +1343,6 @@ async def on_call_end(
     see ``usage_events`` accumulate as a generic analytics primitive they
     can query directly.
     """
-    await upload_recording(call_id, room_name)
     now = datetime.now(timezone.utc)
 
     async with session_scope() as session:

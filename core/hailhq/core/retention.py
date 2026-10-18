@@ -46,6 +46,7 @@ from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
 from hailhq.core.models import Call, Contact, Email, OrgClosure, Sms
+from hailhq.core.recordings import delete_recording
 from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -127,11 +128,8 @@ async def purge_expired_data(session: AsyncSession, now: datetime) -> PurgeSumma
         .scalars()
         .all()
     )
-    if recordings:
-        from hailhq.core.recordings import delete_recording
-
-        for call in recordings:
-            await delete_recording(call)
+    for call in recordings:
+        await delete_recording(call)
 
     call_result = await session.execute(
         update(Call)

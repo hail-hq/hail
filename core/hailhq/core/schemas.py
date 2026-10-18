@@ -211,6 +211,10 @@ class ConsentAttestationMixin(BaseModel):
     )
 
 
+# Call.metadata keys Hail writes for recording state; POST /calls rejects them.
+RESERVED_CALL_METADATA_PREFIX = "recording_"
+
+
 class CallCreate(ConsentAttestationMixin):
     model_config = ConfigDict(extra="forbid")
 
@@ -287,9 +291,26 @@ class CallCreate(ConsentAttestationMixin):
         default_factory=dict,
         description=(
             "Free-form JSON object attached to the call and echoed back on "
-            "reads. Not interpreted by Hail."
+            "reads. Not interpreted by Hail. Keys starting with "
+            "'recording_' are reserved and rejected."
         ),
     )
+
+    @field_validator("metadata")
+    @classmethod
+    def _metadata_has_no_reserved_keys(cls, v: dict) -> dict:
+        # Recording state (egress id, object key, status) lives under these
+        # keys and is read back as Hail-owned by the voicebot, DSAR erasure
+        # and retention. A caller must not be able to plant them.
+        bad = sorted(
+            k
+            for k in v
+            if isinstance(k, str) and k.startswith(RESERVED_CALL_METADATA_PREFIX)
+        )
+        if bad:
+            raise ValueError(f"metadata keys are reserved: {', '.join(bad)}")
+        return v
+
     tools: list[str] | None = Field(
         default=None,
         description=(

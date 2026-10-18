@@ -17,6 +17,7 @@ from uuid import UUID
 
 from hailhq.core.compliance_gate import normalize_recipient
 from hailhq.core.models import AuditLog, Call, Contact, Email, Sms, Suppression
+from hailhq.core.recordings import delete_recording
 from sqlalchemy import (
     and_,
     case,
@@ -294,8 +295,6 @@ async def delete_recipient_data(
     calls_scrubbed = 0
     for call in record.calls:
         if call.recording_s3_key or (call.metadata_ or {}).get("recording_enabled"):
-            from hailhq.core.recordings import delete_recording
-
             await delete_recording(call)
         if call.transcript is not None:
             call.transcript = None

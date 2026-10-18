@@ -9,11 +9,11 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import RedirectResponse
 from hailhq.api.deps import get_current_principal
-from hailhq.core.config import settings
+from hailhq.api.routes.calls import get_livekit
 from hailhq.core.db import get_session
+from hailhq.core.livekit import verify_webhook_event
 from hailhq.core.models import Call
 from hailhq.core.recordings import apply_egress_info, presign_recording
-from livekit import api
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -30,14 +30,9 @@ async def reconcile_recording(db: AsyncSession, call: Call) -> None:
     }:
         return
     try:
-        async with api.LiveKitAPI(
-            settings.livekit_url, settings.livekit_api_key, settings.livekit_api_secret
-        ) as lk:
-            result = await asyncio.wait_for(
-                lk.egress.list_egress(api.ListEgressRequest(egress_id=egress_id)),
-                timeout=3,
-            )
-        for info in result.items:
+        livekit = await get_livekit()
+        infos = await asyncio.wait_for(livekit.list_egress(egress_id), timeout=3)
+        for info in infos:
             await apply_egress_info(db, call, info)
         await db.commit()
         await db.refresh(call)
@@ -81,10 +76,7 @@ async def recording_event(
     if len(body) > 262144:
         raise HTTPException(413, "Event too large")
     try:
-        receiver = api.WebhookReceiver(
-            api.TokenVerifier(settings.livekit_api_key, settings.livekit_api_secret)
-        )
-        event = receiver.receive(
+        event = verify_webhook_event(
             body.decode(), request.headers.get("authorization", "")
         )
     except Exception:

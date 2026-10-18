@@ -49,6 +49,8 @@ async def start_recording(call_id: UUID, room_name: str, lkapi) -> None:
                 api.EncodedFileOutput(
                     file_type=api.OGG,
                     filepath=key,
+                    # No sidecar manifest: erasure deletes exactly one object.
+                    disable_manifest=True,
                     s3=api.S3Upload(
                         bucket=settings.s3_bucket,
                         region=settings.s3_region,
@@ -89,9 +91,13 @@ async def stop_recording(call_id: UUID, lkapi) -> None:
     try:
         async with session_scope() as db:
             call = await db.get(Call, call_id)
-            egress_id = (
-                (call.metadata_ or {}).get("recording_egress_id") if call else None
-            )
+            meta = (call.metadata_ or {}) if call else {}
+            egress_id = meta.get("recording_egress_id")
+            if not egress_id and meta.get("recording_status") == "starting":
+                # The start was cancelled or died before LiveKit answered, so
+                # no Egress id exists to reconcile; never leave it "starting".
+                await recording_state(db, call_id, recording_status="unavailable")
+                await db.commit()
         if not egress_id:
             return
         info = await asyncio.wait_for(
@@ -105,8 +111,3 @@ async def stop_recording(call_id: UUID, lkapi) -> None:
             await db.commit()
     except Exception:
         logger.warning("recording stop deferred for call_id=%s", call_id, exc_info=True)
-
-
-async def upload_recording(call_id: UUID, room_name: str) -> str | None:
-    """Egress uploads independently; retained for the existing finalizer."""
-    return None

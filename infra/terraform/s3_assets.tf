@@ -63,6 +63,11 @@ resource "aws_iam_policy" "recordings" {
   })
 }
 
+resource "aws_iam_user_policy_attachment" "recordings" {
+  user       = aws_iam_user.main.name
+  policy_arn = aws_iam_policy.recordings.arn
+}
+
 variable "asset_allowed_origins" {
   type    = list(string)
   default = ["https://hail.so"]
