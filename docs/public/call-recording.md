@@ -2,6 +2,9 @@
 
 Workspace owners choose recording in **Calls → Settings** or during onboarding.
 Existing workspaces keep audio off until an owner chooses otherwise.
+Choose **7 days**, **30 days**, or **1 year (365 days)** for recording retention.
+The default is one year. A call keeps the choice saved when it starts.
+Changes apply to future calls; existing recordings keep their original expiry.
 Agents and individual calls can disable recording with `recording_enabled: false`.
 They cannot override a workspace that disables recording.
 
@@ -40,11 +43,16 @@ Egress and a reachable LiveKit media server.
 
 Provision cloud storage using `infra/terraform/s3_assets.tf`. Attach the exported
 recordings policy to the recording credentials and pass the assets bucket name.
-The recording prefix expires after 365 days by default. Set
-`HAIL_RECORDING_RETENTION_DAYS` and the bucket lifecycle to the same value.
-Custom stores need equivalent expiry rules. Signed playback enforces expiry too.
+Recordings use `recordings/7d/`, `recordings/30d/`, and `recordings/365d/`
+prefixes. Terraform sets the matching storage lifecycle rules. Unprefixed legacy
+recordings keep their original one-year policy. Playback enforces each call's
+saved expiry, including the lifetime of newly signed URLs. Storage lifecycle
+removal is asynchronous and can follow the playback deadline.
+
+Self-hosters set `HAIL_RECORDING_RETENTION_DAYS` to 7, 30, or 365 for the service
+default. Configure equivalent lifecycle rules on an S3-compatible store.
 Honor valid erasure requests and applicable shorter retention requirements.
-The 365-day default is a product policy, not a universal legal retention period.
+These presets are product choices, not universal legal retention periods.
 
 Configure a LiveKit webhook to `https://YOUR_API/v1/livekit/recording-events`.
 The API verifies LiveKit's signature. Playback also reconciles Egress state when

@@ -20,6 +20,12 @@ def recording_enabled(workspace: bool | None, override: bool | None = None) -> b
     return workspace is True and override is not False
 
 
+def recording_retention_days(call: Call) -> int:
+    """Use the call snapshot; changing workspace settings never changes old audio."""
+    days = (call.metadata_ or {}).get("recording_retention_days")
+    return days if type(days) is int and days in (7, 30, 365) else 365
+
+
 def recording_storage():
     return boto3.client(
         "s3",
@@ -99,19 +105,25 @@ async def apply_egress_info(db: AsyncSession, call: Call, info: api.EgressInfo) 
 
 
 async def presign_recording(call: Call) -> str | None:
-    if not call.recording_s3_key:
-        return None
     if (
-        call.ended_at
-        and (datetime.now(timezone.utc) - call.ended_at).total_seconds()
-        > settings.hail_recording_retention_days * 86400
+        not call.recording_s3_key
+        or (call.metadata_ or {}).get("recording_status") == "erased"
     ):
         return None
+    expires_in = 900
+    if call.ended_at:
+        remaining = (
+            recording_retention_days(call) * 86400
+            - (datetime.now(timezone.utc) - call.ended_at).total_seconds()
+        )
+        if remaining <= 0:
+            return None
+        expires_in = min(expires_in, max(1, int(remaining)))
     return await asyncio.to_thread(
         recording_storage().generate_presigned_url,
         "get_object",
         Params={"Bucket": settings.s3_bucket, "Key": call.recording_s3_key},
-        ExpiresIn=900,
+        ExpiresIn=expires_in,
     )
 
 

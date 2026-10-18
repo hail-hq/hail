@@ -1,4 +1,4 @@
-from pydantic import Field, computed_field, model_validator
+from pydantic import Field, computed_field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -338,6 +338,13 @@ class Settings(BaseSettings):
         "You are resubscribed to Hail messages. Reply STOP to unsubscribe, "
         "HELP for help."
     )
+
+    @field_validator("hail_recording_retention_days")
+    @classmethod
+    def _recording_retention_preset(cls, value: int) -> int:
+        if value not in (7, 30, 365):
+            raise ValueError("Recording retention must be 7, 30, or 365 days")
+        return value
 
     @model_validator(mode="after")
     def _trunk_fallbacks(self) -> "Settings":

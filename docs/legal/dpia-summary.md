@@ -27,7 +27,7 @@ this as required rather than optional.
   [Privacy Policy](https://hail.so/legal/privacy) for the full data-flow
   description and [sub-processor list](https://hail.so/legal/subprocessors).
 - **Data minimization** — call audio is off until a workspace explicitly enables best-effort recording.
-  Recordings use private storage, authenticated playback and 365-day expiry. Voice output is limited to a fixed set of
+  Recordings use private storage, authenticated playback and workspace-selected 7-, 30-, or 365-day expiry. Voice output is limited to a fixed set of
   platform-provided voices — Developers cannot supply or select a custom
   or cloned voice, which closes off voice-cloning misuse as a platform
   capability rather than relying solely on policy to prohibit it.

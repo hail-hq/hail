@@ -9,7 +9,11 @@ from uuid import UUID
 from hailhq.core.config import settings
 from hailhq.core.db import session_scope
 from hailhq.core.models import Call
-from hailhq.core.recordings import apply_egress_info, recording_state
+from hailhq.core.recordings import (
+    apply_egress_info,
+    recording_retention_days,
+    recording_state,
+)
 from livekit import api
 
 logger = logging.getLogger(__name__)
@@ -28,7 +32,8 @@ async def start_recording(call_id: UUID, room_name: str, lkapi) -> None:
                 await recording_state(db, call_id, recording_status="unavailable")
                 await db.commit()
                 return
-            key = f"recordings/{call.organization_id}/{call_id}/audio.ogg"
+            days = recording_retention_days(call)
+            key = f"recordings/{days}d/{call.organization_id}/{call_id}/audio.ogg"
             await recording_state(
                 db, call_id, recording_status="starting", recording_object_key=key
             )

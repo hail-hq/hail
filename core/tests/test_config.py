@@ -31,3 +31,20 @@ def test_api_rate_limit_per_minute_accepts_positive(
 
     monkeypatch.setenv("API_RATE_LIMIT_PER_MINUTE", "5")
     assert Settings(_env_file=None).api_rate_limit_per_minute == 5
+
+
+@pytest.mark.parametrize("days", [7, 30, 365])
+def test_recording_retention_reads_presets_from_environment(monkeypatch, days):
+    from hailhq.core.config import Settings
+
+    monkeypatch.setenv("HAIL_RECORDING_RETENTION_DAYS", str(days))
+    assert Settings(_env_file=None).hail_recording_retention_days == days
+
+
+@pytest.mark.parametrize("days", [0, 8, 366, -1])
+def test_recording_retention_rejects_unsupported_defaults(monkeypatch, days):
+    from hailhq.core.config import Settings
+
+    monkeypatch.setenv("HAIL_RECORDING_RETENTION_DAYS", str(days))
+    with pytest.raises(ValidationError):
+        Settings(_env_file=None)

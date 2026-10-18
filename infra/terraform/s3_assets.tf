@@ -26,8 +26,17 @@ resource "aws_s3_bucket_lifecycle_configuration" "assets" {
     id     = "recording-retention"
     status = "Enabled"
     filter { prefix = "recordings/" }
-    expiration { days = var.recording_retention_days }
+    expiration { days = 365 }
     abort_incomplete_multipart_upload { days_after_initiation = 1 }
+  }
+  dynamic "rule" {
+    for_each = toset([7, 30])
+    content {
+      id     = "recording-retention-${rule.value}d"
+      status = "Enabled"
+      filter { prefix = "recordings/${rule.value}d/" }
+      expiration { days = rule.value }
+    }
   }
 }
 
@@ -52,15 +61,6 @@ resource "aws_iam_policy" "recordings" {
       Resource = "${aws_s3_bucket.assets.arn}/recordings/*"
     }]
   })
-}
-
-variable "recording_retention_days" {
-  type    = number
-  default = 365
-  validation {
-    condition     = var.recording_retention_days >= 1
-    error_message = "Recording retention must be at least one day."
-  }
 }
 
 variable "asset_allowed_origins" {

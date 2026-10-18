@@ -44,12 +44,17 @@ class OrganizationCallSettings(Base):
     # NULL = the service default (HAIL_VOICE_MAX_DURATION_SECONDS).
     max_duration_seconds: Mapped[int | None] = mapped_column(Integer, nullable=True)
     recording_enabled: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    recording_retention_days: Mapped[int | None] = mapped_column(Integer, nullable=True)
     # Workspace AI line template; ``{org}`` is the workspace name. NULL = the
     # built-in line for the call's direction (hailhq.core.disclosure).
     ai_disclosure_line: Mapped[str | None] = mapped_column(Text, nullable=True)
     __table_args__ = (
         CheckConstraint(
             "max_duration_seconds IS NULL OR max_duration_seconds BETWEEN 60 AND 3600"
+        ),
+        CheckConstraint(
+            "recording_retention_days IS NULL OR recording_retention_days IN (7, 30, 365)",
+            name="organization_recording_retention_days_check",
         ),
     )
 

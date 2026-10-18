@@ -228,6 +228,10 @@ async def _answer_or_refuse(
         started_at=now,
         metadata_={
             CALL_META_BILLED: True,
+            "recording_retention_days": (
+                workspace.recording_retention_days if workspace else None
+            )
+            or settings.hail_recording_retention_days,
             "recording_enabled": record,
             "recording_status": "requested" if record else "disabled",
         },

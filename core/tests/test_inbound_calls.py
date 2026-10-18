@@ -253,6 +253,7 @@ async def test_accepted_call_rings_and_returns_dispatch_metadata(async_session) 
         "billed": True,
         "recording_enabled": False,
         "recording_status": "disabled",
+        "recording_retention_days": 365,
     }
     assert call.voice_config == {"voice_id": "v1", "language": "fr"}
 
@@ -323,3 +324,24 @@ async def test_agent_that_does_not_answer_calls_counts_as_no_agent(
     outcome = await inbound_calls.open_inbound_call(async_session, _attrs())
     assert isinstance(outcome, inbound_calls.Rejected)
     assert outcome.reason == "no_agent"
+
+
+async def test_inbound_call_snapshots_recording_retention(async_session):
+    org, _, _ = await _seed(async_session)
+    workspace = OrganizationCallSettings(
+        organization_id=org,
+        recording_enabled=True,
+        recording_retention_days=30,
+    )
+    async_session.add(workspace)
+    await async_session.commit()
+    result = await inbound_calls.open_inbound_call(async_session, _attrs())
+    assert isinstance(result, inbound_calls.Accepted)
+    call = (
+        await async_session.execute(select(Call).where(Call.organization_id == org))
+    ).scalar_one()
+    assert call.metadata_["recording_retention_days"] == 30
+    workspace.recording_retention_days = 7
+    await async_session.commit()
+    await async_session.refresh(call)
+    assert call.metadata_["recording_retention_days"] == 30

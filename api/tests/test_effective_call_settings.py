@@ -18,6 +18,7 @@ async def test_reads_current_service_default(monkeypatch):
     assert result["max_duration_seconds"] == 420
     assert result["default_max_duration_seconds"] == 420
     assert result["uses_default"] is True
+    assert result["recording_retention_days"] == settings.hail_recording_retention_days
     assert result["ai_disclosure_line"] is None
     assert result["default_ai_disclosure_lines"]["inbound"].startswith(
         "Hi, this is an AI"
@@ -31,6 +32,7 @@ async def test_workspace_override_wins(monkeypatch):
     db = AsyncMock()
     db.get.return_value = SimpleNamespace(
         recording_enabled=None,
+        recording_retention_days=None,
         max_duration_seconds=120,
         ai_disclosure_line="AI for {org}.",
     )
@@ -46,6 +48,7 @@ async def test_line_only_row_keeps_default_duration(monkeypatch):
     db = AsyncMock()
     db.get.return_value = SimpleNamespace(
         recording_enabled=None,
+        recording_retention_days=None,
         max_duration_seconds=None,
         ai_disclosure_line="AI for {org}.",
     )
@@ -87,3 +90,17 @@ async def test_route_requires_internal_signature(monkeypatch):
         assert response.status_code == 200
         assert response.json()["max_duration_seconds"] == 420
     assert not any("call-settings" in path for path in app.openapi()["paths"])
+
+
+@pytest.mark.parametrize("days", [7, 30, 365])
+async def test_workspace_recording_retention_wins(monkeypatch, days):
+    monkeypatch.setattr(settings, "hail_recording_retention_days", 365)
+    db = AsyncMock()
+    db.get.return_value = SimpleNamespace(
+        recording_enabled=True,
+        recording_retention_days=days,
+        max_duration_seconds=None,
+        ai_disclosure_line=None,
+    )
+    result = await get_call_settings(uuid4(), db)
+    assert result["recording_retention_days"] == days

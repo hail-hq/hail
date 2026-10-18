@@ -146,3 +146,34 @@ async def test_late_upload_cannot_restore_erased_recording(async_session, monkey
     assert call.recording_s3_key is None
     assert call.recording_status == "erased"
     assert storage.delete_object.call_count == 2
+
+
+@pytest.mark.parametrize("days", [7, 30, 365])
+async def test_recording_uses_snapshotted_storage_expiry(
+    async_session, monkeypatch, days
+):
+    monkeypatch.setattr(settings, "hail_recording_enabled", True)
+    monkeypatch.setattr(settings, "hail_recording_retention_days", 365)
+    call_id = await _make_call_row(async_session)
+    call = await async_session.get(Call, call_id)
+    call.livekit_room = f"hail-{call_id}"
+    call.metadata_ = {
+        "recording_enabled": True,
+        "recording_status": "requested",
+        "recording_retention_days": days,
+    }
+    await async_session.commit()
+    lk = SimpleNamespace(
+        egress=SimpleNamespace(
+            start_room_composite_egress=AsyncMock(
+                return_value=api.EgressInfo(
+                    egress_id="egress-retention",
+                    room_name=call.livekit_room,
+                    status=api.EGRESS_ACTIVE,
+                )
+            )
+        )
+    )
+    await start_recording(call_id, call.livekit_room, lk)
+    request = lk.egress.start_room_composite_egress.await_args.args[0]
+    assert request.file_outputs[0].filepath.startswith(f"recordings/{days}d/")

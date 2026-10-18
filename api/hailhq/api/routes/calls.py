@@ -466,6 +466,9 @@ async def create_call(
         ),
         body.recording_enabled,
     )
+    call_metadata["recording_retention_days"] = (
+        org_call_settings.recording_retention_days if org_call_settings else None
+    ) or settings.hail_recording_retention_days
     call_metadata["recording_enabled"] = record
     call_metadata["recording_status"] = "requested" if record else "disabled"
     max_duration_seconds = (
