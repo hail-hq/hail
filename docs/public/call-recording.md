@@ -41,8 +41,9 @@ LiveKit Cloud Egress must be able to reach the endpoint; a localhost-only store
 will not work with cloud Egress. A fully private installation needs self-hosted
 Egress and a reachable LiveKit media server.
 
-Provision cloud storage using `infra/terraform/s3_assets.tf`. Attach the exported
-recordings policy to the recording credentials and pass the assets bucket name.
+Provision cloud storage using `infra/terraform/s3_assets.tf`. It creates a
+dedicated recordings IAM user; use its key outputs as `S3_ACCESS_KEY` and
+`S3_SECRET_KEY` and the `assets_bucket` output as `S3_BUCKET`.
 Recordings use `recordings/7d/`, `recordings/30d/`, and `recordings/365d/`
 prefixes. Terraform sets the matching storage lifecycle rules. Unprefixed legacy
 recordings keep their original one-year policy. Playback enforces each call's

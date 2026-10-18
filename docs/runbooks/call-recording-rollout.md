@@ -11,9 +11,15 @@ and the deploy by itself (`.github/workflows/deploy.yml`).
    AWS_PROFILE=myaws terragrunt apply
    ```
 
-   Creates `hail-mail-assets` (eu-west-1), its lifecycle and CORS rules, the
-   `hail-mail-recordings` policy, and attaches it to `hail-production`.
+   Creates `hail-mail-assets` (eu-west-1), its lifecycle and CORS rules, and the
+   `hail-mail-recordings` IAM user with only the recordings policy. Its key goes
+   to LiveKit Cloud Egress, so it is not the service user's key.
    It also redeploys the SES ingest Lambda (lint-only source change).
+
+   ```bash
+   AWS_PROFILE=myaws terragrunt output -raw recordings_access_key_id
+   AWS_PROFILE=myaws terragrunt output -raw recordings_secret_access_key
+   ```
 
 2. LiveKit Cloud console: Settings > Webhooks > Add endpoint.
    URL: `https://api.hail.so/v1/livekit/recording-events`. API key: the one in
@@ -22,7 +28,7 @@ and the deploy by itself (`.github/workflows/deploy.yml`).
 3. Copy the repo `.env` to the VM (path from `DEPLOY_PATH`, default `/opt/hail`).
    New keys: `HAIL_RECORDING_ENABLED=true`, `HAIL_RECORDING_RETENTION_DAYS=365`,
    `S3_ENDPOINT=` (empty), `S3_BUCKET=hail-mail-assets`, `S3_ACCESS_KEY` and
-   `S3_SECRET_KEY` (the `hail-production` keys, same as `AWS_*`), `S3_REGION=eu-west-1`.
+   `S3_SECRET_KEY` (the two terraform outputs above), `S3_REGION=eu-west-1`.
 
 4. Merge hail PR #200. Wait for the deploy workflow to finish.
 

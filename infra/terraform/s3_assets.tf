@@ -63,9 +63,19 @@ resource "aws_iam_policy" "recordings" {
   })
 }
 
+# Dedicated user: its key is handed to LiveKit Cloud Egress, so it must not
+# carry the service user's SES or mail-bucket rights.
+resource "aws_iam_user" "recordings" {
+  name = "${var.name_prefix}-recordings"
+}
+
 resource "aws_iam_user_policy_attachment" "recordings" {
-  user       = aws_iam_user.main.name
+  user       = aws_iam_user.recordings.name
   policy_arn = aws_iam_policy.recordings.arn
+}
+
+resource "aws_iam_access_key" "recordings" {
+  user = aws_iam_user.recordings.name
 }
 
 variable "asset_allowed_origins" {
@@ -75,3 +85,14 @@ variable "asset_allowed_origins" {
 
 output "assets_bucket" { value = aws_s3_bucket.assets.bucket }
 output "recordings_policy_arn" { value = aws_iam_policy.recordings.arn }
+
+output "recordings_access_key_id" {
+  description = "Paste into .env as S3_ACCESS_KEY."
+  value       = aws_iam_access_key.recordings.id
+}
+
+output "recordings_secret_access_key" {
+  description = "Paste into .env as S3_SECRET_KEY."
+  value       = aws_iam_access_key.recordings.secret
+  sensitive   = true
+}
