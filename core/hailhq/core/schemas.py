@@ -255,7 +255,7 @@ class CallCreate(ConsentAttestationMixin):
     )
     recording_enabled: bool | None = Field(
         default=None,
-        description="Request best-effort audio recording. Requires workspace recording enabled. Null inherits the agent/workspace. Recording failure never prevents the call. Hail Cloud charges the recording-enabled call rate regardless of capture outcome.",
+        description="Request best-effort audio recording. Requires workspace recording enabled. Null inherits the agent/workspace. Recording failure never prevents the call. The recording-enabled call rate applies regardless of capture outcome.",
     )
     ai_disclosure: bool = Field(
         default=True,

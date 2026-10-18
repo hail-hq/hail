@@ -1,4 +1,4 @@
-"""Recording state and signed playback, independent of the cloud rater."""
+"""Recording state and signed playback."""
 
 from __future__ import annotations
 

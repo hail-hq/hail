@@ -1559,7 +1559,7 @@ type CallCreate struct {
 	// RecipientConsent Attestation that you have obtained the lawful consent required to contact this recipient. Hail does not verify consent itself — you are responsible for a lawful basis under TCPA/ePrivacy/PECR/CAN-SPAM/GDPR as applicable. Rejected (422) if not true.
 	RecipientConsent bool `json:"recipient_consent"`
 
-	// RecordingEnabled Request best-effort audio recording. Requires workspace recording enabled. Null inherits the agent/workspace. Recording failure never prevents the call. Hail Cloud charges the recording-enabled call rate regardless of capture outcome.
+	// RecordingEnabled Request best-effort audio recording. Requires workspace recording enabled. Null inherits the agent/workspace. Recording failure never prevents the call. The recording-enabled call rate applies regardless of capture outcome.
 	RecordingEnabled *bool `json:"recording_enabled,omitempty"`
 
 	// SystemPrompt Task instructions for the agent, sent as its leading system message. At least one of system_prompt or llm is required; both together is also valid.
