@@ -180,7 +180,7 @@ class Settings(BaseSettings):
 
     # Optional recording: deploy capability, separately from workspace consent.
     hail_recording_enabled: bool = False
-    hail_recording_retention_days: int = 30
+    hail_recording_retention_days: int = 365
 
     # Storage
     database_url: str = "postgresql://hail:hail@postgres:5432/hail"

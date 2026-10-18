@@ -40,9 +40,11 @@ Egress and a reachable LiveKit media server.
 
 Provision cloud storage using `infra/terraform/s3_assets.tf`. Attach the exported
 recordings policy to the recording credentials and pass the assets bucket name.
-The recording prefix expires after 30 days by default. Set
+The recording prefix expires after 365 days by default. Set
 `HAIL_RECORDING_RETENTION_DAYS` and the bucket lifecycle to the same value.
 Custom stores need equivalent expiry rules. Signed playback enforces expiry too.
+Honor valid erasure requests and applicable shorter retention requirements.
+The 365-day default is a product policy, not a universal legal retention period.
 
 Configure a LiveKit webhook to `https://YOUR_API/v1/livekit/recording-events`.
 The API verifies LiveKit's signature. Playback also reconciles Egress state when

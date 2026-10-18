@@ -2,7 +2,7 @@
 
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 from uuid import uuid4
 
 import pytest
@@ -63,17 +63,34 @@ async def test_playback_is_scoped_to_authenticated_workspace(
     signer.assert_awaited_once()
 
 
-async def test_expired_recording_is_not_signed(async_session):
+@pytest.mark.parametrize(
+    "age_days,retention_days,expected_status",
+    [(31, 365, 302), (364, 365, 302), (366, 365, 404), (31, 30, 404)],
+)
+async def test_recording_playback_honors_retention(
+    async_session, monkeypatch, age_days, retention_days, expected_status
+):
+    monkeypatch.setattr(
+        recordings.settings, "hail_recording_retention_days", retention_days
+    )
+    storage = Mock()
+    storage.generate_presigned_url.return_value = (
+        "https://storage.example/audio?signed=yes"
+    )
+    monkeypatch.setattr("hailhq.core.recordings.recording_storage", lambda: storage)
     call = await recorded_call(async_session)
-    call.ended_at = datetime.now(timezone.utc) - timedelta(days=31)
+    call.ended_at = datetime.now(timezone.utc) - timedelta(days=age_days)
     await async_session.commit()
-    with pytest.raises(HTTPException) as error:
-        await recordings.get_recording(
-            call.id,
-            async_session,
-            SimpleNamespace(organization_id=call.organization_id),
-        )
-    assert error.value.status_code == 404
+    principal = SimpleNamespace(organization_id=call.organization_id)
+    if expected_status == 404:
+        with pytest.raises(HTTPException) as error:
+            await recordings.get_recording(call.id, async_session, principal)
+        assert error.value.status_code == 404
+        storage.generate_presigned_url.assert_not_called()
+    else:
+        response = await recordings.get_recording(call.id, async_session, principal)
+        assert response.status_code == 302
+        storage.generate_presigned_url.assert_called_once()
 
 
 async def test_recording_event_rejects_unsigned_request(client):

@@ -56,7 +56,7 @@ resource "aws_iam_policy" "recordings" {
 
 variable "recording_retention_days" {
   type    = number
-  default = 30
+  default = 365
   validation {
     condition     = var.recording_retention_days >= 1
     error_message = "Recording retention must be at least one day."
