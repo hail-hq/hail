@@ -1,13 +1,12 @@
 # Changelog
 
-Optional call recording: explicit workspace choice, agent/per-call opt-out, best-effort audio-only Egress, authenticated playback, and one recording-enabled call usage entry. Disabled by default. Recording failures never change call status. Migration 0060 is required.
-
 All notable changes to Hail are documented here. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and Hail adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
 ### Added
 
+- Optional call recording. A workspace turns it on and picks 7, 30 or 365 days of retention. Agents and single calls can opt out. Playback via `GET /calls/{id}/recording`. Off by default.
 - US SMS registration: organizations register their own A2P 10DLC brand and campaign (business or person) with Twilio or Telnyx via console, API (`purpose=sms` on `/verifications`), CLI (`hail numbers register-sms`) and MCP. A person registering through Telnyx confirms with the PIN Telnyx texts them (`POST /verifications/{id}/confirm`, `hail numbers confirm-sms`, MCP `confirm_verification`); `confirmation` on a verification says when. The carrier fee is debited from prepaid credit at filing. Texts from a US long code to a US number need the sending number on an approved registration (422 otherwise); `POST /sms` without `from` prefers such a number. An approved registration can be cancelled (`DELETE /verifications/{id}`, `hail numbers cancel-sms`, MCP `cancel_verification`); its monthly fee stops after the month of the cancellation (Telnyx: at least 3 monthly fees from approval; `minimum_months` in `GET /verifications/sms-fees`). New env: `TWILIO_PRIMARY_PROFILE_SID`. Migrations 0057, 0058.
 
 ### Removed

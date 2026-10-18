@@ -60,5 +60,3 @@ usage grows.
 
 _This summary is not a substitute for the full internal risk assessment
 and does not constitute legal advice._
-
-Recording implementation review (2026-10-18): deployment capability remains off until storage, controls, notices and migration 0060 are deployed together. Validate isolation, deletion, retention and consent before enabling. This note does not constitute completed DPIA approval.

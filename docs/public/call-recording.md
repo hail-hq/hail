@@ -32,7 +32,7 @@ the agent SDK supplies them. Older events have no fabricated seek timestamps.
 
 Enable the deployment capability with `HAIL_RECORDING_ENABLED=true`. In shared-key
 mode this also enables recording by default. Set `recording_enabled: false` on
-individual calls to opt out. Self-hosted deployments do not run Hail Cloud's rater.
+individual calls to opt out.
 
 Configure `S3_BUCKET`, `S3_REGION`, `S3_ACCESS_KEY` and `S3_SECRET_KEY`.
 Use `S3_ENDPOINT` for a compatible object store. Configure its CORS policy for the
@@ -57,20 +57,14 @@ These presets are product choices, not universal legal retention periods.
 
 Configure a LiveKit webhook to `https://YOUR_API/v1/livekit/recording-events`.
 The API verifies LiveKit's signature. Playback also reconciles Egress state when
-a webhook is missed. Keep `HAIL_RECORDING_ENABLED=false` until storage, migration
-0060, legal notices and organization controls are deployed together.
+a webhook is missed. Keep `HAIL_RECORDING_ENABLED=false` until storage is
+reachable and your privacy notices cover recording.
 
 ## Capacity and cost
 
-The free Build plan includes 60 composite minutes per month across the project
-and two concurrent Egress jobs. This implementation uses one job per call.
-Exhausting either allowance leaves the call running without audio capture.
-The allowance is a hard cap, not usage billing.
-
-Ship starts at $50/month, includes 600 composite minutes, then charges $0.005
-per audio-only minute. For recording alone, 1,000 monthly minutes would cost
-approximately $52; 10,000 would cost $97, before storage and other LiveKit usage.
+LiveKit Cloud Egress is metered per plan: the free Build plan allows 60 composite
+minutes per month and two concurrent jobs; this implementation uses one job per
+call. Past the allowance, calls continue without audio capture.
 See [LiveKit pricing](https://livekit.com/pricing) and
 [quotas](https://docs.livekit.io/deploy/admin/quotas-and-limits/).
-The public `costs/recording.json` dataset holds provider costs; Hail Cloud's selling
-rate remains in the private website repository.
+Provider costs are in `costs/recording.json`.
