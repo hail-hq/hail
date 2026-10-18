@@ -49,6 +49,22 @@ this as required rather than optional.
   controls, least-privilege, and audit logging, detailed in our DPA's
   Annex II.
 
+## Re-screen log
+
+**2026-10-18 — new carriers and verification data.** Two carriers were
+added as sub-processors (Telnyx: numbers, voice, SMS; DIDWW: numbers and
+voice, no SMS). Carrier verification was added: when a country requires
+it, a Developer submits identity or business details (names, addresses,
+and identity documents for number verification; legal name, tax ID,
+representative contact details, and sample message text for US SMS
+registration) that Hail forwards to the carrier. Screening result: no
+new high-risk criterion. The carriers play the same role as the existing
+one. Verification data is Developer account data, not Recipient data;
+Hail keeps only the verification state and the carrier's opaque
+reference IDs, never the names, documents, or addresses themselves. The
+sub-processor list, Privacy Policy, Terms, and Records of Processing
+were updated on 2026-10-13. No full re-assessment required.
+
 ## Outcome
 
 Based on this assessment, we consider the residual risk of the outbound
