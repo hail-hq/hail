@@ -274,6 +274,22 @@ another rule set active, activation is destructive.
   state and merge Hail's rule into it. As an alternative, skip the module's rule
   resource and add Hail's rule manually via the AWS console.
 
+### 10.2.1 Rule order inside the active rule set
+
+SES runs the rules of the active rule set from top to bottom. Hail's rule has no
+recipient filter, so it matches every verified identity in the region. Any
+narrower rule from another stack (for example a rule for one subdomain that
+ends with a stop action) must sit **above** Hail's rule to ever run.
+
+SES fixes a rule's position when the rule is created: a rule created without
+`after` goes to the top. Recreating Hail's rule puts it back on top and silently
+takes the other rule's mail. The Terraform rule therefore carries
+`prevent_destroy = true`. If you must recreate it:
+
+1. Remove the guard on purpose and apply.
+2. Check the order: `aws ses describe-active-receipt-rule-set --query 'Rules[].Name' --output text`.
+3. Move Hail's rule back to the bottom: `aws ses set-receipt-rule-position --rule-set-name <set> --rule-name <hail rule> --after <last other rule>`.
+
 ### 10.3 Publish the MX record
 
 At your DNS provider, publish what the Terraform output prints, for example:
