@@ -1897,7 +1897,7 @@ async def _run_call(
     recording_task = asyncio.create_task(record_answered_call())
 
     async def finish_recording() -> None:
-        # The call finalizer and usage write run first; upload cannot delay billing.
+        # Runs after _shutdown (chained below): billing never waits on upload.
         if not answered["done"]:
             recording_task.cancel()
             await asyncio.gather(recording_task, return_exceptions=True)
@@ -1906,7 +1906,7 @@ async def _run_call(
             await asyncio.wait_for(asyncio.shield(recording_task), timeout=6)
         except (TimeoutError, asyncio.CancelledError):
             recording_task.cancel()
-        await stop_recording(call_id, ctx.api)
+        await stop_recording(call_id, ctx.api, ctx.room.name)
 
     room_name = ctx.room.name
 
@@ -2004,8 +2004,15 @@ async def _run_call(
         with identity_scope(shutdown_identity):
             await _shutdown_body()
 
-    ctx.add_shutdown_callback(_shutdown)
-    ctx.add_shutdown_callback(finish_recording)
+    async def _shutdown_then_finish_recording() -> None:
+        # Shutdown callbacks run concurrently in the agents SDK, so chain
+        # explicitly: finalizer and usage write first, recording stop after.
+        try:
+            await _shutdown()
+        finally:
+            await finish_recording()
+
+    ctx.add_shutdown_callback(_shutdown_then_finish_recording)
     if settlement_registered is not None:
         settlement_registered[0] = True
 

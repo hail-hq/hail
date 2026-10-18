@@ -195,3 +195,37 @@ async def test_cancelled_start_never_leaves_recording_starting(async_session):
     await async_session.refresh(call)
     assert call.recording_status == "unavailable"
     lk.egress.stop_egress.assert_not_awaited()
+
+
+async def test_cancelled_start_recovers_egress_by_room(async_session):
+    """LiveKit may have started the Egress although our start task was
+    cancelled before the id was stored; stop it instead of orphaning it."""
+    call_id = await _make_call_row(async_session)
+    call = await async_session.get(Call, call_id)
+    call.livekit_room = f"hail-{call_id}"
+    call.metadata_ = {
+        "recording_enabled": True,
+        "recording_status": "starting",
+        "recording_object_key": "recordings/365d/org/call/audio.ogg",
+    }
+    await async_session.commit()
+    info = api.EgressInfo(
+        egress_id="egress-orphan", room_name=call.livekit_room, status=api.EGRESS_ACTIVE
+    )
+    lk = SimpleNamespace(
+        egress=SimpleNamespace(
+            list_egress=AsyncMock(return_value=SimpleNamespace(items=[info])),
+            stop_egress=AsyncMock(
+                return_value=api.EgressInfo(
+                    egress_id="egress-orphan",
+                    room_name=call.livekit_room,
+                    status=api.EGRESS_ENDING,
+                )
+            ),
+        )
+    )
+    await stop_recording(call_id, lk, call.livekit_room)
+    await async_session.refresh(call)
+    assert call.metadata_["recording_egress_id"] == "egress-orphan"
+    assert call.recording_status != "unavailable"
+    lk.egress.stop_egress.assert_awaited_once()

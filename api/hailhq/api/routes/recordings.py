@@ -9,6 +9,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import RedirectResponse
 from hailhq.api.deps import get_current_principal
+from hailhq.api.ratelimit import exempt_path
 from hailhq.api.routes.calls import get_livekit
 from hailhq.core.db import get_session
 from hailhq.core.livekit import verify_webhook_event
@@ -18,6 +19,9 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 router = APIRouter(tags=["calls"])
+# Signature-authenticated by LiveKit, no Bearer token, so it must not share
+# the anonymous remote-IP bucket.
+exempt_path("/livekit/recording-events")
 
 
 async def reconcile_recording(db: AsyncSession, call: Call) -> None:

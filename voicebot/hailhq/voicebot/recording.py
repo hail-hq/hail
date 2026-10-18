@@ -87,16 +87,36 @@ async def start_recording(call_id: UUID, room_name: str, lkapi) -> None:
             )
 
 
-async def stop_recording(call_id: UUID, lkapi) -> None:
+async def _active_egress_id(room_name: str | None, lkapi) -> str | None:
+    """An Egress LiveKit started although our start task was cancelled first."""
+    if not room_name:
+        return None
+    result = await asyncio.wait_for(
+        lkapi.egress.list_egress(
+            api.ListEgressRequest(room_name=room_name, active=True)
+        ),
+        timeout=3,
+    )
+    for info in result.items:
+        return info.egress_id
+    return None
+
+
+async def stop_recording(call_id: UUID, lkapi, room_name: str | None = None) -> None:
     try:
         async with session_scope() as db:
             call = await db.get(Call, call_id)
             meta = (call.metadata_ or {}) if call else {}
             egress_id = meta.get("recording_egress_id")
             if not egress_id and meta.get("recording_status") == "starting":
-                # The start was cancelled or died before LiveKit answered, so
-                # no Egress id exists to reconcile; never leave it "starting".
-                await recording_state(db, call_id, recording_status="unavailable")
+                # The start was cancelled before LiveKit answered. LiveKit may
+                # still have started the Egress, so look it up by room before
+                # giving up; never leave the row "starting".
+                egress_id = await _active_egress_id(room_name, lkapi)
+                if egress_id:
+                    await recording_state(db, call_id, recording_egress_id=egress_id)
+                else:
+                    await recording_state(db, call_id, recording_status="unavailable")
                 await db.commit()
         if not egress_id:
             return
