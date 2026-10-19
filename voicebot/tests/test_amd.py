@@ -25,6 +25,8 @@ from hailhq.voicebot.amd import (
     run_amd,
 )
 from livekit import rtc
+from livekit.agents.llm import ChatChunk, ChoiceDelta, FunctionToolCall, LLMStream
+from livekit.agents.types import DEFAULT_API_CONNECT_OPTIONS
 from livekit.agents.voice.amd import AMDCategory, AMDPredictionEvent
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -160,6 +162,138 @@ async def test_post_answer_deadline_releases_continuous_speech(monkeypatch):
         await asyncio.wait_for(classifier._verdict_ready.wait(), timeout=0.2)
         assert classifier._verdict_result.category == AMDCategory.UNCERTAIN
         assert classifier._verdict_result.reason == "detection_timeout"
+    finally:
+        await classifier.close()
+
+
+class _GreetingLLM(FakeLLM):
+    def __init__(self, category: str):
+        super().__init__()
+        self.category = category
+        self.transcripts: list[str] = []
+
+    def chat(self, **kwargs):
+        self.transcripts.append(kwargs["chat_ctx"].items[-1].text_content)
+        return _GreetingStream(
+            self,
+            chat_ctx=kwargs["chat_ctx"],
+            tools=kwargs["tools"],
+            conn_options=DEFAULT_API_CONNECT_OPTIONS,
+        )
+
+
+class _GreetingStream(LLMStream):
+    async def _run(self):
+        self._event_ch.send_nowait(
+            ChatChunk(
+                id="greeting",
+                delta=ChoiceDelta(
+                    role="assistant",
+                    tool_calls=[
+                        FunctionToolCall(
+                            call_id="greeting",
+                            name="save_prediction",
+                            arguments=json.dumps({"label": self._llm.category}),
+                        )
+                    ],
+                ),
+            )
+        )
+
+
+async def _timed_classifier(monkeypatch, llm):
+    """Use production detection options with time scaled 10x for SDK tests."""
+    from livekit.agents.voice.amd.classifier import _AMDClassifier
+
+    monkeypatch.setattr(amd_mod, "AMD", _RecordingAMD)
+    _RecordingAMD.result = _prediction("human")
+    await run_amd(_session_with_layers(), UUID(int=1))
+    kwargs = _RecordingAMD.last_kwargs
+    options = dict(kwargs["detection_options"])
+    options["timeout"] *= 0.1
+    options["no_speech_threshold"] *= 0.1
+    classifier = _AMDClassifier(
+        llm=llm,
+        wait_until_finished=kwargs["wait_until_finished"],
+        max_endpointing_delay=0.05,
+        machine_silence_threshold=0.04,
+        **options,
+    )
+    classifier.start_detection_timer()
+    classifier.start_listening()
+    return classifier
+
+
+@pytest.mark.parametrize(
+    "category,transcript",
+    [
+        (
+            "machine-vm",
+            (
+                "Cannot take your call right now. Leave a message after the tone. "
+                "When finished, press the pound key or hang up."
+            ),
+        ),
+        ("machine-ivr", "Welcome to our office. For reception, press one."),
+    ],
+)
+async def test_long_greeting_waits_for_transcript_and_machine_verdict(
+    monkeypatch, category, transcript
+):
+    """A nine-second greeting must reach the classifier before fallback wins."""
+    llm = _GreetingLLM(category)
+    classifier = await _timed_classifier(monkeypatch, llm)
+    try:
+        classifier.on_user_speech_started()
+        await asyncio.sleep(0.9)
+        assert not classifier._verdict_ready.is_set()
+        classifier.on_user_speech_ended(silence_duration=0)
+        classifier.push_text(transcript)
+        classifier.on_end_of_turn()
+        await asyncio.wait_for(classifier._verdict_ready.wait(), timeout=0.5)
+        assert classifier._verdict_result.category == AMDCategory(category)
+        assert classifier._verdict_result.reason == "llm"
+        assert classifier._verdict_result.transcript == transcript
+        assert llm.transcripts == [transcript]
+    finally:
+        await classifier.close()
+
+
+async def test_short_human_greeting_does_not_wait_for_detection_deadline(monkeypatch):
+    classifier = await _timed_classifier(monkeypatch, _GreetingLLM("human"))
+    try:
+        classifier.on_user_speech_started()
+        await asyncio.sleep(0.01)
+        classifier.on_user_speech_ended(silence_duration=0)
+        classifier.push_text("Hello?")
+        await asyncio.wait_for(classifier._verdict_ready.wait(), timeout=0.3)
+        assert classifier._verdict_result.category == AMDCategory.HUMAN
+        assert classifier._verdict_result.reason == "llm"
+    finally:
+        await classifier.close()
+
+
+async def test_silent_pickup_keeps_three_second_limit(monkeypatch):
+    llm = _GreetingLLM("human")
+    classifier = await _timed_classifier(monkeypatch, llm)
+    try:
+        await asyncio.wait_for(classifier._verdict_ready.wait(), timeout=0.6)
+        assert classifier._verdict_result.category == AMDCategory.UNCERTAIN
+        assert classifier._verdict_result.reason == "no_speech_timeout"
+        assert llm.transcripts == []
+    finally:
+        await classifier.close()
+
+
+async def test_continuous_speech_remains_bounded_with_production_options(monkeypatch):
+    llm = _GreetingLLM("human")
+    classifier = await _timed_classifier(monkeypatch, llm)
+    try:
+        classifier.on_user_speech_started()
+        await asyncio.wait_for(classifier._verdict_ready.wait(), timeout=2.5)
+        assert classifier._verdict_result.category == AMDCategory.UNCERTAIN
+        assert classifier._verdict_result.reason == "detection_timeout"
+        assert llm.transcripts == []
     finally:
         await classifier.close()
 

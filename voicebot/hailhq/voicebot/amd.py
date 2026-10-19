@@ -256,9 +256,13 @@ _END_REASON_BY_CATEGORY: dict[str, CallEndReason] = {
 # before hearing anything. Classification uncertainty must not mean dead air.
 NO_SPEECH_THRESHOLD_SECONDS = 3.0
 
-# Starts at SIP answer, unlike the dispatch-wide backstop below. Force a
-# verdict even during continuous speech or a failed classifier request.
-POST_ANSWER_TIMEOUT_SECONDS = 5.0
+# Starts at SIP answer, unlike the dispatch-wide backstop below. Keep the
+# SDK's standard 20s budget so a recorded greeting can finish and be
+# transcribed before fallback. Silence still releases at 3s above; short
+# human greetings release as soon as classified. Keep wait_until_finished
+# false so continuous noise or a failed classifier cannot hold indefinitely.
+# https://docs.livekit.io/telephony/features/answering-machine-detection/#parameters
+POST_ANSWER_TIMEOUT_SECONDS = 20.0
 
 # Backstop on the whole detection. ``execute()`` now starts BEFORE the API
 # dials (``on_ready`` releases the dial gate from inside the AMD context), so
