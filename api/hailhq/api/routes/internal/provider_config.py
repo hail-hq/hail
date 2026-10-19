@@ -1,15 +1,16 @@
-"""/internal/orgs/{org}/providers — hail-website console → API.
+"""/internal/orgs/{org}/providers: hail-website console → API.
 
 Per-org BYO provider keys (cloud console feature; see the design spec in
 the hail-website repo). Shared-secret HMAC auth like the rest of
 ``routes/internal/``. Deliberately NOT in the public OpenAPI spec and has
-no CLI surface — self-host operators configure providers via env vars.
+no CLI surface. Self-host operators configure providers via env vars.
 Keys are write-only: stored Fernet-encrypted (HAIL_PROVIDER_SECRET_KEY),
 surfaced only as last4 + set-at timestamp.
 """
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Annotated
 from uuid import UUID
@@ -132,7 +133,7 @@ async def _set_active(
 ) -> None:
     """Make ``provider``'s row the sole active row for (org, layer).
 
-    Deactivates the currently-active row first, then activates the target —
+    Deactivates the currently-active row first, then activates the target,
     in that order, so the partial-unique index (``UNIQUE(org, layer) WHERE
     is_active``) never sees two active rows for the same layer at once. The
     caller commits; both statements land in the caller's transaction.
@@ -141,7 +142,7 @@ async def _set_active(
     sibling set): ``updated_at`` is ``onupdate=now()``, so touching an
     already-inactive row would reset its timestamp and destroy the recency
     ordering that DELETE-promotion depends on. Only the row genuinely
-    leaving active — and the target row gaining it — should move.
+    leaving active (and the target row gaining it) should move.
     """
     await db.execute(
         update(OrgProviderConfig)
@@ -162,6 +163,78 @@ async def _set_active(
         )
         .values(is_active=True)
     )
+
+
+@dataclass(frozen=True)
+class _LayerState:
+    """The provider, params and fallback flag a layer will have after a change."""
+
+    provider: str
+    params: dict
+    fallback_enabled: bool
+
+
+_KEEP = object()
+
+
+async def _require_servable_language(
+    db: AsyncSession,
+    organization_id: UUID,
+    *,
+    tts: object = _KEEP,
+    stt: object = _KEEP,
+) -> None:
+    """Reject a change that leaves the saved default language unservable.
+
+    The workspace language lives on the active TTS row. ``tts`` and ``stt``
+    are the layer states after the change: a row, a ``_LayerState``, or
+    None when no row will be active. A layer left as ``_KEEP`` uses the
+    current active row. Same rule as the POST /calls gate: a provider that
+    cannot serve the language needs fallback consent.
+    """
+    if tts is _KEEP or stt is _KEEP:
+        active = await load_org_provider_configs(db, organization_id)
+        tts = active.get("tts") if tts is _KEEP else tts
+        stt = active.get("stt") if stt is _KEEP else stt
+    language = (tts.params or {}).get("language") if tts is not None else None
+    if not language:
+        return
+    caps = SUPPORTED_LANGUAGES[language]
+    if tts.provider not in caps.tts and not tts.fallback_enabled:
+        raise HTTPException(
+            422,
+            "This voice provider does not support the saved language. Enable fallback or choose another provider.",
+        )
+    if stt is not None and stt.provider not in caps.stt and not stt.fallback_enabled:
+        raise HTTPException(
+            422,
+            "Your speech recognition provider does not support the saved language. Change it in Advanced or enable fallback.",
+        )
+
+
+async def _next_active_row(
+    db: AsyncSession, organization_id: UUID, layer: str, provider: str
+) -> OrgProviderConfig | None:
+    """The sibling DELETE promotes when ``provider``'s active row goes."""
+    return (
+        await db.execute(
+            select(OrgProviderConfig)
+            .where(
+                OrgProviderConfig.organization_id == organization_id,
+                OrgProviderConfig.layer == layer,
+                OrgProviderConfig.provider != provider,
+            )
+            # provider is the deterministic tiebreak: two siblings written
+            # in one transaction share updated_at (Postgres now() is
+            # tx-start), so ORDER BY updated_at alone would promote an
+            # arbitrary row.
+            .order_by(
+                OrgProviderConfig.updated_at.desc(),
+                OrgProviderConfig.provider.asc(),
+            )
+            .limit(1)
+        )
+    ).scalar_one_or_none()
 
 
 @router.get("/orgs/{organization_id}/providers")
@@ -193,20 +266,9 @@ async def upsert_provider_config(
     _check_layer(layer)
     params = _validated_params(layer, body.provider, body.params)
 
-    if layer == "tts" and (language := params.get("language")):
-        caps = SUPPORTED_LANGUAGES[language]
-        active = await load_org_provider_configs(db, organization_id)
-        stt = active.get("stt")
-        if body.provider not in caps.tts and not body.fallback_enabled:
-            raise HTTPException(
-                422,
-                "This voice provider does not support the chosen language. Enable fallback or choose another provider.",
-            )
-        if stt and stt.provider not in caps.stt and not stt.fallback_enabled:
-            raise HTTPException(
-                422,
-                "Your speech recognition provider does not support the chosen language. Change it in Advanced or enable fallback.",
-            )
+    if layer in ("tts", "stt"):
+        incoming = _LayerState(body.provider, params, body.fallback_enabled)
+        await _require_servable_language(db, organization_id, **{layer: incoming})
 
     row = await _get_row(db, organization_id, layer, body.provider)
     # A provider outside the language's TTS set only passed the gate above
@@ -283,7 +345,7 @@ async def upsert_provider_config(
         row.key_set_at = datetime.now(timezone.utc)
 
     # Flush the upsert first so _set_active's UPDATEs (raw SQL, bypassing
-    # the identity map) see this row — then flip it active in the same
+    # the identity map) see this row, then flip it active in the same
     # transaction as the upsert. Postgres checks the partial-unique index
     # per-statement (not deferred), so a concurrent activation can raise
     # IntegrityError out of _set_active itself, not just out of commit().
@@ -313,33 +375,19 @@ async def delete_provider_config(
     if row is None:
         return
     was_active = row.is_active
+    remaining = None
+    if was_active:
+        remaining = await _next_active_row(db, organization_id, layer, provider)
+        if layer in ("tts", "stt"):
+            await _require_servable_language(db, organization_id, **{layer: remaining})
     await db.delete(row)
 
-    if was_active:
-        # The select below autoflushes the pending delete, so the DELETE hits
-        # Postgres before the promote UPDATE — required, else activating a
-        # sibling while the old active row still exists trips the partial-unique
-        # index. Do NOT reorder the promote before db.delete/this query.
-        remaining = (
-            await db.execute(
-                select(OrgProviderConfig)
-                .where(
-                    OrgProviderConfig.organization_id == organization_id,
-                    OrgProviderConfig.layer == layer,
-                )
-                # provider is the deterministic tiebreak: two siblings written
-                # in one transaction share updated_at (Postgres now() is
-                # tx-start), so ORDER BY updated_at alone would promote an
-                # arbitrary row.
-                .order_by(
-                    OrgProviderConfig.updated_at.desc(),
-                    OrgProviderConfig.provider.asc(),
-                )
-                .limit(1)
-            )
-        ).scalar_one_or_none()
-        if remaining is not None:
-            remaining.is_active = True
+    if remaining is not None:
+        # Flush the pending delete first, so the DELETE hits Postgres before
+        # the promote UPDATE. Otherwise activating a sibling while the old
+        # active row still exists trips the partial-unique index.
+        await db.flush()
+        remaining.is_active = True
 
     try:
         await db.commit()
@@ -365,6 +413,8 @@ async def activate_provider_config(
             status_code=404,
             detail=f"no saved config for provider {body.provider!r} in layer {layer!r}",
         )
+    if layer in ("tts", "stt"):
+        await _require_servable_language(db, organization_id, **{layer: row})
 
     try:
         await _set_active(db, organization_id, layer, body.provider)

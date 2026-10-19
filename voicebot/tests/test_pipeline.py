@@ -627,3 +627,23 @@ def test_startup_capability_warnings_both_keys_empty_returns_both_messages(
 
     warnings = startup_capability_warnings()
     assert len(warnings) == 2
+
+
+def test_house_key_voice_row_without_model_follows_house_model_at_call_time(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A picker save stores no model, so CARTESIA_MODEL changes reach the org."""
+    from hailhq.core.config import settings
+    from hailhq.voicebot.pipeline import ResolvedLayer, build_tts
+    from livekit.plugins import cartesia as cartesia_plugin
+
+    org = ResolvedLayer(
+        provider="cartesia",
+        api_key=None,
+        params={"voice_id": "picked-voice", "language": "fr"},
+        fallback_enabled=False,
+    )
+    monkeypatch.setattr(settings, "cartesia_model", "sonic-3.6")
+    tts = build_tts(org=org, language="fr")
+    assert isinstance(tts, cartesia_plugin.TTS)
+    assert tts.model == "sonic-3.6"

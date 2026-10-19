@@ -523,3 +523,46 @@ async def test_picker_reports_unknown_voice_as_a_choice_error(client, monkeypatc
     body = b'{"provider":"cartesia","params":{"voice_id":"missing","model":"sonic-3.5","language":"fr"},"fallback_enabled":false,"verify_voice_language":true}'
     response = await client.put(f"{BASE}/tts", content=body, headers=_signed(body))
     assert response.status_code == 422, response.text
+
+
+async def _put(client, layer: str, body: bytes):
+    return await client.put(f"{BASE}/{layer}", content=body, headers=_signed(body))
+
+
+@pytest.mark.usefixtures("internal_secret_set", "provider_key_set")
+async def test_stt_change_cannot_strand_the_saved_language(client):
+    tts = b'{"provider":"cartesia","params":{"language":"zh"},"fallback_enabled":false}'
+    assert (await _put(client, "tts", tts)).status_code == 200
+    stt = b'{"provider":"speechmatics","params":{},"fallback_enabled":false}'
+    response = await _put(client, "stt", stt)
+    assert response.status_code == 422
+    assert "speech recognition" in response.json()["detail"]
+    assert (await client.get(BASE, headers=_signed(b""))).json()["providers"][0][
+        "layer"
+    ] == "tts"
+    stt = b'{"provider":"speechmatics","params":{},"fallback_enabled":true}'
+    assert (await _put(client, "stt", stt)).status_code == 200
+
+
+@pytest.mark.usefixtures("internal_secret_set", "provider_key_set")
+async def test_tts_activate_and_delete_cannot_strand_the_saved_language(client):
+    chinese = (
+        b'{"provider":"cartesia","params":{"language":"zh"},"fallback_enabled":false}'
+    )
+    assert (await _put(client, "tts", chinese)).status_code == 200
+    plain = b'{"provider":"elevenlabs","params":{},"fallback_enabled":false}'
+    assert (await _put(client, "tts", plain)).status_code == 200
+    stt = b'{"provider":"speechmatics","params":{},"fallback_enabled":false}'
+    assert (await _put(client, "stt", stt)).status_code == 200
+
+    activate = b'{"provider":"cartesia"}'
+    response = await client.post(
+        f"{BASE}/tts/activate", content=activate, headers=_signed(activate)
+    )
+    assert response.status_code == 422
+    response = await client.delete(f"{BASE}/tts/elevenlabs", headers=_signed(b""))
+    assert response.status_code == 422
+
+    rows = (await client.get(BASE, headers=_signed(b""))).json()["providers"]
+    active_tts = [r["provider"] for r in rows if r["layer"] == "tts" and r["is_active"]]
+    assert active_tts == ["elevenlabs"]
