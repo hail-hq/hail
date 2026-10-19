@@ -313,7 +313,10 @@ async def upsert_provider_config(
         except ValueError as exc:
             raise HTTPException(422, str(exc)) from exc
         except httpx.HTTPStatusError as exc:
-            if exc.response.status_code >= 500 or exc.response.status_code == 429:
+            # A rejected key (401, 403) can be Hail's house key: not the
+            # user's error. Rate limits and provider faults are transient.
+            status = exc.response.status_code
+            if status >= 500 or status in (401, 403, 429):
                 raise HTTPException(
                     503,
                     "Voice support could not be checked. Try again. Your settings were not changed.",
@@ -382,14 +385,14 @@ async def delete_provider_config(
             await _require_servable_language(db, organization_id, **{layer: remaining})
     await db.delete(row)
 
-    if remaining is not None:
-        # Flush the pending delete first, so the DELETE hits Postgres before
-        # the promote UPDATE. Otherwise activating a sibling while the old
-        # active row still exists trips the partial-unique index.
-        await db.flush()
-        remaining.is_active = True
-
     try:
+        if remaining is not None:
+            # Flush the pending delete first, so the DELETE hits Postgres
+            # before the promote UPDATE. Otherwise activating a sibling while
+            # the old active row still exists trips the partial-unique index.
+            # A concurrent delete of the same row raises StaleDataError here.
+            await db.flush()
+            remaining.is_active = True
         await db.commit()
     except (IntegrityError, StaleDataError) as exc:
         await db.rollback()

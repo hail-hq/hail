@@ -647,3 +647,24 @@ def test_house_key_voice_row_without_model_follows_house_model_at_call_time(
     tts = build_tts(org=org, language="fr")
     assert isinstance(tts, cartesia_plugin.TTS)
     assert tts.model == "sonic-3.6"
+
+
+def test_elevenlabs_tagalog_sends_the_filipino_code() -> None:
+    """ElevenLabs spells Tagalog "fil", on the org row and on the house chain."""
+    from hailhq.voicebot.pipeline import ResolvedLayer, build_tts
+    from livekit.agents import tts as agents_tts
+    from livekit.plugins import elevenlabs as elevenlabs_plugin
+
+    org = ResolvedLayer(
+        provider="elevenlabs",
+        api_key=None,
+        params={"voice_id": "picked-voice"},
+        fallback_enabled=True,
+    )
+    tts = build_tts(org=org, language="tl")
+    assert isinstance(tts, agents_tts.FallbackAdapter)
+    eleven = [
+        inst for inst in tts._tts_instances if isinstance(inst, elevenlabs_plugin.TTS)
+    ]
+    assert len(eleven) == 2
+    assert {inst._opts.language.language for inst in eleven} == {"fil"}

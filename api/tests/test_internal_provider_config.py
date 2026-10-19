@@ -506,23 +506,32 @@ async def test_picker_skips_voice_check_when_fallback_serves_the_language(
 
 
 @pytest.mark.usefixtures("internal_secret_set")
-async def test_picker_reports_unknown_voice_as_a_choice_error(client, monkeypatch):
+@pytest.mark.parametrize(
+    ("provider_status", "expected"),
+    [(404, 422), (422, 422), (401, 503), (403, 503), (429, 503), (500, 503)],
+)
+async def test_picker_maps_provider_status_errors(
+    client, monkeypatch, provider_status, expected
+):
+    """A missing voice is the user's choice. A rejected key may be Hail's own."""
     from unittest.mock import AsyncMock
 
     import httpx
 
     request = httpx.Request("GET", "https://api.cartesia.ai/voices/missing")
-    missing = httpx.HTTPStatusError(
-        "not found", request=request, response=httpx.Response(404, request=request)
+    failure = httpx.HTTPStatusError(
+        "provider error",
+        request=request,
+        response=httpx.Response(provider_status, request=request),
     )
     monkeypatch.setattr(settings, "cartesia_api_key", "house-key")
     monkeypatch.setattr(
         "hailhq.api.routes.internal.provider_config.validate_voice_language",
-        AsyncMock(side_effect=missing),
+        AsyncMock(side_effect=failure),
     )
     body = b'{"provider":"cartesia","params":{"voice_id":"missing","model":"sonic-3.5","language":"fr"},"fallback_enabled":false,"verify_voice_language":true}'
     response = await client.put(f"{BASE}/tts", content=body, headers=_signed(body))
-    assert response.status_code == 422, response.text
+    assert response.status_code == expected, response.text
 
 
 async def _put(client, layer: str, body: bytes):
@@ -566,3 +575,21 @@ async def test_tts_activate_and_delete_cannot_strand_the_saved_language(client):
     rows = (await client.get(BASE, headers=_signed(b""))).json()["providers"]
     active_tts = [r["provider"] for r in rows if r["layer"] == "tts" and r["is_active"]]
     assert active_tts == ["elevenlabs"]
+
+
+@pytest.mark.usefixtures("internal_secret_set", "provider_key_set")
+async def test_delete_race_on_flush_returns_409(client, monkeypatch):
+    from sqlalchemy.ext.asyncio import AsyncSession
+    from sqlalchemy.orm.exc import StaleDataError
+
+    first = b'{"provider":"cartesia","params":{},"fallback_enabled":false}'
+    second = b'{"provider":"elevenlabs","params":{},"fallback_enabled":false}'
+    assert (await _put(client, "tts", first)).status_code == 200
+    assert (await _put(client, "tts", second)).status_code == 200
+
+    async def stale_flush(self, objects=None):
+        raise StaleDataError("row deleted concurrently")
+
+    monkeypatch.setattr(AsyncSession, "flush", stale_flush)
+    response = await client.delete(f"{BASE}/tts/elevenlabs", headers=_signed(b""))
+    assert response.status_code == 409

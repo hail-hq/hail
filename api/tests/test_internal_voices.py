@@ -156,3 +156,45 @@ async def test_preview_rejects_path_like_ids(voice_app):
             "/internal/voices/preview", content=body, headers=_signed(body)
         )
         assert response.status_code == 422
+
+
+async def test_preview_locks_serialize_one_sample_and_never_outlive_requests(
+    monkeypatch,
+):
+    import asyncio
+
+    voices._samples.clear()
+    voices._sample_locks.clear()
+    body = voices.PreviewIn(language="en", provider="cartesia", voice_id="known")
+    release = asyncio.Event()
+    running, peak = 0, 0
+
+    async def slow_audio(body, model, cache_key):
+        nonlocal running, peak
+        running += 1
+        peak = max(peak, running)
+        await release.wait()
+        running -= 1
+        return b"audio"
+
+    monkeypatch.setattr(voices, "_cached_audio", slow_audio)
+    first = asyncio.create_task(voices._preview_audio(body, "sonic-3.5"))
+    second = asyncio.create_task(voices._preview_audio(body, "sonic-3.5"))
+    await asyncio.sleep(0)
+    key = ("cartesia", "sonic-3.5", "en", "known")
+    assert voices._sample_locks[key][1] == 2
+    release.set()
+    assert await asyncio.gather(first, second) == [b"audio", b"audio"]
+    assert peak == 1
+    assert voices._sample_locks == {}
+
+
+async def test_failed_preview_synthesis_drops_its_lock(monkeypatch):
+    voices._sample_locks.clear()
+    body = voices.PreviewIn(language="en", provider="cartesia", voice_id="known")
+    monkeypatch.setattr(
+        voices, "_cached_audio", AsyncMock(side_effect=httpx.ConnectError("down"))
+    )
+    with pytest.raises(httpx.ConnectError):
+        await voices._preview_audio(body, "sonic-3.5")
+    assert voices._sample_locks == {}

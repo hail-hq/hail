@@ -65,6 +65,7 @@ from hailhq.core.db import session_scope
 from hailhq.core.languages import (
     SUPPORTED_LANGUAGES,
     default_stt_for,
+    elevenlabs_language,
     resolve_stt_provider,
     tts_providers_for,
     turn_mode_for,
@@ -293,7 +294,7 @@ def _house_tts(
             "model": settings.elevenlabs_model,
         }
         if language:
-            kwargs["language"] = language
+            kwargs["language"] = elevenlabs_language(language)
         instances.append(elevenlabs_plugin.TTS(**kwargs))
     return instances
 
@@ -324,7 +325,7 @@ def _org_tts(
         if voice:
             kwargs["voice_id"] = voice
         if language:
-            kwargs["language"] = language
+            kwargs["language"] = elevenlabs_language(language)
         return elevenlabs_plugin.TTS(**kwargs)
     raise ProviderKeyError(f"unknown org tts provider '{org.provider}'")
 

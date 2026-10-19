@@ -16,20 +16,16 @@ from collections import defaultdict
 
 import httpx
 from hailhq.core.config import settings
-from hailhq.core.languages import CARTESIA_MODEL_LANGUAGES, SUPPORTED_LANGUAGES
+from hailhq.core.languages import (
+    CARTESIA_MODEL_LANGUAGES,
+    SUPPORTED_LANGUAGES,
+    elevenlabs_language,
+)
 
 log = logging.getLogger(__name__)
 HEADERS_VERSION = "2026-08-14"
 _cache: dict[tuple[str, str, str], tuple[float, dict]] = {}
 _catalogue_locks: dict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
-# ElevenLabs uses ISO 639-3 where a language has no ISO 639-1 code.
-# https://elevenlabs.io/docs/models lists Filipino as "fil".
-_ELEVENLABS_CODES = {"tl": "fil"}
-
-
-def elevenlabs_language(language: str) -> str:
-    """Hail's language code as ElevenLabs model and voice metadata spell it."""
-    return _ELEVENLABS_CODES.get(language, language)
 
 
 def language_options() -> list[dict]:

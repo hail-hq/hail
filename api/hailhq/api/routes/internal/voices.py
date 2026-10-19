@@ -11,19 +11,15 @@ import asyncio
 import io
 import time
 import wave
-from collections import OrderedDict, defaultdict
+from collections import OrderedDict
 from typing import Literal
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Response
 from hailhq.api.routes.internal.auth import verify_internal_request
 from hailhq.core.config import settings
-from hailhq.core.languages import SUPPORTED_LANGUAGES, Language
-from hailhq.core.voice_catalog import (
-    HEADERS_VERSION,
-    elevenlabs_language,
-    voice_catalogue,
-)
+from hailhq.core.languages import SUPPORTED_LANGUAGES, Language, elevenlabs_language
+from hailhq.core.voice_catalog import HEADERS_VERSION, voice_catalogue
 from pydantic import BaseModel, Field
 
 router = APIRouter(
@@ -33,10 +29,9 @@ router = APIRouter(
 )
 _samples: OrderedDict[tuple[str, str, str, str], tuple[float, bytes]] = OrderedDict()
 # One lock per sample: concurrent first listens synthesize once, and a slow
-# provider never blocks other samples or cache hits.
-_sample_locks: defaultdict[tuple[str, str, str, str], asyncio.Lock] = defaultdict(
-    asyncio.Lock
-)
+# provider never blocks other samples or cache hits. A lock lives only while
+# a request holds or waits on it, so the map holds in-flight samples only.
+_sample_locks: dict[tuple[str, str, str, str], tuple[asyncio.Lock, int]] = {}
 _HELLO = {
     "ar": "مرحباً، كيف يمكنني مساعدتك اليوم؟",
     "bg": "Здравейте, как мога да ви помогна днес?",
@@ -122,8 +117,17 @@ async def preview_voice(body: PreviewIn) -> Response:
 
 async def _preview_audio(body: PreviewIn, model: str) -> bytes:
     cache_key = (body.provider, model, body.language, body.voice_id)
-    async with _sample_locks[cache_key]:
-        return await _cached_audio(body, model, cache_key)
+    lock, users = _sample_locks.get(cache_key, (asyncio.Lock(), 0))
+    _sample_locks[cache_key] = (lock, users + 1)
+    try:
+        async with lock:
+            return await _cached_audio(body, model, cache_key)
+    finally:
+        lock, users = _sample_locks[cache_key]
+        if users == 1:
+            del _sample_locks[cache_key]
+        else:
+            _sample_locks[cache_key] = (lock, users - 1)
 
 
 async def _cached_audio(
@@ -178,6 +182,5 @@ async def _cached_audio(
         _samples[cache_key] = (time.monotonic(), audio)
         _samples.move_to_end(cache_key)
         if len(_samples) > 3 * len(SUPPORTED_LANGUAGES):
-            evicted, _ = _samples.popitem(last=False)
-            _sample_locks.pop(evicted, None)
+            _samples.popitem(last=False)
     return audio
