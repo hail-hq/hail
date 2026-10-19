@@ -241,3 +241,31 @@ async def test_real_provider_constructors_support_independent_autodetection(
     finally:
         await models.aclose()
         await models.aclose()  # safe when detection and shutdown both clean up
+
+
+async def test_slow_amd_backup_logs_a_clear_warning(layers, caplog):
+    session, _, google = layers
+
+    class Down(FakeLLM):
+        def chat(self, **kwargs):
+            return Stream(
+                self,
+                chat_ctx=kwargs["chat_ctx"],
+                tools=kwargs["tools"],
+                conn_options=kwargs["conn_options"],
+            )
+
+    class Stream(LLMStream):
+        async def _run(self):
+            raise APIStatusError("timed out", status_code=504)
+
+    google.return_value = Down()
+    amd.openai.LLM.return_value = Down()
+    models = amd.build_amd_models(session)
+    try:
+        with pytest.raises(APIStatusError):
+            async with models.llm.chat(chat_ctx=ChatContext()) as stream:
+                await stream.collect()
+        assert "OPENAI_MODEL may be too slow for AMD" in caplog.text
+    finally:
+        await models.aclose()

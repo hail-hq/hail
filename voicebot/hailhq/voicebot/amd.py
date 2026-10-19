@@ -118,8 +118,17 @@ class _ClassifierFailoverStream(LLMStream):
                         self._event_ch.send_nowait(chunk)
                 return
             except (APIError, TimeoutError) as e:
+                if model is self._failover.backup:
+                    logger.warning(
+                        "AMD backup classifier %s failed (limit %ss per try); "
+                        "OPENAI_MODEL may be too slow for AMD: %s",
+                        model.model,
+                        CLASSIFIER_ATTEMPT_TIMEOUT_SECONDS,
+                        e,
+                    )
+                    raise
                 # A partial answer cannot be resent from another model.
-                if sent or model is self._failover.backup:
+                if sent:
                     raise
                 logger.warning(
                     "AMD classifier %s failed, using backup: %s", model.label, e

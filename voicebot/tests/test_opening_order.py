@@ -104,3 +104,14 @@ async def test_generated_opening_answers_words_held_during_greeting(monkeypatch)
     finally:
         greeting.cancel()
         await asyncio.gather(greeting, return_exceptions=True)
+
+
+def test_release_drops_the_empty_early_reply():
+    """An early reply started while held is empty and must not be reused."""
+    from livekit.agents.voice.agent_activity import AgentActivity
+
+    assert callable(getattr(AgentActivity, "_cancel_preemptive_generation", None))
+    agent = SpeechSanitizingAgent(instructions="test", opening_pending=True)
+    agent._activity = Mock()
+    agent.release_opening()
+    agent._activity._cancel_preemptive_generation.assert_called_once()

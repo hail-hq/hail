@@ -204,6 +204,13 @@ class SpeechSanitizingAgent(Agent):
     def release_opening(self) -> str | None:
         """Let replies through. Returns what the person said while held."""
         self._opening_pending = False
+        # An early (preemptive) reply started while held is empty, because
+        # llm_node returned None. Drop it so the next turn is generated fresh
+        # instead of reusing it. Private in livekit-agents 1.8.8;
+        # test_opening_order.py fails if it moves.
+        cancel = getattr(self._activity, "_cancel_preemptive_generation", None)
+        if cancel is not None:
+            cancel()
         heard, self._held_words = " ".join(self._held_words), []
         return heard or None
 
