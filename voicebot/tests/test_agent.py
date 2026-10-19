@@ -92,6 +92,13 @@ def test_metadata_parser_rejects_empty_string() -> None:
 # --------------------------------------------------------------------------- #
 
 
+def test_build_instructions_uses_the_selected_spoken_language() -> None:
+    assert "Speak in French for this call." in build_instructions(
+        "Welcome the user", language="fr"
+    )
+    assert "Speak in" not in build_instructions("Welcome the user", language="invalid")
+
+
 def test_build_instructions_prepends_preamble_to_caller_prompt() -> None:
     """The fixed voice preamble always leads; the caller prompt follows it."""
     caller = "You are calling Dr. Lee's office to book a teeth cleaning."
@@ -1795,7 +1802,11 @@ async def test_soft_cap_without_handover_keeps_audio_and_room() -> None:
     session = FakeBridgeSession()
     state = {"human": None, "connected": False}
     await soft_cap_announce_and_hangup(
-        ctx, session, CALL_ID, delay_seconds=0, bridge_state=state  # type: ignore[arg-type]
+        ctx,
+        session,
+        CALL_ID,
+        delay_seconds=0,
+        bridge_state=state,  # type: ignore[arg-type]
     )
     assert session.output.enabled == []
     assert session.said == [SOFT_CAP_ANNOUNCEMENT]

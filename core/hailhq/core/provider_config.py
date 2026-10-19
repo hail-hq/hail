@@ -15,6 +15,7 @@ from urllib.parse import urlsplit
 from uuid import UUID
 
 from hailhq.core.config import settings
+from hailhq.core.languages import Language
 from hailhq.core.models import OrgProviderConfig
 from hailhq.core.secret_cipher import SecretCipher
 from pydantic import BaseModel, ConfigDict, field_validator, model_validator
@@ -79,6 +80,8 @@ class TTSParams(BaseModel):
     provider: Literal["cartesia", "elevenlabs"]
     voice_id: str | None = None
     model: str | None = None
+    # Default spoken language for the workspace. A call or agent can override it.
+    language: Language | None = None
 
 
 class STTParams(BaseModel):

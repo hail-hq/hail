@@ -41,6 +41,7 @@ from hailhq.core.agent_tools.send_dtmf import DTMF_CODES
 from hailhq.core.agent_tools.spec import BridgeOutcome, BridgeRoute
 from hailhq.core.call_end_reasons import CallEndReason
 from hailhq.core.config import settings
+from hailhq.core.languages import SUPPORTED_LANGUAGES
 from hailhq.core.db import session_scope
 from hailhq.core.disclosure import disclosure_text
 from hailhq.core.handover import HANDOVER_DEFAULT_MAX_SECONDS
@@ -252,9 +253,17 @@ def build_instructions(
     direction: str | None = None,
     *,
     thread_tool: bool = False,
+    language: str | None = None,
 ) -> str:
     """The call's instructions (see :func:`hailhq.core.prompts.build_voice_instructions`)."""
-    return build_voice_instructions(system_prompt, direction, thread_tool=thread_tool)
+    instructions = build_voice_instructions(
+        system_prompt, direction, thread_tool=thread_tool
+    )
+    if language in SUPPORTED_LANGUAGES:
+        instructions += (
+            f"\n\nSpeak in {SUPPORTED_LANGUAGES[language].name} for this call."
+        )
+    return instructions
 
 
 def has_thread_tool(tools: list[Any]) -> bool:
@@ -1899,6 +1908,8 @@ async def _run_call(
                     assert_public_https_url, llm_cfg["base_url"]
                 )
             org_cfgs = await resolve_org_configs(org_id, skip_llm=llm_cfg is not None)
+            org_tts = org_cfgs.get("tts")
+            language = language or (org_tts.params.get("language") if org_tts else None)
             session = build_session(
                 llm_cfg,
                 vad,
@@ -1989,6 +2000,7 @@ async def _run_call(
             metadata.get("system_prompt"),
             metadata.get("direction"),
             thread_tool=thread_tool,
+            language=language,
         ),
         tools=agent_tools,
     )

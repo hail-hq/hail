@@ -556,6 +556,9 @@ def build_session(
     ``None`` (provider defaults / English) rather than raising, so a
     malformed dispatch never crashes the call.
     """
+    org_cfgs = org_cfgs or {}
+    org_tts = org_cfgs.get("tts")
+    language = language or (org_tts.params.get("language") if org_tts else None)
     if language is not None and language not in SUPPORTED_LANGUAGES:
         logger.warning(
             "unsupported language %r from dispatch metadata; falling back to "
@@ -563,7 +566,6 @@ def build_session(
             language,
         )
         language = None
-    org_cfgs = org_cfgs or {}
     org_stt = org_cfgs.get("stt")
     provider = resolve_stt_provider(org_stt.provider if org_stt else None, language)
     if language is not None and provider not in SUPPORTED_LANGUAGES[language].stt:

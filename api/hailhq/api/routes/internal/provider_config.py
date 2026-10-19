@@ -18,11 +18,13 @@ from cryptography.fernet import InvalidToken
 from fastapi import APIRouter, Depends, HTTPException
 from hailhq.api.routes.internal.auth import verify_internal_request
 from hailhq.core.db import get_session
+from hailhq.core.languages import SUPPORTED_LANGUAGES
 from hailhq.core.models import OrgProviderConfig
 from hailhq.core.provider_config import (
     LAYERS,
     PARAMS_BY_LAYER,
     last4,
+    load_org_provider_configs,
     provider_cipher,
 )
 from hailhq.core.provider_validation import validate_provider_key
@@ -186,6 +188,21 @@ async def upsert_provider_config(
 ) -> dict:
     _check_layer(layer)
     params = _validated_params(layer, body.provider, body.params)
+
+    if layer == "tts" and (language := params.get("language")):
+        caps = SUPPORTED_LANGUAGES[language]
+        active = await load_org_provider_configs(db, organization_id)
+        stt = active.get("stt")
+        if body.provider not in caps.tts and not body.fallback_enabled:
+            raise HTTPException(
+                422,
+                "This voice provider does not support the chosen language. Enable fallback or choose another provider.",
+            )
+        if stt and stt.provider not in caps.stt and not stt.fallback_enabled:
+            raise HTTPException(
+                422,
+                "Your speech recognition provider does not support the chosen language. Change it in Advanced or enable fallback.",
+            )
 
     row = await _get_row(db, organization_id, layer, body.provider)
     if row is None:

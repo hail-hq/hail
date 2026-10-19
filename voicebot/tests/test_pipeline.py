@@ -235,6 +235,24 @@ def _make_session(language, org_cfgs=None):
     return build_session(None, MagicMock(), org_cfgs=org_cfgs, language=language)
 
 
+@pytest.mark.parametrize("explicit,expected", [(None, "fr"), ("en", "en")])
+def test_workspace_language_reaches_both_speech_layers(explicit, expected):
+    from unittest.mock import MagicMock, patch
+    from hailhq.voicebot.pipeline import ResolvedLayer
+
+    org_tts = ResolvedLayer(
+        "cartesia", None, {"language": "fr", "voice_id": "chosen"}, True
+    )
+    with (
+        patch("hailhq.voicebot.pipeline.build_stt") as stt,
+        patch("hailhq.voicebot.pipeline.build_tts") as tts,
+        patch("hailhq.voicebot.pipeline.AgentSession"),
+    ):
+        build_session(None, MagicMock(), org_cfgs={"tts": org_tts}, language=explicit)
+    assert stt.call_args.args[1] == expected
+    assert tts.call_args.args[2] == expected
+
+
 def test_session_semantic_turns_for_covered_language() -> None:
     from livekit.agents.inference import TurnDetector
 
@@ -516,9 +534,9 @@ def test_startup_capability_warnings_cartesia_empty_eleven_set_lists_cartesia_on
 
     # Should list exactly the 7 Cartesia-only languages
     expected_langs = {"bn", "gu", "he", "kn", "te", "th", "mr"}
-    assert (
-        extracted_langs == expected_langs
-    ), f"Expected {expected_langs}, got {extracted_langs}"
+    assert extracted_langs == expected_langs, (
+        f"Expected {expected_langs}, got {extracted_langs}"
+    )
     assert len(extracted_langs) == 7
 
 
@@ -549,9 +567,9 @@ def test_startup_capability_warnings_cartesia_empty_eleven_empty_lists_all_tts_l
 
     # Should list all 39 supported languages
     expected_langs = set(SUPPORTED_LANGUAGES.keys())
-    assert (
-        extracted_langs == expected_langs
-    ), f"Expected {expected_langs}, got {extracted_langs}"
+    assert extracted_langs == expected_langs, (
+        f"Expected {expected_langs}, got {extracted_langs}"
+    )
     assert len(extracted_langs) == 39
 
 
@@ -589,9 +607,9 @@ def test_startup_capability_warnings_speechmatics_empty_lists_22_languages(
         code for code in SUPPORTED_LANGUAGES if default_stt_for(code) == "speechmatics"
     }
 
-    assert (
-        extracted_langs == expected_langs
-    ), f"Expected {expected_langs}, got {extracted_langs}"
+    assert extracted_langs == expected_langs, (
+        f"Expected {expected_langs}, got {extracted_langs}"
+    )
     assert len(extracted_langs) == 22
 
 

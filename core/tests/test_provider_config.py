@@ -19,6 +19,14 @@ from hailhq.core.secret_cipher import SecretKeyMissing, generate_key
 from pydantic import ValidationError
 
 
+def test_tts_language_is_validated_without_requiring_a_customer_key():
+    assert (
+        TTSParams(provider="cartesia", voice_id="voice", language="fr").language == "fr"
+    )
+    with pytest.raises(ValidationError):
+        TTSParams(provider="cartesia", language="invalid")
+
+
 @pytest.mark.parametrize("legacy", ["standard", "enhanced"])
 def test_speechmatics_legacy_tiers_resolve_to_the_actual_model(legacy, monkeypatch):
     monkeypatch.setattr(settings, "speechmatics_model", "linden-1")

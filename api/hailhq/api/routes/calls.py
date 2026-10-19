@@ -335,12 +335,17 @@ async def create_call(
     # Language/provider compatibility gate, reject before any Call row is
     # created. Deterministic on request + org config, so failures are
     # cached for idempotent replay like the other 422 gates.
-    lang = body.voice_config.language
-    org_rows = (
-        await load_org_provider_configs(db, principal.organization_id)
-        if lang is not None
-        else {}
+    org_rows = await load_org_provider_configs(db, principal.organization_id)
+    default_tts = org_rows.get("tts")
+    lang = body.voice_config.language or (
+        default_tts.params.get("language") if default_tts else None
     )
+    if lang is not None:
+        body = body.model_copy(
+            update={
+                "voice_config": body.voice_config.model_copy(update={"language": lang})
+            }
+        )
     if lang is not None:
         caps = SUPPORTED_LANGUAGES[lang]
         # Both layers share one consent rule: an org BYO row (STT or TTS)
