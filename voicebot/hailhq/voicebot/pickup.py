@@ -17,7 +17,12 @@ from livekit.agents.voice.amd import AMDCategory, AMDPredictionEvent
 logger = logging.getLogger("hailhq.voicebot")
 
 RECHECK_TIMEOUT_SECONDS = 5.0
+MIN_SPEECH_SECONDS = 1.0
 SAMPLE_RATE = 16000
+# The shared prompt describes live, partial greetings and a postpone tool.
+RECHECK_NOTE = (
+    "\nThis transcript is the complete greeting. Postponing is not available.\n"
+)
 
 
 class PickupAudio:
@@ -91,6 +96,15 @@ class PickupAudio:
         self._pcm.clear()
 
 
+def needs_recheck(result: AMDPredictionEvent) -> bool:
+    """Only a timeout after real speech is worth a second transcription."""
+    return (
+        result.category == AMDCategory.UNCERTAIN
+        and result.reason == "detection_timeout"
+        and result.speech_duration >= MIN_SPEECH_SECONDS
+    )
+
+
 async def recheck_greeting(
     result: AMDPredictionEvent,
     audio: rtc.AudioFrame | None,
@@ -101,9 +115,7 @@ async def recheck_greeting(
 ) -> AMDPredictionEvent:
     """Recheck speech timeouts; silence and positive verdicts stay fast."""
     if (
-        result.category != AMDCategory.UNCERTAIN
-        or result.reason != "detection_timeout"
-        or result.speech_duration < 1.0
+        not needs_recheck(result)
         or audio is None
         or audio.samples_per_channel < audio.sample_rate
     ):
@@ -125,7 +137,7 @@ async def recheck_greeting(
             if not transcript:
                 return result
             ctx = ChatContext()
-            ctx.add_message(role="system", content=prompt)
+            ctx.add_message(role="system", content=prompt + RECHECK_NOTE)
             ctx.add_message(role="user", content=transcript)
             async with llm.chat(
                 chat_ctx=ctx,

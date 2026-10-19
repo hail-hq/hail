@@ -24,6 +24,7 @@ from ._fakes import FakeLLM
 def layers(monkeypatch):
     monkeypatch.setattr(settings, "openai_api_key", "house-openai")
     monkeypatch.setattr(settings, "openai_transcribe_model", "gpt-live-transcribe")
+    monkeypatch.setattr(settings, "openai_file_transcribe_model", "gpt-transcribe")
     monkeypatch.setattr(settings, "openai_model", "house-chat-model")
     monkeypatch.setattr(settings, "google_api_key", "house-google")
     monkeypatch.setattr(settings, "google_amd_model", "gemini-3.1-flash-lite")
@@ -239,6 +240,7 @@ async def test_real_provider_constructors_support_independent_autodetection(
     monkeypatch.setenv("GOOGLE_GENAI_USE_VERTEXAI", "false")
     monkeypatch.setattr(settings, "openai_api_key", "sk-test-placeholder")
     monkeypatch.setattr(settings, "openai_transcribe_model", "gpt-live-transcribe")
+    monkeypatch.setattr(settings, "openai_file_transcribe_model", "gpt-transcribe")
     monkeypatch.setattr(settings, "google_api_key", "google-test-placeholder")
     monkeypatch.setattr(settings, "google_amd_model", "gemini-3.1-flash-lite")
     session = AgentSession(

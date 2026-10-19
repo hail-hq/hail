@@ -11,6 +11,7 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 ### Changed
 
 - Call recording is on by default with 30 days of retention. A workspace that has not saved a choice is asked once during onboarding.
+- Voice: an unsure voicemail check rechecks the whole recorded greeting. New env: `OPENAI_FILE_TRANSCRIBE_MODEL` (value in `.env.example`).
 
 ## [0.29.0] (2026-10-19)
 

@@ -43,6 +43,8 @@ class Settings(BaseSettings):
     # Answering machine detection: transcribes and classifies the pickup
     # greeting. Empty = reuse the call's own STT / LLM.
     openai_transcribe_model: str = ""
+    # Rechecks a whole inconclusive greeting. Empty = no recheck.
+    openai_file_transcribe_model: str = ""
     google_amd_model: str = ""
 
     # Voice pipeline

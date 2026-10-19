@@ -391,7 +391,7 @@ async def test_run_amd_rechecks_before_owned_layers_close(monkeypatch, category)
         aclose=AsyncMock(),
     )
     monkeypatch.setattr(amd, "PickupAudio", Mock(return_value=raw))
-    primary, backup = FakeLLM(), Classifier(json.dumps({"label": category}))
+    primary, backup = Classifier(json.dumps({"label": category})), FakeLLM()
     batch = transcriber()
     models = amd.AMDModels(
         amd.ClassifierFailover(primary, backup), object(), recheck_stt=batch
@@ -406,7 +406,7 @@ async def test_run_amd_rechecks_before_owned_layers_close(monkeypatch, category)
     result = await amd.run_amd(session, call_id, models=models, room=room)
     assert result.category == AMDCategory(category)
     assert result.reason == "greeting_recheck"
-    assert backup.calls
+    assert primary.calls
     amd.PickupAudio.assert_called_once_with(room, f"caller-{call_id}", seconds=20)
     raw.stop.assert_awaited_once()
     raw.aclose.assert_awaited_once()
@@ -419,7 +419,7 @@ async def test_run_amd_rechecks_before_owned_layers_close(monkeypatch, category)
         session._start_ivr_detection.assert_not_called()
 
 
-async def test_new_final_speech_during_recheck_discards_stale_machine_verdict(
+async def test_greeting_transcripts_during_recheck_keep_machine_verdict(
     monkeypatch,
 ):
     original = prediction()
@@ -434,8 +434,7 @@ async def test_new_final_speech_during_recheck_discards_stale_machine_verdict(
     monkeypatch.setattr(amd, "PickupAudio", Mock(return_value=raw))
     session = _session_with_layers()
     emitter = EventEmitter()
-    session.on = emitter.on
-    session.off = Mock(wraps=emitter.off)
+    session.on, session.off = emitter.on, emitter.off
 
     async def recheck(*args, **kwargs):
         emitter.emit(
@@ -448,7 +447,7 @@ async def test_new_final_speech_during_recheck_discards_stale_machine_verdict(
     models = amd.AMDModels(FakeLLM(), object(), recheck_stt=transcriber())
     models.aclose = AsyncMock()
     result = await amd.run_amd(session, UUID(int=10), models=models, room=object())
-    assert result is original
-    session.off.assert_called_once()
+    assert result is not original
+    assert result.category == AMDCategory.MACHINE_VM
     raw.aclose.assert_awaited_once()
     models.aclose.assert_awaited_once()
