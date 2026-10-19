@@ -12,7 +12,6 @@ from livekit.agents.llm import (
     ChatChunk,
     ChatContext,
     ChoiceDelta,
-    FallbackAdapter,
     FunctionToolCall,
     LLMStream,
     function_tool,
@@ -122,7 +121,7 @@ def test_missing_backup_credentials_keep_primary_classifier(layers, monkeypatch)
 
 
 async def test_overloaded_amd_classifier_fails_over_with_prediction_tools(layers):
-    """A real adapter must finish classification when Gemini returns HTTP 503."""
+    """Classification must finish on the backup when Gemini returns HTTP 503."""
     session, _, google = layers
     attempts = []
 
@@ -164,7 +163,7 @@ async def test_overloaded_amd_classifier_fails_over_with_prediction_tools(layers
     google.return_value = primary
     amd.openai.LLM.return_value = backup
     models = amd.build_amd_models(session)
-    assert isinstance(models.llm, FallbackAdapter)
+    assert isinstance(models.llm, amd.ClassifierFailover)
 
     @function_tool
     async def save_prediction(category: str) -> None:
@@ -176,10 +175,10 @@ async def test_overloaded_amd_classifier_fails_over_with_prediction_tools(layers
         ) as stream:
             response = await stream.collect()
         assert [tool.name for tool in response.tool_calls] == ["save_prediction"]
-        assert attempts[0][0] is primary
-        assert any(model is backup for model, _ in attempts)
+        # One try each: no background retry of the overloaded primary.
+        assert [model for model, _ in attempts] == [primary, backup]
         assert all(kwargs["conn_options"].max_retry == 0 for _, kwargs in attempts)
-        assert all(kwargs["conn_options"].timeout == 2.0 for _, kwargs in attempts)
+        assert all(kwargs["conn_options"].timeout == 3.0 for _, kwargs in attempts)
         assert all(kwargs["tool_choice"] == "required" for _, kwargs in attempts)
         assert all(kwargs["tools"] == [save_prediction] for _, kwargs in attempts)
     finally:

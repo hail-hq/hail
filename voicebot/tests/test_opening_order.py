@@ -1,7 +1,7 @@
 """Pickup speech must not queue an introduction ahead of Hail's greeting."""
 
 import asyncio
-from unittest.mock import Mock
+from unittest.mock import AsyncMock, Mock, PropertyMock
 
 import pytest
 from hailhq.voicebot.agent import SpeechSanitizingAgent, speak_greeting
@@ -17,10 +17,15 @@ async def test_pickup_hello_cannot_generate_or_queue_an_early_reply():
     agent = SpeechSanitizingAgent(instructions="test", opening_pending=True)
     async with AgentSession(llm=llm) as session:
         await session.start(agent=agent)
+        added = []
+        session.on("conversation_item_added", lambda ev: added.append(ev.item))
         with pytest.raises(StopResponse):
             await agent.on_user_turn_completed(
                 ChatContext(), ChatMessage(role="user", content=["Hello?"])
             )
+        # The held words stay in the chat and the transcript.
+        assert agent.chat_ctx.messages()[-1].text_content == "Hello?"
+        assert [m.text_content for m in added] == ["Hello?"]
         # Also drive the real generation pipeline, covering preemptive work.
         await session.run(user_input="Hello?")
         llm.chat.assert_not_called()
@@ -65,6 +70,37 @@ async def test_automatic_replies_resume_only_after_introduction(first_message):
                 "Do not greet or introduce yourself again"
                 in session.generate_reply_calls[0]
             )
+    finally:
+        greeting.cancel()
+        await asyncio.gather(greeting, return_exceptions=True)
+
+
+async def test_generated_opening_answers_words_held_during_greeting(monkeypatch):
+    started, finish = asyncio.Event(), asyncio.Event()
+    agent = SpeechSanitizingAgent(instructions="test", opening_pending=True)
+
+    class Session(FakeAnnouncingSession):
+        async def say(self, text, *, allow_interruptions):
+            started.set()
+            await finish.wait()
+
+    session = Session()
+    agent.update_chat_ctx = AsyncMock()
+    monkeypatch.setattr(
+        SpeechSanitizingAgent, "session", PropertyMock(return_value=Mock())
+    )
+    greeting = asyncio.create_task(
+        speak_greeting(session, {}, on_opened=agent.release_opening)
+    )
+    try:
+        await started.wait()
+        with pytest.raises(StopResponse):
+            await agent.on_user_turn_completed(
+                ChatContext(), ChatMessage(role="user", content=["Who is this?"])
+            )
+        finish.set()
+        await greeting
+        assert 'saying: "Who is this?"' in session.generate_reply_calls[0]
     finally:
         greeting.cancel()
         await asyncio.gather(greeting, return_exceptions=True)

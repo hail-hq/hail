@@ -16,13 +16,16 @@ import asyncio
 import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
+from typing import Any
 from uuid import UUID
 
 from hailhq.core.call_end_reasons import CallEndReason
 from hailhq.core.config import settings
 from hailhq.voicebot.pipeline import ResolvedLayer, build_stt
-from livekit.agents.llm import LLM, FallbackAdapter
+from livekit.agents import APIConnectOptions, APIError
+from livekit.agents.llm import LLM, ChatContext, LLMStream, Tool, ToolChoice
 from livekit.agents.stt import STT
+from livekit.agents.types import DEFAULT_API_CONNECT_OPTIONS, NOT_GIVEN, NotGivenOr
 from livekit.agents.voice import AgentSession
 from livekit.agents.voice.amd import AMD, AMDPredictionEvent
 from livekit.plugins import google, openai
@@ -44,6 +47,83 @@ hear the rest; do not guess human just because the greeting is short.
 Examples: 'laissez un message après le bip' and 'اترك رسالة بعد الصافرة' are
 machine-vm; 'drücken Sie die Eins' is machine-ivr; a live 'bonjour ?' is human.
 """
+
+
+# One try per classifier, no retries. A slow but healthy Gemini answer takes up
+# to about 3s; POST_ANSWER_TIMEOUT_SECONDS still caps the whole detection.
+CLASSIFIER_ATTEMPT_TIMEOUT_SECONDS = 3.0
+
+
+class ClassifierFailover(LLM):
+    """Primary classifier, then the backup, one try each.
+
+    Replaces ``FallbackAdapter``, which after a failure sends an extra
+    background request to the failed provider. That request is wasted here:
+    the adapter only lives for one call, and AMD closes the clients first.
+    """
+
+    def __init__(self, primary: LLM, backup: LLM) -> None:
+        super().__init__()
+        self.primary = primary
+        self.backup = backup
+
+    @property
+    def model(self) -> str:
+        return self.primary.model
+
+    @property
+    def provider(self) -> str:
+        return self.primary.provider
+
+    def chat(
+        self,
+        *,
+        chat_ctx: ChatContext,
+        tools: list[Tool] | None = None,
+        conn_options: APIConnectOptions = DEFAULT_API_CONNECT_OPTIONS,
+        parallel_tool_calls: NotGivenOr[bool] = NOT_GIVEN,
+        tool_choice: NotGivenOr[ToolChoice] = NOT_GIVEN,
+        extra_kwargs: NotGivenOr[dict] = NOT_GIVEN,
+    ) -> LLMStream:
+        # Each try has its own timeout; the outer stream never retries.
+        return _ClassifierFailoverStream(
+            self,
+            chat_ctx=chat_ctx,
+            tools=tools or [],
+            conn_options=APIConnectOptions(max_retry=0),
+            tool_choice=tool_choice,
+        )
+
+
+class _ClassifierFailoverStream(LLMStream):
+    def __init__(self, llm: ClassifierFailover, *, tool_choice: Any, **kwargs: Any):
+        super().__init__(llm, **kwargs)
+        self._failover = llm
+        self._tool_choice = tool_choice
+
+    async def _run(self) -> None:
+        for model in (self._failover.primary, self._failover.backup):
+            sent = False
+            try:
+                async with model.chat(
+                    chat_ctx=self._chat_ctx,
+                    tools=self._tools,
+                    tool_choice=self._tool_choice,
+                    conn_options=APIConnectOptions(
+                        max_retry=0, timeout=CLASSIFIER_ATTEMPT_TIMEOUT_SECONDS
+                    ),
+                ) as stream:
+                    async for chunk in stream:
+                        sent = True
+                        self._event_ch.send_nowait(chunk)
+                return
+            except (APIError, TimeoutError) as e:
+                # A partial answer cannot be resent from another model.
+                if sent or model is self._failover.backup:
+                    raise
+                logger.warning(
+                    "AMD classifier %s failed, using backup: %s", model.label, e
+                )
 
 
 @dataclass
@@ -140,12 +220,7 @@ def build_amd_models(
             # its detection budget retrying the same overloaded LLM.
             # Use independent clients so AMD cleanup cannot close conversation
             # providers or change a customer's explicitly selected LLM.
-            models.llm = FallbackAdapter(
-                [models.llm, backup],
-                attempt_timeout=2.0,
-                max_retry_per_llm=0,
-            )
-            models.owned.append(models.llm)
+            models.llm = ClassifierFailover(models.llm, backup)
         except Exception:
             logger.exception("AMD fallback setup failed; keeping primary classifier")
     return models

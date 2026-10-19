@@ -92,7 +92,7 @@ from hailhq.voicebot.tools import build_agent_tools
 from livekit import rtc
 from livekit.agents import Agent, JobContext, JobProcess, StopResponse
 from livekit.agents.llm import LLMError
-from livekit.agents.voice import AgentSession
+from livekit.agents.voice import AgentSession, ConversationItemAddedEvent
 from livekit.api import CreateSIPParticipantRequest, SipCallError
 from livekit.plugins import silero
 from opentelemetry import context as otel_context
@@ -199,15 +199,32 @@ class SpeechSanitizingAgent(Agent):
     def __init__(self, *, opening_pending: bool = False, **kwargs: Any) -> None:
         super().__init__(**kwargs)
         self._opening_pending = opening_pending
+        self._held_words: list[str] = []
 
-    def release_opening(self) -> None:
+    def release_opening(self) -> str | None:
+        """Let replies through. Returns what the person said while held."""
         self._opening_pending = False
+        heard, self._held_words = " ".join(self._held_words), []
+        return heard or None
 
     async def on_user_turn_completed(self, turn_ctx: Any, new_message: Any) -> None:
         if self._opening_pending:
             # AMD pauses playback, but still allows automatic replies to queue.
             # The explicit introduction owns the first turn, including when a
             # recipient says hello while classification is still pending.
+            if new_message is not None:
+                # StopResponse drops the turn, so keep the words here. The
+                # opening and later replies answer them, and the transcript
+                # records them.
+                if text := (new_message.text_content or "").strip():
+                    self._held_words.append(text)
+                chat_ctx = self.chat_ctx.copy()
+                chat_ctx.items.append(new_message)
+                await self.update_chat_ctx(chat_ctx)
+                self.session.emit(
+                    "conversation_item_added",
+                    ConversationItemAddedEvent(item=new_message),
+                )
             raise StopResponse()
 
     async def llm_node(self, chat_ctx: Any, tools: Any, model_settings: Any) -> Any:
@@ -612,7 +629,7 @@ async def speak_greeting(
     pickup_transcript: str | None = None,
     *,
     generate_opening: bool = True,
-    on_opened: Callable[[], None] | None = None,
+    on_opened: Callable[[], str | None] | None = None,
 ) -> None:
     """Open the call: disclosure (unless opted out), then the first message.
 
@@ -661,8 +678,7 @@ async def speak_greeting(
             await session.say(disclosure, allow_interruptions=True)
     finally:
         # Release even when say fails, so the agent is never left unable to reply.
-        if on_opened is not None:
-            on_opened()
+        heard = on_opened() if on_opened is not None else None
     # An inbound caller dialed in: with no ``first_message`` the agent waits
     # for them to speak (the documented ``first_message: null`` behavior). The
     # generated opening is written for a call Hail placed ("say why you are
@@ -670,7 +686,7 @@ async def speak_greeting(
     if generate_opening and metadata.get("direction") != "inbound":
         session.generate_reply(
             instructions=opening_instructions(
-                pickup_transcript, already_introduced=bool(disclosure)
+                pickup_transcript or heard, already_introduced=bool(disclosure)
             )
         )
 
