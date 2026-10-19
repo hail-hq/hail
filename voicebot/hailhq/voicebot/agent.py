@@ -79,6 +79,7 @@ from hailhq.voicebot.amd import (
     run_amd,
 )
 from hailhq.voicebot.audio import prewarm_audio, room_options
+from hailhq.voicebot.confirmation import confirm_pickup
 from hailhq.voicebot.pipeline import (
     ProviderKeyError,
     build_session,
@@ -93,6 +94,7 @@ from livekit import rtc
 from livekit.agents import Agent, JobContext, JobProcess, StopResponse
 from livekit.agents.llm import LLMError
 from livekit.agents.voice import AgentSession, ConversationItemAddedEvent
+from livekit.agents.voice.amd import AMDCategory
 from livekit.api import CreateSIPParticipantRequest, SipCallError
 from livekit.plugins import silero
 from opentelemetry import context as otel_context
@@ -640,6 +642,7 @@ async def speak_greeting(
     *,
     generate_opening: bool = True,
     on_opened: Callable[[], str | None] | None = None,
+    already_introduced: bool = False,
 ) -> None:
     """Open the call: disclosure (unless opted out), then the first message.
 
@@ -696,7 +699,8 @@ async def speak_greeting(
     if generate_opening and metadata.get("direction") != "inbound":
         session.generate_reply(
             instructions=opening_instructions(
-                pickup_transcript or heard, already_introduced=bool(disclosure)
+                pickup_transcript or heard,
+                already_introduced=bool(disclosure) or already_introduced,
             )
         )
 
@@ -2145,8 +2149,8 @@ async def _run_call(
 
     # Answering machine detection: classify the greeting before we say
     # anything. The event is written on every call, machine or not, so
-    # classification quality is observable per call. A detection failure
-    # returns None and the call proceeds exactly as it did before AMD.
+    # classification quality is observable per call. Uncertain/failed detection
+    # gets a neutral conversational check before the business opening.
     #
     # Skipped outright when the SIP leg is already gone. `captured["status"]`
     # is only ever set by the participant-disconnect handler above, so a
@@ -2154,6 +2158,8 @@ async def _run_call(
     # no audio track to classify, and AMD would sit on its 30s backstop
     # before giving up (observed: a leg rejected at :20.475 still held the
     # job until :50.700, then "entrypoint did not exit in time").
+    confirmation_result = None
+    pickup_disclosed = False
     if inbound:
         # The caller dialed us: a person is on the line, no machine to detect.
         amd_result = None
@@ -2178,9 +2184,40 @@ async def _run_call(
             llm_override=llm_cfg is not None,
             language=language,
         )
-        amd_result = await run_amd(
-            session, call_id, models=models, on_ready=signal_ready, room=ctx.room
-        )
+        try:
+            amd_result = await run_amd(
+                session, call_id, models=models, on_ready=signal_ready, room=ctx.room
+            )
+            if (
+                not shutting_down
+                and captured["status"] is None
+                and captured["end_reason"] is None
+                and (amd_result is None or amd_result.category == AMDCategory.UNCERTAIN)
+            ):
+                disclosure = (
+                    disclosure_line(
+                        metadata.get("org_name"),
+                        metadata.get("direction"),
+                        metadata.get("ai_disclosure_line"),
+                    )
+                    if metadata.get("ai_disclosure", True)
+                    else None
+                )
+                prompt = "Can you hear me?"
+                if disclosure:
+                    prompt = f"{disclosure} {prompt}"
+                    pickup_disclosed = True
+                confirmation_result = await confirm_pickup(
+                    session,
+                    llm=models.llm if models is not None else session.llm,
+                    prompt=prompt,
+                )
+                # The probe already identified us; the business opening stays
+                # pending, including an explicit first_message.
+                metadata = {**metadata, "ai_disclosure": False}
+        finally:
+            if models is not None:
+                await models.aclose()
     if not inbound:
         await write_call_event(
             call_id,
@@ -2195,8 +2232,42 @@ async def _run_call(
                 ),
                 "reason": amd_result.reason if amd_result else "detection_failed",
                 "delay": amd_result.delay if amd_result else None,
+                **(
+                    {
+                        "confirmation": {
+                            "category": confirmation_result.category.value,
+                            "reason": confirmation_result.reason,
+                            "delay": confirmation_result.delay,
+                        }
+                    }
+                    if confirmation_result is not None
+                    else {}
+                ),
             },
         )
+    if (
+        shutting_down
+        or captured["status"] is not None
+        or captured["end_reason"] is not None
+    ):
+        return
+    if confirmation_result is not None:
+        if confirmation_result.category == AMDCategory.UNCERTAIN:
+            # No positive machine evidence: do not label this voicemail.
+            captured["status"] = "no_answer"
+            captured["end_reason"] = CallEndReason.USER_UNAVAILABLE.value
+            try:
+                await ctx.delete_room()
+            except Exception:
+                logger.exception("delete_room failed after unanswered pickup check")
+            ctx.shutdown(reason=CallEndReason.USER_UNAVAILABLE.value)
+            return
+        amd_result = confirmation_result
+        if amd_result.category == AMDCategory.MACHINE_IVR:
+            try:
+                await session._start_ivr_detection(transcript=amd_result.transcript)
+            except Exception:
+                logger.exception("could not start IVR detection after pickup check")
     if amd_result is not None and amd_result.category in MACHINE_HANGUP_CATEGORIES:
         # Voicemail or a dead mailbox, hang up without speaking. We never
         # leave a message: a partial line on someone's voicemail is worse
@@ -2246,6 +2317,7 @@ async def _run_call(
                 metadata,
                 pickup_transcript=amd_result.transcript if amd_result else None,
                 on_opened=agent.release_opening,
+                already_introduced=pickup_disclosed,
             )
             recovery.start()
         except Exception:

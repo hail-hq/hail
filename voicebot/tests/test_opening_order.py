@@ -5,10 +5,12 @@ from unittest.mock import AsyncMock, Mock, PropertyMock
 
 import pytest
 from hailhq.voicebot.agent import SpeechSanitizingAgent, speak_greeting
+from hailhq.voicebot.confirmation import confirm_pickup
 from livekit.agents import AgentSession, StopResponse
 from livekit.agents.llm import ChatContext, ChatMessage
 
 from ._fakes import FakeAnnouncingSession, FakeLLM
+from .test_pickup import Classifier
 
 
 async def test_pickup_hello_cannot_generate_or_queue_an_early_reply():
@@ -116,3 +118,46 @@ def test_release_drops_the_empty_early_reply():
     agent._activity = Mock()
     agent.release_opening()
     agent._activity._cancel_preemptive_generation.assert_called_once()
+
+
+async def test_confirmation_does_not_unlock_automatic_or_preemptive_replies(
+    monkeypatch,
+):
+    """Drive the actual SDK turn loop while the probe is waiting."""
+    conversation = FakeLLM(reply="Business message")
+    conversation.chat = Mock(wraps=conversation.chat)
+    agent = SpeechSanitizingAgent(instructions="test", opening_pending=True)
+    async with AgentSession(llm=conversation) as session:
+        await session.start(agent=agent)
+        monkeypatch.setattr(session, "say", AsyncMock())
+        confirmation = asyncio.create_task(
+            confirm_pickup(
+                session,
+                llm=Classifier('{"label":"human"}'),
+                prompt="Can you hear me?",
+            )
+        )
+        try:
+            await asyncio.sleep(0)
+            await session.run(user_input="Who is calling?")
+            conversation.chat.assert_not_called()
+            session.emit(
+                "user_input_transcribed",
+                Mock(is_final=True, transcript="Who is calling?"),
+            )
+            assert (await confirmation).is_human
+            # A positive classifier result alone cannot release normal turns.
+            await session.run(user_input="Yes, I hear you")
+            conversation.chat.assert_not_called()
+            await speak_greeting(
+                session,
+                {"ai_disclosure": False, "first_message": "Calling about your order."},
+                on_opened=agent.release_opening,
+                already_introduced=True,
+            )
+            result = await session.run(user_input="Go ahead")
+            result.expect[:].contains_message(role="assistant")
+            conversation.chat.assert_called_once()
+        finally:
+            confirmation.cancel()
+            await asyncio.gather(confirmation, return_exceptions=True)

@@ -33,6 +33,7 @@ from hailhq.voicebot.agent import (
 )
 from livekit.agents.llm import ChatMessage, LLMError
 from livekit.agents.stt import STTError
+from livekit.agents.voice.amd import AMDCategory, AMDPredictionEvent
 from livekit.agents.voice.events import ConversationItemAddedEvent, ErrorEvent
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -334,12 +335,19 @@ async def _drive_entrypoint(
             return {"llm": object()}
         return {}
 
-    async def _no_amd(_session: object, _call_id: UUID, **kwargs) -> None:
-        return None
+    async def _human_pickup(_session: object, _call_id: UUID, **kwargs):
+        # These tests exercise conversation-provider failures after pickup.
+        return AMDPredictionEvent(
+            category=AMDCategory.HUMAN,
+            reason="test",
+            transcript="Hello?",
+            speech_duration=1.0,
+            delay=0.1,
+        )
 
     monkeypatch.setattr(agent_mod, "resolve_org_configs", _org_cfgs)
     monkeypatch.setattr(agent_mod, "build_session", lambda *a, **k: session)
-    monkeypatch.setattr(agent_mod, "run_amd", _no_amd)
+    monkeypatch.setattr(agent_mod, "run_amd", _human_pickup)
     monkeypatch.setattr(agent_mod, "build_amd_models", lambda *a, **k: None)
     # The per-call base_url is re-resolved off the event loop at call time;
     # keep the test off the network.

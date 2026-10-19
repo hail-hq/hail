@@ -262,7 +262,7 @@ def build_amd_models(
 
 # Categories we hang up on rather than speak to. `machine-ivr` is deliberately
 # absent, AMD starts LiveKit's IVR navigation for it and the tree may still
-# route to a person. `uncertain` is absent too: when in doubt, talk.
+# route to a person. Uncertain pickups get a separate conversational check.
 MACHINE_HANGUP_CATEGORIES: frozenset[str] = frozenset(
     {"machine-vm", "machine-unavailable"}
 )
@@ -344,8 +344,9 @@ async def run_amd(
 ) -> AMDPredictionEvent | None:
     """Classify before speaking, with bounded waiting and explicit providers.
 
-    ``models`` supplies independently configured AMD layers. Without it, reuse
-    the session layers for backwards compatibility and direct dispatches.
+    ``models`` supplies independently configured AMD layers. The caller owns
+    their lifecycle, including any subsequent pickup confirmation. Without
+    them, reuse the session layers for direct dispatches.
     ``on_ready`` releases the API's dialing gate only after AMD is armed.
     Detection failure stays distinct from a positive human classification.
 
@@ -428,7 +429,7 @@ async def run_amd(
     except TimeoutError:
         logger.warning(
             "call_id=%s answering machine detection timed out after %ss; "
-            "proceeding as if a human answered",
+            "leaving pickup unconfirmed",
             call_id,
             DETECTION_TIMEOUT_SECONDS,
         )
@@ -439,8 +440,6 @@ async def run_amd(
     finally:
         if pickup_audio is not None:
             await pickup_audio.aclose()
-        if models is not None:
-            await models.aclose()
         try:
             await _release()
         except Exception:

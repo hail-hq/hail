@@ -503,6 +503,8 @@ async def _drive_entrypoint(
     run_amd_override: Any = None,
     disconnect_before_amd: bool = False,
     answered: bool = False,
+    confirmation_category: str = "uncertain",
+    metadata_overrides: dict | None = None,
 ) -> tuple[UUID, _FakeAmdCtx, _FakeAmdSession]:
     """Run ``entrypoint`` with AMD stubbed, then fire the shutdown callback."""
     from hailhq.voicebot import agent as agent_mod
@@ -510,6 +512,18 @@ async def _drive_entrypoint(
     org_id = UUID("11111111-2222-3333-4444-555555555555")
     call_id = await _make_call_row(async_session)
     session = _FakeAmdSession()
+    models = amd_mod.AMDModels(FakeLLM(), object())
+    models.aclose = AsyncMock()
+    session.amd_models = models
+
+    async def _confirm(_session, *, llm, prompt):
+        models.aclose.assert_not_awaited()
+        await _session.say(prompt)
+        return _prediction(confirmation_category).model_copy(
+            update={"reason": "pickup_confirmation"}
+        )
+
+    session.confirm = AsyncMock(side_effect=_confirm)
 
     async def _no_org_cfgs(_org_id: UUID | None, *, skip_llm: bool = False) -> dict:
         return {}
@@ -519,7 +533,8 @@ async def _drive_entrypoint(
 
     monkeypatch.setattr(agent_mod, "resolve_org_configs", _no_org_cfgs)
     monkeypatch.setattr(agent_mod, "build_session", lambda *a, **k: session)
-    monkeypatch.setattr(agent_mod, "build_amd_models", lambda *a, **k: None)
+    monkeypatch.setattr(agent_mod, "build_amd_models", lambda *a, **k: models)
+    monkeypatch.setattr(agent_mod, "confirm_pickup", session.confirm)
     monkeypatch.setattr(agent_mod, "run_amd", run_amd_override or _fake_run_amd)
     monkeypatch.setattr(
         agent_mod.settings, "hail_voice_max_duration_seconds", 0, raising=False
@@ -532,6 +547,7 @@ async def _drive_entrypoint(
                 "organization_id": str(org_id),
                 "tools": [],
                 "first_message": "Is this a good time?",
+                **(metadata_overrides or {}),
             }
         ),
         room_name=f"hail-{call_id}",
@@ -636,7 +652,7 @@ async def test_machine_categories_hang_up_without_speaking(
     assert refreshed.end_reason == end_reason
 
 
-@pytest.mark.parametrize("category", ["human", "uncertain"])
+@pytest.mark.parametrize("category", ["human"])
 async def test_non_hangup_categories_speak_the_disclosure(
     async_session: AsyncSession,
     monkeypatch: pytest.MonkeyPatch,
@@ -794,17 +810,77 @@ async def test_ivr_greeting_is_deferred_to_the_first_person(
     assert session.say_calls == [f"{AI_DISCLOSURE_LINE} Is this a good time?"]
 
 
-async def test_detection_failure_proceeds_like_a_human_answer(
-    async_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize("category", [None, "uncertain"])
+async def test_unconfirmed_pickup_ends_without_business_message(
+    async_session: AsyncSession, monkeypatch: pytest.MonkeyPatch, category
 ) -> None:
     from hailhq.voicebot.agent import AI_DISCLOSURE_LINE
 
-    _call_id, ctx, session = await _drive_entrypoint(
-        async_session, monkeypatch, amd_result=None
+    call_id, ctx, session = await _drive_entrypoint(
+        async_session,
+        monkeypatch,
+        amd_result=_prediction(category) if category else None,
     )
 
-    assert session.say_calls[0].startswith(AI_DISCLOSURE_LINE)
+    assert session.say_calls == [f"{AI_DISCLOSURE_LINE} Can you hear me?"]
+    assert session.replies == []
+    assert ctx.delete_room_calls == 1
+    assert ctx.shutdown_calls == ["user_unavailable"]
+    session.amd_models.aclose.assert_awaited_once()
+    call = await async_session.get(Call, call_id, populate_existing=True)
+    assert (call.status, call.end_reason) == ("no_answer", "user_unavailable")
+
+
+@pytest.mark.parametrize("first_message", [None, "Calling about your order."])
+@pytest.mark.parametrize("disclosure", [True, False])
+async def test_confirmed_human_gets_business_opening_once(
+    async_session, monkeypatch, first_message, disclosure
+):
+    from hailhq.voicebot.agent import AI_DISCLOSURE_LINE
+
+    _, ctx, session = await _drive_entrypoint(
+        async_session,
+        monkeypatch,
+        amd_result=_prediction("uncertain"),
+        confirmation_category="human",
+        metadata_overrides={
+            "first_message": first_message,
+            "ai_disclosure": disclosure,
+        },
+    )
+    probe = (
+        f"{AI_DISCLOSURE_LINE} Can you hear me?" if disclosure else "Can you hear me?"
+    )
+    assert session.say_calls == ([probe, first_message] if first_message else [probe])
+    if not first_message:
+        assert len(session.replies) == 1
+        if disclosure:
+            assert "Do not greet or introduce yourself again" in session.replies[0]
     assert ctx.delete_room_calls == 0
+    session.amd_models.aclose.assert_awaited_once()
+
+
+@pytest.mark.parametrize(
+    "category,reason",
+    [
+        ("machine-vm", "voicemail_reached"),
+        ("machine-unavailable", "machine_unavailable"),
+        ("machine-ivr", None),
+    ],
+)
+async def test_machine_reply_to_probe_never_gets_business_opening(
+    async_session, monkeypatch, category, reason
+):
+    _, ctx, session = await _drive_entrypoint(
+        async_session,
+        monkeypatch,
+        amd_result=_prediction("uncertain"),
+        confirmation_category=category,
+    )
+    assert len(session.say_calls) == 1
+    assert session.say_calls[0].endswith("Can you hear me?")
+    assert ctx.shutdown_calls == ([reason] if reason else [])
+    assert len(session.replies) == (1 if category == "machine-ivr" else 0)
 
 
 @pytest.mark.parametrize(
@@ -825,6 +901,17 @@ async def test_amd_result_event_written_on_every_path(
         "transcript": "hello you have reached",
         "reason": "test",
         "delay": 0.1,
+        **(
+            {
+                "confirmation": {
+                    "category": "uncertain",
+                    "reason": "pickup_confirmation",
+                    "delay": 0.1,
+                }
+            }
+            if category == "uncertain"
+            else {}
+        ),
     }
 
 
@@ -842,4 +929,9 @@ async def test_amd_result_event_written_when_detection_failed(
         "transcript": None,
         "reason": "detection_failed",
         "delay": None,
+        "confirmation": {
+            "category": "uncertain",
+            "reason": "pickup_confirmation",
+            "delay": 0.1,
+        },
     }

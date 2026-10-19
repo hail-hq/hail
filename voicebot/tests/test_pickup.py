@@ -381,7 +381,9 @@ async def test_cancelling_capture_closes_stream_and_clears_audio(monkeypatch):
 @pytest.mark.parametrize(
     "category", ["machine-unavailable", "machine-vm", "machine-ivr"]
 )
-async def test_run_amd_rechecks_before_owned_layers_close(monkeypatch, category):
+async def test_run_amd_preserves_caller_owned_layers_for_confirmation(
+    monkeypatch, category
+):
     _RecordingAMD.result = prediction()
     monkeypatch.setattr(amd, "AMD", _RecordingAMD)
     raw = SimpleNamespace(
@@ -410,7 +412,7 @@ async def test_run_amd_rechecks_before_owned_layers_close(monkeypatch, category)
     amd.PickupAudio.assert_called_once_with(room, f"caller-{call_id}", seconds=20)
     raw.stop.assert_awaited_once()
     raw.aclose.assert_awaited_once()
-    models.aclose.assert_awaited_once()
+    models.aclose.assert_not_awaited()
     if category == "machine-ivr":
         session._start_ivr_detection.assert_awaited_once_with(
             transcript="A recorded greeting"
@@ -450,4 +452,4 @@ async def test_greeting_transcripts_during_recheck_keep_machine_verdict(
     assert result is not original
     assert result.category == AMDCategory.MACHINE_VM
     raw.aclose.assert_awaited_once()
-    models.aclose.assert_awaited_once()
+    models.aclose.assert_not_awaited()
