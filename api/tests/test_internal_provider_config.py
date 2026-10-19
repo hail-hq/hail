@@ -487,3 +487,39 @@ async def test_picker_validates_house_voice_and_persists_its_model(client, monke
     )
     assert response.json()["params"]["model"] == "validated-model"
     assert response.json()["key_last4"] is None
+
+
+@pytest.mark.usefixtures("internal_secret_set")
+async def test_picker_skips_voice_check_when_fallback_serves_the_language(
+    client, monkeypatch
+):
+    from unittest.mock import AsyncMock
+
+    check = AsyncMock(side_effect=ValueError("unsupported"))
+    monkeypatch.setattr(
+        "hailhq.api.routes.internal.provider_config.validate_voice_language", check
+    )
+    body = b'{"provider":"elevenlabs","params":{"voice_id":"verified","language":"bn"},"fallback_enabled":true,"verify_voice_language":true}'
+    response = await client.put(f"{BASE}/tts", content=body, headers=_signed(body))
+    assert response.status_code == 200, response.text
+    check.assert_not_awaited()
+
+
+@pytest.mark.usefixtures("internal_secret_set")
+async def test_picker_reports_unknown_voice_as_a_choice_error(client, monkeypatch):
+    from unittest.mock import AsyncMock
+
+    import httpx
+
+    request = httpx.Request("GET", "https://api.cartesia.ai/voices/missing")
+    missing = httpx.HTTPStatusError(
+        "not found", request=request, response=httpx.Response(404, request=request)
+    )
+    monkeypatch.setattr(settings, "cartesia_api_key", "house-key")
+    monkeypatch.setattr(
+        "hailhq.api.routes.internal.provider_config.validate_voice_language",
+        AsyncMock(side_effect=missing),
+    )
+    body = b'{"provider":"cartesia","params":{"voice_id":"missing","model":"sonic-3.5","language":"fr"},"fallback_enabled":false,"verify_voice_language":true}'
+    response = await client.put(f"{BASE}/tts", content=body, headers=_signed(body))
+    assert response.status_code == 422, response.text

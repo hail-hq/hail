@@ -11,7 +11,7 @@ import asyncio
 import io
 import time
 import wave
-from collections import OrderedDict
+from collections import OrderedDict, defaultdict
 from typing import Literal
 
 import httpx
@@ -19,7 +19,11 @@ from fastapi import APIRouter, Depends, HTTPException, Response
 from hailhq.api.routes.internal.auth import verify_internal_request
 from hailhq.core.config import settings
 from hailhq.core.languages import SUPPORTED_LANGUAGES, Language
-from hailhq.core.voice_catalog import HEADERS_VERSION, voice_catalogue
+from hailhq.core.voice_catalog import (
+    HEADERS_VERSION,
+    elevenlabs_language,
+    voice_catalogue,
+)
 from pydantic import BaseModel, Field
 
 router = APIRouter(
@@ -28,7 +32,11 @@ router = APIRouter(
     dependencies=[Depends(verify_internal_request)],
 )
 _samples: OrderedDict[tuple[str, str, str, str], tuple[float, bytes]] = OrderedDict()
-_sample_lock = asyncio.Lock()
+# One lock per sample: concurrent first listens synthesize once, and a slow
+# provider never blocks other samples or cache hits.
+_sample_locks: defaultdict[tuple[str, str, str, str], asyncio.Lock] = defaultdict(
+    asyncio.Lock
+)
 _HELLO = {
     "ar": "مرحباً، كيف يمكنني مساعدتك اليوم؟",
     "bg": "Здравейте, как мога да ви помогна днес?",
@@ -102,8 +110,7 @@ async def preview_voice(body: PreviewIn) -> Response:
         )
         if choice is None:
             raise HTTPException(422, "Choose one of the suggested voices.")
-        async with _sample_lock:
-            audio = await _preview_audio(body, choice["model"])
+        audio = await _preview_audio(body, choice["model"])
         return Response(
             audio,
             media_type="audio/wav",
@@ -115,8 +122,16 @@ async def preview_voice(body: PreviewIn) -> Response:
 
 async def _preview_audio(body: PreviewIn, model: str) -> bytes:
     cache_key = (body.provider, model, body.language, body.voice_id)
+    async with _sample_locks[cache_key]:
+        return await _cached_audio(body, model, cache_key)
+
+
+async def _cached_audio(
+    body: PreviewIn, model: str, cache_key: tuple[str, str, str, str]
+) -> bytes:
     cached = _samples.get(cache_key)
     if cached and time.monotonic() - cached[0] < 3600:
+        _samples.move_to_end(cache_key)
         audio = cached[1]
     else:
         async with httpx.AsyncClient(timeout=20) as client:
@@ -149,7 +164,7 @@ async def _preview_audio(body: PreviewIn, model: str) -> bytes:
                     json={
                         "model_id": model,
                         "text": _HELLO[body.language],
-                        "language_code": body.language,
+                        "language_code": elevenlabs_language(body.language),
                     },
                 )
                 response.raise_for_status()
@@ -161,6 +176,8 @@ async def _preview_audio(body: PreviewIn, model: str) -> bytes:
                     wav.writeframes(response.content)
                 audio = output.getvalue()
         _samples[cache_key] = (time.monotonic(), audio)
+        _samples.move_to_end(cache_key)
         if len(_samples) > 3 * len(SUPPORTED_LANGUAGES):
-            _samples.popitem(last=False)
+            evicted, _ = _samples.popitem(last=False)
+            _sample_locks.pop(evicted, None)
     return audio

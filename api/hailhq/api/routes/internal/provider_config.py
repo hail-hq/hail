@@ -209,7 +209,15 @@ async def upsert_provider_config(
             )
 
     row = await _get_row(db, organization_id, layer, body.provider)
-    if layer == "tts" and body.verify_voice_language and params.get("language"):
+    # A provider outside the language's TTS set only passed the gate above
+    # through fallback consent: the house chain speaks, so there is nothing
+    # to verify on this provider.
+    if (
+        layer == "tts"
+        and body.verify_voice_language
+        and params.get("language")
+        and body.provider in SUPPORTED_LANGUAGES[params["language"]].tts
+    ):
         provider = body.provider
         key = body.api_key
         if key is None and row is not None and row.encrypted_api_key is not None:
@@ -242,6 +250,16 @@ async def upsert_provider_config(
             )
         except ValueError as exc:
             raise HTTPException(422, str(exc)) from exc
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code >= 500 or exc.response.status_code == 429:
+                raise HTTPException(
+                    503,
+                    "Voice support could not be checked. Try again. Your settings were not changed.",
+                ) from exc
+            raise HTTPException(
+                422,
+                "This voice could not be found with this key. Choose a suggested voice or update Advanced.",
+            ) from exc
         except httpx.HTTPError as exc:
             raise HTTPException(
                 503,

@@ -22,6 +22,14 @@ log = logging.getLogger(__name__)
 HEADERS_VERSION = "2026-08-14"
 _cache: dict[tuple[str, str, str], tuple[float, dict]] = {}
 _catalogue_locks: dict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
+# ElevenLabs uses ISO 639-3 where a language has no ISO 639-1 code.
+# https://elevenlabs.io/docs/models lists Filipino as "fil".
+_ELEVENLABS_CODES = {"tl": "fil"}
+
+
+def elevenlabs_language(language: str) -> str:
+    """Hail's language code as ElevenLabs model and voice metadata spell it."""
+    return _ELEVENLABS_CODES.get(language, language)
 
 
 def language_options() -> list[dict]:
@@ -128,7 +136,8 @@ def elevenlabs_choices(
         ),
         None,
     )
-    if not capability or language not in {
+    code = elevenlabs_language(language)
+    if not capability or code not in {
         l.get("language_id") for l in capability.get("languages", [])
     }:
         return []
@@ -146,7 +155,7 @@ def elevenlabs_choices(
             v
             for v in (row.get("verified_languages") or [])
             if isinstance(v, dict)
-            and v.get("language") == language
+            and v.get("language") == code
             and v.get("model_id") == model
         ]
         if not verified:
@@ -166,7 +175,7 @@ def elevenlabs_choices(
                 }.get(labels.get("gender"), ""),
                 "language": language,
                 "accent": _accent(verified),
-                "original_language": labels.get("language") == language,
+                "original_language": labels.get("language") == code,
             }
         )
     return choices

@@ -268,3 +268,25 @@ async def test_retained_voice_validation_checks_supported_language_without_synth
                 "cartesia", "custom", "sonic-3.5", "customer-key", "fr"
             )
         assert all(call.request.method == "GET" for call in mock.calls)
+
+
+def test_elevenlabs_tagalog_uses_the_filipino_provider_code():
+    models = [
+        {
+            "model_id": "model-a",
+            "can_do_text_to_speech": True,
+            "languages": [{"language_id": "fil"}],
+        }
+    ]
+    rows = [
+        {
+            "voice_id": "one",
+            "name": "One",
+            "category": "premade",
+            "verified_languages": [
+                {"language": "fil", "model_id": "model-a", "locale": "fil-PH"}
+            ],
+        }
+    ]
+    choices = catalog.elevenlabs_choices(rows, models, "tl", "model-a")
+    assert [c["language"] for c in choices] == ["tl"]
