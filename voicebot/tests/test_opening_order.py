@@ -112,6 +112,7 @@ def test_release_drops_the_empty_early_reply():
 
     assert callable(getattr(AgentActivity, "_cancel_preemptive_generation", None))
     agent = SpeechSanitizingAgent(instructions="test", opening_pending=True)
+    assert agent._activity is None
     agent._activity = Mock()
     agent.release_opening()
     agent._activity._cancel_preemptive_generation.assert_called_once()

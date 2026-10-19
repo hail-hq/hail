@@ -210,7 +210,10 @@ class SpeechSanitizingAgent(Agent):
         # test_opening_order.py fails if it moves.
         cancel = getattr(self._activity, "_cancel_preemptive_generation", None)
         if cancel is not None:
-            cancel()
+            try:
+                cancel()
+            except Exception:
+                logger.exception("could not drop the held early reply")
         heard, self._held_words = " ".join(self._held_words), []
         return heard or None
 
