@@ -40,9 +40,13 @@ def test_house_greeting_transcription_does_not_pin_the_call_language(layers):
     session, transcribe, google = layers
     result = amd.build_amd_models(session, language="en")
     assert result.stt is not session.stt
-    assert transcribe.call_args.kwargs["model"] == "gpt-live-transcribe"
-    assert transcribe.call_args.kwargs["detect_language"] is True
-    assert transcribe.call_args.kwargs["vad"] is session.vad
+    primary, recheck = transcribe.call_args_list
+    assert primary.kwargs["model"] == "gpt-live-transcribe"
+    assert primary.kwargs["detect_language"] is True
+    assert primary.kwargs["vad"] is session.vad
+    assert recheck.kwargs["model"] == "gpt-transcribe"
+    assert recheck.kwargs["detect_language"] is True
+    assert "language" not in recheck.kwargs
     assert google.call_args.kwargs["model"] == "gemini-3.1-flash-lite"
 
 
@@ -55,6 +59,7 @@ def test_byo_layers_keep_the_orgs_providers(layers):
     result = amd.build_amd_models(session, org_cfgs=orgs, language="fr")
     assert result.llm is session.llm
     assert result.stt is session.stt
+    assert result.recheck_stt is None
     transcribe.assert_not_called()
     google.assert_not_called()
 
@@ -96,6 +101,16 @@ def test_optional_stt_setup_failure_keeps_the_working_session_stt(layers):
     transcribe.side_effect = ValueError("speech account not configured")
     result = amd.build_amd_models(session)
     assert result.stt is session.stt
+
+
+def test_optional_recheck_setup_failure_keeps_the_working_live_stt(layers):
+    session, transcribe, _ = layers
+    primary = object()
+    transcribe.side_effect = [primary, ValueError("batch setup unavailable")]
+    result = amd.build_amd_models(session)
+    assert result.stt is primary
+    assert result.recheck_stt is None
+    assert primary in result.owned
 
 
 def test_optional_classifier_setup_failure_keeps_the_working_session_llm(layers):
@@ -238,6 +253,10 @@ async def test_real_provider_constructors_support_independent_autodetection(
         assert models.stt._opts.languages == []  # wire config must not force English
         assert models.stt._vad is session.vad
         assert models.stt is not session.stt
+        assert isinstance(models.recheck_stt, openai.STT)
+        assert models.recheck_stt is not models.stt
+        assert not models.recheck_stt.capabilities.streaming
+        assert models.recheck_stt._opts.languages == []
     finally:
         await models.aclose()
         await models.aclose()  # safe when detection and shutdown both clean up

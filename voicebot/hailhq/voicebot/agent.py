@@ -2179,7 +2179,7 @@ async def _run_call(
             language=language,
         )
         amd_result = await run_amd(
-            session, call_id, models=models, on_ready=signal_ready
+            session, call_id, models=models, on_ready=signal_ready, room=ctx.room
         )
     if not inbound:
         await write_call_event(

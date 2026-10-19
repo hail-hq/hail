@@ -21,13 +21,15 @@ from uuid import UUID
 
 from hailhq.core.call_end_reasons import CallEndReason
 from hailhq.core.config import settings
+from hailhq.voicebot.pickup import PickupAudio, recheck_greeting
 from hailhq.voicebot.pipeline import ResolvedLayer, build_stt
+from livekit import rtc
 from livekit.agents import APIConnectOptions, APIError
 from livekit.agents.llm import LLM, ChatContext, LLMStream, Tool, ToolChoice
 from livekit.agents.stt import STT
 from livekit.agents.types import DEFAULT_API_CONNECT_OPTIONS, NOT_GIVEN, NotGivenOr
 from livekit.agents.voice import AgentSession
-from livekit.agents.voice.amd import AMD, AMDPredictionEvent
+from livekit.agents.voice.amd import AMD, AMDCategory, AMDPredictionEvent
 from livekit.plugins import google, openai
 
 logger = logging.getLogger("hailhq.voicebot")
@@ -46,6 +48,10 @@ For partial ambiguous greetings, use postpone_termination for at most 2 seconds 
 hear the rest; do not guess human just because the greeting is short.
 Examples: 'laissez un message après le bip' and 'اترك رسالة بعد الصافرة' are
 machine-vm; 'drücken Sie die Eins' is machine-ivr; a live 'bonjour ?' is human.
+An unrelated recorded broadcast or song lyrics without a live conversational greeting
+is machine-unavailable. Do not invent a phone menu from lyrics. A live person addressing
+the caller takes precedence over background music or lyrics. Never infer a machine or
+a country from the greeting's language alone.
 """
 
 
@@ -144,6 +150,7 @@ class AMDModels:
     llm: LLM | None
     stt: STT | None
     owned: list = field(default_factory=list)
+    recheck_stt: STT | None = None
 
     async def aclose(self) -> None:
         # Never close the session's conversation layers.
@@ -187,6 +194,22 @@ def build_amd_models(
                 **({"vad": session.vad} if session.vad is not None else {}),
             )
             models.owned.append(models.stt)
+            if settings.openai_transcribe_model == "gpt-live-transcribe":
+                # This API family has separate live/file endpoints. Recheck
+                # the whole greeting only when the live result is inconclusive.
+                # https://developers.openai.com/api/docs/guides/transcription
+                try:
+                    models.recheck_stt = openai.STT(
+                        model=settings.openai_transcribe_model.replace(
+                            "-live-", "-", 1
+                        ),
+                        detect_language=True,
+                        api_key=settings.openai_api_key,
+                    )
+                    if models.recheck_stt is not models.stt:
+                        models.owned.append(models.recheck_stt)
+                except Exception:
+                    logger.warning("AMD full-greeting transcription setup unavailable")
         elif (org_stt := org_cfgs.get("stt")) and org_stt.provider == "deepgram":
             # Only nova-3 has a streaming "multi" mode, and it covers ten
             # languages, not the whole monolingual catalog. Never remove Arabic
@@ -319,6 +342,7 @@ async def run_amd(
     *,
     models: AMDModels | None = None,
     on_ready: Callable[[], Awaitable[None]] | None = None,
+    room: rtc.Room | None = None,
 ) -> AMDPredictionEvent | None:
     """Classify before speaking, with bounded waiting and explicit providers.
 
@@ -333,6 +357,7 @@ async def run_amd(
     the call ``agent_dispatch_failed`` instead of proceeding without AMD.
     """
     released = on_ready is None
+    pickup_audio: PickupAudio | None = None
 
     async def _release() -> None:
         nonlocal released
@@ -353,6 +378,11 @@ async def run_amd(
         if session_stt is None:
             logger.warning("call_id=%s session has no STT; skipping AMD", call_id)
             return None
+        if room is not None and models is not None and models.recheck_stt is not None:
+            pickup_audio = PickupAudio(
+                room, f"caller-{call_id}", seconds=POST_ANSWER_TIMEOUT_SECONDS
+            )
+            pickup_audio.start()
         async with AMD(
             session,
             llm=session_llm,
@@ -367,9 +397,51 @@ async def run_amd(
             },
         ) as detector:
             await _release()
-            return await asyncio.wait_for(
+            result = await asyncio.wait_for(
                 detector.execute(), timeout=DETECTION_TIMEOUT_SECONDS
             )
+            if pickup_audio is not None:
+                await pickup_audio.stop()
+            if (
+                pickup_audio is not None
+                and result.category == AMDCategory.UNCERTAIN
+                and result.reason == "detection_timeout"
+                and result.speech_duration >= 1.0
+            ):
+                assert models is not None and models.recheck_stt is not None
+                # The backup is already configured for this house classifier.
+                # Avoid spending the recheck budget on an overloaded primary.
+                recheck_llm = (
+                    session_llm.backup
+                    if isinstance(session_llm, ClassifierFailover)
+                    else session_llm
+                )
+                caller_progress = False
+
+                def on_transcript(event) -> None:
+                    nonlocal caller_progress
+                    if event.is_final and event.transcript.strip():
+                        caller_progress = True
+
+                session.on("user_input_transcribed", on_transcript)
+                try:
+                    revised = await recheck_greeting(
+                        result,
+                        pickup_audio.frame(),
+                        stt=models.recheck_stt,
+                        llm=recheck_llm,
+                        prompt=GREETING_CLASSIFICATION_PROMPT,
+                    )
+                    # New caller speech makes the buffered greeting stale.
+                    if not caller_progress:
+                        result = revised
+                finally:
+                    session.off("user_input_transcribed", on_transcript)
+                if result.category == AMDCategory.MACHINE_IVR:
+                    # Match AMD.execute() on SDK 1.8.8: the initial uncertain
+                    # result did not arm IVR navigation or its completion event.
+                    await session._start_ivr_detection(transcript=result.transcript)
+            return result
     except TimeoutError:
         logger.warning(
             "call_id=%s answering machine detection timed out after %ss; "
@@ -382,6 +454,8 @@ async def run_amd(
         logger.exception("call_id=%s answering machine detection failed", call_id)
         return None
     finally:
+        if pickup_audio is not None:
+            await pickup_audio.aclose()
         if models is not None:
             await models.aclose()
         try:
