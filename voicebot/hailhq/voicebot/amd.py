@@ -21,7 +21,7 @@ from uuid import UUID
 from hailhq.core.call_end_reasons import CallEndReason
 from hailhq.core.config import settings
 from hailhq.voicebot.pipeline import ResolvedLayer, build_stt
-from livekit.agents.llm import LLM
+from livekit.agents.llm import LLM, FallbackAdapter
 from livekit.agents.stt import STT
 from livekit.agents.voice import AgentSession
 from livekit.agents.voice.amd import AMD, AMDPredictionEvent
@@ -125,6 +125,29 @@ def build_amd_models(
             models.owned.append(models.llm)
     except Exception:
         logger.exception("AMD classifier setup failed; reusing session LLM")
+    if (
+        models.llm is not session.llm
+        and settings.openai_api_key
+        and settings.openai_model
+    ):
+        try:
+            backup = openai.LLM(
+                model=settings.openai_model, api_key=settings.openai_api_key
+            )
+            models.owned.append(backup)
+            # AMD's classifier collects the whole response before executing
+            # prediction tools. Fail over on provider errors without spending
+            # its 20-second detection budget retrying the same overloaded LLM.
+            # Use independent clients so AMD cleanup cannot close conversation
+            # providers or change a customer's explicitly selected LLM.
+            models.llm = FallbackAdapter(
+                [models.llm, backup],
+                attempt_timeout=3.0,
+                max_retry_per_llm=0,
+            )
+            models.owned.append(models.llm)
+        except Exception:
+            logger.exception("AMD fallback setup failed; keeping primary classifier")
     return models
 
 
@@ -249,7 +272,7 @@ async def run_amd(
             return await asyncio.wait_for(
                 detector.execute(), timeout=DETECTION_TIMEOUT_SECONDS
             )
-    except asyncio.TimeoutError:
+    except TimeoutError:
         logger.warning(
             "call_id=%s answering machine detection timed out after %ss; "
             "proceeding as if a human answered",

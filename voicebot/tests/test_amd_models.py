@@ -1,24 +1,38 @@
 """Multilingual AMD must not override a customer's provider selection."""
 
 from types import SimpleNamespace
-from unittest.mock import Mock
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 from hailhq.core.config import settings
 from hailhq.voicebot import amd
 from hailhq.voicebot.pipeline import ResolvedLayer
+from livekit.agents import APIStatusError
+from livekit.agents.llm import (
+    ChatChunk,
+    ChatContext,
+    ChoiceDelta,
+    FallbackAdapter,
+    FunctionToolCall,
+    LLMStream,
+    function_tool,
+)
+
+from ._fakes import FakeLLM
 
 
 @pytest.fixture
 def layers(monkeypatch):
     monkeypatch.setattr(settings, "openai_api_key", "house-openai")
     monkeypatch.setattr(settings, "openai_transcribe_model", "gpt-live-transcribe")
+    monkeypatch.setattr(settings, "openai_model", "house-chat-model")
     monkeypatch.setattr(settings, "google_api_key", "house-google")
     monkeypatch.setattr(settings, "google_amd_model", "gemini-3.1-flash-lite")
     session = SimpleNamespace(llm=object(), stt=object(), vad=object())
     transcribe = Mock(return_value=object())
-    google = Mock(return_value=object())
+    google = Mock(return_value=FakeLLM())
     monkeypatch.setattr(amd.openai, "STT", transcribe)
+    monkeypatch.setattr(amd.openai, "LLM", Mock(return_value=FakeLLM()))
     monkeypatch.setattr(amd.google, "LLM", google)
     return session, transcribe, google
 
@@ -90,6 +104,102 @@ def test_optional_classifier_setup_failure_keeps_the_working_session_llm(layers)
     google.side_effect = ValueError("classifier account not configured")
     result = amd.build_amd_models(session)
     assert result.llm is session.llm
+
+
+def test_optional_backup_setup_failure_keeps_primary_classifier(layers):
+    session, _, google = layers
+    amd.openai.LLM.side_effect = ValueError("backup not configured")
+    result = amd.build_amd_models(session)
+    assert result.llm is google.return_value
+
+
+def test_missing_backup_credentials_keep_primary_classifier(layers, monkeypatch):
+    session, _, google = layers
+    monkeypatch.setattr(settings, "openai_api_key", "")
+    result = amd.build_amd_models(session)
+    assert result.llm is google.return_value
+    amd.openai.LLM.assert_not_called()
+
+
+async def test_overloaded_amd_classifier_fails_over_with_prediction_tools(layers):
+    """A real adapter must finish classification when Gemini returns HTTP 503."""
+    session, _, google = layers
+    attempts = []
+
+    class Classifier(FakeLLM):
+        def __init__(self, overloaded):
+            super().__init__()
+            self.overloaded = overloaded
+
+        def chat(self, **kwargs):
+            attempts.append((self, kwargs))
+            return Stream(
+                self,
+                chat_ctx=kwargs["chat_ctx"],
+                tools=kwargs["tools"],
+                conn_options=kwargs["conn_options"],
+            )
+
+    class Stream(LLMStream):
+        async def _run(self):
+            if self._llm.overloaded:
+                raise APIStatusError("high demand", status_code=503)
+            self._event_ch.send_nowait(
+                ChatChunk(
+                    id="backup-prediction",
+                    delta=ChoiceDelta(
+                        role="assistant",
+                        tool_calls=[
+                            FunctionToolCall(
+                                call_id="prediction",
+                                name="save_prediction",
+                                arguments='{"category":"human"}',
+                            )
+                        ],
+                    ),
+                )
+            )
+
+    primary, backup = Classifier(True), Classifier(False)
+    google.return_value = primary
+    amd.openai.LLM.return_value = backup
+    models = amd.build_amd_models(session)
+    assert isinstance(models.llm, FallbackAdapter)
+
+    @function_tool
+    async def save_prediction(category: str) -> None:
+        """Record the greeting category."""
+
+    try:
+        async with models.llm.chat(
+            chat_ctx=ChatContext(), tools=[save_prediction], tool_choice="required"
+        ) as stream:
+            response = await stream.collect()
+        assert [tool.name for tool in response.tool_calls] == ["save_prediction"]
+        assert attempts[0][0] is primary
+        assert any(model is backup for model, _ in attempts)
+        assert all(kwargs["conn_options"].max_retry == 0 for _, kwargs in attempts)
+        assert all(kwargs["conn_options"].timeout == 3.0 for _, kwargs in attempts)
+        assert all(kwargs["tool_choice"] == "required" for _, kwargs in attempts)
+        assert all(kwargs["tools"] == [save_prediction] for _, kwargs in attempts)
+    finally:
+        await models.aclose()
+
+
+async def test_amd_fallback_cleanup_closes_owned_clients_only(layers):
+    session, transcribe, google = layers
+    session.llm = SimpleNamespace(aclose=AsyncMock())
+    transcribe.return_value = SimpleNamespace(aclose=AsyncMock())
+    primary, backup = google.return_value, amd.openai.LLM.return_value
+    primary.aclose = AsyncMock()
+    backup.aclose = AsyncMock()
+    models = amd.build_amd_models(session)
+    await models.aclose()
+    await models.aclose()
+    primary.aclose.assert_awaited_once()
+    backup.aclose.assert_awaited_once()
+    transcribe.return_value.aclose.assert_awaited_once()
+    session.llm.aclose.assert_not_called()
 
 
 async def test_only_amd_owned_models_are_closed(layers):
