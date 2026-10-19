@@ -23,6 +23,33 @@ _ENGLISH = (
 HEADERS_VERSION = "2026-03-01"
 
 
+def voice_accent(row: dict, language: str) -> dict | None:
+    """Only label an accent when the provider gives one native locale.
+
+    Country of origin and language alone do not identify an accent. A voice
+    can also have several non-native accents, which these samples do not use.
+    """
+    native = [
+        accent
+        for accent in (row.get("accents") or [])
+        if isinstance(accent, dict)
+        and accent.get("is_native") is True
+        and str(accent.get("locale", "")).replace("_", "-").split("-")[0] == language
+    ]
+    if len(native) != 1:
+        return None
+    accent = native[0]
+    locale = accent["locale"].replace("_", "-").split("-")
+    region = locale[-1] if len(locale) > 1 else ""
+    region = (
+        region.upper()
+        if len(region) == 2 and region.isascii() and region.isalpha()
+        else None
+    )
+    label = str(accent.get("accent", "")).replace("-", " ").strip().title()
+    return {"label": label, "country_code": region} if label else None
+
+
 def shortlist(rows: list[dict], language: str, default_id: str = "") -> list[dict]:
     """Deterministic variety, native-language voices only, at most three."""
     rows = [
@@ -74,6 +101,7 @@ def shortlist(rows: list[dict], language: str, default_id: str = "") -> list[dic
             "description": r.get("description", ""),
             "gender": r.get("gender", ""),
             "language": language,
+            "accent": voice_accent(r, language),
             "provider": "cartesia",
             "preview_url": (
                 r.get("preview_file_url")
