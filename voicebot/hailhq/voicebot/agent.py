@@ -652,16 +652,17 @@ async def speak_greeting(
         else None
     )
     first_message = metadata.get("first_message")
-    if first_message:
-        greeting = f"{disclosure} {first_message}" if disclosure else first_message
-        await session.say(greeting, allow_interruptions=True)
+    try:
+        if first_message:
+            greeting = f"{disclosure} {first_message}" if disclosure else first_message
+            await session.say(greeting, allow_interruptions=True)
+            return
+        if disclosure:
+            await session.say(disclosure, allow_interruptions=True)
+    finally:
+        # Release even when say fails, so the agent is never left unable to reply.
         if on_opened is not None:
             on_opened()
-        return
-    if disclosure:
-        await session.say(disclosure, allow_interruptions=True)
-    if on_opened is not None:
-        on_opened()
     # An inbound caller dialed in: with no ``first_message`` the agent waits
     # for them to speak (the documented ``first_message: null`` behavior). The
     # generated opening is written for a call Hail placed ("say why you are
