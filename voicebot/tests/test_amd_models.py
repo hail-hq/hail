@@ -178,7 +178,7 @@ async def test_overloaded_amd_classifier_fails_over_with_prediction_tools(layers
         # One try each: no background retry of the overloaded primary.
         assert [model for model, _ in attempts] == [primary, backup]
         assert all(kwargs["conn_options"].max_retry == 0 for _, kwargs in attempts)
-        assert all(kwargs["conn_options"].timeout == 3.0 for _, kwargs in attempts)
+        assert all(kwargs["conn_options"].timeout == 10.0 for _, kwargs in attempts)
         assert all(kwargs["tool_choice"] == "required" for _, kwargs in attempts)
         assert all(kwargs["tools"] == [save_prediction] for _, kwargs in attempts)
     finally:

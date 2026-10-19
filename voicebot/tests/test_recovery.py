@@ -87,6 +87,24 @@ async def test_transcription_after_recovery_rearms_the_budget(recovery):
     hangup.assert_not_awaited()
 
 
+async def test_interim_after_recovery_extends_listening_without_another_prompt(
+    recovery,
+):
+    watcher, session, now, hangup, _ = recovery
+    now[0] = 20
+    await watcher.check()
+    now[0] = 30
+    session.emit("user_input_transcribed", transcript="partial speech", is_final=False)
+    now[0] = 49
+    await watcher.check()
+    hangup.assert_not_awaited()
+    session.generate_reply.assert_called_once()
+    now[0] = 50
+    await watcher.check()
+    hangup.assert_awaited_once()
+    session.generate_reply.assert_called_once()
+
+
 @pytest.mark.parametrize("state", ["speaking", "thinking"])
 async def test_does_not_interrupt_agent_speech_or_tools(recovery, state):
     watcher, session, now, hangup, _ = recovery

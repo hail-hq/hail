@@ -44,7 +44,10 @@ class ConversationRecovery:
         def on_transcript(event) -> None:
             if event.transcript.strip():
                 self._last_progress = clock()
-                self._attempted = False
+                # Interim text protects an ongoing utterance, but may never
+                # become a usable turn. Only final speech earns another prompt.
+                if event.is_final:
+                    self._attempted = False
 
         @session.on("agent_state_changed")
         def on_agent_state(event) -> None:

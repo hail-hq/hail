@@ -49,9 +49,12 @@ machine-vm; 'drücken Sie die Eins' is machine-ivr; a live 'bonjour ?' is human.
 """
 
 
-# One try per classifier, no retries. A slow but healthy Gemini answer takes up
-# to about 3s; POST_ANSWER_TIMEOUT_SECONDS still caps the whole detection.
+# One try per classifier, no retries. Limit elapsed time locally: the Google
+# plugin forwards conn_options.timeout to its provider, which rejects <10s.
+# https://docs.livekit.io/reference/python/livekit/plugins/google/index.html
+# POST_ANSWER_TIMEOUT_SECONDS still caps the whole detection.
 CLASSIFIER_ATTEMPT_TIMEOUT_SECONDS = 3.0
+CLASSIFIER_REQUEST_TIMEOUT_SECONDS = 10.0
 
 
 class ClassifierFailover(LLM):
@@ -105,17 +108,18 @@ class _ClassifierFailoverStream(LLMStream):
         for model in (self._failover.primary, self._failover.backup):
             sent = False
             try:
-                async with model.chat(
-                    chat_ctx=self._chat_ctx,
-                    tools=self._tools,
-                    tool_choice=self._tool_choice,
-                    conn_options=APIConnectOptions(
-                        max_retry=0, timeout=CLASSIFIER_ATTEMPT_TIMEOUT_SECONDS
-                    ),
-                ) as stream:
-                    async for chunk in stream:
-                        sent = True
-                        self._event_ch.send_nowait(chunk)
+                async with asyncio.timeout(CLASSIFIER_ATTEMPT_TIMEOUT_SECONDS):
+                    async with model.chat(
+                        chat_ctx=self._chat_ctx,
+                        tools=self._tools,
+                        tool_choice=self._tool_choice,
+                        conn_options=APIConnectOptions(
+                            max_retry=0, timeout=CLASSIFIER_REQUEST_TIMEOUT_SECONDS
+                        ),
+                    ) as stream:
+                        async for chunk in stream:
+                            sent = True
+                            self._event_ch.send_nowait(chunk)
                 return
             except (APIError, TimeoutError) as e:
                 if model is self._failover.backup:
