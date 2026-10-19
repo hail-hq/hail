@@ -24,7 +24,8 @@ from ._fakes import FakeLLM
 def layers(monkeypatch):
     monkeypatch.setattr(settings, "openai_api_key", "house-openai")
     monkeypatch.setattr(settings, "openai_transcribe_model", "gpt-live-transcribe")
-    monkeypatch.setattr(settings, "openai_file_transcribe_model", "gpt-transcribe")
+    monkeypatch.setattr(settings, "deepgram_api_key", "house-deepgram")
+    monkeypatch.setattr(settings, "deepgram_model", "nova-3")
     monkeypatch.setattr(settings, "openai_model", "house-chat-model")
     monkeypatch.setattr(settings, "google_api_key", "house-google")
     monkeypatch.setattr(settings, "google_amd_model", "gemini-3.1-flash-lite")
@@ -32,6 +33,7 @@ def layers(monkeypatch):
     transcribe = Mock(return_value=object())
     google = Mock(return_value=FakeLLM())
     monkeypatch.setattr(amd.openai, "STT", transcribe)
+    monkeypatch.setattr(amd.deepgram, "STT", Mock(return_value=object()))
     monkeypatch.setattr(amd.openai, "LLM", Mock(return_value=FakeLLM()))
     monkeypatch.setattr(amd.google, "LLM", google)
     return session, transcribe, google
@@ -41,11 +43,12 @@ def test_house_greeting_transcription_does_not_pin_the_call_language(layers):
     session, transcribe, google = layers
     result = amd.build_amd_models(session, language="en")
     assert result.stt is not session.stt
-    primary, recheck = transcribe.call_args_list
+    primary = transcribe.call_args
     assert primary.kwargs["model"] == "gpt-live-transcribe"
     assert primary.kwargs["detect_language"] is True
     assert primary.kwargs["vad"] is session.vad
-    assert recheck.kwargs["model"] == "gpt-transcribe"
+    recheck = amd.deepgram.STT.call_args
+    assert recheck.kwargs["model"] == "nova-3"
     assert recheck.kwargs["detect_language"] is True
     assert "language" not in recheck.kwargs
     assert google.call_args.kwargs["model"] == "gemini-3.1-flash-lite"
@@ -107,7 +110,8 @@ def test_optional_stt_setup_failure_keeps_the_working_session_stt(layers):
 def test_optional_recheck_setup_failure_keeps_the_working_live_stt(layers):
     session, transcribe, _ = layers
     primary = object()
-    transcribe.side_effect = [primary, ValueError("batch setup unavailable")]
+    transcribe.return_value = primary
+    amd.deepgram.STT.side_effect = ValueError("batch setup unavailable")
     result = amd.build_amd_models(session)
     assert result.stt is primary
     assert result.recheck_stt is None
@@ -240,7 +244,8 @@ async def test_real_provider_constructors_support_independent_autodetection(
     monkeypatch.setenv("GOOGLE_GENAI_USE_VERTEXAI", "false")
     monkeypatch.setattr(settings, "openai_api_key", "sk-test-placeholder")
     monkeypatch.setattr(settings, "openai_transcribe_model", "gpt-live-transcribe")
-    monkeypatch.setattr(settings, "openai_file_transcribe_model", "gpt-transcribe")
+    monkeypatch.setattr(settings, "deepgram_api_key", "house-deepgram")
+    monkeypatch.setattr(settings, "deepgram_model", "nova-3")
     monkeypatch.setattr(settings, "google_api_key", "google-test-placeholder")
     monkeypatch.setattr(settings, "google_amd_model", "gemini-3.1-flash-lite")
     session = AgentSession(
@@ -255,10 +260,9 @@ async def test_real_provider_constructors_support_independent_autodetection(
         assert models.stt._opts.languages == []  # wire config must not force English
         assert models.stt._vad is session.vad
         assert models.stt is not session.stt
-        assert isinstance(models.recheck_stt, openai.STT)
-        assert models.recheck_stt is not models.stt
-        assert not models.recheck_stt.capabilities.streaming
-        assert models.recheck_stt._opts.languages == []
+        assert isinstance(models.recheck_stt, deepgram.STT)
+        assert models.recheck_stt is not session.stt
+        assert models.recheck_stt._opts.detect_language is True
     finally:
         await models.aclose()
         await models.aclose()  # safe when detection and shutdown both clean up

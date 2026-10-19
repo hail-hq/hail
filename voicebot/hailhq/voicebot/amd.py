@@ -30,7 +30,7 @@ from livekit.agents.stt import STT
 from livekit.agents.types import DEFAULT_API_CONNECT_OPTIONS, NOT_GIVEN, NotGivenOr
 from livekit.agents.voice import AgentSession
 from livekit.agents.voice.amd import AMD, AMDCategory, AMDPredictionEvent
-from livekit.plugins import google, openai
+from livekit.plugins import deepgram, google, openai
 
 logger = logging.getLogger("hailhq.voicebot")
 
@@ -49,7 +49,7 @@ hear the rest; do not guess human just because the greeting is short.
 Examples: 'laissez un message après le bip' and 'اترك رسالة بعد الصافرة' are
 machine-vm; 'drücken Sie die Eins' is machine-ivr; a live 'bonjour ?' is human.
 An unrelated recorded broadcast or song lyrics without a live conversational greeting
-is uncertain. Do not invent a phone menu from lyrics. A live person addressing
+is machine-unavailable. Do not invent a phone menu from lyrics. A live person addressing
 the caller takes precedence over background music or lyrics. Never infer a machine or
 a country from the greeting's language alone.
 """
@@ -194,18 +194,18 @@ def build_amd_models(
                 **({"vad": session.vad} if session.vad is not None else {}),
             )
             models.owned.append(models.stt)
-            if settings.openai_file_transcribe_model:
-                # Live models have no file endpoint. Recheck the whole
-                # greeting only when the live result is inconclusive.
-                # https://developers.openai.com/api/docs/guides/transcription
+            if settings.deepgram_api_key and settings.deepgram_model:
+                # The live model cannot take a finished recording. Recheck
+                # the whole greeting only when the live result is inconclusive.
+                # Deepgram detects the language only in one-shot requests.
+                # https://developers.deepgram.com/docs/language-detection
                 try:
-                    models.recheck_stt = openai.STT(
-                        model=settings.openai_file_transcribe_model,
+                    models.recheck_stt = deepgram.STT(
+                        model=settings.deepgram_model,
                         detect_language=True,
-                        api_key=settings.openai_api_key,
+                        api_key=settings.deepgram_api_key,
                     )
-                    if models.recheck_stt is not models.stt:
-                        models.owned.append(models.recheck_stt)
+                    models.owned.append(models.recheck_stt)
                 except Exception:
                     logger.warning("AMD full-greeting transcription setup unavailable")
         elif (org_stt := org_cfgs.get("stt")) and org_stt.provider == "deepgram":
