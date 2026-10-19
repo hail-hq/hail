@@ -18,10 +18,17 @@ name: hail
 #   - `restart: unless-stopped` so the daemon resurrects services after
 #     reboots or crashes.
 
+x-logging: &bounded-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
 services:
   caddy:
     image: caddy:2-alpine
     restart: unless-stopped
+    logging: *bounded-logging
     ports:
       - "80:80"
       - "443:443"
@@ -52,6 +59,7 @@ services:
     image: ghcr.io/hail-hq/hail-api:latest
     build: !reset null
     restart: unless-stopped
+    logging: *bounded-logging
     ports: !override
       - "127.0.0.1:8080:8080"
 
@@ -59,11 +67,13 @@ services:
     image: ghcr.io/hail-hq/hail-voicebot:latest
     build: !reset null
     restart: unless-stopped
+    logging: *bounded-logging
 
   mcp:
     image: ghcr.io/hail-hq/hail-mcp:latest
     build: !reset null
     restart: unless-stopped
+    logging: *bounded-logging
     ports: !override
       - "127.0.0.1:8081:8081"
 

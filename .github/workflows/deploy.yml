@@ -109,6 +109,21 @@ jobs:
             # Containers read the release SHA from the VM .env (env_file).
             sed -i "s|^LOGFIRE_SERVICE_VERSION=.*|LOGFIRE_SERVICE_VERSION=$DEPLOY_GITHUB_SHA|" .env
             COMPOSE="docker compose -f docker-compose.yml -f docker-compose.prod.yml"
+            # Tagged builds accumulated faster than the old 14-day retention
+            # could reclaim them and filled the VM during the 2026-10-19 deploy.
+            # Reclaim BEFORE pulling; Docker preserves every container's image.
+            prune_hail_images() {
+              docker image prune -af --filter "until=48h" \
+                --filter "label=org.opencontainers.image.source=https://github.com/hail-hq/hail"
+            }
+            prune_hail_images
+            docker_root="$(docker info --format '{{.DockerRootDir}}')"
+            free_kib="$(df -Pk "$docker_root" | awk 'NR == 2 {print $4}')"
+            if [ "$free_kib" -lt 20971520 ]; then
+              echo "::error::Docker filesystem needs at least 20 GiB free before pulling a release"
+              df -h "$docker_root"
+              exit 1
+            fi
             $COMPOSE pull
 
             # Migration safety. See docs/public/self-host/operations.md → "Migration discipline".
@@ -158,21 +173,13 @@ jobs:
 
             $COMPOSE ps
 
-            # Reclaim disk. Every deploy pulls both `:latest` and
-            # `sha-<commit>` for three services, and the `sha-` tags are
-            # never removed — tagged images, so a plain dangling-only prune
-            # does not touch them. They accumulated until the VM filled and
-            # a deploy died mid-pull with "no space left on device"
-            # (2026-08-14). `-a` with `until` keeps anything in use by a
-            # running container plus the last two weeks of images (enough to
-            # roll back without a GHCR round-trip) and drops the tail.
-            # Never fail the deploy on cleanup: the rollout already
-            # succeeded by this point.
+            # Reclaim images released by this rollout too. Keep recent builds
+            # for local rollback; older SHA tags remain available in GHCR.
             echo "=== disk before prune ==="
-            df -h /var/lib/docker || df -h /var/lib || true
-            docker image prune -af --filter "until=336h" || true
+            df -h "$docker_root" || true
+            prune_hail_images || true
             echo "=== disk after prune ==="
-            df -h /var/lib/docker || df -h /var/lib || true
+            df -h "$docker_root" || true
 
             # Restore main so operators SSHing the VM see a normal branch
             # state. Deploy work above ran against the detached SHA; this
