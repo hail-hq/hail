@@ -8,23 +8,26 @@ three per supported language). No customer text or key reaches the browser.
 from __future__ import annotations
 
 import asyncio
+import io
 import time
+import wave
 from collections import OrderedDict
+from typing import Literal
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Response
 from hailhq.api.routes.internal.auth import verify_internal_request
 from hailhq.core.config import settings
 from hailhq.core.languages import SUPPORTED_LANGUAGES, Language
-from hailhq.core.voice_catalog import HEADERS_VERSION, recommended_voices
-from pydantic import BaseModel
+from hailhq.core.voice_catalog import HEADERS_VERSION, voice_catalogue
+from pydantic import BaseModel, Field
 
 router = APIRouter(
     prefix="/internal/voices",
     include_in_schema=False,
     dependencies=[Depends(verify_internal_request)],
 )
-_samples: OrderedDict[tuple[str, str], tuple[float, bytes]] = OrderedDict()
+_samples: OrderedDict[tuple[str, str, str, str], tuple[float, bytes]] = OrderedDict()
 _sample_lock = asyncio.Lock()
 _HELLO = {
     "ar": "مرحباً، كيف يمكنني مساعدتك اليوم؟",
@@ -72,10 +75,7 @@ _HELLO = {
 @router.get("")
 async def list_voices(language: Language = "en") -> dict:
     try:
-        return {
-            "voices": await recommended_voices(language),
-            "default_voice_id": settings.cartesia_voice_id,
-        }
+        return await voice_catalogue(language)
     except (httpx.HTTPError, ValueError) as exc:
         raise HTTPException(
             503, "Voice choices could not load. Try again or keep your current voice."
@@ -84,17 +84,26 @@ async def list_voices(language: Language = "en") -> dict:
 
 class PreviewIn(BaseModel):
     language: Language
-    voice_id: str
+    provider: Literal["cartesia", "elevenlabs"]
+    voice_id: str = Field(min_length=1, max_length=128, pattern=r"^[A-Za-z0-9_-]+$")
 
 
 @router.post("/preview")
 async def preview_voice(body: PreviewIn) -> Response:
     try:
-        voices = await recommended_voices(body.language)
-        if body.voice_id not in {v["id"] for v in voices}:
+        catalogue = await voice_catalogue(body.language)
+        choice = next(
+            (
+                v
+                for v in catalogue["voices"]
+                if v["id"] == body.voice_id and v["provider"] == body.provider
+            ),
+            None,
+        )
+        if choice is None:
             raise HTTPException(422, "Choose one of the suggested voices.")
         async with _sample_lock:
-            audio = await _preview_audio(body)
+            audio = await _preview_audio(body, choice["model"])
         return Response(
             audio,
             media_type="audio/wav",
@@ -104,33 +113,53 @@ async def preview_voice(body: PreviewIn) -> Response:
         raise HTTPException(503, "This sample could not play. Try again.") from exc
 
 
-async def _preview_audio(body: PreviewIn) -> bytes:
-    cache_key = (body.language, body.voice_id)
+async def _preview_audio(body: PreviewIn, model: str) -> bytes:
+    cache_key = (body.provider, model, body.language, body.voice_id)
     cached = _samples.get(cache_key)
     if cached and time.monotonic() - cached[0] < 3600:
         audio = cached[1]
     else:
         async with httpx.AsyncClient(timeout=20) as client:
-            response = await client.post(
-                "https://api.cartesia.ai/tts/bytes",
-                headers={
-                    "Authorization": f"Bearer {settings.cartesia_api_key}",
-                    "Cartesia-Version": HEADERS_VERSION,
-                },
-                json={
-                    "model_id": settings.cartesia_model,
-                    "transcript": _HELLO[body.language],
-                    "language": body.language,
-                    "voice": body.voice_id,
-                    "output_format": {
-                        "container": "wav",
-                        "encoding": "pcm_s16le",
-                        "sample_rate": 24000,
+            if body.provider == "cartesia":
+                response = await client.post(
+                    "https://api.cartesia.ai/tts/bytes",
+                    headers={
+                        "Authorization": f"Bearer {settings.cartesia_api_key}",
+                        "Cartesia-Version": HEADERS_VERSION,
                     },
-                },
-            )
-            response.raise_for_status()
-            audio = response.content
+                    json={
+                        "model_id": model,
+                        "transcript": _HELLO[body.language],
+                        "language": body.language,
+                        "voice": body.voice_id,
+                        "output_format": {
+                            "container": "wav",
+                            "encoding": "pcm_s16le",
+                            "sample_rate": 24000,
+                        },
+                    },
+                )
+                response.raise_for_status()
+                audio = response.content
+            else:
+                response = await client.post(
+                    f"https://api.elevenlabs.io/v1/text-to-speech/{body.voice_id}",
+                    headers={"xi-api-key": settings.eleven_api_key},
+                    params={"output_format": "pcm_24000"},
+                    json={
+                        "model_id": model,
+                        "text": _HELLO[body.language],
+                        "language_code": body.language,
+                    },
+                )
+                response.raise_for_status()
+                output = io.BytesIO()
+                with wave.open(output, "wb") as wav:
+                    wav.setnchannels(1)
+                    wav.setsampwidth(2)
+                    wav.setframerate(24000)
+                    wav.writeframes(response.content)
+                audio = output.getvalue()
         _samples[cache_key] = (time.monotonic(), audio)
         if len(_samples) > 3 * len(SUPPORTED_LANGUAGES):
             _samples.popitem(last=False)

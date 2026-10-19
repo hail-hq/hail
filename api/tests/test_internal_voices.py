@@ -16,7 +16,21 @@ pytestmark = pytest.mark.usefixtures("internal_secret_set")
 def voice_app(monkeypatch):
     voices._samples.clear()
     monkeypatch.setattr(
-        voices, "recommended_voices", AsyncMock(return_value=[{"id": "known"}])
+        voices,
+        "voice_catalogue",
+        AsyncMock(
+            return_value={
+                "voices": [
+                    {"id": "known", "provider": "cartesia", "model": "sonic-3.5"}
+                ],
+                "languages": [
+                    {"code": "en", "name": "English"},
+                    {"code": "fr", "name": "French"},
+                ],
+                "default_voice": None,
+                "partial": False,
+            }
+        ),
     )
     app = FastAPI()
     app.include_router(voices.router)
@@ -35,7 +49,8 @@ async def test_catalogue_requires_signature_and_valid_language(voice_app):
             "/internal/voices?language=fr", headers=_signed(b"")
         )
         assert response.status_code == 200
-        voices.recommended_voices.assert_awaited_once_with("fr")
+        voices.voice_catalogue.assert_awaited_once_with("fr")
+        assert response.json()["languages"][1]["code"] == "fr"
 
 
 async def test_preview_is_fixed_text_cached_and_rejects_arbitrary_voices(
@@ -53,7 +68,7 @@ async def test_preview_is_fixed_text_cached_and_rejects_arbitrary_voices(
                 return_value=httpx.Response(200, content=b"RIFF-sample")
             )
             for _ in range(2):
-                body = b'{"voice_id":"known","language":"fr"}'
+                body = b'{"voice_id":"known","provider":"cartesia","language":"fr"}'
                 response = await client.post(
                     "/internal/voices/preview", content=body, headers=_signed(body)
                 )
@@ -63,7 +78,7 @@ async def test_preview_is_fixed_text_cached_and_rejects_arbitrary_voices(
             payload = json.loads(synthesis.calls[0].request.content)
             assert payload["language"] == "fr"
             assert payload["transcript"] == voices._HELLO["fr"]
-            body = b'{"voice_id":"arbitrary","language":"fr"}'
+            body = b'{"voice_id":"arbitrary","provider":"cartesia","language":"fr"}'
             response = await client.post(
                 "/internal/voices/preview", content=body, headers=_signed(body)
             )
@@ -79,8 +94,65 @@ async def test_preview_provider_failure_returns_retryable_error(voice_app):
             respx.post("https://api.cartesia.ai/tts/bytes").mock(
                 return_value=httpx.Response(503)
             )
-            body = b'{"voice_id":"known","language":"en"}'
+            body = b'{"voice_id":"known","provider":"cartesia","language":"en"}'
             response = await client.post(
                 "/internal/voices/preview", content=body, headers=_signed(body)
             )
             assert response.status_code == 503
+
+
+async def test_provider_identity_prevents_cross_provider_preview(voice_app):
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=voice_app), base_url="http://test"
+    ) as client:
+        body = b'{"voice_id":"known","provider":"elevenlabs","language":"en"}'
+        response = await client.post(
+            "/internal/voices/preview", content=body, headers=_signed(body)
+        )
+        assert response.status_code == 422
+
+
+async def test_elevenlabs_preview_uses_verified_model_and_wav_envelope(voice_app):
+    import io
+    import json
+    import wave
+
+    voices.voice_catalogue.return_value["voices"] = [
+        {"id": "known", "provider": "elevenlabs", "model": "verified-model"}
+    ]
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=voice_app), base_url="http://test"
+    ) as client:
+        with respx.mock:
+            route = respx.post(
+                "https://api.elevenlabs.io/v1/text-to-speech/known"
+            ).mock(return_value=httpx.Response(200, content=b"\x01\x00" * 24))
+            body = b'{"voice_id":"known","provider":"elevenlabs","language":"en"}'
+            response = await client.post(
+                "/internal/voices/preview", content=body, headers=_signed(body)
+            )
+            assert response.status_code == 200
+            assert response.headers["content-type"] == "audio/wav"
+            with wave.open(io.BytesIO(response.content)) as audio:
+                assert audio.getframerate() == 24000
+                assert audio.getnframes() == 24
+            assert (
+                json.loads(route.calls[0].request.content)["model_id"]
+                == "verified-model"
+            )
+            voices.voice_catalogue.return_value["voices"][0]["model"] = "updated-model"
+            await client.post(
+                "/internal/voices/preview", content=body, headers=_signed(body)
+            )
+            assert route.call_count == 2
+
+
+async def test_preview_rejects_path_like_ids(voice_app):
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=voice_app), base_url="http://test"
+    ) as client:
+        body = b'{"voice_id":"../other","provider":"elevenlabs","language":"en"}'
+        response = await client.post(
+            "/internal/voices/preview", content=body, headers=_signed(body)
+        )
+        assert response.status_code == 422

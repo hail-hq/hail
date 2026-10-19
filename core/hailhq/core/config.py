@@ -1,12 +1,30 @@
+from typing import Literal
 from uuid import UUID
 
-from pydantic import Field, computed_field, field_validator, model_validator
+from hailhq.core.languages import Language
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    computed_field,
+    field_validator,
+    model_validator,
+)
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # Nil UUID: sentinel organization for every shared-key (HAIL_API_KEY) request.
 # No row in ``organizations``; self-hosted deployments consent to recording
 # through the deploy flag alone.
 SELF_HOSTED_ORG_ID = UUID(int=0)
+
+
+class VoicePreference(BaseModel):
+    """Optional editorial preference, still checked against live capabilities."""
+
+    model_config = ConfigDict(extra="forbid")
+    provider: Literal["cartesia", "elevenlabs"]
+    voice_id: str = Field(min_length=1, max_length=128, pattern=r"^[A-Za-z0-9_-]+$")
+    reason: str = Field(min_length=1, max_length=500)
 
 
 class Settings(BaseSettings):
@@ -58,6 +76,15 @@ class Settings(BaseSettings):
     cartesia_model: str = ""
     elevenlabs_voice_id: str = ""
     elevenlabs_model: str = ""
+
+    # JSON environment values. Empty preferences use metadata-based selection.
+    # A preference can never override language/model/access eligibility.
+    voice_shortlist_preferences: dict[Language, list[VoicePreference]] = Field(
+        default_factory=dict
+    )
+    # For Cartesia models absent from the documented capability snapshot.
+    # ElevenLabs model capabilities are discovered from GET /v1/models.
+    cartesia_model_languages: dict[str, list[Language]] = Field(default_factory=dict)
 
     # Operator contact address, for anywhere a third party needs a contact for
     # Hail (carrier verification notices, support links). Always Hail's own,

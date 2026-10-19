@@ -166,6 +166,18 @@ SUPPORTED_LANGUAGES: dict[str, LanguageCaps] = {
     for code in _NAMES
 }
 
+# Cartesia does not expose model language capabilities through its catalogue.
+# Conservative snapshots: only languages also supported by Hail's STT pipeline.
+# Reviewed 2026-10-19 against the official Sonic 3.5 / Sonic 3.6 model pages:
+# https://docs.cartesia.ai/build-with-cartesia/tts-models/sonic-3-5
+# https://docs.cartesia.ai/build-with-cartesia/tts-models/latest
+# Unknown models require explicit operator capability configuration. This does
+# not change which models an advanced BYO configuration can use.
+CARTESIA_MODEL_LANGUAGES: dict[str, frozenset[str]] = dict.fromkeys(
+    ("sonic-3.5", "sonic-3.5-2026-05-04", "sonic-3.6", "sonic-3.6-2026-08-27"),
+    frozenset(SUPPORTED_LANGUAGES),
+)
+
 
 def default_stt_for(language: str | None) -> str:
     """Auto-route: Deepgram wherever the semantic turn detector works

@@ -438,3 +438,52 @@ async def test_validate_inflight_speechmatics_operating_point(
         "api_key": "sk-sm-inflight",
         "params": {"model": "linden-1"},
     }
+
+
+@pytest.mark.usefixtures("internal_secret_set")
+async def test_picker_checks_retained_voice_with_stored_key_before_write(
+    client, provider_key_set, monkeypatch
+):
+    from unittest.mock import AsyncMock
+
+    monkeypatch.setattr(settings, "cartesia_model", "sonic-3.5")
+    original = b'{"provider":"cartesia","api_key":"customer-secret","params":{"voice_id":"custom","model":"custom-model","language":"en"},"fallback_enabled":false}'
+    response = await client.put(
+        f"{BASE}/tts", content=original, headers=_signed(original)
+    )
+    assert response.status_code == 200
+    check = AsyncMock(side_effect=ValueError("This voice does not support French."))
+    monkeypatch.setattr(
+        "hailhq.api.routes.internal.provider_config.validate_voice_language", check
+    )
+    changed = b'{"provider":"cartesia","params":{"voice_id":"custom","model":"custom-model","language":"fr"},"fallback_enabled":false,"verify_voice_language":true}'
+    response = await client.put(
+        f"{BASE}/tts", content=changed, headers=_signed(changed)
+    )
+    assert response.status_code == 422
+    check.assert_awaited_once_with(
+        "cartesia", "custom", "custom-model", "customer-secret", "fr"
+    )
+    saved = (await client.get(BASE, headers=_signed(b""))).json()["providers"][0]
+    assert saved["params"]["language"] == "en"
+    assert saved["key_last4"] == "cret"
+    assert "customer-secret" not in str(saved)
+
+
+@pytest.mark.usefixtures("internal_secret_set")
+async def test_picker_validates_house_voice_and_persists_its_model(client, monkeypatch):
+    from unittest.mock import AsyncMock
+
+    monkeypatch.setattr(settings, "eleven_api_key", "house-key")
+    check = AsyncMock()
+    monkeypatch.setattr(
+        "hailhq.api.routes.internal.provider_config.validate_voice_language", check
+    )
+    body = b'{"provider":"elevenlabs","params":{"voice_id":"verified","model":"validated-model","language":"fr"},"fallback_enabled":true,"verify_voice_language":true}'
+    response = await client.put(f"{BASE}/tts", content=body, headers=_signed(body))
+    assert response.status_code == 200, response.text
+    check.assert_awaited_once_with(
+        "elevenlabs", "verified", "validated-model", "house-key", "fr"
+    )
+    assert response.json()["params"]["model"] == "validated-model"
+    assert response.json()["key_last4"] is None

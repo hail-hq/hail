@@ -14,9 +14,11 @@ from datetime import datetime, timezone
 from typing import Annotated
 from uuid import UUID
 
+import httpx
 from cryptography.fernet import InvalidToken
 from fastapi import APIRouter, Depends, HTTPException
 from hailhq.api.routes.internal.auth import verify_internal_request
+from hailhq.core.config import settings
 from hailhq.core.db import get_session
 from hailhq.core.languages import SUPPORTED_LANGUAGES
 from hailhq.core.models import OrgProviderConfig
@@ -29,6 +31,7 @@ from hailhq.core.provider_config import (
 )
 from hailhq.core.provider_validation import validate_provider_key
 from hailhq.core.secret_cipher import SecretKeyMissing
+from hailhq.core.voice_catalog import validate_voice_language
 from pydantic import BaseModel, ConfigDict, ValidationError
 from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
@@ -50,6 +53,7 @@ class ProviderConfigIn(BaseModel):
     api_key: str | None = None
     params: dict = {}
     fallback_enabled: bool = False
+    verify_voice_language: bool = False
 
 
 class ValidateIn(BaseModel):
@@ -205,6 +209,44 @@ async def upsert_provider_config(
             )
 
     row = await _get_row(db, organization_id, layer, body.provider)
+    if layer == "tts" and body.verify_voice_language and params.get("language"):
+        provider = body.provider
+        key = body.api_key
+        if key is None and row is not None and row.encrypted_api_key is not None:
+            try:
+                key = provider_cipher().decrypt(row.encrypted_api_key)
+            except (InvalidToken, SecretKeyMissing) as exc:
+                raise HTTPException(
+                    503,
+                    "Your stored voice key could not be read. Update it in Advanced.",
+                ) from exc
+        if key is None:
+            key = (
+                settings.cartesia_api_key
+                if provider == "cartesia"
+                else settings.eleven_api_key
+            )
+        model = params.get("model") or (
+            settings.cartesia_model
+            if provider == "cartesia"
+            else settings.elevenlabs_model
+        )
+        voice_id = params.get("voice_id") or (
+            settings.cartesia_voice_id
+            if provider == "cartesia"
+            else settings.elevenlabs_voice_id
+        )
+        try:
+            await validate_voice_language(
+                provider, voice_id, model, key, params["language"]
+            )
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
+        except httpx.HTTPError as exc:
+            raise HTTPException(
+                503,
+                "Voice support could not be checked. Try again. Your settings were not changed.",
+            ) from exc
     if row is None:
         row = OrgProviderConfig(
             organization_id=organization_id, layer=layer, provider=body.provider
