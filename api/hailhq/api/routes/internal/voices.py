@@ -7,8 +7,8 @@ three per supported language). No customer text or key reaches the browser.
 
 from __future__ import annotations
 
-import time
 import asyncio
+import time
 from collections import OrderedDict
 
 import httpx

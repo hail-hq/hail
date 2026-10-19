@@ -75,9 +75,11 @@ def shortlist(rows: list[dict], language: str, default_id: str = "") -> list[dic
             "gender": r.get("gender", ""),
             "language": language,
             "provider": "cartesia",
-            "preview_url": r.get("preview_file_url")
-            if str(r.get("preview_file_url", "")).startswith("https://")
-            else None,
+            "preview_url": (
+                r.get("preview_file_url")
+                if str(r.get("preview_file_url", "")).startswith("https://")
+                else None
+            ),
         }
         for r in selected
     ]

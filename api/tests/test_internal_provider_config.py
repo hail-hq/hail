@@ -74,7 +74,9 @@ async def test_put_without_key_keeps_stored_key(
 
 @pytest.mark.usefixtures("internal_secret_set")
 async def test_language_choice_rejects_incompatible_voice_without_fallback(client):
-    body = b'{"provider":"elevenlabs","params":{"language":"th"},"fallback_enabled":false}'
+    body = (
+        b'{"provider":"elevenlabs","params":{"language":"th"},"fallback_enabled":false}'
+    )
     response = await client.put(f"{BASE}/tts", content=body, headers=_signed(body))
     assert response.status_code == 422
     response = await client.get(BASE, headers=_signed(b""))
