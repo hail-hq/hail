@@ -90,7 +90,7 @@ from hailhq.voicebot.recovery import ConversationRecovery
 from hailhq.voicebot.telemetry import connect_livekit_tracing
 from hailhq.voicebot.tools import build_agent_tools
 from livekit import rtc
-from livekit.agents import Agent, JobContext, JobProcess
+from livekit.agents import Agent, JobContext, JobProcess, StopResponse
 from livekit.agents.llm import LLMError
 from livekit.agents.voice import AgentSession
 from livekit.api import CreateSIPParticipantRequest, SipCallError
@@ -195,6 +195,26 @@ class SpeechSanitizingAgent(Agent):
     say() lines (disclosure, soft cap) open with letters. Uses the
     documented ``Agent.default.tts_node`` delegation pattern.
     """
+
+    def __init__(self, *, opening_pending: bool = False, **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        self._opening_pending = opening_pending
+
+    def release_opening(self) -> None:
+        self._opening_pending = False
+
+    async def on_user_turn_completed(self, turn_ctx: Any, new_message: Any) -> None:
+        if self._opening_pending:
+            # AMD pauses playback, but still allows automatic replies to queue.
+            # The explicit introduction owns the first turn, including when a
+            # recipient says hello while classification is still pending.
+            raise StopResponse()
+
+    async def llm_node(self, chat_ctx: Any, tools: Any, model_settings: Any) -> Any:
+        if self._opening_pending:
+            # Preemptive generation can run before on_user_turn_completed.
+            return None
+        return Agent.default.llm_node(self, chat_ctx, tools, model_settings)
 
     async def tts_node(self, text: Any, model_settings: Any) -> Any:
         return Agent.default.tts_node(self, _sanitize_tts_stream(text), model_settings)
@@ -557,7 +577,7 @@ async def build_tools_safely(
 # nothing spoken beyond the disclosure and no LLM turn until the callee
 # spoke first. The AMD pickup transcript, when there is one, lets the model
 # react to how the call was answered ("Joe's Pizza, good evening") instead
-# of talking past it; after 6s of pickup silence (AMD's no-speech
+# of talking past it; after pickup silence (AMD's no-speech
 # threshold) the transcript is empty and the model introduces itself cold.
 _OPENING_BASE = (
     "The call was just answered. Open the conversation: briefly greet the "
@@ -566,15 +586,24 @@ _OPENING_BASE = (
 )
 
 
-def opening_instructions(pickup_transcript: str | None) -> str:
+def opening_instructions(
+    pickup_transcript: str | None, *, already_introduced: bool = False
+) -> str:
     """The prompt for the generated opening turn (no caller ``first_message``)."""
+    base = (
+        "The spoken introduction has already identified you and who you represent. "
+        "Continue directly with the reason for calling, following your instructions, "
+        "then give them room to respond. Do not greet or introduce yourself again."
+        if already_introduced
+        else _OPENING_BASE
+    )
     heard = (pickup_transcript or "").strip()
     if heard:
         return (
-            f'{_OPENING_BASE} They answered the phone saying: "{heard}", '
+            f'{base} They answered the phone saying: "{heard}", '
             "respond to that naturally."
         )
-    return f"{_OPENING_BASE} They have not said anything yet."
+    return f"{base} They have not said anything yet."
 
 
 async def speak_greeting(
@@ -583,6 +612,7 @@ async def speak_greeting(
     pickup_transcript: str | None = None,
     *,
     generate_opening: bool = True,
+    on_opened: Callable[[], None] | None = None,
 ) -> None:
     """Open the call: disclosure (unless opted out), then the first message.
 
@@ -625,15 +655,23 @@ async def speak_greeting(
     if first_message:
         greeting = f"{disclosure} {first_message}" if disclosure else first_message
         await session.say(greeting, allow_interruptions=True)
+        if on_opened is not None:
+            on_opened()
         return
     if disclosure:
         await session.say(disclosure, allow_interruptions=True)
+    if on_opened is not None:
+        on_opened()
     # An inbound caller dialed in: with no ``first_message`` the agent waits
     # for them to speak (the documented ``first_message: null`` behavior). The
     # generated opening is written for a call Hail placed ("say why you are
     # calling") and would tell the caller the agent called them.
     if generate_opening and metadata.get("direction") != "inbound":
-        session.generate_reply(instructions=opening_instructions(pickup_transcript))
+        session.generate_reply(
+            instructions=opening_instructions(
+                pickup_transcript, already_introduced=bool(disclosure)
+            )
+        )
 
 
 DTMF_TOOL_NAME = "send_dtmf"
@@ -1919,6 +1957,7 @@ async def _run_call(
     thread_tool = has_thread_tool(agent_tools)
     logger.info("call_id=%s thread_history tool=%s", call_id, thread_tool)
     agent = SpeechSanitizingAgent(
+        opening_pending=not inbound,
         instructions=build_instructions(
             metadata.get("system_prompt"),
             metadata.get("direction"),
@@ -2161,6 +2200,7 @@ async def _run_call(
         # The disclosure is deferred, not dropped: `_speak_deferred_greeting`
         # fires it the moment a person is on the line.
         logger.info("call_id=%s phone tree detected, navigating", call_id)
+        agent.release_opening()
         arm_deferred_greeting(
             session, metadata, call_id, event_tasks, on_greeted=recovery.start
         )
@@ -2178,6 +2218,7 @@ async def _run_call(
                 session,
                 metadata,
                 pickup_transcript=amd_result.transcript if amd_result else None,
+                on_opened=agent.release_opening,
             )
             recovery.start()
         except Exception:

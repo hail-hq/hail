@@ -179,7 +179,7 @@ async def test_overloaded_amd_classifier_fails_over_with_prediction_tools(layers
         assert attempts[0][0] is primary
         assert any(model is backup for model, _ in attempts)
         assert all(kwargs["conn_options"].max_retry == 0 for _, kwargs in attempts)
-        assert all(kwargs["conn_options"].timeout == 3.0 for _, kwargs in attempts)
+        assert all(kwargs["conn_options"].timeout == 2.0 for _, kwargs in attempts)
         assert all(kwargs["tool_choice"] == "required" for _, kwargs in attempts)
         assert all(kwargs["tools"] == [save_prediction] for _, kwargs in attempts)
     finally:

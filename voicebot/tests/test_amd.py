@@ -91,10 +91,12 @@ async def test_run_amd_passes_session_layers_and_identity(
     assert kwargs["stt"] is session.stt
     assert kwargs["participant_identity"] == f"caller-{call_id}"
     assert kwargs["detection_options"] == {
+        "timeout": amd_mod.POST_ANSWER_TIMEOUT_SECONDS,
         "no_speech_threshold": NO_SPEECH_THRESHOLD_SECONDS,
         "human_speech_threshold": 0.0,
         "prompt": amd_mod.GREETING_CLASSIFICATION_PROMPT,
     }
+    assert kwargs["wait_until_finished"] is False
     assert not kwargs.get("suppress_compatibility_warning", False)
     # ivr_detection is left at LiveKit's default (True) on purpose.
     assert "ivr_detection" not in kwargs
@@ -132,6 +134,34 @@ async def test_audio_ready_is_published_after_amd_is_armed(monkeypatch):
     monkeypatch.setattr(amd_mod, "AMD", Detector)
     await run_amd(_session_with_layers(), UUID(int=1), on_ready=ready)
     assert order == ["armed", "ready", "classify"]
+
+
+async def test_post_answer_deadline_releases_continuous_speech(monkeypatch):
+    """The real classifier must release speech even without end-of-turn."""
+    from livekit.agents.voice.amd.classifier import _AMDClassifier
+
+    monkeypatch.setattr(amd_mod, "AMD", _RecordingAMD)
+    monkeypatch.setattr(amd_mod, "POST_ANSWER_TIMEOUT_SECONDS", 0.03)
+    _RecordingAMD.result = _prediction("human")
+    await run_amd(_session_with_layers(), UUID(int=1))
+    kwargs = _RecordingAMD.last_kwargs
+    classifier = _AMDClassifier(
+        llm=FakeLLM(),
+        wait_until_finished=kwargs["wait_until_finished"],
+        **kwargs["detection_options"],
+    )
+    try:
+        # Constructing/arming AMD before the dial must not consume its budget.
+        await asyncio.sleep(0.04)
+        assert not classifier._verdict_ready.is_set()
+        classifier.start_detection_timer()
+        classifier.start_listening()
+        classifier.on_user_speech_started()
+        await asyncio.wait_for(classifier._verdict_ready.wait(), timeout=0.2)
+        assert classifier._verdict_result.category == AMDCategory.UNCERTAIN
+        assert classifier._verdict_result.reason == "detection_timeout"
+    finally:
+        await classifier.close()
 
 
 async def test_dial_gate_is_released_when_amd_is_skipped() -> None:

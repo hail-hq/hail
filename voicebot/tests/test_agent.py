@@ -1070,7 +1070,9 @@ async def test_speak_greeting_speaks_disclosure_when_no_first_message() -> None:
     await speak_greeting(session, {})
 
     assert session.say_calls == [(AI_DISCLOSURE_LINE, True)]
-    assert session.generate_reply_calls == [opening_instructions(None)]
+    assert session.generate_reply_calls == [
+        opening_instructions(None, already_introduced=True)
+    ]
 
 
 async def test_speak_greeting_first_message_suppresses_generated_opening() -> None:

@@ -137,12 +137,12 @@ def build_amd_models(
             models.owned.append(backup)
             # AMD's classifier collects the whole response before executing
             # prediction tools. Fail over on provider errors without spending
-            # its 20-second detection budget retrying the same overloaded LLM.
+            # its detection budget retrying the same overloaded LLM.
             # Use independent clients so AMD cleanup cannot close conversation
             # providers or change a customer's explicitly selected LLM.
             models.llm = FallbackAdapter(
                 [models.llm, backup],
-                attempt_timeout=3.0,
+                attempt_timeout=2.0,
                 max_retry_per_llm=0,
             )
             models.owned.append(models.llm)
@@ -164,18 +164,22 @@ _END_REASON_BY_CATEGORY: dict[str, CallEndReason] = {
 }
 
 # Ceiling on how long a live-but-silent callee waits before hearing the
-# disclosure. LiveKit's default is 10.0s; ten seconds of dead air is a worse
-# regression than a slightly less certain verdict.
-NO_SPEECH_THRESHOLD_SECONDS = 6.0
+# disclosure. A recipient waiting for us to speak should not have to say hello
+# before hearing anything. Classification uncertainty must not mean dead air.
+NO_SPEECH_THRESHOLD_SECONDS = 3.0
+
+# Starts at SIP answer, unlike the dispatch-wide backstop below. Force a
+# verdict even during continuous speech or a failed classifier request.
+POST_ANSWER_TIMEOUT_SECONDS = 5.0
 
 # Backstop on the whole detection. ``execute()`` now starts BEFORE the API
 # dials (``on_ready`` releases the dial gate from inside the AMD context), so
 # this window spans SIP participant creation, the whole ring phase and the
-# callee's greeting. AMD's own 20s budget only arms on ``sip.callStatus ==
+# callee's greeting. AMD's own budget only arms on ``sip.callStatus ==
 # active``; a leg that never publishes audio settles ``participant_missing``
 # within 5s on 1.8.8 and a leg that drops before answer settles on its
 # disconnect, so this only has to outlast the carrier ring timeout plus the
-# 20s budget. 30s was too short: a voicemail that picks up after 25s of
+# post-answer budget. 30s was too short: a voicemail that picks up after 25s of
 # ringing left 5s and the greeting was spoken into the mailbox.
 DETECTION_TIMEOUT_SECONDS = 90.0
 
@@ -262,7 +266,9 @@ async def run_amd(
             llm=session_llm,
             stt=session_stt,
             participant_identity=f"caller-{call_id}",
+            wait_until_finished=False,
             detection_options={
+                "timeout": POST_ANSWER_TIMEOUT_SECONDS,
                 "no_speech_threshold": NO_SPEECH_THRESHOLD_SECONDS,
                 "human_speech_threshold": 0.0,
                 "prompt": GREETING_CLASSIFICATION_PROMPT,
