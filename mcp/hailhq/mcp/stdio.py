@@ -1,8 +1,4 @@
-"""Stdio entry point for hosts such as Glama that launch a local MCP process.
-
-Uses the same tool registry and static-key API client as the HTTP service.
-Only protocol messages go to stdout. The container's default stays HTTP.
-"""
+"""Stdio entry point using the shared tools and API-key client."""
 
 from __future__ import annotations
 

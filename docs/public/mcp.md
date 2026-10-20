@@ -185,49 +185,13 @@ curl -H "Authorization: Bearer ${HAIL_API_KEY}" http://localhost:8081/
 
 The MCP service selects its auth mode from env at boot. For the full env-var contract, refer to the [MCP modes table in the operations runbook](./self-host/operations.md#mcp-modes) (`HAIL_AUTH_URL` for cloud, `HAIL_API_KEY` for self-host, mutually exclusive).
 
-## Stdio hosts, including Glama
+## Stdio
 
-Use the remote URL for clients that accept it. Hosts such as Glama can launch the same tools over stdio.
-The stdio entry point is included in the MCP container. It is not a separate PyPI package.
-
-Glama wraps the configured command with `mcp-proxy`, which expects stdio.
-Starting Uvicorn there opens an HTTP port but leaves the proxy waiting for protocol messages.
-That produces a 60-second timeout even when application startup succeeds.
-
-In Glama's Dockerfile settings, keep the build that installs `core` and `mcp`.
-Set **CMD arguments** to:
-
-```json
-["python", "-u", "-m", "hailhq.mcp.stdio"]
-```
-
-Set the runtime environment:
-
-- `HAIL_API_URL`: `https://api.hail.so`, or your self-hosted API URL.
-- `HAIL_API_KEY`: your API key, stored as a secret.
-- `HAIL_AUTH_URL`: leave unset. Stdio uses the API key instead of browser OAuth.
-
-For Glama's **placeholder parameters**, a dummy key allows schema inspection:
-
-```json
-{
-  "HAIL_API_URL": "https://api.hail.so",
-  "HAIL_API_KEY": "hk_glama_inspection_only"
-}
-```
-
-The dummy key supports initialize, ping, and tool discovery only. Real tool calls require a valid API key.
-Inspection does not need a database, phone carrier, or voice provider.
-The API checks credentials when a tool runs. Stdio uses the existing tool definitions and consent checks.
-
-For a local container check:
+For hosts that require stdio, use the entry point included in the MCP container:
 
 ```sh
-docker build -f mcp/Dockerfile -t hail-mcp-stdio .
-docker run --rm -i \
-  -e HAIL_API_URL=https://api.hail.so \
-  -e HAIL_API_KEY \
-  hail-mcp-stdio python -u -m hailhq.mcp.stdio
+python -u -m hailhq.mcp.stdio
 ```
 
-The image's default command still serves Streamable HTTP on port 8081.
+Set `HAIL_API_URL` to your API URL and `HAIL_API_KEY` to your API key.
+Leave `HAIL_AUTH_URL` unset. Stdio uses the same tools as the HTTP service.

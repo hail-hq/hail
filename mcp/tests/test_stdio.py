@@ -1,4 +1,4 @@
-"""Exercise the real subprocess protocol used by Glama's mcp-proxy."""
+"""Exercise MCP over a real stdio subprocess."""
 
 from __future__ import annotations
 
