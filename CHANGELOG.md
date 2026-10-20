@@ -4,6 +4,10 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 
 ## [Unreleased]
 
+### Changed
+
+- The built-in AI line on calls is spoken in the call's language. Custom lines are spoken as written.
+
 ## [0.30.0] (2026-10-20)
 
 Sender ID SMS to about 110 countries, voice suggestions by language, and call

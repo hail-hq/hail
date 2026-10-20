@@ -2145,3 +2145,27 @@ async def test_other_party_prompt_drops_the_section_on_any_failure(monkeypatch):
     monkeypatch.setattr(agent_mod, "session_scope", stuck)
     monkeypatch.setattr(agent_mod, "_OTHER_PARTY_TIMEOUT_SECONDS", 0.01)
     assert await agent_mod.other_party_prompt(UUID(int=1)) is None
+
+
+async def test_speak_greeting_speaks_built_in_line_in_call_language():
+    session = FakeAnnouncingSession()
+    await speak_greeting(
+        session, {"org_name": "Acme", "voice_config": {"language": "sv"}}
+    )
+    assert session.say_calls == [
+        ("Hej, det här är en AI-assistent som ringer på uppdrag av Acme.", True)
+    ]
+
+    session = FakeAnnouncingSession()
+    await speak_greeting(
+        session,
+        {
+            "direction": "inbound",
+            "org_name": "Acme",
+            "first_message": "Hej! Hur kan jag hjälpa dig?",
+            "voice_config": {"language": "sv"},
+        },
+    )
+    assert session.say_calls == [
+        ("Hej! Jag är en AI-assistent för Acme. Hur kan jag hjälpa dig?", False)
+    ]

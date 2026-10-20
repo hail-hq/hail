@@ -336,11 +336,21 @@ def disclosure_line(
     org_name: str | None,
     direction: str | None = None,
     template: str | None = None,
+    language: str | None = None,
 ) -> str:
     """The exact disclosure to speak, named when the org name resolved."""
     return disclosure_text(
-        "inbound" if direction == "inbound" else "outbound", org_name, template
+        "inbound" if direction == "inbound" else "outbound",
+        org_name,
+        template,
+        language,
     )
+
+
+def call_language(metadata: dict[str, Any]) -> str | None:
+    """The call's language: ``voice_config.language``, filled from the
+    workspace voice in :func:`_run_call` when the request set none."""
+    return (metadata.get("voice_config") or {}).get("language")
 
 
 def make_agent_hangup(
@@ -767,6 +777,7 @@ async def speak_greeting(
             metadata.get("org_name"),
             metadata.get("direction"),
             metadata.get("ai_disclosure_line"),
+            call_language(metadata),
         )
         if metadata.get("ai_disclosure", True)
         else None
@@ -782,7 +793,10 @@ async def speak_greeting(
                 and not (metadata.get("ai_disclosure_line") or "").strip()
             ):
                 greeting = greeting_with_ai_line(
-                    first_message, after_greeting_text(metadata.get("org_name"))
+                    first_message,
+                    after_greeting_text(
+                        metadata.get("org_name"), call_language(metadata)
+                    ),
                 )
                 # The AI line sits after the first sentence: a caller who
                 # speaks over the greeting must still hear it.
@@ -2008,6 +2022,8 @@ async def _run_call(
             org_cfgs = await resolve_org_configs(org_id, skip_llm=llm_cfg is not None)
             org_tts = org_cfgs.get("tts")
             language = language or (org_tts.params.get("language") if org_tts else None)
+            # The greeting reads the language from here (see call_language).
+            metadata = {**metadata, "voice_config": {**voice_cfg, "language": language}}
             session = build_session(
                 llm_cfg,
                 vad,
@@ -2397,6 +2413,7 @@ __all__ = [
     "attach_event_handlers",
     "build_instructions",
     "build_tools_safely",
+    "call_language",
     "disclosure_line",
     "disconnect_reason_to_status",
     "entrypoint",
