@@ -91,7 +91,7 @@ from hailhq.voicebot.pipeline import (
 from hailhq.voicebot.recording import start_recording, stop_recording
 from hailhq.voicebot.recovery import ConversationRecovery
 from hailhq.voicebot.telemetry import connect_livekit_tracing
-from hailhq.voicebot.tools import build_agent_tools
+from hailhq.voicebot.tools import SpeechTracker, build_agent_tools
 from livekit import rtc
 from livekit.agents import Agent, JobContext, JobProcess, StopResponse
 from livekit.agents.llm import LLMError
@@ -2068,15 +2068,12 @@ async def _run_call(
         # Status stays None → on_call_end falls back to "completed".
 
     agent_hangup = make_agent_hangup(ctx, captured, bridge_state)
-    # When the other party last started talking (time.monotonic()), so
-    # end_call can tell whether they spoke over the goodbye. Someone still
-    # talking from before the goodbye counts too.
-    speech_started = {"at": -math.inf}
+    # Whether the other party talked over the goodbye, for end_call.
+    speech = SpeechTracker()
 
     @session.on("user_state_changed")
-    def _on_speech_start(ev: Any) -> None:
-        if getattr(ev, "new_state", None) == "speaking":
-            speech_started["at"] = time.monotonic()
+    def _on_speech_state(ev: Any) -> None:
+        speech.on_state(getattr(ev, "new_state", None), time.monotonic())
 
     other_party_task = asyncio.create_task(other_party_prompt(call_id))
     agent_tools, agent_api = await build_tools_safely(
@@ -2093,8 +2090,7 @@ async def _run_call(
             or HANDOVER_DEFAULT_MAX_SECONDS,
             on_cap_fired=_on_soft_cap_fired,
         ),
-        spoke_since=lambda t: session.user_state == "speaking"
-        or speech_started["at"] >= t,
+        spoke_since=lambda t: speech.talked_since(t, time.monotonic()),
     )
     if agent_tools:
         logger.info(

@@ -237,3 +237,23 @@ async def test_other_session_tools_run_while_they_talk():
     dtmf = _spec(name="send_dtmf", tier="session_control")
     talked = dataclasses.replace(_tctx(), spoke_since=lambda _t: True)
     assert await _make_handler(dtmf, talked)({}, FakeRunContext()) == "ok"
+
+
+def test_speech_tracker_ignores_short_words():
+    from hailhq.voicebot.tools import SpeechTracker
+
+    speech = SpeechTracker()
+    speech.on_state("speaking", 10.0)
+    speech.on_state("listening", 10.4)  # "bye"
+    assert not speech.talked_since(9.0, 11.0)
+
+    speech.on_state("speaking", 12.0)
+    assert not speech.talked_since(9.0, 12.5)  # still talking, not yet long
+    assert speech.talked_since(9.0, 13.2)  # still talking, long enough
+    speech.on_state("listening", 13.8)  # "What is that?"
+    assert speech.talked_since(9.0, 14.0)
+    assert not speech.talked_since(14.0, 14.5)  # it ended before `since`
+
+    speech.on_state("speaking", 15.0)
+    speech.on_state("listening", 15.3)  # a short "ok" after the long one
+    assert speech.talked_since(9.0, 16.0)

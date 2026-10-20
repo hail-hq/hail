@@ -12,6 +12,7 @@ returns a speakable apology to the LLM.
 from __future__ import annotations
 
 import logging
+import math
 import time
 from typing import Any
 from uuid import UUID
@@ -32,6 +33,39 @@ STILL_TALKING = (
     "They started talking during your goodbye, so the call is still open. "
     "Do not hang up: listen and answer them."
 )
+
+
+# Speech this long keeps the call open after a goodbye. A quick "bye" or "ok"
+# over the goodbye is shorter; "What is that?" is longer.
+KEEP_CALL_SPEECH_SECONDS = 1.0
+
+
+class SpeechTracker:
+    """When the other party talks (time.monotonic()), fed by the session's
+    ``user_state_changed`` events."""
+
+    def __init__(self) -> None:
+        self._started: float | None = None
+        self._long_ended = -math.inf
+
+    def on_state(self, state: str | None, now: float) -> None:
+        if state == "speaking":
+            if self._started is None:
+                self._started = now
+        elif self._started is not None:
+            if now - self._started >= KEEP_CALL_SPEECH_SECONDS:
+                self._long_ended = now
+            self._started = None
+
+    def talked_since(self, since: float, now: float) -> bool:
+        """True when they talk now for long enough, or did so after
+        ``since``. Short words count for neither."""
+        if (
+            self._started is not None
+            and now - self._started >= KEEP_CALL_SPEECH_SECONDS
+        ):
+            return True
+        return self._long_ended >= since
 
 
 def _make_handler(spec: ToolSpec, tctx: ToolContext):
