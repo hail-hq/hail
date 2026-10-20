@@ -1546,6 +1546,7 @@ async def test_build_tools_safely_passes_through_on_success(
         hangup: object,
         send_dtmf: object,
         bridge: object = None,
+        spoke_since: object = None,
     ) -> tuple:
         return sentinel_tools, sentinel_api
 

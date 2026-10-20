@@ -12,6 +12,7 @@ returns a speakable apology to the LLM.
 from __future__ import annotations
 
 import logging
+import time
 from typing import Any
 from uuid import UUID
 
@@ -26,6 +27,11 @@ from livekit.agents.voice import RunContext
 logger = logging.getLogger("hailhq.voicebot")
 
 SPOKEN_TOOL_FAILURE = SPOKEN_FALLBACK
+# end_call's answer when the other party talked over the goodbye.
+STILL_TALKING = (
+    "They started talking during your goodbye, so the call is still open. "
+    "Do not hang up: listen and answer them."
+)
 
 
 def _make_handler(spec: ToolSpec, tctx: ToolContext):
@@ -37,8 +43,15 @@ def _make_handler(spec: ToolSpec, tctx: ToolContext):
                 context.disallow_interruptions()
             # session_control tools (end_call) must not cut off the agent's
             # own goodbye: wait for the pre-tool speech to finish playing.
+            # Someone who starts talking meanwhile is not done: keep the call.
             if spec.risk_tier == "session_control":
+                started = time.monotonic()
                 await context.wait_for_playout()
+                if tctx.spoke_since is not None and tctx.spoke_since(started):
+                    logger.info(
+                        "call_id=%s end_call skipped: still talking", tctx.call_id
+                    )
+                    return STILL_TALKING
             return await spec.execute(tctx, raw_arguments)
         except Exception:
             logger.exception(
@@ -68,6 +81,7 @@ async def build_agent_tools(
     hangup,
     send_dtmf,
     bridge=None,
+    spoke_since=None,
 ) -> tuple[list, AgentApiClient | None]:
     """Build this call's LiveKit tools. Returns (tools, api_client).
 
@@ -124,6 +138,7 @@ async def build_agent_tools(
         hangup=hangup,
         send_dtmf=send_dtmf,
         bridge=bridge,
+        spoke_since=spoke_since,
     )
 
     available: list[ToolSpec] = []

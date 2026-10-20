@@ -626,6 +626,7 @@ async def build_tools_safely(
     hangup: Callable[[], Awaitable[None]],
     send_dtmf: Callable[[str], Awaitable[None]],
     bridge: Callable[[BridgeRoute], Awaitable[BridgeOutcome]] | None = None,
+    spoke_since: Callable[[float], bool] | None = None,
 ) -> tuple[list, AgentApiClient | None]:
     """Build this call's agent tools, degrading to none on any failure.
 
@@ -641,6 +642,7 @@ async def build_tools_safely(
             hangup=hangup,
             send_dtmf=send_dtmf,
             bridge=bridge,
+            spoke_since=spoke_since,
         )
     except Exception:
         logger.exception(
@@ -2066,6 +2068,15 @@ async def _run_call(
         # Status stays None → on_call_end falls back to "completed".
 
     agent_hangup = make_agent_hangup(ctx, captured, bridge_state)
+    # When the other party last started talking (time.monotonic()), so
+    # end_call can tell whether they spoke over the goodbye.
+    speech_started = {"at": -math.inf}
+
+    @session.on("user_state_changed")
+    def _on_speech_start(ev: Any) -> None:
+        if getattr(ev, "new_state", None) == "speaking":
+            speech_started["at"] = time.monotonic()
+
     other_party_task = asyncio.create_task(other_party_prompt(call_id))
     agent_tools, agent_api = await build_tools_safely(
         metadata,
@@ -2081,6 +2092,7 @@ async def _run_call(
             or HANDOVER_DEFAULT_MAX_SECONDS,
             on_cap_fired=_on_soft_cap_fired,
         ),
+        spoke_since=lambda t: speech_started["at"] >= t,
     )
     if agent_tools:
         logger.info(

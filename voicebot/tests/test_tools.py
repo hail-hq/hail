@@ -208,3 +208,25 @@ async def test_uninterruptible_tool_disallows_interruptions():
     rc = FakeRunContext()
     await _make_handler(spec, _tctx())({}, rc)
     assert rc.interruptions_allowed is False
+
+
+async def test_end_call_keeps_the_call_when_they_talk_over_the_goodbye():
+    import dataclasses
+
+    from hailhq.voicebot.tools import STILL_TALKING
+
+    hung_up = []
+
+    async def record(_ctx, _args):
+        hung_up.append(True)
+        return "Call ended."
+
+    talked = dataclasses.replace(_tctx(), spoke_since=lambda _t: True)
+    handler = _make_handler(_spec(tier="session_control", execute=record), talked)
+    assert await handler({}, FakeRunContext()) == STILL_TALKING
+    assert hung_up == []
+
+    quiet = dataclasses.replace(_tctx(), spoke_since=lambda _t: False)
+    handler = _make_handler(_spec(tier="session_control", execute=record), quiet)
+    assert await handler({}, FakeRunContext()) == "Call ended."
+    assert hung_up == [True]

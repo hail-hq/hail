@@ -72,6 +72,9 @@ class ToolContext:
     send_dtmf: Callable[[str], Awaitable[None]] | None
     thread: ThreadScope | None = None
     bridge: Callable[[BridgeRoute], Awaitable[BridgeOutcome]] | None = None
+    # True when the other party started speaking at or after the given
+    # time.monotonic(). None outside a live session.
+    spoke_since: Callable[[float], bool] | None = None
 
 
 @dataclass(frozen=True)
