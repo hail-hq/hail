@@ -19,6 +19,7 @@ import asyncio
 import json
 import logging
 import threading
+from pathlib import Path
 from typing import Any
 
 import logfire
@@ -281,8 +282,17 @@ async def _reply_claimed(api: AgentApiClient, claimed: ClaimedReply, span=None) 
     return True
 
 
+# scripts/deploy/roll-voicebot.sh writes this file into the old voicebot just
+# before it drains. Texts then go to the new voicebot's code at once; the old
+# one only finishes its live calls.
+DRAIN_FLAG = Path("/tmp/hail-draining")
+
+
 async def _poll_loop(api: AgentApiClient, stop: threading.Event | None) -> None:
     while stop is None or not stop.is_set():
+        if DRAIN_FLAG.exists():
+            logger.info("text worker stopped: this voicebot is draining")
+            return
         try:
             busy = await reply_once(api)
         except Exception:

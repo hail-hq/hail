@@ -3,7 +3,8 @@
 #
 # 1. Start one voicebot on the pulled image next to the running ones.
 # 2. Wait until it has registered with LiveKit. New calls go to it from then on.
-# 3. Stop each old voicebot in the background. SIGTERM makes the LiveKit worker
+# 3. Stop each old voicebot's text replies (marker file, see textbot.DRAIN_FLAG),
+#    then stop the voicebot in the background. SIGTERM makes the LiveKit worker
 #    drain: it takes no new calls and exits once its live calls end. Docker
 #    kills it after DRAIN_SECONDS: LiveKit's own drain limit (1 hour) plus a
 #    minute for the calls to close cleanly.
@@ -64,6 +65,8 @@ for cid in $old; do
     continue
   fi
   echo "draining voicebot $cid (up to ${DRAIN_SECONDS}s)" >&2
+  # Its text worker stops on this file, so texts move to the new code now.
+  docker exec "$cid" touch /tmp/hail-draining >&2 || true
   setsid nohup sh -c "docker stop -t $DRAIN_SECONDS $cid && docker rm $cid" \
     >/dev/null 2>&1 </dev/null &
 done

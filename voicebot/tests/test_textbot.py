@@ -492,3 +492,18 @@ async def test_run_forever_answers_several_texts_at_once(
     stop.set()
     await asyncio.wait_for(task, 10)
     assert peak >= 2
+
+
+async def test_poll_loop_stops_when_the_voicebot_drains(monkeypatch, tmp_path) -> None:
+    flag = tmp_path / "hail-draining"
+    monkeypatch.setattr(textbot, "DRAIN_FLAG", flag)
+    calls = []
+
+    async def reply_once(_api):
+        calls.append(1)
+        flag.touch()  # the deploy marks this voicebot as draining
+        return True
+
+    monkeypatch.setattr(textbot, "reply_once", reply_once)
+    await asyncio.wait_for(textbot._poll_loop(object(), None), timeout=1)
+    assert calls == [1]
