@@ -44,7 +44,7 @@ async def start_recording(call_id: UUID, room_name: str, lkapi) -> None:
             audio_only=True,
             audio_mixing=api.DUAL_CHANNEL_AGENT,
             advanced=api.EncodingOptions(
-                audio_codec=api.OPUS, audio_bitrate=128, audio_frequency=48000
+                audio_codec=api.OPUS, audio_bitrate=48, audio_frequency=48000
             ),
             file_outputs=[
                 api.EncodedFileOutput(
