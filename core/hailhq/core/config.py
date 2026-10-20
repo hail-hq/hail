@@ -58,6 +58,9 @@ class Settings(BaseSettings):
     openai_model: str = ""
     google_model: str = ""
     anthropic_model: str = ""
+    # Set: the house Anthropic model runs on Amazon Bedrock in this region,
+    # signed with the AWS credentials below. Empty: Anthropic's API.
+    anthropic_bedrock_region: str = ""
     # Answering machine detection: transcribes and classifies the pickup
     # greeting. Empty = reuse the call's own STT / LLM.
     openai_transcribe_model: str = ""

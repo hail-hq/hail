@@ -17,6 +17,7 @@ __all__ = [
     "VOICE_PREAMBLE_INBOUND",
     "build_text_instructions",
     "build_voice_instructions",
+    "other_party_section",
     "prompt_template",
 ]
 
@@ -87,7 +88,7 @@ safe step first.
 - If you reach an automated menu, press the keys it asks for instead of \
 speaking — a menu cannot hear you. Choose the option that advances the call, \
 or the one for a human operator when none fits.
-- Give information in small steps and confirm before moving on.
+- Give information in small steps.
 - Briefly summarize the outcome when you finish a topic or end the call.
 - Never hang up on your own right after an answer. First ask if there is \
 anything else you can help with. Hang up only when the other party says they \
@@ -102,8 +103,11 @@ the required details first.
 fallback or ask how to proceed.
 - Summarize what a tool returns in plain speech; never recite raw data, \
 identifiers, or technical details aloud.
-- Before sending any text message or email, say exactly what you will send \
-and to whom, and wait for the other party's confirmation.
+- When the other party asks you to send a text message or email, their \
+request is the confirmation: send it right away, then say it is sent. Ask \
+one short question only when the recipient or the content is unclear, and \
+never ask the same question twice. Before sending something they did not \
+ask for, say what you will send and to whom, and wait for a yes.
 
 # Guardrails
 
@@ -153,6 +157,7 @@ TEXT_PREAMBLE = (
 
 VOICE_HEADING = "# Caller instructions"
 TEXT_HEADING = "# Business instructions"
+OTHER_PARTY_HEADING = "# The person on this call"
 INSTRUCTIONS_PLACEHOLDER = "{instructions}"
 # Prompts carry no history with the caller: the agent reads it with the
 # thread_history tool. (A record in the prompt also held the agent's own past
@@ -176,23 +181,39 @@ THREAD_TOOL_HINT_TEXT = (
 )
 
 
+def other_party_section(name: str, *, can_email: bool) -> str:
+    """Who is on the line, when their number matched a contact. Without it
+    the model asks "who should I email?" when the caller says "email me"."""
+    line = f'The person on this call is "{name}", one of your contacts.'
+    if can_email:
+        line += (
+            f' When they say "me" or "my email", they mean "{name}": send '
+            "emails for them to that name without asking who."
+        )
+    return f"{OTHER_PARTY_HEADING}\n\n{line}"
+
+
 def build_voice_instructions(
     system_prompt: str | None,
     direction: str | None = None,
     *,
     thread_tool: bool = False,
+    other_party: str | None = None,
 ) -> str:
     """Assemble a call's instructions: voice preamble first, the agent's own
     instructions after. The preamble is non-overridable framing
     (:data:`VOICE_PREAMBLE_INBOUND` when ``direction`` is ``"inbound"``);
     with no instructions it alone is the instruction set. Mode-agnostic: the
     same for the fallback chain and a BYO endpoint. ``thread_tool`` (the call
-    has the ``thread_history`` tool) appends :data:`THREAD_TOOL_HINT_VOICE`."""
+    has the ``thread_history`` tool) appends :data:`THREAD_TOOL_HINT_VOICE`.
+    ``other_party`` (see :func:`other_party_section`) goes last."""
     preamble = VOICE_PREAMBLE_INBOUND if direction == "inbound" else VOICE_PREAMBLE
     caller = (system_prompt or "").strip()
     out = preamble if not caller else f"{preamble}\n\n{VOICE_HEADING}\n\n{caller}"
     if thread_tool:
         out = f"{out}\n\n{THREAD_TOOL_HINT_VOICE}"
+    if other_party:
+        out = f"{out}\n\n{other_party}"
     return out
 
 

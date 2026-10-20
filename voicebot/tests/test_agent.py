@@ -1577,8 +1577,21 @@ async def test_speak_greeting_uses_inbound_line_and_agent_template():
         },
     )
     assert session.say_calls == [
+        ("I'm an AI assistant for Acme. How can I help?", True)
+    ]
+
+    session = FakeAnnouncingSession()
+    await speak_greeting(
+        session,
+        {
+            "direction": "inbound",
+            "org_name": "Acme",
+            "first_message": "Hey, this is Joker! Want to hear a joke?",
+        },
+    )
+    assert session.say_calls == [
         (
-            "Hi, this is an AI assistant answering on behalf of Acme. How can I help?",
+            "Hey, this is Joker! I'm an AI assistant for Acme. Want to hear a joke?",
             True,
         )
     ]
@@ -2046,3 +2059,53 @@ async def test_shutdown_waits_briefly_for_answer_post(monkeypatch) -> None:
     stuck = asyncio.create_task(asyncio.Event().wait())
     await finish_answer_post({"answer_task": stuck}, CALL_ID)
     assert stuck.cancelled()
+
+
+@pytest.mark.parametrize(
+    ("message", "spoken"),
+    [
+        ("Hello there", "Hello there. AI line."),
+        (
+            "Hi, I'm Dr. Lee's assistant. How can I help?",
+            "Hi, I'm Dr. Lee's assistant. AI line. How can I help?",
+        ),
+        ("Need help?", "AI line. Need help?"),
+    ],
+)
+def test_greeting_with_ai_line(message, spoken):
+    from hailhq.voicebot.agent import greeting_with_ai_line
+
+    assert greeting_with_ai_line(message, "AI line.") == spoken
+
+
+async def test_other_party_prompt_names_a_member_caller(monkeypatch):
+    from contextlib import asynccontextmanager
+
+    from hailhq.core.directory import DirectoryEntry
+    from hailhq.voicebot import agent as agent_mod
+
+    class Result:
+        def one_or_none(self):
+            return ("org", "inbound", "+46700000000", "+12025550100")
+
+    class Session:
+        async def execute(self, _stmt):
+            return Result()
+
+    @asynccontextmanager
+    async def scope():
+        yield Session()
+
+    seen = {}
+
+    async def find(_session, org, number):
+        seen["number"] = number
+        return DirectoryEntry(
+            name="Sam", has_email=True, has_phone=True, source="member"
+        )
+
+    monkeypatch.setattr(agent_mod, "session_scope", scope)
+    monkeypatch.setattr(agent_mod, "find_by_phone", find)
+    prompt = await agent_mod.other_party_prompt(UUID(int=1))
+    assert seen["number"] == "+46700000000"
+    assert '"Sam"' in prompt and "my email" in prompt

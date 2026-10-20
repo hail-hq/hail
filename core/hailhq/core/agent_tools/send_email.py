@@ -88,8 +88,9 @@ SPEC = ToolSpec(
     description=(
         "Send an email to a member of the organization's team directory "
         "(use list_contacts to see who). You cannot email arbitrary "
-        "addresses — only directory names. Before sending, say the "
-        "recipient's name and summarize the content, and get confirmation."
+        "addresses, only directory names. When the person on the call asks "
+        "for the email, send it right away; their request is the "
+        "confirmation."
     ),
     parameters={
         "type": "object",

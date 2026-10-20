@@ -65,8 +65,8 @@ SPEC = ToolSpec(
     name="send_sms",
     description=(
         "Send a text message to the person on this call, at the number being "
-        "called. You cannot text anyone else. Before sending, say exactly "
-        "what the message will say and get their confirmation."
+        "called. You cannot text anyone else. When they ask for the text, "
+        "send it right away; their request is the confirmation."
     ),
     parameters={
         "type": "object",

@@ -42,7 +42,8 @@ from hailhq.core.agent_tools.spec import BridgeOutcome, BridgeRoute
 from hailhq.core.call_end_reasons import CallEndReason
 from hailhq.core.config import settings
 from hailhq.core.db import session_scope
-from hailhq.core.disclosure import disclosure_text
+from hailhq.core.directory import find_by_phone
+from hailhq.core.disclosure import after_greeting_text, disclosure_text
 from hailhq.core.handover import HANDOVER_DEFAULT_MAX_SECONDS
 from hailhq.core.inbound_calls import Rejected, SipAttributes, open_inbound_call
 from hailhq.core.internal_webhook import notify_usage_event_recorded
@@ -54,6 +55,7 @@ from hailhq.core.prompts import (
     VOICE_PREAMBLE,
     VOICE_PREAMBLE_INBOUND,
     build_voice_instructions,
+    other_party_section,
 )
 from hailhq.core.schemas import TERMINAL_CALL_STATUSES
 from hailhq.core.secret_cipher import SecretKeyMissing
@@ -254,16 +256,49 @@ def build_instructions(
     *,
     thread_tool: bool = False,
     language: str | None = None,
+    other_party: str | None = None,
 ) -> str:
     """The call's instructions (see :func:`hailhq.core.prompts.build_voice_instructions`)."""
     instructions = build_voice_instructions(
-        system_prompt, direction, thread_tool=thread_tool
+        system_prompt, direction, thread_tool=thread_tool, other_party=other_party
     )
     if language in SUPPORTED_LANGUAGES:
         instructions += (
             f"\n\nSpeak in {SUPPORTED_LANGUAGES[language].name} for this call."
         )
     return instructions
+
+
+async def other_party_prompt(call_id: UUID) -> str | None:
+    """The prompt section naming the person on the line (the caller on an
+    inbound call, the callee on an outbound one) when their number is in the
+    org's directory. A lookup failure only drops the section."""
+    try:
+        async with session_scope() as session:
+            row = (
+                await session.execute(
+                    select(
+                        Call.organization_id,
+                        Call.direction,
+                        Call.from_e164,
+                        Call.to_e164,
+                    ).where(Call.id == call_id)
+                )
+            ).one_or_none()
+            if row is None:
+                return None
+            organization_id, direction, from_e164, to_e164 = row
+            number = from_e164 if direction == "inbound" else to_e164
+            if not number:
+                return None
+            entry = await find_by_phone(session, organization_id, number)
+    except SQLAlchemyError:
+        logger.warning("call_id=%s other-party lookup failed", call_id, exc_info=True)
+        return None
+    if entry is None:
+        return None
+    # send_email reaches members only, so a contact's email is no use here.
+    return other_party_section(entry.name, can_email=entry.source == "member")
 
 
 def has_thread_tool(tools: list[Any]) -> bool:
@@ -642,6 +677,27 @@ def opening_instructions(
     return f"{base} They have not said anything yet."
 
 
+# The end of the greeting's first sentence: "!" or "?", or a "." that does
+# not close a title like "Dr." or "Mr.", followed by the next sentence.
+_FIRST_SENTENCE_END = re.compile(r"(?:[!?]|(?<![A-Z][a-z])(?<![A-Z])\.)\s+(?=\S)")
+
+
+def greeting_with_ai_line(first_message: str, ai_line: str) -> str:
+    """The agent's greeting with the short AI line after its first sentence:
+    "Hey, this is Joker! I'm an AI assistant for Acme. Want to hear a joke?"
+    A one-sentence greeting gets the line at its end, or at its start when
+    it is a question, so the question stays last."""
+    message = first_message.strip()
+    match = _FIRST_SENTENCE_END.search(message)
+    if match is None:
+        if message.endswith("?"):
+            return f"{ai_line} {message}"
+        end = "" if message.endswith((".", "!")) else "."
+        return f"{message}{end} {ai_line}"
+    head, tail = message[: match.start() + 1], message[match.end() :]
+    return f"{head} {ai_line} {tail}"
+
+
 async def speak_greeting(
     session: AgentSession,
     metadata: dict[str, Any],
@@ -664,7 +720,10 @@ async def speak_greeting(
     A caller ``first_message`` is spoken verbatim, concatenated onto the
     disclosure as a single ``session.say()`` call, one spoken turn, not
     two back-to-back utterances that sound like the agent introducing
-    itself twice. Without a ``first_message``, the LLM generates the
+    itself twice. An inbound agent with no custom line goes further: the
+    short line goes inside its greeting (:func:`greeting_with_ai_line`),
+    because "Hi, this is an AI assistant… Hey, this is Joker!" still
+    greets the caller twice. Without a ``first_message``, the LLM generates the
     opening (see :func:`opening_instructions`) so the call never opens in
     dead air, including with ``ai_disclosure: false``; that path stays a
     separate turn since a generated reply's text isn't known until the
@@ -690,7 +749,17 @@ async def speak_greeting(
     first_message = metadata.get("first_message")
     try:
         if first_message:
-            greeting = f"{disclosure} {first_message}" if disclosure else first_message
+            if not disclosure:
+                greeting = first_message
+            elif (
+                metadata.get("direction") == "inbound"
+                and not (metadata.get("ai_disclosure_line") or "").strip()
+            ):
+                greeting = greeting_with_ai_line(
+                    first_message, after_greeting_text(metadata.get("org_name"))
+                )
+            else:
+                greeting = f"{disclosure} {first_message}"
             await session.say(greeting, allow_interruptions=True)
             return
         if disclosure:
@@ -1970,6 +2039,7 @@ async def _run_call(
         # Status stays None → on_call_end falls back to "completed".
 
     agent_hangup = make_agent_hangup(ctx, captured, bridge_state)
+    other_party_task = asyncio.create_task(other_party_prompt(call_id))
     agent_tools, agent_api = await build_tools_safely(
         metadata,
         call_id,
@@ -2001,6 +2071,7 @@ async def _run_call(
             metadata.get("direction"),
             thread_tool=thread_tool,
             language=language,
+            other_party=await other_party_task,
         ),
         tools=agent_tools,
     )

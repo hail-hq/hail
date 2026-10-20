@@ -386,7 +386,7 @@ a new row.
 | ------------------------- | -------------------------------- | --------------------------- |
 | **B — per-call endpoint** | `llm` on `POST /calls`           | none                        |
 | **C — standing endpoint** | `/providers` (console, CLI, SDK) | opt-in                      |
-| **A — Hail's models**     | no `llm` block                   | OpenAI → Google → Anthropic |
+| **A — Hail's models**     | no `llm` block                   | Anthropic → OpenAI → Google |
 
 Precedence is B, then C, then A. A per-call `llm` block overrides your
 standing config for that one call.

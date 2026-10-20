@@ -33,7 +33,7 @@ Go CLI module path is `github.com/hail-hq/hail/cli`. npm packages are published 
 2. **Simple code.** Boring is best. No abstractions without two concrete uses.
 3. **Brief docs.** Each doc fits on one screen. Setup ≤ 10 minutes from a fresh clone.
 4. **Self-hostable.** `docker compose up` runs everything except LiveKit Cloud.
-5. **Pluggable brain.** BYO endpoint compatible with OpenAI's completions API, or use Hail's bundled fallback (OpenAI → Gemini → Anthropic). Voice pipeline + transport are always Hail's.
+5. **Pluggable brain.** BYO endpoint compatible with OpenAI's completions API, or use Hail's bundled fallback (Anthropic → OpenAI → Gemini). Voice pipeline + transport are always Hail's.
 6. **Agent-first docs.** AI agents are first-class readers. Lead with concrete, runnable examples; link to canonical sources (OpenAPI spec, MCP tool schemas, code paths) rather than paraphrase them. Every page should let a reader — human or agent — take the next action.
 
 ## Invariants
@@ -80,7 +80,8 @@ Internal runbooks (not published) live in `docs/operations/`:
 [carrier-verification.md](docs/operations/carrier-verification.md) (verification states, background pass, cancel rules),
 [number-catalog-sync.md](docs/operations/number-catalog-sync.md) (the `costs/<carrier>.json` files, weekly sync, secrets, purchase gate),
 [refresh-costs.md](docs/operations/refresh-costs.md) (weekly LLM/STT/TTS price refresh),
-[didww-by-request.md](docs/operations/didww-by-request.md) (ordering a DIDWW number a customer asked support for).
+[didww-by-request.md](docs/operations/didww-by-request.md) (ordering a DIDWW number a customer asked support for),
+[voice-llm.md](docs/operations/voice-llm.md) (the house LLM chain, Bedrock access and model ids).
 
 ## Style
 
