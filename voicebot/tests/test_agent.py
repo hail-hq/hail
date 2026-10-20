@@ -1577,7 +1577,7 @@ async def test_speak_greeting_uses_inbound_line_and_agent_template():
         },
     )
     assert session.say_calls == [
-        ("I'm an AI assistant for Acme. How can I help?", True)
+        ("I'm an AI assistant for Acme. How can I help?", False)
     ]
 
     session = FakeAnnouncingSession()
@@ -1592,7 +1592,7 @@ async def test_speak_greeting_uses_inbound_line_and_agent_template():
     assert session.say_calls == [
         (
             "Hey, this is Joker! I'm an AI assistant for Acme. Want to hear a joke?",
-            True,
+            False,
         )
     ]
 

@@ -158,3 +158,15 @@ async def test_find_by_phone_prefers_members_and_stays_in_org(async_session):
     )
     assert await find_by_phone(async_session, org_b, "+15551234567") is None
     assert await find_by_phone(async_session, org_a, "+15550000000") is None
+
+
+async def test_find_by_phone_names_nobody_for_a_shared_number(async_session):
+    org = uuid.uuid4()
+    await _add_member(
+        async_session, org, "Ana", "ana@a.test", phone_number="+15550001111"
+    )
+    await _add_member(
+        async_session, org, "Ben", "ben@a.test", phone_number="+15550001111"
+    )
+
+    assert await find_by_phone(async_session, org, "+15550001111") is None

@@ -772,6 +772,7 @@ async def speak_greeting(
     first_message = metadata.get("first_message")
     try:
         if first_message:
+            interruptible = True
             if not disclosure:
                 greeting = first_message
             elif (
@@ -781,9 +782,12 @@ async def speak_greeting(
                 greeting = greeting_with_ai_line(
                     first_message, after_greeting_text(metadata.get("org_name"))
                 )
+                # The AI line sits after the first sentence: a caller who
+                # speaks over the greeting must still hear it.
+                interruptible = False
             else:
                 greeting = f"{disclosure} {first_message}"
-            await session.say(greeting, allow_interruptions=True)
+            await session.say(greeting, allow_interruptions=interruptible)
             return
         if disclosure:
             await session.say(disclosure, allow_interruptions=True)

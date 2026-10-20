@@ -38,7 +38,9 @@ _TIMEOUT_SECONDS = 5
 # only degrades the line to generic wording.
 _ORG_NAME_TIMEOUT_SECONDS = 2.0
 # A name younger than this is used without asking hail.so again; an older one
-# is refreshed, and kept when the refresh fails.
+# is refreshed, and kept when the refresh fails. The cache lives per process:
+# it helps the API. Inbound calls run in a fresh voicebot process each, so
+# they read the mirrored organizations table first (inbound_calls).
 _ORG_NAME_TTL_SECONDS = 600.0
 _org_names: dict[str, tuple[str, float]] = {}
 

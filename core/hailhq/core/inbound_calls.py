@@ -32,18 +32,21 @@ from hailhq.core.call_end_reasons import CallEndReason
 from hailhq.core.carrier_routing import inbound_trunk
 from hailhq.core.compliance_gate import check_channel_suspended
 from hailhq.core.config import SELF_HOSTED_ORG_ID, settings
+from hailhq.core.db import session_scope
 from hailhq.core.handover import HANDOVER_DEFAULT_MAX_SECONDS, handover_targets
 from hailhq.core.internal_webhook import fetch_organization_name
 from hailhq.core.models import (
     Agent,
     Call,
     CallEvent,
+    Organization,
     OrganizationCallSettings,
     PhoneNumber,
 )
 from hailhq.core.recordings import recording_call_metadata
 from hailhq.core.sms_ingest import active_dedicated_number
 from hailhq.core.webhook_fanout import call_event_data, fanout_call_event
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
@@ -169,11 +172,29 @@ async def open_inbound_call(
     # The caller is already connected and hearing silence: look the name up
     # while the checks and the Call row are written, as POST /calls does.
     org_id = number.organization_id
-    org_name = asyncio.create_task(fetch_organization_name(str(org_id)))
+    org_name = asyncio.create_task(_organization_name(org_id))
     try:
         return await _answer_or_refuse(db, number, org_id, attrs, org_name)
     finally:
         org_name.cancel()  # no-op once it has finished (refusals never await it)
+
+
+async def _organization_name(org_id: UUID) -> str | None:
+    """The org's display name from the mirrored ``organizations`` table, in
+    its own session so it runs beside the answer checks. Each inbound call is
+    a fresh voicebot process, so the hail.so lookup's cache never helps here;
+    it is only the fallback for a missing table (self-host) or a blank name."""
+    try:
+        async with session_scope() as session:
+            name = await session.scalar(
+                select(Organization.name).where(Organization.id == org_id)
+            )
+    except Exception:  # a DB connect error is an OSError, not a SQLAlchemyError
+        logger.warning("organizations lookup failed for %s", org_id, exc_info=True)
+        name = None
+    if name and name.strip():
+        return name.strip()
+    return await fetch_organization_name(str(org_id))
 
 
 async def _answer_or_refuse(

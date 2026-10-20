@@ -17,7 +17,7 @@ from hailhq.core.models import (
     WebhookDelivery,
     WebhookSubscription,
 )
-from sqlalchemy import select
+from sqlalchemy import select, text
 
 DIALED = "+14155550100"
 CALLER = "+33612345678"
@@ -345,3 +345,31 @@ async def test_inbound_call_snapshots_recording_retention(async_session):
     await async_session.commit()
     await async_session.refresh(call)
     assert call.metadata_["recording_retention_days"] == 30
+
+
+async def test_org_name_comes_from_the_organizations_table(
+    async_session, monkeypatch
+) -> None:
+    async def fail(_org: str) -> str | None:
+        raise AssertionError("hail.so must not be asked when the row has a name")
+
+    org = uuid.uuid4()
+    await async_session.execute(
+        text("INSERT INTO organizations (id, name) VALUES (:id, :name)"),
+        {"id": org, "name": "  Acme Dental  "},
+    )
+    await async_session.commit()
+    monkeypatch.setattr(inbound_calls, "fetch_organization_name", fail)
+    assert await inbound_calls._organization_name(org) == "Acme Dental"
+
+
+async def test_org_name_falls_back_to_hail_so_without_a_row(async_session) -> None:
+    assert await inbound_calls._organization_name(uuid.uuid4()) == "Acme Dental"
+
+
+async def test_org_name_falls_back_to_hail_so_when_the_db_fails(monkeypatch) -> None:
+    def broken():
+        raise OSError("db down")
+
+    monkeypatch.setattr(inbound_calls, "session_scope", broken)
+    assert await inbound_calls._organization_name(uuid.uuid4()) == "Acme Dental"

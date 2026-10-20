@@ -119,7 +119,9 @@ async def find_by_phone(
     session: AsyncSession, organization_id: uuid.UUID, phone_e164: str
 ) -> DirectoryEntry | None:
     """The member or contact with this number, members first. Names the
-    person on a call so the voicebot knows who "me" is."""
+    person on a call so the voicebot knows who "me" is. A number shared by
+    two members names nobody: "me" would be a guess. Contacts are unique
+    per org and number."""
     member_stmt = (
         select(User.name)
         .join(OrganizationMember, OrganizationMember.user_id == User.id)
@@ -127,26 +129,25 @@ async def find_by_phone(
             OrganizationMember.organization_id == organization_id,
             User.phone_number == phone_e164,
         )
-        .limit(1)
+        .limit(2)
     )
-    name = (await session.execute(member_stmt)).scalar_one_or_none()
-    if name:
+    names = (await session.execute(member_stmt)).scalars().all()
+    if len(names) > 1:
+        return None
+    if names and names[0]:
         return DirectoryEntry(
-            name=name, has_email=True, has_phone=True, source="member"
+            name=names[0], has_email=True, has_phone=True, source="member"
         )
-    contact_stmt = (
-        select(Contact.name, Contact.email)
-        .where(
-            Contact.organization_id == organization_id,
-            Contact.phone_e164 == phone_e164,
-        )
-        .limit(1)
+    contact_stmt = select(Contact.name, Contact.email).where(
+        Contact.organization_id == organization_id,
+        Contact.phone_e164 == phone_e164,
     )
     row = (await session.execute(contact_stmt)).one_or_none()
     if row is None or not row[0]:
         return None
+    name, email = row
     return DirectoryEntry(
-        name=row[0], has_email=row[1] is not None, has_phone=True, source="contact"
+        name=name, has_email=email is not None, has_phone=True, source="contact"
     )
 
 
