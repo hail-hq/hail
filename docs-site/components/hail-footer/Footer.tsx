@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { Mascot } from "./Mascot";
+import { PRODUCT_COPY, PRODUCT_SHORT_DESCRIPTION } from "./product-copy";
 import "./footer.css";
 
 export type FooterGroup = {
@@ -41,8 +42,7 @@ export function Footer({
               <span>hail.so</span>
             </a>
             <p>
-              Give your assistant calls, texts, and email. Add email and SMS to
-              your app. One account, three ways to connect.
+              {PRODUCT_SHORT_DESCRIPTION} {PRODUCT_COPY.availability}
             </p>
             <div className="hail-footer-social">
               <a href="https://github.com/hail-hq/hail">GitHub ↗</a>
