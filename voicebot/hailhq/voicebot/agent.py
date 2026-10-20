@@ -269,12 +269,20 @@ def build_instructions(
     return instructions
 
 
+# The other-party lookup runs before the session starts, so a slow DB must
+# not hold back the greeting.
+_OTHER_PARTY_TIMEOUT_SECONDS = 1.0
+
+
 async def other_party_prompt(call_id: UUID) -> str | None:
     """The prompt section naming the person on the line (the caller on an
     inbound call, the callee on an outbound one) when their number is in the
-    org's directory. A lookup failure only drops the section."""
+    org's directory. A lookup failure or timeout only drops the section."""
     try:
-        async with session_scope() as session:
+        async with (
+            asyncio.timeout(_OTHER_PARTY_TIMEOUT_SECONDS),
+            session_scope() as session,
+        ):
             row = (
                 await session.execute(
                     select(
@@ -292,7 +300,7 @@ async def other_party_prompt(call_id: UUID) -> str | None:
             if not number:
                 return None
             entry = await find_by_phone(session, organization_id, number)
-    except SQLAlchemyError:
+    except Exception:
         logger.warning("call_id=%s other-party lookup failed", call_id, exc_info=True)
         return None
     if entry is None:
@@ -677,9 +685,23 @@ def opening_instructions(
     return f"{base} They have not said anything yet."
 
 
-# The end of the greeting's first sentence: "!" or "?", or a "." that does
-# not close a title like "Dr." or "Mr.", followed by the next sentence.
-_FIRST_SENTENCE_END = re.compile(r"(?:[!?]|(?<![A-Z][a-z])(?<![A-Z])\.)\s+(?=\S)")
+# A sentence end: ".", "!" or "?" followed by the next sentence.
+_SENTENCE_END = re.compile(r"(\w*)[.!?]\s+(?=\S)")
+# Words whose "." does not end a sentence: "Mrs. Smith", "Prof. Lee".
+_TITLES = frozenset(
+    {"dr", "mr", "mrs", "ms", "mx", "prof", "st", "jr", "sr", "mt", "rev", "hon"}
+)
+
+
+def _first_sentence_end(message: str) -> re.Match[str] | None:
+    for match in _SENTENCE_END.finditer(message):
+        word = match.group(1)
+        if match.group(0)[len(word)] == "." and (
+            word.lower() in _TITLES or (len(word) == 1 and word.isupper())
+        ):
+            continue
+        return match
+    return None
 
 
 def greeting_with_ai_line(first_message: str, ai_line: str) -> str:
@@ -688,13 +710,14 @@ def greeting_with_ai_line(first_message: str, ai_line: str) -> str:
     A one-sentence greeting gets the line at its end, or at its start when
     it is a question, so the question stays last."""
     message = first_message.strip()
-    match = _FIRST_SENTENCE_END.search(message)
+    match = _first_sentence_end(message)
     if match is None:
         if message.endswith("?"):
             return f"{ai_line} {message}"
         end = "" if message.endswith((".", "!")) else "."
         return f"{message}{end} {ai_line}"
-    head, tail = message[: match.start() + 1], message[match.end() :]
+    end = match.start() + len(match.group(1)) + 1
+    head, tail = message[:end], message[match.end() :]
     return f"{head} {ai_line} {tail}"
 
 

@@ -95,12 +95,16 @@ MCP: `create_agent(handover_contacts=[{"contact_id": "...", "note": "..."}])` se
      (or `user_rejected`), and `call.failed`;
    - otherwise a `ringing` call, `call.received`, then the agent speaks.
 3. The agent speaks the AI line, then `first_message` (or waits), then
-   follows `system_prompt` with the agent's tools. `call.answered` and
+   follows `system_prompt` with the agent's tools. With a `first_message`
+   and no custom AI line, the agent speaks one greeting instead: the first
+   sentence of `first_message`, then `I'm an AI assistant for {org}.`, then
+   the rest. `call.answered` and
    `call.completed` follow as on outbound calls. Each answered minute costs
    the same as an outbound minute.
 
 The AI line on inbound calls defaults to
-`Hi, this is an AI assistant answering on behalf of {org}.`; the workspace
+`Hi, this is an AI assistant answering on behalf of {org}.` (or the short
+line inside `first_message`, above); the workspace
 default lives in Call settings (`organization_call_settings.ai_disclosure_line`)
 and an agent can set its own `ai_disclosure_line`. `ai_disclosure: false` on the
 agent skips it; the responsibility for that is yours.

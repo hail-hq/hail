@@ -526,7 +526,7 @@ async def create_call(
     # Resolve the org's display name for the spoken TCPA identity
     # disclosure (47 CFR 64.1200(b)(1)). Fail-safe: any lookup failure →
     # None → the voicebot speaks the generic fallback line instead. Run as
-    # a task so the up-to-1s lookup overlaps the LiveKit room creation
+    # a task so the up-to-2s lookup overlaps the LiveKit room creation
     # below (only the dispatch metadata needs the result) instead of
     # adding its latency serially; the task never raises, so an abandoned
     # result on the failure path is inert.

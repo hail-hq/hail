@@ -40,7 +40,9 @@ async def get_call_settings(
         "default_max_duration_seconds": default,
         "uses_default": seconds is None,
         # Workspace AI line template ('{org}' = the organization name); null
-        # means the built-in line for the call's direction.
+        # means the built-in line for the call's direction. An inbound agent
+        # with a first message and no custom line says the shorter
+        # AFTER_GREETING_LINE inside that message instead.
         "ai_disclosure_line": override.ai_disclosure_line if override else None,
         "default_ai_disclosure_lines": {
             "outbound": DEFAULT_OUTBOUND_LINE,

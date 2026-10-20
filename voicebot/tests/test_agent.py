@@ -2070,6 +2070,15 @@ async def test_shutdown_waits_briefly_for_answer_post(monkeypatch) -> None:
             "Hi, I'm Dr. Lee's assistant. AI line. How can I help?",
         ),
         ("Need help?", "AI line. Need help?"),
+        (
+            "Hi, I am Mrs. Smith's assistant. How can I help?",
+            "Hi, I am Mrs. Smith's assistant. AI line. How can I help?",
+        ),
+        (
+            "Hi, this is Prof. J. Lee! How can I help?",
+            "Hi, this is Prof. J. Lee! AI line. How can I help?",
+        ),
+        ("Hi, I am Al. How can I help?", "Hi, I am Al. AI line. How can I help?"),
     ],
 )
 def test_greeting_with_ai_line(message, spoken):
@@ -2109,3 +2118,29 @@ async def test_other_party_prompt_names_a_member_caller(monkeypatch):
     prompt = await agent_mod.other_party_prompt(UUID(int=1))
     assert seen["number"] == "+46700000000"
     assert '"Sam"' in prompt and "my email" in prompt
+
+
+async def test_other_party_prompt_drops_the_section_on_any_failure(monkeypatch):
+    from contextlib import asynccontextmanager
+
+    from hailhq.voicebot import agent as agent_mod
+
+    @asynccontextmanager
+    async def refused():
+        raise ConnectionRefusedError
+        yield
+
+    monkeypatch.setattr(agent_mod, "session_scope", refused)
+    assert await agent_mod.other_party_prompt(UUID(int=1)) is None
+
+    class Session:
+        async def execute(self, _stmt):
+            await asyncio.Event().wait()
+
+    @asynccontextmanager
+    async def stuck():
+        yield Session()
+
+    monkeypatch.setattr(agent_mod, "session_scope", stuck)
+    monkeypatch.setattr(agent_mod, "_OTHER_PARTY_TIMEOUT_SECONDS", 0.01)
+    assert await agent_mod.other_party_prompt(UUID(int=1)) is None

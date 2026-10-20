@@ -61,7 +61,6 @@ import logging
 from typing import Any
 from uuid import UUID
 
-import anthropic as anthropic_sdk
 from hailhq.core.config import settings
 from hailhq.core.db import session_scope
 from hailhq.core.languages import (
@@ -73,6 +72,7 @@ from hailhq.core.languages import (
     turn_mode_for,
 )
 from hailhq.core.provider_config import load_org_provider_configs, provider_cipher
+from hailhq.core.providers.llm.bedrock import bedrock_client, is_bedrock_client
 from hailhq.core.url_guard import UnsafeUrlError, assert_public_https_url
 from livekit.agents import AgentSession, TurnHandlingOptions, inference
 from livekit.agents import llm as agents_llm
@@ -213,7 +213,7 @@ class _FastAnthropicLLM(anthropic_plugin.LLM):
     async def _prewarm_impl(self) -> None:
         # The plugin prewarms with models.list, which the Bedrock client
         # does not have.
-        if isinstance(self._client, anthropic_sdk.AsyncAnthropicBedrock):
+        if is_bedrock_client(self._client):
             return
         await super()._prewarm_impl()
 
@@ -229,11 +229,10 @@ def _house_anthropic() -> agents_llm.LLM:
         return _FastAnthropicLLM(model=settings.anthropic_model)
     # The plugin insists on a key even when handed a client; Bedrock signs
     # with the AWS credential chain instead.
-    client = anthropic_sdk.AsyncAnthropicBedrock(
-        aws_region=settings.anthropic_bedrock_region, max_retries=0
-    )
     return _FastAnthropicLLM(
-        model=settings.anthropic_model, client=client, api_key="bedrock"
+        model=settings.anthropic_model,
+        client=bedrock_client(settings.anthropic_bedrock_region),
+        api_key="bedrock",
     )
 
 
