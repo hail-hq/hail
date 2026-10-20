@@ -4,6 +4,7 @@ name seen, else None."""
 from __future__ import annotations
 
 import asyncio
+import time
 
 import aiohttp
 import pytest
@@ -146,7 +147,10 @@ async def test_fresh_name_is_served_from_cache(monkeypatch, configured):
 
 
 async def test_stale_name_survives_a_failed_refresh(monkeypatch, configured):
-    monkeypatch.setattr(internal_webhook, "_org_names", {"org-123": ("Acme Corp", 0.0)})
+    stale = time.monotonic() - 2 * internal_webhook._ORG_NAME_TTL_SECONDS
+    monkeypatch.setattr(
+        internal_webhook, "_org_names", {"org-123": ("Acme Corp", stale)}
+    )
     session = _FakeSession(exc=asyncio.TimeoutError())
     _install(monkeypatch, session)
 
