@@ -9,8 +9,8 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 Sender ID SMS to about 110 countries, voice suggestions by language, and call
 recording on by default.
 
-Component versions cut alongside this release:
-**`cli-v0.29.0`** (Homebrew + GitHub Releases) and **`sdk-v0.20.1`** (PyPI).
+Component version cut alongside this release:
+**`cli-v0.29.0`** (Homebrew + GitHub Releases). No SDK release.
 Database migrations run on deploy.
 
 ### Added

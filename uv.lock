@@ -1045,7 +1045,7 @@ wheels = [
 
 [[package]]
 name = "hail-sdk"
-version = "0.20.1"
+version = "0.20.0"
 source = { editable = "sdk" }
 dependencies = [
     { name = "httpx" },
