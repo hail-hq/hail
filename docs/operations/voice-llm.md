@@ -19,9 +19,8 @@ GOOGLE_MODEL=gemini-3.5-flash-lite
 
 ## Bedrock access
 
-1. The IAM policy in `infra/terraform/iam.tf` (`VoiceLLMBedrock`) allows
-   `ANTHROPIC_MODEL` and its inference profile, read from `.env` when
-   `ANTHROPIC_BEDROCK_REGION` is set. Apply it after merge:
+1. The IAM policy in `infra/terraform/iam.tf` (`VoiceLLMBedrock`) allows any
+   Bedrock model and any of the account's inference profiles. Apply it once:
 
    ```bash
    cd infra && terragrunt apply
@@ -45,8 +44,5 @@ with the deploy's own keys. A wrong id fails every call over to the next model.
 
 - `ANTHROPIC_MODEL` must accept `thinking: disabled` at effort `low` (Haiku
   5.5 does; Sonnet 5.5 and Opus 5.5 return 400).
-- On Bedrock, the IAM policy allows only the `ANTHROPIC_MODEL` in `.env`.
-  After you change it, run `cd infra && terragrunt apply`, or every request
-  returns AccessDenied.
 - `GOOGLE_MODEL` must accept thinking level `minimal` (Gemini 3.7 and 3.8
   Flash return 400).

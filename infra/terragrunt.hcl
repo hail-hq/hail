@@ -18,8 +18,6 @@ locals {
   ses_tracking_domain   = run_cmd("--terragrunt-quiet", "bash", "-c", "source ${local.env_file} && echo -n \"$HAIL_SES_TRACKING_DOMAIN\"")
   ses_tracking_enabled  = run_cmd("--terragrunt-quiet", "bash", "-c", "source ${local.env_file} && echo -n \"$HAIL_SES_TRACKING_ENABLED\"")
   asset_origins         = run_cmd("--terragrunt-quiet", "bash", "-c", "source ${local.env_file} && echo -n \"$HAIL_ASSET_ALLOWED_ORIGINS\"")
-  # Empty unless the voicebot runs ANTHROPIC_MODEL on Bedrock.
-  voice_llm_bedrock_model = run_cmd("--terragrunt-quiet", "bash", "-c", "source ${local.env_file} && [ -n \"$ANTHROPIC_BEDROCK_REGION\" ] && echo -n \"$ANTHROPIC_MODEL\" || true")
 }
 
 terraform {
@@ -54,5 +52,4 @@ inputs = {
   aws_profile                 = local.aws_profile
   iam_user_name               = local.iam_user_name
   lambda_source_dir           = "${get_repo_root()}/infra/ses-ingest-lambda"
-  voice_llm_bedrock_model     = local.voice_llm_bedrock_model
 }

@@ -70,9 +70,3 @@ variable "ses_tracking_domain_enabled" {
   type        = bool
   default     = false
 }
-
-variable "voice_llm_bedrock_model" {
-  description = "The voicebot's Anthropic model id on Bedrock (ANTHROPIC_MODEL when ANTHROPIC_BEDROCK_REGION is set). Empty grants no Bedrock access."
-  type        = string
-  default     = ""
-}

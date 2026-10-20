@@ -1,8 +1,3 @@
-locals {
-  # "eu.anthropic.claude-haiku-5-5" -> "anthropic.claude-haiku-5-5".
-  voice_llm_foundation_model = try(regex("anthropic\\..+$", var.voice_llm_bedrock_model), "")
-}
-
 data "aws_iam_policy_document" "main" {
   statement {
     sid       = "InboundRawRead"
@@ -37,22 +32,18 @@ data "aws_iam_policy_document" "main" {
     resources = ["*"]
   }
 
-  # The voicebot's first LLM, when it runs on Bedrock (ANTHROPIC_MODEL with
-  # ANTHROPIC_BEDROCK_REGION set). An inference profile like "eu." routes each
-  # request to a region in its geography, so the model is allowed in every
-  # region and the profile in the one the voicebot calls.
-  dynamic "statement" {
-    for_each = local.voice_llm_foundation_model == "" ? [] : [1]
-    content {
-      sid     = "VoiceLLMBedrock"
-      actions = ["bedrock:InvokeModel", "bedrock:InvokeModelWithResponseStream"]
-      resources = concat(
-        ["arn:aws:bedrock:*::foundation-model/${local.voice_llm_foundation_model}"],
-        local.voice_llm_foundation_model == var.voice_llm_bedrock_model ? [] : [
-          "arn:aws:bedrock:*:${data.aws_caller_identity.current.account_id}:inference-profile/${var.voice_llm_bedrock_model}",
-        ],
-      )
-    }
+  # The voicebot's LLMs on Bedrock (ANTHROPIC_MODEL with
+  # ANTHROPIC_BEDROCK_REGION set). Any model and any of the account's
+  # inference profiles, so changing ANTHROPIC_MODEL needs no apply. A profile
+  # like "eu." routes each request to a region in its geography, so every
+  # region is allowed.
+  statement {
+    sid     = "VoiceLLMBedrock"
+    actions = ["bedrock:InvokeModel", "bedrock:InvokeModelWithResponseStream"]
+    resources = [
+      "arn:aws:bedrock:*::foundation-model/*",
+      "arn:aws:bedrock:*:${data.aws_caller_identity.current.account_id}:inference-profile/*",
+    ]
   }
 }
 
