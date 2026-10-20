@@ -4,9 +4,21 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 
 ## [Unreleased]
 
+## [0.30.0] (2026-10-20)
+
+Sender ID SMS to about 110 countries, voice suggestions by language, and call
+recording on by default.
+
+Component versions cut alongside this release:
+**`cli-v0.29.0`** (Homebrew + GitHub Releases) and **`sdk-v0.20.1`** (PyPI).
+Database migrations run on deploy.
+
 ### Added
 
 - Sender ID corridors cover every country Twilio documents, not six. `POST /sms` with no `from` sends from the organization's sender ID (or `HAIL`) to about 110 countries where Twilio delivers a dynamic alphanumeric sender ID unchanged (Denmark, Sweden, France, Italy, Jamaica, ...); 43 countries where operators replace the ID (Finland, Mexico, India, ...) and 68 with no dynamic sender ID, or none Twilio vouches for (US, Canada, Spain, Luxembourg, ...), keep using the organization's dedicated number. Destinations resolve by country, so +1 Jamaica no longer follows the US rule. There is one table per carrier that can send sender-ID SMS (`sender_id_sms_carrier`): Twilio (108 countries) and Telnyx (111), each generated from that carrier's own per-country documentation by `scripts/sender_id_corridors.py`; a carrier without a table requires a dedicated number everywhere. A sender-ID send on Telnyx names the organization's messaging profile (`messaging_profile_id`, required by Telnyx for an alphanumeric sender), found on the org's Telnyx numbers or created once.
+- Voice suggestions by language: onboarding and Call settings suggest up to three voices that speak the workspace's language. The workspace's default language applies to every call unless the call or agent sets one. New env: `VOICE_SHORTLIST_PREFERENCES`, `CARTESIA_MODEL_LANGUAGES` (values in `.env.example`).
+- The console plays a workspace's first line in the chosen voice.
+- Self-host: `HAIL_ASSET_ALLOWED_ORIGINS` lists extra browser origins that may load call recordings. Empty keeps only `https://hail.so`. Apply with `terragrunt apply`.
 
 ### Changed
 
@@ -14,6 +26,13 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 - Voice: an unsure voicemail check rechecks the whole recorded greeting with Deepgram.
 - Call recordings are encoded at 48 kbps instead of 128 kbps: files are half the size and load faster, with no audible change to speech.
 - CLI: `hail tail` prints "Waiting for new events. Press Ctrl-C to stop." on stderr when it starts following, so an idle stream no longer looks stuck.
+- Voice: LiveKit upgraded to 1.8.8.
+- Self-host: `deploy.yml` prunes unused Hail images older than 48 hours, needs 20 GiB free before a pull, and rotates container logs at 10 MB.
+
+### Fixed
+
+- Voice: calls recover better from background noise and interruptions, and voicemail detection works in more languages.
+- Voice: the wait after pickup is capped, the agent no longer greets twice, and longer voicemail greetings finish before the pickup fallback.
 
 ## [0.29.0] (2026-10-19)
 
