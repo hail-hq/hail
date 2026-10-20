@@ -1,18 +1,26 @@
-"""Authenticated catalogue and bounded, fixed-text listening samples.
+"""Authenticated catalogue, fixed-text samples, and first-line playback.
 
-No arbitrary synthesis: only the current three recommendations can be
-previewed. Samples are shared in memory across orgs for one hour (at most
-three per supported language). No customer text or key reaches the browser.
+Previews speak fixed text only: one greeting per language, for the current
+three recommendations. They are shared in memory across orgs for one hour
+(at most three per supported language).
+
+The line route speaks only a workspace's own first line, at most 400
+characters, in a catalogue voice. The website calls it after it checks the
+session, org membership, and a per-user rate limit. Lines are cached in
+memory for one hour, at most 256 at a time. No provider key reaches the
+browser.
 """
 
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import io
 import time
+import unicodedata
 import wave
 from collections import OrderedDict
-from typing import Literal
+from typing import Annotated, Literal
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Response
@@ -20,18 +28,23 @@ from hailhq.api.routes.internal.auth import verify_internal_request
 from hailhq.core.config import settings
 from hailhq.core.languages import SUPPORTED_LANGUAGES, Language, elevenlabs_language
 from hailhq.core.voice_catalog import HEADERS_VERSION, voice_catalogue
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, StringConstraints, field_validator
 
 router = APIRouter(
     prefix="/internal/voices",
     include_in_schema=False,
     dependencies=[Depends(verify_internal_request)],
 )
-_samples: OrderedDict[tuple[str, str, str, str], tuple[float, bytes]] = OrderedDict()
+# Key: provider, model, language, voice id, sha256 of the spoken text.
+_Key = tuple[str, str, str, str, str]
+_Cache = OrderedDict[_Key, tuple[float, bytes]]
+_samples: _Cache = OrderedDict()
+_lines: _Cache = OrderedDict()
+_LINE_CAP = 256
 # One lock per sample: concurrent first listens synthesize once, and a slow
 # provider never blocks other samples or cache hits. A lock lives only while
 # a request holds or waits on it, so the map holds in-flight samples only.
-_sample_locks: dict[tuple[str, str, str, str], tuple[asyncio.Lock, int]] = {}
+_sample_locks: dict[_Key, tuple[asyncio.Lock, int]] = {}
 _HELLO = {
     "ar": "مرحباً، كيف يمكنني مساعدتك اليوم؟",
     "bg": "Здравейте, как мога да ви помогна днес?",
@@ -91,37 +104,81 @@ class PreviewIn(BaseModel):
     voice_id: str = Field(min_length=1, max_length=128, pattern=r"^[A-Za-z0-9_-]+$")
 
 
+class LineIn(PreviewIn):
+    text: Annotated[
+        str, StringConstraints(strip_whitespace=True, min_length=1, max_length=400)
+    ]
+
+    @field_validator("text")
+    @classmethod
+    def _no_control_characters(cls, text: str) -> str:
+        if any(unicodedata.category(char) == "Cc" for char in text):
+            raise ValueError("Use one line of text without control characters.")
+        return text
+
+
+async def _catalogue_model(body: PreviewIn) -> str:
+    catalogue = await voice_catalogue(body.language)
+    choice = next(
+        (
+            v
+            for v in catalogue["voices"]
+            if v["id"] == body.voice_id and v["provider"] == body.provider
+        ),
+        None,
+    )
+    if choice is None:
+        raise HTTPException(422, "Choose one of the suggested voices.")
+    return choice["model"]
+
+
+def _wav(audio: bytes) -> Response:
+    return Response(
+        audio,
+        media_type="audio/wav",
+        headers={"Cache-Control": "private, max-age=3600"},
+    )
+
+
 @router.post("/preview")
 async def preview_voice(body: PreviewIn) -> Response:
     try:
-        catalogue = await voice_catalogue(body.language)
-        choice = next(
-            (
-                v
-                for v in catalogue["voices"]
-                if v["id"] == body.voice_id and v["provider"] == body.provider
-            ),
-            None,
-        )
-        if choice is None:
-            raise HTTPException(422, "Choose one of the suggested voices.")
-        audio = await _preview_audio(body, choice["model"])
-        return Response(
-            audio,
-            media_type="audio/wav",
-            headers={"Cache-Control": "private, max-age=3600"},
-        )
+        model = await _catalogue_model(body)
+        text = _HELLO[body.language]
+        cap = 3 * len(SUPPORTED_LANGUAGES)
+        return _wav(await _audio(body, model, text, _samples, cap))
     except (httpx.HTTPError, ValueError) as exc:
         raise HTTPException(503, "This sample could not play. Try again.") from exc
 
 
-async def _preview_audio(body: PreviewIn, model: str) -> bytes:
-    cache_key = (body.provider, model, body.language, body.voice_id)
+@router.post("/line")
+async def speak_line(body: LineIn) -> Response:
+    try:
+        model = await _catalogue_model(body)
+        return _wav(await _audio(body, model, body.text, _lines, _LINE_CAP))
+    except (httpx.HTTPError, ValueError) as exc:
+        raise HTTPException(503, "This line could not play. Try again.") from exc
+
+
+async def _audio(
+    body: PreviewIn, model: str, text: str, cache: _Cache, cap: int
+) -> bytes:
+    digest = hashlib.sha256(text.encode()).hexdigest()
+    cache_key = (body.provider, model, body.language, body.voice_id, digest)
     lock, users = _sample_locks.get(cache_key, (asyncio.Lock(), 0))
     _sample_locks[cache_key] = (lock, users + 1)
     try:
         async with lock:
-            return await _cached_audio(body, model, cache_key)
+            cached = cache.get(cache_key)
+            if cached and time.monotonic() - cached[0] < 3600:
+                cache.move_to_end(cache_key)
+                return cached[1]
+            audio = await _synthesize(body, model, text)
+            cache[cache_key] = (time.monotonic(), audio)
+            cache.move_to_end(cache_key)
+            while len(cache) > cap:
+                cache.popitem(last=False)
+            return audio
     finally:
         lock, users = _sample_locks[cache_key]
         if users == 1:
@@ -130,57 +187,44 @@ async def _preview_audio(body: PreviewIn, model: str) -> bytes:
             _sample_locks[cache_key] = (lock, users - 1)
 
 
-async def _cached_audio(
-    body: PreviewIn, model: str, cache_key: tuple[str, str, str, str]
-) -> bytes:
-    cached = _samples.get(cache_key)
-    if cached and time.monotonic() - cached[0] < 3600:
-        _samples.move_to_end(cache_key)
-        audio = cached[1]
-    else:
-        async with httpx.AsyncClient(timeout=20) as client:
-            if body.provider == "cartesia":
-                response = await client.post(
-                    "https://api.cartesia.ai/tts/bytes",
-                    headers={
-                        "Authorization": f"Bearer {settings.cartesia_api_key}",
-                        "Cartesia-Version": HEADERS_VERSION,
+async def _synthesize(body: PreviewIn, model: str, text: str) -> bytes:
+    async with httpx.AsyncClient(timeout=20) as client:
+        if body.provider == "cartesia":
+            response = await client.post(
+                "https://api.cartesia.ai/tts/bytes",
+                headers={
+                    "Authorization": f"Bearer {settings.cartesia_api_key}",
+                    "Cartesia-Version": HEADERS_VERSION,
+                },
+                json={
+                    "model_id": model,
+                    "transcript": text,
+                    "language": body.language,
+                    "voice": body.voice_id,
+                    "output_format": {
+                        "container": "wav",
+                        "encoding": "pcm_s16le",
+                        "sample_rate": 24000,
                     },
-                    json={
-                        "model_id": model,
-                        "transcript": _HELLO[body.language],
-                        "language": body.language,
-                        "voice": body.voice_id,
-                        "output_format": {
-                            "container": "wav",
-                            "encoding": "pcm_s16le",
-                            "sample_rate": 24000,
-                        },
-                    },
-                )
-                response.raise_for_status()
-                audio = response.content
-            else:
-                response = await client.post(
-                    f"https://api.elevenlabs.io/v1/text-to-speech/{body.voice_id}",
-                    headers={"xi-api-key": settings.eleven_api_key},
-                    params={"output_format": "pcm_24000"},
-                    json={
-                        "model_id": model,
-                        "text": _HELLO[body.language],
-                        "language_code": elevenlabs_language(body.language),
-                    },
-                )
-                response.raise_for_status()
-                output = io.BytesIO()
-                with wave.open(output, "wb") as wav:
-                    wav.setnchannels(1)
-                    wav.setsampwidth(2)
-                    wav.setframerate(24000)
-                    wav.writeframes(response.content)
-                audio = output.getvalue()
-        _samples[cache_key] = (time.monotonic(), audio)
-        _samples.move_to_end(cache_key)
-        if len(_samples) > 3 * len(SUPPORTED_LANGUAGES):
-            _samples.popitem(last=False)
-    return audio
+                },
+            )
+            response.raise_for_status()
+            return response.content
+        response = await client.post(
+            f"https://api.elevenlabs.io/v1/text-to-speech/{body.voice_id}",
+            headers={"xi-api-key": settings.eleven_api_key},
+            params={"output_format": "pcm_24000"},
+            json={
+                "model_id": model,
+                "text": text,
+                "language_code": elevenlabs_language(body.language),
+            },
+        )
+        response.raise_for_status()
+        output = io.BytesIO()
+        with wave.open(output, "wb") as wav:
+            wav.setnchannels(1)
+            wav.setsampwidth(2)
+            wav.setframerate(24000)
+            wav.writeframes(response.content)
+        return output.getvalue()
