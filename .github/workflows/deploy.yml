@@ -145,7 +145,11 @@ jobs:
             echo "=== applying ==="
             $COMPOSE run --rm api alembic upgrade head
 
-            $COMPOSE up -d --remove-orphans
+            # Everything but the voicebot swaps in place. The voicebot rolls:
+            # the new one starts first, then the old one finishes its live calls
+            # in the background (scripts/deploy/roll-voicebot.sh).
+            $COMPOSE up -d --remove-orphans $($COMPOSE config --services | grep -vx voicebot)
+            new_voicebot="$(scripts/deploy/roll-voicebot.sh $COMPOSE)"
 
             # Stale-image gate. `pull` + `up -d` can silently keep an old
             # build running (cached layer, registry hiccup, a service that
@@ -158,7 +162,9 @@ jobs:
             assert_fresh() {
               svc="$1"
               docker pull -q "ghcr.io/hail-hq/hail-$svc:sha-$DEPLOY_GITHUB_SHA"
-              cid="$($COMPOSE ps -q "$svc")"
+              # The voicebot passes its new container: old ones may still be
+              # draining on the previous image.
+              cid="${2:-$($COMPOSE ps -q "$svc")}"
               [ -n "$cid" ] || { echo "::error::$svc has no running container"; exit 1; }
               running="$(docker inspect --format '{{.Image}}' "$cid")"
               expected="$(docker image inspect --format '{{.Id}}' \
@@ -169,7 +175,9 @@ jobs:
               fi
               echo "$svc: fresh ($expected)"
             }
-            for svc in api voicebot mcp; do assert_fresh "$svc"; done
+            assert_fresh api
+            assert_fresh mcp
+            assert_fresh voicebot "$new_voicebot"
 
             $COMPOSE ps
 
