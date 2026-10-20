@@ -2069,7 +2069,8 @@ async def _run_call(
 
     agent_hangup = make_agent_hangup(ctx, captured, bridge_state)
     # When the other party last started talking (time.monotonic()), so
-    # end_call can tell whether they spoke over the goodbye.
+    # end_call can tell whether they spoke over the goodbye. Someone still
+    # talking from before the goodbye counts too.
     speech_started = {"at": -math.inf}
 
     @session.on("user_state_changed")
@@ -2092,7 +2093,8 @@ async def _run_call(
             or HANDOVER_DEFAULT_MAX_SECONDS,
             on_cap_fired=_on_soft_cap_fired,
         ),
-        spoke_since=lambda t: speech_started["at"] >= t,
+        spoke_since=lambda t: session.user_state == "speaking"
+        or speech_started["at"] >= t,
     )
     if agent_tools:
         logger.info(

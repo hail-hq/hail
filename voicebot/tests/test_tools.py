@@ -221,12 +221,19 @@ async def test_end_call_keeps_the_call_when_they_talk_over_the_goodbye():
         hung_up.append(True)
         return "Call ended."
 
+    end_call = _spec(name="end_call", tier="session_control", execute=record)
     talked = dataclasses.replace(_tctx(), spoke_since=lambda _t: True)
-    handler = _make_handler(_spec(tier="session_control", execute=record), talked)
-    assert await handler({}, FakeRunContext()) == STILL_TALKING
+    assert await _make_handler(end_call, talked)({}, FakeRunContext()) == STILL_TALKING
     assert hung_up == []
 
     quiet = dataclasses.replace(_tctx(), spoke_since=lambda _t: False)
-    handler = _make_handler(_spec(tier="session_control", execute=record), quiet)
-    assert await handler({}, FakeRunContext()) == "Call ended."
+    assert await _make_handler(end_call, quiet)({}, FakeRunContext()) == "Call ended."
     assert hung_up == [True]
+
+
+async def test_other_session_tools_run_while_they_talk():
+    import dataclasses
+
+    dtmf = _spec(name="send_dtmf", tier="session_control")
+    talked = dataclasses.replace(_tctx(), spoke_since=lambda _t: True)
+    assert await _make_handler(dtmf, talked)({}, FakeRunContext()) == "ok"

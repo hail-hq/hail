@@ -191,9 +191,8 @@ def other_party_section(name: str, *, can_email: bool) -> str:
         line += (
             f' Any email for them goes to "{name}": never ask who to email'
             ' when they want it sent to themselves ("me", "my email").'
-        )
-        line += (
-            " If they only ask you to send something, ask once: by text or by" " email?"
+            " If they only ask you to send something, ask once: by text or by"
+            " email?"
         )
     return f"{OTHER_PARTY_HEADING}\n\n{line}"
 

@@ -43,11 +43,17 @@ def _make_handler(spec: ToolSpec, tctx: ToolContext):
                 context.disallow_interruptions()
             # session_control tools (end_call) must not cut off the agent's
             # own goodbye: wait for the pre-tool speech to finish playing.
-            # Someone who starts talking meanwhile is not done: keep the call.
+            # Someone who starts talking during the goodbye is not done: keep
+            # the call. Only end_call: DTMF and transfers run over IVR menus
+            # and "okay"s, so speech must not cancel them.
             if spec.risk_tier == "session_control":
                 started = time.monotonic()
                 await context.wait_for_playout()
-                if tctx.spoke_since is not None and tctx.spoke_since(started):
+                if (
+                    spec.name == "end_call"
+                    and tctx.spoke_since is not None
+                    and tctx.spoke_since(started)
+                ):
                     logger.info(
                         "call_id=%s end_call skipped: still talking", tctx.call_id
                     )
@@ -87,7 +93,7 @@ async def build_agent_tools(
 
     The caller must ``aclose()`` the client at shutdown. Returns no tools
     when the dispatch predates the ``organization_id`` field (rolling
-    deploy) — no tools beats wrong-org tools.
+    deploy): no tools beats wrong-org tools.
     """
     raw_org = metadata.get("organization_id")
     if raw_org is None:
@@ -104,7 +110,7 @@ async def build_agent_tools(
     allowed = metadata.get("tools")  # None ⇒ all available
     if allowed is not None and not isinstance(allowed, list):
         # Malformed dispatch metadata (e.g. a bare string instead of a
-        # list) — `s.name in allowed` would silently do substring
+        # list): `s.name in allowed` would silently do substring
         # matching on a string instead of list membership. Fail closed,
         # matching the malformed-organization_id posture above.
         logger.warning(

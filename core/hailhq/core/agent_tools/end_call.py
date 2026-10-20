@@ -1,4 +1,4 @@
-"""end_call — hang up gracefully once the call's goal is met.
+"""end_call: hang up gracefully once the call's goal is met.
 
 session_control tier: purely local (the voicebot's ``hangup`` handle),
 no API call, affects only its own call. The voicebot wrapper waits for
