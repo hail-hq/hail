@@ -157,6 +157,36 @@
     grid-column: 1/-1;
   }
 }
+@media (max-width: 767px) {
+  .hail-footer-badges {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+  }
+  .hail-footer-badges a {
+    width: 168px;
+    height: 48px;
+    padding: 8px;
+    gap: 8px;
+    border-radius: 8px;
+  }
+  .hail-footer-badges img {
+    flex-basis: 28px;
+    width: 28px;
+    height: 28px;
+  }
+  .hail-footer-badge-copy {
+    gap: 2px;
+  }
+  .hail-footer-badge-label {
+    font-size: 8px;
+    letter-spacing: 0.8px;
+  }
+  .hail-footer-badge-name {
+    font-size: 15px;
+    line-height: 18px;
+  }
+}
 @media (max-width: 480px) {
   .hail-footer-inner {
     width: calc(100% - 32px);
