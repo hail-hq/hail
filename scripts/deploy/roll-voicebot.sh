@@ -5,7 +5,8 @@
 # 2. Wait until it has registered with LiveKit. New calls go to it from then on.
 # 3. Stop each old voicebot in the background. SIGTERM makes the LiveKit worker
 #    drain: it takes no new calls and exits once its live calls end. Docker
-#    kills it after DRAIN_SECONDS (LiveKit's own drain limit is 1 hour).
+#    kills it after DRAIN_SECONDS: LiveKit's own drain limit (1 hour) plus a
+#    minute for the calls to close cleanly.
 #
 # If the new voicebot does not register, it is removed and the old ones keep
 # running, so a bad image never leaves the number without an agent.
@@ -14,9 +15,13 @@
 # Prints the new container id on stdout; progress goes to stderr.
 set -euo pipefail
 
-DRAIN_SECONDS="${DRAIN_SECONDS:-3600}"
+DRAIN_SECONDS="${DRAIN_SECONDS:-3660}"
 READY_SECONDS="${READY_SECONDS:-120}"
 compose=("$@")
+
+# A stopped voicebot left behind would be started again by --scale, on its old
+# image, and taken for the new one. Remove it first.
+"${compose[@]}" rm -f voicebot >&2
 
 old="$("${compose[@]}" ps -q voicebot)"
 count="$(printf '%s\n' "$old" | grep -c . || true)"
@@ -34,7 +39,9 @@ fi
 
 ready=""
 for _ in $(seq "$READY_SECONDS"); do
-  if docker logs "$new" 2>&1 | grep -q "registered worker"; then
+  # Not grep -q: it exits at the first match, docker logs then gets SIGPIPE,
+  # and pipefail turns a match into a failure.
+  if docker logs "$new" 2>&1 | grep "registered worker" >/dev/null; then
     ready=1
     break
   fi
