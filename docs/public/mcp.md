@@ -185,13 +185,49 @@ curl -H "Authorization: Bearer ${HAIL_API_KEY}" http://localhost:8081/
 
 The MCP service selects its auth mode from env at boot. For the full env-var contract, refer to the [MCP modes table in the operations runbook](./self-host/operations.md#mcp-modes) (`HAIL_AUTH_URL` for cloud, `HAIL_API_KEY` for self-host, mutually exclusive).
 
-## Why remote-only (no stdio / no PyPI install)
+## Stdio hosts, including Glama
 
-We release one MCP distribution: a remote HTTP endpoint. It is bundled with every Hail deploy. We deliberately do **not** publish a stdio MCP server on PyPI. The reasons:
+Use the remote URL for clients that accept it. Hosts such as Glama can launch the same tools over stdio.
+The stdio entry point is included in the MCP container. It is not a separate PyPI package.
 
-1. **Web UIs cannot run stdio servers.** Claude.ai's MCP Connectors and ChatGPT's Custom Connectors accept only remote URLs. They cannot start local processes from a browser.
-2. **Every terminal client also accepts a remote URL.** Claude Code, Claude Desktop, Cursor, and Zed all connect to a URL. The URL flow works for all clients. Stdio works only for a subset.
-3. **Stdio fragments distribution.** Two artifacts (PyPI stdio wrapper + HTTP service) cause two versions to keep in sync, two install paths, and two failure modes.
-4. **Installation friction.** Stdio requires Python + pip/uv on the user's dev machine. Remote HTTP requires nothing. You only paste a URL.
+Glama wraps the configured command with `mcp-proxy`, which expects stdio.
+Starting Uvicorn there opens an HTTP port but leaves the proxy waiting for protocol messages.
+That produces a 60-second timeout even when application startup succeeds.
 
-If a restricted client ever needs stdio, we will release a thin stdio-to-HTTP proxy on PyPI (approximately 50 LOC).
+In Glama's Dockerfile settings, keep the build that installs `core` and `mcp`.
+Set **CMD arguments** to:
+
+```json
+["python", "-u", "-m", "hailhq.mcp.stdio"]
+```
+
+Set the runtime environment:
+
+- `HAIL_API_URL`: `https://api.hail.so`, or your self-hosted API URL.
+- `HAIL_API_KEY`: your API key, stored as a secret.
+- `HAIL_AUTH_URL`: leave unset. Stdio uses the API key instead of browser OAuth.
+
+For Glama's **placeholder parameters**, a dummy key allows schema inspection:
+
+```json
+{
+  "HAIL_API_URL": "https://api.hail.so",
+  "HAIL_API_KEY": "hk_glama_inspection_only"
+}
+```
+
+The dummy key supports initialize, ping, and tool discovery only. Real tool calls require a valid API key.
+Inspection does not need a database, phone carrier, or voice provider.
+The API checks credentials when a tool runs. Stdio uses the existing tool definitions and consent checks.
+
+For a local container check:
+
+```sh
+docker build -f mcp/Dockerfile -t hail-mcp-stdio .
+docker run --rm -i \
+  -e HAIL_API_URL=https://api.hail.so \
+  -e HAIL_API_KEY \
+  hail-mcp-stdio python -u -m hailhq.mcp.stdio
+```
+
+The image's default command still serves Streamable HTTP on port 8081.
