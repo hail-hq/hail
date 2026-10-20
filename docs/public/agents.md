@@ -109,6 +109,10 @@ default lives in Call settings (`organization_call_settings.ai_disclosure_line`)
 and an agent can set its own `ai_disclosure_line`. `ai_disclosure: false` on the
 agent skips it; the responsibility for that is yours.
 
+The built-in lines are spoken in the call's language (`voice_config.language`,
+else the workspace voice's language). A custom `ai_disclosure_line` is spoken
+as written.
+
 ## What happens on an inbound text
 
 1. Hail stores the text and sends `sms.received` as before.
