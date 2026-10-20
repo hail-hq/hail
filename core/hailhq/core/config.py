@@ -57,6 +57,8 @@ class Settings(BaseSettings):
     # Set via .env / .env.local, see .env.example for current values.
     openai_model: str = ""
     google_model: str = ""
+    # Must accept thinking off at low effort (Haiku 5.5 does; Sonnet 5.5 and
+    # Opus 5.5 return 400). See docs/operations/voice-llm.md.
     anthropic_model: str = ""
     # Set: the house Anthropic model runs on Amazon Bedrock in this region,
     # signed with the AWS credentials below. Empty: Anthropic's API.
