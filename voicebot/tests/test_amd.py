@@ -394,6 +394,7 @@ class _FakeAmdSession:
         self.replies: list[str] = []
         self.started = False
         self.handlers: dict[str, list] = {}
+        self.stt: Any = object()
 
     def on(self, event: str):
         def _register(fn):
@@ -504,7 +505,9 @@ async def _drive_entrypoint(
     disconnect_before_amd: bool = False,
     answered: bool = False,
     confirmation_category: str = "uncertain",
+    confirmation_reason: str = "pickup_confirmation",
     metadata_overrides: dict | None = None,
+    stt: bool = True,
 ) -> tuple[UUID, _FakeAmdCtx, _FakeAmdSession]:
     """Run ``entrypoint`` with AMD stubbed, then fire the shutdown callback."""
     from hailhq.voicebot import agent as agent_mod
@@ -512,6 +515,8 @@ async def _drive_entrypoint(
     org_id = UUID("11111111-2222-3333-4444-555555555555")
     call_id = await _make_call_row(async_session)
     session = _FakeAmdSession()
+    if not stt:
+        session.stt = None
     models = amd_mod.AMDModels(FakeLLM(), object())
     models.aclose = AsyncMock()
     session.amd_models = models
@@ -520,7 +525,7 @@ async def _drive_entrypoint(
         models.aclose.assert_not_awaited()
         await _session.say(prompt)
         return _prediction(confirmation_category).model_copy(
-            update={"reason": "pickup_confirmation"}
+            update={"reason": confirmation_reason}
         )
 
     session.confirm = AsyncMock(side_effect=_confirm)
@@ -858,6 +863,70 @@ async def test_confirmed_human_gets_business_opening_once(
             assert "Do not greet or introduce yourself again" in session.replies[0]
     assert ctx.delete_room_calls == 0
     session.amd_models.aclose.assert_awaited_once()
+
+
+async def test_probe_into_phone_tree_keeps_disclosure_for_the_person(
+    async_session, monkeypatch
+):
+    """The menu heard the probe, the receptionist did not."""
+    from hailhq.voicebot.agent import AI_DISCLOSURE_LINE
+
+    _, _ctx, session = await _drive_entrypoint(
+        async_session,
+        monkeypatch,
+        amd_result=_prediction("uncertain"),
+        confirmation_category="machine-ivr",
+    )
+    session.emit_keypress()
+    session.emit_user_turn("Hello, reception.")
+    await asyncio.sleep(0)
+    await asyncio.sleep(0)
+
+    assert session.say_calls == [
+        f"{AI_DISCLOSURE_LINE} Can you hear me?",
+        f"{AI_DISCLOSURE_LINE} Is this a good time?",
+    ]
+
+
+async def test_unavailable_pickup_check_opens_the_call(async_session, monkeypatch):
+    from hailhq.voicebot.agent import AI_DISCLOSURE_LINE
+    from hailhq.voicebot.confirmation import UNAVAILABLE_REASON
+
+    _, ctx, session = await _drive_entrypoint(
+        async_session,
+        monkeypatch,
+        amd_result=None,
+        confirmation_reason=UNAVAILABLE_REASON,
+    )
+    assert session.say_calls == [
+        f"{AI_DISCLOSURE_LINE} Can you hear me?",
+        "Is this a good time?",
+    ]
+    assert ctx.delete_room_calls == 0
+    assert ctx.shutdown_calls == []
+
+
+async def test_no_stt_skips_the_probe_and_opens_the_call(async_session, monkeypatch):
+    from hailhq.voicebot.agent import AI_DISCLOSURE_LINE
+
+    _, ctx, session = await _drive_entrypoint(
+        async_session, monkeypatch, amd_result=None, stt=False
+    )
+    session.confirm.assert_not_awaited()
+    assert session.say_calls == [f"{AI_DISCLOSURE_LINE} Is this a good time?"]
+    assert ctx.delete_room_calls == 0
+
+
+async def test_probe_speaks_the_call_language(async_session, monkeypatch):
+    from hailhq.voicebot.agent import AI_DISCLOSURE_LINE
+
+    _, _ctx, session = await _drive_entrypoint(
+        async_session,
+        monkeypatch,
+        amd_result=_prediction("uncertain"),
+        metadata_overrides={"voice_config": {"language": "sv"}},
+    )
+    assert session.say_calls == [f"{AI_DISCLOSURE_LINE} Hör du mig?"]
 
 
 @pytest.mark.parametrize(

@@ -79,7 +79,11 @@ from hailhq.voicebot.amd import (
     run_amd,
 )
 from hailhq.voicebot.audio import prewarm_audio, room_options
-from hailhq.voicebot.confirmation import confirm_pickup
+from hailhq.voicebot.confirmation import (
+    UNAVAILABLE_REASON,
+    confirm_pickup,
+    probe_line,
+)
 from hailhq.voicebot.pipeline import (
     ProviderKeyError,
     build_session,
@@ -92,7 +96,7 @@ from hailhq.voicebot.telemetry import connect_livekit_tracing
 from hailhq.voicebot.tools import build_agent_tools
 from livekit import rtc
 from livekit.agents import Agent, JobContext, JobProcess, StopResponse
-from livekit.agents.llm import LLMError
+from livekit.agents.llm import LLM, LLMError
 from livekit.agents.voice import AgentSession, ConversationItemAddedEvent
 from livekit.agents.voice.amd import AMDCategory
 from livekit.api import CreateSIPParticipantRequest, SipCallError
@@ -290,6 +294,17 @@ def disclosure_line(
     """The exact disclosure to speak, named when the org name resolved."""
     return disclosure_text(
         "inbound" if direction == "inbound" else "outbound", org_name, template
+    )
+
+
+def metadata_disclosure(metadata: dict[str, Any]) -> str | None:
+    """The disclosure this dispatch speaks, or None when opted out."""
+    if not metadata.get("ai_disclosure", True):
+        return None
+    return disclosure_line(
+        metadata.get("org_name"),
+        metadata.get("direction"),
+        metadata.get("ai_disclosure_line"),
     )
 
 
@@ -672,15 +687,7 @@ async def speak_greeting(
     opening would race it and its "they have not said anything yet"
     premise would be false.
     """
-    disclosure = (
-        disclosure_line(
-            metadata.get("org_name"),
-            metadata.get("direction"),
-            metadata.get("ai_disclosure_line"),
-        )
-        if metadata.get("ai_disclosure", True)
-        else None
-    )
+    disclosure = metadata_disclosure(metadata)
     first_message = metadata.get("first_message")
     try:
         if first_message:
@@ -2188,33 +2195,25 @@ async def _run_call(
             amd_result = await run_amd(
                 session, call_id, models=models, on_ready=signal_ready, room=ctx.room
             )
+            classifier = None
             if (
                 not shutting_down
                 and captured["status"] is None
                 and captured["end_reason"] is None
                 and (amd_result is None or amd_result.category == AMDCategory.UNCERTAIN)
             ):
-                disclosure = (
-                    disclosure_line(
-                        metadata.get("org_name"),
-                        metadata.get("direction"),
-                        metadata.get("ai_disclosure_line"),
-                    )
-                    if metadata.get("ai_disclosure", True)
-                    else None
-                )
-                prompt = "Can you hear me?"
+                classifier = models.llm if models is not None else session.llm
+            # Without a classifier or transcripts the reply cannot be judged,
+            # so skip the probe and talk.
+            if isinstance(classifier, LLM) and session.stt is not None:
+                disclosure = metadata_disclosure(metadata)
+                prompt = probe_line(language)
                 if disclosure:
                     prompt = f"{disclosure} {prompt}"
                     pickup_disclosed = True
                 confirmation_result = await confirm_pickup(
-                    session,
-                    llm=models.llm if models is not None else session.llm,
-                    prompt=prompt,
+                    session, llm=classifier, prompt=prompt
                 )
-                # The probe already identified us; the business opening stays
-                # pending, including an explicit first_message.
-                metadata = {**metadata, "ai_disclosure": False}
         finally:
             if models is not None:
                 await models.aclose()
@@ -2252,7 +2251,16 @@ async def _run_call(
     ):
         return
     if confirmation_result is not None:
-        if confirmation_result.category == AMDCategory.UNCERTAIN:
+        if confirmation_result.category != AMDCategory.MACHINE_IVR:
+            # The probe already identified us to this listener; the business
+            # opening stays pending, including an explicit first_message. A
+            # phone tree is not a person, so the IVR path keeps the
+            # disclosure for whoever the tree hands us to.
+            metadata = {**metadata, "ai_disclosure": False}
+        if confirmation_result.reason == UNAVAILABLE_REASON:
+            # The reply could not be judged. When in doubt, talk.
+            logger.info("call_id=%s pickup check unavailable, opening", call_id)
+        elif confirmation_result.category == AMDCategory.UNCERTAIN:
             # No positive machine evidence: do not label this voicemail.
             captured["status"] = "no_answer"
             captured["end_reason"] = CallEndReason.USER_UNAVAILABLE.value
@@ -2262,12 +2270,13 @@ async def _run_call(
                 logger.exception("delete_room failed after unanswered pickup check")
             ctx.shutdown(reason=CallEndReason.USER_UNAVAILABLE.value)
             return
-        amd_result = confirmation_result
-        if amd_result.category == AMDCategory.MACHINE_IVR:
-            try:
-                await session._start_ivr_detection(transcript=amd_result.transcript)
-            except Exception:
-                logger.exception("could not start IVR detection after pickup check")
+        else:
+            amd_result = confirmation_result
+            if amd_result.category == AMDCategory.MACHINE_IVR:
+                try:
+                    await session._start_ivr_detection(transcript=amd_result.transcript)
+                except Exception:
+                    logger.exception("could not start IVR detection after pickup check")
     if amd_result is not None and amd_result.category in MACHINE_HANGUP_CATEGORIES:
         # Voicemail or a dead mailbox, hang up without speaking. We never
         # leave a message: a partial line on someone's voicemail is worse

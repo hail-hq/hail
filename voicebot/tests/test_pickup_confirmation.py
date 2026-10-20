@@ -6,6 +6,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
+from hailhq.core.languages import SUPPORTED_LANGUAGES
 from hailhq.voicebot import confirmation
 from livekit.agents.utils import EventEmitter
 from livekit.agents.voice.amd import AMDCategory
@@ -205,6 +206,61 @@ async def test_shutdown_provider_errors_and_cancellation_keep_opening_blocked(fa
         with pytest.raises(asyncio.CancelledError):
             await task
     else:
-        assert (await task).category == AMDCategory.UNCERTAIN
+        result = await task
+        assert result.category == AMDCategory.UNCERTAIN
+        assert result.reason == (
+            confirmation.UNAVAILABLE_REASON
+            if failure == "llm"
+            else confirmation.UNANSWERED_REASON
+        )
     assert not session._events.get("user_input_transcribed")
     assert not session._events.get("close")
+
+
+async def test_bad_label_is_unavailable_not_unanswered():
+    session = Session()
+    task = await start(session, Classifier('{"label":"robot"}'))
+    session.transcribe("Yes, I can hear you")
+    result = await task
+    assert result.category == AMDCategory.UNCERTAIN
+    assert result.reason == confirmation.UNAVAILABLE_REASON
+
+
+async def test_person_who_keeps_talking_is_still_confirmed():
+    """Every verdict is superseded by newer words until the deadline."""
+    session = Session()
+    llm = Classifier('{"label":"human"}')
+    original = llm.chat
+
+    def chat(**kwargs):
+        session.transcribe("Hello?")
+        return original(**kwargs)
+
+    llm.chat = chat
+    task = await start(session, llm)
+    session.transcribe("Yes? Who is this?")
+    result = await asyncio.wait_for(task, timeout=0.5)
+    assert result.category == AMDCategory.HUMAN
+
+
+async def test_long_probe_gets_time_to_play(monkeypatch):
+    monkeypatch.setattr(confirmation, "PROBE_TIMEOUT_SECONDS", 0.0)
+    monkeypatch.setattr(confirmation, "PROBE_CHARS_PER_SECOND", 100.0)
+    session = Session()
+
+    async def say(*args, **kwargs):
+        await asyncio.sleep(0.05)
+        session.transcribe("Yes")
+
+    session.say.side_effect = say
+    result = await confirmation.confirm_pickup(
+        session, llm=Classifier('{"label":"human"}'), prompt="x" * 20
+    )
+    assert result.category == AMDCategory.HUMAN
+
+
+def test_probe_line_covers_every_supported_language():
+    assert confirmation.PROBE_LINES.keys() == SUPPORTED_LANGUAGES.keys()
+    assert confirmation.probe_line(None) == "Can you hear me?"
+    assert confirmation.probe_line("xx") == "Can you hear me?"
+    assert confirmation.probe_line("sv") == "Hör du mig?"
