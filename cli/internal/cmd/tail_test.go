@@ -142,7 +142,7 @@ func TestTail_WithIdFlagFiltersAndAutoExits(t *testing.T) {
 	})
 
 	idValue := "call:" + uuid.UUID(callA).String()
-	stdout, _, err := runRoot(t,
+	stdout, stderr, err := runRoot(t,
 		map[string]string{"HAIL_API_KEY": "sk_test", "HAIL_API_URL": srv.URL, "NO_COLOR": "1"},
 		"tail", "--id", idValue, "--from-start",
 	)
@@ -161,6 +161,13 @@ func TestTail_WithIdFlagFiltersAndAutoExits(t *testing.T) {
 	}
 	if !strings.Contains(stdout, "hello") {
 		t.Errorf("stdout missing event body:\n%s", stdout)
+	}
+	// Following says it is waiting, on stderr only, so pipes stay clean.
+	if !strings.Contains(stderr, "Waiting for new events. Press Ctrl-C to stop.") {
+		t.Errorf("stderr missing waiting line:\n%s", stderr)
+	}
+	if strings.Contains(stdout, "Waiting for new events") {
+		t.Errorf("waiting line leaked to stdout:\n%s", stdout)
 	}
 }
 
@@ -235,12 +242,15 @@ func TestTail_NoFollowOneShot(t *testing.T) {
 		}},
 	})
 
-	_, _, err := runRoot(t,
+	_, stderr, err := runRoot(t,
 		map[string]string{"HAIL_API_KEY": "sk_test", "HAIL_API_URL": srv.URL, "NO_COLOR": "1"},
 		"tail", "--no-follow",
 	)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
+	}
+	if strings.Contains(stderr, "Waiting for new events") {
+		t.Errorf("--no-follow should not print the waiting line:\n%s", stderr)
 	}
 	if got := atomic.LoadInt32(&srv.hits); got != 1 {
 		t.Errorf("expected exactly 1 poll, got %d", got)

@@ -13,6 +13,7 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 - Call recording is on by default with 30 days of retention. A workspace that has not saved a choice is asked once during onboarding.
 - Voice: an unsure voicemail check rechecks the whole recorded greeting with Deepgram.
 - Call recordings are encoded at 48 kbps instead of 128 kbps: files are half the size and load faster, with no audible change to speech.
+- CLI: `hail tail` prints "Waiting for new events. Press Ctrl-C to stop." on stderr when it starts following, so an idle stream no longer looks stuck.
 
 ## [0.29.0] (2026-10-19)
 
