@@ -12,11 +12,9 @@ export type FooterBadge = {
   id: string;
   href: string;
   alt: string;
-  /** Intrinsic image size in px. Shared CSS sets one display height for all badges. */
-  width: number;
-  height: number;
-  /** One image per footer theme. */
-  src: { light: string; dark: string };
+  name: string;
+  /** Square provider logo. Shared CSS owns all card and logo dimensions. */
+  icon: string;
 };
 
 /** Framework-independent, server-rendered footer. Native anchors cross Next zones safely. */
@@ -68,19 +66,13 @@ export function Footer({
           <ul className="hail-footer-badges" aria-label="Featured on">
             {badges.map((badge) => (
               <li key={badge.id}>
-                <a href={badge.href} target="_blank" rel="noopener">
-                  {(["light", "dark"] as const).map((theme) => (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img
-                      key={theme}
-                      className={`hail-footer-badge-${theme}`}
-                      src={badge.src[theme]}
-                      alt={badge.alt}
-                      width={badge.width}
-                      height={badge.height}
-                      loading="lazy"
-                    />
-                  ))}
+                <a href={badge.href} target="_blank" rel="noopener" aria-label={badge.alt}>
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={badge.icon} alt="" width={36} height={36} loading="lazy" />
+                  <span className="hail-footer-badge-copy">
+                    <span className="hail-footer-badge-label">FEATURED ON</span>
+                    <span className="hail-footer-badge-name">{badge.name}</span>
+                  </span>
                 </a>
               </li>
             ))}
