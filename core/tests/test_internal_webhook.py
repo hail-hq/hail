@@ -1,8 +1,10 @@
-"""Tests for fetch_organization_name — every failure mode folds to None."""
+"""Tests for fetch_organization_name: every failure mode folds to the last
+name seen, else None."""
 
 from __future__ import annotations
 
 import asyncio
+import time
 
 import aiohttp
 import pytest
@@ -42,6 +44,11 @@ class _FakeSession:
         return self.response
 
 
+@pytest.fixture(autouse=True)
+def empty_cache(monkeypatch):
+    monkeypatch.setattr(internal_webhook, "_org_names", {})
+
+
 @pytest.fixture()
 def configured(monkeypatch):
     monkeypatch.setattr(settings, "hail_base_url", "https://hail.so")
@@ -61,7 +68,7 @@ async def test_returns_name_on_200(monkeypatch, configured):
     url, kwargs = session.calls[0]
     assert url == "https://hail.so/api/internal/organizations/lookup"
     assert kwargs["headers"]["X-Hail-Signature"].startswith("sha256=")
-    assert kwargs["timeout"].total == 1.0
+    assert kwargs["timeout"].total == 2.0
 
 
 async def test_unset_config_returns_none_without_any_network_call(monkeypatch):
@@ -128,3 +135,24 @@ async def test_aclose_waits_for_pending_notifier_tasks(monkeypatch):
 
     assert finished.is_set(), "aclose returned before the pending task finished"
     assert not internal_webhook._pending_tasks
+
+
+async def test_fresh_name_is_served_from_cache(monkeypatch, configured):
+    session = _FakeSession(response=_FakeResponse(200, {"name": "Acme Corp"}))
+    _install(monkeypatch, session)
+
+    assert await fetch_organization_name("org-123") == "Acme Corp"
+    assert await fetch_organization_name("org-123") == "Acme Corp"
+    assert len(session.calls) == 1
+
+
+async def test_stale_name_survives_a_failed_refresh(monkeypatch, configured):
+    stale = time.monotonic() - 2 * internal_webhook._ORG_NAME_TTL_SECONDS
+    monkeypatch.setattr(
+        internal_webhook, "_org_names", {"org-123": ("Acme Corp", stale)}
+    )
+    session = _FakeSession(exc=asyncio.TimeoutError())
+    _install(monkeypatch, session)
+
+    assert await fetch_organization_name("org-123") == "Acme Corp"
+    assert len(session.calls) == 1

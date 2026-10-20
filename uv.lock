@@ -214,6 +214,12 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/d1/65/54437e7edea49a3be9ef56f6b5965999bfdc52b9dadc9b448124ca51a594/anthropic-1.15.0-py3-none-any.whl", hash = "sha256:10189a7993c5c71a0a2d4bb80020ca6a2fd27679f51e627405da37251d15ff49", size = 2047755, upload-time = "2026-10-15T19:45:32.951Z" },
 ]
 
+[package.optional-dependencies]
+bedrock = [
+    { name = "boto3" },
+    { name = "botocore" },
+]
+
 [[package]]
 name = "anyio"
 version = "4.13.0"
@@ -1132,6 +1138,7 @@ name = "hailhq-core"
 version = "0.1.0"
 source = { editable = "core" }
 dependencies = [
+    { name = "anthropic", extra = ["bedrock"] },
     { name = "boto3" },
     { name = "cryptography" },
     { name = "didww" },
@@ -1161,6 +1168,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "anthropic", extras = ["bedrock"], specifier = ">=1.15" },
     { name = "boto3", specifier = ">=1.34" },
     { name = "cryptography", specifier = ">=42" },
     { name = "didww", specifier = ">=3.1" },

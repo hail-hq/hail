@@ -335,13 +335,17 @@ async def create_call(
     # Language/provider compatibility gate, reject before any Call row is
     # created. Deterministic on request + org config, so failures are
     # cached for idempotent replay like the other 422 gates.
-    lang = body.voice_config.language
-    org_rows = (
-        await load_org_provider_configs(db, principal.organization_id)
-        if lang is not None
-        else {}
+    org_rows = await load_org_provider_configs(db, principal.organization_id)
+    default_tts = org_rows.get("tts")
+    lang = body.voice_config.language or (
+        default_tts.params.get("language") if default_tts else None
     )
     if lang is not None:
+        body = body.model_copy(
+            update={
+                "voice_config": body.voice_config.model_copy(update={"language": lang})
+            }
+        )
         caps = SUPPORTED_LANGUAGES[lang]
         # Both layers share one consent rule: an org BYO row (STT or TTS)
         # that can't serve the requested language 422s here UNLESS the org
@@ -367,16 +371,15 @@ async def create_call(
                     loc=["body", "voice_config", "language"],
                 ),
             )
-        tts_row = org_rows.get("tts")
         if (
-            tts_row is not None
-            and tts_row.provider not in caps.tts
-            and not tts_row.fallback_enabled
+            default_tts is not None
+            and default_tts.provider not in caps.tts
+            and not default_tts.fallback_enabled
         ):
             raise await cache_failure(
                 idem,
                 unprocessable(
-                    f"your BYO tts provider '{tts_row.provider}' does not "
+                    f"your BYO tts provider '{default_tts.provider}' does not "
                     f"support language '{lang}'; supported providers: "
                     f"{sorted(caps.tts)}",
                     loc=["body", "voice_config", "language"],
@@ -523,7 +526,7 @@ async def create_call(
     # Resolve the org's display name for the spoken TCPA identity
     # disclosure (47 CFR 64.1200(b)(1)). Fail-safe: any lookup failure →
     # None → the voicebot speaks the generic fallback line instead. Run as
-    # a task so the up-to-1s lookup overlaps the LiveKit room creation
+    # a task so the up-to-2s lookup overlaps the LiveKit room creation
     # below (only the dispatch metadata needs the result) instead of
     # adding its latency serially; the task never raises, so an abandoned
     # result on the failure path is inert.

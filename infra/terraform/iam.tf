@@ -31,6 +31,20 @@ data "aws_iam_policy_document" "main" {
     ]
     resources = ["*"]
   }
+
+  # The voicebot's LLMs on Bedrock (ANTHROPIC_MODEL with
+  # ANTHROPIC_BEDROCK_REGION set). Any model and any of the account's
+  # inference profiles, so changing ANTHROPIC_MODEL needs no apply. A profile
+  # like "eu." routes each request to a region in its geography, so every
+  # region is allowed.
+  statement {
+    sid     = "VoiceLLMBedrock"
+    actions = ["bedrock:InvokeModel", "bedrock:InvokeModelWithResponseStream"]
+    resources = [
+      "arn:aws:bedrock:*::foundation-model/*",
+      "arn:aws:bedrock:*:${data.aws_caller_identity.current.account_id}:inference-profile/*",
+    ]
+  }
 }
 
 resource "aws_iam_policy" "main" {

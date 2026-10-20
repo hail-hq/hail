@@ -5,13 +5,13 @@ STT/TTS provider serves each one. Derived from official provider docs on
 2026-07-29 (research spec:
 ``docs/superpowers/specs/2026-07-29-multi-language-voicebot-design.md``):
 
-* Deepgram nova-3 streaming languages —
+* Deepgram nova-3 streaming languages:
   https://developers.deepgram.com/docs/models-languages-overview
-* Speechmatics real-time languages —
+* Speechmatics real-time languages:
   https://docs.speechmatics.com/speech-to-text/languages
-* Cartesia sonic-3.5 languages —
+* Cartesia sonic-3.5 languages:
   https://docs.cartesia.ai/build-with-cartesia/tts-models/latest
-* ElevenLabs eleven_turbo_v2_5 languages —
+* ElevenLabs eleven_turbo_v2_5 languages:
   https://elevenlabs.io/docs/models
 * LiveKit audio TurnDetector languages:
   https://docs.livekit.io/agents/build/turns/turn-detector/
@@ -31,12 +31,13 @@ __all__ = [
     "Language",
     "LanguageCaps",
     "default_stt_for",
+    "elevenlabs_language",
     "resolve_stt_provider",
     "tts_providers_for",
     "turn_mode_for",
 ]
 
-# Keep in sync with SUPPORTED_LANGUAGES — test_literal_matches_matrix_keys
+# Keep in sync with SUPPORTED_LANGUAGES. test_literal_matches_matrix_keys
 # guards the pairing. A Literal (not a StrEnum) so pydantic renders a plain
 # string enum in the OpenAPI spec.
 Language = Literal[
@@ -133,7 +134,7 @@ _SEMANTIC_TURN = frozenset(
 # "zh" is here not because Speechmatics lacks Mandarin but because its code
 # for it is "cmn", and the LiveKit plugin's LanguageCode normalization maps
 # "cmn" back to "zh" (livekit.agents language.py), so the code Speechmatics
-# accepts can never reach the wire — a speechmatics-routed zh call fails at
+# accepts can never reach the wire: a speechmatics-routed zh call fails at
 # websocket start with invalid_language.
 _NO_SPEECHMATICS = frozenset({"gu", "kn", "te", "zh"})
 # Languages ElevenLabs eleven_turbo_v2_5 does NOT cover (Cartesia only).
@@ -166,6 +167,28 @@ SUPPORTED_LANGUAGES: dict[str, LanguageCaps] = {
     for code in _NAMES
 }
 
+# Cartesia does not expose model language capabilities through its catalogue.
+# Conservative snapshots: only languages also supported by Hail's STT pipeline.
+# Reviewed 2026-10-19 against the official Sonic 3.5 / Sonic 3.6 model pages:
+# https://docs.cartesia.ai/build-with-cartesia/tts-models/sonic-3-5
+# https://docs.cartesia.ai/build-with-cartesia/tts-models/latest
+# Unknown models require explicit operator capability configuration. This does
+# not change which models an advanced BYO configuration can use.
+CARTESIA_MODEL_LANGUAGES: dict[str, frozenset[str]] = dict.fromkeys(
+    ("sonic-3.5", "sonic-3.5-2026-05-04", "sonic-3.6", "sonic-3.6-2026-08-27"),
+    frozenset(SUPPORTED_LANGUAGES),
+)
+
+
+# ElevenLabs uses ISO 639-3 where a language has no ISO 639-1 code.
+# https://elevenlabs.io/docs/models lists Filipino as "fil".
+_ELEVENLABS_CODES = {"tl": "fil"}
+
+
+def elevenlabs_language(language: str) -> str:
+    """Hail's language code as ElevenLabs models, voices and requests spell it."""
+    return _ELEVENLABS_CODES.get(language, language)
+
 
 def default_stt_for(language: str | None) -> str:
     """Auto-route: Deepgram wherever the semantic turn detector works
@@ -184,7 +207,7 @@ def default_stt_for(language: str | None) -> str:
 def resolve_stt_provider(org_provider: str | None, language: str | None) -> str:
     """Precedence: org BYO standing choice > language auto-routing.
 
-    STT provider selection is console-BYO-only — there is no per-call
+    STT provider selection is console-BYO-only. There is no per-call
     override. An org row (set via the console) always wins; absent one,
     the call auto-routes by language (see :func:`default_stt_for`).
     """
@@ -203,8 +226,8 @@ def turn_mode_for(language: str | None, stt_provider: str) -> str:
     """Pick the turn-detection strategy for one call.
 
     "semantic": LiveKit audio TurnDetector (14 languages, any STT).
-    "stt" — Speechmatics drives end-of-turn from the transcript stream.
-    "vad" — silence-gap only; the floor when nothing better exists.
+    "stt": Speechmatics drives end-of-turn from the transcript stream.
+    "vad": silence-gap only; the floor when nothing better exists.
     """
     if language is None or SUPPORTED_LANGUAGES[language].semantic_turn:
         return "semantic"

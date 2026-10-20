@@ -115,4 +115,45 @@ async def resolve_member_emails(
     return list((await session.execute(stmt)).scalars().all())
 
 
-__all__ = ["DirectoryEntry", "list_directory", "resolve_member_emails"]
+async def find_by_phone(
+    session: AsyncSession, organization_id: uuid.UUID, phone_e164: str
+) -> DirectoryEntry | None:
+    """The member or contact with this number, members first. Names the
+    person on a call so the voicebot knows who "me" is. A number shared by
+    two members names nobody: "me" would be a guess. Contacts are unique
+    per org and number."""
+    member_stmt = (
+        select(User.name)
+        .join(OrganizationMember, OrganizationMember.user_id == User.id)
+        .where(
+            OrganizationMember.organization_id == organization_id,
+            User.phone_number == phone_e164,
+        )
+        .limit(2)
+    )
+    names = (await session.execute(member_stmt)).scalars().all()
+    if len(names) > 1:
+        return None
+    if names and names[0]:
+        return DirectoryEntry(
+            name=names[0], has_email=True, has_phone=True, source="member"
+        )
+    contact_stmt = select(Contact.name, Contact.email).where(
+        Contact.organization_id == organization_id,
+        Contact.phone_e164 == phone_e164,
+    )
+    row = (await session.execute(contact_stmt)).one_or_none()
+    if row is None or not row[0]:
+        return None
+    name, email = row
+    return DirectoryEntry(
+        name=name, has_email=email is not None, has_phone=True, source="contact"
+    )
+
+
+__all__ = [
+    "DirectoryEntry",
+    "find_by_phone",
+    "list_directory",
+    "resolve_member_emails",
+]

@@ -11,7 +11,7 @@ Hail v1 is three Python services plus a Go CLI, built around LiveKit Cloud.
                                                                      │
                                                                      ├─ VAD:   Silero
                                                                      ├─ STT:   Deepgram
-                                                                     ├─ LLM:   fallback(OpenAI → Gemini → Anthropic)
+                                                                     ├─ LLM:   fallback(Anthropic → OpenAI → Gemini)
                                                                      │        or caller-provided endpoint
                                                                      └─ TTS:   Cartesia (→ ElevenLabs fallback)
 ```

@@ -244,6 +244,11 @@ func runTail(ctx context.Context, opts *Options, f *tailFlags) error {
 	if !f.fromStart {
 		cursor = encodeEventCursor(time.Now().UTC(), openapi_types.UUID(uuid.Nil))
 	}
+	// Following prints nothing until an event arrives. Say so on stderr, so
+	// the terminal does not look stuck and stdout stays clean for pipes.
+	if !f.noFollow {
+		fmt.Fprintln(opts.Stderr, "Waiting for new events. Press Ctrl-C to stop.")
+	}
 	interval := time.Duration(f.intervalMS) * time.Millisecond
 	// Generous limit so a single fetch can drain a long backlog.
 	limit := 1000

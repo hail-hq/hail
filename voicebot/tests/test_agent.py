@@ -92,6 +92,13 @@ def test_metadata_parser_rejects_empty_string() -> None:
 # --------------------------------------------------------------------------- #
 
 
+def test_build_instructions_uses_the_selected_spoken_language() -> None:
+    assert "Speak in French for this call." in build_instructions(
+        "Welcome the user", language="fr"
+    )
+    assert "Speak in" not in build_instructions("Welcome the user", language="invalid")
+
+
 def test_build_instructions_prepends_preamble_to_caller_prompt() -> None:
     """The fixed voice preamble always leads; the caller prompt follows it."""
     caller = "You are calling Dr. Lee's office to book a teeth cleaning."
@@ -1570,9 +1577,22 @@ async def test_speak_greeting_uses_inbound_line_and_agent_template():
         },
     )
     assert session.say_calls == [
+        ("I'm an AI assistant for Acme. How can I help?", False)
+    ]
+
+    session = FakeAnnouncingSession()
+    await speak_greeting(
+        session,
+        {
+            "direction": "inbound",
+            "org_name": "Acme",
+            "first_message": "Hey, this is Joker! Want to hear a joke?",
+        },
+    )
+    assert session.say_calls == [
         (
-            "Hi, this is an AI assistant answering on behalf of Acme. How can I help?",
-            True,
+            "Hey, this is Joker! I'm an AI assistant for Acme. Want to hear a joke?",
+            False,
         )
     ]
 
@@ -1795,7 +1815,11 @@ async def test_soft_cap_without_handover_keeps_audio_and_room() -> None:
     session = FakeBridgeSession()
     state = {"human": None, "connected": False}
     await soft_cap_announce_and_hangup(
-        ctx, session, CALL_ID, delay_seconds=0, bridge_state=state  # type: ignore[arg-type]
+        ctx,
+        session,
+        CALL_ID,
+        delay_seconds=0,
+        bridge_state=state,  # type: ignore[arg-type]
     )
     assert session.output.enabled == []
     assert session.said == [SOFT_CAP_ANNOUNCEMENT]
@@ -2035,3 +2059,88 @@ async def test_shutdown_waits_briefly_for_answer_post(monkeypatch) -> None:
     stuck = asyncio.create_task(asyncio.Event().wait())
     await finish_answer_post({"answer_task": stuck}, CALL_ID)
     assert stuck.cancelled()
+
+
+@pytest.mark.parametrize(
+    ("message", "spoken"),
+    [
+        ("Hello there", "Hello there. AI line."),
+        (
+            "Hi, I'm Dr. Lee's assistant. How can I help?",
+            "Hi, I'm Dr. Lee's assistant. AI line. How can I help?",
+        ),
+        ("Need help?", "AI line. Need help?"),
+        (
+            "Hi, I am Mrs. Smith's assistant. How can I help?",
+            "Hi, I am Mrs. Smith's assistant. AI line. How can I help?",
+        ),
+        (
+            "Hi, this is Prof. J. Lee! How can I help?",
+            "Hi, this is Prof. J. Lee! AI line. How can I help?",
+        ),
+        ("Hi, I am Al. How can I help?", "Hi, I am Al. AI line. How can I help?"),
+    ],
+)
+def test_greeting_with_ai_line(message, spoken):
+    from hailhq.voicebot.agent import greeting_with_ai_line
+
+    assert greeting_with_ai_line(message, "AI line.") == spoken
+
+
+async def test_other_party_prompt_names_a_member_caller(monkeypatch):
+    from contextlib import asynccontextmanager
+
+    from hailhq.core.directory import DirectoryEntry
+    from hailhq.voicebot import agent as agent_mod
+
+    class Result:
+        def one_or_none(self):
+            return ("org", "inbound", "+46700000000", "+12025550100")
+
+    class Session:
+        async def execute(self, _stmt):
+            return Result()
+
+    @asynccontextmanager
+    async def scope():
+        yield Session()
+
+    seen = {}
+
+    async def find(_session, org, number):
+        seen["number"] = number
+        return DirectoryEntry(
+            name="Sam", has_email=True, has_phone=True, source="member"
+        )
+
+    monkeypatch.setattr(agent_mod, "session_scope", scope)
+    monkeypatch.setattr(agent_mod, "find_by_phone", find)
+    prompt = await agent_mod.other_party_prompt(UUID(int=1))
+    assert seen["number"] == "+46700000000"
+    assert '"Sam"' in prompt and "my email" in prompt
+
+
+async def test_other_party_prompt_drops_the_section_on_any_failure(monkeypatch):
+    from contextlib import asynccontextmanager
+
+    from hailhq.voicebot import agent as agent_mod
+
+    @asynccontextmanager
+    async def refused():
+        raise ConnectionRefusedError
+        yield
+
+    monkeypatch.setattr(agent_mod, "session_scope", refused)
+    assert await agent_mod.other_party_prompt(UUID(int=1)) is None
+
+    class Session:
+        async def execute(self, _stmt):
+            await asyncio.Event().wait()
+
+    @asynccontextmanager
+    async def stuck():
+        yield Session()
+
+    monkeypatch.setattr(agent_mod, "session_scope", stuck)
+    monkeypatch.setattr(agent_mod, "_OTHER_PARTY_TIMEOUT_SECONDS", 0.01)
+    assert await agent_mod.other_party_prompt(UUID(int=1)) is None

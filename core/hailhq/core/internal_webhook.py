@@ -21,6 +21,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import time
 from typing import Any
 
 import aiohttp
@@ -32,9 +33,16 @@ logger = logging.getLogger(__name__)
 
 _TIMEOUT_SECONDS = 5
 
-# Org-name lookup budget: tight enough not to noticeably slow POST /calls,
-# and every failure just degrades the spoken disclosure to generic wording.
-_ORG_NAME_TIMEOUT_SECONDS = 1.0
+# Org-name lookup budget. The lookup takes 0.5 to 1.0 s, so a 1 s budget
+# timed out often and the AI line lost the business name. A failure still
+# only degrades the line to generic wording.
+_ORG_NAME_TIMEOUT_SECONDS = 2.0
+# A name younger than this is used without asking hail.so again; an older one
+# is refreshed, and kept when the refresh fails. The cache lives per process:
+# it helps the API. Inbound calls run in a fresh voicebot process each, so
+# they read the mirrored organizations table first (inbound_calls).
+_ORG_NAME_TTL_SECONDS = 600.0
+_org_names: dict[str, tuple[str, float]] = {}
 
 _session: aiohttp.ClientSession | None = None
 _pending_tasks: set[asyncio.Task[None]] = set()
@@ -111,11 +119,24 @@ async def _post(path: str, payload: dict[str, Any]) -> None:
 async def fetch_organization_name(organization_id: str) -> str | None:
     """Resolve an organization's display name from hail-website.
 
-    Fail-safe by design: unset config (self-host — same posture as the
+    Fail-safe by design: unset config (self-host, same posture as the
     fire-and-forget notifier), timeout, non-200, connection error,
-    malformed body, or a blank name all return ``None``. Never raises —
-    the call-creation path must not be able to fail on this.
+    malformed body, or a blank name all return the last name seen for the
+    org, else ``None``. Never raises: the call-creation path must not be
+    able to fail on this. Names are cached per process for
+    ``_ORG_NAME_TTL_SECONDS``.
     """
+    cached = _org_names.get(organization_id)
+    if cached is not None and time.monotonic() - cached[1] < _ORG_NAME_TTL_SECONDS:
+        return cached[0]
+    name = await _lookup_organization_name(organization_id)
+    if name is None:
+        return cached[0] if cached is not None else None
+    _org_names[organization_id] = (name, time.monotonic())
+    return name
+
+
+async def _lookup_organization_name(organization_id: str) -> str | None:
     parts = _signed_body({"organization_id": organization_id})
     if parts is None:
         return None

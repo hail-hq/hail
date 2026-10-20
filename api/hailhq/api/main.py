@@ -44,6 +44,7 @@ from hailhq.api.routes.internal import numbers as internal_numbers
 from hailhq.api.routes.internal import org_closures as internal_org_closures
 from hailhq.api.routes.internal import provider_config as internal_provider_config
 from hailhq.api.routes.internal import ses_events as internal_ses_events
+from hailhq.api.routes.internal import voices as internal_voices
 from hailhq.api.usage import write_usage_event
 from hailhq.api.verification_worker import VerificationWorker
 from hailhq.core import internal_webhook
@@ -467,6 +468,7 @@ app.include_router(internal_ses_events.router)
 app.include_router(internal_org_closures.router)
 app.include_router(internal_provider_config.router)
 app.include_router(internal_call_settings.router)
+app.include_router(internal_voices.router)
 app.include_router(internal_dsar.router)
 app.include_router(internal_agent.router)
 app.include_router(internal_numbers.router)

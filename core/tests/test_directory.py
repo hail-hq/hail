@@ -5,7 +5,11 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timezone
 
-from hailhq.core.directory import list_directory, resolve_member_emails
+from hailhq.core.directory import (
+    find_by_phone,
+    list_directory,
+    resolve_member_emails,
+)
 from hailhq.core.models import Contact, OrganizationMember, User
 from sqlalchemy import text
 
@@ -132,3 +136,37 @@ async def test_resolve_member_emails_returns_all_matches(async_session):
         "sam1@x.test",
         "sam2@x.test",
     ]
+
+
+async def test_find_by_phone_prefers_members_and_stays_in_org(async_session):
+    org_a, org_b = uuid.uuid4(), uuid.uuid4()
+    await _add_member(
+        async_session, org_a, "Priya", "p@a.test", phone_number="+15551234567"
+    )
+    await _add_contact(async_session, org_a, "Priya Mobile", phone_e164="+15551234567")
+    await _add_contact(
+        async_session, org_a, "Maya", email="m@a.test", phone_e164="+15559876543"
+    )
+
+    member = await find_by_phone(async_session, org_a, "+15551234567")
+    assert (member.name, member.source) == ("Priya", "member")
+    contact = await find_by_phone(async_session, org_a, "+15559876543")
+    assert (contact.name, contact.source, contact.has_email) == (
+        "Maya",
+        "contact",
+        True,
+    )
+    assert await find_by_phone(async_session, org_b, "+15551234567") is None
+    assert await find_by_phone(async_session, org_a, "+15550000000") is None
+
+
+async def test_find_by_phone_names_nobody_for_a_shared_number(async_session):
+    org = uuid.uuid4()
+    await _add_member(
+        async_session, org, "Ana", "ana@a.test", phone_number="+15550001111"
+    )
+    await _add_member(
+        async_session, org, "Ben", "ben@a.test", phone_number="+15550001111"
+    )
+
+    assert await find_by_phone(async_session, org, "+15550001111") is None

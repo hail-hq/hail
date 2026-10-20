@@ -12,7 +12,7 @@
 [![Docs](https://img.shields.io/badge/docs-hail.so%2Fdocs-blue)](https://hail.so/docs)
 [![Brand assets](https://img.shields.io/badge/brand-hail.so%2Fbrand-5284ff)](https://hail.so/brand)
 
-Your agent needs to call a person to move an appointment. Hail connects to the telephone carrier and runs the voice pipeline — STT, TTS, turn detection. Your agent is the brain: point Hail at any OpenAI-compatible endpoint ([bring your own LLM](docs/public/byo-llm.md)), or let Hail's fallback chain (OpenAI → Gemini → Anthropic) do the talking. SMS and email work the same way — one MCP endpoint, one API key, one invoice.
+Your agent needs to call a person to move an appointment. Hail connects to the telephone carrier and runs the voice pipeline — STT, TTS, turn detection. Your agent is the brain: point Hail at any OpenAI-compatible endpoint ([bring your own LLM](docs/public/byo-llm.md)), or let Hail's fallback chain (Anthropic → OpenAI → Gemini) do the talking. SMS and email work the same way — one MCP endpoint, one API key, one invoice.
 
 Self-hostable with Docker Compose; LiveKit Cloud and the communication
 providers remain external. Open source under AGPLv3.
@@ -245,7 +245,7 @@ A checked box is a released feature. Per-artifact changelogs (GitHub Releases fo
 - Turn detection
   - [x] LiveKit turn-detector
 - LLM — system-prompt mode
-  - [x] Fallback: OpenAI → Gemini → Anthropic, fast models
+  - [x] Fallback: Anthropic → OpenAI → Gemini, fast models
 - LLM — BYO-endpoint mode
   - [x] OpenAI chat-completions-compatible ([docs](docs/public/byo-llm.md))
 - Recording

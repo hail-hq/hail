@@ -6,8 +6,9 @@ clean up). Three LLM modes are supported:
 
 * **Mode A, Hail fallback chain** (``llm`` is ``None`` and no org BYO llm
   config): assemble a :class:`livekit.agents.llm.FallbackAdapter` over
-  OpenAI → Google → Anthropic fast-tier models so a single provider outage
-  doesn't take the call down.
+  Anthropic (on Bedrock when ``ANTHROPIC_BEDROCK_REGION`` is set) → OpenAI
+  → Google fast-tier models so a single provider outage doesn't take the
+  call down.
 * **Mode B, caller-provided endpoint** (dispatch metadata's ``llm`` is a
   dict with ``base_url``/``api_key``/``model``, possibly decrypted from
   ``api_key_enc``): a single :class:`livekit.plugins.openai.LLM` pointed at
@@ -65,17 +66,21 @@ from hailhq.core.db import session_scope
 from hailhq.core.languages import (
     SUPPORTED_LANGUAGES,
     default_stt_for,
+    elevenlabs_language,
     resolve_stt_provider,
     tts_providers_for,
     turn_mode_for,
 )
 from hailhq.core.provider_config import load_org_provider_configs, provider_cipher
+from hailhq.core.providers.llm.bedrock import bedrock_client, is_bedrock_client
 from hailhq.core.url_guard import UnsafeUrlError, assert_public_https_url
 from livekit.agents import AgentSession, TurnHandlingOptions, inference
 from livekit.agents import llm as agents_llm
 from livekit.agents import stt as agents_stt
 from livekit.agents import tts as agents_tts
 from livekit.agents import vad as agents_vad
+from livekit.agents.types import NOT_GIVEN
+from livekit.agents.utils import is_given
 from livekit.plugins import (
     anthropic as anthropic_plugin,
 )
@@ -200,13 +205,50 @@ def decrypt_llm_metadata(llm_cfg: dict[str, Any] | None) -> dict[str, Any] | Non
     return llm_cfg
 
 
+class _FastAnthropicLLM(anthropic_plugin.LLM):
+    """Thinking off and low effort on every request: a voice turn needs the
+    first word fast, and the call's turns are short. Thinking off also means
+    no thinking blocks the plugin would have to send back unchanged."""
+
+    async def _prewarm_impl(self) -> None:
+        # The plugin prewarms with models.list, which the Bedrock client
+        # does not have.
+        if is_bedrock_client(self._client):
+            return
+        await super()._prewarm_impl()
+
+    def chat(self, *, extra_kwargs: Any = NOT_GIVEN, **kwargs: Any) -> Any:
+        extra = dict(extra_kwargs) if is_given(extra_kwargs) else {}
+        extra.setdefault("thinking", {"type": "disabled"})
+        extra.setdefault("output_config", {"effort": "low"})
+        return super().chat(extra_kwargs=extra, **kwargs)
+
+
+def _house_anthropic() -> agents_llm.LLM:
+    if not settings.anthropic_bedrock_region:
+        return _FastAnthropicLLM(model=settings.anthropic_model)
+    # The plugin insists on a key even when handed a client; Bedrock signs
+    # with the AWS credential chain instead.
+    return _FastAnthropicLLM(
+        model=settings.anthropic_model,
+        client=bedrock_client(settings.anthropic_bedrock_region),
+        api_key="bedrock",
+    )
+
+
+def _house_llms() -> list[agents_llm.LLM]:
+    return [
+        _house_anthropic(),
+        openai_plugin.LLM(model=settings.openai_model),
+        google_plugin.LLM(
+            model=settings.google_model, thinking_config={"thinking_level": "minimal"}
+        ),
+    ]
+
+
 def _house_llm() -> agents_llm.LLM:
     return agents_llm.FallbackAdapter(
-        llm=[
-            openai_plugin.LLM(model=settings.openai_model),
-            google_plugin.LLM(model=settings.google_model),
-            anthropic_plugin.LLM(model=settings.anthropic_model),
-        ],
+        llm=_house_llms(),
         attempt_timeout=10.0,
         max_retry_per_llm=1,
         retry_interval=5.0,
@@ -260,12 +302,7 @@ def build_llm(
         byo = _org_llm(org)
         if org.fallback_enabled:
             return agents_llm.FallbackAdapter(
-                llm=[
-                    byo,
-                    openai_plugin.LLM(model=settings.openai_model),
-                    google_plugin.LLM(model=settings.google_model),
-                    anthropic_plugin.LLM(model=settings.anthropic_model),
-                ],
+                llm=[byo, *_house_llms()],
                 attempt_timeout=10.0,
                 max_retry_per_llm=1,
                 retry_interval=5.0,
@@ -293,7 +330,7 @@ def _house_tts(
             "model": settings.elevenlabs_model,
         }
         if language:
-            kwargs["language"] = language
+            kwargs["language"] = elevenlabs_language(language)
         instances.append(elevenlabs_plugin.TTS(**kwargs))
     return instances
 
@@ -324,7 +361,7 @@ def _org_tts(
         if voice:
             kwargs["voice_id"] = voice
         if language:
-            kwargs["language"] = language
+            kwargs["language"] = elevenlabs_language(language)
         return elevenlabs_plugin.TTS(**kwargs)
     raise ProviderKeyError(f"unknown org tts provider '{org.provider}'")
 
@@ -556,6 +593,9 @@ def build_session(
     ``None`` (provider defaults / English) rather than raising, so a
     malformed dispatch never crashes the call.
     """
+    org_cfgs = org_cfgs or {}
+    org_tts = org_cfgs.get("tts")
+    language = language or (org_tts.params.get("language") if org_tts else None)
     if language is not None and language not in SUPPORTED_LANGUAGES:
         logger.warning(
             "unsupported language %r from dispatch metadata; falling back to "
@@ -563,7 +603,6 @@ def build_session(
             language,
         )
         language = None
-    org_cfgs = org_cfgs or {}
     org_stt = org_cfgs.get("stt")
     provider = resolve_stt_provider(org_stt.provider if org_stt else None, language)
     if language is not None and provider not in SUPPORTED_LANGUAGES[language].stt:

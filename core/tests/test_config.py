@@ -48,3 +48,20 @@ def test_recording_retention_rejects_unsupported_defaults(monkeypatch, days):
     monkeypatch.setenv("HAIL_RECORDING_RETENTION_DAYS", str(days))
     with pytest.raises(ValidationError):
         Settings(_env_file=None)
+
+
+def test_voice_preferences_are_operator_configuration_with_provenance(monkeypatch):
+    from hailhq.core.config import Settings
+
+    monkeypatch.setenv(
+        "VOICE_SHORTLIST_PREFERENCES",
+        '{"fr":[{"provider":"cartesia","voice_id":"reviewed-voice","reason":"French listening review"}]}',
+    )
+    settings = Settings(_env_file=None)
+    assert settings.voice_shortlist_preferences["fr"][0].voice_id == "reviewed-voice"
+    monkeypatch.setenv(
+        "VOICE_SHORTLIST_PREFERENCES",
+        '{"fr":[{"provider":"cartesia","voice_id":"reviewed-voice"}]}',
+    )
+    with pytest.raises(ValidationError):
+        Settings(_env_file=None)

@@ -17,6 +17,7 @@ locals {
   hail_mail_base_domain = run_cmd("--terragrunt-quiet", "bash", "-c", "source ${local.env_file} && echo -n \"$HAIL_MAIL_BASE_DOMAIN\"")
   ses_tracking_domain   = run_cmd("--terragrunt-quiet", "bash", "-c", "source ${local.env_file} && echo -n \"$HAIL_SES_TRACKING_DOMAIN\"")
   ses_tracking_enabled  = run_cmd("--terragrunt-quiet", "bash", "-c", "source ${local.env_file} && echo -n \"$HAIL_SES_TRACKING_ENABLED\"")
+  asset_origins         = run_cmd("--terragrunt-quiet", "bash", "-c", "source ${local.env_file} && echo -n \"$HAIL_ASSET_ALLOWED_ORIGINS\"")
 }
 
 terraform {
@@ -47,6 +48,7 @@ inputs = {
   hail_mail_base_domain       = local.hail_mail_base_domain
   ses_tracking_domain         = local.ses_tracking_domain
   ses_tracking_domain_enabled = local.ses_tracking_enabled == "true"
+  asset_allowed_origins       = local.asset_origins == "" ? ["https://hail.so"] : [for o in split(",", local.asset_origins) : trimspace(o)]
   aws_profile                 = local.aws_profile
   iam_user_name               = local.iam_user_name
   lambda_source_dir           = "${get_repo_root()}/infra/ses-ingest-lambda"

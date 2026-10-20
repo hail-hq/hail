@@ -235,6 +235,25 @@ def _make_session(language, org_cfgs=None):
     return build_session(None, MagicMock(), org_cfgs=org_cfgs, language=language)
 
 
+@pytest.mark.parametrize("explicit,expected", [(None, "fr"), ("en", "en")])
+def test_workspace_language_reaches_both_speech_layers(explicit, expected):
+    from unittest.mock import MagicMock, patch
+
+    from hailhq.voicebot.pipeline import ResolvedLayer
+
+    org_tts = ResolvedLayer(
+        "cartesia", None, {"language": "fr", "voice_id": "chosen"}, True
+    )
+    with (
+        patch("hailhq.voicebot.pipeline.build_stt") as stt,
+        patch("hailhq.voicebot.pipeline.build_tts") as tts,
+        patch("hailhq.voicebot.pipeline.AgentSession"),
+    ):
+        build_session(None, MagicMock(), org_cfgs={"tts": org_tts}, language=explicit)
+    assert stt.call_args.args[1] == expected
+    assert tts.call_args.args[2] == expected
+
+
 def test_session_semantic_turns_for_covered_language() -> None:
     from livekit.agents.inference import TurnDetector
 
@@ -608,3 +627,44 @@ def test_startup_capability_warnings_both_keys_empty_returns_both_messages(
 
     warnings = startup_capability_warnings()
     assert len(warnings) == 2
+
+
+def test_house_key_voice_row_without_model_follows_house_model_at_call_time(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A picker save stores no model, so CARTESIA_MODEL changes reach the org."""
+    from hailhq.core.config import settings
+    from hailhq.voicebot.pipeline import ResolvedLayer, build_tts
+    from livekit.plugins import cartesia as cartesia_plugin
+
+    org = ResolvedLayer(
+        provider="cartesia",
+        api_key=None,
+        params={"voice_id": "picked-voice", "language": "fr"},
+        fallback_enabled=False,
+    )
+    monkeypatch.setattr(settings, "cartesia_model", "sonic-3.6")
+    tts = build_tts(org=org, language="fr")
+    assert isinstance(tts, cartesia_plugin.TTS)
+    assert tts.model == "sonic-3.6"
+
+
+def test_elevenlabs_tagalog_sends_the_filipino_code() -> None:
+    """ElevenLabs spells Tagalog "fil", on the org row and on the house chain."""
+    from hailhq.voicebot.pipeline import ResolvedLayer, build_tts
+    from livekit.agents import tts as agents_tts
+    from livekit.plugins import elevenlabs as elevenlabs_plugin
+
+    org = ResolvedLayer(
+        provider="elevenlabs",
+        api_key=None,
+        params={"voice_id": "picked-voice"},
+        fallback_enabled=True,
+    )
+    tts = build_tts(org=org, language="tl")
+    assert isinstance(tts, agents_tts.FallbackAdapter)
+    eleven = [
+        inst for inst in tts._tts_instances if isinstance(inst, elevenlabs_plugin.TTS)
+    ]
+    assert len(eleven) == 2
+    assert {inst._opts.language.language for inst in eleven} == {"fil"}

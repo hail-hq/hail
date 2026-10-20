@@ -1449,6 +1449,50 @@ async def test_supported_language_with_auto_stt_accepted(
     assert metadata["voice_config"]["language"] == "da"
 
 
+@pytest.mark.parametrize("explicit,expected", [(None, "fr"), ("da", "da")])
+async def test_workspace_language_defaults_and_per_call_override(
+    client,
+    async_session,
+    org_and_key,
+    livekit_mock,
+    add_phone_number,
+    explicit,
+    expected,
+) -> None:
+    from hailhq.core.models import OrgProviderConfig
+
+    org_id, _, plain = org_and_key
+    await add_phone_number(async_session, org_id)
+    async_session.add(
+        OrgProviderConfig(
+            organization_id=org_id,
+            layer="tts",
+            provider="cartesia",
+            is_active=True,
+            params={"voice_id": "custom", "language": "fr"},
+            fallback_enabled=True,
+        )
+    )
+    await async_session.commit()
+    response = await client.post(
+        "/calls",
+        json={
+            "to": "+14155559999",
+            "system_prompt": "hi",
+            "recipient_consent": True,
+            "voice_config": {"language": explicit} if explicit else {},
+        },
+        headers={"Authorization": f"Bearer {plain}"},
+    )
+    assert response.status_code == 201, response.text
+    assert (
+        livekit_mock.dispatch_agent.await_args.kwargs["metadata"]["voice_config"][
+            "language"
+        ]
+        == expected
+    )
+
+
 async def test_byo_elevenlabs_tts_with_cartesia_only_language_422(
     client: httpx.AsyncClient,
     async_session: AsyncSession,

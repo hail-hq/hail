@@ -42,10 +42,12 @@ from hailhq.core.agent_tools.spec import BridgeOutcome, BridgeRoute
 from hailhq.core.call_end_reasons import CallEndReason
 from hailhq.core.config import settings
 from hailhq.core.db import session_scope
-from hailhq.core.disclosure import disclosure_text
+from hailhq.core.directory import find_by_phone
+from hailhq.core.disclosure import after_greeting_text, disclosure_text
 from hailhq.core.handover import HANDOVER_DEFAULT_MAX_SECONDS
 from hailhq.core.inbound_calls import Rejected, SipAttributes, open_inbound_call
 from hailhq.core.internal_webhook import notify_usage_event_recorded
+from hailhq.core.languages import SUPPORTED_LANGUAGES
 from hailhq.core.livekit import VOICE_READY_ATTRIBUTE
 from hailhq.core.models import Call, CallEvent, UsageEvent
 from hailhq.core.pool import release_pool_reservation
@@ -53,6 +55,7 @@ from hailhq.core.prompts import (
     VOICE_PREAMBLE,
     VOICE_PREAMBLE_INBOUND,
     build_voice_instructions,
+    other_party_section,
 )
 from hailhq.core.schemas import TERMINAL_CALL_STATUSES
 from hailhq.core.secret_cipher import SecretKeyMissing
@@ -258,9 +261,58 @@ def build_instructions(
     direction: str | None = None,
     *,
     thread_tool: bool = False,
+    language: str | None = None,
+    other_party: str | None = None,
 ) -> str:
     """The call's instructions (see :func:`hailhq.core.prompts.build_voice_instructions`)."""
-    return build_voice_instructions(system_prompt, direction, thread_tool=thread_tool)
+    instructions = build_voice_instructions(
+        system_prompt, direction, thread_tool=thread_tool, other_party=other_party
+    )
+    if language in SUPPORTED_LANGUAGES:
+        instructions += (
+            f"\n\nSpeak in {SUPPORTED_LANGUAGES[language].name} for this call."
+        )
+    return instructions
+
+
+# The other-party lookup runs before the session starts, so a slow DB must
+# not hold back the greeting.
+_OTHER_PARTY_TIMEOUT_SECONDS = 1.0
+
+
+async def other_party_prompt(call_id: UUID) -> str | None:
+    """The prompt section naming the person on the line (the caller on an
+    inbound call, the callee on an outbound one) when their number is in the
+    org's directory. A lookup failure or timeout only drops the section."""
+    try:
+        async with (
+            asyncio.timeout(_OTHER_PARTY_TIMEOUT_SECONDS),
+            session_scope() as session,
+        ):
+            row = (
+                await session.execute(
+                    select(
+                        Call.organization_id,
+                        Call.direction,
+                        Call.from_e164,
+                        Call.to_e164,
+                    ).where(Call.id == call_id)
+                )
+            ).one_or_none()
+            if row is None:
+                return None
+            organization_id, direction, from_e164, to_e164 = row
+            number = from_e164 if direction == "inbound" else to_e164
+            if not number:
+                return None
+            entry = await find_by_phone(session, organization_id, number)
+    except Exception:
+        logger.warning("call_id=%s other-party lookup failed", call_id, exc_info=True)
+        return None
+    if entry is None:
+        return None
+    # send_email reaches members only, so a contact's email is no use here.
+    return other_party_section(entry.name, can_email=entry.source == "member")
 
 
 def has_thread_tool(tools: list[Any]) -> bool:
@@ -650,6 +702,42 @@ def opening_instructions(
     return f"{base} They have not said anything yet."
 
 
+# A sentence end: ".", "!" or "?" followed by the next sentence.
+_SENTENCE_END = re.compile(r"(\w*)[.!?]\s+(?=\S)")
+# Words whose "." does not end a sentence: "Mrs. Smith", "Prof. Lee".
+_TITLES = frozenset(
+    {"dr", "mr", "mrs", "ms", "mx", "prof", "st", "jr", "sr", "mt", "rev", "hon"}
+)
+
+
+def _first_sentence_end(message: str) -> re.Match[str] | None:
+    for match in _SENTENCE_END.finditer(message):
+        word = match.group(1)
+        if match.group(0)[len(word)] == "." and (
+            word.lower() in _TITLES or (len(word) == 1 and word.isupper())
+        ):
+            continue
+        return match
+    return None
+
+
+def greeting_with_ai_line(first_message: str, ai_line: str) -> str:
+    """The agent's greeting with the short AI line after its first sentence:
+    "Hey, this is Joker! I'm an AI assistant for Acme. Want to hear a joke?"
+    A one-sentence greeting gets the line at its end, or at its start when
+    it is a question, so the question stays last."""
+    message = first_message.strip()
+    match = _first_sentence_end(message)
+    if match is None:
+        if message.endswith("?"):
+            return f"{ai_line} {message}"
+        end = "" if message.endswith((".", "!")) else "."
+        return f"{message}{end} {ai_line}"
+    end = match.start() + len(match.group(1)) + 1
+    head, tail = message[:end], message[match.end() :]
+    return f"{head} {ai_line} {tail}"
+
+
 async def speak_greeting(
     session: AgentSession,
     metadata: dict[str, Any],
@@ -673,7 +761,10 @@ async def speak_greeting(
     A caller ``first_message`` is spoken verbatim, concatenated onto the
     disclosure as a single ``session.say()`` call, one spoken turn, not
     two back-to-back utterances that sound like the agent introducing
-    itself twice. Without a ``first_message``, the LLM generates the
+    itself twice. An inbound agent with no custom line goes further: the
+    short line goes inside its greeting (:func:`greeting_with_ai_line`),
+    because "Hi, this is an AI assistant… Hey, this is Joker!" still
+    greets the caller twice. Without a ``first_message``, the LLM generates the
     opening (see :func:`opening_instructions`) so the call never opens in
     dead air, including with ``ai_disclosure: false``; that path stays a
     separate turn since a generated reply's text isn't known until the
@@ -691,8 +782,22 @@ async def speak_greeting(
     first_message = metadata.get("first_message")
     try:
         if first_message:
-            greeting = f"{disclosure} {first_message}" if disclosure else first_message
-            await session.say(greeting, allow_interruptions=True)
+            interruptible = True
+            if not disclosure:
+                greeting = first_message
+            elif (
+                metadata.get("direction") == "inbound"
+                and not (metadata.get("ai_disclosure_line") or "").strip()
+            ):
+                greeting = greeting_with_ai_line(
+                    first_message, after_greeting_text(metadata.get("org_name"))
+                )
+                # The AI line sits after the first sentence: a caller who
+                # speaks over the greeting must still hear it.
+                interruptible = False
+            else:
+                greeting = f"{disclosure} {first_message}"
+            await session.say(greeting, allow_interruptions=interruptible)
             return
         if disclosure:
             await session.say(disclosure, allow_interruptions=True)
@@ -1910,6 +2015,8 @@ async def _run_call(
                     assert_public_https_url, llm_cfg["base_url"]
                 )
             org_cfgs = await resolve_org_configs(org_id, skip_llm=llm_cfg is not None)
+            org_tts = org_cfgs.get("tts")
+            language = language or (org_tts.params.get("language") if org_tts else None)
             session = build_session(
                 llm_cfg,
                 vad,
@@ -1970,6 +2077,7 @@ async def _run_call(
         # Status stays None → on_call_end falls back to "completed".
 
     agent_hangup = make_agent_hangup(ctx, captured, bridge_state)
+    other_party_task = asyncio.create_task(other_party_prompt(call_id))
     agent_tools, agent_api = await build_tools_safely(
         metadata,
         call_id,
@@ -2000,6 +2108,8 @@ async def _run_call(
             metadata.get("system_prompt"),
             metadata.get("direction"),
             thread_tool=thread_tool,
+            language=language,
+            other_party=await other_party_task,
         ),
         tools=agent_tools,
     )

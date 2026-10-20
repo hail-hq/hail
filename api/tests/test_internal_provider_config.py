@@ -72,6 +72,17 @@ async def test_put_without_key_keeps_stored_key(
     assert got["fallback_enabled"] is True
 
 
+@pytest.mark.usefixtures("internal_secret_set")
+async def test_language_choice_rejects_incompatible_voice_without_fallback(client):
+    body = (
+        b'{"provider":"elevenlabs","params":{"language":"th"},"fallback_enabled":false}'
+    )
+    response = await client.put(f"{BASE}/tts", content=body, headers=_signed(body))
+    assert response.status_code == 422
+    response = await client.get(BASE, headers=_signed(b""))
+    assert response.json()["providers"] == []
+
+
 async def test_put_rejects_wrong_provider_and_bad_params(
     client, internal_secret_set, provider_key_set  # noqa: F811
 ) -> None:
@@ -427,3 +438,158 @@ async def test_validate_inflight_speechmatics_operating_point(
         "api_key": "sk-sm-inflight",
         "params": {"model": "linden-1"},
     }
+
+
+@pytest.mark.usefixtures("internal_secret_set")
+async def test_picker_checks_retained_voice_with_stored_key_before_write(
+    client, provider_key_set, monkeypatch
+):
+    from unittest.mock import AsyncMock
+
+    monkeypatch.setattr(settings, "cartesia_model", "sonic-3.5")
+    original = b'{"provider":"cartesia","api_key":"customer-secret","params":{"voice_id":"custom","model":"custom-model","language":"en"},"fallback_enabled":false}'
+    response = await client.put(
+        f"{BASE}/tts", content=original, headers=_signed(original)
+    )
+    assert response.status_code == 200
+    check = AsyncMock(side_effect=ValueError("This voice does not support French."))
+    monkeypatch.setattr(
+        "hailhq.api.routes.internal.provider_config.validate_voice_language", check
+    )
+    changed = b'{"provider":"cartesia","params":{"voice_id":"custom","model":"custom-model","language":"fr"},"fallback_enabled":false,"verify_voice_language":true}'
+    response = await client.put(
+        f"{BASE}/tts", content=changed, headers=_signed(changed)
+    )
+    assert response.status_code == 422
+    check.assert_awaited_once_with(
+        "cartesia", "custom", "custom-model", "customer-secret", "fr"
+    )
+    saved = (await client.get(BASE, headers=_signed(b""))).json()["providers"][0]
+    assert saved["params"]["language"] == "en"
+    assert saved["key_last4"] == "cret"
+    assert "customer-secret" not in str(saved)
+
+
+@pytest.mark.usefixtures("internal_secret_set")
+async def test_picker_validates_house_voice_and_persists_its_model(client, monkeypatch):
+    from unittest.mock import AsyncMock
+
+    monkeypatch.setattr(settings, "eleven_api_key", "house-key")
+    check = AsyncMock()
+    monkeypatch.setattr(
+        "hailhq.api.routes.internal.provider_config.validate_voice_language", check
+    )
+    body = b'{"provider":"elevenlabs","params":{"voice_id":"verified","model":"validated-model","language":"fr"},"fallback_enabled":true,"verify_voice_language":true}'
+    response = await client.put(f"{BASE}/tts", content=body, headers=_signed(body))
+    assert response.status_code == 200, response.text
+    check.assert_awaited_once_with(
+        "elevenlabs", "verified", "validated-model", "house-key", "fr"
+    )
+    assert response.json()["params"]["model"] == "validated-model"
+    assert response.json()["key_last4"] is None
+
+
+@pytest.mark.usefixtures("internal_secret_set")
+async def test_picker_skips_voice_check_when_fallback_serves_the_language(
+    client, monkeypatch
+):
+    from unittest.mock import AsyncMock
+
+    check = AsyncMock(side_effect=ValueError("unsupported"))
+    monkeypatch.setattr(
+        "hailhq.api.routes.internal.provider_config.validate_voice_language", check
+    )
+    body = b'{"provider":"elevenlabs","params":{"voice_id":"verified","language":"bn"},"fallback_enabled":true,"verify_voice_language":true}'
+    response = await client.put(f"{BASE}/tts", content=body, headers=_signed(body))
+    assert response.status_code == 200, response.text
+    check.assert_not_awaited()
+
+
+@pytest.mark.usefixtures("internal_secret_set")
+@pytest.mark.parametrize(
+    ("provider_status", "expected"),
+    [(404, 422), (422, 422), (401, 503), (403, 503), (429, 503), (500, 503)],
+)
+async def test_picker_maps_provider_status_errors(
+    client, monkeypatch, provider_status, expected
+):
+    """A missing voice is the user's choice. A rejected key may be Hail's own."""
+    from unittest.mock import AsyncMock
+
+    import httpx
+
+    request = httpx.Request("GET", "https://api.cartesia.ai/voices/missing")
+    failure = httpx.HTTPStatusError(
+        "provider error",
+        request=request,
+        response=httpx.Response(provider_status, request=request),
+    )
+    monkeypatch.setattr(settings, "cartesia_api_key", "house-key")
+    monkeypatch.setattr(
+        "hailhq.api.routes.internal.provider_config.validate_voice_language",
+        AsyncMock(side_effect=failure),
+    )
+    body = b'{"provider":"cartesia","params":{"voice_id":"missing","model":"sonic-3.5","language":"fr"},"fallback_enabled":false,"verify_voice_language":true}'
+    response = await client.put(f"{BASE}/tts", content=body, headers=_signed(body))
+    assert response.status_code == expected, response.text
+
+
+async def _put(client, layer: str, body: bytes):
+    return await client.put(f"{BASE}/{layer}", content=body, headers=_signed(body))
+
+
+@pytest.mark.usefixtures("internal_secret_set", "provider_key_set")
+async def test_stt_change_cannot_strand_the_saved_language(client):
+    tts = b'{"provider":"cartesia","params":{"language":"zh"},"fallback_enabled":false}'
+    assert (await _put(client, "tts", tts)).status_code == 200
+    stt = b'{"provider":"speechmatics","params":{},"fallback_enabled":false}'
+    response = await _put(client, "stt", stt)
+    assert response.status_code == 422
+    assert "speech recognition" in response.json()["detail"]
+    assert (await client.get(BASE, headers=_signed(b""))).json()["providers"][0][
+        "layer"
+    ] == "tts"
+    stt = b'{"provider":"speechmatics","params":{},"fallback_enabled":true}'
+    assert (await _put(client, "stt", stt)).status_code == 200
+
+
+@pytest.mark.usefixtures("internal_secret_set", "provider_key_set")
+async def test_tts_activate_and_delete_cannot_strand_the_saved_language(client):
+    chinese = (
+        b'{"provider":"cartesia","params":{"language":"zh"},"fallback_enabled":false}'
+    )
+    assert (await _put(client, "tts", chinese)).status_code == 200
+    plain = b'{"provider":"elevenlabs","params":{},"fallback_enabled":false}'
+    assert (await _put(client, "tts", plain)).status_code == 200
+    stt = b'{"provider":"speechmatics","params":{},"fallback_enabled":false}'
+    assert (await _put(client, "stt", stt)).status_code == 200
+
+    activate = b'{"provider":"cartesia"}'
+    response = await client.post(
+        f"{BASE}/tts/activate", content=activate, headers=_signed(activate)
+    )
+    assert response.status_code == 422
+    response = await client.delete(f"{BASE}/tts/elevenlabs", headers=_signed(b""))
+    assert response.status_code == 422
+
+    rows = (await client.get(BASE, headers=_signed(b""))).json()["providers"]
+    active_tts = [r["provider"] for r in rows if r["layer"] == "tts" and r["is_active"]]
+    assert active_tts == ["elevenlabs"]
+
+
+@pytest.mark.usefixtures("internal_secret_set", "provider_key_set")
+async def test_delete_race_on_flush_returns_409(client, monkeypatch):
+    from sqlalchemy.ext.asyncio import AsyncSession
+    from sqlalchemy.orm.exc import StaleDataError
+
+    first = b'{"provider":"cartesia","params":{},"fallback_enabled":false}'
+    second = b'{"provider":"elevenlabs","params":{},"fallback_enabled":false}'
+    assert (await _put(client, "tts", first)).status_code == 200
+    assert (await _put(client, "tts", second)).status_code == 200
+
+    async def stale_flush(self, objects=None):
+        raise StaleDataError("row deleted concurrently")
+
+    monkeypatch.setattr(AsyncSession, "flush", stale_flush)
+    response = await client.delete(f"{BASE}/tts/elevenlabs", headers=_signed(b""))
+    assert response.status_code == 409
