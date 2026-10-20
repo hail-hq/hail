@@ -63,7 +63,7 @@ export function Footer({
           ))}
         </div>
         {badges.length > 0 && (
-          <ul className="hail-footer-badges" aria-label="Featured on">
+          <ul id="footer-badges" className="hail-footer-badges" aria-label="Featured on">
             {badges.map((badge) => (
               <li key={badge.id}>
                 <a href={badge.href} target="_blank" rel="noopener" aria-label={badge.alt}>

@@ -1,0 +1,16 @@
+[
+  {
+    "id": "forg",
+    "href": "https://forg.to/projects/hail",
+    "alt": "Hail - Featured on Forg",
+    "name": "Forg",
+    "icon": "https://hail.so/assets/forg-logo.svg"
+  },
+  {
+    "id": "devhunt",
+    "href": "https://devhunt.org/tool/hail",
+    "alt": "hail - Featured on DevHunt",
+    "name": "DevHunt",
+    "icon": "https://hail.so/assets/devhunt-logo.svg"
+  }
+]
