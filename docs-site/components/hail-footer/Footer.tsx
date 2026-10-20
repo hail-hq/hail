@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { Mascot } from "./Mascot";
+import { PRODUCT_COPY, PRODUCT_SHORT_DESCRIPTION } from "./product-copy";
 import "./footer.css";
 
 export type FooterGroup = {
@@ -11,7 +12,7 @@ export type FooterBadge = {
   id: string;
   href: string;
   alt: string;
-  /** Rendered size in px. Both are set so the row does not shift on load. */
+  /** Intrinsic image size in px. Shared CSS sets one display height for all badges. */
   width: number;
   height: number;
   /** One image per footer theme. */
@@ -41,8 +42,7 @@ export function Footer({
               <span>hail.so</span>
             </a>
             <p>
-              Give your assistant calls, texts, and email. Add email and SMS to
-              your app. One account, three ways to connect.
+              {PRODUCT_SHORT_DESCRIPTION} {PRODUCT_COPY.availability}
             </p>
             <div className="hail-footer-social">
               <a href="https://github.com/hail-hq/hail">GitHub ↗</a>

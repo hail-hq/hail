@@ -83,12 +83,19 @@
   display: block;
   line-height: 0;
 }
+.hail-footer-badges li {
+  max-width: 100%;
+}
 .hail-footer-badges a:hover {
   text-decoration: none;
 }
 .hail-footer-badges img {
+  /* One height for every badge and viewport. Preserve each source's proportions. */
+  height: 48px;
   width: auto;
   max-width: 100%;
+  object-fit: contain;
+  object-position: left center;
 }
 .hail-footer-badge-dark {
   display: none;
