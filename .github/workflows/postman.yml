@@ -1,0 +1,57 @@
+name: Postman collections
+
+on:
+  pull_request:
+    paths:
+      - "openapi/openapi.yaml"
+      - "postman/**"
+      - "scripts/postman/**"
+      - ".github/workflows/postman.yml"
+  push:
+    branches: [main]
+    paths:
+      - "openapi/openapi.yaml"
+      - "postman/**"
+      - "scripts/postman/**"
+      - ".github/workflows/postman.yml"
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: "Update the two existing Postman collections (main only)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: postman-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  collections:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: scripts/postman/package-lock.json
+      - run: npm ci --prefix scripts/postman
+      - run: npm test --prefix scripts/postman
+      - run: npm run generate --prefix scripts/postman
+      - uses: actions/upload-artifact@v4
+        with:
+          name: hail-postman-collections
+          path: postman/*.postman_collection.json
+      - name: Update existing public collections
+        if: >-
+          github.ref == 'refs/heads/main' &&
+          ((github.event_name == 'push' && vars.POSTMAN_AUTO_SYNC == 'true') ||
+          (github.event_name == 'workflow_dispatch' && inputs.publish))
+        env:
+          POSTMAN_API_KEY: ${{ secrets.POSTMAN_API_KEY }}
+          POSTMAN_REFERENCE_COLLECTION_UID: ${{ vars.POSTMAN_REFERENCE_COLLECTION_UID }}
+          POSTMAN_QUICKSTART_COLLECTION_UID: ${{ vars.POSTMAN_QUICKSTART_COLLECTION_UID }}
+        run: npm run publish --prefix scripts/postman

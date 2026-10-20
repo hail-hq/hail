@@ -1,0 +1,13 @@
+{
+  "name": "hail-postman",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "generate": "node generate.mjs",
+    "test": "node --test *.test.mjs",
+    "publish": "node publish.mjs"
+  },
+  "dependencies": {
+    "yaml": "2.9.1"
+  }
+}
