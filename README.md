@@ -94,6 +94,8 @@ buy numbers, or change settings.
 Calls and messages require account credit and recipient permission.
 Marketing sends also require a record of that permission. Use your own
 approved email and SMS copy. Review the recipient and cost before sending.
+Outbound SMS to US numbers is not supported. US inbound and outbound calls
+are supported. Use a supported non-US destination when testing outbound SMS.
 
 The plugin manifest is [`.cursor-plugin/plugin.json`](.cursor-plugin/plugin.json).
 Its [MCP configuration](mcp.json) uses the hosted service. The source license
