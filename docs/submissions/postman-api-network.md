@@ -25,8 +25,7 @@ status: drafted
 ## Steps to submit
 
 1. Create an account at <https://www.postman.com/> and a team named **Hail**.
-   Choose a Hail-related public handle if it is available. The user confirmed
-   on 2026-10-20 that no Postman account exists yet.
+   Choose a Hail-related public handle if it is available.
 2. Create a workspace named **Hail API**. Use an internal workspace while
    preparing it, then change its visibility to public when ready.
 3. Add the summary and overview from **Content** below. Use the Hail logo at
@@ -45,6 +44,12 @@ status: drafted
 6. Fork **Hail API: Start here** to a separate test workspace. Store your Hail
    API key in your local Postman Vault as `hail-api-key`. Send **Check API
    health**, then **List my agents**. No credit is spent by those requests.
+   **List my agents** must return 200: this checks that the collection
+   variable `api_key = {{vault:hail-api-key}}` resolves through the
+   collection bearer auth. Postman's vault docs do not confirm this setup.
+   If it returns 401, do not publish. Instead, tell users to paste their key
+   as the current value of `api_key` in their fork, and update
+   `postman/README.md` to match.
    Review the individual examples you want to try before enabling paid requests.
 7. Return to the original workspace. Its collection variables must contain
    vault references and placeholders, never your API key or customer data.

@@ -25,35 +25,15 @@ export function walk(items) {
 function normalize(items, namespace, parents = []) {
   for (const item of items) {
     const path = [...parents, item.name];
+    const url = item.request?.url?.raw ?? item.request?.url;
     item.id = stableId(
-      `${namespace}:${item.request?.method ?? "folder"}:${item.request?.url?.raw ?? item.request?.url ?? path.join("/")}`,
+      item.request
+        ? `${namespace}:${item.request.method}:${url.split("?")[0]}`
+        : `${namespace}:folder:${path.join("/")}`,
     );
     if (item.item) normalize(item.item, namespace, path);
-    if (item.request) {
-      item.id = stableId(
-        `${namespace}:${item.request.method}:${(item.request.url.raw ?? item.request.url).split("?")[0]}`,
-      );
-      item.request.header = (item.request.header ?? []).filter(
-        (h) => h.key.toLowerCase() !== "authorization",
-      );
-      // These public routes do not require a Hail key.
-      const raw = item.request.url.raw ?? item.request.url;
-      if (
-        raw.endsWith("/healthz") ||
-        raw.endsWith("/v1/webhooks/event-types")
-      ) {
-        item.request.auth = { type: "noauth" };
-      } else delete item.request.auth;
-      for (const [index, response] of (item.response ?? []).entries()) {
-        response.id = stableId(`${item.id}:response:${response.code}:${index}`);
-        if (response.originalRequest) {
-          response.originalRequest.header = (
-            response.originalRequest.header ?? []
-          ).filter((h) => h.key.toLowerCase() !== "authorization");
-          delete response.originalRequest.auth;
-        }
-      }
-    }
+    for (const [index, response] of (item.response ?? []).entries())
+      response.id = stableId(`${item.id}:response:${response.code}:${index}`);
   }
 }
 
@@ -73,24 +53,13 @@ function finish(collection, name, overview, variables = []) {
 }
 
 export async function generate() {
-  const original = parse(
+  const spec = parse(
     await readFile(new URL("openapi/openapi.yaml", root), "utf8"),
   );
   const overview = await readFile(new URL("postman/README.md", root), "utf8");
-  const spec = structuredClone(original);
   spec.paths = Object.fromEntries(
     Object.entries(spec.paths).filter(([path]) => publicPath(path)),
   );
-  // The API models describe Authorization as an optional route parameter. Set
-  // actual bearer authentication on the collection instead of a fake header.
-  for (const path of Object.values(spec.paths))
-    for (const [method, operation] of Object.entries(path)) {
-      if (!httpMethods.has(method)) continue;
-      operation.parameters = (operation.parameters ?? []).filter(
-        (p) =>
-          !(p.in === "header" && p.name?.toLowerCase() === "authorization"),
-      );
-    }
   const reference = finish(
     { item: referenceItems(spec) },
     "Hail API Reference",
@@ -108,14 +77,6 @@ export async function generate() {
     "Hail API: Start here",
     overview,
     quickstartVariables,
-  );
-  // Keep the server price check numeric after Postman variable expansion.
-  const buy = walk(quickstart.item).find(
-    (item) => item.name === "Get a quoted number",
-  );
-  buy.request.body.raw = buy.request.body.raw.replace(
-    '"{{expected_total_cents}}"',
-    "{{expected_total_cents}}",
   );
   const output = new URL("postman/", root);
   await mkdir(output, { recursive: true });

@@ -100,6 +100,10 @@ export function referenceItems(spec) {
           description: p.description ?? "",
           disabled: !p.required,
         }));
+      // Hail declares Authorization as a header parameter. Routes without it
+      // are public; the rest use the collection's bearer auth.
+      const isAuth = (p) =>
+        p.in === "header" && p.name.toLowerCase() === "authorization";
       const urlPath = path.replace(/\{([^}]+)\}/g, ":$1");
       const enabledQuery = query
         .filter((p) => !p.disabled)
@@ -110,10 +114,7 @@ export function referenceItems(spec) {
       const request = {
         method: method.toUpperCase(),
         header: params
-          .filter(
-            (p) =>
-              p.in === "header" && p.name.toLowerCase() !== "authorization",
-          )
+          .filter((p) => p.in === "header" && !isAuth(p))
           .map((p) => ({
             key: p.name,
             value: String(example(spec, p.schema)),
@@ -133,6 +134,7 @@ export function referenceItems(spec) {
         },
         description: operation.description ?? operation.summary ?? "",
       };
+      if (!params.some(isAuth)) request.auth = { type: "noauth" };
       const content = resolve(spec, operation.requestBody).content;
       if (content?.["application/json"]?.schema) {
         const schema = content["application/json"].schema;
@@ -177,16 +179,14 @@ export function referenceItems(spec) {
         });
       const tag = operation.tags?.[0] ?? "Other";
       if (!folders.has(tag)) folders.set(tag, { name: tag, item: [] });
-      folders
-        .get(tag)
-        .item.push({
-          name:
-            operation.summary ??
-            operation.operationId ??
-            `${method.toUpperCase()} ${path}`,
-          request,
-          response: responses,
-        });
+      folders.get(tag).item.push({
+        name:
+          operation.summary ??
+          operation.operationId ??
+          `${method.toUpperCase()} ${path}`,
+        request,
+        response: responses,
+      });
     }
   }
   return [...folders.values()];

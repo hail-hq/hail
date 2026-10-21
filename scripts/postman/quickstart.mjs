@@ -3,7 +3,6 @@ const variable = (name) => `{{${name}}}`;
 export const quickstartVariables = [
   ["country_code", "US"],
   ["number_type", "local"],
-  ["region", "AZ"],
   ["quote_id", ""],
   ["expected_total_cents", "0"],
   ["number_id", ""],
@@ -35,7 +34,11 @@ function request(name, method, path, description, body, paid = false) {
     });
     item.request.body = {
       mode: "raw",
-      raw: JSON.stringify(body, null, 2),
+      // Keep the price check numeric after Postman expands the variable.
+      raw: JSON.stringify(body, null, 2).replace(
+        '"{{expected_total_cents}}"',
+        "{{expected_total_cents}}",
+      ),
       options: { raw: { language: "json" } },
     };
   }
@@ -101,7 +104,7 @@ export function quickstartItems() {
           "List states and provinces",
           "GET",
           "/v1/numbers/regions",
-          "Lists US states and Canadian provinces. Use a returned code as region when searching by city.",
+          "Lists US states and Canadian provinces. To search by city, add city and a returned region code to the Get number quotes body.",
         ),
         request(
           "Get a quoted number",
@@ -112,7 +115,7 @@ export function quickstartItems() {
             quote_id: variable("quote_id"),
             country_code: variable("country_code"),
             number_type: variable("number_type"),
-            expected_total_cents: "{{expected_total_cents}}",
+            expected_total_cents: variable("expected_total_cents"),
           },
           true,
         ),

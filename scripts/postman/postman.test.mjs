@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 import { generate, root, walk } from "./generate.mjs";
 import { updateCollection } from "./publish.mjs";
+import { resolve } from "./reference.mjs";
 
 const { reference, quickstart, spec } = await generate();
 
@@ -23,18 +24,35 @@ test("quickstart requests use current public routes, fields, and query parameter
     const example = JSON.parse(
       request.body.raw.replaceAll("{{expected_total_cents}}", "100"),
     );
-    const body = operation.requestBody.content["application/json"].schema;
-    const definition = body.$ref
-      ? spec.components.schemas[body.$ref.split("/").at(-1)]
-      : body;
-    for (const key of definition.required ?? [])
-      assert.ok(key in example, `${request.method} ${path} needs ${key}`);
-    if (definition.additionalProperties === false) {
-      for (const key of Object.keys(example))
-        assert.ok(key in definition.properties, `Unknown body field ${key}`);
-    }
+    checkBody(
+      example,
+      operation.requestBody.content["application/json"].schema,
+      `${request.method} ${path}`,
+    );
   }
 });
+
+// Check required and allowed fields, including nested objects.
+function checkBody(value, input, where) {
+  const schema = resolve(spec, input);
+  const options = schema.anyOf ?? schema.oneOf;
+  if (options) {
+    const object = options
+      .map((s) => resolve(spec, s))
+      .find((s) => s.properties);
+    if (object) checkBody(value, object, where);
+    return;
+  }
+  if (!schema.properties || typeof value !== "object" || value === null) return;
+  for (const key of schema.required ?? [])
+    assert.ok(key in value, `${where} needs ${key}`);
+  for (const [key, field] of Object.entries(value)) {
+    if (schema.additionalProperties === false)
+      assert.ok(key in schema.properties, `${where}: unknown field ${key}`);
+    if (schema.properties[key])
+      checkBody(field, schema.properties[key], `${where}.${key}`);
+  }
+}
 
 test("exports have unique stable IDs and no internal requests or fake auth headers", async () => {
   const repeated = await generate();
