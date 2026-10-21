@@ -4383,7 +4383,9 @@ paths:
 
         `purpose=sms` is for registering to send SMS in the US; without
 
-        `provider` it uses the carrier of your US numbers. For `purpose=number`,
+        `provider` it uses the carrier of your US numbers, or of the number
+
+        passed as `number_id`. For `purpose=number`,
 
         pass the offer's `quote_id` to get that offer's carrier. Build your form
 
@@ -4444,6 +4446,21 @@ paths:
           description:
             quote_id of an offer from POST /numbers/quotes that needs verification.
             The carrier is read from it.
+        - name: number_id
+          in: query
+          required: false
+          schema:
+            anyOf:
+              - type: string
+                format: uuid
+              - type: "null"
+            description:
+              "For purpose=sms: id of one of your US numbers. The carrier is
+              read from it. Needed when your US numbers are with more than one carrier."
+            title: Number Id
+          description:
+            "For purpose=sms: id of one of your US numbers. The carrier is
+            read from it. Needed when your US numbers are with more than one carrier."
         - name: authorization
           in: header
           required: false
@@ -4504,7 +4521,9 @@ paths:
 
         `quote_id` (optional, for `number`: the offer to verify for; its carrier
 
-        is used),
+        is used), `number_id` (optional, for `sms`: one of your US numbers; its
+
+        carrier is used),
 
         `fields` (JSON object), `address` (JSON object, when required), `documents`
 

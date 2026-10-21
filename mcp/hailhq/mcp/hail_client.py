@@ -558,6 +558,7 @@ class HailClient:
         number_type: str,
         subject_type: str = "person",
         quote_id: str | None = None,
+        number_id: str | None = None,
         purpose: str = "number",
     ) -> dict[str, Any]:
         params: dict[str, Any] = {
@@ -568,6 +569,8 @@ class HailClient:
         }
         if quote_id is not None:
             params["quote_id"] = quote_id
+        if number_id is not None:
+            params["number_id"] = number_id
         resp = await self._client.get("/verifications/requirements", params=params)
         return Requirements.model_validate(_decode(resp)).model_dump(mode="json")
 
@@ -613,6 +616,7 @@ class HailClient:
         subject_type: str = "person",
         address: dict[str, str] | None = None,
         quote_id: str | None = None,
+        number_id: str | None = None,
         purpose: str = "number",
     ) -> dict[str, Any]:
         """POST /verifications — multipart/form-data, personal data in transit.
@@ -637,6 +641,8 @@ class HailClient:
         }
         if quote_id is not None:
             data["quote_id"] = quote_id
+        if number_id is not None:
+            data["number_id"] = number_id
         if address is not None:
             data["address"] = json.dumps(address)
         parts = [

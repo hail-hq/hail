@@ -3693,7 +3693,10 @@ type GetVerificationRequirementsParams struct {
 	Purpose     *string                                       `form:"purpose,omitempty" json:"purpose,omitempty"`
 
 	// QuoteId quote_id of an offer from POST /numbers/quotes that needs verification. The carrier is read from it.
-	QuoteId       *openapi_types.UUID `form:"quote_id,omitempty" json:"quote_id,omitempty"`
+	QuoteId *openapi_types.UUID `form:"quote_id,omitempty" json:"quote_id,omitempty"`
+
+	// NumberId For purpose=sms: id of one of your US numbers. The carrier is read from it. Needed when your US numbers are with more than one carrier.
+	NumberId      *openapi_types.UUID `form:"number_id,omitempty" json:"number_id,omitempty"`
 	Authorization *string             `json:"authorization,omitempty"`
 }
 
@@ -9216,6 +9219,22 @@ func NewGetVerificationRequirementsRequest(server string, params *GetVerificatio
 		if params.QuoteId != nil {
 
 			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "quote_id", *params.QuoteId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: "uuid"}); err != nil {
+				return nil, err
+			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+				return nil, err
+			} else {
+				for k, v := range parsed {
+					for _, v2 := range v {
+						queryValues.Add(k, v2)
+					}
+				}
+			}
+
+		}
+
+		if params.NumberId != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "number_id", *params.NumberId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: "uuid"}); err != nil {
 				return nil, err
 			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
 				return nil, err

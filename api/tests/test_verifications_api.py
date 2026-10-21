@@ -1886,11 +1886,75 @@ async def test_sms_with_us_numbers_on_two_carriers_must_name_one(
     resp = await _post_sms(client, key, provider="")
     assert resp.status_code == 422, resp.text
     detail = resp.json()["detail"][0]
-    assert detail["loc"] == ["body", "provider"]
+    assert detail["loc"] == ["body", "number_id"]
     assert detail["msg"] == (
-        "Your US numbers are with more than one carrier. Name the carrier."
+        "Your US numbers are with more than one carrier. Pass number_id: "
+        "the id of the number to register."
     )
     assert sms_carrier.drafts == []
+
+
+async def test_sms_number_id_picks_that_numbers_carrier(
+    client, org_and_key, sms_carrier, async_session
+) -> None:
+    org_id, _, key = org_and_key
+    await _set_balance(async_session, org_id, 10_000)
+    fake = await _us_number(async_session, org_id, "+15125550100", resource="PN1")
+    await _us_number(
+        async_session, org_id, "+15125550101", provider="telnyx", resource="PN2"
+    )
+    resp = await client.get(
+        "/verifications/requirements",
+        params={
+            "country_code": "US",
+            "number_type": "local",
+            "purpose": "sms",
+            "number_id": str(fake.id),
+        },
+        headers=_auth(key),
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["provider"] == "fake"
+    resp = await _post_sms(client, key, provider="", number_id=str(fake.id))
+    assert resp.status_code == 201, resp.text
+    assert resp.json()["provider"] == "fake"
+
+
+async def test_sms_number_id_must_be_an_org_us_number(
+    client, org_and_key, sms_carrier, async_session
+) -> None:
+    _, _, key = org_and_key
+    other_org, _, _ = await insert_org_and_key(async_session)
+    theirs = await _us_number(async_session, other_org, resource="PN9")
+    for number_id in (theirs.id, uuid.uuid4()):
+        resp = await _post_sms(client, key, provider="", number_id=str(number_id))
+        assert resp.status_code == 404, resp.text
+    assert sms_carrier.drafts == []
+
+
+async def test_sms_number_id_rejects_a_different_provider(
+    client, org_and_key, sms_carrier, async_session
+) -> None:
+    org_id, _, key = org_and_key
+    mine = await _us_number(async_session, org_id)
+    resp = await _post_sms(client, key, provider="telnyx", number_id=str(mine.id))
+    assert resp.status_code == 422, resp.text
+    assert resp.json()["detail"][0]["loc"] == ["body", "provider"]
+
+
+async def test_number_id_is_rejected_for_number_purpose(client, org_and_key) -> None:
+    _, _, key = org_and_key
+    resp = await client.get(
+        "/verifications/requirements",
+        params={
+            "country_code": "GB",
+            "number_type": "local",
+            "number_id": str(uuid.uuid4()),
+        },
+        headers=_auth(key),
+    )
+    assert resp.status_code == 422, resp.text
+    assert resp.json()["detail"][0]["loc"] == ["query", "number_id"]
 
 
 async def test_shared_key_filing_writes_no_debit(

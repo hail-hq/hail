@@ -42,8 +42,9 @@ logger = logging.getLogger(__name__)
 # so two runs never both file a registration for one number.
 ORDER_CHECK_LEASE = timedelta(minutes=5)
 
-# Quotes that expired unused are deleted after this long.
-QUOTE_RETENTION = timedelta(hours=1)
+# Quotes that expired unused are deleted after this long. Verification reads
+# the carrier from a quote, and collecting documents can take hours.
+QUOTE_RETENTION = timedelta(hours=24)
 # Consumed quotes answer replays of the purchase that used them (idempotency
 # keys live 24h) and are deleted after this long.
 CONSUMED_QUOTE_RETENTION = timedelta(days=7)

@@ -910,12 +910,15 @@ async def get_verification_requirements(
     number_type: str,
     subject_type: str = "person",
     quote_id: str | None = None,
+    number_id: str | None = None,
     purpose: str = "number",
 ) -> dict[str, Any]:
     if purpose not in _VERIFICATION_PURPOSES:
         return {"error": f"{_PURPOSE_ERROR}."}
     if quote_id is not None and _as_uuid(quote_id) is None:
         return _not_uuid("quote_id")
+    if number_id is not None and _as_uuid(number_id) is None:
+        return _not_uuid("number_id")
     try:
         return _without_carrier(
             await client.get_verification_requirements(
@@ -923,6 +926,7 @@ async def get_verification_requirements(
                 number_type=number_type,
                 subject_type=subject_type,
                 quote_id=quote_id,
+                number_id=number_id,
                 purpose=purpose,
             )
         )
@@ -1015,12 +1019,15 @@ async def submit_verification(
     subject_type: str = "person",
     address: Any = None,
     quote_id: str | None = None,
+    number_id: str | None = None,
     purpose: str = "number",
 ) -> dict[str, Any]:
     if purpose not in _VERIFICATION_PURPOSES:
         return {"error": f"{_PURPOSE_ERROR}. Nothing was sent."}
     if quote_id is not None and _as_uuid(quote_id) is None:
         return {"error": "quote_id must be a UUID. Nothing was sent."}
+    if number_id is not None and _as_uuid(number_id) is None:
+        return {"error": "number_id must be a UUID. Nothing was sent."}
     if attest_authorized is not True:
         return {
             "error": "attest_authorized must be true. Pass true only if the "
@@ -1064,6 +1071,7 @@ async def submit_verification(
                 files=decoded,
                 address=address,
                 quote_id=quote_id,
+                number_id=number_id,
                 purpose=purpose,
             )
         )
@@ -2454,6 +2462,7 @@ def register_tools(
         number_type: str,
         subject_type: str = "person",
         quote_id: str | None = None,
+        number_id: str | None = None,
         purpose: str = "number",
     ) -> dict[str, Any]:
         """Read what the carrier needs to verify the organization before it
@@ -2470,7 +2479,9 @@ def register_tools(
         ``purpose`` is ``number`` (default, to buy a number) or ``sms``.
         ``purpose='sms'`` registers the organization to text US numbers from a
         US number (country_code US, number_type local). The carrier fee is
-        debited from credit at filing.
+        debited from credit at filing. If the error says to pass
+        ``number_id``, pass the ``id`` of one of the organization's US numbers
+        from list_numbers.
 
         Returns ``required`` (false means no verification is needed and
         submit_verification would fail), ``fields`` (values to collect),
@@ -2489,6 +2500,7 @@ def register_tools(
                     number_type=number_type,
                     subject_type=subject_type,
                     quote_id=quote_id,
+                    number_id=number_id,
                     purpose=purpose,
                 )
         except RuntimeError as exc:
@@ -2516,6 +2528,7 @@ def register_tools(
         subject_type: str = "person",
         address: _JsonObjectOrNone = None,
         quote_id: str | None = None,
+        number_id: str | None = None,
         purpose: str = "number",
     ) -> dict[str, Any]:
         """Send the user's personal or company details and identity documents
@@ -2533,7 +2546,8 @@ def register_tools(
         (country_code US, number_type local). The carrier fee is debited from
         credit at filing. Pass the same ``purpose`` to
         get_verification_requirements. For ``purpose='number'``, pass the
-        same ``quote_id`` you passed to get_verification_requirements.
+        same ``quote_id`` you passed to get_verification_requirements. For
+        ``purpose='sms'``, pass the same ``number_id`` if you passed one.
 
         Steps: 1) call get_verification_requirements. 2) Ask the user for each
         field and file. 3) Call this once. Do not submit twice: a 409 means
@@ -2577,6 +2591,7 @@ def register_tools(
                     subject_type=subject_type,
                     address=address,
                     quote_id=quote_id,
+                    number_id=number_id,
                     purpose=purpose,
                 )
         except RuntimeError:

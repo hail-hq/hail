@@ -6,12 +6,12 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 
 ### Added
 
-- Verifications: `GET /verifications/requirements` and `POST /verifications` accept a number offer's `quote_id`.
+- Verifications: `GET /verifications/requirements` and `POST /verifications` accept a number offer's `quote_id` (for `purpose=number`) or one of your `number_id`s (for `purpose=sms`).
 - MCP: a stdio entry point in the MCP container (`python -m hailhq.mcp.stdio`) for hosts that require stdio. It uses `HAIL_API_KEY`.
 
 ### Changed
 
-- MCP: number, quote and verification tools no longer show which carrier backs a number. Verification tools take `quote_id` instead of `provider`.
+- MCP: number, quote and verification tools no longer show which carrier backs a number. Verification tools take `quote_id` or `number_id` instead of `provider`.
 
 ### Fixed
 

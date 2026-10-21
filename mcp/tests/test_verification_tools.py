@@ -200,6 +200,29 @@ async def test_requirements_rejects_a_bad_quote_id(client: HailClient) -> None:
 
 
 @respx.mock
+async def test_requirements_sends_number_id(client: HailClient) -> None:
+    route = respx.get(f"{_BASE_URL}/verifications/requirements").mock(
+        return_value=httpx.Response(200, json=_requirements())
+    )
+    await tools.get_verification_requirements(
+        client=client,
+        country_code="US",
+        number_type="local",
+        purpose="sms",
+        number_id="8b1f0c2e-0000-4000-8000-000000000003",
+    )
+    params = dict(route.calls[0].request.url.params)
+    assert params["number_id"] == "8b1f0c2e-0000-4000-8000-000000000003"
+
+
+async def test_requirements_rejects_a_bad_number_id(client: HailClient) -> None:
+    result = await tools.get_verification_requirements(
+        client=client, country_code="US", number_type="local", number_id="nope"
+    )
+    assert "number_id" in result["error"]
+
+
+@respx.mock
 async def test_requirements_hide_the_carrier(client: HailClient) -> None:
     respx.get(f"{_BASE_URL}/verifications/requirements").mock(
         return_value=httpx.Response(200, json=_requirements())
@@ -423,6 +446,30 @@ async def test_submit_omits_optional_parts(client: HailClient) -> None:
     assert "address" not in captured["parts"]
     assert "provider" not in captured["parts"]
     assert "quote_id" not in captured["parts"]
+    assert "number_id" not in captured["parts"]
+
+
+@respx.mock
+async def test_submit_sends_number_id(client: HailClient) -> None:
+    captured: dict = {}
+
+    def _handler(request: httpx.Request) -> httpx.Response:
+        captured["parts"] = _parse_multipart(request)
+        return httpx.Response(201, json=_verification())
+
+    respx.post(f"{_BASE_URL}/verifications").mock(side_effect=_handler)
+    await tools.submit_verification(
+        **_kwargs(client, number_id="8b1f0c2e-0000-4000-8000-000000000003")
+    )
+    assert (
+        captured["parts"]["number_id"]["body"]
+        == b"8b1f0c2e-0000-4000-8000-000000000003"
+    )
+
+
+async def test_submit_rejects_a_bad_number_id(client: HailClient) -> None:
+    result = await tools.submit_verification(**_kwargs(client, number_id="nope"))
+    assert result == {"error": "number_id must be a UUID. Nothing was sent."}
 
 
 @respx.mock
