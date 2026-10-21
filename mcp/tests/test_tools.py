@@ -1649,6 +1649,8 @@ async def test_quote_numbers_posts_body_and_returns_offers(client: HailClient) -
     assert result["offers"][0]["readiness"] == "ready"
     # Agents never learn which carrier backs an offer.
     assert "provider" not in result["offers"][0]
+    assert "verification_id" not in result["offers"][0]
+    assert "address_id" not in result["offers"][0]
     assert "unavailable_providers" not in result
     assert result["recommended_quote_id"] == result["offers"][0]["quote_id"]
 
@@ -1993,6 +1995,7 @@ async def test_get_number_returns_row(client: HailClient) -> None:
     assert result["id"] == nid
     assert result["provisioning_state"] == "active"
     assert "provider" not in result
+    assert "messaging_service_sid" not in result
 
 
 @respx.mock

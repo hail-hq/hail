@@ -116,10 +116,13 @@ async def _quote_provider_name(
     organization_id: UUID,
     quote_id: UUID,
     name: str | None,
+    country_code: str,
+    number_type: str,
     where: str,
 ) -> str:
     """The carrier of a number quote, so a client can verify for an offer
-    without knowing which carrier backs it."""
+    without knowing which carrier backs it. The quote must be for the same
+    country and number type as the request."""
     offer = (
         await db.execute(
             select(NumberOffer.offer).where(
@@ -132,6 +135,14 @@ async def _quote_provider_name(
         raise HTTPException(
             status_code=http_status.HTTP_404_NOT_FOUND,
             detail="Number quote not found; quote again and pass the new quote_id",
+        )
+    if (
+        offer.get("country_code", "").upper() != country_code.upper()
+        or offer.get("number_type") != number_type
+    ):
+        raise unprocessable(
+            "quote_id is for a different country_code or number_type",
+            loc=[where, "quote_id"],
         )
     carrier = offer["provider"]
     if name and name != carrier:
@@ -200,7 +211,7 @@ def _provider_or_404(
     if provider is None:
         raise HTTPException(
             status_code=http_status.HTTP_404_NOT_FOUND,
-            detail=f"no verification provider named {name!r}",
+            detail="no verification provider is configured for this carrier",
         )
     return provider
 
@@ -512,13 +523,23 @@ async def get_requirements(
     from it."""
     if purpose not in PURPOSES:
         raise unprocessable("unknown purpose", loc=["query", "purpose"])
+    if purpose == "sms" and quote_id is not None:
+        raise unprocessable(
+            "quote_id is only for purpose=number", loc=["query", "quote_id"]
+        )
     if purpose == "sms":
         name = await _sms_provider_name(
             db, principal.organization_id, provider, "query"
         )
     elif quote_id is not None:
         name = await _quote_provider_name(
-            db, principal.organization_id, quote_id, provider, "query"
+            db,
+            principal.organization_id,
+            quote_id,
+            provider,
+            country_code,
+            number_type,
+            "query",
         )
     else:
         name = _resolve_provider_name(provider, default_provider)
@@ -679,13 +700,23 @@ async def create_verification(
             "SMS registration is for US local numbers", loc=["body", "country_code"]
         )
 
+    if sub.purpose == "sms" and sub.quote_id is not None:
+        raise unprocessable(
+            "quote_id is only for purpose=number", loc=["body", "quote_id"]
+        )
     if sub.purpose == "sms":
         provider_name = await _sms_provider_name(
             db, principal.organization_id, sub.provider, "body"
         )
     elif sub.quote_id is not None:
         provider_name = await _quote_provider_name(
-            db, principal.organization_id, sub.quote_id, sub.provider, "body"
+            db,
+            principal.organization_id,
+            sub.quote_id,
+            sub.provider,
+            sub.country_code,
+            sub.number_type,
+            "body",
         )
     else:
         provider_name = _resolve_provider_name(sub.provider, default_provider)

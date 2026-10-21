@@ -974,7 +974,12 @@ async def _raw_quote(async_session, org_id, carrier_name: str) -> str:
 
     quote = NumberOffer(
         organization_id=org_id,
-        offer={"provider": carrier_name, "e164": "+447700900001"},
+        offer={
+            "provider": carrier_name,
+            "e164": "+447700900001",
+            "country_code": "GB",
+            "number_type": "mobile",
+        },
         expires_at=datetime.now(timezone.utc) + timedelta(minutes=10),
     )
     async_session.add(quote)
@@ -1037,6 +1042,48 @@ async def test_quote_id_rejects_a_different_provider(
         headers=_auth(key),
     )
     assert resp.status_code == 422
+
+
+async def test_quote_id_must_match_country_and_number_type(
+    client, org_and_key, carrier, async_session
+) -> None:
+    org_id, _, key = org_and_key
+    quote_id = await _raw_quote(async_session, org_id, "fake")
+    for params in (
+        {"country_code": "FR", "number_type": "mobile"},
+        {"country_code": "GB", "number_type": "local"},
+    ):
+        resp = await client.get(
+            "/verifications/requirements",
+            params={**params, "quote_id": quote_id},
+            headers=_auth(key),
+        )
+        assert resp.status_code == 422, resp.text
+    resp = await client.post(
+        "/verifications",
+        data=_submission(provider="", quote_id=quote_id, country_code="FR"),
+        files=_passport(),
+        headers=_auth(key),
+    )
+    assert resp.status_code == 422, resp.text
+
+
+async def test_quote_id_is_rejected_for_sms(
+    client, org_and_key, carrier, async_session
+) -> None:
+    org_id, _, key = org_and_key
+    quote_id = await _raw_quote(async_session, org_id, "fake")
+    resp = await client.get(
+        "/verifications/requirements",
+        params={
+            "country_code": "US",
+            "number_type": "local",
+            "purpose": "sms",
+            "quote_id": quote_id,
+        },
+        headers=_auth(key),
+    )
+    assert resp.status_code == 422, resp.text
 
 
 async def test_no_configured_carrier_is_404(client, org_and_key, carrier) -> None:

@@ -563,7 +563,16 @@ async def create_agent(*, client: HailClient, **fields: Any) -> dict[str, Any]:
 
 # Hail does not tell agents which carrier backs a number, an offer or a
 # verification. The carrier is read server-side from the quote instead.
-_CARRIER_KEYS = frozenset({"provider", "unavailable_providers"})
+# Carrier-issued ids are dropped too: their format names the carrier.
+_CARRIER_KEYS = frozenset(
+    {
+        "provider",
+        "unavailable_providers",
+        "messaging_service_sid",
+        "verification_id",
+        "address_id",
+    }
+)
 
 
 def _drop_carrier(value: Any) -> Any:
@@ -1666,8 +1675,8 @@ def register_tools(
         carrier delivers a dynamic alphanumeric sender ID unchanged (about
         110 countries, see core/hailhq/core/sender_id_corridors.py) use
         your organization's sender ID
-        (or ``HAIL``, the platform default); Australia (+61) may always use
-        ``HAIL``; every other destination,
+        (or ``HAIL``, the platform default); Australia (+61) may use
+        ``HAIL`` instead; every other destination,
         including the US and Canada,
         uses your organization's oldest active SMS-capable number and the
         API returns 422 when there is none.
@@ -2235,7 +2244,8 @@ def register_tools(
         bought until the organization is verified. Call
         get_verification_requirements, ask the user for the details, then
         submit_verification, both with the offer's ``quote_id``, and poll
-        get_verification (review takes business days). ``requirements`` lists what the carrier needs. Prefer an offer whose
+        get_verification (review takes business days). ``requirements``
+        lists what the carrier needs. Prefer an offer whose
         ``readiness`` is ``"ready"``; ``recommended_quote_id`` points at the
         best one, or is null if none is ready.
 
